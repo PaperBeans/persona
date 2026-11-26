@@ -44,13 +44,13 @@ import { Empty, FileGlyph, GitDot, GitBadge, useStoredFlag } from "./files/parts
 
 type Listed = { at: string; listing?: FsListing; error?: string };
 
-export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClose }: { mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string; onClose: () => void }) {
+export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClose, onBrowse }: { mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string; onClose: () => void; onBrowse?: (path: string) => void }) {
   // Where it starts: `path` (a folder to open at) or the session's folder; Back / Forward walk what was shown since.
   const startDir = path || cwd;
   const [history, setHistory] = useState<FilesHistory>({ current: startDir, back: [], forward: [] });
   useEffect(() => setHistory({ current: startDir, back: [], forward: [] }), [startDir]);
   const dir = history.current;
-  const go = useCallback((p: string) => setHistory((h) => historyGo(h, p)), []);
+  const go = useCallback((p: string) => onBrowse ? onBrowse(p) : setHistory((h) => historyGo(h, p)), [onBrowse]);
   const machine = useStore((s) => s.machines.find((m) => m.id === mid));
   const home = machine?.home;
   const [highlight, setHighlight] = useState(marked);

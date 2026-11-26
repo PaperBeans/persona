@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -88,17 +89,28 @@ func (rt *historyRuntime) page(_ string, raw json.RawMessage) (any, error) {
 
 func historyFixture(t *testing.T, logs ...func(string, ...any)) (*Service, *fakeHub, *db.DB, *historyRuntime) {
 	t.Helper()
-	database := todoTestDB(t)
 	logf := testLogf(t)
 	if len(logs) > 0 {
 		logf = logs[0]
 	}
+	return historyFixtureWithHub(t, logf, nil)
+}
+
+func historyFixtureWithHub(t *testing.T, logf func(string, ...any), wrapHub func(Hub) Hub) (*Service, *fakeHub, *db.DB, *historyRuntime) {
+	t.Helper()
+	database := todoTestDB(t)
 	f := newFakeHub().withMachine()
-	s := withSettings(t, f, New(Options{Hub: f, Store: func() Store { return database }, Logf: logf}))
+	var hub Hub = f
+	if wrapHub != nil {
+		hub = wrapHub(f)
+	}
+	s := withSettings(t, f, New(Options{Hub: hub, Store: func() Store { return database }, Logf: logf}))
 	setSettings(t, s, func(cfg *Settings) { cfg.Main = "main-chat"; cfg.Leaders = []string{"lead-chat"} })
+	f.mu.Lock()
 	for _, id := range []string{"main-chat", "lead-chat", "side-chat", "coding-agent"} {
 		f.known[id] = true
 	}
+	f.mu.Unlock()
 	f.setSessions("server",
 		proto.Session{SessionID: "main-chat", Assistant: true, Rev: 100},
 		proto.Session{SessionID: "lead-chat", Assistant: true, Rev: 100},
@@ -625,5 +637,267 @@ func TestDurableHistoryPartialHandoffPrefersSourceAndMarksOfflineFallback(t *tes
 	handoff = mainHandoff{}
 	if err := s.call(t.Context(), "server", DeviceAssistantHandoff, params, &handoff); err != nil || !handoff.Partial || len(handoff.Recent) != 2 {
 		t.Fatalf("partial offline handoff misrepresented: %+v %v", handoff, err)
+	}
+}
+
+type memHistoryStore struct {
+	*fleetMem
+	mu      sync.Mutex
+	history map[searchKey]*db.ConversationHistory
+	items   map[searchKey]map[string]conversationlog.Item
+}
+
+func newMemHistoryStore() *memHistoryStore {
+	return &memHistoryStore{
+		fleetMem: newFleetMem(),
+		history:  map[searchKey]*db.ConversationHistory{},
+		items:    map[searchKey]map[string]conversationlog.Item{},
+	}
+}
+
+func (m *memHistoryStore) ConversationHistory(_ context.Context, machine, sid string) (*db.ConversationHistory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h := m.history[searchKey{machine, sid}]
+	if h == nil {
+		return nil, nil
+	}
+	cp := *h
+	cp.Coverage = append([]conversationlog.Range(nil), h.Coverage...)
+	if h.TailSeq != nil {
+		v := *h.TailSeq
+		cp.TailSeq = &v
+	}
+	return &cp, nil
+}
+
+func (m *memHistoryStore) PutConversationPage(_ context.Context, p db.ConversationPage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := searchKey{p.MachineID, p.SessionID}
+	h := m.history[k]
+	if h == nil || h.History != p.History {
+		if h != nil && p.ExpectedHistory != "" && p.ExpectedHistory != h.History {
+			return db.ErrConversationHistoryChanged
+		}
+		h = &db.ConversationHistory{MachineID: p.MachineID, SessionID: p.SessionID, History: p.History}
+		m.history[k] = h
+		m.items[k] = map[string]conversationlog.Item{}
+	}
+	h.Revision = p.Revision
+	h.Coverage = conversationlog.MergeRanges(h.Coverage, conversationlog.Range{From: p.FromSeq, Through: p.ThroughSeq})
+	if p.Tail {
+		v := p.ThroughSeq
+		h.TailSeq = &v
+	}
+	for _, it := range p.Items {
+		row, err := conversationlog.Bound(it)
+		if err != nil {
+			return err
+		}
+		m.items[k][it.ID] = row
+	}
+	return nil
+}
+
+func (m *memHistoryStore) ConversationItems(_ context.Context, machine, sid, history string, from, through, limit int, newest bool) ([]conversationlog.Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := searchKey{machine, sid}
+	h := m.history[k]
+	if h == nil || h.History != history {
+		return nil, nil
+	}
+	out := make([]conversationlog.Item, 0, len(m.items[k]))
+	for _, row := range m.items[k] {
+		if row.Item.Seq > from && row.Item.Seq <= through {
+			out = append(out, row)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Item.Seq < out[j].Item.Seq })
+	if limit > 0 && len(out) > limit {
+		if newest {
+			out = out[len(out)-limit:]
+		} else {
+			out = out[:limit]
+		}
+	}
+	return out, nil
+}
+
+func (m *memHistoryStore) ConversationItem(_ context.Context, machine, sid, history, itemID string) (*conversationlog.Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := searchKey{machine, sid}
+	h := m.history[k]
+	if h == nil || h.History != history {
+		return nil, nil
+	}
+	row, ok := m.items[k][itemID]
+	if !ok {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (m *memHistoryStore) PutConversationSummary(_ context.Context, machine, sid, history string, revision int64, summary string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h := m.history[searchKey{machine, sid}]
+	if h == nil || h.History != history {
+		return db.ErrConversationHistoryChanged
+	}
+	h.Revision = revision
+	h.Summary = summary
+	h.SummaryKnown = true
+	return nil
+}
+
+func (m *memHistoryStore) ConversationHistoryStats(_ context.Context) (db.ConversationHistoryStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var stats db.ConversationHistoryStats
+	stats.Conversations = int64(len(m.history))
+	for _, rows := range m.items {
+		stats.Items += int64(len(rows))
+	}
+	return stats, nil
+}
+
+func TestConversationHistoryOfflineIdleProbeBackoff(t *testing.T) {
+	st := newMemHistoryStore()
+	f := newFakeHub().withMachine()
+	s := withSettings(t, f, New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t)}))
+	setSettings(t, s, func(cfg *Settings) { cfg.Main = "main-chat"; cfg.Leaders = []string{"lead-chat"} })
+	for _, id := range []string{"main-chat", "lead-chat", "side-chat"} {
+		f.known[id] = true
+	}
+	rt := &historyRuntime{history: "h1", items: []proto.Item{
+		{ID: "u1", Seq: 1, Role: "user", Kind: proto.KindText, Text: "question one"},
+		{ID: "a1", Seq: 2, Role: "assistant", Kind: proto.KindText, Text: "answer one"},
+		{ID: "u2", Seq: 3, Role: "user", Kind: proto.KindText, Text: "question two"},
+		{ID: "a2", Seq: 4, Role: "assistant", Kind: proto.KindText, Text: "answer two"},
+		{ID: "u3", Seq: 5, Role: "user", Kind: proto.KindText, Text: "question three"},
+		{ID: "a3", Seq: 6, Role: "assistant", Kind: proto.KindText, Text: "answer three"},
+	}}
+	f.answerNode(DeviceSessionItems, rt.page)
+	f.answerNode(DeviceAssistantHandoff, func(_ string, _ json.RawMessage) (any, error) {
+		return map[string]any{"summary": "compacted summary"}, nil
+	})
+
+	now := time.Date(2026, 11, 26, 1, 0, 0, 0, time.UTC)
+	s.history.mu.Lock()
+	s.history.now = func() time.Time { return now }
+	s.history.mu.Unlock()
+
+	offlineSess := proto.Session{SessionID: "side-chat", Assistant: true, Status: proto.StatusOffline, Rev: 100}
+	activeSess := proto.Session{SessionID: "main-chat", Assistant: true, Status: proto.StatusIdle, Rev: 100}
+	partialSess := proto.Session{SessionID: "lead-chat", Assistant: true, Status: proto.StatusOffline, Rev: 100}
+	f.setSessions("server", offlineSess, activeSess)
+
+	reads := func() int {
+		rt.mu.Lock()
+		defer rt.mu.Unlock()
+		return rt.reads
+	}
+
+	// Initial sweep covers both conversations and records their first probe time.
+	s.historySweep(t.Context(), st)
+	afterInitial := reads()
+	if afterInitial == 0 {
+		t.Fatal("initial sweep did not probe sessions")
+	}
+
+	// Between 30s and 10m: fully covered idle offline conversation skips redundant forced probe,
+	// while an active conversation still re-probes at 30s.
+	now = now.Add(45 * time.Second)
+	beforeOffline := reads()
+	if err := s.historySync(t.Context(), st, "server", offlineSess); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads(); got != beforeOffline {
+		t.Fatalf("idle covered offline session re-probed after 45s: reads %d -> %d", beforeOffline, got)
+	}
+	if err := s.historySync(t.Context(), st, "server", activeSess); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads(); got <= beforeOffline {
+		t.Fatalf("active session did not re-probe after 45s: reads %d -> %d", beforeOffline, got)
+	}
+
+	// Just under 10m: still skips forced probe for idle covered offline session.
+	now = now.Add(9*time.Minute + 14*time.Second) // 9m59s since initial probe
+	beforeNearLimit := reads()
+	if err := s.historySync(t.Context(), st, "server", offlineSess); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads(); got != beforeNearLimit {
+		t.Fatalf("idle covered offline session re-probed before 10m: reads %d -> %d", beforeNearLimit, got)
+	}
+
+	// Once 10m elapses, the periodic verification probe runs again.
+	now = now.Add(2 * time.Second) // 10m01s since initial probe
+	if err := s.historySync(t.Context(), st, "server", offlineSess); err != nil {
+		t.Fatal(err)
+	}
+	afterPeriodic := reads()
+	if afterPeriodic <= beforeNearLimit {
+		t.Fatalf("idle covered offline session did not re-probe after 10m: reads %d -> %d", beforeNearLimit, afterPeriodic)
+	}
+
+	// Within the next 10m window, a revision change still syncs immediately.
+	now = now.Add(2 * time.Minute)
+	rt.mu.Lock()
+	rt.items = append(rt.items, proto.Item{ID: "a4", Seq: 7, Role: "assistant", Kind: proto.KindText, Text: "appended"})
+	rt.mu.Unlock()
+	offlineSess.Rev = 101
+	f.setSessions("server", offlineSess, activeSess)
+	if err := s.historySync(t.Context(), st, "server", offlineSess); err != nil {
+		t.Fatal(err)
+	}
+	afterRevBump := reads()
+	if afterRevBump <= afterPeriodic {
+		t.Fatalf("offline session revision change did not sync immediately: reads %d -> %d", afterPeriodic, afterRevBump)
+	}
+	h, err := st.ConversationHistory(t.Context(), "server", offlineSess.SessionID)
+	if err != nil || h == nil || h.Revision != 101 || h.TailSeq == nil || *h.TailSeq != 7 {
+		t.Fatalf("revision change not persisted: %+v %v", h, err)
+	}
+
+	// Within the 10m window, an explicit session signal still triggers immediate sync.
+	now = now.Add(time.Minute)
+	s.NodeEvent("server", "session.items", json.RawMessage(`{"session_id":"side-chat","history":"h1","items":[]}`))
+	if err := s.historySync(t.Context(), st, "server", offlineSess); err != nil {
+		t.Fatal(err)
+	}
+	afterSignal := reads()
+	if afterSignal <= afterRevBump {
+		t.Fatalf("explicit signal did not sync offline session immediately: reads %d -> %d", afterRevBump, afterSignal)
+	}
+
+	// An offline session whose durable coverage is still partial must sync immediately
+	// even if probed recently.
+	f.setSessions("server", offlineSess, activeSess, partialSess)
+	readHistory(t, s, partialSess.SessionID, map[string]any{"turns": 1, "lazy_images": true})
+	partialBefore, err := st.ConversationHistory(t.Context(), "server", partialSess.SessionID)
+	if err != nil || partialBefore == nil || partialBefore.TailSeq == nil || conversationlog.Covers(partialBefore.Coverage, 0, *partialBefore.TailSeq) {
+		t.Fatalf("expected partial coverage seed, got %+v %v", partialBefore, err)
+	}
+	s.history.mu.Lock()
+	if s.history.probed == nil {
+		s.history.probed = map[searchKey]time.Time{}
+	}
+	s.history.probed[searchKey{"server", partialSess.SessionID}] = now.Add(-2 * time.Minute)
+	s.history.mu.Unlock()
+	beforePartial := reads()
+	if err := s.historySync(t.Context(), st, "server", partialSess); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads(); got <= beforePartial {
+		t.Fatalf("uncovered offline session did not sync immediately: reads %d -> %d", beforePartial, got)
+	}
+	partialAfter, err := st.ConversationHistory(t.Context(), "server", partialSess.SessionID)
+	if err != nil || partialAfter == nil || partialAfter.TailSeq == nil || !conversationlog.Covers(partialAfter.Coverage, 0, *partialAfter.TailSeq) {
+		t.Fatalf("uncovered offline session was not fully backfilled: %+v %v", partialAfter, err)
 	}
 }

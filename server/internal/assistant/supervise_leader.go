@@ -458,6 +458,7 @@ func (s *Service) leadersChange(ctx context.Context, cfg Settings, in []string) 
 					return fmt.Errorf("assistant.leaders changed after the card was shown, so nothing was saved: get it and set it again for a new card (%w)", approvalops.ErrStale)
 				}
 				v.Leaders = list
+				s.directionRolesChanged(ctx, before, list)
 				return nil
 			}); err != nil {
 				return "", err

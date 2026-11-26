@@ -60,6 +60,7 @@ var managerMessageTypes = map[string]bool{
 var hubMessageTypes = map[string]bool{
 	"hello": true, "client_hello_ack": true, "pong": true, "notify": true, "push_grading": true, "lock_test": true, "error": true,
 	"interaction": true, "interaction_resolved": true,
+	"counts":   true, // a manager's counts view as it told it (counts_view.go): only the hub relays it
 	"machines": true, "sessions": true, "sessions_delta": true, "sessions_list": true, "items": true, "revs": true,
 	"conversation_deleted": true,
 	"delta":                true, "live": true, proto.FeatureMessageSendState: true, proto.FeatureTodoSendState: true,

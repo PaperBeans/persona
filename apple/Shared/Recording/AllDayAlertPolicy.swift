@@ -78,13 +78,17 @@ nonisolated enum AllDayAlertPolicy {
 
     /// `phoneDay`: the stored `recordingDay` (nil when the phone never set it, 0 before its user agreed, else the
     /// contract version, where a higher one than this watch knows still means it can).
-    static func access(phoneDay: Int?, state: AllDaySnapshot.State) -> Access {
+    ///
+    /// `recording`: the phone's word on its hub's recording module (#15214). Off, nothing starts or continues from
+    /// stopped (`moduleOff`); a recording that runs keeps going until the user stops it, like one whose consent changed.
+    static func access(phoneDay: Int?, state: AllDaySnapshot.State, recording: PhoneRecordingAllowance = .allowed) -> Access {
         switch state {
         case .recording, .paused, .interrupted:
             // A recording already running goes on under the agreement it started with: its controls stay whatever the
             // phone says now, and a new consent takes effect at the next start.
             return .ready
         case .off, .stopped:
+            guard recording.offersWrites else { return .moduleOff }
             guard let phoneDay else {
                 // A wish to record from before (it stopped by itself) still shows, so Stop for Today can end it.
                 return state == .stopped ? .needsConsent : .hidden
@@ -96,13 +100,31 @@ nonisolated enum AllDayAlertPolicy {
     /// Whether a start may open the microphone now. The phone's own start request (its switch, or the Start button of
     /// its notice) stands for its consent, which its application context may not have brought yet: the two travel
     /// separately, and a context can arrive after a message sent later.
-    static func mayStart(_ access: Access, askedByPhone: Bool) -> Bool { askedByPhone || access == .ready }
+    /// Never while the hub's recording module is off, whoever asks.
+    static func mayStart(_ access: Access, askedByPhone: Bool) -> Bool {
+        access != .moduleOff && (askedByPhone || access == .ready)
+    }
+
+    /// Whether the home list (and the unpaired page) shows All-Day Recording at all: not with a phone that doesn't
+    /// take it, and not while the hub's recording module is off, unless a wish to record is left from before (it
+    /// stopped by itself), which Stop for Today on its page ends.
+    static func listed(_ access: Access, state: AllDaySnapshot.State) -> Bool {
+        switch access {
+        case .hidden: false
+        case .moduleOff: state == .stopped
+        case .needsConsent, .ready: true
+        }
+    }
 
     /// Whether the watch asks for notification permission now (once; a start asks too): a pause, a stop and the
     /// phone's start reach the wrist only as notifications. On the page whenever it is offered at all; on the home
     /// card only once the user agreed on the iPhone, so a card they haven't chosen doesn't bring up a prompt.
     static func asksForNotifications(_ access: Access, onPage: Bool) -> Bool {
-        onPage ? access != .hidden : access == .ready
+        switch access {
+        case .hidden, .moduleOff: false
+        case .needsConsent: onPage
+        case .ready: true
+        }
     }
 
     // MARK: - What a change does

@@ -42,9 +42,21 @@ vi.mock("./settings/ModelConfiguration", () => ({
     </div>
   ),
 }));
-vi.mock("./settings/KnowledgeSelection", () => ({ KnowledgeSelection: () => <div data-page="knowledge-selection" /> }));
+vi.mock("./settings/KnowledgeSelection", () => ({
+  KnowledgeSelection: () => (
+    <div data-page="knowledge-selection">
+      <section data-settings-group="knowledge-items"><div /></section>
+    </div>
+  ),
+}));
 vi.mock("./settings/TranslationSettings", () => ({ TranslationSettings: () => <div data-page="translation" /> }));
-vi.mock("./settings/AssistantSettings", () => ({ AssistantSettings: () => <div data-page="persona" /> }));
+vi.mock("./settings/AssistantSettings", () => ({
+  AssistantSettings: () => (
+    <div data-page="persona">
+      <section data-settings-group="repositories"><div /></section>
+    </div>
+  ),
+}));
 vi.mock("./settings/SidebarPages", () => ({ SidebarPagesGroup: () => <div data-page="sidebar-pages" /> }));
 vi.mock("./settings/StartPage", () => ({ StartPageGroup: () => <div data-page="start-page" /> }));
 vi.mock("../lib/pwa", async (original) => ({ ...(await original<typeof import("../lib/pwa")>()), useInstall: () => "installed" }));
@@ -66,9 +78,11 @@ vi.mock("./settings/HubConnector", () => ({
 }));
 vi.mock("./settings/SentSettings", () => ({ SentSettings: () => <div data-page="sent" /> }));
 vi.mock("./settings/Integrations", () => ({
-  Integrations: ({ open, onOpen }: { open: string | null; onOpen: (id: string | null) => void }) => (
+  Integrations: ({ open, onOpen, onSettings }: { open: string | null; onOpen: (id: string | null) => void; onSettings?: (url: string) => void }) => (
     <div data-page="integrations" data-open={open ?? ""}>
       <button type="button" data-integrations-sources onClick={() => onOpen("-sources")} />
+      <button type="button" data-integrations-repos onClick={() => onSettings?.("settings/persona#repositories")} />
+      <button type="button" data-integrations-kb onClick={() => onSettings?.("settings/knowledge#knowledge-items")} />
     </div>
   ),
 }));
@@ -685,5 +699,30 @@ describe("Settings category navigation", () => {
     await act(async () => groupBtn.click());
     expect(location.pathname + location.search).toBe("/settings?tab=integrations&integration=-sources");
     expect(host.querySelector('[data-page="integrations"]')?.getAttribute("data-open")).toBe("-sources");
+  });
+
+  it("handles Integrations onSettings #anchor jumps to Assistant repositories and Knowledge items smoothly in-app", async () => {
+    viewport.integrationsV2 = true;
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+
+    // Jump from Integrations to Settings › Assistant #repositories
+    await mount("/settings?tab=integrations&integration=builtin%3Agithub");
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-integrations-repos]")!.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=persona");
+    const reposGroup = host.querySelector<HTMLElement>('[data-settings-group="repositories"]')!;
+    expect(reposGroup).not.toBeNull();
+    expect(scrolled).toContain(reposGroup);
+    expect(reposGroup.querySelector<HTMLElement>(":scope > div")!.style.boxShadow).toContain("var(--accent)");
+
+    // Jump from Integrations to Settings › Knowledge #knowledge-items
+    scrolled.length = 0;
+    await act(async () => category(t("settings-nav.tab_integrations")).click());
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-integrations-kb]")!.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=knowledge");
+    const kbGroup = host.querySelector<HTMLElement>('[data-settings-group="knowledge-items"]')!;
+    expect(kbGroup).not.toBeNull();
+    expect(scrolled).toContain(kbGroup);
+    expect(kbGroup.querySelector<HTMLElement>(":scope > div")!.style.boxShadow).toContain("var(--accent)");
   });
 });

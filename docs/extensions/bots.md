@@ -271,6 +271,29 @@ some names were resolved. Reauthorization preserves cursors and the pending repa
 due now; the next scheduler tick runs the sync and retries repair automatically. Disabled bindings remain disabled.
 The repair marks its version complete only after it finishes, so later ticks are idempotent.
 
+Senders that `contact/v3` cannot see (external members) are looked up in the chat's member list, read on demand: only
+while a sender of that chat is still unnamed, resuming where it stopped, up to 500 pages of 100. A member who left the
+group is in no list; the binding's name book (`sender_names` cursor, at most 5,000 names, the oldest learned dropped
+first) keeps the names the sync learned from contacts, member lists and @mentions, and the sender-name backfill
+(version 3) also reads the chat around such a sender's message for an @mention of them. Another app's bot is named only
+when a message mentions it: the API that names an app by its id
+([application/v6](https://open.feishu.cn/document/server-docs/application-v6/application/get)) takes a tenant token,
+an admin scope and a custom app of the same enterprise, none of which a user's sync has. A system message without a
+`sender_id` stays unnamed.
+
+The sender-name backfill runs in rounds, one after each sync run until it is done. A round has its own budget
+(`larkSyncNamesBudget`, 90 seconds, apart from the run's) and starts only after the run's messages are committed, so it
+never holds up message sync. Every lookup is paced at five requests a second, so a backlog of external senders (one
+`contact/v3` call each) and a few large groups (up to 500 member pages each) can need more than one round. When the
+budget runs out, the round stops and saves how far it got in the `sender_names:progress` cursor: each large group's
+next member page and which senders the pages already read were checked for, plus the lookups that found nothing. Those
+are tried again after a week. The next round picks up from there, and `backfill_version` advances only once a round
+finishes everything. A timeout, rate limit or passing failure in this step only degrades naming. The binding's health
+stays `ok`, the run is not counted as failed, and the reason goes into `names_warning`, with `names_rounds` counting the
+rounds. Only what the owner has to fix shows in health: a missing contact scope (`scope_missing`) or a refused grant
+(`needs_reauth`). Coverage: `server/internal/modules/lark/larksync/names_progress_test.go`,
+`server/internal/extmgr/larksync_names_test.go`.
+
 Regression coverage: `server/internal/larksyncwire/scopes_test.go` checks the audited permission alternatives;
 `scripts/test/test_lark_sync_scope_guides.py` checks every locale of the three setup guides against both packs;
 `server/internal/extmgr/larksync_impoll_test.go` covers scope refusal followed by authorization and scheduler recovery;

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -35,9 +36,17 @@ const (
 	// admissionDirectionCap is the code default every direction falls back to when neither direction_cap_by_direction
 	// nor direction_cap_by_project names it. The counts are taken per supervising conversation, so the default must fit
 	// the busiest charter direction (the main product line's charter is 8); narrower lines are configured per direction.
-	admissionDirectionCap      = 8
-	admissionMinMemoryBytes    = int64(2) * 1024 * 1024 * 1024        // 2 GiB
-	admissionHubMinMemory      = int64(2.5 * float64(1024*1024*1024)) // 2.5 GiB
+	admissionDirectionCap   = 8
+	admissionMinMemoryBytes = int64(2) * 1024 * 1024 * 1024        // 2 GiB
+	admissionHubMinMemory   = int64(2.5 * float64(1024*1024*1024)) // 2.5 GiB
+	// recommendMinMemoryBytes is the healthy-candidate available memory floor (4 GiB) for automatic selection
+	// when the effective admission floor is lower.
+	recommendMinMemoryBytes = int64(4) * 1024 * 1024 * 1024 // 4 GiB
+	// placementSlotMemoryBytes is the memory budget per target concurrent Agent slot (2.5 GiB).
+	placementSlotMemoryBytes = int64(2.5 * float64(1024*1024*1024))
+	// placementRatioBucketScale quantizes working/(available/2.5GiB) to 0.01 steps so near-equal ratios break
+	// ties toward higher available memory while preserving a strict weak ordering for sorting.
+	placementRatioBucketScale  = 100.0
 	admissionMaxClaudeProcs    = 20
 	admissionHubMaxClaudeProcs = 20
 	admissionSettingsFresh     = 5 * time.Second
@@ -354,16 +363,19 @@ func (s *Service) machineViolationWith(p *placement, machineID string, lim admis
 }
 
 // recommendMachine names the reachable computer best able to take work now: fresh metrics, every machine line
-// passing, lowest load1-per-core (then most free memory). except and the optional suitable filter narrow the field.
+// passing (including at least 4 GiB available memory), lowest working-to-slot ratio
+// ((working_agents + claims) / (available_memory / 2.5 GiB)), breaking ties toward more available memory and then
+// lower load1-per-core. except and the optional suitable filter narrow the field.
 func (s *Service) recommendMachine(ctx context.Context, except string, suitable func(Device) bool) (Device, bool) {
 	if s.devs == nil {
 		return Device{}, false
 	}
 	cfg := s.admissionSettings(ctx)
 	type candidate struct {
-		d        Device
-		loadRate float64
-		free     int64
+		d           Device
+		ratioBucket int64
+		free        int64
+		loadRate    float64
 	}
 	var candidates []candidate
 	for _, d := range s.devices(ctx) {
@@ -390,26 +402,51 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 			p.violation(d.ID, why)
 			continue
 		}
-		if s.machineViolation(ctx, d.ID, s.limitsFor(ctx, d.ID, "", "", cfg)) != nil {
+		lim := s.limitsFor(ctx, d.ID, "", "", cfg)
+		if lim.minMemory < recommendMinMemoryBytes {
+			lim.minMemory = recommendMinMemoryBytes
+		}
+		s.admission.mu.Lock()
+		claims := s.admission.machineClaims[d.ID]
+		s.admission.mu.Unlock()
+		if s.machineViolationWith(p, d.ID, lim, claims) != nil {
 			continue
 		}
+		active := claims
+		if working, has := s.workingSessions(d.ID); has {
+			active += working
+		} else if facts.claudeProcs != nil && *facts.claudeProcs > 0 {
+			active += *facts.claudeProcs
+		}
+		targetSlots := float64(facts.available) / float64(placementSlotMemoryBytes)
+		if targetSlots <= 0 {
+			continue
+		}
+		slotRatio := float64(active) / targetSlots
+		ratioBucket := int64(math.Round(slotRatio * placementRatioBucketScale))
 		// A machine without a load average cannot show measured pressure: rank it at a zero rate so it stays eligible
-		// for a reroute, and let the free-memory tiebreak order it against machines that do report a load.
+		// for a reroute, and let the slot-ratio and free-memory keys order it against machines that do report a load.
 		loadRate := 0.0
 		if facts.load1 != nil {
 			loadRate = *facts.load1 / float64(facts.cores)
 		}
 		if p != nil {
 			c := p.candidate(d.ID)
-			c.LoadPerCore, c.FreeBytes = &loadRate, &facts.available
+			c.LoadPerCore, c.FreeBytes, c.SlotRatio = &loadRate, &facts.available, &slotRatio
 		}
-		candidates = append(candidates, candidate{d: d, loadRate: loadRate, free: facts.available})
+		candidates = append(candidates, candidate{d: d, ratioBucket: ratioBucket, free: facts.available, loadRate: loadRate})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].ratioBucket != candidates[j].ratioBucket {
+			return candidates[i].ratioBucket < candidates[j].ratioBucket
+		}
+		if candidates[i].free != candidates[j].free {
+			return candidates[i].free > candidates[j].free
+		}
 		if candidates[i].loadRate != candidates[j].loadRate {
 			return candidates[i].loadRate < candidates[j].loadRate
 		}
-		return candidates[i].free > candidates[j].free
+		return candidates[i].d.ID < candidates[j].d.ID
 	})
 	if len(candidates) == 0 {
 		return Device{}, false

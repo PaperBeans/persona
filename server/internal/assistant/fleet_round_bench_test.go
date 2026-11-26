@@ -8,6 +8,8 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant/fleetcount"
 	"github.com/nwverse/persona/server/internal/assistant/fleetcount/fleetcountadapt"
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/domainkit/opt"
 	kitoutcome "github.com/nwverse/persona/server/internal/domainkit/outcome" // the package's tests have an outcome helper
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -57,30 +59,32 @@ func roundFleet() ([]fleetInput, []proto.Interaction, map[string]bool) {
 
 // BenchmarkRound is one live round's needs-you work on roundFleet, as liveLoop does it over the arrays its last round
 // kept (round): the Live Activity's state, and Persona Link's summary and the counts view built from one fill of the
-// agents and cards. allocs/op is the gate (docs/plans/plan-derived-counts.md, steps 5 and 7a); B/op may rise only by
-// the counting core's own copies of the agents and cards, which core-copies makes for both fills (fleetcount.NewAgents
-// and NewCards, twice: the summary and the view share theirs). counts-tell is the view's telling in a round whose
-// counts did not change, which is most rounds.
+// agents and cards, with the to-dos counted (roundTodos). allocs/op is the gate (docs/plans/plan-derived-counts.md,
+// steps 5 and 7a); B/op may rise only by the counting core's own copies of the agents and cards, which core-copies
+// makes for both fills (fleetcount.NewAgents and NewCards, twice: the summary and the view share theirs). counts-tell
+// is the view's telling in a round whose counts did not change, which is most rounds.
 func BenchmarkRound(b *testing.B) {
 	agents, ixs, told := roundFleet()
+	todos := roundTodos()
 	b.Run("round", func(b *testing.B) {
 		var r fleetRound
 		if st := r.buildFleet("en", agents, ixs); st.NeedsYou == 0 || st.Working == 0 || st.Unread == 0 {
 			b.Fatalf("the fleet: %+v", st)
 		}
-		if a, v := r.linkAndCounts("en", agents, ixs, told); a.NeedsYou == 0 || v.Counts.AgentsNeedsYou.N == 0 {
-			b.Fatalf("the summary: %+v; the view: %+v", a, v.Counts.AgentsNeedsYou)
+		if a, v := r.linkAndCounts("en", agents, ixs, told, todos); a.NeedsYou == 0 || v.Counts.AgentsNeedsYou.N == 0 ||
+			v.Counts.TodosNeedsYou == nil {
+			b.Fatalf("the summary: %+v; the view: %+v", a, v.Counts)
 		}
 		b.ReportAllocs()
 		for b.Loop() {
 			r.buildFleet("en", agents, ixs)
-			r.linkAndCounts("en", agents, ixs, told)
+			r.linkAndCounts("en", agents, ixs, told, todos)
 		}
 	})
 	b.Run("counts-tell", func(b *testing.B) {
 		s := New(Options{Hub: newFakeHub(), Logf: func(string, ...any) {}, Devices: newFleetDevs()})
 		var r fleetRound
-		_, v := r.linkAndCounts("en", agents, ixs, told)
+		_, v := r.linkAndCounts("en", agents, ixs, told, todos)
 		s.tellCounts(v)
 		b.ReportAllocs()
 		for b.Loop() {
@@ -96,6 +100,12 @@ func BenchmarkRound(b *testing.B) {
 			}
 		}
 	})
+}
+
+// roundTodos is the to-do list's counts a round's view carries once the manager has counted its to-dos.
+func roundTodos() opt.Option[assistantwire.TodoCounts] {
+	return opt.Some(assistantwire.TodoCounts{Open: 9, NeedsYou: 3, InProgress: 4, Sections: map[string]int{
+		assistantwire.TodoListSectionNeedsYou: 3, assistantwire.TodoListSectionWorking: 4}})
 }
 
 // coreValues is a round's agents and cards as fleetcount's values, built through its adapter.

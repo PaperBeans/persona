@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,6 +312,42 @@ func TestExtensionMarketRows(t *testing.T) {
 	}
 	if rows, _ := d.ExtensionMarkets(ctx); len(rows) != 0 {
 		t.Fatal(rows)
+	}
+}
+
+func TestIdleArchiveAuditMirrorIsIdempotent(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	const plugin = "example-idle-archive-audit"
+	clean := func() {
+		if _, err := d.pool.Exec(context.Background(), `DELETE FROM plugin_audit WHERE plugin = $1`, plugin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clean()
+	t.Cleanup(clean)
+	detail := json.RawMessage(`{"audit_id":"ia_restart_once","outcome":"archived_and_closed"}`)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := d.AddExtensionAudit(ctx, plugin, "session_idle_archive", "recovery", detail); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	// A crash after the mirror write but before the outbox update may leave an already mirrored pending entry.
+	// Replaying it must not rewrite its timestamp or add a second row.
+	if err := d.AddExtensionAudit(ctx, plugin, "session_idle_archive", "recovery", detail); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM plugin_audit WHERE plugin = $1`, plugin).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("idle archive recovery wrote %d plugin_audit rows, want 1", count)
 	}
 }
 

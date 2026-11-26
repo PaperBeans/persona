@@ -107,6 +107,7 @@ push.grading         DELETE /api/v1/push/grading/layer
 -                    DELETE /api/v1/task-trust
 -                    DELETE /api/v1/todos/{id}
 todos.write          DELETE /api/v1/todos/{id}/agents/{mid}/{sid}
+-                    DELETE /api/v1/todos/{id}/blockers/{blockerId}
 -                    DELETE /api/v1/todos/{id}/seen
 -                    DELETE /api/v1/todos/{id}/someday
 todos.write          DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}
@@ -209,6 +210,7 @@ assistant.start_defaults GET /api/v1/assistant/start-defaults
 -                    GET /api/v1/assistant/tasks/cron
 spaces               GET /api/v1/assistant/track-kinds
 spaces               GET /api/v1/assistant/tracks
+spaces               GET /api/v1/assistant/tracks/{slug}/conversations
 spaces               GET /api/v1/assistant/tracks/{slug}/space-md
 -                    GET /api/v1/assistant/urgent-call
 assistant.start_defaults GET /api/v1/assistant/worker-presets
@@ -390,6 +392,7 @@ notify               GET /api/v1/push/stats/daily
 -                    GET /api/v1/resources
 agents.read          GET /api/v1/saved-agent-searches
 agents.read          GET /api/v1/sessions
+agents.archive_idle  GET /api/v1/sessions/archive-idle/audit
 agents.read          GET /api/v1/sessions/archived
 -                    GET /api/v1/sessions/{mid}/{sid}/agent-messages
 agents.read          GET /api/v1/sessions/{mid}/{sid}/info
@@ -724,6 +727,7 @@ push.grading         POST /api/v1/push/grading/preview
 agents.control       POST /api/v1/sessions
 -                    POST /api/v1/sessions/{mid}/{sid}/agent-messages
 -                    POST /api/v1/sessions/{mid}/{sid}/archive
+agents.archive_idle  POST /api/v1/sessions/{mid}/{sid}/archive-idle
 -                    POST /api/v1/sessions/{mid}/{sid}/attach
 -                    POST /api/v1/sessions/{mid}/{sid}/autoname
 -                    POST /api/v1/sessions/{mid}/{sid}/close
@@ -768,6 +772,7 @@ todos.write          POST /api/v1/todos
 -                    POST /api/v1/todos/{id}/backend-workspace/cleanup
 -                    POST /api/v1/todos/{id}/backend-workspace/prepare
 -                    POST /api/v1/todos/{id}/backend-workspace/start
+-                    POST /api/v1/todos/{id}/blockers
 -                    POST /api/v1/todos/{id}/decision-dismiss
 -                    POST /api/v1/todos/{id}/decision-undo-dismiss
 todos.write          POST /api/v1/todos/{id}/decisions

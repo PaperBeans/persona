@@ -22,7 +22,7 @@ const captured = vi.hoisted(() => ({
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle", state: "idle" } as Session,
 }));
 // one transcript object for every render, as the hook keeps one (a new one each time re-runs the echo checks forever)
-const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "", streamEnded: false, streamEndedThrough: undefined as number | undefined }));
+const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, firstRead: true, error: "", hasMore: false, streaming: "", streamEnded: false, streamEndedThrough: undefined as number | undefined }));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 vi.mock("../../lib/store", async (importOriginal) => {
   const store = await importOriginal<typeof import("../../lib/store")>();
@@ -425,6 +425,20 @@ describe("a message waiting for its turn to start (#2450)", () => {
     expect(host.textContent).toContain(t("chat-empty-response.no_response"));
     expect([...host.querySelectorAll("button")].some(b => b.textContent === t("chat-lines.retry"))).toBe(true);
     expect(stopControl()).toBeNull();
+  });
+
+  it("offers no retry from a page whose newest read failed: the cached turn may have a reply it has not read", async () => {
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts: new Date(Date.now() - 120_000).toISOString() }];
+    transcript.error = "Refresh failed";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    // the "Refresh failed" pill says why and reloads; the turn's own note with its Retry (a second send) is not there
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    transcript.error = "";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(host.textContent).toContain(t("chat-empty-response.no_response"));
   });
 
   it("keeps an ended reply preview after host completion without keeping its work or interrupt controls running", async () => {

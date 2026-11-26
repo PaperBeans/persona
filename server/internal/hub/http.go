@@ -1728,6 +1728,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	c.sendJSON(map[string]any{"type": "machines", "machines": localizedMachines(c.lang(), h.machineList())})
+	h.sendCountsViews(c) // the managers' counts views, before the lists they count (counts_view.go)
 	if c.listMode {
 		h.sessionListNotice(c)
 	} else {

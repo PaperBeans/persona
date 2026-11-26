@@ -368,6 +368,7 @@ MOVED = {
     "meeting_finishing_mock": ("#13537", ("MEETING_FINISHING",)),
     "extension_scene_mock": ("#12544", ("SCENE_MODE", "_HOME_DRAWS", "_home_scene_component", "_home_scene_downgrade",
                                         "_home_scene_view", "mock_home_scene")),
+    "todo_wait_reasons_mock": ("#16168", ("_wr_work_sid", "_wr_todo")),
 }
 
 

@@ -158,6 +158,7 @@ let currentChannels: Record<string, ChannelDetail>;
 let currentConnectors: HubConnector[];
 let currentMailAccounts: { id: string; email: string; provider: string; status: string }[];
 let currentFeishuBot: FeishuBotStatus;
+let currentRepositories: { id: string; provider?: string }[] | "error" | null;
 
 const flush = async () => {
   for (let i = 0; i < 14; i++) {
@@ -224,6 +225,7 @@ beforeEach(() => {
   ];
   currentMailAccounts = [{ id: "m1", email: "me@example.com", provider: "imap", status: "ok" }];
   currentFeishuBot = structuredClone(FEISHU_BOT_STATUS);
+  currentRepositories = [{ id: "repo-1", provider: "github" }, { id: "repo-2", provider: "github" }];
 
   resetManagerChoice();
   setRoster(ROSTER);
@@ -305,6 +307,17 @@ beforeEach(() => {
     }
     if (url.includes("/subscriptions/summary")) {
       return ok({ lines: [] });
+    }
+    if (url.includes("/assistant/repositories")) {
+      if (currentRepositories === "error") return notFound();
+      if (currentRepositories === null) return ok({});
+      return ok({ manager: "assistant", repositories: currentRepositories });
+    }
+    if (url.includes("/lark/status")) {
+      return ok({ configured: true, connected: true, name: "Team Lark" });
+    }
+    if (url.includes("/lark/accounts")) {
+      return ok({ accounts: [] });
     }
     if (url.includes("/trust")) {
       return notFound();
@@ -401,28 +414,86 @@ describe("Built-in services", () => {
     expect(requests.some((r) => r.url.includes("/bots/feishu"))).toBe(false);
   });
 
-  it("renders Feishu Bot inline with connection, channel routing, and bot features", async () => {
+  it("renders Feishu Bot inline with connection, channel routing, bot features, and knowledge sync shortcut", async () => {
+    const onSettings = vi.fn();
     act(() => {
-      root.render(<IntegrationDetail target={{ kind: "builtin", id: "feishu-bot" }} />);
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "feishu-bot" }} onSettings={onSettings} />);
     });
     await flush();
 
-    expect(sectionIds()).toEqual(["connection", "channel"]);
+    expect(sectionIds()).toEqual(["connection", "channel", "inbox"]);
     expect(section("connection")!.textContent).toContain("Alice");
     expect(section("channel")!.textContent).toContain(t("settings-integrations.thread_mode_title"));
     expect(section("channel")!.textContent).toContain(t("settings-feishubot.topic_groups"));
+    const kbBtn = section("inbox")!.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+    expect(kbBtn).not.toBeNull();
+    act(() => kbBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
   });
 
-  it("renders built-in GitHub connector across Account & Connection and Inbox & Sync", async () => {
+  it("renders built-in GitHub connector with Saved repositories shortcut and tolerates repository API failure", async () => {
+    const onSettings = vi.fn();
     act(() => {
-      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} />);
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} onSettings={onSettings} />);
     });
     await flush();
 
     expect(sectionIds()).toEqual(["connection", "inbox"]);
     expect(section("connection")!.textContent).toContain("octocat");
     expect(section("inbox")!.textContent).toContain("org/noisy");
+    expect(section("inbox")!.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).toBeNull();
+    const repoBtn = section("connection")!.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(repoBtn).not.toBeNull();
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_title"));
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_count", { count: 2 }));
+    act(() => repoBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
     expect(requests.some((r) => r.url.includes("/bots/feishu"))).toBe(false);
+
+    // Repository query failure does not block rendering or clicking the shortcut.
+    onSettings.mockClear();
+    currentRepositories = "error";
+    act(() => root.render(null));
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} onSettings={onSettings} />);
+    });
+    await flush();
+    const fallbackBtn = section("connection")!.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(fallbackBtn).not.toBeNull();
+    act(() => fallbackBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
+  });
+
+  it("renders Knowledge sync scope shortcut in Inbox & Sync for Mail, Lark gateway, and history-capable connectors", async () => {
+    const onSettings = vi.fn();
+    currentConnectors.push({
+      id: "chat-history",
+      name: "History Connector",
+      status: "ok",
+      enabled: true,
+      archive: true,
+      inbox: false,
+      capabilities: ["history"],
+    });
+
+    for (const target of [
+      { kind: "builtin", id: "mail" } as const,
+      { kind: "builtin", id: "lark" } as const,
+      { kind: "builtin", id: "chat-history", connectorId: "chat-history" } as const,
+    ]) {
+      onSettings.mockClear();
+      act(() => root.render(null));
+      act(() => {
+        root.render(<IntegrationDetail target={target} onSettings={onSettings} />);
+      });
+      await flush();
+
+      const kbBtn = section("inbox")?.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+      expect(kbBtn, `${target.id} knowledge shortcut`).not.toBeNull();
+      expect(kbBtn!.textContent).toContain(t("settings-integrations.knowledge_scope_title"));
+      act(() => kbBtn!.click());
+      expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
+    }
   });
 
   it("omits the Back button when onBack is undefined (desktop split-pane / phone) and renders it when provided", async () => {
@@ -471,9 +542,10 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
     expect(section("channel")!.textContent).toContain(t("settings-integrations.thread_idle_hours_title"));
     expect(section("channel")!.querySelector('[data-field="mention_prefix"]')).not.toBeNull();
 
-    // 3. Inbox & Sync: connector feeds + section="inbox" field
+    // 3. Inbox & Sync: connector feeds + section="inbox" field + knowledge sync scope shortcut for larkx
     expect(section("inbox")!.textContent).toContain(t("settings-hubconnector.to_inbox"));
     expect(section("inbox")!.querySelector('[data-field="triage_rules"]')).not.toBeNull();
+    expect(section("inbox")!.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).not.toBeNull();
 
     // 4. Extension Settings: unsectioned field visible, advanced field folded by default, secret present
     expect(section("extension-settings")!.querySelector('[data-field="display_alias"]')).not.toBeNull();
@@ -614,5 +686,61 @@ describe("Older Hub and legacy extension graceful degradation", () => {
     expect(section("extension-settings")!.querySelector('[data-field="api_url"]')).not.toBeNull();
     expect(section("extension-settings")!.querySelector('[data-field="max_items"]')).not.toBeNull();
     expect(section("extension-settings")!.querySelector("[data-integration-advanced]")).toBeNull();
+    expect(host.querySelector('[data-settings-row="saved-repositories-shortcut"]')).toBeNull();
+    expect(host.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).toBeNull();
+  });
+
+  it("shows Knowledge sync scope shortcut for an external extension whose connector advertises history capability", async () => {
+    const onSettings = vi.fn();
+    currentExt = {
+      id: "acme-chat",
+      name: "Acme Chat",
+      kind: "process",
+      source: "installed",
+      status: "running",
+      version: "1.0.0",
+      enabled: true,
+      origin: "market:official/acme-chat",
+      contributes: { connectors: ["acme_conn"] },
+    };
+    currentConnectors = [
+      { id: "acme_conn", name: "Acme", status: "ok", enabled: true, archive: true, capabilities: ["history"] },
+    ];
+
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "extension", id: "acme-chat" }} onSettings={onSettings} />);
+    });
+    await flush();
+
+    const kbBtn = section("inbox")?.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+    expect(kbBtn).not.toBeNull();
+    act(() => kbBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
+  });
+
+  it("shows Saved repositories shortcut for a GitHub-compatible extension", async () => {
+    const onSettings = vi.fn();
+    currentExt = {
+      id: "github-extra",
+      name: "GitHub Extra",
+      kind: "process",
+      source: "installed",
+      status: "running",
+      version: "1.0.0",
+      enabled: true,
+      origin: "market:official/github-extra",
+      contributes: { repository_providers: ["github"] },
+    };
+
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "extension", id: "github-extra" }} onSettings={onSettings} />);
+    });
+    await flush();
+
+    const repoBtn = section("connection")?.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(repoBtn).not.toBeNull();
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_count", { count: 2 }));
+    act(() => repoBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
   });
 });

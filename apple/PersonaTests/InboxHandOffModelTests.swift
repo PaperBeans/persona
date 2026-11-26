@@ -12,6 +12,7 @@ struct InboxHandOffModelTests {
         var handOffs: [(id: String, text: String, clientID: UUID)] = []
         var opened: [(key: SessionKey, text: String, clientID: UUID)] = []
         var asked: [String] = []
+        var askedClientIDs: [UUID] = []
         var started: [String] = []
         var agents: [(key: SessionKey, text: String, markDone: Bool)] = []
         var agentAccepted = true
@@ -58,8 +59,9 @@ struct InboxHandOffModelTests {
             },
             record: { _, _, _, _, _ in },
             showMain: { calls.opened.append(($0, $1, $2)) },
-            plainToMain: {
-                calls.asked.append($0)
+            plainToMain: { text, clientID in
+                calls.asked.append(text)
+                calls.askedClientIDs.append(clientID)
                 if !calls.askFailures.isEmpty { throw calls.askFailures.removeFirst() }
                 return Self.main
             },
@@ -371,6 +373,7 @@ struct InboxHandOffModelTests {
         calls.askFailures = [URLError(.timedOut)]
         let first = await m.send(ask: "a")
         #expect(!first && m.error == look && calls.asked.count == 1)
+        #expect(calls.askedClientIDs == [calls.handOffs[0].clientID])
         let second = await m.send(ask: "a")
         #expect(!second && m.error == Self.lookAgain && calls.asked.count == 1)
         #expect(calls.handOffs.count == 2 && calls.handOffs[0].clientID == calls.handOffs[1].clientID)

@@ -56,8 +56,8 @@ The prototype is the UI and interaction standard; compare screen by screen durin
 
 | Request | Meaning |
 | --- | --- |
-| `"new"` | Create a checkout through the machine's existing herdr/Orca workspace engine |
-| `{"new":{"branch":"task/fix-login"}}` | Create through that engine, with an explicit branch |
+| `"new"` | Prepare an isolated task folder on the selected computer |
+| `{"new":{"branch":"task/fix-login"}}` | Use the supplied branch name for a single repository. Reuse its checkout when the node can verify it is available. |
 | `{"existing":"/code/app"}` | Reuse an existing directory (`~/…` is expanded on the selected machine) |
 | `{"existing":"/code/app","queue":true}` | Reuse an existing directory, queueing FIFO behind an occupying task instead of failing |
 | `{"existing":"ws_…"}` | Select a workspace from that machine's catalog; node-local and board-qualified IDs are accepted |
@@ -67,12 +67,14 @@ Settings › Assistant › Dispatch tasks offers **When dispatching tasks, prefe
 `task_workspace_preference: "prefer-existing"` (default) reuses an available source directory;
 `"prefer-new"` gives each writable Git task a new checkout. A read-only task defaults to `none`.
 A writable Git task whose directory is occupied defaults to `new`, regardless of preference.
-When that inferred `new` meets an engine that cannot prepare checkouts (`worktree.prepare` fails with code `worktree_unsupported`:
-the Paseo or Cindy runtime, or a host without checkout support), the task runs in its `cwd` as tasks did before workspaces: a free directory becomes `existing`, an occupied one becomes
-`none` with `workspace_resolved.shared: true` and no claim. An explicit `new` still fails on such an engine.
-A repository nobody has committed to (no ref names a commit) has nothing to check out, so `worktree.prepare` fails
-with code `worktree_no_commits` (#5548): an inferred `new` then uses the free directory as `existing`, and an occupied one
-is refused with a message naming the task that holds it; an explicit `new` fails saying the repository has no commits.
+On a supported computer, the node uses the [workspace naming rules](todos.md#backend-workspace-naming).
+For a linked local Git workspace it uses the source checkout's commit. An explicit `new` in a plain
+directory can prepare a task folder with zero repositories, even with Git unavailable. Older nodes
+keep their engine path. If that engine cannot prepare checkouts (`worktree_unsupported`), an inferred
+`new` reuses a free source directory or shares an occupied one with `workspace_resolved.shared: true`.
+An explicit `new` on that older node requires engine checkout support.
+A Git source with no starting commit cannot produce a checkout (#5548). An inferred `new` then reuses
+a free source directory and refuses an occupied one. An explicit `new` returns the missing-commit error.
 An explicit `workspace` overrides inference. When a caller knows a particular checkout, it should name it with `existing`.
 When an explicit `existing` workspace is occupied by another open task and the caller either sets `workspace.queue: true` or names that occupying task in `after`, the hub parks the task in a durable workspace queue (`TaskQueue` with key `workspace_occupied`) instead of failing into a start-error card (#13142). When the occupying task completes, is accepted/cancelled, or otherwise releases the workspace, the hub deterministically dequeues and auto-starts the next FIFO waiter on that `(machine, workspace)` whose `after` prerequisites are satisfied, without polling timers. Without `queue: true` or a matching `after` prerequisite, occupancy still refuses immediately naming the occupying task.
 Saved repository bindings may also declare an optional `task_workflow` preference (`"isolated"` / unset by default, or `"shared_branch"`, #13204). When `workspace` is omitted on a writable task targeting a `"shared_branch"` repository, default resolution reuses the checkout with `queue: true` (cooperating with #13142 instead of splitting to `new` or failing on occupancy) and uses a `container` workspace when a to-do binds multiple repositories (cooperating with #13143); `"isolated"` or unset preserves the existing defaults unchanged, and any explicit `workspace` overrides inference.
@@ -80,13 +82,11 @@ For an explicit `new.branch`, admission first asks the node whether that branch 
 It reuses that checkout only after a successful clean-tree check, complete live-Agent inventory, and the hub's unfinished-task
 ownership check. Dirty, occupied, changed or unverifiable checkouts are refused with their path and known owner; nothing is forced.
 Older nodes omit branch lookup and keep the existing creation/refusal behavior.
-An unnamed `new` asks the same about its own `task/<todo id>` (#10365): a plan that continues a to-do, or reuses its ID, gets that
-branch and checkout path again, and the checkout an earlier failed start or Agent of the same to-do left is reused when the node
-finds it idle and inside the checkouts folder (`in_checkouts`), with no tracked or staged changes. The new start records it as `reused`
-and keeps untracked drafts in place. Tracked or staged changes block the start and show up to three changed paths with recovery steps.
-Commit or stash the changes and retry, or choose a different branch in a new workspace. Other unusable leftovers still refuse with
-their path and next step. An unavailable branch lookup still falls back to normal checkout creation. Agents keep temporary files and
-drafts outside repository checkouts, for example in the operating system's temporary directory.
+On the older-node path, an unnamed `new` tries to reuse the to-do's own `task/<todo id>` branch (#10365).
+The lookup must find an idle checkout inside the engine's checkouts folder with no tracked or staged
+changes. A safely reused checkout keeps untracked drafts in place. A task that already has a
+created or reused checkout keeps that directory on retry, including after a node upgrade.
+Agents keep temporary files and drafts outside repository checkouts, for example in the operating system's temporary directory.
 Since the node names the directory an Agent starts in by a linked home's own spelling (`workspace.resolve` with `terminal`,
 #10365), while a claim or an Agent from before, or from an older node, has the resolved one (`home_real`), the hub compares
 task directories with the two spellings folded (`taskDirKey` in `server/internal/assistant/tasks_workspace.go`): a directory
@@ -102,31 +102,28 @@ an optional new branch, and the resolved absolute path. “Edit” also supports
 Start sends those choices through the existing `/start` request; clients cannot supply trusted resolution metadata.
 Task details and the started plan show the chosen policy and actual path, read-only.
 
-For a new checkout, the default branch is `task/<todo id>`: the plan reserves that ID for a stable preview but does not create
-the todo or workspace until Start. The path comes only from the machine engine:
-`WorktreePrepare.Path` plus `herdr.WorktreeDirName(branch)`, exactly as `agent_start` does.
-There is no new workspace-root/template setting or arbitrary new-path override. Dispatch rechecks on the final machine,
-calls `newWorktree`, uses the engine's returned path/host workspace ID, and stores the actual `cwd` in the plan and the unchanged
-`todo_agents.cwd` column. A retry uses the created checkout rather than creating another one; a created checkout stays on its machine.
-Creation/lookup failures prevent Agent launch and appear on the task as failed dispatch with the underlying reason.
-A safely reused checkout is saved with `workspace_resolved.reused: true`, not `created: true`; it keeps its actual path and
-machine on retries just as a newly created checkout does. This recovery does not grant permission or change the Start gate.
+The plan reserves a to-do ID for preview. Start persists the naming operation on the selected computer,
+prepares the folder there, and records the actual `cwd` in the plan and in `todo_agents.cwd`. The default
+base directory is `{home}/workspace` and the default task branch is `persona/{task-id}`. The engine
+receives the prepared directory for launch. The same operation and computer are used on a retry.
+Older nodes use their engine's checkout directory and the `task/<todo id>` default branch.
+A preparation or lookup failure appears on the task before any Agent starts. A safely reused checkout
+is recorded as `workspace_resolved.reused: true` with its actual path and computer.
 
 An existing workspace on the same machine and canonical path cannot be reused while another unfinished task holds it.
 The refusal names that task's ID/title and suggests waiting or choosing New (v1 has no queue).
 Admission also covers concurrent starts before the agent link exists. Ended/released tasks do not retain a claim.
 Read-only tasks using `none` do not claim a workspace.
 
-The saved `PlanTask.workspace_resolved` is a hub-owned object, separate from the policy, so future repository entries can be
-added without overloading `cwd`. Examples below omit the other task fields and unrelated response fields; the paths are illustrative
-engine answers, not a required directory layout.
+The saved `PlanTask.workspace_resolved` is a hub-owned object, separate from the policy.
+The examples show the default naming rules and omit unrelated fields.
 
 `task_plan` itself still returns a textual plan/dispatch acknowledgement. The response fragments are saved tasks read from
 `GET /api/v1/task-plans/{id}` or the conversation feed **after dispatch completes**, not confirmation from the initial queued reply:
 
 ```json
 {"workspace":"new","cwd":"/code/app"}
-{"workspace":"new","cwd":"/wt/app/task-todo_example","workspace_resolved":{"machine":"box","path":"/wt/app/task-todo_example","branch":"task/todo_example","workspace_id":"host-space","created":true}}
+{"workspace":"new","cwd":"/home/example/workspace/task-todo_example","workspace_resolved":{"machine":"computer","path":"/home/example/workspace/task-todo_example","branch":"persona/todo_example","operation_id":"op_example","backend_workspace_id":"ws_example","created":true}}
 
 {"workspace":{"existing":"/code/app"},"cwd":"/code/app"}
 {"workspace":{"existing":"/code/app"},"cwd":"/code/app","workspace_resolved":{"machine":"box","path":"/code/app"}}
@@ -155,7 +152,9 @@ rule below. Native clients keep their existing two-entry presentation until they
   for Start (one row per plan); a message card waiting for Send; the conversation's own cards. A finished task is never
   here, whatever `ask` it still carries (a supervisor's accepting review can leave its "please verify" behind): the
   To-dos page files it with the finished ones and the tray has nothing to answer, so until #12974 such rows kept the
-  badge up for good while the list the owner opened showed none of them.
+  badge up for good while the list the owner opened showed none of them. On the web, a task review's current owner
+  decision is answerable in the supervising conversation's tray and in the main tray, where a direction's decision is
+  grouped under its supervisor. A quiet task's decision can appear there while the global To-dos badge still skips it.
 - **A supervisor's review is not the owner's.** A supervised task judged finished waits in `pending_review` for its
   supervisor (the background supervisor, a leader, or the conversation that handed it out; "Supervision" and
   "Background supervisor" below), who closes it with `task_review`. That review is Persona's to do, so the Needs you

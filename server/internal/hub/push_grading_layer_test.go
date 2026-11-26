@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -171,8 +172,8 @@ func TestPushGradingLayerOwnershipIsolation(t *testing.T) {
 		{"foreign PUT query mgr", http.MethodPut, "/api/v1/push/grading/layer?manager=manager-b", `{"version":1}`, codeOtherManager},
 		{"foreign DELETE query ext", http.MethodDelete, "/api/v1/push/grading/layer?extension=ext-a", "", codeLayerOwnershipDenied},
 		{"foreign DELETE query mgr", http.MethodDelete, "/api/v1/push/grading/layer?manager=manager-b", "", codeOtherManager},
-		{"foreign preview draft ext", http.MethodPost, "/api/v1/push/grading/preview", `{"notification":{"level":"P1"},"layer":{"extension":"ext-a","enabled":false}}`, codeLayerOwnershipDenied},
 		{"foreign preview query ext", http.MethodPost, "/api/v1/push/grading/preview?extension=ext-a", `{"notification":{"level":"P1"}}`, codeLayerOwnershipDenied},
+		{"foreign preview query mgr", http.MethodPost, "/api/v1/push/grading/preview?manager=manager-b", `{"notification":{"level":"P1"}}`, codeOtherManager},
 		{"foreign preview notif mgr", http.MethodPost, "/api/v1/push/grading/preview", `{"notification":{"level":"P1","manager":"manager-b"}}`, codeOtherManager},
 	}
 	for _, tc := range denied {
@@ -244,7 +245,7 @@ func TestPushGradingLayerPersistenceAcrossReload(t *testing.T) {
 		t.Fatalf("PUT v1 response = %s (%v)", body, err)
 	}
 	store.mu.Lock()
-	_, legacyExists := store.vals[gradingLayersSettingKey]
+	_, legacyExists := store.vals["hub.push_grading.layers"]
 	store.mu.Unlock()
 	if legacyExists {
 		t.Fatal("PUT wrote to legacy hub.push_grading.layers key")
@@ -414,29 +415,39 @@ func TestPushGradingLayerRemovalAndExtensionTeardownRestoresOwnerSettings(t *tes
 	})
 }
 
-func seedLegacyGradingLayer(t *testing.T, h *Hub, p *principal, raw string) {
+func putVersionedLayer(t *testing.T, h *Hub, p *principal, body string) {
 	t.Helper()
-	var in pushGradingLayerInput
-	if err := json.Unmarshal([]byte(raw), &in); err != nil {
-		t.Fatalf("decode legacy test layer: %v", err)
-	}
-	layer, err := in.buildLayer(p.Manager, p.Extension, h.push.now())
-	if err != nil {
-		t.Fatalf("build legacy test layer: %v", err)
-	}
-	if _, err := h.push.putGradingLayer(context.Background(), layer); err != nil {
-		t.Fatalf("seed legacy test layer: %v", err)
+	code, raw := gradingLayerHTTP(t, h, p, http.MethodPut, "/api/v1/push/grading/layer", body)
+	if code != http.StatusOK {
+		t.Fatalf("PUT layer %s: %d %s", body, code, raw)
 	}
 }
 
+func previewGradingHTTP(t *testing.T, h *Hub, p *principal, body string) pushGradingPreviewResponse {
+	t.Helper()
+	code, raw := gradingLayerHTTP(t, h, p, http.MethodPost, "/api/v1/push/grading/preview", body)
+	if code != http.StatusOK {
+		t.Fatalf("POST preview %s: %d %s", body, code, raw)
+	}
+	var out pushGradingPreviewResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode preview %s: %v", raw, err)
+	}
+	return out
+}
+
 // Combination safety: system alerts always pass, active owner attention modes are never weakened by extension layers,
-// multiple extension layers compose deterministically (stricter wins), disabled layers are inert, and custom dedup works.
+// per-manager isolation holds, custom dedup windows work without suppressing P0, merge_held is respected, owner explicit
+// enabled:false overrides extension layers, and cache invalidation makes layer/switch/prune writes take effect immediately.
 func TestPushGradingLayerCombinesSafelyWithOwnerControls(t *testing.T) {
-	t.Run("system alerts bypass catch-all silent layer", func(t *testing.T) {
+	t.Run("system alerts bypass owner base P0 hold and extension layers", func(t *testing.T) {
 		h, f := gradingHub(t)
 		attempts := gradingAttempts(h)
-		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
-		seedLegacyGradingLayer(t, h, extA, `{"grading_enabled":true,"rules":[{"when":{},"action":"silent"}]}`)
+		baseCfg := parseGradingTestConfig(t, `{"version":1,"enabled":true,"actions":{"P0":"hold","P1":"silence","P2":"silence"}}`, false)
+		if err := writePushGradingBase(context.Background(), h.push.store, baseCfg); err != nil {
+			t.Fatal(err)
+		}
+		h.push.invalidatePushGradingCache()
 		h.push.sendLocalized(func(i18n.Lang) map[string]any {
 			return map[string]any{"aps": map[string]any{"alert": map[string]any{"title": "Computer joined"}, "sound": "default"}}
 		}, "", nil)
@@ -446,31 +457,33 @@ func TestPushGradingLayerCombinesSafelyWithOwnerControls(t *testing.T) {
 		f.calls(t, 1)
 	})
 
-	t.Run("owner attention mode is never weakened by extension allow or P0 promotion", func(t *testing.T) {
+	t.Run("owner attention mode is never weakened by extension actions or notify_user promotion", func(t *testing.T) {
 		h, f := gradingHub(t)
 		attempts := gradingAttempts(h)
 		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
-		seedLegacyGradingLayer(t, h, extA,
-			`{"rules":[{"id":"force-allow","when":{"related_key_prefix":"vip:"},"level":"P0","action":"allow"},{"id":"hold-focused","when":{"related_key_prefix":"noisy:"},"action":"hold","reason":"ext_noisy"}]}`)
-		// Immersive focus on qa-plain: out-of-focus vip push is STILL held by immersive mode.
+		putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"push","P2":"push"},"notify_user":{"others":"P0"}}`)
+
+		// Immersive focus on qa-plain: out-of-focus P1 and in-focus level-less non-main notify_user are STILL held by immersive mode.
 		setAttention(h, assistantwire.AttentionImmersive, time.Hour, &assistantwire.AttentionFocus{Track: "qa-plain"})
-		nOut := trackNotification(assistantwire.LevelP1, "qa-other", "", "out of focus vip")
-		nOut.RelatedKey = "vip:1"
+		nOut := trackNotification(assistantwire.LevelP1, "qa-other", "", "out of focus")
 		out, err := h.deliverPushFrom(assistantwire.AssistantID, nOut)
 		if err != nil || heldOf(out) != assistantwire.AttentionReasonImmersiveHeld || *attempts != 0 {
-			t.Fatalf("immersive out-of-focus vip: out=%+v err=%v attempts=%d", out, err, *attempts)
+			t.Fatalf("immersive out-of-focus: out=%+v err=%v attempts=%d", out, err, *attempts)
 		}
-		// In-focus P0 that extension explicitly holds IS held (stricter wins).
-		nNoisy := trackNotification(assistantwire.LevelP0, "qa-plain", "", "in focus noisy")
-		nNoisy.RelatedKey = "noisy:1"
-		out, err = h.deliverPushFrom(assistantwire.AssistantID, nNoisy)
-		if err != nil || heldOf(out) != "ext_noisy" || *attempts != 0 {
-			t.Fatalf("immersive in-focus extension hold: out=%+v err=%v attempts=%d", out, err, *attempts)
+		nInFocusNonMain := trackNotification("", "qa-plain", "", "in focus non-main")
+		nInFocusNonMain.DeviceID, nInFocusNonMain.SessionID = "mac", "routine-conv"
+		out, err = h.deliverPushFrom(assistantwire.AssistantID, nInFocusNonMain)
+		if err != nil || heldOf(out) != assistantwire.AttentionReasonImmersiveHeld || *attempts != 0 {
+			t.Fatalf("immersive in-focus non-main promoted by ext: out=%+v err=%v attempts=%d", out, err, *attempts)
 		}
-		// Quiet mode: even an allowed P0 is STILL hushed (no sound, passive).
+
+		// Quiet mode: even an allowed P0 is STILL hushed (no sound, passive), and P1 stays quiet-held despite layer actions.P1=push.
 		setAttention(h, assistantwire.AttentionQuiet, time.Hour, nil)
-		nQuiet := gradingNotification(assistantwire.LevelP0, "vip:quiet", "quiet p0")
-		if err := h.deliverPush(nQuiet); err != nil {
+		out, err = h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP1, "q:p1", "quiet p1"))
+		if err != nil || heldOf(out) != assistantwire.AttentionReasonQuietHeld {
+			t.Fatalf("quiet P1 weakened by layer: out=%+v err=%v", out, err)
+		}
+		if err := h.deliverPush(gradingNotification(assistantwire.LevelP0, "q:p0", "quiet p0")); err != nil {
 			t.Fatal(err)
 		}
 		calls := f.calls(t, 1)
@@ -479,79 +492,95 @@ func TestPushGradingLayerCombinesSafelyWithOwnerControls(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple layers compose deterministically with stricter winning", func(t *testing.T) {
-		h, _ := gradingHub(t)
-		extAllow := extGradingPrincipal(assistantwire.AssistantID, "ext-alpha")
-		extHold := extGradingPrincipal(assistantwire.AssistantID, "ext-beta")
-		extSilent := extGradingPrincipal(assistantwire.AssistantID, "ext-gamma")
-
-		seedLegacyGradingLayer(t, h, extAllow, `{"rules":[{"id":"allow-pr","when":{"related_key_prefix":"pr:"},"action":"allow"}]}`)
-		seedLegacyGradingLayer(t, h, extHold, `{"rules":[{"id":"hold-pr","when":{"related_key_prefix":"pr:"},"action":"hold","reason":"ext_hold_pr"}]}`)
-		dec := h.push.previewPushGrading(pushPolicy{
-			kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP1, relatedKey: "pr:9",
-		}, nil, false)
-		if dec.Allow || dec.Action != pushGradingActionHold || dec.Reason != "ext_hold_pr" || dec.MatchedLayer == nil || dec.MatchedLayer.Extension != "ext-beta" {
-			t.Fatalf("allow + hold composition = %+v, want hold by ext-beta", dec)
-		}
-
-		// Adding a silent rule beats hold.
-		seedLegacyGradingLayer(t, h, extSilent, `{"rules":[{"id":"silent-pr","when":{"related_key_prefix":"pr:"},"action":"silent","reason":"ext_silent_pr"}]}`)
-		dec2 := h.push.previewPushGrading(pushPolicy{
-			kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP1, relatedKey: "pr:9",
-		}, nil, false)
-		if dec2.Allow || dec2.Action != pushGradingActionSilent || dec2.Reason != "ext_silent_pr" || dec2.MatchedLayer == nil || dec2.MatchedLayer.Extension != "ext-gamma" {
-			t.Fatalf("allow + hold + silent composition = %+v, want silent by ext-gamma", dec2)
-		}
-	})
-
-	t.Run("disabled layer is inert and custom dedup window works without suppressing P0", func(t *testing.T) {
+	t.Run("per-manager isolation, owner explicit off, custom dedup window, and immediate cache invalidation", func(t *testing.T) {
 		h, f := gradingHub(t)
 		attempts := gradingAttempts(h)
 		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
 
-		// Disabled layer does not filter pushes.
-		seedLegacyGradingLayer(t, h, extA, `{"enabled":false,"grading_enabled":true}`)
-		if err := h.deliverPush(gradingNotification(assistantwire.LevelP1, "k-dis", "disabled layer")); err != nil {
-			t.Fatal(err)
-		}
-		if *attempts != 1 {
-			t.Fatalf("disabled layer held push: attempts=%d", *attempts)
+		// Claim layer on assistant with 20h dedup, P1=push, P2=hold (hub.ln_mode stays off).
+		putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"push","P2":"hold"},"dedup_window":"20h"}`)
+		if h.push.pushGradingOn() {
+			t.Fatal("extension layer mutated hub.ln_mode")
 		}
 
-		// Custom 20h dedup window (72000s): after 15h (>12h default, <20h layer), non-P0 repeat is still deduped,
-		// while P0 still interrupts.
-		seedLegacyGradingLayer(t, h, extA, `{"enabled":true,"grading_enabled":true,"dedup_window_seconds":72000}`)
+		// Other manager (manager-b) is unaffected: P2 still pushes.
+		outB, err := h.deliverPushFrom("manager-b", gradingNotification(assistantwire.LevelP2, "mb:1", "manager-b p2"))
+		if err != nil || heldOf(outB) != "" || *attempts != 1 {
+			t.Fatalf("manager-b affected by assistant layer: out=%+v err=%v attempts=%d", outB, err, *attempts)
+		}
+
+		// Assistant applies the layer immediately without waiting for TTL: P1 pushes, P2 is held (ln_p1_held),
+		// and a 15h repeat after P0 is deduped under the 20h window while P0 still interrupts.
 		base := h.push.now()
-		if err := h.deliverPush(gradingNotification(assistantwire.LevelP0, "pr:dedup", "first p0")); err != nil {
-			t.Fatal(err)
+		outP0, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP0, "pr:dedup", "first p0"))
+		if err != nil || heldOf(outP0) != "" {
+			t.Fatalf("first P0: out=%+v err=%v", outP0, err)
 		}
 		moveGradingClock(h, base.Add(15*time.Hour))
-		out, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP1, "pr:dedup", "repeat p1"))
-		if err != nil || heldOf(out) != interceptReasonDedup {
-			t.Fatalf("15h repeat under 20h layer: out=%+v err=%v, want ln_dedup_12h", out, err)
+		outP2Repeat, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP2, "pr:dedup", "repeat p2"))
+		if err != nil || heldOf(outP2Repeat) != interceptReasonDedup {
+			t.Fatalf("15h repeat under 20h layer: out=%+v err=%v, want %s", outP2Repeat, err, interceptReasonDedup)
 		}
-		// P0 with the same key still interrupts.
-		out, err = h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP0, "pr:dedup", "second p0"))
-		if err != nil || heldOf(out) != "" || *attempts != 3 {
-			t.Fatalf("P0 under 20h dedup: out=%+v err=%v attempts=%d, want delivered", out, err, *attempts)
+		outP2Fresh, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP2, "pr:fresh", "fresh p2"))
+		if err != nil || heldOf(outP2Fresh) != interceptReasonP1 {
+			t.Fatalf("fresh P2 under actions.P2=hold: out=%+v err=%v, want %s", outP2Fresh, err, interceptReasonP1)
 		}
-		f.calls(t, 3)
+		outP0Repeat, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP0, "pr:dedup", "second p0"))
+		if err != nil || heldOf(outP0Repeat) != "" {
+			t.Fatalf("P0 under 20h dedup: out=%+v err=%v, want delivered", outP0Repeat, err)
+		}
+
+		// Deleting the layer invalidates the cache immediately (same timestamp) and restores default delivery.
+		if code, raw := gradingLayerHTTP(t, h, extA, http.MethodDelete, "/api/v1/push/grading/layer", ""); code != http.StatusOK {
+			t.Fatalf("DELETE layer: %d %s", code, raw)
+		}
+		outAfterDel, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP2, "pr:after-del", "after delete"))
+		if err != nil || heldOf(outAfterDel) != "" {
+			t.Fatalf("after DELETE layer: out=%+v err=%v, want immediate restore", outAfterDel, err)
+		}
+
+		// Owner explicit hub.push_grading enabled=false overrides an active extension layer.
+		putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"silence","P2":"silence"}}`)
+		baseOff := parseGradingTestConfig(t, `{"version":1,"enabled":false}`, false)
+		if err := writePushGradingBase(context.Background(), h.push.store, baseOff); err != nil {
+			t.Fatal(err)
+		}
+		h.push.invalidatePushGradingCache()
+		outBaseOff, err := h.deliverPushFrom(assistantwire.AssistantID, gradingNotification(assistantwire.LevelP2, "pr:base-off", "base off"))
+		if err != nil || heldOf(outBaseOff) != "" {
+			t.Fatalf("owner base enabled=false did not override layer: out=%+v err=%v", outBaseOff, err)
+		}
+		f.calls(t, 5)
 	})
 
-	t.Run("HTTP notify matches alert kind and calling extension", func(t *testing.T) {
+	t.Run("merge_held false keeps same-minute P1 intercepts separate", func(t *testing.T) {
 		h, _ := gradingHub(t)
 		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
-		seedLegacyGradingLayer(t, h, extA, `{"rules":[{"id":"mute-ext-bot","when":{"kinds":["alert"],"extension":"noisy-bot"},"action":"silent","reason":"ext_bot_muted"}]}`)
-		res, err := h.deliverNotify(notifyRequest{Title: "Ping", Body: "hello", Level: levelActive, PushLevel: assistantwire.LevelP0}, "", "noisy-bot", assistantwire.AssistantID)
-		if err != nil || res["sent"] != false || res["held"] != true || res["reason"] != "ext_bot_muted" {
-			t.Fatalf("deliverNotify = %+v, err=%v; want held ext_bot_muted", res, err)
+		putVersionedLayer(t, h, extA, `{"version":1,"merge_held":false}`)
+		for _, title := range []string{"one", "two"} {
+			if err := h.deliverPush(gradingNotification(assistantwire.LevelP1, "k:"+title, title)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if view := h.push.heldPushesView("", 0); len(view) != 2 {
+			t.Fatalf("merge_held=false rows = %d, want 2: %+v", len(view), view)
+		}
+	})
+
+	t.Run("HTTP notify obeys per-manager layer and returns live reason", func(t *testing.T) {
+		h, _ := gradingHub(t)
+		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
+		putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"silence"}}`)
+		res, err := h.deliverNotify(notifyRequest{Title: "Ping", Body: "hello", Level: levelActive, PushLevel: assistantwire.LevelP1}, "", "noisy-bot", assistantwire.AssistantID)
+		if err != nil || res["sent"] != false || res["held"] != true || res["reason"] != interceptReasonP2 {
+			t.Fatalf("deliverNotify = %+v, err=%v; want held %s", res, err, interceptReasonP2)
 		}
 	})
 }
 
-// POST /api/v1/push/grading/preview returns the combined decision (including draft layers, dedup hits, main
-// conversation promotion, and active attention modes) with ZERO side effects on any notification, dedup,
-// intercept, delivered-push, layer, WebSocket, or store state.
+// POST /api/v1/push/grading/preview returns neutral evaluator outcomes ("held", "silenced", "deduped"),
+// explicit live_reason adapter output, and config attribution for persisted, draft, and layer:null previews
+// with ZERO side effects on any notification, dedup, intercept, delivered-push, layer, WebSocket, or store state.
 func TestPushGradingPreviewMatchesDeliveryAndWritesZeroState(t *testing.T) {
 	h, f := gradingHub(t)
 	h.clients = map[*client]struct{}{}
@@ -569,21 +598,21 @@ func TestPushGradingPreviewMatchesDeliveryAndWritesZeroState(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.calls(t, 1)
-	// Drain the WS notify frame emitted by the initial real push before snapshotting.
 	<-wsClient.out
 	if !h.push.waitInterceptsSaved(2 * time.Second) {
 		t.Fatal("initial push state did not save")
 	}
-	seedLegacyGradingLayer(t, h, extA, `{"rules":[{"id":"vip-p0","when":{"related_key_prefix":"vip:"},"level":"P0"}]}`)
+	putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"hold","P2":"push"},"dedup_window":"6h"}`)
 
-	// Snapshot every piece of mutable state before running previews.
-	snapshotState := func() (intercepts []heldPushRecord, stats []pushDayStats, lastAlert map[string]time.Time, layers []PushGradingLayer, storeVals map[string][]byte, sentRows int) {
+	snapshotState := func() (intercepts []heldPushRecord, stats []pushDayStats, lastAlert map[string]map[string]time.Time, storeVals map[string][]byte, sentRows int) {
 		intercepts = h.push.heldPushesView("", 0)
 		stats = h.push.pushDailyStats(h.push.now().Add(-24*time.Hour), "")
 		h.push.gradingMu.Lock()
-		lastAlert = maps.Clone(h.push.gradingLastAlert)
+		lastAlert = make(map[string]map[string]time.Time, len(h.push.gradingLastAlert))
+		for m, byKey := range h.push.gradingLastAlert {
+			lastAlert[m] = maps.Clone(byKey)
+		}
 		h.push.gradingMu.Unlock()
-		layers = h.push.listGradingLayers("")
 		store.mu.Lock()
 		storeVals = make(map[string][]byte, len(store.vals))
 		for k, v := range store.vals {
@@ -593,66 +622,63 @@ func TestPushGradingPreviewMatchesDeliveryAndWritesZeroState(t *testing.T) {
 		sentRows = len(store.sentTable())
 		return
 	}
-	beforeIntercepts, beforeStats, beforeLastAlert, beforeLayers, beforeStore, beforeSentRows := snapshotState()
+	beforeIntercepts, beforeStats, beforeLastAlert, beforeStore, beforeSentRows := snapshotState()
 	attempts := gradingAttempts(h)
 
-	preview := func(p *principal, body string) PushGradingDecision {
-		t.Helper()
-		code, raw := gradingLayerHTTP(t, h, p, http.MethodPost, "/api/v1/push/grading/preview", body)
-		if code != http.StatusOK {
-			t.Fatalf("preview %s: got %d %s", body, code, raw)
-		}
-		var dec PushGradingDecision
-		if err := json.Unmarshal(raw, &dec); err != nil {
-			t.Fatalf("decode preview %s: %v", raw, err)
-		}
-		return dec
+	// 1. Persisted layer sets actions.P2=push -> allowed with layer attribution.
+	d1 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P2","related_key":"bg:1"}}`)
+	if !d1.Allow || d1.Held || d1.Action != "push" || d1.Reason != "" || d1.LiveReason != "" ||
+		d1.EffectiveLevel != assistantwire.LevelP2 || d1.Source != "extension:ext-a" ||
+		d1.LayerSource != "extension:ext-a" || d1.DedupWindowSeconds != int((6*time.Hour).Seconds()) {
+		t.Fatalf("preview 1 (persisted P2=push) = %+v", d1)
 	}
 
-	// 1. Persisted layer promotes vip: P1 to P0 -> allowed, source=extension, matched_layer=ext-a/vip-p0.
-	d1 := preview(extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"vip:urgent"}}`)
-	if !d1.Allow || d1.Held || d1.EffectiveLevel != assistantwire.LevelP0 || d1.Source != pushGradingSourceExtension ||
-		d1.MatchedLayer == nil || d1.MatchedLayer.Extension != "ext-a" || d1.MatchedLayer.RuleID != "vip-p0" ||
-		d1.MatchedLayer.RuleIndex == nil || *d1.MatchedLayer.RuleIndex != 0 {
-		t.Fatalf("preview 1 (persisted vip) = %+v", d1)
+	// 2. Fresh P1 -> neutral reason "held", live_reason "ln_p1_held".
+	d2 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"regular:1"}}`)
+	if d2.Allow || !d2.Held || d2.Action != "hold" || d2.Reason != pushGradingOutcomeHeld ||
+		d2.LiveReason != interceptReasonP1 || d2.Source != "extension:ext-a" {
+		t.Fatalf("preview 2 (fresh P1) = %+v", d2)
 	}
 
-	// 2. Unmatched P1 -> held by owner switch.
-	d2 := preview(extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"regular:1"}}`)
-	if d2.Allow || !d2.Held || d2.Reason != interceptReasonP1 || d2.Source != pushGradingSourceOwner || d2.MatchedLayer != nil {
-		t.Fatalf("preview 2 (unmatched P1) = %+v", d2)
-	}
-
-	// 3. Existing P0 key -> dedup hit detected read-only.
-	d3 := preview(extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"pr:existing"}}`)
-	if d3.Allow || !d3.Held || !d3.DedupHit || d3.Reason != interceptReasonDedup {
+	// 3. Existing P0 key -> neutral reason "deduped", live_reason "ln_dedup_12h", DedupHit=true.
+	d3 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"pr:existing"}}`)
+	if d3.Allow || !d3.Held || !d3.DedupHit || d3.Reason != pushGradingOutcomeDeduped || d3.LiveReason != interceptReasonDedup {
 		t.Fatalf("preview 3 (dedup hit) = %+v", d3)
 	}
 
-	// 4. Previewing a fresh P0 key returns allow=true AND does NOT record it into gradingLastAlert!
-	d4 := preview(extA, `{"notification":{"kind":"assistant","level":"P0","related_key":"pr:never-sent"}}`)
+	// 4. Previewing a fresh P0 key returns allow=true AND does NOT record it into gradingLastAlert.
+	d4 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P0","related_key":"pr:never-sent"}}`)
 	if !d4.Allow || d4.EffectiveLevel != assistantwire.LevelP0 {
 		t.Fatalf("preview 4 (fresh P0) = %+v", d4)
 	}
 
 	// 5. Main conversation level-less notify_user promotes to P0 in preview just like live delivery.
-	d5 := preview(extA, `{"notification":{"kind":"assistant","machine_id":"mac","session_id":"main-conv"}}`)
-	if !d5.Allow || d5.InputLevel != assistantwire.LevelP0 || d5.EffectiveLevel != assistantwire.LevelP0 {
+	d5 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","machine_id":"mac","session_id":"main-conv"}}`)
+	if !d5.Allow || d5.EffectiveLevel != assistantwire.LevelP0 {
 		t.Fatalf("preview 5 (main conversation) = %+v", d5)
 	}
 
-	// 6. Draft layer overrides ext-a's persisted layer for this preview only (without saving it).
-	d6 := preview(extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"vip:urgent"},"layer":{"enabled":false}}`)
-	if d6.Allow || !d6.Held || d6.Reason != interceptReasonP1 || d6.Source != pushGradingSourceOwner {
-		t.Fatalf("preview 6 (draft disabled layer) = %+v", d6)
-	}
-	d7 := preview(extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"draft:1"},"layer":{"rules":[{"id":"draft-silent","when":{"related_key_prefix":"draft:"},"action":"silent","reason":"ext_draft_mute"}]}}`)
-	if d7.Allow || d7.Action != pushGradingActionSilent || d7.Reason != "ext_draft_mute" || d7.MatchedLayer == nil || d7.MatchedLayer.RuleID != "draft-silent" {
-		t.Fatalf("preview 7 (draft silent rule) = %+v", d7)
+	// 6. Explicit "layer": null previews removing the persisted layer (owner switch on -> P2 silenced, 12h dedup).
+	d6 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P2","related_key":"bg:1"},"layer":null}`)
+	if d6.Allow || !d6.Held || d6.Action != "silence" || d6.Reason != pushGradingOutcomeSilenced ||
+		d6.LiveReason != interceptReasonP2 || d6.LayerSource != "" || d6.DedupWindowSeconds != int((12*time.Hour).Seconds()) {
+		t.Fatalf("preview 6 (layer:null) = %+v", d6)
 	}
 
-	// Verify ZERO state mutation after all 7 preview calls.
-	afterIntercepts, afterStats, afterLastAlert, afterLayers, afterStore, afterSentRows := snapshotState()
+	// 7. Draft versioned layer overrides persisted layer for this preview only (without saving it).
+	d7 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"draft:1"},"layer":{"version":1,"actions":{"P1":"silence"}}}`)
+	if d7.Allow || d7.Action != "silence" || d7.Reason != pushGradingOutcomeSilenced || d7.LiveReason != interceptReasonP2 {
+		t.Fatalf("preview 7 (draft P1=silence) = %+v", d7)
+	}
+
+	// 8. Owner preview on another manager (manager-b) ignores assistant's singleton layer.
+	d8 := previewGradingHTTP(t, h, nil, `{"notification":{"kind":"assistant","level":"P2","manager":"manager-b","related_key":"bg:1"}}`)
+	if d8.Allow || d8.Reason != pushGradingOutcomeSilenced || d8.LayerSource != "" {
+		t.Fatalf("preview 8 (manager-b isolation) = %+v", d8)
+	}
+
+	// Verify ZERO state mutation after all 8 preview calls.
+	afterIntercepts, afterStats, afterLastAlert, afterStore, afterSentRows := snapshotState()
 	if *attempts != 0 {
 		t.Fatalf("preview triggered %d APNs attempts, want 0", *attempts)
 	}
@@ -671,12 +697,181 @@ func TestPushGradingPreviewMatchesDeliveryAndWritesZeroState(t *testing.T) {
 	if !reflect.DeepEqual(beforeLastAlert, afterLastAlert) {
 		t.Fatalf("preview mutated gradingLastAlert: before=%+v after=%+v", beforeLastAlert, afterLastAlert)
 	}
-	if !reflect.DeepEqual(beforeLayers, afterLayers) {
-		t.Fatalf("preview mutated persisted layers: before=%+v after=%+v", beforeLayers, afterLayers)
-	}
 	if !reflect.DeepEqual(beforeStore, afterStore) || beforeSentRows != afterSentRows {
 		t.Fatalf("preview wrote to store: sentRows %d→%d, store changed=%v", beforeSentRows, afterSentRows, !reflect.DeepEqual(beforeStore, afterStore))
 	}
+}
+
+// Same-input semantic parity: for identical notifications across owner switch, versioned base,
+// manager-scoped extension layers, dedup windows, active attention modes, and main/non-main
+// notify_user derivation, POST /api/v1/push/grading/preview and live deliverPushFrom agree 1:1.
+func TestPushGradingPreviewLiveSemanticParity(t *testing.T) {
+	type parityStep struct {
+		name         string
+		manager      string
+		notification assistantwire.Notification
+		wantAllow    bool
+		wantNeutral  string
+		wantLive     string
+	}
+	runParity := func(t *testing.T, setup func(*testing.T, *Hub), steps []parityStep) {
+		t.Helper()
+		h, _ := gradingHub(t)
+		mainGradingProfile(h)
+		setup(t, h)
+		for _, st := range steps {
+			mgr := cmp.Or(st.manager, assistantwire.AssistantID)
+			payload, err := json.Marshal(map[string]any{
+				"notification": pushGradingPreviewNotification{
+					Kind:       st.notification.Kind,
+					Level:      st.notification.Level,
+					RelatedKey: st.notification.RelatedKey,
+					MachineID:  st.notification.DeviceID,
+					SessionID:  st.notification.SessionID,
+					Track:      st.notification.Track,
+					Depth:      st.notification.Depth,
+					Manager:    mgr,
+					Title:      st.notification.Title,
+					Body:       st.notification.Body,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prev := previewGradingHTTP(t, h, nil, string(payload))
+			liveOut, err := h.deliverPushFrom(mgr, st.notification)
+			if err != nil {
+				t.Fatalf("%s: live deliverPushFrom error: %v", st.name, err)
+			}
+			liveHeld := heldOf(liveOut)
+			liveAllow := liveHeld == ""
+			if prev.Allow != liveAllow || prev.LiveReason != liveHeld {
+				t.Fatalf("%s: preview/live mismatch: preview(allow=%v reason=%q live=%q) vs live(allow=%v held=%q)",
+					st.name, prev.Allow, prev.Reason, prev.LiveReason, liveAllow, liveHeld)
+			}
+			if prev.Allow != st.wantAllow || prev.Reason != st.wantNeutral || prev.LiveReason != st.wantLive {
+				t.Fatalf("%s: got allow=%v neutral=%q live=%q, want allow=%v neutral=%q live=%q",
+					st.name, prev.Allow, prev.Reason, prev.LiveReason, st.wantAllow, st.wantNeutral, st.wantLive)
+			}
+		}
+	}
+
+	t.Run("default off allows every level", func(t *testing.T) {
+		runParity(t, func(*testing.T, *Hub) {}, []parityStep{
+			{name: "P0", notification: gradingNotification(assistantwire.LevelP0, "k0", "p0"), wantAllow: true},
+			{name: "P1", notification: gradingNotification(assistantwire.LevelP1, "k1", "p1"), wantAllow: true},
+			{name: "P2", notification: gradingNotification(assistantwire.LevelP2, "k2", "p2"), wantAllow: true},
+		})
+	})
+
+	t.Run("owner switch on with P0 dedup and main promotion", func(t *testing.T) {
+		runParity(t, func(t *testing.T, h *Hub) {
+			if err := h.push.setPushGrading(context.Background(), true); err != nil {
+				t.Fatal(err)
+			}
+		}, []parityStep{
+			{name: "P0 pushes and records dedup", notification: gradingNotification(assistantwire.LevelP0, "pr:1", "p0"), wantAllow: true},
+			{name: "P1 repeat deduped", notification: gradingNotification(assistantwire.LevelP1, "pr:1", "p1 rep"), wantAllow: false, wantNeutral: pushGradingOutcomeDeduped, wantLive: interceptReasonDedup},
+			{name: "P1 fresh held", notification: gradingNotification(assistantwire.LevelP1, "pr:2", "p1 fresh"), wantAllow: false, wantNeutral: pushGradingOutcomeHeld, wantLive: interceptReasonP1},
+			{name: "P2 fresh silenced", notification: gradingNotification(assistantwire.LevelP2, "pr:3", "p2 fresh"), wantAllow: false, wantNeutral: pushGradingOutcomeSilenced, wantLive: interceptReasonP2},
+			{name: "main conv level-less pushes", notification: gradingNotifyUserPush("main-conv", ""), wantAllow: true},
+			{name: "non-main level-less held", notification: gradingNotifyUserPush("routine-conv", ""), wantAllow: false, wantNeutral: pushGradingOutcomeHeld, wantLive: interceptReasonP1},
+		})
+	})
+
+	t.Run("extension layer on assistant isolated from manager-b without touching hub.ln_mode", func(t *testing.T) {
+		runParity(t, func(t *testing.T, h *Hub) {
+			extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
+			putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"push","P2":"hold"},"notify_user":{"others_max":"P1"}}`)
+		}, []parityStep{
+			{name: "assistant P1 pushes", manager: assistantwire.AssistantID, notification: gradingNotification(assistantwire.LevelP1, "a:1", "a p1"), wantAllow: true},
+			{name: "assistant P2 held", manager: assistantwire.AssistantID, notification: gradingNotification(assistantwire.LevelP2, "a:2", "a p2"), wantAllow: false, wantNeutral: pushGradingOutcomeHeld, wantLive: interceptReasonP1},
+			{name: "assistant non-main explicit P0 capped to P1 and pushed", manager: assistantwire.AssistantID, notification: gradingNotifyUserPush("routine-conv", assistantwire.LevelP0), wantAllow: true},
+			{name: "manager-b P2 unaffected", manager: "manager-b", notification: gradingNotification(assistantwire.LevelP2, "b:1", "b p2"), wantAllow: true},
+		})
+	})
+
+	t.Run("owner base shallow merge with extension layer", func(t *testing.T) {
+		runParity(t, func(t *testing.T, h *Hub) {
+			base := parseGradingTestConfig(t, `{"version":1,"enabled":true,"actions":{"P1":"push"}}`, false)
+			if err := writePushGradingBase(context.Background(), h.push.store, base); err != nil {
+				t.Fatal(err)
+			}
+			extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
+			putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P2":"push"}}`)
+		}, []parityStep{
+			{name: "assistant P1 from base", manager: assistantwire.AssistantID, notification: gradingNotification(assistantwire.LevelP1, "m:1", "p1"), wantAllow: true},
+			{name: "assistant P2 from layer", manager: assistantwire.AssistantID, notification: gradingNotification(assistantwire.LevelP2, "m:2", "p2"), wantAllow: true},
+			{name: "manager-b P1 from base", manager: "manager-b", notification: gradingNotification(assistantwire.LevelP1, "m:3", "p1"), wantAllow: true},
+			{name: "manager-b P2 default silence", manager: "manager-b", notification: gradingNotification(assistantwire.LevelP2, "m:4", "p2"), wantAllow: false, wantNeutral: pushGradingOutcomeSilenced, wantLive: interceptReasonP2},
+		})
+	})
+
+	t.Run("active owner attention mode dominates extension layer", func(t *testing.T) {
+		runParity(t, func(t *testing.T, h *Hub) {
+			extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
+			putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"push","P2":"push"},"notify_user":{"others":"P0"}}`)
+			setAttention(h, assistantwire.AttentionImmersive, time.Hour, &assistantwire.AttentionFocus{Track: "qa-plain"})
+		}, []parityStep{
+			{name: "immersive in-focus P0 allowed", notification: trackNotification(assistantwire.LevelP0, "qa-plain", "", "in focus"), wantAllow: true},
+			{name: "immersive out-of-focus P0 held", notification: trackNotification(assistantwire.LevelP0, "qa-other", "", "out"), wantAllow: false, wantNeutral: assistantwire.AttentionReasonImmersiveHeld, wantLive: assistantwire.AttentionReasonImmersiveHeld},
+			{name: "immersive P1 held despite layer", notification: trackNotification(assistantwire.LevelP1, "qa-plain", "", "p1"), wantAllow: false, wantNeutral: assistantwire.AttentionReasonImmersiveHeld, wantLive: assistantwire.AttentionReasonImmersiveHeld},
+			{name: "immersive P2 silent despite layer", notification: trackNotification(assistantwire.LevelP2, "qa-plain", "", "p2"), wantAllow: false, wantNeutral: assistantwire.AttentionReasonSilent, wantLive: assistantwire.AttentionReasonSilent},
+		})
+	})
+
+	t.Run("P1-5 per-manager dedup isolation and 48h retention under mixed windows", func(t *testing.T) {
+		h, _ := gradingHub(t)
+		if err := h.push.setPushGrading(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+		extA := extGradingPrincipal(assistantwire.AssistantID, "ext-a")
+		putVersionedLayer(t, h, extA, `{"version":1,"actions":{"P1":"push"},"dedup_window":"36h"}`)
+
+		base := h.push.now()
+		// Assistant pushes P1 (allowed by layer) with key "shared:1" -> records dedup ONLY for assistant.
+		if allow, _ := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP1, relatedKey: "shared:1"}); !allow {
+			t.Fatal("assistant P1 should push")
+		}
+		// Manager-b must NOT see assistant's dedup entry (neither in preview nor live).
+		prevB := previewGradingHTTP(t, h, nil, `{"notification":{"kind":"assistant","level":"P2","manager":"manager-b","related_key":"shared:1"}}`)
+		if prevB.DedupHit || prevB.Reason != pushGradingOutcomeSilenced {
+			t.Fatalf("manager-b saw assistant's dedup entry: %+v", prevB)
+		}
+		// 13h later (>12h manager-b window, <36h assistant window), manager-b pushes P0 "other:1".
+		// That must NOT evict assistant's "shared:1" entry!
+		moveGradingClock(h, base.Add(13*time.Hour))
+		if allow, _ := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: "manager-b", level: assistantwire.LevelP0, relatedKey: "other:1"}); !allow {
+			t.Fatal("manager-b P0 should push")
+		}
+		prevA := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P2","related_key":"shared:1"}}`)
+		if !prevA.DedupHit || prevA.Reason != pushGradingOutcomeDeduped {
+			t.Fatalf("assistant 36h dedup entry was prematurely evicted by manager-b push: %+v", prevA)
+		}
+	})
+
+	t.Run("P1-6 preview enforces machine/session ownership and scopes mainConv to target manager", func(t *testing.T) {
+		h, _ := gradingHub(t)
+		mainGradingProfile(h)
+		if err := h.push.setPushGrading(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+		// Extension on manager-b probing assistant's machine/session gets 403 other_manager.
+		extOtherMgr := extGradingPrincipal("manager-b", "ext-b")
+		code, raw := gradingLayerHTTP(t, h, extOtherMgr, http.MethodPost, "/api/v1/push/grading/preview",
+			`{"notification":{"kind":"assistant","machine_id":"mac","session_id":"main-conv"}}`)
+		var errBody map[string]any
+		_ = json.Unmarshal(raw, &errBody)
+		if code != http.StatusForbidden || errBody["code"] != codeOtherManager {
+			t.Fatalf("foreign machine/session preview: got %d %s, want 403 %s", code, raw, codeOtherManager)
+		}
+		// Owner preview targeting manager-b with assistant's main-conv does NOT promote to P0.
+		prevOther := previewGradingHTTP(t, h, nil,
+			`{"notification":{"kind":"assistant","manager":"manager-b","machine_id":"mac","session_id":"main-conv"}}`)
+		if prevOther.Allow || prevOther.EffectiveLevel != assistantwire.LevelP1 {
+			t.Fatalf("manager-b preview promoted assistant's main conversation: %+v", prevOther)
+		}
+	})
 }
 
 // Strict input validation for PUT /api/v1/push/grading/layer and POST /api/v1/push/grading/preview.
@@ -722,13 +917,21 @@ func TestPushGradingLayerValidation(t *testing.T) {
 
 	// Bad preview inputs.
 	badPreviews := map[string]string{
-		"unknown field":     `{"notification":{"level":"P1"},"unknown":true}`,
-		"bad kind":          `{"notification":{"kind":"bogus"}}`,
-		"bad level":         `{"notification":{"level":"P9"}}`,
-		"bad depth":         `{"notification":{"depth":"huge"}}`,
-		"bad draft layer":   `{"notification":{"level":"P1"},"layer":{"dedup_window_seconds":1}}`,
-		"control char key":  `{"notification":{"related_key":"a\u0001b"}}`,
-		"duplicate preview": `{"notification":{"level":"P1"},"notification":{"level":"P2"}}`,
+		"missing notification": `{}`,
+		"null notification":    `{"notification":null}`,
+		"unknown field":        `{"notification":{"level":"P1"},"unknown":true}`,
+		"unknown notif field":  `{"notification":{"level":"P1","extra":1}}`,
+		"bad kind":             `{"notification":{"kind":"bogus"}}`,
+		"bad level":            `{"notification":{"level":"P9"}}`,
+		"bad depth":            `{"notification":{"depth":"huge"}}`,
+		"legacy draft layer":   `{"notification":{"level":"P1"},"layer":{"dedup_window_seconds":1}}`,
+		"draft bad version":    `{"notification":{"level":"P1"},"layer":{"version":2}}`,
+		"draft owner enabled":  `{"notification":{"level":"P1"},"layer":{"version":1,"enabled":true}}`,
+		"draft holds P0":       `{"notification":{"level":"P1"},"layer":{"version":1,"actions":{"P0":"hold"}}}`,
+		"draft foreign field":  `{"notification":{"level":"P1"},"layer":{"version":1,"extension":"ext-a"}}`,
+		"control char key":     `{"notification":{"related_key":"a\u0001b"}}`,
+		"duplicate preview":    `{"notification":{"level":"P1"},"notification":{"level":"P2"}}`,
+		"case colliding field": `{"notification":{"level":"P1"},"Notification":{"level":"P2"}}`,
 	}
 	for name, body := range badPreviews {
 		code, raw := gradingLayerHTTP(t, h, extA, http.MethodPost, "/api/v1/push/grading/preview", body)

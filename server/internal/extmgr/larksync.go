@@ -43,6 +43,7 @@ const (
 	larkSyncBudget      = 20 * time.Minute     // one full run's budget: what is left is read next time
 	larkSyncIMBudget    = 5 * time.Minute      // one lightweight IM incremental run's budget
 	larkSyncIMEvery     = 15 * time.Minute     // how often chat-enabled bindings run a lightweight IM incremental sync
+	larkSyncNamesBudget = 90 * time.Second     // one sender-name backfill round's own budget, after the run's commit
 	larkSyncPendingTail = "~pending"           // the key suffix of a bot's authorization under way
 	larkSyncDocsWindow  = 7 * 24 * time.Hour   // how far back the connector's Items reach
 	larkSyncOutboxKeep  = 30 * 24 * time.Hour  // how long outbox rows are kept
@@ -54,8 +55,12 @@ const (
 	larkSyncBodyMost    = int64(1 << 20)       // request bodies of the sync's routes
 	larkSyncChangesMost = 100                  // chat batches one Changes call hands over by default
 	larkSyncStaleAuth   = larkSyncAuthFor + time.Minute
-	// larkSyncBackfillVersion triggers the one-time idempotent sender-name backfill for pre-#15486 outbox messages.
-	larkSyncBackfillVersion = 1
+	// larkSyncBackfillVersion triggers the one-time idempotent sender-name backfill for outbox messages:
+	// v1 resolved contact/v3 names for pre-#15486 rows; v2 adds chat-member, p2p chat-info, and message-carried
+	// fallbacks (plus unnamed DM chat name repair) for personal/external tenants where contact/v3 misses; v3 reads a
+	// large group's member list on demand past the old 20-page cap, and names members who left the group from the
+	// binding's name book and from @mentions around their messages.
+	larkSyncBackfillVersion = 3
 	// larkSyncLinksBackfillVersion triggers the one-time idempotent remediation that scans already-synced chat
 	// outbox messages and enqueues cloud document / wiki links missing body content in lark_sync_index.
 	larkSyncLinksBackfillVersion = 1
@@ -146,6 +151,11 @@ type larkSyncBinding struct {
 	BackfillVersion int `json:"backfill_version,omitempty"`
 	// LinksBackfillVersion records the highest completed one-time dropped-links remediation version (larkSyncLinksBackfillVersion).
 	LinksBackfillVersion int `json:"links_backfill_version,omitempty"`
+	// NamesRounds counts the sender-name backfill rounds run since the binding last completed one (0 once
+	// BackfillVersion reaches larkSyncBackfillVersion); NamesWarning is why the last round stopped short ("" when
+	// it did not). A round that stops short degrades naming only and never sets Health.
+	NamesRounds  int    `json:"names_rounds,omitempty"`
+	NamesWarning string `json:"names_warning,omitempty"`
 	// An authorization under way: browser (State, the PKCE verifier and the redirect), or device (the device code).
 	AuthState       string    `json:"auth_state,omitempty"`
 	AuthVerifierEnc string    `json:"auth_verifier_enc,omitempty"`

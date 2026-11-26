@@ -61,7 +61,6 @@
   "busiest": "最大{value}",
   "core_title": "コア{n}：{value}",
   "open_space": "スペース「{name}」を開く",
-  "engine_pill_hint": "このコンピューターのエンジン。クリックすると下の「エンジン」で変更できます",
   "rename": "名前を変更",
   "rename_label": "コンピュータ名",
   "rename_hint": "すべてのアプリとこのコンピュータの Persona Link に表示されます。空欄なら ID を使います。ID は変わりません。",
@@ -116,5 +115,10 @@
   "hosted_assistants_settings": "設定 › ハブ › アシスタント",
   "manager_pending_restart_hint": "再デプロイでバイナリが更新されました。アイドル状態になり次第、自動で再起動して反映されます。",
   "manager_older_version": "旧バージョン",
-  "manager_version_lag_hint": "このアシスタントはこのコンピューターの node より古いバージョンで動作しています。適用するにはアシスタントサービスを再起動してください。"
+  "manager_version_lag_hint": "このアシスタントはこのコンピューターの node より古いバージョンで動作しています。適用するにはアシスタントサービスを再起動してください。",
+  "configuration": "設定",
+  "other_workspaces": "その他のワークスペース",
+  "no_other_workspaces": "他のワークスペースはありません",
+  "workspaces_loading": "ワークスペースを読み込み中…",
+  "workspaces_failed": "一部のワークスペースを読み込めませんでした。しばらくしてから再試行します。"
 }

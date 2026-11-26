@@ -85,7 +85,10 @@ const options = () => [...host.querySelectorAll('[role="option"]:not([data-panel
 
 describe("@ other sessions on a paging hub (#12983)", () => {
   it("starts from the list's summary rows and one opened chat, as a paging hub leaves the store", () => {
-    expect(api).toHaveBeenCalledWith(expect.stringMatching(/^\/sessions\?(.+&)?summary=1(&|$)/), undefined);
+    expect(api).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/sessions\?(.+&)?summary=1(&|$)/),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(getState().sessionSummaries.map((s) => s.session_id)).toEqual(["trip", "weather", "login"]);
     expect(Object.values(getState().sessions).flat().map((s) => s.session_id)).toEqual(["login"]);
   });

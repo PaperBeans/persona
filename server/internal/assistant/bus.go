@@ -162,7 +162,7 @@ func NewBusHub(o BusOptions) *BusHub {
 			b.mu.Unlock()
 			params := map[string]any{"id": id, "host": host, "os": runtime.GOOS, "arch": runtime.GOARCH,
 				"deploy": o.Deploy, "version": o.Version, "capabilities": withPages(withHealth(withRecording([]string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
-					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
+					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentSessionIdleArchive, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
 					assistantwire.CapabilityTaskInput, assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHealthIntake, assistantwire.CapabilityHealthItems, assistantwire.CapabilityHealthStrength, assistantwire.CapabilityHealthTell, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
@@ -342,11 +342,11 @@ func (b *BusHub) onHello(res json.RawMessage) error {
 				svc.Resync(context.WithoutCancel(ctx))
 			}
 		}()
-		// The inbox's "Needs you" count, which the hub keeps of this connection only (inbox_store.go): what is stored
-		// is read now if nothing read it yet, so the roster has the number before the first round.
+		// The modules' handshake hooks (kernel/seam: the Inbox's "Needs you" count, which the hub keeps of this
+		// connection only), once the connection counts as up.
 		go func() {
-			if b.client.Wait(ctx) == nil && svc.inboxReady(context.WithoutCancel(ctx)) == nil {
-				svc.tellInboxNeedsYou()
+			if b.client.Wait(ctx) == nil {
+				svc.kernel.Connected(context.WithoutCancel(ctx))
 			}
 		}()
 		// The conversations the channels follow (channels_handler.go).
@@ -670,16 +670,15 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 		}
 		if target, _ := params[ownerApprovalHandledParam].(string); target != "" {
 			s.notesOwnerRefused(ctx, carry) // an approval is not a model turn or a conversation message
+			s.forgetUnusedOwnerRelayLater(ctx, p.SessionID, msg)
 			return map[string]any{"params": params}, nil
 		}
-		laterDone, err := s.withOwnerRelayLater(ctx, p.MachineID, p.SessionID, msg, params, true)
-		if err != nil {
+		if _, err := s.withOwnerRelayLater(ctx, p.MachineID, p.SessionID, msg, params, true); err != nil {
 			s.notesOwnerRefused(ctx, carry)
 			s.appSendRefused(p.MachineID, p.SessionID, err)
 			return nil, err
 		}
 		s.notesOwnerSent(ctx, carry, msg)
-		s.relayLaterOwnerSent(p.SessionID, msg, laterDone)
 		if *note != "" {
 			return map[string]any{"params": params, "launcher_note": *note}, nil
 		}
@@ -756,7 +755,7 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 	if out, ok, err := s.extensionEventRequest(ctx, method, params); ok { // extensions' assistant.event (extension_event.go)
 		return out, err
 	}
-	if out, ok, err := inboxRequest(ctx, s, method, decode); ok { // the inbox's (inbox_bus.go)
+	if out, ok, err := s.kernel.Answer(ctx, method, params); ok { // the modules' (kernel/seam: the Inbox's)
 		return out, err
 	}
 	if e := b.opts.Extensions; e != nil {

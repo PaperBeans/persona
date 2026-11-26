@@ -9,6 +9,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   checks: write
 
@@ -272,26 +273,26 @@ jobs:
         with:
           name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: ${{ runner.temp }}/release-plan
-      - name: Download every required Android shard receipt
+      - name: Download the exact-source Android result
         uses: actions/download-artifact@v4
         with:
-          pattern: android-source-receipt-${{ needs.plan.outputs.commit }}-*
+          name: android-source-result-${{ needs.plan.outputs.commit }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/android-source-evidence
-          merge-multiple: true
-      - name: Verify every required Android shard passed this exact source
+      - name: Verify every required Android lane passed this exact source
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/android-source-evidence"
-          for lane in lint-build-test-0 test-1; do
-            test -f "$RUNNER_TEMP/android-source-evidence/receipt-$lane.json"
-            python3 - "$RUNNER_TEMP/android-source-evidence/receipt-$lane.json" "${{ needs.plan.outputs.commit }}" <<'PY'
+          python3 - "$RUNNER_TEMP/android-source-evidence/result.json" "${{ needs.plan.outputs.commit }}" \
+            '${{ github.run_id }}' '${{ github.run_attempt }}' <<'PY'
           import json, sys
           from pathlib import Path
-          receipt = json.loads(Path(sys.argv[1]).read_text())
-          assert receipt['commit'] == sys.argv[2], 'Android test evidence belongs to another commit'
-          assert receipt['verified'] is True
+          result = json.loads(Path(sys.argv[1]).read_text())
+          assert result['commit'] == sys.argv[2], 'Android test evidence belongs to another commit'
+          assert result['run_id'] == sys.argv[3], 'Android test evidence belongs to another workflow run'
+          assert result['run_attempt'] == sys.argv[4], 'Android test evidence belongs to another workflow attempt'
+          assert result['status'] == 'verified' and result['verified'] is True
+          assert {lane: value['status'] for lane, value in result['lanes'].items()} == {
+              'lint-build-test-0': 'verified', 'test-1': 'verified'}
           PY
-          done
       - name: Prepare protected Android signing configuration without logging secrets
         env:
           PERSONA_ANDROID_CERTIFICATE_SHA256: ${{ secrets.PERSONA_ANDROID_CERTIFICATE_SHA256 }}

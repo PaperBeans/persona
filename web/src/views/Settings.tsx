@@ -7,7 +7,7 @@ import { takeOverlayEntry } from "../lib/back-close";
 import { useScrollMemory } from "../lib/scroll-memory";
 import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, enc, errorText } from "../lib/api";
-import { splitDevices } from "../lib/devices";
+import { groupDevices, type DeviceGroupKey } from "../lib/devices";
 import { ago } from "../lib/format";
 import { agentName, isTraeCli } from "../lib/agent-kind";
 import { install, useInstall, type InstallState } from "../lib/pwa";
@@ -332,7 +332,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     const show = (el: HTMLElement) => {
       clearTimeout(timer);
       const row = el.hasAttribute("data-settings-row");
-      el.scrollIntoView({ block: row ? "center" : "start" });
+      el.scrollIntoView?.({ block: row ? "center" : "start" });
       card = row ? el : el.querySelector<HTMLElement>(":scope > div") ?? el;
       prev = card.style.boxShadow;
       card.style.boxShadow = "inset 0 0 0 2px var(--accent)";
@@ -368,6 +368,12 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     const agent = g.tab === "agents" ? AGENT_KINDS.find((id) => g.anchor === `settings-${id}`) : undefined;
     pick(g.tab, g.sub ?? null, agent);
     setScrollAnchor(g.anchor);
+  };
+  const openSettingsUrl = (url: string) => {
+    const target = settingsTarget(url);
+    if (!target || !(isCoreTab(target.tab) || isModuleTab(target.tab))) return;
+    pick(target.tab as Tab, target.sub);
+    if (target.anchor) setScrollAnchor(target.anchor);
   };
   const onExtensionPage =
     (tab === "extensions" && extensionsRoute(sub).kind === "page") ||
@@ -471,10 +477,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                     initialFilter={normalizeIntegrationFilter(new URLSearchParams(location.search).get("filter"))}
                     onOpen={(id) => pick("integrations", id)}
                     onPageWide={setExtensionPageWide}
-                    onSettings={(url) => {
-                      const target = settingsTarget(url);
-                      if (target && (isCoreTab(target.tab) || isModuleTab(target.tab))) pick(target.tab as Tab, target.sub);
-                    }}
+                    onSettings={openSettingsUrl}
                   />
                 </Suspense>
               ) : (
@@ -483,16 +486,10 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               {tab === "channels" && (sub ? (twoCol ? (
                 <div className="flex gap-6">
                   <div className="w-[300px] shrink-0"><ChannelList openBeside={sub} onOpen={(id) => pick("channels", id)} onMarketItem={(market, id) => pick("extensions", routeSub({ kind: "item", market, id }))} /></div>
-                  <div className="min-w-0 flex-1"><ChannelPage key={sub} {...parseOwnedSub(sub)} onBack={() => pick("channels")} onSettings={(url) => {
-                    const target = settingsTarget(url);
-                    if (target && (isCoreTab(target.tab) || isModuleTab(target.tab))) pick(target.tab as Tab, target.sub);
-                  }} /></div>
+                  <div className="min-w-0 flex-1"><ChannelPage key={sub} {...parseOwnedSub(sub)} onBack={() => pick("channels")} onSettings={openSettingsUrl} /></div>
                 </div>
               ) : (
-                <ChannelPage key={sub} {...parseOwnedSub(sub)} onBack={() => pick("channels")} headerBack={phone} onSettings={(url) => {
-                  const target = settingsTarget(url);
-                  if (target && (isCoreTab(target.tab) || isModuleTab(target.tab))) pick(target.tab as Tab, target.sub);
-                }} />
+                <ChannelPage key={sub} {...parseOwnedSub(sub)} onBack={() => pick("channels")} headerBack={phone} onSettings={openSettingsUrl} />
               )) : (
                 <ChannelList onOpen={(id) => pick("channels", id)} onMarketItem={(market, id) => pick("extensions", routeSub({ kind: "item", market, id }))} />
               ))}
@@ -1495,15 +1492,16 @@ function DetailBlock({ d, place }: { d: LauncherDetail; place?: string }) {
 // ── Devices ─────────────────────────────────────────────
 
 function Devices() {
-  const [data, setData] = useState<{ tokens: DeviceToken[]; current?: string } | null>(null);
+  const [data, setData] = useState<{ tokens: DeviceToken[]; current?: string; online: Set<string> } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [revokingOthers, setRevokingOthers] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const load = () => {
     setLoading(true);
-    return api<{ tokens: DeviceToken[]; current?: string }>("/auth/tokens")
-      .then((r) => (setData({ tokens: r.tokens ?? [], current: r.current }), setError("")))
+    return api<{ tokens: DeviceToken[]; current?: string; online?: string[] }>("/auth/tokens")
+      .then((r) => (setData({ tokens: r.tokens ?? [], current: r.current, online: new Set(r.online ?? []) }), setError("")))
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   };
@@ -1519,18 +1517,57 @@ function Devices() {
       toast(errorText(e), "error");
     }
   };
-  const kind: Record<string, string> = { phone: t("settings.kind_phone"), watch: t("settings.kind_watch"), other: t("settings.kind_cli"), web: t("settings.kind_web") };
+  const { groups, revoked } = groupDevices(data?.tokens ?? [], data?.current, data?.online);
+  const otherBrowsers = (groups.find((g) => g.key === "browsers")?.items ?? []).filter((tok) => tok.id !== data?.current);
+  const revokeOtherBrowsers = async () => {
+    if (revokingOthers || otherBrowsers.length === 0) return;
+    setRevokingOthers(true);
+    let ok = 0;
+    let firstError = "";
+    try {
+      for (const tok of otherBrowsers) {
+        try {
+          await api(`/auth/tokens/${enc(tok.id)}`, { method: "DELETE" });
+          ok++;
+        } catch (e) {
+          if (!firstError) firstError = errorText(e);
+        }
+      }
+      setConfirm(null);
+      if (ok > 0) toast(t("settings.revoked_other_browsers_toast", { count: ok }), "ok");
+      if (firstError) toast(firstError, "error");
+      void load();
+    } finally {
+      setRevokingOthers(false);
+    }
+  };
+
+  const kind: Record<string, string> = {
+    phone: t("settings.kind_phone"),
+    watch: t("settings.kind_watch"),
+    other: t("settings.kind_cli"),
+    web: t("settings.kind_web"),
+    link: t("settings.kind_link"),
+  };
   const roles: Record<string, string> = { answer: t("settings.role_answer"), scoped: t("settings.role_scoped") };
-  const { active, revoked } = splitDevices(data?.tokens ?? [], data?.current);
+  const groupTitle = (key: DeviceGroupKey, count: number): string => {
+    if (key === "devices") return t("settings.devices_title", { count });
+    if (key === "browsers") return t("settings.devices_group_browsers", { count });
+    if (key === "links") return t("settings.devices_group_links", { count });
+    return t("settings.devices_group_integrations", { count });
+  };
+  const iconFor = (tok: DeviceToken) =>
+    tok.kind === "phone" ? "phone" : tok.kind === "watch" ? "watch" : tok.kind === "web" ? "web" : tok.kind === "link" ? "link" : "key";
 
   // A revoked credential is shown greyed, with when it was revoked and no "Revoke" (iOS DeviceCredentials.swift).
   const row = (tok: DeviceToken, gone: boolean) => (
     <div key={tok.id} className="flex items-center gap-3 px-4 py-2.5">
-      <Icon name={tok.kind === "phone" ? "phone" : tok.kind === "watch" ? "watch" : "web"} size={15} className="shrink-0 text-ink-3" />
+      <Icon name={iconFor(tok)} size={15} className="shrink-0 text-ink-3" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className={cx("truncate text-[13px]", gone ? "text-ink-3" : "text-ink")}>{tok.name || tok.id}</span>
           {tok.id === data?.current && <Pill tone="green">{t("settings.this_browser")}</Pill>}
+          {!gone && tok.id !== data?.current && data?.online.has(tok.id) && <Pill tone="green">{t("settings.device_online")}</Pill>}
           {tok.role !== "full" && <Pill>{roles[tok.role] ?? tok.role}</Pill>}
         </div>
         <div className="mt-0.5 truncate text-[11.5px] text-ink-3">
@@ -1550,7 +1587,7 @@ function Devices() {
           onCancel={() => setConfirm(null)}
           onConfirm={() => void revoke(tok.id)}
           trigger={
-            <Button tone="quiet" onClick={() => setConfirm(tok.id)} className="text-red enabled:hover:text-red">
+            <Button tone="quiet" onClick={() => setConfirm(tok.id)} className="whitespace-nowrap text-red enabled:hover:text-red">
               {t("settings.revoke")}
             </Button>
           }
@@ -1559,6 +1596,30 @@ function Devices() {
     </div>
   );
 
+  const connectButton = (
+    <Button tone="quiet" icon="plus" onClick={() => setConnecting(true)} className="whitespace-nowrap">
+      {t("settings-connectdevice.add")}
+    </Button>
+  );
+  const revokeOthersControl = otherBrowsers.length > 0 ? (
+    <RowConfirm
+      open={confirm === "__other_browsers__"}
+      confirm={t("settings.confirm_revoke_other_browsers")}
+      onCancel={() => setConfirm(null)}
+      onConfirm={() => void revokeOtherBrowsers()}
+      trigger={
+        <Button
+          tone="quiet"
+          busy={revokingOthers}
+          onClick={() => setConfirm("__other_browsers__")}
+          className="whitespace-nowrap text-red enabled:hover:text-red"
+        >
+          {t("settings.revoke_other_browsers")}
+        </Button>
+      }
+    />
+  ) : null;
+
   return (
     <>
       {!data && !error && <Loading />}
@@ -1566,21 +1627,38 @@ function Devices() {
         <p role="alert" className="min-w-0 flex-1 text-[13px] break-words text-red">{error}</p>
         <Button icon="retry" onClick={() => void load()} busy={loading}>{t("settings.retry")}</Button>
       </div>}
-      {data && (
+      {data && groups.length === 0 && (
         <Group
           anchor="devices"
-          title={t("settings.devices_title", { count: active.length })}
+          title={t("settings.devices_title", { count: 0 })}
           footer={t("settings.devices_footer")}
-          right={
-            <Button tone="quiet" icon="plus" onClick={() => setConnecting(true)} className="whitespace-nowrap">
-              {t("settings-connectdevice.add")}
-            </Button>
-          }
+          right={connectButton}
         >
-          {active.length === 0 && <p className="px-4 py-3 text-[12.5px] text-ink-3">{t("settings.no_devices")}</p>}
-          {active.map((tok) => row(tok, false))}
+          <p className="px-4 py-3 text-[12.5px] text-ink-3">{t("settings.no_devices")}</p>
         </Group>
       )}
+      {data && groups.map((group, idx) => {
+        const isFirst = idx === 0;
+        const isLast = idx === groups.length - 1;
+        const right = isFirst && group.key === "browsers" && revokeOthersControl
+          ? <div className="flex items-center gap-2">{revokeOthersControl}{connectButton}</div>
+          : isFirst
+            ? connectButton
+            : group.key === "browsers"
+              ? revokeOthersControl
+              : undefined;
+        return (
+          <Group
+            key={group.key}
+            anchor={isFirst ? "devices" : undefined}
+            title={groupTitle(group.key, group.items.length)}
+            footer={isLast ? t("settings.devices_footer") : undefined}
+            right={right}
+          >
+            {group.items.map((tok) => row(tok, false))}
+          </Group>
+        );
+      })}
       {data && revoked.length > 0 && <Group title={t("settings.revoked_title", { count: revoked.length })}>{revoked.map((tok) => row(tok, true))}</Group>}
       <ConnectDevice open={connecting} onClose={() => setConnecting(false)} onPaired={() => void load()} />
     </>

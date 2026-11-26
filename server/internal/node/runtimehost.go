@@ -541,6 +541,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp", "remote_agent", "memory_tools", "codex_claims")
 			if hello.Caps.Assistant {
 				features = append(features, "assistant_pids")
+				if hello.Caps.AssistantEnvironment && !hello.Caps.RemoteAgent {
+					features = append(features, "assistant_command_gate")
+				}
 			}
 		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,

@@ -78,5 +78,12 @@
   "connector_unavailable": "Couldn't load connector status: {error}",
   "mail_description": "Connect email accounts so Persona can read, search, and bring important mail into your Inbox.",
   "lark_gateway_description": "Status and display preferences for the hub's Lark gateway.",
-  "feishu_bot_description": "Talk to Persona from Feishu or Lark, pair your account, and control notifications and group topics."
+  "feishu_bot_description": "Talk to Persona from Feishu or Lark, pair your account, and control notifications and group topics.",
+  "saved_repositories_title": "Saved repositories",
+  "saved_repositories_hint": "Manage bound repository identities and aliases in Assistant settings.",
+  "saved_repositories_count_one": "1 saved",
+  "saved_repositories_count_other": "{count} saved",
+  "saved_repositories_empty": "None saved",
+  "knowledge_scope_title": "Knowledge sync scope",
+  "knowledge_scope_hint": "Choose which chats, folders, and documents are indexed into Knowledge."
 }

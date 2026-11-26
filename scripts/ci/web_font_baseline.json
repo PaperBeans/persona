@@ -262,7 +262,6 @@
  "web/src/views/session/files/HtmlPreview.tsx": 2,
  "web/src/views/session/files/LineComment.tsx": 3,
  "web/src/views/session/files/NotebookView.tsx": 9,
- "web/src/views/session/files/OfficeView.tsx": 1,
  "web/src/views/session/files/Permissions.tsx": 2,
  "web/src/views/session/files/SheetView.tsx": 11,
  "web/src/views/session/files/parts.tsx": 6,

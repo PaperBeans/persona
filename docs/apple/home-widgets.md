@@ -271,7 +271,9 @@ Widgets/faces/<id>_<rev>/    the chosen package's pictures, one per state, at th
   and a week of steps. About 6 KB, with the days up to about 20 KB. Times are Unix seconds. The app and its widgets
   ship together: a file of another shape (`HomeSnapshot.version`, written before an update) reads as none until the
   app writes again. A new optional field (the days) reads as absent from an older file and needs no new version, so
-  the widgets keep their content across the update.
+  the widgets keep their content across the update. `recordingModule` is such a field (#15214): written as `off` only
+  while the hub's recording module is off, when the Record widget and the Control offer no start
+  (`docs/apple/recording.md`, "With the hub's recording module off (#15214)"); absent or an unknown word means allowed.
 - **When the app writes it**: on every change a widget shows, coalesced to at most one write every 5 seconds (P7);
   when it goes to the background; at least every 20 minutes while it runs (`HomeWidgetWriter.heartbeat`); and when the
   hub's widget push wakes it (#5721). That push is sent within seconds when Needs You changes; other changes are coalesced to at most one

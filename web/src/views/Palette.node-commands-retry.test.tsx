@@ -54,13 +54,16 @@ afterEach(async () => {
 
 it("asks for the node's commands again on the next opening after a failed load", async () => {
   act(() => openPalette("command"));
+  await vi.waitFor(() => {
+    expect(loads.count).toBe(1);
+  });
   await settle();
-  expect(loads.count).toBe(1);
   expect(option("Retry this pane…")).toBeUndefined();
   act(() => closePalette());
   await settle();
   act(() => openPalette("command"));
-  await settle();
-  expect(loads.count).toBe(2);
-  expect(option("Retry this pane…")).toBeDefined();
+  await vi.waitFor(() => {
+    expect(loads.count).toBe(2);
+    expect(option("Retry this pane…")).toBeDefined();
+  });
 });

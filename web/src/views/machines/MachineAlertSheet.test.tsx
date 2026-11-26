@@ -69,7 +69,7 @@ const agents = [
   agent("u1", "Release notes", "unread"),
 ];
 
-function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
+function render(over: { machine?: Machine; kind?: Exclude<AlertKind, "disk">; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
   act(() => root.render(
     <MachineAlertSheet
       machine={over.machine ?? laptop}
@@ -207,7 +207,7 @@ describe("the memory sheet", () => {
   });
 });
 
-describe("the disk sheet", () => {
+describe("cache recovery on a computer without a usage map", () => {
   const disk = (caches: { id: string; path: string; bytes: number; in_use: boolean }[]) => ({
     machine_id: "laptop", at: 1,
     disk: { volumes: [{ mount: "/", used: 450 * GB, total: 500 * GB }], folders: [{ path: "~/code", bytes: 120 * GB }], partial: true, caches },
@@ -224,7 +224,9 @@ describe("the disk sheet", () => {
       ] : [{ id: "go-build", path: "~/.cache/go-build", bytes: 6 * GB, in_use: true }]));
     };
     routes["POST /api/v1/machines/laptop/cleanup"] = () => json({ freed_bytes: 4.8 * GB, items: [{ id: "npm-cache", bytes: 2 * GB, status: "cleaned" }, { id: "xcode-derived-data", bytes: 3 * GB, status: "in_use" }] });
-    render({ kind: "disk", alerts: [{ kind: "disk", severity: "critical" }] });
+    routes["GET /api/v1/machines/laptop/storage/usage"] = () => json({ code: "node_outdated" }, 409);
+    const { UsageMap } = await import("./UsageMap");
+    await act(async () => root.render(<UsageMap machine={laptop} focus={{ mode: "reclaim", seq: 1 }} />));
     await flush();
     expect($("[data-testid=folders]")?.textContent).toContain("~/code");
     expect($("[data-testid=folders-partial]")).not.toBeNull();

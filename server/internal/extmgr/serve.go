@@ -347,7 +347,7 @@ func (h *Manager) Hello(res json.RawMessage) {
 	h.hello.Store(&hl)
 	h.isMemberNow.Store(hl.Assistant.Standby)
 	if was != hl.Assistant.Standby && h.extensions != nil {
-		go h.extensions.roleChanged(context.Background()) // a member's center runs what runs once (mesh_group.go)
+		go h.extensions.roleChanged(h.extensions.runtimeContext(nil)) // a member's center runs what runs once (mesh_group.go)
 		go func() {
 			h.restartBot() // the center's Feishu bot answers for the group
 			h.sendReport()

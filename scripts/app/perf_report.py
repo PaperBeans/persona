@@ -211,20 +211,27 @@ def probe_lines(root):
     found, issues = {}, []
     for log in sorted(pathlib.Path(root).glob("test-*.log")):
         try:
-            for number, line in enumerate(log.read_text(errors="replace").splitlines(), 1):
-                match = re.search(r"perf-frames: (\S+) (.*)$", line)
-                if not match:
-                    continue
-                values = {}
-                for key, value in re.findall(r"(\w+)=(\S+)", match.group(2)):
+            with log.open(errors="replace") as stream:
+                for number, raw in enumerate(stream, 1):
+                    line = raw.rstrip("\n")
+                    match = re.search(r"perf-frames: (\S+) (.*)$", line)
+                    if not match:
+                        continue
                     try:
-                        values[key] = float(value)
-                    except ValueError:
-                        pass
-                found.setdefault(test_id(match.group(1)), []).append({
-                    "values": values, "source": "log_fallback_only", "raw_line": line,
-                    "provenance": {"log": str(log), "line": number}})
-        except (OSError, ValueError) as error:
+                        ident = test_id(match.group(1))
+                    except ValueError as error:
+                        issues.append(f"{log}:{number}: {error}")
+                        continue
+                    values = {}
+                    for key, value in re.findall(r"(\w+)=(\S+)", match.group(2)):
+                        try:
+                            values[key] = float(value)
+                        except ValueError:
+                            pass
+                    found.setdefault(ident, []).append({
+                        "values": values, "source": "log_fallback_only", "raw_line": line,
+                        "provenance": {"log": str(log), "line": number}})
+        except OSError as error:
             issues.append(f"cannot read {log}: {error}")
     return found, issues
 

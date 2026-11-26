@@ -508,7 +508,7 @@ func (n *Node) runCodex(ctx context.Context) {
 			scanAt = time.Now()
 		}
 		cfg := n.codexInventory()
-		deadline := time.Now().Add(codexHomeListWait)
+		deadline := time.Now().Add(n.codexHomeListBudget())
 		for _, home := range cfg.Homes {
 			n.indexCodexHome(home, deadline)
 		}
@@ -824,7 +824,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		pass = newCodexListPass()
 	}
 	cfg := n.codexInventory()
-	deadline := time.Now().Add(codexHomeListWait)
+	deadline := time.Now().Add(n.codexHomeListBudget())
 	for _, home := range cfg.Homes {
 		if !n.indexCodexHome(home, deadline) {
 			pass.markHomeUnavailable(home)

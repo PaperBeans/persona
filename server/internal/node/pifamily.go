@@ -131,7 +131,7 @@ func (n *Node) resolveSessionAlias(method, id string) string {
 		return id
 	}
 	switch method {
-	case "session.close", "session.retire", "session.stop":
+	case "session.close", "session.retire", "session.retire_guarded", "session.stop":
 		return id
 	}
 	n.mu.Lock()

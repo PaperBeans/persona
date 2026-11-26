@@ -58,12 +58,20 @@ type run struct {
 	docLeadsEnqueued   bool
 	pendingLinksDirty  bool
 	pendingLinksAuth   string
-	// names are the senders' display names read this run (open id -> name); namesOff stops asking after a missing
-	// contact scope: names are a help for matching the gateway's copy, never a reason to fail.
+	// names are the senders' display names read via contact/v3 this run (open id -> name); namesOff stops contact/v3
+	// lookups after a missing contact scope: names are a help for matching the gateway's copy, never a reason to fail.
+	// chatMembers caches GET /open-apis/im/v1/chats/:chat_id/members per chat, read on demand (members.go), as a
+	// fallback when contact/v3 misses external users; memberNames aggregates learned member names across chats;
+	// msgNames caches display names carried in message payloads (sender.name, mentions, post @-nodes).
 	// senderTypes records each sender id's sender_type ("user", "app", …) seen in messages this run.
-	names       map[string]string
-	senderTypes map[string]string
-	namesOff    bool
+	names          map[string]string
+	chatMembers    map[string]*chatMemberList
+	book           *nameBook // the binding's name book (members.go); nil until first used
+	memberNames    map[string]string
+	msgNames       map[string]string
+	senderTypes    map[string]string
+	namesOff       bool
+	chatMembersOff bool
 }
 
 // resourceState is how one resource (a cursor key) ended: failed (its content is dropped), abandoned (the budget ran
@@ -142,6 +150,9 @@ func newRun(s *Syncer, b larksyncwire.Binding, token func(context.Context) (stri
 		msgs:          map[string]*msgState{},
 		docs:          map[string]*docState{},
 		names:         map[string]string{},
+		chatMembers:   map[string]*chatMemberList{},
+		memberNames:   map[string]string{},
+		msgNames:      map[string]string{},
 		senderTypes:   map[string]string{},
 		chats:         map[string]chatInfo{},
 		readChats:     map[string]bool{},

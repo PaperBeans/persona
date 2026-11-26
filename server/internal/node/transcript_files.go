@@ -449,7 +449,7 @@ func (n *Node) followCopy(id string, f *transcript.File) (moved bool) {
 }
 
 // maxFiles caps the transcripts kept parsed in memory: every session ever opened used to stay, items and all.
-const maxFiles = 16
+const maxFiles = 48
 
 // used marks a parsed transcript as just asked for. Callers hold n.mu.
 func (n *Node) used(id string) {
@@ -461,8 +461,8 @@ func (n *Node) used(id string) {
 }
 
 // evictFiles drops the least recently used parsed transcripts of offline sessions nobody watches, down to maxFiles.
-// Live sessions stay (warmTranscripts parsed them so the phone never waits for a cold parse). Reopening one parses
-// the file again; its history stays the same (same file, same first line). Callers hold n.mu.
+// Live sessions (terminal agents and running headless assistant processes) stay so the phone never waits for a cold
+// parse. Reopening one parses the file again; its history stays the same (same file, same first line). Callers hold n.mu.
 func (n *Node) evictFiles() {
 	for len(n.files) > maxFiles {
 		oldest, at := "", uint64(0)
@@ -473,12 +473,15 @@ func (n *Node) evictFiles() {
 			if _, live := n.agents[id]; live {
 				continue
 			}
+			if p := n.procs[id]; p != nil && p.alive() {
+				continue
+			}
 			if t := n.fileUse[id]; oldest == "" || t < at {
 				oldest, at = id, t
 			}
 		}
 		if oldest == "" {
-			return // all watched
+			return // all watched or live
 		}
 		delete(n.files, oldest)
 		delete(n.fileUse, oldest)

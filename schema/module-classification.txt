@@ -93,6 +93,8 @@ go server/internal/assistant/kernel/seam core
 go server/internal/assistant/repository core
 go server/internal/assistant/repositorystore core
 go server/internal/assistant/saved core
+go server/internal/assistant/supervisionrole core
+go server/internal/assistant/supervisionrole/supervisionroleadapt core
 go server/internal/assistant/todo/conflict core
 go server/internal/assistant/todo/mergetrain core
 go server/internal/assistant/todo/projection core

@@ -2,6 +2,11 @@ package assistant
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -11,6 +16,11 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant/todo/stagegate"
 	"github.com/nwverse/persona/server/internal/db"
+)
+
+const (
+	maxBlockedByPRURLs            = 20
+	externalPRBlockerFetchTimeout = 5 * time.Second
 )
 
 // todoBlockerStore is the narrow persistence seam for persistent todos_v2 blockers (#15731).
@@ -124,6 +134,104 @@ func (s *Service) addTodoBlocker(ctx context.Context, row db.TodoBlockerRow) (*d
 	return st.UpsertTodoBlocker(ctx, row)
 }
 
+func todoBlockerID(todoID, kind, targetRef string) string {
+	hashRef := targetRef
+	if kind == todoBlockerKindExternalPR {
+		hashRef = strings.ToLower(normalizeTodoBlockerPRRef(targetRef))
+	}
+	sum := sha256.Sum256([]byte(todoID + "\x00" + kind + "\x00" + hashRef))
+	return "blk_" + hex.EncodeToString(sum[:8])
+}
+
+// AddTodoBlocker persists a typed blocker edge for todoID when todos_v2 is enabled.
+// Uses a deterministic edge ID per (todoID, kind, normalized targetRef) so repeated calls are idempotent.
+// Strictly bypassed (no-op) when todos_v2 is off.
+func (s *Service) AddTodoBlocker(ctx context.Context, todoID, kind, targetRef, conditionJSON string) (*db.TodoBlockerRow, error) {
+	if s == nil || !s.settings(ctx).todosV2On() {
+		return nil, nil
+	}
+	todoID = strings.TrimSpace(todoID)
+	kind = strings.TrimSpace(kind)
+	targetRef = normalizeTodoBlockerPRRef(targetRef)
+	if kind == todoBlockerKindExternalPR {
+		targetRef = normalizeTodoBlockerPRRef(targetRef)
+	}
+	if todoID == "" || kind == "" || targetRef == "" {
+		return nil, errors.New("todo_blockers: todo_id, kind, and target_ref are required")
+	}
+	return s.addTodoBlocker(ctx, db.TodoBlockerRow{
+		ID:            todoBlockerID(todoID, kind, targetRef),
+		TodoID:        todoID,
+		Kind:          kind,
+		TargetRef:     targetRef,
+		ConditionJSON: strings.TrimSpace(conditionJSON),
+		State:         db.TodoBlockerStateActive,
+	})
+}
+
+// parseBlockedByPRURLs validates and deduplicates external PR URLs for blocked_by_pr inputs (#16099).
+func parseBlockedByPRURLs(raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > maxBlockedByPRURLs {
+		return nil, fmt.Errorf("blocked_by_pr accepts at most %d URLs", maxBlockedByPRURLs)
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		norm := normalizeTodoBlockerPRRef(item)
+		if norm == "" {
+			return nil, errors.New("blocked_by_pr contains an empty URL")
+		}
+		u, err := url.Parse(norm)
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || strings.TrimSpace(u.Host) == "" {
+			return nil, fmt.Errorf("blocked_by_pr URL %q must be a valid https:// URL", item)
+		}
+		key := strings.ToLower(norm)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, norm)
+	}
+	return out, nil
+}
+
+// persistExternalPRBlockers writes external_pr blocker rows for todoID strictly when todos_v2 is enabled.
+func (s *Service) persistExternalPRBlockers(ctx context.Context, todoID string, urls []string) error {
+	if s == nil || !s.settings(ctx).todosV2On() || len(urls) == 0 {
+		return nil
+	}
+	for _, u := range urls {
+		if _, err := s.AddTodoBlocker(ctx, todoID, todoBlockerKindExternalPR, u, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReconcileTodoBlockers performs a pull-based reconciliation of persisted active blockers under todos_v2 (#16099).
+// Pass targetRef="" for a full fallback sweep, or a specific PR URL / todo ID for targeted fast-path reconciliation.
+func (s *Service) ReconcileTodoBlockers(ctx context.Context, targetRef string) (todoBlockerReconcileSummary, error) {
+	return s.reconcilePersistedTodoBlockers(ctx, targetRef)
+}
+
+// reconcileTodoBlockersForPR runs targeted blocker reconciliation using an already-observed PR status
+// from pr_status.go, avoiding a redundant forge round-trip on the event-driven fast path (#16099).
+func (s *Service) reconcileTodoBlockersForPR(ctx context.Context, status TodoPRStatus) (todoBlockerReconcileSummary, error) {
+	norm := normalizeTodoBlockerPRRef(status.URL)
+	if norm == "" {
+		return todoBlockerReconcileSummary{}, nil
+	}
+	fact := todoBlockerPRFact{
+		URL:    norm,
+		State:  status.State,
+		Merged: strings.EqualFold(status.State, "merged"),
+	}
+	return s.reconcilePersistedTodoBlockersWithPRFact(ctx, norm, &fact)
+}
+
 // incrementTodoBlockerAttempts increments the persistent attempt counter for blocker id under todos_v2.
 func (s *Service) incrementTodoBlockerAttempts(ctx context.Context, id string) (*db.TodoBlockerRow, error) {
 	if s == nil || !s.settings(ctx).todosV2On() {
@@ -174,6 +282,10 @@ func (s *Service) sharedActiveTodoBlockerGroups(ctx context.Context) ([]todoBloc
 //
 // When todos_v2 is disabled, this method returns an empty summary with zero DB or side-effect work.
 func (s *Service) reconcilePersistedTodoBlockers(ctx context.Context, targetRef string) (todoBlockerReconcileSummary, error) {
+	return s.reconcilePersistedTodoBlockersWithPRFact(ctx, targetRef, nil)
+}
+
+func (s *Service) reconcilePersistedTodoBlockersWithPRFact(ctx context.Context, targetRef string, observedPR *todoBlockerPRFact) (todoBlockerReconcileSummary, error) {
 	if s == nil || !s.settings(ctx).todosV2On() {
 		return todoBlockerReconcileSummary{}, nil
 	}
@@ -182,7 +294,7 @@ func (s *Service) reconcilePersistedTodoBlockers(ctx context.Context, targetRef 
 		return todoBlockerReconcileSummary{}, nil
 	}
 
-	targetRef = strings.TrimSpace(targetRef)
+	targetRef = normalizeTodoBlockerPRRef(targetRef)
 	var rows []db.TodoBlockerRow
 	var err error
 	if targetRef == "" {
@@ -227,7 +339,7 @@ func (s *Service) reconcilePersistedTodoBlockers(ctx context.Context, targetRef 
 	}
 
 	active := dbRowsToTodoBlockers(rows)
-	facts, err := s.buildBlockerFactSnapshot(ctx, active)
+	facts, err := s.buildBlockerFactSnapshot(ctx, active, observedPR)
 	if err != nil {
 		return todoBlockerReconcileSummary{}, err
 	}
@@ -260,7 +372,10 @@ func (s *Service) reconcilePersistedTodoBlockers(ctx context.Context, targetRef 
 	}
 
 	for _, todoID := range result.UnblockedTodoIDs {
-		s.notifyTodoBlockerUnblocked(ctx, todoID, onUnblocked)
+		s.notifyTodoBlockerUnblockedOnly(ctx, todoID, onUnblocked)
+	}
+	if len(result.UnblockedTodoIDs) > 0 && s.settings(ctx).todosV2On() {
+		s.sweepAdmissionQueue(ctx)
 	}
 
 	return todoBlockerReconcileSummary{
@@ -272,11 +387,53 @@ func (s *Service) reconcilePersistedTodoBlockers(ctx context.Context, targetRef 
 	}, nil
 }
 
-func (s *Service) notifyTodoBlockerUnblocked(ctx context.Context, todoID string, hook func(ctx context.Context, todoID string)) {
+// activeTodoBlockerRefs returns the target_refs of all active persistent blockers for todoID
+// when todos_v2 is enabled, or nil when todos_v2 is off or no active blockers remain.
+func (s *Service) activeTodoBlockerRefs(ctx context.Context, todoID string) []string {
+	if s == nil || !s.settings(ctx).todosV2On() {
+		return nil
+	}
+	todoID = strings.TrimSpace(todoID)
+	if todoID == "" {
+		return nil
+	}
+	st := s.todoBlockerDB()
+	if st == nil {
+		return nil
+	}
+	rows, err := st.ListTodoBlockersByTodo(ctx, todoID)
+	if err != nil {
+		s.logf("todo_blockers: list active for %s: %v", todoID, err)
+		return nil
+	}
+	var refs []string
+	for _, r := range rows {
+		if r.State != db.TodoBlockerStateActive {
+			continue
+		}
+		if ref := strings.TrimSpace(r.TargetRef); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// hasActiveTodoBlockers reports whether todoID currently has at least one active persistent blocker under todos_v2.
+func (s *Service) hasActiveTodoBlockers(ctx context.Context, todoID string) bool {
+	return len(s.activeTodoBlockerRefs(ctx, todoID)) > 0
+}
+
+func (s *Service) notifyTodoBlockerUnblockedOnly(ctx context.Context, todoID string, hook func(ctx context.Context, todoID string)) {
+	key := "blockers_unblocked:" + todoID
+	to := ""
+	if t, ok := s.todoNow(todoID); ok {
+		to = s.todoReadySupervisor(ctx, s.settings(ctx), t)
+	}
 	s.signal(superviseSignal{
 		Todo:   todoID,
 		Kind:   sigTodoReady,
-		Key:    "blockers_unblocked:" + todoID,
+		Key:    key,
+		To:     to,
 		Detail: "all persistent blockers resolved",
 	})
 	if hook != nil {
@@ -284,7 +441,14 @@ func (s *Service) notifyTodoBlockerUnblocked(ctx context.Context, todoID string,
 	}
 }
 
-func (s *Service) buildBlockerFactSnapshot(ctx context.Context, active []todoBlockerRecord) (todoBlockerFactSnapshot, error) {
+func (s *Service) notifyTodoBlockerUnblocked(ctx context.Context, todoID string, hook func(ctx context.Context, todoID string)) {
+	s.notifyTodoBlockerUnblockedOnly(ctx, todoID, hook)
+	if s.settings(ctx).todosV2On() {
+		s.sweepAdmissionQueue(ctx)
+	}
+}
+
+func (s *Service) buildBlockerFactSnapshot(ctx context.Context, active []todoBlockerRecord, observedPR *todoBlockerPRFact) (todoBlockerFactSnapshot, error) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return todoBlockerFactSnapshot{}, err
 	}
@@ -294,6 +458,13 @@ func (s *Service) buildBlockerFactSnapshot(ctx context.Context, active []todoBlo
 		Todos:       make(map[string]todoBlockerTodoFact),
 		PRs:         make(map[string]todoBlockerPRFact),
 		MergeTrains: make(map[string]todoBlockerMergeTrainFact),
+	}
+	if observedPR != nil {
+		if norm := normalizeTodoBlockerPRRef(observedPR.URL); norm != "" {
+			cp := *observedPR
+			cp.URL = norm
+			facts.PRs[norm] = cp
+		}
 	}
 
 	s.todos.mu.RLock()
@@ -366,26 +537,33 @@ func (s *Service) buildBlockerFactSnapshot(ctx context.Context, active []todoBlo
 	}
 
 	// Pull live PR truth for any external_pr blocker not already known to be terminal.
-	queriedPRs := make(map[string]struct{})
+	fetched := make(map[string]todoBlockerPRFact)
+	attempted := make(map[string]struct{})
 	for _, b := range active {
 		if b.Kind != todoBlockerKindExternalPR {
 			continue
 		}
-		norm := strings.TrimRight(strings.TrimSpace(b.TargetRef), "/")
+		norm := normalizeTodoBlockerPRRef(b.TargetRef)
 		if norm == "" {
 			continue
 		}
-		if existing, ok := facts.PRs[norm]; ok {
+		if existing, ok := lookupTodoBlockerPRFact(facts.PRs, norm); ok {
 			st := strings.ToLower(strings.TrimSpace(existing.State))
 			if existing.Merged || st == "merged" || st == "closed" {
 				continue
 			}
 		}
-		if _, seen := queriedPRs[norm]; seen {
+		cacheKey := strings.ToLower(norm)
+		if cached, ok := fetched[cacheKey]; ok {
+			facts.PRs[norm] = cached
 			continue
 		}
-		queriedPRs[norm] = struct{}{}
+		if _, tried := attempted[cacheKey]; tried {
+			continue
+		}
+		attempted[cacheKey] = struct{}{}
 		if pr, ok := s.fetchBlockerPRFact(ctx, norm); ok {
+			fetched[cacheKey] = pr
 			facts.PRs[norm] = pr
 		}
 	}
@@ -402,28 +580,76 @@ func (s *Service) fetchBlockerPRFact(ctx context.Context, targetRef string) (tod
 			return fn(ctx, targetRef)
 		}
 	}
+	return s.fetchExternalPRBlockerFact(ctx, targetRef)
+}
 
-	f, ok := s.forge().(prStatusForge)
-	if !ok {
+func parseGitHubPRBlockerRef(targetRef string) (repo string, number int, ok bool) {
+	if m := ciPRURL.FindStringSubmatch(targetRef); m != nil {
+		n, err := strconv.Atoi(m[2])
+		if err == nil && n > 0 {
+			return m[1], n, true
+		}
+		return "", 0, false
+	}
+	if !strings.Contains(targetRef, "://") {
+		if repoPart, numPart, found := strings.Cut(targetRef, "#"); found {
+			parts := strings.Split(repoPart, "/")
+			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+				if n, err := strconv.Atoi(numPart); err == nil && n > 0 {
+					return repoPart, n, true
+				}
+			}
+		}
+	}
+	return "", 0, false
+}
+
+// fetchExternalPRBlockerFact resolves live remote PR status for an external_pr blocker edge
+// using the configured GitHub forge or supported code host, bounded by a short timeout so a
+// single network failure never stalls blocker reconciliation.
+func (s *Service) fetchExternalPRBlockerFact(ctx context.Context, targetRef string) (todoBlockerPRFact, bool) {
+	targetRef = normalizeTodoBlockerPRRef(targetRef)
+	if targetRef == "" {
 		return todoBlockerPRFact{}, false
 	}
-	m := ciPRURL.FindStringSubmatch(targetRef)
-	if m == nil {
-		return todoBlockerPRFact{}, false
+	fetchCtx, cancel := context.WithTimeout(ctx, externalPRBlockerFetchTimeout)
+	defer cancel()
+
+	if repo, number, ok := parseGitHubPRBlockerRef(targetRef); ok {
+		f, hasForge := s.forge().(prStatusForge)
+		if !hasForge {
+			return todoBlockerPRFact{}, false
+		}
+		st, err := f.PRStatus(fetchCtx, repo, number)
+		if err != nil {
+			s.logf("todo_blockers: fetch external PR %s: %v", targetRef, err)
+			return todoBlockerPRFact{}, false
+		}
+		return todoBlockerPRFact{
+			URL:    targetRef,
+			State:  st.State,
+			Merged: strings.EqualFold(st.State, "merged"),
+		}, true
 	}
-	number, err := strconv.Atoi(m[2])
-	if err != nil || number <= 0 {
-		return todoBlockerPRFact{}, false
+
+	if otherReviewLink(targetRef) {
+		other, _ := s.codeHostFor(targetRef)
+		if other == nil {
+			return todoBlockerPRFact{}, false
+		}
+		st, err := otherPRStatus(fetchCtx, other, targetRef)
+		if err != nil {
+			s.logf("todo_blockers: fetch external PR %s: %v", targetRef, err)
+			return todoBlockerPRFact{}, false
+		}
+		return todoBlockerPRFact{
+			URL:    targetRef,
+			State:  st.State,
+			Merged: strings.EqualFold(st.State, "merged"),
+		}, true
 	}
-	st, err := f.PRStatus(ctx, m[1], number)
-	if err != nil {
-		return todoBlockerPRFact{}, false
-	}
-	return todoBlockerPRFact{
-		URL:    targetRef,
-		State:  st.State,
-		Merged: strings.EqualFold(st.State, "merged"),
-	}, true
+
+	return todoBlockerPRFact{}, false
 }
 
 func dbRowsToTodoBlockers(rows []db.TodoBlockerRow) []todoBlockerRecord {

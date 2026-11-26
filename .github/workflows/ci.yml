@@ -15,6 +15,7 @@ on:
         type: string
         default: ''
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: ci-${{ github.repository }}-${{ github.ref_name }}-${{ inputs.full }}-${{ inputs.lanes }}

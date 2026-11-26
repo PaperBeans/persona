@@ -349,7 +349,8 @@ async function runSharedGet(key: string, entry: InFlightGet, path: string, init:
       try {
         let res: Response;
         try {
-          res = await entry.fetcher(`${BASE}/api/v1${path}`, { redirect: "manual", ...fetchOptions, headers });
+          // Native browser fetch requires the global receiver, not the in-flight entry that stores it.
+          res = await entry.fetcher.call(globalThis, `${BASE}/api/v1${path}`, { redirect: "manual", ...fetchOptions, headers });
         } catch (e) {
           if (!isAbort(e)) requestCrumb(method, path, 0);
           throw e;

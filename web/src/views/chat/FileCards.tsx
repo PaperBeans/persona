@@ -6,7 +6,7 @@ import { fileThumbURL } from "../../lib/api";
 import { documentKind, isDarkPage, isDocument, MAX_DOCUMENT_CARDS } from "../../lib/documents";
 import { usePathLinks } from "../../lib/path-presence";
 import { bytes } from "../../lib/format";
-import { openPanel } from "../../lib/panel";
+import { openPanel, useReadOnlyFile } from "../../lib/panel";
 import { formatDuration, mediaKindOf, replyPaths, type AttachedFile } from "../../lib/turns";
 import { cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -47,6 +47,7 @@ export function FileCards({ files, mid, align = "end" }: { files: AttachedFile[]
 }
 
 function FileCard({ f, mid }: { f: AttachedFile; mid: string }) {
+  const readOnly = useReadOnlyFile();
   // the length the file really has wins over the one the message says (it may be rounded, or wrong)
   const [real, setReal] = useState<number | undefined>(undefined);
   const duration = real ?? f.duration;
@@ -64,7 +65,7 @@ function FileCard({ f, mid }: { f: AttachedFile; mid: string }) {
   return (
     <button
       type="button"
-      onClick={() => openPanel({ kind: "file", mid, path: f.path })}
+      onClick={() => openPanel({ kind: "file", mid, path: f.path, ...(readOnly ? { readOnly: true } : {}) })}
       className="flex max-w-[360px] min-w-0 items-center gap-2 rounded-[12px] bg-inset px-3 py-2 text-left shadow-hairline hover:bg-hover"
       title={f.path}
     >
@@ -117,13 +118,14 @@ export function DocumentCards({ files, mid, cwd }: { files: AttachedFile[]; mid:
 }
 
 function DocumentCard({ f, mid, cwd }: { f: AttachedFile; mid: string; cwd?: string }) {
+  const readOnly = useReadOnlyFile();
   // no thumbnail (an old hub, a machine that cannot draw it, the file gone) or a dark page (Quick Look in dark mode):
   // the file's glyph, as iOS falls back to its symbol
   const [failed, setFailed] = useState(false);
   return (
     <button
       type="button"
-      onClick={() => openPanel({ kind: "file", mid, path: f.path })}
+      onClick={() => openPanel({ kind: "file", mid, path: f.path, ...(readOnly ? { readOnly: true } : {}) })}
       title={f.path}
       className="flex h-16 w-60 max-w-full shrink-0 items-center gap-3 rounded-[14px] bg-inset px-2 text-left shadow-hairline outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent"
       style={{ animation: "fade-in 220ms ease-out both" }}

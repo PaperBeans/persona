@@ -117,7 +117,7 @@ func (s *Service) liveLoop(ctx context.Context) {
 		l := s.lang(context.Background())
 		agents, ixs, told := s.fleetInputsInto(lists)
 		s.tellLive(round.buildFleet(l, agents, ixs))
-		attention, counts := round.linkAndCounts(l, agents, ixs, told)
+		attention, counts := round.linkAndCounts(l, agents, ixs, told, s.fleet.live.counts.todos.kept())
 		s.devs.SetAttention(attention) // sent on only when it changed
 		s.tellCounts(counts)
 	}

@@ -230,6 +230,9 @@ final class RecordingSync {
     @ObservationIgnored private let api: () -> APIClient?
     /// The connected hub's `hello.features` (empty while there is none).
     @ObservationIgnored private let hubFeatures: () -> Set<String>
+    /// Whether the hub's recording module is on (`RecordingModule.allowance`, #15214). Off, nothing is uploaded or
+    /// reconciled (those routes are gone with the module); deletes still go, through the knowledge base's own route.
+    @ObservationIgnored private let recording: () -> RecordingAllowance
     @ObservationIgnored private let file: URL
     @ObservationIgnored private let now: () -> Date
     /// All-day recordings go their own way (`RecordingDaySync`): this hands them over.
@@ -249,8 +252,10 @@ final class RecordingSync {
     init(library: RecordingLibrary = .shared, api: @escaping () -> APIClient? = { AppModel.shared.api },
          now: @escaping () -> Date = { .now }, daySync: @escaping () -> RecordingDaySync = { RecordingDaySync.shared },
          recordingDaysChanged: @escaping (Int) -> Void = { RecordingDayPhoneCapabilities.shared.recordingDaysChanged($0) },
-         hubFeatures: @escaping () -> Set<String> = { AppModel.shared.hubFeatures }) {
+         hubFeatures: @escaping () -> Set<String> = { AppModel.shared.hubFeatures },
+         recording: @escaping () -> RecordingAllowance = { RecordingModule.allowance }) {
         self.library = library; self.api = api; self.now = now; self.daySync = daySync; self.hubFeatures = hubFeatures
+        self.recording = recording
         self.recordingDaysChanged = recordingDaysChanged
         file = library.root.appendingPathComponent("sync.json")
         store = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Store.self, from: $0) } ?? Store()
@@ -419,7 +424,8 @@ final class RecordingSync {
     }
 
     private var needsWork: Bool {
-        !store.deletes.isEmpty || library.entries.contains { status($0) == .pending }
+        // With the recording module off only deletes can go: a pending upload is no reason to try again.
+        !store.deletes.isEmpty || (recording().offersWrites && library.entries.contains { status($0) == .pending })
     }
 
     private func pass() async {
@@ -427,6 +433,15 @@ final class RecordingSync {
         purgeExpired()
         guard let api = api(), !api.config.isDemo else {
             lastProblem = api() == nil ? nil : String(localized: "Demo mode doesn't sync recordings")
+            return
+        }
+        // The hub's recording module is off (#15214): its routes (the list, uploads) answer 404, so nothing is asked of
+        // them and no "sync isn't supported" problem is shown. What the user deletes still leaves the knowledge base.
+        guard recording().offersWrites else {
+            for id in store.deletes.sorted(by: { $0.uuidString < $1.uuidString }) {
+                guard await sendDelete(id, api) else { return }
+            }
+            lastProblem = nil
             return
         }
         if lastReconcile == nil {
@@ -719,7 +734,7 @@ final class RecordingSync {
             return true
         }
         do {
-            _ = try await api.request("DELETE", "/api/v1/recordings/\(id.uuidString.lowercased())")
+            _ = try await api.request("DELETE", Self.deletePath(id, recording: recording()))
         } catch let error as APIError where error.status == 410 {
             // The hub confirms it was already deleted. An unsupported 404 does not confirm a remote deletion.
         } catch {
@@ -729,6 +744,18 @@ final class RecordingSync {
         store.deletes.remove(id)
         save()
         return true
+    }
+
+    /// Where a delete goes. With the recording module on, its own route, as always (it also answers for a recording saved
+    /// into a track, and `410` for one already deleted). Off, that route is gone with the module, and the knowledge
+    /// base's own delete stays (#15214, `server/internal/assistant/kb_recording_routes.go`): `200 {"deleted": bool}`,
+    /// false for a recording it no longer has, so either answer settles the delete; `400` / `403 kb_read_only` and an
+    /// older hub's `404` leave it pending, as before.
+    nonisolated static func deletePath(_ id: UUID, recording: RecordingAllowance) -> String {
+        switch recording {
+        case .on: "/api/v1/recordings/\(id.uuidString.lowercased())"
+        case .off: "/api/v1/kb/recordings/\(id.uuidString.lowercased())"
+        }
     }
 
     /// Deleted in the knowledge base (the web, another device): the text there is the truth, so it goes here too.

@@ -204,13 +204,13 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
       </span>
       {interactive && (
         <span className="flex size-6 shrink-0 items-center justify-center">
-          <Icon name="arrowUpRight" size={16} stroke={2} className="text-ink-2 transition-colors duration-150 group-hover:text-ink" />
+          <Icon name="arrowUpRight" size={16} stroke={2} className="text-ink-2 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-ink" />
         </span>
       )}
     </>
   );
   // cindy's 16 px padding and 14 px gap; a phone's narrower card gives them back to the words
-  const look = "flex w-full min-w-0 items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left sm:gap-3.5 sm:p-4";
+  const look = "flex w-full min-w-0 items-center gap-3 rounded-card bg-surface p-3 text-left shadow-card sm:gap-3.5 sm:p-4";
   const data = { "data-handoff-card": agent ? `${agent.mid}/${agent.sid}` : todo ? `todo:${todo}` : handoff.key };
   if (!interactive) return <div {...data} className={look}>{body}</div>;
   return (
@@ -219,7 +219,7 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
       {...data}
       title={agent ? `${title} · ${shortSessionId(agent.sid)}` : title}
       onClick={open}
-      className={cx(look, "group transition-colors duration-150 hover:border-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas")}
+      className={cx(look, "group card-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas")}
     >
       {body}
     </button>

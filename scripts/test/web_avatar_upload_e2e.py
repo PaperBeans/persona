@@ -105,21 +105,24 @@ WORDS = {
     "en": {
         "upload": "Upload an image as an avatar", "dialog": "New avatar from an image", "edit_dialog": "Edit avatar",
         "name": "Name", "subtitle": "Description (optional)", "send": "Upload", "save": "Save",
-        "edit": "Edit {}", "delete": "Delete {}", "confirm": "Delete",
+        "edit": "Edit {}", "delete": "Delete {}", "confirm": "Delete", "cancel": "Cancel", "back": "Back",
+        "keep_current": "Keep current",
         "mochi": "Mochi, the default avatar", "zoom": "Zoom", "avatar": "Avatar", "making": "Making the avatar…",
         "color_custom": "Choose color", "apply_crop": "Done", "match_avatar": "Match avatar", "theme_color": "Theme color",
     },
     "zh-Hans": {
         "upload": "上传图片做形象", "dialog": "用图片做形象", "edit_dialog": "编辑形象",
         "name": "名字", "subtitle": "描述（可选）", "send": "上传", "save": "保存",
-        "edit": "编辑「{}」", "delete": "删除「{}」", "confirm": "删除",
+        "edit": "编辑「{}」", "delete": "删除「{}」", "confirm": "删除", "cancel": "取消", "back": "返回",
+        "keep_current": "保留原图",
         "mochi": "团子，默认形象", "zoom": "缩放", "avatar": "形象", "making": "正在生成形象…",
         "color_custom": "自选颜色", "apply_crop": "完成", "match_avatar": "跟随形象", "theme_color": "主题色",
     },
     "ja": {
         "upload": "画像をアップロードしてアバターにする", "dialog": "画像からアバターを作成", "edit_dialog": "アバターを編集",
         "name": "名前", "subtitle": "説明（任意）", "send": "アップロード", "save": "保存",
-        "edit": "「{}」を編集", "delete": "「{}」を削除", "confirm": "削除",
+        "edit": "「{}」を編集", "delete": "「{}」を削除", "confirm": "削除", "cancel": "キャンセル", "back": "戻る",
+        "keep_current": "元の画像を維持",
         "mochi": "だんご（デフォルトのアバター）", "zoom": "ズーム", "avatar": "アバター", "making": "アバターを作成しています…",
         "color_custom": "色を選ぶ", "apply_crop": "完了", "match_avatar": "アバターに合わせる", "theme_color": "テーマカラー",
     },
@@ -508,11 +511,171 @@ def check(browser, base, width, theme, lang, image, apng, shots):
         context.close()
 
 
+def _dispatch_file_drag(locator, event_types, file_path=None, mime="image/png"):
+    """Simulate native OS file drag events on a locator using a real DataTransfer + File."""
+    b64 = base64.b64encode(open(file_path, "rb").read()).decode("ascii") if file_path else None
+    name = os.path.basename(file_path) if file_path else "drop.png"
+    return locator.evaluate(
+        """(el, { eventTypes, b64, name, mime }) => {
+            const dt = new DataTransfer();
+            const raw = b64 ? Uint8Array.from(atob(b64), c => c.charCodeAt(0)) : new Uint8Array([1, 2, 3]);
+            dt.items.add(new File([raw], name, { type: mime }));
+            const results = [];
+            for (const type of eventTypes) {
+                const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+                el.dispatchEvent(ev);
+                results.push({ type, defaultPrevented: ev.defaultPrevented, dropEffect: dt.dropEffect });
+            }
+            return results;
+        }""",
+        {"eventTypes": event_types, "b64": b64, "name": name, "mime": mime},
+    )
+
+
+def check_drops(browser, base, width, theme, lang, image, apng, shots):
+    """Per-slot drag-and-drop (#15612): picker cards, main slot, state rows, state crop sub-view, and near-miss guard."""
+    w = WORDS[lang]
+    phone = width < 640
+    context = _new_context(browser, width, theme, lang)
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(base + "/settings?tab=avatar&token=mock")
+        group = page.locator('section[data-settings-group="avatar"]')
+        picker = group.get_by_role("radiogroup", name=w["avatar"])
+        upload_card = picker.get_by_role("button", name=w["upload"], exact=True)
+        mikan_card = picker.get_by_role("radio", name=DEMO_STATES, exact=True)
+        mochi_card = picker.get_by_role("radio", name=w["mochi"], exact=True)
+        expect(upload_card).to_be_visible()
+        expect(mikan_card).to_be_visible()
+
+        # 1. Built-in card ignores drops and never highlights; grid near-miss guard prevents navigation
+        res = _dispatch_file_drag(mochi_card, ["dragover", "drop"], image)
+        expect(mochi_card).not_to_have_attribute("data-drop-over", "true")
+        assert all(r["defaultPrevented"] for r in res), res
+        expect(page.get_by_role("dialog")).to_have_count(0)
+
+        # 2. Picker Upload card drag-over highlight -> drop opens Upload dialog with image ready to crop
+        _dispatch_file_drag(upload_card, ["dragenter", "dragover"], image)
+        expect(upload_card).to_have_attribute("data-drop-over", "true")
+        if shots:
+            page.wait_for_timeout(180)
+            group.screenshot(path=os.path.join(shots, f"drop-picker-upload-over-{width}-{theme}.png"))
+        _dispatch_file_drag(upload_card, ["drop"], image)
+        expect(upload_card).not_to_have_attribute("data-drop-over", "true")
+        dlg = page.get_by_role("dialog", name=w["dialog"])
+        expect(dlg).to_be_visible()
+        expect(dlg.locator('[data-testid="look-upload-crop"]')).to_be_visible()
+        page.wait_for_function("() => { const c = document.querySelector('[data-testid=look-upload-crop] canvas'); if (!c || !c.width) return false; const d = c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data; return d[3] > 0; }")
+        if shots:
+            page.wait_for_timeout(200)
+            (page if phone else dlg).screenshot(path=os.path.join(shots, f"drop-picker-opened-upload-{width}-{theme}.png"))
+        dlg.get_by_role("button", name=w["cancel"], exact=True).click()
+        expect(page.get_by_role("dialog")).to_have_count(0)
+
+        # 3. Picker uploaded card (Mikan) drag-over highlight -> drop opens Edit dialog with new main picture & Keep current
+        _dispatch_file_drag(mikan_card, ["dragenter", "dragover"], image)
+        expect(mikan_card).to_have_attribute("data-drop-over", "true")
+        if shots:
+            page.wait_for_timeout(180)
+            group.screenshot(path=os.path.join(shots, f"drop-picker-uploaded-over-{width}-{theme}.png"))
+        _dispatch_file_drag(mikan_card, ["drop"], image)
+        expect(mikan_card).not_to_have_attribute("data-drop-over", "true")
+        edit_dlg = page.get_by_role("dialog", name=w["edit_dialog"])
+        expect(edit_dlg).to_be_visible()
+        expect(edit_dlg.locator('[data-testid="look-upload-crop"]')).to_be_visible()
+        keep_btn = edit_dlg.get_by_role("button", name=w["keep_current"], exact=True)
+        expect(keep_btn).to_be_visible()
+        if shots:
+            page.wait_for_timeout(200)
+            (page if phone else edit_dlg).screenshot(path=os.path.join(shots, f"drop-picker-opened-edit-{width}-{theme}.png"))
+        keep_btn.click()
+        expect(edit_dlg.locator('[data-testid="look-edit-preview"]')).to_be_visible()
+        if shots:
+            edit_dlg.locator("[data-dialog-body]").evaluate("el => { el.scrollTop = el.scrollHeight; }")
+            page.wait_for_timeout(200)
+            (page if phone else edit_dlg).screenshot(path=os.path.join(shots, f"drop-edit-states-{width}-{theme}.png"))
+        edit_dlg.get_by_role("button", name=w["cancel"], exact=True).click()
+        expect(page.get_by_role("dialog")).to_have_count(0)
+
+        # 4. Upload dialog: near-miss guard, main drop-over, states open, state row drop-over, state crop view + replacement
+        upload_card.click()
+        dlg = page.get_by_role("dialog", name=w["dialog"])
+        expect(dlg).to_be_visible()
+
+        # Near-miss drop on dialog content root changes nothing and is defaultPrevented
+        near = _dispatch_file_drag(dlg.locator("[data-dialog-body] > div").first, ["dragover", "drop"], image)
+        assert all(r["defaultPrevented"] for r in near), near
+        expect(dlg.locator('[data-testid="look-upload-crop"]')).to_have_count(0)
+
+        # Drag-over highlight on empty main slot
+        main_zone = dlg.locator('[data-testid="look-upload-drop"]')
+        _dispatch_file_drag(main_zone, ["dragenter", "dragover"], image)
+        expect(main_zone).to_have_attribute("data-drop-over", "true")
+        if shots:
+            page.wait_for_timeout(180)
+            (page if phone else dlg).screenshot(path=os.path.join(shots, f"drop-main-over-{width}-{theme}.png"))
+        _dispatch_file_drag(main_zone, ["drop"], image)
+        expect(dlg.locator('[data-testid="look-upload-crop"]')).to_be_visible()
+        page.wait_for_function("() => { const c = document.querySelector('[data-testid=look-upload-crop] canvas'); if (!c || !c.width) return false; const d = c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data; return d[3] > 0; }")
+
+        # Open Pictures for each state
+        dlg.locator('[data-testid="look-states-toggle"]').click()
+        expect(dlg.locator("[data-state-row]")).to_have_count(5)
+        page.wait_for_timeout(350)
+        dlg.locator("[data-dialog-body]").evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        if shots:
+            page.wait_for_timeout(180)
+            (page if phone else dlg).screenshot(path=os.path.join(shots, f"drop-upload-states-open-{width}-{theme}.png"))
+
+        # Drag-over highlight on Working state row ONLY
+        working_row = dlg.locator('[data-state-row="working"]')
+        _dispatch_file_drag(working_row, ["dragenter", "dragover"], apng)
+        expect(working_row).to_have_attribute("data-drop-over", "true")
+        expect(dlg.locator('[data-state-row="idle"]')).not_to_have_attribute("data-drop-over", "true")
+        if shots:
+            page.wait_for_timeout(180)
+            (page if phone else dlg).screenshot(path=os.path.join(shots, f"drop-state-row-over-{width}-{theme}.png"))
+
+        # Drop animated APNG onto Working row -> opens state crop sub-view playing animation
+        _dispatch_file_drag(working_row, ["drop"], apng)
+        crop_dlg = page.get_by_role("dialog")
+        expect(crop_dlg.locator('[data-testid="look-upload-animated"]')).to_be_visible()
+        if shots:
+            page.wait_for_timeout(200)
+            (page if phone else crop_dlg).screenshot(path=os.path.join(shots, f"drop-state-crop-{width}-{theme}.png"))
+
+        # Drop still PNG onto crop sub-view replaces the state picture cleanly
+        state_crop_box = crop_dlg.locator('[data-testid="look-upload-crop"]')
+        _dispatch_file_drag(state_crop_box, ["dragenter", "dragover"], image)
+        expect(state_crop_box).to_have_attribute("data-drop-over", "true")
+        _dispatch_file_drag(state_crop_box, ["drop"], image)
+        expect(crop_dlg.locator('[data-testid="look-upload-animated"]')).to_have_count(0)
+        expect(crop_dlg.locator('[data-testid="look-upload-crop"] canvas')).to_have_count(1)
+        crop_dlg.get_by_role("button", name=w["apply_crop"], exact=True).click()
+        expect(dlg).to_be_visible()
+        dlg.get_by_role("button", name=w["cancel"], exact=True).click()
+        expect(page.get_by_role("dialog")).to_have_count(0)
+
+        assert not errors, errors
+        print(f"PASS avatar drop targets {width}px {theme}", flush=True)
+    except Exception:
+        print(f"FAIL avatar drop targets {width}px {theme}; path={page.url.removeprefix(base)}; page errors={errors}", flush=True)
+        if shots:
+            page.screenshot(path=os.path.join(shots, f"failure-drops-{width}-{theme}.png"))
+        raise
+    finally:
+        context.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("base")
     parser.add_argument("--basic", help="Optional web URL pointed at MOCK_LOOK_UPLOADS=basic (old hub)")
     parser.add_argument("--shots")
+    parser.add_argument("--drops", action="store_true", help="Run only the per-slot drag-and-drop checks and screenshots (#15612)")
     parser.add_argument("--lang", default="en", choices=sorted(WORDS))
     parser.add_argument("--channel", default="chrome", help="Playwright browser channel (default: the installed Chrome)")
     parser.add_argument("--executable", help="Explicit browser executable path (overrides --channel)")
@@ -528,12 +691,18 @@ def main():
         launch = {"executable_path": args.executable} if args.executable else {"channel": args.channel}
         browser = playwright.chromium.launch(**launch)
         try:
-            check_no_uploads(browser, base, args.lang)
-            check_reduced_motion(browser, base, args.lang, apng)
-            for width in (1280, 390):
-                for theme in ("light", "dark"):
-                    check_basic_old_hub(browser, base, basic, width, theme, args.lang, image, args.shots)
-                    check(browser, base, width, theme, args.lang, image, apng, args.shots)
+            if args.drops:
+                for width in (1280, 390):
+                    for theme in ("light", "dark"):
+                        check_drops(browser, base, width, theme, args.lang, image, apng, args.shots)
+            else:
+                check_no_uploads(browser, base, args.lang)
+                check_reduced_motion(browser, base, args.lang, apng)
+                for width in (1280, 390):
+                    for theme in ("light", "dark"):
+                        check_basic_old_hub(browser, base, basic, width, theme, args.lang, image, args.shots)
+                        check(browser, base, width, theme, args.lang, image, apng, args.shots)
+                        check_drops(browser, base, width, theme, args.lang, image, apng, args.shots)
         finally:
             browser.close()
     print("PASS web avatar upload e2e")

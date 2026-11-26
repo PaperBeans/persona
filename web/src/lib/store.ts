@@ -1817,7 +1817,7 @@ export function putTodo(todo: Todo) {
   // A confirmed write is newer than every list read that is still in flight.
   todosAsked.forget();
   if (todo.manager) noteItemManager(`/todos/${encodeURIComponent(todo.id)}`, todo.manager);
-  set({ todos: state.todos.map((t) => (t.id === todo.id ? { ...t, ...todo } : t)) });
+  set({ todos: state.todos.map((t) => (t.id === todo.id ? { ...t, ...todo, wait: todo.wait } : t)) });
 }
 
 /** Takes a todo the hub just deleted out of the list at once; a /todos answer asked for before the delete is older

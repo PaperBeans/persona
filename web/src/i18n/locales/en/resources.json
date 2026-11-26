@@ -1,4 +1,5 @@
 {
+  "assistant_resources": "Assistant resources",
   "title": "Shared resources",
   "configure": "Configure runners",
   "invalid": "Enter a JSON array.",

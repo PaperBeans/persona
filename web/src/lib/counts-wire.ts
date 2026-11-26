@@ -36,6 +36,8 @@ export function countsEpoch(raw: string): CountsEpoch {
 export interface CountsViewCounts {
   /** The Agents that need the owner (docs/protocol/counts.md, "agents_needs_you"). */
   agents_needs_you?: CountsViewCount;
+  /** The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, "todos_needs_you"). */
+  todos_needs_you?: CountsViewCount;
 }
 
 /**
@@ -45,6 +47,8 @@ export interface CountsViewCounts {
 export interface CountsViewTotals {
   /** counts.agents_needs_you.n. */
   agents_needs_you?: number;
+  /** counts.todos_needs_you.n. */
+  todos_needs_you?: number;
 }
 
 /**

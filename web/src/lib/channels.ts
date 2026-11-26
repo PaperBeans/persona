@@ -246,10 +246,15 @@ export function isPolled(p?: ChannelPrompt | null): boolean {
   return !!p && !p.done && (p.kind === "qr" || p.kind === "pair_code" || p.kind === "device_code");
 }
 
-/** Where a channel's settings_url ("settings/connectors/feishu-bot") opens in the settings page: its tab and sub-page. */
-export function settingsTarget(url: string): { tab: string; sub: string | null } | null {
-  const m = /^settings\/([a-z-]+)(?:\/(.+))?$/.exec(url);
-  return m ? { tab: settingsTab(m[1]), sub: m[2] ?? null } : null;
+/** Where a channel's settings_url ("settings/connectors/feishu-bot" or "settings/persona#repositories") opens in the settings page. */
+export function settingsTarget(url: string): { tab: string; sub: string | null; anchor?: string } | null {
+  const hashIdx = url.indexOf("#");
+  const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+  const anchor = hashIdx >= 0 ? url.slice(hashIdx + 1) : "";
+  const m = /^settings\/([a-z-]+)(?:\/(.+))?$/.exec(base);
+  if (!m) return null;
+  if (anchor && !/^[a-z0-9-]+$/i.test(anchor)) return null;
+  return { tab: settingsTab(m[1]), sub: m[2] ?? null, ...(anchor ? { anchor } : {}) };
 }
 
 /** A settings tab by its name now: `plugins` (a hub or a link from before #1844 / #1845) is `extensions`. */

@@ -55,11 +55,13 @@ vi.mock("./IntegrationDetail", () => ({
     onBack,
     onUpgrade,
     onPage,
+    onSettings,
   }: {
     target: { kind: string; id: string; channelId?: string; connectorId?: string | null; manager?: string };
     onBack?: () => void;
     onUpgrade?: (market: string, id: string, manager?: string) => void;
     onPage?: (extId: string, uiId: string, manager?: string) => void;
+    onSettings?: (url: string) => void;
   }) => (
     <div
       data-mock-integration-detail
@@ -83,6 +85,16 @@ vi.mock("./IntegrationDetail", () => ({
         <button type="button" data-mock-detail-page onClick={() => onPage(target.id, "dashboard", target.manager)}>
           Open page
         </button>
+      )}
+      {onSettings && (
+        <>
+          <button type="button" data-mock-detail-repos onClick={() => onSettings("settings/persona#repositories")}>
+            Repos
+          </button>
+          <button type="button" data-mock-detail-kb onClick={() => onSettings("settings/knowledge#knowledge-items")}>
+            Knowledge
+          </button>
+        </>
       )}
     </div>
   ),
@@ -1200,5 +1212,40 @@ describe("Settings navigation collapse and bidirectional redirects under integra
 
     await act(async () => extViewMock.onWide?.(false));
     expect(container().className).toContain("max-w-[1120px]");
+  });
+
+  it("forwards IntegrationDetail crosslinks through Settings to Assistant repositories and Knowledge items", async () => {
+    state.integrationsV2 = true;
+    state.twoCol = true;
+    state.phone = false;
+    state.features = ["channels", "extension_manager", "connectors", "lark"];
+    stubFullHubFetch();
+
+    history.replaceState(null, "", "/settings?tab=integrations&integration=builtin%3Agithub");
+    await act(async () => {
+      root.render(<Settings onToggleSidebar={() => {}} />);
+    });
+    await flush();
+
+    const reposBtn = host.querySelector<HTMLButtonElement>("[data-mock-detail-repos]")!;
+    expect(reposBtn).not.toBeNull();
+    await act(async () => reposBtn.click());
+    await flush();
+    expect(location.pathname + location.search).toBe("/settings?tab=persona");
+    expect(host.querySelector('[data-page="persona"]')).not.toBeNull();
+
+    history.replaceState(null, "", "/settings?tab=integrations&integration=builtin%3Amail");
+    await act(async () => root.render(null));
+    await act(async () => {
+      root.render(<Settings onToggleSidebar={() => {}} />);
+    });
+    await flush();
+
+    const kbBtn = host.querySelector<HTMLButtonElement>("[data-mock-detail-kb]")!;
+    expect(kbBtn).not.toBeNull();
+    await act(async () => kbBtn.click());
+    await flush();
+    expect(location.pathname + location.search).toBe("/settings?tab=knowledge");
+    expect(host.querySelector('[data-page="knowledge-selection"]')).not.toBeNull();
   });
 });

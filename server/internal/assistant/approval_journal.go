@@ -321,16 +321,29 @@ func (s *Service) deliverApprovalResults() {
 	}
 }
 
+// approvalResultRetryDelay is how long a transient delivery failure waits before the next pass
+// (approvalBook.retryDelay shortens it for one manager in tests).
+const approvalResultRetryDelay = time.Minute
+
+// scheduleApprovalResultRetryLocked arms one retry pass. It belongs to the run that armed it: once that run has ended
+// (the manager stopped, its store and bus closed), the pass does nothing and arms no other; the next manager's Run
+// delivers what is left from the durable journal (recoverApprovalJournals, #16045). Before Run, with no run context,
+// it always retries.
 func (s *Service) scheduleApprovalResultRetryLocked() {
 	b := &s.approvals
 	if b.retry {
 		return
 	}
 	b.retry = true
-	time.AfterFunc(time.Minute, func() {
+	run := s.runCtx()
+	time.AfterFunc(cmp.Or(b.retryDelay, approvalResultRetryDelay), func() {
 		b.mu.Lock()
 		b.retry = false
 		b.mu.Unlock()
+		if run.Err() != nil {
+			s.logf("approval results: retry skipped, the manager's run ended; the next run delivers them from the journal")
+			return
+		}
 		s.deliverApprovalResults()
 	})
 }

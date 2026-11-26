@@ -23,6 +23,7 @@ import { Icon } from "../../ui/icons";
 import { PRESET_COLORS } from "../../ui/look";
 import { t } from "../../i18n";
 import { useReducedMotion } from "./face-motion";
+import { fileDropGuard, useFileDrop, useWindowFileDropGuard } from "./lookDrop";
 import { StatePicturesSection, ThemeColorSection, type StateDrafts } from "./LookUploadExtras";
 import { MochiFace } from "./MochiFace";
 import { inputClass } from "./parts";
@@ -90,6 +91,7 @@ export function LookUploadDialog({
   onEdited,
   supportsStates = false,
   edit,
+  initialFile,
   deps = {},
 }: {
   open: boolean;
@@ -99,6 +101,7 @@ export function LookUploadDialog({
   onEdited?: (look: LookView) => void;
   supportsStates?: boolean;
   edit?: PersonaInfo;
+  initialFile?: File;
   deps?: LookUploadDeps;
 }) {
   const isEdit = !!edit;
@@ -118,7 +121,6 @@ export function LookUploadDialog({
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
-  const [over, setOver] = useState(false);
 
   // Secondary options (#15449): collapsed by default on Create; open on Edit so current color & playing dots are visible.
   const [colorOpen, setColorOpen] = useState(() => isEdit);
@@ -137,6 +139,7 @@ export function LookUploadDialog({
   const picks = useRef(0);
   const busy = useRef(false);
   const abort = useRef<AbortController | null>(null);
+  const appliedInitialFile = useRef<File | null>(null);
   const ids = useId();
   const sending = phase === "preparing" || phase === "sending" || phase === "making";
 
@@ -152,6 +155,7 @@ export function LookUploadDialog({
     }
     keptCropping.current?.release();
     keptCropping.current = null;
+    appliedInitialFile.current = null;
     picks.current++; // an image still being decoded is let go as it comes
   };
   useEffect(() => {
@@ -244,18 +248,19 @@ export function LookUploadDialog({
     keptCropping.current?.release();
     keptCropping.current = img;
     const prev = stateDrafts[state];
-    setCroppingState({
+    setCroppingState((cur) => ({
       state,
       image: img,
       crop: centeredCrop(img.size),
-      mark: state === "idle" ? false : prev.mode === "own" ? prev.mark : true,
+      mark: state === "idle" ? false : cur && cur.state === state ? cur.mark : prev.mode === "own" ? prev.mark : true,
       isNew: true,
-    });
+    }));
   };
 
   const openExistingStateCrop = (state: PersonaState) => {
     const draft = stateDrafts[state];
     if (!draft.picked) return;
+    setError("");
     setCroppingState({
       state,
       image: draft.picked,
@@ -270,6 +275,7 @@ export function LookUploadDialog({
       croppingState.image.release();
       if (keptCropping.current === croppingState.image) keptCropping.current = null;
     }
+    setError("");
     setCroppingState(null);
   };
 
@@ -285,8 +291,27 @@ export function LookUploadDialog({
       ...prev,
       [state]: { mode: "own", mark: state === "idle" ? false : mark, picked: img, crop: stateCrop },
     }));
+    setError("");
     setCroppingState(null);
   };
+
+  // A file dropped onto a picker card opens the dialog with that file picked once as the main picture.
+  useEffect(() => {
+    if (!open || !initialFile || appliedInitialFile.current === initialFile) return;
+    appliedInitialFile.current = initialFile;
+    void pick(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFile]);
+
+  const mainDrop = useFileDrop({ disabled: sending, onFile: (file) => void pick(file) });
+  const stateCropDrop = useFileDrop({
+    disabled: sending || !croppingState,
+    onFile: (file) => {
+      if (croppingState) void pickStateFile(croppingState.state, file);
+    },
+  });
+  // A near miss on the title, the footer or the backdrop must not open the image in the tab either.
+  useWindowFileDropGuard(open);
 
   const resetStateAuto = (state: PersonaState) => {
     keptStates.current[state]?.release();
@@ -461,9 +486,9 @@ export function LookUploadDialog({
           </>
         }
       >
-        <div className="flex flex-col gap-3">
-          <div className="mx-auto w-full max-w-(--crop-box)">
-            <CropBox image={croppingState.image} crop={croppingState.crop} setCrop={setStateCrop} disabled={false} over={false} hintId={`${ids}-state-hint`} />
+        <div className="flex flex-col gap-3" {...fileDropGuard}>
+          <div className="mx-auto w-full max-w-(--crop-box)" {...stateCropDrop.props}>
+            <CropBox image={croppingState.image} crop={croppingState.crop} setCrop={setStateCrop} disabled={sending} over={stateCropDrop.over} hintId={`${ids}-state-hint`} />
           </div>
           <div className="mx-auto flex w-full max-w-(--crop-box) flex-col gap-1.5">
             <div className="flex items-center gap-2">
@@ -496,6 +521,7 @@ export function LookUploadDialog({
               />
             </div>
           )}
+          {error && <p role="alert" className="text-label leading-relaxed break-words text-red">{error}</p>}
         </div>
       </Dialog>
     );
@@ -528,35 +554,21 @@ export function LookUploadDialog({
     </>
   );
 
-  const drop = {
-    onDragOver: (e: React.DragEvent) => {
-      if (sending || ![...e.dataTransfer.types].includes("Files")) return;
-      e.preventDefault();
-      setOver(true);
-    },
-    onDragLeave: () => setOver(false),
-    onDrop: (e: React.DragEvent) => {
-      setOver(false);
-      if (sending || !e.dataTransfer.files.length) return;
-      e.preventDefault();
-      void pick(e.dataTransfer.files[0]);
-    },
-  };
-
   const initialOwnMap = Object.fromEntries(
     PERSONA_STATES.map((st) => [st.id, editInitial?.states[st.id].own ?? false]),
   ) as Record<PersonaState, boolean>;
 
   return (
     <Dialog open={open} onClose={close} title={t(isEdit ? "assistant-lookupload.edit_title" : "assistant-lookupload.title")} width={400} footer={footer}>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3" {...fileDropGuard}>
         {isEdit && edit && !picked ? (
           <div
             data-testid="look-edit-preview"
-            {...drop}
+            data-drop-over={mainDrop.over ? "true" : undefined}
+            {...mainDrop.props}
             className={cx(
               "flex items-center gap-3 rounded-card border border-dashed px-3 py-3 transition-colors duration-150",
-              over ? "border-accent bg-accent-tint" : "border-line-strong bg-inset",
+              mainDrop.over ? "border-accent bg-accent-tint" : "border-line-strong bg-inset",
             )}
           >
             <PersonaAvatar size={64} persona={edit} fallback={<MochiFace size={64} />} />
@@ -568,15 +580,16 @@ export function LookUploadDialog({
             </div>
           </div>
         ) : (
-          <div className="mx-auto w-full max-w-(--crop-box)" {...drop}>
+          <div className="mx-auto w-full max-w-(--crop-box)" {...mainDrop.props}>
             {picked ? (
-              <CropBox image={picked} crop={crop} setCrop={setCrop} disabled={sending} over={over} hintId={`${ids}-hint`} />
+              <CropBox image={picked} crop={crop} setCrop={setCrop} disabled={sending} over={mainDrop.over} hintId={`${ids}-hint`} />
             ) : (
               <div
                 data-testid="look-upload-drop"
+                data-drop-over={mainDrop.over ? "true" : undefined}
                 className={cx(
                   "flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-card border border-dashed p-6 text-center transition-colors duration-150",
-                  over ? "border-accent bg-accent-tint" : "border-line-strong bg-inset",
+                  mainDrop.over ? "border-accent bg-accent-tint" : "border-line-strong bg-inset",
                 )}
               >
                 <span className="flex size-14 items-center justify-center rounded-full bg-field text-ink-3">
@@ -829,6 +842,7 @@ function CropBox({ image, crop, setCrop, disabled, over, hintId }: { image: Pick
       aria-label={t("assistant-lookupload.crop_label")}
       aria-describedby={hintId}
       data-testid="look-upload-crop"
+      data-drop-over={over ? "true" : undefined}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}

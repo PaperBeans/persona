@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { getToken, setToken } from "./api";
-import { storedCredentials, storedValue, storeValue, removeStoredValue } from "./compatibility";
+import { storeCredentials, storedCredentials, storedValue, storeValue, removeStoredValue } from "./compatibility";
 import bootstrap from "../../public/compatibility-bootstrap.js?raw";
 import appHTML from "../../index.html?raw";
 import adminHTML from "../../admin/index.html?raw";
@@ -147,5 +147,26 @@ describe("baseline browser persistence compatibility", () => {
     localStorage.setItem("persona.theme", "");
     new Function("localStorage", bootstrap)(localStorage);
     expect(localStorage.getItem("persona.theme")).toBe("");
+  });
+
+  it("clears remaining credential aliases when clearing an empty token encounters a failing key or read", () => {
+    const values = new Map<string, string>([
+      ["persona.token", "tok"],
+      ["jarvis.token", "tok"],
+      ["persona.tokenId", "dev"],
+      ["jarvis.tokenId", "dev"],
+    ]);
+    const flaky = {
+      getItem: () => { throw new DOMException("read blocked", "SecurityError"); },
+      setItem: () => { throw new DOMException("write blocked", "SecurityError"); },
+      removeItem: (key: string) => {
+        if (key === "persona.token") throw new DOMException("key blocked", "SecurityError");
+        values.delete(key);
+      },
+    } as unknown as Storage;
+    expect(() => storeCredentials("", undefined, flaky)).not.toThrow();
+    expect(values.get("jarvis.token")).toBeUndefined();
+    expect(values.get("persona.tokenId")).toBeUndefined();
+    expect(values.get("jarvis.tokenId")).toBeUndefined();
   });
 });

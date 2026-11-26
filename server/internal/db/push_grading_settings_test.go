@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 )
@@ -482,4 +483,51 @@ func TestPushGradingLayerClearAndPrune(t *testing.T) {
 			t.Fatalf("after claim-first conflict + prune: row should be absent, got %v", raw)
 		}
 	})
+}
+
+func TestPushGradingSetSwitchAtomicity(t *testing.T) {
+	d, ctx := openPushGradingHubStore(t)
+
+	// Without a base row, SetPushGradingSwitch writes only hub.ln_mode (does not fabricate hub.push_grading).
+	if err := d.SetPushGradingSwitch(ctx, gradingTestBaseKey, gradingTestMirrorKey, true); err != nil {
+		t.Fatal(err)
+	}
+	vals, err := d.Settings(ctx, gradingTestBaseKey, gradingTestMirrorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, hasBase := vals[gradingTestBaseKey]; hasBase {
+		t.Fatalf("SetPushGradingSwitch created base row unexpectedly: %s", vals[gradingTestBaseKey])
+	}
+	if string(vals[gradingTestMirrorKey]) != "true" {
+		t.Fatalf("mirror = %s, want true", vals[gradingTestMirrorKey])
+	}
+
+	// With a base row carrying custom actions, SetPushGradingSwitch updates enabled and mirror atomically
+	// without losing the other base fields.
+	base := map[string]any{"version": 1, "enabled": true, "actions": map[string]string{"P1": "push"}}
+	if err := d.PutPushGradingBase(ctx, gradingTestBaseKey, gradingTestLayerKey, gradingTestMirrorKey, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetPushGradingSwitch(ctx, gradingTestBaseKey, gradingTestMirrorKey, false); err != nil {
+		t.Fatal(err)
+	}
+	vals, err = d.Settings(ctx, gradingTestBaseKey, gradingTestMirrorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated map[string]any
+	if err := json.Unmarshal(vals[gradingTestBaseKey], &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated["enabled"] != false {
+		t.Fatalf("base.enabled = %v, want false", updated["enabled"])
+	}
+	actions, _ := updated["actions"].(map[string]any)
+	if actions["P1"] != "push" {
+		t.Fatalf("SetPushGradingSwitch lost base actions: %+v", updated)
+	}
+	if string(vals[gradingTestMirrorKey]) != "false" {
+		t.Fatalf("mirror = %s, want false", vals[gradingTestMirrorKey])
+	}
 }

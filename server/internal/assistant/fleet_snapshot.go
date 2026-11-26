@@ -19,6 +19,17 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 	}
 	r := &s.fleet.rep
 	r.mu.Lock()
+	// Sequenced snapshots come from publish(), which releases pubMu before entering here.
+	// Ignore any snapshot superseded by a newer sequence number so an older publisher cannot
+	// revert rep state, falsely drop linked tasks, or trigger stale sessionsChanged/screen syncs.
+	// Unsequenced direct applications (Seq == 0) remain authoritative.
+	if snap.Seq > 0 {
+		if snap.Seq <= r.seq {
+			r.mu.Unlock()
+			return
+		}
+		r.seq = snap.Seq
+	}
 	oldSessions, oldWork, oldOn, oldLinks, oldQuiet, oldMarks := r.sessions, r.work, r.workOn, r.links, r.quiet, r.marks
 	oldCompleted := r.completed
 	views := make(map[string]SessionView, len(snap.Sessions))

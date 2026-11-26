@@ -658,3 +658,16 @@ func TestTransferConcurrentStartsReserveSlots(t *testing.T) {
 		t.Fatalf("after the slots were reused: %+v", end)
 	}
 }
+
+// startTransfer must return the initial running snapshot even if runTransfer finishes before startTransfer returns.
+func TestTransferStartReturnsRunningSnapshotWhenRunFinishesFirst(t *testing.T) {
+	src := &sourceNode{data: []byte("hello")}
+	dst := &targetNode{}
+	d, _, _, _, mux := transferDevices(t, src, dst)
+	d.transfers.afterLaunch = func(tr *transfer) { <-tr.done }
+
+	tr := started(t, postTransfer(t, mux, transferBody))
+	if end := waitTransfer(t, d, mux, tr.ID); end.State != proto.TransferDone {
+		t.Fatalf("end %+v", end)
+	}
+}

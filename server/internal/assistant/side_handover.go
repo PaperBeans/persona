@@ -186,12 +186,7 @@ func (s *Service) handOverSideTask(ctx context.Context, t Todo, side, to, reason
 		if reason == "archived" {
 			detail = "派出它的对话已归档，转给你跟进验收" // i18n-ignore: the supervision message is the assistant's prompt
 		}
-		g := superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v), Detail: detail}
-		b := &s.supervise
-		b.dedupMu.Lock()
-		s.forgetSupervision(ctx, []superviseSignal{g}, s.webBase(ctx))
-		b.dedupMu.Unlock()
-		s.signal(g)
+		s.signalHandedOverReview(t.ID, to, reviewKey(&v), detail)
 	}
 }
 
@@ -227,9 +222,9 @@ func (s *Service) sideHandoverNotice(ctx context.Context, t Todo, side, to, reas
 }
 
 // handOverReview makes conversation to (the main one) the supervisor of task t, which waited for side conversation
-// side's review, and signals the review again: under the key of the ledger as it is now, and with what was said of it
-// before forgotten, so that it is told where it goes now and, the ledger no longer naming a side conversation, only
-// this once. A task reviewed, sent back to work or moved meanwhile is left alone.
+// side's review, and signals the review again addressed to recipient to, so to gets its own deduplication fingerprint
+// while the previous supervisor's receipt stays intact and, the ledger no longer naming a side conversation, this
+// handover runs only once. A task reviewed, sent back to work or moved meanwhile is left alone.
 func (s *Service) handOverReview(ctx context.Context, t Todo, side, to string, now time.Time) {
 	var waited time.Duration
 	s.reviewDismissals.actions.acquire(t.ID)
@@ -253,11 +248,20 @@ func (s *Service) handOverReview(ctx context.Context, t Todo, side, to string, n
 	}
 	s.logf("task %s: conversation %s left its review waiting for %s; the main conversation's follow-up takes it over",
 		t.ID, short(side), waited.Round(time.Minute))
-	g := superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v),
-		Detail: fmt.Sprintf("派出它的对话过了 %d 分钟没验收，转给你验收", int(waited.Minutes()))} // i18n-ignore: the supervision message is the assistant's prompt
-	b := &s.supervise
-	b.dedupMu.Lock()
-	s.forgetSupervision(ctx, []superviseSignal{g}, s.webBase(ctx)) // said to the side conversation within the window: not said here yet
-	b.dedupMu.Unlock()
+	detail := fmt.Sprintf("派出它的对话过了 %d 分钟没验收，转给你验收", int(waited.Minutes())) // i18n-ignore: the supervision message is the assistant's prompt
+	s.signalHandedOverReview(t.ID, to, reviewKey(&v), detail)
+}
+
+// signalHandedOverReview emits a handed-over sigReview scoped to recipient to.
+// Setting Recipient preserves the previous supervisor's deduplication receipt while giving to its own fingerprint and
+// ensuring digestEntry verifies that to still supervises the task; clearing any matching early sent entry lets a
+// same-key handover (such as an external-PR wake or same-microsecond update) pass admission.
+func (s *Service) signalHandedOverReview(todoID, to, key, detail string) {
+	g := superviseSignal{Todo: todoID, Kind: sigReview, Key: key, Recipient: to, Detail: detail}
+	s.supervise.mu.Lock()
+	if s.supervise.sent[g.id()] == g.Key {
+		delete(s.supervise.sent, g.id())
+	}
+	s.supervise.mu.Unlock()
 	s.signal(g)
 }

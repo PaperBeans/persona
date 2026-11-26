@@ -844,7 +844,13 @@ func TestRuntimeAssistantEnvironmentPersistentWorkerCloseAndResume(t *testing.T)
 func TestRuntimeAssistantEnvironmentDisconnectBetweenHubConnectionsReleasesKeeperLeases(t *testing.T) {
 	api := newFakeAPI(t)
 	keeper := newAssistantKeeper()
-	shared := NewRuntimeHost("test", filepath.Join(t.TempDir(), "rt.sock"))
+	// Short: t.TempDir() carries this long test name, and the socket path must stay under the unix limit (108 bytes on Linux).
+	sockDir, err := os.MkdirTemp("", "rte")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
+	shared := NewRuntimeHost("test", filepath.Join(sockDir, "rt.sock"))
 	shared.logger = log.New(io.Discard, "", 0)
 	shared.leaseDisconnectGrace = 40 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())

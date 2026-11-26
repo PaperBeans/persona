@@ -233,6 +233,7 @@ showAvatarCropColor
 showAvatarCropName
 showAvatarCropPage
 showAvatarDelete
+showAvatarDropTarget
 showAvatarEdit
 showAvatarStatePicture
 showBlankLanding

@@ -53,7 +53,13 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 	}
 	if g.externalPRReview() {
 		// Keep the latest source wake per task, independent of its Agent's answer or a manager restart.
-		key, _ := json.Marshal([]string{g.Todo, g.Kind, "external_pr"})
+		// Scope by Recipient only on explicit supervision handovers so pre-upgrade receipts stored under
+		// [todo, kind, "external_pr"] continue to deduplicate ordinary watches for the same supervisor.
+		parts := []string{g.Todo, g.Kind, "external_pr"}
+		if g.Recipient != "" {
+			parts = append(parts, g.Recipient)
+		}
+		key, _ := json.Marshal(parts)
 		sum := sha256.Sum256([]byte(g.Key))
 		return string(key), hex.EncodeToString(sum[:])
 	}
@@ -173,7 +179,14 @@ func (s *Service) reserveSupervisionDelivery(ctx context.Context, entries []prom
 	for i, entry := range entries {
 		key, hash := digestFingerprint(entry, signals[i])
 		current, undelivered := pending[signals[i].id()]
-		if seen, ok := next[key]; ok && seen.Hash == hash && (seen.Permanent || seen.Todo != "" || now.Sub(seen.At) < superviseDedupWindow) {
+		seen, ok := next[key]
+		if !ok && signals[i].externalPRReview() && signals[i].Recipient == "" && signals[i].To != "" {
+			alt := signals[i]
+			alt.Recipient = alt.To
+			altKey, _ := digestFingerprint(entry, alt)
+			seen, ok = next[altKey]
+		}
+		if ok && seen.Hash == hash && (seen.Permanent || seen.Todo != "" || now.Sub(seen.At) < superviseDedupWindow) {
 			if seen.Permanent && seen.Key == "" {
 				continue // a delivered PR head is told once for good; a reserved Key still owes a delivery
 			}
@@ -302,14 +315,18 @@ func (s *Service) forgetSupervision(ctx context.Context, signals []superviseSign
 	}
 	next := maps.Clone(history)
 	for _, g := range signals {
-		if g.Kind == sigAllStopped {
+		if g.Kind == sigAllStopped || g.externalPRReview() {
 			key, _ := digestFingerprint(prompts.SuperviseEntry{}, g)
 			if seen, ok := next[key]; ok && seen.Key == g.Key {
 				delete(next, key)
 			}
 			continue
 		}
-		if e, ok := s.digestEntry(ctx, g, web); ok {
+		lookup := g
+		if lookup.Kind == sigReview {
+			lookup.Recipient = ""
+		}
+		if e, ok := s.digestEntry(ctx, lookup, web); ok {
 			key, _ := digestFingerprint(e, g)
 			if seen, ok := next[key]; ok && seen.Key == g.Key {
 				delete(next, key)

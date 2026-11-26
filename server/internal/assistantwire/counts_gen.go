@@ -29,6 +29,8 @@ func (v CountsEpoch) String() string { return string(v) }
 type CountsViewCounts struct {
 	// The Agents that need the owner (docs/protocol/counts.md, "agents_needs_you").
 	AgentsNeedsYou *CountsViewCount `json:"agents_needs_you,omitempty"`
+	// The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, "todos_needs_you").
+	TodosNeedsYou *CountsViewCount `json:"todos_needs_you,omitempty"`
 }
 
 // CountsViewTotals: each count's n again, by its id, for what reads a number without its rows: the hub copies it as
@@ -36,6 +38,8 @@ type CountsViewCounts struct {
 type CountsViewTotals struct {
 	// counts.agents_needs_you.n.
 	AgentsNeedsYou *int `json:"agents_needs_you,omitempty"`
+	// counts.todos_needs_you.n.
+	TodosNeedsYou *int `json:"todos_needs_you,omitempty"`
 }
 
 // CountsViewCount: one count: its number, the rows it counts and the rows the list keeps but the count leaves out.

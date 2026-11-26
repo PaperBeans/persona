@@ -362,8 +362,9 @@ test('an autonomous wake preserves a previous unexported reply through interrupt
   nativeState(directory, 'IDLE', 5)
   await until('both replies are exported despite a mid-prompt system message', () => runtime.idle() && node.last('session.items')?.to_seq === 5)
   const final = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(final.items.filter((item) => !item.wake).map((item) => item.text), ['Run the workflow.', 'Workflow started.', 'Workflow finished.'])
+  assert.deepEqual(final.items.filter((item) => !item.wake && item.kind !== 'turn_duration').map((item) => item.text), ['Run the workflow.', 'Workflow started.', 'Workflow finished.'])
   assert.deepEqual(final.items.filter((item) => item.wake).map((item) => item.seq), [5])
+  assert.equal(final.items.at(-1).kind, 'turn_duration')
 })
 
 test('a text-only wake preserves the unexported prompt and opens its own live exchange', async (t) => {
@@ -385,8 +386,9 @@ test('a text-only wake preserves the unexported prompt and opens its own live ex
   nativeState(directory, 'IDLE', 3)
   await until('both exact replies land in one markerless export', () => runtime.idle())
   const settled = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(settled.items.map(item => item.wake ? 'wake' : item.text),
+  assert.deepEqual(settled.items.filter((item) => item.kind !== 'turn_duration').map(item => item.wake ? 'wake' : item.text),
     ['Run the workflow.', 'Workflow started.', 'wake', 'Workflow finished.'])
+  assert.equal(settled.items.at(-1).kind, 'turn_duration')
 })
 
 test('live and native wakes keep one identity across batched notifications and a watched file attachment', async (t) => {
@@ -408,7 +410,8 @@ test('live and native wakes keep one identity across batched notifications and a
   const final = await visible()
   assert.deepEqual(final.items.slice(0, prior.items.length), prior.items)
   assert.deepEqual(final.items.filter(item => item.wake).map(item => item.id), [wakeID])
-  assert.equal(final.items.at(-1).text, steps[5].content)
+  assert.equal(final.items.filter(item => item.kind !== 'turn_duration').at(-1).text, steps[5].content)
+  assert.equal(final.items.at(-1).kind, 'turn_duration')
 })
 
 test('an observed ACP wake keeps its boundary when the native export omits its scheduler notice', async (t) => {
@@ -430,7 +433,8 @@ test('an observed ACP wake keeps its boundary when the native export omits its s
   const final = await read()
   assert.deepEqual(final.items.slice(0, prior.items.length), prior.items)
   assert.deepEqual(final.items.filter(item => item.wake).map(item => item.id), [wake.id])
-  assert.equal(final.items.at(-1).text, 'The check is complete.')
+  assert.equal(final.items.filter(item => item.kind !== 'turn_duration').at(-1).text, 'The check is complete.')
+  assert.equal(final.items.at(-1).kind, 'turn_duration')
   const receipt = readFileSync(join(directory, 'config/brain', RAW, '.persona-observed-wakes'), 'utf8')
   assert.equal(receipt, readFileSync(new URL('./fixtures/observed-wake.txt', import.meta.url), 'utf8'))
 
@@ -757,7 +761,7 @@ test('live thinking chunks, parallel tool updates and settling keep history stab
   }
 
   const merged = [...mergedById.values()].sort((a, b) => a.seq - b.seq)
-  assert.deepEqual(merged.slice(0, 4).map((it) => it.text), ['Old prompt 1', 'Old answer 1', 'Old prompt 2', 'Old answer 2'])
+  assert.deepEqual(merged.filter((it) => it.kind !== 'turn_duration').slice(0, 4).map((it) => it.text), ['Old prompt 1', 'Old answer 1', 'Old prompt 2', 'Old answer 2'])
   const thoughts = merged.filter((it) => it.kind === 'thinking')
   assert.deepEqual(thoughts.map((it) => it.text), ['Step 1: reading runtime.js.', 'Step 2: wrapping up.'])
   const readUse = merged.find((it) => it.kind === 'tool_use' && it.tool_name === 'Read')
@@ -768,7 +772,7 @@ test('live thinking chunks, parallel tool updates and settling keep history stab
   assert.equal(resultsByCall.get(readUse.tool_use_id)?.is_error, true)
   assert.equal(resultsByCall.get(bashUse.tool_use_id)?.text, 'ok-2')
   assert.equal(resultsByCall.get(bashUse.tool_use_id)?.is_error, false)
-  assert.equal(merged.at(-1).text, 'Fixed cleanly.')
+  assert.equal(merged.filter((it) => it.kind !== 'turn_duration').at(-1).text, 'Fixed cleanly.')
 
   // 5. Only once native transcript_full.jsonl actually flushes does the history change, replacing the projected steps.
   const flushed = [
@@ -782,7 +786,8 @@ test('live thinking chunks, parallel tool updates and settling keep history stab
     return latest && latest.history !== liveHistory && latest.to_seq === 6
   })
   assert.equal(node.last('session.items').from_seq, 0)
-  assert.equal(node.last('session.items').items.at(-1).text, 'Fixed cleanly.')
+  assert.equal(node.last('session.items').items.filter((it) => it.kind !== 'turn_duration').at(-1).text, 'Fixed cleanly.')
+  assert.equal(node.last('session.items').items.at(-1).kind, 'turn_duration')
 })
 
 test('trailing thinking chunks arriving right before turn completion are not dropped on settle (#11129)', { timeout: 20_000 }, async (t) => {
@@ -876,7 +881,9 @@ for (const partialTools of [false, true]) {
     const full = [...partial, replyStep(partial.at(-1).step_index + 1, 'Final answer.')]
     transcripts(directory, full, full)
     await until('final export replaces pending history', () => node.last('session.items') && node.last('session.items').history !== page.history)
-    assert.equal((await node.peer.call('session.items', { session_id: SESSION })).items.at(-1).text, 'Final answer.')
+    const finalItems = (await node.peer.call('session.items', { session_id: SESSION })).items
+    assert.equal(finalItems.filter((item) => item.kind !== 'turn_duration').at(-1).text, 'Final answer.')
+    assert.equal(finalItems.at(-1).kind, 'turn_duration')
   })
 }
 
@@ -967,7 +974,9 @@ for (const secondReply of ['Second answer.', 'First answer.']) {
     const full = [...first, userStep(2, 'Second.'), replyStep(3, secondReply)]
     transcripts(directory, full, full)
     await until('second export replaces pending', () => node.last('session.items') && node.last('session.items').history !== page.history)
-    assert.equal(node.last('session.items').items.at(-1).text, secondReply)
+    const pushedItems = node.last('session.items').items
+    assert.equal(pushedItems.filter((item) => item.kind !== 'turn_duration').at(-1).text, secondReply)
+    assert.equal(pushedItems.at(-1).kind, 'turn_duration')
   })
 }
 
@@ -986,7 +995,7 @@ for (const externalReply of [false, true]) {
     transcripts(directory, steps, steps)
     const page = await node.peer.call('session.items', { session_id: SESSION })
     assert.notEqual(page.history, pending.history)
-    assert.deepEqual(page.items.map((item) => item.text), steps.map((step) => step.content))
+    assert.deepEqual(page.items.filter((item) => item.kind !== 'turn_duration').map((item) => item.text), steps.map((step) => step.content))
   })
 }
 
@@ -1129,7 +1138,7 @@ for (const prompt of ['', 'Check the photo.']) {
     const native = await read()
     assert.notEqual(await checkUser(native), liveId)
     assert.notEqual(native.history, live.history)
-    assert.deepEqual(native.items.map((item) => item.kind), [...(prompt ? ['text'] : []), 'image', 'text', 'notice'])
+    assert.deepEqual(native.items.map((item) => item.kind), [...(prompt ? ['text'] : []), 'image', 'text', 'turn_duration', 'notice'])
     assert.equal(native.items.at(-1).text, '上下文已压缩')
     assert.equal(node.last('runtime.sessions').sessions.find((row) => row.session_id === SESSION).last_text, 'Checked.')
   })

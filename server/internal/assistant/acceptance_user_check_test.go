@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 )
 
@@ -156,12 +157,21 @@ func TestUserCheckPassHTTPCompletesTheTask(t *testing.T) {
 	if todo.DoneAt != nil {
 		t.Fatal("task was closed before the web's Pass")
 	}
-	a := askOf(s, todo.ID)
-	body := `{"asked_at":"` + a.AskedAt.Format(timeKeyLayout) + `"}`
+	row := listedTodos(t, s)[todo.ID]
+	view, _ := row["view"].(map[string]any)
+	ask, _ := row["ask"].(map[string]any)
+	at, _ := ask["asked_at"].(string)
+	if view["section"] != assistantwire.TodoListSectionNeedsYou || view["reason"] != assistantwire.TodoReasonVerify || at == "" {
+		t.Fatalf("verification should be actionable under Needs you: %v", row)
+	}
+	body := `{"asked_at":"` + at + `"}`
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/todos/"+todo.ID+"/accept", strings.NewReader(body)))
 	if rec.Code != http.StatusOK || todoNow(s, todo.ID).DoneAt == nil {
 		t.Fatalf("web Pass: status=%d body=%s todo=%+v", rec.Code, rec.Body.String(), todoNow(s, todo.ID))
+	}
+	if ask := listedAsk(t, s, todo.ID); ask != nil {
+		t.Fatalf("completed task still has a verification ask: %v", ask)
 	}
 }
 

@@ -297,4 +297,3 @@ def gen_kotlin(defs: dict[str, Def], *, header: list[str] | None = None, prefix:
     code = "\n".join(line for line in out if not line.startswith("import "))
     return "\n".join(line for line in out if not line.startswith("import ")
                      or re.search(r"\b" + re.escape(line.rsplit(".", 1)[1]) + r"\b", code))
-

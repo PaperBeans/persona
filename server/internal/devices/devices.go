@@ -1017,6 +1017,28 @@ func (d *Devices) Shown(id string) (Shown, bool) {
 	return s, true
 }
 
+// CurrentConnectionListed reports whether id has a live node connection outside
+// warm/reload grace that has completed at least one sessions.list on this
+// connection (never satisfied by a retained pre-reconnect snapshot).
+func (d *Devices) CurrentConnectionListed(id string) bool {
+	m := d.machineByID(id)
+	if m == nil {
+		return false
+	}
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.peer == nil || !m.online || !m.sessionsListed || now.Before(m.warmUntil) || now.Before(m.reloadUntil) {
+		return false
+	}
+	select {
+	case <-m.peer.Done():
+		return false
+	default:
+		return true
+	}
+}
+
 // Has reports whether id is one of the machines (an entry another one absorbed included).
 func (d *Devices) Has(id string) bool { return d.machineByID(id) != nil }
 

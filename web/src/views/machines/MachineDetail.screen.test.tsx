@@ -46,7 +46,7 @@ const mac = (computer: Machine["computer"], extra: Partial<Machine> = {}) => ({ 
 
 async function open(m: Machine) {
   fake.machines = [m];
-  act(() => root.render(<MachineDetail mid="mac" onToggleSidebar={() => {}} />));
+  act(() => root.render(<MachineDetail subview="management" mid="mac" onToggleSidebar={() => {}} />));
   await flush();
 }
 

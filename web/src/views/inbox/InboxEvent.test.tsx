@@ -50,6 +50,7 @@ vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: fal
 
 import type { InboxItem } from "../../lib/inbox";
 import { resetInboxForTests, shortTime, useInbox } from "../../lib/inbox";
+import { inboxReturnTo } from "../../lib/inbox-nav";
 import { sourceLine } from "../../lib/inbox-page";
 import { rowMeta } from "../../lib/inbox-now";
 import { chainRows, type ChainEntry } from "../../lib/inbox-events";
@@ -63,6 +64,7 @@ import { toast } from "../../ui/atoms";
 import { InboxDetail } from "./InboxDetail";
 import { chainIconMeaning, EventBody } from "./InboxEvent";
 import { InboxList } from "./InboxList";
+import { resetRoster, setRoster } from "../../lib/managers";
 import { settleRosterDefault } from "../../lib/manager-choice";
 
 // the roster's default is known, as once the app has read it: an item's page draws at once
@@ -131,6 +133,116 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+});
+
+describe("opening an Inbox handling conversation", () => {
+  const link = { type: "session" as const, machine_id: "m1", session_id: "inbox-chat" };
+  const item: InboxItem = {
+    ...plain(reply), id: "larkcli:chat:100", now: "looking", suggestion: undefined,
+    handling: { owner: "manager", state: "looking", machine_id: link.machine_id, session_id: link.session_id },
+    chain: [{ id: "handling", kind: "handling", text: "助手处理", link }],
+  };
+  const itemPath = "/inbox/larkcli%3Achat%3A100";
+
+  beforeEach(() => {
+    Object.assign(getState(), { sessions: {}, sessionSummaries: [], assistant: { machine_id: "m1", conversations: [] } });
+    history.replaceState(null, "", itemPath);
+  });
+
+  afterEach(() => {
+    Object.assign(getState(), { sessions: {}, sessionSummaries: [], assistant: null });
+    resetRoster();
+    settleRosterDefault();
+    history.replaceState(null, "", "/");
+  });
+
+  it.each(["处理对话", "助手处理"])("opens %s in Persona and remembers the Inbox item with no cached session", async (button) => {
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press(button);
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it.each(["处理对话", "助手处理"])("keeps %s on the Agent page when a cached session is non-assistant", async (button) => {
+    getState().sessions[link.machine_id] = [
+      { machine_id: link.machine_id, session_id: link.session_id, assistant: false, title: "Agent", cwd: "", status: "idle" },
+    ];
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press(button);
+    expect(location.pathname + location.search).toBe("/s/m1/inbox-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it("opens an uncached Agent handling session on its session page", async () => {
+    const handling = { ...item.handling, state: "agent", machine_id: "m1", session_id: "agent-chat" };
+    act(() => root.render(<EventBody item={{ ...item, handling, chain: undefined }} onSource={() => {}} />));
+    await press("处理对话");
+    expect(location.pathname + location.search).toBe("/s/m1/agent-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it.each(["处理对话", "Agent suggestion"])("keeps %s on the Agent page when the chain identifies the uncached session as an Agent", async (button) => {
+    const chain = [
+      { id: "agent", kind: "agent", text: "Handed to Agent", link },
+      { id: "suggestion", kind: "handling", text: "Agent suggestion", detail: "Suggested reply", link },
+    ];
+    act(() => root.render(<EventBody item={{ ...item, chain }} onSource={() => {}} />));
+    await press(button);
+    expect(location.pathname + location.search).toBe("/s/m1/inbox-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it("opens the uncached Assistant handling conversation while its child Agent is working", async () => {
+    const handling = { ...item.handling!, state: "agent" };
+    const chain = [...item.chain!, { id: "agent", kind: "agent", text: "Child Agent", link: { ...link, session_id: "child-agent" } }];
+    act(() => root.render(<EventBody item={{ ...item, handling, chain }} onSource={() => {}} />));
+    await press("处理对话");
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it("uses the cached conversation's manager when the Assistant owns the session", async () => {
+    setRoster({ default: "assistant", managers: [{ id: "assistant", name: "Persona", online: true }, { id: "work", name: "Work", online: true }] });
+    const session = { machine_id: link.machine_id, session_id: link.session_id, assistant: false, manager: "work", title: "Handling", cwd: "", status: "idle" };
+    getState().sessions[link.machine_id] = [session];
+    getState().assistant!.conversations = [session];
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press("处理对话");
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat?machine=m1&manager=work");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it.each(["处理对话", "助手处理"])("opens %s in its space when the session is only in session summaries", async (button) => {
+    getState().sessionSummaries = [
+      { machine_id: link.machine_id, session_id: link.session_id, assistant: true, space: "notes", title: "Handling", cwd: "", status: "idle" },
+    ];
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press(button);
+    expect(location.pathname + location.search).toBe("/tracks/notes/inbox-chat");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id });
+  });
+
+  it.each(["处理对话", "助手处理"])("opens %s on the conversation's computer for another manager", async (button) => {
+    setRoster({ default: "assistant", managers: [{ id: "assistant", name: "Persona", online: true }, { id: "work", name: "Work", online: true }] });
+    history.replaceState(null, "", `${itemPath}?manager=work`);
+    act(() => root.render(<EventBody item={{ ...item, manager: "work" }} onSource={() => {}} />));
+    await press(button);
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat?machine=m1&manager=work");
+    expect(inboxReturnTo(history.state)).toEqual({ id: item.id, manager: "work" });
+  });
+
+  it("names the handling computer when it differs from the only assistant's computer", async () => {
+    Object.assign(getState(), { assistant: { machine_id: "hub", conversations: [] } });
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press("处理对话");
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat?machine=m1");
+  });
+
+  it.each([{ kind: "agent" }, { kind: "handling", detail: "Agent suggestion" }])("keeps a linked Agent's $kind entry on its session page", async (entry) => {
+    act(() => root.render(<EventBody item={{ ...item, chain: [{ ...entry, id: "agent", text: "Agent", link: { ...link, session_id: "agent-chat" } }] }} onSource={() => {}} />));
+    await press("Agent");
+    expect(location.pathname + location.search).toBe("/s/m1/agent-chat");
+  });
 });
 
 describe("收件箱事件：详情", () => {

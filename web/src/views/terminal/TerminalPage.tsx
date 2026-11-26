@@ -30,6 +30,9 @@ import { useCloseFinished } from "./CloseFinished";
 import { interactiveSessionPane, standaloneShells, type ShellSpace, type ShellTab } from "./work-terminal-layout";
 import { t } from "../../i18n";
 
+import { MachineTerminalEntry } from "./MachineTerminalEntry";
+import type { MachineTerminalTarget } from "../../lib/machine-terminal";
+
 type TerminalRoute = Extract<Route, { name: "terminal" }>;
 
 export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWorkPane }: {
@@ -45,7 +48,9 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
   const panesOn = useStore((s) => s.features.includes("terminal_panes"));
   // New terminal on a computer with no workspace yet (#6362): a hub that checks the node can (else 409 node_outdated)
   const newSpaceOn = useStore((s) => s.features.includes("pane_new_space"));
-  const addressed = route?.mid ?? detail?.selected?.mid;
+  const canOpenFolder = useStore(s => s.features.includes("pane_cwd"));
+  const target: MachineTerminalTarget | undefined = route?.view === "terminals" && !route.id ? history.state?.machineTerminal : undefined;
+  const addressed = target?.mid ?? route?.mid ?? detail?.selected?.mid;
   // A bookmarked terminal or session may name another assistant's computer. Only the current one's are listed.
   const targets = addressed && !machines.some((m) => m.id === addressed) ? allMachines.filter((m) => machines.includes(m) || m.id === addressed) : machines;
   const { listing, busy, refresh, reload } = usePanes(targets, panesOn);
@@ -124,6 +129,10 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
   // "Close finished terminals" (#4754): previewed, confirmed, then exactly those (CloseFinished.tsx)
   const finished = useCloseFinished({ spacesOf: (id) => trees[id] ?? [], reload: (id) => void reload([id]) });
   const listsTerminals = listView === "terminals";
+
+  if (target && panesOn) return <MachineTerminalEntry key={JSON.stringify(target)} target={target}
+    machine={targets.find(m => m.id === target.mid)} listing={listing[target.mid]}
+    canCreateSpace={newSpaceOn} canOpenFolder={canOpenFolder} retry={() => void reload([target.mid])} />;
 
   return (
     <div className="flex h-full min-w-0 flex-col">

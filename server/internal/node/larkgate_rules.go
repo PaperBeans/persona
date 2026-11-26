@@ -37,7 +37,40 @@ func larkDecision(cfg proto.AssistantLark, c larkCall) string {
 	if c.Gate < 0 || c.Gate >= len(cfg.Gates) {
 		return "confirm"
 	}
-	return decideLark(cfg.Gates[c.Gate].Rules, c)
+	g := cfg.Gates[c.Gate]
+	if c.fileBody && g.Auth == nil {
+		return decideLarkFileBody(g.Rules, c)
+	}
+	return decideLark(g.Rules, c)
+}
+
+// decideLarkFileBody decides a command-gate call whose body comes from @file on a gate without Auth.
+// Without a proxy to enforce rules on the actual HTTP body at send time, check-time @file contents
+// cannot select a body-scoped allow rule or silently clear an earlier body-scoped deny/confirm rule.
+// Body-independent rules without a preceding body-scoped restriction, and body-scoped deny/confirm
+// rules that match the check-time snapshot, still apply.
+func decideLarkFileBody(rules []proto.LarkRule, c larkCall) string {
+	sawBodyRestriction := false
+	for _, r := range rules {
+		if (r.Method != "*" && !strings.EqualFold(r.Method, c.Method)) || !pathMatches(r.Path, c.Path) {
+			continue
+		}
+		if len(r.Body) > 0 {
+			if r.Action == "allow" {
+				continue
+			}
+			if bodyMatches(r.Body, c.Body) {
+				return r.Action
+			}
+			sawBodyRestriction = true
+			continue
+		}
+		if r.Action == "allow" && sawBodyRestriction {
+			return "confirm"
+		}
+		return r.Action
+	}
+	return "confirm"
 }
 
 // larkRead: a call that only reads (lark-cli's own read risk or a command it does not have, a GET / HEAD).

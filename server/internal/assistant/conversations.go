@@ -366,10 +366,14 @@ type relayBook struct {
 	// before that are not counted. In memory like sent.
 	quoted     map[string]time.Time
 	roundsFrom map[string]time.Time
-	// ownerLater tracks in-flight hub owner sends (assistant.send_params -> session.assistant_sent) so unnamed sends
-	// (no client_msg_id) and older hubs settle their reserved quiet relays (relay_later.go, #12867).
-	ownerLater        map[string][]ownerLaterSend
-	ownerLaterNamedOn uint64
+	// ownerLaterInFlight tracks active owner sends carrying relayState.Later[sid] so deferred fanout wakes wait
+	// before deciding whether a wake is still needed (conversation_fanout.go, #14381). It never performs settlement
+	// (settlement is always durable via LaterSends[owner:<client_msg_id>]).
+	ownerLaterInFlight map[string]map[string]time.Time
+	// ownerLaterDegraded tracks (session, client_msg_id) owner sends that degraded without quiet relays during a
+	// relay state read outage so storage recovery before session.assistant_sent cannot drop an older reservation
+	// unread (relay_later.go, #12867).
+	ownerLaterDegraded map[[2]string]time.Time
 }
 
 // ownerTurn is one conversation's owner-turn gate (#6394).
@@ -1787,7 +1791,7 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	if c.SessionID == self {
 		return "", errors.New("that is this conversation: you can't send a message to yourself")
 	}
-	if c.LogicalPlaceholder {
+	if c.LogicalPlaceholder && !s.isZeroTurnPlaceholderConversation(ctx, c.MachineID, c.SessionID) {
 		// Its active physical segment is gone. Keep the durable conversation readable, but never manufacture a new
 		// execution segment or queue a message for an identity that no longer exists.
 		return "", logicalRefusal(ctx, "unavailable")

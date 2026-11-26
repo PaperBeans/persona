@@ -397,6 +397,20 @@ order hello, machines, counts, then session lists; TestBroadcastTypes, `test_doc
 guard pass, apart from `TestHubAnswersOnlyItsOwnRoutes`, which already fails on main (#9485) and is compared with
 `origin/main`.
 
+*Landed (#15893):* the relay (`hub/counts_view.go`): the hub keeps each manager's last view on its bus connection,
+compacted and checked only for its object, `epoch`, `rev` and bound, and sends it to full-role apps that ask, at connect
+between `machines` and the session lists, after a `client_hello` that names the feature, and as `view: null` when the
+connection ends; relays and connect-time sends share `h.mu`, so an app never gets a manager's view after a newer one.
+`spec/fixtures/counts/views.json` writes D13's cases as given, one transport event (`arrived`, `arrivedEmpty`,
+`wentOffline`, `restarted`, `leftRoster`, `signedOut`) and then, with its section in the fixtures' README;
+`TestTheHubReplaysTheRestartCases` replays its restart cases through the hub, and `test_wire_schema.py` holds each of
+its views to the schema. What differs, and why: the hub feature is appended from `proto/features_counts.go`, the proto
+feature seam (`docs/server/architecture.md` "Registering a domain's entries"), which heads features()' static list, so
+it is listed always and no line of `hub/extensions_link.go` changes; the roster carries the `counts_view` flag and not
+the view, so a client has one source of views, the WebSocket, and the roster read every `managers` push asks for does
+not grow by up to 16 KB per manager, which also leaves no view on the roster to keep from scoped, answer-only and
+extension tokens; the mock domain module waits for step 8, the first step that draws a view and screenshots it.
+
 **8. Android reads `agents_needs_you`.** *Change:* ShellCounts and the switcher's agents share read the view, with the
 overlay and the frozen fallback, and the switcher adds its Persona-conversation part by today's rule (section 3.3 item
 7), so a Persona conversation's card stays on it; HubManagers.kt decodes the generated type. Step 3's Android mark
@@ -463,6 +477,24 @@ Persona tab, the app icon and the switchers' Persona-conversation part after D9;
 `assistant/todo_projection.go` and `todo/projection` have 4 open PRs (#11179, #11168, #10809d, #9823), `todo-triage.ts`
 3; draft PRs #10809 and #9777 change what Needs you holds and must be reconciled. *Gate:* the named decision.
 *Rollback:* revert. *Done:* the count's rows in surfaces.json turn `matches`; the lane differ is green.
+
+*Landed, the To-dos' server part (#15896):* `todos_needs_you` is an optional field of the view's `counts` and `totals`
+(`schema/wire/counts.schema.json`, its four outputs regenerated; no client reads it yet), written by `fleetcountadapt`'s
+`Fleet.View`, which `surfaces.json` names as its `producer`. Package assistant hands `Fleet.View` the counts of its last
+read of the whole to-do list, the `Counts()` `GET /api/v1/todos` answers with (`server/internal/assistant/counts_view.go`):
+every read of the list, of one to-do or of the places keeps them; when no read follows a `{"type":"todos"}` within a
+second, the manager reads the list itself, one read at a time; until a run has counted its to-dos, each round asks for
+a count, and the view leaves it out. `TestCountsViewCountsTheToDosAsTheListDoes` holds the view's number to the list's
+`counts.needs_you` on every `spec/fixtures/todo-counts` case, `TestCountsViewFollowsTheToDoList` to `GET /api/v1/todos`
+on a manager's own list, and `TestCountsViewRecountsOneReadAtATime` keeps a slow read from starting a second one.
+What differs, and why: the count lists no rows (`keys` absent, all of `n` is `more`), since `Counts()` gives numbers
+only; the to-do projection (`todo/projection`) is neither declared nor given a record or an exported field while #9823,
+#11168 and #11179 are open, and `assistant/todo_projection.go` is untouched; `Fleet.View` takes the counts as the wire
+has them (`assistantwire.TodoCounts`, in an `opt.Option`), and once the projection is a core they come in as its value,
+`Fleet.View` staying the producer. TodoCountsFallback's multi-manager case retires with the iOS client's step, and the
+clients' To-dos rows stay `differs` until each draws N. `BenchmarkRound` with the to-dos counted: 266 to 267 allocs/op
+and 35,096 to 35,184 B/op against `origin/main` on one machine, the to-dos count's one allocation; `BenchmarkLiveRound`
+(no to-dos counted) and telling an unchanged view are unchanged (139 allocs/op; 0).
 
 **13. Retire the fallbacks.** *Change:* when D14's window ends, delete each client's fallback file with its fixture
 replay and step-3 marks (the view-path cases stay); the hub keeps FleetState, `inbox_needs_you` and Link for old apps;

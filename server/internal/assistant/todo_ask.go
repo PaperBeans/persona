@@ -69,16 +69,27 @@ const (
 	defaultNever = "never"
 )
 
+// todoActiveBlockerView is a persistent active blocker edge attached to a listedTodo under todos_v2.
+type todoActiveBlockerView struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	TargetRef string `json:"target_ref"`
+	State     string `json:"state"`
+	Attempts  int    `json:"attempts,omitempty"`
+}
+
 // listedTodo is a to-do as GET /api/v1/todos lists it: with its ask while one waits (none: no `ask`, which a client that
 // does not know it never reads), and, while it is open and nobody works on it, why (`orphaned`, tasks_orphan.go); on
 // the routes, its view (todo_view_routes.go).
 type listedTodo struct {
 	Todo
 	PrerequisiteBlockers []string                   `json:"prerequisite_blockers,omitzero"`
+	ActiveBlockers       []todoActiveBlockerView    `json:"active_blockers,omitempty"`
 	Ask                  *todoAsk                   `json:"ask,omitempty"`
 	DecisionReview       *decisionReview            `json:"decision_review,omitempty"`
 	Orphaned             *TodoOrphan                `json:"orphaned,omitempty"`
 	View                 *assistantwire.TodoSummary `json:"view,omitempty"`
+	Wait                 *assistantwire.TodoWait    `json:"wait,omitempty"`
 	RepoGate             *repoGate                  `json:"repo_gate,omitempty"`
 	ItemType             string                     `json:"item_type,omitempty"`
 }

@@ -813,8 +813,10 @@ Something the owner raises in the main conversation and wants an answer to is a 
 **Personal verification** (#10047): `task_review` with `verdict: "accepted"` and `user_check: true` records the
 supervisor's review but leaves `done_at` unset, with `supervision.state: "user_check"` (**Awaiting your
 verification**). The task remains open and counted as Waiting on you, even if its delivery is already live or its
-reply has been read. Its existing "Please verify" ask is reused; without a Lark card the same ask stays available in
-the apps. Completed-task retirement does not select this Agent, and personal verification also protects it from the
+reply has been read. In Web **Needs you**, personal verification appears in the main conversation's own group
+and in the supervising conversation's tray. While the ask is unavailable, the row opens the task. Pass appears
+once the hub supplies the answerable round. Lark also shows the card when task reports and notification settings allow it.
+Completed-task retirement does not select this Agent, and personal verification also protects it from the
 ordinary stalled-task idle limit. This does not change the closure policy for tasks that really have completed.
 
 The owner's **Pass** (app, card or approval reply) marks the task verified, closes it by review, and permits normal
@@ -945,6 +947,7 @@ The existing ready `merge_review` path still gates terminal wakes on the task's 
 - **Provenance boundary**: the supervisor must inspect the actual source receipt before supplying evidence. The tool validates and persists the supplied source-backed account; admission itself does not contact providers or independently verify a receipt. Automatic observation is limited to the explicit supported bindings described here, not arbitrary wake prose or URLs. It does not forward events or send an Agent instruction. `recorded_by` is server-authored for the current conversation and is output only. Legacy parks with no `evidence` mean evidence was not recorded, not that a contact or wait was verified.
 - **Mechanical waits**: a mechanical wait without source evidence is no longer automatically parked; its signal remains visible to the supervisor for ordinary review. This does not change native future-wake deferral or merged-delivery advancement. Outside the supported typed bindings, the recorded wake condition is descriptive, not an event adapter. No UI, status-only, outbox or supervision-authority behavior is added here.
 - **What parked means**: the to-do stays open with `supervision.state: "parked"` and `supervision.parked: {reason, until, waiting_on, count, evidence?}`. It is not a new owner question: no `ask`, push or conclusion card, and it is not filed under Waiting on you just because it is parked. The exception is an `external_event` with a verified `interaction_id`: its already-pending interaction appears once in the usual Needs you flow while it remains actionable, without creating a new ask or changing the park ledger. While parked, its supervisor gets no `stalled`, `no_progress`, `idle`, `unjudged`, `orphaned`, `overdue`, `undecidable` or no-progress `check` signal, and the manager does not send the Agent its own follow-up. At `until`, one `parked_due` message returns the task and its recorded decisions to its supervisor; the task remains parked until the supervisor acts.
+- **Typed waiting reason (`wait`, #16168)**: whenever a to-do is projected into `waiting` (parked, open PR, usage limit, run waiting on another Agent or external event, rolled-up waiting step, or `todos_v2` active blocker), `GET /api/v1/todos` and `GET /api/v1/todos/{id}` emit a strongly-typed `wait` (`TodoWait`, `schema/wire/todo-wait.schema.json`, pinned by `spec/fixtures/todo-wait/`) naming `kind` (`TodoWaitKind`), `waiting_on`, `reason`, `wake_condition`, `wake_at`, `until`, `since`, `url`, `handoff_todo_id`, `contact`, `pr_blockers`, and `step`. Every timestamp is absolute RFC 3339 UTC so ETags stay stable. Non-waiting rows omit `wait`, and clients render `wait` directly without deriving waiting state themselves.
 - **Leaving**: any Agent turn ends the parking, drops a still-pending `parked_due`, and returns the task to in progress (or `rework` when rounds were used). There is no status-only exception in this change. Any other review ends parking; a closed to-do is not parked.
 - **Owner decision wake** (#8044): an owner's recorded decision ends a park waiting on `someone_else`, and still ends a legacy `owner_priority` park or its reconciled `needs_user` wait, even without an Agent turn. The supervisor receives one `park_decided` with the decision so it can resume, review or close. A decision before a later park does not end that newer park. The decision is stored before the ledger is touched, so a failed ledger write does not fail the decision request; it is logged and the watch recovers within 30 seconds. A later review or re-park does not drop an already queued `park_decided`; only `accepted` or `cancelled` does, and a decision from before a newer park does not end it. The ledger records the decision and whether supervision carried it across restarts. Agent notes, routed-card answers by the supervisor, deadline defaults and outcome records are not the owner's decision; decisions do not end `external_event` or `date` parks.
 - **Not a place to forget things**: `count` is consecutive parks without an Agent turn; three re-parks are allowed, and the next is refused. An Agent turn or an owner's decision that ends the park resets the count.
@@ -1342,7 +1345,7 @@ An approved start is remembered across manager restarts and rechecked by the tas
 | Tool | What it does | Confirmed on the phone |
 | --- | --- | --- |
 | `todo_list` | Open to-dos and failed starts by default, earliest due first (none last), filtered by state, due before / after, overdue, with or without agents, project, words | — |
-| `todo_get` | One in full: notes, agents, the task it is, decisions in force | — |
+| `todo_get` | One in full: notes, agents, the task it is, its pending user decision and decisions in force | — |
 | `todo_create` | `title`, `notes`, `due` (a day, a moment in the user's time zone or RFC 3339, `2h` / `3d`), `remind` (a moment, not past), `priority`, `project`, `part_of`, `after` ("Requests in pieces"); an open to-do with the same title and due date is returned instead of made twice | No |
 | `todo_update` | Title, notes, due, remind, priority, project, `part_of`, `after`; `""` / `[]` clears | No |
 | `todo_complete` / `todo_reopen` | Mark done / open again | Only for a task, or a to-do agents work on (completing closes its agents) |
@@ -1572,23 +1575,23 @@ belong to the workspace preparation service.
 
 ## Backend workspace naming
 
-People configuring coding tasks can open **Workspace naming** inside Assistant
-settings’ **Starting tasks** group after choosing **New workspaces**.
-The entry waits for the matching assistant’s confirmed preference; other, missing
-or unknown preferences hide it without deleting saved rules. A to-do’s details
-keep an independent naming entry. Template help appears beneath each field by
-default; preview options open on request. Labels and fields form compact desktop
-rows and stack on narrow screens. Unset inputs are blank, with localized
-placeholders showing the system default (Assistant settings) or the effective
-Assistant default (task overrides). Clearing and saving removes that override;
-there are no inheritance status labels or reset buttons. A preview shows the task
-folder once, then a labeled branch for a root repository or each repository's
-folder-to-branch mapping for a container, without repeating the parent path. The
-computer and layout selectors and the preview action form one compact row that
-stacks on phones; a task's repository choices sit above it. Routine planning
-time, time zone and disclaimer text are left out of the result.
-It applies only to explicitly selected backend preparation. It does not change Engine creation, legacy `new`, `existing`
-or `none`, existing preferences, task progress or cleanup.
+People who want to choose where Persona puts new task folders can open **Workspace
+naming** in Assistant settings or on an individual to-do. Settings shows a separate
+entry whenever the manager supports naming, for either workspace preference.
+Reusing an existing folder keeps its path and current branch.
+
+The base folder, task folder template and branch template each have a full-width
+field. An unset field shows the server's system default in Settings or the effective
+Assistant default on a to-do. Clear a field to remove its override, or choose
+**Use defaults** to clear all three. Save appears in the footer when edits are pending.
+
+**Preview naming** shows the task folder once. A task without repositories gets
+only that folder. With Git repositories, the preview lists the new branches and
+their starting points. **Preview options** changes the computer and layout and,
+on a to-do, selects the repositories to include. The Settings example uses one
+repository at the root or two in subfolders.
+[Task workspace policy](unified-entry.md#task-workspace-policy-3659)
+describes the dispatch policy and older-computer fallback.
 
 The fields are `base_directory` (default `{home}/workspace`),
 `task_directory_template` (`task-{task-id}`), and `branch_template`
@@ -1598,24 +1601,31 @@ empty strings are invalid on the wire. The Web editor converts a cleared field
 to a null patch and uses the same fallback in preview and after reload. Assistant
 writes still require the explicit manager.
 Assistant GET and PUT responses keep `workspace_rules` as the saved partial
-object (`{}` when unset or wholly reset); `effective_workspace_rules` separately
-contains all resolved fields. Saving a value equal to a default still records
+object (`{}` when unset or wholly reset). `effective_workspace_rules` contains
+all resolved fields and the optional `system_defaults` reports the built-in
+values directly. Saving a value equal to a default still records
 an explicit override. Reading defaults never materializes them in saved rules.
 Task overrides have their own CAS revision, independent of legacy Todo edits.
 
 Folder templates support `{task-id}`, `{task-slug}`, `{yyyy}` and `{mmdd}`.
-Branches also support `{repo}`, `{branch}` and `{base-branch}`. The last two
-require an explicit branch; default, tag, commit and arbitrary typed refs are
-preserved without guessing a branch. Only a template using an unavailable field
-fails. A root repository maps to `.`, while containers use each repository's
-explicit alias or the shared repository-name default. Duplicate names fail.
+Branch templates also support `{repo}` and `{base-branch}`. `{branch}` is an alias
+for `{base-branch}`. Both take the named starting branch, either from local Git or
+from an explicit repository branch selection. A repository default, tag, commit
+or other ref supplies no name at preview time. The settings example also uses a
+repository default, so a template that requires a name produces an incomplete
+preview. Optional `branch_sources` rows identify each repository's input and
+include the branch name when one is available.
+A root repository maps to `.` with exactly one selected repository. Containers
+work with zero or more repositories and use each repository's explicit alias or
+its repository name. Duplicate names fail. For zero repositories the task root
+is the workspace and there are no branch names to compute.
 
 | Route | Contract |
 | --- | --- |
-| `GET/PUT /api/v1/assistant` | `workspace_rules`, `effective_workspace_rules`, `workspace_naming_version` (`workspace-naming/v1`); PUT patches rules with explicit manager ownership. |
+| `GET/PUT /api/v1/assistant` | `workspace_rules`, `effective_workspace_rules`, optional `system_defaults`, and `workspace_naming_version` (`workspace-naming/v1`). PUT patches rules with explicit manager ownership. |
 | `GET/PUT /api/v1/todos/{id}/workspace-rules` | `{todo_id, revision, workspace_rules}`; PUT requires `expected_revision` and a rule patch. |
 | `POST /api/v1/assistant/workspace-naming/preview` | Clearly labeled sample, using selected computer and layout; optional draft rules. |
-| `POST /api/v1/todos/{id}/workspace-naming/preview` | Trusted saved Todo/repositories, explicit `machine_id`, `layout` (`root` or `container`) and `selected_repo_ids`, optional draft rules. |
+| `POST /api/v1/todos/{id}/workspace-naming/preview` | Trusted saved Todo/repositories, explicit `machine_id`, `layout` (`root` or `container`) and `selected_repo_ids` (which may be `[]`), plus optional draft rules. Both preview routes can return `system_defaults` and `branch_sources`. |
 | `POST /api/v1/todos/{id}/workspace-naming/plans` | Same selection plus required stable `operation_id`, without draft rules; saves one immutable snapshot for this operation. |
 | `GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}` | Reads a saved snapshot, including after a lost save response. |
 
@@ -1624,14 +1634,12 @@ It supplies its own home and native path semantics; no browser-provided home or
 resolved path is trusted. The pure resolver checks lexical paths; on Darwin it
 compares components without case to conservatively reserve private state even
 on case-sensitive volumes, while Linux comparisons remain case-sensitive.
-The Node resolves existing symlink ancestors of the base, task root and every
-repository's absolute path through its existing guarded walker, then rejects
-credential paths and physical private state. Only a missing tail is accepted;
-other resolution errors fail closed. This includes the private-state root itself:
-the guarded walk returns its physical existing ancestors plus missing tail even
-with `ErrNotExist`, and containment uses that returned path. It also validates local branch format.
-No directory is created, no repository is
-queried or fetched, and no Engine is opened. `.persona` and `.git` task path
+The same Node path check runs at preview and preparation. It checks the base,
+task root and each repository's path. Links to credential paths or physical
+private state return `base_scope_denied`. Other symbolic links return
+`path_symlink`. A missing tail is allowed. The preview validates branch format
+locally, with no directory creation, repository fetch or Engine call.
+`.persona` and `.git` task path
 segments and private state directories are unavailable; `{persona-home}` has no
 registered public workspace subtree in this version and is unsupported.
 Windows device and extended namespaces (`//?/`, `//./` and `/??/`, including
@@ -1691,11 +1699,11 @@ These controls never select a creation mode or start an Agent.
 
 ## Backend workspace preparation
 
-Backend creation is an explicit additional path for people preparing repository work on a computer.
-It does not change legacy `new` / `existing` / `none`, engine-created workspaces, existing checkout
-reuse, ordinary to-dos or their defaults. Associating repositories never creates a directory. A saved
-naming plan selects the repositories to prepare, independently of later association edits. Root layout
-uses one linked worktree at relative path `.`; container layout uses the selected subdirectories.
+Persona Node prepares newly isolated task folders and can also prepare a saved naming plan on request.
+Associating repositories only records task metadata. An explicit preparation or a task dispatch
+reserves the actual directory. A saved naming plan selects the repositories independently of later
+association edits. Root layout uses one linked worktree at relative path `.`. Container layout uses
+the selected subdirectories or an empty task folder when zero repositories are selected.
 
 The Manager adopts the T1 repository snapshot and saved T2 naming plan in one transaction before
 calling the Node. The shared repository contract lives in `server/internal/repositorywire`; the original
@@ -1703,12 +1711,13 @@ calling the Node. The shared repository contract lives in `server/internal/repos
 the Hub independent of Manager code while preserving the T1/T2 API. Naming and preparation persistence extend the Manager-owned `assistant/repositorystore` on the same database pool; no repository business storage is restored to shared `db`. New records are in manager migration `20261119163935_task_workspaces.sql`, separate from
 legacy engine workspace IDs. Repository migration `0516_todo_repositories.sql` replaces its earlier
 0513/0514 names through the existing renumbering mechanism; 0514 on main belongs to search. A Node
-stores physical receipts and private bare repositories under its protected `task-workspaces` directory.
-The bare repositories are private to the workspace, have no shared object dependencies, and survive
-default cleanup so local branches and commits really remain available. `common_dir` reports their
-actual locations. This separate Git storage also permits a root worktree to be removed while retaining
-its branches. File APIs cannot edit the ownership receipts; shell access under the same OS account
-is not a separate security boundary.
+stores physical receipts under its protected `task-workspaces` directory. Bound remote repositories
+use the existing bare repository and optional mirror flow. Each prepared remote worktree retains a
+private object store so its branches and commits survive default cleanup. Local Git dispatches link
+the worktree to the source repository's common directory and use the commit read from the selected
+checkout, including unpushed commits. They require no clone or fetch. `common_dir` reports the actual
+Git location in both cases. Only the worktree is owned for a local source. Folder-only preparation owns
+the task directory and records an empty repository list. File APIs cannot edit the ownership receipts.
 
 The HTTP operations are:
 
@@ -1747,12 +1756,15 @@ Windows an interrupted in-flight command remains `operation_unknown` because the
 implementation cannot prove its child stopped; normal completed-command restart recovery is supported.
 No native Windows execution is claimed by a cross-build.
 
-Cleanup uses the existing worktree rules: running Agents/use claims prevent removal, uncommitted
-changes require force, and deleting an unmerged task branch requires force. New commits alone do
-not prevent default cleanup because the task branch and its bare object store remain. The ancestry
+Cleanup uses the existing worktree rules. Running Agents and use claims prevent removal, uncommitted
+changes require force, and deleting an unmerged task branch requires force. Default cleanup retains
+the branch and its Git objects. A branch that already existed when a local worktree was prepared is
+retained even when deleting the task branch is requested. The ancestry
 check for non-force branch deletion uses the frozen source, the equivalent of the source checkout's
 branch. It also protects branches whose worktrees were removed by an earlier partial cleanup or
-reconciled after a lost receipt; a completed branch deletion can resume without recreating the branch. Unknown container files and additional Git registrations are preserved, including with force.
+reconciled after a lost receipt. A completed branch deletion can resume without recreating the branch.
+Unknown container files and additional Git registrations are preserved, including with force. A
+folder-only workspace is removed once it is empty and no Agent uses it.
 Cleanup results distinguish removed checkouts from retained branch storage; no retained branch is
 claimed after its object store has been deleted.
 
@@ -1781,8 +1793,8 @@ immutable `container` naming plan, prepare all selected repositories, acquire
 the launch use lock and start the session at the container root. Pass
 `"workspace":{"container":{"operation_id":"op_example"}}` with `todo_id` to
 launch directly into an existing saved or prepared `container` workspace (a
-non-container `root` plan is rejected). Legacy `new`, `existing` and `none`
-single-repository policies and defaults are unchanged.
+non-container `root` plan is rejected). The `new`, `existing` and `none` choices
+remain available. A capable Node prepares an isolated `new` workspace.
 
 For an owner starting a to-do directly, including one created by hand, use
 `POST /api/v1/todos/{id}/backend-workspace/start`. Send `operation_id`,

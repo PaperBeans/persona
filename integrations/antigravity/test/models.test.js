@@ -164,6 +164,37 @@ test('availability checks use native ACP and deny tools without phone cards', as
   assert.equal(n.last('runtime.sessions')?.sessions.length ?? 0, 0)
 })
 
+test('availability checks honor explicit params.model (by id and display name) over settings.json default', async (t) => {
+  const { n, home, calls } = await fixture(t, { noStart: true })
+  const byId = await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK', model: entries[2].modelId })
+  assert.equal(byId.ok, true)
+  assert.equal(byId.model, entries[2].modelId)
+  const byName = await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK', model: entries[3].name })
+  assert.equal(byName.ok, true)
+  assert.equal(byName.model, entries[3].modelId)
+  const blank = await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK', model: '   ' })
+  assert.equal(blank.ok, true)
+  assert.equal(blank.model, entries[1].modelId)
+  assert.deepEqual(
+    calls().filter((call) => call.method === 'session/set_model').map((call) => call.params.modelId),
+    [entries[2].modelId, entries[3].modelId, entries[1].modelId],
+  )
+})
+
+test('availability checks reject an unavailable params.model and close the check session instead of probing the default', async (t) => {
+  const { n, home, calls } = await fixture(t, { noStart: true })
+  await assert.rejects(
+    n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK', model: 'missing-model' }),
+    /Model unavailable/,
+  )
+  assert.deepEqual(
+    calls().filter((call) => call.method === 'session/set_model').map((call) => call.params.modelId),
+    ['missing-model'],
+  )
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 0)
+  assert.equal(calls().filter((call) => call.method === 'session/close').length, 1)
+})
+
 // An Antigravity CLI without session/set_mode (#14533): a check needs no mode switch, so it passes; a start that asks
 // for a mode other than the default says the CLI is too old, and one that asks for the default starts.
 test('availability checks and default-mode starts work on a CLI without session/set_mode', async (t) => {

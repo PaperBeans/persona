@@ -86,17 +86,32 @@ export function removeStoredValue(key: string, store: Storage = localStorage) {
 }
 
 /** Credentials are written as one logical pair; changing the token cannot inherit an unrelated token id. */
-export function storeCredentials(token: string, tokenId?: string, store: Storage = localStorage) {
-  const previous = storedCredentials(store);
+export function storeCredentials(token: string, tokenId?: string, store?: Storage) {
   if (!token) {
-    removeStoredValue("persona.token", store);
-    removeStoredValue("persona.tokenId", store);
+    let s: Storage | null = store ?? null;
+    if (!s) {
+      try {
+        s = (typeof localStorage === "undefined" ? null : localStorage) ?? null;
+      } catch {
+        return;
+      }
+    }
+    if (!s) return;
+    for (const key of ["persona.token", STORAGE_ALIASES["persona.token"], "persona.tokenId", STORAGE_ALIASES["persona.tokenId"]]) {
+      try {
+        s.removeItem(key);
+      } catch {
+        // isolate each key removal so a single blocked key cannot leave a legacy token behind to resurrect on reload
+      }
+    }
     return;
   }
-  const knownId = tokenId ?? (previous.token === token ? store.getItem("persona.tokenId") : null);
-  if (knownId === null) removeStoredValue("persona.tokenId", store);
-  storeValue("persona.token", token, store);
-  if (knownId !== null) storeValue("persona.tokenId", knownId, store);
+  const s = store ?? localStorage;
+  const previous = storedCredentials(s);
+  const knownId = tokenId ?? (previous.token === token ? s.getItem("persona.tokenId") : null);
+  if (knownId === null) removeStoredValue("persona.tokenId", s);
+  storeValue("persona.token", token, s);
+  if (knownId !== null) storeValue("persona.tokenId", knownId, s);
 }
 
 // Cross-version identities are transport contracts, never product copy.

@@ -17,6 +17,9 @@ import (
 )
 
 func (e *workspaceExecutor) source(ctx context.Context, r *taskworkspace.Instance) string {
+	if r.Input.Local != nil {
+		return e.localSource(ctx, r)
+	}
 	if r.ResolvedCommit != "" {
 		if !e.owned(r.CommonDir) {
 			return "identity_mismatch"
@@ -274,7 +277,7 @@ func resolveRefInMirror(ctx context.Context, mirrorDir string, ref repository.Re
 	}
 }
 func (e *workspaceExecutor) materialize(ctx context.Context, r *taskworkspace.Instance) string {
-	if !e.owned(e.journal.Plan.RootPath) || !e.owned(r.CommonDir) {
+	if !e.owned(e.journal.Plan.RootPath) || !e.sameGitDir(r) {
 		return "identity_mismatch"
 	}
 	// A completed command whose receipt was lost is adopted only through its
@@ -296,8 +299,14 @@ func (e *workspaceExecutor) materialize(ctx context.Context, r *taskworkspace.In
 		}
 	}
 	args := []string{"worktree", "add", "-b", r.TaskBranch, "--", r.Path, r.ResolvedCommit}
-	if tip, err := workspaceReadGit(ctx, r.CommonDir, "rev-parse", "--verify", "refs/heads/"+r.TaskBranch); err == nil {
-		if r.State != "materializing" || tip != r.ResolvedCommit {
+	if local := r.Input.Local; local != nil && local.ExistingBranch {
+		tip, err := workspaceBranchTip(ctx, r.CommonDir, "refs/heads/"+r.TaskBranch)
+		if err != nil || tip != r.ResolvedCommit {
+			return "branch_conflict"
+		}
+		args = []string{"worktree", "add", "--", r.Path, r.TaskBranch}
+	} else if tip, err := workspaceReadGit(ctx, r.CommonDir, "rev-parse", "--verify", "refs/heads/"+r.TaskBranch); err == nil {
+		if r.Input.Local != nil || r.State != "materializing" || tip != r.ResolvedCommit {
 			return "branch_conflict"
 		}
 		fields, err := workspaceWorktreeList(ctx, r.CommonDir)
@@ -334,7 +343,7 @@ func (e *workspaceExecutor) materialize(ctx context.Context, r *taskworkspace.In
 	return e.inspect(ctx, r)
 }
 func (e *workspaceExecutor) checkRegistration(ctx context.Context, r *taskworkspace.Instance) string {
-	if workspaceNoLinks(r.Path) != nil || workspaceNoLinks(r.CommonDir) != nil || !e.owned(r.CommonDir) {
+	if workspaceNoLinks(r.Path) != nil || !e.sameGitDir(r) || r.Input.Local != nil && !e.owned(r.Path) {
 		return "identity_mismatch"
 	}
 	for _, path := range []string{filepath.Join(r.Path, ".git"), filepath.Join(r.CommonDir, "config"), filepath.Join(r.CommonDir, "objects"), filepath.Join(r.CommonDir, "refs"), filepath.Join(r.CommonDir, "worktrees")} {
@@ -380,10 +389,12 @@ func (e *workspaceExecutor) checkRegistration(ctx context.Context, r *taskworksp
 	if !found {
 		return "git_layout_mismatch"
 	}
-	for _, path := range []string{filepath.Join(r.CommonDir, "objects", "info", "alternates"), filepath.Join(r.CommonDir, "shallow")} {
-		data, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) || len(data) > 0 {
-			return "git_layout_mismatch"
+	if r.Input.Local == nil {
+		for _, path := range []string{filepath.Join(r.CommonDir, "objects", "info", "alternates"), filepath.Join(r.CommonDir, "shallow")} {
+			data, err := os.ReadFile(path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) || len(data) > 0 {
+				return "git_layout_mismatch"
+			}
 		}
 	}
 	return ""
@@ -490,7 +501,9 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 		return j.Record
 	}
 	if len(j.Uses) > 0 || e.n.agentRunsIn(j.Plan.RootPath) {
-		return e.fail("worktree_in_use", "cleanup", "", j.Plan.RootPath)
+		result := j.Record
+		result.Error = taskworkspace.Failure("worktree_in_use", "cleanup", j.OperationID, "", j.Plan.RootPath)
+		return result
 	}
 	if !e.owned(j.Plan.RootPath) {
 		if _, err := os.Lstat(j.Plan.RootPath); !errors.Is(err, os.ErrNotExist) || j.Cleanup == nil && !e.hasNoResources(j.Plan.RootPath) {
@@ -501,7 +514,7 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 		for i := range j.Repositories {
 			r := &j.Repositories[i]
 			if !r.Removed && r.State == "ready" {
-				if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) && e.owned(r.CommonDir) {
+				if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) && e.sameGitDir(r) {
 					fields, err := workspaceWorktreeList(ctx, r.CommonDir)
 					if err == nil && !slices.Contains(fields, "worktree "+r.Path) {
 						r.Removed = true
@@ -537,10 +550,10 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 				return e.fail("worktree_dirty", "cleanup", r.RepoID, r.Path)
 			}
 		}
-		if req.DeleteBranch && !r.BranchDeleted {
+		if req.DeleteBranch && canDeleteTaskBranch(r) {
 			// A partial cleanup may have removed the worktree already. Its branch
 			// still needs the same non-force protection on every retry/recovery.
-			if !e.owned(r.CommonDir) {
+			if !e.sameGitDir(r) {
 				return e.fail("identity_mismatch", "cleanup", r.RepoID, r.CommonDir)
 			}
 			tip, err := workspaceBranchTip(ctx, r.CommonDir, "refs/heads/"+r.TaskBranch)
@@ -558,8 +571,8 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 	j.Cleanup = &taskworkspace.CleanupResult{RetainedPaths: []string{}}
 	for i := range j.Repositories {
 		r := &j.Repositories[i]
-		if !e.owned(r.CommonDir) {
-			if j.Identities[r.CommonDir] != "" {
+		if !e.sameGitDir(r) {
+			if j.Identities[r.CommonDir] != "" || r.Input.Local != nil && j.LocalGitIdentity != "" {
 				return e.fail("identity_mismatch", "cleanup", r.RepoID, r.CommonDir)
 			}
 			continue
@@ -580,7 +593,7 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 				return e.fail("persistence_failed", "cleanup", r.RepoID, r.Path)
 			}
 		}
-		if req.DeleteBranch && r.Removed && !r.BranchDeleted {
+		if req.DeleteBranch && r.Removed && canDeleteTaskBranch(r) {
 			ref := "refs/heads/" + r.TaskBranch
 			tip, err := workspaceBranchTip(ctx, r.CommonDir, ref)
 			if err != nil {
@@ -632,6 +645,10 @@ func (e *workspaceExecutor) cleanup(ctx context.Context, req taskworkspace.Reque
 	j.Error = nil
 	j.Cleanup.Removed = true
 	return j.Record
+}
+
+func canDeleteTaskBranch(r *taskworkspace.Instance) bool {
+	return !r.BranchDeleted && (r.Input.Local == nil || !r.Input.Local.ExistingBranch)
 }
 
 func (n *Node) workspaceSourceAllowed(input repository.PreparationRepository) bool {

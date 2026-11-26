@@ -118,7 +118,13 @@ private fun ChannelNote(text: String) = SettingsCaption(text, Modifier.padding(h
  * page when Android has one ([onOpen]). Persona's own apps, /agent in Feishu and voice are set up elsewhere: only shown.
  */
 @Composable
-internal fun ChannelPage(channels: ChannelManagement?, channelId: String, onBack: () -> Unit, onOpen: ((NavKey) -> Unit)? = null) {
+internal fun ChannelPage(channels: ChannelManagement?, channelId: String, onBack: () -> Unit, onOpen: ((NavKey) -> Unit)? = null,
+    larkBot: LarkBotEntry = LarkBotEntry.Offered) {
+    // The Lark bot's channel on a hub whose Lark module is off (#15995): its switch, linking and test cannot work.
+    if (larkBot.hides(channelId)) {
+        LarkBotOffPage(stringResource(R.string.settings_feishu_bot_title), onBack)
+        return
+    }
     if (channels == null) {
         JListPage(title = stringResource(R.string.settings_src_channels_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_channels_demo)) } }
         return

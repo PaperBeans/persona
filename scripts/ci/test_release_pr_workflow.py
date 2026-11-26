@@ -27,7 +27,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
         self.assertIn("github.event.pull_request.user.login == 'chyroc'", text)
         self.assertIn("github.event.pull_request.merge_commit_sha", text)
-        self.assertEqual(self.pr["permissions"], {"contents": "read", "checks": "write"})
+        self.assertEqual(self.pr["permissions"], {"actions": "read", "contents": "read", "checks": "write"})
 
     def test_all_platforms_feed_the_one_verified_plan(self):
         jobs = self.pr["jobs"]
@@ -135,13 +135,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]["android"]["with"]["commit"], "${{ github.sha }}")
         self.assertIn("ref: ${{ inputs.commit || github.sha }}", workflow)
         self.assertIn("lane: [lint-build-test-0, test-1]", workflow)
-        self.assertIn("android-source-receipt-${{ inputs.commit || github.sha }}-${{ matrix.lane }}", workflow)
+        self.assertIn("android-source-receipt-${{ inputs.commit || github.sha }}-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
         self.assertIn("JOB_STATUS: ${{ job.status }}", workflow)
+        self.assertIn("scripts/ci/android_result.py bind", workflow)
+        self.assertIn("scripts/ci/android_result.py verify", workflow)
         self.assertIn("uses: ./.github/workflows/android-test.yml", release)
         self.assertIn("commit: ${{ needs.plan.outputs.commit }}", release)
-        self.assertIn("pattern: android-source-receipt-${{ needs.plan.outputs.commit }}-*", release)
+        self.assertIn("name: android-source-result-${{ needs.plan.outputs.commit }}-${{ github.run_id }}-${{ github.run_attempt }}", release)
         self.assertIn("--release-only", release)
         self.assertIn("Android test evidence belongs to another commit", release)
+        self.assertIn("Android test evidence belongs to another workflow run", release)
+        self.assertIn("Android test evidence belongs to another workflow attempt", release)
         self.assertEqual(self.pr["jobs"]["android"]["needs"], ["plan", "android-tests"])
 
     def test_apple_export_keychain_is_visible_to_xcode(self):

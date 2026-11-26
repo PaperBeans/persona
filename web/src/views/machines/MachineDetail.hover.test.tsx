@@ -85,7 +85,7 @@ beforeEach(async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  act(() => root.render(<MachineDetail mid="box" onToggleSidebar={() => {}} />));
+  act(() => root.render(<MachineDetail subview="monitoring" mid="box" onToggleSidebar={() => {}} />));
   await flush();
 });
 

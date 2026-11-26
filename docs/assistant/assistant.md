@@ -353,6 +353,9 @@ The current mechanisms are generic; specific commands, routes, and variables are
   - With only gated commands (and output-only commands such as jq / head / grep / echo / cd / `timeout N`), check each: reads allowed directly; self-only actions (mark read, complete own to-dos) allowed;
     other writes (send / reply / recall / forward, reactions, docs, schedules, approvals, mail, group settings…) show a phone "Lark" approval card with action, chat name (extension `assistant.summary`),
     method, path, and body to send (reads `@file`). Denial returns user feedback as the reason; "Always allow in this session" remembers this route type with ids stripped.
+    For a gate without `Auth` in default mode, an `@file` body never selects a body-scoped `allow` (and cannot silently clear an earlier body-scoped restriction): the call is confirmed or denied by fallback rules because no proxy can verify the eventual request body at send time. Inline bodies, body-independent rules without an earlier body-scoped restriction, authenticated proxy gates (where the proxy enforces rules on the received body), and bypass mode are unchanged (#8413).
+    `@file` body and `--url-query @file` reads pin the resolved parent directory with `os.OpenRoot`, open without blocking or following a final symlink, accept only regular files up to 1 MiB (with `os.DevNull` kept as an empty `--url-query` sentinel), reject lexical and resolved `/proc`, `/dev` and `/sys` paths, and keep the 4000-character whole-character clip for bodies.
+    `sort -o` / `--output` / `--compress-program`, `date -s` / `--set` / positional clock-setting operands, and `uniq` with a second output-file operand are not treated as output-only filters.
     On Claude Code alone, one static authenticated send/reply with a top-level text body declares `editable_text`: the web may replace that text on a plain Allow or attach a denial note. The node retires the original card's grant, applies the same classifier and rules to the rebuilt command, and grants only the edited call once with all other tool input and call identity unchanged. Codex, runtimes, lark-cli, dynamic/file bodies and other routes keep ordinary Allow/Deny.
   - A write that went out through the proxy (the API answered 2xx) is kept in the sent-as-user ledger (`docs/extensions/connectors.md` "Sent as the user"): the node tells the manager (`lark.sent`) how the gate let it through. Not in it: lark-cli writes and gates without `auth`.
   - A health conversation's writes are confirmed each time, rules' allow included (`docs/assistant/health.md` "Outbound"), at both entrances: `larkCheck` turns an allow into a card, and the proxy address opened for a process started in the health space
@@ -452,7 +455,7 @@ An assistant conversation (the main one, a space's, a track's) reads and writes 
 Tapping "Always allow in this session" on an assistant permission card remains effective throughout the conversation, including process restarts and scheduled follow-ups. The card explains the scope before approval: Claude file tools grant that tool in the file's directory; Bash grants **all commands in this conversation**, not just the displayed command. Other Claude tools grant all calls to that tool. Codex command and file approvals retain their narrower command/path scopes; runtime-provided labels describe that runtime's scope.
 
 - Node supplies `always_keys` on assistant cards (Agents-page sessions keep their existing behavior): Claude `tool:<tool name>` for a whole tool, or a directory rule such as `tool:Read(//workspace/project/**)` for file tools; Codex `codex-command:<command>`, `codex-edit:<file>` / `codex-root:<directory>`, and `codex-permissions:<permission>`; Lark `lark:<route>` with IDs stripped. Whole-command gate confirmations are not remembered.
-- The manager stores approved keys in Postgres `assistant_always` by conversation ID and key SHA-256. Every requested key must match to auto-allow a later card. Directory keys are exact matches; a subdirectory can prompt separately. Only explicit permission grants are remembered; denials, one-time allows, and unknown keys still prompt. Automatically replayed answers do not write grants back, so an in-flight answer cannot resurrect a deleted grant. A remembered grant also answers the covered cards already waiting in the conversation (parallel tool calls produce several). Such an answer carries `remembered: true` (`proto.Resolution`), so the node can tell it from the answer to a card: the sent-as-user ledger records a Lark write let through this way as `conversation_always` (`docs/extensions/connectors.md` "Sent as the user").
+- The manager stores approved keys in Postgres `assistant_always` by conversation ID and key SHA-256. Every requested key must match to auto-allow a later card. Directory keys are exact matches; a subdirectory can prompt separately. Only explicit permission grants are remembered; denials, one-time allows, and unknown keys still prompt. Automatically replayed answers do not write grants back, so an in-flight answer cannot resurrect a deleted grant. A remembered grant also answers the covered cards already waiting in the conversation (parallel tool calls produce several). Such an answer carries `remembered: true` (`proto.Resolution`), so the node can tell it from the answer to a card: the sent-as-user ledger records a Lark write let through this way as `conversation_always` (`docs/extensions/connectors.md` "Sent as the user"). When the main conversation is replaced (`POST /api/v1/assistant/main/new`, `/clear`, or changing `main` in settings), the manager copies the replaced main conversation's grants once to the new main conversation (`handOverMainAlways`, #16158); grants from leader or Inbox-origin conversations are never copied, and revoking a carried-over grant on the new main conversation sticks permanently without affecting the archived conversation's history.
 - Cards say whether this is offered (`always_honored`, #3590, `docs/protocol/protocol.md` "Always allow"): `true` on a node's card whose keys the manager remembers, `false` on the manager's own cards (the extensions' tools, `persona_settings`, its to-do and agent confirmations), which keep no grant, so the clients show only Allow and Deny there. Those cards are titled with their tool's name for people (`tool_title`).
 - For assistant conversations, Claude no longer receives `addRules … destination: session`; Codex command/file approvals are one-shot and extended permissions use turn scope; the Lark gate consults the manager instead of keeping its own grants. The manager remains the authority across processes. Agents-page approvals are unchanged.
 
@@ -1811,13 +1814,16 @@ operation then read as accepted and the bubble waited for the transcript and wen
   or kept undelivered retries). It starts no turn of its own, costs no hop and no place in the relay rate, and is
   dropped (publishing the refreshed queue state immediately) only once the message carrying it went in. Before a manager
   send with a `once_id`, its quiet-message context (including an empty one) is saved in `relayState.LaterSends` for
-  seven days and reused on retries, including after restart. For an owner send (`client_msg_id`), a reservation is saved
+  seven days and reused on retries, including after restart. For an owner send with a `client_msg_id` (unnamed sends
+  without a `client_msg_id` leave `Later` untouched so every carry has a durable settlement key), a reservation is saved
   only when quiet messages are actually waiting to be carried (empty queues do zero relay writes), is deleted in the
   same save once delivery is confirmed (or when a kept undelivered message is deleted), and expires after 24 hours
-  (`ownerLaterKeep`, matching `undeliveredGiveUp`) if never settled; an owner Retry of an earlier in-doubt kept send
-  only reuses an existing reservation without picking up later arrivals. If the relay state cannot be read on an owner
-  send, the send degrades and delivers the owner's own message without quiet context (leaving `Later` untouched), while
-  saving a carry reservation for waiting quiet messages stays fail-closed. Nothing is guessed from
+  (`ownerLaterKeep`, matching `undeliveredGiveUp`) if never settled; reusing a `client_msg_id` for a non-carrying send
+  (such as a slash command or approval reply) clears any unkept stale reservation without dropping `Later`, and an owner
+  Retry of an earlier in-doubt kept send only reuses an existing reservation without picking up later arrivals. If the
+  relay state cannot be read on an owner send, the send degrades and delivers the owner's own message without quiet
+  context (leaving `Later` untouched even if storage recovers before settlement), while saving a carry reservation for
+  waiting quiet messages stays fail-closed. Nothing is guessed from
   the words: only the explicit argument decides. A `quote` (the owner's request) always wakes, so the two together are
   refused. While kept, the message shows above the composer (`queuedRelays`) and disappears once consumed.
 - **Per-sender wake cap and deferred wakes** (#13888, #14352, `server/internal/assistant/conversation_fanout.go`,
@@ -2907,6 +2913,12 @@ repeated. Retired callers lose manager tool authority immediately. Physical appr
 activation; the node's retirement latch prevents recovery and idle-compaction work on that segment. Closure is retried
 when offline nodes reconnect. Deleting a conversation cascades through segment history and queue content, retaining
 only deletion markers and minimal offline closure identities.
+
+Each manager advances at most four conversations at a time, rotating across the remaining work on later sweeps.
+Preparation and receipt calls run after Postgres releases its connection. The durable start claim and operation ID
+prevent duplicate starts, and mapping the candidate rechecks the current operation and epoch under the row lock.
+If a cancellation or deletion wins during a node call, the sweep uses the saved candidate identity to close the
+unused session.
 
 `conversations_switch` and `POST /api/v1/assistant/conversation-switches` coordinate an explicit set of these logical
 switches without adding another engine protocol. The settings-backed batch stores each conversation's before-image,

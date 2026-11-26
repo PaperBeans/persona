@@ -7,10 +7,11 @@ import { sendDraft } from "../lib/drafts";
 import { navigate } from "../lib/router";
 import { getState } from "../lib/store";
 import { balanceEmpty, balanceText } from "../lib/usage-balance";
-import { canonicalUsageProvider, groupByProvider, isBalanceAccount, isPinnableUsageAccount, planNote, protectReserve, providerTitle, remainingPercent, remainingText, remainingTone, resetLabel, resetPinnedUsageAccounts, sampleAge, sortedWindows, sourceNames, TIMELINE_CAP_MS, TIMELINE_TICKS_HOURS, timelinePosition, togglePinnedUsageAccount, usePinnedUsageAccounts, windowKey, type ProviderGroup, type UnconnectedProvider, type UsageAccount, type UsageWindow } from "../lib/usage-windows";
-import { isWindowPaused, unifiedTimeline, type TimelineLane, type UnifiedTimelineRow } from "../lib/usage-timeline";
-import { accountPace } from "../lib/usage-pace";
 import { useCloseOnBack } from "../lib/back-close";
+import { accountPace } from "../lib/usage-pace";
+import { groupByProvider, planNote, providerTitle, remainingText, sortedWindows, TIMELINE_CAP_MS, TIMELINE_TICKS_HOURS, timelinePosition, type ProviderGroup } from "../lib/usage-popover";
+import { isWindowPaused, unifiedTimeline, type TimelineLane, type UnifiedTimelineRow } from "../lib/usage-timeline";
+import { canonicalUsageProvider, isBalanceAccount, isPinnableUsageAccount, protectReserve, remainingPercent, remainingTone, resetLabel, resetPinnedUsageAccounts, sampleAge, selectSidebarUsageItems, sourceNames, togglePinnedUsageAccount, usageWindowPinId, usePinnedUsageAccounts, windowKey, type UnconnectedProvider, type UsageAccount, type UsageWindow } from "../lib/usage-windows";
 import { Collapse, cx } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { reducedMotion } from "../ui/motion";
@@ -432,7 +433,8 @@ export function UsagePopover({
   const groups = groupByProvider(accounts);
   const pinnedIds = usePinnedUsageAccounts();
   const pinnedSet = new Set(pinnedIds);
-  const livePinnedCount = accounts.reduce((n, a) => n + (isPinnableUsageAccount(a) && pinnedSet.has(a.id) ? 1 : 0), 0);
+  const { items: selectedPins, custom: hasLivePins } = selectSidebarUsageItems(accounts, pinnedIds);
+  const livePinnedCount = hasLivePins ? selectedPins.length : 0;
   useEffect(() => {
     if (fixed !== undefined || phase !== "open") return;
     const t = setInterval(() => setTick(Date.now()), 1000);
@@ -526,7 +528,6 @@ export function UsagePopover({
     const onStarter = typeof location !== "undefined" && (location.pathname === "/persona/new" || (location.pathname === "/persona" && !getState().assistant?.main));
     if (!onStarter) navigate("/persona/new");
   };
-
   const bodyStyle = {
     "--usage-cols": String(layout.cols),
     "--usage-col-w": `${layout.colWidth}px`,
@@ -568,7 +569,7 @@ export function UsagePopover({
           }}
         >
           <div ref={bodyRef} className="usage-popover-body" data-cols={layout.cols} style={bodyStyle}>
-            {pinnedIds.length > 0 && accounts.length > 0 && (
+            {pinnedIds.length > 0 && (accounts.length > 0 || unconnected.length > 0) && (
               <div data-usage-pinned-bar className="usage-popover-span usage-popover-pinned flex items-center justify-between gap-2 border-b border-line pb-2 text-submeta">
                 <span className="min-w-0 truncate text-ink-3">
                   {livePinnedCount > 0 ? tr("usage.pinned_summary", { count: livePinnedCount }) : tr("usage.pinned_fallback")}
@@ -604,7 +605,7 @@ export function UsagePopover({
                   </header>
                   {g.accounts.map((a, i) => (
                     <div key={a.id} className={cx("flex flex-col", i > 0 && "border-t border-line pt-2.5")}>
-                      <AccountSection a={a} now={now} pinned={pinnedSet.has(a.id)} />
+                      <AccountSection a={a} now={now} pinnedSet={pinnedSet} />
                     </div>
                   ))}
                 </section>
@@ -636,9 +637,47 @@ export function UsagePopover({
   return anchor && typeof document !== "undefined" ? createPortal(dialog, document.body) : dialog;
 }
 
-function AccountSection({ a, now, pinned }: { a: UsageAccount; now: number; pinned: boolean }) {
+function PinToggle({
+  pinned,
+  label,
+  onClick,
+  pinAttr,
+  windowAttr,
+  iconSize = 12,
+  className,
+}: {
+  pinned: boolean;
+  label: string;
+  onClick: () => void;
+  pinAttr?: string;
+  windowAttr?: string;
+  iconSize?: number;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-usage-pin={pinAttr}
+      data-usage-pin-window={windowAttr}
+      aria-pressed={pinned}
+      aria-label={label}
+      title={pinned ? tr("usage.unpin_title") : tr("usage.pin_title")}
+      onClick={onClick}
+      className={cx(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control transition-colors",
+        pinned ? "bg-hover-2 text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink",
+        className,
+      )}
+    >
+      <Icon name="pin" size={iconSize} />
+    </button>
+  );
+}
+
+function AccountSection({ a, now, pinnedSet }: { a: UsageAccount; now: number; pinnedSet: ReadonlySet<string> }) {
   const from = sourceNames(a);
   const plan = planNote(a);
+  const pinned = pinnedSet.has(a.id);
   const showPin = isPinnableUsageAccount(a) || pinned;
   // A balance's failure is about the provider's balance route, not a usage gateway's stored windows (#11825).
   const problem = isBalanceAccount(a) ? balanceProblemText(a) : problemText(a);
@@ -649,20 +688,12 @@ function AccountSection({ a, now, pinned }: { a: UsageAccount; now: number; pinn
           <h3 className={cx("min-w-0 flex-1 truncate text-label font-medium", a.stale ? "text-ink-2" : "text-ink")}>{a.name}</h3>
           <span className="shrink-0 whitespace-nowrap text-submeta text-ink-3">{a.stale ? tr("usage.stale_age", { age: sampleAge(a.sampled_at, now) }) : sampleAge(a.sampled_at, now)}</span>
           {showPin && (
-            <button
-              type="button"
-              data-usage-pin={a.id}
-              aria-pressed={pinned}
-              aria-label={pinned ? tr("usage.unpin_account", { name: a.name }) : tr("usage.pin_account", { name: a.name })}
-              title={pinned ? tr("usage.unpin_title") : tr("usage.pin_title")}
+            <PinToggle
+              pinned={pinned}
+              pinAttr={a.id}
+              label={pinned ? tr("usage.unpin_account", { name: a.name }) : tr("usage.pin_account", { name: a.name })}
               onClick={() => togglePinnedUsageAccount(a.id)}
-              className={cx(
-                "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control transition-colors",
-                pinned ? "bg-hover-2 text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink",
-              )}
-            >
-              <Icon name="pin" size={12} />
-            </button>
+            />
           )}
         </div>
         {(from.length > 0 || plan) && (
@@ -683,9 +714,10 @@ function AccountSection({ a, now, pinned }: { a: UsageAccount; now: number; pinn
         </div>
       )}
       {!a.balance && isBalanceAccount(a) && <div data-usage-balance-unavailable className="text-xs text-orange">{tr("usage.balance_unavailable")}</div>}
-      {sortedWindows(a).map((w) => (
-        <WindowRow key={windowKey(w)} name={a.name} w={w} stale={Boolean(a.stale)} now={now} />
-      ))}
+      {sortedWindows(a).map((w) => {
+        const pinId = usageWindowPinId(a.id, w);
+        return <WindowRow key={windowKey(w)} name={a.name} w={w} stale={Boolean(a.stale)} now={now} pinId={pinId} pinned={pinnedSet.has(pinId)} />;
+      })}
     </section>
   );
 }
@@ -846,7 +878,7 @@ export function UnifiedTimeline({ groups, now }: { groups: readonly ProviderGrou
   );
 }
 
-function WindowRow({ name, w, stale, now }: { name: string; w: UsageWindow; stale: boolean; now: number }) {
+function WindowRow({ name, w, stale, now, pinId, pinned }: { name: string; w: UsageWindow; stale: boolean; now: number; pinId: string; pinned: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const p = accountPace({ stale }, w, now);
   const remaining = remainingPercent(w.used_percent);
@@ -866,6 +898,9 @@ function WindowRow({ name, w, stale, now }: { name: string; w: UsageWindow; stal
     : tr("usage.window_remaining_label", { name, window: w.label, percent: shown(remaining) });
   const meterLabel = paceVerdict ? `${meterBaseLabel}, ${paceVerdict}` : meterBaseLabel;
   const rowTitle = [w.label, shown(remaining), paceVerdict, fullResetWithPaused].filter(Boolean).join(" · ");
+  const pinLabel = w.model
+    ? (pinned ? tr("usage.unpin_window_model", { name, window: w.label, model: w.model }) : tr("usage.pin_window_model", { name, window: w.label, model: w.model }))
+    : (pinned ? tr("usage.unpin_window", { name, window: w.label }) : tr("usage.pin_window", { name, window: w.label }));
   return (
     <div className="flex flex-col">
       {w.model && (
@@ -873,58 +908,68 @@ function WindowRow({ name, w, stale, now }: { name: string; w: UsageWindow; stal
           {w.model}
         </span>
       )}
-      <button
-        type="button"
-        data-window-row={w.label}
-        data-window-paused={paused ? "true" : undefined}
-        aria-expanded={hasDetail ? expanded : undefined}
-        aria-label={rowTitle}
-        title={rowTitle}
-        disabled={!hasDetail}
-        onClick={() => hasDetail && setExpanded((v) => !v)}
-        className={cx(
-          "grid w-full grid-cols-[1.75rem_minmax(2.5rem,1fr)_auto_minmax(0,auto)_auto] items-center gap-x-1.5 rounded-sm text-left text-submeta [@media(pointer:coarse)]:min-h-11",
-          hasProtect && "mt-3.5",
-          hasDetail && "hover:bg-hover/60",
-        )}
-      >
-        <span className="w-7 truncate text-ink-2">{w.label}</span>
-        <span className={cx("block min-w-0", stale && "opacity-70")}>
-          <Meter
-            remaining={remaining}
-            expectedRemaining={expectedRemaining}
-            reserve={reserve ?? undefined}
-            barClass={TONE_BG[tone]}
-            reserveTop={false}
-            label={meterLabel}
-            tall
-          />
-        </span>
-        <span data-usage-percent className={cx("shrink-0 whitespace-nowrap text-right font-medium tabular-nums", stale ? "text-ink-2" : TONE_TEXT[tone])}>
-          {shown(remaining)}
-        </span>
-        {fullResetWithPaused ? (
-          <span data-usage-reset data-usage-paused={paused ? "true" : undefined} className="min-w-0 truncate text-right text-ink-3" title={fullResetWithPaused}>
-            {paused && <span className="font-medium text-red">{pausedLabel}</span>}
-            {paused && fullReset && <span aria-hidden> · </span>}
-            {fullReset && (
-              <>
-                <span data-reset-full className="hidden @[300px]:inline">{fullReset}</span>
-                <span data-reset-short className="@[300px]:hidden">{shortReset}</span>
-              </>
-            )}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          data-window-row={w.label}
+          data-window-paused={paused ? "true" : undefined}
+          aria-expanded={hasDetail ? expanded : undefined}
+          aria-label={rowTitle}
+          title={rowTitle}
+          disabled={!hasDetail}
+          onClick={() => hasDetail && setExpanded((v) => !v)}
+          className={cx(
+            "grid min-w-0 flex-1 grid-cols-[1.75rem_minmax(2.5rem,1fr)_auto_minmax(0,auto)_auto] items-center gap-x-1.5 rounded-sm text-left text-submeta [@media(pointer:coarse)]:min-h-11",
+            hasProtect && "mt-3.5",
+            hasDetail && "hover:bg-hover/60",
+          )}
+        >
+          <span className="w-7 truncate text-ink-2">{w.label}</span>
+          <span className={cx("block min-w-0", stale && "opacity-70")}>
+            <Meter
+              remaining={remaining}
+              expectedRemaining={expectedRemaining}
+              reserve={reserve ?? undefined}
+              barClass={TONE_BG[tone]}
+              reserveTop={false}
+              label={meterLabel}
+              tall
+            />
           </span>
-        ) : (
-          <span aria-hidden />
-        )}
-        {hasDetail ? (
-          <span aria-hidden data-window-chevron className={cx("inline-flex shrink-0 items-center text-ink-3 transition-transform", expanded ? "rotate-180" : "-rotate-90")}>
-            <Icon name="chevron" size={10} />
+          <span data-usage-percent className={cx("shrink-0 whitespace-nowrap text-right font-medium tabular-nums", stale ? "text-ink-2" : TONE_TEXT[tone])}>
+            {shown(remaining)}
           </span>
-        ) : (
-          <span aria-hidden />
-        )}
-      </button>
+          {fullResetWithPaused ? (
+            <span data-usage-reset data-usage-paused={paused ? "true" : undefined} className="min-w-0 truncate text-right text-ink-3" title={fullResetWithPaused}>
+              {paused && <span className="font-medium text-red">{pausedLabel}</span>}
+              {paused && fullReset && <span aria-hidden> · </span>}
+              {fullReset && (
+                <>
+                  <span data-reset-full className="hidden @[300px]:inline">{fullReset}</span>
+                  <span data-reset-short className="@[300px]:hidden">{shortReset}</span>
+                </>
+              )}
+            </span>
+          ) : (
+            <span aria-hidden />
+          )}
+          {hasDetail ? (
+            <span aria-hidden data-window-chevron className={cx("inline-flex shrink-0 items-center text-ink-3 transition-transform", expanded ? "rotate-180" : "-rotate-90")}>
+              <Icon name="chevron" size={10} />
+            </span>
+          ) : (
+            <span aria-hidden />
+          )}
+        </button>
+        <PinToggle
+          pinned={pinned}
+          windowAttr={pinId}
+          label={pinLabel}
+          onClick={() => togglePinnedUsageAccount(pinId)}
+          iconSize={11}
+          className={hasProtect ? "mt-3.5" : undefined}
+        />
+      </div>
       {hasDetail && (
         <Collapse open={expanded} lazy>
           <div data-usage-pace-detail className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 pl-7 pt-1 text-submeta">

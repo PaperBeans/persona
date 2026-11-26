@@ -112,7 +112,7 @@ export function Row({ label, hint, children, onClick, mono, icon, wrapHint, wrap
       )}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] text-ink">{label}</div>
-        {hint && <div className={cx("mt-0.5 text-[11.5px] text-ink-3", wrapHint ? "leading-snug" : "truncate")}>{hint}</div>}
+        {hint && <div className={cx("mt-0.5 text-[11.5px] text-ink-3", wrapHint ? "whitespace-normal leading-snug" : "truncate")}>{hint}</div>}
       </div>
       {children !== undefined && <div className={cx("flex min-w-0 items-center gap-2 text-[12.5px] text-ink-2", wrapValue ? "max-w-1/2 shrink break-all" : "shrink-0", stackOnNarrow && "max-sm:w-full", mono && "font-mono")}>{children}</div>}
       {onClick && <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />}

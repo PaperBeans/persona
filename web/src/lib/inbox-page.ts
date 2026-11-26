@@ -5,10 +5,14 @@
 import { itemHeaders, stampedHeaders } from "./manager-choice";
 import { t } from "../i18n";
 import { api, enc, getToken } from "./api";
+import { inboxConversationPage, spacePage } from "./conversation-page";
+import { openFromInbox } from "./inbox-nav";
 import type { ContextRef } from "./links";
 import { larkPath } from "./lark-accounts";
+import { mailReading } from "./mail";
 import { baseName, uuid } from "./format";
 import type { Route } from "./router";
+import { getSession, getState } from "./store";
 import type { Interaction, Session } from "./types";
 import { type DocChange, type InboxDoc, type InboxItem, type InboxMute, type InboxMuteOption, type InboxParent, type InboxParentKind, type InboxPolicy, type InboxTree, type InboxTriage, type LarkMention, type LarkMessage, type LarkPart, type MomentContent, type PolicyTier, type PolicyTwin, connectorReference, contextXML, docTypeName, isLark, itemPath, itemRequest, itemRoute, sourceMailbox } from "./inbox";
 
@@ -51,6 +55,20 @@ export function parentRoute(p: InboxParent, manager?: string): Route | undefined
   if (p.kind === "todo") return { name: "todos", id: p.id };
   const i = p.id.indexOf("/");
   return i > 0 && i < p.id.length - 1 ? { name: "session", mid: p.id.slice(0, i), sid: p.id.slice(i + 1) } : undefined;
+}
+
+/** Inbox links can identify an Assistant conversation even when its session is missing from the store. */
+export function inboxSessionRoute(mid: string, sid: string, manager?: string, assumeAssistant = true): Route {
+  const row = getSession(mid, sid);
+  const { assistant } = getState();
+  const own = assistant?.conversations.some((c) => c.machine_id === mid && c.session_id === sid);
+  if (!row?.assistant && !own && (row || !assumeAssistant)) return { name: "session", mid, sid };
+  if (row?.space) return spacePage(row.space, sid);
+  return inboxConversationPage(sid, mid, row?.manager ?? manager, assistant?.machine_id);
+}
+
+export function openInboxConversation(mid: string, sid: string, manager?: string, assumeAssistant = true): void {
+  openFromInbox(inboxSessionRoute(mid, sid, manager, assumeAssistant));
 }
 
 /** Whether "AI draft reply" applies: a connector's thread only when the hub can answer it (a CI run cannot). */
@@ -120,7 +138,8 @@ export function handOffContext(it: InboxItem): ContextRef {
   }
   if (it.connector?.url) text += `\n\n${t("lib-inbox-page.handoff_connector", { name: it.account_name || it.source, url: it.connector.url })}`;
   const uid = it.mail?.uids[it.mail.uids.length - 1];
-  if (it.mail && uid !== undefined) text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox || "INBOX", uid })}`;
+  // a hub with mail off has no mail_read / mail_send to point the agent at (lib/mail.ts mailReading)
+  if (it.mail && uid !== undefined && mailReading().kind === "full") text += `\n\n${t("lib-inbox-page.handoff_mail", { account: it.mail.account_id, mailbox: it.mail.mailbox || "INBOX", uid })}`;
   return { id: `inbox:${it.id}`, kind: "context", title, url: "", text };
 }
 

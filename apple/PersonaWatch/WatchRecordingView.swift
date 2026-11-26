@@ -22,6 +22,11 @@ struct WatchRecordingView: View {
     @State private var allDay = WatchAllDay.shared
     /// The phone's `recordingDay`: absent from a phone that doesn't take day recordings, 0 until its user agrees.
     @AppStorage(WatchSync.phoneDayKey) private var phoneDay: Int?
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
+
+    /// What the page offers: everything, unless the phone says its hub's recording module is off.
+    private var offers: WatchRecordingOffers { WatchRecordingOffers(PhoneRecordingAllowance(wire: phoneRecording)) }
 
     #if DEBUG
     /// `-showWatchNote YES`: the page with Note picked (screenshots).
@@ -46,8 +51,10 @@ struct WatchRecordingView: View {
         ScrollView {
             VStack(spacing: Theme.Space.m) {
                 // Still asking for the microphone: the clip view's wait and Cancel, whichever mode is starting.
+                // First, where Record would be, and above a recording that still runs: why nothing new is offered.
+                if offers.saysOff { WatchRecordingOffLine() }
                 if capture.allDay, capture.state != .starting {
-                    WatchAllDaySummary()
+                    WatchAllDaySummary(offers: offers)
                 } else {
                     clip
                 }
@@ -79,6 +86,8 @@ struct WatchRecordingView: View {
             // The complication's Record: one tap from the watch face; once, and never over a recording running. While
             // all-day recording runs, the same tap marks the meeting in the day.
             guard startsMeeting, !startedMeeting else { return }
+            // The hub's recording module is off: the page says so, and nothing starts or is marked (#15214).
+            guard offers.starts else { return }
             if capture.allDay {
                 startedMeeting = true
                 allDay.markMeeting()
@@ -102,14 +111,20 @@ struct WatchRecordingView: View {
     /// Every recording but all-day's: the clock, Record with the next start's settings under it (type, language) and the
     /// other modes (rolling, all-day), and the controls of the one running.
     @ViewBuilder private var clip: some View {
-        Text(RecordingFormat.clock(capture.elapsed))
-            .font(Theme.Font.display.monospacedDigit())
-            .foregroundStyle(capture.state == .recording ? Theme.danger : .primary)
+        // With nothing to start (the hub's recording module is off) an idle clock counts nothing: left out.
+        if offers.starts || capture.state != .idle {
+            Text(RecordingFormat.clock(capture.elapsed))
+                .font(Theme.Font.display.monospacedDigit())
+                .foregroundStyle(capture.state == .recording ? Theme.danger : .primary)
+        }
         if let id = capture.recordingID, library.entry(id)?.isMeeting == true {
             Label("Meeting", systemImage: Theme.Icon.meeting).font(Theme.Font.caption).foregroundStyle(Theme.accent)
                 .accessibilityIdentifier("watch-recording-meeting")
         }
-        if capture.state == .idle {
+        if capture.state == .idle, !offers.starts {
+            // Only a wish to record all day left from before still has a way to its page, where Stop for Today ends it.
+            if allDay.state == .stopped { allDayEntry }
+        } else if capture.state == .idle {
             Button(action: record) {
                 Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).lineLimit(1)
             }
@@ -157,8 +172,10 @@ struct WatchRecordingView: View {
                     Label(capture.state == .paused ? String(localized: "Continue") : String(localized: "Pause"), systemImage: capture.state == .paused ? Theme.Icon.run : Theme.Icon.pause)
                         .labelStyle(.iconOnly)
                 }
-                Button { capture.addMark() } label: { Label("Bookmark", systemImage: Theme.Icon.pin).labelStyle(.iconOnly) }
-                    .recordingPrimaryGesture()
+                if offers.marks {
+                    Button { capture.addMark() } label: { Label("Bookmark", systemImage: Theme.Icon.pin).labelStyle(.iconOnly) }
+                        .recordingPrimaryGesture()
+                }
                 if capture.rolling {
                     Button { capture.eraseRecent() } label: { Label("Erase 10m", systemImage: Theme.Icon.delete).labelStyle(.iconOnly) }
                 }
@@ -179,8 +196,8 @@ struct WatchRecordingView: View {
     /// All-Day Recording once the phone takes it: one tap starts it, or, until the user agreed on the iPhone, opens
     /// its page, which says so.
     @ViewBuilder private var allDayEntry: some View {
-        let access = allDay.access(phoneDay: phoneDay)
-        if access != .hidden {
+        let access = allDay.access(phoneDay: phoneDay, recording: PhoneRecordingAllowance(wire: phoneRecording))
+        if AllDayAlertPolicy.listed(access, state: allDay.state) {
             // Stopped by itself earlier: say so above the button that continues it.
             if allDay.state == .stopped { WatchAllDayStatus(state: .stopped, since: nil, startable: access == .ready) }
             Group {
@@ -204,6 +221,17 @@ struct WatchRecordingView: View {
         return capture.rolling
             ? String(localized: "Rolling · keeps the last 6 hours")
             : String(localized: "Recording · keeps going with your wrist down")
+    }
+}
+
+/// The one line where a start would be, while the phone says its hub's recording module is off (#15214): calm, in the
+/// words the iPhone uses, and never an error.
+struct WatchRecordingOffLine: View {
+    var body: some View {
+        Label("Meeting recording is off on this hub.", systemImage: Theme.Icon.info)
+            .font(Theme.Font.secondary).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("watch-recording-off")
     }
 }
 

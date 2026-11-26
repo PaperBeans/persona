@@ -52,9 +52,13 @@
   "protect_label": "残り {percent}% で自動一時停止",
   "pin_account": "{name} をサイドバーに固定",
   "unpin_account": "{name} のサイドバー固定を解除",
+  "pin_window": "{name} {window} をサイドバーに固定",
+  "unpin_window": "{name} {window} のサイドバー固定を解除",
+  "pin_window_model": "{name} {window}（{model}）をサイドバーに固定",
+  "unpin_window_model": "{name} {window}（{model}）のサイドバー固定を解除",
   "pin_title": "サイドバーに固定",
   "unpin_title": "固定を解除",
   "pinned_summary": "サイドバーに {count} 件を固定中",
-  "pinned_fallback": "固定アカウントが利用不可のため自動表示中",
+  "pinned_fallback": "固定項目が利用不可のため自動表示中",
   "reset_pinned": "自動表示に戻す"
 }

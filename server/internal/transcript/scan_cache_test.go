@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -243,5 +244,77 @@ func TestScanCacheBounded(t *testing.T) {
 	scanEntryFor("/late", now.Add(scanCacheIdle+time.Hour))
 	if n := len(scanCache.entries); n != 1 {
 		t.Fatalf("%d entries after the others were idle, want 1", n)
+	}
+}
+
+// Rotating across 16 large (>2*scanBlock) transcripts must not evict cached scan
+// checkpoints or trigger a second full cold rescan.
+func TestScanCacheHandles16LargeFilesWithoutColdRescan(t *testing.T) {
+	resetScanCache(t)
+	const fileCount = 16
+	payload := bigClaudeTranscriptBytes(9)
+	dir := t.TempDir()
+	paths := make([]string, fileCount)
+	for i := range fileCount {
+		p := filepath.Join(dir, fmt.Sprintf("transcript-%02d.jsonl", i))
+		if err := os.WriteFile(p, payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths[i] = p
+	}
+
+	scanOnce := func(p string) (int64, int64) {
+		t.Helper()
+		fh, err := openTranscript(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fh.Close()
+		st, err := statOpenedTranscript(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := scanRead.Load()
+		if _, _, _, _, _, _, _, err := scanLinesCached(p, fh, st); err != nil {
+			t.Fatal(err)
+		}
+		return scanRead.Load() - before, st.Size()
+	}
+
+	// Pass 1: populate scanCache for all 16 files with one cold scan each.
+	for i, p := range paths {
+		read, size := scanOnce(p)
+		if read < size {
+			t.Fatalf("cold pass file %d read %d of %d bytes", i, read, size)
+		}
+	}
+	scanCache.mu.Lock()
+	cachedCount := len(scanCache.entries)
+	scanCache.mu.Unlock()
+	if cachedCount != fileCount {
+		t.Fatalf("cached %d files after cold pass, want %d", cachedCount, fileCount)
+	}
+
+	// Pass 2: rotate across all 16 unchanged files; each must reuse its cached
+	// checkpoint and read only the tail block.
+	tailLimit := int64(scanBlock + scanKeep)
+	for i, p := range paths {
+		read, size := scanOnce(p)
+		if read > tailLimit {
+			t.Fatalf("second pass file %d triggered cold rescan: read %d bytes (size %d, limit %d)", i, read, size, tailLimit)
+		}
+	}
+
+	// Pass 3: append a line to each file and rotate again; still no cold rescan,
+	// and the cached scan matches a cold scan byte-for-byte.
+	for i, p := range paths {
+		appendLine(t, p, i)
+		read, size := scanOnce(p)
+		if read > tailLimit {
+			t.Fatalf("appended pass file %d triggered cold rescan: read %d bytes (size %d, limit %d)", i, read, size, tailLimit)
+		}
+	}
+	if read := sameScan(t, "post-rotation parity", paths[0]); read > tailLimit {
+		t.Fatalf("parity scan triggered cold rescan: read %d bytes (limit %d)", read, tailLimit)
 	}
 }

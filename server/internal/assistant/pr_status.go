@@ -547,8 +547,14 @@ func (s *Service) applyPRStatus(ctx context.Context, t Todo, status TodoPRStatus
 			return err
 		}
 	}
+	terminalState := strings.EqualFold(status.State, "merged") || strings.EqualFold(status.State, "closed")
 	current, ok := s.todoNow(t.ID)
 	if !ok || current.DoneAt != nil || current.PRURL != status.URL && !slices.Contains(current.PRs, status.URL) {
+		if terminalState && s.settings(ctx).todosV2On() {
+			if _, err := s.reconcileTodoBlockersForPR(ctx, status); err != nil {
+				s.logf("task %s: reconcile blockers for PR %s: %v", t.ID, status.URL, err)
+			}
+		}
 		return nil
 	}
 	t = current
@@ -703,6 +709,11 @@ func (s *Service) applyPRStatus(ctx context.Context, t Todo, status TodoPRStatus
 		}
 		s.drainWorkspaceQueuesForPrereq(ctx, t.ID)
 		s.evaluateTodoAfterDependents(ctx, t.ID)
+	}
+	if terminalState && s.settings(ctx).todosV2On() {
+		if _, err := s.reconcileTodoBlockersForPR(ctx, status); err != nil {
+			s.logf("task %s: reconcile blockers for PR %s: %v", t.ID, status.URL, err)
+		}
 	}
 	s.onPRStatusMergeTrain(ctx, t, status)
 	return nil

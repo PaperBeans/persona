@@ -139,6 +139,17 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		}
 		t.Audience = aud
 		t.DirectionID = strings.TrimSpace(t.DirectionID)
+		if s.settings(ctx).todosV2On() {
+			if len(t.BlockedByPR) > 0 {
+				normPRs, err := parseBlockedByPRURLs(t.BlockedByPR)
+				if err != nil {
+					return "", fmt.Errorf("task %d: %w", i+1, err)
+				}
+				t.BlockedByPR = normPRs
+			}
+		} else {
+			t.BlockedByPR = nil
+		}
 		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}

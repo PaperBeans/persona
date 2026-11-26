@@ -13,7 +13,9 @@ import (
 var todoRoutes = []string{
 	"GET /api/v1/todos/revision",         // the pushed read's cheap validator (todo_revision.go, #13804)
 	"POST /api/v1/todos/reorganize",      // batch reorganization without interrupting running Agents (todo_reorganize.go, #14704)
-	"POST /api/v1/todos/decisions/batch", // batch decision submission for Decision Queue (todo_decisions_batch.go, #15698)
+	"POST /api/v1/todos/decisions/batch",           // batch decision submission for Decision Queue (todo_decisions_batch.go, #15698)
+	"POST /api/v1/todos/{id}/blockers",             // add external PR blocker under todos_v2 (todo_blockers_routes.go, #16198)
+	"DELETE /api/v1/todos/{id}/blockers/{blockerId}", // cancel blocker under todos_v2 (todo_blockers_routes.go, #16198)
 }
 
 func init() { Routes = append(Routes, todoRoutes...) }

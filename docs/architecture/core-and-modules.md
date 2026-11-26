@@ -672,7 +672,9 @@ which the kernel announces while it is loaded (it left `modapi.ClientModules` wi
 - **With the module absent** (`persona_without_health`, `persona_core_only`, or switched off in the `modules` row) the
   nine routes (including health items GET/PUT) answer 404, the hello names neither `health_items` nor `health_intake`
   (so the hub announces neither feature), the `health_intake` tool is not listed and refuses, and no
-  water reminder runs (`TestHealthFollowsItsModule`). The entries already stored stay in the database.
+  water reminder runs (`TestHealthFollowsItsModule`). The entries already stored stay in the database. The Web keeps
+  the core Health space's stored conversations, reports and memory on its existing `/health…` and
+  `/tracks/health…` addresses through a read-only default-panel archive; it does not call the absent intake routes.
   Health chat retains phone-data guidance but omits intake-item instructions. The `Items` seam reads the ordered
   `health.items` setting (or computed defaults); item saves, tool logging and reminder planning share the module lock.
   Strength training (#14713) adds `StrengthStore`, `CardShown`, `CardChanged` and `PageLink` to Host. Its contract types
@@ -839,7 +841,8 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
 
 ## Clients
 
-Each client documents its side in its own platform doc; these are pointers only.
+Each client documents its side in its own platform doc; these are pointers only. Across both Core and feature
+modules, shared domain logic lives in the Go server while clients stay thin (`docs/architecture/server-first-logic.md`).
 
 - **Apple** (#13432): `PersonaHostApp` with `PersonaModuleAPI` and `PersonaModule<Name>` packages. See `docs/apple/` (written with #13432).
   A module the hub may turn off declares `feature` = `module.<id>`; the app follows the rule agreed on #13844 (off only

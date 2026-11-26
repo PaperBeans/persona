@@ -339,6 +339,24 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(probe["log_fallback"][0]["values"]["hitch_ms_per_s"], {"non_finite": "nan"})
         self.assertFalse(result["acceptance_eligible"])
 
+    def test_malformed_log_identifier_does_not_discard_later_summaries(self):
+        fake = FakeExporter(values={})
+        fake.results = {TEST: "Passed"}
+        ident = TEST.removesuffix("()")
+        log = self.root / "test-example.log"
+        log.write_text(
+            f"perf-frames: {ident} runs=2 fps=60\n"
+            "perf-frames: malformed runs=2 fps=99\n"
+            f"perf-frames: {ident} runs=2 fps=58\n"
+        )
+        result = self.collect(fake)
+        probe = result["tests"][TEST]["probe"]
+        self.assertEqual(probe["source"], "log_fallback_only")
+        self.assertEqual([row["provenance"]["line"] for row in probe["log_fallback"]], [1, 3])
+        self.assertEqual([row["values"]["fps"] for row in probe["log_fallback"]], [60, 58])
+        self.assertIn(f"{log.resolve()}:2: missing or invalid test identifier", result["issues"])
+        self.assertFalse(result["acceptance_eligible"])
+
     def test_wrong_manifest_test_tag_and_shared_run_ids(self):
         wrong = self.collect(FakeExporter(values={OTHER: samples()}))
         self.assertFalse(wrong["complete"])

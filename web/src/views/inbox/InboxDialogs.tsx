@@ -9,8 +9,8 @@ import { api, ApiError, errorText } from "../../lib/api";
 import { startConversation } from "../../lib/assistant-start";
 import { adoptConversation, askPersonaOf, noteSent, sendToSession } from "../../lib/outbox";
 import { baseName, sessionTitle, stateOf, uuid } from "../../lib/format";
-import { agentDraft, connectorReference, conversationRoute, docChangeKey, handOffToMain, isLark, itemKey, itemPath, itemRequest, keepDropped, keptChanges, sendReply, useDroppedChanges, setDone, unsentReplies, type InboxItem } from "../../lib/inbox";
-import { docChangeLine, HANDOFF_PRESETS, handOffContext, handOffMessage, recordHandOff } from "../../lib/inbox-page";
+import { agentDraft, connectorReference, docChangeKey, handOffToMain, isLark, itemKey, itemPath, itemRequest, keepDropped, keptChanges, sendReply, useDroppedChanges, setDone, unsentReplies, type InboxItem } from "../../lib/inbox";
+import { docChangeLine, HANDOFF_PRESETS, handOffContext, handOffMessage, openInboxConversation, recordHandOff } from "../../lib/inbox-page";
 import { isTransient } from "../../lib/ops";
 import { hasFinePointer } from "../../lib/viewport";
 import { machineWithHub } from "../../lib/mesh";
@@ -25,7 +25,7 @@ import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
 import { StatusMark } from "../../ui/StatusMark";
 import { Icon } from "../../ui/icons";
 import { Spark } from "./InboxParts";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 import { handOffAgents, Target, TARGET_SUB } from "./HandOffTargets";
 
 export function InboxExternalSourceDialog({ item, source, onClose }: {
@@ -56,9 +56,7 @@ export function DraftDialog(props: { item: InboxItem; onClose: () => void }) {
 }
 
 function DraftEditor({ item, onClose }: { item: InboxItem; onClose: () => void }) {
-  const readOnly = useLarkItemReadOnly(item);
-  const sessions = useStore((s) => s.sessions);
-  const assistant = useStore((s) => s.assistant);
+  const readOnly = useItemReadOnly(item);
   const key = itemKey(item);
   const agentText = agentDraft(item);
   const [text, setText] = useState(() => unsentReplies.get(key) ?? agentText ?? "");
@@ -72,6 +70,8 @@ function DraftEditor({ item, onClose }: { item: InboxItem; onClose: () => void }
   const kept = keptChanges(item, dropped);
   const generation = useRef(0);
   const agent = item.agent;
+  const mid = agent?.machine_id;
+  const sid = agent?.session_id;
   const box = useRef<HTMLTextAreaElement>(null);
   const focused = useRef(false);
 
@@ -149,13 +149,12 @@ function DraftEditor({ item, onClose }: { item: InboxItem; onClose: () => void }
       {agentText && agent && (agent.note || agent.session_id) && (
         <div className="mb-3 rounded-[10px] bg-accent-tint px-3 py-2.5">
           {agent.note && <p className="text-[12px] leading-relaxed text-ink-2"><Spark />{agent.note}</p>}
-          {agent.machine_id && agent.session_id && (
+          {mid && sid && (
             <button
               type="button"
               onClick={() => {
                 onClose();
-                // The AI twin runs as the assistant (docs/assistant/inbox.md): its conversation is one of Persona's.
-                navigate(agent.machine_id === assistant?.machine_id ? conversationPage(agent.session_id!, agent.machine_id, item.manager) : conversationRoute(agent.machine_id!, agent.session_id!, sessions, assistant, item.manager));
+                openInboxConversation(mid, sid, item.manager);
               }}
               className="mt-1.5 flex items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:underline"
             >

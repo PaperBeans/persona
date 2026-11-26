@@ -32,7 +32,14 @@ enum QuickAction: String, CaseIterable {
             return UIApplicationShortcutItem(type: recentType, localizedTitle: s.displayTitle, localizedSubtitle: recentSubtitle(s, key: key),
                                              icon: UIApplicationShortcutIcon(systemImageName: Theme.Icon.recent), userInfo: ["key": key.path as NSString])
         }
-        UIApplication.shared.shortcutItems = recent + allCases.map(\.item)
+        UIApplication.shared.shortcutItems = recent + offered(recording: RecordingModule.allowance).map(\.item)
+    }
+
+    /// The menu's actions on this hub: Start Meeting is left out while the hub's recording module is off (#15214). The
+    /// menu is published at launch and when the app leaves the front, so one tapped before it caught up is refused in
+    /// words (`MeetingRecorder.startRefusal`).
+    nonisolated static func offered(recording: RecordingAllowance) -> [QuickAction] {
+        allCases.filter { $0 != .meetingRecording || recording.offersWrites }
     }
 
     /// Where a recent conversation is: "Persona" for one of Persona's, else its computer and folder.

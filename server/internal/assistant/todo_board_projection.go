@@ -134,8 +134,15 @@ func (s *Service) todoBoardDirectionLabels(ctx context.Context) map[string]strin
 }
 
 // buildTodoBoardProjection deterministically computes the complete server-owned board projection tree
-// for GET /api/v1/todos under todos_v2=true.
+// for GET /api/v1/todos under todos_v2=true with default top-level goal folding enabled.
 func buildTodoBoardProjection(items []listedTodo, directions map[string]string) *todoBoardProjection {
+	return buildTodoBoardProjectionWithOptions(items, directions, true)
+}
+
+// buildTodoBoardProjectionWithOptions deterministically computes the complete server-owned board projection tree
+// for GET /api/v1/todos under todos_v2=true. When foldChildren is false, child tasks are not folded under top-level
+// parent goals and every open to-do appears flat in status_groups and sidebar_tree.
+func buildTodoBoardProjectionWithOptions(items []listedTodo, directions map[string]string, foldChildren bool) *todoBoardProjection {
 	metaByID := make(map[string]*todoBoardItemMeta, len(items))
 	orderedIDs := make([]string, 0, len(items))
 
@@ -174,27 +181,29 @@ func buildTodoBoardProjection(items []listedTodo, directions map[string]string) 
 	// Resolve cycle-safe top-level ancestor goal and whether each child surfaces as a blocker.
 	foldedChildren := make(map[string][]string)
 	surfacedChildren := make(map[string][]string)
-	for _, id := range orderedIDs {
-		m := metaByID[id]
-		rootID := resolveBoardRootGoalID(id, metaByID)
-		if rootID == "" {
-			continue
-		}
-		// Never fold an open child under a closed parent; open work must stay visible.
-		if metaByID[rootID].section == boardSectionDone && m.section != boardSectionDone {
-			continue
-		}
-		m.rootGoalID = rootID
-		if isBoardChildSurfaced(m) {
-			m.surfaced = true
-			// A surfaced child with an active ask/needs_user always surfaces into needs_you.
-			if m.section != boardSectionNeedsYou {
-				m.section = boardSectionNeedsYou
-				m.subOrder = 0
+	if foldChildren {
+		for _, id := range orderedIDs {
+			m := metaByID[id]
+			rootID := resolveBoardRootGoalID(id, metaByID)
+			if rootID == "" {
+				continue
 			}
-			surfacedChildren[rootID] = append(surfacedChildren[rootID], id)
-		} else {
-			foldedChildren[rootID] = append(foldedChildren[rootID], id)
+			// Never fold an open child under a closed parent; open work must stay visible.
+			if metaByID[rootID].section == boardSectionDone && m.section != boardSectionDone {
+				continue
+			}
+			m.rootGoalID = rootID
+			if isBoardChildSurfaced(m) {
+				m.surfaced = true
+				// A surfaced child with an active ask/needs_user always surfaces into needs_you.
+				if m.section != boardSectionNeedsYou {
+					m.section = boardSectionNeedsYou
+					m.subOrder = 0
+				}
+				surfacedChildren[rootID] = append(surfacedChildren[rootID], id)
+			} else {
+				foldedChildren[rootID] = append(foldedChildren[rootID], id)
+			}
 		}
 	}
 

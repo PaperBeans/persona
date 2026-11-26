@@ -61,7 +61,6 @@
   "busiest": "最忙 {value}",
   "core_title": "核心 {n}：{value}",
   "open_space": "打开空间「{name}」",
-  "engine_pill_hint": "这台电脑的引擎，点一下到下面的「引擎」修改",
   "rename": "改名",
   "rename_label": "电脑名字",
   "rename_hint": "所有 App 和这台电脑的 Persona Link 都会显示这个名字；留空就用 id，id 不变。",
@@ -116,5 +115,10 @@
   "hosted_assistants_settings": "设置 › Hub › 助手",
   "manager_pending_restart_hint": "程序已随重新部署更新，这个助手会在空闲后自动重启生效。",
   "manager_older_version": "版本落后",
-  "manager_version_lag_hint": "助手仍在运行低于本机 node 的旧版本，请重启它的助手服务以生效。"
+  "manager_version_lag_hint": "助手仍在运行低于本机 node 的旧版本，请重启它的助手服务以生效。",
+  "configuration": "配置",
+  "other_workspaces": "其他工作空间",
+  "no_other_workspaces": "没有其他工作空间",
+  "workspaces_loading": "正在读取工作空间…",
+  "workspaces_failed": "未能读取所有工作空间，稍后会重试。"
 }

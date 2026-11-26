@@ -225,3 +225,164 @@ describe("the newest version under a search", () => {
     expect(older?.rows.map((r) => `${r.model.id}${r.latest ? "^" : ""}`)).toEqual(["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"]);
   });
 });
+
+describe("Antigravity thinking/effort variants and cross-engine qualifiers", () => {
+  it("groups Claude thinking and effort variants under their Claude tier while rejecting unknown or double suffixes", () => {
+    expect(modelFamily({ id: "claude-opus-5-5-high" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [5, 5], rank: 1 });
+    expect(modelFamily({ id: "claude-opus-4-6-medium" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-opus-4-6-xhigh" })).toMatchObject({ key: "claude:opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-opus-4-6-max" })).toMatchObject({ key: "claude:opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-sonnet-4-6-thinking" })).toMatchObject({ key: "claude:sonnet", label: "Claude Sonnet", version: [4, 6], rank: 2 });
+    expect(modelFamily({ id: "claude-opus-4-6-thinking-high" })).toMatchObject({ key: "claude:opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-opus-4-6-high-thinking" })).toMatchObject({ key: "claude:opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-fable-5-2-thinking-xhigh" })).toMatchObject({ key: "claude:fable", version: [5, 2], rank: 0 });
+    expect(modelFamily({ id: "claude-3-7-sonnet-20250219-thinking" })).toMatchObject({ key: "claude:sonnet", version: [3, 7] });
+    expect(modelFamily({ id: "claude-3-7-sonnet-20250219-high" })).toMatchObject({ key: "claude:sonnet", version: [3, 7] });
+    expect(modelFamily({ id: "claude-opus-4-6-thinking-20260101" })).toMatchObject({ key: "claude:opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-opus-4-20250514-thinking" })).toMatchObject({ key: "claude:opus", version: [4] });
+    expect(modelFamily({ id: "claude-sonnet-4.6-thinking-high" })).toMatchObject({ key: "claude:sonnet", version: [4, 6] });
+    expect(modelFamily({ id: "anthropic/claude-opus-5-5-high[1m]" })).toMatchObject({ key: "claude:opus", version: [5, 5] });
+    for (const bad of ["claude-opus-4-6-custom", "claude-opus-4-6-high-low", "claude-opus-4-6-20251001-20251002"]) {
+      expect(modelFamily({ id: bad })).toBeUndefined();
+    }
+  });
+
+  it("strips Gemini max, ultra, and thinking qualifiers without dropping standalone Ultra tiers", () => {
+    expect(modelFamily({ id: "gemini-4-hydrogen-max" })).toMatchObject({ key: "gemini:hydrogen", label: "Gemini Hydrogen", version: [4] });
+    expect(modelFamily({ id: "gemini-4-neon-ultra" })).toMatchObject({ key: "gemini:neon", label: "Gemini Neon", version: [4] });
+    expect(modelFamily({ id: "gemini-3.8-pro-max-preview" })).toMatchObject({ key: "gemini:pro", label: "Gemini Pro", version: [3, 8] });
+    expect(modelFamily({ id: "gemini-2.0-flash-thinking-exp" })).toMatchObject({ key: "gemini:flash", label: "Gemini Flash", version: [2, 0] });
+    expect(modelFamily({ id: "gemini-2.0-flash-thinking-exp-01-21" })).toMatchObject({ key: "gemini:flash", label: "Gemini Flash", version: [2, 0] });
+    expect(modelFamily({ id: "gemini-1.0-ultra" })).toMatchObject({ key: "gemini:ultra", label: "Gemini Ultra", version: [1, 0] });
+    expect(modelFamily({ id: "gemini-4-ultra-high" })).toMatchObject({ key: "gemini:ultra", label: "Gemini Ultra", version: [4] });
+    expect(modelFamily({ id: "gemini-4-ultra-max" })).toMatchObject({ key: "gemini:ultra", label: "Gemini Ultra", version: [4] });
+    expect(modelFamily({ id: "gemini-3.8-high" })).toBeUndefined();
+    expect(modelFamily({ id: "gemini-3.8-thinking" })).toBeUndefined();
+  });
+
+  it("strips GPT effort suffixes and pre-suffix date stamps without breaking real GPT tiers", () => {
+    for (const effort of ["minimal", "low", "medium", "high", "xhigh"]) {
+      expect(modelFamily({ id: `gpt-5.4-${effort}` })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 4] });
+    }
+    expect(modelFamily({ id: "gpt-5.4-2025-04-14-high" })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 4] });
+    expect(modelFamily({ id: "gpt-5.4-20250414-high" })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 4] });
+    expect(modelFamily({ id: "gpt-5.4-codex-2025-04-14-high" })).toMatchObject({ key: "gpt:codex", label: "GPT Codex", version: [5, 4] });
+    expect(modelFamily({ id: "gpt-5.5-codex-high" })).toMatchObject({ key: "gpt:codex", label: "GPT Codex", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-5.5-codex-mini-low" })).toMatchObject({ key: "gpt:codex-mini", label: "GPT Codex Mini", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-6.1-sol-xhigh" })).toMatchObject({ key: "gpt:sol", label: "GPT Sol", version: [6, 1] });
+    expect(modelFamily({ id: "gpt-5.1-codex-max" })).toMatchObject({ key: "gpt:codex-max", label: "GPT Codex Max", version: [5, 1] });
+    expect(modelFamily({ id: "gpt-5.1-codex-max-high" })).toMatchObject({ key: "gpt:codex-max", label: "GPT Codex Max", version: [5, 1] });
+    expect(modelFamily({ id: "gpt-5.5-ultra" })).toMatchObject({ key: "gpt:ultra", label: "GPT Ultra", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-5.5-ultra-high" })).toMatchObject({ key: "gpt:ultra", label: "GPT Ultra", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-5.5-high-low" })).toBeUndefined();
+    // Folded multi-level variants resolve from variants.base even when resolved carries an effort suffix; whitespace falls back cleanly
+    expect(modelFamily({ id: "gpt-5.5-max", resolved: "openai/gpt-5.5-max", variants: { base: "gpt-5.5" } })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-5.5-high", resolved: "   " })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 5] });
+  });
+
+  it("handles colon-separated effort/thinking suffixes and rejects unknown or double colon suffixes", () => {
+    expect(modelFamily({ id: "google-antigravity/gemini-4-argon:high" })).toMatchObject({ key: "gemini:argon", label: "Gemini Argon", version: [4] });
+    expect(modelFamily({ id: "google-antigravity/claude-opus-4-6-thinking:high" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [4, 6] });
+    expect(modelFamily({ id: "claude-3-7-sonnet-20250219-thinking:high" })).toMatchObject({ key: "claude:sonnet", label: "Claude Sonnet", version: [3, 7] });
+    expect(modelFamily({ id: "claude-opus-4-6-thinking:high[1m]" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [4, 6] });
+    expect(modelFamily({ id: "anthropic/claude-opus-4-6:high[1m]" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [4, 6] });
+    expect(modelFamily({ id: "anthropic/claude-sonnet-4-6:thinking" })).toMatchObject({ key: "claude:sonnet", label: "Claude Sonnet", version: [4, 6] });
+    expect(modelFamily({ id: "claude-opus-4-6-20260101:high" })).toMatchObject({ key: "claude:opus", label: "Claude Opus", version: [4, 6] });
+    expect(modelFamily({ id: "openai/gpt-5.5:xhigh" })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 5] });
+    expect(modelFamily({ id: "openai/gpt-5.5:max" })).toMatchObject({ key: "gpt:", label: "GPT", version: [5, 5] });
+    expect(modelFamily({ id: "gpt-5.1-codex-max:high" })).toMatchObject({ key: "gpt:codex-max", label: "GPT Codex Max", version: [5, 1] });
+    expect(modelFamily({ id: "gemini-4-ultra:high" })).toMatchObject({ key: "gemini:ultra", label: "Gemini Ultra", version: [4] });
+    for (const bad of [
+      "openai/gpt-5.5:custom",
+      "openai/gpt-5.5:0",
+      "openai/gpt-5.5:free",
+      "openai/gpt-5.5:high:low",
+      "claude-opus-4-6-high:low",
+      "claude-opus-4-6-thinking:thinking",
+      "claude-opus-4-6-thinking:thinking-high",
+      "claude-opus-4-6-high-thinking:low",
+      "claude-opus-4-6-thinking-high:low",
+      "gpt-5.4-high:low",
+      "gemini-4-argon-high:low",
+      "gemini-4-hydrogen-max:high",
+      "gemini-3.8:high",
+    ]) {
+      expect(modelFamily({ id: bad })).toBeUndefined();
+    }
+  });
+
+  it("groups and folds Antigravity catalogs cleanly in panelSections, keeping folded listed and search consistent", () => {
+    const level = (base: string, name: string, effort: string, efforts: string[]): PanelModel => ({
+      id: `${base}-${effort}`,
+      name: `${name} (${effort})`,
+      efforts,
+      defaultEffort: effort,
+    });
+    const agy: PanelProvider = {
+      id: "agy",
+      name: "agy",
+      engine: "agy",
+      models: [
+        ...["low", "high"].map((e) => level("claude-opus-5-5", "Opus 5.5", e, ["low", "high"])),
+        ...["low", "high"].map((e) => level("claude-opus-4-6-thinking", "Opus 4.6", e, ["low", "high"])),
+        ...["low", "max"].map((e) => level("gemini-4-hydrogen", "Gemini 4 Hydrogen", e, ["low", "max"])),
+        ...["low", "high"].map((e) => level("gemini-3.8-hydrogen", "Gemini 3.8 Hydrogen", e, ["low", "high"])),
+        ...["low", "max"].map((e) => level("gpt-5.5-codex", "GPT 5.5 Codex", e, ["low", "max"])),
+        ...["low", "high"].map((e) => level("gpt-5.4-codex", "GPT 5.4 Codex", e, ["low", "high"])),
+        { id: "gpt-5.1-codex-max", name: "GPT 5.1 Codex Max", efforts: [] },
+        { id: "gpt-5.0-codex-max", name: "GPT 5.0 Codex Max", efforts: [] },
+      ],
+    };
+    const renderBlocks = (query = "", currentModel = "gemini-4-hydrogen-max") =>
+      panelSections({
+        providers: [agy],
+        state: { current: { provider: "agy", model: currentModel }, recommended: [] },
+        view: { kind: "provider", provider: "agy" },
+        query,
+        favorites: [],
+        recent: [],
+        overrides: {},
+      })
+        .find((s) => s.key === "provider:agy")
+        ?.blocks?.map((b) => `${b.family?.label ?? "-"}: ${b.rows.map((r) => `${r.model.id}${r.latest ? "^" : ""}`).join(", ")}${b.older ? ` (+${b.older})` : ""}`);
+
+    // Folded gpt-5.5-codex-low/max stays in GPT Codex and never pollutes GPT Codex Max with a ghost empty block
+    expect(renderBlocks()).toEqual([
+      "Claude Opus: claude-opus-5-5-low^ (+1)",
+      "Gemini Hydrogen: gemini-4-hydrogen-max^ (+1)",
+      "GPT Codex: gpt-5.5-codex-low^ (+1)",
+      "GPT Codex Max: gpt-5.1-codex-max^ (+1)",
+    ]);
+
+    // Single-level search match ("max") still classifies gpt-5.5-codex-max under GPT Codex, not GPT Codex Max
+    expect(renderBlocks("max", "claude-opus-5-5-low")).toEqual([
+      "Gemini Hydrogen: gemini-4-hydrogen-max^",
+      "GPT Codex: gpt-5.5-codex-max^",
+      "GPT Codex Max: gpt-5.1-codex-max^, gpt-5.0-codex-max",
+    ]);
+
+    // Search ("low") knows about newer max/ultra-only folded version in full catalog, so gpt-5.5 is not falsely marked Latest
+    const mixed: PanelProvider = {
+      id: "mixed",
+      name: "mixed",
+      engine: "agy",
+      models: [
+        ...["max", "ultra"].map((e) => level("gpt-5.6", "GPT 5.6", e, ["max", "ultra"])),
+        ...["low", "high"].map((e) => level("gpt-5.5", "GPT 5.5", e, ["low", "high"])),
+        ...["low", "high"].map((e) => level("gpt-5.4", "GPT 5.4", e, ["low", "high"])),
+      ],
+    };
+    const lowSearch = panelSections({
+      providers: [mixed],
+      state: { current: null, recommended: [] },
+      view: { kind: "provider", provider: "mixed" },
+      query: "low",
+      favorites: [],
+      recent: [],
+      overrides: {},
+    }).find((s) => s.key === "provider:mixed");
+    expect(lowSearch?.blocks?.map((b) => `${b.family?.label ?? "-"}: ${b.rows.map((r) => `${r.model.id}${r.latest ? "^" : ""}`).join(", ")}`)).toEqual([
+      "GPT: gpt-5.5-low, gpt-5.4-low",
+    ]);
+  });
+});

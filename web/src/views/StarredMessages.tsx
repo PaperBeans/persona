@@ -10,7 +10,10 @@ import { Button, copyText, IconButton, Loading } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { Markdown } from "../ui/Markdown";
 import { SearchField } from "../ui/SearchField";
-import { StarredBackupDialog } from "./StarredBackupDialog";
+import { lazyOverlay } from "./LazyOverlay";
+
+// Loaded on first open so backup/restore logic stays off StarredMessages' initial chunk.
+const StarredBackupDialog = lazyOverlay(() => import("./StarredBackupDialog").then((m) => m.StarredBackupDialog));
 
 const PAGE_SIZE = 24;
 const PREVIEW_CHARS = 420;

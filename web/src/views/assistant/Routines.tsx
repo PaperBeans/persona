@@ -25,9 +25,13 @@ import type { MenuAt } from "../../ui/menu-model";
 import { Icon, type IconName } from "../../ui/icons";
 import { Pill } from "../settings/SettingsParts";
 import { Empty, IconTile, SectionTitle, Switch } from "./parts";
-import { RunLine, TaskEditor } from "./TaskEditor";
+import { lazyOverlay } from "../LazyOverlay";
+import { RunLine } from "./RunLine";
 import { ScenarioTemplateDialog } from "./ScenarioTemplateDialog";
 import { t } from "../../i18n";
+
+// Loaded on first open so the ~40 KB task editor stays off Routines' initial chunk.
+const TaskEditor = lazyOverlay(() => import("./TaskEditor").then((m) => m.TaskEditor));
 
 /** A task's mark, from its title (the iOS app's AssistantScheduleText.symbol). */
 function taskIcon(task: Task): IconName {

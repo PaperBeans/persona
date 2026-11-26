@@ -234,7 +234,8 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
   const read = slot(Boolean(o.first)).then(async (done) => {
     try {
       if (scope.owner !== credentialOwner()) return;
-      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager });
+      // This read owns a queued generation; the per-key cache above, not an older GET, coalesces its callers.
+      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager, dedupe: false });
       for (const id of hidden) {
         if (r?.models.some((m) => m.id === id && m.custom)) {
           forgetting.get(sharedKey)?.get(id)?.restore.set(key, withoutCustom(r, id).restore);
@@ -357,7 +358,7 @@ export const ENGINE_SWITCH_FEATURE = "engine_switch";
 export function engineSwitchable(s: Session): boolean {
   const engine = sessionEngine(s);
   if (engine === "claude") return !s.source_kind && canSwitchModel(s);
-  return engine === "codex" && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
+  return (engine === "codex" || engine === "agy") && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
 }
 
 /** What the pill and the panel can change on the session now: its model (Claude Code in a terminal, a runtime that says

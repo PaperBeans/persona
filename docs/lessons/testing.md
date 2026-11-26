@@ -1396,6 +1396,13 @@ the suite with `GIT_CONFIG_GLOBAL` pointing at a file that sets `init.defaultBra
   with SIGINT, SIGHUP and SIGTERM at their defaults (`preexec_fn`, as a terminal would), and one test runs them with the
   runner ignoring the signals (#11250). Do the same in a new signal test before blaming the change.
 
+- A readiness marker's path exists before its write completes. `test_heavy_slot.py`'s synthetic command created
+  `<ready>` with `open(..., "w").write("ready")`; when the test signaled as soon as the path appeared, the Python
+  handler could run inside that write, and CPython discarded the handler's `SystemExit` and caught-file write, leaving
+  the command asleep while the helper was correctly waiting (#14464). Publish such a marker with the tested signal
+  blocked, restore the mask after the write, and keep a held variant in the regression to prove the signal stays
+  pending. A delay after the marker hides the race; it does not fix it.
+
 ## A script started with its stderr closed (2026-11-20, #11250)
 
 A caller can close a script's stderr (`2>&-`, some service managers). Every later redirection that copies it (`4>&2`)

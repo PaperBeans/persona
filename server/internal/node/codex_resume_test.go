@@ -32,6 +32,7 @@ func codexHistoryNode(t *testing.T) (*Node, *fakeHerdr, string) {
 	n.codices = newCodexRegistry()
 	n.codices.scan = func() []codexProcess { return nil }
 	n.codices.checked = func() ([]codexProcess, bool) { return nil, true }
+	fixtureCodexIndex(n.codices)
 	n.configureCodex(proto.CodexConfig{}) // ~/.codex is the legacy home: its thread ids are the session ids
 	return n, f, cwd
 }
@@ -132,6 +133,7 @@ func TestCodexDesktopThreadIsNotResumedInATerminal(t *testing.T) {
 	}
 	n.codices = newCodexRegistry()
 	n.codices.scan = func() []codexProcess { return nil }
+	fixtureCodexIndex(n.codices)
 	n.configureCodex(proto.CodexConfig{})
 	if s := byID(listSessions(t, n))[startThread]; s.Capabilities == nil || s.Capabilities.Send {
 		t.Errorf("a Codex App thread is sendable: %+v", s)

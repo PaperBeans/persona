@@ -45,17 +45,17 @@ func (s pushGradingSnapshot) effectiveForManager(manager string) pushGradingEffe
 	return resolvePushGrading(s.Base, nil, "")
 }
 
-func (c *pushGradingEffectiveCache) effective(ctx context.Context, store Store, manager string) (pushGradingEffective, error) {
+func (c *pushGradingEffectiveCache) loadSnapshot(ctx context.Context, store Store) (pushGradingSnapshot, error) {
 	for {
 		c.mu.Lock()
 		if c.snapshot != nil && c.now().Before(c.expires) {
 			snapshot := *c.snapshot
 			c.mu.Unlock()
-			return snapshot.effectiveForManager(manager), nil
+			return snapshot, nil
 		}
 		if err := ctx.Err(); err != nil {
 			c.mu.Unlock()
-			return pushGradingEffective{}, err
+			return pushGradingSnapshot{}, err
 		}
 		load := c.loading
 		if load == nil {
@@ -74,17 +74,25 @@ func (c *pushGradingEffectiveCache) effective(ctx context.Context, store Store, 
 		select {
 		case <-ctx.Done():
 			c.leaveLoad(load)
-			return pushGradingEffective{}, ctx.Err()
+			return pushGradingSnapshot{}, ctx.Err()
 		case <-load.done:
 		}
 		if load.snapshot != nil {
-			return load.snapshot.effectiveForManager(manager), nil
+			return *load.snapshot, nil
 		}
 		if load.err != nil {
-			return pushGradingEffective{}, load.err
+			return pushGradingSnapshot{}, load.err
 		}
 		// The flight was superseded by invalidate() or cancelled after all waiters left; retry.
 	}
+}
+
+func (c *pushGradingEffectiveCache) effective(ctx context.Context, store Store, manager string) (pushGradingEffective, error) {
+	snapshot, err := c.loadSnapshot(ctx, store)
+	if err != nil {
+		return pushGradingEffective{}, err
+	}
+	return snapshot.effectiveForManager(manager), nil
 }
 
 func (c *pushGradingEffectiveCache) runLoad(load *pushGradingLoad, ctx context.Context, store Store) {

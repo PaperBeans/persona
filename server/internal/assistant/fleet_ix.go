@@ -82,7 +82,20 @@ type pending struct {
 	// when the user views the card in an app (owner_card_expiry.go).
 	seenTTL         time.Duration
 	deadlineChanged chan struct{}
+	// remindTimer fires once after pendingReminderDelay to re-push an unanswered owner-facing card (#16159).
+	remindTimer *time.Timer
+	reminded    bool
 }
+
+func (p *pending) stopReminderLocked() {
+	if p != nil && p.remindTimer != nil {
+		p.remindTimer.Stop()
+		p.remindTimer = nil
+	}
+}
+
+// pendingReminderDelay is how long an unanswered owner-facing approval card waits before one follow-up push (#16159).
+var pendingReminderDelay = 30 * time.Minute
 
 // resumeGrace is how long a resumable interaction outlives its node: a little longer than hooks keep reconnecting
 // (nodeclient.ResumeWait).
@@ -178,9 +191,59 @@ func (s *Service) tellUser(ix proto.Interaction, push bool) {
 	s.recordConfirmationNotification(ix)
 	if push && !s.muted(ix.MachineID, ix.SessionID) {
 		s.notifyInteraction(ix, s.machineName(ix.MachineID), s.linkCovers(ix))
+		s.armPendingReminder(ix)
 		go s.threadAgentAsks(ix) // and the topic of the todo this agent works on, if it has one
 	}
 	s.InteractionAnnounced(context.Background(), InteractionAnnounced{Interaction: ix}) // the Feishu bot, the channels
+}
+
+// reminderEligible reports whether an owner-facing card should receive one follow-up push when left unanswered (#16159).
+func reminderEligible(ix proto.Interaction) bool {
+	return ix.Kind == proto.IxPermission || ix.Kind == proto.IxQuestion || ix.Kind == proto.IxPlan
+}
+
+// armPendingReminder schedules at most one follow-up push after pendingReminderDelay for a pending, told
+// approval card whose remaining lifetime exceeds the delay (#16159).
+func (s *Service) armPendingReminder(ix proto.Interaction) {
+	delay := pendingReminderDelay
+	if delay <= 0 || !reminderEligible(ix) {
+		return
+	}
+	if !ix.NoExpiry && !ix.ExpiresAt.IsZero() && time.Until(ix.ExpiresAt) <= delay {
+		return
+	}
+	s.fleet.mu.Lock()
+	p := s.fleet.interactions[ix.ID]
+	if p == nil || p.claimed || p.graceEnded || !p.told || p.reminded || p.remindTimer != nil {
+		s.fleet.mu.Unlock()
+		return
+	}
+	p.remindTimer = time.AfterFunc(delay, func() { s.firePendingReminder(ix.ID, p) })
+	s.fleet.mu.Unlock()
+}
+
+func (s *Service) firePendingReminder(id string, p *pending) {
+	s.fleet.mu.Lock()
+	if s.fleet.interactions[id] != p || p.claimed || p.graceEnded || !p.told || p.reminded {
+		s.fleet.mu.Unlock()
+		return
+	}
+	if a := p.prepared; a != nil && (a.terminal || a.paused) {
+		p.remindTimer = nil
+		s.fleet.mu.Unlock()
+		return
+	}
+	p.reminded = true
+	p.remindTimer = nil
+	ix := p.ix
+	s.fleet.mu.Unlock()
+	if !ix.NoExpiry && !ix.ExpiresAt.IsZero() && !time.Now().Before(ix.ExpiresAt) {
+		return
+	}
+	if s.directoryHiddenSession(ix.MachineID, ix.SessionID) || s.muted(ix.MachineID, ix.SessionID) || s.quietSession(ix.MachineID, ix.SessionID) {
+		return
+	}
+	s.notifyInteraction(ix, s.machineName(ix.MachineID), s.linkCovers(ix))
 }
 
 // show puts a card on every app without a push: one they were told about already (a way back), or one that is not the
@@ -951,6 +1014,7 @@ func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Re
 		return fmt.Errorf("standing authorizations require a hook-waited card")
 	}
 	if p != nil && p.local != nil {
+		p.stopReminderLocked()
 		delete(s.fleet.interactions, id) // claimed: a second answer to the same card is not pending any more
 		if p.ix.Kind == proto.IxScreen && !r.Dismiss {
 			// Marked before the keys go: the node's next list may come while they are on the way (#4391).
@@ -1143,8 +1207,11 @@ func (s *Service) finishInteraction(id string) {
 	s.fleet.mu.Lock()
 	p, ok := s.fleet.interactions[id]
 	delete(s.fleet.interactions, id)
-	if ok && p.orphaned != nil {
-		p.orphaned.Stop()
+	if ok {
+		if p.orphaned != nil {
+			p.orphaned.Stop()
+		}
+		p.stopReminderLocked()
 	}
 	s.fleet.mu.Unlock()
 	if ok {

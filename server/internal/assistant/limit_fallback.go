@@ -250,7 +250,7 @@ func (s *Service) limitFallbackStart(ctx context.Context, machine, sid string, r
 		s.logf("limit fallback %s/%s: %s", machine, short(sid), why)
 		return
 	}
-	row, err := resolve(ctx, sid)
+	row, err := resolve(ctx, machine, sid)
 	if err != nil {
 		return
 	}
@@ -293,10 +293,11 @@ func (s *Service) limitFallbackStart(ctx context.Context, machine, sid string, r
 	}
 }
 
-// conversationSwitchResolver finds machine's conversation for a batch the manager makes itself, as the full-role
-// HTTP route does.
-func (s *Service) conversationSwitchResolver(machine string) conversationSwitchResolver {
-	return func(ctx context.Context, id string) (proto.Session, error) {
+// conversationSwitchResolver finds a conversation on targetMachine (defaulting to defaultMachine) for a batch the
+// manager makes itself, as the full-role HTTP route does.
+func (s *Service) conversationSwitchResolver(defaultMachine string) conversationSwitchResolver {
+	return func(ctx context.Context, targetMachine, id string) (proto.Session, error) {
+		machine := cmp.Or(targetMachine, defaultMachine)
 		row, ok := s.session(ctx, machine, id)
 		if !ok {
 			return proto.Session{}, errors.New("conversation not found")

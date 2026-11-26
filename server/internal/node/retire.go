@@ -49,9 +49,30 @@ var (
 // shell it left closed too (closeAfterExit: Herdr only, refused when anything else is in it). cause is what the
 // close records: an automatic one (idle, task_completed) keeps the supervisor's resume, anything else is the user's;
 // an after-exit close keeps the cause the Agent stopped with.
-func (n *Node) retire(ctx context.Context, id string, closeTerminal, afterExit bool, cause proto.StopCause) (done bool, err error) {
+// retireActivityGuard carries the session activity version and pane observed by the manager before requesting a
+// guarded idle close. When Active is true, the node refreshes the live host state under recovery+typing locks and
+// refuses with not_retirable if the session became active, opened a dialog, changed pane, or changed transcript version.
+type retireActivityGuard struct {
+	Active            bool
+	ExpectedRev       int64
+	HasExpectedRev    bool
+	ExpectedUpdatedAt time.Time
+	ExpectedPane      string
+}
+
+func (n *Node) retire(ctx context.Context, id string, closeTerminal, afterExit bool, cause proto.StopCause, guards ...retireActivityGuard) (done bool, err error) {
+	var guard retireActivityGuard
+	if len(guards) > 0 {
+		guard = guards[0]
+	}
 	if !closeTerminal {
+		if guard.Active {
+			return false, refusal(notRetirable, "guarded retire requires close_terminal", nil)
+		}
 		return n.stopWithCause(ctx, id, true, proto.StopUnknown)
+	}
+	if guard.Active && !guard.HasExpectedRev && guard.ExpectedUpdatedAt.IsZero() {
+		return false, refusal(notRetirable, "guarded retire requires activity version or timestamp", nil)
 	}
 	release := n.recovery.lock(id)
 	defer release()
@@ -60,12 +81,21 @@ func (n *Node) retire(ctx context.Context, id string, closeTerminal, afterExit b
 		return false, err
 	}
 	if !ok {
-		if !afterExit {
+		if !afterExit || guard.Active {
 			return false, nil
 		}
 		return n.closeExited(ctx, id)
 	}
 	defer unlock()
+	if guard.Active {
+		stillRunning, guardErr := n.verifyRetireActivityGuardLocked(ctx, id, guard)
+		if guardErr != nil {
+			return false, guardErr
+		}
+		if !stillRunning {
+			return false, nil
+		}
+	}
 	if !cause.AllowsSupervisorResume() || cause == proto.StopRestart || cause == proto.StopTimeout {
 		cause = proto.StopUser
 	}
@@ -73,6 +103,89 @@ func (n *Node) retire(ctx context.Context, id string, closeTerminal, afterExit b
 		return false, err
 	}
 	return true, nil
+}
+
+// verifyRetireActivityGuardLocked checks live host state and current transcript activity under n.recovery and n.typing
+// locks before a guarded idle terminal close. It returns (false, nil) when the agent is no longer running.
+func (n *Node) verifyRetireActivityGuardLocked(ctx context.Context, id string, guard retireActivityGuard) (bool, error) {
+	a, ok := n.agent(id)
+	if !ok {
+		return false, nil
+	}
+	if guard.ExpectedPane != "" && a.PaneID != guard.ExpectedPane {
+		return false, refusal(notRetirable, "session pane changed", nil)
+	}
+	kind := host.ParsePane(a.PaneID).Kind
+	h := n.hosts.Get(kind)
+	if h == nil {
+		return false, refusal(notRetirable, "this session host is not available", nil)
+	}
+	if err := n.refreshHostForPaneStrict(ctx, h, a.PaneID); err != nil {
+		return false, refusal(notRetirable, "could not verify live session state: "+err.Error(), nil)
+	}
+	a, ok = n.agent(id)
+	if !ok {
+		return false, nil
+	}
+	if a.AgentStatus != proto.StatusIdle && a.AgentStatus != proto.StatusDone {
+		why := "the agent status is unknown"
+		if a.AgentStatus != "" {
+			why = "the agent is " + a.AgentStatus
+		}
+		return false, refusal(notRetirable, why, nil)
+	}
+	if guard.ExpectedPane != "" && a.PaneID != guard.ExpectedPane {
+		return false, refusal(notRetirable, "session pane changed", nil)
+	}
+	if head := n.dialogOn(id, a.PaneID); head != "" {
+		return false, refusal(notRetirable, "session has an open dialog", nil)
+	}
+	if head := n.allowDialog(id); head != "" {
+		return false, refusal(notRetirable, "session has an open approval dialog", nil)
+	}
+	if !guard.ExpectedUpdatedAt.IsZero() && !a.LastTextAt.IsZero() && a.LastTextAt.After(guard.ExpectedUpdatedAt) {
+		return false, refusal(notRetirable, "session had newer output", nil)
+	}
+	curRev, curUpdatedAt, hasTranscript := n.currentSessionActivity(id, a)
+	if guard.HasExpectedRev {
+		if hasTranscript {
+			if curRev != guard.ExpectedRev {
+				return false, refusal(notRetirable, "session activity version changed", nil)
+			}
+		} else if guard.ExpectedRev > 0 {
+			return false, refusal(notRetirable, "session activity version could not be verified", nil)
+		} else {
+			n.mu.Lock()
+			lastRev := n.lastRevs[id]
+			n.mu.Unlock()
+			if lastRev != guard.ExpectedRev {
+				return false, refusal(notRetirable, "session activity version changed", nil)
+			}
+		}
+	}
+	if !guard.ExpectedUpdatedAt.IsZero() && hasTranscript && !curUpdatedAt.IsZero() && !curUpdatedAt.Equal(guard.ExpectedUpdatedAt) {
+		return false, refusal(notRetirable, "session activity timestamp changed", nil)
+	}
+	return true, nil
+}
+
+func (n *Node) currentSessionActivity(id string, a host.Agent) (rev int64, updatedAt time.Time, hasTranscript bool) {
+	if p := n.transcriptPath(id); p != "" {
+		if st, err := os.Stat(p); err == nil {
+			m := n.meta(p, st)
+			rev = st.Size()
+			updatedAt = lastUsed(m, st)
+			hasTranscript = true
+		}
+	}
+	if a.Agent == traexAgent {
+		if t, ok := n.traexThread(id); ok {
+			if u := t.updated(); !u.IsZero() && (updatedAt.IsZero() || u.After(updatedAt)) {
+				updatedAt = u
+			}
+		}
+	}
+	return rev, updatedAt, hasTranscript
 }
 
 // closeExited closes the shell session id's agent left when it quit (closeAfterExit), under the recovery lock its

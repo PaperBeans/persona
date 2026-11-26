@@ -90,6 +90,30 @@ describe("followHinted", () => {
     expect(reads()).toBe(settled);
   });
 
+  it("reads once more when the only hint lands while its read is out", async () => {
+    const replies: (() => void)[] = [];
+    vi.mocked(api).mockImplementation((_path, init) => {
+      signals.push(init?.signal ?? undefined);
+      const seen = version;
+      return new Promise((resolve) => {
+        replies.push(() => resolve({ version: seen }));
+      }) as ReturnType<typeof api>;
+    });
+    const a = follow(), b = follow();
+    expect(reads()).toBe(1);
+    change();
+    replies.shift()!();
+    await wait(0);
+    expect([a.values, b.values]).toEqual([[0], [0]]);
+    await wait(HINT_WINDOW_MS);
+    expect(reads()).toBe(2);
+    replies.shift()!();
+    await wait(0);
+    expect([a.values, b.values]).toEqual([[0, version], [0, version]]);
+    await wait(10 * HINT_WINDOW_MS);
+    expect(reads()).toBe(2);
+  });
+
   it("a follower that joins gets the last answer at once and shares the next read", async () => {
     const a = follow();
     await wait(100);

@@ -135,7 +135,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
     const version = ++request.current;
     const valid = () => current() && version === request.current && !signal?.aborted;
     try {
-      const r = await api<KBDetailResponse>(`/kb/${enc(kind)}/${enc(id)}${query ? `?q=${enc(query)}` : ""}`, { signal, ...auth });
+      // Each read owns its response and cancellation: a photos change may invalidate an older read before it answers.
+      const r = await api<KBDetailResponse>(`/kb/${enc(kind)}/${enc(id)}${query ? `?q=${enc(query)}` : ""}`, { signal, ...auth, dedupe: false });
       if (!valid()) return false;
       // The server canonicalizes source IDs (including recording UUID case); the request owns this response.
       if (r.detail.kind !== kind) throw new Error(t("knowledge-confirmedfacts.entry_changed"));

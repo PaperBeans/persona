@@ -7,7 +7,7 @@ import { clickLink, linkHref, linkRoute, prefetchLink } from "../lib/links";
 import { fileDownloadURL } from "../lib/api";
 import { isMachineRef, isWindowsDrivePath, linkLine, resolveRef } from "../lib/files";
 import { useLinkManager } from "../lib/manager-choice";
-import { openPanel } from "../lib/panel";
+import { openPanel, useReadOnlyFile } from "../lib/panel";
 import remarkMath from "remark-math";
 import { copyText, toast } from "./atoms";
 import { tableHtml, tableToTsv, writeTableClipboard } from "./tableCopy";
@@ -346,7 +346,7 @@ export function markdownUrl(url: string): string {
 // A link opens where it belongs (lib/links.ts): Feishu documents in the side panel (read as the chat's manager),
 // conversations in place, pages in a new tab. ⌘ / Ctrl / middle click is always the browser's new tab.
 // `line`: a path a message names at a line (src/a.ts:12, PathLinks.tsx, or `#L12` in a Markdown link) opens there.
-function Link({ href, children, mid, cwd, line, title: hover }: { href?: string; children?: React.ReactNode; mid?: string; cwd?: string; line?: number; title?: string }) {
+function Link({ href, children, mid, cwd, line, title: hover, readOnly }: { href?: string; children?: React.ReactNode; mid?: string; cwd?: string; line?: number; title?: string; readOnly?: boolean }) {
   const title = textOf(children).trim();
   const path = mid && href && isMachineRef(href) ? resolveRef(cwd ?? "", href) : "";
   const targetLine = line ?? (path && href ? linkLine(href) : undefined);
@@ -360,7 +360,7 @@ function Link({ href, children, mid, cwd, line, title: hover }: { href?: string;
       onClick={(e) => {
         if (path && mid && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
           e.preventDefault();
-          openPanel({ kind: "file", mid, path, cwd, line: targetLine });
+          openPanel({ kind: "file", mid, path, cwd, line: targetLine, ...(readOnly ? { readOnly: true } : {}) });
         } else clickLink(e, href, title && title !== href ? title : undefined, manager);
       }}
       onPointerEnter={() => prefetchLink(href, manager)}
@@ -612,8 +612,8 @@ function TableBlock({ children, ref: _ref, ...rest }: React.ComponentProps<"tabl
 // does not mount the links again.
 const linkComponents = new Map<string, Components>();
 
-function componentsFor(mid: string, cwd: string | undefined): Components {
-  const k = `${mid}\0${cwd ?? "\u0001"}`;
+function componentsFor(mid: string, cwd: string | undefined, readOnly = false): Components {
+  const k = `${mid}\0${cwd ?? "\u0001"}${readOnly ? "\0ro" : ""}`;
   let c = linkComponents.get(k);
   if (!c) {
     c = {
@@ -621,7 +621,7 @@ function componentsFor(mid: string, cwd: string | undefined): Components {
       a: ({ href, children, node }) => {
         const line = Number(node?.properties?.dataLine) || undefined;
         const title = typeof node?.properties?.title === "string" ? node.properties.title : undefined;
-        return <Link href={href} mid={mid} cwd={cwd} line={line} title={title}>{children}</Link>;
+        return <Link href={href} mid={mid} cwd={cwd} line={line} title={title} readOnly={readOnly || undefined}>{children}</Link>;
       },
       img: (props) => {
         const src = typeof props.src === "string" ? props.src : "";
@@ -651,8 +651,10 @@ function componentsFor(mid: string, cwd: string | undefined): Components {
 // "Reply animation" off or reduced motion; once streaming ends it is plain Markdown again, without the fade's spans.
 // `lineBreaks`: a reply, read line by line as it was written (#2088, `reply-breaks.ts`): a single line break is one,
 // and steps numbered on from 5 right under a line of text are a list.
-export const Markdown = memo(function Markdown({ text: raw, small, compact, mid, cwd, streaming, fade, lineBreaks, askImages }: { text: string; small?: boolean; compact?: boolean; mid?: string; cwd?: string; streaming?: boolean; fade?: boolean; lineBreaks?: boolean; askImages?: boolean }) {
-  const components = useMemo<Components>(() => (mid ? componentsFor(mid, cwd) : markdownComponents), [mid, cwd]);
+export const Markdown = memo(function Markdown({ text: raw, small, compact, mid, cwd, streaming, fade, lineBreaks, askImages, readOnly }: { text: string; small?: boolean; compact?: boolean; mid?: string; cwd?: string; streaming?: boolean; fade?: boolean; lineBreaks?: boolean; askImages?: boolean; readOnly?: boolean }) {
+  const inheritedReadOnly = useReadOnlyFile();
+  const ro = Boolean(readOnly || inheritedReadOnly);
+  const components = useMemo<Components>(() => (mid ? componentsFor(mid, cwd, ro) : markdownComponents), [mid, cwd, ro]);
   const text = useThrottledText(raw, Boolean(streaming));
   const motion = useReplyMotion();
   const wordFade = useWordFade(Boolean(streaming) && motion, Boolean(fade && !streaming) && motion, text);
@@ -691,8 +693,8 @@ export const Markdown = memo(function Markdown({ text: raw, small, compact, mid,
     () =>
       chunks || !markdownCache.on
         ? null
-        : cachedMarkdown(markdownKey(md, `${katex ? "katex" : ""}|${highlight ? "highlight" : ""}|${images ? (mid ? "images:local" : "images") : ""}|${key}`, mid, cwd), { children: md, remarkPlugins, rehypePlugins, components, urlTransform: markdownUrl }),
-    [chunks, md, katex, highlight, images, key, mid, cwd, remarkPlugins, rehypePlugins, components],
+        : cachedMarkdown(markdownKey(md, `${katex ? "katex" : ""}|${highlight ? "highlight" : ""}|${images ? (mid ? "images:local" : "images") : ""}|${mid && ro ? "ro" : ""}|${key}`, mid, cwd), { children: md, remarkPlugins, rehypePlugins, components, urlTransform: markdownUrl }),
+    [chunks, md, katex, highlight, images, ro, key, mid, cwd, remarkPlugins, rehypePlugins, components],
   );
   return (
     <HighlightWanted.Provider value={fenced && inBlock}>

@@ -12,6 +12,10 @@ field. HTTP routes and WebSocket names in the tables are guarded against source 
 
 - A panel talks only to the hub. The hub answers from its own snapshots or relays to the manager that owns the data;
   a panel does not import a manager or a feature module.
+- Server-first logic, thin clients: any logic that defines shared product truth, domain rules, or must agree across
+  clients (state transitions, validation/idempotency, querying/windowing, projections/counts, permissions/affordances,
+  orchestration, and cross-device state) belongs in the Go server; panels own presentation, local transient UI state,
+  device-native capabilities, and offline/low-latency UX (`docs/architecture/server-first-logic.md`).
 - Credential requirements are route-specific. Rows call out `full`-only operations where that restriction is explicit.
   Scoped `agents.read`, `agents.control`, and `agents.permission_mode` credentials open only their registered subsets;
   an answer-only watch has its own smaller allowlist. Authentication and scope rules are in `docs/protocol/protocol.md`.

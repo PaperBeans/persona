@@ -5,6 +5,7 @@
 // (apple/Shared/HubPageLink.swift) and Android read the same table; spec/fixtures/deep-links/cases.json is what every
 // client checks (lib/deep-links.test.ts for both kinds of link here). Only the keys a page lists are read: a link only
 // opens a page, it never signs in or acts.
+import { machineLocation, machinePath, type MachineLocation } from "./machine-route";
 import { APP_SCHEMES, assistantPath } from "./compatibility";
 
 
@@ -21,7 +22,7 @@ export type DeepPage =
   | { page: "knowledge"; kind?: string }
   | { page: "knowledge-entry"; kind: string; id: string }
   | { page: "machines" }
-  | { page: "machine"; id: string; range?: string }
+  | ({ page: "machine"; id: string } & MachineLocation)
   | { page: "settings"; tab?: string; item?: string; manager?: string }
   | { page: "extension"; extension: string; ui: string; state?: string };
 
@@ -95,9 +96,11 @@ export function pageOfPath(path: string, search = ""): DeepPage | null {
       if (!DEEP_KB_KINDS.includes(p[1]!)) return null;
       if (p.length === 2) return { page: "knowledge", kind: p[1]! };
       return p.length === 3 ? { page: "knowledge-entry", kind: p[1]!, id: p[2]! } : null;
-    case "machines":
+    case "machines": {
       if (p.length === 1) return { page: "machines" };
-      return p.length === 2 ? clean({ page: "machine", id: p[1]!, range: v("range") }) : null;
+      const location = machineLocation(p, search);
+      return location ? { page: "machine", id: p[1]!, ...location } : null;
+    }
     case "settings":
       if (p.length === 2 && p[1] === "sent") return { page: "settings", tab: "connectors", item: SENT };
       if (p.length >= 2 && (p[1] === "sources" || p[1]!.startsWith("sources@"))) {
@@ -215,7 +218,7 @@ export function pagePath(p: DeepPage): string {
     case "machines":
       return "/machines";
     case "machine":
-      return withQuery(`/machines/${enc(p.id)}`, [["range", p.range]]);
+      return machinePath(p.id, p);
     case "settings": {
       const key = p.tab ? DEEP_SETTINGS_TABS[p.tab] : null;
       return withQuery("/settings", [["tab", p.tab], [key ?? "", key ? p.item : undefined], ["manager", p.manager]]);

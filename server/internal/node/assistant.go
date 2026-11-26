@@ -376,9 +376,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 	}
 	recovery, restart := assistantRecoveryOf(ctx)
+	recoverySwitched := false
 	if recovery != nil {
 		n.mu.Lock()
 		valid := n.recoveries[id] == recovery
+		recoverySwitched = valid && recovery.switched
 		p := n.procs[id]
 		n.mu.Unlock()
 		if !valid {
@@ -554,12 +556,14 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			launcher, options = "", nil // it keeps what it started on (the hub sends none either)
 		}
 	}
+	crossEngineResume := false
 	if own, switched := n.assistantResumeLauncher(ctx, id, launcher, st); switched && !strictRuntime {
 		if executionOption(options).Strict {
 			return "", errors.New("task execution context differs from this conversation; start a new conversation")
 		}
 		n.logger.Printf("assistant %s: resumes on %s, the kind of agent it was started on, not on %s", short(id), launcherOr(own, st.Launcher), launcher)
 		launcher, options = own, nil // the model picked for the other launcher is not this one's
+		crossEngineResume = true
 	}
 	execution := executionOption(options)
 	execution.Public = public
@@ -620,7 +624,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			// What it ran, with this message's claude_interactive: the manager's switch, sent with every message, not a
 			// model pick (assistant_tui.go). Without it a message that picks no model (a supervision message, a relay)
 			// started claude -p, and restarted a conversation that runs interactive Claude Code.
-			execution = modelExecution{Source: execution.Source, CacheKeepalive: execution.CacheKeepalive, Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting}
+			execution = modelExecution{Source: execution.Source, CacheKeepalive: execution.CacheKeepalive, Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, OriginKnown: originKnown, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting || (crossEngineResume && requested.FollowsSetting), PersistedModel: st.Model != "" && guest == nil}
 		}
 	}
 	if launcher != "" && st.Launcher != "" && launcher != st.Launcher && execution.Fingerprint == "" {
@@ -630,6 +634,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	execution.Public = public
 	if effort != "" {
 		execution.Effort = effort
+	}
+	if execution.PersistedModel && execution.Model != "" && !proto.ValidModelID(execution.Model) {
+		execution.Model, execution.Effort, execution.UseEffort, execution.Fingerprint, execution.PersistedModel = "", effort, true, "launcher-default", false
 	}
 	if err := execution.checkModel(); err != nil {
 		return "", err
@@ -645,6 +652,13 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	}
 	if err := n.ensureManaged(ctx, launcher); err != nil { // the conversation's own provider (managed.go)
 		return "", err
+	}
+	if execution.PersistedModel && execution.Model != "" {
+		n.sanitizePersistedModel(ctx, id, launcher, st, &execution, crossEngineResume, isMain || st.IsMain || execution.FollowsSetting, effort)
+	}
+	if crossEngineResume && execution.Model == "" && execution.Fingerprint == "" && guest == nil {
+		execution.UseEffort = true
+		execution.Fingerprint = "launcher-default"
 	}
 	execution.IsMain = isMain && guest == nil
 	protected := strictProtectedExecution(execution) || n.recoveryProtected(id)
@@ -982,6 +996,10 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	fresh := p == nil
 	if p == nil {
 		if p, err = n.spawnAssistantWith(id, cwd, launcher, resume && n.transcriptPath(id) != "", false, round, execution); err != nil {
+			if execution.PersistedModel && execution.Model != "" && assistantModelRouteUnavailable(err.Error()) {
+				n.noteModelRouteUnavailable(id, launcher, execution.Model)
+				n.clearStalePersistedModel(id, launcher, execution.Model)
+			}
 			return "", err
 		}
 	}
@@ -1004,13 +1022,22 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 		n.noteModes(id, mode, effort)
 	}
-	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.ModelSource != execution.Source || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
+	fromRecovery := execution.FromRecovery || recoverySwitched
+	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || (!fromRecovery && (st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || (st.ModelFromRecovery && !execution.PersistedModel))) || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.ModelSource != execution.Source || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
 		started := st.StartedAt
 		if started.IsZero() {
 			started = time.Now().UTC()
 		}
+		launcherChanged := !known || st.Launcher != launcher
 		st.Launcher, st.Cwd, st.StartedAt = launcher, cwd, started
-		st.Model, st.ModelFingerprint, st.ModelEffort = execution.Model, execution.Fingerprint, execution.Effort
+		if !fromRecovery || launcherChanged {
+			st.Model, st.ModelFingerprint, st.ModelEffort = execution.Model, execution.Fingerprint, execution.Effort
+			if fromRecovery {
+				st.ModelFromRecovery = true
+			} else if !execution.PersistedModel {
+				st.ModelFromRecovery = false
+			}
+		}
 		st.Origin = origin
 		st.OriginKnown = execution.OriginKnown
 		st.ModelSource = execution.Source
@@ -1088,12 +1115,18 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		p.model.NewModelChoice = execution.NewModelChoice
 		if recovery != nil || !wasBusy {
 			p.turnRecovery = recovery
+			p.model.PersistedModel = execution.PersistedModel
+			p.model.FromRecovery = fromRecovery
 		}
 		p.mu.Unlock()
 		if err := p.cx.deliver(ctx, live, text, images, selected...); err != nil {
 			p.mu.Lock()
 			p.busy = p.cx.turn() != ""
 			p.mu.Unlock()
+			if execution.PersistedModel && execution.Model != "" && assistantModelRouteUnavailable(err.Error()) {
+				n.noteModelRouteUnavailable(id, launcher, execution.Model)
+				n.clearStalePersistedModel(id, launcher, execution.Model)
+			}
 			return "", fmt.Errorf("send to codex: %w", err)
 		}
 		n.commitModelChoice(id, execution)
@@ -1169,6 +1202,8 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		p.model.NewModelChoice = execution.NewModelChoice
 		if recovery != nil || !wasBusy {
 			p.turnRecovery = recovery
+			p.model.PersistedModel = execution.PersistedModel
+			p.model.FromRecovery = fromRecovery
 		}
 		p.mu.Unlock()
 		var timeout *assistantControlTimeoutError
@@ -1536,9 +1571,11 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			recovering := n.recoverAssistantResult(p, ev.IsError, ev.Result, kinds...)
 			if !recovering {
 				n.clearAssistantRecovery(p, !ev.IsError)
-				// A turn that ended well is newer evidence than an exhausted chain: the failure card's cause and reset
-				// time must not survive onto a later error, so drop the marker on any successful result (#7824).
-				if !ev.IsError {
+				if ev.IsError {
+					n.handleModelRouteFailure(p, ev.Result)
+				} else {
+					// A turn that ended well is newer evidence than an exhausted chain: the failure card's cause and reset
+					// time must not survive onto a later error, so drop the marker on any successful result (#7824).
 					if r := n.modelRecovery(p.id); r != nil && r.ChainExhausted {
 						n.clearModelRecovery(p.id)
 					}

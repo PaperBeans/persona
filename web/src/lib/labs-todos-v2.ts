@@ -1,12 +1,135 @@
-// Adapt the selected Assistant's todos_v2 Labs setting to the Labs form (#14538, #14584).
+// Adapt the selected Assistant's todos_v2 Labs setting and attention preferences to the Labs form (#14538, #14584, #16111).
 import { t } from "../i18n";
-import { api, ApiError } from "./api";
+import { api, ApiError, onCredentialChange } from "./api";
 import { MANAGER_HEADER, sameManager, shownManager } from "./manager-choice";
-import { patchAssistant } from "./store";
+import { patchAssistant, refreshTodos } from "./store";
 import { checkUpdate, CONFIGURATION_VERSION, ConfigurationError, type ConfigurationDocument, type ConfigurationSource } from "./configuration/contract";
+import type {
+  TodosV2AttentionPrefs,
+  TodosV2AutoSeen,
+  TodosV2CanWaitSLAHours,
+  TodosV2PendingReviewSLAHours,
+} from "./types";
 
 const field = "todos_v2";
-type Settings = { manager?: string; todos_v2?: boolean };
+type Settings = {
+  manager?: string;
+  todos_v2?: boolean;
+} & TodosV2AttentionPrefs;
+
+export const TODOS_V2_AUTO_SEEN_OPTIONS: readonly TodosV2AutoSeen[] = ["off", "subtasks", "all_autonomous"];
+export const TODOS_V2_PENDING_REVIEW_SLA_OPTIONS: readonly TodosV2PendingReviewSLAHours[] = [0, 12, 24, 48];
+export const TODOS_V2_CAN_WAIT_SLA_OPTIONS: readonly TodosV2CanWaitSLAHours[] = [0, 24, 48, 72];
+
+export interface ResolvedTodosV2AttentionPrefs {
+  todos_v2_auto_seen: TodosV2AutoSeen;
+  todos_v2_pending_review_sla_hours: TodosV2PendingReviewSLAHours;
+  todos_v2_can_wait_sla_hours: TodosV2CanWaitSLAHours;
+  todos_v2_fold_children: boolean;
+}
+
+export const DEFAULT_TODOS_V2_ATTENTION_PREFS: ResolvedTodosV2AttentionPrefs = {
+  todos_v2_auto_seen: "all_autonomous",
+  todos_v2_pending_review_sla_hours: 24,
+  todos_v2_can_wait_sla_hours: 48,
+  todos_v2_fold_children: true,
+};
+
+export function resolveTodosV2AttentionPrefs(raw?: TodosV2AttentionPrefs | null): ResolvedTodosV2AttentionPrefs {
+  const autoSeen = raw?.todos_v2_auto_seen && (TODOS_V2_AUTO_SEEN_OPTIONS as readonly string[]).includes(raw.todos_v2_auto_seen)
+    ? raw.todos_v2_auto_seen
+    : DEFAULT_TODOS_V2_ATTENTION_PREFS.todos_v2_auto_seen;
+  const pendingReview = raw?.todos_v2_pending_review_sla_hours !== undefined
+    && (TODOS_V2_PENDING_REVIEW_SLA_OPTIONS as readonly number[]).includes(raw.todos_v2_pending_review_sla_hours)
+    ? raw.todos_v2_pending_review_sla_hours
+    : DEFAULT_TODOS_V2_ATTENTION_PREFS.todos_v2_pending_review_sla_hours;
+  const canWait = raw?.todos_v2_can_wait_sla_hours !== undefined
+    && (TODOS_V2_CAN_WAIT_SLA_OPTIONS as readonly number[]).includes(raw.todos_v2_can_wait_sla_hours)
+    ? raw.todos_v2_can_wait_sla_hours
+    : DEFAULT_TODOS_V2_ATTENTION_PREFS.todos_v2_can_wait_sla_hours;
+  const foldChildren = typeof raw?.todos_v2_fold_children === "boolean"
+    ? raw.todos_v2_fold_children
+    : DEFAULT_TODOS_V2_ATTENTION_PREFS.todos_v2_fold_children;
+  return {
+    todos_v2_auto_seen: autoSeen,
+    todos_v2_pending_review_sla_hours: pendingReview,
+    todos_v2_can_wait_sla_hours: canWait,
+    todos_v2_fold_children: foldChildren,
+  };
+}
+
+export interface TodosV2ManagerSnapshot {
+  enabled: boolean;
+  prefs: ResolvedTodosV2AttentionPrefs;
+}
+
+const stateByManager = new Map<string, TodosV2ManagerSnapshot>();
+const listeners = new Set<() => void>();
+const notify = () => listeners.forEach((l) => l());
+
+onCredentialChange(() => {
+  stateByManager.clear();
+  notify();
+});
+
+function sameSnapshot(a: TodosV2ManagerSnapshot | undefined, b: TodosV2ManagerSnapshot): boolean {
+  return !!a
+    && a.enabled === b.enabled
+    && a.prefs.todos_v2_auto_seen === b.prefs.todos_v2_auto_seen
+    && a.prefs.todos_v2_pending_review_sla_hours === b.prefs.todos_v2_pending_review_sla_hours
+    && a.prefs.todos_v2_can_wait_sla_hours === b.prefs.todos_v2_can_wait_sla_hours
+    && a.prefs.todos_v2_fold_children === b.prefs.todos_v2_fold_children;
+}
+
+function recordState(manager: string, state: Settings, mergePrev = false) {
+  const prev = stateByManager.get(manager);
+  const next: TodosV2ManagerSnapshot = {
+    enabled: typeof state.todos_v2 === "boolean" ? state.todos_v2 : prev?.enabled ?? false,
+    prefs: resolveTodosV2AttentionPrefs(mergePrev && prev ? { ...prev.prefs, ...state } : state),
+  };
+  if (sameSnapshot(prev, next)) return;
+  stateByManager.set(manager, next);
+  notify();
+}
+
+export function getTodosV2State(manager: string): TodosV2ManagerSnapshot | null {
+  return stateByManager.get(manager) ?? null;
+}
+
+export function subscribeTodosV2State(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function resetTodosV2StateForTest() {
+  stateByManager.clear();
+  notify();
+}
+
+export async function saveTodosV2AttentionPrefs(
+  manager: string,
+  patch: TodosV2AttentionPrefs,
+): Promise<ResolvedTodosV2AttentionPrefs> {
+  const headers = { [MANAGER_HEADER]: manager };
+  const state = await api<Settings>("/assistant", {
+    method: "PUT",
+    headers,
+    json: patch,
+  });
+  if (state.manager && state.manager !== manager) {
+    throw new ConfigurationError("configuration_unavailable");
+  }
+  const prev = stateByManager.get(manager);
+  const resolved = resolveTodosV2AttentionPrefs(prev ? { ...prev.prefs, ...state } : state);
+  recordState(manager, state, true);
+  if (sameManager(manager, shownManager())) {
+    patchAssistant(resolved);
+    void refreshTodos();
+  }
+  return resolved;
+}
 
 function document(manager: string, state: Settings, saved = false): ConfigurationDocument {
   if (state.manager !== manager) throw new ConfigurationError("configuration_unavailable");
@@ -35,7 +158,12 @@ export function todosV2LabsSource(manager: string): ConfigurationSource {
   const headers = { [MANAGER_HEADER]: manager };
   return {
     key: `labs:assistant-todos-v2:${manager}`,
-    read: async (signal) => document(manager, await api<Settings>("/assistant", { headers, signal })),
+    read: async (signal) => {
+      const state = await api<Settings>("/assistant", { headers, signal });
+      const doc = document(manager, state);
+      recordState(manager, state);
+      return doc;
+    },
     update: async (update, signal) => {
       const expected = update.revision === "true";
       const refused = checkUpdate(document(manager, { manager, todos_v2: expected }), update);
@@ -45,7 +173,10 @@ export function todosV2LabsSource(manager: string): ConfigurationSource {
         const state = await api<Settings>("/assistant", { method: "PUT", headers, signal,
           json: { todos_v2: value, expected_todos_v2: expected } });
         if (state.todos_v2 !== value) throw new ConfigurationError("configuration_unavailable");
-        if (sameManager(manager, shownManager())) patchAssistant({ todos_v2: state.todos_v2 === true });
+        recordState(manager, state);
+        if (sameManager(manager, shownManager())) {
+          patchAssistant({ todos_v2: state.todos_v2 === true, ...resolveTodosV2AttentionPrefs(state) });
+        }
         return document(manager, state, true);
       } catch (e) {
         if (e instanceof ApiError) throw ConfigurationError.fromBody(e.body, e.status);

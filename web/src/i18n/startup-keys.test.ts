@@ -4,6 +4,9 @@ import startup from "./startup-namespaces.json";
 import modelIdMessages from "./locales/en/lib-model-id.json";
 import emptyResponseMessages from "./locales/en/chat-empty-response.json";
 import hubSettingsMessages from "./locales/en/settings-hubsettings.json";
+import notifyMessages from "./locales/en/notify.json";
+import assistantViewMessages from "./locales/en/lib-assistant-view.json";
+import assistantCardMessages from "./locales/en/ui-assistantcard.json";
 
 describe("startupMatcher", () => {
   const inStartup = startupMatcher(["common", "settings.avatar", "todos.stage_"]);
@@ -63,5 +66,20 @@ describe("startupMatcher", () => {
       "new_main_done_carried", "new_main_done", "new_main_failed", "new_main_title", "new_main", "new_main_body",
       "carry_summary", "carry_summary_hint",
     ]) expect(configured(`assistant-assistantchat.${key}`), key).toBe(false);
+  });
+
+  it("keeps notification copy out of the first-screen startup catalog", () => {
+    const configured = startupMatcher(startup);
+    expect(startup).not.toContain("notify");
+    for (const key of Object.keys(notifyMessages)) expect(configured(`notify.${key}`), key).toBe(false);
+  });
+
+  it("defers assistant-view and body-only assistantcard strings while keeping shell and bubble keys eager", () => {
+    const configured = startupMatcher(startup);
+    for (const key of Object.keys(assistantViewMessages)) expect(configured(`lib-assistant-view.${key}`), key).toBe(false);
+    const eagerCardKeys = new Set(["cannot_open", "from_card"]);
+    for (const key of Object.keys(assistantCardMessages)) {
+      expect(configured(`ui-assistantcard.${key}`), key).toBe(eagerCardKeys.has(key));
+    }
   });
 });

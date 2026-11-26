@@ -1570,3 +1570,13 @@ project lists each of its folders as its own `project_path`, so the section's fi
 Use a label linked by ID, with the select beside it. When a label wraps the native select, browser label lookup can
 include the option text in the label. Check the label in a real browser and attach any inherited-policy hint with
 `aria-describedby` so it stays available without changing the control's name.
+
+## A cached first screen is not evidence of an outcome (#16286)
+
+The chat draws its cached page at once and reads the hub's newest page behind it (`useTranscript`, `firstRead`). The
+cache can be older than the last turn's reply, so anything that judges an outcome from it is a guess. "No response
+returned" with Retry was drawn from the cache. While a stalled hub held the read (#16214), each reload showed it again,
+and Retry sent the question a second time although the reply was in the transcript. Draw verdicts and offer actions that
+act on them only once the page holds the newest read, `firstRead` without an `error` (`chatLines` `stale`). A failed
+read keeps its "Refresh failed" pill, which reloads and sends nothing. Test with a cache that lacks the reply and a held
+read (`sync/fake-hub.ts` `hold`), not with a mocked transcript.

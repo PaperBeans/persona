@@ -86,7 +86,10 @@ test('native fork keeps the entire conversation in the same workspace', async (t
     sourceCascadeId: source, forkAtStepIndex: -1,
     targetForkWorkspace: 'FORK_TARGET_CURRENT_WORKSPACE', sourceWorkspaceUris: [pathToFileURL(cwd).href],
   })
-  assert.deepEqual(await items(branched), await items())
+  const visible = (list) => list.filter((item) => item.kind !== 'turn_duration')
+  const sourceItems = await items()
+  assert.deepEqual(visible(await items(branched)), visible(sourceItems))
+  assert.equal(sourceItems.at(-1).kind, 'turn_duration')
   checkSource()
 })
 

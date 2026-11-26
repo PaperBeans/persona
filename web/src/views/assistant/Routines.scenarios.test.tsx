@@ -131,7 +131,11 @@ describe("scenario template UI", () => {
       await change(t("assistant-scenario-templates.scope_label"), "example/project");
     }
     await review();
-    expect(document.querySelector("textarea")).not.toBeNull();
+    // The scenario's editor is a lazy chunk; wait for its actual textarea, not the review dialog's first commit.
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(document.querySelector("textarea")).not.toBeNull();
+    });
     expect(document.querySelector("textarea")?.value).toContain(t("assistant-scenario-templates.read_only_safety"));
     if (key === "inbox-triage") expect(document.querySelector("textarea")?.value).toContain("Unread support messages");
     if (key === "pr-review") expect(document.querySelector("textarea")?.value).toContain("example/project");

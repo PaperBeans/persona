@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +69,58 @@ func phoneToolNames(tools []proto.Tool) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+func TestAssistantInstructionsRequireDevicePhoneTools(t *testing.T) {
+	s, h := flakyPhoneService(t)
+	h.set(0, "phone_write_queue_list", "phone_write_queue_cancel", "mail_search")
+	withoutPhone := s.claudeMD(context.Background(), "", false)
+	for _, unwanted := range []string{"- **iPhone**", "phone_reminders_create", "phone_calendar_events", "快捷指令只能", "家庭设备先"} {
+		if strings.Contains(withoutPhone, unwanted) {
+			t.Errorf("queue-only tools still inject phone procedure %q", unwanted)
+		}
+	}
+
+	h.set(0, "phone_reminders_create", "phone_reminders_list")
+	withReminders := s.claudeMD(context.Background(), "", false)
+	for _, want := range []string{"- **iPhone**", "phone_reminders_create", "快捷指令只能", "家庭设备先"} {
+		if !strings.Contains(withReminders, want) {
+			t.Errorf("device phone tools lost procedure %q", want)
+		}
+	}
+	if strings.Contains(withReminders, "iPhone 日历（`phone_calendar_events`）") {
+		t.Error("an unrelated phone tool injected the unavailable calendar tool")
+	}
+
+	h.set(0, "phone_calendar_events")
+	withCalendar := s.claudeMD(context.Background(), "", false)
+	if !strings.Contains(withCalendar, "手机日历（`phone_calendar_events`）") {
+		t.Error("the available phone calendar is missing from schedule guidance")
+	}
+	for _, unwanted := range []string{"- **iPhone**", "phone_reminders_create", "快捷指令只能", "家庭设备先"} {
+		if strings.Contains(withCalendar, unwanted) {
+			t.Errorf("calendar-only tools still inject unrelated phone procedure %q", unwanted)
+		}
+	}
+
+	h.set(0, "phone_calendar_create_event")
+	if withCreate := s.claudeMD(context.Background(), "", false); strings.Contains(withCreate, "phone_reminders_create") ||
+		strings.Contains(withCreate, "手机日历（`phone_calendar_events`）") || strings.Contains(withCreate, "occurrence_start") {
+		t.Error("calendar create alone injected reminder, query, or update procedures")
+	}
+
+	h.set(0, "phone_calendar_events", "phone_calendar_update_event", "phone_calendar_delete_event")
+	withCalendarWrites := s.claudeMD(context.Background(), "", false)
+	for _, want := range []string{"occurrence_start", "`span` 只在用户说了「以后都…」时用 `future`"} {
+		if !strings.Contains(withCalendarWrites, want) {
+			t.Errorf("calendar update/delete lost safeguard %q", want)
+		}
+	}
+	for _, unwanted := range []string{"phone_contacts_search", "phone_reminders_create", "快捷指令只能", "家庭设备先"} {
+		if strings.Contains(withCalendarWrites, unwanted) {
+			t.Errorf("calendar update/delete injected unrelated procedure %q", unwanted)
+		}
+	}
 }
 
 // A conversation that starts while the hub's link comes back still gets the phone's tools (#6422).

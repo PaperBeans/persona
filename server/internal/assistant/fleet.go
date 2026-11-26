@@ -156,6 +156,7 @@ type fleetBook struct {
 type fleetReport struct {
 	mu        sync.RWMutex
 	got       bool
+	seq       uint64                 // highest sequenced Snapshot.Seq applied (0: none yet)
 	sessions  map[string]SessionView // by session id
 	work      map[[2]string]proto.WorkState
 	workOn    bool

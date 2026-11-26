@@ -268,6 +268,14 @@ func (d *DB) AddExtensionAudit(ctx context.Context, id, action, actor string, de
 	if len(detail) == 0 {
 		detail = json.RawMessage(`{}`)
 	}
+	// An idle-archive audit carries its stable audit_id and may be replayed by durable recovery. All other
+	// extension audits remain append-only; the scoped partial unique index makes only this recovery idempotent.
+	if action == "session_idle_archive" || action == "session_idle_archive_refused" {
+		_, err := d.pool.Exec(ctx, `INSERT INTO plugin_audit (plugin, action, actor, detail) VALUES ($1, $2, $3, $4)
+			ON CONFLICT ((detail->>'audit_id')) WHERE action IN ('session_idle_archive', 'session_idle_archive_refused')
+				AND detail->>'audit_id' IS NOT NULL DO NOTHING`, id, action, actor, []byte(detail))
+		return err
+	}
 	_, err := d.pool.Exec(ctx, `INSERT INTO plugin_audit (plugin, action, actor, detail) VALUES ($1, $2, $3, $4)`, id, action, actor, []byte(detail))
 	return err
 }

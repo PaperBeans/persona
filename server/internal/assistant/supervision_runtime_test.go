@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -51,7 +51,7 @@ func TestRuntimeTaskPlanDeliversCompletionToCompatibleSupervisor(t *testing.T) {
 				return slices.ContainsFunc(f.sends, func(p map[string]any) bool {
 					text, _ := p["text"].(string)
 					return p["session_id"] == reviewer && strings.Contains(text, report) &&
-						p["supervision_instructions"] == prompts.RenderSupervisionInstructions()
+						p["supervision_instructions"] == mustSupervisionRole(t, supervisionrole.RoleMain())
 				})
 			})
 			if f.sentTo(side.SessionID) != 0 || s.queuedFor(side.SessionID) != 0 {
@@ -236,8 +236,10 @@ func TestRuntimeSupervisedStockTaskGoesToOwnSupervisor(t *testing.T) {
 					t.Fatal(err)
 				}
 				reviewer := persona.SessionID
+				reviewerRole := supervisionrole.RoleMain()
 				if !useMain {
 					reviewer = background.SessionID
+					reviewerRole = supervisionrole.RoleBackground()
 				}
 				if delivery == "queued" {
 					f.setSessions("server", persona, background, func() proto.Session { w := side; w.Status = proto.StatusWorking; return w }())
@@ -253,7 +255,7 @@ func TestRuntimeSupervisedStockTaskGoesToOwnSupervisor(t *testing.T) {
 					return slices.ContainsFunc(f.sends, func(p map[string]any) bool {
 						text, _ := p["text"].(string)
 						return p["session_id"] == reviewer && strings.Contains(text, report) &&
-							p["supervision_instructions"] == prompts.RenderSupervisionInstructions()
+							p["supervision_instructions"] == mustSupervisionRole(t, reviewerRole)
 					})
 				})
 				if f.sentTo(side.SessionID) != 0 || s.queuedFor(side.SessionID) != 0 {
@@ -461,7 +463,7 @@ func TestCapableRuntimeSideChatSupervisesOwnTasks(t *testing.T) {
 		return slices.ContainsFunc(f.sends, func(p map[string]any) bool {
 			text, _ := p["text"].(string)
 			return p["session_id"] == side.SessionID && strings.Contains(text, report) &&
-				p["supervision_instructions"] == prompts.RenderSupervisionInstructions()
+				p["supervision_instructions"] == mustSupervisionRole(t, supervisionrole.RoleSide())
 		})
 	})
 	if _, err := runJSON(t, s, side.SessionID, "task_review", map[string]any{
@@ -509,12 +511,12 @@ func TestCapableRuntimeLeaderAndBackgroundSupervisor(t *testing.T) {
 		t.Fatal("non-capable runtime background supervisor was treated as valid")
 	}
 	// Main keeps its policy for new main-supervised work (#5732); background and leader receive their own policies too.
-	if got := mustSupervisionInstructions(t, s, ctx, "server", main.SessionID); got != prompts.RenderSupervisionInstructions() {
-		t.Fatalf("main chat lost its supervision policy (%d bytes)", len(got))
-	}
-	for _, id := range []string{bg.SessionID, lead.SessionID} {
-		if got := mustSupervisionInstructions(t, s, ctx, "server", id); got != prompts.RenderSupervisionInstructions() {
-			t.Fatalf("%s did not receive supervision policy", id)
+	// Use real owner dispatches: a policy-only lookup cannot manufacture a compact baseline the node has not accepted.
+	for id, role := range map[string]supervisionrole.Role{
+		main.SessionID: supervisionrole.RoleMain(), bg.SessionID: supervisionrole.RoleBackground(), lead.SessionID: supervisionrole.RoleLeader(),
+	} {
+		if got := dispatchedPolicy(t, s, id); got != mustSupervisionRole(t, role) {
+			t.Fatalf("%s did not receive its %s supervision policy", id, supervisionRoleWord(role))
 		}
 	}
 	// Leader task stays with the capable leader; background supervisor does not usurp it.

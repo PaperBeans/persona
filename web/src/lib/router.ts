@@ -1,3 +1,4 @@
+import { machineLocation, machinePath, type MachineLocation } from "./machine-route";
 import { assistantPath } from "./compatibility";
 // A tiny history router: the hub serves index.html for every path that isn't a file.
 import { useSyncExternalStore } from "react";
@@ -5,6 +6,7 @@ import { takeOverlayEntry } from "./back-close";
 import { BASE, stripBase } from "./base";
 import { decodeURIComponentSafe } from "./uri";
 import { moduleExtensionAt, moduleKBKindAt, modulePath, moduleRouteAt } from "../core/module-host";
+import { healthReadOnlyRoute } from "./health-archive";
 
 // Persona's main conversation is the front door (like the app, which opens on the assistant): `/` and `/persona` open it, `/persona/<id>` is
 // one conversation, `/persona/new` starts a one-off one, and "Overview" lives at `/overview`. `/extension/<id>/<ui>` is an extension's page
@@ -48,9 +50,9 @@ export type Route =
   | { name: "routines" }
   | { name: "kb"; kind?: string; id?: string }
   | { name: "machines" }
-  | { name: "machine"; mid: string }
+  | ({ name: "machine"; mid: string } & MachineLocation)
   // one space of a machine by its name (lib/space-page.ts): its agents, the todos it hangs on, what can be done to it
-  | { name: "space"; mid: string; space: string }
+  | { name: "space"; mid: string; space: string; workspace?: string }
   // the terminal browser (docs/integrations/terminal.md "Standalone terminal"): every pane of every machine; `id` is the terminal opened (an agent
   // session's id, or "pane:<pane>" for a plain shell); `view` is the list beside it, `?view=sessions|terminals`
   // (lib/terminal-list.ts): without it the one this browser chose last
@@ -115,6 +117,10 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "lark-oauth" && !p[1]) return { name: "lark-oauth" };
   if (p[0] === "history") return p[1] ? { name: "history", origin: p[1] } : { name: "history" };
   const module = moduleRouteAt(p);
+  // Existing Health data has a default-panel read-only route both when its module is switched off and when a
+  // core-only build has no descriptor for it. Other absent modules keep their not-found behavior.
+  const healthArchive = healthReadOnlyRoute(p);
+  if (healthArchive) return healthArchive;
   if (module === "absent") return notFound(path, search);
   if (module) return module;
   if (p[0] === "tracks" && p[1] === "new" && !p[2]) return { name: "track-new" };
@@ -132,8 +138,15 @@ export function parse(path: string, search = ""): Route {
   // An entry of a kind only a feature module draws is unknown while that module is off. Existing recordings are the
   // exception: their data and Core read-only detail stay available.
   if (p[0] === "kb") return p[1] && p[1] !== "recordings" && p[2] && moduleKBKindAt(p[1]) === "absent" ? notFound(path, search) : { name: "kb", kind: p[1], id: p[2] };
-  if (p[0] === "space" && p[1] && p[2]) return { name: "space", mid: p[1], space: p[2] };
-  if (p[0] === "machines") return p[1] ? { name: "machine", mid: p[1] } : { name: "machines" };
+  if (p[0] === "space" && p[1] && p[2]) {
+    const workspace = new URLSearchParams(search).get("workspace");
+    return { name: "space", mid: p[1], space: p[2], ...(workspace && { workspace }) };
+  }
+  if (p[0] === "machines") {
+    if (!p[1]) return { name: "machines" };
+    const view = machineLocation(p, search);
+    return view ? { name: "machine", mid: p[1], ...view } : notFound(path, search);
+  }
   if (p[0] === "terminal") {
     const list = new URLSearchParams(search).get("view");
     const shown = list === "sessions" || list === "terminals" ? { view: list as "sessions" | "terminals" } : {};
@@ -236,9 +249,9 @@ export function routePath(r: Route): string {
     case "machines":
       return "/machines";
     case "machine":
-      return `/machines/${encodeURIComponent(r.mid)}`;
+      return machinePath(r.mid, r);
     case "space":
-      return `/space/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.space)}`;
+      return `/space/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.space)}` + (r.workspace ? "?" + new URLSearchParams({ workspace: r.workspace }) : "");
     case "terminal": {
       const path = r.mid && r.id ? `/terminal/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.id)}` : "/terminal";
       return r.view ? `${path}?view=${r.view}` : path;
@@ -325,6 +338,7 @@ export function navigate(r: Route | string, replace = false, state: Record<strin
   // the query is part of the address (/s/…?view=term): the same page with another view is somewhere else.
   // A replace still applies at the same address: reselecting a drill-down as a root clears its entry state (#12055).
   if (to === location.pathname + location.search && !replace) return;
+  if (!replace && typeof r !== "string" && r.name === "machine") state = { ...state, machineBack: location.pathname + location.search };
   returnedTo = "";
   // From inside an open overlay (a drawer's link, a sheet's action): the new page takes the overlay's entry, so Back
   // from it goes to the page under the overlay, not to a dead copy of it (#1996). A replace keeps the entry's state:

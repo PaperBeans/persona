@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/repositorywire"
+	"github.com/nwverse/persona/server/internal/taskworkspace"
 	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
 func TestWorkspaceNamingUsesTargetHomeWithoutEngineOrCreation(t *testing.T) {
 	for range 2 {
-		home := t.TempDir()
+		home := workspaceTemp(t)
 		n := &Node{home: home, dir: filepath.Join(home, ".persona")}
 		source := workspacenaming.Source{TodoID: "todo_example", Title: "Example", PlannedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC), Timezone: "UTC", Rules: workspacenaming.Defaults(), Layout: repositorywire.LayoutRoot, Repositories: repositorywire.PreparationSnapshot{Repositories: []repositorywire.PreparationRepository{{RepoID: "web", RequestedRef: repositorywire.RequestedRef{Kind: "default"}}}}}
 		raw, _ := json.Marshal(source)
@@ -39,8 +40,8 @@ func TestWorkspaceNamingRejectsPrivateSymlinkAncestors(t *testing.T) {
 	for _, level := range []string{"base", "task", "repository"} {
 		for _, target := range []string{"state", "ssh", "missing-ssh", "missing-step-secret"} {
 			t.Run(level+"/"+target, func(t *testing.T) {
-				home := t.TempDir()
-				state := filepath.Join(t.TempDir(), "private-state")
+				home := workspaceTemp(t)
+				state := filepath.Join(workspaceTemp(t), "private-state")
 				if err := os.Mkdir(state, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -90,7 +91,7 @@ func TestWorkspaceNamingRejectsPrivateSymlinkAncestors(t *testing.T) {
 }
 
 func TestWorkspaceNamingResolvesPrivateStateItself(t *testing.T) {
-	home, state := t.TempDir(), t.TempDir()
+	home, state := workspaceTemp(t), workspaceTemp(t)
 	t.Setenv("PERSONA_HOME", state)
 	alias := filepath.Join(home, "state-alias")
 	if err := os.Symlink(state, alias); err != nil {
@@ -117,7 +118,7 @@ func TestWorkspaceNamingMissingPrivateStateBehindSymlink(t *testing.T) {
 		for _, level := range []string{"base", "task", "repository"} {
 			for _, target := range []string{"state", "descendant", "sibling-prefix"} {
 				t.Run(link+"/"+level+"/"+target, func(t *testing.T) {
-					home, physical := t.TempDir(), physicalTempDir(t)
+					home, physical := workspaceTemp(t), physicalTempDir(t)
 					physicalState := filepath.Join(physical, "missing", "private-state")
 					alias := filepath.Join(home, "state-alias")
 					state, to := alias, physicalState
@@ -158,17 +159,15 @@ func TestWorkspaceNamingMissingPrivateStateBehindSymlink(t *testing.T) {
 					}
 					before := namingGuardTree(t, home, physical)
 					got := namingGuardPreview(t, n, source)
+					code := "base_scope_denied"
 					if target == "sibling-prefix" {
-						if got.Plan == nil || got.Status != "complete" || workspacenaming.CheckPlan(*got.Plan) != nil {
-							t.Fatal("safe sibling metadata rejected or changed", got)
-						}
-					} else {
-						if got.Plan != nil || got.Status != "invalid" || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "base_scope_denied" {
-							t.Fatal("missing physical private state accepted", got)
-						}
-						if level == "repository" && got.Diagnostics[0].RepoID != "web" {
-							t.Fatal("missing repository attribution", got)
-						}
+						code = "path_symlink"
+					}
+					if got.Plan != nil || got.Status != "invalid" || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != code {
+						t.Fatal("workspace link was accepted or misclassified", got)
+					}
+					if level == "repository" && got.Diagnostics[0].RepoID != "web" {
+						t.Fatal("missing repository attribution", got)
 					}
 					if !reflect.DeepEqual(before, namingGuardTree(t, home, physical)) {
 						t.Fatal("preview changed resources")
@@ -182,7 +181,7 @@ func TestWorkspaceNamingMissingPrivateStateBehindSymlink(t *testing.T) {
 func TestWorkspaceNamingFailsClosedOnPathResolutionErrors(t *testing.T) {
 	for _, kind := range []string{"loop", "not-directory"} {
 		t.Run(kind, func(t *testing.T) {
-			home := t.TempDir()
+			home := workspaceTemp(t)
 			at := filepath.Join(home, "workspace")
 			if kind == "loop" {
 				if err := os.Symlink(at, at); err != nil {
@@ -200,27 +199,49 @@ func TestWorkspaceNamingFailsClosedOnPathResolutionErrors(t *testing.T) {
 	}
 }
 
-func TestWorkspaceNamingAllowsSafeMissingTailAndSymlinks(t *testing.T) {
-	for _, linked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "missing tail", true: "safe link"}[linked], func(t *testing.T) {
-			home := t.TempDir()
+func TestWorkspaceNamingAndPrepareCheckTheSamePaths(t *testing.T) {
+	for _, level := range []string{"missing tail", "base", "task", "repository"} {
+		t.Run(level, func(t *testing.T) {
+			home := workspaceTemp(t)
 			n := &Node{home: home, dir: filepath.Join(home, ".persona")}
-			if linked {
-				to := filepath.Join(home, "projects")
-				if err := os.Mkdir(to, 0o700); err != nil {
+			plan := workspacePlan(t, home, repositorywire.LayoutContainer, workspaceRemote(t, "trunk"))
+			linkAt, field, repo := "", "", ""
+			switch level {
+			case "base":
+				linkAt, field = plan.BasePath, "base_directory"
+			case "task":
+				linkAt, field = plan.RootPath, "task_directory_template"
+			case "repository":
+				linkAt, field, repo = plan.Repositories[0].AbsolutePath, "directory_alias", "web"
+			}
+			if linkAt != "" {
+				if err := os.MkdirAll(filepath.Dir(linkAt), 0700); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(to, filepath.Join(home, "workspace")); err != nil {
+				if err := os.Symlink(workspaceTemp(t), linkAt); err != nil {
 					t.Skip("symlinks:", err)
 				}
 			}
 			before := namingGuardTree(t, home)
-			got := namingGuardPreview(t, n, namingGuardSource())
-			if got.Status != "complete" || got.Plan == nil || got.Plan.RootPath != filepath.Join(home, "workspace", "task-todo_example") || workspacenaming.CheckPlan(*got.Plan) != nil {
-				t.Fatal("safe metadata-only plan rejected or changed", got)
-			}
+			got := namingGuardPreview(t, n, plan.Source)
 			if !reflect.DeepEqual(before, namingGuardTree(t, home)) {
 				t.Fatal("preview created resources")
+			}
+			req := taskworkspace.Request{WorkspaceID: "ws_parity", OperationID: "op_parity", Plan: plan}
+			prepared := workspaceCall(t, n, "prepare", req)
+			if linkAt == "" {
+				if got.Plan == nil || got.Plan.Digest != plan.Digest || prepared.State != "ready" {
+					t.Fatal(got, prepared)
+				}
+				return
+			}
+			if got.Plan != nil || got.Status != "invalid" || len(got.Diagnostics) != 1 ||
+				got.Diagnostics[0].Code != "path_symlink" || got.Diagnostics[0].Field != field || got.Diagnostics[0].RepoID != repo ||
+				prepared.Error == nil || prepared.Error.Code != got.Diagnostics[0].Code || prepared.Error.RepoID != repo {
+				t.Fatal(got, prepared)
+			}
+			if !reflect.DeepEqual(before, namingGuardTree(t, home)) {
+				t.Fatal("refused preparation created resources")
 			}
 		})
 	}

@@ -75,5 +75,11 @@
   "connector_unavailable": "无法加载连接器状态：{error}",
   "mail_description": "连接邮箱账号，让 Persona 可以阅读、检索并把重要邮件整理进收件箱。",
   "lark_gateway_description": "查看主机飞书网关的实时状态与消息显示偏好。",
-  "feishu_bot_description": "在飞书/Lark 里和 Persona 对话，完成配对并管理推送与话题群设置。"
+  "feishu_bot_description": "在飞书/Lark 里和 Persona 对话，完成配对并管理推送与话题群设置。",
+  "saved_repositories_title": "常用仓库",
+  "saved_repositories_hint": "前往「设置 › 助手」管理已保存的仓库绑定与别名。",
+  "saved_repositories_count_other": "{count} 个已保存",
+  "saved_repositories_empty": "未绑定",
+  "knowledge_scope_title": "知识库同步范围",
+  "knowledge_scope_hint": "前往「设置 › 知识库」选择要同步到知识库的会话、文件夹和文档。"
 }

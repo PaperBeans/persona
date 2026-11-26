@@ -271,6 +271,14 @@ const RestartExitCode = 75
 // TaskWorkspace supports explicit backend-created task workspaces.
 const TaskWorkspace = "task_workspace_v1"
 
+// TaskWorkspaceCapabilities is the reply to task.workspace.capabilities.
+type TaskWorkspaceCapabilities struct {
+	Capability        string `json:"capability"`
+	Start             bool   `json:"start,omitempty"`
+	EmptyRepositories bool   `json:"empty_repositories,omitempty"`
+	LocalGit          bool   `json:"local_git,omitempty"`
+}
+
 // MarkdownCloseout means the node recognizes the terminal-readable work report as well as archived XML.
 const MarkdownCloseout = "closeout.markdown.v1"
 

@@ -217,6 +217,10 @@ func TestAgyToolInput(t *testing.T) {
 			wantWrite(path, "line1\n"+transcript.ApproximateClipNote(14)), true},
 		{"tail cut after escaped backslash", "write_to_file", "Write", written(encode(path), "\"line1\\n\\\\\n<truncated 8 bytes>"),
 			wantWrite(path, "line1\n\\"+transcript.ApproximateClipNote(15)), true},
+		{"read_file with JSON-encoded numeric line bounds", "read_file", "Read", map[string]string{"Path": encode(path), "StartLine": "1", "EndLine": "260"},
+			map[string]string{"file_path": path}, false},
+		{"run_command with JSON-encoded numeric and boolean args", "run_command", "Bash", map[string]string{"CommandLine": encode("go test ./..."), "WaitMsBeforeAsync": "10000", "IsDaemon": "false", "toolSummary": encode("Run tests")},
+			map[string]string{"command": "go test ./...", "description": "Run tests"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.args)

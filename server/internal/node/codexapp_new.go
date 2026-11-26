@@ -155,6 +155,12 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 	if err != nil {
 		return nil, err
 	}
+	backend := backendLaunchFrom(ctx)
+	if backend != nil {
+		if err := backend.beforeDispatch(""); err != nil {
+			return nil, err
+		}
+	}
 	var thread string
 	if projectID == "" {
 		thread, err = seedCodexAppChat(ctx, cli, home, dir, title)
@@ -174,6 +180,11 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 		Launcher: codexAppLauncher, Status: proto.StatusIdle, StartedByPersona: true, UpdatedAt: time.Now().UTC()}
 	n.state.put(s.SessionID, sessionState{Launcher: codexAppLauncher, Cwd: dir, StartedAt: s.UpdatedAt,
 		DesktopPendingModel: model, DesktopPendingEffort: effort})
+	if backend != nil {
+		if receiptErr := backend.executor.recordLaunchSession(s.SessionID); receiptErr != nil {
+			return nil, receiptErr
+		}
+	}
 	if err != nil {
 		return s, desktopCreatedError(s, err, false)
 	}

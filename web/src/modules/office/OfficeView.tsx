@@ -3,17 +3,18 @@
 // (file/convert). The rendered pages go into a frame with no scripts and no network (srcdoc, empty sandbox, CSP):
 // a document is someone else's content, and nothing in it may run as this page or call out.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, ApiError, enc, errorText, fileDownloadURL, isAbort, pastHub } from "../../../lib/api";
-import { extOf, OFFICE_RENDERED, type FileContent } from "../../../lib/files";
-import { SANS, withFallback } from "../../../lib/fonts";
-import { bytes } from "../../../lib/format";
-import { IWORK_PREVIEWS, readZipEntry } from "../../../lib/zip-range";
-import { Button, Loading } from "../../../ui/atoms";
-import { fileBytes } from "./file-data";
-import { rangeReader } from "./file-range";
-import { Empty } from "./parts";
-import { t } from "../../../i18n";
-import { tRich } from "../../../i18n/rich";
+import { api, ApiError, enc, errorText, fileDownloadURL, isAbort, pastHub } from "../../lib/api";
+import { extOf, OFFICE_RENDERED } from "../../lib/files";
+import { SANS, withFallback } from "../../lib/fonts";
+import { bytes } from "../../lib/format";
+import { IWORK_PREVIEWS, readZipEntry } from "../../lib/zip-range";
+import { Button, Loading } from "../../ui/atoms";
+import { fileBytes } from "../../views/session/files/file-data";
+import { rangeReader } from "../../views/session/files/file-range";
+import { Empty } from "../../views/session/files/parts";
+import { t } from "../../i18n";
+import type { ModuleFilePreviewProps } from "../../core/module-host";
+import { tRich } from "../../i18n/rich";
 
 const MAX_OFFICE_BYTES = 100 << 20; // bigger documents go to LibreOffice or download
 const PAD = 24; // the frame's margin around the pages
@@ -28,11 +29,11 @@ type State =
   | { kind: "pdf"; url: string }
   | { kind: "error"; title: string; detail: string; convertible: boolean; missing?: boolean };
 
-export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: string; file: FileContent; onDownload: () => void }) {
+export function OfficeView({ mid, cwd, file, onDownload }: ModuleFilePreviewProps) {
   const ext = extOf(file.name);
   const renderable = OFFICE_RENDERED.includes(ext) && typeof file.text !== "string";
   const iwork = IWORK.includes(ext) && typeof file.text !== "string";
-  const [state, setState] = useState<State>({ kind: "loading", label: t("session-files-officeview.opening") });
+  const [state, setState] = useState<State>({ kind: "loading", label: t("office.opening") });
   const [want, setWant] = useState<"render" | "preview" | "pdf">(renderable ? "render" : iwork ? "preview" : "pdf");
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
     if (want === "preview") {
       // iWork documents carry a preview Apple's apps wrote: a PDF of every page, or a picture of the first
       let url = "";
-      setState({ kind: "loading", label: t("session-files-officeview.reading_preview") });
+      setState({ kind: "loading", label: t("office.reading_preview") });
       readZipEntry(rangeReader(mid, file, cwd, ac.signal), file.size, IWORK_PREVIEWS)
         .then((got) => {
           if (ac.signal.aborted) return;
@@ -58,25 +59,25 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
       };
     }
     if (want === "render") {
-      setState({ kind: "loading", label: t("session-files-officeview.opening_size", { size: bytes(file.size) }) });
+      setState({ kind: "loading", label: t("office.opening_size", { size: bytes(file.size) }) });
       (async () => {
-        if (file.size > MAX_OFFICE_BYTES) throw new Error(t("session-files-officeview.too_large", { size: bytes(file.size) }));
+        if (file.size > MAX_OFFICE_BYTES) throw new Error(t("office.too_large", { size: bytes(file.size) }));
         const data = await fileBytes(mid, file, cwd, ac.signal);
         const doc = ext.startsWith("ppt") || ext === "potx" ? await renderPptx(data) : await renderDocx(data);
         if (!ac.signal.aborted) setState({ kind: "rendered", doc });
-      })().catch((e) => fail(t("session-files-officeview.render_failed"), e, true));
+      })().catch((e) => fail(t("office.render_failed"), e, true));
     } else {
-      setState({ kind: "loading", label: t("session-files-officeview.converting") });
+      setState({ kind: "loading", label: t("office.converting") });
       // the hub gives the machine's LibreOffice 2 minutes (hub/download.go)
       api<{ path: string }>(`/machines/${enc(mid)}/file/convert?path=${enc(file.path)}&cwd=${enc(cwd ?? "")}&to=pdf`, { signal: ac.signal, timeout: pastHub(120_000) })
         .then((r) => !ac.signal.aborted && setState({ kind: "pdf", url: fileDownloadURL(mid, r.path, "", { inline: true }) }))
-        .catch((e) => fail(t("session-files-officeview.convert_failed"), e, false));
+        .catch((e) => fail(t("office.convert_failed"), e, false));
     }
     return () => ac.abort();
   }, [mid, cwd, file, ext, want]);
 
   const bar = (left: React.ReactNode, right?: React.ReactNode) => (
-    <div className="flex min-h-9 shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums">
+    <div className="flex min-h-9 shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-submeta whitespace-nowrap text-ink-3 tabular-nums">
       <span className="min-w-0 flex-1 truncate">{left}</span>
       {right}
     </div>
@@ -91,11 +92,11 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
   if (state.kind === "error") {
     const detail = state.missing ? (
       <>
-        {t("session-files-officeview.no_libreoffice")}
+        {t("office.no_libreoffice")}
         <br />
-        {tRich("session-files-officeview.install_macos", { command: <code className="whitespace-nowrap">brew install --cask libreoffice</code> })}
+        {tRich("office.install_macos", { command: <code className="whitespace-nowrap">brew install --cask libreoffice</code> })}
         <br />
-        {tRich("session-files-officeview.install_linux", { command: <code className="whitespace-nowrap">apt install libreoffice</code> })}
+        {tRich("office.install_linux", { command: <code className="whitespace-nowrap">apt install libreoffice</code> })}
       </>
     ) : (
       state.detail
@@ -103,17 +104,17 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
     return (
       <Empty
         icon="info"
-        title={state.missing ? t("session-files-officeview.needs_libreoffice") : state.title}
+        title={state.missing ? t("office.needs_libreoffice") : state.title}
         detail={detail}
         action={
           <div className="flex gap-2">
             {state.convertible && (
               <Button icon="retry" onClick={() => setWant("pdf")}>
-                {t("session-files-officeview.to_pdf")}
+                {t("office.to_pdf")}
               </Button>
             )}
             <Button icon="arrowDown" onClick={onDownload}>
-              {t("session-files-officeview.download")}
+              {t("office.download")}
             </Button>
           </div>
         }
@@ -124,9 +125,9 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
     return (
       <>
         {bar(
-          state.pdf ? t("session-files-officeview.own_preview") : t("session-files-officeview.own_preview_image"),
+          state.pdf ? t("office.own_preview") : t("office.own_preview_image"),
           <Button tone="quiet" onClick={() => setWant("pdf")}>
-            {t("session-files-officeview.to_pdf")}
+            {t("office.to_pdf")}
           </Button>,
         )}
         {state.pdf ? (
@@ -142,10 +143,10 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
     return (
       <>
         {bar(
-          t("session-files-officeview.libreoffice_pdf"),
+          t("office.libreoffice_pdf"),
           (renderable || iwork) && (
             <Button tone="quiet" onClick={() => setWant(renderable ? "render" : "preview")}>
-              {renderable ? t("session-files-officeview.render_preview") : t("session-files-officeview.builtin_preview")}
+              {renderable ? t("office.render_preview") : t("office.builtin_preview")}
             </Button>
           ),
         )}
@@ -155,9 +156,9 @@ export function OfficeView({ mid, cwd, file, onDownload }: { mid: string; cwd?: 
   return (
     <>
       {bar(
-        `${t(state.doc.unit === "slides" ? "session-files-officeview.slides" : "session-files-officeview.pages", { count: state.doc.count })} · ${bytes(file.size)}`,
+        `${t(state.doc.unit === "slides" ? "office.slides" : "office.pages", { count: state.doc.count })} · ${bytes(file.size)}`,
         <Button tone="quiet" onClick={() => setWant("pdf")}>
-          {t("session-files-officeview.to_pdf")}
+          {t("office.to_pdf")}
         </Button>,
       )}
       <DocFrame doc={state.doc} title={file.name} />
@@ -258,9 +259,9 @@ async function renderDocx(data: ArrayBuffer): Promise<Rendered> {
 }
 
 async function renderPptx(data: ArrayBuffer): Promise<Rendered> {
-  const [{ default: JSZip }, { readPptx, deckHTML, DECK_CSS }] = await Promise.all([import("jszip"), import("../../../lib/pptx")]);
+  const [{ default: JSZip }, { readPptx, deckHTML, DECK_CSS }] = await Promise.all([import("jszip"), import("../../lib/pptx")]);
   const zip = await JSZip.loadAsync(data);
   const deck = await readPptx(zip, (s) => new DOMParser().parseFromString(s, "application/xml"));
-  if (!deck.slides.length) throw new Error(t("session-files-officeview.no_slides"));
+  if (!deck.slides.length) throw new Error(t("office.no_slides"));
   return { html: deckHTML(deck), css: DECK_CSS, width: deck.width, count: deck.slides.length, unit: "slides" };
 }

@@ -477,7 +477,31 @@ func resolveTodoStageBlocker(b todoBlockerRecord, facts todoBlockerFactSnapshot)
 }
 
 func normalizeTodoBlockerPRRef(raw string) string {
-	return strings.TrimRight(strings.TrimSpace(raw), "/")
+	s := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if s == "" {
+		return ""
+	}
+	scheme, rest, found := strings.Cut(s, "://")
+	if !found {
+		return s
+	}
+	lowerScheme := strings.ToLower(scheme)
+	if lowerScheme != "http" && lowerScheme != "https" {
+		return s
+	}
+	end := strings.IndexAny(rest, "/?#")
+	authority := rest
+	suffix := ""
+	if end >= 0 {
+		authority = rest[:end]
+		suffix = rest[end:]
+	}
+	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+		authority = authority[:at+1] + strings.ToLower(authority[at+1:])
+	} else {
+		authority = strings.ToLower(authority)
+	}
+	return lowerScheme + "://" + authority + suffix
 }
 
 func lookupTodoBlockerPRFact(prs map[string]todoBlockerPRFact, targetRef string) (todoBlockerPRFact, bool) {

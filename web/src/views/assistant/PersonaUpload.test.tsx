@@ -70,6 +70,13 @@ vi.mock("../../lib/look-upload", async (orig) => {
     },
   };
 });
+vi.mock("../../lib/look-upload-states", async (orig) => {
+  const real = await orig<typeof import("../../lib/look-upload-states")>();
+  return {
+    ...real,
+    readUploadImage: async () => ({ source: {}, size: { w: 600, h: 600 }, release: () => {} }),
+  };
+});
 class FakeImage {
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -371,5 +378,81 @@ describe("uploaded looks in the picker", () => {
     expect(dlg.textContent).toContain(t("assistant-lookupload.edit_title"));
     const nameInput = document.getElementById([...dlg.querySelectorAll("label")].find((l) => l.textContent === t("assistant-lookupload.name"))!.htmlFor) as HTMLInputElement;
     expect(nameInput.value).toBe("Doudou");
+  });
+
+  function dispatchDrag(el: Element, type: "dragenter" | "dragover" | "dragleave" | "drop", files: File[] = [new File(["x"], "drop.png", { type: "image/png" })]) {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    const dt = { types: ["Files"], files, dropEffect: "" };
+    Object.defineProperty(ev, "dataTransfer", { value: dt, configurable: true });
+    act(() => { el.dispatchEvent(ev); });
+    return { ev, dt };
+  }
+
+  async function dispatchDrop(el: Element, files: File[] = [new File(["x"], "drop.png", { type: "image/png" })]) {
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    const dt = { types: ["Files"], files, dropEffect: "" };
+    Object.defineProperty(ev, "dataTransfer", { value: dt, configurable: true });
+    await act(async () => { el.dispatchEvent(ev); });
+    return { ev, dt };
+  }
+
+  it("highlights the Upload card on drag-over and opens the upload dialog with the dropped file ready to crop", async () => {
+    hub.features = ["look_uploads", "look_uploads_states"];
+    const { t } = await draw();
+    const uploadCard = byLabel(t("assistant-persona.upload_label"))!;
+    const { dt } = dispatchDrag(uploadCard, "dragover");
+    expect(uploadCard.getAttribute("data-drop-over")).toBe("true");
+    expect((uploadCard as HTMLElement).style.outlineStyle).toBe("dashed");
+    expect(dt.dropEffect).toBe("copy");
+
+    await dispatchDrop(uploadCard);
+    expect(uploadCard.getAttribute("data-drop-over")).toBeNull();
+    expect((uploadCard as HTMLElement).style.outlineStyle).toBe("");
+    const dlg = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dlg).not.toBeNull();
+    expect(dlg.textContent).toContain(t("assistant-lookupload.title"));
+    await vi.waitFor(() => {
+      expect(dlg.querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
+    }, { timeout: 5_000 });
+  });
+
+  it("highlights an uploaded card with Edit and opens Edit with the dropped file as new main picture (Keep current reverts)", async () => {
+    hub.features = ["look_uploads", "look_uploads_states"];
+    const { t } = await draw();
+    const doudouCard = radios().find((r) => r.getAttribute("aria-label") === "Doudou")!;
+    const { dt } = dispatchDrag(doudouCard, "dragover");
+    expect(doudouCard.getAttribute("data-drop-over")).toBe("true");
+    expect((doudouCard as HTMLElement).style.outlineStyle).toBe("dashed");
+    expect(dt.dropEffect).toBe("copy");
+
+    await dispatchDrop(doudouCard);
+    expect(doudouCard.getAttribute("data-drop-over")).toBeNull();
+    expect((doudouCard as HTMLElement).style.outlineStyle).toBe("");
+    const dlg = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dlg).not.toBeNull();
+    expect(dlg.textContent).toContain(t("assistant-lookupload.edit_title"));
+    await vi.waitFor(() => {
+      expect(dlg.querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
+    }, { timeout: 5_000 });
+    expect(dlg.textContent).toContain(t("assistant-lookupload.keep_current"));
+    expect(hub.uploads).toHaveLength(0);
+  });
+
+  it("ignores drops on built-in cards and on uploaded cards without Edit, while guarding against browser navigation", async () => {
+    hub.features = ["look_uploads"]; // no look_uploads_states, so no Edit on Doudou
+    await draw();
+    const mochiCard = radios().find((r) => r.getAttribute("aria-label") === "Mochi, the default avatar")!;
+    const frogCard = radios().find((r) => r.getAttribute("aria-label") === "Milk Frog")!;
+    const doudouCard = radios().find((r) => r.getAttribute("aria-label") === "Doudou")!;
+
+    for (const card of [mochiCard, frogCard, doudouCard]) {
+      const over = dispatchDrag(card, "dragover");
+      expect(card.getAttribute("data-drop-over")).toBeNull();
+      expect(over.ev.defaultPrevented).toBe(true);
+      expect(over.dt.dropEffect).toBe("none");
+      const drop = await dispatchDrop(card);
+      expect(drop.ev.defaultPrevented).toBe(true);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    }
   });
 });

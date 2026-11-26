@@ -1,4 +1,4 @@
-// The alert sheet's disk section (#8037): each volume, the largest folders under home (the node says when its bounded
+// Cache recovery on computers that predate the disk usage map (#8037): each volume, the largest folders under home (the node says when its bounded
 // scan was cut short), and the rebuildable caches it found, each with a checkbox: the ones nothing uses are picked, one
 // a running tool uses can't be. Clean selected → a confirmation naming every folder and the total → POST …/cleanup →
 // what the volume really gained (freed_bytes, measured by the node) and each item's outcome; then the diagnosis again.
@@ -6,10 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { bytesBin, percent } from "../../lib/machine-detail";
 import { cleanup, diagnosisFailure, type CleanupResult, type DiagnosisCache, type DiagnosisFailure } from "../../lib/machine-diagnosis";
-import type { Machine, MachineMetrics } from "../../lib/types";
+import type { Machine } from "../../lib/types";
 import { Button, cx, Dialog } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
-import { DiagnosisLoading, DiagnosisNote, Figure, SheetPart, ShareBar, useDiagnosis } from "./AlertParts";
+import { DiagnosisLoading, DiagnosisNote, SheetPart, ShareBar, useDiagnosis } from "./AlertParts";
 
 const SECTIONS = ["disk"] as const;
 
@@ -41,7 +41,7 @@ export function cacheTitle(id: string): string {
   }
 }
 
-function statusText(status: string, error?: string): string {
+export function cleanupStatusText(status: string, error?: string): string {
   switch (status) {
     case "cleaned":
       return t("machines-alerts.status_cleaned");
@@ -54,9 +54,8 @@ function statusText(status: string, error?: string): string {
   }
 }
 
-export function DiskSection({ machine, metrics, redeploy, onUsageMap }: { machine: Machine; metrics?: MachineMetrics; redeploy?: React.ReactNode; onUsageMap?: (mid: string) => void }) {
+export function LegacyCacheRecovery({ machine }: { machine: Machine }) {
   const { read, reload } = useDiagnosis(machine.id, SECTIONS, machine.online);
-  const latest = metrics?.latest;
   const data = read.state === "ok" ? read.data.disk : undefined;
   const caches = useMemo(() => data?.caches ?? [], [data]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -68,7 +67,6 @@ export function DiskSection({ machine, metrics, redeploy, onUsageMap }: { machin
   useEffect(() => setPicked(new Set(caches.filter((c) => !c.in_use).map((c) => c.id))), [caches]);
   const chosen = caches.filter((c) => picked.has(c.id) && !c.in_use);
   const total = chosen.reduce((n, c) => n + c.bytes, 0);
-  const diskPct = latest?.disk_total && latest.disk_used !== undefined ? (100 * latest.disk_used) / latest.disk_total : undefined;
 
   const run = async () => {
     setBusy(true);
@@ -109,22 +107,11 @@ export function DiskSection({ machine, metrics, redeploy, onUsageMap }: { machin
               );
             })}
           </ul>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <Figure label={t("machines-alerts.disk")} value={percent(diskPct)} detail={latest?.disk_total ? t("machines-alerts.disk_free", { size: bytesBin(Math.max(0, latest.disk_total - (latest.disk_used ?? 0))) }) : undefined} tone={diskPct === undefined ? undefined : diskPct >= 90 ? "critical" : diskPct >= 80 ? "warning" : undefined} />
-          </div>
-        )}
-        {onUsageMap && (
-          <div className="mt-2">
-            <Button size="sm" tone="secondary" icon="chart" onClick={() => onUsageMap(machine.id)} testId="disk-usage-map">
-              {t("machines-usagemap.reclaim_open")}
-            </Button>
-          </div>
-        )}
+        ) : null}
       </SheetPart>
       <SheetPart part="why">
         {read.state === "loading" && <DiagnosisLoading label={t("machines-alerts.disk_loading")} />}
-        {read.state === "failed" && <DiagnosisNote failure={read.failure} onRetry={reload} redeploy={redeploy} />}
+        {read.state === "failed" && <DiagnosisNote failure={read.failure} onRetry={reload} />}
         {data && (
           <>
             <h4 className="mb-1 text-meta font-medium text-ink">{t("machines-alerts.folders_title")}</h4>
@@ -179,7 +166,7 @@ export function DiskSection({ machine, metrics, redeploy, onUsageMap }: { machin
             <p className="mt-1.5 text-submeta text-ink-3">{t("machines-alerts.clean_note")}</p>
           </>
         )}
-        {failure && <div className="mt-2"><DiagnosisNote failure={failure} onRetry={() => setAsking(true)} redeploy={redeploy} /></div>}
+        {failure && <div className="mt-2"><DiagnosisNote failure={failure} onRetry={() => setAsking(true)} /></div>}
         {result && <CleanupOutcome result={result} />}
       </SheetPart>
       <Dialog
@@ -227,7 +214,7 @@ function CleanupOutcome({ result }: { result: CleanupResult }) {
         {result.items.map((i) => (
           <li key={i.id} className="flex items-baseline gap-2 text-submeta" data-item={i.id} data-status={i.status}>
             <span className="min-w-0 flex-1 truncate text-ink-2">{cacheTitle(i.id)}</span>
-            <span className={cx("shrink-0", i.status === "cleaned" ? "text-ink-3" : i.status === "failed" ? "text-red" : "text-orange")}>{statusText(i.status, i.error)}</span>
+            <span className={cx("shrink-0", i.status === "cleaned" ? "text-ink-3" : i.status === "failed" ? "text-red" : "text-orange")}>{cleanupStatusText(i.status, i.error)}</span>
           </li>
         ))}
       </ul>

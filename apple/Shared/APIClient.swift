@@ -1263,7 +1263,7 @@ nonisolated struct APIClient: Sendable {
         var images: [ImagePayload]?
         var launcher: String?
         var model: String?
-        var clientMsgID: String?
+        var clientMsgID: String
         var clearDraft: String?
         var todoID: String?
         var via: MessageVia?
@@ -1275,8 +1275,8 @@ nonisolated struct APIClient: Sendable {
         }
     }
     /// launcher / model switch what a headless (assistant) conversation runs on from this message on. clientMsgID
-    /// stays the same on a retry (the node types it once); clearDraft is the computer's draft the user agreed to
-    /// clear first.
+    /// is required and stays the same on a retry (the node types it once; runtime sessions reject sends without one
+    /// with `codex_send_guard`); clearDraft is the computer's draft the user agreed to clear first.
     /// opID: the message's op id (the outbox passes its id, the same as clientMsgID: docs/protocol/protocol.md「Operation receipts」).
     /// via: how the app sent it when not typed in the app itself (Siri, the share sheet).
     /// Returns whether the message waits behind a question on the computer (`waits_on_computer`, #5890): a Claude
@@ -1284,7 +1284,7 @@ nonisolated struct APIClient: Sendable {
     /// (the composer and the outbox flush) tells the user; the other callers drop it.
     @discardableResult
     func send(_ k: SessionKey, text: String, images: [ImagePayload] = [], launcher: String? = nil, model: String? = nil,
-              clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil) async throws -> Bool {
+              clientMsgID: String, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil) async throws -> Bool {
         try await sendReply(k, text: text, images: images, launcher: launcher, model: model, clientMsgID: clientMsgID,
                             clearDraft: clearDraft, todoID: todoID, via: via, opID: opID).waitsOnComputer == true
     }
@@ -1306,9 +1306,13 @@ nonisolated struct APIClient: Sendable {
 
     /// `send`, with the whole answer (`SendReply`).
     func sendReply(_ k: SessionKey, text: String, images: [ImagePayload] = [], launcher: String? = nil, model: String? = nil,
-                   clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil, holdsAgentMessages: Bool = false, waitForEffort: Bool = false) async throws -> SendReply {
+                   clientMsgID: String, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil, holdsAgentMessages: Bool = false, waitForEffort: Bool = false) async throws -> SendReply {
+        let normalizedClientMsgID = clientMsgID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedClientMsgID.isEmpty else {
+            throw APIError(status: 400, message: "client_msg_id is required", fields: ["code": "codex_send_guard", "delivered": "none"])
+        }
         let data = try await post(sp(k) + "/messages", body: SendBody(text: HubNaming.outbound(text, canonical: personaNaming), images: images.isEmpty ? nil : images, launcher: launcher,
-                                                                      model: model, clientMsgID: clientMsgID, clearDraft: clearDraft, todoID: todoID, via: via,
+                                                                      model: model, clientMsgID: normalizedClientMsgID, clearDraft: clearDraft, todoID: todoID, via: via,
                                                                       waitForEffort: waitForEffort ? true : nil),
                                   timeout: 100, opID: opID, extraHeaders: holdsAgentMessages ? ["X-Persona-Features": UndeliveredMessage.agentHoldFeature] : [:])
         return (try? JSON.decoder.decode(SendReply.self, from: data)) ?? SendReply()
@@ -1370,6 +1374,8 @@ nonisolated struct APIClient: Sendable {
     struct DeviceTokens: Decodable, Sendable {
         var tokens: [DeviceToken]
         var current: String?
+        /// Credential IDs with a live connection to the hub; nil from an older hub.
+        var online: [String]?
         /// Per credential, the push way of the device it registered last; nil from an older hub.
         var push: [String: PushRoute]?
         /// Which device takes the phone tools' calls (docs/apple/phone-tools.md); nil from an older hub.
@@ -1383,8 +1389,19 @@ nonisolated struct APIClient: Sendable {
     }
 
     /// Trades this credential for a device's own (kind "watch": answer-only).
-    func createToken(name: String, kind: String) async throws -> NewToken {
-        try JSON.decoder.decode(NewToken.self, from: try await request("POST", "/api/v1/auth/tokens", body: ["name": name, "kind": kind]))
+    /// When `replaces` names an earlier credential of the same kind, the hub revokes it alongside the exchange.
+    func createToken(name: String, kind: String, replaces: String? = nil) async throws -> NewToken {
+        let base = ["name": name, "kind": kind]
+        if let replaces, !replaces.isEmpty {
+            var withReplaces = base
+            withReplaces["replaces"] = replaces
+            do {
+                return try JSON.decoder.decode(NewToken.self, from: try await request("POST", "/api/v1/auth/tokens", body: withReplaces))
+            } catch let error as APIError where error.status == 400 {
+                // An older hub that rejects unknown fields on /auth/tokens answers 400; retry once without `replaces`.
+            }
+        }
+        return try JSON.decoder.decode(NewToken.self, from: try await request("POST", "/api/v1/auth/tokens", body: base))
     }
     func deviceTokens(timeout: TimeInterval = 30) async throws -> DeviceTokens {
         try JSON.decoder.decode(DeviceTokens.self, from: try await request("GET", "/api/v1/auth/tokens", timeout: timeout))

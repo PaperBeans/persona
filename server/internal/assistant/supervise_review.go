@@ -506,7 +506,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			}
 			return fmt.Sprintf("Task %s is accepted by you and remains open awaiting the owner's verification (user_check). "+
 				"Its Agent stays available. The owner's \"Pass\" completes it; change feedback returns it to ongoing work. "+
-				"A \"Please verify\" card waits for them: don't ask them again. Terminal cleanup: skipped.", t.ID) + result.words() + deliveryNote, nil
+				"They can find the verification under Needs you in Persona. Don't ask them again. Terminal cleanup: skipped.", t.ID) + result.words() + deliveryNote, nil
 		}
 		reason := cmp.Or(clip(oneLine(note), 80), "验收通过")
 		if verdict == reviewCancelled {
@@ -881,6 +881,16 @@ func (s *Service) reviewDoneTodo(ctx context.Context, id, reason string, accepte
 		if accepted && row.DoneAt != nil {
 			s.evaluateTodoAfterDependents(ctx, id)
 			s.evaluateParentCloseoutForChild(ctx, id)
+		}
+		if s.settings(ctx).todosV2On() {
+			if recErr := s.ResetSupervisedTaskRecovery(ctx, id); recErr != nil {
+				s.logf("task %s: reset todos_v2 restart recovery: %v", id, recErr)
+			}
+			if accepted && row.DoneAt != nil {
+				if _, blkErr := s.ReconcileTodoBlockers(ctx, id); blkErr != nil {
+					s.logf("task %s: reconcile todos_v2 blockers: %v", id, blkErr)
+				}
+			}
 		}
 		if t, now := s.todoNow(id); ok && now {
 			// A side conversation's task the main conversation supervised: the planning conversation hears it ended (#4669).

@@ -433,4 +433,3 @@ def for_apps(defs: dict[str, Def]) -> dict[str, Def]:
             if defs[r].side:
                 raise SchemaError(f"{d.name} refers to {r}, which is {defs[r].side}-side: the apps do not have it")
     return apps
-

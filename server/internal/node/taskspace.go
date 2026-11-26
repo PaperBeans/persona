@@ -117,10 +117,10 @@ func (n *Node) putAgentState(ctx context.Context, launch host.Launcher, id strin
 // tabSpace keeps ordinary directory placement unless this is a task start on classic herdr. A recorded task workspace
 // is selected by ID, never by a directory basename or a mutable label. If it is gone, the same task label is recreated.
 func (n *Node) tabSpace(ctx context.Context, launch host.Launcher, cwd, asked string) (string, error) {
-	if backendLaunchFrom(ctx) != nil {
+	ts := taskSpaceIn(ctx, launch)
+	if backend := backendLaunchFrom(ctx); backend != nil && (!backend.taskDispatch || ts == nil) {
 		return "", nil
 	}
-	ts := taskSpaceIn(ctx, launch)
 	if ts == nil {
 		if asked != "" {
 			if _, ok := launch.(*herdrHost); ok {

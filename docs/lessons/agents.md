@@ -135,6 +135,15 @@ message on the node until it ends; count a turn the node just started as running
 sends in a row steer the second into the first's turn. On Codex's own app-server, steer with `turn/steer` and the
 observed turn id instead; never send both a steer and a start for one message.
 
+## Task workspace sources and ownership (#16161)
+
+For a local linked checkout, keep the source Git directory's identity separate from the
+owned task path. Otherwise a generic delete guard can claim the user's source repository.
+Save the chosen commit and operation before dispatching a side effect. A missing capability
+can select the older checkout path. An uncertain prepare or start must retain the same operation.
+Use the same path check at preview and prepare so existing symlinks cannot pass one check
+and fail the other.
+
 ## Task branch reuse is not forced worktree creation (#8357)
 
 An explicitly named task branch may already have a checkout outside the engine's usual directory. Discover it from Git,

@@ -3,7 +3,7 @@ import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type T
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
 import { decisionDismissed, linkedParkInteraction, parkInteractionID, reviewState, withoutParkInteraction } from "./supervision";
 import { finishedAt, hubNeedsYou, JUST_DONE_MS, openByView, supersededFailedStarts, triage } from "./todo-triage";
-import { awaitsReview, dockAgents, heldDelivery, heldForSupervisor, makeSessionLookup, openAsk, todoRank, todoStatus, withInteractionLookup, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { awaitsReview, dockAgents, heldDelivery, heldForSupervisor, makeSessionLookup, openAsk, taskReviewDecisionAsk, todoRank, todoStatus, withInteractionLookup, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
 import { sameManager } from "./manager-choice";
@@ -213,8 +213,11 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     const waits = status === "failed" ? bucket === "open" && !supervised : !todo.done_at && WAITS_ON_YOU.has(status) && !held;
     const decision = taskAwaitsDecision(todo);
     const deliveryApproval = heldDelivery(todo)?.unblock === "user";
-    // the hub's view decides when there is one, so this tray, the To-dos badge and the hub's needs_you agree
-    const hub = hubNeedsYou(todo, openOf);
+    // The global badge skips quiet tasks. Explicit reviews can still ask the owner in the conversation tray.
+    const supervisesHere = todo.supervision?.supervisor === conversation;
+    const quietOwnerAskHere = todo.quiet && (isMain || supervisesHere) && (reviewState(todo) === "user_check" ||
+      taskReviewDecisionAsk(todo) && !input.deferred?.[decisionLaterKey(todo)]);
+    const hub = hubNeedsYou(quietOwnerAskHere ? { ...todo, quiet: false } : todo, openOf);
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks, countsOpen });
     else if (hub ?? (waits || decision || deliveryApproval)) {
       // Only the review decision is hidden; a live Agent question above still has its home.
@@ -286,15 +289,25 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   };
 }
 
-/** Needs you's rows by the conversation supervising them (#4314, docs/assistant/assistant.md "Background rounds"): a
- *  task's `origin`, else `conversation` (agents, plans, message cards, hand-made to-dos). This conversation's group comes
+/** Needs you's rows by conversation (#4314, docs/assistant/assistant.md "Background rounds"): review decisions
+ *  follow their supervisor. Personal verifications are in Main's own group and their supervisor's tray. Rows
+ *  showing a live Agent interaction follow their origin. This conversation's group comes
  *  first, then the others in the order their first row appears; the rows and their order within a group are as given,
  *  so the entry's count is unchanged. One group when every row is this conversation's. */
-export function needsYouBySupervisor(items: readonly NeedsYouItem[], conversation: string): { supervisor: string; items: NeedsYouItem[] }[] {
+export function needsYouBySupervisor(items: readonly NeedsYouItem[], conversation: string, isMain = false): { supervisor: string; items: NeedsYouItem[] }[] {
   const groups = new Map<string, NeedsYouItem[]>([[conversation, []]]);
   for (const item of items) {
-    const supervisor = item.kind === "task" && item.todo.origin ? item.todo.origin :
-      item.kind === "plan" ? item.plan.conversation || conversation : conversation;
+    let supervisor = conversation;
+    if (item.kind === "task") {
+      const { todo, asks } = item;
+      if (!asks.length && reviewState(todo) === "user_check") {
+        supervisor = isMain ? conversation : todo.supervision?.supervisor || todo.origin || conversation;
+      } else {
+        supervisor = (!asks.length && taskReviewDecisionAsk(todo) && todo.supervision?.supervisor) || todo.origin || conversation;
+      }
+    } else if (item.kind === "plan") {
+      supervisor = item.plan.conversation || conversation;
+    }
     const group = groups.get(supervisor);
     if (group) group.push(item);
     else groups.set(supervisor, [item]);

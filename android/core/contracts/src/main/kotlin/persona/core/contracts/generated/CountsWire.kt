@@ -56,6 +56,10 @@ data class CountsViewCounts(
      * The Agents that need the owner (docs/protocol/counts.md, "agents_needs_you").
      */
     @SerialName("agents_needs_you") val agentsNeedsYou: CountsViewCount? = null,
+    /**
+     * The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, "todos_needs_you").
+     */
+    @SerialName("todos_needs_you") val todosNeedsYou: CountsViewCount? = null,
 )
 
 /**
@@ -68,6 +72,10 @@ data class CountsViewTotals(
      * counts.agents_needs_you.n.
      */
     @SerialName("agents_needs_you") val agentsNeedsYou: Int? = null,
+    /**
+     * counts.todos_needs_you.n.
+     */
+    @SerialName("todos_needs_you") val todosNeedsYou: Int? = null,
 )
 
 /**

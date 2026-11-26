@@ -29,9 +29,11 @@ import { useScrollMemory } from "../lib/scroll-memory";
 import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { useScoped } from "../lib/current-assistant";
 import { lazyPage } from "../lib/lazy-page";
-import { dropTodo, refresh, refreshTodos, useStore } from "../lib/store";
+import { dropTodo, putTodo, refresh, refreshTodos, useStore } from "../lib/store";
 import {
   addTodoDecision,
+  addTodoExternalPRBlocker,
+  cancelTodoBlocker,
   createTodo,
   DECISIONS_FIRST,
   type DecisionsView,
@@ -58,8 +60,10 @@ import {
   todoStatus,
   unlinkAgentFromTodo,
   unlinkSpaceFromTodo,
+  unseeTodo,
   updateTodo,
   type Todo,
+  type TodoActiveBlocker,
   type TodoAgent,
   type TodoImage,
   type TodoPatch,
@@ -93,6 +97,7 @@ import {
   TODO_LIST_FILTERS,
   TODO_LIST_SORTS,
   hiddenWaiting,
+  isAgentTask,
   isTodoListFilter,
   isTodoListSort,
   listFilterCounts,
@@ -108,6 +113,7 @@ import { foldGoalTasks, type GoalFoldResult, type GoalSummary } from "../lib/tod
 import { findSelectedBlocker, matchesSharedBlocker, parseSharedBlockers } from "../lib/todo-shared-blockers";
 import { SharedBlockersStrip } from "../components/SharedBlockersStrip";
 import {
+  eligibleParentTargets,
   reorganizeDirectionOptions,
   reorganizeTodos,
   resolveDirectionSections,
@@ -116,6 +122,7 @@ import {
 } from "../lib/todo-reorganize";
 import { BatchReorganizeBar } from "../components/BatchReorganizeBar";
 import { TodoDirectionPicker } from "../components/TodoDirectionPicker";
+import { TodoParentPicker } from "../components/TodoParentPicker";
 import {
   classifyTodoDetailTemplate,
   resolveWorkGoalActions,
@@ -812,6 +819,10 @@ function TodoListView({
     setTodoSeen(id, true, after).catch(failed);
     toast(t("todos.seen_moved"), "ok", { label: t("lib-agents.undo"), run: () => void setTodoSeen(id, false).catch(failed) });
   }, []);
+  const markDecidedUnseen = useCallback((id: string) => {
+    decided.current.add(id);
+    if (seenOnLeave.current === id) seenOnLeave.current = undefined;
+  }, []);
   // Board is read-only: track a to-do opened while on Board so closing it (even via a URL change that drops
   // view=board before selectedId clears) never arms or fires the automatic seen-on-leave write.
   const boardOpenedId = useRef<string | undefined>(undefined);
@@ -1223,6 +1234,7 @@ function TodoListView({
                           role="radio"
                           aria-checked={active}
                           data-selected={active}
+                          data-kind={k}
                           onClick={() => setKindFilter(k)}
                           className={cx(
                             "touch-hit h-7 rounded-chip px-2 text-submeta whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-accent",
@@ -1635,6 +1647,7 @@ function TodoListView({
               onOpenTodo={openFromList}
               onDeleteClick={() => askDelete(activeTodo.id)}
               todosV2={todosV2}
+              allTodos={todosV2 ? todos : undefined}
               parentTodo={todosV2 && activeTodo.part_of ? todos.find((td) => td.id === activeTodo.part_of) : undefined}
               childTodos={todosV2 ? todos.filter((td) => td.part_of === activeTodo.id) : undefined}
               directionName={
@@ -1647,6 +1660,7 @@ function TodoListView({
               }
               directions={todosV2 ? reorganizeDirections : undefined}
               onReorganizeDirection={todosV2 ? applyDetailReorganize : undefined}
+              onUnseen={todosV2 ? markDecidedUnseen : undefined}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
@@ -2418,6 +2432,7 @@ const DOT_STATE: Record<TodoStatus, AgentState> = {
  *  else what its agent last reported to its supervisor (#3156). */
 export function todoRowView(todo: Todo, lookup: SessionLookup, interactions: Interaction[]): TodoRowView {
   const view = agentRowView(todo, lookup, interactions);
+  if (todo.wait != null) return view;
   // Nobody is working on it (#3618): the hub's finding goes ahead of what a stopped agent last said (Interrupted,
   // Follow up; docs/assistant/todos.md). A card that waits for the user still says its question.
   const orphan = view.status !== "needs_you" ? orphanedLine(todo) : undefined;
@@ -2449,7 +2464,7 @@ function agentRowView(todo: Todo, lookup: SessionLookup, interactions: Interacti
   const urgent = mostUrgentAgent(todo, lookup);
   const activeCount = (todo.agents ?? []).filter((a) => !a.released_at).length;
   const view: TodoRowView = { status, dotState: DOT_STATE[shownStatus(todo, status)], age: lastMoved(todo, lookup), activeCount, urgentLine: false, urgentLead: "", urgentText: "", orphaned: false, ultracode: todoUltracode(todo, lookup), wait: waitOf(todo, status, lookup) };
-  if (todo.done_at || !urgent?.session) return view;
+  if (todo.wait != null || todo.done_at || !urgent?.session) return view;
   const limit = status === "usage_limit" ? usageLimitLabel(urgent.session) : undefined;
   if (limit) {
     view.urgentLine = true;
@@ -2553,9 +2568,10 @@ const TodoListItem = memo(function TodoListItem({
 }) {
   const { status, dotState, activeCount } = view;
   const effectiveSection = section ?? view.section;
-  const showWait = effectiveSection === "parked";
+  const parkedRow = effectiveSection === "parked";
   // the PR it waits on: its current one, or an earlier one still open (#7935)
-  const openPR = effectiveSection === "parked" ? openMergePRs(todo, Date.now())[0] : undefined;
+  const legacyMerges = todo.wait == null && parkedRow ? openMergePRs(todo, Date.now()) : [];
+  const openPR = todo.wait?.kind === "pr_merge" || legacyMerges.length > 0;
   // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
   const look = todoLook(todo, status, view.wait);
   // its steps as the hub counts them (#11858, lib/todo-steps.ts): in place of Not started, or after its Agent count
@@ -3033,7 +3049,7 @@ const TodoListItem = memo(function TodoListItem({
         )}
 
         {/* Status Line (parked rows collapse to title + concise TaskWaitInfo summary line) */}
-        {!showWait && (
+        {!parkedRow && (
           <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px]" data-testid="todo-status-line">
             {open && <StatusMark state={dotState} size="sm" />}
             <span className={cx("shrink-0 whitespace-nowrap font-medium", TONE_CLASS[look.tone])} data-testid="todo-status">{steps?.label ?? look.label}</span>
@@ -3085,7 +3101,7 @@ const TodoListItem = memo(function TodoListItem({
 
         {/* Due date, a reminder still to push, high priority (#1683) */}
         <TodoPlanLine todo={todo} />
-        {showWait && <div className="mt-1" data-testid={openPR ? "todo-pr-line" : undefined}><TaskWaitInfo todo={todo} merges={openMergePRs(todo, Date.now())} /></div>}
+        {(todo.wait != null || parkedRow) && <div className="mt-1" data-testid={openPR ? "todo-pr-line" : undefined}><TaskWaitInfo todo={todo} merges={legacyMerges} /></div>}
 
         {/* Why its agent did not start, while it waits on the owner (DESIGN_SYSTEM 5.6: what failed, in red) */}
         {failedOpen && <div className="mt-1 truncate text-[11.5px] text-red" data-testid="todo-start-failed">{t("todos.start_failed", { error: todo.start_error ?? "" })}</div>}
@@ -3108,7 +3124,7 @@ const TodoListItem = memo(function TodoListItem({
         )}
 
         {/* Most Urgent Agent Line */}
-        {view.urgentLine && !showWait && (
+        {view.urgentLine && !parkedRow && todo.wait == null && (
           <div className="mt-1 truncate text-[11.5px] text-ink-3" data-orphaned={view.orphaned || undefined}>
             {view.urgentLead && <span className={cx("font-medium", view.orphaned ? "text-orange" : "text-attention")}>{view.urgentLead}</span>}
             {view.urgentText}
@@ -3377,7 +3393,7 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
   if (!sup) return null;
   const list = checklist(sup);
   const review = latestReview(sup);
-  const parked = triage(todo, lookup, Date.now()).section === "parked";
+  const parked = todo.wait == null && triage(todo, lookup, Date.now()).section === "parked";
   // What this list cannot say of finished work (#3822): the criteria a scope change dropped, and what was done beyond the brief.
   const extras = todo.done_at ? resultExtras(todo) : undefined;
   const assistantMatchesTodo = Boolean(assistant && sameManager(assistant.manager ?? shown, todo.manager));
@@ -3615,6 +3631,238 @@ function TodoImages({ todo, owner }: { todo: Todo; owner: string }) {
   );
 }
 
+function activeBlockerKindLabel(kind: string): string {
+  switch (kind) {
+    case "external_pr":
+      return t("todos.active_blocker_kind_external_pr");
+    case "todo_done":
+      return t("todos.active_blocker_kind_todo_done");
+    case "todo_stage":
+      return t("todos.active_blocker_kind_todo_stage");
+    case "merge_train":
+      return t("todos.active_blocker_kind_merge_train");
+    case "write_conflict":
+      return t("todos.active_blocker_kind_write_conflict");
+    case "owner_decision":
+      return t("todos.active_blocker_kind_owner_decision");
+    default:
+      return kind.trim() || t("todos.active_blocker_kind_other");
+  }
+}
+
+function activeBlockerLink(raw: string): { url: string; label: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("https://")) return null;
+  let u: URL;
+  try {
+    u = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:") return null;
+  const ghPr = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/.exec(u.pathname);
+  if (ghPr) return { url: u.href, label: `${ghPr[1]}/${ghPr[2]}#${ghPr[3]}` };
+  const ghIssue = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/.exec(u.pathname);
+  if (ghIssue) return { url: u.href, label: `${ghIssue[1]}/${ghIssue[2]}#${ghIssue[3]}` };
+  const glMr = /^\/(.+?)\/-\/merge_requests\/(\d+)\/?$/.exec(u.pathname);
+  if (glMr) return { url: u.href, label: `${glMr[1]}!${glMr[2]}` };
+  const path = u.pathname.replace(/\/$/, "");
+  return { url: u.href, label: path ? `${u.host}${path}` : u.host };
+}
+
+function validateExternalPRUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let u: URL;
+  try {
+    u = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || !u.hostname) return null;
+  return u.href;
+}
+
+/** Compact inline form to add an external PR blocker edge under todos_v2 (#16199). */
+function TodoAddPRBlockerForm({
+  value,
+  error,
+  busy,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  value: string;
+  error: string | null;
+  busy: boolean;
+  onChange: (next: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      noValidate
+      data-testid="todo-add-pr-blocker-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit();
+      }}
+      className="mt-2 rounded-control border border-line bg-inset/70 p-2.5 text-meta"
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <input
+          type="url"
+          value={value}
+          disabled={busy}
+          autoFocus
+          data-testid="todo-add-pr-blocker-input"
+          aria-label={t("todos.active_blocker_pr_input_aria")}
+          placeholder={t("todos.active_blocker_pr_placeholder")}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !busy) {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          className="h-7 min-w-0 flex-1 rounded-control border border-line bg-surface px-2 text-meta text-ink outline-none placeholder:text-ink-3 focus:border-accent disabled:opacity-50"
+        />
+        <Button
+          type="submit"
+          tone="primary"
+          size="sm"
+          busy={busy}
+          disabled={busy}
+          testId="todo-add-pr-blocker-submit"
+          className="h-7 shrink-0 px-2.5 text-label whitespace-nowrap"
+        >
+          {t("todos.active_blocker_pr_submit")}
+        </Button>
+        <Button
+          type="button"
+          tone="quiet"
+          size="sm"
+          disabled={busy}
+          testId="todo-add-pr-blocker-cancel"
+          onClick={onCancel}
+          className="h-7 shrink-0 px-2 text-label whitespace-nowrap"
+        >
+          {t("todos.active_blocker_pr_cancel")}
+        </Button>
+      </div>
+      {error && (
+        <p data-testid="todo-add-pr-blocker-error" role="alert" className="mt-1.5 text-submeta text-red">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+/** Compact strip of active persistent blocker edges projected by the server under todos_v2 (#16135, #16138, #16199). */
+function TodoActiveBlockersStrip({
+  blockers,
+  canAddPR = false,
+  addingPROpen = false,
+  onToggleAddPR,
+  cancellingId = null,
+  onCancelBlocker,
+}: {
+  blockers: readonly TodoActiveBlocker[];
+  canAddPR?: boolean;
+  addingPROpen?: boolean;
+  onToggleAddPR?: () => void;
+  cancellingId?: string | null;
+  onCancelBlocker?: (blockerId: string) => void;
+}) {
+  return (
+    <section
+      data-testid="todo-active-blockers"
+      aria-label={t("todos.active_blockers_region")}
+      className="mt-3 rounded-control border border-orange/30 bg-orange-tint/40 px-3 py-2 text-meta text-ink-2"
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-label font-semibold text-orange">
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <Icon name="alertCircle" size={12} stroke={2} className="shrink-0" />
+          <span className="truncate">{t("todos.active_blockers_title", { count: blockers.length })}</span>
+        </span>
+        {canAddPR && onToggleAddPR && (
+          <Button
+            tone="quiet"
+            size="sm"
+            icon="plus"
+            expanded={addingPROpen}
+            testId="todo-add-pr-blocker-btn"
+            onClick={onToggleAddPR}
+            className="h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+          >
+            {t("todos.active_blocker_add_pr")}
+          </Button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-1">
+        {blockers.map((blocker) => {
+          const link = activeBlockerLink(blocker.target_ref);
+          const attempts = typeof blocker.attempts === "number" && blocker.attempts > 0 ? blocker.attempts : 0;
+          const cancelling = cancellingId === blocker.id;
+          return (
+            <li
+              key={blocker.id}
+              data-testid="todo-active-blocker-item"
+              data-blocker-kind={blocker.kind}
+              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
+            >
+              <span
+                data-testid="todo-active-blocker-kind"
+                className="shrink-0 rounded-chip bg-surface px-1.5 py-0.5 text-submeta font-medium text-ink-2 shadow-hairline"
+              >
+                {activeBlockerKindLabel(blocker.kind)}
+              </span>
+              {link ? (
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  data-testid="todo-active-blocker-link"
+                  className="inline-flex min-w-0 items-center gap-1 truncate font-medium text-accent-ink hover:underline"
+                >
+                  <span className="truncate">{link.label}</span>
+                  <Icon name="external" size={11} stroke={2} className="shrink-0" />
+                </a>
+              ) : (
+                <span data-testid="todo-active-blocker-target" className="min-w-0 truncate text-ink">
+                  {blocker.target_ref}
+                </span>
+              )}
+              {attempts > 0 && (
+                <span
+                  data-testid="todo-active-blocker-attempts"
+                  className="shrink-0 rounded-chip bg-surface px-1.5 py-0.5 text-submeta text-ink-3 tabular-nums shadow-hairline"
+                >
+                  {t("todos.active_blocker_attempts", { count: attempts })}
+                </span>
+              )}
+              {onCancelBlocker && (
+                <button
+                  type="button"
+                  data-testid={`todo-cancel-blocker-${blocker.id}`}
+                  disabled={cancelling}
+                  aria-label={t("todos.active_blocker_cancel_aria", { target: link?.label ?? blocker.target_ref })}
+                  title={t("todos.active_blocker_cancel")}
+                  onClick={() => onCancelBlocker(blocker.id)}
+                  className="touch-hit ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+                >
+                  {cancelling ? <Spinner size={11} /> : <Icon name="x" size={12} stroke={2} />}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function TodoDetail({
   todo,
   owner,
@@ -3631,11 +3879,13 @@ function TodoDetail({
   onOpenTodo,
   onDeleteClick,
   todosV2,
+  allTodos = [],
   parentTodo,
   childTodos = [],
   directionName,
   directions = [],
   onReorganizeDirection,
+  onUnseen,
 }: {
   todo: Todo;
   owner: string;
@@ -3654,11 +3904,13 @@ function TodoDetail({
   onOpenTodo: (id: string) => void;
   onDeleteClick: () => void;
   todosV2?: boolean;
+  allTodos?: readonly Todo[];
   parentTodo?: Todo;
   childTodos?: readonly Todo[];
   directionName?: string;
   directions?: readonly ReorganizeDirectionOption[];
   onReorganizeDirection?: (req: TodoReorganizeRequest) => Promise<void>;
+  onUnseen?: (id: string) => void;
 }) {
   const title = useTodoField({
     remote: todo.title, owner, allowEmpty: false,
@@ -3677,13 +3929,129 @@ function TodoDetail({
   // Under todos_v2 (#14851), all right-pane sections including participated history start expanded by default.
   const [releasedOpenV2, setReleasedOpenV2] = useState(true);
   const releasedVisible = todosV2 === true ? releasedOpenV2 : showReleased;
-  // Single-item direction picker strictly gated behind todos_v2 (#15653).
+  // Single-item direction and parent-goal pickers strictly gated behind todos_v2 (#15653, #16100).
   const [directionPickerOpen, setDirectionPickerOpen] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [itemTypeBusy, setItemTypeBusy] = useState(false);
+  const [unseeing, setUnseeing] = useState(false);
+  // Manual external PR blocker add & active blocker cancel strictly gated behind todos_v2 (#16199).
+  const [prBlockerOpen, setPrBlockerOpen] = useState(false);
+  const [prBlockerUrl, setPrBlockerUrl] = useState("");
+  const [prBlockerError, setPrBlockerError] = useState<string | null>(null);
+  const [prBlockerBusy, setPrBlockerBusy] = useState(false);
+  const [cancellingBlockerId, setCancellingBlockerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPrBlockerOpen(false);
+    setPrBlockerUrl("");
+    setPrBlockerError(null);
+    setPrBlockerBusy(false);
+    setCancellingBlockerId(null);
+  }, [todo.id, todosV2]);
+
+  const hasActiveBlockers = Boolean(todo.active_blockers && todo.active_blockers.length > 0);
+  const canAddPRBlocker = todosV2 === true && open;
+
+  const toggleAddPRBlocker = () => {
+    setPrBlockerOpen((prev) => !prev);
+    setPrBlockerError(null);
+  };
+
+  const submitExternalPRBlocker = async () => {
+    if (prBlockerBusy) return;
+    const validUrl = validateExternalPRUrl(prBlockerUrl);
+    if (!validUrl) {
+      setPrBlockerError(t("todos.active_blocker_pr_url_invalid"));
+      return;
+    }
+    setPrBlockerBusy(true);
+    setPrBlockerError(null);
+    try {
+      await addTodoExternalPRBlocker(todo.id, validUrl);
+      await refreshTodos();
+      setPrBlockerOpen(false);
+      setPrBlockerUrl("");
+      toast(t("todos.active_blocker_added"), "ok");
+    } catch (e) {
+      setPrBlockerError(t("todos.active_blocker_add_failed", { error: errorText(e) }));
+    } finally {
+      setPrBlockerBusy(false);
+    }
+  };
+
+  const handleCancelBlocker = async (blockerId: string) => {
+    if (cancellingBlockerId) return;
+    setCancellingBlockerId(blockerId);
+    try {
+      await cancelTodoBlocker(todo.id, blockerId);
+      await refreshTodos();
+      toast(t("todos.active_blocker_cancelled"), "ok");
+    } catch (e) {
+      toast(t("todos.active_blocker_cancel_failed", { error: errorText(e) }), "error");
+    } finally {
+      setCancellingBlockerId(null);
+    }
+  };
   const canChangeDirection =
     todosV2 === true &&
     Boolean(onReorganizeDirection) &&
     (directions.length > 0 || Boolean(todo.direction_id));
   const showDirectionPicker = canChangeDirection && directionPickerOpen;
+  const hasEligibleParentTarget = useMemo(
+    () =>
+      todosV2 === true &&
+      eligibleParentTargets(allTodos, [todo.id]).some((td) => !td.done_at && !td.part_of?.trim()),
+    [todosV2, allTodos, todo.id],
+  );
+  const canChangeParent =
+    todosV2 === true &&
+    Boolean(onReorganizeDirection) &&
+    (hasEligibleParentTarget || Boolean(todo.part_of));
+  const showParentPicker = canChangeParent && parentPickerOpen;
+  const currentItemType: "personal" | "task" = isAgentTask(todo) ? "task" : "personal";
+  const canUnsee =
+    todosV2 === true &&
+    (Boolean(todo.seen_at) || (Boolean(todo.done_at) && (todo.audience === "autonomous" || isAutoDone(todo))));
+
+  const switchItemType = async (nextType: "personal" | "task") => {
+    if (itemTypeBusy || nextType === currentItemType) return;
+    setItemTypeBusy(true);
+    try {
+      const updated = await updateTodo(todo.id, { item_type: nextType });
+      if (updated) putTodo(updated);
+      await refreshTodos();
+      toast(
+        t("todos.item_type_updated", {
+          type: nextType === "task" ? t("todos.item_type_task") : t("todos.item_type_personal"),
+        }),
+        "ok",
+      );
+    } catch (e) {
+      toast(t("todos.item_type_update_failed", { error: errorText(e) }), "error");
+    } finally {
+      setItemTypeBusy(false);
+    }
+  };
+
+  const handleUnsee = async () => {
+    if (unseeing) return;
+    setUnseeing(true);
+    try {
+      const updated = await unseeTodo(todo.id);
+      onUnseen?.(todo.id);
+      if (updated) {
+        putTodo({ ...updated, seen_at: updated.seen_at ?? null });
+      } else {
+        putTodo({ ...todo, seen_at: null });
+      }
+      await refreshTodos();
+      toast(t("todos.detail_marked_unread"), "ok");
+    } catch (e) {
+      toast(t("todos.action_failed", { error: errorText(e) }), "error");
+    } finally {
+      setUnseeing(false);
+    }
+  };
 
   const template = useMemo(
     () => (todosV2 === true ? classifyTodoDetailTemplate(todo, childTodos.length, { repositoryCount }) : undefined),
@@ -3835,20 +4203,54 @@ function TodoDetail({
                 </span>
               </>
             )}
-            {canChangeDirection && (
-              <Button
-                tone="quiet"
-                size="sm"
-                icon="folder"
-                expanded={showDirectionPicker}
-                testId="todo-detail-change-direction"
-                onClick={() => setDirectionPickerOpen((v) => !v)}
-                className="ml-auto h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
-              >
-                {t("todos.detail_change_direction")}
-              </Button>
+            {(canChangeParent || canChangeDirection) && (
+              <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                {canChangeParent && (
+                  <Button
+                    tone="quiet"
+                    size="sm"
+                    icon="layers"
+                    expanded={showParentPicker}
+                    testId="todo-detail-change-parent"
+                    onClick={() => {
+                      setParentPickerOpen((v) => !v);
+                      setDirectionPickerOpen(false);
+                    }}
+                    className="h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+                  >
+                    {t("todos.detail_change_parent")}
+                  </Button>
+                )}
+                {canChangeDirection && (
+                  <Button
+                    tone="quiet"
+                    size="sm"
+                    icon="folder"
+                    expanded={showDirectionPicker}
+                    testId="todo-detail-change-direction"
+                    onClick={() => {
+                      setDirectionPickerOpen((v) => !v);
+                      setParentPickerOpen(false);
+                    }}
+                    className="h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+                  >
+                    {t("todos.detail_change_direction")}
+                  </Button>
+                )}
+              </div>
             )}
           </div>
+          {showParentPicker && onReorganizeDirection && (
+            <TodoParentPicker
+              key={`${todo.id}:${todo.part_of ?? ""}`}
+              todoId={todo.id}
+              currentParentId={todo.part_of}
+              currentParentTitle={parentTodo?.title}
+              todos={allTodos}
+              onApply={onReorganizeDirection}
+              onClose={() => setParentPickerOpen(false)}
+            />
+          )}
           {showDirectionPicker && onReorganizeDirection && (
             <TodoDirectionPicker
               key={`${todo.id}:${todo.direction_id ?? ""}`}
@@ -3926,6 +4328,22 @@ function TodoDetail({
           placeholder={t("todos.title_placeholder")}
           className="min-w-0 flex-1 bg-transparent text-[22px] font-bold text-ink outline-none transition-colors focus:border-b focus:border-accent"
         />
+        {!isWorkGoalV2 && canChangeParent && (
+          <Button
+            tone="quiet"
+            size="sm"
+            icon="layers"
+            expanded={showParentPicker}
+            testId="todo-detail-change-parent"
+            onClick={() => {
+              setParentPickerOpen((v) => !v);
+              setDirectionPickerOpen(false);
+            }}
+            className="h-7 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+          >
+            {t("todos.detail_change_parent")}
+          </Button>
+        )}
         {!isWorkGoalV2 && canChangeDirection && (
           <Button
             tone="quiet"
@@ -3933,7 +4351,10 @@ function TodoDetail({
             icon="folder"
             expanded={showDirectionPicker}
             testId="todo-detail-change-direction"
-            onClick={() => setDirectionPickerOpen((v) => !v)}
+            onClick={() => {
+              setDirectionPickerOpen((v) => !v);
+              setParentPickerOpen(false);
+            }}
             className="h-7 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
           >
             {t("todos.detail_change_direction")}
@@ -3957,6 +4378,19 @@ function TodoDetail({
           />
         )}
       </div>
+      {!isWorkGoalV2 && showParentPicker && onReorganizeDirection && (
+        <div className="mt-2.5">
+          <TodoParentPicker
+            key={`${todo.id}:${todo.part_of ?? ""}`}
+            todoId={todo.id}
+            currentParentId={todo.part_of}
+            currentParentTitle={parentTodo?.title}
+            todos={allTodos}
+            onApply={onReorganizeDirection}
+            onClose={() => setParentPickerOpen(false)}
+          />
+        </div>
+      )}
       {!isWorkGoalV2 && showDirectionPicker && onReorganizeDirection && (
         <div className="mt-2.5">
           <TodoDirectionPicker
@@ -4008,6 +4442,65 @@ function TodoDetail({
         )}
         <span className="text-ink-3">·</span>
         <span>{t("todos.created_at", { time: clock(todo.created_at) })}</span>
+        {todosV2 === true && (
+          <>
+            <span className="text-ink-3" aria-hidden>·</span>
+            <div
+              role="radiogroup"
+              aria-label={t("todos.detail_item_type_label")}
+              data-testid="todo-detail-item-type"
+              className="inline-flex h-6 shrink-0 items-center gap-0.5 rounded-control bg-inset p-0.5 shadow-hairline"
+            >
+              {(["task", "personal"] as const).map((nextType) => {
+                const active = currentItemType === nextType;
+                return (
+                  <button
+                    key={nextType}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    data-item-type={nextType}
+                    disabled={itemTypeBusy}
+                    onClick={() => void switchItemType(nextType)}
+                    className={cx(
+                      "touch-hit h-5 rounded-chip px-2 text-submeta whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50",
+                      active ? "bg-surface font-medium text-ink shadow-btn" : "text-ink-3 hover:text-ink-2",
+                    )}
+                  >
+                    {nextType === "task" ? t("todos.item_type_task") : t("todos.item_type_personal")}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+        {canUnsee && (
+          <Button
+            tone="quiet"
+            size="sm"
+            icon="undo"
+            busy={unseeing}
+            disabled={unseeing}
+            testId="todo-unsee-btn"
+            onClick={() => void handleUnsee()}
+            className="h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+          >
+            {t("todos.detail_mark_unread")}
+          </Button>
+        )}
+        {canAddPRBlocker && !hasActiveBlockers && (
+          <Button
+            tone="quiet"
+            size="sm"
+            icon="plus"
+            expanded={prBlockerOpen}
+            testId="todo-add-pr-blocker-btn"
+            onClick={toggleAddPRBlocker}
+            className="h-6 shrink-0 border border-line bg-surface px-2 text-label whitespace-nowrap text-ink-2 hover:bg-hover"
+          >
+            {t("todos.active_blocker_add_pr")}
+          </Button>
+        )}
       </div>
       {isCancelled(todo) && cancellationReason(todo) && (
         <p className="mt-2 text-xs leading-[1.6] text-ink-3" data-testid="todo-detail-cancelled-reason">
@@ -4030,6 +4523,35 @@ function TodoDetail({
       <TodoAskPanel todo={todo} />
       <HeldForBriefing todo={todo} />
 
+      {/* Active persistent blocker edges projected by the server under todos_v2 (#16135, #16138, #16199) */}
+      {todosV2 === true && hasActiveBlockers && (
+        <TodoActiveBlockersStrip
+          blockers={todo.active_blockers!}
+          canAddPR={open}
+          addingPROpen={prBlockerOpen}
+          onToggleAddPR={toggleAddPRBlocker}
+          cancellingId={cancellingBlockerId}
+          onCancelBlocker={(blockerId) => void handleCancelBlocker(blockerId)}
+        />
+      )}
+      {canAddPRBlocker && prBlockerOpen && (
+        <TodoAddPRBlockerForm
+          value={prBlockerUrl}
+          error={prBlockerError}
+          busy={prBlockerBusy}
+          onChange={(next) => {
+            setPrBlockerUrl(next);
+            if (prBlockerError) setPrBlockerError(null);
+          }}
+          onSubmit={() => void submitExternalPRBlocker()}
+          onCancel={() => {
+            setPrBlockerOpen(false);
+            setPrBlockerUrl("");
+            setPrBlockerError(null);
+          }}
+        />
+      )}
+
       {/* Due date, reminder, priority (#1683) */}
       <TodoPlanEditor todo={todo} todosV2={todosV2} />
       {/* The brief its work is held to (#3822): who asked and in what words above the criteria; the scope changes
@@ -4039,6 +4561,7 @@ function TodoDetail({
           <TaskBriefPanel todo={todo} />
         </Suspense>
       )}
+      {todo.wait != null && <div className="mt-2 select-text"><TaskWaitInfo todo={todo} expanded /></div>}
       <ReviewChecklist todo={todo} lookup={lookup} />
       {todo.brief && (
         <Suspense fallback={null}>

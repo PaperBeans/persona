@@ -11,6 +11,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import persona.core.contracts.api.*
+import persona.core.moduleapi.HubModule
+import persona.core.moduleapi.ModuleRegistry
 import persona.core.navigation.Navigator
 
 /**
@@ -60,6 +62,9 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
             KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender,
                 sessions = sessions, namespace = namespace) { hierarchy.value }
         }
-        KnowledgeDetailScreen(model, navigator, openLinkInApp, onNewAgent)
+        // The hub's recording module, by the rule every module follows (#15214): the one place its flag is read.
+        val features = LocalHubFeatures.current
+        val recordingOn = remember(features) { ModuleRegistry.isActive(HubModule.Recording, features) }
+        KnowledgeDetailScreen(model, navigator, openLinkInApp, onNewAgent, recordingOn)
     }
 }

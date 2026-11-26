@@ -14,14 +14,26 @@ import { Button, cx, Loading, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { ComposeDialog } from "./ComposeDialog";
 import { Glyph, Monogram, StatusMenu, Tag } from "./InboxParts";
+import { useMailReading } from "./item-write-gate";
 import { openMedia } from "./LarkThread";
+import { StoredMailBody } from "./StoredMailBody";
 
 // ── mail ─────────────────────────────────────────────────
 
 /** A mail: who, the body (its HTML in a sandboxed frame), attachments. Opening it marks it read in the mailbox; with
  * Settings › Translation on for mail, a foreign one is shown translated ("Original" one click away). Replies are written by hand.
- * `onLatest`: an older message from the handling chain is open; the action returns to the thread's latest. */
+ * `onLatest`: an older message from the handling chain is open; the action returns to the thread's latest.
+ * On a hub with mail off (lib/mail.ts mailReading) there is no message to ask for: the text the hub kept is shown
+ * (StoredMailBody), with no reply, flag or attachment. */
 export function MailBody({ item, onLatest }: { item: InboxItem; onLatest?: () => void }) {
+  const reading = useMailReading();
+  switch (reading.kind) {
+    case "stored": return <StoredMailBody item={item} onLatest={onLatest} />;
+    case "full": return <FullMailBody item={item} onLatest={onLatest} />;
+  }
+}
+
+function FullMailBody({ item, onLatest }: { item: InboxItem; onLatest?: () => void }) {
   const m = item.mail!;
   const uid = m.uids[m.uids.length - 1];
   const mailbox = m.mailbox || "INBOX";

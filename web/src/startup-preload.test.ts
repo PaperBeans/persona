@@ -414,6 +414,13 @@ describe("idle tier", () => {
     expect(idleImports(host)).toEqual([]);
   });
 
+  it("loads AssistantCardBody and LiveCardBody only when a card mounts, outside the idle tier", () => {
+    const card = readFileSync(join(__dirname, "ui/AssistantCard.tsx"), "utf8");
+    expect(card).toContain('lazyPage(() => import("./AssistantCardBody").then((m) => m.AssistantCardBody))');
+    expect(card).toContain('lazyPage(() => import("./AssistantCardBody").then((m) => m.LiveCardBody))');
+    expect(idleImports(card)).toEqual([]);
+  });
+
   it("counts each file gzipped at the best level, or as it is under 1 KB", async () => {
     const dir = mkdtempSync(join(tmpdir(), "idle-gz-"));
     mkdirSync(join(dir, "assets"));

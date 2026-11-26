@@ -1072,8 +1072,8 @@ export const Composer = memo(function Composer({
       <div
         className={cx(
           // a container: what sits in its bottom row (the model pill) takes its width modes from the card's own width
-          "@container/composer relative flex flex-col gap-1.5 rounded-[14px] border bg-surface/95 p-1.5 shadow-card backdrop-blur-md transition-[border-color,box-shadow] duration-150 focus-within:border-line-strong",
-          dragging ? "border-dashed border-accent shadow-[0_0_0_3px_var(--accent-tint)]" : "border-line",
+          "@container/composer relative flex flex-col gap-1.5 rounded-[14px] bg-surface/95 p-1.5 shadow-card backdrop-blur-md transition-shadow duration-150 focus-within:shadow-[0_0_0_1px_var(--line-strong)]",
+          dragging && "ring-2 ring-accent",
         )}
       >
         {dragging && (

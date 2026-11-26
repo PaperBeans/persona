@@ -173,6 +173,7 @@ type PlanTask struct {
 	// a to-do (todo_id) keeps that to-do's own. Not what the apps send back with an edit.
 	PartOf      string   `json:"part_of,omitempty"`
 	After       []string `json:"after,omitempty"`
+	BlockedByPR []string `json:"blocked_by_pr,omitempty"`
 	RequestGate string   `json:"request_gate,omitempty"`
 	// Project: the knowledge-base project the task's todo goes in (#2581, todo_project.go), checked and kept as its slug
 	// when the plan is made; "" for none.
@@ -218,6 +219,8 @@ type PlanTask struct {
 	inPane    string
 	planID    string
 	planIndex int
+	// The preview is metadata-only until admission saves its naming operation.
+	dispatchedWorkspace *dispatchedWorkspacePlan
 	// cwdStatus: what worktree.status said of cwdStatusOf (machine NUL cleaned cwd) in this resolve, kept so that
 	// resolveTaskRepo does not ask the machine twice for that folder. Never serialized.
 	cwdStatus   *proto.WorktreeStatus

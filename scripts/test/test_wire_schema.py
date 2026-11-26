@@ -107,9 +107,17 @@ def item_detail(expected):
 
 
 def counts_views():
-    """(definition, sample) of every view counts/view_samples.json expects (#15512)."""
+    """(definition, sample) of every view counts/view_samples.json expects (#15512), and of every view a device keeps
+    or gets in counts/views.json (#15893)."""
     for c in cases("counts/view_samples.json"):
         yield "CountsView", f"counts/view_samples.json {c['name']}.expected.view", c["expected"]["view"]
+    for c in cases("counts/views.json"):
+        where = f"counts/views.json {c['name']}"
+        for part in ("given", "then"):
+            for i, k in enumerate(c[part]["kept"]):
+                yield "CountsView", f"{where}.{part}.kept[{i}].view", k["view"]
+        if "view" in c["when"]:
+            yield "CountsView", f"{where}.when.view", c["when"]["view"]
 
 
 def wire_ids():
@@ -125,8 +133,16 @@ def agent_views():
             yield "AgentView", f"{where}.expected.views[{i}] {v['id']}", v["view"]
 
 
+def todo_waits():
+    """(definition, sample) of every waiting reason todo-wait expects (#16168)."""
+    for where, c in domain_cases("todo-wait"):
+        wait = c["expected"].get("wait")
+        if wait is not None:
+            yield "TodoWait", f"{where}.expected.wait", wait
+
+
 SAMPLES = {"agent-view.schema.json": agent_views, "counts.schema.json": counts_views, "ids.schema.json": wire_ids, "recents.schema.json": recent_setups,
-           "todo-view.schema.json": todo_views}
+           "todo-view.schema.json": todo_views, "todo-wait.schema.json": todo_waits}
 
 
 def walk(doc, schema, value, at, reached):

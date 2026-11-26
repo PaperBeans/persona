@@ -146,7 +146,7 @@ describe("a model error is cindy's error notice (#5157)", () => {
   it("is a neutral card: the red mark only, what happened, what helps, then Retry and Error details", () => {
     const html = banner(gpu, false);
     expect(html).toContain("data-error-notice");
-    expect(html).toContain("border border-line bg-surface");
+    expect(html).toContain("bg-surface p-3 shadow-card");
     expect(html).not.toMatch(/bg-red-tint|var\(--red\)_22%/);
     expect(html).toContain('class="mt-0.5 inline-flex shrink-0 text-red"');
     expect(html).toContain("推理服务暂时没有可用的 GPU");

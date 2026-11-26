@@ -170,6 +170,14 @@ func (s *Service) retryGatewayWait(ctx context.Context, plan *TaskPlan, i int, t
 			return
 		}
 	}
+	if s.settings(ctx).todosV2On() {
+		if refs := s.activeTodoBlockerRefs(ctx, task.TodoID); len(refs) > 0 {
+			q := s.blockerWaitQueue(refs)
+			q.Retry = queue.Retry
+			s.replaceTaskQueue(ctx, task, q, queueCAS)
+			return
+		}
+	}
 	queue.Claimed, queue.NextAt = true, now
 	queue.Reason = i18n.T(s.lang(ctx), "assistant-tasks.request_unconfirmed")
 	if !s.replaceTaskQueue(ctx, task, &queue, queueQuotaStart) {

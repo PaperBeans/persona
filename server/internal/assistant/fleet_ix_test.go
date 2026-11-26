@@ -361,7 +361,8 @@ func TestResumableSurvivesAManagerRestart(t *testing.T) {
 	// The next manager, on the same table.
 	st := &restoreMem{fleetMem: ft.st}
 	f2 := newFakeHub()
-	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: t.Logf, Devices: ft.d})
+	// testLogf: restoring the cards starts deliveries of their results that can still be logging as the test ends (#16045).
+	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: testLogf(t), Devices: ft.d})
 	s2.FleetUp(context.Background())
 	var full assistantwire.FleetInteractions
 	for _, tl := range f2.told {
@@ -431,7 +432,8 @@ func TestRestartResolvesTheCardsTheLastManagerLeft(t *testing.T) {
 	// The next manager, on the same table.
 	st := &restoreMem{fleetMem: ft.st}
 	f2 := newFakeHub()
-	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: t.Logf, Devices: ft.d})
+	// testLogf: restoring the cards starts deliveries of their results that can still be logging as the test ends (#16045).
+	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: testLogf(t), Devices: ft.d})
 	s2.FleetUp(context.Background())
 	if status, _, _ := st.InteractionOutcome(context.Background(), asked.ID); status != "cancelled" {
 		t.Fatalf("status %q", status)

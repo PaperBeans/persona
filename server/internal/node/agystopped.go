@@ -15,10 +15,11 @@ import (
 // conversation under its own id, agy-<conversation>, as it lists every conversation it holds: done or idle, as if a
 // turn had just ended there. A Claude Code pane the user closed is listed as not running, stopped by the user
 // (markStopped, #4754), and so is this conversation's row: offline, with the user's stop cause, until it runs again (a
-// live pane shows it, or its row works, waits on the user or changes after the close). It keeps what the companion lets
-// it do: a message from the user continues it there, as there is no terminal to resume it in, and an A2A message does
-// not wake it, as it wakes no Agent the user stopped (assistant a2aStopped). The marks are kept in memory, for the
-// agyStoppedMost latest: after a restart the companion's rows are listed as it says.
+// live pane shows it, the user continues it through the companion, or its row works, waits on the user or changes after
+// the close). It keeps what the companion lets it do: a message from the user continues it there, as there is no
+// terminal to resume it in, and an A2A message does not wake it, as it wakes no Agent the user stopped (assistant
+// a2aStopped). The marks are kept in memory, for the agyStoppedMost latest: after a restart the companion's rows are
+// listed as it says.
 
 const (
 	// agyStopGrace: what the conversation does in the minute after the close is the close's own (agy ending its turn,
@@ -59,6 +60,24 @@ func (n *Node) noteAgyStopped(id string) {
 			delete(n.agyStopped, c)
 		}
 	}
+}
+
+// clearAgyStopped forgets a user-stop mark on conversation id once a companion send or compact continues it, so a
+// resumed turn inside agyStopGrace is neither masked as StatusOffline (StopUser) nor trapped offline if it finishes
+// within that minute. Marks recorded after at are kept so a concurrent user close during an in-flight call wins.
+func (n *Node) clearAgyStopped(id string, at time.Time) bool {
+	conversation, ok := strings.CutPrefix(id, agyAgent+"-")
+	if !ok || conversation == "" {
+		return false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	st, ok := n.agyStopped[conversation]
+	if !ok || st.at.After(at) {
+		return false
+	}
+	delete(n.agyStopped, conversation)
+	return true
 }
 
 // markAgyStopped lists the conversations the user stopped (noteAgyStopped) as stopped on list's rows under their own

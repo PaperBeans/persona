@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatList, t } from "../../i18n";
 import { ConnectorExternalSourceSettings } from "../../features/external-sources/ExternalSourceSettingsEntry";
-import { enc, errorText } from "../../lib/api";
+import { api, enc, errorText } from "../../lib/api";
+import { settingsTarget } from "../../lib/channels";
 import {
   connectorBrand, connectorState, connectorTone, listConnectors,
   type ConnectorTone, type HubConnector,
@@ -21,9 +22,10 @@ import {
   setExtensionEnabled, setupSecret, stateLine, valueAt,
   type ExtensionField, type ExtensionSecret, type HubExtensionDetail, type Json, type JsonObject,
 } from "../../lib/extensions";
-import { defaultManager, otherManager, pinManagerAt, sameManager, useChosenManager } from "../../lib/manager-choice";
+import { defaultManager, itemHeaders, otherManager, pinManagerAt, sameManager, useChosenManager } from "../../lib/manager-choice";
 import { useRoster } from "../../lib/managers";
 import { isResumed } from "../../lib/reconnect";
+import { navigate } from "../../lib/router";
 import { onHubEvent, useStore } from "../../lib/store";
 import { Button, cx, Dialog, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { BrandMark } from "../../ui/BrandMark";
@@ -46,6 +48,7 @@ import {
 } from "./ExtensionSettingsPage";
 import { OwnerMark } from "./OwnerMark";
 import { Disclosure } from "./ProviderFields";
+import { settingsHref } from "./href";
 import { Group, Pill, Row, SettingsHint, Switch } from "./SettingsParts";
 import { ChannelBindingBlock, ChannelDeliveryBlock, ChannelStateInline, useChannelController } from "./integrations/ChannelSection";
 import { ConnectorConnectionBlock, connectorHasInbox, ConnectorInboxBlock } from "./integrations/ConnectorSection";
@@ -110,6 +113,71 @@ function SectionBlock({ id, title, children }: { id: IntegrationSectionId; title
       <h2 className="mb-2 px-1 text-label font-semibold text-ink-3">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function openSettingsTarget(url: string, onSettings?: (url: string) => void) {
+  if (onSettings) {
+    onSettings(url);
+    return;
+  }
+  const parsed = settingsTarget(url);
+  if (!parsed) return;
+  navigate(settingsHref(parsed.tab, parsed.sub, false));
+}
+
+function isGitHubIntegration(id: string, connectorIds: readonly string[] = [], repoProviders?: readonly string[]): boolean {
+  return id === "github" || connectorIds.includes("github") || (repoProviders?.includes("github") ?? false);
+}
+
+function SavedRepositoriesShortcut({ manager, onSettings }: { manager?: string; onSettings?: (url: string) => void }) {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api<{ repositories?: unknown[] }>("/assistant/repositories", manager ? { headers: itemHeaders(manager) } : undefined)
+      .then((res) => {
+        if (alive && Array.isArray(res?.repositories)) setCount(res.repositories.length);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [manager]);
+
+  return (
+    <Group anchor="integration-saved-repositories">
+      <Row
+        anchor="saved-repositories-shortcut"
+        icon="git"
+        label={t("settings-integrations.saved_repositories_title")}
+        hint={t("settings-integrations.saved_repositories_hint")}
+        wrapHint
+        onClick={() => openSettingsTarget("settings/persona#repositories", onSettings)}
+      >
+        {count !== null ? (
+          <span className="tabular-nums">
+            {count === 0
+              ? t("settings-integrations.saved_repositories_empty")
+              : t("settings-integrations.saved_repositories_count", { count })}
+          </span>
+        ) : undefined}
+      </Row>
+    </Group>
+  );
+}
+
+function KnowledgeScopeShortcut({ onSettings }: { onSettings?: (url: string) => void }) {
+  return (
+    <Group anchor="integration-knowledge-scope">
+      <Row
+        anchor="knowledge-scope-shortcut"
+        icon="filter"
+        label={t("settings-integrations.knowledge_scope_title")}
+        hint={t("settings-integrations.knowledge_scope_hint")}
+        wrapHint
+        onClick={() => openSettingsTarget("settings/knowledge#knowledge-items", onSettings)}
+      />
+    </Group>
   );
 }
 
@@ -333,18 +401,21 @@ function FeishuBotBuiltinDetail({
       <ConnectorExternalSourceSettings ids={[channelId]} manager={manager} />
 
       {/* 3. Inbox & Sync */}
-      {showInboxSection && larkcli && (
-        <SectionBlock id="inbox" title={t("settings-integrations.section_inbox")}>
-          <ConnectorInboxBlock connector={larkcli} reload={loadLarkcli} onSaved={setLarkcli} />
-          {!manager && (
-            <SubscriptionsEntry
-              pick={(l) => l.connector === "larkcli"}
-              scope={{ c: "larkcli" }}
-              onOpen={onOpenSources ? (st) => onOpenSources(st, manager) : undefined}
-            />
-          )}
-        </SectionBlock>
-      )}
+      <SectionBlock id="inbox" title={t("settings-integrations.section_inbox")}>
+        {showInboxSection && larkcli && (
+          <>
+            <ConnectorInboxBlock connector={larkcli} reload={loadLarkcli} onSaved={setLarkcli} />
+            {!manager && (
+              <SubscriptionsEntry
+                pick={(l) => l.connector === "larkcli"}
+                scope={{ c: "larkcli" }}
+                onOpen={onOpenSources ? (st) => onOpenSources(st, manager) : undefined}
+              />
+            )}
+          </>
+        )}
+        <KnowledgeScopeShortcut onSettings={onSettings} />
+      </SectionBlock>
     </div>
   );
 }
@@ -427,8 +498,15 @@ function BuiltinIntegrationDetail({
 
   const subscriptionConnectorId = connectorId ?? (isMail ? "mail" : isLarkGateway ? "lark" : null);
   const larkSubCounts = countsOf(useSubscriptionSummary(), (l) => isLarkGateway && l.connector === "lark");
+  const isGitHub = isGitHubIntegration(target.id, connectorId ? [connectorId] : []);
+  const showKnowledgeScope =
+    isMail ||
+    isLarkGateway ||
+    connectorId === "larkcli" ||
+    (connector?.capabilities?.includes("history") ?? false);
   const showInboxSection =
     isMail ||
+    showKnowledgeScope ||
     (isLarkGateway && !manager && larkSubCounts !== null) ||
     (!!connector && connectorHasInbox(connector)) ||
     (!!connectorId && !manager);
@@ -503,6 +581,7 @@ function BuiltinIntegrationDetail({
           </>
         )}
         {channelId && <ChannelBindingBlock ctl={channelCtl} />}
+        {isGitHub && <SavedRepositoriesShortcut manager={manager} onSettings={onSettings} />}
       </SectionBlock>
 
       {/* 2. Chat & Delivery */}
@@ -530,6 +609,7 @@ function BuiltinIntegrationDetail({
               onOpen={onOpenSources ? (st) => onOpenSources(st, manager) : undefined}
             />
           )}
+          {showKnowledgeScope && <KnowledgeScopeShortcut onSettings={onSettings} />}
         </SectionBlock>
       )}
       {!isMail && !isLarkGateway && <ConnectorExternalSourceSettings ids={[connectorId ?? "", channelId ?? ""]} manager={manager} />}
@@ -845,11 +925,15 @@ function ExtensionIntegrationDetail({
   const topSecrets = (p?.secrets ?? []).filter((s) => !s.list);
   const uiPages = p ? shownPages(p.ui, p.auth) : [];
 
+  const isGitHub = isGitHubIntegration(id, connectorIds, p?.contributes?.repository_providers);
+  const showKnowledgeScope = connectors.some((c) => c.capabilities?.includes("history")) || id === "larkx";
+
   const hasConnectionSection =
     !!p && (
       !!p.auth ||
       connectors.length > 0 ||
       !!channelId ||
+      isGitHub ||
       (editable && sections.connection.length > 0)
     );
   const hasChannelSection = !!p && (!!channelId || (editable && sections.channel.length > 0));
@@ -857,6 +941,7 @@ function ExtensionIntegrationDetail({
   const hasInboxSection =
     !!p && (
       inboxConnectors.length > 0 ||
+      showKnowledgeScope ||
       (!manager && (p.enabled ?? true) && !!p.contributes?.connectors?.length) ||
       (editable && sections.inbox.length > 0)
     );
@@ -988,6 +1073,7 @@ function ExtensionIntegrationDetail({
                   fieldProps={sharedFieldProps}
                 />
               )}
+              {isGitHub && <SavedRepositoriesShortcut manager={manager} onSettings={onSettings} />}
             </SectionBlock>
           )}
 
@@ -1032,6 +1118,7 @@ function ExtensionIntegrationDetail({
                   fieldProps={sharedFieldProps}
                 />
               )}
+              {showKnowledgeScope && <KnowledgeScopeShortcut onSettings={onSettings} />}
             </SectionBlock>
           )}
           <ConnectorExternalSourceSettings ids={[...connectorIds, channelId ?? ""]} manager={manager} />

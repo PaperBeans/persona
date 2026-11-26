@@ -15,6 +15,7 @@ import (
 const (
 	featureAgentSessionArchives     = assistantwire.CapabilityAgentSessionArchives
 	featureAgentSessionArchiveClose = assistantwire.CapabilityAgentSessionArchiveClose
+	featureAgentSessionIdleArchive  = assistantwire.CapabilityAgentSessionIdleArchive
 )
 
 // Archive state belongs to managers. The hub only gates a rolling upgrade,
@@ -59,16 +60,24 @@ func (h *Hub) agentSessionArchiveFeatures() []string {
 		return nil
 	}
 	closeToo := true
+	idleToo := true
 	for _, id := range ids {
 		if h.archiveManagerStatus(id) != http.StatusOK {
 			return nil
 		}
 		closeToo = closeToo && h.archiveManagerHas(id, assistantwire.CapabilityAgentSessionArchiveClose) == http.StatusOK
+		idleToo = idleToo && h.archiveManagerHas(id, assistantwire.CapabilityAgentSessionIdleArchive) == http.StatusOK
 	}
-	if closeToo {
+	switch {
+	case closeToo && idleToo:
+		return []string{featureAgentSessionArchives, featureAgentSessionArchiveClose, featureAgentSessionIdleArchive}
+	case closeToo:
 		return []string{featureAgentSessionArchives, featureAgentSessionArchiveClose}
+	case idleToo:
+		return []string{featureAgentSessionArchives, featureAgentSessionIdleArchive}
+	default:
+		return []string{featureAgentSessionArchives}
 	}
-	return []string{featureAgentSessionArchives}
 }
 
 func (h *Hub) archiveManagerReady(w http.ResponseWriter, id string) bool {
@@ -82,6 +91,32 @@ func (h *Hub) archiveManagerReady(w http.ResponseWriter, id string) bool {
 		writeErrCode(w, status, "agent_archives_unsupported", i18n.Err("hub-agent_archives.upgrade"))
 	}
 	return false
+}
+
+func (h *Hub) forwardAgentIdleArchive(w http.ResponseWriter, r *http.Request) {
+	role := principalOf(r.Context()).Role
+	if role != roleFull && role != roleExtension {
+		writeErr(w, http.StatusForbidden, i18n.Err("hub-agent_archives.forbidden"))
+		return
+	}
+	by := h.byRequest
+	if r.Method == http.MethodPost {
+		by = h.byMachine
+	}
+	owner, ok := h.owner(w, r, by)
+	if !ok {
+		return
+	}
+	status := h.archiveManagerHas(owner, assistantwire.CapabilityAgentSessionIdleArchive)
+	if status == http.StatusServiceUnavailable {
+		writeErrCode(w, status, assistantwire.CodeAssistantOffline, errAssistantOffline)
+		return
+	}
+	if status != http.StatusOK {
+		writeErrCode(w, status, "agent_idle_archive_unsupported", i18n.Err("hub-agent_archives.close_upgrade"))
+		return
+	}
+	h.forwardHTTP(w, r, owner)
 }
 
 func (h *Hub) forwardAgentArchives(w http.ResponseWriter, r *http.Request) {

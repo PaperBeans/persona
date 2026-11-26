@@ -494,10 +494,21 @@ final class AvatarUploadModel: Identifiable {
         self.error = error?.shown ?? String(localized: "Couldn't open this image. Try another one.")
     }
 
-    /// A new main picture (an edit): the square starts centered.
+    /// A new main picture (an edit or a replacement dropped on the crop): the square starts centered.
     func replaceMain(_ picture: AvatarPicture) {
         main = AvatarFraming(picture)
         automaticSeed = nil
+    }
+
+    /// Loads picked or dropped bytes as the new main picture (new or edit sheet) and refreshes the automatic theme
+    /// color estimate (#15612). On failure sets `error` and leaves the current main picture unchanged.
+    @discardableResult
+    func receiveMain(_ data: Data) async -> Bool {
+        guard made == nil, !uploading else { return false }
+        guard let picture = await load(data) else { return false }
+        replaceMain(picture)
+        if offersStates { await estimateColor() }
+        return true
     }
 
     /// Back to the package's main picture (an edit).
@@ -511,6 +522,16 @@ final class AvatarUploadModel: Identifiable {
     func give(_ state: PersonaState, _ picture: AvatarPicture) {
         states[state, default: StatePicture()].source = .picked
         states[state, default: StatePicture()].picked = AvatarFraming(picture)
+    }
+
+    /// Loads picked or dropped bytes as `state`'s own picture (#15612). On failure sets `error` and leaves `state`
+    /// unchanged.
+    @discardableResult
+    func receiveState(_ state: PersonaState, _ data: Data) async -> Bool {
+        guard offersStates, made == nil, !uploading else { return false }
+        guard let picture = await load(data) else { return false }
+        give(state, picture)
+        return true
     }
 
     /// `state` made from the main picture again.
@@ -795,6 +816,30 @@ final class AvatarUploadsModel {
         guard canEdit(p) else { return nil }
         error = nil
         return deps.edit(p)
+    }
+
+    /// Opens the New from Photo crop sheet for an image dropped on the New from Photo card (#15612).
+    func dropOnNew(_ data: Data) async -> AvatarUploadModel? {
+        guard available, !loading else { return nil }
+        return await picked(data)
+    }
+
+    /// Opens the Edit sheet for an uploaded avatar with a dropped image as its new main picture (#15612); nothing is
+    /// saved until Save. Built-in avatars and older hubs without `look_uploads_states` do not react.
+    func drop(_ data: Data, on p: Persona) async -> AvatarUploadModel? {
+        guard canEdit(p), !deleting.contains(p.id), !loading else { return nil }
+        loading = true
+        defer { loading = false }
+        do {
+            let picture = try await Self.load(data, animated: true)
+            error = nil
+            let sheet = deps.edit(p)
+            sheet.replaceMain(picture)
+            return sheet
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
     }
 
     /// Decodes picked bytes off the main actor: an animated picture kept as it moves when the hub takes one.

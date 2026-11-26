@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../../../spec/fixtures/entries/cases.json";
-import { assistantEntries, decisionLaterKey, needsYouBySupervisor } from "./assistant-entries";
+import { assistantEntries, decisionLaterKey, needsYouBySupervisor, type NeedsYouItem } from "./assistant-entries";
 import { triageTodos } from "./todo-triage";
 import { makeSessionLookup } from "./todos";
 import type { FeedItem, TaskPlan } from "./feed";
 import type { Todo } from "./todos";
 import type { Interaction, Session } from "./types";
+
+it("keeps an Agent interaction on a verifying task under its original conversation in Main", () => {
+  const at = "2026-11-10T08:00:00Z";
+  const todo: Todo = { id: "verify", title: "Review the result", origin: "dispatch-chat", created_at: at, updated_at: at,
+    supervision: { state: "user_check", supervisor: "direction-lead" }, ask: { verdict: "Please verify", asked_at: at } };
+  const card: Interaction = { id: "question", kind: "question", machine_id: "machine", session_id: "agent", created_at: at };
+  const item: NeedsYouItem = { kind: "task", key: "task:verify", todo, status: "needs_you", asks: [card], countsOpen: true };
+  expect(needsYouBySupervisor([item], "main", true)).toEqual([
+    { supervisor: "main", items: [] }, { supervisor: "dispatch-chat", items: [item] },
+  ]);
+});
 
 // Android reads the same fixture (AssistantEntriesFixtureTest): the two entries split the same input the same way.
 describe("the Assistant's Needs you and In progress entries (spec/fixtures/entries)", () => {

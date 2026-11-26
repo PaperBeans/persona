@@ -208,12 +208,23 @@ func (n *Node) newDesktopSession(ctx context.Context, p runtimeStartParams, name
 	id, title := newUUID(), desktopTitle(cmp.Or(strings.TrimSpace(p.Prompt), nameHint), dir)
 	s := &proto.Session{SessionID: id, Cwd: dir, Title: title, Agent: "claude", Status: proto.StatusIdle,
 		Model: model, Effort: p.Effort, StartedByPersona: true, SourceKind: proto.SourceClaudeDesktop, UpdatedAt: time.Now().UTC()}
+	backend := backendLaunchFrom(ctx)
+	if backend != nil {
+		if err := backend.beforeDispatch(id); err != nil {
+			return nil, err
+		}
+	}
 	seedErr := seedDesktopSession(ctx, claude, dir, id, title)
 	path := n.transcriptPath(id)
 	if seedErr != nil && path == "" {
 		return nil, fmt.Errorf("Claude Code 没能写出新会话：%v", seedErr)
 	}
 	n.state.put(id, sessionState{Launcher: claudeDesktopLauncher, Cwd: dir, StartedAt: s.UpdatedAt})
+	if backend != nil {
+		if err := backend.executor.recordLaunchSession(id); err != nil {
+			return nil, err
+		}
+	}
 	if path == "" {
 		return s, desktopCreatedError(s, fmt.Errorf("Claude Code 没有写出会话 %s", id), false)
 	}

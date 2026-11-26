@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
                 app.hub.flatMapLatest { it?.connection?.imageLimits ?: flowOf(persona.core.contracts.ImageLimitsTable.Standard) }.distinctUntilChanged()
             }.collectAsStateWithLifecycle(persona.core.contracts.ImageLimitsTable.Standard)
             val lark = remember(features) { LarkFeatures.of(features) }
+            val mail = remember(features) { persona.android.ui.mailAccessOf(features) }
             // The selected hub's managers: pages group by them when there are several (docs/assistant/managers.md step 4).
             val managers by managerRoster.roster.collectAsStateWithLifecycle()
             val managerGroup by managerRoster.group.collectAsStateWithLifecycle()
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
                 persona.feature.assistant.LocalOpenerIcons provides openerIcons,
                 persona.feature.chat.LocalOpeningMessageSource provides ::conversationOpeningSource,
                 persona.core.designsystem.LocalLarkFeatures provides lark,
+                persona.core.designsystem.LocalMailAccess provides mail,
                 persona.core.designsystem.LocalHubFeatures provides features,
                 persona.core.designsystem.LocalHubImageLimits provides imageLimits,
                 persona.core.designsystem.LocalManagerRoster provides managers,

@@ -81,44 +81,62 @@ func (s *Service) createOutsideDirection(ctx context.Context, in directionCreate
 	}
 	id, now := "dir_"+randomHex(16), time.Now().UTC()
 	var view *leaderView
-	_, err = s.updateSettingsSave(ctx, func(v *Settings) error {
-		if len(v.Leaders) >= leadersMost {
-			return fmt.Errorf("%w: at most %d directions: end one first", errDirectionConflict, leadersMost)
-		}
-		if slices.Contains(v.Leaders, id) {
-			return fmt.Errorf("%w: direction id already exists", errDirectionConflict)
-		}
-		v.Leaders = append(slices.Clone(v.Leaders), id)
-		return nil
-	}, func(ctx context.Context, _ Store, v Settings) error {
-		b := &s.directions
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		if !s.directionsLocked(ctx) {
-			return errors.New("the directions could not be read")
-		}
-		if b.m[id] != nil {
-			return fmt.Errorf("%w: direction id already exists", errDirectionConflict)
-		}
-		if ref.MachineID != "" {
-			for other, d := range b.m {
-				if d.EndedAt == nil && d.Outside != nil && d.Outside.MachineID == ref.MachineID && d.Outside.SessionID == ref.SessionID {
-					return fmt.Errorf("%w: that Agent already stands for direction %s", errDirectionConflict, other)
+	for {
+		var fenceWait chan struct{}
+		_, err = s.updateSettingsSave(ctx, func(v *Settings) error {
+			if len(v.Leaders) >= leadersMost {
+				return fmt.Errorf("%w: at most %d directions: end one first", errDirectionConflict, leadersMost)
+			}
+			if slices.Contains(v.Leaders, id) {
+				return fmt.Errorf("%w: direction id already exists", errDirectionConflict)
+			}
+			v.Leaders = append(slices.Clone(v.Leaders), id)
+			return nil
+		}, func(ctx context.Context, _ Store, v Settings) error {
+			b := &s.directions
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if ref.MachineID != "" && ref.SessionID != "" {
+				if ch := s.idleCloseFenceFor(ref.MachineID, ref.SessionID); ch != nil {
+					fenceWait = ch
+					return errIdleCloseFenceActive
 				}
 			}
+			if !s.directionsLocked(ctx) {
+				return errors.New("the directions could not be read")
+			}
+			if b.m[id] != nil {
+				return fmt.Errorf("%w: direction id already exists", errDirectionConflict)
+			}
+			if ref.MachineID != "" {
+				for other, d := range b.m {
+					if d.EndedAt == nil && d.Outside != nil && d.Outside.MachineID == ref.MachineID && d.Outside.SessionID == ref.SessionID {
+						return fmt.Errorf("%w: that Agent already stands for direction %s", errDirectionConflict, other)
+					}
+				}
+			}
+			next := maps.Clone(b.m)
+			d := &direction{Outside: &directionOutside{MachineID: ref.MachineID, SessionID: ref.SessionID}, Project: project,
+				By: directionByUser, At: now, Name: name, NameBy: directionByUser}
+			next[id] = d
+			if err := creator.CreateOutsideDirection(ctx, id, ref, map[string]any{settingsKey: v, directionsKey: next}); err != nil {
+				return err
+			}
+			b.m = next
+			view = &leaderView{External: true, MachineID: ref.MachineID, SessionID: ref.SessionID, By: d.By, At: d.At}
+			view.ID, view.Title, view.Name, view.Project = id, name, name, project
+			return nil
+		})
+		if errors.Is(err, errIdleCloseFenceActive) && fenceWait != nil {
+			select {
+			case <-fenceWait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
-		next := maps.Clone(b.m)
-		d := &direction{Outside: &directionOutside{MachineID: ref.MachineID, SessionID: ref.SessionID}, Project: project,
-			By: directionByUser, At: now, Name: name, NameBy: directionByUser}
-		next[id] = d
-		if err := creator.CreateOutsideDirection(ctx, id, ref, map[string]any{settingsKey: v, directionsKey: next}); err != nil {
-			return err
-		}
-		b.m = next
-		view = &leaderView{External: true, MachineID: ref.MachineID, SessionID: ref.SessionID, By: d.By, At: d.At}
-		view.ID, view.Title, view.Name, view.Project = id, name, name, project
-		return nil
-	})
+		break
+	}
 	if err != nil {
 		return nil, err
 	}

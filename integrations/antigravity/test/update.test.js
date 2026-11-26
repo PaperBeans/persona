@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { PACKAGES, packageHash, readShipped } from '../../runtime-sdk/lib/package.js'
+import { installCurrent, PACKAGES, packageHash, readShipped, verifyPackage } from '../../runtime-sdk/lib/package.js'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { installAntigravityPackage, PACKAGE_NAME } from '../install.mjs'
 import { createAgyRuntime } from '../lib/runtime.js'
@@ -176,6 +176,195 @@ test('an idle store runtime installs the offered package as current and exits fo
   assert.equal(readlinkSync(join(store, 'current')), v2.hash)
 })
 
+test('store lock contention retries without blacklisting the offer or blocking timers', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const [running, offered] = ['lock-A', 'lock-B'].map((marker) => offerOf(marker))
+  const current = verifyPackage(running, PACKAGE_NAME)
+  installCurrent(store, current.hash, current.files)
+  node.offer = offered
+  const lock = join(store, '.install.lock')
+  const owner = join(lock, `${process.pid}-0000000000000000`)
+  mkdirSync(lock)
+  writeFileSync(owner, '')
+  const exits = []
+  const logs = []
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 20,
+    log: (msg) => logs.push(msg),
+    update: { name: PACKAGE_NAME, hash: running.hash, store, exit: (hash) => exits.push(hash) },
+  })
+  t.after(() => {
+    rmSync(lock, { recursive: true, force: true })
+    return runtime.stop()
+  })
+  runtime.start()
+  await until('first package fetch', () => node.packageCalls.length === 1)
+  await until('asynchronous lock retries', () => logs.filter((msg) => msg.includes('store is busy')).length >= 2)
+  assert.equal(node.packageCalls.length, 1, 'a lock retry reuses the verified package instead of fetching it again')
+  assert.equal(readlinkSync(join(store, 'current')), running.hash)
+  assert.deepEqual(exits, [])
+  rmSync(owner)
+  rmdirSync(lock)
+  await until('install succeeds after the lock is released', () => readlinkSync(join(store, 'current')) === offered.hash)
+  await until('the accepted update exits for its supervisor', () => exits.length === 1)
+  assert.equal(exits[0], offered.hash)
+})
+
+test('package fetch failures retry without blacklisting the offer', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const [running, offered] = ['fetch-A', 'fetch-B'].map((marker) => offerOf(marker))
+  const current = verifyPackage(running, PACKAGE_NAME)
+  installCurrent(store, current.hash, current.files)
+  node.offer = offered
+  const push = node.packageCalls.push.bind(node.packageCalls)
+  let failFetch = true
+  node.packageCalls.push = (...args) => {
+    const result = push(...args)
+    if (failFetch) {
+      node.offer = undefined // The hello offered it, but this first fetch hits a transient node failure.
+      failFetch = false
+    }
+    return result
+  }
+  const exits = []
+  const logs = []
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 20,
+    log: (msg) => logs.push(msg),
+    update: { name: PACKAGE_NAME, hash: running.hash, store, exit: (hash) => exits.push(hash) },
+  })
+  t.after(() => runtime.stop())
+  runtime.start()
+  await until('transient package fetch failure', () => logs.some((msg) => msg.includes('package fetch failed')))
+  node.offer = offered
+  await until('the same offer succeeds after the node recovers', () => readlinkSync(join(store, 'current')) === offered.hash)
+  await until('the accepted update exits for its supervisor', () => exits.length === 1)
+  assert.ok(node.packageCalls.length >= 2)
+  assert.equal(exits[0], offered.hash)
+})
+
+test('a newer offer invalidates an older lock retry', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const [running, older, newer] = ['retry-A', 'retry-B', 'retry-C'].map((marker) => offerOf(marker))
+  const current = verifyPackage(running, PACKAGE_NAME)
+  installCurrent(store, current.hash, current.files)
+  node.offer = older
+  const lock = join(store, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-0000000000000000`), '')
+  const logs = []
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 100,
+    log: (msg) => logs.push(msg),
+    update: { name: PACKAGE_NAME, hash: running.hash, store },
+  })
+  t.after(() => {
+    rmSync(lock, { recursive: true, force: true })
+    return runtime.stop()
+  })
+  runtime.start()
+  await until('the older offer is waiting on the lock', () => logs.some((msg) => msg.includes('store is busy')))
+  node.offer = newer
+  rmSync(lock, { recursive: true, force: true })
+  node.peer.close(new Error('a newer node offer arrives'))
+  await until('the newer offer installs', () => readlinkSync(join(store, 'current')) === newer.hash)
+  await new Promise((resolve) => setTimeout(resolve, 160))
+  assert.equal(readlinkSync(join(store, 'current')), newer.hash, 'the older timed retry cannot roll current back')
+  assert.equal(node.packageCalls.length, 2, 'the older retry does not need another package fetch')
+})
+
+test('a completed hello without an offer cancels the stale lock retry', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const [running, offered] = ['hello-A', 'hello-B'].map((marker) => offerOf(marker))
+  const current = verifyPackage(running, PACKAGE_NAME)
+  installCurrent(store, current.hash, current.files)
+  node.offer = offered
+  const lock = join(store, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-0000000000000000`), '')
+  const logs = []
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 100,
+    log: (msg) => logs.push(msg),
+    update: { name: PACKAGE_NAME, hash: running.hash, store },
+  })
+  t.after(() => {
+    rmSync(lock, { recursive: true, force: true })
+    return runtime.stop()
+  })
+  runtime.start()
+  await until('the stale offer is waiting on the lock', () => logs.some((msg) => msg.includes('store is busy')))
+  const hellos = node.hellos
+  let answerHello
+  node.holdHello = new Promise((resolve) => { answerHello = resolve })
+  t.after(() => { answerHello(); node.holdHello = undefined })
+  node.offer = running // The replacement node rolled back to A, but its hello is still negotiating.
+  rmSync(lock, { recursive: true, force: true })
+  node.peer.close(new Error('node rollback'))
+  await until('the rollback hello is negotiating', () => node.hellos > hellos)
+  await new Promise((resolve) => setTimeout(resolve, 160))
+  assert.equal(readlinkSync(join(store, 'current')), running.hash, 'a stale retry cannot publish B while disconnected or negotiating hello')
+  node.hello = undefined
+  answerHello()
+  node.holdHello = undefined
+  await until('the rollback hello completed', () => node.hello?.package?.hash === running.hash)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(readlinkSync(join(store, 'current')), running.hash, 'the completed hello invalidates B instead of publishing it later')
+  assert.equal(node.packageCalls.length, 1)
+})
+
+test('a companion that stays on A keeps its running version through consecutive installs', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const versions = ['running-A', 'B', 'C', 'D', 'E', 'F'].map((marker) => offerOf(`active-${marker}`))
+  const running = verifyPackage(versions[0], PACKAGE_NAME)
+  installCurrent(store, running.hash, running.files)
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 20,
+    log: () => {},
+    // No exit hook: this is the long-lived process that must keep using A.
+    update: { name: PACKAGE_NAME, hash: running.hash, store },
+  })
+  t.after(() => runtime.stop())
+  node.offer = versions[1]
+  runtime.start()
+  for (const [index, offered] of versions.slice(1).entries()) {
+    if (index > 0) {
+      node.offer = offered
+      node.peer.close(new Error('next consecutive upgrade'))
+    }
+    await until(`installed upgrade ${index + 2}`, () => {
+      try { return readlinkSync(join(store, 'current')) === offered.hash } catch { return false }
+    })
+  }
+  assert.ok(existsSync(join(store, running.hash, 'antigravity', 'mcp-proxy.mjs')), 'the process still running A retains its proxy after A → B → C and later upgrades')
+  assert.ok(existsSync(join(store, running.hash, 'antigravity', 'media-guard.mjs')), 'the same retained generation keeps the media guard usable')
+})
+
 test('waits for an open permission card and active ACP turn to settle before exiting onto the installed version', async (t) => {
   const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
   const exits = []
@@ -219,6 +408,36 @@ test('waits for an open permission card and active ACP turn to settle before exi
   writeFileSync(join(dir, 'release-turn'), '1')
   await until('exits once turn finishes', () => exits.length === 1)
   assert.equal(exits[0], v2.hash)
+})
+
+test('a valid package whose hash differs from the hello offer is not installed', async (t) => {
+  const { dir, binary, agyDir, store, socketPath } = makeEnv(t)
+  const node = await startFakeNode(t, { path: socketPath })
+  const [running, offered, replacement] = ['offer-A', 'offer-B', 'offer-C'].map((marker) => offerOf(marker))
+  const current = verifyPackage(running, PACKAGE_NAME)
+  installCurrent(store, current.hash, current.files)
+  node.offer = offered
+  const push = node.packageCalls.push.bind(node.packageCalls)
+  node.packageCalls.push = (...args) => {
+    const result = push(...args)
+    node.offer = replacement // A different valid package answers the fetch for B.
+    return result
+  }
+  const runtime = createAgyRuntime({
+    agyBin: binary,
+    agyDir,
+    home: dir,
+    socketPath: node.path,
+    retryMs: 20,
+    log: () => {},
+    update: { name: PACKAGE_NAME, hash: running.hash, store },
+  })
+  t.after(() => runtime.stop())
+  runtime.start()
+  await until('the replacement package answered', () => node.packageCalls.length === 1)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  assert.equal(readlinkSync(join(store, 'current')), running.hash, 'C is not cached or installed for the B offer')
+  assert.equal(node.packageCalls.length, 1, 'the mismatched response does not start a retry loop')
 })
 
 test('rejects a tampered package without touching current or retrying the bad hash', async (t) => {
@@ -291,12 +510,23 @@ test('install.mjs seeds the store and companion.mjs self-updates unless --no-upd
   assert.equal(readlinkSync(current), v2.hash)
   assert.ok(existsSync(join(store, v1Hash)), 'previous version stays alongside current')
 
-  const restartedProc = spawn(process.execPath, [entry, '--socket', socketPath, '--agy-bin', binary, '--agy-dir', agyDir], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const lock = join(store, '.install.lock')
+  mkdirSync(lock)
+  writeFileSync(join(lock, `${process.pid}-1111111111111111`), '')
+  const restartedProc = spawn(process.execPath, [entry, '--socket', socketPath, '--agy-bin', binary, '--agy-dir', agyDir, '--parent-stdin'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
   t.after(() => { try { restartedProc.kill('SIGKILL') } catch {} })
+  const active = join(store, '.active', v2.hash)
+  mkdirSync(active, { recursive: true })
+  const nodeReservation = join(active, `${process.pid}-0000000000000000`)
+  writeFileSync(nodeReservation, '')
+  rmSync(lock, { recursive: true, force: true })
   await until('restarted companion connected on v2', () => node.hellos >= 3 && node.hello?.package?.hash === v2.hash)
   assert.equal(node.packageCalls.length, 1, 'v2 matches node offer so no further package fetch occurs')
+  assert.equal(existsSync(nodeReservation), false, 'companion registration releases the node startup reservation')
+  const companionLeases = readdirSync(active).filter((name) => name.startsWith(`${restartedProc.pid}-`))
+  assert.equal(companionLeases.length, 1, 'the companion keeps its own lease after the handoff')
   const stoppedRestarted = once(restartedProc, 'exit')
   restartedProc.kill('SIGTERM')
   const [restartedCode] = await stoppedRestarted

@@ -7,7 +7,10 @@ computers) and runs `persona-hub run` with a clean environment, so nothing of th
 PERSONA_HOME) is read. The hub starts the persona-manager beside it, as an installed hub does. Then it checks:
 
 - /api/v1/health answers ok, and an authenticated request (/api/v1/managers) is served;
-- the manager connects and says `modules: loaded none` (internal/assistant/modules.go);
+- the manager connects and says `modules: loaded none` (internal/assistant/modules.go), and the hub's hello still
+  carries the `modules` marker with no built-in module's `module.<id>` flag (a client-only flag such as
+  `module.glasses` may stay), which is the wire fact every client's hide-decision reads (#16243,
+  docs/architecture/core-and-modules.md "Hub flags");
 - every extension program a module provides (builtinext.AddProgram in server/internal/modules/all) is an unknown
   subcommand of personad and persona-manager (usage, exit 2), its built-in extension is not in /api/v1/extensions, and
   that extension's route (/api/v1/extensions/<id>/-/assistant-data) answers 404;
@@ -418,14 +421,14 @@ def observe(base, token):
 
 def expect(base, token, loaded, present, absent, programs, connectors, module_exts, flags=True):
     """Every module in present is there (loaded, its flag, programs' extensions and routes, connectors) and every one in
-    absent is not. flags: check the module.<id> flags (a core-only hub announces none)."""
+    absent is not. flags: check every built-in module's module.<id> flag (a core-only hub announces none of them, but
+    still announces the `modules` marker every client reads; docs/architecture/core-and-modules.md "Hub flags")."""
     features, extensions, listed = observe(base, token)
     for want, ids in ((True, present), (False, absent)):
         what = "missing" if want else "present"
         for id in ids:
             check((id in loaded) == want, f"module {id} {what} in the manager's modules: loaded {loaded}")
-            if flags:
-                check(("module." + id in features) == want, f"flag module.{id} {what} in the hub's features")
+            check(("module." + id in features) == want, f"flag module.{id} {what} in the hub's features")
         for name in flat(programs, ids):
             check((name in extensions) == want, f"extension {name} {what}: {sorted(extensions)}")
             status, _ = http(f"{base}/api/v1/extensions/{name}/-/assistant-data", token)
@@ -442,6 +445,13 @@ def expect(base, token, loaded, present, absent, programs, connectors, module_ex
                 check((status != 404) == want, f"{MODULE_ROUTES[id]} ({id}): {status}, want {'not ' if want else ''}404")
     if flags and (present or absent):
         check("modules" in features, "the hub's features lack the modules marker")
+    if not flags:
+        # A core-only hub has no built-in module, but it still publishes the marker every client's hide-decision needs
+        # (#16243; docs/architecture/core-and-modules.md "Hub flags"). A client-only flag (modapi.ClientModules, glasses)
+        # may stay; any built-in module's flag would mean the core loaded it.
+        check("modules" in features, "a core-only hub's features lack the modules marker, so clients cannot tell it serves no module")
+        stray = sorted(f for f in features if f.startswith("module.") and f.removeprefix("module.") in set(absent))
+        check(not stray, f"a core-only hub announces built-in module flags it loaded no module for: {stray}")
 
 
 def set_modules_off(container, ids):

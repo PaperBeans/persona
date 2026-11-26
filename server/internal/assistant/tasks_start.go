@@ -286,6 +286,11 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			continue
 		}
 		t.TodoID = todo.ID
+		if s.settings(ctx).todosV2On() && len(t.BlockedByPR) > 0 {
+			if err := s.persistExternalPRBlockers(ctx, todo.ID, t.BlockedByPR); err != nil {
+				s.logf("task %s: persist external_pr blockers: %v", todo.ID, err)
+			}
+		}
 		if t.RequestGate != "" {
 			// Persist the approved edges, including edges inherited from a reused to-do.
 			t.After = cleanIDs(slices.Concat(t.After, todo.After))
@@ -294,7 +299,12 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			q := s.pendingPlacementQueueEntry(ctx, p.ID, pendingPlacementBatchSize, pendingPlacementBatchIdx, s.placementNow())
 			pendingPlacementBatchIdx++
 			t.Queue = &q
-		} else if t.Workspace != nil && t.Workspace.Mode == workspaceExisting && (!t.WorkspaceInferred || t.Workspace.Queue) && t.WorkspaceResolved != nil {
+		} else if s.settings(ctx).todosV2On() && len(t.BlockedByPR) > 0 {
+			if refs := s.activeTodoBlockerRefs(ctx, todo.ID); len(refs) > 0 {
+				t.Queue = s.blockerWaitQueue(refs)
+			}
+		}
+		if t.Queue == nil && t.Workspace != nil && t.Workspace.Mode == workspaceExisting && (!t.WorkspaceInferred || t.Workspace.Queue) && t.WorkspaceResolved != nil {
 			effMachine := s.effectiveBoardMachine(t.Machine)
 			wsPath := t.WorkspaceResolved.Path
 			wsKey := effMachine + "\x00" + s.taskDirKey(ctx, t.Machine)(wsPath)
@@ -384,6 +394,14 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 					batchSize = task.Queue.Placement.BatchSize
 				}
 				s.onPendingPlacementEnqueued(ctx, p.ID, task.TodoID, batchSize)
+				continue
+			}
+			if task.Queue != nil && task.Queue.Key == blockerWaitQueueKey {
+				held := task.ReuseTodo
+				if held == "" && task.InboxItem != "" {
+					held = task.TodoID
+				}
+				s.releaseTakenTodo(held)
 				continue
 			}
 			if task.Queue != nil && task.Queue.Key == workspaceQueueKey && task.Queue.Workspace != nil {
@@ -879,6 +897,49 @@ func (s *Service) closeDeferredTaskStart(ctx context.Context, t *PlanTask, mid, 
 	}
 }
 
+// parkActiveTodoBlockers checks whether t currently has active persistent blockers under todos_v2.
+// When blocked, it re-parks the plan task into blockerWaitQueueKey (clearing any prior Claimed/Gateway/Workspace
+// queue state while keeping t.Machine and t.Cwd intact) and returns true so runPlanTaskStart aborts launch cleanly
+// without marking the to-do failed. When todos_v2 is off, this is a zero-overhead no-op returning false.
+func (s *Service) parkActiveTodoBlockers(ctx context.Context, planID string, i int, t PlanTask, retry bool) bool {
+	if !s.settings(ctx).todosV2On() {
+		return false
+	}
+	refs := s.activeTodoBlockerRefs(ctx, t.TodoID)
+	if len(refs) == 0 {
+		return false
+	}
+	q := s.blockerWaitQueue(refs)
+	q.Retry = retry
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+	defer cancel()
+	switch {
+	case t.RequestGate != "" && t.Queue != nil:
+		s.replaceTaskQueue(pctx, t, q, queueOwnerStart)
+	case t.claimedGatewayStart():
+		s.replaceTaskQueue(pctx, t, q, queueQuotaStart)
+	case t.Queue != nil && t.Queue.Claimed:
+		s.replaceTaskQueue(pctx, t, q, queueCAS)
+	default:
+		var savedPlacement *placement
+		if err := s.patchPlanTask(pctx, planID, i, func(pt *PlanTask) {
+			if pt.TodoID != t.TodoID {
+				return
+			}
+			pt.Queue = q
+			pt.Placement = queuedPlacement(*pt, q)
+			savedPlacement = pt.Placement
+			pt.Error, pt.ErrorCode, pt.ErrorArgs = "", "", nil
+		}); err != nil {
+			s.logf("task %s: park active todo blockers: %v", t.TodoID, err)
+		} else if savedPlacement != nil {
+			s.savePlacement(pctx, savedPlacement)
+		}
+	}
+	s.logf("task %s: deferred start until active todo blockers clear (%d active)", t.TodoID, len(refs))
+	return true
+}
+
 // runPlanTaskStart is the shared start body; its caller owns the idle reservation through every return path.
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
@@ -907,6 +968,9 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 			t.admissionRelease = nil
 		}
 	}()
+	if s.parkActiveTodoBlockers(ctx, planID, i, t, retry) {
+		return
+	}
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
 	if t.Role == roleLeader { // legacy one-shot tool discovery may wait for this link (task_leader.go)
 		s.leaderStarts.Add(1)
@@ -1067,6 +1131,13 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		s.closeDeferredTaskStart(ctx, &t, mid, sid)
 	}
 	if err == nil {
+		if !linkedDone && s.settings(ctx).todosV2On() {
+			rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+			if recErr := s.RecordSupervisedTaskActive(rctx, t.TodoID, mid, sid, s.runtimeBootEpoch()); recErr != nil {
+				s.logf("task %s: record todos_v2 active checkpoint: %v", t.TodoID, recErr)
+			}
+			rcancel()
+		}
 		if t.HandoffID != "" {
 			hctx, hcancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
 			_, _ = s.recordTodoHandoffDelivery(hctx, t.HandoffID, mid, sid, t.startedAgent, handoffDeliveryAccepted, "")
@@ -1135,7 +1206,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		}
 		args["launcher"] = s.startLauncher(ctx, t.Launcher)
 	}
-	if !t.backendWorkspace() && t.RequestGate == "" && s.beginRemedy(ctx, planID, i, t, err, code, args, reason) {
+	if !t.usesPreparedWorkspace() && t.RequestGate == "" && s.beginRemedy(ctx, planID, i, t, err, code, args, reason) {
 		return
 	}
 	// A retry the assistant asked for that failed so its tab is gone: the start fails for good, and the supervisor and
@@ -1149,18 +1220,12 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		failed.ErrorCode, failed.ErrorArgs = code, args
 		retryWith = s.retryLaunchers(ctx, m, failed, err)
 	}
-	if ferr := s.failTodo(ctx, t.TodoID, reason); ferr != nil {
-		s.logf("task %s: fail: %v", t.TodoID, ferr)
-	}
-	if t.HandoffID != "" {
-		_, _ = s.recordTodoHandoffDelivery(ctx, t.HandoffID, t.Machine, "", "", handoffDeliveryRejected, err.Error())
-	}
 	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		pt.Error = err.Error()
 		var problem *taskworkspace.Problem
 		if errors.As(err, &problem) {
 			pt.WorkspaceError = problem
-		} else if t.backendWorkspace() && t.backendRequest != nil {
+		} else if t.usesPreparedWorkspace() && t.backendRequest != nil {
 			pt.WorkspaceError = taskworkspace.Failure("engine_start_failed", "start", t.backendRequest.OperationID, "", t.Cwd)
 		}
 		pt.ErrorCode, pt.ErrorArgs, pt.RetryWith = code, args, retryWith
@@ -1169,6 +1234,12 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		}
 	}); perr != nil {
 		s.logf("plan %s: task %d's start error: %v", planID, i, perr)
+	}
+	if ferr := s.failTodo(ctx, t.TodoID, reason); ferr != nil {
+		s.logf("task %s: fail: %v", t.TodoID, ferr)
+	}
+	if t.HandoffID != "" {
+		_, _ = s.recordTodoHandoffDelivery(ctx, t.HandoffID, t.Machine, "", "", handoffDeliveryRejected, err.Error())
 	}
 	s.tasks.mu.Lock()
 	s.tasks.receipted[t.TodoID] = time.Now()

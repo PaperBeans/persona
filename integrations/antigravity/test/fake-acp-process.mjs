@@ -10,7 +10,11 @@ import { appendFileSync, closeSync, existsSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 const [pidFile, mode = 'ok', marker] = process.argv.slice(2)
-if (pidFile) appendFileSync(pidFile, `${process.pid}\n`)
+if (pidFile) {
+  appendFileSync(pidFile, `${process.pid}\n`)
+  appendFileSync(`${pidFile}.cwds`, `${process.cwd()}\n`)
+appendFileSync(`${pidFile}.config-dirs`, `${process.env.ANTIGRAVITY_CLI_CONFIG_DIR || ''}\n`)
+}
 
 let first = false
 if ((mode === 'silent-once' || mode === 'fail-once') && marker && !existsSync(marker)) {

@@ -211,6 +211,11 @@ func absGit(ctx context.Context, dir, option string) (string, error) {
 func (n *Node) worktreeRemove(ctx context.Context, kind, path string, deleteBranch, force bool) (proto.WorktreeRemoved, error) {
 	var res proto.WorktreeRemoved
 	p := proto.ExpandHome(strings.TrimSpace(path), n.home)
+	if filepath.IsAbs(p) {
+		if err := n.guardBackendDeletion(p); err != nil {
+			return res, err
+		}
+	}
 	rt, runtime, _ := n.worktreeRuntime(ctx, kind)
 	// A reviewer's copy is a plain worktree in the node's own checkouts folder on every engine, and goes the way the node
 	// made it (reviewsnapshot.go). An engine runtime made no workspace of it, so the runtime's way refused it as

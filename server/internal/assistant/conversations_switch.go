@@ -123,7 +123,7 @@ type conversationsSwitchArgs struct {
 	cancelUnfinished bool
 }
 
-type conversationSwitchResolver func(context.Context, string) (proto.Session, error)
+type conversationSwitchResolver func(ctx context.Context, machine, id string) (proto.Session, error)
 type conversationSwitchConfirm func(string) (bool, string, error)
 
 func (a *conversationsSwitchArgs) validate(status bool) error {
@@ -230,7 +230,7 @@ func (s *Service) planConversationSwitchItem(ctx context.Context, state conversa
 		item.Outcome, item.Reason = conversationSwitchRefused, reason
 		return item
 	}
-	row, err := resolve(ctx, id)
+	row, err := resolve(ctx, machine, id)
 	if err != nil {
 		return refuse(err.Error())
 	}
@@ -357,7 +357,7 @@ func (s *Service) planConversationSwitchCancel(ctx context.Context, st logicalSw
 	if active, ok := c.Active(); !ok || active.ID != op.SourceSegment {
 		return refuse("the original batch item has not completed a switch")
 	}
-	row, err := resolve(ctx, old.ConversationID)
+	row, err := resolve(ctx, old.Machine, old.ConversationID)
 	if err != nil {
 		return refuse(err.Error())
 	}
@@ -823,9 +823,10 @@ func (s *Service) conversationSwitchRoutes() {
 			apierr.Write(w, 400, err)
 			return
 		}
-		machine := cmp.Or(a.Machine, s.settings(r.Context()).MachineID)
-		a.Machine = machine
-		resolve := func(ctx context.Context, id string) (proto.Session, error) {
+		defaultMachine := cmp.Or(a.Machine, s.settings(r.Context()).MachineID)
+		a.Machine = defaultMachine
+		resolve := func(ctx context.Context, targetMachine, id string) (proto.Session, error) {
+			machine := cmp.Or(targetMachine, defaultMachine)
 			row, ok := s.session(ctx, machine, id)
 			if !ok {
 				return proto.Session{}, fmt.Errorf("conversation not found")
@@ -885,12 +886,15 @@ func (s *Service) toolConversationsSwitch(ctx context.Context, machine, self str
 		encoded, _ := json.MarshalIndent(report, "", "  ")
 		return string(encoded), nil
 	}
-	a.Machine = cmp.Or(a.Machine, s.settings(ctx).MachineID)
-	resolve := func(ctx context.Context, id string) (proto.Session, error) {
-		row, err := s.ownSpaceConversationOnMachine(ctx, a.Machine, self, id)
+	defaultMachine := cmp.Or(a.Machine, s.settings(ctx).MachineID)
+	a.Machine = defaultMachine
+	resolve := func(ctx context.Context, targetMachine, id string) (proto.Session, error) {
+		target := cmp.Or(targetMachine, defaultMachine)
+		row, err := s.ownSpaceConversationOnMachine(ctx, target, self, id)
 		if err != nil {
 			return proto.Session{}, err
 		}
+		row.MachineID = cmp.Or(row.MachineID, target)
 		return row, nil
 	}
 	if a.Preview {

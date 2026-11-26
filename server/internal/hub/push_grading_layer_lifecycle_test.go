@@ -205,9 +205,12 @@ func TestPushGradingLayerLifecycleManagerIsolationAndQuiesce(t *testing.T) {
 		if err := h.quiesce.pause(ctx); err != nil {
 			t.Fatal(err)
 		}
-		// HTTP write while paused returns 503.
+		// HTTP write while paused returns 503, and setPushGrading also respects write quiesce.
 		if code, body := gradingLayerHTTP(t, h, extA, http.MethodDelete, "/api/v1/push/grading/layer", ""); code != http.StatusServiceUnavailable {
 			t.Fatalf("DELETE while quiesced: %d %s, want 503", code, body)
+		}
+		if err := h.push.setPushGrading(ctx, true); err == nil {
+			t.Fatal("setPushGrading succeeded while hub writes were quiesced")
 		}
 		// Reconcile while paused defers until resume.
 		h.reconcilePushGradingLayer(assistantwire.AssistantID, nil)
@@ -361,14 +364,31 @@ func TestPushGradingLayerRoutesAndLifecycleRealPostgres(t *testing.T) {
 	extB := extGradingPrincipal(assistantwire.AssistantID, "ext-pg-b")
 	extOtherMgr := extGradingPrincipal("manager-pg-b", "ext-pg-a")
 
-	// Claim and renew in real Postgres.
+	// Claim and renew in real Postgres, checking preview and live applyPushGrading parity immediately after each change.
 	code, body := gradingLayerHTTP(t, h, extA, http.MethodPut, "/api/v1/push/grading/layer", `{"version":1,"actions":{"P1":"hold","P2":"push"}}`)
 	if code != http.StatusOK || !strings.Contains(string(body), `"revision":1`) {
 		t.Fatalf("PG claim: %d %s", code, body)
 	}
+	prev1 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P2","related_key":"pg:1"}}`)
+	allow1, reason1 := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP2, relatedKey: "pg:1"})
+	if !prev1.Allow || !allow1 || reason1 != "" || prev1.LayerSource != "extension:ext-pg-a" {
+		t.Fatalf("PG claim preview/live mismatch: prev=%+v live=(%v,%q)", prev1, allow1, reason1)
+	}
+	// Manager-pg-b does NOT inherit assistant's layer (still uses owner switch -> P2 silenced).
+	prevOther := previewGradingHTTP(t, h, nil, `{"notification":{"kind":"assistant","level":"P2","manager":"manager-pg-b","related_key":"pg:2"}}`)
+	allowOther, reasonOther := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: "manager-pg-b", level: assistantwire.LevelP2, relatedKey: "pg:2"})
+	if prevOther.Allow || prevOther.Reason != pushGradingOutcomeSilenced || prevOther.LiveReason != interceptReasonP2 || allowOther || reasonOther != interceptReasonP2 {
+		t.Fatalf("PG manager isolation mismatch: prev=%+v live=(%v,%q)", prevOther, allowOther, reasonOther)
+	}
+
 	code, body = gradingLayerHTTP(t, h, extA, http.MethodPut, "/api/v1/push/grading/layer", `{"version":1,"actions":{"P1":"silence"},"dedup_window":"4h"}`)
 	if code != http.StatusOK || !strings.Contains(string(body), `"revision":2`) {
 		t.Fatalf("PG renew: %d %s", code, body)
+	}
+	prev2 := previewGradingHTTP(t, h, extA, `{"notification":{"kind":"assistant","level":"P1","related_key":"pg:3"}}`)
+	allow2, reason2 := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP1, relatedKey: "pg:3"})
+	if prev2.Allow || prev2.Reason != pushGradingOutcomeSilenced || prev2.LiveReason != interceptReasonP2 || allow2 || reason2 != interceptReasonP2 {
+		t.Fatalf("PG renew immediate cache invalidation mismatch: prev=%+v live=(%v,%q)", prev2, allow2, reason2)
 	}
 
 	// Competing extension and competing manager both get 409 layer_taken.
@@ -395,6 +415,12 @@ func TestPushGradingLayerRoutesAndLifecycleRealPostgres(t *testing.T) {
 	}
 	if snap, err := readPushGradingSnapshot(ctx, store); err != nil || snap.Layer != nil {
 		t.Fatalf("PG layer survived reconcile: %+v err=%v", snap, err)
+	}
+	// Immediately after prune, cache is invalidated and P1 reverts to owner's default "held" / ln_p1_held.
+	prevAfterPrune := previewGradingHTTP(t, h, nil, `{"notification":{"kind":"assistant","level":"P1","related_key":"pg:4"}}`)
+	allowAfterPrune, reasonAfterPrune := h.push.applyPushGrading(pushPolicy{kind: assistantwire.NotifyPush, manager: assistantwire.AssistantID, level: assistantwire.LevelP1, relatedKey: "pg:4"})
+	if prevAfterPrune.Allow || prevAfterPrune.Reason != pushGradingOutcomeHeld || prevAfterPrune.LiveReason != interceptReasonP1 || allowAfterPrune || reasonAfterPrune != interceptReasonP1 {
+		t.Fatalf("PG post-prune parity mismatch: prev=%+v live=(%v,%q)", prevAfterPrune, allowAfterPrune, reasonAfterPrune)
 	}
 
 	// Verify owner hub.ln_mode remained true throughout.

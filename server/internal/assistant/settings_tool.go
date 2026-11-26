@@ -176,7 +176,7 @@ func (s *Service) allOwnSettings() []ownSetting {
 			get: func(ctx context.Context) (string, error) { return readonlyModeOf(s.settings(ctx)), nil },
 			set: s.setReadonlyMode},
 		{Setting: Setting{Key: "assistant.task_workspace_preference", Title: "Task workspace preference", Actions: getSet,
-			About: "prefer-existing (default): reuse the task directory if free; prefer-new: isolate writable Git tasks. Read-only defaults to none, busy directories to new; explicit task workspace wins. Paths come from the machine engine",
+			About: "prefer-existing (default) reuses a free task directory. prefer-new isolates writable Git tasks. Read-only tasks use their original directory. Busy Git directories use a new workspace. Explicit choices take precedence. New workspaces follow naming rules on supported computers",
 			Value: "prefer-existing or prefer-new"},
 			get: func(ctx context.Context) (string, error) { return s.taskWorkspacePreference(ctx), nil },
 			set: s.setTaskWorkspacePreference},
@@ -495,6 +495,32 @@ func (s *Service) allOwnSettings() []ownSetting {
 				"off by default; only the owner changes it, in Settings › Assistant",
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.dashboardsOn(ctx)), nil }},
+		{Setting: Setting{Key: todosV2AutoSeenSettingKey, Title: "Auto-clear unseen badge on completed tasks (todos_v2)", Actions: getSet,
+			About: "controls whether autonomously completed to-dos auto-clear unseen badges under todos_v2=true: all_autonomous (default), subtasks (part_of children only), or off; no effect when todos_v2 is off",
+			Value: "off, subtasks or all_autonomous"},
+			get: func(ctx context.Context) (string, error) { return s.settings(ctx).todosV2AutoSeenMode(), nil },
+			set: s.setTodosV2AutoSeen},
+		{Setting: Setting{Key: todosV2PendingReviewSLASettingKey, Title: "Pending review quiet SLA hours (todos_v2)", Actions: getSet,
+			About: "how many hours pending_review tasks stay quiet in Working under todos_v2=true before escalating to Needs you: 0 (off, immediate Needs you), 12, 24 (default), or 48; no effect when todos_v2 is off",
+			Value: "0, 12, 24 or 48"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2PendingReviewSLAHours()), nil
+			},
+			set: s.setTodosV2PendingReviewSLAHours},
+		{Setting: Setting{Key: todosV2CanWaitSLASettingKey, Title: "Can-wait decision aging SLA hours (todos_v2)", Actions: getSet,
+			About: "how many hours non-critical can_wait decisions wait under todos_v2=true before aging into Needs you: 0 (off, never auto-escalate), 24, 48 (default), or 72; no effect when todos_v2 is off",
+			Value: "0, 24, 48 or 72"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2CanWaitSLAHours()), nil
+			},
+			set: s.setTodosV2CanWaitSLAHours},
+		{Setting: Setting{Key: todosV2FoldChildrenSettingKey, Title: "Fold child tasks under parent goals (todos_v2)", Actions: getSet,
+			About: "on (default): non-urgent child tasks fold under their top-level parent goal in todos_v2 board projection; off: show child tasks flat; no effect when todos_v2 is off",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2FoldChildrenOn()), nil
+			},
+			set: s.setTodosV2FoldChildren},
 		s.trustSetting(),
 		s.urgentRulesSetting(), // urgent_call_rules.go
 	}
@@ -793,6 +819,13 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 // dashboardsSettingKey is the Dashboards switch as persona_settings names it (Settings.Dashboards, `dashboards` in
 // GET/PUT /api/v1/assistant).
 const dashboardsSettingKey = "assistant.dashboards"
+
+const (
+	todosV2AutoSeenSettingKey         = "assistant.todos_v2_auto_seen"
+	todosV2PendingReviewSLASettingKey = "assistant.todos_v2_pending_review_sla_hours"
+	todosV2CanWaitSLASettingKey       = "assistant.todos_v2_can_wait_sla_hours"
+	todosV2FoldChildrenSettingKey     = "assistant.todos_v2_fold_children"
+)
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -1350,6 +1383,121 @@ func (s *Service) setChatReplyRelay(ctx context.Context, v json.RawMessage) (*ow
 		return out, err
 	}
 	return ch, nil
+}
+
+func (s *Service) setTodosV2AutoSeen(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var mode string
+	if err := json.Unmarshal(v, &mode); err != nil {
+		return nil, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous")
+	}
+	mode = strings.TrimSpace(mode)
+	if !slices.Contains(todosV2AutoSeenModes, mode) {
+		return nil, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous")
+	}
+	before := s.settings(ctx).todosV2AutoSeenMode()
+	if mode == before {
+		return &ownChange{summary: todosV2AutoSeenSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %s → %s", todosV2AutoSeenSettingKey, before, mode)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2AutoSeen = mode; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %s (applies when todos_v2 is enabled).", todosV2AutoSeenSettingKey, mode), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2PendingReviewSLAHours(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var hours *int
+	if err := json.Unmarshal(v, &hours); err != nil || hours == nil || !slices.Contains(todosV2PendingReviewSLAOptions, *hours) {
+		return nil, errors.New("todos_v2_pending_review_sla_hours must be 0, 12, 24 or 48")
+	}
+	next := *hours
+	before := s.settings(ctx).todosV2PendingReviewSLAHours()
+	if next == before {
+		return &ownChange{summary: todosV2PendingReviewSLASettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %d → %d", todosV2PendingReviewSLASettingKey, before, next)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2PendingReviewSLAHours = &next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %d (applies when todos_v2 is enabled).", todosV2PendingReviewSLASettingKey, next), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2CanWaitSLAHours(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var hours *int
+	if err := json.Unmarshal(v, &hours); err != nil || hours == nil || !slices.Contains(todosV2CanWaitSLAOptions, *hours) {
+		return nil, errors.New("todos_v2_can_wait_sla_hours must be 0, 24, 48 or 72")
+	}
+	next := *hours
+	before := s.settings(ctx).todosV2CanWaitSLAHours()
+	if next == before {
+		return &ownChange{summary: todosV2CanWaitSLASettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %d → %d", todosV2CanWaitSLASettingKey, before, next)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2CanWaitSLAHours = &next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %d (applies when todos_v2 is enabled).", todosV2CanWaitSLASettingKey, next), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2FoldChildren(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var onPtr *bool
+	if err := json.Unmarshal(v, &onPtr); err != nil || onPtr == nil {
+		return nil, errors.New("value must be true or false")
+	}
+	on := *onPtr
+	before := s.settings(ctx).todosV2FoldChildrenOn()
+	if on == before {
+		return &ownChange{summary: todosV2FoldChildrenSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %v → %v", todosV2FoldChildrenSettingKey, before, on)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2FoldChildren = &on; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %v (applies when todos_v2 is enabled).", todosV2FoldChildrenSettingKey, on), nil
+		},
+	}, nil
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

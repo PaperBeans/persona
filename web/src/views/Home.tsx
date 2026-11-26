@@ -19,7 +19,7 @@ import { heldAsWorking, userCards } from "../lib/supervisor-held";
 import { agentLabel } from "../lib/mentions";
 import { hubLabel, machineWithHub } from "../lib/mesh";
 import { isPending, machineErrorText } from "../lib/add-computer";
-import { machineDeployment } from "../lib/machine-deploy";
+import { disconnectExpected } from "../lib/machine-connection-state";
 import { classifyConnection } from "../lib/connection-failure";
 import { href, navigate, onLinkClick, type Route } from "../lib/router";
 import { useScrollMemory } from "../lib/scroll-memory";
@@ -154,7 +154,7 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
           const hub = hubLabel(m, machines);
           const detail = { name: "machine" as const, mid: m.id };
           return (
-            <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card transition-colors hover:bg-hover">
+            <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card card-interactive">
               <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
                 <Icon name="machine" size={15} />
               </span>
@@ -733,7 +733,7 @@ function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry
       href={href(to)}
       onClick={(e) => onLinkClick(e, to, entry)}
       title={[title, ...tags].join(" · ")}
-      className={cx("group flex min-w-0 items-center gap-2.5 rounded-card px-3 py-2 transition-[background-color,transform] duration-150", !below && "bg-surface shadow-card hover:bg-inset active:scale-[0.995]")}
+      className={cx("group flex min-w-0 items-center gap-2.5 rounded-card px-3 py-2", !below && "bg-surface shadow-card card-interactive")}
       style={below ? undefined : enter}
     >
       {done ? (
@@ -765,7 +765,7 @@ function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry
   if (!below) return link;
   return (
     // the capsule shades while the link part is hovered, not while a button is
-    <div className="rounded-card bg-surface shadow-card transition-colors duration-150 has-[>a:hover]:bg-inset" style={enter}>
+    <div className="rounded-card bg-surface shadow-card transition-shadow duration-150 has-[>a:hover]:shadow-btn" style={enter}>
       {link}
       {below}
     </div>
@@ -813,6 +813,6 @@ export function offlineLine(m: Machine): string {
   if (isPending(m)) return t("machines.never_connected");
   const coded = machineErrorText(m.error_code);
   if (coded) return coded;
-  if (machineDeployment(m).expectedDisconnect) return t("machines.waiting_node");
+  if (disconnectExpected(m)) return t("machines.waiting_node");
   return classifyConnection(m)?.title ?? (m.error || t("home.offline"));
 }

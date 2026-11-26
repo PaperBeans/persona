@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistant/fleetcount"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/domainkit/defect"
+	"github.com/nwverse/persona/server/internal/domainkit/opt"
 	"github.com/nwverse/persona/server/internal/domainkit/outcome"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -24,8 +26,66 @@ const surfacesTable = "../../../../../spec/fixtures/counts/surfaces.json"
 // thisPackage is this package's directory as the table names files.
 const thisPackage = "server/internal/assistant/fleetcount/fleetcountadapt"
 
-// badgeView is what View writes of the Agents list's tally of f's agents and cards.
-func badgeView(f *Fleet) assistantwire.CountsView { return f.View(f.decide(fleetcount.SurfaceBadge())) }
+// todoCountsFixtures are the to-do list's counts (spec/fixtures/todo-counts/README.md): what GET /api/v1/todos
+// answers for each case's list, todos_needs_you's number.
+const todoCountsFixtures = "../../../../../spec/fixtures/todo-counts/todo_counts.json"
+
+// badgeView is what View writes of the Agents list's tally of f's agents and cards, before the to-dos were counted.
+func badgeView(f *Fleet) assistantwire.CountsView {
+	return f.View(f.decide(fleetcount.SurfaceBadge()), opt.None[assistantwire.TodoCounts]())
+}
+
+// todoCountsCases are the to-do list's counts of each todo-counts case, by name.
+func todoCountsCases(t *testing.T) map[string]assistantwire.TodoCounts {
+	t.Helper()
+	b, err := os.ReadFile(todoCountsFixtures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Cases []struct {
+			Name     string `json:"name"`
+			Expected struct {
+				Counts assistantwire.TodoCounts `json:"counts"`
+			} `json:"expected"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(b, &file); err != nil || len(file.Cases) == 0 {
+		t.Fatalf("%s: %v (%d cases)", todoCountsFixtures, err, len(file.Cases))
+	}
+	out := map[string]assistantwire.TodoCounts{}
+	for _, c := range file.Cases {
+		out[c.Name] = c.Expected.Counts
+	}
+	return out
+}
+
+// todos_needs_you is the to-do list's own number, as GET /api/v1/todos answers it for each todo-counts case: n is its
+// needs_you and totals repeat it, with no row listed (the list's counts carry none), so all of n is more; the agents'
+// count beside it is the one View writes without the to-dos. Before the to-dos are counted the view carries neither
+// the count nor its total: unknown, never 0.
+func TestViewWritesTheToDoListsNumber(t *testing.T) {
+	f := waitingFleet(t, "studio", 2, 1, shortIDs)
+	agents := badgeView(f)
+	if agents.Counts.TodosNeedsYou != nil || agents.Totals.TodosNeedsYou != nil {
+		t.Fatalf("to-dos not counted yet, yet the view has %+v, totals %+v", agents.Counts.TodosNeedsYou, agents.Totals)
+	}
+	for name, counts := range todoCountsCases(t) {
+		t.Run(name, func(t *testing.T) {
+			v := f.View(f.decide(fleetcount.SurfaceBadge()), opt.Some(counts))
+			got := v.Counts.TodosNeedsYou
+			if got == nil || v.Totals.TodosNeedsYou == nil || got.N != counts.NeedsYou || *v.Totals.TodosNeedsYou != got.N ||
+				got.More != got.N || got.Keys != nil || got.Held != nil {
+				b, _ := json.Marshal(v)
+				t.Fatalf("view %s; want todos_needs_you %d with no rows", b, counts.NeedsYou)
+			}
+			if !reflect.DeepEqual(v.Counts.AgentsNeedsYou, agents.Counts.AgentsNeedsYou) ||
+				*v.Totals.AgentsNeedsYou != *agents.Totals.AgentsNeedsYou {
+				t.Fatalf("the agents' count moved with the to-dos: %+v", v.Counts.AgentsNeedsYou)
+			}
+		})
+	}
+}
 
 // The view of each needs-you case is the case's Agents list as the fixture defines it: its counted rows (badge_rows)
 // as keys with their cards, its number as n and in totals, and its other rows as held, muted when the owner muted the
@@ -218,14 +278,14 @@ func TestViewRefusesAnotherTally(t *testing.T) {
 		do   func()
 	}{
 		{"fleetcountadapt.Fleet.View: a tally of another surface than the Agents list's", func() {
-			small.View(small.decide(fleetcount.SurfaceLink()))
+			small.View(small.decide(fleetcount.SurfaceLink()), opt.None[assistantwire.TodoCounts]())
 		}},
 		{"fleetcountadapt.Fleet.View: a tally of another surface than the Agents list's", func() {
 			var none fleetcount.Tally
-			small.View(none)
+			small.View(none, opt.None[assistantwire.TodoCounts]())
 		}},
 		{"fleetcountadapt.Fleet.View: a tally of another fleet", func() {
-			small.View(big.decide(fleetcount.SurfaceBadge()))
+			small.View(big.decide(fleetcount.SurfaceBadge()), opt.None[assistantwire.TodoCounts]())
 		}},
 	} {
 		func() {
@@ -267,7 +327,9 @@ func TestViewWritesTheCountsThatNameIt(t *testing.T) {
 		sort.Strings(out)
 		return out
 	}
-	producers := map[string][]string{"Fleet.View": written(badgeView(waitingFleet(t, "studio", 1, 0, shortIDs)))}
+	f := waitingFleet(t, "studio", 1, 0, shortIDs)
+	counted := opt.Some(assistantwire.TodoCounts{NeedsYou: 1})
+	producers := map[string][]string{"Fleet.View": written(f.View(f.decide(fleetcount.SurfaceBadge()), counted))}
 	b, err := os.ReadFile(surfacesTable)
 	if err != nil {
 		t.Fatal(err)

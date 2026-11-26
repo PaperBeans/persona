@@ -14,7 +14,7 @@ import { AssistantAvatar } from "../../ui/AssistantAvatar";
 import { BrandMark } from "../../ui/BrandMark";
 import { Icon } from "../../ui/icons";
 import { useClamped } from "../../ui/use-clamped";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 import larkMark from "./lark.svg";
 
 // ── glyphs not in ui/icons (Beautiful UI grammar: 24 grid, round caps, currentColor) ──
@@ -242,7 +242,7 @@ export function Count({ n, accent }: { n: number; accent?: boolean }) {
  * differs from the AI's. "Edit" opens it in the draft dialog. `onSend` gets the text and changes shown.
  */
 export function DraftCard({ it, onEdit, onSend }: { it: InboxItem; onEdit: () => void; onSend: (text: string, changes: DocChange[]) => void }) {
-  const readOnly = useLarkItemReadOnly(it);
+  const readOnly = useItemReadOnly(it);
   const draft = agentDraft(it);
   const key = itemKey(it);
   const sending = useInbox((s) => s.sending.includes(key));

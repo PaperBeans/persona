@@ -92,5 +92,5 @@ func (n *Node) pinBackendSession(ctx context.Context, id, cwd string, resume boo
 			}
 		}
 	}
-	return &backendLaunch{executor: e, use: j.Launch.UseID}, lock, nil
+	return &backendLaunch{executor: e, use: j.Launch.UseID, taskDispatch: j.Launch.TaskDispatch}, lock, nil
 }

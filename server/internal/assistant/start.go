@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
@@ -67,6 +68,18 @@ func (s *Service) assistantPrompt(ctx context.Context, here string, larkCLI bool
 	d := prompts.AssistantClaudeMD{Owner: strings.TrimSpace(hello.Owner), Notes: s.notes(ctx), ExtraDirs: s.kbExtraDirs(ctx),
 		KnowledgeDir: s.kb.dir, LarkCLI: larkCLI, Language: answerLanguage(hello.Locale),
 		BackgroundSupervisor: s.backgroundOn(settings), UrgentCall: s.urgentPrompt(ctx)}
+	for _, tool := range s.phoneTools(ctx) {
+		if strings.HasPrefix(tool.Name, "phone_") && !strings.HasPrefix(tool.Name, "phone_write_queue_") &&
+			!strings.HasPrefix(tool.Name, "phone_calendar_") {
+			d.PhoneTools = true
+		}
+		if tool.Name == "phone_calendar_events" {
+			d.PhoneCalendar = true
+		}
+		if tool.Name == "phone_calendar_update_event" || tool.Name == "phone_calendar_delete_event" {
+			d.PhoneCalendarWrite = true
+		}
+	}
 	devices := s.devices(ctx)
 	if i := slices.IndexFunc(devices, func(d Device) bool { return d.ID == here }); i >= 0 {
 		d.OnHub = devices[i].Kind == "local"
@@ -143,14 +156,18 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 	// The digest of the hub's own part lets the extensions' data instructions ride along when it changes (the
 	// conversation restarts for it anyway) instead of restarting it on their own (extmgr extension_assistant_data.go).
 	pluginParams := map[string]any{"machine_id": machine}
-	var own, onDemand string
+	var own, onDemand, viewsGuide string
 	if tmpl == trackTemplateAssistant {
 		settings := s.settings(ctx)
 		d := s.assistantPrompt(ctx, machine, conns.LarkCLI, settings)
+		viewsGuide = prompts.RenderAssistantClaudeMD(d)
+		d.FullViewGuide = true
 		own = prompts.RenderAssistantClaudeMD(d)
 		if settings.workGuideOn() {
 			d.WorkGuide = true
 			onDemand = prompts.RenderAssistantClaudeMD(d)
+			d.FullViewGuide = false
+			viewsGuide = prompts.RenderAssistantClaudeMD(d)
 		}
 		sum := sha256.Sum256([]byte(own))
 		pluginParams["base_digest"] = hex.EncodeToString(sum[:16])
@@ -182,7 +199,7 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 			prepCats = []string{}
 		}
 	}
-	given := preparedState{md: md, skills: digests, workGuide: onDemand != "", deny: string(denyKey),
+	given := preparedState{md: md, skills: digests, workGuide: onDemand != "", viewsGuide: viewsGuide != "", deny: string(denyKey),
 		trackKind: kind, categories: strings.Join(prepCats, ","), categoriesKnown: floorKnown}
 	// A track's instructions end with its SPACE.md, which the node reads (and the user edits there): the node is asked
 	// every time, and what it read is compared after (space_md_digest).
@@ -196,9 +213,13 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 	}
 	params := map[string]any{"dir": dir, "claude_md": md,
 		"connectors": conns.Connectors, "clis": conns.CLIs, "plugin_skills": plugins.Skills, "deny_dirs": deny}
-	// Older nodes read only claude_md, so they retain the complete instructions.
+	// Older nodes read only claude_md, so they retain every complete instruction. New nodes select each compact
+	// guide only after its managed skill is ready; views_guide_md is the final form when all requested guides are ready.
 	if onDemand != "" {
 		params["work_guide_md"] = onDemand + plugins.Instructions
+	}
+	if viewsGuide != "" {
+		params["views_guide_md"] = viewsGuide + plugins.Instructions
 	}
 	if tmpl == trackTemplateSpace {
 		params["space"] = map[string]any{"slug": track.Slug, "initial_space_md": s.initialSpaceMD(ctx, track)}
@@ -247,6 +268,7 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 type preparedState struct {
 	md, skills, deny string
 	workGuide        bool
+	viewsGuide       bool
 	trackKind        string
 	categories       string
 	categoriesKnown  bool
@@ -499,7 +521,7 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 		s.putCacheKeepalive(ctx, machine, "", main, params)
 	}
 	if main && p.Space == "" && p.GuestTools == nil {
-		ctx = context.WithValue(ctx, supervisionStartup{}, true)
+		ctx = context.WithValue(ctx, supervisionStartup{}, supervisionrole.RoleMain())
 	}
 	err = s.call(ctx, machine, DeviceAssistantSend, params, &res)
 	if fromSetting && (nodeOutdated(err) || profileRefused(err)) {
@@ -527,6 +549,15 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	sess.Effort, _ = params["effort"].(string)
 	sess.Model, _ = params["model"].(string) // what it was started with ("": the launcher's default)
+	if startup := ctx.Value(supervisionStartup{}); startup != nil && sess.SessionID != "" {
+		if role, ok := startup.(supervisionrole.Role); ok {
+			// The node has accepted both the compact policy and this id. Record that exact baseline before any follow-up
+			// can find the new process working; a pre-id record could not identify the process it belonged to.
+			if err := s.recordAcceptedSupervisionRole(context.WithoutCancel(ctx), machine, sess.SessionID, role); err != nil {
+				s.logf("record accepted assistant supervision role: %v", err)
+			}
+		}
+	}
 	return sess, nil
 }
 
@@ -836,9 +867,13 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 	}
 	s.settingsChanged(ctx)
 	if handoff.From != "" {
-		s.handOverMainTasks(context.WithoutCancel(ctx), handoff.From, sess.SessionID) // its open tasks follow (main_handover.go)
+		s.handOverMainTasks(context.WithoutCancel(ctx), handoff.From, sess.SessionID)  // its open tasks follow (main_handover.go)
+		s.handOverMainAlways(context.WithoutCancel(ctx), handoff.From, sess.SessionID) // its Always-allow grants follow once (#16158)
 	} else {
 		s.handOverFormerMainTasks(context.WithoutCancel(ctx)) // e.g. after /clear, which puts the old main in Former with no handoff.From
+		if cfg := s.settings(ctx); len(cfg.Former) > 0 && cfg.Former[0].SessionID != "" && cfg.Former[0].SessionID != sess.SessionID {
+			s.handOverMainAlways(context.WithoutCancel(ctx), cfg.Former[0].SessionID, sess.SessionID)
+		}
 	}
 	return sess, nil
 }

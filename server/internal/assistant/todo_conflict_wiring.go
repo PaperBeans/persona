@@ -9,10 +9,16 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"weak"
 
 	"github.com/nwverse/persona/server/internal/assistant/todo/conflict"
 	"github.com/nwverse/persona/server/internal/proto"
+)
+
+const (
+	runtimeChangedFilesCacheTTL = 30 * time.Second
+	runtimeChangedFilesTimeout  = 3 * time.Second
 )
 
 // plannedWriteScopeInput carries a planned task together with optional write-scope
@@ -43,18 +49,89 @@ type todoWriteScopeRecord struct {
 // writeScopeTracker keeps per-Service in-memory write scopes and runtime changed files
 // for dispatched todos under todos_v2, without adding DB migrations or modifying Service fields.
 type writeScopeTracker struct {
-	mu      sync.RWMutex
-	records map[string]todoWriteScopeRecord
+	mu                  sync.RWMutex
+	records             map[string]todoWriteScopeRecord
+	fetchedAt           map[string]time.Time
+	inFlight            map[string]bool
+	notifiedConflicts   map[string]struct{}
+	changedFilesFetcher func(ctx context.Context, machineID, cwd string) ([]string, error)
+	nowFn               func() time.Time
 }
 
 func newWriteScopeTracker() *writeScopeTracker {
-	return &writeScopeTracker{records: make(map[string]todoWriteScopeRecord)}
+	return &writeScopeTracker{
+		records:           make(map[string]todoWriteScopeRecord),
+		fetchedAt:         make(map[string]time.Time),
+		inFlight:          make(map[string]bool),
+		notifiedConflicts: make(map[string]struct{}),
+	}
 }
 
 func (w *writeScopeTracker) reset() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	clear(w.records)
+	clear(w.fetchedAt)
+	clear(w.inFlight)
+	clear(w.notifiedConflicts)
+}
+
+func (w *writeScopeTracker) now() time.Time {
+	w.mu.RLock()
+	fn := w.nowFn
+	w.mu.RUnlock()
+	if fn != nil {
+		return fn()
+	}
+	return time.Now()
+}
+
+func (w *writeScopeTracker) tryBeginFetch(todoID string, now time.Time, ttl time.Duration) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.inFlight[todoID] {
+		return false
+	}
+	if last, ok := w.fetchedAt[todoID]; ok && now.Sub(last) < ttl {
+		return false
+	}
+	w.inFlight[todoID] = true
+	return true
+}
+
+func (w *writeScopeTracker) finishFetch(todoID string, fetchedAt time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.inFlight, todoID)
+	w.fetchedAt[todoID] = fetchedAt
+}
+
+func (w *writeScopeTracker) markRuntimeConflictNotified(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, seen := w.notifiedConflicts[key]; seen {
+		return false
+	}
+	w.notifiedConflicts[key] = struct{}{}
+	return true
+}
+
+func (w *writeScopeTracker) setFetcher(fn func(ctx context.Context, machineID, cwd string) ([]string, error)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.changedFilesFetcher = fn
+}
+
+func (w *writeScopeTracker) fetcher() func(ctx context.Context, machineID, cwd string) ([]string, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.changedFilesFetcher
+}
+
+func (w *writeScopeTracker) setClock(fn func() time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.nowFn = fn
 }
 
 func (w *writeScopeTracker) set(todoID string, rec todoWriteScopeRecord) {
@@ -139,6 +216,214 @@ func (s *Service) recordTodoRuntimeChangedFiles(ctx context.Context, todoID stri
 		return
 	}
 	s.writeScopeTracker().setRuntimeChangedFiles(todoID, files)
+}
+
+// setRuntimeChangedFilesFetcher installs a test hook to override workspace git diff file collection.
+func (s *Service) setRuntimeChangedFilesFetcher(fn func(ctx context.Context, machineID, cwd string) ([]string, error)) {
+	if s == nil {
+		return
+	}
+	s.writeScopeTracker().setFetcher(fn)
+}
+
+// setRuntimeChangedFilesClock installs a test clock for runtime changed-files cache TTL checks.
+func (s *Service) setRuntimeChangedFilesClock(fn func() time.Time) {
+	if s == nil {
+		return
+	}
+	s.writeScopeTracker().setClock(fn)
+}
+
+func (s *Service) fetchWorkspaceChangedFiles(ctx context.Context, machineID, cwd string) ([]string, error) {
+	dctx, cancel := context.WithTimeout(ctx, runtimeChangedFilesTimeout)
+	defer cancel()
+
+	if fn := s.writeScopeTracker().fetcher(); fn != nil {
+		raw, err := fn(dctx, machineID, cwd)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeRuntimeChangedFiles(raw), nil
+	}
+
+	var rev proto.GitReview
+	if err := s.call(dctx, machineID, "git.review", proto.GitReviewRequest{
+		Cwd:   cwd,
+		Scope: proto.ReviewUncommitted,
+	}, &rev); err != nil {
+		return nil, err
+	}
+	raw := make([]string, 0, len(rev.Files))
+	for _, f := range rev.Files {
+		if f.Path != "" {
+			raw = append(raw, f.Path)
+		}
+		if f.OldPath != "" && f.OldPath != f.Path {
+			raw = append(raw, f.OldPath)
+		}
+	}
+	return normalizeRuntimeChangedFiles(raw), nil
+}
+
+func normalizeRuntimeChangedFiles(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, p := range raw {
+		norm, ok := conflict.NormalizeFile(p)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[norm]; dup {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// refreshTodoRuntimeChangedFiles collects actual modified file paths from working agents'
+// workspaces under todos_v2=true (bounded with short timeout and per-task TTL cache), feeds them
+// into recordTodoRuntimeChangedFiles, and emits deduplicated supervision signals when live
+// same-repository runtime file intersections emerge. Strictly bypassed when todos_v2=false.
+func (s *Service) refreshTodoRuntimeChangedFiles(ctx context.Context, t Todo, agents []proto.Session) []conflict.PairConflict {
+	if s == nil || !s.settings(ctx).todosV2On() {
+		return nil
+	}
+	if t.DoneAt != nil || t.CancelledAt != nil || t.Supervision == nil || strings.TrimSpace(t.ID) == "" {
+		return nil
+	}
+
+	type workspaceRef struct {
+		machine string
+		cwd     string
+	}
+	var workspaces []workspaceRef
+	seenWS := make(map[workspaceRef]struct{})
+	for _, c := range agents {
+		if c.State != proto.StateWorking && !strings.EqualFold(strings.TrimSpace(c.Status), proto.StatusWorking) {
+			continue
+		}
+		machine := strings.TrimSpace(c.MachineID)
+		cwd := strings.TrimSpace(c.Cwd)
+		if cwd == "" {
+			for _, a := range t.Agents {
+				if a.MachineID == c.MachineID && a.SessionID == c.SessionID && strings.TrimSpace(a.Cwd) != "" {
+					cwd = strings.TrimSpace(a.Cwd)
+					break
+				}
+			}
+		}
+		if machine == "" || cwd == "" {
+			continue
+		}
+		ws := workspaceRef{machine: machine, cwd: cwd}
+		if _, dup := seenWS[ws]; dup {
+			continue
+		}
+		seenWS[ws] = struct{}{}
+		workspaces = append(workspaces, ws)
+	}
+	if len(workspaces) == 0 {
+		return nil
+	}
+
+	tr := s.writeScopeTracker()
+	now := tr.now()
+	if !tr.tryBeginFetch(t.ID, now, runtimeChangedFilesCacheTTL) {
+		return nil
+	}
+	defer tr.finishFetch(t.ID, now)
+
+	var collected []string
+	anyOK := false
+	for _, ws := range workspaces {
+		files, err := s.fetchWorkspaceChangedFiles(ctx, ws.machine, ws.cwd)
+		if err != nil {
+			continue
+		}
+		anyOK = true
+		collected = append(collected, files...)
+	}
+	if !anyOK {
+		return nil
+	}
+
+	files := normalizeRuntimeChangedFiles(collected)
+	if rec, _ := tr.get(t.ID); rec.RepoKey == "" && s.openTodoRepoKey(ctx, t) == "" {
+		if key := normalizeConflictRepoPathKey(workspaces[0].machine, workspaces[0].cwd); key != "" {
+			tr.set(t.ID, todoWriteScopeRecord{RepoKey: key})
+		}
+	}
+	s.recordTodoRuntimeChangedFiles(ctx, t.ID, files)
+	if len(files) == 0 {
+		return nil
+	}
+
+	return s.detectAndSignalLiveRuntimeConflicts(ctx, t, tr)
+}
+
+func (s *Service) detectAndSignalLiveRuntimeConflicts(ctx context.Context, t Todo, tr *writeScopeTracker) []conflict.PairConflict {
+	if s.ensureTodosLoaded(ctx) != nil {
+		return nil
+	}
+	var open []Todo
+	s.todos.mu.RLock()
+	for _, td := range s.todos.todos {
+		if td.DoneAt != nil || td.CancelledAt != nil {
+			continue
+		}
+		open = append(open, copyTodoLocked(td))
+	}
+	s.todos.mu.RUnlock()
+
+	scopes := make([]conflict.TaskScope, 0, len(open))
+	for _, td := range open {
+		if scope, ok := s.openTodoTaskScope(ctx, td, tr); ok {
+			scopes = append(scopes, scope)
+		}
+	}
+	all := conflict.Detect(scopes)
+	if len(all) == 0 {
+		return nil
+	}
+
+	var matched []conflict.PairConflict
+	for _, c := range all {
+		if c.TodoA != t.ID && c.TodoB != t.ID {
+			continue
+		}
+		if c.Action != conflict.ActionSerialize || len(c.RuntimeFiles) == 0 {
+			continue
+		}
+		if c.Layer != conflict.LayerRuntime && c.Layer != conflict.LayerBoth {
+			continue
+		}
+		matched = append(matched, c)
+
+		dedupKey := c.RepoKey + "|" + c.TodoA + "|" + c.TodoB + "|" + strings.Join(c.RuntimeFiles, ",")
+		if !tr.markRuntimeConflictNotified(dedupKey) {
+			continue
+		}
+		peer := c.TodoB
+		if peer == t.ID {
+			peer = c.TodoA
+		}
+		s.signal(superviseSignal{
+			Todo: t.ID,
+			Kind: sigPRConflict,
+			Key:  "write_conflict:" + dedupKey,
+			Detail: fmt.Sprintf(
+				"Runtime write-scope conflict (%s, action=%s) with %s in %s on files: %s. Downgrade to serial execution/merge (force_parallel does not override runtime intersections).",
+				c.Layer, c.Action, peer, c.RepoKey, strings.Join(c.RuntimeFiles, ", "),
+			),
+		})
+	}
+	return matched
 }
 
 // rememberPlannedWriteScopes records dispatched tasks' declared write scopes against their

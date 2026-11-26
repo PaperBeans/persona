@@ -44,7 +44,7 @@ vi.mock("./assistant/Readiness", () => ({
 }));
 
 const ROSTER: ManagerList = { default: "assistant", managers: [{ id: "assistant", name: "Persona", online: true }, { id: "m-work", name: "Work", online: true }] };
-const WORK_CHAT: Session = { machine_id: "macbook", session_id: "work-chat", manager: "m-work", assistant: true, state: "idle", status: "idle", title: "Hand-off", cwd: "/" } as Session;
+const WORK_CHAT: Session = { machine_id: "macbook", session_id: "work-chat", manager: "m-work", assistant: true, archived: true, origin: "inbox", origin_ref: "mail:demo:thread:1", state: "idle", status: "idle", title: "Hand-off", cwd: "/" } as Session;
 
 let host: HTMLDivElement;
 let root: Root;
@@ -105,7 +105,7 @@ describe("another assistant's conversation opened by its address alone", () => {
     expect(chat()?.dataset.chat).toBe("macbook/work-chat");
     // the exact lookup asked its computer and put its row in the store
     expect(calls.some((c) => c.url.includes("machine_id=macbook") && c.url.includes("session_id=work-chat"))).toBe(true);
-    expect(getSession("macbook", "work-chat")?.manager).toBe("m-work");
+    expect(getSession("macbook", "work-chat")).toMatchObject({ manager: "m-work", archived: true, origin: "inbox" });
     expect(chat()?.dataset.canSend).toBe("1");
     expect(sessionCan(getSession("macbook", "work-chat"), "send")).toBe(true);
     expect(conversationHeaders("work-chat")).toEqual({ "X-Persona-Manager": "m-work" });

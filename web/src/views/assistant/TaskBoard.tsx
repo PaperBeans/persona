@@ -113,7 +113,7 @@ export function TaskBoard({ open, conversation, onClose }: { open: boolean; conv
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="truncate text-[13.5px] font-medium text-ink">{todo.title}</span>
-                        {sec.key !== "parked" && <span className="truncate text-[12px] text-ink-3">{subtitle(todo, status)}</span>}
+                        {todo.wait == null && sec.key !== "parked" && <span className="truncate text-[12px] text-ink-3">{subtitle(todo, status)}</span>}
                       </span>
                       <Icon name="chevronRight" size={13} className="shrink-0 text-ink-3" />
                     </button>
@@ -121,8 +121,8 @@ export function TaskBoard({ open, conversation, onClose }: { open: boolean; conv
                       <IconButton icon="trash" label={t("assistant-task-actions.board_remove", { title: todo.title })} onClick={() => removeTaskNow(todo)} className="mr-1.5" />
                     )}
                     </div>
-                    {sec.key === "parked" &&
-                      <div className="px-3 pb-2.5"><TaskWaitInfo todo={todo} merges={openMergePRs(todo, Date.now())} /></div>}
+                    {(todo.wait != null || sec.key === "parked") &&
+                      <div className="px-3 pb-2.5"><TaskWaitInfo todo={todo} merges={todo.wait == null ? openMergePRs(todo, Date.now()) : undefined} /></div>}
                   </div>
                 ))}
                 {sec.agents.map(({ session: s, state }) => (

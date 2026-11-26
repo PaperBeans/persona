@@ -304,4 +304,55 @@ describe("a launcher of the other engine", () => {
     expect(pickPlan(codexWaiting, { provider: "cx", model: "gpt-5.5", effort: "medium" }, raw, engine)).toEqual([{ launcher: "cx", from: "cx" }]);
     expect(sessionPanel(codexWaiting, launchers, listOf, engine).state.note).toBe(t("chat-modelpanel.engine_note"));
   });
+
+  it("supports Claude Code and Antigravity (agy) cross-engine switching for terminal Agents, not companion runtime sessions", () => {
+    const agyList: LauncherModels = {
+      agent: "agy",
+      models: [{ id: "gemini-4-neon-high", name: "Gemini 4 Neon (High)", default: true, default_effort: "high" }],
+    };
+    const withAgy: Launcher[] = [...launchers, { name: "agy", agent: "agy" }];
+    const readAgy = (name: string): ModelList => (name === "agy" ? { list: agyList } : listOf(name));
+    const rawAgy = (name: string) => readAgy(name).list;
+    const providerAgy = (s: Session, id: string, o: PanelOptions = engine) =>
+      sessionPanel(s, withAgy, readAgy, o).providers.find((p) => p.id === id)!;
+
+    // Terminal Claude Agent can switch to agy when engineSwitch is on
+    expect(providerAgy(session(), "agy", engine).unavailable).toBeUndefined();
+    expect(pickPlan(session(), { provider: "agy", model: "gemini-4-neon-high" }, rawAgy, engine)).toEqual([
+      { launcher: "agy", from: "claude" },
+    ]);
+    expect(providerAgy(session(), "agy", on).unavailable).toBe(
+      t("chat-modelpanel.other_engine", { from: "Claude Code", to: "agy" }),
+    );
+
+    // Terminal agy pane can switch to Claude Code and Codex
+    const terminalAgy = session({
+      agent: "agy",
+      launcher: "agy",
+      model: "gemini-4-neon-high",
+      effort: "high",
+      pane_id: "w1:p3",
+      capabilities: { send: true },
+    });
+    expect(providerAgy(terminalAgy, "claude", engine).unavailable).toBeUndefined();
+    expect(providerAgy(terminalAgy, "cx", engine).unavailable).toBeUndefined();
+    expect(pickPlan(terminalAgy, { provider: "claude", model: "opus", effort: "high" }, rawAgy, engine)).toEqual([
+      { launcher: "claude", from: "agy", model: "opus", effort: "high" },
+    ]);
+
+    // Companion runtime agy session (source_kind: "runtime") cannot engine-switch
+    const runtimeAgy = session({
+      agent: "agy",
+      launcher: "agy",
+      source_kind: "runtime",
+      source_instance_id: "agy",
+      pane_id: undefined,
+      model: "gemini-4-neon-high",
+      capabilities: { send: true },
+    });
+    expect(providerAgy(runtimeAgy, "claude", engine).unavailable).toBe(
+      t("chat-modelpanel.other_engine", { from: "agy", to: "Claude Code" }),
+    );
+    expect(pickPlan(runtimeAgy, { provider: "claude", model: "opus" }, rawAgy, engine)).toBeNull();
+  });
 });

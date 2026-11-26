@@ -6,7 +6,7 @@ import { useExpanded } from "./expanded";
 import { diffLines, type Op } from "../../lib/diff-lines";
 import { fileName, toolFile } from "../../lib/files";
 import { bytes } from "../../lib/format";
-import { openPanel, type Panel } from "../../lib/panel";
+import { openPanel, useReadOnlyFile, type Panel } from "../../lib/panel";
 import { getSession } from "../../lib/store";
 import { taskBadge, type TaskIndex } from "../../lib/tasks";
 import { ownEntry, personaToolVerb, SUBJECT_KEYS, toolChip, toolDisplayName, toolLabel } from "../../lib/turns";
@@ -442,12 +442,13 @@ function ActionRowView({
   fullMore,
 }: ActionRowViewProps) {
   const { use, result, images } = step;
+  const readOnly = useReadOnlyFile();
   const name = use.tool_name ?? "";
   const narrow = useMedia(NARROW);
   const p = useMemo(() => presentAction(use), [use]);
   const diffs = useMemo(() => (DIFF_TOOLS.has(name) ? editDiffs(use) : null), [name, use]);
   const stats = diffs ? diffStats(diffs) : null;
-  const inPlace = trace || !FILE_TOOLS.has(name);
+  const inPlace = trace || (readOnly && Boolean(diffs)) || !FILE_TOOLS.has(name);
   const call = use.tool_use_id;
   const bg =
     controlledBadge !== undefined
@@ -472,13 +473,14 @@ function ActionRowView({
   const activate = () => {
     if (trace) return onToggle();
     if (diffs) {
+      if (readOnly) return onToggle();
       const path = p.file ?? "";
       const resolvedCwd = resolveCwd();
       return openActionPanel({ kind: "changes", mid, sid, at: { path: path ? changePath(path, resolvedCwd) : "", call } });
     }
     if (inPlace) return onToggle();
     const f = toolFile(name, use.tool_input);
-    if (f) openActionPanel({ kind: "file", mid, path: f.path, cwd: resolveCwd(), line: f.line });
+    if (f) openActionPanel({ kind: "file", mid, path: f.path, cwd: resolveCwd(), line: f.line, ...(readOnly ? { readOnly: true } : {}) });
   };
   const ids = useMemo(() => [use.id, ...(result ? [result.id] : [])], [use.id, result]);
   const label = [p.verb, p.param?.text].filter(Boolean).join(" ");
@@ -548,15 +550,15 @@ function ActionRowView({
             </div>
           )}
           {COMMAND_TOOLS.has(name) && str((use.tool_input as Record<string, unknown> | undefined)?.description) && <div className="mb-2 font-sans">{str((use.tool_input as Record<string, unknown>).description)}</div>}
-          {input && <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{input}</pre>}
+          {readOnly && diffs ? <DiffBlocks diffs={diffs} /> : input && <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{input}</pre>}
           {output && (
             <>
-              {(input || detail) && <div className="my-2 h-px bg-tool-ink/20" />}
+              {(input || detail || (readOnly && diffs)) && <div className="my-2 h-px bg-tool-ink/20" />}
               <pre className={cx("m-0 whitespace-pre-wrap [overflow-wrap:anywhere]", error ? "text-red" : "text-tool-ink")}><AnsiOutput text={output} /></pre>
               {fullMore}
             </>
           )}
-          {!input && !detail && !output && <span className="text-tool-ink">{t("chat-actionrow.no_content")}</span>}
+          {!input && !detail && !output && !(readOnly && diffs) && <span className="text-tool-ink">{t("chat-actionrow.no_content")}</span>}
         </div>
       )}
     </div>

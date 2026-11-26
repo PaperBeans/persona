@@ -7,20 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Machine, MachineMetrics } from "../lib/types";
 import { chooseManager, resetManagerChoice } from "../lib/manager-choice";
 import { currentRoster, resetRoster, setRoster } from "../lib/managers";
+import { navigate } from "../lib/router";
 import { getState } from "../lib/store";
 import { t } from "../i18n";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
   g.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  HTMLElement.prototype.scrollTo ??= () => {};
   const kept = new Map<string, string>();
   g.localStorage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
 });
 
-const fake = vi.hoisted(() => ({ machines: [] as Machine[], features: [] as string[] }));
+const fake = vi.hoisted(() => ({ machines: [] as Machine[], features: [] as string[], loaded: true }));
 vi.mock("../lib/store", async (importOriginal) => {
   const real = await importOriginal<typeof import("../lib/store")>();
-  return { ...real, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T) => select({ ...real.getState(), loaded: true, machines: fake.machines, features: fake.features }) };
+  return { ...real, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T) => select({ ...real.getState(), loaded: fake.loaded, machines: fake.machines, features: fake.features }) };
 });
 
 const { Machines } = await import("./Machines");
@@ -56,8 +58,10 @@ beforeEach(() => {
   resetRoster();
   resetManagerChoice();
   metricsReplies = {};
+  localStorage.removeItem("persona.machines.view");
   fake.machines = [];
   fake.features = [];
+  fake.loaded = true;
   replies = [];
   posts = [];
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
@@ -76,6 +80,132 @@ afterEach(() => {
 });
 
 describe("Machines", () => {
+  it("puts cards first, assistant resources last and fleet telemetry on the overview", async () => {
+    fake.machines = ["a", "b"].map(id => ({ id, name: id, online: true }));
+    metricsReplies["/api/v1/metrics"] = [{
+      machine_id: "a", online: true, points: [], usage: { today: { in: 12 }, per_minute: 2, recent: [] },
+    }];
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    const views = [...host.querySelectorAll<HTMLButtonElement>('[role="radiogroup"] [role="radio"]')];
+    const tokens = () => host.querySelector('[data-testid="machines-tokens"]');
+    const hint = t("machines.refresh_interval", { seconds: 10 });
+    expect(views[0]?.textContent).toBe(t("machines.view_cards"));
+    expect(views.at(-1)?.textContent).toBe(t("resources.assistant_resources"));
+    expect(tokens()).not.toBeNull();
+    expect(host.textContent).toContain(hint);
+    for (const view of views.slice(1)) {
+      await act(async () => view.click());
+      expect(Boolean(tokens())).toBe(view.textContent === t("machines.view_capabilities"));
+      expect(host.textContent).not.toContain(hint);
+    }
+    await flush();
+  });
+
+  const link = (path: string) => host.querySelector<HTMLAnchorElement>(`a[href="${path}"]`);
+  const show = async () => {
+    await act(async () => root.render(<Machines onToggleSidebar={() => {}} />));
+    await act(async () => { await vi.dynamicImportSettled(); });
+  };
+  const follow = async (path: string) => {
+    expect(link(path)).toBeTruthy();
+    await act(async () => link(path)!.click());
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(location.pathname).toBe(path);
+  };
+
+  it("opens every tool on B, restores a bookmark and retains an offline target", async () => {
+    fake.machines = ["a", "b"].map(id => ({ id, name: id, online: true }));
+    await show();
+    await follow("/machines/b");
+    for (const view of ["files", "storage", "diagnostics", "services", "network", "toolchain", "procs"]) {
+      await follow("/machines/b/" + view);
+      expect(host.querySelector("h1")?.textContent).toBe("b");
+    }
+    await follow("/machines/a/procs");
+    await act(async () => {
+      const popped = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
+      history.back();
+      await popped;
+    });
+    expect(location.pathname).toBe("/machines/b/procs");
+    expect(host.querySelector("h1")?.textContent).toBe("b");
+    await act(async () => root.render(null));
+    fake.machines[1] = { ...fake.machines[1]!, online: false };
+    await show();
+    expect(host.querySelector("h1")?.textContent).toBe("b");
+    expect(host.querySelector("[data-offline-box]")).not.toBeNull();
+    const reads = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(reads).toContain("/api/v1/machines/b/storage");
+    expect(reads).not.toContain("/api/v1/machines/a/storage");
+  });
+
+  it("restores the fleet tab and scroll offset when leaving detail through Back", async () => {
+    fake.machines = ["a", "b"].map(id => ({ id, name: id, online: true }));
+    await show();
+    await act(async () => buttons(t("machines.view_capabilities"))[0]!.click());
+    const scroller = () => host.querySelector<HTMLDivElement>(".overflow-y-auto")!;
+    scroller().scrollTop = 175;
+    scroller().dispatchEvent(new Event("scroll"));
+    await follow("/machines/b");
+    await act(async () => {
+      const popped = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
+      host.querySelector<HTMLAnchorElement>("header a")!.click();
+      await popped;
+    });
+    expect(location.pathname).toBe("/machines");
+    expect(scroller().scrollTop).toBe(175);
+    expect(host.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe(t("machines.view_capabilities"));
+  });
+
+  it("keeps Overview as the previous page and restores an old engine bookmark", async () => {
+    fake.machines = [{ id: "b", name: "Computer B", online: true }];
+    history.replaceState(null, "", "/overview");
+    navigate({ name: "machine", mid: "b" });
+    await show();
+    expect(host.querySelector("header a")?.getAttribute("href")).toBe("/overview");
+    await act(async () => root.render(null));
+    history.replaceState(null, "", "/machines/b#engine");
+    await show();
+    expect(location.pathname).toBe("/machines/b/management");
+    expect(host.querySelector("#engine")).not.toBeNull();
+  });
+
+  it("waits for the directory and reports a refused tool request on the requested machine", async () => {
+    fake.loaded = false;
+    history.replaceState(null, "", "/machines/b/network");
+    await show();
+    expect(host.textContent).not.toContain(t("machines-machinedetail.not_found"));
+    expect(host.querySelector('[data-testid="network-panel"]')).toBeNull();
+    fake.loaded = true;
+    fake.machines = [{ id: "b", name: "Computer B", online: true }];
+    vi.mocked(fetch).mockImplementation(async input => String(input).endsWith("/b/network") ? json({ error: "Forbidden" }, 403) : hub(input));
+    await show();
+    expect(host.querySelector('[data-testid="network-panel"]')?.textContent).toContain(t("machines-network.forbidden"));
+    expect(host.querySelector("h1")?.textContent).toBe("Computer B");
+  });
+
+  it("replaces a legacy reclaim entry with the selected computer's shareable URL", async () => {
+    fake.machines = ["a", "b"].map(id => ({ id, name: id, online: true }));
+    history.replaceState({ usage_focus: { mid: "b", mode: "reclaim" } }, "", "/machines");
+    await show();
+    expect(location.pathname + location.search).toBe("/machines/b/storage?mode=reclaim");
+    expect(host.querySelector('[data-testid="storage-panel"]')).not.toBeNull();
+    expect(history.state.usage_focus).toBeUndefined();
+  });
+
+  it("shows a single actionable card and keeps a missing direct target unavailable", async () => {
+    fake.machines = [{ id: "a", name: "Computer A", online: true }];
+    await show();
+    expect(link("/machines/a")).toBeTruthy();
+    expect(buttons(t("machines.view_capabilities"))).toHaveLength(0);
+    await act(async () => navigate({ name: "machine", mid: "missing", subview: "storage" }));
+    await show();
+    expect(host.textContent).toContain(t("machines-machinedetail.not_found"));
+    expect(host.querySelector('[data-testid="storage-panel"]')).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/missing/"))).toBe(false);
+  });
+
   it("keeps the last cards and says so in red when a refresh fails", async () => {
     fake.machines = [{ id: "mac", name: "电脑 A", online: true }];
     replies = [200, 503];
@@ -154,8 +284,10 @@ describe("Machines", () => {
       act(() => root.render(<Machines onToggleSidebar={() => {}} />));
     };
     show();
-    await flush();
-    expect(buttons(t("lib-machine-deploy.redeploy"))[0]?.disabled).toBe(false);
+    await vi.waitFor(async () => {
+      await flush();
+      expect(buttons(t("lib-machine-deploy.redeploy"))[0]?.disabled).toBe(false);
+    });
     for (const phase of ["waiting_idle", "transferring", "restarting", "confirming"] as const) {
       show(phase); // phase alone is sufficient, including when an older hub omits `deploying`
       const [redeploy] = buttons(t(`lib-machine-deploy.${phase}`));

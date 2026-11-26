@@ -27,6 +27,10 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
     var usage: Usage?
     var machines: [Machine] = []
     var recording: Recording?
+    /// Whether the hub lets a recording start (#15214, `RecordingModule.allowance` when the app wrote the file). Written
+    /// only when it is off: absent (every file with the module on, and one from before the field) means allowed, as
+    /// does a word this build doesn't know. Off, the Record widget and the Control offer no start; Stop stays.
+    var recordingModule: PhoneRecordingAllowance?
     var health: Health?
     var intake: Intake?
     var activity: Activity?
@@ -38,6 +42,9 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
     static let staleAfter: TimeInterval = 60 * 60
 
     func isStale(at date: Date) -> Bool { at > 0 && date.timeIntervalSince1970 - at > Self.staleAfter }
+
+    /// A tap may start a meeting recording: always, unless the hub's recording module is off.
+    var offersRecordingStart: Bool { (recordingModule ?? .allowed).offersWrites }
 
     // MARK: Persona
 

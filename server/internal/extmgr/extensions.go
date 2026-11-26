@@ -477,7 +477,9 @@ func (h *Manager) attachExtensions(ctx context.Context) {
 		h.extensions = newExtensionsWith(h.dataDirOrTemp(), nil, h.logf, h.modules())
 	}
 	ps := h.extensions
+	ps.mu.Lock()
 	ps.h, ps.ctx = h, ctx
+	ps.mu.Unlock()
 	var store extension.Store
 	if s, ok := h.store.(extension.Store); ok {
 		store = s
@@ -553,9 +555,14 @@ func (h *Manager) startExtensions(ctx context.Context) {
 		return
 	}
 	ps := h.extensions
+	ps.mu.Lock()
 	if ps.h == nil {
-		ps.h, ps.ctx = h, ctx
+		ps.h = h
 	}
+	if ps.ctx == nil {
+		ps.ctx = ctx
+	}
+	ps.mu.Unlock()
 	for _, p := range ps.reg.DependencyOrder() {
 		if hp := ps.get(p.Record.ID); hp == nil || hp.pending {
 			ps.apply(ctx, p.Record.ID)
@@ -573,10 +580,7 @@ func (ps *extensions) changed(c extension.Change) {
 	if ps.h != nil && ps.h.opts.TracksChanged != nil {
 		defer ps.h.opts.TracksChanged()
 	}
-	ctx := ps.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := ps.runtimeContext(nil)
 	if c.Kind == "config" {
 		ps.settingsMoved(c.ID) // before the restart: the old address is refused from now on
 	}
@@ -756,9 +760,32 @@ func (ps *extensions) watchUpgrade(ctx context.Context, id string) (rolledBack b
 	return false, ""
 }
 
+// runtimeContext is the long-lived lifecycle context for extension processes and manager-owned restarts. Once the
+// manager has started, processes follow ps.ctx (or h.ctx), never a caller's short-lived HTTP or RPC request context.
+// When no manager context has been attached (isolated unit tests), it detaches cancellation from fallback so request
+// teardown cannot kill the process.
+func (ps *extensions) runtimeContext(fallback context.Context) context.Context {
+	ps.mu.Lock()
+	ctx := ps.ctx
+	h := ps.h
+	ps.mu.Unlock()
+	if ctx != nil {
+		return ctx
+	}
+	if h != nil && h.ctx != nil {
+		return h.ctx
+	}
+	if fallback != nil {
+		return context.WithoutCancel(fallback)
+	}
+	return context.Background()
+}
+
 // apply makes plugin id run as the registry says: whatever ran of it stops (its connectors leave the registry), and
-// it starts again if it is there, switched on, compatible and set up.
+// it starts again if it is there, switched on, compatible and set up. The started process and its setup belong to the
+// manager's lifecycle (runtimeContext), never to a short-lived caller request context.
 func (ps *extensions) apply(ctx context.Context, id string) {
+	ctx = ps.runtimeContext(ctx)
 	ps.mu.Lock()
 	old := ps.byID[id]
 	delete(ps.byID, id)
@@ -849,7 +876,7 @@ func (ps *extensions) apply(ctx context.Context, id string) {
 				ps.logf("plugin %s: %v", id, err)
 			} else if c.ID() == "github" {
 				// after this start: the move changes its settings, which restarts it
-				go ps.h.migrateGitHubConfig(context.WithoutCancel(ctx), id)
+				go ps.h.migrateGitHubConfig(ctx, id)
 			}
 		}
 	}
@@ -1559,13 +1586,14 @@ func (ps *extensions) roleChanged(ctx context.Context) {
 	if ps == nil {
 		return
 	}
+	runCtx := ps.runtimeContext(ctx)
 	for _, p := range ps.reg.List() {
 		if !p.Record.Enabled || p.Problem != "" || len(p.Manifest.Connectors()) == 0 && len(p.Manifest.APIs()) == 0 {
 			continue
 		}
 		if hp := ps.get(p.Record.ID); hp != nil && hp.proc != nil {
 			ps.logf("plugin %s: restarted for the hub's new role in its group", p.Record.ID)
-			ps.apply(ctx, p.Record.ID)
+			ps.apply(runCtx, p.Record.ID)
 		}
 	}
 }
@@ -1599,7 +1627,7 @@ func (ps *extensions) connectorSwitched(ctx context.Context, id string, on bool)
 		state = "on"
 	}
 	ps.logf("plugin %s: restarted for its connector %s switched %s", owner, id, state)
-	ps.apply(ctx, owner)
+	ps.apply(ps.runtimeContext(ctx), owner)
 }
 
 // errModuleProgramOff: an extension runs `personad <name>`, a module's program, and the manager's `modules` setting has

@@ -6,6 +6,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -81,11 +82,36 @@ func (n *Node) prepareAssistantCwd(cwd string, strict bool) error {
 	return os.MkdirAll(cwd, 0o700)
 }
 
-// assistantDirectoryPrepared identifies directories whose generated assistant files the hub owns.
+// assistantDirectoryPrepared identifies directories whose generated assistant files the hub owns in this process.
 // A user-selected task directory keeps its own instructions and skills.
 func (n *Node) assistantDirectoryPrepared(cwd string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	_, ok := n.assistantPrepared[assistantPrepareDir(cwd)]
 	return ok
+}
+
+// assistantInstructionDirectoryPrepared proves a prior prepare from disk after a restart. It is used only to restore
+// saved instructions, never to run a full skill sync with the connector state that existed only in the old process.
+// Requiring this node's managed state root keeps lookalike files in an ordinary user task directory from qualifying.
+func (n *Node) assistantInstructionDirectoryPrepared(cwd string) bool {
+	key := assistantPrepareDir(cwd)
+	if key == "" || n.dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(assistantPrepareDir(n.stateRoot()), key)
+	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	mode, err := os.ReadFile(filepath.Join(key, assistantInstructionMode))
+	if err != nil {
+		return false
+	}
+	switch strings.TrimSpace(string(mode)) {
+	case assistantInstructionModeViews, assistantInstructionModeFull:
+	default:
+		return false
+	}
+	full, err := os.Stat(filepath.Join(key, assistantInstructionFallback))
+	return err == nil && full.Mode().IsRegular()
 }
