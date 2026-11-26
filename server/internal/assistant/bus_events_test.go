@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -88,7 +91,12 @@ type heldBus struct {
 
 func newHeldBus(t *testing.T) *heldBus {
 	t.Helper()
-	s := newTestService(t, newFakeHub())
+	return newHeldBusFor(t, newTestService(t, newFakeHub()))
+}
+
+// newHeldBusFor is newHeldBus whose events s handles.
+func newHeldBusFor(t *testing.T, s *Service) *heldBus {
+	t.Helper()
 	b := NewBusHub(BusOptions{Logf: testLogf(t)})
 	b.setHello(Hello{}) // the hub's answer is in: events are not held back for it (waitHello)
 	gate := make(chan struct{})
@@ -219,22 +227,24 @@ func TestBusLongLineKeepsArrivalOrder(t *testing.T) {
 	}
 }
 
-// While the line is long, an event that says the whole of something takes the place of the one of its key that
-// waits, and is handled where it came, not where the older one waited; under eventsRoom every event waits itself.
+// While the line is long, an event of which only the newest matters (the mutes, a request to report everything)
+// takes the place of the one of its key that waits, and is handled where it came, not where the older one waited;
+// under eventsRoom every event waits itself. A machine's list and the hello again say the whole of something too,
+// but their handlers go by what changed since the one before: each of those waits itself, however long the line.
 func TestBusLongLineKeepsTheNewestWhole(t *testing.T) {
 	list := func(machine string, n int) json.RawMessage {
 		raw, _ := json.Marshal(map[string]any{"machine_id": machine, "sessions": []any{}, "n": n})
 		return raw
 	}
 	b := NewBusHub(BusOptions{Logf: testLogf(t)})
-	b.queueEvent(assistantwire.EventSessionsChanged, list("mac", -2))
-	b.queueEvent(assistantwire.EventSessionsChanged, list("mac", -1))
+	b.queueEvent(assistantwire.EventMutes, numbered(-2))
+	b.queueEvent(assistantwire.EventMutes, numbered(-1))
 	if n := eventsWaiting(b); n != 2 {
-		t.Fatalf("a short line: %d events waiting, want both lists", n)
+		t.Fatalf("a short line: %d events waiting, want both mutes", n)
 	}
 	fill(b, eventsRoom-2)
-	// What comes now, in order: mac's list 50 times with a turn's start in the middle, another machine's list three
-	// times, ten requests to report everything, the mutes five times.
+	// What comes now, in order: ten requests to report everything with a turn's start in the middle, mac's list
+	// three times, the hello twice, the mutes five times.
 	n := 0
 	queue := func(event string, params func(int) json.RawMessage, times int) {
 		for i := 0; i < times; i++ {
@@ -242,12 +252,11 @@ func TestBusLongLineKeepsTheNewestWhole(t *testing.T) {
 			n++
 		}
 	}
-	onMac := func(n int) json.RawMessage { return list("mac", n) }
-	queue(assistantwire.EventSessionsChanged, onMac, 25)
-	queue(assistantwire.EventTurnStarted, numbered, 1) // number 25
-	queue(assistantwire.EventSessionsChanged, onMac, 25)
-	queue(assistantwire.EventSessionsChanged, func(n int) json.RawMessage { return list("win", n) }, 3)
-	queue(assistantwire.EventResync, numbered, 10)
+	queue(assistantwire.EventResync, numbered, 5)
+	queue(assistantwire.EventTurnStarted, numbered, 1) // number 5
+	queue(assistantwire.EventResync, numbered, 5)
+	queue(assistantwire.EventSessionsChanged, func(n int) json.RawMessage { return list("mac", n) }, 3)
+	queue(assistantwire.EventUpdated, numbered, 2)
 	queue(assistantwire.EventMutes, numbered, 5)
 	if n := goroutinesIn(queueEventFn); n != 0 {
 		t.Fatalf("%d goroutines started by queueEvent, want none", n)
@@ -259,11 +268,14 @@ func TestBusLongLineKeepsTheNewestWhole(t *testing.T) {
 		name string
 		n    int
 	}{
-		{assistantwire.EventTurnStarted, 25},
-		{assistantwire.EventSessionsChanged, 50}, // mac's newest, after the turn's start that came before it
-		{assistantwire.EventSessionsChanged, 53}, // the other machine's newest
-		{assistantwire.EventResync, 63},
-		{assistantwire.EventMutes, 68},
+		{assistantwire.EventTurnStarted, 5},
+		{assistantwire.EventResync, 10}, // the newest, after the turn's start that came before it
+		{assistantwire.EventSessionsChanged, 11},
+		{assistantwire.EventSessionsChanged, 12},
+		{assistantwire.EventSessionsChanged, 13},
+		{assistantwire.EventUpdated, 14},
+		{assistantwire.EventUpdated, 15},
+		{assistantwire.EventMutes, 20},
 	}
 	if n := eventsWaiting(b); n != len(want) {
 		t.Fatalf("%d events waiting past the first %d, want %d", n, eventsRoom, len(want))
@@ -276,6 +288,96 @@ func TestBusLongLineKeepsTheNewestWhole(t *testing.T) {
 	}
 	if n := b.pending.Load(); n != 0 {
 		t.Fatalf("%d events counted as not taken after all were", n)
+	}
+}
+
+// Every hello the hub sends again (manager.updated) is handled, however long the line: the computers one lists and
+// the one before did not are the ones just confirmed, which get their keys (trustChanged). A computer the first
+// hello takes off the list and the second confirms again got none while the second took the first's place in line:
+// the list before and after was the same.
+func TestBusLongLineHandlesEveryHello(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.sessions["mac"] = nil
+	f.devices = []Device{{ID: "server", Online: true, Reachable: true}, {ID: "mac", Online: true, Reachable: true}}
+	st := &trustStore{memStore: &memStore{}}
+	h := newHeldBusFor(t, newServiceTrust(t, f, st, st))
+	hello := func(machines ...string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"assistant": map[string]any{"machine_id": "server", "machines": machines}})
+		return raw
+	}
+	var kept Hello
+	if err := json.Unmarshal(hello("server", "mac"), &kept); err != nil {
+		t.Fatal(err)
+	}
+	h.b.setHello(kept) // the hello in effect lists both computers
+	h.hold(t)
+	fill(h.b, eventsRoom)
+	h.b.queueEvent(assistantwire.EventUpdated, hello("server"))        // the mac is no longer confirmed
+	h.b.queueEvent(assistantwire.EventUpdated, hello("server", "mac")) // and is again
+	f.mu.Lock()
+	clear(f.managed)
+	f.mu.Unlock()
+	h.release()
+	h.wait(t, eventsRoom+2)
+	h.b.Settle()
+	if got := h.b.helloNow().Assistant.Machines; len(got) != 2 {
+		t.Fatalf("the hello kept lists %v, want both computers", got)
+	}
+	// The keys go on a goroutine of their own (a node's answer can take seconds).
+	waitFor(t, "the computer confirmed again gets the managed launchers", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		_, mac := f.managed["mac"]
+		return mac
+	})
+}
+
+// Every list of a machine's is handed over, in order, however long the line: what follows the lists goes by
+// consecutive ones, so a list that shows a conversation working, followed by one that shows it stopped, is not a
+// repeat of it (only the stopped one was handed over while it took the working one's place in line).
+func TestBusLongLineHandsEveryListOver(t *testing.T) {
+	s := newTestService(t, newFakeHub().withMachine())
+	var mu sync.Mutex
+	var seen []string
+	s.sessionsSeen = func(d DeviceSessions) {
+		if d.MachineID != "mac" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range d.Sessions {
+			seen = append(seen, c.SessionID+" "+c.Status)
+		}
+	}
+	h := newHeldBusFor(t, s)
+	list := func(status string) json.RawMessage {
+		raw, err := json.Marshal(DeviceSessions{MachineID: "mac", Sessions: []proto.Session{{SessionID: "c1", Status: status}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	h.hold(t)
+	fill(h.b, eventsRoom)
+	h.b.queueEvent(assistantwire.EventSessionsChanged, list(proto.StatusWorking))
+	h.b.queueEvent(assistantwire.EventTurnEnded, json.RawMessage(`{"machine_id":"mac","session_id":"c1"}`))
+	h.b.queueEvent(assistantwire.EventSessionsChanged, list(proto.StatusDone))
+	h.release()
+	h.wait(t, eventsRoom+3)
+	h.b.Settle()
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"c1 " + proto.StatusWorking, "c1 " + proto.StatusDone}; !slices.Equal(seen, want) {
+		t.Fatalf("the lists handed over: %q, want %q", seen, want)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var order []string
+	for _, ev := range h.taken[len(h.taken)-3:] {
+		order = append(order, ev.name)
+	}
+	if want := []string{assistantwire.EventSessionsChanged, assistantwire.EventTurnEnded, assistantwire.EventSessionsChanged}; !slices.Equal(order, want) {
+		t.Fatalf("taken in the order %q, want %q", order, want)
 	}
 }
 
@@ -422,5 +524,164 @@ func TestBusEventsNotKeptStartANewConnection(t *testing.T) {
 	defer logMu.Unlock()
 	if !strings.Contains(strings.Join(logged, "\n"), "3 event(s) of the hub's were not kept") {
 		t.Fatalf("the log does not say what was not kept:\n%s", strings.Join(logged, "\n"))
+	}
+}
+
+// What waits behind the note of events not kept is not taken before the new connection's hello answer is kept: one
+// of the events lost may have been the hub's settings (manager.updated), and until the hello is kept again the ones
+// it has are older than those the later events were sent under.
+func TestBusEventsBehindALossWaitForTheNewHello(t *testing.T) {
+	asked := make(chan struct{}, 8)
+	second := make(chan struct{}) // closed: the hub answers the second connection's hello
+	var hellos atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		conn := bus.NewConn(r.Context(), ws)
+		p := rpc.New("h", conn)
+		p.OnRequest = func(ctx context.Context, method string, _ json.RawMessage) (any, error) {
+			if method == assistantwire.MethodHello {
+				n := hellos.Add(1)
+				asked <- struct{}{}
+				if n == 2 {
+					select {
+					case <-second:
+					case <-ctx.Done():
+					}
+				}
+			}
+			return map[string]any{}, nil
+		}
+		_ = p.Serve(r.Context(), conn)
+	}))
+	defer srv.Close()
+	hello := func(what string) {
+		t.Helper()
+		select {
+		case <-asked:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no hello: %s", what)
+		}
+	}
+
+	b := NewBusHub(BusOptions{Hub: srv.URL, Token: "jb_x", Backoff: 10 * time.Millisecond, Logf: testLogf(t)})
+	behindParams := json.RawMessage(`{"behind":true}`)
+	held, gate := make(chan struct{}), make(chan struct{})
+	var answered atomic.Bool
+	behind := make(chan bool, 1) // the event behind the note was taken: whether the second hello was answered by then
+	first := true
+	b.taking = func(ev busEvent) {
+		switch {
+		case first:
+			first = false
+			close(held)
+			<-gate
+		case ev.lost > 0:
+			b.queueEvent("managers", behindParams) // the line is empty but for the note being taken: this waits behind it
+		case string(ev.params) == string(behindParams):
+			behind <- answered.Load()
+		}
+	}
+	st := &memStore{}
+	svc := New(Options{Hub: b, Store: func() Store { return st }, Logf: testLogf(t)})
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- b.Serve(ctx, svc) }()
+	defer func() {
+		cancel()
+		<-served
+	}()
+	defer close(second)
+	hello("the first connection")
+	if err := b.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	b.TellLocal("managers", json.RawMessage(`{}`))
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first event was not taken")
+	}
+	fill(b, eventsMost+3) // three more than the line keeps
+	close(gate)
+	hello("after the events that were not kept") // asked, not answered yet
+	select {
+	case <-behind:
+		t.Fatal("the event behind the note was taken before the new connection's hello was answered")
+	default:
+	}
+	answered.Store(true)
+	second <- struct{}{}
+	select {
+	case after := <-behind:
+		if !after {
+			t.Fatal("the event behind the note was taken before the new connection's hello was answered")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the event behind the note was never taken")
+	}
+	if err := b.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b.Settle()
+}
+
+// With no hub to say hello again, the line goes on after helloWait with the settings it has, and waits once for a
+// connection, not once for every note of events lost on it: a line that keeps filling is not held helloWait each time.
+func TestBusEventsBehindALossGoOnWithoutAHub(t *testing.T) {
+	was := helloWait
+	t.Cleanup(func() { helloWait = was }) // after the consumer below has ended
+	helloWait = 20 * time.Millisecond
+	var logMu sync.Mutex
+	var logged []string
+	b := NewBusHub(BusOptions{Logf: func(format string, args ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, args...))
+		logMu.Unlock()
+	}})
+	b.setHello(Hello{})
+	holdParams := json.RawMessage(`{"hold":true}`)
+	held, gate := make(chan struct{}), make(chan struct{})
+	b.taking = func(ev busEvent) {
+		if string(ev.params) == string(holdParams) {
+			held <- struct{}{}
+			<-gate
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	b.mu.Lock()
+	b.svc, b.ctx = newTestService(t, newFakeHub()), ctx
+	b.mu.Unlock()
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		b.takeEvents(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-ended
+	})
+	for round := 1; round <= 2; round++ {
+		b.queueEvent("managers", holdParams)
+		select {
+		case <-held:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("round %d: the event to hold was not taken", round)
+		}
+		fill(b, eventsMost+2) // two more than the line keeps
+		gate <- struct{}{}
+		b.Settle()
+	}
+	logMu.Lock()
+	defer logMu.Unlock()
+	all := strings.Join(logged, "\n")
+	if n := strings.Count(all, "2 event(s) of the hub's were not kept"); n != 2 {
+		t.Fatalf("%d notes of events not kept in the log, want 2:\n%s", n, all)
+	}
+	if n := strings.Count(all, "no new hello from the hub"); n != 1 {
+		t.Fatalf("the line waited for a new hello %d times, want once for the connection:\n%s", n, all)
 	}
 }

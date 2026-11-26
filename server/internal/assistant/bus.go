@@ -90,6 +90,13 @@ type BusHub struct {
 	// would be missing — they wait for it (waitHello).
 	helloed   chan struct{}
 	helloOnce sync.Once
+	// keptConn is the connection (conns as onHello counted it) whose hello's answer was kept last, and keptNext is
+	// closed when a later one's is (waitHelloAfter); both guarded by mu.
+	keptConn uint64
+	keptNext chan struct{}
+	// lossWaited, when not 0, is one more than the connection after which no hello was kept within helloWait of
+	// events lost on it: the line does not wait for it again (eventsLost). takeEvents' own.
+	lossWaited uint64
 
 	events  *eventQueue   // the hub's events, taken in the order they came (bus_events.go)
 	conns   atomic.Uint64 // the connections whose hello was answered: the current one's number (busEvent.conn)
@@ -115,7 +122,7 @@ type busEvent struct {
 	name   string
 	params json.RawMessage
 	conn   uint64 // the connection it came on (BusHub.conns as it was read)
-	key    string // of one that says the whole of something and came while the line was long (eventKey); else ""
+	key    string // of one of which only the newest matters and that came while the line was long (eventKey); else ""
 	lost   int    // not an event of the hub's: the note of this many that the full line did not keep (eventsLost)
 }
 
@@ -276,7 +283,7 @@ func (b *BusHub) CredentialRevoked(ctx context.Context, id string) (bool, error)
 // onHello keeps the hub's answer to manager.hello. A new connection: the hub shows nothing of the assistant until it
 // reports the whole of it again.
 func (b *BusHub) onHello(res json.RawMessage) error {
-	b.conns.Add(1) // what the hub's events say of the hub is that connection's (busEvent.conn)
+	conn := b.conns.Add(1) // what the hub's events say of the hub is that connection's (busEvent.conn)
 	var h Hello
 	if err := json.Unmarshal(res, &h); err != nil {
 		return err
@@ -286,10 +293,12 @@ func (b *BusHub) onHello(res json.RawMessage) error {
 			// Existing node connections survive a failed hub handshake. Keep its new
 			// restrictions before rejecting placement, so they cannot serve stale access.
 			b.setHello(h)
+			b.helloKept(conn)
 			return err
 		}
 	}
 	h = b.setHello(h)
+	b.helloKept(conn)
 	b.mu.Lock()
 	svc, ctx := b.svc, b.ctx
 	b.mu.Unlock()
@@ -450,6 +459,47 @@ func (b *BusHub) waitHello(ctx context.Context) {
 	case <-b.helloed:
 	case <-t.C:
 	case <-ctx.Done():
+	}
+}
+
+// helloKept says connection conn's hello answer is kept: what waited for one later than another's goes on.
+func (b *BusHub) helloKept(conn uint64) {
+	b.mu.Lock()
+	b.keptConn = conn
+	next := b.keptNext
+	b.keptNext = nil
+	b.mu.Unlock()
+	if next != nil {
+		close(next)
+	}
+}
+
+// waitHelloAfter returns true once the hello's answer of a connection made after conn is kept (at once when one
+// is), false after helloWait or ctx.
+func (b *BusHub) waitHelloAfter(ctx context.Context, conn uint64) bool {
+	var t *time.Timer
+	for {
+		b.mu.Lock()
+		if b.keptConn > conn {
+			b.mu.Unlock()
+			return true
+		}
+		if b.keptNext == nil {
+			b.keptNext = make(chan struct{})
+		}
+		next := b.keptNext
+		b.mu.Unlock()
+		if t == nil {
+			t = time.NewTimer(helloWait)
+			defer t.Stop()
+		}
+		select {
+		case <-next:
+		case <-t.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
 	}
 }
 
@@ -948,12 +998,12 @@ func (b *BusHub) takeEvents(ctx context.Context) {
 		if f := b.taking; f != nil {
 			f(ev)
 		}
+		b.waitHello(ctx)
 		if ev.lost > 0 {
-			b.eventsLost(ev)
+			b.eventsLost(ctx, ev)
 			b.pending.Add(-1)
 			continue
 		}
-		b.waitHello(ctx)
 		if ev.name == assistantwire.EventSessionDelta {
 			ev.params = b.takeDelta(ev.params)
 		}
