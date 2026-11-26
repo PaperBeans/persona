@@ -65,3 +65,70 @@ func BenchmarkPublishListWithArchive(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkApplyArchives_500Sessions(b *testing.B) {
+	ctx := context.Background()
+	f := newFakeHub()
+	f.devices = []Device{{ID: "box", Home: "/home/u"}}
+	d := newFleetDevs()
+	d.add("box", "Computer")
+	st := newFleetMem()
+	s := New(Options{Hub: f, Devices: d, Store: func() Store { return st }})
+
+	at := time.Date(2026, 11, 26, 0, 0, 0, 0, time.UTC)
+	archive := map[string]agentArchive{}
+	list := make([]proto.Session, 500)
+	for i := range list {
+		sid := fmt.Sprintf("claude-11111111-2222-4333-8444-%012d", i)
+		sess := proto.Session{
+			MachineID: "box",
+			SessionID: sid,
+			Cwd:       "/code/example",
+			Agent:     "claude",
+			Status:    proto.StatusIdle,
+			Title:     "Example session",
+			UpdatedAt: at,
+		}
+		if i < 20 {
+			sess.SetAliases([]string{fmt.Sprintf("pane-w1-p%02d", i)})
+		}
+		list[i] = sess
+		if i < 50 {
+			archive[runtimeListID("box", sid)] = agentArchive{
+				Session:   archiveSnapshot(sess),
+				Archived:  i < 25,
+				ChangedAt: at,
+			}
+		}
+	}
+	for i := range 200 {
+		sid := fmt.Sprintf("archived-tail-%04d", i)
+		sess := archiveSnapshot(proto.Session{
+			MachineID: "box",
+			SessionID: sid,
+			Cwd:       "/code/example",
+			Agent:     "claude",
+			UpdatedAt: at,
+		})
+		archive[runtimeListID("box", sid)] = agentArchive{
+			Session:   sess,
+			Archived:  true,
+			ChangedAt: at,
+		}
+	}
+	if err := st.PutSetting(ctx, agentArchivesKey, archive); err != nil {
+		b.Fatal(err)
+	}
+
+	mark := s.archiveMark()
+	if _, _, err := s.applyArchives(ctx, "box", list, mark, true); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, err := s.applyArchives(ctx, "box", list, mark, true); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

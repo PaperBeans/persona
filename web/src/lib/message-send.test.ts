@@ -7,7 +7,7 @@ const fake = vi.hoisted(() => ({
   changes: [] as (() => void)[], credentials: [] as (() => void)[], managers: [] as (() => void)[], send: vi.fn(),
 }));
 vi.mock("./api", () => ({ credentialOwner: () => fake.owner, getToken: () => "synthetic-token", onCredentialChange: (f: () => void) => fake.credentials.push(f), sessionPath: (mid: string, sid: string) => `/sessions/${mid}/${sid}` }));
-vi.mock("./format", () => ({ stateOf: (s: Session) => s.state ?? s.status }));
+vi.mock("./format", () => ({ activityOf: (s: Session) => s.state ?? s.status }));
 vi.mock("./manager-choice", () => ({ MANAGER_HEADER: "X-Persona-Manager", managerHeaderFor: () => fake.manager, shownManager: () => fake.manager, onManagerChoice: (f: () => void) => fake.managers.push(f) }));
 vi.mock("./store", () => ({ getSession: () => fake.row, onHubEvent: (name: string, f: (event: Record<string, unknown>) => void) => fake.events.set(name, f), send: fake.send, subscribe: (f: () => void) => fake.changes.push(f) }));
 import { beginMessageSend, configureMessageFeedback, messageFeedback, observeMessageItems, receiveMessageSend, resetMessageFeedback, settleMessageEcho, stopMessageFeedback } from "./message-send";

@@ -145,6 +145,9 @@ type busConn struct {
 	// inboxNeedsYou is the inbox's "Needs you" count it reported on this connection (inbox.needs_you, managers.go);
 	// nil: none yet. It goes with the connection, so the roster never shows the count of a manager that is away.
 	inboxNeedsYou *int
+	// countsView is the counts view it told on this connection (counts.view, counts_view.go), compacted and never
+	// decoded; nil: none yet. It goes with the connection, as inboxNeedsYou does.
+	countsView json.RawMessage
 
 	// roster is the managers event on its way to it (sendRoster): the newest list, its number and the one sent last.
 	roster struct {
@@ -557,6 +560,7 @@ func (h *Hub) busEnded(c *busConn) {
 	if current {
 		h.extLost.lost(c.ident.ID, time.Now()) // its extensions may still call for a while (extensions_proof.go)
 		h.logf("bus: [%s] disconnected", c.ident.ID)
+		h.countsViewEnded(c) // the apps hear that its view stopped (counts_view.go); they keep the one they have
 		if c.ident.Role == bus.RoleManager {
 			go h.devicesGone(c.ident.ID) // its machines (devices_reports.go)
 		}

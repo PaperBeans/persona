@@ -135,6 +135,14 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 	if err != nil {
 		return nil, err
 	}
+	// A proxy reply's guest lists only its one tool, before any other guest's list (bot_handoff.go).
+	if id, handoff, err := s.handoffOf(ctx, machine, session); guest && err == nil && handoff {
+		_ = id
+		if s.isWorkMachine(machine) {
+			return []proto.Tool{}, nil
+		}
+		return guestTools(s.larkModule().HandoffTools(), allowed), nil
+	}
 	if _, room, err := s.roomOf(ctx, machine, session); guest && err == nil && room {
 		if s.isWorkMachine(machine) {
 			return []proto.Tool{}, nil

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,6 +312,92 @@ func TestExtensionMarketRows(t *testing.T) {
 	}
 	if rows, _ := d.ExtensionMarkets(ctx); len(rows) != 0 {
 		t.Fatal(rows)
+	}
+}
+
+// A private market's trusted keys survive a round trip; a row written without them (every market before the column,
+// or an older manager's upsert that does not name it) reads as no keys, and the shape check refuses a non-array.
+func TestExtensionMarketTrustedKeys(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	at := time.Date(2026, 11, 26, 1, 2, 3, 0, time.UTC)
+	clean := func() { _ = d.DeleteExtensionMarket(context.Background(), "mk-keys") }
+	clean()
+	t.Cleanup(clean)
+	if _, err := d.pool.Exec(ctx, `INSERT INTO plugin_markets (id, spec, name, token_sealed, warnings, error, added_at)
+		VALUES ('mk-keys', 'https://example.com/keys/persona-extensions.json', '', '', '[]', '', $1)`, at); err != nil {
+		t.Fatal(err)
+	}
+	find := func() extension.MarketRecord {
+		rows, err := d.ExtensionMarkets(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			if r.ID == "mk-keys" {
+				return r
+			}
+		}
+		t.Fatal("market row missing")
+		return extension.MarketRecord{}
+	}
+	if r := find(); len(r.TrustedKeys) != 0 {
+		t.Fatalf("legacy row has keys: %v", r.TrustedKeys)
+	}
+	r := find()
+	r.TrustedKeys = []string{"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "ed25519:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}
+	if err := d.PutExtensionMarket(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if g := find(); len(g.TrustedKeys) != 2 || g.TrustedKeys[1] != r.TrustedKeys[1] {
+		t.Fatalf("keys lost: %v", g.TrustedKeys)
+	}
+	// An older manager's upsert (no trusted_keys column in its statement) keeps the keys.
+	if _, err := d.pool.Exec(ctx, `INSERT INTO plugin_markets (id, spec, name, token_sealed, warnings, error, added_at)
+		VALUES ('mk-keys', 'https://example.com/keys/persona-extensions.json', 'Renamed', '', '[]', '', $1)
+		ON CONFLICT (id) DO UPDATE SET name = 'Renamed'`, at); err != nil {
+		t.Fatal(err)
+	}
+	if g := find(); len(g.TrustedKeys) != 2 || g.Name != "Renamed" {
+		t.Fatalf("older upsert dropped the keys: %+v", g)
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE plugin_markets SET trusted_keys = '{"k":1}' WHERE id = 'mk-keys'`); err == nil {
+		t.Fatal("a non-array trusted_keys was stored")
+	}
+}
+
+func TestIdleArchiveAuditMirrorIsIdempotent(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	const plugin = "example-idle-archive-audit"
+	clean := func() {
+		if _, err := d.pool.Exec(context.Background(), `DELETE FROM plugin_audit WHERE plugin = $1`, plugin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clean()
+	t.Cleanup(clean)
+	detail := json.RawMessage(`{"audit_id":"ia_restart_once","outcome":"archived_and_closed"}`)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := d.AddExtensionAudit(ctx, plugin, "session_idle_archive", "recovery", detail); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	// A crash after the mirror write but before the outbox update may leave an already mirrored pending entry.
+	// Replaying it must not rewrite its timestamp or add a second row.
+	if err := d.AddExtensionAudit(ctx, plugin, "session_idle_archive", "recovery", detail); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM plugin_audit WHERE plugin = $1`, plugin).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("idle archive recovery wrote %d plugin_audit rows, want 1", count)
 	}
 }
 

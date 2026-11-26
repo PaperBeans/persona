@@ -386,7 +386,7 @@ function AssistantModelPanelView({
     const host = assistantModelHost(chat.session, provider);
     void readModels(mid, provider, {
       purpose: "assistant",
-      again: true,
+      refresh: true,
       first: canonicalLauncher(provider) === canonicalLauncher(setup.provider),
       ...(host ? { host } : {}),
     });

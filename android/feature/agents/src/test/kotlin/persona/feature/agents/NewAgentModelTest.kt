@@ -157,7 +157,7 @@ class NewAgentModelTest {
         try {
             advanceUntilIdle()
             assertEquals("codex", model.state.value.agentType)
-            assertEquals("5.5", defaultModelDetail(res, model.state.value))
+            assertEquals("GPT-5.5", defaultModelDetail(res, model.state.value))
             model.pickModel("gpt-5.5-mini")
             model.prompt("修一下登录")
             model.submit()

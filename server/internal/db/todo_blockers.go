@@ -139,10 +139,11 @@ func (d *DB) ListTodoBlockersByTodo(ctx context.Context, todoID string) ([]TodoB
 	return scanTodoBlockerRows(rows)
 }
 
-// ListActiveTodoBlockersByTarget returns all active blocker edges waiting on targetRef.
+// ListActiveTodoBlockersByTarget returns all active blocker edges waiting on targetRef
+// using case-insensitive matching so mixed-case PR URLs hit the event-driven fast path.
 func (d *DB) ListActiveTodoBlockersByTarget(ctx context.Context, targetRef string) ([]TodoBlockerRow, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT `+todoBlockerCols+` FROM todo_blockers WHERE target_ref = $1 AND state = $2 ORDER BY created_at ASC, id ASC`,
+		`SELECT `+todoBlockerCols+` FROM todo_blockers WHERE LOWER(target_ref) = LOWER($1) AND state = $2 ORDER BY created_at ASC, id ASC`,
 		strings.TrimSpace(targetRef), TodoBlockerStateActive)
 	if err != nil {
 		return nil, err

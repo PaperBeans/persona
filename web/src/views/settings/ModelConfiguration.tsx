@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, ApiError, enc, errorText } from "../../lib/api";
+import { api, ApiError, enc, errorText, invalidateInFlightGets } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
   providerAgent, providerName, modelProviderTitle, modelPurpose, modelSummary, runtimeLabel, usageTokens,
@@ -74,8 +74,9 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   // Each load's number: only the latest one's answer is shown, so an older GET still on its way (the first one, a
   // Refresh) cannot put back what a save's reload has just replaced.
   const loads = useRef(0);
-  const load = async () => {
+  const load = async (fresh = false) => {
     const at = ++loads.current;
+    if (fresh) invalidateInFlightGets("/model-config");
     try {
       // the background supervisor's purpose is listed right after Main chat (#5082). A hub since #5806 has it in the
       // catalog; one before that answers it by its own id only, so only then is it asked for. There, only a hub that
@@ -109,7 +110,7 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3" />
           {query && <IconButton icon="x" label={t("settings-modelconfiguration.clear")} size={22} iconSize={12} onClick={() => setQuery("")} />}
         </label>
-        <IconButton icon="retry" label={t("settings-modelconfiguration.refresh")} onClick={() => void load()} />
+        <IconButton icon="retry" label={t("settings-modelconfiguration.refresh")} onClick={() => void load(true)} />
       </div>
       <p className="mb-5 px-1 text-[12px] leading-relaxed text-ink-3">{t("settings-modelconfiguration.intro")}</p>
       {!data && !error && <Loading />}
@@ -229,9 +230,10 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
       ?? a.conversations.find((row) => row.machine_id === a.machine_id && row.session_id === a.main);
   });
   const kept = useStore((s) => s.features.includes(ASSISTANT_MODEL_PICK_FEATURE));
-  const load = async () => {
+  const load = async (fresh = false) => {
     if (!id) return;
     const at = ++loads.current;
+    if (fresh) invalidateInFlightGets("/model-config/purposes");
     try {
       const r = await modelPurpose(id, manager);
       if (!alive.current || at !== loads.current) return;
@@ -498,7 +500,7 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
         <p className="text-[11.5px] leading-relaxed text-ink-3">{p.kind === "plugin" ? t("settings-modelconfiguration.save_note_plugin") : t("settings-modelconfiguration.save_note")}</p>
       </div>}
       {error && <p role="alert" className="mt-3 text-[12px] text-red">{error}</p>}
-      {(conflict || (!p && error)) && <Button tone="secondary" disabled={busy} onClick={() => void load()}>{conflict ? t("settings-modelconfiguration.reload_discard") : t("settings-modelconfiguration.retry")}</Button>}
+      {(conflict || (!p && error)) && <Button tone="secondary" disabled={busy} onClick={() => void load(true)}>{conflict ? t("settings-modelconfiguration.reload_discard") : t("settings-modelconfiguration.retry")}</Button>}
     </Dialog>
   );
 }

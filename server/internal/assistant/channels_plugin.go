@@ -300,7 +300,7 @@ func (s *Service) channelThreadKey(ctx context.Context, id string, m channel.Mes
 	c := &s.chans
 	c.mu.Lock()
 	s.loadChannelsLocked(ctx)
-	mode := s.channelPrefLocked(id).ThreadMode
+	mode := s.channelPrefLocked(id).ThreadMode.Effective(v.Capabilities.Threads)
 	c.mu.Unlock()
 	return channelRouteKey(mode, m)
 }
@@ -534,9 +534,10 @@ func (s *Service) textChannels(ctx context.Context) []channel.View {
 		return nil
 	}
 	var out []channel.View
+	v2 := s.integrationsV2On(ctx)
 	for _, v := range list {
 		if v.Source == channel.SourcePlugin && v.Kind == channel.KindIM && v.State == channel.StateConnected {
-			out = append(out, s.filledChannel(ctx, v))
+			out = append(out, s.filledChannel(ctx, v, v2))
 		}
 	}
 	return out

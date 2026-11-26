@@ -20,6 +20,21 @@ import {
 } from '../lib/map.js'
 
 describe('antigravity transcript and tool mapping', () => {
+  it('keeps botmux marker lines out of reply previews within the current turn', () => {
+    const marker = 'BOTMUX_NOTHING_TO_SEND'
+    const reply = (content) => ({ type: 'PLANNER_RESPONSE', content })
+    const mention = `The guide mentions ${marker}.`
+    const mixed = reply(`${mention}\n${marker}`)
+    const steps = [mixed, reply(marker)]
+    for (const summaryOnly of [false, true]) {
+      const result = stepsToItems(steps, { summaryOnly })
+      assert.equal(result.lastText, mention)
+      if (!summaryOnly) assert.deepEqual(result.items.map((item) => item.text), [mixed.content, marker])
+      const next = { type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'Next question' }
+      assert.equal(stepsToItems([...steps, next, reply(marker)], { summaryOnly }).lastText, '')
+    }
+  })
+
   it('keeps reply previews within the latest explicit user turn', () => {
     const question = { type: 'PLANNER_RESPONSE', content: 'Which configuration should I use?' }
     const prompt = { type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'What were the results?' }
@@ -597,5 +612,74 @@ describe('antigravity transcript and tool mapping', () => {
       assert.equal(next.usage.contextTokens, 8000)
       assert.equal(next.usage.contextWindow, 0)
     }
+  })
+
+  it('emits structured agy_turn_end turn_duration items for completed turns without mutating cached prefixes', () => {
+    const at = '2026-11-25T10:00:00Z'
+    const turn1 = [
+      { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: at, content: 'Fix bug' },
+      { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at, content: 'Fixed.' },
+    ]
+    // Omitting turnEnded preserves direct-caller behavior; turnEnded: false suppresses trailing turn_duration.
+    assert.equal(stepsToItems(turn1).items.some((it) => it.kind === 'turn_duration'), false)
+    assert.equal(stepsToItems(turn1, { turnEnded: false }).items.some((it) => it.kind === 'turn_duration'), false)
+
+    // With turnEnded: true, emits a structured turn_duration linked to the reply and opening user item.
+    const ended = stepsToItems(turn1, { turnEnded: true, cacheKey: 'turn-end-cache', immutablePrefix: turn1.length })
+    const td = ended.items.at(-1)
+    assert.equal(td.kind, 'turn_duration')
+    assert.equal(td.role, 'system')
+    assert.equal(td.seq, 2)
+    assert.equal(td.ts, at)
+    assert.equal(td.turn_duration.duration_ms, 0)
+    assert.equal(td.turn_duration.source, 'agy_turn_end')
+    assert.equal(td.turn_duration.user_item_id, ended.items[0].id)
+    assert.equal(td.id, `${td.turn_duration.parent_uuid}#turn_duration`)
+
+    // Flipping turnEnded back to false on the same cacheKey must not leak a cached turn_duration.
+    const runningAgain = stepsToItems(turn1, { turnEnded: false, cacheKey: 'turn-end-cache', immutablePrefix: turn1.length })
+    assert.equal(runningAgain.items.some((it) => it.kind === 'turn_duration'), false)
+
+    // Trailing CHECKPOINT notice stays after turn_duration to preserve monotonic seq ordering.
+    const withCheckpoint = [...turn1, { step_index: 2, type: 'CHECKPOINT', created_at: at }]
+    const cpMapped = stepsToItems(withCheckpoint, { turnEnded: true })
+    assert.deepEqual(cpMapped.items.map((it) => [it.seq, it.kind]), [[1, 'text'], [2, 'text'], [2, 'turn_duration'], [3, 'notice']])
+
+    // Open tool calls, tool results, and errors never emit turn_duration even with turnEnded: true.
+    for (const openSteps of [
+      [turn1[0], { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at, content: 'Running', tool_calls: [{ name: 'run_command', args: {} }] }],
+      [turn1[0], { step_index: 1, source: 'MODEL', type: 'GENERIC', status: 'DONE', created_at: at, content: 'Output' }],
+      [turn1[0], { step_index: 1, source: 'MODEL', type: 'ERROR_MESSAGE', status: 'DONE', created_at: at, content: 'Boom' }],
+    ]) {
+      assert.equal(stepsToItems(openSteps, { turnEnded: true }).items.some((it) => it.kind === 'turn_duration'), false)
+    }
+
+    // Starting turn 2 keeps turn 1's turn_duration stable while turn 2 stays open until turnEnded: true.
+    const turn2Open = [
+      ...turn1,
+      { step_index: 2, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: at, content: 'Second' },
+      { step_index: 3, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at, content: 'Second reply.' },
+    ]
+    const whileRunning = stepsToItems(turn2Open, { turnEnded: false, cacheKey: 'turn-end-cache', immutablePrefix: turn1.length })
+    assert.deepEqual(whileRunning.items.map((it) => [it.seq, it.kind]), [[1, 'text'], [2, 'text'], [2, 'turn_duration'], [3, 'text'], [4, 'text']])
+    const afterDone = stepsToItems(turn2Open, { turnEnded: true, cacheKey: 'turn-end-cache', immutablePrefix: turn2Open.length })
+    const durations = afterDone.items.filter((it) => it.kind === 'turn_duration')
+    assert.equal(durations.length, 2)
+    assert.equal(durations[0].seq, 2)
+    assert.equal(durations[0].turn_duration.user_item_id, afterDone.items[0].id)
+    assert.equal(durations[1].seq, 4)
+    assert.equal(durations[1].turn_duration.user_item_id, afterDone.items[3].id)
+
+    // Autonomous wake turn omits user_item_id while preserving turn 1's turn_duration.
+    const withWake = [
+      ...turn1,
+      { step_index: 2, type: 'SYSTEM_MESSAGE', created_at: at, content: 'Background job finished.' },
+      { step_index: 3, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at, content: 'Wake summary.' },
+    ]
+    const wakeDone = stepsToItems(withWake, { turnEnded: true })
+    const wakeDurations = wakeDone.items.filter((it) => it.kind === 'turn_duration')
+    assert.equal(wakeDurations.length, 2)
+    assert.equal(wakeDurations[0].turn_duration.user_item_id, wakeDone.items[0].id)
+    assert.equal(wakeDurations[1].turn_duration.user_item_id, undefined)
   })
 })

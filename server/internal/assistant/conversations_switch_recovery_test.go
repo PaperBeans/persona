@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // These tests pin the way out of a batch switch that never activates its target (#15317): its retries are bounded
@@ -86,6 +90,77 @@ func conversationSwitchTestOnSource(t *testing.T, r *conversationSwitchTestRig, 
 	if !ok || c.Epoch != item.ExpectedEpoch || c.Switch != nil || a.MachineID != "server" || a.SessionID != "fresh-chat" || len(c.Segments) != segments {
 		t.Fatalf("the conversation left its source: %+v", c)
 	}
+}
+
+func TestConversationSwitchReceiptRetriesAfterDisconnect(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+	}{
+		{"offline", apierr.ErrOffline},
+		{"request_not_sent", rpc.NotSent(rpc.ErrClosed)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newConversationSwitchTestRig(t)
+			lostReply := errors.New("fake link reset after preparation")
+			var receipt any // Both handlers access the receipt under the fake hub's lock.
+			r.f.mu.Lock()
+			prepare := r.f.nodes["assistant.segment.prepare"]
+			r.f.mu.Unlock()
+			r.f.answerNode("assistant.segment.prepare", func(machine string, raw json.RawMessage) (any, error) {
+				var err error
+				receipt, err = prepare(machine, raw)
+				if err != nil {
+					return nil, err
+				}
+				return nil, lostReply
+			})
+			r.f.answerNode("assistant.segment.receipt", func(string, json.RawMessage) (any, error) {
+				return map[string]bool{"unknown": true}, nil
+			})
+			started, item := conversationSwitchTestStart(t, r)
+			conversationSwitchTestWaitSwitch(t, r, item, "in_doubt", lostReply.Error())
+			preparation := conversationSwitchTestPreparationFor(t, r, item)
+
+			r.f.answerNode("assistant.segment.receipt", func(string, json.RawMessage) (any, error) { return nil, tt.err })
+			var op *db.ConversationSwitch
+			waitFor(t, "failed receipt check to be recorded", func() bool {
+				r.s.logicalSweep(t.Context())
+				var err error
+				op, err = r.d.ConversationSwitch(t.Context(), item.Machine, item.ConversationID, item.OperationID)
+				return err == nil && op != nil && (op.Phase == "rejected" || op.Error == tt.err.Error())
+			})
+			if op.Phase != "in_doubt" {
+				t.Fatalf("receipt error %v left switch %q (%q), want in_doubt", tt.err, op.Phase, op.Error)
+			}
+
+			r.f.answerNode("assistant.segment.receipt", func(_ string, raw json.RawMessage) (any, error) {
+				var params struct {
+					OperationID string `json:"operation_id"`
+				}
+				if err := json.Unmarshal(raw, &params); err != nil {
+					return nil, err
+				}
+				if params.OperationID != preparation["operation_id"] {
+					return nil, errors.New("receipt queried a different preparation")
+				}
+				return receipt, nil
+			})
+			conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"fresh-chat": "switched"})
+			conversationSwitchTestPreparationFor(t, r, item)
+		})
+	}
+}
+
+func TestConversationSwitchInitialPrepareOfflineIsRefused(t *testing.T) {
+	r := newConversationSwitchTestRig(t)
+	r.f.answerNode("assistant.segment.prepare", func(string, json.RawMessage) (any, error) {
+		return nil, apierr.ErrOffline
+	})
+	started, item := conversationSwitchTestStart(t, r)
+	conversationSwitchTestWaitSwitch(t, r, item, "rejected", "preparation refused")
+	conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"fresh-chat": "refused"})
+	conversationSwitchTestOnSource(t, r, item, 1)
 }
 
 // A preparation whose receipt stays unknown keeps retrying within the limit, keeping its latest error; past the limit,
@@ -325,13 +400,21 @@ func TestConversationSwitchRestoreCancelSurvivesACrash(t *testing.T) {
 	conversationSwitchTestWaitSwitch(t, r, item, "in_doubt", "fake receipt unavailable")
 	conversationSwitchTestSettle(t, r.s)
 
-	// Before the cancel: a receipt check holds the conversation's lock, so the saved cancel cannot run yet.
-	hold := conversationSwitchTestHoldOn(r, "assistant.segment.receipt")
-	go r.s.logicalSweep(context.Background())
-	select {
-	case <-hold.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no receipt check started")
+	// A concurrent action holds the epoch lock, so the saved cancel cannot run yet.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	lock, err := pgx.Connect(ctx, os.Getenv("PERSONA_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close(context.Background())
+	tx, err := lock.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 FOR SHARE`, item.Machine, item.ConversationID); err != nil {
+		t.Fatal(err)
 	}
 	code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`"}`)
 	restoring := conversationSwitchTestDecode(t, code, raw)
@@ -341,8 +424,9 @@ func TestConversationSwitchRestoreCancelSurvivesACrash(t *testing.T) {
 	if op, _ := r.d.ConversationSwitch(context.Background(), item.Machine, item.ConversationID, item.OperationID); op.Phase != "in_doubt" {
 		t.Fatalf("cancelled under the lock: %+v", op)
 	}
-	close(hold.release)
-	conversationSwitchTestSettle(t, r.s)
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	restarted := withSettings(t, r.f, New(Options{Hub: r.f, Store: func() Store { return r.d }, Logf: testLogf(t)}))
 	conversationSwitchTestDrive(t, restarted, restoring.BatchID, map[string]string{"fresh-chat": "switched"})

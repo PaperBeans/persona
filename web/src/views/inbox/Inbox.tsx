@@ -7,12 +7,11 @@ import { TodoDialogHost } from "./InboxTodoDialog";
 import { useInbox, refreshInbox, loadRoutedItem, type InboxItem } from "../../lib/inbox";
 import { useScope } from "../../lib/current-assistant";
 import { ItemManager, otherManager, sameManager } from "../../lib/manager-choice";
-import { newDraft, useMailAccounts } from "../../lib/mail";
+import { useMailbox, useMailAccounts } from "../../lib/mail";
 import { backToInboxList } from "../../lib/inbox-nav";
 import { InboxViewMemoryContext, useInboxViewMemory } from "../../lib/inbox-view-memory";
 import { t } from "../../i18n";
 import { Button, cx, IconButton, Spinner } from "../../ui/atoms";
-import { ComposeDialog } from "./ComposeDialog";
 import { DetailPlaceholder, InboxDetail } from "./InboxDetail";
 import { LarkWriteGate } from "./lark-write-gate";
 import { InboxList } from "./InboxList";
@@ -45,6 +44,7 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
   // a new mail is the current assistant's (docs/assistant/managers.md "Clients"): its own mail accounts, sent through it
   const scope = useScope();
   const composer = scope.several ? otherManager(scope.id) : undefined;
+  const { mailbox } = useMailbox();
   const accounts = useMailAccounts({ manager: composer });
   const [composing, setComposing] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -102,7 +102,7 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
         {!picking && (
           <>
             {main && <IconButton icon="list" label={t("chat-chatview.background_activity")} onClick={() => setActivityOpen(true)} />}
-            <IconButton icon="compose" label={accounts.length ? t("inbox-inbox.compose") : t("inbox-inbox.compose_no_account")} onClick={() => setComposing(true)} disabled={!accounts.length} />
+            {mailbox && <IconButton icon="compose" label={accounts.length ? t("inbox-inbox.compose") : t("inbox-inbox.compose_no_account")} onClick={() => setComposing(true)} disabled={!accounts.length} />}
             <IconButton icon="retry" label={t("inbox-inbox.refresh")} onClick={() => void refreshInbox()} disabled={loading} />
           </>
         )}
@@ -119,9 +119,9 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
       <PolicyDialogHost />
       <FolderDialogHost />
       <TodoDialogHost />
-      {composing && (
+      {mailbox && composing && (
         <ItemManager.Provider value={composer}>
-          <ComposeDialog draftKey="new" initial={newDraft(accounts[0]?.id ?? "")} accounts={accounts} onClose={() => setComposing(false)} />
+          <mailbox.Compose accounts={accounts} onClose={() => setComposing(false)} />
         </ItemManager.Provider>
       )}
     </div>

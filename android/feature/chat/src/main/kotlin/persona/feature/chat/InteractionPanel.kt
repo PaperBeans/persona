@@ -520,7 +520,7 @@ internal fun InteractionForm(
         if (!interaction.isSecretRun && !interaction.isSecretHandoff) Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if (onTerminal != null || showTerminalHelp) JTextButton(if (onTerminal != null) RequestExpiry.terminalLabel.text() else stringResource(R.string.chat_request_terminal_help),
                 { password = ""; if (onTerminal != null) onTerminal() else terminalHelp = true })
-            if (ApprovalPolicy.actions(AnswerEntry.Conversation, interaction.kind, false).any { it.id == ApprovalAction.Dismiss }) {
+            if (!interaction.noHandBack && ApprovalPolicy.actions(AnswerEntry.Conversation, interaction.kind, false).any { it.id == ApprovalAction.Dismiss }) {
                 JTextButton(stringResource(R.string.chat_request_dismiss), { act(AnswerAction.Dismiss) }, enabled = enabled(AnswerAction.Dismiss))
             }
         }

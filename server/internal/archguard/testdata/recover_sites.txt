@@ -8,6 +8,7 @@ cmd/password-wasm/main.go the browser's password worker answers a failed OPAQUE 
 internal/agents/avatar.go the SVG rasterizer panics on some malformed images, and an avatar that cannot be drawn is an error
 internal/assistant/fleet.go guard answers a store that does not keep a fleet table, which panics on it, as errNoTable
 internal/assistant/kb.go kbRun logs a panic with its stack, so one malformed message does not stop the knowledge-base loop
+internal/assistant/launcher_import_tool.go the launcher_import confidentiality boundary catches RPC/store panics so discovered credentials are never formatted into outer recovery or model errors
 internal/assistant/modules.go checkModuleRoutes turns ServeMux's panic on a conflicting module route into the error that leaves the module out
 internal/assistant/profile_trial.go a model-routing trial logs its panic, so a trial can never fail or alter the real dispatch
 internal/domainkit/defect/defect.go defect.Catch, the one recover() a site in catch_sites.txt defers

@@ -106,7 +106,7 @@ func (n *Node) planAfterTerminal(id string, decidedHere func()) (stop func()) {
 			default:
 				// Its own time: the watch may be nearly over when the approval is seen.
 				sctx, done := context.WithTimeout(context.Background(), planThenSet)
-				err := n.tuiSetMode(sctx, pane, want)
+				_, err := n.tuiSetMode(sctx, pane, want)
 				done()
 				if err != nil {
 					log.Printf("plan %s: approved in the terminal in %s, could not move to %s: %v", short(id), cur, want, err)

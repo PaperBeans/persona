@@ -609,6 +609,127 @@ func TestPushGradingEffectiveCacheInvalidateNeverReturnsZeroConfig(t *testing.T)
 	}
 }
 
+func TestPushGradingEffectiveCacheWaiterAfterInvalidationAndLeaderCancel(t *testing.T) {
+	t.Run("P1-1 waiter arriving after invalidation never gets zero snapshot", func(t *testing.T) {
+		ctx := context.Background()
+		store := newGradingCacheStore()
+		prepareGradingCacheStore(t, store)
+		store.block = make(chan struct{})
+		store.started = make(chan struct{})
+		cache := newPushGradingEffectiveCache(time.Minute)
+
+		resA := make(chan pushGradingEffective, 1)
+		errA := make(chan error, 1)
+		go func() {
+			got, err := cache.effective(ctx, store, "manager-a")
+			if err != nil {
+				errA <- err
+				return
+			}
+			resA <- got
+		}()
+		select {
+		case <-store.started:
+		case <-time.After(5 * time.Second):
+			close(store.block)
+			t.Fatal("load A did not start")
+		}
+
+		// Update base and invalidate while A is blocked in Settings.
+		updated := parseGradingTestConfig(t, `{"version":1,"enabled":true,"actions":{"P1":"silence"}}`, false)
+		if err := writePushGradingBase(ctx, store, updated); err != nil {
+			close(store.block)
+			t.Fatal(err)
+		}
+		cache.invalidate()
+
+		// B arrives AFTER invalidation while A's stale load is still blocked.
+		resB := make(chan pushGradingEffective, 1)
+		errB := make(chan error, 1)
+		go func() {
+			got, err := cache.effective(ctx, store, "manager-b")
+			if err != nil {
+				errB <- err
+				return
+			}
+			resB <- got
+		}()
+
+		close(store.block)
+		for name, ch := range map[string]struct {
+			res chan pushGradingEffective
+			err chan error
+		}{"A": {resA, errA}, "B": {resB, errB}} {
+			select {
+			case err := <-ch.err:
+				t.Fatalf("%s error: %v", name, err)
+			case got := <-ch.res:
+				if !got.Enabled || got.Actions.P1 != "silence" {
+					t.Fatalf("%s got stale or zero config: %+v", name, got)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s timed out", name)
+			}
+		}
+	})
+
+	t.Run("P1-2 cancelled leader does not poison concurrent waiter", func(t *testing.T) {
+		store := newGradingCacheStore()
+		prepareGradingCacheStore(t, store)
+		store.block = make(chan struct{})
+		store.started = make(chan struct{})
+		cache := newPushGradingEffectiveCache(time.Minute)
+
+		leaderCtx, cancelLeader := context.WithCancel(context.Background())
+		leaderErr := make(chan error, 1)
+		go func() {
+			_, err := cache.effective(leaderCtx, store, "manager-a")
+			leaderErr <- err
+		}()
+		select {
+		case <-store.started:
+		case <-time.After(5 * time.Second):
+			close(store.block)
+			t.Fatal("leader load did not start")
+		}
+
+		waiterRes := make(chan pushGradingEffective, 1)
+		waiterErr := make(chan error, 1)
+		go func() {
+			got, err := cache.effective(context.Background(), store, "manager-a")
+			if err != nil {
+				waiterErr <- err
+				return
+			}
+			waiterRes <- got
+		}()
+
+		// Cancel leader before releasing the store read.
+		cancelLeader()
+		select {
+		case err := <-leaderErr:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("leader err = %v, want context.Canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			close(store.block)
+			t.Fatal("leader did not return after cancel")
+		}
+		close(store.block)
+
+		select {
+		case err := <-waiterErr:
+			t.Fatalf("waiter was poisoned by cancelled leader: %v", err)
+		case got := <-waiterRes:
+			if !got.Enabled || got.Actions.P2 != "push" {
+				t.Fatalf("waiter got wrong config: %+v", got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("waiter timed out")
+		}
+	})
+}
+
 type panickingGradingStore struct {
 	settingsStore
 	panicVal any

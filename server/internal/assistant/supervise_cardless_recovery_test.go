@@ -197,7 +197,10 @@ func TestCardlessClaimRecoveredPendingDeliversOnce(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			store.mu.Lock()
-			store.failMarker = strings.Contains(mode, "marker_failure")
+			// The ambiguous mode's first marker write commits and loses its reply; every later one fails. Both are armed
+			// before the watch: its claim is immediate, so the live digest timer can retry the marker as soon as the
+			// watch releases writeMu, before a failure armed after the watch would apply (#16013).
+			store.failMarker = strings.Contains(mode, "marker_failure") || mode == "legacy_ambiguous_marker_write"
 			store.commitMarkerError = mode == "legacy_ambiguous_marker_write"
 			if mode == "cancelled_after_outbox" {
 				store.afterOutbox = cancel
@@ -205,9 +208,6 @@ func TestCardlessClaimRecoveredPendingDeliversOnce(t *testing.T) {
 			store.mu.Unlock()
 			s.superviseWatch(ctx, time.Now().Add(cardlessSettle+time.Minute))
 			if mode == "legacy_ambiguous_marker_write" {
-				store.mu.Lock()
-				store.failMarker = true
-				store.mu.Unlock()
 				s.superviseWatch(ctx, time.Now().Add(cardlessSettle+2*time.Minute))
 			}
 			if mode != "legacy_claim" && todoNow(s, todo.ID).Supervision.CardlessToldAt != nil {
@@ -504,14 +504,14 @@ func (s *cardlessClaimStore) PutTodoSupervision(ctx context.Context, row db.Todo
 		s.commitMarkerError = false
 	}
 	s.mu.Unlock()
-	if fail && row.CardlessToldAt != nil {
-		return errors.New("injected cardless marker failure")
-	}
-	if ambiguous {
+	if ambiguous { // the one lost reply comes before a standing failMarker
 		if err := s.DB.PutTodoSupervision(ctx, row); err != nil {
 			return err
 		}
 		return errors.New("injected lost reply after marker commit")
+	}
+	if fail && row.CardlessToldAt != nil {
+		return errors.New("injected cardless marker failure")
 	}
 	return s.DB.PutTodoSupervision(ctx, row)
 }

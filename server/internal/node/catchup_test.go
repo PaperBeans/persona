@@ -223,13 +223,14 @@ func TestQuickMetaCountsBigToolResultsAsActivity(t *testing.T) {
 	}
 }
 
-// Parsed transcripts are kept for the 16 offline sessions used last; a watched one and a live one stay however old.
+// Parsed transcripts are kept for the maxFiles offline sessions used last; a watched one and a live one stay however old.
 func TestParsedTranscriptsAreEvicted(t *testing.T) {
 	n, home := testNode(t)
 	dir := filepath.Join(home, ".claude", "projects", "-work")
 	_ = os.MkdirAll(dir, 0o700)
 	id := func(i int) string { return fmt.Sprintf("11111111-2222-3333-4444-%012d", i) }
-	for i := 0; i < 20; i++ {
+	total := maxFiles + 4
+	for i := 0; i < total; i++ {
 		writeCodexToolLines(t, filepath.Join(dir, id(i)+".jsonl"), 0, 1)
 	}
 	withHub(t, n)
@@ -240,7 +241,7 @@ func TestParsedTranscriptsAreEvicted(t *testing.T) {
 	n.mu.Lock()
 	n.agents[id(1)] = host.Agent{}
 	n.mu.Unlock()
-	for i := 1; i < 20; i++ {
+	for i := 1; i < total; i++ {
 		if _, err := n.file(id(i)); err != nil {
 			t.Fatal(err)
 		}
@@ -250,7 +251,7 @@ func TestParsedTranscriptsAreEvicted(t *testing.T) {
 	if len(n.files) != maxFiles {
 		t.Fatalf("%d parsed transcripts kept, want %d", len(n.files), maxFiles)
 	}
-	if n.files[id(0)] == nil || n.files[id(1)] == nil || n.files[id(19)] == nil || n.files[id(2)] != nil {
+	if n.files[id(0)] == nil || n.files[id(1)] == nil || n.files[id(total-1)] == nil || n.files[id(2)] != nil {
 		t.Fatal("want the watched one, the live one and the newest kept, the oldest offline one dropped")
 	}
 }

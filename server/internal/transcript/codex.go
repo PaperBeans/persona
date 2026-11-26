@@ -589,7 +589,7 @@ func codexItemLines(seq int, ts time.Time, turnID string, it *codexItem, meta *M
 			return nil
 		}
 		// AgentMessage is what Codex said, including narration between tool calls; only Reasoning is thinking.
-		if t := withoutBotmuxSentinel(text); t != "" {
+		if t := WithoutBotmuxSentinel(text); t != "" {
 			meta.LastText = t
 			meta.turnSaid(t)
 		}

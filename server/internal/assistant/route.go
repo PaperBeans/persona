@@ -184,12 +184,14 @@ func (s *Service) makeDirection(ctx context.Context, id, project, newProject, ti
 	// a direction that exists.
 	if !already {
 		if _, err := s.updateSettings(context.WithoutCancel(ctx), func(v *Settings) error {
+			before := slices.Clone(v.Leaders)
 			if !slices.Contains(v.Leaders, id) {
 				if len(v.Leaders) >= leadersMost {
 					return fmt.Errorf("at most %d directions: end one first", leadersMost)
 				}
 				v.Leaders = append(slices.Clone(v.Leaders), id)
 			}
+			s.directionRolesChanged(ctx, before, v.Leaders)
 			return nil
 		}); err != nil {
 			return nil, err
@@ -261,7 +263,9 @@ func (s *Service) endDirection(ctx context.Context, id string) (bool, error) {
 		return false, errors.New("no database on this hub")
 	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
+		before := slices.Clone(v.Leaders)
 		v.Leaders = slices.DeleteFunc(slices.Clone(v.Leaders), func(l string) bool { return l == id })
+		s.directionRolesChanged(ctx, before, v.Leaders)
 		return nil
 	}); err != nil {
 		return false, err

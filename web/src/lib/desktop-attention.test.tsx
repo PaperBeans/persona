@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
 vi.mock("./router", async (orig) => ({ ...(await orig<typeof import("./router")>()), navigate: navigateMock }));
 
-import { useAttentionSignals } from "./attention-signals";
+import { preloadAttentionSignals, useAttentionSignals } from "./attention-signals";
 import type { DesktopBridge, DesktopPresence } from "./desktop-types";
 import type { Interaction } from "./types";
 
@@ -67,7 +67,8 @@ function Probe() {
 
 describe("desktop attention lifecycle", () => {
   let root: Root;
-  beforeEach(() => {
+  beforeEach(async () => {
+    await preloadAttentionSignals();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     features = ["desktop_unregister"];
     notifyOn = true;

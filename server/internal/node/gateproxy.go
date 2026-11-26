@@ -111,9 +111,10 @@ type gateKey struct {
 // gateGrant is a call larkCheck let through, to go once.
 type gateGrant struct {
 	command, method, path, query string
-	body                         any  // the JSON body confirmed, when bodyBound (nil there is JSON null)
-	bodyBound                    bool // false: any body (not JSON, cut short, an upload, $… in it)
-	bodyUseNumber                bool // an edited grant compares JSON numbers without float64 rounding
+	body                         any    // the JSON body confirmed, when bodyBound (nil there is JSON null)
+	bodyBound                    bool   // false: any body (not JSON, cut short, an upload, $… in it)
+	bodyUseNumber                bool   // an edited grant compares JSON numbers without float64 rounding
+	rewriteBody                  []byte // when set, proxy forwards these JSON bytes instead of the matched original body
 	until                        time.Time
 	// session is the conversation larkCheck decided for, and through how it let the call through: what the ledger says
 	// of the write once it has gone out.
@@ -576,13 +577,14 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// How the call was let through, for the ledger once the API has taken it.
 	session, through := gk.session, proto.LarkLetThrough{}
+	var rewriteBody []byte
 	switch larkDecision(cfg, c) {
 	case "allow":
 		// A call larkCheck confirmed and a rule allows too (a space or remote runtime conversation confirms what a rule allows)
 		// was let through by the card: it uses up its grant, as a confirmed call does. In a space or remote runtime conversation
 		// a write goes only so: a rule's allow is not the phone's yes.
 		if gr, ok := p.take(gk, c.Method, c.Path, c.Query, body, isJSON); ok {
-			session, through = firstNonEmpty(gr.session, session), gr.through
+			session, through, rewriteBody = firstNonEmpty(gr.session, session), gr.through, gr.rewriteBody
 		} else if (gk.space || gk.remote || n.isRemoteRuntimeSession(session)) && !larkRead(c) {
 			gateNeedsPhone(w, command, c)
 			return
@@ -598,7 +600,20 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			gateNeedsPhone(w, command, c)
 			return
 		}
-		session, through = firstNonEmpty(gr.session, session), gr.through
+		session, through, rewriteBody = firstNonEmpty(gr.session, session), gr.through, gr.rewriteBody
+	}
+	if len(rewriteBody) > 0 {
+		body = rewriteBody
+		isJSON = true
+		c.Body = string(body)
+		if larkDecision(cfg, c) == "deny" {
+			gateRefuse(w, http.StatusForbidden, "这个操作按配置不允许（"+c.Method+" "+c.Path+"）。")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		r.Header.Del("Content-Length")
+		r.TransferEncoding = nil
 	}
 	sw := &statusWriter{ResponseWriter: w}
 	if !larkRead(c) {

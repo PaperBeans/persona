@@ -225,11 +225,19 @@ struct HomeCalendarGallery: View {
 /// those kinds (one screenshot holds a kind's three sizes). `-showHomeWidgets lock`: the Lock Screen's families
 /// instead, and `lock:agents,today` only those kinds (one screenshot holds four).
 struct HomeGalleryOverlay: View {
+    /// The sample data; with `-recording.phoneModule off`, as the app writes it while the hub's recording module is off
+    /// (#15214): the Record widget then offers no start.
+    private static var sample: HomeSnapshot {
+        var s = HomeSamples.busy(zh: LanguageStore.shared.launched.hasPrefix("zh"), now: .now)
+        if PhoneRecordingAllowance.stored() == .off { s.recordingModule = .off }
+        return s
+    }
+
     @State private var shown = UserDefaults.standard.string(forKey: "showHomeWidgets").flatMap { ["", "NO"].contains($0) ? nil : $0 }
 
     var body: some View {
         if let shown {
-            let entry = HomeEntry(date: .now, snapshot: HomeSamples.busy(zh: LanguageStore.shared.launched.hasPrefix("zh"), now: .now))
+            let entry = HomeEntry(date: .now, snapshot: Self.sample)
             ScrollView([.vertical, .horizontal]) {
                 HomeGallerySheet(title: "Persona", note: nil) {
                     if shown.hasPrefix("health:") {

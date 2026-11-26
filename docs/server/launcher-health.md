@@ -268,6 +268,18 @@ A direction override takes precedence over a project override. A retained comput
 (older than 30 seconds), unknown cores or ambiguous memory fails admission. Missing optional load or process readings
 skip their respective lines. A computer outside the resource layer skips machine checks.
 
+`persona_settings` changes `assistant.admission` behind an approval card. The card lists each line that changes, one per
+row, with the old value and the new one in words: what the number bounds, on which computer, direction, project or
+launcher group, and memory in binary units. A value the setting does not carry is shown as the line it falls back to,
+marked as the default, the line for every computer or the hub computer's line (`admissionChangeCard`,
+`server/internal/assistant/admission_card.go`). A project the setting does not name shows the cap for every direction;
+a direction does too unless the setting carries project caps, where its fallback depends on the task and the row says
+it has no line of its own. Lines are compared by their stored value, so two memory sizes that round to the same text
+both appear, with their byte counts, and two launcher lists that read the same appear as written, quoted. Names are
+written on one line, so a line break inside one cannot start a row. The list is not clipped, and rows are in a fixed
+order because the card is built again when it is answered and must match what was shown. The stored JSON stays under
+the card's "Show input".
+
 A refused `machine_policy=fixed` task stays put and gets the reason plus the least-loaded reachable alternative. A `flexible` task is moved to that
 alternative when its launcher runs there and its directory exists (the same `fs.stat` and reroute-trail rules as the launcher detour); no alternative means refusal. The
 direction cap refuses either policy, since moving machines does not free a direction slot. The check and the slot reservation happen in one critical section

@@ -117,35 +117,38 @@ func TestPushGradingEffectiveEvaluator(t *testing.T) {
 
 func TestPushGradingEffectiveMatchesLegacyDefaults(t *testing.T) {
 	now := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
-	lastAlert := map[string]time.Time{"repeat": now.Add(-time.Hour)}
+	lastAlert := map[string]time.Time{
+		"repeat":  now.Add(-time.Hour),
+		"expired": now.Add(-13 * time.Hour),
+	}
 	attention := assistantwire.Attention{Mode: assistantwire.AttentionNormal}
 	cfg := gradingEffectiveConfig(t, `{"version":1,"enabled":true}`)
 
 	cases := []struct {
-		name   string
-		policy pushPolicy
+		name       string
+		policy     pushPolicy
+		wantAllow  bool
+		wantLevel  string
+		wantReason string
+		wantLegacy string
 	}{
-		{name: "P0 fresh", policy: gradingEffectivePolicy(assistantwire.LevelP0, "")},
-		{name: "P1 held", policy: gradingEffectivePolicy(assistantwire.LevelP1, "")},
-		{name: "P2 silenced", policy: gradingEffectivePolicy(assistantwire.LevelP2, "")},
-		{name: "P0 repeats", policy: gradingEffectivePolicy(assistantwire.LevelP0, "repeat")},
-		{name: "P1 dedup", policy: gradingEffectivePolicy(assistantwire.LevelP1, "repeat")},
-		{name: "P2 dedup", policy: gradingEffectivePolicy(assistantwire.LevelP2, "repeat")},
-		{name: "P1 dedup expires", policy: func() pushPolicy {
-			policy := gradingEffectivePolicy(assistantwire.LevelP1, "expired")
-			return policy
-		}()},
+		{name: "P0 fresh", policy: gradingEffectivePolicy(assistantwire.LevelP0, ""), wantAllow: true, wantLevel: assistantwire.LevelP0},
+		{name: "P1 held", policy: gradingEffectivePolicy(assistantwire.LevelP1, ""), wantAllow: false, wantLevel: assistantwire.LevelP1, wantReason: pushGradingOutcomeHeld, wantLegacy: interceptReasonP1},
+		{name: "P2 silenced", policy: gradingEffectivePolicy(assistantwire.LevelP2, ""), wantAllow: false, wantLevel: assistantwire.LevelP2, wantReason: pushGradingOutcomeSilenced, wantLegacy: interceptReasonP2},
+		{name: "P0 repeats", policy: gradingEffectivePolicy(assistantwire.LevelP0, "repeat"), wantAllow: true, wantLevel: assistantwire.LevelP0},
+		{name: "P1 dedup", policy: gradingEffectivePolicy(assistantwire.LevelP1, "repeat"), wantAllow: false, wantLevel: assistantwire.LevelP1, wantReason: pushGradingOutcomeDeduped, wantLegacy: interceptReasonDedup},
+		{name: "P2 dedup", policy: gradingEffectivePolicy(assistantwire.LevelP2, "repeat"), wantAllow: false, wantLevel: assistantwire.LevelP2, wantReason: pushGradingOutcomeDeduped, wantLegacy: interceptReasonDedup},
+		{name: "P1 dedup expires", policy: gradingEffectivePolicy(assistantwire.LevelP1, "expired"), wantAllow: false, wantLevel: assistantwire.LevelP1, wantReason: pushGradingOutcomeHeld, wantLegacy: interceptReasonP1},
 	}
-	lastAlert["expired"] = now.Add(-13 * time.Hour)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := evaluatePushGradingEffective(now, cfg, tc.policy, lastAlert)
-			legacy := evaluatePushGradingLocked(now, true, attention, nil, lastAlert, tc.policy, false)
-			if got.Allow != legacy.Allow || got.Level != legacy.EffectiveLevel {
-				t.Fatalf("decision mismatch: new=%+v legacy=%+v", got, legacy)
+			eval := evaluatePushGradingDecision(now, cfg, cfg, attention, lastAlert, tc.policy)
+			if got.Allow != tc.wantAllow || got.Level != tc.wantLevel || got.Reason != tc.wantReason {
+				t.Fatalf("evaluator = %+v, want allow=%v level=%q reason=%q", got, tc.wantAllow, tc.wantLevel, tc.wantReason)
 			}
-			if reason := legacyPushGradingReason(got.Reason); reason != legacy.Reason {
-				t.Fatalf("reason mismatch: new=%q legacy=%q decision=%+v", reason, legacy.Reason, got)
+			if eval.Allow != tc.wantAllow || eval.EffectiveLevel != tc.wantLevel || eval.Reason != tc.wantReason || eval.LiveReason != tc.wantLegacy {
+				t.Fatalf("decision = %+v, want allow=%v level=%q reason=%q live=%q", eval, tc.wantAllow, tc.wantLevel, tc.wantReason, tc.wantLegacy)
 			}
 		})
 	}
@@ -155,10 +158,70 @@ func TestPushGradingEffectiveMatchesLegacyDefaults(t *testing.T) {
 		for _, level := range []string{assistantwire.LevelP0, assistantwire.LevelP1, assistantwire.LevelP2} {
 			policy := gradingEffectivePolicy(level, "repeat")
 			got := evaluatePushGradingEffective(now, disabled, policy, lastAlert)
-			legacy := evaluatePushGradingLocked(now, false, attention, nil, lastAlert, policy, false)
-			if !got.Allow || !legacy.Allow || got.Level != legacy.EffectiveLevel {
-				t.Fatalf("disabled mismatch for %s: new=%+v legacy=%+v", level, got, legacy)
+			eval := evaluatePushGradingDecision(now, disabled, disabled, attention, lastAlert, policy)
+			if !got.Allow || !eval.Allow || got.Level != level || eval.EffectiveLevel != level || eval.Reason != "" || eval.LiveReason != "" {
+				t.Fatalf("disabled mismatch for %s: eval=%+v decision=%+v", level, got, eval)
 			}
+		}
+	})
+
+	t.Run("extension notify_user promotion cannot weaken active owner attention mode", func(t *testing.T) {
+		baseCfg := resolvePushGrading(nil, nil, "")
+		layer := parseGradingTestConfig(t, `{"version":1,"notify_user":{"others":"P0"},"actions":{"P1":"push","P2":"push"}}`, true)
+		effCfg := resolvePushGrading(nil, &layer, "extension:ext-a")
+		immersive := assistantwire.Attention{
+			Mode:  assistantwire.AttentionImmersive,
+			Until: now.Add(time.Hour),
+			Focus: &assistantwire.AttentionFocus{Track: "focus-track"},
+		}
+		policy := pushPolicy{
+			kind:         assistantwire.NotifyPush,
+			level:        assistantwire.LevelP1,
+			derivedLevel: true,
+			manager:      assistantwire.AssistantID,
+			track:        "focus-track",
+		}
+		eval := evaluatePushGradingDecision(now, effCfg, baseCfg, immersive, nil, policy)
+		if eval.Allow || eval.Reason != assistantwire.AttentionReasonImmersiveHeld || eval.LiveReason != assistantwire.AttentionReasonImmersiveHeld {
+			t.Fatalf("extension weakened immersive mode: %+v", eval)
+		}
+	})
+
+	t.Run("notify_user main promotion and others_max cap", func(t *testing.T) {
+		layer := parseGradingTestConfig(t, `{"version":1,"notify_user":{"main":"P0","others":"P2","others_max":"P1"}}`, true)
+		effCfg := resolvePushGrading(nil, &layer, "extension:ext-a")
+		mainPolicy := pushPolicy{kind: assistantwire.NotifyPush, level: assistantwire.LevelP1, derivedLevel: true, manager: assistantwire.AssistantID, mainConv: true}
+		if eval := evaluatePushGradingDecision(now, effCfg, effCfg, attention, nil, mainPolicy); !eval.Allow || eval.EffectiveLevel != assistantwire.LevelP0 {
+			t.Fatalf("main promotion = %+v, want allow P0", eval)
+		}
+		nonMainExplicitP0 := pushPolicy{kind: assistantwire.NotifyPush, level: assistantwire.LevelP0, manager: assistantwire.AssistantID}
+		if eval := evaluatePushGradingDecision(now, effCfg, effCfg, attention, nil, nonMainExplicitP0); eval.Allow || eval.EffectiveLevel != assistantwire.LevelP1 || eval.Reason != pushGradingOutcomeHeld {
+			t.Fatalf("non-main others_max cap = %+v, want held P1", eval)
+		}
+		nonMainDefault := pushPolicy{kind: assistantwire.NotifyPush, level: assistantwire.LevelP1, derivedLevel: true, manager: assistantwire.AssistantID}
+		if eval := evaluatePushGradingDecision(now, effCfg, effCfg, attention, nil, nonMainDefault); eval.Allow || eval.EffectiveLevel != assistantwire.LevelP2 || eval.Reason != pushGradingOutcomeSilenced {
+			t.Fatalf("non-main others default = %+v, want silenced P2", eval)
+		}
+	})
+
+	t.Run("P1-3 disabled base or layer notify_user overrides do not run during attention mode", func(t *testing.T) {
+		baseOff := parseGradingTestConfig(t, `{"version":1,"enabled":false,"notify_user":{"main":"P2","others_max":"P2"}}`, false)
+		layer := parseGradingTestConfig(t, `{"version":1,"notify_user":{"main":"P2","others_max":"P2"}}`, true)
+		effCfg := resolvePushGrading(&baseOff, &layer, "extension:ext-a")
+		baseCfg := resolvePushGrading(&baseOff, nil, "")
+		if effCfg.Enabled || baseCfg.Enabled {
+			t.Fatalf("expected disabled effective config: eff=%+v base=%+v", effCfg, baseCfg)
+		}
+		fragment := assistantwire.Attention{Mode: assistantwire.AttentionFragment, Until: now.Add(time.Hour)}
+		mainPolicy := pushPolicy{kind: assistantwire.NotifyPush, level: assistantwire.LevelP1, derivedLevel: true, mainConv: true, manager: assistantwire.AssistantID}
+		eval := evaluatePushGradingDecision(now, effCfg, baseCfg, fragment, nil, mainPolicy)
+		if !eval.Allow || eval.EffectiveLevel != assistantwire.LevelP0 {
+			t.Fatalf("disabled layer muted main conversation during fragment mode: %+v", eval)
+		}
+		explicitP0 := pushPolicy{kind: assistantwire.NotifyPush, level: assistantwire.LevelP0, manager: assistantwire.AssistantID}
+		eval2 := evaluatePushGradingDecision(now, effCfg, baseCfg, fragment, nil, explicitP0)
+		if !eval2.Allow || eval2.EffectiveLevel != assistantwire.LevelP0 {
+			t.Fatalf("disabled layer capped explicit P0 during fragment mode: %+v", eval2)
 		}
 	})
 }

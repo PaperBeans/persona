@@ -2,7 +2,8 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { t } from "../../i18n";
-import { api, errorText } from "../../lib/api";
+import { errorText } from "../../lib/api";
+import { followHinted } from "../../lib/hinted-read";
 import { onShownHint } from "../../lib/shown-hints";
 import { filterQuery, SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
 import { boundedCounts } from "../../lib/sessions";
@@ -45,6 +46,9 @@ export interface PagedSessionListProps<T> {
   renderRow: (row: T, within?: GroupDimension, group?: SessionGroup) => ReactNode;
   personal?: boolean;
   label?: (dimension: string, value: string) => string;
+  /** The personal list's Browse by account: the mark drawn before an account's name (its provider's), in its group's
+   *  heading and in the account picker. The id `label` replaces stays the name's tooltip there. */
+  accountMark?: (account: string) => ReactNode;
   /** The hub's computer order, shared with the complete list; count maps alone cannot carry it (#11801). */
   machineOrder?: readonly string[];
   /** The hub names this collection's projects and spaces (`sessions_catalog`): a repository checked out on several
@@ -132,7 +136,7 @@ export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText, holdCounts }: PagedSessionListProps<T>) {
+export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, accountMark, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText, holdCounts }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
   const [typed, setTyped] = useState("");
   // the sidebar's groupings take ⌘K's words (#6589); every other list its own field's, once typing pauses
@@ -208,8 +212,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const rootPage = useSyncExternalStore(root.subscribe, root.getSnapshot, root.getSnapshot);
   // Counts without state keep other state tabs reachable; machine scopes disambiguate computer-local groups.
   const facetFilters = useMemo(() => ({ ...(q ? { q } : {}), ...(provider ? { provider } : {}), ...(spaceMachine ? { machine_id: spaceMachine } : {}), ...narrowed, ...exclude }), [q, provider, spaceMachine, narrowed, exclude]);
-  // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and once per hint; they
-  // do not follow the root's counts, which land for that same hint (a second read of the same counts every time).
+  // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and after hints (one read
+  // per hint window, lib/hinted-read.ts); they do not follow the root's counts, which land for that same hint.
   const facetScoped = Object.keys(facetFilters).length > 0;
   const facetQuery = useMemo(() => countsQuery(facetFilters), [facetFilters]);
   // With no state tab and no browsed value the filtered list's own per-hint counts read is the facet query: follow it.
@@ -228,18 +232,10 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }, [facetsFromList, page.counts]);
   useEffect(() => {
     if (!facetScoped || facetsFromList) return;
-    let live = true;
-    let sequence = 0;
-    const controller = new AbortController();
-    const read = () => {
-      const request = ++sequence;
-      void api<ListCounts>(`${countsPath}${facetQuery}`, { signal: controller.signal }).then((counts) => {
-        if (live && request === sequence && counts.state && counts.group && counts.project && counts.machine) { setFacets(counts); setFacetError(""); }
-      }, (e) => { if (live && request === sequence) setFacetError(errorText(e)); });
-    };
-    read();
-    const off = onShownHint(event, read);
-    return () => { live = false; controller.abort(); off(); };
+    // read now and after hints, one read per window for every list in the page that follows the same counts (#15910)
+    return followHinted<ListCounts>(event, `${countsPath}${facetQuery}`, (counts) => {
+      if (counts?.state && counts.group && counts.project && counts.machine) { setFacets(counts); setFacetError(""); }
+    }, (e) => setFacetError(errorText(e)));
   }, [countsPath, event, facetScoped, facetsFromList, facetQuery, facetAttempt]);
   useEffect(() => {
     // Keep the last counts while a refresh or a new scope is loading, including a root rebaseline.
@@ -256,17 +252,9 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }, [scopeFromFacets, facets]);
   useEffect(() => {
     if (scopeQuery === "counts=1" || scopeFromFacets) return;
-    let sequence = 0;
-    const abort = new AbortController();
-    const read = () => {
-      const request = ++sequence;
-      void api<ListCounts>(`${countsPath}${scopeQuery}`, { signal: abort.signal }).then((counts) => {
-        if (request === sequence && counts.state) { setScopeCounts(counts); setScopeError(""); }
-      }, (e) => { if (request === sequence) setScopeError(errorText(e)); });
-    };
-    read();
-    const off = onShownHint(event, read);
-    return () => { sequence++; abort.abort(); off(); };
+    return followHinted<ListCounts>(event, `${countsPath}${scopeQuery}`, (counts) => {
+      if (counts?.state) { setScopeCounts(counts); setScopeError(""); }
+    }, (e) => setScopeError(errorText(e)));
   }, [scopeQuery, scopeFromFacets, countsPath, event]);
   useEffect(() => {
     // Even a grouped, filtered list needs the root counts for the unfiltered chips.
@@ -294,8 +282,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   // The scope's counts as the page shows them (holdCounts): only against the rows the same answer brought (the root's,
   // or the filtered list's own page, on a hub that sends a page's counts with it), so a newer count is never taken for
   // an older row's or the other way round. Counts read on their own (a scope only the hub can count, such as hidden
-  // botmux sessions in a grouping) are the hub's: they are read again on every hint, the one after the hub records a
-  // seen too.
+  // botmux sessions in a grouping) are the hub's: they are read again after hints (lib/hinted-read.ts), the one after
+  // the hub records a seen too.
   const coupled = !root.usesPageCounts() ? undefined
     : scopeQuery === "counts=1" ? (rootPage.counts ? { counts: rootPage.counts, rows: rootPage.rows } : undefined)
     : scopeFromFacets && facetsFromList && page.counts ? { counts: page.counts, rows: page.rows } : undefined;
@@ -474,6 +462,10 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const machineName = (id: string) => label?.("machine", id) ?? id;
   // a to-do and a state come named; a computer, and a space or account a hub without the catalog knows by id, by the caller
   const groupName = (g: SessionGroup) => g.members || dimension === "project" || dimension === "todo" || dimension === "state" ? g.name : label?.(dimension, g.key) ?? g.name;
+  // only the personal list's accounts: every other grouping keeps its plain name
+  const accounts = personal && dimension === "group";
+  const groupLead = accounts && accountMark ? (g: SessionGroup) => (g.members ? undefined : accountMark(g.key)) : undefined;
+  const groupTip = accounts ? (g: SessionGroup) => { const name = groupName(g); return name !== g.key ? g.key : undefined; } : undefined;
   // the lines under a group's name in the menu: a project's remote and directories, a space's computer
   const severalMachines = groupMachines(allGroups ?? []) > 1;
   const groupDetail = (g: SessionGroup): string | undefined => {
@@ -548,12 +540,12 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
           {dimension === "group" && !personal && !cataloged && <PickChip label={t("paged-agents.machine")} header={t("paged-agents.machine")} value={machine} shown={machine ? machineName(machine) : t("paged-agents.all_machines")}
             items={[{ key: "", label: t("paged-agents.all_machines") }, ...machines.map(([id, n]) => ({ key: id, label: machineName(id), hint: String(n) }))]}
             onChoose={(id) => { setMachine(id); setPicked(null); }} />}
-          {dimension && <PickChip label={t("paged-agents.group_filter")} header={dimensionLabel} value={value} shown={picked ? groupName(picked) : allOf} grow
-            items={[{ key: "", label: allOf }, ...groups.map((g) => ({ key: g.key, label: groupName(g), hint: String(g.count), detail: groupDetail(g) }))]}
+          {dimension && <PickChip label={t("paged-agents.group_filter")} header={dimensionLabel} value={value} shown={picked ? groupName(picked) : allOf} lead={picked ? groupLead?.(picked) : undefined} grow
+            items={[{ key: "", label: allOf }, ...groups.map((g) => ({ key: g.key, label: groupName(g), hint: String(g.count), detail: groupDetail(g), lead: groupLead?.(g), tip: groupTip?.(g) }))]}
             onChoose={chooseGroup} />}
           {personal && <SearchField value={providerQuery} onChange={setProviderQuery} placeholder={t("paged-agents.provider")} tone="inset" icon={false} className="min-w-0 flex-1" />}
         </div>}
-        <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="-mx-1 flex min-w-0 items-center justify-between gap-2 px-2">
           <p className="min-w-0 truncate text-xs text-ink-3" data-session-total>{shownTotal === null ? "\u00a0" : t("paged-agents.count", { count: shownTotal })}</p>
           {/* a display choice of the one flat list: its groups are sections of their own */}
           {activeAt && !sections && <ActiveWindowMenu value={win} onChange={chooseWindow} />}
@@ -564,7 +556,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
       {sections && <>
         {allGroups && (allGroups.length > 0 || (dimension === "state" && Boolean(heldSeen?.rows.length) && (chipless || chip.state === "unread"))) && <Suspense fallback={loadingLine}>
           <GroupedSessions groups={allGroups} dimension={dimension as GroupDimension} kind={personal ? "personal" : "runtime"} scope={groupScope} source={source}
-            renderRow={renderRow} groupName={groupName} machineName={machineName} open={openPlace} foldScope={grouping?.foldScope} heldSeen={heldSeen} placeOf={placeOf} justFinished={justFinished} chipless={chipless} />
+            renderRow={renderRow} groupName={groupName} groupLead={groupLead} groupTip={groupTip} machineName={machineName} open={openPlace} foldScope={grouping?.foldScope} heldSeen={heldSeen} placeOf={placeOf} justFinished={justFinished} chipless={chipless} />
         </Suspense>}
         {!allGroups && !grouped.error && loadingLine}
         {grouped.error && <ListError text={failureText(grouped.error)} onRetry={grouped.retry} />}
@@ -638,13 +630,14 @@ function useWidth(el: HTMLElement | null): number {
 
 /** A pill that names what is chosen and opens the choices in the design system's menu (no native select). The menu is
  *  as wide as its pill, like a select's list, and never narrower than a menu is anywhere else. */
-function PickChip({ label, header = label, value, shown, items, onChoose, grow = false }: { label: string; header?: string; value: string; shown: string; items: { key: string; label: string; hint?: string; detail?: string }[]; onChoose: (key: string) => void; grow?: boolean }) {
+function PickChip({ label, header = label, value, shown, lead, items, onChoose, grow = false }: { label: string; header?: string; value: string; shown: string; lead?: ReactNode; items: { key: string; label: string; hint?: string; detail?: string; lead?: ReactNode; tip?: string }[]; onChoose: (key: string) => void; grow?: boolean }) {
   const menu = useMenu();
   const width = Math.max(useWidth(menu.anchor), SESSION_LIST_METRICS.pickMenuMin);
   const rows: MenuItem[] = items.map((it, i) => ({ ...it, radio: true, checked: it.key === value, divider: i === 1, onSelect: () => onChoose(it.key) }));
   return <>
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} title={shown} onClick={menu.open}
       className={cx("touch-hit relative z-10 flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full bg-inset px-2 text-[11.5px] shadow-hairline transition-colors duration-150 hover:bg-hover", value ? "font-medium text-ink" : "text-ink-2", grow && "flex-1")}>
+      {lead}
       <span className="min-w-0 flex-1 truncate text-left">{shown}</span>
       <Icon name="chevron" size={11} className="shrink-0 text-ink-3" />
     </button>

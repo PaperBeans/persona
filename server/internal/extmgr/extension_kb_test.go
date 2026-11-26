@@ -258,6 +258,8 @@ func TestExtensionKBRPCScopesAndAssistantBridge(t *testing.T) {
 	}
 	denied(read, assistantwire.MethodKBUpdate, extension.ScopeKBWrite)
 	denied(none, assistantwire.MethodKBUpdate, extension.ScopeKBWrite)
+	denied(read, assistantwire.MethodKBPutRecording, extension.ScopeKBWrite)
+	denied(none, assistantwire.MethodKBPutRecording, extension.ScopeKBWrite)
 	if out, err := callRPC(write, assistantwire.MethodKBUpdate, `{"kind":"projects","id":"example","name":"Example","summary":"confirmed example","tags":["verified"]}`); err != nil || out != `{"id":"example"}` {
 		t.Fatalf("scoped write without hub_api: %s %v", out, err)
 	}
@@ -288,7 +290,7 @@ func TestExtensionKBRPCScopesAndAssistantBridge(t *testing.T) {
 	if out, err := callRPC(full, assistantwire.MethodKBGet, `{"kind":"projects","id":"legacy"}`); err != nil || !strings.Contains(out, "Legacy") {
 		t.Fatalf("legacy full read: %s %v", out, err)
 	}
-	for _, method := range []string{"kb.forget", "kb.context", "kb.posts_put", "kb.nope", "kb.owner.update", assistantwire.MethodKBExtensionUpdate, assistantwire.MethodKBExtensionDay} {
+	for _, method := range []string{"kb.forget", "kb.context", "kb.posts_put", "kb.nope", "kb.owner.update", assistantwire.MethodKBExtensionUpdate, assistantwire.MethodKBExtensionDay, assistantwire.MethodKBExtensionPutRecording} {
 		_, err := callRPC(full, method, `{}`)
 		var re *rpc.Error
 		if !errors.As(err, &re) || re.Code != extension.CodeUnknownMethod {

@@ -63,11 +63,11 @@ On a Mac the desktop app can show the Agents' state at the notch (#7669), as the
   saves the choice before applying it: one it cannot save changes nothing, and the switch says why.
 - **What it shows**: closed, a black pill around the notch: the most urgent category with its symbol and count on the left
   (Needs you, then Working, then Unread), the next one on the right, the iPhone's preset A (`IslandCell.sides`), in the
-  iPhone island's colors. With the pointer over it, it opens downward into the agents that need you, then the working
-  ones, then the ones that finished unseen (at most five; in each state the one that entered it last first, by
-  `state_since`, so a working agent's updates do not move its row), each with its title, state and the line its
-  Agents-list row shows. A click shows the desktop window at that session through the notification-click path. With
-  nothing to count, it is hidden.
+  iPhone island's colors. With the pointer over it, it grows downward, at the pill's width, into the agents that need
+  you, then the working ones, then the ones that finished unseen (at most five; in each state the one that entered it
+  last first, by `state_since`, so a working agent's updates do not move its row), each with its title, state and the
+  line its Agents-list row shows. A click shows the desktop window at that session through the notification-click
+  path. With nothing to count, it is hidden.
 - **Data**: the web works it out from the Agents list (`web/src/lib/desktop-island.ts`, a leaf beside
   `AttentionSignals`) and sends it with `setIslandState` when it changes, words already in the user's language. The
   counts and the rows come from the same list, so the pill counts no agent its list cannot show: not the Persona
@@ -84,9 +84,12 @@ On a Mac the desktop app can show the Agents' state at the notch (#7669), as the
   hidden until a signed-in page sends its own.
 - **Shell**: `desktop/src/island.ts` draws it from a local page, in a frameless, transparent, always-on-top panel that
   takes no focus and stays on every Space and over full-screen apps, without Electron's default of making the whole app
-  a background one for that (no Dock icon or badge; the e2e checks it). The page comes from the shell's own scheme,
-  `persona-island://app/island.html` (`island-page.ts`), which serves its three files (`island.html`, `island.css`,
-  `island.cjs`, in `dist/island/`) and nothing else. It cannot come from `file://`: with
+  a background one for that (no Dock icon or badge; the e2e checks it). The panel has no title bar style
+  (`roundedCorners: false` in `ISLAND_WINDOW`, `island-model.ts`): Electron keeps every frameless window titled
+  otherwise, and macOS rounds all four corners of a titled window (16 pt on macOS 27), which pulled the island's top
+  corners off the top of the screen (#16301). Its page draws its own bottom corners. The page comes from the shell's
+  own scheme, `persona-island://app/island.html` (`island-page.ts`), which serves its three files (`island.html`,
+  `island.css`, `island.cjs`, in `dist/island/`) and nothing else. It cannot come from `file://`: with
   `grantFileProtocolExtraPrivileges` off, a packaged app's `file://` does not reach into its asar, the page fails with
   `ERR_FILE_NOT_FOUND` and the island's window shows nothing. The page's preload (`island-preload.cts`) has two fixed
   operations: the pointer over it or away, and a clicked row's route. A route is checked as a notification's
@@ -95,11 +98,15 @@ On a Mac the desktop app can show the Agents' state at the notch (#7669), as the
 - **Where**: Electron does not say where a notch is. The built-in display whose menu bar is taller than a plain one
   (32 pt or more instead of 24) is taken to have one, about 200 pt wide at the top center; the pill is the menu bar's
   height, with 64 pt on each side for a symbol and a count. On another display it is the same pill without the middle,
-  at the top center over the menu bar. Moving or adding displays places it again.
+  at the top center over the menu bar. Open, it keeps the pill's width around the notch (328 pt) and only grows
+  downward, so it covers no more of the menu bar than the pill does (it was 400 pt wide and reached the menu bar items
+  beside the pill, #16301); on another display it opens to that same width. Moving or adding displays places it again.
 - **Not yet**: the iPhone's other presets (tokens per minute, today's tokens), buttons on the island, Windows.
 
 The screenshots are on #7699, captured from the built desktop app against the synthetic hub
-(`scripts/mock/mock_hub.py`), in English; the island is always dark, as the notch is. What they show:
+(`scripts/mock/mock_hub.py`), in English; the island is always dark, as the notch is. They are captures of the page
+(`capturePage`), which show neither the window's shape nor where it sits over the menu bar; the PR for #16301 shows the
+island at its place over a notched display, before and after its open width and corners changed. What they show:
 
 - **Settings › Notifications**, light and dark: "Show at the MacBook notch" ("Counts of Agents that need you, are working
   or finished, around the notch; point at it for the list") sits between "Notify this browser" and "Alert sound", off by

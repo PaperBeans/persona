@@ -5,7 +5,7 @@
 import { t } from "../../i18n";
 import { splitAgentSessions, type AgentMutes } from "../../lib/agent-groups";
 import type { Direction } from "../../lib/direction-tree";
-import { stateOf } from "../../lib/format";
+import { activityOf, stateOf } from "../../lib/format";
 import type { GoalChildEntry, GoalFoldResult, GoalSummary } from "../../lib/todo-goal-fold";
 import type { ResolvedDirectionSection } from "../../lib/todo-reorganize";
 import {
@@ -356,7 +356,7 @@ export function consumeBoardDirectionGroups({
 
 function defaultSessionCompare(mutes: AgentMutes) {
   const rank = (s: Session): number => {
-    const st = stateOf(s);
+    const st = activityOf(s);
     const waiting =
       (st === "idle" || st === "unknown") &&
       Boolean(s.loop || s.background?.length || s.subagents?.some((a) => a.running));

@@ -577,17 +577,11 @@ describe("Feishu bot dialog", () => {
   });
 
   it("fills the saved App ID into a dialog opened by URL before the status arrived", async () => {
-    const before = location.href;
-    history.replaceState(null, "", "?tab=connectors&connector=feishu-bot");
-    try {
-      act(() => root.render(<FeishuBot larkcli={null} />));
-      await advanced();
-      expect(input("App ID").value).toBe("");
-      await act(async () => calls.status[0].resolve(saved()));
-      expect(input("App ID").value).toBe("cli_saved");
-    } finally {
-      history.replaceState(null, "", before);
-    }
+    act(() => root.render(<FeishuBot larkcli={null} onRouteClose={() => {}} />));
+    await advanced();
+    expect(input("App ID").value).toBe("");
+    await act(async () => calls.status[0].resolve(saved()));
+    expect(input("App ID").value).toBe("cli_saved");
   });
 
   it("keeps a typed App ID when a feature switch is flipped", async () => {

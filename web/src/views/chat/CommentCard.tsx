@@ -4,11 +4,14 @@
 // same fill; the number is the one the spot carries in the transcript (CommentMarks.tsx) and the one the agent reads.
 import { jumpToComment } from "../../lib/comment-marks";
 import { codePreview, diffLabel, openSpot, rangeLabel, type CodeSpot, type ElementSpot } from "../../lib/comments";
+import { lazyPage } from "../../lib/lazy-page";
 import { openPanel } from "../../lib/panel";
 import { addressOf } from "../../lib/preview";
 import type { DraftQuote } from "../../lib/drafts";
 import { cx, toast } from "../../ui/atoms";
 import { t } from "../../i18n";
+
+export const LazyDraftCommentCard = lazyPage(() => import("./DraftCommentCard").then((m) => m.DraftCommentCard));
 
 /** `staged`, `unstaged`, `commit 1a2b3c4d`, worded for the reader. */
 export function diffName(d: NonNullable<CodeSpot["diff"]>): string {

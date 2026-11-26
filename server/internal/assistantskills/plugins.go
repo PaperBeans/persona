@@ -132,6 +132,11 @@ func installPlugins(dir, plugins string, mine []string) error {
 		if n == "" || slices.ContainsFunc(want, func(w string) bool { return strings.HasPrefix(w, n+"=") }) {
 			continue
 		}
+		if n == viewsGuideName {
+			// This name is now a built-in. Its old extension stamp cannot prove that a directory the owner later
+			// substituted is still Persona's copy; leave it for the managed-guide ownership check and full fallback.
+			continue
+		}
 		if isCopy(filepath.Join(dir, n)) {
 			_ = os.RemoveAll(filepath.Join(dir, n))
 		}

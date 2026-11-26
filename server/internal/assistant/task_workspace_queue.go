@@ -386,6 +386,14 @@ func (s *Service) drainWorkspaceQueue(ctx context.Context, machine, cwd string) 
 			}
 			continue
 		}
+		if s.settings(dctx).todosV2On() {
+			if refs := s.activeTodoBlockerRefs(dctx, w.task.TodoID); len(refs) > 0 {
+				q := s.blockerWaitQueue(refs)
+				q.Retry = w.task.Queue.Retry
+				s.replaceTaskQueue(dctx, w.task, q, queueCAS)
+				continue
+			}
+		}
 		if !s.preclaimWorkspace(dctx, effMachine, w.task.Queue.Workspace.Path, w.task.TodoID) {
 			return // workspace was claimed concurrently
 		}

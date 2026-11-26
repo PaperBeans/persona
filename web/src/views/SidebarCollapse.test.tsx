@@ -221,6 +221,42 @@ describe("the shortcut", () => {
 });
 
 describe("folding a block of the sidebar", () => {
+  it("keeps the Hub notice directly under Settings when Pages folds and reopens", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(
+      String(url).endsWith("/hub/update") ? { state: "building" } : {},
+    )));
+    act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
+    await flush();
+    await act(() => vi.dynamicImportSettled());
+    const notice = host.querySelector('[data-testid="hub-notice"]')!;
+    const settings = host.querySelector('a[href="/settings"]')!;
+    expect(settings.nextElementSibling).toBe(notice);
+    expect(notice.closest("[data-sidebar-agents]")).toBeNull();
+    expect(host.querySelectorAll('[data-testid="hub-notice"]')).toHaveLength(1);
+    const fold = settings.closest("[data-sidebar-group]")!.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    act(() => fold.click());
+    expect(notice.closest("[inert]")).not.toBeNull();
+    act(() => fold.click());
+    expect(notice.closest("[inert]")).toBeNull();
+  });
+
+  it("places the drawer notice beneath the grid row containing Settings", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ state: "building" })));
+    const onNavigate = vi.fn();
+    const pages = (["home", "settings", "inbox", "machines"] as const).map((name) => ({
+      k: name, label: name, icon: "gear" as const, to: { name },
+    }));
+    act(() => root.render(<NavGrid showHubNotice pages={pages} activeKey="home" go={() => () => {}} onNavigate={onNavigate} />));
+    await flush();
+    await act(() => vi.dynamicImportSettled());
+    const notice = host.querySelector('[data-testid="hub-notice"]')!;
+    expect(notice.closest("nav")).toBe(host.querySelector('a[href="/settings"]')!.closest("nav"));
+    expect(notice.parentElement!.style.gridRowStart).toBe("2");
+    act(() => notice.querySelector("button")!.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=hub");
+    expect(onNavigate).toHaveBeenCalledOnce();
+  });
+
   it("folds 页面 under its title and keeps it", async () => {
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();

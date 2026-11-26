@@ -96,6 +96,7 @@ func (s *Service) nodeEvent(machine, event string, params json.RawMessage) bool 
 					s.fleet.hooked[[2]string{machine, sid}] = true
 					s.fleet.mu.Unlock()
 				}
+				s.resetIdleObservation(machine, sid)
 				s.noteStop(machine, sid, p)
 				s.meetingTurnPrompt(machine, sid, p) // the user's own prompt to an Agent ends its meeting turn (meeting_turns.go)
 			}
@@ -163,6 +164,7 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 			return nil, true, err
 		}
 		p.Interaction.MachineID = machine
+		s.resetIdleObservation(machine, p.Interaction.SessionID)
 		s.placeCard(&p.Interaction)
 		// A write through a skill's gated command (node/larkgate.go): its plugin names what the ids are.
 		if sum, ok := s.assistantSummary(ctx, p.Interaction.ToolName, p.Interaction.Summary); ok {
@@ -208,6 +210,15 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 			return nil, true, errors.New("gate.relay: no extensions here to relay to")
 		}
 		out, err := r.RelayGate(ctx, machine, params)
+		return out, true, err
+	case proto.MethodPluginNodeHubCall: // a program on that computer calls the hub (extmgr/extension_node_calls.go)
+		r, ok := s.ext.(interface {
+			NodeProgramHubCall(ctx context.Context, machine string, params json.RawMessage) (any, error)
+		})
+		if !ok {
+			return nil, true, errors.New("plugin.node.hub_call: no extensions here")
+		}
+		out, err := r.NodeProgramHubCall(ctx, machine, params)
 		return out, true, err
 	case proto.MethodMailAttachment: // mail_save_attachment's bytes for the node that saves them (fleet_tools.go)
 		var p proto.MailAttachmentRequest
@@ -267,6 +278,13 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 		defer s.endMCPWait(ctx)
 		if res, refused := s.guestRefuses(ctx, machine, p.SessionID, p.Name, p.Guest); refused {
 			return res, true, nil
+		}
+		// A proxy reply's one tool is answered here, before a meeting room's (bot_handoff.go).
+		if id, handoff, err := s.handoffOf(ctx, machine, p.SessionID); err == nil && handoff {
+			if s.isWorkMachine(machine) {
+				return proto.TextResult("unknown tool "+p.Name, true), true, nil
+			}
+			return s.larkModule().HandoffToolCall(ctx, id, p.Name, p.Args), true, nil
 		}
 		if rec, room, err := s.roomOf(ctx, machine, p.SessionID); err == nil && room {
 			if s.isWorkMachine(machine) {

@@ -37,6 +37,12 @@ import {
 import { BR, docErrorFromBody, loadDoc, mediaURL, orderedNumbers, prepareMarkdown, readDoc, type DocNode, type Get } from "../views/link/feishu-doc";
 
 describe("where a link opens", () => {
+  it("keeps Settings fragments on same-hub page links behind a base path", () => {
+    const path = "/settings?tab=persona#repositories";
+    expect(linkRoute("https://hub.example.com/base" + path, false, "https://hub.example.com", "/base"))
+      .toEqual({ kind: "page", path });
+  });
+
   it("reads Feishu documents in the panel, like the phone's FeishuLinks.isDoc", () => {
     for (const u of [
       "https://example.feishu.cn/docx/AbC123",

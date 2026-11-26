@@ -63,6 +63,56 @@ class KnowledgeMinutesTest {
         assertEquals(MinutesView(MinutesPhase.Offer, canMake = true), view(meta()))
     }
 
+    /** #15214: the recording module off takes the writes away, and a paused recording says so in place of "writing". */
+    @Test fun withoutTheRecordingModuleTheSectionOnlyReadsAndSaysWhatIsPaused() {
+        val minutes = RecordingMinutes(version = 2, points = listOf(MinutesItem("Ship on Friday", 62.0)))
+        val off = RecordingAccess(writes = false)
+        val paused = RecordingAccess(writes = false, paused = true)
+        fun view(meta: JsonObject, minutes: RecordingMinutes? = null, access: RecordingAccess) =
+            minutesView(detail(meta, minutes), RecordingFacts.of(meta), access)
+
+        // Stored minutes stay; nothing to make, add or try again.
+        assertEquals(MinutesView(MinutesPhase.Ready, minutes, canAdd = false), view(meta("ready"), minutes, off))
+        assertEquals(MinutesView(MinutesPhase.Ready, minutes, canAdd = false), view(meta("failed"), minutes, off))
+        assertEquals(MinutesView(MinutesPhase.Ready, minutes, trimmed = true, canAdd = false), view(meta("ready", trimmed = true), minutes, off))
+        // Newer ones were on their way: paused, not "Updating…".
+        assertEquals(MinutesView(MinutesPhase.Ready, minutes, canAdd = false, paused = true), view(meta("pending"), minutes, paused))
+        // None yet: paused where "Writing the minutes…" or "Minutes will be written…" stood.
+        assertEquals(MinutesView(MinutesPhase.Paused, canAdd = false, paused = true), view(meta("pending"), access = paused))
+        assertEquals(MinutesView(MinutesPhase.Paused, canAdd = false, paused = true), view(meta(complete = false, kind = "meeting"), access = paused))
+        assertEquals(MinutesView(MinutesPhase.Paused, canAdd = false, paused = true), view(meta(complete = false), access = paused))
+        // None, and none can be made here: no offer and no "try regenerating".
+        assertNull(view(meta(), access = off))
+        assertNull(view(meta("failed"), access = off))
+        assertNull(view(meta(trimmed = true), access = paused))
+
+        // The hub's word is what pauses: its mark shows even while this app still reads the module as on.
+        assertEquals(MinutesView(MinutesPhase.Paused, paused = true), view(meta("pending"), access = RecordingAccess(paused = true)))
+        // With the module on and nothing paused, every case above is as it was.
+        assertEquals(minutesView(detail(meta("pending"), minutes), RecordingFacts.of(meta("pending"))), view(meta("pending"), minutes, RecordingAccess.Full))
+        assertEquals(MinutesView(MinutesPhase.Offer, canMake = true), view(meta(), access = RecordingAccess.Full))
+    }
+
+    @Test fun theAccessComesFromTheModuleFlagAndTheHubsMarkOnly() {
+        val meta = meta("pending")
+        assertEquals(RecordingAccess.Full, RecordingAccess.of(detail(meta), moduleOn = true))
+        assertEquals(RecordingAccess.Full, RecordingAccess.of(null, moduleOn = true))
+        assertEquals(RecordingAccess(writes = false), RecordingAccess.of(detail(meta), moduleOn = false))
+        assertEquals(RecordingAccess(writes = false, paused = true),
+            RecordingAccess.of(detail(meta).copy(paused = RecordingPaused.ModuleOff), moduleOn = false))
+        // A reason this app does not know pauses nothing here: no module-off words, and the page goes on as before.
+        assertEquals(RecordingAccess.Full, RecordingAccess.of(detail(meta).copy(paused = RecordingPaused.Unknown), moduleOn = true))
+    }
+
+    @Test fun pendingMinutesAreReadAgainUnlessTheyArePaused() {
+        val pending = detail(meta("pending"))
+        assertTrue(minutesPolled(pending, RecordingAccess.Full))
+        assertTrue(minutesPolled(pending, RecordingAccess(writes = false)))
+        assertFalse(minutesPolled(pending, RecordingAccess(writes = false, paused = true)))
+        assertFalse(minutesPolled(detail(meta("ready")), RecordingAccess.Full))
+        assertFalse(minutesPolled(null, RecordingAccess.Full))
+    }
+
     @Test fun waitsForTheFinalPassLikeTheOtherClients() {
         val fixture = File(System.getProperty("persona.repo.root"), "spec/fixtures/minutes-wait/cases.json")
         val cases = Json.parseToJsonElement(fixture.readText()).jsonObject.getValue("cases").jsonArray

@@ -19,7 +19,7 @@ import (
 
 const (
 	scanBlock       = 4 << 20
-	scanCacheFiles  = 4
+	scanCacheFiles  = 32
 	scanCacheIdle   = 10 * time.Minute
 	scanCheckWindow = 64 << 10
 	scanSample      = 4 << 10

@@ -17,7 +17,7 @@ func (ps *extensions) extensionKBCall(ctx context.Context, id, method string, pa
 	switch method {
 	case assistantwire.MethodKBList, assistantwire.MethodKBGet, assistantwire.MethodKBDay, assistantwire.MethodKBSearch, assistantwire.MethodKBOwner, assistantwire.MethodKBRecent:
 		scope = extension.ScopeKBRead
-	case assistantwire.MethodKBUpdate:
+	case assistantwire.MethodKBUpdate, assistantwire.MethodKBPutRecording:
 		scope = extension.ScopeKBWrite
 	default:
 		return nil, &rpc.Error{Code: extension.CodeUnknownMethod, Message: "unknown method " + method}
@@ -36,12 +36,16 @@ func (ps *extensions) extensionKBCall(ctx context.Context, id, method string, pa
 	if sentRead {
 		method = assistantwire.MethodKBExtensionDay
 	}
-	if method == assistantwire.MethodKBUpdate { // the write is the extension's: say whose (#6100)
+	if method == assistantwire.MethodKBUpdate || method == assistantwire.MethodKBPutRecording { // the write is the extension's: say whose (#6100)
 		storageID, err := ps.assistantStorageID(ctx, ps.reg.SnapshotExact(id))
 		if err != nil {
 			return nil, err
 		}
-		method, ask = assistantwire.MethodKBExtensionUpdate, assistantwire.KBExtensionUpdate{Extension: id, StorageID: storageID, Params: params}
+		envelope := assistantwire.MethodKBExtensionUpdate
+		if method == assistantwire.MethodKBPutRecording {
+			envelope = assistantwire.MethodKBExtensionPutRecording
+		}
+		method, ask = envelope, assistantwire.KBExtensionUpdate{Extension: id, StorageID: storageID, Params: params}
 	}
 	err := ps.h.kbAsk(ctx, method, ask, &out)
 	oldAssistant := false

@@ -4,16 +4,16 @@
 import { memo, useMemo } from "react";
 import { fileDownloadURL } from "../lib/api";
 import { resolveRef } from "../lib/files";
-import { openPanel } from "../lib/panel";
+import { openPanel, useReadOnlyFile } from "../lib/panel";
 import { codePathRef, findPathRefs, splitAtRefs, uniquePaths, type PathRef } from "../lib/path-refs";
 import { usePathLinks } from "../lib/path-presence";
 import { t } from "../i18n";
 
 /** Opens a path a message names in the file panel; ⌘ / Ctrl / middle click is the browser's (the raw file). */
-export function openPathRef(e: React.MouseEvent, mid: string, cwd: string | undefined, path: string, line?: number) {
+export function openPathRef(e: React.MouseEvent, mid: string, cwd: string | undefined, path: string, line?: number, readOnly?: boolean) {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
-  openPanel({ kind: "file", mid, path: resolveRef(cwd ?? "", path) || path, cwd, line });
+  openPanel({ kind: "file", mid, path: resolveRef(cwd ?? "", path) || path, cwd, line, ...(readOnly ? { readOnly: true } : {}) });
 }
 
 /** Where a path link points for the browser itself (a new tab: the file inline). */
@@ -32,7 +32,9 @@ export function writtenText(text: string): string {
 }
 
 /** Plain text with the paths that are there linked. */
-export const PathText = memo(function PathText({ text, mid, cwd }: { text: string; mid?: string; cwd?: string }) {
+export const PathText = memo(function PathText({ text, mid, cwd, readOnly }: { text: string; mid?: string; cwd?: string; readOnly?: boolean }) {
+  const inheritedReadOnly = useReadOnlyFile();
+  const ro = Boolean(readOnly || inheritedReadOnly);
   const refs = useMemo(() => (mid ? findPathRefs(text) : []), [text, mid]);
   const { linkable, key } = usePathLinks(mid, cwd, useMemo(() => uniquePaths(refs), [refs]));
   const parts = useMemo(() => splitAtRefs(text, refs, linkable), [text, refs, key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -50,7 +52,7 @@ export const PathText = memo(function PathText({ text, mid, cwd }: { text: strin
             rel="noreferrer noopener"
             title={refTitle(p)}
             className="path-link"
-            onClick={(e) => openPathRef(e, mid, cwd, p.path, p.line)}
+            onClick={(e) => openPathRef(e, mid, cwd, p.path, p.line, ro || undefined)}
           >
             {text.slice(p.start, p.end)}
           </a>

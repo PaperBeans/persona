@@ -2,6 +2,7 @@
 // Audit items 15 and 84: a list emptied by its filters or a search is not "All caught up" (no green check, a way back
 // to the whole Inbox, Clean up all names the filters instead of "Nothing to do"); while the list loads or after a failed
 // read Clean up all claims nothing, and the failure line over waiting agents has its own Retry.
+import { registerTestMailbox } from "../../test/mailbox-fixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,6 +83,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
 });
+
+registerTestMailbox();
 
 describe("a list emptied by its filters (audit item 15)", () => {
   it("chips that leave nothing say so, offer Clear filters, and Clean up all names them instead of 没有未处理的", async () => {

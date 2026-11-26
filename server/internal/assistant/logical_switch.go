@@ -346,6 +346,9 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 	return map[string]any{"operation_id": p.OperationID, "phase": "preparing", "epoch": c.Epoch}, nil
 }
 
+// Keep room in the eight-connection pool for foreground traffic and node callbacks.
+const logicalSweepAdvanceLimit = 4
+
 // The loop is independent of the switch-enable setting: disabling new switches
 // must not strand existing routing, queued messages or deferred closures.
 func (s *Service) logicalSweep(ctx context.Context) {
@@ -389,7 +392,16 @@ func (s *Service) logicalSweep(ctx context.Context) {
 			_ = st.ConversationPreparedCandidateDone(ctx, candidate.MachineID, candidate.SessionID)
 		}
 	}
-	for _, c := range rows {
+	s.logical.mu.Lock()
+	after := s.logical.sweepAfter
+	s.logical.mu.Unlock()
+	// Resume after the last admitted conversation so repeatedly failing switches
+	// in the first rows cannot keep later conversations from getting a turn.
+	start := slices.IndexFunc(rows, func(c db.LogicalConversation) bool {
+		return c.MachineID == after[0] && c.SessionID == after[1]
+	}) + 1
+	for i := range rows {
+		c := rows[(start+i)%len(rows)]
 		pending, err := st.ConversationInputPending(ctx, c.MachineID, c.SessionID)
 		if err != nil {
 			continue
@@ -403,12 +415,17 @@ func (s *Service) logicalSweep(ctx context.Context) {
 		}
 		key := [2]string{c.MachineID, c.SessionID}
 		s.logical.mu.Lock()
+		if len(s.logical.running) >= logicalSweepAdvanceLimit {
+			s.logical.mu.Unlock()
+			break
+		}
 		if s.logical.running == nil {
 			s.logical.running = map[[2]string]bool{}
 		}
 		busy := s.logical.running[key]
 		if !busy {
 			s.logical.running[key] = true
+			s.logical.sweepAfter = key
 		}
 		s.logical.mu.Unlock()
 		if busy {
@@ -598,13 +615,20 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 			return err
 		}
 		if len(handoff) == 0 {
-			h, err := s.logicalSwitchHandoff(ctx, st, c)
-			if err != nil {
-				return err
+			if source, ok := c.Active(); ok && s.isZeroTurnPreparedSegment(ctx, c, source) {
+				if prev, err := st.ConversationPendingHandoff(ctx, c.MachineID, c.SessionID, source.ID); err == nil && len(prev) > 0 {
+					handoff = prev
+				}
 			}
-			handoff, err = json.Marshal(h)
-			if err != nil {
-				return err
+			if len(handoff) == 0 {
+				h, err := s.logicalSwitchHandoff(ctx, st, c)
+				if err != nil {
+					return err
+				}
+				handoff, err = json.Marshal(h)
+				if err != nil {
+					return err
+				}
 			}
 			if err = st.PutConversationHandoff(ctx, c.MachineID, c.SessionID, op.OperationID, handoff); err != nil {
 				return err
@@ -627,7 +651,7 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 			params["title"] = row.Title
 			cwd, err := s.prepareSpace(ctx, p.MachineID, row.Space)
 			if err != nil {
-				_ = st.ResolveConversationSwitch(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation unavailable")
+				_ = st.ResolveConversationPreparation(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation unavailable")
 				return err
 			}
 			params["cwd"] = cwd
@@ -637,57 +661,50 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 			// another id and lost the segment (a direction supervisor switched to Codex, live 2026-11-22).
 			policy, err := s.supervisionInstructions(ctx, c.MachineID, c.SessionID)
 			if err != nil {
-				_ = st.ResolveConversationSwitch(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation unavailable")
+				_ = st.ResolveConversationPreparation(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation unavailable")
 				return err
 			}
 			if policy != "" {
 				params["supervision_instructions"] = policy
 			}
 		}
-		var raw json.RawMessage
-		err = st.WithConversationEpoch(ctx, c.MachineID, c.SessionID, c.Epoch, func(current *db.LogicalConversation) error {
-			if current.Switch == nil || current.Switch.OperationID != op.OperationID {
-				return db.ErrConversationEpoch
-			}
-			// A manager may have persisted the positive start receipt and crashed
-			// before mapping it. That durable receipt also survives loss of the
-			// node's in-memory receipt cache; never start a replacement candidate.
-			candidates, err := st.ConversationPreparedCandidates(ctx)
+		// The durable claim allows one start. A saved positive receipt survives
+		// manager and node restarts. The node prepares an empty, private session
+		// and may call back into the hub, so release the DB connection before the RPC.
+		targetSession, err := st.ConversationPreparedSession(ctx, c.MachineID, c.SessionID, op.OperationID, p.MachineID, c.Epoch)
+		if err != nil {
+			return err
+		}
+		if targetSession == "" {
+			raw, err := s.logicalPhysical(ctx, p.MachineID, method, params)
 			if err != nil {
-				return err
-			}
-			for _, candidate := range candidates {
-				if candidate.LogicalMachine == c.MachineID && candidate.LogicalSession == c.SessionID && candidate.OperationID == op.OperationID && candidate.MachineID == p.MachineID {
-					raw, err = json.Marshal(map[string]any{"session_id": candidate.SessionID, "prepared": true})
-					return err
+				// A failed receipt lookup leaves the earlier prepare unconfirmed. Only
+				// a definite failure of the initial prepare can reject it here.
+				if method == "assistant.segment.prepare" && logicalNotTaken(err) {
+					return st.ResolveConversationPreparation(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation refused")
 				}
-			}
-			raw, err = s.logicalPhysical(ctx, p.MachineID, method, params)
-			if err != nil {
+				_ = st.ResolveConversationPreparation(ctx, c.MachineID, c.SessionID, op.OperationID, "in_doubt", "preparation receipt pending")
 				return err
 			}
-			var receipt struct {
+			var reply struct {
 				SessionID string `json:"session_id"`
 				Prepared  bool   `json:"prepared"`
 			}
-			if json.Unmarshal(raw, &receipt) == nil && receipt.Prepared && receipt.SessionID != "" {
-				return st.RecordConversationPreparedCandidate(ctx, db.ConversationPreparedCandidate{MachineID: p.MachineID, SessionID: receipt.SessionID, LogicalMachine: c.MachineID, LogicalSession: c.SessionID, OperationID: op.OperationID})
+			if json.Unmarshal(raw, &reply) != nil || !reply.Prepared || reply.SessionID == "" {
+				return nil
 			}
-			return nil
-		})
-		if err != nil {
-			if logicalNotTaken(err) {
-				return st.ResolveConversationSwitch(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation refused")
+			targetSession = reply.SessionID
+			// Keep the positive receipt even if cancellation or deletion won during the
+			// RPC. Mapping checks authority again, and the sweep closes an orphan.
+			save, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			err = st.RecordConversationPreparedCandidate(save, db.ConversationPreparedCandidate{
+				MachineID: p.MachineID, SessionID: targetSession,
+				LogicalMachine: c.MachineID, LogicalSession: c.SessionID, OperationID: op.OperationID,
+			})
+			cancel()
+			if err != nil {
+				return err
 			}
-			_ = st.ResolveConversationSwitch(ctx, c.MachineID, c.SessionID, op.OperationID, "in_doubt", "preparation receipt pending")
-			return err
-		}
-		var reply struct {
-			SessionID string `json:"session_id"`
-			Prepared  bool   `json:"prepared"`
-		}
-		if json.Unmarshal(raw, &reply) != nil || !reply.Prepared || reply.SessionID == "" {
-			return nil
 		}
 		source, ok := c.Active()
 		if !ok {
@@ -698,12 +715,15 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 			return err
 		}
 		// Pull a proven physical tail after preparation; never infer it from item count.
+		// A confirmed 0-turn prepared placeholder has no transcript yet and freezes at 0.
 		// For an offline-source failover switch, fall back to persisted Postgres ConversationHistory.
 		var tail historyPage
 		var tailSeq int
 		err = s.physicalHistoryCall(ctx, source.MachineID, DeviceSessionItems, map[string]any{"session_id": source.SessionID, "limit": 1, "lazy_images": true}, &tail)
 		if err == nil && tail.ToSeq != nil && !tail.MoreAfter {
 			tailSeq = *tail.ToSeq
+		} else if s.isZeroTurnEmptyTail(ctx, c, source, tail, err, p.AllowOfflineSource) {
+			tailSeq = 0
 		} else if p.AllowOfflineSource && (errors.Is(busError(err), apierr.ErrOffline) || errors.Is(busError(err), rpc.ErrClosed) || s.machinePhysicallyOffline(ctx, source.MachineID)) {
 			seq, okTail := s.offlineHistoryTailSeq(ctx, source.MachineID, source.SessionID)
 			if !okTail {
@@ -719,11 +739,20 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 			}
 			return logicalRefusal(ctx, "missing_generation")
 		}
-		if err = st.PrepareConversationSegment(ctx, c.MachineID, c.SessionID, op.OperationID, conversationlog.Segment{ID: randomHex(16), MachineID: p.MachineID, SessionID: reply.SessionID, Engine: target.Engine, Launcher: p.Launcher, Model: p.Model, Effort: p.Effort, PermissionMode: p.PermissionMode}, tailSeq); err != nil {
+		var prepared conversationlog.Segment
+		prepared.ID = randomHex(16)
+		prepared.MachineID = p.MachineID
+		prepared.SessionID = targetSession
+		prepared.Engine = target.Engine
+		prepared.Launcher = p.Launcher
+		prepared.Model = p.Model
+		prepared.Effort = p.Effort
+		prepared.PermissionMode = p.PermissionMode
+		if err = st.PrepareConversationSegment(ctx, c.MachineID, c.SessionID, op.OperationID, prepared, tailSeq); err != nil {
 			return err
 		}
 		c, err = st.LogicalConversation(ctx, c.MachineID, c.SessionID)
-		if err != nil {
+		if err != nil || c == nil {
 			return err
 		}
 		op = c.Switch
@@ -759,7 +788,76 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 	if c == nil {
 		return nil
 	}
+	if c.Switch == nil {
+		if active, ok := c.Active(); ok && s.isVanishedZeroTurnSegment(ctx, c, active) {
+			if pending, err := st.ConversationInputPending(ctx, c.MachineID, c.SessionID); err == nil && pending {
+				if _, err := s.beginZeroTurnRecoverySwitch(ctx, st, c, active); err != nil {
+					return err
+				}
+				s.historyWake()
+				return nil
+			}
+		}
+	}
 	return s.drainLogicalInput(ctx, st, c)
+}
+
+func (s *Service) isZeroTurnEmptyTail(ctx context.Context, c *db.LogicalConversation, source conversationlog.Segment, tail historyPage, err error, allowOfflineSource bool) bool {
+	emptyPage := err == nil && tail.History == "" && tail.ToSeq == nil && len(tail.Items) == 0
+	missingTranscript := err != nil && isMissingTranscriptErr(err)
+	offlineAllowed := allowOfflineSource && err != nil && (errors.Is(busError(err), apierr.ErrOffline) || errors.Is(busError(err), rpc.ErrClosed) || s.machinePhysicallyOffline(ctx, source.MachineID))
+	return (emptyPage || missingTranscript || offlineAllowed) && s.isZeroTurnPreparedSegment(ctx, c, source)
+}
+
+func (s *Service) beginZeroTurnRecoverySwitch(ctx context.Context, st logicalConversationStore, c *db.LogicalConversation, active conversationlog.Segment) (*db.LogicalConversation, error) {
+	launcher := active.Launcher
+	if launcher == "" {
+		launcher = proto.AssistantEngineKind(active.Engine)
+	}
+	if active.MachineID == "" || launcher == "" || s.isWorkMachine(active.MachineID) {
+		return nil, logicalRefusal(ctx, "unavailable")
+	}
+	target, err := s.logicalTarget(ctx, active.MachineID, launcher)
+	if err != nil {
+		return nil, err
+	}
+	role, err := s.logicalRoleRequired(ctx, c.MachineID, c.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if role && !target.SupervisionPolicy {
+		return nil, s.supervisionRuntimeRefusal(ctx, active.MachineID)
+	}
+	p := logicalSwitchRequest{
+		OperationID:    "zero-turn-recover-" + randomHex(12),
+		ExpectedEpoch:  c.Epoch,
+		MachineID:      active.MachineID,
+		Launcher:       launcher,
+		Model:          active.Model,
+		Effort:         active.Effort,
+		PermissionMode: active.PermissionMode,
+	}
+	request, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.BeginConversationSwitch(ctx, c.MachineID, c.SessionID, db.ConversationSwitch{
+		OperationID:   p.OperationID,
+		ExpectedEpoch: c.Epoch,
+		SourceSegment: active.ID,
+		Request:       request,
+	}); err != nil && !errors.Is(err, db.ErrConversationSwitchBusy) && !errors.Is(err, db.ErrConversationEpoch) {
+		return nil, err
+	}
+	s.logicalChanged()
+	next, err := st.LogicalConversation(ctx, c.MachineID, c.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if next == nil || next.Deleted {
+		return nil, db.ErrConversationDeleted
+	}
+	return next, nil
 }
 
 func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, c *db.LogicalConversation) (retErr error) {
@@ -796,6 +894,14 @@ func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, 
 		}
 		return nil
 	}
+	if c.Switch != nil && c.Switch.Phase != "active" {
+		return nil
+	}
+	pending, err := st.ConversationInputPending(ctx, c.MachineID, c.SessionID)
+	if err != nil || !pending {
+		return err
+	}
+	vanishedActiveTarget := c.Switch != nil && c.Switch.Phase == "active" && s.isVanishedZeroTurnSegment(ctx, c, a)
 	input, err := st.ClaimConversationInput(ctx, c.MachineID, c.SessionID, c.Epoch)
 	if err != nil || input == nil {
 		return err
@@ -882,8 +988,20 @@ func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, 
 		if !ok || active.ID != a.ID {
 			return db.ErrConversationEpoch
 		}
+		if vanishedActiveTarget && current.Switch != nil && current.Switch.Phase == "active" && s.physicalSegmentMissing(ctx, active) {
+			return logicalRefusal(ctx, "unavailable")
+		}
 		if logicalSourceMayBeRetired(current) {
 			if _, err := s.logicalPhysical(ctx, a.MachineID, "assistant.segment.restore", map[string]any{"session_id": a.SessionID}); err != nil {
+				return err
+			}
+		}
+		if active.Ordinal > 1 {
+			marker, ok := s.store().(logicalSegmentInputStore)
+			if !ok {
+				return logicalRefusal(ctx, "unavailable")
+			}
+			if err := marker.MarkConversationSegmentDispatched(ctx, c.MachineID, c.SessionID, active.ID); err != nil {
 				return err
 			}
 		}

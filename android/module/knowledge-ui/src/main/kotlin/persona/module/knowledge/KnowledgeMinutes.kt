@@ -27,6 +27,7 @@ import persona.core.contracts.api.KnowledgeDetail
 import persona.core.contracts.api.KnowledgeSegment
 import persona.core.contracts.api.MinutesAction
 import persona.core.contracts.api.MinutesItem
+import persona.core.contracts.api.RecordingPaused
 import persona.core.contracts.api.RecordingMinutes
 import persona.core.designsystem.GroupPosition
 import persona.core.designsystem.JButton
@@ -49,6 +50,7 @@ import persona.core.designsystem.Tone
 import persona.core.designsystem.UiText
 import persona.core.designsystem.currentLocale
 import persona.core.designsystem.icons.PhIcon
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.rowPadding
 import persona.core.designsystem.text
@@ -76,7 +78,40 @@ internal enum class MinutesPhase {
     Failed,
     /** None, nothing on the way: the hub can make them from the transcript. */
     Offer,
+    /** None, and the hub says what was on its way is paused ([RecordingAccess.paused]). */
+    Paused,
 }
+
+/**
+ * What a recording's page may do and say on this hub (#15214), worked out once per page from the hub's recording module
+ * flag ([persona.core.moduleapi.HubModule.Recording], read where the page is registered) and the recording's own
+ * `paused` mark, then handed to everything on the page: nothing below reads the flag or the mark again.
+ */
+internal data class RecordingAccess(
+    /**
+     * The recording module's routes are there: Make / Regenerate minutes, Add to to-dos and Hand to Agent are offered.
+     * False takes those away and nothing else: the transcript, the stored minutes, the facts, copy, share, tagging and
+     * Ask Persona stay.
+     */
+    val writes: Boolean = true,
+    /** The hub says the recording's in-flight state waits for the module to be back ([RecordingPaused.ModuleOff]). */
+    val paused: Boolean = false,
+) {
+    companion object {
+        /** Before #15214, and whenever the module is on and nothing is paused. */
+        val Full = RecordingAccess()
+
+        fun of(detail: KnowledgeDetail?, moduleOn: Boolean) =
+            RecordingAccess(writes = moduleOn, paused = detail?.paused == RecordingPaused.ModuleOff)
+    }
+}
+
+/**
+ * Whether the page reads the recording again every few seconds: while the hub writes its minutes, and not while that
+ * is paused (nothing changes until the module is back; a pull still reads it).
+ */
+internal fun minutesPolled(detail: KnowledgeDetail?, access: RecordingAccess): Boolean =
+    detail?.meta.string("minutes_state") == "pending" && !access.paused
 
 internal data class MinutesView(
     val phase: MinutesPhase,
@@ -90,6 +125,10 @@ internal data class MinutesView(
     /** Make minutes / Regenerate is offered. */
     val canMake: Boolean = false,
     val progress: MinutesProgress? = null,
+    /** Add to to-dos / Add all is offered for the actions that are not to-dos yet ([RecordingAccess.writes]). */
+    val canAdd: Boolean = true,
+    /** What was on its way is paused: said in place of the writing line ([RecordingAccess.paused]). */
+    val paused: Boolean = false,
 )
 
 internal data class MinutesProgress(val done: Int, val total: Int)
@@ -97,20 +136,28 @@ internal data class MinutesProgress(val done: Int, val total: Int)
 /**
  * The minutes section for [detail], the web's rules: what the hub wrote (`detail.minutes`) and where newer ones stand
  * (`meta.minutes_state`). Null: no section (a note whose transcript isn't complete, or a trimmed one without minutes).
+ *
+ * [access] (#15214): paused, the section says so in place of the writing line; without the recording module's routes
+ * it offers no write, and with no minutes it says nothing about ones that cannot be made here (no offer, no "try
+ * regenerating").
  */
-internal fun minutesView(detail: KnowledgeDetail, facts: RecordingFacts): MinutesView? {
+internal fun minutesView(detail: KnowledgeDetail, facts: RecordingFacts, access: RecordingAccess = RecordingAccess.Full): MinutesView? {
     val state = detail.meta.string("minutes_state")
     val meeting = detail.meta.string("kind") == "meeting"
     val trimmed = detail.meta.string("trimmed_at").isNotBlank()
     val minutes = detail.minutes
-    if (minutes != null) return MinutesView(MinutesPhase.Ready, minutes, updating = state == "pending", failed = state == "failed",
-        trimmed = trimmed, canMake = !trimmed && facts.complete && state != "pending")
+    val writes = access.writes
+    val paused = access.paused && !trimmed
+    if (minutes != null) return MinutesView(MinutesPhase.Ready, minutes, updating = state == "pending" && !paused,
+        failed = state == "failed" && writes, trimmed = trimmed,
+        canMake = writes && !trimmed && facts.complete && state != "pending", canAdd = writes, paused = paused)
     if (trimmed) return null
     return when {
-        state == "pending" -> pendingMinutes(detail.meta?.get("transcription") as? JsonObject)
-        state == "failed" -> MinutesView(MinutesPhase.Failed, canMake = facts.complete)
-        !facts.complete -> if (meeting) MinutesView(MinutesPhase.Waiting) else null
-        else -> MinutesView(MinutesPhase.Offer, canMake = true)
+        paused -> MinutesView(MinutesPhase.Paused, canAdd = writes, paused = true)
+        state == "pending" -> pendingMinutes(detail.meta?.get("transcription") as? JsonObject).copy(canAdd = writes)
+        state == "failed" -> if (writes) MinutesView(MinutesPhase.Failed, canMake = facts.complete) else null
+        !facts.complete -> if (meeting) MinutesView(MinutesPhase.Waiting, canAdd = writes) else null
+        else -> if (writes) MinutesView(MinutesPhase.Offer, canMake = true) else null
     }
 }
 
@@ -195,7 +242,13 @@ internal fun LazyListScope.recordingMinutes(view: MinutesView, actions: MinutesA
         view.phase == MinutesPhase.Offer -> R.string.knowledge_ui_minutes_offer
         else -> null
     }
-    if (view.phase == MinutesPhase.Checking || view.phase == MinutesPhase.Writing || view.updating) item("minutes-writing", contentType = "row") {
+    // Paused (#15214): a calm line where the writing one stood, nothing to tap; what is stored follows as ever.
+    if (view.paused) item("minutes-paused", contentType = "row") {
+        JGroupItem(GroupPosition.Single, if (view.minutes != null) Modifier.padding(bottom = Tokens.Space.s) else Modifier) {
+            JRow(stringResource(R.string.knowledge_ui_minutes_paused), subtitle = stringResource(R.string.knowledge_ui_minutes_paused_note),
+                subtitleLines = 4, leadingIcon = PersonaIcons.pause, modifier = Modifier.testTag("minutes-paused"))
+        }
+    } else if (view.phase == MinutesPhase.Checking || view.phase == MinutesPhase.Writing || view.updating) item("minutes-writing", contentType = "row") {
         // Apart from the minutes it is writing again, which follow.
         JGroupItem(GroupPosition.Single, if (view.minutes != null) Modifier.padding(bottom = Tokens.Space.s) else Modifier) {
             val checking = view.phase == MinutesPhase.Checking
@@ -246,13 +299,13 @@ internal fun LazyListScope.recordingMinutes(view: MinutesView, actions: MinutesA
         val remaining = minutes.actions.filter { !it.added }.map { it.id }
         item("minutes-actions-header", contentType = "section") {
             JSectionHeader(stringResource(R.string.knowledge_ui_minutes_actions), count = minutes.actions.size, sub = true, action = {
-                if (remaining.size > 1) JButton(stringResource(R.string.knowledge_ui_minutes_add_all), { actions.add(remaining) }, kind = JButtonKind.Quiet,
+                if (view.canAdd && remaining.size > 1) JButton(stringResource(R.string.knowledge_ui_minutes_add_all), { actions.add(remaining) }, kind = JButtonKind.Quiet,
                     size = JButtonSize.Small, enabled = !actions.busy, modifier = Modifier.testTag("minutes-add-all"))
             })
         }
         minutes.actions.forEachIndexed { index, action ->
             item("minutes-action/${action.id.ifBlank { index.toString() }}", contentType = "minutes-item") {
-                JGroupItem(GroupPosition.of(index, minutes.actions.size)) { ActionRow(action, actions, clock) }
+                JGroupItem(GroupPosition.of(index, minutes.actions.size)) { ActionRow(action, actions, clock, view.canAdd) }
             }
         }
     }
@@ -292,9 +345,9 @@ private fun ItemRow(icon: PhIcon, text: String, byline: String?, at: Double?, ac
     }
 }
 
-/** An action item: who · what · by when · due date, its time, and Add to to-dos, or Added once it is one. */
+/** An action item: who · what · by when · due date, its time, and Add to to-dos ([canAdd]), or Added once it is one. */
 @Composable
-private fun ActionRow(action: MinutesAction, actions: MinutesActions, clock: @Composable (Double) -> String?) {
+private fun ActionRow(action: MinutesAction, actions: MinutesActions, clock: @Composable (Double) -> String?, canAdd: Boolean) {
     Row(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         JIcon(PhIcons.ListChecks, null, size = Tokens.Space.l, tint = PersonaTheme.palette.accent, modifier = Modifier.padding(top = Tokens.Space.xxs))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
@@ -304,7 +357,7 @@ private fun ActionRow(action: MinutesAction, actions: MinutesActions, clock: @Co
                 Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
             }
             if (action.added) JTag(stringResource(R.string.knowledge_ui_minutes_added), Tone.Positive, Modifier.testTag("minutes-added"))
-            else JButton(stringResource(R.string.knowledge_ui_minutes_add_todo), { actions.add(listOf(action.id)) }, kind = JButtonKind.Secondary,
+            else if (canAdd) JButton(stringResource(R.string.knowledge_ui_minutes_add_todo), { actions.add(listOf(action.id)) }, kind = JButtonKind.Secondary,
                 size = JButtonSize.Small, enabled = !actions.busy && action.id.isNotBlank(), modifier = Modifier.testTag("minutes-add"))
         }
         action.at?.let { Time(it, actions, clock) }

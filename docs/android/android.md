@@ -1277,6 +1277,65 @@ for a pairing and keeps them in `ShellSession.modules` (by id), with the hub's h
 A module that is off is absent: no page registered, no menu action, no Settings row, nothing left over. The voice module
 declares `module.voice`; its "Voice chat" item still appears only while the hub runs a voice extension, as before.
 
+**A hub module the app carries no module for** (`HubModule`, #15214). Some of the hub's modules have no `:module:<id>`
+project here: what they produced is shown by pages another module or the core draws. The app follows their flag by the
+same rule (`ModuleRegistry.isActive(HubModule, features)`) without listing them in `Modules.kt`, so
+`-Ppersona.modules` is unaffected. Off takes away the module's new activity and entry points and nothing else: what it
+produced earlier stays listed, readable and searchable (#13430). Today those are `HubModule.Recording`
+(`module.recording`), `HubModule.Lark` (`module.lark`) and `HubModule.Mail` (`module.mail`), the last two below. For
+recordings:
+
+- The Knowledge list, search, deep links and a recording's page (transcript, stored minutes, facts, copy, share) are
+  as they are with the module on; they read the core's `kb` routes, which the hub keeps.
+- A recording's page hides the controls that write through the recording module's routes: Make / Regenerate minutes,
+  Add to to-dos / Add all, Hand to Agent. Tagging (`PUT /api/v1/kb/recordings/{id}`, a core route) and Ask Persona (a
+  chat message) stay.
+- The hub's `paused` on a recording's detail and list entry is decoded into the closed `RecordingPaused`
+  (`ModuleOff`, and `Unknown` for a reason a newer hub names). Paused for `module_off`, the minutes section shows
+  "Minutes are paused" where "Writing the minutes…" or "Updating…" stood, and the page stops reading the recording
+  again every five seconds; an unknown reason changes nothing.
+- The flag is read once, where the page is registered (`knowledgeEntries`), and becomes a `RecordingAccess` with the
+  recording's `paused` mark; `minutesView`, the hand-off entry and the poll take that and read neither again.
+  Tests: `ModuleRegistryTest`, `RecordingPausedContractTest`, `KnowledgeMinutesTest`, `RecordingModuleOffScreenTest`.
+
+`HubModule.Lark` (#15995) is the Lark bot: the hub connects it only while its Lark module is on, and with the module off
+the bot's settings write nothing useful or are refused. Settings reads the flag once (`rememberLarkBotEntry`, in
+`SettingsContent` and where a channel's page is registered) into the closed `LarkBotEntry` (`Offered`, `ModuleOff`) and
+hands that down:
+
+- Off, the bot's channel (`feishu`) is not listed in Settings › Channels and is left out of the Channels row's count on
+  the settings list; its page (the switch, linking, where its messages go, the test message, "More settings") and the
+  Lark bot page (the app's credentials, the daily sync) are not offered. A link, a saved page or the debug launch that
+  lands on either shows the page's title, its way back and one line (`settings_lark_bot_module_off`) and asks the hub
+  nothing.
+- It is not `LarkFeatures` (the hello's `lark`, announced by the Lark extension). That one decides what the extension's
+  surfaces can do: Settings › Connectors › Lark, Messages, the Inbox's Lark chats, documents and company-feed posts and
+  their replies. They read the extension's own `/api/v1/lark/…` routes, which the hub keeps serving, and are what the
+  user already has, so none of them reads the module's flag (`LarkBotModuleOffTest` pins that only `LarkBotEntry` does)
+  and all stay with the module off. `/agent` in Lark (`lark_agent`) is the extension's channel and stays listed too.
+- On, or a hello without `modules`: unchanged; `LarkBotEntry.listing` hands back the same `ChannelManagement`.
+  Tests: `ModuleRegistryTest`, `LarkBotModuleOffTest`, `LarkBotModuleOffShotsTest`.
+
+`HubModule.Mail` (#15995) is mail: accounts, a message read in full with its HTML and attachments, flags and sending
+are the module's routes (everything under `/api/v1/mail`), and each of those is fetched live from the mail server. What
+the hub stored of a mail is the Inbox item: sender, date, summary, a preview and up to 3,000 characters of the newest
+message's text (`context` of `GET /api/v1/inbox/{id}`), all core routes. The shell reads the flag once
+(`mailAccessOf` in `:app`, provided as `LocalMailAccess` beside `LocalLarkFeatures`; the demo is always live) into the
+closed `MailAccess` (`Live`, `StoredOnly`, in `:core:designsystem`), and pages read only that:
+
+- `StoredOnly`, Settings › Connectors has no Mail row and does not read the accounts; its pages (`mail`, `mail-add`,
+  reached by a link or a saved page) show their title, the way back and one line (`settings_mail_module_off`).
+- `StoredOnly`, a mail opened from the Inbox is `MailStoredScreen`, not the live page: it asks no mail route (no
+  message, accounts, flags or attachment, so opening it marks nothing read) and shows the item's sender, date and
+  summary, the stored text, and one line that the full message and its attachments cannot be loaded
+  (`inbox_mail_module_off`). The hub does not tell clients whether the stored text was clipped, so the line does not
+  claim it. Hand to AI and Done are the Inbox's own and stay.
+- `StoredOnly`, nothing that would send a mail is offered: New mail in the Inbox, reply / reply all / forward, the reply
+  sheet on a mail's event page, the AI's draft with its Send and a suggested reply for a mail
+  (`MailAccess.offersReply`). Other sources are untouched.
+- `Live` (the module on, no hello, or a hub without `modules`): unchanged, with the same requests as before.
+  Tests: `ModuleRegistryTest`, `HubMailTest`, `MailModuleOffTest`, `MailModuleOffSettingsTest`.
+
 ```sh
 cd android
 ./gradlew -Ppersona.modules= :app:testDebugUnitTest :app:lintDebug :app:assembleDebug   # Persona Core alone
@@ -1974,7 +2033,8 @@ Android counterparts of iPhone Live Activities, widgets and shortcuts. All four 
 
 - **Data**: `FleetFeed` receives WS `fleet`, also `GET /api/v1/fleet` after each connection (hub pushes only changes; with multiple groups, fetch each connected group concurrently so a stalled hub cannot delay others, translate to merged ids like pushed data, then sum). Latest snapshot stored per pairing in SharedPreferences `fleet`, allowing widgets and tiles to render with no process running; unpairing clears it and new pairings never show the former hub. HTTP and pairing identity supplied by App `FleetModule` (`FleetSource`).
 - **Ongoing summary notification** (foreground-service notification, `OngoingStatus` / `Notifier.ongoing`): title "N need you / working / finished", subtitle other counts. With **Show lock-screen details** on, body is the first Agent's "name · work", or the permission/plan the buttons operate on (like iOS, not an older question above another Agent's Allow); expanded, up to three rows with "machine · space › tab" and "+N". Working-only uses a timer. First permission Deny / Allow, first plan View / Approve (`acceptEdits`; allow/approve require unlock; buttons through `ActionReceiver` + `NotificationActionExecutor`). Tap opens the sole Agent, otherwise Agents. Nothing, only unread completions for 5 minutes, or disconnected falls back to the connection row. With details off (default), body and expanded list also use generic text ("4 need you", "A permission is waiting", "2 permissions are waiting", "1 working"), no Agent names, locations or request detail—even if system lock screen is set to show all content. Buttons remain. With details on, names appear but the notification remains private, with a count-only public version, so hiding sensitive content at system level still shows only counts. See `platform/notify/README.md`.
-- **Home-screen widget** (`PersonaWidget`, Glance 1.2.0): Persona logo row, state-colored title dot, other counts, then as many Agents as fit (max 3, dot + name + "work · machine · space") and "+N"; empty "No Agents need you", unpaired "Not paired / Open Persona and scan the hub QR code". Tap Agent opens its chat; other areas behave like tile (sole Agent or Agents). Navigation only, no widget approval. Uses actual launcher size (`SizeMode.Exact`, portrait and landscape): Agent count depends only on height (`WidgetLayout`, row heights measured in launcher, room reserved for "+N", fewer with larger system font; phone one-row height shows 0, two rows 2, three rows 3); if even logo cannot fit, only counts remain. Former Responsive sizes (110×100 / 250×150 / 250×200 / 250×260) all had 250 dp width except the smallest, so phone 2×2 widgets always chose smallest and showed only the title regardless of height; 150 dp also clipped "+N" (found on emulator 2026-11-02). Minimum 110×100 dp, default 3×2 cells, resizable both ways, no periodic refresh (`updatePeriodMillis=0`); `SurfacesRuntime` redraws on summary change. Design-system color/type (`SystemSurfaces`: selected style palette and type, light / dark pair passed to Glance to follow system); corners use system widget radii.
+- **Agents home-screen widget** (`PersonaWidget` / `PersonaWidgetReceiver`, Glance 1.2.0; picker label **Agents**, aligned with iOS `docs/apple/home-widgets.md`): keeps the existing `PersonaWidgetReceiver` class and `persona_widget_info.xml` binding for seamless upgrades on already-placed widgets. Shows the Persona mark + **Agents** header, state-colored title dot, other counts, then as many Agents as fit (max 3, dot + name + "work · machine · space") and "+N"; empty "No Agents need you", unpaired "Not paired / Open Persona and scan the hub QR code". Tap Agent opens its chat; other areas behave like tile (sole Agent or Agents). Navigation only, no widget approval. Uses actual launcher size (`SizeMode.Exact`, portrait and landscape): Agent count depends only on height (`WidgetLayout`, row heights measured in launcher, room reserved for "+N", fewer with larger system font; phone one-row height shows 0, two rows 2, three rows 3); if even the header cannot fit, only counts remain. Former Responsive sizes (110×100 / 250×150 / 250×200 / 250×260) all had 250 dp width except the smallest, so phone 2×2 widgets always chose smallest and showed only the title regardless of height; 150 dp also clipped "+N" (found on emulator 2026-11-02). Minimum 110×100 dp, default 3×2 cells, resizable both ways, no periodic refresh (`updatePeriodMillis=0`); `SurfacesRuntime` redraws on summary change and `PersonaApp` redraws when style, theme color, or the active persona package's colors change. Design-system color/type (`SystemSurfaces`: selected style palette and type, light / dark pair passed to Glance to follow system); corners use system widget radii.
+- **Ask Persona home-screen widget** (`AskPersonaWidget` / `AskPersonaWidgetReceiver`, Glance 1.2.0; picker label **Ask Persona**): standalone everyday main-chat entry aligned with iOS single-responsibility home widgets (`docs/apple/home-widgets.md`) and `DESIGN_SYSTEM.md` 5.6. Reads only local pairing state (`PairingService`) and appearance (`AppStyleStore` / `SystemSurfaces` / `Tokens`), with no extra permissions or network blocking. Tapping the widget opens the main chat with the composer focused when paired (`SurfaceLinks.ask` / `AskPersonaLink`), or opens the app's pairing page when unpaired (`SurfaceLinks.app`). Uses `SizeMode.Exact` (`AskWidgetLayout`) across `2 × 1`, `2 × 2`, `4 × 1` and `4 × 2` (default `2 × 1`, minimum `110 × 40 dp`, resizable both ways, `updatePeriodMillis=0`), switching between a compact horizontal row and a stacked card while adapting to light/dark, all three `AppStyle`s and larger system font sizes without nested borders. `SurfacesRuntime` redraws it on pairing changes and `PersonaApp` redraws it on appearance changes.
 - **Quick Settings tile** (`PersonaTileService`): Persona label, summary subtitle ("All handled", "Not paired"); active when needs-you or working, unavailable if unpaired; tap opens like widget.
 - **Icon long-press shortcuts** (`ShortcutPublisher`, published dynamically because static shortcuts require hard-coded application id): **Ask Persona** opens Persona, focuses composer and keyboard (`persona://open?target=tab&tab=persona&focus=composer`, cold or already open; the main chat's composer, inside the shared chat page (`ComposerFocusAsk` in `feature/chat`), as iOS's Ask Persona sends to the main chat; with no main chat yet, the composer of the page that starts it); **Approve pending**; then the two most recently active online Agents (not Persona itself, by update time; not a subtask the Agents list hangs under an online session above it, #4769 `RecentAgents`), opening their chats. Republish only on change; remove on unpairing.
 - **Approve pending** (`ApproveFirstActivity`, not exported, transparent, only a design-system dialog over `palette.scrim`; without the scrim white dark-mode status icons disappear on light wallpaper): fetch pending requests fresh from hub, take earliest. Permission asks "Allow <summary>?"; plan "Approve this plan?", explaining "Edits will be accepted automatically; commands will still ask first" (`ApprovalPolicy` shortcut: plan only `acceptEdits`, unlock required), then "session · machine". Questions/terminal dialogs say to open Persona and offer **Open Persona** (that chat at that request; a card outside any session, e.g. `personad ask` in a plain terminal, opens Agents with that card, as its notification does, #5719); also loading, nothing pending, unpaired, error states. Buttons disabled during send; unclear outcome says "Result awaiting confirmation", not retry. Success Toast "Allowed Bash" / "Plan approved; starting".
@@ -1986,9 +2046,10 @@ Debug (debug package only):
 ```sh
 # Approve pending states: loading, nothing, unpaired, question, screen, permission, plan, sending, error
 adb shell am start -n <package>/persona.platform.shortcuts.ApproveFirstPreviewActivity --es debug.approveState plan --es debug.style board --es debug.theme dark
-# Widget sizes (minimum, heights for 1 / 2 / 3 Agents; the 2-Agent one is two launcher cells wide), hosted over wallpaper like a launcher; grant binding once
+# Widget sizes (Agents default; pass --es debug.widget ask or all for Ask Persona), hosted over wallpaper like a launcher; grant binding once
 adb shell appwidget grantbind --package <package> --user 0
 adb shell am start -n <package>/persona.platform.shortcuts.WidgetPreviewActivity
+adb shell am start -n <package>/persona.platform.shortcuts.WidgetPreviewActivity --es debug.widget ask
 # Add tile to Quick Settings
 adb shell cmd statusbar add-tile <package>/persona.platform.shortcuts.PersonaTileService
 # Ask Persona

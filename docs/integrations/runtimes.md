@@ -56,6 +56,8 @@ With the SDK (`integrations/runtime-sdk`, Node 22+, no dependencies) you only wr
 | `listSessions()` | Session rows: `session_id`, `title`, `cwd`, `status` (`working` / `blocked` / `done` / `idle` / `offline`), `updated_at`, `rev` (changes whenever content changes; the App fetches new content based on it), `last_text`, `space_id` / `space_name` (sessions in the same space are grouped together in the App), `model`; optionally `permission_mode` / `effort` (the current mode), `transcript` (this session's chat is a local Claude transcript: the content belongs to node, see "Runtimes that run Claude Code" below), `codex_thread` (this session's chat is a local Codex thread, see "Runtimes that run Codex" below), `is_subagent` / `parent_session_id` (another of the runtime's sessions started this one, see "Sub-Agents and background tasks" below), `started_at` (when the session began: a child's card counts its running time from it) and `started_by_persona` (the hub started this session through the runtime or had it take the session over: the manager finds a start whose answer it lost among these, so say it after a restart too; a daemon's is dropped, #8130). A session `start` answered before it really began (see below) is listed with `starting: true` until it has, and once it failed as `offline` with `start_error` (why) for a while, as the node lists its own starts (`docs/protocol/protocol.md` ("New session")) |
 | `items(params)` | One page of items (same params and result as `session.items`: from the end backwards by `turns` / `limit`, `before_seq` to page back, `after_seq` to catch up, `from_seq` + `through_seq` for a range), with `history` and `to_seq` |
 
+A row's `last_text` is the agent's reply preview. When botmux delivers a reply to its topic, the agent can finish with a line containing only `BOTMUX_NOTHING_TO_SEND`. The node removes standalone marker lines from reported previews. A marker-only update retains the previous words for that session or subagent when available. Runtime drivers that shorten previews should remove marker lines before joining lines or clipping text. The full message remains available in `session.items`.
+
 Optional (for each one present, the SDK declares the capability in `runtime.hello`; for those missing, node answers "not supported" for you and the App displays as usual):
 
 | Driver method | Capability |
@@ -423,8 +425,8 @@ To avoid going to the computer and clicking every time, the plugin is split into
 - **Another kind of host: one that reloads by itself (pi)**: pi reads extensions from disk on reload and doesn't cache modules, so it doesn't need the loader layer. The extension is installed from a fixed path in the store,
   `<store>/current/…` (`current` is a symlink to `<hash>`, replaced by rename via `installCurrent`). On an offer it fetches the package, installs it as the new `current`,
   and when idle asks the host to reload (pi uses a command the extension registers itself); the new version's host connects to node with the same process identity (`createRuntime`'s `instance`) and replaces the old one.
-  A long-running standalone process (pi's and Antigravity's `companion.mjs`) exits once idle after installing and is brought back up by launchd / systemd (`--no-update` opts out). `selfPackage(import.meta.url, name)` tells a module which package it's running from
-  and whether it's inside the store (if not, it doesn't update). Details in `docs/integrations/pi.md` ("Automatic updates") and "Antigravity CLI" below.
+  A long-running standalone process (pi's and Antigravity's `companion.mjs`) exits once idle after installing and is brought back up by launchd / systemd (`--no-update` opts out). The installer passes its own running hash to `installCurrent`, which retains that version, `current`, the previous version and the three most recently installed other generations; older idle versions and day-old temporary files are still removed, so a busy companion survives consecutive upgrades without unbounded idle-version growth. Antigravity companions also register their hash under `<store>/.active/<hash>/` for their process lifetime, protecting every active companion when another process installs. Installation and registration share a nonblocking, crash-recoverable `.install.lock`; lock contention retries asynchronously with the already verified package and without blacklisting the offered hash. A transient package-fetch failure also remains retryable, while a hash/content mismatch is not fetched again. Every completed hello cancels an older pending retry before that hello's offer is handled, so reconnecting to a node that rolled back to the running hash cannot later publish a stale offer. Updates wait for that completed hello (`rt.ready`, rather than merely an open socket) and check that its offer is still current after every asynchronous fetch; a retry therefore cannot install or recreate itself while disconnected, negotiating a replacement hello, or after a no-offer rollback. A valid response whose package hash differs from the hello's offered hash is not installed or cached for a later retry. Process start identities detect PID reuse (Unix `ps` reads are pinned to UTC and the C locale), cleanup reclaims registrations whose process is gone, and it preserves all generations if registrations cannot be read. Reinstalling a cached generation, including a rollback, refreshes its modification time so it counts as recently used. `selfPackage(import.meta.url, name)` tells a module which package it's running from
+  and whether it's inside the store (if not, it doesn't update). The lock coordinates installers and Go built-in writers that use this SDK contract; an already-running legacy installer does not know the lock and cannot be made mutually exclusive with new cleanup in the same store. The supervisor must restart old companions once onto the fixed code, and rollback to an unlocked installer brings back its old pruning behavior. Details in `docs/integrations/pi.md` ("Automatic updates") and "Antigravity CLI" below.
 - An implementation module that can be swapped exports `api` (`LOADER_API`, currently 1) and `start(host)`, returning `{stop, busy, fetchPackage}` (the methods of the same name on `createRuntime`).
   `host` holds the loader's `context` (for DSH, `{ctx, config}`) plus the `package` and `onUpdate` to pass to `createRuntime`. To add such a runtime: register its files in both lists,
   and change the entry point the host loads to `createLoader`.
@@ -461,7 +463,7 @@ Lark tokens and gates. node drives it with calls the protocol already has:
 | `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir, supervision_instructions?}` | `context`: a `<persona-context>` block given to the model before the user's text (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages"); `supervision_instructions`: sent only when the runtime declared `caps.supervision_policy` (always present, including explicit `""` to clear a prior role on demotion) |
 | `session.interrupt` | Stop on the phone; closing the assistant chat = stopping the running turn, the chat stays in the runtime |
 
-A **local** runtime can opt into `caps.assistant_environment`. Node then supplies `env` as an object mapping environment variable names to values on `session.start`, `session.send`, `session.modes`, and an assistant `session.fork`. This is the existing generic Assistant environment: the generated `assistant-bin` / `assistant-bins` command directory first on `PATH`, `PERSONA_ASSISTANT_BIN`, `PERSONA_SPACE`, non-proxied gate variables, and—for Auth-backed or relayed (`socket_env`) command gates—a session-scoped local gate proxy address in `base_env` reused idempotently per `(session, command)` across turns, mode changes, forks, interrupt-only assistant closes, and same-instance reconnects until an explicit runtime close, instance replacement, or disconnect past the reconnect grace window. It never contains Auth-held credentials, raw `socket_env` paths, a direct upstream replacing their proxy address, or raw secret references; the node's gate proxy injects credentials and enforces gate and space rules. Missing credentials stay absent rather than substituting the raw configuration.
+A **local** runtime can opt into `caps.assistant_environment`. Node then supplies `env` as an object mapping environment variable names to values on `session.start`, `session.send`, `session.modes`, and an assistant `session.fork`. This is the existing generic Assistant environment: the generated `assistant-bin` / `assistant-bins` command directory first on `PATH`, `PERSONA_ASSISTANT_BIN`, `PERSONA_SPACE`, non-proxied gate variables, and—for Auth-backed or relayed (`socket_env`) command gates—a session-scoped local gate proxy address in `base_env` reused idempotently per `(session, command)` across turns, mode changes, forks, interrupt-only assistant closes, and same-instance reconnects until an explicit runtime close, instance replacement, or disconnect past the reconnect grace window. It never contains Auth-held credentials, raw `socket_env` paths, a direct upstream replacing their proxy address, or raw secret references; the node's gate proxy injects credentials and enforces gate and space rules. Missing credentials stay absent rather than substituting the raw configuration. For eligible static proxy-authenticated Lark send/reply commands routed through `assistant_command_gate`, node also declares `editable_text`, applies edited Allow answers by rewriting the JSON body inside `gateProxy` (bound once to the unmodified original request), preserves detached `pending: true` dismissals so the runtime cancels the turn cleanly without executing or retrying, and returns explicit owner deny notes (without `reason: "gate_rule"`) so Antigravity can deliver them as a refusal follow-up after the turn ends.
 
 Apply a snapshot only when spawning that conversation's **dedicated Assistant worker**. Keep it with the conversation for an idle/crash replacement and use the newest supplied snapshot for the next worker; changing an already-running process's environment is neither required nor possible. Never put it on the companion, model probes, or the shared ordinary-Agent worker, and never log its values. Runtimes without the capability and daemon / remote runtimes receive no `env` field. Their wire contract and gate-only credential boundary stay unchanged.
 
@@ -525,6 +527,7 @@ end to end in `integrations/dsh/e2e/assistant.mjs`.
 | omp (`omp-<pid>`) | `integrations/omp`: the pi host under omp's identity (agent and name `omp`); no companion and no auto-update | `docs/integrations/omp.md` |
 | opencode (`opencode` / `opencode-<pid>`) | `integrations/opencode`: embedded `persona-opencode-runtime` ACP companion (`companion.mjs`, auto-supervised by `personad` via `server/internal/node/opencodebridge.go` when `opencode` is installed and no external companion or `opencode serve` plugin is connected; `start`, `models`, `modes`, `assistant: true` with loopback HTTP MCP proxy, lazy/idle ACP cleanup, reads 1.x & 2.x `opencode.db`) and opencode server plugin (`index.js`, one connection per `opencode serve` process, merges with herdr TUI panes) | `docs/integrations/opencode.md` |
 | Grok CLI (`grok-chat`) | `integrations/grok/companion.mjs`: optional standalone ACP companion with assistant tools, permission hooks, native renaming and restart recovery; also lists conversations started in a terminal (read-only while the terminal holds them) | `integrations/grok/README.md` |
+| Hermes Agent (`hermes`) | `integrations/hermes/companion.mjs` provides an opt-in workspace launcher via the official `hermes acp` transport | `integrations/hermes/README.md` |
 | Antigravity CLI (`antigravity`) | `integrations/antigravity/companion.mjs`: companion process; reads CLI transcripts and runs terminal-less Agent and assistant sessions through `agy acp` | "Antigravity CLI" below |
 | Managed Agents (`managed-agents`, configurable) | `integrations/managed-agents/companion.mjs`: standalone companion for Volcengine Ark Managed Agents and compatible endpoints (cloud or self-hosted, the user's own key); reads sessions over the REST API, sends, interrupts, starts, and answers tool confirmations and question / plan tools on the phone; `--listen` makes it a daemon | `docs/integrations/managed-agents.md` |
 | echo (example) | `integrations/runtime-sdk/examples/echo-runtime.mjs` (with `--listen <port>` it's a daemon) | "Minimal example" in this doc, `docs/integrations/daemons.md` |
@@ -565,10 +568,17 @@ node integrations/antigravity/desktop.mjs
 ```
 
 It discovers the local desktop hub through the current user's private descriptor under
-`~/.gemini/antigravity/daemon/`, lists existing conversations, watches exported transcript items,
-and forwards text replies and interrupts to the selected Cascade. Start each conversation with a message in the desktop app so replies can reuse its model and tool configuration.
-Handle approvals there as well. The desktop and CLI companions can run together. Override the desktop data directory
-with `--desktop-dir` or the Persona runtime socket with `--socket`. The desktop RPC is private and version dependent.
+`~/.gemini/antigravity/daemon/`, advertises an opt-in `antigravity-desktop` launcher, lists active
+conversations, watches exported transcript items, starts new conversations through
+`ConversationService/CreateConversation` (with model and effort selection via `launchers.models`
+and `session.start`), forwards text replies and settled interrupts, and supports native `rename`,
+`archive`, and `unarchive` controls through `ConversationService/UpdateConversation`.
+Desktop-UI-created conversations without an initialized configuration still require an initial turn
+in the desktop app so replies can reuse their model and tool configuration, and approvals stay in
+Antigravity Desktop. The desktop and CLI companions can run together. Override the desktop data
+directory with `--desktop-dir`, the Persona runtime socket with `--socket`, or the runtime identity
+and default model with `--runtime`, `--launcher`, `--display-name`, and `--model`. The desktop RPC
+is private and version dependent.
 
 ### Antigravity CLI
 
@@ -644,8 +654,9 @@ included. The CLI companion writes an agy plugin, `<agy config>/../config/plugin
 file that is no picture, gets no opinion (`ask`: agy's own permissions decide). A cut or damaged one is refused (`deny`,
 which wins over another hook's `allow`) with a reason the model passes on, and the file is left as it is. A truncated
 JPEG whose image data began also gets a terminated copy under `<agy config>/persona-media-guard/`, named in the reason,
-so the model can still look at the part that arrived. The hook answers `ask` when its script is gone (the package moved
-on), so a stale plugin never blocks agy; `--no-media-guard` keeps the companion from writing it. Pictures attached to a
+so the model can still look at the part that arrived. The companion atomically copies its `media-guard.mjs` into the plugin
+directory and the hook executes that installed copy, so later upgrades, another companion's exit or a changed `current`
+cannot strand it in a deleted generation. The installed `package.json` gives the copied `.js` decision helper an explicit ES-module scope even under a CommonJS parent. The hook answers `ask` when that copy is gone, so a stale plugin never blocks agy; `--no-media-guard` keeps the companion from writing it. Pictures attached to a
 message from Persona get the same check: a broken one is left out of the prompt with a line saying so.
 
 Native model errors can be omitted from the JSONL export even when ACP reports a completed prompt. When an idle
@@ -698,7 +709,9 @@ The CLI companion runs the **Antigravity CLI (`agy`)**. When `personad node`
 runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`
 runtime is connected on `runtime.sock`, the node automatically writes out the embedded `persona-antigravity-runtime`
 package and supervises `antigravity/companion.mjs` (passing `--no-update --parent-stdin`), yielding whenever an external
-`agy` runtime connects (`server/internal/node/agybridge.go`). The node resolves `agy` when it starts the companion and
+`agy` runtime connects (`server/internal/node/agybridge.go`). The built-in package is unpacked under the separate
+`runtime-packages/persona-antigravity-runtime-builtin/<hash>/` store, so its cleanup never scans external companions'
+generations or changes their `current`. The sibling layout also keeps built-in files out of legacy external-store pruning. Go writes and pruning use the same `.install.lock` and process-start identity format as JavaScript registration, so a reused PID cannot strand a lock or inherit a lease. The node reserves the generation with its own process lease before launching the companion; a cached launch refreshes that reservation and retries cleanup. Once the companion registers its own lease, it releases the node's reservation for that generation. Reserving a newly launched generation also removes this node's reservations from other generations, which is necessary after a Unix `exec` upgrade retains both PID and start identity. This closes the window before the companion can register its own lease, while idle generations and dead-process leases remain reclaimable. The node resolves `agy` when it starts the companion and
 looks again every 30 seconds while it runs (#14533): when the path or the file there changed (replaced by an update,
 installed elsewhere, removed) and two looks in a row agree, it restarts the companion on the `agy` found now, waiting
 while one of its sessions is working or a call to it is pending (the old file keeps running until then). You can also start
@@ -714,9 +727,10 @@ serve as an assistant backend through the optional assistant contract above. It 
 with ACP support; `--agy-bin`, `--agy-dir`, `--socket`, `--no-update` and `--parent-stdin` override the executable, CLI data
 directory, node socket, automatic updates and parent-pipe shutdown. When `--agy-dir` is passed explicitly, the companion also sets `ANTIGRAVITY_CLI_CONFIG_DIR` for its spawned `agy` child processes (`acp` and `models`) so discovery, ACP sessions, and transcript reads share the same directory.
 To run an additional companion instance alongside the default `agy` companion (for example, a wrapped `agy` executable or separate configuration directory), pass a distinct `--runtime <id>` (default `agy`), and optionally `--launcher <name>` (default `<runtime>`), `--display-name <label>` (default `Antigravity`), `--prefix <prefix>` (default `<runtime>-`), and `--assistant-for <launcher>` to point a non-assistant Agent launcher at this companion in the main-chat picker. Custom runtime IDs keep `agent: "agy"` and do not cause the node's built-in `agy` companion to yield.
-Models come from authenticated `agy models` discovery and ACP session metadata. The companion discovers the catalog once
-at startup, reuses a fresh catalog for five minutes on `models({launcher})`, and refreshes on demand when the TTL has
-elapsed or the picker requests `models({launcher, refresh: true})` (`caps.models`, `launchers.models`; #15253).
+Models come from authenticated `agy models` discovery and ACP session metadata. The companion discovers the catalog at
+startup and again every five minutes in the background, with backoff on sign-in timeouts (#15481). It reuses a fresh
+catalog on `models({launcher})` and refreshes on demand once the five-minute TTL has elapsed or the picker requests
+`models({launcher, refresh: true})` (`caps.models`, `launchers.models`; #15253).
 Discovery never sends a prompt. The native settings file determines the advertised
 default. New sessions and availability checks explicitly apply that model through ACP, since ACP may ignore the
 settings file when choosing its initial model. An explicit caller model takes precedence, and resumed sessions retain
@@ -764,10 +778,14 @@ declaration budget, largest first, and has no `call_mcp_tool` for servers passed
 (#7333). The proxy declares only the tools larger than `persona_call`, so it is always the smallest declared and never
 the one deferred, however many small tools connectors add (sizes are what agy declares of a tool: its name, description
 and input schema). The others stay callable through it: `persona_call` with no name lists every tool, and those left out
-with their description and arguments (#10756). For non-assistant Agent sessions (`--agent`), the proxy prioritizes core
-task, leader and supervision tools and caps secondary declarations within the eager budget so `agy` does not evict
-leader or supervision tools while keeping secondary tools reachable through `persona_call` (#15822); `persona_a2a` stays
-on its separate scoped server.
+with their description and arguments (#10756). A companion loaded from `<store>/<hash>/` resolves the proxy afresh for
+each new or resumed session, preferring `<store>/current/antigravity/mcp-proxy.mjs` whenever it exists. Consecutive
+upgrades therefore do not leave later sessions pointing into a deleted generation; source checkouts without `current`
+keep using their own `mcp-proxy.mjs`. The proxy entry is self-contained (its schema projection is inlined), so after
+Node loads it, pruning its generation cannot break a later relative import. For non-assistant Agent sessions (`--agent`),
+the proxy prioritizes core task, leader and supervision tools and caps secondary declarations within the eager budget so
+`agy` does not evict leader or supervision tools while keeping secondary tools reachable through `persona_call` (#15822);
+`persona_a2a` stays on its separate scoped server.
 A role-bearing task start targeting the Companion (including read-only and explicit `agy` host starts) uses `defer_mcp`
 as described under "What to implement": the real ACP session id exists and the task's role link is committed before the
 first MCP attach and prompt, and deferred activation preserves separate `task_instructions` and `task_attachments`, so

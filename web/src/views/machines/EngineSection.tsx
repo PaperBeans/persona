@@ -2,7 +2,7 @@
 // come from. The engines its node found ("Available" with the version / "Not detected", and why one cannot be used), or every known
 // engine while it is offline; a choice stays here until "Save" (PUT …/engine), which the hub takes offline too. Pushes
 // of the machine refresh the choice until the user starts changing it; a failed save keeps it for another try.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import {
   canSaveEngine,
@@ -34,16 +34,27 @@ export function EngineSection({ machine, heading }: { machine: Machine; heading:
 function SingleEngineSection({ machine, heading }: { machine: Machine; heading: React.ReactNode }) {
   const current = currentEngine(machine);
   const [prevMachineId, setPrevMachineId] = useState(machine.id);
+  const [prevCurrent, setPrevCurrent] = useState(current);
   const [selected, setSelected] = useState(current);
   const [edited, setEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   if (prevMachineId !== machine.id) {
     setPrevMachineId(machine.id);
+    setPrevCurrent(current);
     setSelected(current);
     setEdited(false);
     setSaving(false);
     setError("");
+  } else if (!saving && prevCurrent !== current) {
+    setPrevCurrent(current);
+    if (!edited) {
+      setSelected(current);
+    } else if (selected === current) {
+      // Remote state converged to the unsaved draft: clear the latch so future pushes follow the hub.
+      setEdited(false);
+      setError("");
+    }
   }
   const machineIdRef = useRef(machine.id);
   const saveSeqRef = useRef(0);
@@ -65,12 +76,6 @@ function SingleEngineSection({ machine, heading }: { machine: Machine; heading: 
       savingRef.current = false;
     }
   }, [machine.id]);
-
-  // Same-machine hub pushes follow until the user starts editing or saving.
-  useEffect(() => {
-    if (!edited && !saving) setSelected(current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machine.id, current]);
 
   const choose = (id: string) => {
     if (savingRef.current) return;

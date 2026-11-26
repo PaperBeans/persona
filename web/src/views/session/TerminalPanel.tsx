@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { resumeAgent, useResume } from "../../lib/agent-resume";
-import { isStoppedAgent, sessionTitle, stateOf } from "../../lib/format";
+import { isStoppedAgent, sessionTitle, activityOf } from "../../lib/format";
 import { machineWithHub } from "../../lib/mesh";
 import { registerShortcut } from "../../lib/shortcuts";
 import { getSession, useStore } from "../../lib/store";
@@ -533,7 +533,7 @@ export function TerminalPanel({
   const [paneOffline, setPaneOffline] = useState(false);
   const resume = useResume(mid, sid);
   const agentRow = Boolean(session && (!session.source_kind || isStoppedAgent(session)) && !session.assistant && !isPaneAddress(sid));
-  const resumable = agentRow && (isStoppedAgent(session) || (paneOffline && stateOf(session!) === "offline") || resume.phase === "resuming");
+  const resumable = agentRow && (isStoppedAgent(session) || (paneOffline && activityOf(session!) === "offline") || resume.phase === "resuming");
 
   const dir = cwd || session?.cwd || "";
   const subtitle = [label ?? (session ? sessionTitle(session) : ""), machine].filter(Boolean).join(" · ");

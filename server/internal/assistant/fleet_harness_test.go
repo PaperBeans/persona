@@ -563,6 +563,29 @@ func (m *fleetMem) AlwaysAllowed(_ context.Context, session string, keys []strin
 	return len(keys) > 0, nil
 }
 
+func (m *fleetMem) CopyAlways(_ context.Context, fromSession, toSession string) (int, error) {
+	if fromSession == "" || toSession == "" || fromSession == toSession {
+		return 0, nil
+	}
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	src := m.always[fromSession]
+	if len(src) == 0 {
+		return 0, nil
+	}
+	if m.always[toSession] == nil {
+		m.always[toSession] = map[string]bool{}
+	}
+	copied := 0
+	for k := range src {
+		if !m.always[toSession][k] {
+			m.always[toSession][k] = true
+			copied++
+		}
+	}
+	return copied, nil
+}
+
 func (m *fleetMem) MarkSeen(_ context.Context, machine, session string, at time.Time) error {
 	m.fmu.Lock()
 	defer m.fmu.Unlock()

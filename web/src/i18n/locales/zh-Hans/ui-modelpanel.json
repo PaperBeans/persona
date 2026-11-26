@@ -23,6 +23,8 @@
   "forget": "忘记「{id}」",
   "loading": "正在读取模型…",
   "retry": "重试",
+  "refresh_models": "刷新模型",
+  "refresh_provider_models": "刷新 {provider} 的模型",
   "weekly_left": "{label} · 剩 {percent}%",
   "price_tier": "参考价格 {tier}/3 档",
   "price_per_million": "每 100 万 token",

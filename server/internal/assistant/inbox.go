@@ -202,9 +202,13 @@ type InboxItem struct {
 	ChainSeq   int `json:"chain_seq,omitempty"`
 	SuggestSeq int `json:"suggest_seq,omitempty"`
 	// ReplyPolicy is the latest server-side reply-policy classification for this item (inbox_reply_policy.go).
-	// Persisted, never listed. MailBodyTruncated distinguishes a clipped body from formatted headers.
-	ReplyPolicy       *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
-	MailBodyTruncated *bool                     `json:"mail_body_truncated,omitempty"`
+	// Persisted, never listed.
+	ReplyPolicy *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
+	// MailBodyTruncated says whether readMailBody clipped the newest mail's text when it wrote Context: true clipped,
+	// false whole, nil not known (a row stored before the flag, or a mail whose text was not read). It distinguishes
+	// a clipped body from formatted headers for the reply policy. Persisted; the list leaves it out, and the item's
+	// own page carries what shownMailBodyTruncated makes of it, beside the context it describes.
+	MailBodyTruncated *bool `json:"mail_body_truncated,omitempty"`
 }
 
 type InboxLark struct {
@@ -267,6 +271,29 @@ func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
 		ref.Account = strconv.Itoa(it.Lark.OLAccount)
 	}
 	return ref
+}
+
+// shownMailBodyTruncated is mail_body_truncated as GET /api/v1/inbox/{id} carries it beside the context: whether the
+// stored text is a clipped copy of the newest mail (true), all of it (false), or not known (nil). The stored flag
+// answers only for the text readMailBody wrote: while a newer mail's body is still unread the context is the
+// mailbox's snippet, and a merged row's context also holds its members' text, so "whole" is not claimed for those.
+func (it *InboxItem) shownMailBodyTruncated() *bool {
+	if it.Mail == nil || it.MailBodyTruncated == nil || it.BodyOf != it.Last {
+		return nil
+	}
+	if !*it.MailBodyTruncated && len(it.MergedFrom) > 0 {
+		return nil
+	}
+	clipped := *it.MailBodyTruncated
+	return &clipped
+}
+
+// shown is the item as its own page shows it: the listed item with its context and, for a mail, whether that text
+// was clipped. Nothing else listed() leaves out comes back.
+func (it *InboxItem) shown() InboxItem {
+	c := it.listed()
+	c.Context, c.MailBodyTruncated = it.Context, it.shownMailBodyTruncated()
+	return c
 }
 
 // listed is the item as the list shows it (no context).

@@ -485,6 +485,10 @@
     <string name="chat_web_pick_edit">AIで修正</string>
     <string name="chat_web_pick_context">コンテキストにする</string>
     <string name="chat_web_pick_hand">Personaに任せる</string>
+    <string name="chat_web_download_started">%1$s をダウンロードしています</string>
+    <string name="chat_web_download_opened_browser">ブラウザでダウンロードを開きました</string>
+    <string name="chat_web_download_loopback_unsupported">ポート転送されたローカルファイルはここではダウンロードできません</string>
+    <string name="chat_web_download_failed">ダウンロードを開始できませんでした</string>
     <string name="chat_file_video">動画</string>
     <string name="chat_file_audio">録音</string>
     <string name="chat_file_file">ファイル</string>

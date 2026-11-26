@@ -256,7 +256,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	list = append(list, pathList...)
 	maps.Copy(settings, pathSettings)
 	if len(list) == 0 {
-		list = []proto.Launcher{{Name: "claude"}}
+		list = []proto.Launcher{{Name: "claude", DisplayName: "Claude Code"}}
 	}
 	codex = map[string][]string{}
 	ls, words := parseCodexAliases(aliases)
@@ -267,7 +267,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		codexWord = bundledCodexCLI() // the ChatGPT app's own, by its path: the shell would not find it
 	}
 	if codexWord != "" && words["codex"] == nil {
-		list = append(list, proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
+		list = append(list, proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc", DisplayName: "Codex", PromptOptional: true, RunHere: true})
 		codex["codex"] = []string{codexWord}
 	}
 	for _, l := range ls {
@@ -280,16 +280,16 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		list = append(list, proto.Launcher{Name: traexAgent, Agent: traexAgent, Source: "zshrc", DisplayName: "TRAE CLI"})
 	}
 	if strings.TrimSpace(ompPath) != "" && !seen["omp"] && codex["omp"] == nil {
-		list = append(list, proto.Launcher{Name: "omp", Agent: "omp", Source: "zshrc"})
+		list = append(list, proto.Launcher{Name: "omp", Agent: "omp", Source: "zshrc", DisplayName: "Oh My Pi"})
 	}
-	for _, bin := range []struct{ name, agent, path string }{
-		{"pi", piAgent, piPath},
-		{"cursor", cursorAgent, cursorPath},
-		{"agy", agyAgent, agyPath},
+	for _, bin := range []struct{ name, agent, displayName, path string }{
+		{"pi", piAgent, "", piPath},
+		{"cursor", cursorAgent, "Cursor", cursorPath},
+		{"agy", agyAgent, "Antigravity CLI", agyPath},
 	} {
 		if strings.TrimSpace(bin.path) != "" && !seen[bin.name] && codex[bin.name] == nil {
 			list = append(list, proto.Launcher{Name: bin.name, Agent: bin.agent, Source: "zshrc",
-				RuntimeFallback: bin.agent == agyAgent && !taken[bin.name]})
+				DisplayName: bin.displayName, RuntimeFallback: bin.agent == agyAgent && !taken[bin.name]})
 		}
 	}
 	return list, codex, settings, scripts

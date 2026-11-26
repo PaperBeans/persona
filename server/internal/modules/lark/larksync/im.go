@@ -52,14 +52,18 @@ type apiMessage struct {
 	ChatID     string `json:"chat_id"`
 	Sender     struct {
 		ID         string `json:"id"`
+		IDType     string `json:"id_type"`
 		SenderType string `json:"sender_type"`
+		Name       string `json:"name"`
 	} `json:"sender"`
 	Body struct {
 		Content string `json:"content"`
 	} `json:"body"`
 	Mentions []struct {
-		Key  string `json:"key"`
-		Name string `json:"name"`
+		Key    string `json:"key"`
+		ID     string `json:"id"`
+		IDType string `json:"id_type"`
+		Name   string `json:"name"`
 	} `json:"mentions"`
 }
 
@@ -365,11 +369,15 @@ func (r *run) readChat(ctx context.Context, c chatInfo) error {
 			}
 		}
 		if peer == "" && len(committedMsgs) > 0 && !r.overBudget() {
-			if peer = r.fetchP2PChatName(ctx, c.id); peer != "" {
-				for i := range committedMsgs {
-					if committedMsgs[i].ChatName == "" {
-						committedMsgs[i].ChatName = peer
-					}
+			peer = r.fetchP2PChatName(ctx, c.id)
+		}
+		if peer != "" {
+			for i := range committedMsgs {
+				if committedMsgs[i].ChatName == "" {
+					committedMsgs[i].ChatName = peer
+				}
+				if !committedMsgs[i].Mine && committedMsgs[i].SenderName == "" {
+					committedMsgs[i].SenderName = peer
 				}
 			}
 		}
@@ -502,6 +510,7 @@ func (r *run) message(am apiMessage, c chatInfo) larksyncwire.Message {
 	if am.Sender.ID != "" && am.Sender.SenderType != "" {
 		r.senderTypes[am.Sender.ID] = am.Sender.SenderType
 	}
+	extractMessageNames(am, r.msgNames)
 	text, files := messageText(am)
 	for i := range files {
 		files[i].Ref = attachmentRef(r.b.Key, am.MessageID, files[i].Ref, files[i].Kind)
@@ -826,8 +835,9 @@ func (r *run) saveP2PChats() {
 	}
 }
 
-// fetchP2PChatName tries GET /open-apis/im/v1/chats/:chat_id as a best-effort fallback when a single chat's messages
-// in this window did not include a named human peer (for example, only the owner sent messages, or the peer is a bot).
+// fetchP2PChatName tries GET /open-apis/im/v1/chats/:chat_id and then GET /open-apis/im/v1/chats/:chat_id/members
+// as best-effort fallbacks when a single chat's messages did not yield a named peer (for example, only the owner sent
+// messages, the peer is a bot, or the peer is a cross-tenant external user invisible to contact/v3).
 // Feishu Open Platform docs: https://open.feishu.cn/document/server-docs/group/chat/get
 func (r *run) fetchP2PChatName(ctx context.Context, chatID string) string {
 	if chatID == "" || r.chatMetaTried[chatID] || ctx.Err() != nil {
@@ -840,21 +850,46 @@ func (r *run) fetchP2PChatName(ctx context.Context, chatID string) string {
 		P2PTargetID   string `json:"p2p_target_id"`
 		P2PTargetType string `json:"p2p_target_type"`
 	}
+	var targetID string
 	err := r.sess.getJSON(ctx, request{family: famIM, op: "chat info", path: "/open-apis/im/v1/chats/" + pathEsc(chatID),
 		query: map[string]string{"user_id_type": "open_id"}}, &data)
-	if err != nil {
-		return ""
-	}
-	if name := strings.TrimSpace(data.Name); name != "" {
-		return name
-	}
-	if data.P2PTargetID != "" && isContactUser(data.P2PTargetID, data.P2PTargetType) {
-		if name := r.senderName(ctx, data.P2PTargetID); name != "" {
+	if err == nil {
+		if name := strings.TrimSpace(data.Name); name != "" {
 			return name
 		}
+		if data.P2PTargetID != "" && isContactUser(data.P2PTargetID, data.P2PTargetType) {
+			targetID = data.P2PTargetID
+		} else if data.OwnerID != "" && data.OwnerID != r.owner && isContactUser(data.OwnerID, "") {
+			targetID = data.OwnerID
+		} else if data.P2PTargetID != "" {
+			// Another app's bot: no API a user token may call names it (members.go); an @mention may have.
+			if name := cmpString(r.msgNames[data.P2PTargetID], r.nameBook().name(data.P2PTargetID)); name != "" {
+				return name
+			}
+		}
+		if targetID != "" {
+			if name := r.senderName(ctx, targetID); name != "" {
+				return name
+			}
+			if name := r.memberNames[targetID]; name != "" {
+				return name
+			}
+		}
 	}
-	if data.OwnerID != "" && data.OwnerID != r.owner && isContactUser(data.OwnerID, "") {
-		return r.senderName(ctx, data.OwnerID)
+	if members := r.ensureChatMembers(ctx, chatID); len(members) > 0 {
+		if targetID != "" {
+			if name := members[targetID]; name != "" {
+				return name
+			}
+		}
+		if peer := uniqueP2PPeerName(members, r.owner); peer != "" {
+			return peer
+		}
+	}
+	if targetID != "" {
+		if name := cmpString(r.msgNames[targetID], r.nameBook().name(targetID)); name != "" {
+			return name
+		}
 	}
 	return ""
 }
@@ -1026,15 +1061,58 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // nameSenders fills in the senders' display names, and a single chat's name when the platform gives none (the other
 // person's name, as the Lark gateway names it): the knowledge base matches a message it already has from the gateway
-// by chat name, sender and text (kb.NewGatewayAligner), and the gateway writes names, not open ids. Best effort:
-// non-user senders (bots/apps such as cli_* or sender_type != "user") are skipped without querying the contact API;
-// a missing contact scope stops lookups for the rest of the run, while a single sender's failure leaves only that
-// sender unnamed.
+// by chat name, sender and text (kb.NewGatewayAligner), and the gateway writes names, not open ids.
+//
+// Resolution order for human senders:
+//  1. contact/v3/users/:open_id (same-tenant directory; cached per run; skipped when the sender is already resolved
+//     from a previously fetched chat member list)
+//  2. GET /open-apis/im/v1/chats/:chat_id/members (per-chat cached fallback for cross-tenant/external group and p2p
+//     members invisible to contact/v3, e.g. personal 1-person tenants)
+//  3. Message-carried sender/mention display names (sender.name, mentions, post @-nodes)
+//
+// Best effort: non-user senders (bots/apps such as cli_* or sender_type != "user") skip contact/v3 and chat-members
+// lookups (still checking message-carried names); a missing contact scope stops contact/v3 lookups for the rest of
+// the run while exposing sender_names as scope_missing, and a missing chat-members scope silently disables only the
+// chat-members fallback.
 func (r *run) nameSenders(ctx context.Context, msgs []larksyncwire.Message) {
 	for i := range msgs {
 		m := &msgs[i]
-		if m.SenderName == "" && isContactUser(m.SenderID, r.senderTypes[m.SenderID]) {
-			m.SenderName = r.senderName(ctx, m.SenderID)
+		if m.SenderName != "" {
+			continue
+		}
+		if isContactUser(m.SenderID, r.senderTypes[m.SenderID]) {
+			if name, ok := r.names[m.SenderID]; ok && name != "" {
+				m.SenderName = name
+			} else if name := r.memberNames[m.SenderID]; name != "" {
+				m.SenderName = name
+			} else if m.ChatID != "" && r.chatMembers[m.ChatID] != nil {
+				// This chat already missed contact/v3 (an external group): its member list, read on, names the rest.
+				if m.SenderName = r.chatMemberName(ctx, m.ChatID, m.SenderID); m.SenderName == "" {
+					m.SenderName = r.senderName(ctx, m.SenderID)
+				}
+			} else {
+				m.SenderName = r.senderName(ctx, m.SenderID)
+			}
+			// Free before paging a large group's member list: a name a message carried, or the book's (a member who
+			// left the group is in no list).
+			if m.SenderName == "" {
+				m.SenderName = r.msgNames[m.SenderID]
+			}
+			if m.SenderName == "" {
+				m.SenderName = r.nameBook().name(m.SenderID)
+			}
+			if m.SenderName == "" && m.ChatID != "" {
+				m.SenderName = r.chatMemberName(ctx, m.ChatID, m.SenderID)
+			}
+		}
+		if m.SenderName == "" && m.SenderID != "" {
+			m.SenderName = r.msgNames[m.SenderID]
+		}
+		if m.SenderName == "" && m.SenderID != "" {
+			m.SenderName = r.nameBook().name(m.SenderID) // a bot named by an earlier @mention
+		}
+		if m.SenderName != "" {
+			r.nameBook().learn(m.SenderID, m.SenderName, r.s.now())
 		}
 	}
 	peers := map[string]string{}
@@ -1052,6 +1130,136 @@ func (r *run) nameSenders(ctx context.Context, msgs []larksyncwire.Message) {
 		if msgs[i].ChatName == "" {
 			if peer := peers[msgs[i].ChatID]; peer != "" {
 				msgs[i].ChatName = peer
+			}
+		}
+	}
+}
+
+// chatMemberName looks up openID among chatID's members, reading the list on demand (chatMemberList.find) through
+// the binding's rate limiter; each page is read at most once per chat and run.
+func (r *run) chatMemberName(ctx context.Context, chatID, openID string) string {
+	if chatID == "" || openID == "" {
+		return ""
+	}
+	return r.readChatMembers(ctx, chatID, openID)[openID]
+}
+
+// ensureChatMembers reads chatID's whole member list (member_id -> display name) for this run.
+func (r *run) ensureChatMembers(ctx context.Context, chatID string) map[string]string {
+	if chatID == "" {
+		return nil
+	}
+	return r.readChatMembers(ctx, chatID, "")
+}
+
+// readChatMembers reads chatID's members until want ("" for all) is among them and returns what was read.
+func (r *run) readChatMembers(ctx context.Context, chatID, want string) map[string]string {
+	l := r.chatMembers[chatID]
+	if l == nil {
+		if r.chatMembersOff {
+			return nil
+		}
+		l = &chatMemberList{}
+		r.chatMembers[chatID] = l
+	}
+	if !l.done && !r.chatMembersOff && ctx.Err() == nil {
+		_, _ = l.find(ctx, r.sess, chatID, want, r.overBudget)
+		if l.denied {
+			r.chatMembersOff = true
+		}
+	}
+	for id, name := range l.names {
+		if name != "" && r.memberNames[id] == "" {
+			r.memberNames[id] = name
+		}
+	}
+	return l.names
+}
+
+// nameBook is the binding's name book (members.go), read from its cursor on first use.
+func (r *run) nameBook() *nameBook {
+	if r.book == nil {
+		r.book = parseNameBook(r.cursors[larksyncwire.SenderNamesCursor])
+	}
+	return r.book
+}
+
+// saveNameBook keeps what the run learned in the name book: the senders it named and the users messages mentioned.
+func (r *run) saveNameBook() {
+	if r.b.Tier != larksyncwire.TierFull {
+		return
+	}
+	b := r.nameBook()
+	b.learnAll(r.msgNames, r.s.now())
+	if raw := b.encode(); raw != "" && raw != r.cursors[larksyncwire.SenderNamesCursor] {
+		r.moveCursor(larksyncwire.SenderNamesCursor, raw)
+	}
+}
+
+// uniqueP2PPeerName returns the display name of the single non-owner member in a p2p chat's member map, or "" when
+// none or more than one non-owner member is present.
+func uniqueP2PPeerName(members map[string]string, owner string) string {
+	peer := ""
+	for id, name := range members {
+		if id == "" || name == "" || (owner != "" && id == owner) {
+			continue
+		}
+		if peer != "" && peer != name {
+			return ""
+		}
+		peer = name
+	}
+	return peer
+}
+
+// extractMessageNames collects display names carried directly in an im/v1 message payload (sender.name when present,
+// mentions[].{id,name}, and post @-mention nodes) into dst without overwriting existing entries.
+func extractMessageNames(am apiMessage, dst map[string]string) {
+	if dst == nil {
+		return
+	}
+	put := func(id, name string) {
+		id = strings.TrimSpace(id)
+		name = strings.TrimSpace(name)
+		if id != "" && name != "" && dst[id] == "" {
+			dst[id] = name
+		}
+	}
+	put(am.Sender.ID, am.Sender.Name)
+	for _, m := range am.Mentions {
+		if m.IDType == "" || m.IDType == "open_id" || m.IDType == "app_id" {
+			put(m.ID, m.Name)
+		}
+	}
+	if am.MsgType != "post" || strings.TrimSpace(am.Body.Content) == "" {
+		return
+	}
+	var c map[string]any
+	if json.Unmarshal([]byte(am.Body.Content), &c) != nil {
+		return
+	}
+	if _, ok := c["content"]; !ok {
+		for _, k := range sortedKeys(c) {
+			if inner, ok := c[k].(map[string]any); ok {
+				if _, ok := inner["content"]; ok {
+					c = inner
+					break
+				}
+			}
+		}
+	}
+	paras, _ := c["content"].([]any)
+	for _, p := range paras {
+		elems, _ := p.([]any)
+		for _, e := range elems {
+			el, _ := e.(map[string]any)
+			if tag, _ := el["tag"].(string); tag != "at" {
+				continue
+			}
+			uid, _ := el["user_id"].(string)
+			uname, _ := el["user_name"].(string)
+			if uid != "" && uid != "all" && !strings.HasPrefix(uid, "@") {
+				put(uid, uname)
 			}
 		}
 	}

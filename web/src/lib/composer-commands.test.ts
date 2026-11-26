@@ -165,7 +165,7 @@ describe("rankSlashSkills", () => {
   });
 });
 
-// /permissions (#6476) goes wherever the chat shows the permission picker: an agent with modes while it runs.
+// /permissions (#6476) goes wherever the chat shows the permission picker: an agent with modes or listed permission_modes while it runs.
 describe("agentCommands' /permissions", () => {
   const LIST = [{ text: "/compact" }, { text: PERMISSIONS_COMMAND }];
   const has = (s?: Session) => agentCommands(LIST, s).some((c) => c.text === PERMISSIONS_COMMAND);
@@ -173,6 +173,20 @@ describe("agentCommands' /permissions", () => {
     expect(has(session({}))).toBe(true);
     expect(has(session({ state: "working", status: "working" }))).toBe(true);
     expect(has(session({ agent: "agy", source_kind: "runtime" }))).toBe(true);
+  });
+  it("is listed for a running runtime that declares capabilities.permission_modes, and hidden when offline or under two modes", () => {
+    const listed = (over: Partial<Session> = {}) =>
+      session({
+        agent: "paseo",
+        source_kind: "runtime",
+        pane_id: undefined,
+        capabilities: { read: true, send: true, modes: false, permission_modes: ["default", "bypassPermissions"] },
+        ...over,
+      });
+    expect(has(listed())).toBe(true);
+    expect(has(listed({ state: "working", status: "working" }))).toBe(true);
+    expect(has(listed({ state: "offline", status: "offline" }))).toBe(false);
+    expect(has(listed({ capabilities: { read: true, send: true, modes: false, permission_modes: ["default"] } }))).toBe(false);
   });
   it("is not listed for agy or cursor in a terminal pane, whose mode is their start's", () => {
     expect(has(session({ agent: "agy" }))).toBe(false);

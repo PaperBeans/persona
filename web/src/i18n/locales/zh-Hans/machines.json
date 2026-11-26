@@ -1,4 +1,5 @@
 {
+  "computer_label": "电脑",
   "reconnecting": "正在重新连接",
   "reconnect_failed": "重新连接失败：{error}",
   "sidebar": "侧边栏",
@@ -39,6 +40,10 @@
   "memory_last_hour": "最近一小时内存",
   "network_last_hour": "最近一小时网络：下载（橙色）、上传（紫色）",
   "view_label": "显示方式",
+  "view_management": "管理",
+  "view_work": "工作",
+  "view_diagnostics": "诊断",
+  "view_back": "返回",
   "view_cards": "卡片",
   "view_capabilities": "能力",
   "view_procs": "端口与进程",

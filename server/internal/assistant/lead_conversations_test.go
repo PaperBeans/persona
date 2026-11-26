@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistant/supervisionrole"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/devicewire"
@@ -255,7 +256,7 @@ func TestDirectionNotesWaitForAnIdleLead(t *testing.T) {
 		t.Fatal(err)
 	}
 	v1 := policyOf(s)
-	if !strings.HasPrefix(v1, prompts.RenderSupervisionInstructions()+"\n\n") || !strings.Contains(v1, "Readings: v1.") {
+	if !strings.HasPrefix(v1, mustSupervisionRole(t, supervisionrole.RoleLeader())+"\n\n") || !strings.Contains(v1, "Readings: v1.") {
 		t.Fatalf("idle: %q", v1)
 	}
 	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v2.", nil); err != nil {
@@ -286,7 +287,7 @@ func TestDirectionNotesWaitForAnIdleLead(t *testing.T) {
 		t.Fatalf("busy after the idle send: %q", got)
 	}
 	// Another leader's policy, and a leader without notes, are untouched.
-	if other := mustSupervisionInstructions(t, s2, ctx, "server", "conv_other"); other != prompts.RenderSupervisionInstructions() {
+	if other := mustSupervisionInstructions(t, s2, ctx, "server", "conv_other"); other != mustSupervisionRole(t, supervisionrole.RoleLeader()) {
 		t.Fatal("another leader's policy changed")
 	}
 }
@@ -491,14 +492,14 @@ func nodeRefuses(string, json.RawMessage) (any, error) {
 
 func nodeTakes(string, json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil }
 
-// A direction ended and made again does not bring back the notes block it had before it ended: once unpinned, an idle
-// send restarts the conversation on the plain policy (it still supervises its task), so after the owner clears the
-// notes and pins it again, a message that finds it working is sent on that plain policy, with no role change for the
-// node to refuse.
+// A direction ended and made again does not bring back the notes block or role it had before it ended: once unpinned,
+// an idle send restarts the conversation as a side supervisor. Re-pinning it while that side process works holds the
+// leader role until an idle send; a refused idle send rolls the role back instead of making later messages busy too.
 func TestDirectionNotesInEffectFollowTheConversationAcrossItsEnd(t *testing.T) {
 	s, f := notesEnv(t)
 	ctx := context.Background()
-	plain := prompts.RenderSupervisionInstructions()
+	leader := mustSupervisionRole(t, supervisionrole.RoleLeader())
+	side := mustSupervisionRole(t, supervisionrole.RoleSide())
 	todo, err := s.createTodo(ctx, "Ship the build", "", "conv_lead", "")
 	if err != nil {
 		t.Fatal(err)
@@ -514,8 +515,8 @@ func TestDirectionNotesInEffectFollowTheConversationAcrossItsEnd(t *testing.T) {
 	if ended, err := s.endDirection(ctx, "conv_lead"); err != nil || !ended {
 		t.Fatalf("end: %v %v", ended, err)
 	}
-	if got := dispatchedPolicy(t, s, "conv_lead"); got != plain {
-		t.Fatalf("unpinned: %q", got)
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != side {
+		t.Fatalf("unpinned leader with remaining work did not become a side supervisor: %q", got)
 	}
 	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "", nil); err != nil {
 		t.Fatal(err)
@@ -524,8 +525,154 @@ func TestDirectionNotesInEffectFollowTheConversationAcrossItsEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
-	if got := dispatchedPolicy(t, s, "conv_lead"); got != plain {
-		t.Fatalf("pinned again while it works: the policy changed to %q", strings.TrimPrefix(got, plain))
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != side {
+		t.Fatalf("pinned again while it works changed the running process's policy: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if got := ownerPolicy(t, s, "conv_lead"); got != leader {
+		t.Fatalf("the idle send did not take the leader role: %q", got)
+	}
+	hubSent(s, "conv_lead", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != side {
+		t.Fatalf("a refused role change did not roll back: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != leader {
+		t.Fatalf("the next idle send did not retry the leader role: %q", got)
+	}
+}
+
+func TestDirectionEndWaitsForAnIdleRoleChange(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	leader := mustSupervisionRole(t, supervisionrole.RoleLeader())
+	todo, err := s.createTodo(ctx, "Ship the build", "", "conv_lead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv_lead", []string{"Shipped"}, 30)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number.", nil); err != nil {
+		t.Fatal(err)
+	}
+	withNotes := dispatchedPolicy(t, s, "conv_lead")
+	if !strings.HasPrefix(withNotes, leader) {
+		t.Fatalf("lead: %q", withNotes)
+	}
+	if ended, err := s.endDirection(ctx, "conv_lead"); err != nil || !ended {
+		t.Fatalf("end: %v %v", ended, err)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != withNotes {
+		t.Fatalf("ending a working direction changed its policy: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != mustSupervisionRole(t, supervisionrole.RoleSide()) {
+		t.Fatalf("the idle send did not become a side supervisor: %q", got)
+	}
+}
+
+func TestDirectionFirstPinWhileSideWorksKeepsItsRole(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	side := mustSupervisionRole(t, supervisionrole.RoleSide())
+	todo, err := s.createTodo(ctx, "Keep the side work", "", "conv_side", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv_side", []string{"Kept"}, 30)
+	listLeads(f, proto.Session{SessionID: "conv_side", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_side"); got != side {
+		t.Fatalf("side before its first pin: %q", got)
+	}
+	// The side send has no direction record; its accepted supplement baseline moves onto the new direction at the pin.
+	listLeads(f, proto.Session{SessionID: "conv_side", Status: proto.StatusWorking})
+	if _, err := s.makeDirection(ctx, "conv_side", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatchedPolicy(t, s, "conv_side"); got != side {
+		t.Fatalf("the first pin changed a working legacy side's policy: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_side", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_side"); got != mustSupervisionRole(t, supervisionrole.RoleLeader()) {
+		t.Fatalf("the idle send did not take the leader role: %q", got)
+	}
+}
+
+type directionRolePublicationStore struct {
+	Store
+	check func(Settings)
+}
+
+func (s *directionRolePublicationStore) PutSetting(ctx context.Context, key string, v any) error {
+	if key == settingsKey {
+		s.check(v.(Settings))
+	}
+	return s.Store.PutSetting(ctx, key, v)
+}
+
+func TestDirectionRoleBaselinePrecedesLeaderPublication(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	todo, err := s.createTodo(ctx, "Keep the side work", "", "conv_side", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv_side", []string{"Kept"}, 30)
+	listLeads(f, proto.Session{SessionID: "conv_side", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_side"); got != mustSupervisionRole(t, supervisionrole.RoleSide()) {
+		t.Fatalf("side before its first pin: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_side", Status: proto.StatusWorking})
+	base := s.store()
+	checked := false
+	wrapped := &directionRolePublicationStore{Store: base, check: func(cfg Settings) {
+		if !slices.Contains(cfg.Leaders, "conv_side") {
+			return
+		}
+		checked = true
+		s.directions.mu.Lock()
+		d := s.directions.m["conv_side"]
+		role := ""
+		if d != nil {
+			role = d.RoleInEffect
+		}
+		s.directions.mu.Unlock()
+		if role != "side" {
+			t.Errorf("new leader membership reached storage before its old-role baseline: %q", role)
+		}
+	}}
+	storeFn := func() Store { return wrapped }
+	s.storeFn.Store(&storeFn)
+	if _, err := s.makeDirection(ctx, "conv_side", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !checked {
+		t.Fatal("the leader settings write was not observed")
+	}
+}
+
+func TestDirectionFirstEndWhileLegacyLeaderWorksKeepsItsRole(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	todo, err := s.createTodo(ctx, "Keep the legacy lead", "", "conv_lead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv_lead", []string{"Kept"}, 30)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if ended, err := s.endDirection(ctx, "conv_lead"); err != nil || !ended {
+		t.Fatalf("end: %v %v", ended, err)
+	}
+	// The pre-upgrade record and supplement have no role baseline. Assuming a compact leader policy here would invent
+	// a fingerprint the working legacy process never received, so it keeps the complete policy until an idle send.
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != prompts.RenderSupervisionInstructions() {
+		t.Fatalf("the first unpin changed a working legacy leader's full policy: %q", got)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != mustSupervisionRole(t, supervisionrole.RoleSide()) {
+		t.Fatalf("the idle send did not select the former leader's side role: %q", got)
 	}
 }
 
@@ -534,11 +681,14 @@ func TestDirectionNotesInEffectFollowTheConversationAcrossItsEnd(t *testing.T) {
 func TestDirectionNotesFirstSaveWhileTheLeadWorks(t *testing.T) {
 	s, f := notesEnv(t)
 	ctx := context.Background()
-	plain := prompts.RenderSupervisionInstructions()
+	plain := mustSupervisionRole(t, supervisionrole.RoleLeader())
 	// conv_other has notes from before any block in effect was recorded: every send so far carried them.
 	at := time.Now().UTC()
 	s.directions.mu.Lock()
 	s.directions.m["conv_other"].Notes, s.directions.m["conv_other"].NotesAt = "Infra rule: back up first.", &at
+	// This notes test starts with current role-filtered processes; the separate upgrade test covers an absent baseline.
+	s.directions.m["conv_lead"].RoleInEffect = "leader"
+	s.directions.m["conv_other"].RoleInEffect = "leader"
 	s.directions.mu.Unlock()
 	withOld := plain + "\n\n" + prompts.RenderDirectionNotes(s.directionPrompt(ctx, "conv_other"))
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking},
@@ -697,7 +847,7 @@ func TestDirectionNotesSettledByTheSendThatCarriedThem(t *testing.T) {
 			hubSent(s, "conv_lead", tc.owner)
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 			if got := nodePolicy(t, s, "conv_lead"); !strings.Contains(got, tc.want) {
-				t.Fatalf("taken to run %q, want %s", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()), tc.want)
+				t.Fatalf("taken to run %q, want %s", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())), tc.want)
 			}
 		})
 	}
@@ -850,11 +1000,11 @@ func TestDirectionNotesOwnerNoticeSettlesItsOwnMessage(t *testing.T) {
 	hubSentID(s, "conv_lead", "m-3", assistantwire.ConversationFailed)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("taken to run %q after its own refusal", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q after its own refusal", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	// The rest of the turn keeps the policy the lead runs on.
 	if got := ownerMessage(t, s, "conv_lead", "m-4"); got != v1 {
-		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	hubSentID(s, "conv_lead", "m-4", assistantwire.ConversationDelivered)
 }
@@ -869,7 +1019,7 @@ func TestDirectionNotesReplayedMessageMovesNothing(t *testing.T) {
 	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
 	saveLeadNotes(t, s, "Readings: v2.")
 	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v1 {
-		t.Fatalf("the replay moved the block: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("the replay moved the block: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	// The next message moves it, and is refused: the block before it is the one the lead runs.
 	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v2.") {
@@ -878,7 +1028,7 @@ func TestDirectionNotesReplayedMessageMovesNothing(t *testing.T) {
 	hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationFailed)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -896,7 +1046,7 @@ func TestDirectionNotesOlderHubNoticeWithoutAnID(t *testing.T) {
 	hubSent(s, "conv_lead", assistantwire.ConversationFailed)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -948,7 +1098,7 @@ func TestDirectionNotesSendThatNeverReachedTheComputerIsNotTaken(t *testing.T) {
 			}
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 			if got := nodePolicy(t, s, "conv_lead"); got != want {
-				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 		})
 	}
@@ -982,11 +1132,11 @@ func TestDirectionNotesRetryTheHubSendsSettlesTheBlockItCarried(t *testing.T) {
 			saveLeadNotes(t, s, "Readings: v2.")
 			v2 := ownerMessage(t, s, "conv_lead", "m-1") // no notice comes for it
 			if !strings.Contains(v2, "Readings: v2.") {
-				t.Fatalf("the first attempt: %q", strings.TrimPrefix(v2, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("the first attempt: %q", strings.TrimPrefix(v2, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 			setClock(s, at.Add(tc.later))
 			if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v2 {
-				t.Fatalf("the retry carries %q, not the first attempt's block", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("the retry carries %q, not the first attempt's block", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 			setClock(s, at.Add(tc.later+2*time.Minute))
 			hubSentID(s, "conv_lead", "m-1", tc.outcome)
@@ -996,11 +1146,11 @@ func TestDirectionNotesRetryTheHubSendsSettlesTheBlockItCarried(t *testing.T) {
 			}
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 			if got := nodePolicy(t, s, "conv_lead"); got != want {
-				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 			// The rest of the turn carries what the lead runs.
 			if got := ownerMessage(t, s, "conv_lead", "m-2"); got != want {
-				t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 		})
 	}
@@ -1022,20 +1172,20 @@ func TestDirectionNotesRetryAnsweredFromTheRecordMovesNothing(t *testing.T) {
 	saveLeadNotes(t, s, "Readings: v3.")
 	setClock(s, at.Add(time.Minute))
 	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v2 {
-		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	setClock(s, at.Add(notesOwnerWait))
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("while a notice can still come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("while a notice can still come: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	setClock(s, at.Add(time.Minute+notesOwnerWait))
 	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
-		t.Fatalf("once none can: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("once none can: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
 	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v3.") {
-		t.Fatalf("the next idle message: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("the next idle message: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -1053,12 +1203,12 @@ func TestDirectionNotesRetryAfterALaterMessageWasTaken(t *testing.T) {
 	v3 := ownerMessage(t, s, "conv_lead", "m-2")
 	hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationDelivered)
 	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v3 {
-		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v3 {
-		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -1131,7 +1281,7 @@ func TestDirectionNotesNoticeWithoutAnIDOnceTheHubNamesMessages(t *testing.T) {
 	hub.sent("m-1", assistantwire.ConversationDelivered)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
-		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	late := hub.read("m-x", assistantwire.ConversationDelivered) // read on this connection, handled after the next hello
 	hub.hello()
@@ -1139,13 +1289,13 @@ func TestDirectionNotesNoticeWithoutAnIDOnceTheHubNamesMessages(t *testing.T) {
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
 	saveLeadNotes(t, s, "Readings: v3.")
 	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v3.") {
-		t.Fatalf("the next message: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("the next message: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	hub.sent("", assistantwire.ConversationFailed) // an older hub's notice for it
 	// The lead runs v2, and the rest of its turn carries it.
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := ownerMessage(t, s, "conv_lead", "m-3"); got != v2 {
-		t.Fatalf("after a new connection, a message of the turn carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("after a new connection, a message of the turn carries %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	hub.sent("", assistantwire.ConversationDelivered)
 }
@@ -1189,7 +1339,7 @@ func TestDirectionNotesMessagesWithAndWithoutIDs(t *testing.T) {
 			expect := func(what, want string) {
 				t.Helper()
 				if got := nodePolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: "+want+".") {
-					t.Fatalf("%s: taken to run %q, want %s", what, strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()), want)
+					t.Fatalf("%s: taken to run %q, want %s", what, strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())), want)
 				}
 			}
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
@@ -1217,13 +1367,13 @@ func TestDirectionNotesRetryWhileALaterMoveIsInFlight(t *testing.T) {
 			saveLeadNotes(t, s, "Readings: v3.")
 			v3 := ownerMessage(t, s, "conv_lead", "m-2") // it goes in; its notice comes later
 			if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v3 {
-				t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("the retry carries %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 			hubSentID(s, "conv_lead", "m-1", outcome)
 			hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationDelivered)
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 			if got := nodePolicy(t, s, "conv_lead"); got != v3 {
-				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 		})
 	}
@@ -1247,11 +1397,11 @@ func TestDirectionNotesRetryRefusedSettlesNothing(t *testing.T) {
 	}
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("while the first attempt waits: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("while the first attempt waits: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	setClock(s, at.Add(notesOwnerWait))
 	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
-		t.Fatalf("once its notice can no longer come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("once its notice can no longer come: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -1268,10 +1418,10 @@ func TestDirectionNotesNoticeOfAnUnknownOutcomeKeepsTheBlock(t *testing.T) {
 	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationUnknown)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
-		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	if got := ownerMessage(t, s, "conv_lead", "m-2"); got != v2 {
-		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 
@@ -1289,7 +1439,7 @@ func TestDirectionNotesSendWithoutAHandleTakesTheConfirmedBlock(t *testing.T) {
 			saveLeadNotes(t, s, "Readings: v2.")
 			v2 := ownerMessage(t, s, "conv_lead", "m-2") // in flight
 			if own := nodePolicy(t, s, "conv_lead"); own != v1 {
-				t.Fatalf("the node's own message took a block in flight: %q", strings.TrimPrefix(own, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("the node's own message took a block in flight: %q", strings.TrimPrefix(own, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 			hubSentID(s, "conv_lead", "m-2", outcome)
 			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
@@ -1298,7 +1448,7 @@ func TestDirectionNotesSendWithoutAHandleTakesTheConfirmedBlock(t *testing.T) {
 				want = v2
 			}
 			if got := nodePolicy(t, s, "conv_lead"); got != want {
-				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 			}
 		})
 	}
@@ -1320,11 +1470,11 @@ func TestDirectionNotesKeptWhenTheOutcomeIsNeverLearned(t *testing.T) {
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	setClock(s, at.Add(notesOwnerWait-time.Second))
 	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
-		t.Fatalf("while its notice can still come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("while its notice can still come: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	setClock(s, at.Add(notesOwnerWait))
 	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
-		t.Fatalf("once it can no longer come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("once it can no longer come: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 	// A manager restart between a send and its outcome: the block is kept, and the restarted manager settles nothing.
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
@@ -1334,7 +1484,7 @@ func TestDirectionNotesKeptWhenTheOutcomeIsNeverLearned(t *testing.T) {
 	hubSentID(s2, "conv_lead", "m-3", assistantwire.ConversationFailed)
 	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
 	if got := nodePolicy(t, s2, "conv_lead"); got != v3 || !strings.Contains(v3, "Readings: v3.") {
-		t.Fatalf("after a restart: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+		t.Fatalf("after a restart: %q", strings.TrimPrefix(got, mustSupervisionRole(t, supervisionrole.RoleLeader())))
 	}
 }
 

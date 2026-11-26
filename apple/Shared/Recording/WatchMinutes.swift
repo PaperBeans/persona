@@ -14,6 +14,13 @@ nonisolated struct WatchMinutes: Codable, Hashable, Sendable {
         var points: [String] = []
         var decisions: [String] = []
         var actions: [String] = []
+        /// Why minutes still being written are not moving (#15214): the hub's `paused`, or the phone's own word that
+        /// its hub's recording module is off. Absent when nothing holds them, and from a phone before the field; a
+        /// watch from before it ignores the key and keeps saying they are being written.
+        var paused: RecordingPause? = nil
+
+        /// Held back while the hub's recording module is off: the watch says Paused, not Writing.
+        var isPaused: Bool { state == .writing && paused?.isModuleOff == true }
     }
 
     var meetings: [Meeting] = []
@@ -26,8 +33,12 @@ nonisolated struct WatchMinutes: Codable, Hashable, Sendable {
     static let maxChars = 120
 
     /// The short version of a recording's minutes (nil: not written yet, or `failed`).
-    static func meeting(id: UUID, title: String, date: Date, minutes: RecordingMinutes?, failed: Bool = false) -> Meeting {
-        guard let minutes else { return Meeting(id: id, title: title, date: date, state: failed ? .failed : .writing) }
+    static func meeting(id: UUID, title: String, date: Date, minutes: RecordingMinutes?, failed: Bool = false,
+                        paused: RecordingPause? = nil) -> Meeting {
+        guard let minutes else {
+            // Only minutes still being written can be paused; failed ones say so.
+            return Meeting(id: id, title: title, date: date, state: failed ? .failed : .writing, paused: failed ? nil : paused)
+        }
         func cut(_ s: String) -> String { s.count > maxChars ? String(s.prefix(maxChars - 1)) + "…" : s }
         func lines(_ items: [RecordingMinutes.Item], _ line: (RecordingMinutes.Item) -> String) -> [String] {
             items.prefix(maxItems).map { cut(line($0)) }

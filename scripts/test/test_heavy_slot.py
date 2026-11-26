@@ -39,13 +39,20 @@ with open(log, "a") as f:
 SIGNAL_WAIT = 60
 UNSIGNALLED_SLEEP = 10 * SIGNAL_WAIT
 # A command that writes <ready> once its SIGTERM handler is in place and exits 42 when the TERM comes; without one it
-# sleeps UNSIGNALLED_SLEEP seconds and exits 3.
-TERM_CATCHER = f"""import signal, sys, time
+# sleeps UNSIGNALLED_SLEEP seconds and exits 3. The marker path appears as soon as open() creates it, so SIGTERM stays
+# blocked while it is written: a handler that runs inside that write can have its SystemExit discarded (#14464). An
+# optional <hold> keeps the block active until that file appears, so a regression can prove the signal stays pending.
+TERM_CATCHER = f"""import os, signal, sys, time
+old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {{signal.SIGTERM}})
 def caught(signum, frame):
     open(sys.argv[2], "w").write("TERM")
     sys.exit(42)
 signal.signal(signal.SIGTERM, caught)
 open(sys.argv[1], "w").write("ready")
+if len(sys.argv) > 3:
+    while not os.path.exists(sys.argv[3]):
+        time.sleep(0.01)
+signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
 time.sleep({UNSIGNALLED_SLEEP})
 sys.exit(3)
 """
@@ -254,11 +261,40 @@ class HeavySlotTests(unittest.TestCase):
             proc.communicate(timeout=SIGNAL_WAIT)
         except subprocess.TimeoutExpired:
             # The command sleeps ten times as long as this wait unless the TERM reaches it: say which side stalled.
+            state = {"helper_poll": proc.poll(), "ready": ready.exists(), "caught": caught.exists()}
             if caught.exists():
-                self.fail(f"the command caught the TERM, but the helper had not exited {SIGNAL_WAIT}s later")
-            self.fail(f"the TERM never reached the command: it was still sleeping {SIGNAL_WAIT}s later")
+                self.fail(f"the command caught the TERM, but the helper had not exited {SIGNAL_WAIT}s later: {state}")
+            self.fail(f"the TERM never reached the command: it was still sleeping {SIGNAL_WAIT}s later: {state}")
         self.assertEqual("TERM", caught.read_text())
         self.assertEqual(42, proc.returncode)  # the command's own exit status after it handled the TERM
+        self.assertEqual(0, self.run_helper("go", "true", env={"PERSONA_HEAVY_SLOT_TIMEOUT": "0"})[0])
+
+    def test_sigterm_waits_until_the_ready_marker_is_published(self):
+        # The marker path exists as soon as open() creates it. Keep SIGTERM blocked after that point and prove the TERM
+        # forwarded by the helper stays pending until the command restores its mask, instead of being handled inside the
+        # marker's file write (#14464).
+        (self.tmp / "catcher.py").write_text(TERM_CATCHER)
+        ready, caught, release = self.tmp / "ready", self.tmp / "caught", self.tmp / "release"
+        proc = self.spawn("go", sys.executable, str(self.tmp / "catcher.py"), str(ready), str(caught), str(release))
+        self.wait_for(ready.exists, "the command never published its ready marker", seconds=SIGNAL_WAIT)
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            state = {"helper_poll": proc.poll(), "ready": ready.exists(), "caught": caught.exists()}
+            self.fail(f"the helper exited while SIGTERM was still blocked: {state}")
+        state = {"helper_poll": proc.poll(), "ready": ready.exists(), "caught": caught.exists()}
+        self.assertFalse(caught.exists(), f"the command handled SIGTERM before the marker was released: {state}")
+        release.touch()
+        try:
+            proc.communicate(timeout=SIGNAL_WAIT)
+        except subprocess.TimeoutExpired:
+            state = {"helper_poll": proc.poll(), "ready": ready.exists(), "caught": caught.exists()}
+            self.fail(f"the deferred TERM never reached the command: {state}")
+        self.assertEqual("TERM", caught.read_text())
+        self.assertEqual(42, proc.returncode)
         self.assertEqual(0, self.run_helper("go", "true", env={"PERSONA_HEAVY_SLOT_TIMEOUT": "0"})[0])
 
     def test_a_signal_the_caller_ignores_stays_ignored(self):

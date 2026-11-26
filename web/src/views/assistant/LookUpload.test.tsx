@@ -2,14 +2,14 @@
 // The upload dialog (#2404): nothing goes before there is an image and a name, a file the hub can't read or one too
 // small is refused at once, the body carries the crop and the trimmed texts, a second click sends nothing more, the
 // progress shows, and the hub's refusal is shown as it is.
-import { act } from "react";
+import { StrictMode, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import { ApiError } from "../../lib/api";
 import type { PickedImage, UploadAnswer, UploadBody } from "../../lib/look-upload";
 import type { ExtendedUploadBody, PatchAnswer, PatchLookBody, PickedUploadImage } from "../../lib/look-upload-states";
-import type { PersonaInfo } from "../../lib/persona";
+import { PERSONA_STATES, type PersonaInfo } from "../../lib/persona";
 import { LookUploadDialog, type LookUploadDeps } from "./LookUpload";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -381,5 +381,243 @@ describe("the upload dialog", () => {
     expect(patches).toEqual([{ id: "u-demo0001", body: { color: "auto", states: { working: { mark: false } } } }]);
     expect(onEdited).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  function dispatchDrag(el: Element, type: "dragenter" | "dragover" | "dragleave" | "drop", files: File[] = [png()], types: string[] = ["Files"]) {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    const dt = { types, files, dropEffect: "" };
+    Object.defineProperty(ev, "dataTransfer", { value: dt, configurable: true });
+    act(() => { el.dispatchEvent(ev); });
+    return { ev, dt };
+  }
+
+  async function dispatchDrop(el: Element, files: File[] = [png()], types: string[] = ["Files"]) {
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    const dt = { types, files, dropEffect: "" };
+    Object.defineProperty(ev, "dataTransfer", { value: dt, configurable: true });
+    await act(async () => { el.dispatchEvent(ev); });
+    return { ev, dt };
+  }
+
+  const editFixture = (): PersonaInfo => ({
+    id: "u-demo0001",
+    rev: "r1",
+    manifest: {
+      format: 1,
+      id: "u-demo0001",
+      name: "Doudou",
+      subtitle: "Warm",
+      avatar: { sizes: { "128": "avatar/128.png" } },
+      dot: {
+        size: 144,
+        states: {
+          idle: { file: "dot/idle.png", frames: 1 },
+          thinking: { file: "dot/thinking.png", frames: 1 },
+          working: { file: "dot/working.png", frames: 1 },
+          needs_you: { file: "dot/needs_you.png", frames: 1 },
+          offline: { file: "dot/offline.png", frames: 1 },
+        },
+      },
+      source: { kind: "upload", color: { auto: true }, states: {} },
+    },
+  });
+
+  it("highlights and drops onto the main slot in upload and edit dialogs, and keeps Keep current working", async () => {
+    const read = vi.fn(async () => image(600, 600));
+    const deps: LookUploadDeps = { read, extractColor: vi.fn(() => "#27747F") };
+    act(() => root.render(<LookUploadDialog open supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={deps} />));
+
+    const dropZone = dialog().querySelector('[data-testid="look-upload-drop"]')!;
+    const { dt } = dispatchDrag(dropZone, "dragenter");
+    expect(dropZone.getAttribute("data-drop-over")).toBe("true");
+    expect(dropZone.className).toContain("border-accent");
+    expect(dropZone.className).toContain("bg-accent-tint");
+    // Child enter/leave does not drop the highlight while still inside
+    dispatchDrag(dropZone.firstElementChild!, "dragenter");
+    dispatchDrag(dropZone, "dragleave");
+    expect(dropZone.getAttribute("data-drop-over")).toBe("true");
+    dispatchDrag(dropZone, "dragover");
+    expect(dt.dropEffect === "" || dt.dropEffect === "copy").toBe(true);
+
+    await dispatchDrop(dropZone, [png()]);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(dialog().querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
+
+    // Edit dialog: drag-over highlights preview, drop opens crop with Keep current
+    act(() => root.render(<LookUploadDialog key="edit" open supportsStates edit={editFixture()} onClose={vi.fn()} onUploaded={vi.fn()} deps={deps} />));
+    const preview = dialog().querySelector('[data-testid="look-edit-preview"]')!;
+    dispatchDrag(preview, "dragover");
+    expect(preview.getAttribute("data-drop-over")).toBe("true");
+    expect(preview.className).toContain("border-accent");
+    await dispatchDrop(preview, [png()]);
+    expect(dialog().querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
+    const keepBtn = button(t("assistant-lookupload.keep_current"));
+    expect(keepBtn).toBeDefined();
+    act(() => keepBtn.click());
+    expect(dialog().querySelector('[data-testid="look-edit-preview"]')).not.toBeNull();
+  });
+
+  for (const mode of ["upload", "edit"] as const) {
+    it(`drops onto each of the 5 state rows independently in ${mode} mode and labels each Choose/Change button`, async () => {
+      for (const st of PERSONA_STATES) {
+        const deps: LookUploadDeps = {
+          read: vi.fn(async () => image(400, 400)),
+          extractColor: vi.fn(() => "#3A7BD5"),
+        };
+        act(() => root.render(
+          <LookUploadDialog
+            key={`${mode}-${st.id}`}
+            open
+            supportsStates
+            edit={mode === "edit" ? editFixture() : undefined}
+            onClose={vi.fn()}
+            onUploaded={vi.fn()}
+            deps={deps}
+          />,
+        ));
+        if (mode === "upload") {
+          act(() => dialog().querySelector<HTMLButtonElement>('[data-testid="look-states-toggle"]')!.click());
+        }
+        const row = dialog().querySelector(`[data-state-row="${st.id}"]`)!;
+        // Choose button has an accessible name naming the state
+        const chooseBtn = row.querySelector<HTMLButtonElement>(`button[aria-label="${t("assistant-lookupload.state_choose_label", { state: st.title })}"]`);
+        expect(chooseBtn).not.toBeNull();
+
+        // Drag-over highlights ONLY this state row
+        dispatchDrag(row, "dragover");
+        expect(row.getAttribute("data-drop-over")).toBe("true");
+        expect(row.className).toContain("border-accent");
+        expect(row.className).toContain("bg-accent-tint");
+        for (const other of PERSONA_STATES) {
+          if (other.id === st.id) continue;
+          expect(dialog().querySelector(`[data-state-row="${other.id}"]`)!.getAttribute("data-drop-over")).toBeNull();
+        }
+        expect(dialog().querySelector('[data-testid="look-upload-drop"]')?.getAttribute("data-drop-over") ?? null).toBeNull();
+        expect(dialog().querySelector('[data-testid="look-edit-preview"]')?.getAttribute("data-drop-over") ?? null).toBeNull();
+
+        // Drop opens that state's crop sub-view with the right title
+        await dispatchDrop(row, [new File(["img"], `${st.id}.png`, { type: "image/png" })]);
+        expect(dialog().querySelector("h2")?.textContent).toBe(t("assistant-lookupload.crop_state_title", { state: st.title }));
+
+        // Apply sets ONLY that state row to Custom and updates its button label to Change
+        act(() => button(t("assistant-lookupload.apply_crop")).click());
+        for (const other of PERSONA_STATES) {
+          const r = dialog().querySelector(`[data-state-row="${other.id}"]`)!;
+          if (other.id === st.id) {
+            expect(r.textContent).toContain(t("assistant-lookupload.state_custom"));
+            expect(r.querySelector(`button[aria-label="${t("assistant-lookupload.state_change_label", { state: st.title })}"]`)).not.toBeNull();
+          } else {
+            expect(r.textContent).not.toContain(t("assistant-lookupload.state_custom"));
+          }
+        }
+      }
+    });
+  }
+
+  it("refuses an unsupported file dropped on a state row and keeps animated GIF frames when dropped on a state", async () => {
+    const animBytes = new Uint8Array([71, 73, 70, 56]);
+    const animImg: PickedUploadImage = {
+      source: {} as CanvasImageSource,
+      size: { w: 300, h: 300 },
+      release: vi.fn(),
+      animated: true,
+      file: new Blob([animBytes], { type: "image/gif" }),
+      bytes: animBytes,
+      url: "blob:anim-drop",
+    };
+    const deps: LookUploadDeps = { read: vi.fn(async () => animImg), extractColor: vi.fn(() => "#D4683F") };
+    act(() => root.render(<LookUploadDialog open supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={deps} />));
+    act(() => dialog().querySelector<HTMLButtonElement>('[data-testid="look-states-toggle"]')!.click());
+
+    const thinkingRow = dialog().querySelector('[data-state-row="thinking"]')!;
+    await dispatchDrop(thinkingRow, [new File(["hello"], "notes.txt", { type: "text/plain" })]);
+    expect(alertText()).toBe(t("assistant-lookupload.not_image"));
+    expect(deps.read).not.toHaveBeenCalled();
+
+    // Drop an animated GIF on Thinking
+    await dispatchDrop(thinkingRow, [new File([animBytes], "think.gif", { type: "image/gif" })]);
+    expect(dialog().querySelector('[data-testid="look-upload-animated"]')).not.toBeNull();
+    act(() => button(t("assistant-lookupload.apply_crop")).click());
+    expect(dialog().querySelector('[data-state-preview="thinking"]')?.getAttribute("data-playing")).toBe("true");
+  });
+
+  it("replaces a state's picture when dropped onto its crop sub-view and releases the previous unapplied image", async () => {
+    const first: PickedUploadImage = { source: {} as CanvasImageSource, size: { w: 400, h: 400 }, release: vi.fn() };
+    const second: PickedUploadImage = { source: {} as CanvasImageSource, size: { w: 500, h: 500 }, release: vi.fn(), animated: true, url: "blob:second" };
+    let n = 0;
+    const deps: LookUploadDeps = { read: vi.fn(async () => (++n === 1 ? first : second)), extractColor: vi.fn(() => "#3A7BD5") };
+    act(() => root.render(<LookUploadDialog open supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={deps} />));
+    act(() => dialog().querySelector<HTMLButtonElement>('[data-testid="look-states-toggle"]')!.click());
+
+    await dispatchDrop(dialog().querySelector('[data-state-row="working"]')!, [png()]);
+    const cropBox = dialog().querySelector('[data-testid="look-upload-crop"]')!;
+    expect(dialog().querySelector('[data-testid="look-upload-animated"]')).toBeNull();
+
+    // Drag over shows accent ring on crop sub-view
+    dispatchDrag(cropBox, "dragover");
+    expect(cropBox.getAttribute("data-drop-over")).toBe("true");
+    expect(cropBox.className).toContain("shadow-[0_0_0_2px_var(--accent)]");
+
+    // Near-miss drop inside the crop sub-view does nothing and is defaultPrevented
+    const nearMissSub = await dispatchDrop(dialog().querySelector('[data-dialog-body]')!.firstElementChild!, [png()]);
+    expect(nearMissSub.ev.defaultPrevented).toBe(true);
+    expect(deps.read).toHaveBeenCalledTimes(1);
+
+    // Drop onto CropBox replaces the picture and releases the first
+    await dispatchDrop(cropBox, [new File(["gif"], "replace.gif", { type: "image/gif" })]);
+    expect(first.release).toHaveBeenCalledTimes(1);
+    expect(dialog().querySelector('[data-testid="look-upload-animated"]')).not.toBeNull();
+
+    // Unsupported file dropped onto CropBox shows error while staying in crop sub-view
+    await dispatchDrop(dialog().querySelector('[data-testid="look-upload-crop"]')!, [new File(["x"], "bad.txt", { type: "text/plain" })]);
+    expect(alertText()).toBe(t("assistant-lookupload.not_image"));
+  });
+
+  it("swallows near-miss drags and drops on the main dialog content without opening or picking anything", async () => {
+    const read = vi.fn(async () => image(600, 600));
+    act(() => root.render(<LookUploadDialog open supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read }} />));
+    const contentRoot = dialog().querySelector('[data-dialog-body]')!.firstElementChild!;
+    const over = dispatchDrag(contentRoot, "dragover");
+    expect(over.ev.defaultPrevented).toBe(true);
+    expect(over.dt.dropEffect).toBe("none");
+    const drop = await dispatchDrop(contentRoot, [png()]);
+    expect(drop.ev.defaultPrevented).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+    expect(dialog().querySelector('[data-testid="look-upload-crop"]')).toBeNull();
+  });
+
+  it("swallows a near-miss drop on the footer or outside the dialog while open, and stops once closed", async () => {
+    const read = vi.fn(async () => image(600, 600));
+    act(() => root.render(<LookUploadDialog open supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read }} />));
+    const footer = dialog().querySelector("[data-dialog-footer]")!;
+    const over = dispatchDrag(footer, "dragover");
+    expect(over.ev.defaultPrevented).toBe(true);
+    expect(over.dt.dropEffect).toBe("none");
+    expect((await dispatchDrop(footer)).ev.defaultPrevented).toBe(true);
+    expect((await dispatchDrop(document.body)).ev.defaultPrevented).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+    act(() => root.render(<LookUploadDialog open={false} supportsStates onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read }} />));
+    expect((await dispatchDrop(document.body)).ev.defaultPrevented).toBe(false);
+  });
+
+  it("picks initialFile once when opened in upload or edit mode", async () => {
+    const read = vi.fn(async () => image(600, 600));
+    const file = png();
+    await act(async () => root.render(<LookUploadDialog open supportsStates initialFile={file} onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read, extractColor: vi.fn(() => "#27747F") }} />));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(dialog().querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
+
+    // Rerendering with the same initialFile does not pick again
+    await act(async () => root.render(<LookUploadDialog open supportsStates initialFile={file} onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read, extractColor: vi.fn(() => "#27747F") }} />));
+    expect(read).toHaveBeenCalledTimes(1);
+
+    // Under React StrictMode (dev double-mount effect), initialFile still completes and shows the crop box
+    const strictRead = vi.fn(async () => image(600, 600));
+    await act(async () => root.render(
+      <StrictMode>
+        <LookUploadDialog key="strict" open supportsStates initialFile={png()} onClose={vi.fn()} onUploaded={vi.fn()} deps={{ read: strictRead, extractColor: vi.fn(() => "#27747F") }} />
+      </StrictMode>,
+    ));
+    expect(dialog().querySelector('[data-testid="look-upload-crop"]')).not.toBeNull();
   });
 });

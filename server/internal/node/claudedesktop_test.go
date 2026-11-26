@@ -394,6 +394,58 @@ func TestDesktopSessionsHaveACountOfTheirOwn(t *testing.T) {
 	}
 }
 
+// A sidebar of a couple of hundred sessions, quiet for more than the usual 7 days, is listed whole (#15522): with the old
+// bound of 100 the older ones were cut while the app still showed them.
+func TestDesktopSidebarOfHundredsIsListedWhole(t *testing.T) {
+	n, home := testNode(t)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
+	dir := filepath.Join(home, ".claude", "projects", "-src-app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := useDesktopDirs(t)
+	const sidebar = 250
+	for i := 0; i < sidebar; i++ {
+		id := fmt.Sprintf("dddddddd-0000-4000-8000-%012d", i)
+		writeEntrypointTranscript(t, dir, id, "claude-desktop", offlineWindow+time.Duration(i+1)*time.Hour)
+		writeDesktopEntry(t, first, fmt.Sprintf("d%d", i), id, false, nil, "")
+	}
+	listed := 0
+	for _, s := range n.scanOffline() {
+		if strings.HasPrefix(s.SessionID, "dddddddd") {
+			listed++
+		}
+	}
+	if listed != sidebar {
+		t.Fatalf("listed %d of the sidebar's %d sessions", listed, sidebar)
+	}
+}
+
+// A session New Agent starts in the desktop app is written by `claude -p` and taken over by the app
+// (claudedesktop_new.go): until the app ends a turn in it, its transcript says only sdk-cli. The sidebar lists it, so the
+// offline list does too; the same run that no entry names is still a program's one-shot run and stays out (#15522).
+func TestDesktopListedOneShotTranscriptIsListed(t *testing.T) {
+	t.Setenv("PERSONA_HOME", "")
+	n, home := testNode(t)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
+	dir := filepath.Join(home, ".claude", "projects", "-src-app")
+	first, _ := useDesktopDirs(t)
+	const (
+		adopted = "5d500000-0000-4000-8000-0000000000a1" // New Agent's session, in the app's sidebar
+		script  = "5d500000-0000-4000-8000-0000000000a2" // a program's `claude -p`, no entry names it
+	)
+	writeClaudeRun(t, dir, adopted, time.Minute, "sdk-cli")
+	writeClaudeRun(t, dir, script, 2*time.Minute, "sdk-cli")
+	writeDesktopEntry(t, first, "adopted", adopted, false, nil, `,"fromCliTranscript":true,"adoptedFromOtherSurface":true`)
+	got := listedIDs(n)
+	if !got[adopted] {
+		t.Fatal("a session the desktop app's sidebar lists is left out as a one-shot run")
+	}
+	if got[script] {
+		t.Fatal("a program's one-shot run no entry names is listed")
+	}
+}
+
 // A session deleted in the app leaves the list at once: Delete writes deleted_<uuid> for the session's own id and for each
 // transcript it ran, so desktopEntryGrace is not waited out, whether or not this node read the entry before. A delete
 // whose markers name no transcript, or an entry removed without any, still waits it out; a transcript an entry names

@@ -122,11 +122,11 @@ export function defaultLabel(d: LauncherDefault | null | undefined, fallback = "
 // The hub gives a model list 70 s (assistant/models_launchers.go): the node may have to start the CLI to ask its /model.
 const MODELS_HUB_MS = 70_000;
 
-async function readModelCatalog<T extends LauncherModels>(path: string, params: [string, string | undefined][], opts: { manager?: string; signal?: AbortSignal }): Promise<T | null> {
+async function readModelCatalog<T extends LauncherModels>(path: string, params: [string, string | undefined][], opts: { manager?: string; signal?: AbortSignal; dedupe?: boolean }): Promise<T | null> {
   const query = new URLSearchParams();
   for (const [k, v] of params) if (v) query.set(k, v);
   try {
-    const r = await api<T>(`${path}${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
+    const r = await api<T>(`${path}${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined, dedupe: opts.dedupe });
     return { ...r, models: r.models ?? [] };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -135,7 +135,7 @@ async function readModelCatalog<T extends LauncherModels>(path: string, params: 
 }
 
 /** The list for `launcher` on `mid` (seconds when the node has to start the CLI); null from an older hub (no picker). */
-export function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; host?: string; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+export function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; host?: string; manager?: string; signal?: AbortSignal; dedupe?: boolean } = {}): Promise<LauncherModels | null> {
   return readModelCatalog(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models`, [["refresh", opts.refresh ? "1" : ""], ["purpose", opts.purpose], ["host", opts.host]], opts);
 }
 
@@ -251,13 +251,13 @@ export function defaultModel(models: AgentModel[]): AgentModel | undefined {
   return models.find((m) => m.default);
 }
 
-/** Display only: explicit aliases win; raw GPT ids lose the prefix and separate their variant words. */
+/** Display only: explicit aliases win; raw GPT ids keep the GPT- prefix and separate their variant words. */
 export function modelName(m: { id: string; name?: string }): string {
   const name = m.name?.trim() ? m.name : m.id;
   if (name.toLowerCase() !== m.id.toLowerCase()) return name;
   const gpt = /^gpt-([a-z0-9]+(?:\.[a-z0-9]+)*(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)*)$/i.exec(name);
   if (!gpt) return name;
-  return gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
+  return `GPT-${gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ")}`;
 }
 
 /** A catalog variant encodes its default effort in its model ID. */

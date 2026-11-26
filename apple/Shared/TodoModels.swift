@@ -67,6 +67,7 @@ nonisolated extension TodoItem {
         }
         if waitsForOwner { return StateName.needsYou.text }
         if deliveredAwaitingReview(state) { return String(localized: "Delivered · Awaiting Review [To-do Sections]") }
+        if wait != nil { return StateName.taskWaiting.text }
         return state.todoLabel
     }
 
@@ -110,6 +111,7 @@ nonisolated extension TodoItem {
         if acceptedAtRest(state) { return .done }
         if waitsForOwner { return .needsYou }
         if deliveredAwaitingReview(state) { return .unread }
+        if wait != nil { return .waiting }
         return state
     }
 

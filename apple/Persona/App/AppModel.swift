@@ -11,7 +11,9 @@ import PersonaWire
 final class AppModel {
     static let shared: AppModel = {
         NativeStateMigration.prepare()
-        return AppModel()
+        let model = AppModel()
+        InboxStore.bindAfterLaunch(to: model)
+        return model
     }()
 
     /// Every hub paired and the groups they form (HubStore, docs/protocol/multi-hub.md). Changed only through the group
@@ -20,6 +22,8 @@ final class AppModel {
     /// The keychain could not be read at launch (before the first unlock after boot): `registry` is empty because it is
     /// unknown, not because nothing is paired. Nothing is written until it reads (`retryRegistry`).
     @ObservationIgnored private(set) var registryUnreadable = false
+    @ObservationIgnored private let readHubRegistry: () -> HubStore.Loaded
+    @ObservationIgnored private let hubSelectionDefaults: UserDefaults
     /// The credentials upgrade in flight (upgradeCredentials).
     @ObservationIgnored var credentialsUpgrade: Task<Void, Never>?
     /// Pairing tokens this launch traded for the device's own, to that token (DeviceCredentialTrade): a socket or a
@@ -555,6 +559,10 @@ final class AppModel {
     }
     /// An Inbox item a link asked to open (`HubPage.inboxItem`): the Inbox pushes it and clears this.
     var inboxToOpen: InboxOpenRequest?
+    #if os(iOS)
+    let pageVisibility = HubPageVisibility()
+    @ObservationIgnored var deferredNavigationEntry: (page: HubPage, group: String)?
+    #endif
     /// A to-do, knowledge entry or computer a link opened where no screen handles links itself (`HubLinkSheet`), over
     /// everything.
     var linkSheet: HubLinkSheet?
@@ -657,6 +665,8 @@ final class AppModel {
     /// instead of a made-up launcher name (#4200). Held settings (or a restored snapshot) keep the page usable. An
     /// answer that names no launcher sets it too (current hubs always name one; purely defensive against old hubs).
     private(set) var assistantConfigLoadFailed = false
+    /// Distinguishes visits to the same hub and assistant when an earlier request is still in flight.
+    @ObservationIgnored private var assistantPageGeneration = 0
     /// The directions' names by leader conversation id (`GET /api/v1/assistant/leaders`): the sidebar's Directions group
     /// shows these instead of the conversations' titles. Read again with the assistant; empty without leaders.
     private(set) var directionNames: [String: String] = [:]
@@ -850,8 +860,11 @@ final class AppModel {
     static let demoKey = "demo.on"
 
     /// `personas`: a store of its own (tests: a folder and defaults of their own); the app's otherwise.
-    init(stateFolder: URL? = nil, personas store: PersonaStore? = nil) {
+    init(stateFolder: URL? = nil, personas store: PersonaStore? = nil,
+         readHubRegistry: @escaping () -> HubStore.Loaded = { HubStore.read() }, hubSelectionDefaults: UserDefaults = .standard) {
         self.stateFolder = stateFolder
+        self.readHubRegistry = readHubRegistry
+        self.hubSelectionDefaults = hubSelectionDefaults
         personas = store ?? PersonaStore()
         RetiredPreferences.clear(from: .standard)
         Task.detached(priority: .utility) { LarkAttachment.staging.sweep() }
@@ -867,7 +880,7 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: Self.demoKey)
         }
         #endif
-        switch HubStore.read() {
+        switch readHubRegistry() {
         case .registry(let r): registry = r
         case .unreadable:
             // Not "unpaired": launched before the first unlock after boot (a push in the background). Nothing is
@@ -883,7 +896,7 @@ final class AppModel {
             registryUnreadable = false
         }
         #endif
-        hubGroup = UserDefaults.standard.string(forKey: Self.hubGroupKey) ?? ""
+        hubGroup = hubSelectionDefaults.string(forKey: Self.hubGroupKey) ?? ""
         if let raw = Self.savedPlace?.string(forKey: "app.tab"), let tab = AppTab(rawValue: raw) {
             selectedTab = tab
         }
@@ -918,6 +931,7 @@ final class AppModel {
             // All-day recording: the erases and deletes the watch hasn't confirmed go now that a send reaches it
             // (docs/assistant/day-recap.md「Erasing」「Deleting」), paired with a hub or not.
             RecordingDayReceiver.shared.sessionActivated()
+            RecordingModule.tellWatch() // what the hub says of recording, as last remembered (#15214)
             guard let self, self.isPaired, !self.isDemo else { return }
             WatchSync.shared.push(persona: self.personas.chosenID)
             self.pushWatchConfigs()
@@ -983,7 +997,10 @@ final class AppModel {
     /// The keychain could not be read at launch: try again (the app came to the front, the phone was unlocked), and
     /// once it reads, start as a launch with it would have.
     func retryRegistry() {
-        guard registryUnreadable, case .registry(let r) = HubStore.read() else { return }
+        guard registryUnreadable, case .registry(let r) = readHubRegistry() else { return }
+        #if os(iOS)
+        defer { resumeNavigationEntry() }
+        #endif
         registryUnreadable = false
         registry = r
         buildLinks()
@@ -1008,6 +1025,14 @@ final class AppModel {
         }
     }
 
+    /// Remember both an explicit pick and the fallback when a group's last pairing is removed. A later launch may
+    /// need that choice before protected pairing data is readable.
+    func rememberHubGroup(_ group: String) {
+        guard hubGroup != group else { return }
+        hubGroup = group
+        hubSelectionDefaults.set(group, forKey: Self.hubGroupKey)
+    }
+
     /// One link per group of the registry, keeping the ones that are already there (their sockets stay open).
     func buildLinks() {
         let wanted = registry.groups
@@ -1025,10 +1050,13 @@ final class AppModel {
         links = out
         for link in links where !link.isDemo { link.live.route = routePicker(link.group) }
         arrangeAddresses()
-        if link(hubGroup) == nil, let first = links.first { hubGroup = first.group }
+        if link(hubGroup) == nil, let first = links.first { rememberHubGroup(first.group) }
         applyPersonaPalette()
         relabelMachines()
         syncExtensionSurfaces()
+        #if os(iOS)
+        pageVisibility.follow(hub?.group, link: hub.map(ObjectIdentifier.init))
+        #endif
     }
 
 
@@ -1165,6 +1193,7 @@ final class AppModel {
             if let id = identity?.hubID, !id.isEmpty, let had = h.hubID { return had == id }
             return h.config.url == new.url // a hub that does not say who it is: the same address
         }
+        var replacedPrevious: (device: String?, watch: String?, hubID: String?, url: URL)?
         if let i = same, DeviceCredentialTrade.keepsDevice(r.hubs[i], pairing: new, traded: tradedTokens) {
             // The same pairing link again (scanned twice, opened from the camera as well): it was traded for this
             // device's own token already. Writing it back would leave the app on a token the hub drops in minutes.
@@ -1173,7 +1202,9 @@ final class AppModel {
             group = r.hubs[i].group
             tunnels.adopt(SSHTunnels.pairingID, as: r.hubs[i].id)
         } else if let i = same {
-            // The same hub paired again (a new pairing link): its new credential replaces the old one.
+            // The same hub paired again (a new pairing link): remember the prior credentials so upgradeCredentials
+            // sends them in `replaces`, even for pairings created before PreviousDeviceCredentials existed.
+            replacedPrevious = (r.hubs[i].deviceID, r.hubs[i].watchDeviceID, r.hubs[i].hubID ?? identity?.hubID, r.hubs[i].config.url)
             r.hubs[i].config = new
             r.hubs[i].deviceID = deviceID
             r.hubs[i].tradedPairing = nil
@@ -1211,7 +1242,15 @@ final class AppModel {
         link.live.connect(registry.primary(group)?.config ?? new)
         pushWatchConfigs()
         PushRegistrar.shared.registerIfPossible()
-        Task { await upgradeCredentials() }
+        Task {
+            if let prev = replacedPrevious {
+                await Task.detached {
+                    if let d = prev.device { PreviousDeviceCredentials.record(d, slot: .device, hubID: prev.hubID, url: prev.url) }
+                    if let w = prev.watch { PreviousDeviceCredentials.record(w, slot: .watch, hubID: prev.hubID, url: prev.url) }
+                }.value
+            }
+            await upgradeCredentials()
+        }
     }
 
 
@@ -1300,6 +1339,8 @@ final class AppModel {
 
     /// Sign Out of everything: every group, every hub (Settings › Disconnect with one group, a revoked credential of this device).
     func unpair() {
+        assistantPageGeneration += 1
+        directionNames = [:]
         forgetSeen()
         updateHeldRetryReceipts { _ in [] }
         LarkChatOutbox.forget()
@@ -1531,9 +1572,11 @@ final class AppModel {
     /// Loads the assistant config; with no remembered conversation, picks up the newest one.
     func refreshAssistant() async {
         guard let api else { return }
+        let generation = assistantPageGeneration
+        func isCurrent() -> Bool { generation == assistantPageGeneration && showsPage(of: api) }
         do {
             let st = try await api.assistant()
-            guard showsPage(of: api) else { return } // another group or manager was picked meanwhile
+            guard isCurrent() else { return } // another group or manager was picked meanwhile
             let previousMain = assistantMain
             assistantConfig = st
             // A different main for the manager that was cleared: the empty page is over, and someone looking at it
@@ -1576,12 +1619,12 @@ final class AppModel {
             // own too; the hub keeps whichever came last), unless the user picked one by hand (#1855): then it stays.
             let tz = TimeZone.current.identifier
             if Self.syncsZone(st, device: tz), let updated = try? await api.setAssistant(timezone: tz) {
-                guard showsPage(of: api) else { return }
+                guard isCurrent() else { return }
                 assistantConfig = updated
             }
-            guard showsPage(of: api) else { return }
-            await refreshDirectionInfo(api, leaders: st.leaders ?? [])
-            guard showsPage(of: api) else { return }
+            guard isCurrent() else { return }
+            await refreshDirectionInfo(api, leaders: st.leaders ?? [], generation: generation)
+            guard isCurrent() else { return }
             // A hub that names no launcher gets the same retry state as a failed read (#4200): current hubs always
             // resolve one (their default), so an empty answer means an old hub — show Couldn't Load Settings instead of an
             // endless Reading or a made-up name.
@@ -1591,13 +1634,13 @@ final class AppModel {
             if directionTree == nil { Task { await refreshDirectionTree(api, followLeaders: false) } }
         } catch {
             // Settings that already name a launcher stay usable; with none held the page shows Couldn't Load Settings (#4200).
-            if showsPage(of: api), (assistantConfig?.launcher ?? "").isEmpty { assistantConfigLoadFailed = true }
+            if isCurrent(), (assistantConfig?.launcher ?? "").isEmpty { assistantConfigLoadFailed = true }
         }
     }
 
     /// The directions' names and outside metadata for `leaders`: none without leaders; a hub that cannot list them
     /// keeps what is held (or none), and the sidebar shows those conversations' titles. Counts come from the tree alone.
-    private func refreshDirectionInfo(_ api: APIClient, leaders: [String]) async {
+    private func refreshDirectionInfo(_ api: APIClient, leaders: [String], generation: Int) async {
         guard !leaders.isEmpty else {
             if !directionNames.isEmpty { directionNames = [:] }
             outsideDirectionFallback = [:]
@@ -1605,7 +1648,7 @@ final class AppModel {
             if outside != outsideDirections { outsideDirections = outside }
             return
         }
-        guard let list = try? await api.leaders(), showsPage(of: api) else { return }
+        guard let list = try? await api.leaders(), generation == assistantPageGeneration, showsPage(of: api) else { return }
         let names = APIClient.directionNames(list)
         if names != directionNames { directionNames = names }
         // This response may land after the tree. Keep newly announced flat rows, but never replace a tree row's counts
@@ -1735,7 +1778,18 @@ final class AppModel {
         do {
             if let main = assistantMain { // an ended one is resumed by the hub
                 assistantCurrent = main
-                try await api.send(main, text: text)
+                let retryKey = DirectSendRetryKey(key: main, text: text, imageFingerprints: [])
+                let id = directSendID(for: retryKey)
+                let socket = socket(main.group)
+                do {
+                    try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
+                        try await api.send(main, text: text, clientMsgID: id.uuidString, opID: id)
+                    }
+                    directSendRetries.sent(retryKey)
+                } catch {
+                    if Self.directSendDidNotDeliver(error) { directSendRetries.sent(retryKey) }
+                    throw error
+                }
             } else {
                 // Settings not read yet: whether it has a main conversation is unknown, and a plain one replaces none.
                 let makesMain = assistantConfig != nil
@@ -3285,11 +3339,15 @@ final class AppModel {
         let isHub = group == hub?.group
         switch ev {
         case .hello(let hello):
+            #if os(iOS)
+            if isHub { refreshPageVisibility() }
+            #endif
             let previousSurfaceCapabilities = extensionSurfaceCapabilities
             link(group)?.received(hello)
             if let link = link(group), !link.isDemo { Task { await link.agentsDisplay.refresh() } }
             // The hub may turn modules off, or on again (#13849, docs/apple/ios.md "Modules"); kept per hub.
             ModuleState.shared.heard(Set(hello.features), from: group, isHub: isHub)
+            if isHub { RecordingModule.tellSurfaces() } // the watch, the widgets and the control follow the recording module too (#15214)
             #if os(iOS)
             if isHub { Task { await HealthIntakeSync.shared.refresh(model: self) } }
             #endif
@@ -4167,14 +4225,45 @@ final class AppModel {
             settleSend(key, msg.id, outcome)
         }
     }
-    func send(_ key: SessionKey, text: String, images: [ImagePayload] = [], haptic: Bool = true) async -> Bool {
+    private struct DirectSendRetryKey: Hashable {
+        var key: SessionKey
+        var text: String
+        var imageFingerprints: [String]
+    }
+    /// Failed direct sends (`askPersona`, `send`) whose delivery is uncertain keep their id on retry so the hub
+    /// deduplicates delivery; cleared once delivered or definitively refused without typing.
+    @ObservationIgnored private var directSendRetries = RetryIDs<DirectSendRetryKey>()
+
+    private func directSendID(for key: DirectSendRetryKey) -> UUID {
+        UUID(uuidString: directSendRetries.id(for: key)) ?? UUID()
+    }
+
+    private nonisolated static func directSendDidNotDeliver(_ error: Error) -> Bool {
+        guard let api = error as? APIError else { return false }
+        if api.fields["delivered"] == "none" { return true }
+        if (400..<500).contains(api.status), api.status != 408, api.status != 429,
+           api.fields["delivered"] != "unknown", api.fields["delivered"] != "yes" {
+            return true
+        }
+        return false
+    }
+
+    func send(_ key: SessionKey, text: String, images: [ImagePayload] = [], haptic: Bool = true, clientMsgID: UUID? = nil) async -> Bool {
         guard allowSend(key), let api = api(key.group) else { return false }
         readiness.failure = nil // the refusal card goes with the next try
+        let retryKey = DirectSendRetryKey(key: key, text: text, imageFingerprints: images.map { DeviceCredentialTrade.fingerprint($0.mime + ":" + $0.data) })
+        let id = clientMsgID ?? directSendID(for: retryKey)
+        let socket = socket(key.group)
         do {
-            try await api.send(key, text: text, images: images, launcher: assistantLaunchers[key], model: assistantModels[key])
+            try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
+                try await api.send(key, text: text, images: images, launcher: assistantLaunchers[key], model: assistantModels[key],
+                                   clientMsgID: id.uuidString, opID: id)
+            }
+            if clientMsgID == nil { directSendRetries.sent(retryKey) }
             if haptic { Haptics.tap() }
             return true
         } catch {
+            if clientMsgID == nil, Self.directSendDidNotDeliver(error) { directSendRetries.sent(retryKey) }
             show(error)
             return false
         }
@@ -5112,7 +5201,10 @@ final class AppModel {
 
     /// Another group was picked for the hub-level pages: their data starts over from that group's.
     func hubChanged() {
+        assistantPageGeneration += 1
+        directionNames = [:]
         ModuleState.shared.follow(hub?.group ?? "", features: hub?.features ?? []) // the modules this hub allows (#13849)
+        RecordingModule.tellSurfaces()
         if let g = hub?.group {
             assistantConfig = heldAssistant(g)
         }
@@ -5133,6 +5225,7 @@ final class AppModel {
         SavedPromptStore.shared.reload()
         #if os(iOS)
         refreshStarred(reset: true)
+        refreshPageVisibility()
         #endif
         followScope()
         // The avatar is the new hub's from now, before its list is read below: a card tapped meanwhile goes to it.
@@ -5161,7 +5254,9 @@ final class AppModel {
         assistantLauncherRequestRevision += 1
         assistantConfig = heldAssistant(hub?.group ?? "")
         // The tree is the default manager's: kept through a re-read of it, dropped for any other.
+        if switched { assistantPageGeneration += 1 }
         if switched || !assistantShows(nil) {
+            directionNames = [:]
             directionTree = nil // the other manager's; `refreshAssistant` below reads this one's
             outsideDirections = [:]
             outsideDirectionFallback = [:]

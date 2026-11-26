@@ -17,10 +17,12 @@ function valueToDirectionTarget(value: string): ReorganizeTarget {
 
 /**
  * Compact single-item direction picker panel rendered inside `TodoDetail`
- * strictly when `todos_v2 === true` (#15653).
+ * strictly when `todos_v2 === true` (#15653, #16138).
  *
- * Calls `POST /api/v1/todos/reorganize` with `transfer_supervision` defaulting
- * to `false` so running Agents are never interrupted unless the user opts in.
+ * Calls `POST /api/v1/todos/reorganize` with `include_children` defaulting to
+ * `true` when the item has subtasks (so parent/child goals stay aligned unless
+ * the user opts out) and `transfer_supervision` defaulting to `false` so
+ * running Agents are never interrupted unless the user opts in.
  */
 export function TodoDirectionPicker({
   todoId,
@@ -41,7 +43,7 @@ export function TodoDirectionPicker({
 }) {
   const normalizedCurrent = currentDirectionId?.trim() ?? "";
   const [selectedValue, setSelectedValue] = useState(normalizedCurrent);
-  const [includeChildren, setIncludeChildren] = useState(false);
+  const [includeChildren, setIncludeChildren] = useState(true);
   const [transferSupervision, setTransferSupervision] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,13 +138,13 @@ export function TodoDirectionPicker({
               <label className="inline-flex cursor-pointer items-center gap-1.5 select-none">
                 <input
                   type="checkbox"
-                  data-testid="todo-detail-direction-include-children"
+                  data-testid="todo-direction-include-children"
                   checked={includeChildren}
                   disabled={submitting}
                   onChange={(e) => setIncludeChildren(e.target.checked)}
                   className="size-3.5 accent-accent"
                 />
-                <span>{t("todos.reorganize_include_children")}</span>
+                <span>{t("todos.direction_include_children", { count: childCount })}</span>
               </label>
             )}
             {transferAllowed && (

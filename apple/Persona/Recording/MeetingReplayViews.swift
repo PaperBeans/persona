@@ -21,13 +21,35 @@ nonisolated struct MeetingRoomOffers: Equatable, Sendable {
     var followup: Bool
     /// The replay's clock, state and speed in place of the recording's.
     var replayClock: Bool
+    /// The after page's ⋯ menu, with the way to the recording's own page (its audio, sharing and deleting).
+    var afterMenu = true
+    /// Rename, in the after page's menu.
+    var rename = true
+    /// Delete Photo on a meeting photo.
+    var photoDelete = true
+    /// The room's state is read from the hub while the page shows (`GET …/live`).
+    var liveWatch = true
 
     static let meeting = MeetingRoomOffers(ask: true, justMe: true, bookmark: true, photos: true, persona: true, pageMenu: true,
                                            privateMeeting: true, handOff: true, followup: true, replayClock: false)
     static let replay = MeetingRoomOffers(ask: false, justMe: false, bookmark: false, photos: false, persona: false, pageMenu: false,
-                                          privateMeeting: false, handOff: false, followup: false, replayClock: true)
+                                          privateMeeting: false, handOff: false, followup: false, replayClock: true,
+                                          afterMenu: false, rename: false)
+    /// With the hub's recording module off (#15214): nothing that writes through it or asks its routes. Pause and End
+    /// stay while a meeting still records (it must be possible to stop), and everything that reads stays: the minutes,
+    /// the transcript, the photos, the conversation so far, and the way to the recording's page, where Delete is.
+    static let moduleOff = MeetingRoomOffers(ask: false, justMe: false, bookmark: false, photos: false, persona: false, pageMenu: false,
+                                             privateMeeting: false, handOff: false, followup: false, replayClock: false,
+                                             afterMenu: true, rename: false, photoDelete: false, liveWatch: false)
 
     static func of(_ recording: UUID) -> MeetingRoomOffers { ReplayedMeeting.holds(recording) ? .replay : .meeting }
+
+    /// What the page offers for `recording` on a hub whose recording module is `module`: a replayed tape is on no hub, so
+    /// the module changes nothing for it.
+    static func of(_ recording: UUID, module: RecordingAllowance) -> MeetingRoomOffers {
+        if ReplayedMeeting.holds(recording) { return .replay }
+        return module.offersWrites ? .meeting : .moduleOff
+    }
 }
 
 /// The replayed meeting's line under its title (#10589): Play or Pause, where the tape is of its length ("1:23 / 3:46"),

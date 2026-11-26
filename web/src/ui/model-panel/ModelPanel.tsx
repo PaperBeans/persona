@@ -26,7 +26,7 @@ import { navigate } from "../../lib/router";
 import type { LauncherQuotaAnswer } from "../../lib/quota";
 import { hasFinePointer, keyboardFrame } from "../../lib/viewport";
 import { settingsHref } from "../../views/settings/nav";
-import { cx, Spinner } from "../atoms";
+import { Button, cx, Spinner } from "../atoms";
 import { Icon } from "../icons";
 import { NARROW_QUERY, returnFocus, SHEET_QUERY, useMedia } from "../overlay";
 import { LauncherColumn, LevelColumn, SAVED_SIDE, SpeedSwitch } from "./Columns";
@@ -47,7 +47,7 @@ export interface ModelPanelProps {
   onPick: (config: PanelConfig) => Promise<boolean>;
   /** A flyout edit (effort, Fast) on the model that runs now: applied at once, the flyout stays open. */
   onApplyCurrent?: (patch: { effort?: string; fast?: boolean }) => Promise<boolean>;
-  /** Reads a provider's list again (its group's Retry). */
+  /** Refreshes a provider's catalog (also used for Retry). */
   onReload?: (provider: string) => void;
   /** Forgets a typed model ID (#1644). */
   onForget?: (provider: string, model: string) => void;
@@ -547,7 +547,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (row.kind === "typed") return { text: `${name} · ${t("ui-modelpanel.use_typed_note")}` };
     if (row.kind === "preset") return { text: `${name} · ${row.preset?.description || row.model.name}` };
     if (row.model.custom) return { text: `${name} · ${t("ui-modelpanel.typed_before")}` };
-    if (!searching && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
+    if (!searching && !columns && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
     if (!searching && row.kind === "model") return { text: row.model.description ?? "", describes: true };
     return { text: name };
   };
@@ -611,6 +611,36 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
             </div>
           )}
         </div>
+      </div>
+    );
+  };
+
+  const catalogActions = (s: PanelSection) => {
+    const p = s.provider!;
+    const loading = s.loading || p.loading;
+    const refresh = onReload && p.models !== null && !p.error && !p.unavailable && !p.locked;
+    if (!loading && !refresh) return null;
+    return (
+      <div className="flex items-center justify-end px-2">
+        {loading && (
+          <div role="status" className="mr-auto flex items-center gap-2 px-1 py-2 text-label text-ink-3">
+            <Spinner size={12} />
+            {t("ui-modelpanel.loading")}
+          </div>
+        )}
+        {refresh && (
+          <Button
+            tone="quiet"
+            size="sm"
+            icon="retry"
+            className="touch-hit"
+            aria-label={t("ui-modelpanel.refresh_provider_models", { provider: p.name })}
+            disabled={picking || loading}
+            onClick={() => onReload(p.id)}
+          >
+            {t("ui-modelpanel.refresh_models")}
+          </Button>
+        )}
       </div>
     );
   };
@@ -784,12 +814,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                   ) : sideSection ? (
                     <div role="group" aria-label={sideSection.provider!.name} data-panel-section="provider">
                       {sideNote(sideSection.provider!)}
-                      {sideSection.loading && (
-                        <div role="status" className="flex items-center gap-2 px-3 py-2 text-label text-ink-3">
-                          <Spinner size={12} />
-                          {t("ui-modelpanel.loading")}
-                        </div>
-                      )}
+                      {catalogActions(sideSection)}
                       {renderBlocks(sideSection)}
                     </div>
                   ) : null
@@ -844,12 +869,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                           />
                           {expanded.has(s.provider!.id) && (
                             <div className="ml-2 border-l border-line pl-1">
-                              {s.loading && (
-                                <div role="status" className="flex items-center gap-2 px-3 py-2 text-[12px] text-ink-3">
-                                  <Spinner size={12} />
-                                  {t("ui-modelpanel.loading")}
-                                </div>
-                              )}
+                              {catalogActions(s)}
                               {renderBlocks(s)}
                             </div>
                           )}

@@ -98,6 +98,10 @@ type managerInfo struct {
 	// (inbox.needs_you). Absent: not known (it is away or being installed, a build from before it reported one, or
 	// its stored items could not be read).
 	InboxNeedsYou *int `json:"inbox_needs_you,omitempty"`
+	// CountsView: it is online and its manager.hello named the counts view (assistantwire.CapabilityCountsView), so
+	// the apps draw its counts from the view it tells (counts_view.go). Absent while it is offline: an app keeps the
+	// view it has (D13 of docs/plans/plan-derived-counts.md).
+	CountsView bool `json:"counts_view,omitempty"`
 }
 
 // defaultManager is the manager the entries that belong to none go to (Siri, the shortcuts, the assistant page as
@@ -162,6 +166,7 @@ func (h *Hub) managerList(ctx context.Context) ([]managerInfo, error) {
 			m.PendingRestart = p.PendingRestart
 			m.NeedsUpdate = !slices.Contains(p.Capabilities, assistantwire.CapabilityConfigOwn)
 			m.InboxNeedsYou = needsYou[b.ID]
+			m.CountsView = slices.Contains(p.Capabilities, assistantwire.CapabilityCountsView)
 		}
 		if m.Builtin {
 			// Not hidden while it is used: the default, a computer of its own, or something in its inbox that needs

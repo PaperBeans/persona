@@ -2,14 +2,17 @@
 // what happened in the last hours, what is to be verified), as the hub worked it out when the run started; the same
 // rows as the Lark card, with an Accept button for each task to verify and a Handled button for each question that can wait
 // (docs/extensions/bots.md "Morning and evening briefings").
+import { VerificationFollowUp } from "./VerificationFollowUp";
+import { EvidenceLink } from "./EvidenceLink";
 import { leaveChat, openAgent, openTask } from "../../lib/handoff";
 import { conversationRoute } from "../../lib/conversation-page";
 import { type ReactNode, Suspense, useRef, useState } from "react";
 import { lazyPage } from "../../lib/lazy-page";
 import { errorText } from "../../lib/api";
 import { getState, putTodo, refreshTodos } from "../../lib/store";
-import { updateTodo } from "../../lib/todos";
-import { acceptBrief, briefBody, failedKey, handledLater, type BriefBody, type BriefRow, type FeedItem } from "../../lib/feed";
+import { updateTodo, type Todo } from "../../lib/todos";
+import { briefBody } from "../../lib/brief-rows";
+import { acceptBrief, failedKey, handledLater, type BriefBody, type BriefRow, type FeedItem } from "../../lib/feed";
 import { shortDuration } from "../../lib/format";
 import { formatDate, t } from "../../i18n";
 import { Button, cx, toast } from "../../ui/atoms";
@@ -97,7 +100,7 @@ function acceptLabel(row: BriefRow): { label: string; title: string } {
   return { label: t("assistant-brief.accept"), title: t("assistant-brief.accept_row", { title: row.title }) };
 }
 
-export function AcceptRow({ row, stacked = false, admission, onBusyChange, blocked = false, secondary, hideTitle = false }: { row: BriefRow; stacked?: boolean; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; secondary?: ReactNode; hideTitle?: boolean }) {
+export function AcceptRow({ row, verification, stacked = false, admission, onBusyChange, blocked = false, secondary, hideTitle = false }: { row: BriefRow; verification?: Todo; stacked?: boolean; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; secondary?: ReactNode; hideTitle?: boolean }) {
   const [state, setState] = useState<Accepting>("idle");
   // Admit either action synchronously, before React disables the other button.
   const ownAdmission = useRef(false);
@@ -160,7 +163,8 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
             {row.verdict}
           </div>
         )}
-        {row.detail && <div className="text-label text-ink-2 [overflow-wrap:anywhere]">{row.detail}</div>}
+        {row.detail && <div className={cx("text-label text-ink-2 [overflow-wrap:anywhere]", !row.outcome && "line-clamp-4 leading-relaxed")} title={row.detail}>{row.detail}</div>}
+        {!row.outcome && <EvidenceLink verification link={row.evidence_link} todoId={row.id} />}
         {row.recommend && <div className="text-label text-ink-2 [overflow-wrap:anywhere]" data-brief-recommend>{t("assistant-brief.recommend", { option: row.recommend })}</div>}
         <div className={cx("text-label", stacked ? "text-ink-3" : "text-ink-2")} data-brief-meta>{meta(row)}</div>
       </div>
@@ -173,6 +177,7 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
           {t("assistant-brief.finish")}
         </Button>
       )}
+      {!settled && verification && <VerificationFollowUp todo={verification} disabled={blocked || state !== "idle"} />}
       {!settled && secondary}
       {settled ? (
         <span className={cx("shrink-0 text-[12.5px] text-ink-2", full)} data-brief-accepted={state}>

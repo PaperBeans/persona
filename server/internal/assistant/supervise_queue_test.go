@@ -187,7 +187,7 @@ func TestQueuedDigestKeepsFollowingOwnerMessage(t *testing.T) {
 
 func TestQueuedDigestPersistsAcrossServiceRestart(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, newDatabase(t), db.AllSets)
+	database, err := db.Open(ctx, newMigratedDatabase(t, db.AllSets), db.AllSets)
 	if err != nil {
 		t.Fatal(err)
 	}

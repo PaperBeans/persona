@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -529,5 +531,193 @@ func TestSearchRouteNeedsAFullDevice(t *testing.T) {
 		if w.Code != want {
 			t.Errorf("role %q: %d, want %d (%s)", role, w.Code, want, w.Body.String())
 		}
+	}
+}
+
+type trackingDropSearch struct {
+	*memSearch
+	mu      sync.Mutex
+	dropped []searchKey
+}
+
+func (m *trackingDropSearch) DropSearchConversation(ctx context.Context, machine, session string) error {
+	m.mu.Lock()
+	m.dropped = append(m.dropped, searchKey{machine, session})
+	m.mu.Unlock()
+	return m.memSearch.DropSearchConversation(ctx, machine, session)
+}
+
+func TestSearchSweepDropsDeletedWithoutPerCursorLockDBQueries(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeHub().withMachine()
+	f.settings = &Settings{MachineID: "server", Main: "main"}
+	st := newDurableDeletionCountingStore()
+
+	const total = 24
+	sessions := make([]proto.Session, 0, total+1)
+	sessions = append(sessions, proto.Session{SessionID: "main", Title: "Main", Assistant: true, Rev: 1, UpdatedAt: searchT0})
+	feed := &chatFeed{items: map[string][]proto.Item{"main": {msg(1, "user", "main body")}}, history: map[string]string{}}
+	for i := range total {
+		id := fmt.Sprintf("chat-%02d", i)
+		sessions = append(sessions, proto.Session{
+			SessionID: id,
+			Title:     fmt.Sprintf("Chat %02d", i),
+			Assistant: true,
+			Rev:       1,
+			UpdatedAt: searchT0.Add(time.Duration(i+1) * time.Minute),
+		})
+		feed.items[id] = []proto.Item{msg(1, "user", fmt.Sprintf("message body %02d", i))}
+	}
+	f.setSessions("server", sessions...)
+
+	searchMem := &trackingDropSearch{memSearch: newMemSearch()}
+	s := newServiceOn(t, f, st)
+	s.search.fetch, s.search.store = feed.fetch, searchMem
+
+	var clockMu sync.Mutex
+	now := time.Date(2026, 11, 26, 11, 0, 0, 0, time.UTC)
+	s.deletedConversations.now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	}
+
+	s.searchSweep(ctx)
+	s.search.mu.Lock()
+	if len(s.search.cursors) != total+1 {
+		s.search.mu.Unlock()
+		t.Fatalf("indexed %d cursors, want %d", len(s.search.cursors), total+1)
+	}
+	s.search.mu.Unlock()
+
+	// Seed 3 cross-process deletions directly in the durable store and advance past TTL.
+	deletedIDs := []string{"chat-02", "chat-11", "chat-19"}
+	for _, id := range deletedIDs {
+		raw, _ := json.Marshal(deletedConversation{Machine: "server", ID: id, At: now})
+		if err := st.PutConversationDeletion(ctx, "server", id, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(deletedConversationsTTL + time.Second)
+
+	// Sub-check 1: warm sweep with 25 cursors issues 0 per-cursor ConversationDeletion queries
+	// and at most 1 batch ledger read, dropping chat-02 and chat-11 while preserving surviving cursors.
+	// Keep chat-19 out of the store until sub-check 2 so we can test concurrent cursor removal during
+	// deletedSearchKeys's unlocked DB reload.
+	st.dmu.Lock()
+	ledger := st.ledgerLocked(ctx)
+	delete(ledger, runtimeListID("server", "chat-19"))
+	st.dmu.Unlock()
+	if err := st.PutSetting(ctx, deletedConversationsKey, ledger); err != nil {
+		t.Fatal(err)
+	}
+
+	var lockHeldDuringDB atomic.Bool
+	st.dmu.Lock()
+	st.onSettingRead = func() {
+		if !s.search.mu.TryLock() {
+			lockHeldDuringDB.Store(true)
+			return
+		}
+		s.search.mu.Unlock()
+	}
+	st.dmu.Unlock()
+
+	// Empty inventory ensures only permanent deletion checks trigger drops.
+	f.setSessions("server")
+	st.settingReads.Store(0)
+	st.singleReads.Store(0)
+	searchMem.mu.Lock()
+	searchMem.dropped = nil
+	searchMem.mu.Unlock()
+
+	s.searchSweep(ctx)
+
+	if lockHeldDuringDB.Load() {
+		t.Fatal("s.search.mu was held while querying the deletion ledger during searchSweep")
+	}
+	if got := st.singleReads.Load(); got != 0 {
+		t.Fatalf("searchSweep issued %d per-cursor ConversationDeletion DB queries, want 0", got)
+	}
+	if got := st.settingReads.Load(); got != 1 {
+		t.Fatalf("searchSweep issued %d ledger reads across %d cursors, want 1", got, total+1)
+	}
+	searchMem.mu.Lock()
+	dropped := slices.Clone(searchMem.dropped)
+	searchMem.mu.Unlock()
+	slices.SortFunc(dropped, func(a, b searchKey) int { return strings.Compare(a.session, b.session) })
+	wantDropped := []searchKey{{machine: "server", session: "chat-02"}, {machine: "server", session: "chat-11"}}
+	if !slices.Equal(dropped, wantDropped) {
+		t.Fatalf("dropped %+v, want %+v", dropped, wantDropped)
+	}
+
+	// Sub-check 2: force the TTL to expire specifically between searchConversations and
+	// deletedSearchKeys so the DB read happens while searchSweep's cursor snapshot is unlocked,
+	// and concurrently remove chat-19 from s.search.cursors to prove searchSweep re-checks membership.
+	raw19, _ := json.Marshal(deletedConversation{Machine: "server", ID: "chat-19", At: now})
+	if err := st.PutConversationDeletion(ctx, "server", "chat-19", raw19); err != nil {
+		t.Fatal(err)
+	}
+	raw20, _ := json.Marshal(deletedConversation{Machine: "server", ID: "chat-20", At: now})
+	if err := st.PutConversationDeletion(ctx, "server", "chat-20", raw20); err != nil {
+		t.Fatal(err)
+	}
+
+	var clockCalls atomic.Int64
+	baseNow := now
+	s.deletedConversations.now = func() time.Time {
+		if clockCalls.Add(1) >= 2 {
+			return baseNow.Add(deletedConversationsTTL + time.Second)
+		}
+		return baseNow
+	}
+
+	var reloadInSweep atomic.Int64
+	concurrentlyRemoved := searchKey{machine: "server", session: "chat-19"}
+	st.dmu.Lock()
+	st.onSettingRead = func() {
+		reloadInSweep.Add(1)
+		if !s.search.mu.TryLock() {
+			lockHeldDuringDB.Store(true)
+			return
+		}
+		delete(s.search.cursors, concurrentlyRemoved)
+		s.search.mu.Unlock()
+	}
+	st.dmu.Unlock()
+
+	st.settingReads.Store(0)
+	st.singleReads.Store(0)
+	searchMem.mu.Lock()
+	searchMem.dropped = nil
+	searchMem.mu.Unlock()
+
+	s.searchSweep(ctx)
+
+	if lockHeldDuringDB.Load() {
+		t.Fatal("s.search.mu was held during deletedSearchKeys reload")
+	}
+	if reloadInSweep.Load() != 1 {
+		t.Fatalf("expected exactly 1 reload inside deletedSearchKeys, got %d", reloadInSweep.Load())
+	}
+	if got := st.singleReads.Load(); got != 0 {
+		t.Fatalf("second searchSweep issued %d per-cursor DB queries, want 0", got)
+	}
+	searchMem.mu.Lock()
+	dropped2 := slices.Clone(searchMem.dropped)
+	searchMem.mu.Unlock()
+	if !slices.Equal(dropped2, []searchKey{{machine: "server", session: "chat-20"}}) {
+		t.Fatalf("dropped %+v, want only chat-20 (concurrently removed chat-19 must be skipped)", dropped2)
+	}
+
+	s.search.mu.Lock()
+	defer s.search.mu.Unlock()
+	for _, id := range []string{"chat-02", "chat-11", "chat-19", "chat-20"} {
+		if _, ok := s.search.cursors[searchKey{"server", id}]; ok {
+			t.Fatalf("deleted cursor %s survived searchSweep", id)
+		}
+	}
+	if _, ok := s.search.cursors[searchKey{"server", "chat-00"}]; !ok {
+		t.Fatal("surviving offline cursor lost during searchSweep")
 	}
 }

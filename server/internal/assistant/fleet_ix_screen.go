@@ -272,6 +272,7 @@ func (s *Service) upgradeScreenCard(machine, session, id string, p *pending) {
 				if p.orphaned != nil {
 					p.orphaned.Stop()
 				}
+				p.stopReminderLocked()
 			}
 			s.fleet.mu.Unlock()
 			if same {

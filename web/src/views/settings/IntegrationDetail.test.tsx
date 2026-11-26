@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 // Unit & integration tests for the lazy-loaded unified IntegrationDetail view (integrations_v2, #14847).
+import { installedMailbox, preloadMailbox } from "../../test/installed-mailbox";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
-import type { ChannelDetail } from "../../lib/channels";
+import { ago } from "../../lib/format";
+import { channelStateText, type ChannelDetail } from "../../lib/channels";
 import type { HubConnector } from "../../lib/connectors";
+import { askSignIn, signInAsked } from "../../lib/extension-auth";
+import { track, type ExtensionOperation } from "../../lib/extension-operations";
 import type { HubExtensionDetail } from "../../lib/extensions";
 import type { FeishuBotStatus } from "../../lib/feishu-bot";
-import { resetManagerChoice } from "../../lib/manager-choice";
+import { chosenManager, managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
 import { setRoster } from "../../lib/managers";
 import { applyCompleteSessions } from "../../lib/store";
+import { FEATURES } from "./FeishuBot";
 import { IntegrationDetail, isIntegrationsV2Active, partitionExtensionFields } from "./IntegrationDetail";
 
 vi.mock("../../ui/atoms", async (original) => ({
@@ -20,6 +25,7 @@ vi.mock("../../ui/atoms", async (original) => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 interface RecordedRequest {
+  manager: string | null;
   url: string;
   method: string;
   body: unknown;
@@ -42,7 +48,7 @@ const ROSTER = {
   default: "assistant",
   managers: [
     { id: "assistant", name: "Default", builtin: true, online: true },
-    { id: "other", name: "Other", builtin: false, online: true },
+    { id: "work", name: "Work", builtin: false, online: true },
   ],
 };
 
@@ -96,6 +102,7 @@ const COMPOSITE_CHANNEL: ChannelDetail = {
   kind: "im",
   source: "plugin",
   plugin: "larkx",
+  settings_url: "settings/plugins/larkx",
   installed: true,
   enabled: true,
   state: "connected",
@@ -129,7 +136,7 @@ const FEISHU_BOT_STATUS: FeishuBotStatus = {
   domain: "feishu",
   bot_name: "Persona Feishu",
   owner: { name: "Alice", paired_at: 1700000000 },
-  features: { main: true, cards: true, all_cards: false, pushes: true, sync: true, reports: true, board: false, workbench: false, only_conclusions: false, agents: true },
+  features: { main: true, cards: false, report_steps: true, answer_new_card: true, topic_cot: false, read_group: false, all_cards: false, pushes: true, sync: true, reports: true, board: false, workbench: false, only_conclusions: false, agents: true },
   nudge_after: 15,
 };
 
@@ -145,8 +152,9 @@ const FEISHU_CHANNEL: ChannelDetail = {
   capabilities: { push: true, threads: true, asks: "buttons" },
   bind: "fields",
   target: { kind: "main" },
-  thread_mode: "per_topic",
-  thread_idle_hours: 24,
+  settings_url: "settings/connectors/feishu-bot",
+  target_override: { mode: "topics" },
+  features: FEATURES.map(({ key, title }) => ({ id: key, title, on: !!FEISHU_BOT_STATUS.features?.[key] })),
   waiting: { answers: 0, asks: 0 },
 };
 
@@ -158,6 +166,7 @@ let currentChannels: Record<string, ChannelDetail>;
 let currentConnectors: HubConnector[];
 let currentMailAccounts: { id: string; email: string; provider: string; status: string }[];
 let currentFeishuBot: FeishuBotStatus;
+let currentRepositories: { id: string; provider?: string }[] | "error" | null;
 
 const flush = async () => {
   for (let i = 0; i < 14; i++) {
@@ -224,6 +233,7 @@ beforeEach(() => {
   ];
   currentMailAccounts = [{ id: "m1", email: "me@example.com", provider: "imap", status: "ok" }];
   currentFeishuBot = structuredClone(FEISHU_BOT_STATUS);
+  currentRepositories = [{ id: "repo-1", provider: "github" }, { id: "repo-2", provider: "github" }];
 
   resetManagerChoice();
   setRoster(ROSTER);
@@ -236,7 +246,8 @@ beforeEach(() => {
     if (typeof init?.body === "string" && init.body) {
       try { body = JSON.parse(init.body); } catch { body = init.body; }
     }
-    requests.push({ url, method, body });
+    const manager = new Headers(init?.headers).get("X-Persona-Manager");
+    requests.push({ url, method, body, manager });
 
     if (url.includes("/mail/accounts")) {
       return ok({ accounts: currentMailAccounts });
@@ -253,7 +264,7 @@ beforeEach(() => {
     if (url.includes("/connectors/") && url.endsWith("/settings") && method === "PUT") {
       const m = /\/connectors\/([^/]+)\/settings/.exec(url);
       const cid = m ? decodeURIComponent(m[1]) : "";
-      const found = currentConnectors.find((c) => c.id === cid);
+      const found = currentConnectors.find((c) => c.id === cid && (c.manager ?? null) === manager);
       if (found && body && typeof body === "object") {
         Object.assign(found, body);
         return ok(found);
@@ -274,13 +285,13 @@ beforeEach(() => {
       if (!ch) return notFound();
       if (method === "PUT" && body && typeof body === "object") {
         const patch = body as Partial<ChannelDetail>;
+        const mode = patch.thread_mode ?? ch.thread_mode;
         const next: ChannelDetail = {
           ...ch,
           ...patch,
-          target_override:
-            (patch.thread_mode ?? ch.thread_mode) === "per_group_and_topic" || (patch.thread_mode ?? ch.thread_mode) === "per_topic"
-              ? { mode: "topics" }
-              : undefined,
+          target_override: mode === "per_group_and_topic"
+            ? { mode: "groups_and_topics" }
+            : mode === "per_topic" ? { mode: "topics" } : undefined,
         };
         currentChannels[cid] = next;
         return ok(next);
@@ -305,6 +316,17 @@ beforeEach(() => {
     }
     if (url.includes("/subscriptions/summary")) {
       return ok({ lines: [] });
+    }
+    if (url.includes("/assistant/repositories")) {
+      if (currentRepositories === "error") return notFound();
+      if (currentRepositories === null) return ok({});
+      return ok({ manager: "assistant", repositories: currentRepositories });
+    }
+    if (url.includes("/lark/status")) {
+      return ok({ configured: true, connected: true, name: "Team Lark" });
+    }
+    if (url.includes("/lark/accounts")) {
+      return ok({ accounts: [] });
     }
     if (url.includes("/trust")) {
       return notFound();
@@ -389,7 +411,9 @@ describe("integrations_v2 gating & legacy isolation", () => {
 });
 
 describe("Built-in services", () => {
-  it("renders Mail with Account & Connection accounts and Inbox & Sync switch", async () => {
+  it.skipIf(!installedMailbox)("renders Mail with Account & Connection accounts and Inbox & Sync switch", async () => {
+    await preloadMailbox("Settings");
+    await preloadMailbox("InboxSwitch");
     act(() => {
       root.render(<IntegrationDetail target={{ kind: "builtin", id: "mail" }} />);
     });
@@ -401,34 +425,120 @@ describe("Built-in services", () => {
     expect(requests.some((r) => r.url.includes("/bots/feishu"))).toBe(false);
   });
 
-  it("renders Feishu Bot inline with connection, channel routing, and bot features", async () => {
-    act(() => {
-      root.render(<IntegrationDetail target={{ kind: "builtin", id: "feishu-bot" }} />);
+  it("gives Feishu Bot a single set of controls and refreshes its channel after a bot save", async () => {
+    currentFeishuBot.agents = [{ title: "Daily review", machine_id: "computer-id", session_id: "review" }];
+    applyCompleteSessions([SEED_SESSION], [], { machines: [{ id: "computer-id", name: "Office laptop" } as never] });
+    const onSettings = vi.fn();
+    await act(async () => {
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "feishu-bot" }} onSettings={onSettings} />);
     });
     await flush();
 
-    expect(sectionIds()).toEqual(["connection", "channel"]);
+    expect(sectionIds()).toEqual(["connection", "channel", "inbox"]);
     expect(section("connection")!.textContent).toContain("Alice");
-    expect(section("channel")!.textContent).toContain(t("settings-integrations.thread_mode_title"));
+    const delivery = section("channel")!;
+    expect(delivery.textContent).toContain("Office laptop");
+    expect(delivery.textContent).not.toContain("computer-id");
+    expect(delivery.querySelector("[data-channel-routing]")).toBeNull();
+    expect(delivery.textContent).toContain(t("settings-channels.target_row"));
+    expect(delivery.textContent).toContain(t("settings-channels.target_override_topics"));
+    expect(delivery.textContent).not.toContain(t("settings-channels.target_override_settings"));
+    expect(delivery.textContent).not.toContain(t("settings-channels.enable", { name: FEISHU_CHANNEL.name }));
+    expect(delivery.textContent).not.toContain(t("settings-channels.send_test"));
+    const buttons = [...section("connection")!.querySelectorAll<HTMLButtonElement>("button")];
+    expect(buttons.filter((b) => b.textContent === t("settings-feishubot.send_test"))).toHaveLength(1);
+    for (const { key, title } of FEATURES) {
+      const switches = delivery.querySelectorAll<HTMLButtonElement>(`[role="switch"][aria-label="${title}"]`);
+      expect(switches, key).toHaveLength(1);
+      if (key === "all_cards") expect(switches[0].disabled).toBe(true);
+    }
+    const enable = buttons.filter((b) => b.getAttribute("aria-label") === t("settings-feishubot.enable"));
+    expect(enable).toHaveLength(1);
+    requests.length = 0;
+    currentChannels.feishu.state = "disabled";
+    await act(async () => enable[0].click());
+    await flush();
+    const writes = requests.filter((r) => r.method === "PUT");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ url: expect.stringContaining("/bots/feishu"), body: { enabled: false } });
+    expect(requests.some((r) => r.method === "GET" && r.url.endsWith("/channels/feishu"))).toBe(true);
+    expect(host.querySelector("h1")!.closest("section")!.textContent).toContain(channelStateText(currentChannels.feishu));
     expect(section("channel")!.textContent).toContain(t("settings-feishubot.topic_groups"));
+    const kbBtn = section("inbox")!.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+    expect(kbBtn).not.toBeNull();
+    act(() => kbBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
   });
 
-  it("renders built-in GitHub connector across Account & Connection and Inbox & Sync", async () => {
+  it("renders built-in GitHub connector with Saved repositories shortcut and tolerates repository API failure", async () => {
+    const onSettings = vi.fn();
     act(() => {
-      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} />);
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} onSettings={onSettings} />);
     });
     await flush();
 
     expect(sectionIds()).toEqual(["connection", "inbox"]);
     expect(section("connection")!.textContent).toContain("octocat");
     expect(section("inbox")!.textContent).toContain("org/noisy");
+    expect(section("inbox")!.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).toBeNull();
+    const repoBtn = section("connection")!.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(repoBtn).not.toBeNull();
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_title"));
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_count", { count: 2 }));
+    act(() => repoBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
     expect(requests.some((r) => r.url.includes("/bots/feishu"))).toBe(false);
+
+    // Repository query failure does not block rendering or clicking the shortcut.
+    onSettings.mockClear();
+    currentRepositories = "error";
+    act(() => root.render(null));
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "builtin", id: "github" }} onSettings={onSettings} />);
+    });
+    await flush();
+    const fallbackBtn = section("connection")!.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(fallbackBtn).not.toBeNull();
+    act(() => fallbackBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
+  });
+
+  it("renders Knowledge sync scope shortcut in Inbox & Sync for Mail, Lark gateway, and history-capable connectors", async () => {
+    const onSettings = vi.fn();
+    currentConnectors.push({
+      id: "chat-history",
+      name: "History Connector",
+      status: "ok",
+      enabled: true,
+      archive: true,
+      inbox: false,
+      capabilities: ["history"],
+    });
+
+    for (const target of [
+      ...(installedMailbox ? [{ kind: "builtin", id: "mail" } as const] : []),
+      { kind: "builtin", id: "lark" } as const,
+      { kind: "builtin", id: "chat-history", connectorId: "chat-history" } as const,
+    ]) {
+      onSettings.mockClear();
+      act(() => root.render(null));
+      act(() => {
+        root.render(<IntegrationDetail target={target} onSettings={onSettings} />);
+      });
+      await flush();
+
+      const kbBtn = section("inbox")?.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+      expect(kbBtn, `${target.id} knowledge shortcut`).not.toBeNull();
+      expect(kbBtn!.textContent).toContain(t("settings-integrations.knowledge_scope_title"));
+      act(() => kbBtn!.click());
+      expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
+    }
   });
 
   it("omits the Back button when onBack is undefined (desktop split-pane / phone) and renders it when provided", async () => {
     const onBack = vi.fn();
     for (const target of [
-      { kind: "builtin", id: "mail" } as const,
+      ...(installedMailbox ? [{ kind: "builtin", id: "mail" } as const] : []),
       { kind: "builtin", id: "feishu-bot" } as const,
       { kind: "extension", id: "larkx" } as const,
     ]) {
@@ -447,7 +557,7 @@ describe("Built-in services", () => {
       expect(visibleBack, `${target.id} with onBack`).toBeDefined();
       act(() => visibleBack!.click());
     }
-    expect(onBack).toHaveBeenCalledTimes(3);
+    expect(onBack).toHaveBeenCalledTimes(installedMailbox ? 3 : 2);
   });
 });
 
@@ -471,9 +581,10 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
     expect(section("channel")!.textContent).toContain(t("settings-integrations.thread_idle_hours_title"));
     expect(section("channel")!.querySelector('[data-field="mention_prefix"]')).not.toBeNull();
 
-    // 3. Inbox & Sync: connector feeds + section="inbox" field
+    // 3. Inbox & Sync: connector feeds + section="inbox" field + knowledge sync scope shortcut for larkx
     expect(section("inbox")!.textContent).toContain(t("settings-hubconnector.to_inbox"));
     expect(section("inbox")!.querySelector('[data-field="triage_rules"]')).not.toBeNull();
+    expect(section("inbox")!.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).not.toBeNull();
 
     // 4. Extension Settings: unsectioned field visible, advanced field folded by default, secret present
     expect(section("extension-settings")!.querySelector('[data-field="display_alias"]')).not.toBeNull();
@@ -508,6 +619,7 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
 
     const putCfg = requests.find((r) => r.method === "PUT" && r.url.includes("/-/config"));
     expect(putCfg).toBeDefined();
+    expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(true);
     expect(putCfg!.body).toEqual({
       config: {
         endpoint: "https://next.example.com",
@@ -519,9 +631,86 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
     });
   });
 
+  it("waits for a channel's display name on a direct detail link", async () => {
+    const originalFetch = fetch;
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    vi.stubGlobal("fetch", (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith("/channels/internal-channel-id") ? pending : originalFetch(url, init));
+    await act(async () => root.render(
+      <IntegrationDetail target={{ kind: "builtin", id: "internal-channel-id", channelId: "internal-channel-id", connectorId: null }} />,
+    ));
+    expect(host.textContent).not.toContain("internal-channel-id");
+    await act(async () => finish(new Response(JSON.stringify({ ...COMPOSITE_CHANNEL, id: "internal-channel-id" }))));
+    expect(host.querySelector("h1")?.textContent).toBe(COMPOSITE_CHANNEL.name);
+  });
+
+  it.each(["settings/plugins/other", "settings/plugins/larkx"])("shows read-only channel activity and routes More settings only to another page (%s)", async (url) => {
+    const onSettings = vi.fn();
+    const when = new Date().toISOString();
+    Object.assign(currentChannels.larkx_chat, { read_only: true, settings_url: url, last_event_at: when });
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "extension", id: "larkx" }} onSettings={onSettings} />));
+    await flush();
+    expect(host.querySelector("h1")?.closest("section")?.textContent).toContain(t("settings-channels.last_event", { when: ago(when) }));
+    const more = [...section("channel")!.querySelectorAll("button")].find((b) => b.textContent === t("settings-channels.more_settings"));
+    if (url.endsWith("other")) {
+      expect(more).toBeDefined();
+      act(() => more!.click());
+      expect(onSettings).toHaveBeenCalledWith(url);
+    } else {
+      expect(more).toBeUndefined();
+    }
+  });
+
+  it("keeps the override link when it opens another integration", async () => {
+    const onSettings = vi.fn();
+    currentChannels.larkx_chat.settings_url = "settings/plugins/other";
+    currentChannels.larkx_chat.target_override = { mode: "threads" };
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "extension", id: "larkx" }} onSettings={onSettings} />));
+    await flush();
+    const link = [...section("channel")!.querySelectorAll("button")].find(
+      (b) => b.textContent === t("settings-channels.target_override_extension_settings"),
+    );
+    expect(link).toBeDefined();
+    act(() => link!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/plugins/other");
+  });
+
+  it("locks channel controls during a routing save and keeps the refreshed route after a late reply", async () => {
+    const fetchNow = fetch;
+    let finishPut!: () => void;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/channels/larkx_chat") && init?.method === "PUT") {
+        return new Promise((resolve) => {
+          finishPut = () => resolve(ok({ ...COMPOSITE_CHANNEL, thread_mode: "per_topic" }));
+        });
+      }
+      return fetchNow(input, init);
+    });
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "extension", id: "larkx" }} />));
+    await flush();
+    const delivery = section("channel")!;
+    const option = (label: string) => [...delivery.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+      (b) => b.textContent?.includes(label),
+    )!;
+    const enable = delivery.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    await act(async () => option(t("settings-integrations.thread_mode_topic_title")).click());
+    expect(enable.disabled).toBe(true);
+    currentChannels.larkx_chat.thread_mode = "per_group_and_topic";
+    const refresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("settings-integrations.refresh")}"]`)!;
+    await act(async () => refresh.click());
+    await flush();
+    const groupTopic = t("settings-integrations.thread_mode_group_topic_title");
+    expect(option(groupTopic).getAttribute("aria-checked")).toBe("true");
+    await act(async () => finishPut());
+    await flush();
+    expect(option(groupTopic).getAttribute("aria-checked")).toBe("true");
+    expect(delivery.querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(false);
+  });
+
   it("saves thread_mode and thread_idle_hours via PUT /api/v1/channels/{id} and sends test messages", async () => {
     act(() => {
-      root.render(<IntegrationDetail target={{ kind: "extension", id: "larkx" }} />);
+      root.render(<IntegrationDetail target={{ kind: "extension", id: "larkx" }} onSettings={vi.fn()} />);
     });
     await flush();
 
@@ -536,7 +725,9 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
     const modePut = requests.find((r) => r.method === "PUT" && r.url.includes("/channels/larkx_chat"));
     expect(modePut?.body).toEqual({ thread_mode: "per_group_and_topic" });
     // Response updated target_override -> override hint appears immediately
-    expect(section("channel")!.textContent).toContain(t("settings-channels.target_override_topics"));
+    expect(section("channel")!.textContent).toContain(t("settings-channels.target_override_groups_and_topics"));
+
+    expect(section("channel")!.textContent).not.toContain(t("settings-channels.target_override_extension_settings"));
 
     // Update thread_idle_hours to 48 and click Save inside the ConfigurationForm field
     const idleField = section("channel")!.querySelector<HTMLElement>('[data-configuration-field="thread_idle_hours"]')!;
@@ -561,6 +752,27 @@ describe("Composite extension (connector + channel + sectioned config + lifecycl
 });
 
 describe("Older Hub and legacy extension graceful degradation", () => {
+  it.each([
+    ["built-in voice", { id: "voice", kind: "voice", source: "builtin" }, false],
+    ["app", { kind: "app" }, false],
+    ["market", { source: "market" }, false],
+    ["uninstalled plugin", { installed: false }, false],
+    ["read-only plugin", { read_only: true }, false],
+    ["mention plugin", { kind: "mention" }, true],
+  ] as const)("shows the expected routing controls for %s", async (_name, patch, visible) => {
+    const channel = "source" in patch && patch.source === "builtin"
+      ? { ...FEISHU_CHANNEL, ...patch, id: "voice", name: "Voice" }
+      : { ...COMPOSITE_CHANNEL, ...patch };
+    currentChannels[channel.id] = channel;
+    const target = channel.source === "builtin"
+      ? { kind: "builtin" as const, id: channel.id, channelId: channel.id, connectorId: null }
+      : { kind: "extension" as const, id: "larkx" };
+    act(() => root.render(<IntegrationDetail target={target} />));
+    await flush();
+    expect(section("channel")).not.toBeNull();
+    expect(!!section("channel")!.querySelector("[data-channel-routing]")).toBe(visible);
+  });
+
   it("degrades routing controls to read-only on an older Hub omitting thread_mode/thread_idle_hours", async () => {
     currentChannels.larkx_chat = {
       ...COMPOSITE_CHANNEL,
@@ -614,5 +826,259 @@ describe("Older Hub and legacy extension graceful degradation", () => {
     expect(section("extension-settings")!.querySelector('[data-field="api_url"]')).not.toBeNull();
     expect(section("extension-settings")!.querySelector('[data-field="max_items"]')).not.toBeNull();
     expect(section("extension-settings")!.querySelector("[data-integration-advanced]")).toBeNull();
+    expect(host.querySelector('[data-settings-row="saved-repositories-shortcut"]')).toBeNull();
+    expect(host.querySelector('[data-settings-row="knowledge-scope-shortcut"]')).toBeNull();
+  });
+
+  it("shows Knowledge sync scope shortcut for an external extension whose connector advertises history capability", async () => {
+    const onSettings = vi.fn();
+    currentExt = {
+      id: "acme-chat",
+      name: "Acme Chat",
+      kind: "process",
+      source: "installed",
+      status: "running",
+      version: "1.0.0",
+      enabled: true,
+      origin: "market:official/acme-chat",
+      contributes: { connectors: ["acme_conn"] },
+    };
+    currentConnectors = [
+      { id: "acme_conn", name: "Acme", status: "ok", enabled: true, archive: true, capabilities: ["history"] },
+    ];
+
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "extension", id: "acme-chat" }} onSettings={onSettings} />);
+    });
+    await flush();
+
+    const kbBtn = section("inbox")?.querySelector<HTMLButtonElement>('[data-settings-row="knowledge-scope-shortcut"]');
+    expect(kbBtn).not.toBeNull();
+    act(() => kbBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/knowledge#knowledge-items");
+  });
+
+  it("shows Saved repositories shortcut for a GitHub-compatible extension", async () => {
+    const onSettings = vi.fn();
+    currentExt = {
+      id: "github-extra",
+      name: "GitHub Extra",
+      kind: "process",
+      source: "installed",
+      status: "running",
+      version: "1.0.0",
+      enabled: true,
+      origin: "market:official/github-extra",
+      contributes: { repository_providers: ["github"] },
+    };
+
+    act(() => {
+      root.render(<IntegrationDetail target={{ kind: "extension", id: "github-extra" }} onSettings={onSettings} />);
+    });
+    await flush();
+
+    const repoBtn = section("connection")?.querySelector<HTMLButtonElement>('[data-settings-row="saved-repositories-shortcut"]');
+    expect(repoBtn).not.toBeNull();
+    expect(repoBtn!.textContent).toContain(t("settings-integrations.saved_repositories_count", { count: 2 }));
+    act(() => repoBtn!.click());
+    expect(onSettings).toHaveBeenCalledWith("settings/persona#repositories");
+  });
+});
+
+describe("manager-owned integration links", () => {
+  it("scopes contributed and target connectors to the extension owner for the lifetime of the detail", async () => {
+    currentConnectors.push({ ...COMPOSITE_CONNECTOR, manager: "work" }, { id: "imessage", name: "Messages", status: "ok", manager: "work" });
+    await act(async () => root.render(
+      <IntegrationDetail integrationsV2 target={{ kind: "extension", id: "larkx", connectorId: "imessage", manager: "work" }} />,
+    ));
+    await flush();
+    const toggle = section("inbox")!.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-hubconnector.to_inbox")}"]`)!;
+    await act(async () => toggle.click());
+
+    expect(requests.filter((r) => r.url.endsWith("/connectors/larkx_conn/settings"))).toEqual([
+      expect.objectContaining({ method: "PUT", body: { inbox: false }, manager: "work" }),
+    ]);
+    expect(requests).toContainEqual(expect.objectContaining({ url: "/api/v1/imessage", method: "GET", manager: "work" }));
+    expect(currentConnectors.find((c) => c.id === "larkx_conn" && c.manager === "work")?.inbox).toBe(false);
+    expect(currentConnectors.find((c) => c.id === "larkx_conn" && !c.manager)?.inbox).toBe(true);
+    expect(managerHeaderFor("/connectors/imessage/settings")).toBe("work");
+    expect(managerHeaderFor("/connectors/unrelated/settings")).toBeUndefined();
+    expect(chosenManager()).toBeNull();
+    act(() => root.render(null));
+    for (const path of ["/connectors/larkx_conn/settings", "/connectors/imessage/settings", "/imessage"]) {
+      expect(managerHeaderFor(path)).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["github", "saved-repositories-shortcut", "settings/persona#repositories"],
+    ...(installedMailbox ? [["mail", "knowledge-scope-shortcut", "settings/knowledge#knowledge-items"]] : []),
+  ])("opens %s settings with the owner's assistant already selected", async (id, row, destination) => {
+    const onSettings = vi.fn(() => chosenManager());
+    await act(async () => root.render(<IntegrationDetail integrationsV2 target={{ kind: "builtin", id, manager: "work" }} onSettings={onSettings} />));
+    await flush();
+    expect(chosenManager()).toBeNull();
+    if (id === "github") {
+      expect(requests).toContainEqual(expect.objectContaining({ url: "/api/v1/assistant/repositories", manager: "work" }));
+    }
+    act(() => host.querySelector<HTMLButtonElement>(`[data-settings-row="${row}"]`)!.click());
+    expect(onSettings).toHaveBeenCalledWith(destination);
+    expect(onSettings).toHaveReturnedWith("work");
+  });
+});
+
+describe("integration detail parity", () => {
+  const extension = { kind: "extension", id: "larkx" } as const;
+  const refresh = () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("settings-integrations.refresh")}"]`)!.click();
+  const unloadWarns = () => !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+  const input = (name: string) => host.querySelector<HTMLInputElement>(`#extension-field-${name}`)!;
+  function finish(kind: ExtensionOperation["kind"], manager?: string) {
+    const now = new Date().toISOString();
+    track({ id: `operation-${kind}`, kind, extension: extension.id, state: "succeeded", started_at: now,
+      updated_at: now, steps: [], retryable: false }, manager);
+  }
+
+  it("starts the requested market sign-in once and consumes the marker", async () => {
+    askSignIn(extension.id);
+    await act(async () => root.render(<IntegrationDetail target={extension} />));
+    expect(signInAsked(extension.id)).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(requests.filter((r) => r.url.endsWith("/auth/step"))).toHaveLength(1);
+    act(() => root.render(null));
+    await act(async () => root.render(<IntegrationDetail target={extension} />));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps upper-section edits through navigation, refresh and external upgrades until reverted", async () => {
+    const onUninstalled = vi.fn();
+    const page = <IntegrationDetail target={extension} onUninstalled={onUninstalled} />;
+    await act(async () => root.render(page));
+    act(() => setInputValue(input("endpoint"), "https://edited.example.com"));
+    const bar = host.querySelector('[data-settings-group="integration-save-bar"]')!;
+    expect(bar.closest("[data-integration-section]")).toBeNull();
+    expect(unloadWarns()).toBe(true);
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "builtin", id: "mail" }} />));
+    expect(unloadWarns()).toBe(true);
+    currentExt.config = { ...currentExt.config, display_alias: "Updated elsewhere" };
+    await act(async () => root.render(page));
+    expect(input("endpoint").value).toBe("https://edited.example.com");
+    expect(input("display_alias").value).toBe("Updated elsewhere");
+    currentExt.config.display_alias = "Refreshed";
+    await act(async () => refresh());
+    expect(input("endpoint").value).toBe("https://edited.example.com");
+    expect(input("display_alias").value).toBe("Refreshed");
+    currentExt.name = "Upgraded";
+    currentExt.config.display_alias = "After upgrade";
+    await act(async () => finish("upgrade", "work"));
+    expect(host.querySelector("h1")!.textContent).not.toBe("Upgraded");
+    await act(async () => finish("upgrade"));
+    expect(host.querySelector("h1")!.textContent).toBe("Upgraded");
+    expect(input("display_alias").value).toBe("After upgrade");
+    expect(input("endpoint").value).toBe("https://edited.example.com");
+    const revert = [...host.querySelectorAll("button")].find((b) => b.textContent === t("settings-extensions.revert"))!;
+    act(() => revert.click());
+    expect(input("endpoint").value).toBe(currentExt.config.endpoint);
+    expect(unloadWarns()).toBe(false);
+    act(() => setInputValue(input("endpoint"), "https://other.example.com"));
+    await act(async () => finish("uninstall"));
+    expect(onUninstalled).toHaveBeenCalledTimes(1);
+    expect(unloadWarns()).toBe(false);
+  });
+
+  it.each(["builtin", "extension"] as const)("polls a starting %s connector until sign-in is available, for at most 15s", async (kind) => {
+    vi.useFakeTimers();
+    try {
+      const target = kind === "builtin" ? { kind, id: "larkx_conn" } : extension;
+      const c = { ...COMPOSITE_CONNECTOR, account: "", status: "not_signed_in", capabilities: [] as string[] };
+      currentConnectors = [c];
+      const draw = () => act(async () => root.render(<IntegrationDetail target={target} />));
+      const reads = () => requests.filter((r) => r.url.endsWith("/connectors")).length;
+      const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      await draw();
+      expect(host.textContent).toContain(t("settings-hubconnector.starting", { name: c.name }));
+      const initial = reads();
+      for (let second = 0; second < 17; second++) await tick();
+      expect(reads() - initial).toBe(15);
+      act(() => root.render(null));
+      await draw();
+      c.capabilities = ["login"];
+      await tick();
+      expect(host.textContent).not.toContain(t("settings-hubconnector.starting", { name: c.name }));
+      expect(section("connection")!.textContent).toContain(t("settings-hubconnector.sign_in_to", { name: c.name }));
+      const ready = reads();
+      await tick();
+      expect(reads()).toBe(ready);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["apps", "voice", "feishu-mention"])("omits the empty connection section on read-only %s", async (id) => {
+    currentChannels[id] = { ...COMPOSITE_CHANNEL, id, source: "builtin", kind: id === "apps" ? "app" : "mention", read_only: true };
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "builtin", id, channelId: id, connectorId: null }} />));
+    await act(async () => vi.dynamicImportSettled());
+    expect(section("channel")).not.toBeNull();
+    expect(section("connection")).toBeNull();
+    if (id === "apps") expect(requests.some((r) => r.url.includes("provider=apps"))).toBe(false);
+  });
+
+  it.each(["builtin", "extension"] as const)("omits the inbox heading for a %s connector with no feeds or subscriptions", async (kind) => {
+    currentConnectors = [{ id: "plain", name: "Plain", status: "ok", capabilities: ["read"] }];
+    currentExt = { ...currentExt, id: "plain", contributes: { connectors: ["plain"] }, form: undefined };
+    await act(async () => root.render(<IntegrationDetail target={{ kind, id: "plain" }} />));
+    expect(section("connection")).not.toBeNull();
+    expect(section("inbox")).toBeNull();
+  });
+
+  it.each(["builtin", "extension"] as const)("keeps a subscription-only %s section actionable with a single summary read", async (kind) => {
+    applyCompleteSessions([SEED_SESSION], [], { features: ["connectors", "source_subscriptions"] });
+    currentConnectors = [{ id: "plain", name: "Plain", status: "ok", capabilities: ["read"] }];
+    currentExt = { ...currentExt, id: "plain", contributes: { connectors: ["plain"] }, form: undefined };
+    const fetch = vi.mocked(window.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((url, init) => String(url).endsWith("/subscriptions/summary")
+      ? Promise.resolve(ok({ connectors: [{ connector: "plain", extension: "plain", on: 1, failing: 0 }] }) as Response)
+      : fallback(url, init));
+    const onOpen = vi.fn();
+    await act(async () => root.render(<IntegrationDetail integrationsV2 target={{ kind, id: "plain" }} onOpenSources={onOpen} />));
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("/subscriptions/summary"))).toHaveLength(1);
+    const button = section("inbox")!.querySelector("button")!;
+    expect(button.textContent).toContain(t("subscriptions.row"));
+    act(() => button.click());
+    expect(onOpen).toHaveBeenCalledWith(JSON.stringify(kind === "builtin" ? { c: "plain" } : { ext: "plain" }), undefined);
+  });
+
+  it.skipIf(!installedMailbox)("refreshes mail accounts and only groups an available inbox switch", async () => {
+    await preloadMailbox("Settings");
+    await preloadMailbox("InboxSwitch");
+    currentMailAccounts = [];
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "builtin", id: "mail" }} />));
+    expect(requests.some((r) => r.url.includes("/connectors?all=1"))).toBe(false);
+    expect(section("inbox")!.querySelectorAll("section")).toHaveLength(1); // Knowledge scope shortcut
+    currentMailAccounts.push({ id: "added", email: "added@example.com", provider: "imap", status: "ok" });
+    currentConnectors = [];
+    await act(async () => refresh());
+    expect(section("connection")!.textContent).toContain("added@example.com");
+    expect(section("inbox")!.querySelectorAll("section")).toHaveLength(1); // Older hub lacks the switch
+    currentConnectors.push({ id: "mail", name: "Mail", status: "ok", inbox: true });
+    await act(async () => refresh());
+    expect(section("inbox")!.querySelector('[role="switch"]')).not.toBeNull();
+  });
+
+  it("refreshes both Lark gateway reads from the detail header", async () => {
+    await act(async () => root.render(<IntegrationDetail target={{ kind: "builtin", id: "lark" }} />));
+    requests.length = 0;
+    await act(async () => refresh());
+    expect(requests.some((r) => r.url.endsWith("/lark/status"))).toBe(true);
+    expect(requests.some((r) => r.url.endsWith("/lark/accounts"))).toBe(true);
+  });
+
+  it("loads external settings for every contributed channel", async () => {
+    currentExt.contributes!.channel = ["larkx_chat", "second_chat"];
+    await act(async () => root.render(<IntegrationDetail target={extension} />));
+    await act(async () => vi.dynamicImportSettled());
+    for (const id of ["larkx_chat", "second_chat", "larkx_conn"]) {
+      expect(requests.some((r) => r.url.includes(`provider=${id}`)), id).toBe(true);
+    }
   });
 });

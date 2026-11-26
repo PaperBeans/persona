@@ -72,7 +72,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
   it("names the most recent unread side, +1 for the other, in place of the parent's own seen words", () => {
     act(() => applyCompleteSessions([parent(), older, newer, seen], [], { loaded: true }));
     draw(listed());
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     expect(sideLine()?.textContent).toBe("分支新回复：Side chat+1");
     expect(sideLine()?.getAttribute("data-side-unread")).toBe("chat");
     expect(sideLine()?.getAttribute("role")).toBe("link");
@@ -85,7 +85,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
   it("keeps the parent's own unread words beside the side's line when both are unread", () => {
     act(() => applyCompleteSessions([parent({ state: "unread", updated_at: "2026-11-15T10:02:00Z" }), newer, seen], [], { loaded: true }));
     draw(listed());
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     expect(rowLine()).toBe("Parent summary");
     expect(sideLine()?.textContent).toBe("分支新回复：Side chat");
   });
@@ -98,7 +98,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
     // nor a parent whose own reply is unread with only seen sides
     act(() => applyCompleteSessions([parent({ state: "unread", updated_at: "2026-11-15T10:02:00Z", children: { total: 1, sides: 1 } })]));
     draw(listed());
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     expect(rowLine()).toBe("Parent summary");
     expect(sideLine()).toBeNull();
   });
@@ -108,7 +108,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
     // a paged list's row, as the hub sent it: the hub still counts the side unread until it records the look
     const hubRow = getState().sessions.mac!.find((s) => s.session_id === "review")!;
     draw(hubRow);
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     act(() => sideLine()!.click());
     expect(went).toEqual([to]);
     expect(rowClicks).toBe(0);
@@ -138,7 +138,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
     act(() => applyCompleteSessions([parent({ state: "unread", updated_at: "2026-11-15T10:02:00Z", children: { total: 1, sides: 1, sides_unread: 1 } }), newer], [], { loaded: true }));
     act(() => markSeenLocally("mac", "review"));
     draw(listed());
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     expect(rowLine()).toBeUndefined();
     expect(sideLine()?.textContent).toBe("分支新回复：Side chat");
   });
@@ -147,7 +147,7 @@ describe("a parent row kept Unread by a side session (#13299)", () => {
     // the store has not read its rows yet: no held side rows, only the hub's rollup
     act(() => applyCompleteSessions([parent()]));
     draw(getState().sessions.mac![0]!);
-    expect(mark()).toBe("unread");
+    expect(mark()).toBe("done");
     expect(sideLine()?.textContent).toBe("2 个分支会话有新回复");
     expect(sideLine()?.getAttribute("role")).toBeNull();
   });

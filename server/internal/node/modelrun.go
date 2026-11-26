@@ -17,6 +17,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/aiwire"
 	"github.com/nwverse/persona/server/internal/modelhttp"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/shellcmd"
@@ -617,13 +618,21 @@ func (n *Node) modelRunAgy(ctx context.Context, p proto.ModelRunParams, dir stri
 	// Override HOME only on the agy invocation (after loginShell sources ~/.zshrc) so shell aliases/PATH still resolve
 	// while agy itself reads zero global hooks/MCP from ~/.gemini/config and persists nothing into the real ~/.gemini/antigravity-cli.
 	script := "cd " + scriptPath(dir) + " && HOME=" + scriptPath(isoHome) + " " + launcherCmd + b.String() + " < " + scriptPath(inPath)
-	runCtx, cancelRun := context.WithCancel(ctx)
-	defer cancelRun()
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	defer cancelRun(nil)
 
 	cmd := loginShell(runCtx, script)
 	killGroupOnCancel(cmd)
-	raw, loggedOutFast, runErr := runWithEarlyAuthDetect(cancelRun, cmd, isAgyInteractiveAuthPrompt)
-	if ctx.Err() != nil {
+	return runAgyModelCommand(runCtx, cancelRun, cmd, p, timedOut)
+}
+
+var errAgyInteractiveAuth = errors.New("agy requested interactive authentication")
+
+func runAgyModelCommand(ctx context.Context, cancel context.CancelCauseFunc, cmd *exec.Cmd, p proto.ModelRunParams, timedOut error) (proto.ModelRunAnswer, error) {
+	raw, runErr := runWithEarlyAuthDetect(ctx, cancel, cmd, isAgyInteractiveAuthPrompt)
+	// Preserve the first cancellation cause even if the parent deadline expires during process cleanup.
+	cause := context.Cause(ctx)
+	if cause != nil && cause != errAgyInteractiveAuth {
 		return proto.ModelRunAnswer{}, timedOut
 	}
 	text := strings.TrimSpace(string(raw))
@@ -635,7 +644,7 @@ func (n *Node) modelRunAgy(ctx context.Context, p proto.ModelRunParams, dir stri
 			Usage: res.usage,
 		}, nil
 	}
-	if loggedOutFast {
+	if cause == errAgyInteractiveAuth {
 		return proto.ModelRunAnswer{}, &rpc.Error{Code: proto.CodeModelRunLoggedOut, Message: "model.run: " + p.Launcher + " is not logged in here"}
 	}
 	errText := cmp.Or(res.errMsg, text)
@@ -655,30 +664,35 @@ func (n *Node) modelRunAgy(ctx context.Context, p proto.ModelRunParams, dir stri
 
 // runWithEarlyAuthDetect captures combined stdout+stderr and cancels the process immediately if matchLine detects an
 // interactive login prompt (e.g. agy waiting 60 seconds for an OAuth browser callback when signed out).
-func runWithEarlyAuthDetect(cancel context.CancelFunc, cmd *exec.Cmd, matchLine func(string) bool) ([]byte, bool, error) {
+func runWithEarlyAuthDetect(ctx context.Context, cancel context.CancelCauseFunc, cmd *exec.Cmd, matchLine func(string) bool) ([]byte, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
-		return nil, false, err
+		return nil, err
 	}
+	// A descendant can retain the write end after the launcher dies. WaitDelay cannot interrupt Scan before Wait.
+	stopReading := context.AfterFunc(ctx, func() { _ = stdout.Close() })
+	defer stopReading()
 	var buf bytes.Buffer
-	var authTriggered bool
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
 		buf.WriteString(line)
 		buf.WriteByte('\n')
-		if !authTriggered && matchLine(line) {
-			authTriggered = true
-			cancel()
+		if ctx.Err() == nil && matchLine(line) {
+			cancel(errAgyInteractiveAuth)
 		}
 	}
 	waitErr := cmd.Wait()
-	return buf.Bytes(), authTriggered, waitErr
+	if ctx.Err() != nil {
+		// A child forking during the first group signal can survive it on macOS (#5942).
+		osproc.SweepGroup(cmd.Process.Pid, time.Second)
+	}
+	return buf.Bytes(), waitErr
 }
 
 type agyStreamOut struct {

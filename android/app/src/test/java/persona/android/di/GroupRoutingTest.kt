@@ -1,6 +1,7 @@
 package persona.android.di
 
 import androidx.test.core.app.ApplicationProvider
+import java.lang.reflect.Proxy
 import java.security.Security
 import persona.android.PersonaApp
 import persona.core.contracts.*
@@ -12,21 +13,28 @@ import persona.core.data.addPairedHub
 import persona.core.hub.HeartbeatPolicy
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
+import persona.core.hub.HttpAgentCreationService
 import persona.feature.agents.AgentsDraftSource
 import persona.feature.agents.AgentsOperationsBindings
 import persona.feature.agents.AgentsWiringState
+import persona.feature.chat.ChatAppBindings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -276,6 +284,63 @@ class GroupRoutingTest {
         assertEquals(DraftKey.Assistant(), wrapped.save(DraftKey.Assistant(), "t", 0).key)
         assertSame(repository, repository.inGroup(primary))
     }
+
+    @Test fun groupedChatLaunchersAndModelsUseTheHubsPlainMachineId() = runBlocking<Unit> {
+        MockWebServer().use { server ->
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            try {
+                val connection = object : HubConnection {
+                    override val state = MutableStateFlow(ConnectionState.Online)
+                    override val events = MutableSharedFlow<ServerEvent>()
+                    override fun reconnect() = error("unused")
+                    override fun send(message: JsonObject) = error("unused")
+                }
+                val composer = object : ChatComposerService {
+                    override val deliveries = MutableStateFlow<Map<String, ComposerDelivery>>(emptyMap())
+                    override suspend fun upload(session: SessionKey, name: String, file: java.io.File) = error("unused")
+                    override suspend fun interrupt(session: SessionKey) = error("unused")
+                    override suspend fun retryRefused(clientMessageId: String, clearDraft: Boolean) = error("unused")
+                }
+                val sender = object : MainConversationSender {
+                    override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+                    override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = error("unused")
+                }
+                val hub = HubScope("synthetic-hub", "synthetic-generation")
+                fun service() = HttpAgentCreationService(hub.path, server.url("/").toString(), "test-token", OkHttpClient())
+                var activeService: AgentCreationService? = service()
+                val bindings = ChatAppBindings(hub, scope, unused(), connection, unused(), composer, unused(), unused(),
+                    sender, worktrees = { activeService })
+
+                assertSame(bindings, bindings.inGroup(primary))
+                for (group in listOf(primary, other)) {
+                    val provider = requireNotNull(bindings.inGroup(group).worktrees)
+                    val previous = requireNotNull(provider())
+                    assertSame(previous, provider())
+                    activeService = null
+                    assertNull(provider())
+                    activeService = service()
+                    val service = requireNotNull(provider())
+                    assertNotSame(previous, service)
+                    assertSame(service, provider())
+                    val machineId = group.session(Session("machine", "session")).machineId
+                    server.enqueue(MockResponse().setBody("""{"agent":"claude","models":[{"id":"test-model"}]}"""))
+                    server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"}]}"""))
+
+                    assertEquals("test-model", service.launcherModels(machineId, "claude")?.models?.single()?.id)
+                    assertEquals("/api/v1/machines/machine/launchers/claude/models", server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)?.path)
+                    assertEquals("claude", service.launchers(machineId).single().name)
+                    assertEquals("/api/v1/machines/machine/launchers", server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)?.path)
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    private inline fun <reified T> unused(): T =
+        Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, method, _ ->
+            error("Unexpected call to ${method.name}")
+        } as T
 
     @Test fun creatingAnAgentReachesTheGroupWithItsPlainMachineAndComesBackSuffixed() = runBlocking<Unit> {
         var requested: AgentStartRequest? = null

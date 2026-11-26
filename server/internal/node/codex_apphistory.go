@@ -84,8 +84,11 @@ func codexHistoryDBPath(home string) string {
 	return codexNumberedDB(home, "thread_history_")
 }
 
+// codexNumberedDBGlob is what codexNumberedDB globs with, indirected so a test can count the history/log Globs.
+var codexNumberedDBGlob = filepath.Glob
+
 func codexNumberedDB(home, prefix string) string {
-	paths, _ := filepath.Glob(filepath.Join(home, prefix+"*.sqlite"))
+	paths, _ := codexNumberedDBGlob(filepath.Join(home, prefix+"*.sqlite"))
 	best, bestN := "", -1
 	for _, p := range paths {
 		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), prefix), ".sqlite"))

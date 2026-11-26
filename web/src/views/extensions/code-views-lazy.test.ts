@@ -27,10 +27,15 @@ describe("the first screen's extension files", () => {
     expect(source.match(/<Suspense fallback=\{<Loading \/>\}>\s*<OwnerScope extension=\{[^}]+\}>\s*<ExtensionUI /g)).toHaveLength(3);
   });
 
-  it("the assistant's cards load the renderer through the first-screen module (#3614)", () => {
+  it("the assistant's cards load their body on demand and register view-sections-lazy on the first screen (#3614)", () => {
     const card = read("../../ui/AssistantCard.tsx");
     expect(staticImports(card)).not.toContain("../views/extensions/ViewBody");
-    expect(staticImports(card)).toContain("../views/extensions/view-sections-lazy");
+    expect(staticImports(card)).not.toContain("./AssistantCardBody");
+    expect(card).toMatch(/^import\s+["']\.\.\/views\/extensions\/view-sections-lazy["'];/m);
+    expect(card).toMatch(/lazyPage\(\(\) => import\("\.\/AssistantCardBody"\)/);
+    const body = read("../../ui/AssistantCardBody.tsx");
+    expect(staticImports(body)).not.toContain("../views/extensions/ViewBody");
+    expect(staticImports(body)).toContain("../views/extensions/view-sections-lazy");
     const lazy = read("./view-sections-lazy.tsx");
     // types only from ViewBody: a value import would put the renderer back on the first screen
     expect(lazy).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+["']\.\/ViewBody["']/m);

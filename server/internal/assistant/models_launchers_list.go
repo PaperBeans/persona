@@ -301,7 +301,7 @@ func (s *Service) machineLaunchersFrom(ctx context.Context, machine string, res 
 	// same installation signal used by the built-in provider and Agent-start fallback, and works with older nodes.
 	if !res.HostRuntime && d.ClaudeVersion != "" && !slices.Contains(hidden, "claude") &&
 		!slices.ContainsFunc(out, func(l proto.Launcher) bool { return l.Name == "claude" }) {
-		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
+		out = append(out, proto.Launcher{Name: "claude", Source: "builtin", DisplayName: "Claude Code"})
 	}
 	agyAssistant := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant })
 	agyPolicy := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant && l.SupervisionPolicy })

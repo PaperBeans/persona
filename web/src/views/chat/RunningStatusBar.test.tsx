@@ -89,6 +89,7 @@ describe("RunningStatusView", () => {
     expect(html).not.toContain("tok/s");
     expect(html).not.toContain("data-running-speed");
     expect(html).toContain("text-ink-2");
+    expect(html).toContain(statusIcon("sparkles"));
     expect(html).toContain("text-accent-ink");
     expect(html).not.toContain("text-status-accent");
     expect(html).toContain('data-running-status="on"');
@@ -271,9 +272,11 @@ describe("model request retries (#887)", () => {
     expect(text).not.toContain("模型服务暂时不可用");
   };
 
-  it("shows the observed error, its known classification and the current/max attempt while working", () => {
+  it("shows the retry and its classification on one warm line with the observed error as detail", () => {
     const html = render({ live: retryLive(rateLimited, 5, 10, 0), working: true });
-    expect(html).toContain(rateLimited);
+    expect(html).toContain(`title="${rateLimited}"`);
+    expect(html).toMatch(/data-running-verb="true" title="[^"]*">[^<]*5\/10[^<]*<\/span>/);
+    expect(html).toContain("text-orange");
     expect(html).toContain("5/10");
     expect(html).toContain("请求太多，被限流了");
     expect(html).toContain("重试");
@@ -286,15 +289,18 @@ describe("model request retries (#887)", () => {
     document.body.append(host);
     const root = createRoot(host);
     const text = () => host.textContent ?? "";
+    const detail = () => host.querySelector("[data-running-verb]")?.getAttribute("title");
     try {
       act(() => root.render(bar(retryLive("API Error", 1, 10))));
-      expect(text()).toContain("API Error");
+      expect(detail()).toBe("API Error");
+      expect(text()).not.toContain("API Error");
       expect(text()).toContain("1/10");
       expect(text()).toContain("模型请求失败");
       expect(text()).not.toContain("请求太多，被限流了");
 
       act(() => root.render(bar(retryLive(rateLimited, 5, 10))));
-      expect(text()).toContain(rateLimited);
+      expect(detail()).toBe(rateLimited);
+      expect(text()).not.toContain(rateLimited);
       expect(text()).toContain("5/10");
       expect(text()).toContain("请求太多，被限流了");
       expect(text()).not.toContain("模型请求失败");
@@ -305,6 +311,7 @@ describe("model request retries (#887)", () => {
 
       act(() => root.render(bar({ verb: "Frosting", elapsed_s: 30 })));
       expect(text()).toContain("Bash 运行中…");
+      expect(detail()).toBeNull();
       expectNoRetry(text());
       expect(text()).not.toContain("6/10");
     } finally {
@@ -320,10 +327,11 @@ describe("model request retries (#887)", () => {
     const text = () => host.textContent ?? "";
     try {
       act(() => root.render(bar(retryLive(rateLimited, 5, 10))));
-      expect(text()).toContain(rateLimited);
+      expect(host.querySelector("[data-running-verb]")?.getAttribute("title")).toBe(rateLimited);
       act(() => root.render(bar(null)));
       expect(text()).toContain("Bash 运行中…");
       expectNoRetry(text());
+      expect(host.querySelector("[data-running-verb]")?.hasAttribute("title")).toBe(false);
       expect(text()).not.toContain("5/10");
     } finally {
       act(() => root.unmount());
@@ -340,13 +348,14 @@ describe("model request retries (#887)", () => {
     const text = () => host.textContent ?? "";
     try {
       act(() => root.render(bar(retryLive(upstream, 4, 10))));
-      expect(text()).toContain(upstream);
+      expect(host.querySelector("[data-running-verb]")?.getAttribute("title")).toBe(upstream);
       expect(text()).toContain("4/10");
       expect(text()).toContain("模型服务暂时不可用");
 
       act(() => root.render(bar(null, false)));
       expect(host.querySelector('[data-running-status="linger"]')).not.toBeNull();
       expectNoRetry(text());
+      expect(host.querySelector("[data-running-verb]")?.hasAttribute("title")).toBe(false);
       expect(text()).not.toContain("4/10");
 
       act(() => { vi.advanceTimersByTime(LINGER_MS); });
@@ -371,6 +380,16 @@ describe("model request retries (#887)", () => {
     expect(html).toContain(rateLimited);
     expect(html).toContain("5/10");
     expect(html).not.toContain('data-running-background="workflow"');
+  });
+
+  it("uses the foreground retry and its clock when background work is also listed", () => {
+    const html = render({
+      live: retryLive(upstream, 4, 10, 12), working: true,
+      command: { what: "Build release", more: 0 },
+    });
+    expect(html).toContain("4/10");
+    expect(html).toMatch(/data-running-elapsed[^>]*>12s</);
+    expect(html).not.toContain("Build release");
   });
 
   it("never infers a retry from elapsed time or attempt numbers without an observed error", () => {

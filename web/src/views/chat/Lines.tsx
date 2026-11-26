@@ -146,7 +146,7 @@ function SupervisionLine({ line, ...props }: LineProps & { line: Extract<ChatLin
   );
 }
 
-/** A notice on a line of its own: a wake opening new work (a hairline divider), "Interrupted", a long local command's output. */
+/** A notice on a line of its own: a wake opening new work (a hairline divider), "Interrupted", or a long local command's output. */
 function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
   const [open, setOpen] = useState(false);
   if (item.model_refusal) return <Suspense fallback={null}><RefusalNotice item={item} plain={assistant} /></Suspense>;
@@ -157,12 +157,14 @@ function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
         role="separator"
         aria-label={w.text}
         title={clock(item.ts)}
+        data-wake-divider
         data-wake-notice
         className={cx("flex min-w-0 items-center gap-2.5 py-0.5 text-[11.5px]", w.failed ? "text-red" : "text-ink-3")}
       >
         <span aria-hidden className="h-px min-w-4 flex-1 bg-line" />
         <span className="min-w-0 truncate">{w.text}</span>
         <span aria-hidden className="h-px min-w-4 flex-1 bg-line" />
+      </div>
       </div>
     );
   }

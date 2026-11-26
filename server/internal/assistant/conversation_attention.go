@@ -2,6 +2,8 @@ package assistant
 
 import (
 	"context"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +36,65 @@ type conversationAttentionBook struct {
 	routeMachine string
 }
 
-func conversationAttentionCacheKey(machine, session string) string { return machine + "\x00" + session }
+// conversationAttentionCacheKey is safe as a Postgres JSONB object key and collision-free even if a legacy
+// machine or session ID contains '|': each side is percent-escaped and joined with '|' (matching
+// supervise_background.go's '|' convention). The former NUL separator caused Postgres JSONB writes to fail
+// with SQLSTATE 22P05; reads and saves still accept and migrate that legacy encoding.
+func conversationAttentionCacheKey(machine, session string) string {
+	return url.PathEscape(machine) + "|" + url.PathEscape(session)
+}
+
+func conversationAttentionLegacyKey(machine, session string) string {
+	return machine + "\x00" + session
+}
+
+func conversationAttentionHasNULKey(entries map[string]conversationAttentionEntry) bool {
+	for k := range entries {
+		if strings.ContainsRune(k, '\x00') {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeConversationAttentionEntries rewrites any legacy NUL-delimited keys to the JSONB-safe form so
+// loaded state remains readable and subsequent PutSetting writes never emit \u0000.
+func normalizeConversationAttentionEntries(raw map[string]conversationAttentionEntry) map[string]conversationAttentionEntry {
+	out := make(map[string]conversationAttentionEntry, len(raw))
+	for k, v := range raw {
+		if !strings.ContainsRune(k, '\x00') {
+			out[k] = v
+		}
+	}
+	for k, v := range raw {
+		machine, session, ok := strings.Cut(k, "\x00")
+		if !ok {
+			continue
+		}
+		migrated := conversationAttentionCacheKey(machine, session)
+		if existing, exists := out[migrated]; !exists || v.Rev > existing.Rev {
+			out[migrated] = v
+		}
+	}
+	return out
+}
+
+func (s *Service) loadConversationAttentionLocked(ctx context.Context) bool {
+	b := &s.convAttention
+	if b.loaded {
+		return true
+	}
+	var loaded map[string]conversationAttentionEntry
+	if st := s.store(); st != nil {
+		if _, err := st.Setting(ctx, conversationAttentionKey, &loaded); err != nil {
+			s.logf("load conversation attention: %v", err)
+			return false
+		}
+	}
+	b.entries = normalizeConversationAttentionEntries(loaded)
+	b.loaded = true
+	return true
+}
 
 // mainConversationRoute reads the settings only before the first cached profile.
 // Once a profile exists, the caller uses that fresher snapshot instead.
@@ -54,17 +114,15 @@ func (s *Service) conversationAttentionCached(machine, session string, rev int64
 	b := &s.convAttention
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.loaded {
-		b.entries = map[string]conversationAttentionEntry{}
-		if st := s.store(); st != nil {
-			if _, err := st.Setting(context.Background(), conversationAttentionKey, &b.entries); err != nil {
-				s.logf("load conversation attention: %v", err)
-				return conversationAttentionEntry{}, false
-			}
-		}
-		b.loaded = true
+	if !s.loadConversationAttentionLocked(context.Background()) {
+		return conversationAttentionEntry{}, false
 	}
 	e, ok := b.entries[conversationAttentionCacheKey(machine, session)]
+	if !ok || e.Rev != rev {
+		if legacy, legacyOK := b.entries[conversationAttentionLegacyKey(machine, session)]; legacyOK && legacy.Rev == rev {
+			return legacy, true
+		}
+	}
 	return e, ok && e.Rev == rev
 }
 
@@ -75,15 +133,11 @@ func (s *Service) putConversationAttention(ctx context.Context, machine, session
 	b := &s.convAttention
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.loaded {
-		b.entries = map[string]conversationAttentionEntry{}
-		if st := s.store(); st != nil {
-			if _, err := st.Setting(ctx, conversationAttentionKey, &b.entries); err != nil {
-				s.logf("load conversation attention: %v", err)
-				return
-			}
-		}
-		b.loaded = true
+	if !s.loadConversationAttentionLocked(ctx) {
+		return
+	}
+	if b.entries == nil || conversationAttentionHasNULKey(b.entries) {
+		b.entries = normalizeConversationAttentionEntries(b.entries)
 	}
 	b.entries[conversationAttentionCacheKey(machine, session)] = entry
 	if st := s.store(); st != nil {

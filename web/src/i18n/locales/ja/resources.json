@@ -1,4 +1,5 @@
 {
+  "assistant_resources": "アシスタントの共有リソース",
   "title": "共有リソース",
   "configure": "ランナー設定",
   "invalid": "JSON 配列を入力してください。",

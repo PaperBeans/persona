@@ -1,10 +1,11 @@
 // Pure bidirectional route codec between unified Settings › Integrations (`integrations_v2`) and
 // legacy `connectors` / `channels` / `extensions` / `sources` routes (query and path forms, preserving `@manager` and `state`).
-// Zero external imports so Settings nav, deep-link redirects, and the lazy Integrations chunk share one truth.
+import { splitSettingsOwner, type LegacyIntegrationTab } from "../../lib/deep-links";
+import { decodeURIComponentSafe } from "../../lib/uri";
+
+export { isLegacyIntegrationTab, parseSettingsPath, type LegacyIntegrationTab } from "../../lib/deep-links";
 
 export type IntegrationFilter = "all" | "channels" | "data" | "tools";
-
-export type LegacyIntegrationTab = "channels" | "connectors" | "extensions" | "sources";
 
 export type IntegrationsRoute =
   | { kind: "list" }
@@ -22,37 +23,19 @@ export type IntegrationsRoute =
 const KNOWN_BUILTIN_IDS = new Set(["mail", "feishu-bot", "lark", "imessage", "github", "larkcli"]);
 const BUILTIN_CHANNEL_IDS = new Set(["apps", "voice", "feishu-mention", "feishu"]);
 
-export function isLegacyIntegrationTab(tab: string | null | undefined): tab is LegacyIntegrationTab {
-  return tab === "channels" || tab === "connectors" || tab === "extensions" || tab === "sources";
-}
-
 export function normalizeIntegrationFilter(value: string | null | undefined): IntegrationFilter {
   if (value === "channels" || value === "data" || value === "tools") return value;
   return "all";
-}
-
-function splitOwned(raw: string): { id: string; manager?: string } {
-  const at = raw.indexOf("@");
-  if (at <= 0) return { id: raw };
-  const manager = raw.slice(at + 1);
-  return manager ? { id: raw.slice(0, at), manager } : { id: raw.slice(0, at) };
 }
 
 function withManager(id: string, manager?: string): string {
   return manager ? `${id}@${manager}` : id;
 }
 
-function decodePathPart(part: string): string {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    return part;
-  }
-}
-
 /** Parses `?tab=integrations&integration=<sub>` into a structured route. */
 export function parseIntegrationsSub(sub: string | null | undefined): IntegrationsRoute {
   if (!sub) return { kind: "list" };
+  if (sub.startsWith("extension:")) sub = "ext:" + sub.slice("extension:".length);
   if (sub === "-sent") return { kind: "sent" };
   if (sub === "-market") return { kind: "catalog" };
   if (sub === "-markets") return { kind: "markets" };
@@ -63,7 +46,7 @@ export function parseIntegrationsSub(sub: string | null | undefined): Integratio
     const head = slash >= 0 ? rest.slice(0, slash) : rest;
     const manager = head.startsWith("@") ? head.slice(1) : "";
     const rawState = slash >= 0 ? rest.slice(slash + 1) : "";
-    const state = rawState ? decodePathPart(rawState) : "";
+    const state = rawState ? decodeURIComponentSafe(rawState) : "";
     return {
       kind: "sources",
       ...(state ? { state } : {}),
@@ -84,30 +67,30 @@ export function parseIntegrationsSub(sub: string | null | undefined): Integratio
   if (sub.startsWith("builtin:")) {
     const rest = sub.slice("builtin:".length);
     if (!rest || rest.includes("/")) return { kind: "list" };
-    const { id, manager } = splitOwned(rest);
+    const { id, manager } = splitSettingsOwner(rest);
     return id ? { kind: "builtin", id, ...(manager ? { manager } : {}) } : { kind: "list" };
   }
   if (sub.startsWith("ext:")) {
     const rest = sub.slice("ext:".length);
     if (!rest || rest.includes("/")) return { kind: "list" };
-    const { id, manager } = splitOwned(rest);
+    const { id, manager } = splitSettingsOwner(rest);
     return id ? { kind: "extension", id, ...(manager ? { manager } : {}) } : { kind: "list" };
   }
   if (sub.startsWith("channel:")) {
     const rest = sub.slice("channel:".length);
     if (!rest || rest.includes("/")) return { kind: "list" };
-    const { id, manager } = splitOwned(rest);
+    const { id, manager } = splitSettingsOwner(rest);
     return id ? { kind: "channel", id, ...(manager ? { manager } : {}) } : { kind: "list" };
   }
   if (sub.startsWith("connector:")) {
     const rest = sub.slice("connector:".length);
     if (!rest || rest.includes("/")) return { kind: "list" };
-    const { id, manager } = splitOwned(rest);
+    const { id, manager } = splitSettingsOwner(rest);
     return id ? { kind: "connector", id, ...(manager ? { manager } : {}) } : { kind: "list" };
   }
 
   if (sub.startsWith("-") || sub.includes("/")) return { kind: "list" };
-  const { id, manager } = splitOwned(sub);
+  const { id, manager } = splitSettingsOwner(sub);
   if (!id) return { kind: "list" };
   if (KNOWN_BUILTIN_IDS.has(id)) {
     return { kind: "builtin", id, ...(manager ? { manager } : {}) };
@@ -185,7 +168,7 @@ export function legacyToIntegrations(
   if (tab === "connectors") {
     if (!sub) return { sub: null, filter: "data" };
     if (sub === "-sent") return { sub: "-sent" };
-    const { id, manager: ownedManager } = splitOwned(sub);
+    const { id, manager: ownedManager } = splitSettingsOwner(sub);
     if (id === "mail" || id === "feishu-bot" || id === "lark") {
       return { sub: formatIntegrationsSub({ kind: "builtin", id, manager: ownedManager }) };
     }
@@ -194,7 +177,7 @@ export function legacyToIntegrations(
 
   if (tab === "channels") {
     if (!sub) return { sub: null, filter: "channels" };
-    const { id, manager: ownedManager } = splitOwned(sub);
+    const { id, manager: ownedManager } = splitSettingsOwner(sub);
     if (id === "feishu") {
       return { sub: formatIntegrationsSub({ kind: "builtin", id: "feishu-bot", manager: ownedManager }) };
     }
@@ -215,7 +198,7 @@ export function legacyToIntegrations(
     return { sub: formatIntegrationsSub({ kind: "page", id: page[1]!, ui: page[3]!, ...(page[2] ? { manager: page[2] } : {}) }) };
   }
   if (sub.startsWith("-") || sub.includes("/")) return { sub: null };
-  const { id, manager: ownedManager } = splitOwned(sub);
+  const { id, manager: ownedManager } = splitSettingsOwner(sub);
   return { sub: formatIntegrationsSub({ kind: "extension", id, manager: ownedManager }) };
 }
 
@@ -255,7 +238,7 @@ export function integrationsToLegacy(
     case "connector":
       return { tab: "connectors", sub: withManager(route.id, route.manager) };
     case "builtin":
-      if (route.id === "mail" || route.id === "lark") {
+      if (!route.manager && (route.id === "mail" || route.id === "lark")) {
         return { tab: "connectors", sub: null };
       }
       if (BUILTIN_CHANNEL_IDS.has(route.id)) {
@@ -263,31 +246,4 @@ export function integrationsToLegacy(
       }
       return { tab: "connectors", sub: withManager(route.id, route.manager) };
   }
-}
-
-/**
- * Parses path-based Settings URLs such as `/settings/connectors/github@work`,
- * `/settings/channels/feishu`, `/settings/extensions/larkx@work/ui/board`,
- * `/settings/sources`, `/settings/sources/<state>`, `/settings/sources@work/<state>`,
- * `/settings/plugins/larkx`, `/settings/integrations/builtin:mail`, or `/settings/sent`.
- */
-export function parseSettingsPath(path: string): { tab: string; sub: string | null; manager?: string } | null {
-  const trimmed = path.replace(/\/+$/, "");
-  if (!trimmed.startsWith("/settings/")) return null;
-  const rest = trimmed.slice("/settings/".length);
-  if (!rest) return null;
-  const slash = rest.indexOf("/");
-  const head = decodePathPart(slash >= 0 ? rest.slice(0, slash) : rest);
-  const tail = slash >= 0 ? rest.slice(slash + 1).split("/").map(decodePathPart).join("/") : null;
-  if (head === "sent") return { tab: "sent", sub: null };
-  if (head === "plugins") return { tab: "extensions", sub: tail || null };
-  if (head === "sources") return { tab: "sources", sub: tail || null };
-  if (head.startsWith("sources@")) {
-    const manager = head.slice("sources@".length);
-    return { tab: "sources", sub: tail || null, ...(manager ? { manager } : {}) };
-  }
-  if (head === "connectors" || head === "channels" || head === "extensions" || head === "integrations") {
-    return { tab: head, sub: tail || null };
-  }
-  return null;
 }

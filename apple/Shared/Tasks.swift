@@ -617,9 +617,12 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     /// never restored, while not put off, and from older hubs. Its `view` says where they file it; these are the facts.
     var restoredAt: Date?
     var somedayUntil: Date?
+    /// Strongly-typed waiting reason computed by the server (`wait`, #16168): non-nil while the task is projected into
+    /// Waiting, nil otherwise and on older hubs. Clients render it directly without deriving waiting state themselves.
+    var wait: TodoWait?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, lineage, manager, orphaned, project, check, after
+        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, lineage, manager, orphaned, project, check, after, wait
         case decisionReview = "decision_review"
         case doneAt = "done_at", createdAt = "created_at", updatedAt = "updated_at", reopenedAt = "reopened_at", seenAt = "seen_at", planID = "plan_id", startError = "start_error",
              doneBy = "done_by", doneReason = "done_reason", cancelledAt = "cancelled_at", cancelledReason = "cancelled_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
@@ -637,7 +640,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
          delivery: TodoDelivery? = nil, lineage: [TodoLineageStep]? = nil, manager: String? = nil, seenAt: Date? = nil,
          decisionReview: DecisionReview? = nil, orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil, check: TodoCheck? = nil,
          partOf: String? = nil, after: [String]? = nil, restoredAt: Date? = nil, somedayUntil: Date? = nil,
-         stageKind: String? = nil, stageDone: Bool = false) {
+         stageKind: String? = nil, stageDone: Bool = false, wait: TodoWait? = nil) {
         self.id = id
         self.title = title
         self.notes = notes
@@ -681,6 +684,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.somedayUntil = somedayUntil
         self.stageKind = stageKind
         self.stageDone = stageDone
+        self.wait = wait
     }
 
     init(from decoder: Decoder) throws {
@@ -741,6 +745,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         // New (#3380, #11590): absent from older hubs; one that does not decode is as if there were none.
         stageKind = (try? c.decodeIfPresent(String.self, forKey: .stageKind)) ?? nil
         stageDone = (try? c.decodeIfPresent(Bool.self, forKey: .stageDone)) ?? false
+        // New (#16168): server-computed waiting reason; absent on non-waiting rows and older hubs.
+        wait = (try? c.decodeIfPresent(TodoWait.self, forKey: .wait)) ?? nil
     }
 
     /// An ended task cannot keep an old decision card alive.

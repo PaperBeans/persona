@@ -4,7 +4,7 @@ import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "reac
 import { formatList, t } from "../i18n";
 import { awaitsReply, justFinished, sessionSource, sourceName } from "../lib/agent-groups";
 import { addSection, arrangeSessions, assignSection, GROUP_LABEL, isDefaultView, providerLabel, refreshAgentSessions, removeSection, resetView, setView, SHOW_LABEL, SORT_LABEL, toggleProvider, togglePin, totalUnread, updateAgentPrefs, useAgentList, useAgentPrefs, viewOf, type AgentPrefs, type AgentSession, type GroupBy, type ShowMode, type SortBy } from "../lib/agents";
-import { backgroundWaiting, sessionDisplayTab, sessionTitle, sessionTitleDetail, stateOf, tabLabel } from "../lib/format";
+import { activityOf, backgroundWaiting, sessionDisplayTab, sessionTitle, sessionTitleDetail, stateOf, tabLabel } from "../lib/format";
 import { useHerdrTabName } from "../lib/agents-display";
 import { firstAndCurrent } from "../lib/persona-nav";
 import { pickMainChat } from "../lib/handoff";
@@ -37,6 +37,7 @@ import { AgentAvatar } from "./agents/AgentAvatar";
 import { useFolded } from "../lib/use-folded";
 import { ariaKeyshortcuts, formatChord } from "../lib/shortcuts";
 import { PagedSessionList } from "./agents/PagedSessionList";
+import { useAccountGroups } from "./agents/account-groups";
 import { runtimeIdentity } from "../lib/runtime-list";
 import { heldSeen } from "../lib/seen-outbox";
 import { heldLaunchWorking, launchForSession } from "../lib/launch-handoff";
@@ -61,7 +62,7 @@ import type { UIColor } from "../lib/extension-ui-v6";
 // Memoized like SessionRow: a push that leaves the main conversation as it was does not render it again.
 export const PersonaRow = memo(function PersonaRow({ reg, hover, active, go, main, chord, waiting, onMenu: menuOf }: { reg: RegFn; hover: (k: string | null) => void; active: boolean; go: GoFn; main?: Session; /** The "Open Persona" shortcut as bound now ("": none). */ chord?: string; /** The main conversation's exact direct-user waiting count. */ waiting?: number; /** The conversation rows' menu, opened on `main`: none without it. */ onMenu?: RowMenuFn }) {
   const to: Route = { name: "persona" };
-  const st = main ? stateOf(main) : undefined;
+  const st = main ? activityOf(main) : undefined;
   const pending = waiting ?? main?.pending_interactions ?? 0;
   const onMenu = main && menuOf ? (anchor: HTMLElement, at?: MenuAt) => menuOf(main, anchor, at) : undefined;
   // one ref for the row's life, so a re-render does not let go of it and register it again (useGlide's reg)
@@ -202,7 +203,7 @@ export const NavRow = memo(function NavRow({ k, reg, hover, active, to, go, icon
 // The list's one-line notes (loading, no match), as each writes it.
 const NOTE = "px-2 py-1 text-label text-ink-3";
 
-// two shapes as well as two tones, so they tell apart without color: a framed terminal prompt and a window with a title bar
+// Two shapes as well as two tones, so they tell apart without color: a framed terminal prompt and a window with a title bar.
 const SOURCE_ICON = { terminal: { name: "terminal", tone: "text-ink-3" }, desktop: { name: "appWindow", tone: "text-source-desktop" } } as const;
 
 /** Where the agent was opened (#2526), as a mark: a terminal or a desktop app's window in its own color, Lark's mark for a
@@ -338,13 +339,14 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   // line below says which (#13299). `own`: the row in its own state, as the hub sent it.
   const ownSeen = heldSeen(ownRow(row), seenMark, nowHandoff);
   const marked = heldSeen(answeredSession(given, Boolean(ix), justAnswered, pending), seenMark, nowHandoff);
-  const keptBySide = marked.state !== given.state && stateOf(given) === "unread" && foldedStateWith(ownSeen, sides && countSides(sides)) === "unread";
+  const keptBySide = marked.state !== given.state && activityOf(given) === "unread" && foldedStateWith(ownSeen, sides && countSides(sides)) === "unread";
   const base = heldLaunchWorking(keptBySide ? { ...marked, state: "unread" } : marked, launch, nowHandoff);
-  const s = heldOnly && stateOf(base) === "needs_you" ? { ...base, state: "working" as const } : base;
+  const s = !base.view && heldOnly && stateOf(base) === "needs_you" ? { ...base, state: "working" as const, pending_interactions: 0 } : base;
   const preferTab = useHerdrTabName();
   const title = sessionTitle(s, preferTab);
   const displayTitle = label ?? title;
-  const st = stateOf(s);
+  const st = activityOf(s);
+  const phase = stateOf(s);
   // A lead row whose own conversation is idle while something under it runs (the tree's `running`: an Agent at work,
   // #6626) carries the working arc anyway (#6230). An own needs-you / unread / working state still wins, and Agent rows
   // (showState) keep their own state.
@@ -416,7 +418,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   const sideCount = sidesUnread ? sidesUnread.length : hubUnread;
   const sideLine = holdSides && st === "unread" && sideCount > 0;
   // only its sides are unread: what it did itself was seen, so its own last words do not stand under the green dot
-  const sideOnly = sideLine && stateOf(ownSeen) !== "unread";
+  const sideOnly = sideLine && activityOf(ownSeen) !== "unread";
   const openSide = useCallback((side: Session, e: React.MouseEvent) => {
     if (!to || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     rememberSessionRow(row);
@@ -457,7 +459,7 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
     >
       {/* the agent's mark before its state (#6390): what runs there, then how it is doing */}
       {showState && !s.assistant && <SessionMark s={s} size={14} />}
-      <span className="flex size-3.5 shrink-0 items-center justify-center">{showState || st === "working" || leadActive ? <StatusMark state={leadActive ? "working" : usageLimitLabel(s) && st === "unread" ? "idle" : st} awaiting={awaiting} finished={finished} waiting={backgroundWaiting(s)} /> : <Icon name={icon} size={12} className="text-ink-3" />}</span>
+      <span className="flex size-3.5 shrink-0 items-center justify-center">{showState || st === "working" || leadActive ? <StatusMark state={leadActive ? "working" : phase} awaiting={awaiting} finished={finished} waiting={backgroundWaiting(s)} /> : <Icon name={icon} size={12} className="text-ink-3" />}</span>
       {prefix && <span className={prefixClass}>{prefix}</span>}
       {/* with the mark, the title sits in the column whether a second line shows or not: the same element through a
           workflow's start and end, so the mark does not fade in again */}
@@ -657,9 +659,10 @@ function BoundedPersonalAgents({ reg, hover, activeKey, go }: { reg: RegFn; hove
   const [folded, toggle] = useFolded("personal-agents", false, { holds: activeKey.startsWith("a:") });
   const page = useSyncExternalStore(personalSessions.subscribe, personalSessions.getSnapshot, personalSessions.getSnapshot);
   const going = useGoingIds();
+  const accounts = useAccountGroups();
   if (!page.loaded || !page.rows.some((s) => !going.has(s.id))) return null;
   return <Section top title={t("sidebar.personal_agents")} folded={folded} onToggle={toggle} right={<GroupCount n={page.total} label={t("sidebar.agent_count", { count: page.total })} />}>
-    {!folded && <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal
+    {!folded && <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal label={accounts.label} accountMark={accounts.accountMark}
       renderRow={(s) => (going.has(s.id) ? null : <AgentRow s={s} reg={reg} hover={hover} active={activeKey === `a:${s.id}`} go={go} pinned={prefs.pins.includes(s.id)} onMenu={onMenu} />)} />}
     {rowMenu && <Menu anchor={rowMenu.el} onClose={() => setRowMenu(null)} align="right" width={200} items={agentRowItems(rowMenu.s, prefs)} />}
   </Section>;

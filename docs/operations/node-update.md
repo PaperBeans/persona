@@ -60,7 +60,7 @@ Windows release downloads keep `.exe` before `.gz` (`personad-windows-amd64.exe.
 
 ### Redeploy and automatic updates
 
-When the web Machines page or machine detail shows a version mismatch, click **Redeploy**. The page then shows **Waiting for idle**, **Transferring**, **Restarting**, **Confirming** in turn. Finishing the file transfer does not mean success: the machine must reconnect and actually run the target version before the hub confirms the update is complete.
+When the web Machines page or machine detail shows a version mismatch, click **Redeploy**. The page then shows **Waiting for idle**, **Transferring**, **Waiting to restart**, **Restarting**, **Confirming** in turn. Finishing the file transfer does not mean success: the machine must reconnect and actually run the target version before the hub confirms the update is complete.
 
 The assistant's `machine_redeploy` tool starts this same operation for one machine and waits for its confirmed success or failure. Its wait is separate from the job: canceling the tool call does not cancel the deployment, and the machine card keeps the same phases and result as a button-started update. The tool refuses to target the machine running its own conversation, since that conversation would keep the node busy while waiting for the result; use a conversation on another machine.
 
@@ -88,7 +88,7 @@ Updates are offered only for resident nodes with a supported way to recover the 
 
 ## Protocol and install boundaries
 
-`node.info` gains the optional `node_update` and `node_update_reason`. Old nodes do not report them and are treated as unsupported. The existing `POST /api/v1/machines/{mid}/deploy` is unchanged; the machine model gains `can_deploy`, `deploy_reason` and `deploy_phase`, and old clients that ignore the new fields still work.
+`node.info` gains the optional `node_update`, `node_update_reason` and `update_draining` (present with `{id, target}` while a resident node is draining active work for an accepted update), and nodes that report draining advertise `node_update_drain_v1` in `capabilities`. Old nodes do not report them and are treated as unsupported or legacy-confirming. The existing `POST /api/v1/machines/{mid}/deploy` is unchanged; the machine model gains `can_deploy`, `deploy_reason` and `deploy_phase` (`waiting_idle`, `transferring`, `draining`, `restarting`, `confirming`), and old clients that ignore the new fields still work.
 
 node RPC:
 
@@ -132,6 +132,20 @@ handles recovery. Retrying the same commit while recovery is pending returns the
 notification arrives, including from older nodes, the hub keeps the two-minute confirmation timeout. Older hubs
 ignore the notification.
 
+Once `node.update.commit` succeeds and its reply is written on a `node_update_drain_v1` resident node, the node enters
+the `draining` phase (`node.update.draining` event and `node.info.update_draining`) and holds the local rollback
+watchdog in draining mode while active work finishes, rather than starting the post-restart confirmation deadline
+before handover (#16517). The resident keeps the marker's `draining` flag set and slides its deadline while alive (so
+an older backup watchdog from disk drift also stays alive without falsely rolling back a live drain); for an adopted
+external binary (#15708) it refreshes only the adoption deadline without ever creating a backup or watchdog. Once
+draining finishes, the resident emits `node.restarting` (carrying `{id, target}`) and arms the fresh post-`exec`
+rollback deadline right before `exec`. On the hub, the two-minute post-restart confirmation timer (`not_confirmed`)
+starts only at that handover (or after a sustained disconnect during `draining`), not on the commit reply. During
+`draining`, the hub tolerates brief connection flaps that reconnect with a matching `update_draining` state, resumes
+tracking across a hub restart without misclassifying an online draining old-version node as `rolled_back`, and caps
+draining at a bounded maximum wait (`devices-deploy.drain_timeout`). Older nodes without `node_update_drain_v1` keep
+the legacy post-commit confirmation timer.
+
 An independent recovery process from the old version stays next to the executable; it restores the backup if the new version crashes, fails to start or times out before confirmation. Under systemd it is a separate transient user service, so it does not exit when the node's cgroup is cleaned up; under launchd, and under a supervisor declared with `--supervised`, it is a process detached in a session of its own, outside the node's process group. Replacement is allowed only after the recovery process is ready. The switch itself is the same on Linux and macOS: the node runs the new executable in place (exec, same process id), and the supervisor only matters when the node exits: a crash, or the recovery process stopping a new version that never confirmed, after which the supervisor's restart runs the restored old file. Windows has no exec and will not replace a running program's file: the node moves its file aside, puts the new one in place and exits with `nodeproto.RestartExitCode`, which persona-link's supervisor answers by starting it again at once; the recovery process there is detached and reports itself ready through the transaction marker, and rolls back the same way ([windows.md](windows.md) "Updates through the hub"). The recovery process distinguishes the node from a process that later reused its id by its exact start time, with `ps -o lstart=` as the portable fallback; with a declared supervisor the node checks at startup that `ps` can report it (BusyBox's cannot) and otherwise says why it cannot be updated. Recovery does not depend on the new node starting successfully, nor on the hub being online at the time. The necessary local recovery transaction marker is stored next to the binary, for the same reason as the hub's self-update: recovery must work when the database and remote connections are unavailable; the hub's business state and update tasks are not written to local JSON.
 
 A commit checks the installed file against the snapshot it took before preparing rollback. A rollback checks it against
@@ -146,7 +160,7 @@ Markers written by binaries without the exact identity still work through their 
 
 On Linux, a killed or exited process that has not yet been reaped (state `Z` or `X` in procfs) has no live identity. The node treats such a watchdog as gone and starts a replacement, even if `ps` still reports its old start time. An authoritative missing-process or zombie result never falls back to `ps`; the fallback remains for unavailable exact readings and older transaction markers without an exact start time, after checking that the process is not known to be gone.
 
-After reconnecting, the hub first confirms the node can read sessions normally, then confirms the target version; confirmation can complete even if the original update task vanished because the hub restarted. Until it is confirmed online, the client keeps the failed or confirming state and does not treat a successful file transfer as a finished update. A failed update of one node does not trigger a rollback of the whole hub.
+After reconnecting, the hub first confirms the node can read sessions normally, then confirms the target version; confirmation can complete even if the original update task vanished because the hub restarted. If a previous deployment record in Postgres (`node.deploy.<machine id>`) had already been marked `failed` (for example after a late confirmation), confirming the matching target version on reconnect updates that persisted record to `succeeded` and clears the stored error so stale `not_confirmed` failures never resurface across later disconnects or hub restarts. Until it is confirmed online, the client keeps the failed or confirming state and does not treat a successful file transfer as a finished update. A failed update of one node does not trigger a rollback of the whole hub.
 
 ## Verification
 

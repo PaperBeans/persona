@@ -473,7 +473,7 @@ func TestCodexAppServerModelSwitchAndPendingFallback(t *testing.T) {
 	}
 
 	// Switching to acme/gpt-5-pro reconciles xhigh -> medium.
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "acme/gpt-5-pro", "", "", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "acme/gpt-5-pro", "", "", false); err != nil {
 		t.Fatal(err)
 	}
 	up := f.sent("thread/settings/update")
@@ -488,10 +488,10 @@ func TestCodexAppServerModelSwitchAndPendingFallback(t *testing.T) {
 	f.mu.Lock()
 	f.reject, f.rejectCode = "thread/settings/update", -32601
 	f.mu.Unlock()
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "beta/gpt-5-pro", "", "", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "beta/gpt-5-pro", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "", "", "xhigh", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "", "", "xhigh", false); err != nil {
 		t.Fatal(err)
 	}
 	if s := paneRow(t, n, remoteRaw); s.Model != "beta/gpt-5-pro" || s.Effort != "xhigh" {

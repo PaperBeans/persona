@@ -82,4 +82,17 @@ struct PermissionAlwaysScopeTests {
         codex.alwaysLabel = nil
         #expect(codex.offersAlways && labels(codex).contains(String(localized: "Always Approve")))
     }
+
+    @Test func noHandBackDecodesAndRoundTripsWithoutChangingOlderCards() throws {
+        let headlessRaw = Data(#"{"id":"ix_hb","machine_id":"computer","session_id":"chat","kind":"permission","tool_name":"Bash","no_hand_back":true}"#.utf8)
+        let headless = try JSONDecoder().decode(Interaction.self, from: headlessRaw)
+        #expect(headless.noHandBack == true)
+        let encoded = try JSONEncoder().encode(headless)
+        let decoded = try JSONDecoder().decode(Interaction.self, from: encoded)
+        #expect(decoded.noHandBack == true)
+
+        let legacyRaw = Data(#"{"id":"ix_legacy","machine_id":"computer","session_id":"chat","kind":"permission","tool_name":"Bash"}"#.utf8)
+        let legacy = try JSONDecoder().decode(Interaction.self, from: legacyRaw)
+        #expect(legacy.noHandBack == nil)
+    }
 }

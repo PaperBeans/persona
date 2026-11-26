@@ -5,7 +5,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
-import { askRow, briefBody, type BriefRow, type FeedItem } from "../../lib/feed";
+import { briefBody, askRow } from "../../lib/brief-rows";
+import { type BriefRow, type FeedItem } from "../../lib/feed";
 import type { Todo, TodoAsk } from "../../lib/todos";
 
 const api = vi.hoisted(() => vi.fn());
@@ -426,6 +427,25 @@ describe("a row's meta line", () => {
 });
 
 describe("NeedsYouBody open acceptance ask", () => {
+  it("renders the active verification summary and PR in both the live tray and briefing", async () => {
+    const summary = "Both routes have step-free access.";
+    const link = "https://example.com/travel/routes/pull/7";
+    const todo: Todo = {
+      id: "trip", title: "Review the route", created_at: ASKED, updated_at: ASKED,
+      supervision: { supervisor: "main", state: "user_check", reviews: [] },
+      ask: { verdict: "Done: please verify the result", summary, link, asked_at: ASKED },
+    };
+    await import("./TaskDecision");
+    await act(async () => {
+      root.render(<NeedsYouBody item={{ kind: "task", key: "task:trip", todo, status: "needs_you", asks: [], countsOpen: true }} />);
+    });
+    await vi.waitFor(() => expect(host.querySelector("a")?.href).toBe(link));
+    expect(host.textContent).toContain(summary);
+    expect(host.querySelector("a")?.textContent).toBe("PR #7");
+    draw(item(body({ accept: [{ id: todo.id, title: todo.title, detail: summary, evidence_link: link, asked_at: ASKED }] })));
+    expect(host.querySelector('[data-brief-row="accept"] a')?.getAttribute("href")).toBe(link);
+  });
+
   it("loads AcceptRow lazily through NeedsYouPart with row attributes and Accept action intact", async () => {
     const todo: Todo = {
       id: "todo_lazy_ask",

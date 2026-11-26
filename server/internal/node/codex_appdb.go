@@ -74,6 +74,9 @@ type codexAppDB struct {
 	at    time.Time // when the database was last looked at
 	stamp string    // the database's files and the sidebar's ids when last read
 	byID  map[string]codexAppThread
+	// sqliteMissingUntil backs off database reads (and their path Globs) after the system sqlite3 CLI was found absent.
+	// Unlike at, this also bounds fresh callers, which otherwise bypass the refresh TTL on every high-frequency re-entry.
+	sqliteMissingUntil time.Time
 }
 
 var codexAppDBs = struct {

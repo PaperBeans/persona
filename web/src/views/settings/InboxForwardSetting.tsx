@@ -2,19 +2,20 @@
 import { useEffect, useState } from "react";
 import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
-import { itemHeaders, otherManager, useChosenManager } from "../../lib/manager-choice";
+import { ownerHeaders, useChosenManager } from "../../lib/manager-choice";
 import { toast } from "../../ui/atoms";
 import { Group, Row, Switch } from "./SettingsParts";
 
-export function InboxForwardSetting() {
-  const manager = otherManager(useChosenManager() ?? undefined);
+export function InboxForwardSetting({ manager: owner }: { manager?: string }) {
+  const picked = useChosenManager();
+  const manager = owner ?? picked ?? undefined;
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let dead = false;
     setEnabled(null);
-    api<{ inbox_todo_forward?: boolean }>("/assistant", { headers: itemHeaders(manager) })
+    api<{ inbox_todo_forward?: boolean }>("/assistant", { headers: ownerHeaders(manager) })
       .then((r) => {
         if (!dead && typeof r.inbox_todo_forward === "boolean") setEnabled(r.inbox_todo_forward);
       })
@@ -31,7 +32,7 @@ export function InboxForwardSetting() {
     setEnabled(next);
     setBusy(true);
     try {
-      const r = await api<{ inbox_todo_forward?: boolean }>("/assistant", { method: "PUT", json: { inbox_todo_forward: next }, headers: itemHeaders(manager) });
+      const r = await api<{ inbox_todo_forward?: boolean }>("/assistant", { method: "PUT", json: { inbox_todo_forward: next }, headers: ownerHeaders(manager) });
       setEnabled(typeof r.inbox_todo_forward === "boolean" ? r.inbox_todo_forward : next);
     } catch (e) {
       setEnabled(before);

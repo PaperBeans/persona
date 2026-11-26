@@ -79,6 +79,29 @@ func (d *DB) PutPushGradingBase(ctx context.Context, baseKey, _, mirrorKey strin
 	})
 }
 
+// SetPushGradingSwitch atomically updates the owner's legacy switch and, when a
+// versioned base configuration row already exists, updates its enabled field in
+// the same advisory-locked transaction so both settings never diverge.
+func (d *DB) SetPushGradingSwitch(ctx context.Context, baseKey, mirrorKey string, enabled bool) error {
+	return d.pushGradingWrite(ctx, func(tx pgx.Tx) error {
+		var existing []byte
+		err := tx.QueryRow(ctx, `SELECT value FROM `+d.settingsTable()+` WHERE key = $1`, baseKey).Scan(&existing)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			if _, err := tx.Exec(ctx, `UPDATE `+d.settingsTable()+`
+				SET value = jsonb_set(value, '{enabled}', to_jsonb($2::boolean), true), updated_at = now()
+				WHERE key = $1`, baseKey, enabled); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO `+d.settingsTable()+` (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+			ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = now()`, mirrorKey, enabled)
+		return err
+	})
+}
+
 // PutPushGradingLayer claims or renews only the extension layer. A different
 // owner changes no row. Neither success nor conflict touches the legacy switch.
 func (d *DB) PutPushGradingLayer(ctx context.Context, _, layerKey, _, manager, source string, value any, out any) (bool, error) {

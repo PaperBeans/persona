@@ -132,6 +132,7 @@ func (s *Service) nudgeLoop(ctx context.Context) {
 		case <-t.C:
 			cctx, cancel := context.WithTimeout(ctx, time.Minute)
 			s.larkModule().NudgeTick(cctx)
+			s.larkModule().HandoffTick(cctx)
 			cancel()
 		}
 	}
@@ -594,4 +595,19 @@ func (h larkHost) OpenTodo(ctx context.Context, o assistantwire.ChatOpenTodo) (s
 		s.logf("task %s: feed: %v", todo.ID, err)
 	}
 	return todo.ID, nil
+}
+
+// StartHandoffGuest starts the guest that answers a proxy reply (bot_handoff.go).
+func (h larkHost) StartHandoffGuest(ctx context.Context, handoff, text, launcher string) (string, string, error) {
+	return h.s.StartHandoffGuest(ctx, handoff, text, launcher)
+}
+
+// RaiseHandoffDecision asks the owner to approve one draft before the bot posts it.
+func (h larkHost) RaiseHandoffDecision(ctx context.Context, handoff string, req assistantwire.OutsideDecisionRequest) (string, error) {
+	return h.s.RaiseHandoffDecision(ctx, handoff, req)
+}
+
+// WithdrawHandoffDecision takes back a confirmation nobody answered.
+func (h larkHost) WithdrawHandoffDecision(ctx context.Context, id string) {
+	h.s.WithdrawHandoffDecision(ctx, id)
 }

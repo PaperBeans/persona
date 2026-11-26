@@ -275,8 +275,19 @@ func TestDetachedApprovalCarriesEditedTextAndTerminalOutcomes(t *testing.T) {
 		if err := ft.s.resolve("ix_after_expiry", proto.Resolution{Allow: &deny}); err != nil {
 			t.Fatal(err)
 		}
-		if result := waitApprovalResult(t, ft, "ix_after_expiry"); !strings.Contains(result, "denied") {
+		if result := waitApprovalResult(t, ft, "ix_after_expiry"); !strings.Contains(result, "denied") || strings.Contains(result, "Owner note:") {
 			t.Fatalf("denial result = %q", result)
+		}
+
+		// Detached denial with an owner note preserves that note in the delivered journal outcome.
+		withNote := startDetachedTest(t, ft, detachedTestCard("ix_detached_deny_note"))
+		elapse(30 * time.Millisecond)
+		awaitDetachedTest(t, withNote)
+		if err := ft.s.resolve("ix_detached_deny_note", proto.Resolution{Allow: &deny, Message: "  Change tone to brief  "}); err != nil {
+			t.Fatal(err)
+		}
+		if result := waitApprovalResult(t, ft, "ix_detached_deny_note"); !strings.Contains(result, "denied") || !strings.Contains(result, "Owner note: Change tone to brief") {
+			t.Fatalf("denial-with-note result = %q, want owner note preserved", result)
 		}
 	})
 }
@@ -599,4 +610,63 @@ func TestDetachedCommandApprovalRestoredReconnectAdoptsPreparedCoordinator(t *te
 			t.Fatalf("retry after restored reconnect = %+v, %v", consumed, err)
 		}
 	})
+}
+
+func TestDetachedCommandClarifyPreservesDecisionDeadlineAfterAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		zeroExpires bool
+	}{
+		{name: "explicit_expires_at", zeroExpires: false},
+		{name: "default_ttl_expires_at", zeroExpires: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ft := newFleetTest(t)
+				preparedTestConversation(ft)
+				ix := detachedTestCard("ix_detached_clarify_" + tc.name)
+				if tc.zeroExpires {
+					ix.ExpiresAt = time.Time{}
+				}
+				done := startDetachedTest(t, ft, ix)
+				elapse(10 * time.Millisecond)
+
+				if err := ft.s.clarify(context.Background(), ix.ID, "Why run this command?", "owner-q-"+tc.name, nil); err != nil {
+					t.Fatalf("clarify: %v", err)
+				}
+				first := awaitDetachedTest(t, done)
+				if first.err != nil || !first.res.Pending || !first.res.Dismiss || first.res.ApprovalID != ix.ID {
+					t.Fatalf("initial hook result after clarify = %+v, %v", first.res, first.err)
+				}
+
+				elapse(200 * time.Millisecond)
+				ref := SessionRef{MachineID: "mac", SessionID: "s1"}
+				ft.s.approvalAnswerTurnStarted(ref)
+				ft.s.approvalAnswerTurnEnded(ref)
+
+				// Remaining decision time must be preserved after the answer (minutes/hour, never 0ms).
+				elapse(time.Minute)
+				pending := ft.s.pendingInteractions()
+				if len(pending) != 1 || pending[0].ID != ix.ID {
+					t.Fatalf("detached card expired right after clarification answer: pending=%+v", pending)
+				}
+				if time.Until(pending[0].ExpiresAt) <= 0 {
+					t.Fatalf("resumed ExpiresAt is not in the future: %v", pending[0].ExpiresAt)
+				}
+
+				allow := true
+				if err := ft.s.resolve(ix.ID, proto.Resolution{Allow: &allow}); err != nil {
+					t.Fatalf("Allow after clarification answer failed: %v", err)
+				}
+				if result := waitApprovalResult(t, ft, ix.ID); !strings.Contains(result, "approved") {
+					t.Fatalf("continuation result = %q", result)
+				}
+				retry := detachedTestCard("ix_detached_clarify_retry_" + tc.name)
+				got, err := ft.s.nodeInteraction(context.Background(), retry)
+				if err != nil || got.Allow == nil || !*got.Allow || got.ApprovalID != ix.ID {
+					t.Fatalf("retry after clarified Allow = %+v, %v", got, err)
+				}
+			})
+		})
+	}
 }

@@ -26,27 +26,17 @@ const CATEGORY: Record<SearchCategory, string> = {
 };
 
 const NO_RESULTS: ChatSearchResults = { hits: [], truncated: false };
+const NO_ITEMS: Item[] = [];
 
 /** How a run of "Load earlier" ended: null reached the start; a string says why it stopped. */
 export type LoadOutcome = string | null;
 
-export function ChatSearch({
-  open,
-  query,
-  onQuery,
-  items,
-  foldsLoading = false,
-  foldsPartial = false,
-  rounds,
-  hasMore,
-  onLoadEarlier,
-  onPick,
-  onClose,
-}: {
+export interface ChatSearchProps {
   open: boolean;
   query: string;
   onQuery: (q: string) => void;
-  items: Item[];
+  /** Loaded chat items searched by default when controlled `results` are not provided. */
+  items?: Item[];
   /** The folded work is being fetched for the search (useFoldSearch). */
   foldsLoading?: boolean;
   /** Some folded work is not searched (its fetch failed, or past the budget). */
@@ -55,40 +45,108 @@ export function ChatSearch({
   rounds: number;
   hasMore: boolean;
   /** Pages back (up to 20) until the start, an error or `stop()`; `onPage` counts the pages in. */
-  onLoadEarlier: (onPage: (n: number) => void, stopped: () => boolean) => Promise<LoadOutcome>;
+  onLoadEarlier?: (onPage: (n: number) => void, stopped: () => boolean) => Promise<LoadOutcome> | void;
   onPick: (hit: ChatSearchHit) => void;
   onClose: () => void;
-}) {
+  /** Controlled search results skip the default `searchChat` pass over `items`. */
+  results?: ChatSearchResults;
+  /** Controlled search-in-progress state (defaults to debounce state, or false when `results` are controlled). */
+  searching?: boolean;
+  /** Custom matcher replacing the default `searchChat` when `results` are not controlled. */
+  searchItems?: (items: Item[], query: string) => ChatSearchResults;
+  /** Debounce delay in ms before running local matching (default 200). */
+  settleMs?: number;
+  /** Controlled earlier-loading state, page count, status notice and stop callback. */
+  loadingEarlier?: boolean;
+  loadedPages?: number;
+  notice?: string | null;
+  onStopLoadEarlier?: () => void;
+}
+
+export function ChatSearch({
+  open,
+  query,
+  onQuery,
+  items = NO_ITEMS,
+  foldsLoading = false,
+  foldsPartial = false,
+  rounds,
+  hasMore,
+  onLoadEarlier,
+  onPick,
+  onClose,
+  results: controlledResults,
+  searching: controlledSearching,
+  searchItems,
+  settleMs = SETTLE_MS,
+  loadingEarlier: controlledLoadingEarlier,
+  loadedPages: controlledLoadedPages,
+  notice: controlledNotice,
+  onStopLoadEarlier,
+}: ChatSearchProps) {
+  const hasControlledResults = controlledResults !== undefined;
   const [applied, setApplied] = useState(query);
   useEffect(() => {
-    const id = window.setTimeout(() => setApplied(query), SETTLE_MS);
+    if (hasControlledResults || settleMs <= 0) return;
+    const id = window.setTimeout(() => setApplied(query), settleMs);
     return () => clearTimeout(id);
-  }, [query]);
-  const searching = applied !== query;
+  }, [query, hasControlledResults, settleMs]);
+  const effectiveApplied = settleMs <= 0 ? query : applied;
+  const searching = controlledSearching ?? (hasControlledResults ? false : effectiveApplied !== query);
+  const activeQuery = hasControlledResults ? query : effectiveApplied;
   // only while the panel shows: the query stays after a pick, and the chat keeps changing under it
-  const results = useMemo(() => (open ? searchChat(items, applied) : NO_RESULTS), [open, items, applied]);
+  const results = useMemo(
+    () => (!open ? NO_RESULTS : controlledResults !== undefined ? controlledResults : (searchItems ?? searchChat)(items, effectiveApplied)),
+    [open, controlledResults, searchItems, items, effectiveApplied],
+  );
   const groups = useMemo(() => groupHits(results.hits), [results.hits]);
 
-  const [loading, setLoading] = useState(false);
-  const [pages, setPages] = useState(0);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [internalLoading, setInternalLoading] = useState(false);
+  const [internalPages, setInternalPages] = useState(0);
+  const [internalNotice, setInternalNotice] = useState<string | null>(null);
+  const loading = controlledLoadingEarlier ?? internalLoading;
+  const pages = controlledLoadedPages ?? internalPages;
+  const notice = controlledNotice !== undefined ? controlledNotice : internalNotice;
   const stop = useRef(false);
+  const loadRun = useRef(0);
+  const wasOpen = useRef(open);
   // the panel closing stops a run going
   useEffect(() => {
-    if (!open) stop.current = true;
-  }, [open]);
-  const loadEarlier = async () => {
-    stop.current = false;
-    setLoading(true);
-    setPages(0);
-    setNotice(null);
-    try {
-      setNotice(await onLoadEarlier(setPages, () => stop.current));
-    } catch {
-      setNotice(t("chat-chatview.search_load_failed"));
-    } finally {
-      setLoading(false);
+    const closed = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!open) {
+      stop.current = true;
+      if (closed && loading) onStopLoadEarlier?.();
     }
+  }, [open, loading, onStopLoadEarlier]);
+  useEffect(() => () => {
+    stop.current = true;
+    loadRun.current += 1;
+  }, []);
+  const loadEarlier = async () => {
+    if (!onLoadEarlier) return;
+    const run = ++loadRun.current;
+    stop.current = false;
+    setInternalLoading(true);
+    setInternalPages(0);
+    setInternalNotice(null);
+    try {
+      const outcome = await onLoadEarlier(
+        (n) => {
+          if (loadRun.current === run) setInternalPages(n);
+        },
+        () => stop.current || loadRun.current !== run,
+      );
+      if (loadRun.current === run && outcome !== undefined) setInternalNotice(outcome);
+    } catch {
+      if (loadRun.current === run) setInternalNotice(t("chat-chatview.search_load_failed"));
+    } finally {
+      if (loadRun.current === run) setInternalLoading(false);
+    }
+  };
+  const stopLoading = () => {
+    stop.current = true;
+    onStopLoadEarlier?.();
   };
 
   const count = `${results.hits.length}${results.truncated ? "+" : ""}`;
@@ -98,11 +156,11 @@ export function ChatSearch({
         {loading ? t("chat-chatsearch.loading_pages", { count: pages }) : notice ?? (foldsLoading ? t("chat-chatsearch.searching_folds") : foldsPartial ? t("chat-chatsearch.folds_partial") : hasMore ? "" : t("chat-chatsearch.at_start"))}
       </span>
       {loading ? (
-        <Button tone="quiet" onClick={() => (stop.current = true)}>
+        <Button tone="quiet" onClick={stopLoading}>
           {t("chat-chatsearch.stop_loading")}
         </Button>
       ) : (
-        hasMore && (
+        hasMore && onLoadEarlier && (
           <Button onClick={() => void loadEarlier()}>
             {t("chat-chatsearch.load_earlier")}
           </Button>
@@ -140,7 +198,7 @@ export function ChatSearch({
         </div>
         <div className="-mx-1 max-h-[52vh] overflow-y-auto px-1 max-sm:max-h-none" role="list">
           {!searching && results.hits.length === 0 ? (
-            <Empty icon="search" title={applied.trim() ? t("chat-chatsearch.no_hits") : t("chat-chatsearch.enter_keyword")}>
+            <Empty icon="search" title={activeQuery.trim() ? t("chat-chatsearch.no_hits") : t("chat-chatsearch.enter_keyword")}>
               {t("chat-chatsearch.scope")}
             </Empty>
           ) : (

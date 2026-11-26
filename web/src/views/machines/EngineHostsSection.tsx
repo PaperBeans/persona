@@ -1,7 +1,7 @@
 // "Engine" on a machine's page with a hub that takes sets (#2576, docs/integrations/engines.md "Host sets"): every engine is a checkbox
 // (several may be on at once, or none), and one of the checked ones is the default, where new sessions open. Same row
 // shape as the single-engine picker (EngineSection); a choice stays here until "Save" (PUT …/engine {hosts, default}).
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import {
   currentHosts,
@@ -25,19 +25,30 @@ import { t } from "../../i18n";
 
 export function EngineHostsSection({ machine, heading }: { machine: Machine; heading: React.ReactNode }) {
   const current = currentHosts(machine);
+  const currentKey = `${current.hosts.join(",")}|${current.default}`;
   const [prevMachineId, setPrevMachineId] = useState(machine.id);
+  const [prevCurrentKey, setPrevCurrentKey] = useState(currentKey);
   const [choice, setChoice] = useState<HostChoice>(current);
   const [edited, setEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   if (prevMachineId !== machine.id) {
     setPrevMachineId(machine.id);
+    setPrevCurrentKey(currentKey);
     setChoice(current);
     setEdited(false);
     setSaving(false);
     setError("");
+  } else if (!saving && prevCurrentKey !== currentKey) {
+    setPrevCurrentKey(currentKey);
+    if (!edited) {
+      if (!sameHosts(choice, current)) setChoice(current);
+    } else if (sameHosts(choice, current)) {
+      // Remote state converged to the unsaved draft: clear the latch so future pushes follow the hub.
+      setEdited(false);
+      setError("");
+    }
   }
-  const currentKey = `${current.hosts.join(",")}|${current.default}`;
   const machineIdRef = useRef(machine.id);
   const saveSeqRef = useRef(0);
   const savingRef = useRef(false);
@@ -58,12 +69,6 @@ export function EngineHostsSection({ machine, heading }: { machine: Machine; hea
       savingRef.current = false;
     }
   }, [machine.id]);
-
-  // Same-machine hub pushes follow until the user starts editing or saving.
-  useEffect(() => {
-    if (!edited && !saving) setChoice((prev) => (sameHosts(prev, current) ? prev : current));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machine.id, currentKey]);
 
   const change = (next: HostChoice) => {
     if (savingRef.current) return;

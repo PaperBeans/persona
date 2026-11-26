@@ -43,12 +43,8 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 				return false
 			}
 			name := list.Name.Value
-			if _, shadow := vars[name]; shadow || name == "IFS" || larkExecutableEnv[name] {
-				return false
-			}
-			switch name {
-			case "RANDOM", "SRANDOM", "SECONDS":
-				return false // the shell computes these values instead of retaining the assignment
+			if _, shadow := vars[name]; shadow || larkShellManaged(name) || larkExecutableEnv[name] {
+				return false // the shell rewrites a managed name (cd, =~, RANDOM) instead of retaining the binding
 			}
 			values := make([]string, len(list.Items))
 			for i, item := range list.Items {
@@ -148,8 +144,8 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 			// These commands cannot mutate a binding in the parent shell. Unknown
 			// builtins/functions and all assignment/declaration forms fall back.
 			ordinary := map[string]bool{"[": true, ":": true, "false": true, "cd": true, "ls": true, "git": true, "go": true, "pwd": true, "sleep": true, "cat": true, "tee": true, "python": true, "python3": true, "sha256sum": true}[name] ||
-				larkFilters[name] && name != "printf" && name != "cd"
-			external := (filepath.IsAbs(name) || strings.HasPrefix(name, "~/")) && !commandShells[base] && !indirectLarkCommand(base)
+				isLarkFilter(words[index:]) && name != "printf" && name != "cd"
+			external := (filepath.IsAbs(name) || strings.HasPrefix(name, "~/")) && !commandShells[base] && !indirectLarkCommand(base) && isSafeFilterInvocation(base, words[index+1:])
 			if !gated && !ordinary && !external {
 				return false
 			}
@@ -225,7 +221,7 @@ func bindLiteralLoopAssignments(assigns []*syntax.Assign, vars map[string]string
 		return false
 	}
 	for _, a := range assigns {
-		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
+		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || larkShellManaged(a.Name.Value) || larkExecutableEnv[a.Name.Value] {
 			return false
 		}
 		value, dynamic := executionWord(a.Value)
@@ -245,7 +241,7 @@ func bindLiteralLoopAssignments(assigns []*syntax.Assign, vars map[string]string
 // IFS remain opaque because they can change what the expanded words mean.
 func literalLoopEnvAssignments(assigns []*syntax.Assign) bool {
 	for _, a := range assigns {
-		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
+		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || larkShellManaged(a.Name.Value) || larkExecutableEnv[a.Name.Value] {
 			return false
 		}
 	}

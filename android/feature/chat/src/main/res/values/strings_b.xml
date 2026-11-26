@@ -500,6 +500,10 @@
     <string name="chat_web_pick_edit">AI edit</string>
     <string name="chat_web_pick_context">Use as context</string>
     <string name="chat_web_pick_hand">Hand to Persona</string>
+    <string name="chat_web_download_started">Downloading %1$s</string>
+    <string name="chat_web_download_opened_browser">Opened download in browser</string>
+    <string name="chat_web_download_loopback_unsupported">Local forwarded port files can\'t be downloaded here</string>
+    <string name="chat_web_download_failed">Couldn\'t start download</string>
     <string name="chat_file_video">Video</string>
     <string name="chat_file_audio">Recording</string>
     <string name="chat_file_file">File</string>

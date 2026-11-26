@@ -169,6 +169,7 @@ func gradingHub(t *testing.T) (*Hub, *fakeAPNs) {
 		t.Fatal(err)
 	}
 	h := &Hub{push: p}
+	h.push.quiesce = &h.quiesce
 	setGradingClock(h, time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC))
 	return h, f
 }

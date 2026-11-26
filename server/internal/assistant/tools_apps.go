@@ -181,10 +181,10 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		switch {
 		case a.Kind != kb.KindRecording || json.Unmarshal(d.Meta, &trimmed) != nil || trimmed.At == nil:
 		case trimmed.Kind == kb.RecordingDay:
-			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_days); only the recap above is kept, until "+
+			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_text_days); only the recap above is kept, until "+
 				"assistant.minutes_days after the day (0 means forever, the default), and it can't be written again.\n", trimmed.At.In(s.location(ctx)).Format("2006-01-02"))
 		default:
-			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_days); only the minutes above are kept, until "+
+			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_text_days); only the minutes above are kept, until "+
 				"assistant.minutes_days after the meeting (0 means forever, the default), and they can't be made again.\n", trimmed.At.In(s.location(ctx)).Format("2006-01-02"))
 		}
 		switch {

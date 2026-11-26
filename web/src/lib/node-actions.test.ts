@@ -96,7 +96,7 @@ describe("splitting and running an agent", () => {
     const agent = by(nodeActions(tab, d), "node-agent");
     expect(typeof agent.children).toBe("function");
     const list = await (agent.children as () => Promise<MenuItem[]>)();
-    expect(list.map((i) => i.label)).toEqual(["claude", "work"]); // a Codex launcher needs a first message
+    expect(list.map((i) => i.label)).toEqual(["Claude Code", "work"]); // a Codex launcher needs a first message
     expect(list[1].hint).toBe("m1");
     await list[1].onSelect();
     expect(d.post).toHaveBeenCalledWith("m1", "panes/agent", { pane: "w1:p2", launcher: "work" });
@@ -117,7 +117,7 @@ describe("splitting and running an agent", () => {
       ]),
     });
     const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
-    expect(list.map((i) => i.label)).toEqual(["claude", "codex"]);
+    expect(list.map((i) => i.label)).toEqual(["Claude Code", "Codex"]);
     await list[1].onSelect();
     expect(d.post).toHaveBeenCalledWith("m1", "panes/agent", { pane: "w1:p2", launcher: "codex" });
     // its waiting row opens, where the first message goes (docs/integrations/codex.md "Starting without a first message")
@@ -133,7 +133,7 @@ describe("splitting and running an agent", () => {
       ]),
     });
     const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
-    expect(list.map((i) => i.label)).toEqual(["claude"]);
+    expect(list.map((i) => i.label)).toEqual(["Claude Code"]);
   });
 
   it("names a provider by its display name, its ID before the model at the row's end; an rc alias by its ID (#5029)", async () => {
@@ -172,7 +172,7 @@ describe("splitting and running an agent", () => {
     });
     const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
     // usable first (still being retried by the hub counts: offered as before), the blocked one after a line, with why
-    expect(list.map((i) => i.label)).toEqual(["claude", "slow", "work"]);
+    expect(list.map((i) => i.label)).toEqual(["Claude Code", "slow", "work"]);
     expect(list[2].detail).toBe("这台电脑的终端里用不了");
     expect(list[2].divider).toBe(true);
     expect(list[0].detail).toBeUndefined();

@@ -34,7 +34,7 @@ func sessionLayout() uint64 {
 // too, each type under its own layout hash: while one's fields differ from the ones written here, its values are left to
 // the reflect encoder (value), the rest of the session still written here.
 const (
-	backgroundWireLayout   = 0x2c6a40db481222e7
+	backgroundWireLayout   = 0x69fdd6d60e3fb445
 	subagentWireLayout     = 0xbf84f2ee699de074
 	workflowToolWireLayout = 0x56c71f2c71223998
 )
@@ -446,6 +446,7 @@ func (w *wireWriter) backgroundTasks(list []BackgroundTask) {
 		if t.ExitCode != nil {
 			w.integer(`"exit_code":`, int64(*t.ExitCode), false)
 		}
+		w.boolean(`"moved_from_foreground":`, t.MovedFromForeground, true)
 		w.close()
 	}
 	w.b = append(w.b, ']')

@@ -43,7 +43,7 @@ import { openTodoDialog } from "./InboxTodoDialog";
 import { FolderBar, FolderLine, FolderSettingsDialog, openFolderDialog, useFoldersShown } from "./InboxFolders";
 import { folderCrumbs, UNFILED } from "../../lib/inbox-folders";
 import { AgentWorking, Chip, Count, DraftCard, Glyph, ItemAvatar, Spark, StatusMenu, Tag, type GlyphName } from "./InboxParts";
-import { useLarkItemReadOnly } from "./lark-write-gate";
+import { useItemReadOnly } from "./item-write-gate";
 import { CheckMark } from "../settings/ProviderFields";
 import { barFade, InboxBar } from "./InboxBar";
 import { groupClear, type GroupClear } from "./group-clear";
@@ -910,7 +910,7 @@ export async function markFromRow(it: InboxItem, done: boolean, touch = isNoHove
  * (#2059): with `pick` the row is a checkbox that picks it instead of opening it; `off`: it cannot be picked (a done item).
  */
 const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdit, pick, picked = false, off = false }: { it: InboxItem; selected: boolean; showAccount: boolean; /** the folder picked; undefined: folders are not shown */ folder?: string; onEdit: (it: InboxItem) => void; pick?: (it: InboxItem) => void; picked?: boolean; off?: boolean }) {
-  const larkReadOnly = useLarkItemReadOnly(it);
+  const readOnly = useItemReadOnly(it);
   const to = itemRoute(it);
   const done = isDone(it);
   const label = kindLabel(it);
@@ -963,8 +963,8 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   return (
     // selecting: a click anywhere on the card picks it (its draft and the rest under it are inert, so clicks there land here)
     <div data-item={it.id} data-manager={it.manager} data-picked={picked || undefined} onClick={pick ? () => pick(it) : undefined} {...(picking ? {} : contextMenuProps((at) => setMenu(at)))}
-      className={cx("group relative scroll-my-3 rounded-[14px] transition-[background-color,box-shadow,opacity] duration-150 has-[a:focus-visible]:shadow-[0_0_0_1.5px_var(--accent)]", !off && "hover:bg-inset", off && "opacity-45",
-        picked ? "bg-accent-tint shadow-[0_0_0_1.5px_var(--accent)]" : selected && !picking ? "bg-inset shadow-[0_0_0_1.5px_var(--accent)]" : "bg-surface shadow-card")}>
+      className={cx("group relative scroll-my-3 rounded-[14px] transition-[background-color,box-shadow,opacity] duration-150 has-[a:focus-visible]:shadow-[0_0_0_1.5px_var(--accent)]", off && "opacity-45",
+        picked ? "bg-accent-tint shadow-[0_0_0_1.5px_var(--accent)]" : selected && !picking ? "bg-surface shadow-[0_0_0_1.5px_var(--accent)]" : cx("bg-surface shadow-card", !off && "card-interactive"))}>
       {pick ? (
         <button type="button" role="checkbox" aria-checked={picked} className="flex w-full gap-3 rounded-[14px] p-3 text-left outline-offset-[-2px]">{head}</button>
       ) : off ? (
@@ -982,7 +982,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
               {rows.length > 1 && <span className="shrink-0 text-ink-3">{t("inbox-inboxlist.more_rows", { count: rows.length - 1 })}</span>}
             </div>
           )}
-          {draft && <DraftCard it={it} onEdit={() => onEdit(it)} onSend={(text, changes) => { if (!larkReadOnly) void sendReply(it, text, changes); }} />}
+          {draft && <DraftCard it={it} onEdit={() => onEdit(it)} onSend={(text, changes) => { if (!readOnly) void sendReply(it, text, changes); }} />}
           {working && <AgentWorking it={it} />}
           {mark}
         </div>
@@ -1136,7 +1136,7 @@ const AgentRow = memo(function AgentRow({ ix, off = false }: { ix: Interaction; 
   const ask = interactionAsk(ix);
   const glyph = IX_GLYPH[ix.kind];
   return (
-    <a href={href(to)} onClick={(e) => onLinkClick(e, to)} inert={off} className={cx("flex gap-3 rounded-[14px] bg-surface p-3 shadow-card transition-[background-color,opacity] duration-150 hover:bg-inset", off && "opacity-45")}>
+    <a href={href(to)} onClick={(e) => onLinkClick(e, to)} inert={off} className={cx("flex gap-3 rounded-[14px] bg-surface p-3 shadow-card transition-opacity duration-150", off ? "opacity-45" : "card-interactive")}>
       <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-field text-attention">
         {glyph === "list" || glyph === "terminal" ? <Icon name={glyph} size={18} stroke={2} /> : <Glyph name={glyph} size={18} stroke={2} />}
       </span>

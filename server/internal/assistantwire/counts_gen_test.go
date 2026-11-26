@@ -45,12 +45,20 @@ func TestCountsViewSamplesRoundTrip(t *testing.T) {
 		if p := checkCounts(t, root, out); p != "" {
 			t.Errorf("%s: %s", name, p)
 		}
-		if c := v.Counts.AgentsNeedsYou; c != nil && len(c.Keys)+c.More != c.N {
-			t.Errorf("%s: %d keys and %d more for n %d", name, len(c.Keys), c.More, c.N)
+		var agents, todos *int
+		if v.Totals != nil {
+			agents, todos = v.Totals.AgentsNeedsYou, v.Totals.TodosNeedsYou
 		}
-		if c, tot := v.Counts.AgentsNeedsYou, v.Totals; tot != nil && (c == nil) != (tot.AgentsNeedsYou == nil) ||
-			c != nil && tot != nil && *tot.AgentsNeedsYou != c.N {
-			t.Errorf("%s: totals do not repeat n", name)
+		for id, c := range map[string]struct {
+			count *CountsViewCount
+			total *int
+		}{"agents_needs_you": {v.Counts.AgentsNeedsYou, agents}, "todos_needs_you": {v.Counts.TodosNeedsYou, todos}} {
+			if c.count != nil && len(c.count.Keys)+c.count.More != c.count.N {
+				t.Errorf("%s: %s has %d keys and %d more for n %d", name, id, len(c.count.Keys), c.count.More, c.count.N)
+			}
+			if v.Totals != nil && (c.count == nil) != (c.total == nil) || c.count != nil && c.total != nil && *c.total != c.count.N {
+				t.Errorf("%s: totals do not repeat %s's n", name, id)
+			}
 		}
 	}
 }

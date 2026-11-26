@@ -1,12 +1,12 @@
 // `/permissions` in the composer's "/" palette (#6476): it opens the conversation's permission picker with every mode
 // (Plan mode included, which the chip's own menu leaves to the + panel) instead of sending the words, wherever the chip
-// is shown (an Agent with modes while it runs, a Persona conversation). Picking a mode switches the running session as
+// is shown (an Agent with modes or listed `capabilities.permission_modes` while it runs, or a Persona conversation). Picking a mode switches the running session as
 // the chip does (POST …/modes): at once where the agent takes it while it runs; Full access for a terminal Claude Code
 // started without a bypass flag restarts the session in it once its turn is over (node/mode_restart.go), which its row
 // says before it is picked; a Persona conversation's Full access takes effect with its next message.
 import { t } from "../i18n";
-import { hasModes } from "./session-actions";
-import { stateOf } from "./format";
+import { hasModes, listedModesOf } from "./session-actions";
+import { activityOf } from "./format";
 import type { Session } from "./types";
 
 export const PERMISSIONS_COMMAND = "/permissions";
@@ -18,10 +18,10 @@ export const permissionsCommand = () => ({ word: PERMISSIONS_COMMAND, desc: t("c
 export const isPermissionsCommand = (draft: string) => draft.trim().toLowerCase() === PERMISSIONS_COMMAND;
 
 /** Where the chat shows the permission picker, and so offers `/permissions`: a Persona conversation whatever its state,
- *  an agent with modes while it runs (Codex, a compatible CLI and read-only sources have none). */
+ *  an agent with modes or listed `capabilities.permission_modes` while it runs (read-only sources and offline sessions have none). */
 export function canPickPermissions(s: Session | undefined, assistant?: boolean): boolean {
   if (!s) return false;
-  return Boolean(assistant || s.assistant) || (hasModes(s) && stateOf(s) !== "offline");
+  return Boolean(assistant || s.assistant) || ((hasModes(s) || Boolean(listedModesOf(s))) && activityOf(s) !== "offline");
 }
 
 // ── opening the picker from the composer ─────────────────────────────────────

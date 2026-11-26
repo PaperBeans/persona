@@ -125,7 +125,10 @@ The parts are balanced by measured task time, and each lane runs its parts in on
 share runs once per lane rather than once per part (#3056). Module declarations are dynamically partitioned; unknown module prefixes
 use a fallback part, while unsupported declarations fail rather than skip coverage. Every module's complete test selector retains all
 variants. Gradle workers remain bounded; build and public Robolectric dependency caches do not contain private config. Per-lane Gradle
-profiles and test/lint reports are uploaded for diagnosis. Local entry points without lane options still run complete verification.
+profiles and test/lint reports are uploaded for diagnosis. An independent exact-source result job then verifies run-bound receipts from
+both lanes and publishes one aggregate artifact even when a lane fails or disappears; missing receipts are recorded as unavailable rather
+than as passes or ordinary test failures, and release signing consumes only a verified aggregate. Local entry points without lane
+options still run complete verification.
 The chat module's single-JVM tests use a 1 GB heap because their Robolectric native-graphics classes accumulate resource/theme
 tables in the shared test process. A two-worker lane can run at most two test JVMs, a 2 GB combined test-heap cap when both use that
 setting; the 4 GB Gradle daemon and non-heap allocations are separate.
@@ -218,8 +221,19 @@ The ordinary `AboutVersionRegularVisualTests` invocation has its own observation
 and `regular-visual-context.json`, recorded immediately before its unchanged `xcodebuild`. Its scoped stream therefore
 does not inherit the preceding readiness invocation's horizon. A 15-second sampler records only PID, parent PID, state
 and process name for the owned Persona host and a debugserver validated under it or its owned launchd_sim. A debugger
-first seen before the host remains associated with this invocation, including when absent from a later sample; matching
-`ps -M` output is bounded. One read-only `launchctl print system` after 60 seconds projects only the synthetic bundle
+first seen before the host remains associated with this invocation through its process start time while continuously
+present, including when its launcher exits. Once a successful snapshot observes it absent, or its identity is rejected,
+current owned ancestry is required before accepting it again. This applies even when its new parent is 1 or its
+one-second `lstart` timestamp is unchanged; an equal timestamp alone cannot transfer ownership. The timestamp is
+internal only and never exported. Matching `ps -M` output is bounded and runs only after an immediate PID, start-time
+and ancestry check.
+Each sample retains its own private identity snapshot while revalidation refreshes the shared current map. A process exit
+or a missing/changed identity at either check writes explicit unavailable evidence rather than aborting later sampling or
+final collection. A further check after temporary capture replaces a mismatching successful result with an explicit
+identity-mismatch status and unavailable evidence. Portable `ps` cannot atomically validate a PID and read its threads, so
+a replacement between those kernel operations remains an inherent race; the checks narrow it rather than claim atomic
+capture. Command arguments and private identity values are not exported.
+One read-only `launchctl print system` after 60 seconds projects only the synthetic bundle
 ID and its allowlisted `state`, `pid`, `runs` and `last exit code` fields; raw arguments, programs, paths, environment
 and arbitrary values are never exported. The visual command tees its actual stdout/stderr to `ios-about-regular.log`
 without losing its exit status. Once that invocation has started, failure diagnostics require the log, publish an
@@ -710,6 +724,9 @@ real web app.
 ```bash
 DOCKER=<docker client> python3 scripts/ci/module-e2e.py --modules voice,health,recording \
     [--checkout <dir>] [--shots ~/persona-pr-shots/<pr>] [--evidence <file>] [--strict-before-hello]
+
+# The core alone against a client: build with -tags persona_core_only and check every module is off (#16243).
+DOCKER=<docker client> python3 scripts/ci/module-e2e.py --core-only [--no-build-web] [--shots <dir>]
 ```
 
 - **Start-up**: builds `personad`, `persona-hub`, `persona-manager` and `persona-node` (a default build) and the web app
@@ -745,13 +762,32 @@ DOCKER=<docker client> python3 scripts/ci/module-e2e.py --modules voice,health,r
   its minutes too), none of the module's controls is on that page (rename, make or regenerate minutes, hand to an Agent, the private
   mark, the questions asked in the meeting), and none of the module's chunks is requested, the detail opened inside
   the app included. `on` and `back-on` are as for every entry: present, opens, its chunk loads.
+  Mail has the same kind of row against the mock hub (#15995, the `Inbox mail item` entry): with `module.mail` off the
+  mock answers 404 on `/api/v1/mail/…` as the hub does and keeps the item's stored text on `GET /api/v1/inbox/{id}`
+  (`scripts/mock/mail_mock.py`, with `mail_body_truncated` as the text is: `MOCK_MAIL_STORED_TEXT=clipped` makes every
+  stored mail a long one cut at 3,000 characters, `=unknown` leaves the key out); the mail is still listed in the Inbox, opens with that text and the line saying mail
+  is off, and shows no reply, AI draft reply, attachment or error. On the older hub it opens the whole message.
 - **Output**: a `PASS` / `WARN` / `FAIL` line per phase, module and check, the evidence JSON (`--evidence`, default
   `<shots>/evidence.json`: commit, the settings row, the manager line, the hello's module flags, what the browser got and
   requested), and screenshots `<phase>-<scheme>-<name>.png` in `--shots` (this machine's name is masked; never commit
   or push them). The last line is the verdict (`PASS`, `FAIL` or `TIMEOUT` after `--timeout`, default 40 minutes); the
   exit code is non-zero unless it is `PASS`. A run takes about four to six minutes after the builds.
 - **A module the tables lack** is still checked for its hello flag and the manager line, and the run says so: the PR
-  that moves a module adds its rows (what the hub has of it, what the web app shows of it).
+  that moves a module adds its rows (what the hub has of it, what the web app shows of it). A module with nothing of its
+  own on a hub (only its flag and the manager line) gets the honest empty `SERVER` row `{}`, not a missing one; a module
+  the web gates nothing on may have no `WEB` row (only a `NOTE`), or a chunks-only one (its chunks must not be requested
+  while it is off).
+- **Row forms that are not "on or absent"**: `off_stays` is a page the default panel keeps for existing data while the
+  module is off (`health`'s `/health` is the read-only archive, #15704): it stays and shows what it stores, with none of
+  the module's controls. `needs_on` on a kept item is data only the `on` phase makes (the recording the gate uploads),
+  skipped in a run with no `on` phase.
+- **The core-only mode** (`--core-only`, #16243) is the one check that runs a client against a hub built with
+  `-tags persona_core_only` instead of a default build with modules switched off. It builds the four programs with the
+  tag (its own `persona_core_only` build, `--no-build-web` serving the existing `web/dist`), starts a disposable hub the
+  same way, and runs the browser half with **every** module expected off: the hello carries the `modules` marker and no
+  built-in flag, the manager says `modules: loaded none`, the core's pages render with no page or console error, no
+  module's entry, address or chunk is there, and stored recordings stay readable. `--modules` is optional (every module
+  by default). It has no `on`/`off`/`back-on` and no mock phases; the full gate above covers those.
 
 ## End-to-end (verified 2026-10-24)
 
@@ -2396,19 +2432,19 @@ What a large request body costs the hub's slot and the manager it is relayed to,
 
 Hub transcription (`docs/assistant/meeting-minutes.md`, "Phase 5: hub transcription") against a real service, for what
 the tests' scripted contribution cannot tell: how well the words come back, how soon, and what it costs.
-`server/internal/transcribelive` plays the phone against a running test hub whose voice extension is set up with a
+`server/scripts/transcribelive` plays the phone against a running test hub whose voice extension is set up with a
 GPT-Live-compatible upstream (the contribution chosen for transcription, `meeting_transcription_ready` true; it also
 reads the meeting aloud through that extension's speech). Run it on the hub machine, from `server/`:
 
 ```sh
 cd server
-go run ./internal/transcribelive -hub <hub address> -token-file <file> -kb <PERSONA_HOME>/data -lang zh-CN -out <directory>
+go run ./scripts/transcribelive -hub <hub address> -token-file <file> -kb <PERSONA_HOME>/data -lang zh-CN -out <directory>
 ```
 
 - Without `-hub` and `-token-file` it takes `public_url` and `token` from `$PERSONA_HOME/hub.json` (`-kb` defaults to
   `$PERSONA_HOME/data`, where it reads the meeting's files). Never point it at a hub in use: it also sets the hub's
   `meeting_glossary` to the script's terms.
-- The meeting is made up (`server/internal/transcribelive/testdata/mixed_meeting.json`): a third Chinese, a third
+- The meeting is made up (`server/scripts/transcribelive/testdata/mixed_meeting.json`): a third Chinese, a third
   English, a third both in one sentence, and one line said by "Persona". The hub reads each line aloud
   (`POST /api/v1/extensions/voice/speak`, `-voices F=<id>,M=<id>,E=<id>,P=<id>` picks the voices); the audio and the
   script with each line's times go to `<out>/meeting.pcm` and `<out>/script.json`, which a later run reuses

@@ -943,8 +943,8 @@ func (s *Service) signal(g superviseSignal) {
 
 // signalReplacing records g and, when old is still pending, atomically replaces that older stretch in the outbox.
 func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
-	if !s.autoSupervisionOn(context.Background()) {
-		return // automatic supervision messages are off: nothing is gathered, scheduled or told (supervise_switch.go)
+	if !s.supervisionAllowed(context.Background(), g) {
+		return // the mode drops it (off, or a routine check under outcomes): nothing is gathered, scheduled or told (supervise_switch.go)
 	}
 	if g.Todo != "" {
 		if t, ok := s.todoNow(g.Todo); ok && s.reporterStopped(context.Background(), t.Origin) {
@@ -1010,11 +1010,17 @@ func (s *Service) releaseReportsLocked(g superviseSignal) []string {
 
 // queueSignalReplacing also removes the older stretch it supersedes from the durable outbox.
 func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) {
-	if !s.autoSupervisionOn(context.Background()) {
+	if !s.supervisionAllowed(context.Background(), g) {
 		return // the same for a signal that skipped signal (supervise_switch.go)
 	}
 	if g.Kind != sigAsk {
 		g = s.currentSupervisorSignal(g)
+	}
+	currentSupervisor := ""
+	if g.Kind == sigReview && g.Recipient == "" {
+		if t, ok := s.todoNow(g.Todo); ok && t.Supervision != nil {
+			currentSupervisor = t.Supervision.Supervisor
+		}
 	}
 	if g.At.IsZero() {
 		g.At = time.Now()
@@ -1055,6 +1061,12 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 		}
 		if g.Detail == "" && cur.Key == g.Key {
 			g.Detail = cur.Detail // the watch's sight of what an event told already
+		}
+		if g.Recipient == "" && cur.Recipient != "" && cur.Key == g.Key &&
+			(g.To == "" || g.To == cur.Recipient) &&
+			(cur.To == "" || g.To == "" || cur.To == g.To) &&
+			(currentSupervisor == "" || currentSupervisor == cur.Recipient) {
+			g.Recipient = cur.Recipient
 		}
 		g = preserveIdleHandoff(cur, g)
 		if g.Kind == sigReport && cur.Key != g.Key {
@@ -1357,6 +1369,9 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.backfillBriefs(ctx, tasks)   // tasks from before briefs get one from what they still have (task_brief.go)
 	groups := allStoppedTaskGroups(tasks)
 	todosV2 := s.settings(ctx).todosV2On()
+	if todosV2 {
+		s.maybeRunStartupRestartRecovery(ctx, lists)
+	}
 	backfilled := 0
 	for _, t := range tasks {
 		if t.Supervision == nil && t.DoneAt == nil {
@@ -1390,6 +1405,19 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		for _, c := range agents {
 			if c.State == proto.StateWorking {
 				s.observeProgress(c, now)
+			}
+			if todosV2 && (c.State == proto.StateWorking || strings.EqualFold(strings.TrimSpace(c.Status), proto.StatusWorking)) {
+				if err := s.RecordSupervisedTaskActive(ctx, t.ID, c.MachineID, c.SessionID, s.runtimeBootEpoch()); err != nil {
+					s.logf("todos_v2 restart recovery checkpoint %s: %v", t.ID, err)
+				}
+			}
+		}
+		if todosV2 {
+			s.refreshTodoRuntimeChangedFiles(ctx, t, agents)
+		}
+		if todosV2 && ((t.Check != nil && t.Check.Verdict == verdictDone) || (t.Supervision != nil && t.Supervision.Progress != nil && t.Supervision.Progress.Kind == "done")) {
+			if err := s.ResetSupervisedTaskRecovery(ctx, t.ID); err != nil {
+				s.logf("todos_v2 restart recovery reset %s: %v", t.ID, err)
 			}
 		}
 		s.closeStalledTask(ctx, t, agents, now)
@@ -1462,6 +1490,11 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	}
 	if s.todosLoaded() {
 		s.pruneHandledStalls(ctx, openIDs)
+	}
+	if todosV2 {
+		if _, err := s.ReconcileTodoBlockers(ctx, ""); err != nil {
+			s.logf("todos_v2 blocker reconcile sweep: %v", err)
+		}
 	}
 }
 

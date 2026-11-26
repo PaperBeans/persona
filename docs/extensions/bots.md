@@ -271,11 +271,36 @@ some names were resolved. Reauthorization preserves cursors and the pending repa
 due now; the next scheduler tick runs the sync and retries repair automatically. Disabled bindings remain disabled.
 The repair marks its version complete only after it finishes, so later ticks are idempotent.
 
+Senders that `contact/v3` cannot see (external members) are looked up in the chat's member list, read on demand: only
+while a sender of that chat is still unnamed, resuming where it stopped, up to 500 pages of 100. A member who left the
+group is in no list; the binding's name book (`sender_names` cursor, at most 5,000 names, the oldest learned dropped
+first) keeps the names the sync learned from contacts, member lists and @mentions, and the sender-name backfill
+(version 3) also reads the chat around such a sender's message for an @mention of them. Another app's bot is named only
+when a message mentions it: the API that names an app by its id
+([application/v6](https://open.feishu.cn/document/server-docs/application-v6/application/get)) takes a tenant token,
+an admin scope and a custom app of the same enterprise, none of which a user's sync has. A system message without a
+`sender_id` stays unnamed.
+
+The sender-name backfill runs in rounds, one after each sync run until it is done. A round has its own budget
+(`larkSyncNamesBudget`, 90 seconds, apart from the run's) and starts only after the run's messages are committed, so it
+never holds up message sync. Every lookup is paced at five requests a second, so a backlog of external senders (one
+`contact/v3` call each) and a few large groups (up to 500 member pages each) can need more than one round. When the
+budget runs out, the round stops and saves how far it got in the `sender_names:progress` cursor: each large group's
+next member page and which senders the pages already read were checked for, plus the lookups that found nothing. Those
+are tried again after a week. The next round picks up from there, and `backfill_version` advances only once a round
+finishes everything. A timeout, rate limit or passing failure in this step only degrades naming. The binding's health
+stays `ok`, the run is not counted as failed, and the reason goes into `names_warning`, with `names_rounds` counting the
+rounds. Only what the owner has to fix shows in health: a missing contact scope (`scope_missing`) or a refused grant
+(`needs_reauth`). Coverage: `server/internal/modules/lark/larksync/names_progress_test.go`,
+`server/internal/extmgr/larksync_names_test.go`.
+
 Regression coverage: `server/internal/larksyncwire/scopes_test.go` checks the audited permission alternatives;
 `scripts/test/test_lark_sync_scope_guides.py` checks every locale of the three setup guides against both packs;
 `server/internal/extmgr/larksync_impoll_test.go` covers scope refusal followed by authorization and scheduler recovery;
 client sync model/component tests cover the reauthorization prompt and action.
 
+
+The sync's runs commit cursors, the dedup index and the outbox rows together in one transaction; once committed, any round that wrote new messages emits batched, paginated `lark.messages` metadata events (no message bodies) to enabled extensions subscribed to `lark.messages` and explicitly granted `lark.messages.read` (`docs/extensions/extensions.md` "Events").
 
 Requests are rate-limited per binding and per API family, and a 429, `99991400`, `230020` or `1061045` waits as the platform
 asks before trying again. **A read that fails leaves its cursor where it was**: the cursors, the dedup index and what the
@@ -459,6 +484,40 @@ The progress card's **Stop** acts only while its actual message is the current w
 
 Subscribe to **Receive message v2.0** (`im.message.receive_v1`) as for the DM; the bot has to be in the group. A leading @ of the bot is stripped when reading `/topics`.
 
+## Proxy replies handed off from a group
+
+An authorized extension, or the owner from their own app, can hand the bot a question a teammate asked in a group the bot is in. The bot answers in that group. The question never enters the owner's conversations: the assistant runs it as a guest conversation with a single tool, `bot_group_reply`, and that tool is also how the answer reaches the bot (`server/internal/modules/lark/handoff.go`). Nothing about the handoff makes the chat one the bot may send into (`botChatAllowed` is unchanged), so a card, a progress note, an agent message or a plain `feishu.text` into it is refused as ever.
+
+**The two routes.** Both are the manager's, relayed by the hub like the other `/api/v1/bots/` routes, and each needs its own scope (`docs/extensions/extensions.md`).
+
+- `GET /api/v1/bots/feishu/identity` (scope `bots.feishu.identity`) answers `{enabled, paired, ready, app_id?, bot_open_id?, bot_name?, domain?, capabilities}`. `ready` means the bot can send now. Unknown values are left out; `capabilities` is what this build supports (`["proxy_reply"]`), not the owner's policy. The body never carries a secret, a pairing or registration code, or the owner's identity.
+- `POST /api/v1/bots/feishu/handoffs` (scope `bots.feishu.handoff`, or full credentials) takes `{chat_id, message_id?, in_thread?, ref?, chat_name?, sender_name?, question, context?}`. `chat_id` is required (1 to 100 characters, no whitespace). `message_id` is an optional anchor the bot can read, and the hub refuses it unless the message is in `chat_id`; absent, the bot posts one new message into the chat. `in_thread` needs an anchor. `ref` (optional, at most 120 characters of letters, digits and `:._-`, scoped to the caller) makes a repeat of the same payload return the first handoff with `replayed: true`, and a different payload under the same ref a 409 `handoff_conflict`. `chat_name` and `sender_name` are clipped to 80 characters, one line, with terminal escapes stripped. `question` is required and at most 2000 characters; `context` at most 6000. The body is at most 64 KiB. The call answers once the assistant has accepted: `{handoff: {id, state: "accepted", delivery, expires_at}, replayed}`. `delivery` is `confirm` or `direct`. There is no status route.
+
+**Errors.** Every body is `{error, code}` with a message from the `hub-bots` catalog.
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 400 | `invalid_handoff` | Bad JSON, a field outside its rule, or an anchor that is not in `chat_id` |
+| 403 | `handoff_off` | The owner switched proxy replies off |
+| 403 | `chat_blocked` | `chat_id` is on the blocklist, which always wins |
+| 403 | `permission_denied` | The scope was not granted, or the caller is an answer-only device |
+| 409 | `bot_off` | The bot is off, unpaired, or not connected |
+| 409 | `handoff_conflict` | `ref` reused with another payload |
+| 429 | `handoff_rate_limited` | The per-chat or daily cap, or too many running; `Retry-After` is set |
+| 503 | `assistant_unavailable` | The assistant is away, does not know `feishu.handoff`, or the settings could not be read |
+
+A hub from before this change answers 404, which a caller treats as "not available". `chat_blocked`, `handoff_off`, `bot_off` and 429 are not retried; a 503 is retried once with the same `ref`.
+
+**Policy.** Kept under `handoff` in `bots.feishu` and set with `PUT /api/v1/bots/feishu` (no client draws it). A chat on `blocked_chats` is refused (`chat_blocked`) and that always wins; `off: true` refuses every handoff (`handoff_off`); a chat on `direct_chats` is answered without asking; every other chat needs the owner's confirmation. The default, when `handoff` was never set, confirms every chat, so an install that never receives a handoff changes nothing. Unpairing or changing the App ID clears the policy. `launcher` names the launcher of the guest run (empty uses the assistant's default; guest runs are Claude Code only).
+
+**Confirm and direct.** In direct mode the guest's one reply is posted at once. In confirm mode the draft is held and the owner is asked with the ordinary decision card (Needs you, a push, every client): one option posts exactly the stored draft, the other drops it. A typed answer or any other option drops it too, and it is never taken by default. The draft is at most 400 characters; a direct reply may be 2000.
+
+**What is posted.** Plain text, in the owner's language: a header naming who asked and the question (clipped), the answer, and a footer saying it is an AI reply for reference. With an anchor it is a reply under that message (in its thread when `in_thread` was set) and is lost if the message is gone, never sent into the chat instead. Without an anchor it is one new message in the chat. At most one message lands: a repeat carries the same idempotency key.
+
+**Limits and audit.** Six handoffs an hour per chat, sixty a day, three running at once; a handoff nobody finished is dropped after six hours. The audit records the policy change, a handoff taken, one refused, one posted and one ended, with the chat id and the handoff id only. The question, the context, the draft, the reply and the caller's names are never stored and never audited.
+
+**Known limitations.** Without an anchor, a topic group gets the reply as a new topic. The chat and sender names in the confirmation come from the caller; only `chat_id` is checked against the owner's lists. The confirmation shows the draft on one line. A live process bubble in the group (a native agent message) is not part of this: the default is to ask the owner before anything is posted.
+
 ## Commands
 
 `/help`, `/main`, `/new [first message]`, `/list`, `/agents [keyword]`, `/start [what it should do]` (a form to pick a machine and fill in a directory), `/stop` (Chinese aliases `/停止`, `/停`; interrupts the turn: sent in a message's thread / as a reply to it, it interrupts the chat or Agent bound to that message, otherwise the current target; a conversation whose last turn already ended gets "nothing is running" and no interrupt, while one this chat just sent a message into is stopped even when it does not read as working yet, #3793), `/status` (picks the target the same way from the reply / thread binding: who messages go to now, how many answers are pending), `/tasks` (aliases `/进展`, `/总览`; a snapshot of what waits for your decision and the open to-dos, or with `board` on, the standing board below). With `workbench` on: `/home` (aliases `/工作台`, `/主页`), `/today` (`/今日`, `/今天`) and `/inbox` (`/收件箱`); with it off they go on as text, as any command the bot does not know.
@@ -520,7 +579,9 @@ These routes belong to the hub; `target` and `agents` in the response are querie
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/api/v1/bots/feishu` | `{enabled, app_id, domain, has_secret, from_config, features{main,cards,all_cards,pushes,sync,agents,reports,board,only_conclusions,report_steps,answer_new_card,topic_cot,read_group}, connected, error, last_event_at, bot_name, owner{name,paired_at}, pairing{code,expires_at}, topic_chats[{chat_id,name,added_at}], nudge_after, target, agents[{title,machine_id,session_id}], larkcli?:{profile,app_id?,same_app,mode,choice,profiles:[{name,app_id?,user?,token_status?}]}}`. `mode` is `config` when `manager.json` fixes `lark.cli.profile`, `chosen` for the app setting, `bot` for the managed bot profile, or `default`; `choice` is the saved app setting. Profiles contain no secrets. |
-| PUT | `/api/v1/bots/feishu` | Changes only supplied fields: `enabled`, `app_id` + `app_secret` (validated first) + `domain`, `features` (merged over the current ones), `topic_chats` (the opted-in group chats, replaced as a whole, "Topic group chats"), `nudge_after` (minutes before the ordinary nudge under an unanswered card, 0 turns both ordinary and deadline nudges off, "Nudging a card nobody answered"), `larkcli_profile` (empty for automatic selection, or an existing `lark-cli profile list` name). A non-empty choice is rejected with 400 when it does not exist and with 409 when `manager.json` fixes `lark.cli.profile`; changing it rebuilds the lark-cli connector while retaining its feed switches. `app_id: ""` clears the credentials saved in the App (falls back to manager.json). The source reply settings are `source_report_delay_minutes` (whole minutes from 0 to 60) and `source_report_full_reply` (boolean). |
+| PUT | `/api/v1/bots/feishu` | Changes only supplied fields: `enabled`, `app_id` + `app_secret` (validated first) + `domain`, `features` (merged over the current ones), `topic_chats` (the opted-in group chats, replaced as a whole, "Topic group chats"), `nudge_after` (minutes before the ordinary nudge under an unanswered card, 0 turns both ordinary and deadline nudges off, "Nudging a card nobody answered"), `larkcli_profile` (empty for automatic selection, or an existing `lark-cli profile list` name). A non-empty choice is rejected with 400 when it does not exist and with 409 when `manager.json` fixes `lark.cli.profile`; changing it rebuilds the lark-cli connector while retaining its feed switches. `app_id: ""` clears the credentials saved in the App (falls back to manager.json). `handoff` sets the proxy-reply policy (`{off?, direct_chats?, blocked_chats?, launcher?}`, an absent key leaves it and `[]` clears a list; "Proxy replies handed off from a group"). The source reply settings are `source_report_delay_minutes` (whole minutes from 0 to 60) and `source_report_full_reply` (boolean). |
+| GET | `/api/v1/bots/feishu/identity` | The bot's public identity (`bots.feishu.identity`): `{enabled, paired, ready, app_id?, bot_open_id?, bot_name?, domain?, capabilities}`. No secrets. |
+| POST | `/api/v1/bots/feishu/handoffs` | Hand a group question to the bot (`bots.feishu.handoff`): "Proxy replies handed off from a group". |
 | POST | `/api/v1/bots/feishu/pair` | Generate a pairing code |
 | DELETE | `/api/v1/bots/feishu/owner` | Unpair (also clears chat state and the opted-in group chats) |
 | POST | `/api/v1/bots/feishu/test` | Send the owner a test message |
@@ -542,6 +603,7 @@ Nothing, when the app is created in one authorization ("Pairing and permissions"
 - Agents (Claude Code / Codex in herdr) have no "text being written", so progress cards show only steps.
 - Card callback tokens (two further updates allowed within 30 minutes) aren't used: after an answer, cards are edited through the update-message endpoint.
 - One hub connects one Lark bot and one owner.
+- A proxy reply has no live process bubble in the group; the answer is one text message, after the owner confirms it unless the chat is listed for direct replies ("Proxy replies handed off from a group").
 
 ## Verification
 

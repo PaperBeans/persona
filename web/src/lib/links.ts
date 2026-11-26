@@ -145,7 +145,7 @@ function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | n
     const id = p[1] || u.searchParams.get("id");
     if (id) return { kind: "task", id };
   }
-  return parseRoute(path, u.search).name === "not-found" ? null : { kind: "page", path: path + u.search };
+  return parseRoute(path, u.search).name === "not-found" ? null : { kind: "page", path: path + u.search + u.hash };
 }
 
 /**

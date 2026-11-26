@@ -31,6 +31,9 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	// run while a connector downloads, so reread their metadata before commit.
 	e.Store.ingestMu.Lock()
 	defer e.Store.ingestMu.Unlock()
+	// After every other deferred unlock (chatMu below), still under ingestMu: gateway lines a fuller sync message
+	// supersedes go once that message is written (align_loose.go).
+	defer e.settleSuperseded(ChatID(src.Name(), sc.ID))
 	cut := e.textCutoff()
 	e.Store.chatMu.Lock()
 	c, exists, r, err := e.Store.ingestState(src.Name(), sc, cut)
@@ -157,9 +160,13 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 		}
 		kept = append(kept, m)
 	}
-	if len(repairs) > 0 {
+	needChatNameFill := exists && syncSource(src) && sc.Name != "" && c.Name == ""
+	if len(repairs) > 0 || needChatNameFill {
 		if err := e.repairLarkSyncSenders(src, sc, cut, repairs); err != nil {
 			return 0, err
+		}
+		if needChatNameFill {
+			c.Name = sc.Name
 		}
 	}
 	if len(lines) == 0 {

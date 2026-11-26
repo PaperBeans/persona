@@ -128,8 +128,9 @@ final class WatchAllDay {
 
     /// What the watch offers now. `phoneDay`: the stored `recordingDay` (`WatchSync.phoneDayKey`), which the views
     /// read through `@AppStorage` so they redraw when the phone changes it (UserDefaults isn't observed here).
-    func access(phoneDay: Int?) -> AllDayAlertPolicy.Access {
-        AllDayAlertPolicy.access(phoneDay: shown(phoneDay: phoneDay), state: state)
+    /// `recording`: the phone's word on its hub's recording module (`WatchSync.phoneRecordingKey`), read the same way.
+    func access(phoneDay: Int?, recording: PhoneRecordingAllowance) -> AllDayAlertPolicy.Access {
+        AllDayAlertPolicy.access(phoneDay: shown(phoneDay: phoneDay), state: state, recording: recording)
     }
 
     private func shown(phoneDay: Int?) -> Int? {
@@ -141,6 +142,9 @@ final class WatchAllDay {
 
     /// The phone's `recordingDay` as last stored, read when a start is asked for.
     private static var storedPhoneDay: Int? { UserDefaults.standard.object(forKey: WatchSync.phoneDayKey) as? Int }
+
+    /// The phone's word on its hub's recording module as last stored (#15214); allowed until a phone says otherwise.
+    private static var storedRecording: PhoneRecordingAllowance { .stored() }
 
     /// UserDefaults Data: the last gap said (`AllDayAlertPolicy.Gap`), so a later launch that finds the same day still
     /// open doesn't say it again. Written once per halt.
@@ -259,7 +263,7 @@ final class WatchAllDay {
         // A sample's made-up state never reaches the real face.
         guard !sampleShown else { return }
         #endif
-        let access = access(phoneDay: Self.storedPhoneDay)
+        let access = access(phoneDay: Self.storedPhoneDay, recording: Self.storedRecording)
         guard force || access != offered, published == state else { return }
         publishFace(published, group: DispatchGroup(), onlyIfRedrawn: true)
     }
@@ -270,7 +274,8 @@ final class WatchAllDay {
     /// start yet (the user hasn't agreed on the iPhone): the page says so instead. `byPhone`: the phone asked for this
     /// start, which stands for its consent (`AllDayAlertPolicy.mayStart`).
     @discardableResult func requestStart(byPhone: Bool = false) -> Bool {
-        guard AllDayAlertPolicy.mayStart(access(phoneDay: Self.storedPhoneDay), askedByPhone: byPhone) else { return false }
+        let access = access(phoneDay: Self.storedPhoneDay, recording: Self.storedRecording)
+        guard AllDayAlertPolicy.mayStart(access, askedByPhone: byPhone) else { return false }
         bringToRecording()
         return true
     }
@@ -324,13 +329,14 @@ final class WatchAllDay {
 
     /// A meeting starts now: a mark in the day (one microphone, so not a second recording).
     func markMeeting() {
-        guard capture.allDay else { return }
+        // Nothing is marked while the hub's recording module is off (`WatchRecordingOffers.marks`, #15214).
+        guard capture.allDay, WatchRecordingOffers(Self.storedRecording).marks else { return }
         capture.markMeeting()
         show(.meetingMarked)
     }
 
     func addBookmark() {
-        guard capture.allDay else { return }
+        guard capture.allDay, WatchRecordingOffers(Self.storedRecording).marks else { return }
         capture.addMark()
         show(.bookmarked)
     }
@@ -432,7 +438,8 @@ final class WatchAllDay {
     /// (`AllDayAlertPolicy.asksForNotifications`), so the phone's start and a pause can reach the wrist before the first
     /// start on the watch, and learn whether the user turned them off.
     func askForNotifications(phoneDay: Int?, onPage: Bool) async {
-        guard Self.inFront, AllDayAlertPolicy.asksForNotifications(access(phoneDay: phoneDay), onPage: onPage) else { return }
+        let access = access(phoneDay: phoneDay, recording: Self.storedRecording)
+        guard Self.inFront, AllDayAlertPolicy.asksForNotifications(access, onPage: onPage) else { return }
         #if DEBUG
         // Screenshots (`-showAllDaySample`): the system's prompt would cover the page.
         if UserDefaults.standard.string(forKey: "showAllDaySample") != nil { return }
@@ -454,7 +461,8 @@ final class WatchAllDay {
     private func phoneCommand(_ command: String) {
         switch command {
         case RecordingDayContract.Command.start:
-            guard state != .recording else { return }
+            // No start, and no notice offering one, while the hub's recording module is off (#15214).
+            guard state != .recording, WatchRecordingOffers(Self.storedRecording).starts else { return }
             // `WatchSync` acted on it just now, so the newest stamp is this command's: its notice keeps it.
             let sentAt = UserDefaults.standard.double(forKey: WatchDayCommandOrder.lastKey)
             if handle(.phoneAskedToStart(sentAt: sentAt)).startsNow { open(.start, byPhone: true) }
@@ -639,7 +647,8 @@ final class WatchAllDay {
     private func publishFace(_ state: AllDaySnapshot.State, group: DispatchGroup, onlyIfRedrawn: Bool = false) {
         let now = Date.now
         heartbeatAt = now
-        let access = AllDayAlertPolicy.access(phoneDay: shown(phoneDay: Self.storedPhoneDay), state: state)
+        let access = AllDayAlertPolicy.access(phoneDay: shown(phoneDay: Self.storedPhoneDay), state: state,
+                                              recording: Self.storedRecording)
         offered = access
         let day = capture.dayRecordingID.flatMap { RecordingLibrary.shared.entry($0)?.day }
         let snapshot = AllDaySnapshot(state: state, since: since, updatedAt: now, day: day, pending: waiting, access: access)

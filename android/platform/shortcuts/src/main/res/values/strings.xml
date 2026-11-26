@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The widget, the tile, the launcher shortcuts and "Approve first pending" (docs/android/android.md "Home screen entries"). English is the fallback (docs/protocol/i18n.md). -->
 <resources>
-    <string name="shortcuts_widget_label" translatable="false">Persona</string>
+    <string name="shortcuts_widget_label">Agents</string>
     <string name="shortcuts_tile_label" translatable="false">Persona</string>
     <string name="shortcuts_widget_description">Which agents need you, are working, or are done</string>
+    <string name="shortcuts_ask_widget_description">Open your main chat with Persona and start typing</string>
+    <string name="shortcuts_ask_widget_subtitle">Main chat</string>
     <string name="shortcuts_approve_title">Approve first pending</string>
     <string name="shortcuts_loading">Checking what\'s waiting for you…</string>
     <string name="shortcuts_not_paired">Not paired yet. Open Persona and scan the hub\'s pairing QR code.</string>

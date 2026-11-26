@@ -60,7 +60,7 @@ describe("FailureNote", () => {
     const note = host.querySelector<HTMLElement>('[data-testid="chat-failure"]')!;
     expect(note.hasAttribute("data-error-notice")).toBe(true);
     expect(note.getAttribute("role")).toBe("status");
-    expect(note.className).toContain("border border-line bg-surface");
+    expect(note.className).toContain("bg-surface p-3 shadow-card");
     expect(note.className).not.toContain("bg-red-tint");
     // its actions are the notice's 28 px buttons with a finger-sized target, on one line each
     for (const id of ["chat-failure-retry", "chat-failure-lark"]) {

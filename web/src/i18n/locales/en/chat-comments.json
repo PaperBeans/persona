@@ -4,6 +4,8 @@
   "comment_n": "Comment {n}",
   "placeholder": "Add a comment…",
   "note_label": "Comment {n}",
+  "add_images": "Add images to comment",
+  "preparing_images": "Preparing images…",
   "remove": "Remove comment",
   "jump": "Go to the commented spot",
   "jump_text_gone": "That passage is not on screen any more",

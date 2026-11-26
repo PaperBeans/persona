@@ -1116,6 +1116,9 @@ private struct HomeRecordWidget: View {
     var pictures: HomeFacePictures?
 
     private var recording: HomeSnapshot.Recording? { c.snapshot.recording }
+    /// Nothing records and the hub's recording module is off (#15214): no start is offered, the widget only says so and
+    /// a tap opens the app (the widget's own link). A recording that runs keeps its Stop.
+    private var off: Bool { recording == nil && !c.snapshot.offersRecordingStart }
 
     var body: some View {
         if family == .systemSmall {
@@ -1123,7 +1126,7 @@ private struct HomeRecordWidget: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HomeHeader(title: HomeKind.record.title, color: HomeWidgetTokens.recording, mood: recording == nil ? nil : .working, pictures: pictures)
                     Spacer(minLength: 0)
-                    HomeRecordDisc(side: HomeWidgetTokens.recordHero * (recording == nil ? 0.82 : 0.6), recording: recording != nil)
+                    HomeRecordDisc(side: HomeWidgetTokens.recordHero * (recording == nil ? 0.82 : 0.6), recording: recording != nil, off: off)
                     Spacer(minLength: 0)
                     words(lines: 1)
                 }
@@ -1132,10 +1135,10 @@ private struct HomeRecordWidget: View {
         } else {
             button {
                 HStack(spacing: HomeWidgetTokens.halves) {
-                    HomeRecordDisc(side: HomeWidgetTokens.recordMedium, recording: recording != nil)
+                    HomeRecordDisc(side: HomeWidgetTokens.recordMedium, recording: recording != nil, off: off)
                     VStack(alignment: .leading, spacing: HomeWidgetTokens.tight) {
                         words(lines: 2)
-                        if recording == nil {
+                        if recording == nil, !off {
                             Text("Audio stays on this iPhone; the transcript goes to Knowledge. [Home Widgets]")
                                 .font(HomeWidgetTokens.caption).lineLimit(2).homeInk(.tertiary)
                         }
@@ -1150,6 +1153,8 @@ private struct HomeRecordWidget: View {
     @ViewBuilder private func button<Label: View>(@ViewBuilder label: () -> Label) -> some View {
         if let recording {
             Button(intent: StopRecordingIntent(recordingID: recording.id), label: label).buttonStyle(.plain)
+        } else if off {
+            label() // no button: nothing would start
         } else {
             Button(intent: StartMeetingRecordingIntent(), label: label).buttonStyle(.plain)
         }
@@ -1162,6 +1167,8 @@ private struct HomeRecordWidget: View {
                     .font(HomeWidgetTokens.heroSmall).monospacedDigit().homeTone(HomeWidgetTokens.recording)
                 Text(verbatim: recording.title).font(HomeWidgetTokens.headline).lineLimit(lines).homeInk(.primary)
                 Text("Tap to stop [Home Widgets]").font(HomeWidgetTokens.caption).homeInk(.secondary)
+            } else if off {
+                Text("Meeting recording is off on this hub.").font(HomeWidgetTokens.caption).lineLimit(lines + 2).homeInk(.secondary)
             } else {
                 Text("Record a Meeting [Home Widgets]").font(HomeWidgetTokens.headline).lineLimit(1).homeInk(.primary)
                 if let now = c.eventNow {
@@ -1178,12 +1185,14 @@ private struct HomeRecordWidget: View {
 private struct HomeRecordDisc: View {
     var side: CGFloat
     var recording: Bool
+    /// The hub's recording module is off: the same mark without the recording red, and not named as a button.
+    var off = false
     @Environment(\.widgetRenderingMode) private var mode
 
     var body: some View {
         let full = mode == .fullColor
         ZStack {
-            Circle().fill(full ? HomeWidgetTokens.recordButton : .white)
+            Circle().fill(full ? (off ? AnyShapeStyle(.tertiary) : AnyShapeStyle(HomeWidgetTokens.recordButton)) : AnyShapeStyle(.white))
             HomeWidgetTokens.symbol(recording ? HomeWidgetTokens.stopSymbol : HomeWidgetTokens.recordSymbol)
                 .font(.system(size: side * 0.4, weight: .bold))
                 .foregroundStyle(full ? Color.white : Color.black)
@@ -1192,7 +1201,8 @@ private struct HomeRecordDisc: View {
         .compositingGroup()
         .frame(width: side, height: side)
         .homeAccent()
-        .accessibilityLabel(Text(recording ? "Stop Recording [Home Widgets]" : "Record a Meeting [Home Widgets]"))
+        .accessibilityLabel(off ? Text("Meeting recording is off on this hub.")
+                            : Text(recording ? "Stop Recording [Home Widgets]" : "Record a Meeting [Home Widgets]"))
     }
 }
 
@@ -1522,13 +1532,22 @@ struct HomeLockView: View {
             Gauge(value: min(1, Double(steps) / Double(avg))) { HomeWidgetTokens.symbol(symbol) } currentValueLabel: { Text(verbatim: homeSteps(steps)).minimumScaleFactor(HomeWidgetTokens.heroMinScale) }
                 .gaugeStyle(.accessoryCircular).privacySensitive()
         case .record:
-            Button(intent: StartMeetingRecordingIntent()) {
+            if c.snapshot.offersRecordingStart {
+                Button(intent: StartMeetingRecordingIntent()) {
+                    ZStack {
+                        AccessoryWidgetBackground()
+                        HomeWidgetTokens.symbol(symbol).font(HomeWidgetTokens.recordMarkLock).homeAccent()
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                // The hub's recording module is off (#15214): the mark, dimmed, and no button.
                 ZStack {
                     AccessoryWidgetBackground()
-                    HomeWidgetTokens.symbol(symbol).font(HomeWidgetTokens.recordMarkLock).homeAccent()
+                    HomeWidgetTokens.symbol(symbol).font(HomeWidgetTokens.recordMarkLock).foregroundStyle(.secondary)
                 }
+                .accessibilityLabel(Text("Meeting recording is off on this hub."))
             }
-            .buttonStyle(.plain)
         case .today:
             ZStack {
                 AccessoryWidgetBackground()
@@ -1563,11 +1582,13 @@ struct HomeLockView: View {
         HStack(spacing: HomeWidgetTokens.gap) {
             if kind == .agents {
                 HomeFace(size: HomeWidgetTokens.faceLock, mood: c.mood(.agents), pictures: entry.pictures)
-            } else if kind == .record {
+            } else if kind == .record, c.snapshot.offersRecordingStart {
                 Button(intent: StartMeetingRecordingIntent()) {
                     HomeWidgetTokens.symbol(symbol).font(HomeWidgetTokens.recordMarkLock).homeAccent()
                 }
                 .buttonStyle(.plain)
+            } else if kind == .record {
+                HomeWidgetTokens.symbol(symbol).font(HomeWidgetTokens.recordMarkLock).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: lockTitle).font(HomeWidgetTokens.lockTitle).lineLimit(1).homeAccent()
@@ -1595,6 +1616,8 @@ struct HomeLockView: View {
         case .computers:
             return interfaceText("\(c.machines.filter(\.online).count) of \(c.machines.count) online [Home Widgets]") // perf-ok: drawn once per timeline entry, in the widget extension
         case .record:
+            // The hub's recording module is off (#15214): the page's name, not a start.
+            guard c.snapshot.offersRecordingStart else { return interfaceText("Record [Home Widgets]") } // perf-ok: drawn once per timeline entry, in the widget extension
             return interfaceText("Record a Meeting [Home Widgets]") // perf-ok: drawn once per timeline entry, in the widget extension
         case .health:
             return interfaceText("\(c.snapshot.health?.steps ?? 0) steps [Home Widgets]") // perf-ok: drawn once per timeline entry, in the widget extension
@@ -1618,6 +1641,7 @@ struct HomeLockView: View {
         case .computers:
             return c.machines.prefix(2).map { $0.name + " · " + computerState($0).words }
         case .record:
+            guard c.snapshot.offersRecordingStart else { return [interfaceText("Off on this hub")] } // perf-ok: drawn once per timeline entry, in the widget extension
             return c.eventNow.map { [interfaceText("Named “\($0.title)” [Home Widgets]")] } ?? [] // perf-ok: drawn once per timeline entry, in the widget extension
         case .health:
             guard let hrs = c.snapshot.health?.sleepHours else { return [] }

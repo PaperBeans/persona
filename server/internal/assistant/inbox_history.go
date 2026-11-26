@@ -253,9 +253,8 @@ func (s *Service) storedInboxItem(ctx context.Context, id string) (InboxItem, bo
 	b := &s.inbox
 	b.mu.Lock()
 	b.stored(&it)
-	c := it.listed()
+	c := it.shown()
 	b.mu.Unlock()
-	c.Context = it.Context
 	return c, true, nil
 }
 

@@ -185,21 +185,22 @@ type NodeInfo struct {
 	// Protocol, ProtocolMin and Capabilities are the node protocol handshake (internal/nodeproto, docs/protocol/protocol.md
 	// "Node handshake"): the node protocol it speaks, the oldest manager protocol it answers, and what it can do.
 	// Nodes from before the handshake leave all three out (protocol 0); managers from before it ignore them.
-	Protocol           int      `json:"protocol,omitempty"`
-	ProtocolMin        int      `json:"protocol_min,omitempty"`
-	Capabilities       []string `json:"capabilities,omitempty"`
-	NodeUpdate         bool     `json:"node_update,omitempty"`
-	NodeUpdateReason   string   `json:"node_update_reason,omitempty"`
-	ModelConfiguration bool     `json:"model_configuration,omitempty"`
-	Hostname           string   `json:"hostname"`
-	OS                 string   `json:"os"`
-	Arch               string   `json:"arch"`
-	Home               string   `json:"home"`
-	DataDir            string   `json:"data_dir,omitempty"`
-	HerdrVersion       string   `json:"herdr_version"`
-	ClaudeVersion      string   `json:"claude_version"`
-	Version            string   `json:"version"`
-	System             *System  `json:"system,omitempty"`
+	Protocol           int                 `json:"protocol,omitempty"`
+	ProtocolMin        int                 `json:"protocol_min,omitempty"`
+	Capabilities       []string            `json:"capabilities,omitempty"`
+	NodeUpdate         bool                `json:"node_update,omitempty"`
+	NodeUpdateReason   string              `json:"node_update_reason,omitempty"`
+	UpdateDraining     *NodeUpdateDraining `json:"update_draining,omitempty"`
+	ModelConfiguration bool                `json:"model_configuration,omitempty"`
+	Hostname           string              `json:"hostname"`
+	OS                 string              `json:"os"`
+	Arch               string              `json:"arch"`
+	Home               string              `json:"home"`
+	DataDir            string              `json:"data_dir,omitempty"`
+	HerdrVersion       string              `json:"herdr_version"`
+	ClaudeVersion      string              `json:"claude_version"`
+	Version            string              `json:"version"`
+	System             *System             `json:"system,omitempty"`
 	// Program is the program the node runs as (nodeproto.ProgramPersonad / ProgramPersonaNode) and Executable the file
 	// it runs from: an update brings the same kind of program, to that file. Older nodes leave both out (personad, at the
 	// machine's remote_bin).

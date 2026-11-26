@@ -16,6 +16,7 @@ Exit status: 0 when every image matches and none is missing, 1 otherwise, 2 for 
 """
 import argparse
 import fnmatch
+from io import BytesIO
 import struct
 import sys
 import zlib
@@ -31,12 +32,12 @@ class Picture:
         self.width, self.height, self.rgba = width, height, rgba
 
 
-def load(path):
+def load(data):
     try:
         from PIL import Image
     except ImportError:
-        return decode_png(path.read_bytes())
-    with Image.open(path) as image:
+        return decode_png(data)
+    with Image.open(BytesIO(data)) as image:
         image = image.convert("RGBA")
         return Picture(image.width, image.height, image.tobytes())
 
@@ -178,13 +179,15 @@ def main():
     same, different, unreadable = [], [], []
     for name in sorted(names_before & names_after):
         path_a, path_b = args.before / name, args.after / name
-        if path_a.read_bytes() == path_b.read_bytes():
-            same.append(name)
-            print("相同  %s" % name)
-            continue
         try:
-            before, after = load(path_a), load(path_b)
-        except (OSError, ValueError, zlib.error) as error:
+            data_a, data_b = path_a.read_bytes(), path_b.read_bytes()
+            before = load(data_a)
+            if data_a == data_b:
+                same.append(name)
+                print("相同  %s" % name)
+                continue
+            after = load(data_b)
+        except (OSError, ValueError, zlib.error, struct.error, IndexError) as error:
             unreadable.append(name)
             print("读不了  %s：%s" % (name, error))
             continue

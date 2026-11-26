@@ -1107,7 +1107,8 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	if !s.deliverReportingReport(ctx, t, g) {
 		s.signal(g)
 	}
-	progress := TaskProgress{Kind: kind, Step: step, Steps: steps, Text: clip(oneLine(text), 200), At: now.UTC()}
+	progress := TaskProgress{Kind: kind, Step: step, Steps: steps, Text: clip(oneLine(text), 200), At: now.UTC(),
+		machine: machine, session: session}
 	if text != progress.Text {
 		progress.Detail = text
 	}

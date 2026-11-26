@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -119,10 +120,15 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 	}
 }
 
-// normalizeRuntimeSessions keeps the sessions a runtime may list (valid ids, once each) and fills what the apps expect:
+// normalizeRuntimeSessions prepares a live row update, using the preceding snapshot from this connection.
+func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Session {
+	return normalizeRuntimeRows(h, list, h.runtimePreviews())
+}
+
+// normalizeRuntimeRows keeps the sessions a runtime may list (valid ids, once each) and fills what the apps expect:
 // the agent and its label, the space kind (the runtime's id). It works in place: the rows kept are list's first ones,
 // in list's own array, the rest cleared, so list is the caller's to give up. Rows share read-only capabilities when equal.
-func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Session {
+func normalizeRuntimeRows(h *runtimeConn, list []proto.Session, preview func(id, text string) string) []proto.Session {
 	h.mu.Lock()
 	rt, agent, label, caps, daemon := h.hello.Runtime, h.hello.Agent, h.hello.Name, h.hello.Caps, h.daemon != ""
 	h.mu.Unlock()
@@ -282,7 +288,8 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		} else if s.ContextBreakdown() != nil {
 			s.SetContextBreakdown(nil)
 		}
-		runtimeWork(&s)
+		s.LastText = preview(s.SessionID, s.LastText)
+		runtimeWork(&s, preview)
 		out = append(out, s)
 	}
 	clear(list[len(out):]) // the rows left out hold no strings
@@ -334,7 +341,54 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 	if !n.runtimes.owns(h, ix.SessionID) {
 		return nil, fmt.Errorf("session %s is not listed by this runtime", ix.SessionID)
 	}
-	if n.runtimeSessionBlocked(ix.SessionID, ix.Cwd) {
+	assistantSid := ix.SessionID
+	s, hasRow := h.row(ix.SessionID)
+	isAsstSession := false
+	if n.state != nil {
+		isAsstSession = n.isAssistantSession(assistantSid)
+		if !isAsstSession {
+			if parent, _, ok := splitRuntimeChild(ix.SessionID); ok && n.isAssistantSession(parent) {
+				isAsstSession = true
+				assistantSid = parent
+			}
+		}
+	} else {
+		if hasRow && identity.IsAssistantDir(s.Cwd) {
+			isAsstSession = true
+		} else if parent, _, ok := splitRuntimeChild(ix.SessionID); ok {
+			if ps, ok := h.row(parent); ok && identity.IsAssistantDir(ps.Cwd) {
+				isAsstSession = true
+				assistantSid = parent
+			}
+		}
+	}
+	if !hasRow && assistantSid != ix.SessionID {
+		s, hasRow = h.row(assistantSid)
+	}
+	var st sessionState
+	if n.state != nil {
+		st, _ = n.state.get(assistantSid)
+	}
+	sessionCwd := ""
+	if hasRow {
+		sessionCwd = s.Cwd
+	}
+	if st.Cwd != "" {
+		sessionCwd = st.Cwd
+	}
+	rawCwd := strings.TrimSpace(ix.Cwd)
+	execCwd := rawCwd
+	if execCwd != "" {
+		execCwd = proto.ExpandHome(execCwd, n.home)
+	}
+	if execCwd == "" {
+		execCwd = sessionCwd
+	} else if !filepath.IsAbs(execCwd) && sessionCwd != "" {
+		execCwd = filepath.Join(sessionCwd, execCwd)
+	}
+	if n.runtimeSessionBlocked(ix.SessionID, "") ||
+		(rawCwd != "" && n.runtimeSessionBlocked(ix.SessionID, rawCwd)) ||
+		(execCwd != "" && execCwd != rawCwd && n.runtimeSessionBlocked(ix.SessionID, execCwd)) {
 		return proto.Resolution{Dismiss: true}, nil // a blocked Agent folder (agentdirs.go): handed back to the computer
 	}
 	rt := h.id()
@@ -365,12 +419,15 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 	// that agent's, and called by the name its row gives it whenever it gives one. Paseo's other providers (Grok, Kimi,
 	// Cursor…) all run under Paseo's own id, each named by its provider's label: the card and its push say "Grok", not
 	// the runtime's "Paseo" (#8142).
-	if s, ok := h.row(ix.SessionID); ok {
+	if hasRow {
 		if s.Agent != "" && s.Agent != agent {
 			agent = s.Agent
 		}
 		if s.AgentLabel != "" {
 			label = s.AgentLabel
+		}
+		if ix.SessionTitle == "" {
+			ix.SessionTitle = s.Title
 		}
 	}
 	if agent == "claude" {
@@ -379,7 +436,16 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		ix.Agent, ix.AgentLabel = agent, label
 	}
 	now := time.Now().UTC()
-	ix.MachineID, ix.Screen, ix.Dialog, ix.Secret, ix.OutwardWrite = "", "", nil, false, false
+	ix.MachineID, ix.Screen, ix.Dialog, ix.Secret, ix.OutwardWrite, ix.EditableText = "", "", nil, false, false, ""
+	if isAsstSession {
+		if sessionCwd != "" && execCwd != "" {
+			ix.Cwd = identity.CardCwd(sessionCwd, execCwd)
+		} else if ix.Cwd == "" {
+			ix.Cwd = execCwd
+		}
+	} else if ix.Cwd == "" {
+		ix.Cwd = sessionCwd
+	}
 	// "Always allow for this session" kept by the hub for a runtime's permission card (#3974): what it grants is the node's word, never
 	// the runtime's — one key for this runtime's tool, which the manager keeps under this session id, so it never
 	// reaches another session or another tool. Only for a runtime that asked for it in its hello (caps.keep_always: it
@@ -404,14 +470,9 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 	// a dismiss: a dismiss reached the runtime before it heard the hub was gone (detach), and the Paseo bridge took a
 	// Codex or ACP card, which has no tool call id, for one the user handed back (#8128).
 	ix.Resumable = ownID || ix.ToolUseID != ""
-	for _, s := range h.sessionsCopy() {
-		if s.SessionID == ix.SessionID {
-			if ix.SessionTitle == "" {
-				ix.SessionTitle = s.Title
-			}
-			if ix.Cwd == "" {
-				ix.Cwd = s.Cwd
-			}
+	if h.assistantEnvironment() && ix.Kind == proto.IxPermission && strings.EqualFold(ix.ToolName, "Bash") && isAsstSession {
+		if res, handled, err := n.runtimeAssistantCommandGate(ctx, ix, assistantSid, sessionCwd, execCwd, hasRow, s); handled || err != nil {
+			return res, err
 		}
 	}
 	res, ok, err := n.ask(ctx, ix)
@@ -425,6 +486,83 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 		return proto.Resolution{Dismiss: true}, nil
 	}
 	return res, nil
+}
+
+var truncatedCommandNoteRe = lazyre.New(`\n…（已截断，共 [0-9]+ 字节）$`)
+
+// runtimeAssistantCommandGate runs a local assistant_environment runtime's Bash command through Persona's shared
+// Lark/command gate (larkCheck) before ordinary permission prompting: classified reads auto-allow, writes confirm on
+// the phone and issue one-use gateProxy grants, and configured or exfiltration rules deny. Truncated or empty commands
+// fail closed to ordinary confirmation. Non-gated commands auto-allow only for non-guest sessions in bypass mode.
+func (n *Node) runtimeAssistantCommandGate(ctx context.Context, ix proto.Interaction, session, sessionCwd, execCwd string, hasRow bool, s proto.Session) (any, bool, error) {
+	var bashIn struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(ix.ToolInput, &bashIn) != nil || strings.TrimSpace(bashIn.Command) == "" || truncatedCommandNoteRe.MatchString(bashIn.Command) {
+		return nil, false, nil
+	}
+	if identity.InSpace(sessionCwd) || (hasRow && (s.Space != "" || identity.InSpace(s.Cwd))) {
+		n.gates().markSpace(session)
+	}
+	gateCwd := execCwd
+	if gateCwd == "" {
+		gateCwd = identity.AssistantDir(n.home)
+	}
+	gateIx := ix
+	gateIx.SessionID = session
+	gateIx.Agent, gateIx.AgentLabel, gateIx.AlwaysLabel, gateIx.AlwaysKeys = "", "", "", nil
+	gateIx.ToolName = "Bash"
+	if gateIx.SessionTitle == "" {
+		gateIx.SessionTitle = n.assistantTitle(session, gateCwd)
+	}
+	cfg := n.assistantLark(ctx)
+	call, _, original, editable := n.editableLarkCall(cfg, bashIn.Command, gateCwd)
+	if editable {
+		gateIx.EditableText = original
+	}
+	out, err := n.larkCheckOutcome(ctx, session, gateCwd, bashIn.Command, gateIx)
+	if errors.Is(err, errNodeGone) {
+		return nil, true, &rpc.Error{Message: "node going away", Code: "node_gone"}
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	switch out.decision {
+	case "allow":
+		if editable && out.editedText != "" && out.editedText != original {
+			card := out.card
+			if card.InteractionID == "" {
+				card.InteractionID = gateIx.ID
+			}
+			if err := n.applyLarkProxyEdit(ctx, cfg, session, card, call, out.editedText); err != nil {
+				return proto.Resolution{Allow: proto.Bool(false), Message: err.Error(), Reason: "gate_rule"}, true, nil
+			}
+		}
+		return proto.Resolution{Allow: proto.Bool(true), Message: out.reason}, true, nil
+	case "deny":
+		if out.pending {
+			return proto.Resolution{Dismiss: true, Pending: true, ApprovalID: out.approvalID, Message: out.reason}, true, nil
+		}
+		if out.dismiss {
+			return proto.Resolution{Dismiss: true, ApprovalID: out.approvalID, Message: out.reason}, true, nil
+		}
+		if out.userDenied {
+			return proto.Resolution{Allow: proto.Bool(false), Message: out.userNote}, true, nil
+		}
+		return proto.Resolution{Allow: proto.Bool(false), Message: out.reason, Reason: "gate_rule"}, true, nil
+	}
+	mode, _ := n.modesOf(session)
+	rowMode := ""
+	if hasRow {
+		rowMode = s.PermissionMode
+	}
+	nonGuest := n.guestOf(session) == nil
+	nodeBypass := mode == proto.ModeBypass && (rowMode == "" || rowMode == proto.ModeBypass)
+	rowFallbackBypass := (mode == "" || mode == "auto") && rowMode == proto.ModeBypass
+	if nonGuest && (nodeBypass || rowFallbackBypass) {
+		return proto.Resolution{Allow: proto.Bool(true)}, true, nil
+	}
+	return nil, false, nil
 }
 
 // runtimeInSpace: the card's session is in a space (its cwd or the row's), where every write is confirmed

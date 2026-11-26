@@ -58,11 +58,18 @@ func TestWorkGuideFreshChatSettings(t *testing.T) {
 		if present != enabled {
 			t.Fatalf("unexpected native guide selection %t", present)
 		}
+		views, ok := p["views_guide_md"].(string)
+		if !ok || !strings.Contains(full, `"title":"选择方案"`) || strings.Contains(views, `"title":"选择方案"`) {
+			t.Fatal("the views guide did not retain a complete legacy fallback")
+		}
 		if enabled {
 			for _, migrated := range []string{"todo_create", "continues_why", "task_scope", "concern_report"} {
 				if !strings.Contains(full, migrated) || strings.Contains(short, migrated) {
 					t.Errorf("procedure %s", migrated)
 				}
+			}
+			if !strings.Contains(short, `"title":"选择方案"`) || strings.Contains(views, "concern_report") {
+				t.Error("work and views fallbacks are not independently selectable")
 			}
 			t.Logf("Shared instructions in UTF-8 bytes: default %d, enabled %d, migrated %d", len(full), len(short), len(full)-len(short))
 		}

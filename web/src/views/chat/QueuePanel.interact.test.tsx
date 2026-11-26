@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../lib/api";
+import { onDraftEvent, type DraftEvent } from "../../lib/drafts";
 import type { Session } from "../../lib/types";
 import { QueuePanel } from "./QueuePanel";
 
@@ -477,5 +478,91 @@ describe("QueuePanel status, always-visible Send now and photo thumbnails (#1087
     expect(thumbs[2].getAttribute("src")).toContain(encodeURIComponent(photo("p3")));
     const overflow = rows()[0].querySelector<HTMLElement>("[data-queue-photo-overflow]");
     expect(overflow?.textContent).toBe("+2");
+  });
+});
+
+describe("QueuePanel pull-back lifecycle and cross-session isolation", () => {
+  it("still restores text and images to the originating draft when unmounting after the last queued item empties before HTTP resolves", async () => {
+    let resolvePull!: (v: unknown) => void;
+    vi.mocked(api).mockReturnValue(new Promise((r) => { resolvePull = r; }));
+    const draftEvents: DraftEvent[] = [];
+    const unsub = onDraftEvent("qp-unmount-last", (e) => draftEvents.push(e));
+    try {
+      const single = { ...session, queued: ["最后一条排队消息"] } as unknown as Session;
+      render(<QueuePanel session={single} draftKey="qp-unmount-last" canEdit />);
+      click(within(0, "[data-queue-edit]"));
+      expect(calls()).toEqual([["/sessions/m/s/queue", { keep: [] }]]);
+
+      // Queue-emptying push unmounts QueuePanel while the composer for qp-unmount-last stays mounted.
+      render(null);
+      expect(host.innerHTML).toBe("");
+
+      resolvePull({
+        queue: ["最后一条排队消息"],
+        images: [[{ mime: "image/png", data: "AAAA" }]],
+      });
+      await settle();
+
+      expect(draftEvents).toEqual([
+        { type: "append", text: "最后一条排队消息" },
+        { type: "image", image: { name: "photo-1.png", mime: "image/png", data: "AAAA" } },
+      ]);
+    } finally {
+      unsub();
+    }
+  });
+
+  it("never restores into session B or unlocks session A2 on cross-session / ABA switches while an edit pull-back is in flight", async () => {
+    let resolveA1!: (v: unknown) => void;
+    let resolveA2!: (v: unknown) => void;
+    vi.mocked(api)
+      .mockReturnValueOnce(new Promise((r) => { resolveA1 = r; }))
+      .mockReturnValueOnce(new Promise((r) => { resolveA2 = r; }));
+
+    const eventsA: DraftEvent[] = [];
+    const eventsB: DraftEvent[] = [];
+    const unsubA = onDraftEvent("qp-aba-a", (e) => eventsA.push(e));
+    const unsubB = onDraftEvent("qp-aba-b", (e) => eventsB.push(e));
+    try {
+      const sessionA = { ...session, machine_id: "m-a", session_id: "s-a", queued: ["A 第一条", "A 第二条"] } as unknown as Session;
+      const sessionB = { ...session, machine_id: "m-b", session_id: "s-b", queued: ["B 第一条"] } as unknown as Session;
+
+      // Start pull-back in session A (request #1 stays pending).
+      render(<QueuePanel session={sessionA} draftKey="qp-aba-a" canEdit />);
+      click(within(0, "[data-queue-edit]"));
+      expect(within(1, "[data-queue-delete]").hasAttribute("disabled")).toBe(true);
+
+      // Switch to session B while A1 is in flight: B is interactive and unlocked.
+      render(<QueuePanel session={sessionB} draftKey="qp-aba-b" canEdit />);
+      expect(within(0, "[data-queue-delete]").hasAttribute("disabled")).toBe(false);
+
+      // ABA: return to session A and start delete #2 on row 1.
+      render(<QueuePanel session={sessionA} draftKey="qp-aba-a" canEdit />);
+      expect(within(1, "[data-queue-delete]").hasAttribute("disabled")).toBe(false);
+      click(within(1, "[data-queue-delete]"));
+      expect(within(0, "[data-queue-edit]").hasAttribute("disabled")).toBe(true);
+
+      // Stale A1 edit resolves late: restores strictly to A's draft (never B) and does NOT unlock A2.
+      resolveA1({
+        queue: ["A 第一条", "A 第二条"],
+        images: [[{ mime: "image/png", data: "BBBB" }]],
+      });
+      await settle();
+
+      expect(eventsB).toEqual([]);
+      expect(eventsA).toEqual([
+        { type: "append", text: "A 第一条" },
+        { type: "image", image: { name: "photo-1.png", mime: "image/png", data: "BBBB" } },
+      ]);
+      expect(within(0, "[data-queue-edit]").hasAttribute("disabled")).toBe(true);
+
+      // Active A2 delete resolves: unlocks A2 cleanly.
+      resolveA2({ queue: ["A 第一条", "A 第二条"] });
+      await settle();
+      expect(within(0, "[data-queue-edit]").hasAttribute("disabled")).toBe(false);
+    } finally {
+      unsubA();
+      unsubB();
+    }
   });
 });

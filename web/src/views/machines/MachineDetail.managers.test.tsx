@@ -27,7 +27,7 @@ const { MachineDetail } = await import("./MachineDetail");
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
-  for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  await act(async () => { await vi.dynamicImportSettled(); });
 };
 
 beforeEach(() => {
@@ -59,7 +59,7 @@ describe("MachineDetail hosted managers (#14964)", () => {
     fake.machines = [
       { id: "box", name: "Dev Box", online: true, machine_uid: "uid-box", hostname: "box-host", node_version: "v1-202611241200", node_mismatch: true, can_deploy: true },
     ];
-    act(() => root.render(<MachineDetail mid="box" onToggleSidebar={() => {}} />));
+    act(() => root.render(<MachineDetail subview="management" mid="box" onToggleSidebar={() => {}} />));
     await flush();
 
     const section = host.querySelector('[data-testid="hosted-managers-detail"]')!;
@@ -95,7 +95,7 @@ describe("MachineDetail hosted managers (#14964)", () => {
       managers: [{ id: "m-1", name: "别机助手", online: true, machine_uid: "uid-other", host: "other-host", deploy: "service" }],
     });
     fake.machines = [{ id: "box", name: "Dev Box", online: true, machine_uid: "uid-box", hostname: "box-host" }];
-    act(() => root.render(<MachineDetail mid="box" onToggleSidebar={() => {}} />));
+    act(() => root.render(<MachineDetail subview="management" mid="box" onToggleSidebar={() => {}} />));
     await flush();
     expect(host.querySelector('[data-testid="hosted-managers-detail"]')).toBeNull();
     expect(host.querySelector('[data-testid="deploy-co-located-note"]')).toBeNull();

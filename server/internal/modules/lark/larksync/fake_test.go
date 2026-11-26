@@ -66,7 +66,9 @@ func newFakeOpen(t *testing.T, clk *fakeClock) *fakeOpen {
 		}
 		f.mu.Lock()
 		custom := f.handlers[r.URL.Path] != nil
-		if !custom && strings.HasPrefix(r.URL.Path, "/open-apis/contact/v3/users/") {
+		defaultContact := !custom && strings.HasPrefix(r.URL.Path, "/open-apis/contact/v3/users/")
+		defaultMembers := !custom && strings.HasPrefix(r.URL.Path, "/open-apis/im/v1/chats/") && strings.HasSuffix(r.URL.Path, "/members")
+		if defaultContact || defaultMembers {
 			f.calls = append(f.calls, r.Method+" "+r.URL.Path)
 			f.auths = append(f.auths, r.Header.Get("Authorization"))
 		}
@@ -74,6 +76,10 @@ func newFakeOpen(t *testing.T, clk *fakeClock) *fakeOpen {
 		if name, ok := strings.CutPrefix(r.URL.Path, "/open-apis/contact/v3/users/"); ok && !custom {
 			// Senders' names (run.senderName): every user is "Name <open id>" unless a test answers otherwise.
 			writeData(w, map[string]any{"user": map[string]any{"name": "Name " + name}})
+			return
+		}
+		if defaultMembers {
+			writeData(w, map[string]any{"items": []any{}})
 			return
 		}
 		f.mu.Lock()

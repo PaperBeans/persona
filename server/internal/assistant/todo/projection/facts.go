@@ -84,6 +84,14 @@ type Facts struct {
 	Loc *time.Location `json:"-"`
 	// TodosV2 gates experimental New To-dos & Tasks projection rules (#14620); false preserves legacy behavior identically.
 	TodosV2 bool `json:"-"`
+	// PendingReviewSLAHours overrides the default 24h pending_review quiet window under todos_v2=true when > 0 (#16098).
+	// PendingReviewSLADisabled disables pending_review quiet sinking so it surfaces immediately to needs_you.
+	PendingReviewSLAHours    int  `json:"-"`
+	PendingReviewSLADisabled bool `json:"-"`
+	// CanWaitSLAHours overrides the default 48h can_wait auto-escalation window under todos_v2=true when > 0 (#16098).
+	// CanWaitSLADisabled disables automatic aging of can_wait decisions into active needs_you.
+	CanWaitSLAHours    int  `json:"-"`
+	CanWaitSLADisabled bool `json:"-"`
 }
 
 // Agent is one of the to-do's runs (an Agent session) as the list links it (agents[]).
@@ -135,18 +143,21 @@ type Supervision struct {
 
 // Parked is what a parked task waits for: why, until when, on what kind of thing.
 type Parked struct {
-	Reason    string        `json:"reason"`
-	Until     time.Time     `json:"until"`
-	WaitingOn string        `json:"waiting_on"`
-	Evidence  *ParkEvidence `json:"evidence,omitempty"`
+	Reason    string                        `json:"reason"`
+	Until     time.Time                     `json:"until"`
+	WaitingOn string                        `json:"waiting_on"`
+	Evidence  *ParkEvidence                 `json:"evidence,omitempty"`
+	Handoff   *assistantwire.TodoHandoffRef `json:"handoff,omitempty"`
 }
 
-// ParkEvidence carries the fields of parked evidence the projection reads (owner-request link and shared-blocker root cause).
+// ParkEvidence carries the fields of parked evidence the projection reads (owner-request link, shared-blocker root cause, and waiting details).
 type ParkEvidence struct {
-	Kind          string `json:"kind,omitempty"`
-	Target        string `json:"target,omitempty"`
-	URL           string `json:"url,omitempty"`
-	InteractionID string `json:"interaction_id,omitempty"`
+	Kind          string                         `json:"kind,omitempty"`
+	Target        string                         `json:"target,omitempty"`
+	URL           string                         `json:"url,omitempty"`
+	Wake          string                         `json:"wake,omitempty"`
+	InteractionID string                         `json:"interaction_id,omitempty"`
+	Contact       *assistantwire.TodoWaitContact `json:"contact,omitempty"`
 }
 
 // Review is one review of the ledger: when, its verdict, its note (a cancellation's why), and a needs_user review's
@@ -175,8 +186,12 @@ type Delivery struct {
 // PRStatus is an observation of one of the task's PRs.
 type PRStatus struct {
 	URL       string    `json:"url"`
+	Title     string    `json:"title,omitempty"`
 	State     string    `json:"state"`
 	Draft     bool      `json:"draft"`
+	Review    string    `json:"review,omitempty"`
+	Checks    string    `json:"checks,omitempty"`
+	Conflicts bool      `json:"conflicts,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
 }
 
@@ -191,11 +206,19 @@ const (
 	reviewPending   = "pending_review"
 	reviewAccepted  = "accepted"
 	reviewNeedsUser = "needs_user"
+	reviewUserCheck = "user_check"
 	reviewCancelled = "cancelled"
 	reviewParked    = "parked"
 
 	parkSomeoneElse   = "someone_else"
 	parkExternalEvent = "external_event"
+	parkDate          = "date"
+	parkTodoHandoff   = "todo_handoff"
+
+	parkEvidencePersonReply   = "person_reply"
+	parkEvidenceMergeReview   = "merge_review"
+	parkEvidenceExternalEvent = "external_event"
+	parkEvidenceDate          = "date"
 
 	outcomeDone   = "done"
 	outcomeCannot = "cannot"

@@ -62,12 +62,21 @@ func (s *Service) sendDigestLocked(ctx context.Context) {
 	if b.timer != nil {
 		b.timer.Stop()
 	}
-	if !s.autoSupervisionOn(ctx) {
+	mode := s.supervisionMode(ctx)
+	if mode == supervisionModeOff {
 		// Switched off while this digest waited for its turn: nothing is taken out of the gather, and the withdrawal
 		// empties it.
 		b.mu.Unlock()
 		s.syncAutoSupervision(ctx)
 		return
+	}
+	if mode == supervisionModeOutcomes && slices.ContainsFunc(slices.Collect(maps.Values(b.pending)), func(g superviseSignal) bool {
+		return !supervisionSignalAllowed(mode, g)
+	}) {
+		// Switched to outcomes while this digest waited: its withdrawal takes the routine signals out first.
+		b.mu.Unlock()
+		s.syncAutoSupervision(ctx)
+		b.mu.Lock()
 	}
 	b.timer, b.timerAt = nil, time.Time{}
 	b.syncBatchInterval(batch)
@@ -707,6 +716,11 @@ func mergeSignals(a, b []superviseSignal) []superviseSignal {
 			}
 			if g.Kind == sigOutageRecovery {
 				g = joinOutageRecovery(out[i], g)
+			}
+			if g.Recipient == "" && out[i].Recipient != "" && out[i].Key == g.Key &&
+				(g.To == "" || g.To == out[i].Recipient) &&
+				(out[i].To == "" || g.To == "" || out[i].To == g.To) {
+				g.Recipient = out[i].Recipient
 			}
 			g = preserveIdleHandoff(out[i], g)
 			out[i] = g

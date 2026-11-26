@@ -56,6 +56,9 @@ func (s *Service) Tools(ctx context.Context) []proto.Tool {
 	if s.storeFn.Load() != nil && ownerReplyApprovalOn(s.settings(ctx)) {
 		tools = append(tools, toolsNamed([]string{ownerActionPrepareTool})...)
 	}
+	if s.storeFn.Load() != nil && s.settings(ctx).todosV2On() {
+		tools = append(tools, toolsNamed([]string{"todo_split", "todo_merge"})...)
+	}
 	if s.urgentOn(ctx) {
 		tools = append(tools, toolsNamed([]string{"urgent_call"})...)
 	}
@@ -230,7 +233,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolTodoRepositoryLinksAdd(ctx, machine, self, name, args)
 	case "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set":
 		return s.toolTodoRepositories(ctx, machine, self, name, args)
-	case "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete":
+	case "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "todo_split", "todo_merge":
 		return s.toolTodo(ctx, machine, self, name, args) // todo_tools.go
 	case "direction_name":
 		return s.toolDirectionName(ctx, self, args) // direction_progress.go

@@ -212,4 +212,3 @@ export function itemAtUid(it: InboxItem, uid?: number): InboxItem {
   const i = m.uids.indexOf(uid);
   return i < 0 ? it : { ...it, mail: { ...m, uids: m.uids.slice(0, i + 1) } };
 }
-

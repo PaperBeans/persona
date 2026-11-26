@@ -287,21 +287,26 @@ func (h *herdrCoreHost) Prompt(ctx context.Context, pane host.PaneRef, text stri
 		return inputErr(err)
 	}
 	if fromTerminal(*t).Agent == "" {
-		return host.Mark(fmt.Errorf("herdr-core: no agent runs in %s any more", pane.ID), host.ErrNotDelivered)
+		err := host.Mark(fmt.Errorf("herdr-core: no agent runs in %s any more", pane.ID), host.ErrNotDelivered)
+		if t.State != "live" || (t.Foreground != nil && isShell(t.Foreground)) {
+			return host.Mark(err, errTerminalFinished)
+		}
+		return err
 	}
 	return inputErr(h.c.Send(ctx, pane.ID, text))
 }
 
 // inputErr marks the herdr-core refusals that typed nothing (host.ErrNotDelivered): a program reporting a dialog
-// (blocked, also host.ErrDialogOpen), a status that changed, a terminal not ready, finished or gone.
+// (blocked, also host.ErrDialogOpen), a finished or missing terminal (also errTerminalFinished), or a transient refusal.
 func inputErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case herdrcore.IsKind(err, "blocked"):
 		return host.Mark(host.Mark(err, host.ErrNotDelivered), host.ErrDialogOpen)
-	case herdrcore.IsKind(err, "status_mismatch"), herdrcore.IsKind(err, "unavailable"), herdrcore.IsKind(err, "finished"),
-		herdrcore.IsKind(err, "not_found"), errors.Is(err, herdrcore.ErrNoSocket):
+	case herdrcore.IsKind(err, "finished"), herdrcore.IsKind(err, "not_found"):
+		return host.Mark(host.Mark(hcErr(err), host.ErrNotDelivered), errTerminalFinished)
+	case herdrcore.IsKind(err, "status_mismatch"), herdrcore.IsKind(err, "unavailable"), errors.Is(err, herdrcore.ErrNoSocket):
 		return host.Mark(hcErr(err), host.ErrNotDelivered)
 	}
 	return err

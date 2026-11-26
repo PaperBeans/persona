@@ -60,7 +60,7 @@ func (c recordingCore) Deleted() []recordingwire.ID {
 func (c recordingCore) RecordingFile(id recordingwire.ID, f recordingwire.File) ([]byte, error) {
 	return c.e.Store.recordingRead(string(id), string(f))
 }
-func (c recordingCore) RecordingDays() int { return recordingDays(c.e.RecordingDays()) }
+func (c recordingCore) RecordingDays() int { return c.e.RecordingDays() }
 func (c recordingCore) TranscriptionReady() bool {
 	return c.e.TranscriptionReady != nil && c.e.TranscriptionReady()
 }

@@ -98,5 +98,6 @@
   "host_placeholder": "地址，如 rss.example.org 或 rss.example.org:8443",
   "host_field_label": "给 {name} 放行的地址",
   "host_allowed": "已放行 {host}",
-  "host_revoked": "已撤销 {host}"
+  "host_revoked": "已撤销 {host}",
+  "signature_key": "用公钥 {key} 验签"
 }

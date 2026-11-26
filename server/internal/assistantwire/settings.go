@@ -172,6 +172,9 @@ type StartParams struct {
 	// GuestTools: a guest conversation (assistant/guest.go) that may use only these connector tools; nil is an
 	// ordinary one.
 	GuestTools []string `json:"guest_tools,omitempty"`
+	// GuestHandoff: a proxy reply's guest (assistant/bot_handoff.go). The manager registers it before the node
+	// starts it; never over the bus.
+	GuestHandoff string `json:"-"`
 	// NewSessionID: start it under this session id (a meeting's follow-up, made once also across a restart); a node
 	// that cannot picks its own. Never over the bus.
 	NewSessionID string `json:"-"`

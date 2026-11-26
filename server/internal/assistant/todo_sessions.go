@@ -25,6 +25,10 @@ const (
 	// {session_id, close_terminal: true} → {closed}: the user's "Archive and close" (agent_archive_close.go); without
 	// close_terminal a node since #4754 only stops the agent.
 	deviceSessionRetire = "session.retire"
+	// {session_id, close_terminal: true, expected_rev, has_expected_rev, expected_updated_at, expected_pane_id}
+	// → {closed, guard_verified: true}: guarded idle terminal close (agent_archive_idle.go, node retire.go).
+	// Older nodes reject it with "unknown method" rather than executing an unguarded close.
+	deviceSessionRetireGuarded = "session.retire_guarded"
 	// {session_id, retire?} → {stopped}: the agent quits, its terminal stays (tasks_close.go, tasks_idle.go,
 	// supervise_leader.go; node retire.go). A node before #4754 does not know it: a refusal, nothing closed.
 	deviceSessionStop = "session.stop"
@@ -277,7 +281,7 @@ func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
 			continue
 		}
 		key := [2]string{machine, c.SessionID}
-		if doneCreations[key] {
+		if doneCreations[key] || s.idleCloseFenceActive(machine, c.SessionID) {
 			continue
 		}
 

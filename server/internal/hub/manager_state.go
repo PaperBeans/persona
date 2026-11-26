@@ -138,6 +138,26 @@ func (h *Hub) mainOf(machine, session string) bool {
 	return false
 }
 
+// isMainForManager reports whether session on machine is manager's own main conversation
+// on a machine owned by manager.
+func (h *Hub) isMainForManager(manager, machine, session string) bool {
+	if session == "" || machine == "" {
+		return false
+	}
+	mgr := normalizeGradingManager(manager)
+	var p *assistantwire.Profile
+	if mgr == assistantwire.AssistantID {
+		prof := h.assistantProfile()
+		p = &prof
+	} else {
+		a := h.assistantOf(mgr)
+		a.mu.RLock()
+		p = a.profile
+		a.mu.RUnlock()
+	}
+	return p != nil && p.Main != "" && p.Main == session && p.MainRouteMachine() == machine && h.mayClaim(mgr, machine)
+}
+
 // managerTools are manager id's tools (not the assistant's: assistantToolsNow), asked for the first time they are
 // needed after it connected and kept while it is away.
 func (h *Hub) managerTools(ctx context.Context, id string) []proto.Tool {

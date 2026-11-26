@@ -406,6 +406,8 @@ func TestBudgetStopsAsPartialWithFinishedCursorsOnly(t *testing.T) {
 	if !res.Partial {
 		t.Fatal("not partial")
 	}
+	// The name book (members.go) keeps what the finished part learned.
+	delete(res.Cursors, larksyncwire.SenderNamesCursor)
 	if res.Cursors["im:oc_a"] == "" || res.Cursors["im:oc_b"] != "" || len(res.Cursors) != 1 {
 		t.Errorf("cursors = %v, want only oc_a's", res.Cursors)
 	}
@@ -486,9 +488,11 @@ func TestMessageTextByType(t *testing.T) {
 		am.Body.Content = string(raw)
 		for _, m := range mentions {
 			am.Mentions = append(am.Mentions, struct {
-				Key  string `json:"key"`
-				Name string `json:"name"`
-			}{m["key"], m["name"]})
+				Key    string `json:"key"`
+				ID     string `json:"id"`
+				IDType string `json:"id_type"`
+				Name   string `json:"name"`
+			}{Key: m["key"], ID: m["id"], IDType: m["id_type"], Name: m["name"]})
 		}
 		return am
 	}
@@ -1825,5 +1829,245 @@ func TestReadChatNextPageErrorDoesNotPrematurelyCommitThreadCursor(t *testing.T)
 	}
 	if got := res2.Cursors[threadCursorStem+"omt_p1"]; got != "done" {
 		t.Fatalf("run 2 thread cursor = %q, want done", got)
+	}
+}
+
+// In a personal 1-person tenant where contact/v3 cannot see external users, live sync falls back to per-chat cached
+// GET /open-apis/im/v1/chats/:chat_id/members, p2p chat info + members, and message-carried names (mentions / sender
+// name / post @-nodes), naming both senders and single chats without repeating failed contact/v3 or members calls.
+func TestIMExternalGroupAndP2PNameFallbacksCachedPerChat(t *testing.T) {
+	clk := &fakeClock{t: testNow}
+	f := newFakeOpen(t, clk)
+	s := newTestSyncer(t, clk)
+	b := binding(f, "primary~a1", larksyncwire.TierFull)
+	emptyDocs(f)
+
+	// contact/v3 cannot see any external user in a 1-person personal tenant.
+	for _, id := range []string{"ou_ext1", "ou_ext2", "ou_ext3", "ou_left", "ou_p2p_peer"} {
+		f.handle("/open-apis/contact/v3/users/"+id, func(w http.ResponseWriter, _ *http.Request) {
+			writeCode(w, http.StatusBadRequest, 41001, "user not visible in personal tenant")
+		})
+	}
+
+	f.data("/open-apis/im/v1/chats", map[string]any{"items": []any{
+		map[string]any{"chat_id": "oc_ext_grp", "name": "External Group", "chat_mode": "group"},
+	}})
+	f.handle("/open-apis/search/v2/message", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["chat_type"] == searchChatTypeP2P {
+			writeData(w, map[string]any{"items": []string{"om_p2p_human", "om_p2p_bot"}})
+			return
+		}
+		writeData(w, map[string]any{"items": []string{}})
+	})
+
+	// Paginated group members list for oc_ext_grp (2 pages).
+	f.handle("/open-apis/im/v1/chats/oc_ext_grp/members", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("member_id_type") != "open_id" {
+			t.Errorf("member_id_type = %q, want open_id", r.URL.Query().Get("member_id_type"))
+		}
+		if r.URL.Query().Get("page_token") == "" {
+			writeData(w, map[string]any{
+				"items":      []any{map[string]any{"member_id": "ou_ext1", "name": "External One"}, map[string]any{"member_id": "ou_ext2", "name": "External Two"}},
+				"has_more":   true,
+				"page_token": "m2",
+			})
+			return
+		}
+		writeData(w, map[string]any{
+			"items":    []any{map[string]any{"member_id": "ou_ext3", "name": "External Three"}},
+			"has_more": false,
+		})
+	})
+
+	// P2P human chat: chats/:id has empty name and p2p_target_id; members returns owner + peer.
+	f.data("/open-apis/im/v1/chats/oc_p2p_human", map[string]any{"chat_mode": "p2p", "name": "", "p2p_target_id": "ou_p2p_peer", "p2p_target_type": "user"})
+	f.data("/open-apis/im/v1/chats/oc_p2p_human/members", map[string]any{
+		"items": []any{
+			map[string]any{"member_id": testOwner, "name": "Owner"},
+			map[string]any{"member_id": "ou_p2p_peer", "name": "External Friend"},
+		},
+	})
+	// P2P bot chat: chats/:id has bot's display name.
+	f.data("/open-apis/im/v1/chats/oc_p2p_bot", map[string]any{"chat_mode": "p2p", "name": "Helper Bot"})
+
+	msgMentionLeft := textMsg("om_m1", "oc_ext_grp", "ou_ext1", "hi @_user_1", testNow.Add(-5*time.Minute))
+	msgMentionLeft["mentions"] = []any{map[string]any{"key": "@_user_1", "id": "ou_left", "id_type": "open_id", "name": "Former Member"}}
+	msgBotDM := textMsg("om_p2p_bot", "oc_p2p_bot", "cli_helper", "bot reply", testNow.Add(-2*time.Minute))
+	msgBotDM["sender"] = map[string]any{"id": "cli_helper", "sender_type": "app"}
+
+	f.data("/open-apis/im/v1/messages/om_p2p_human", map[string]any{"items": []any{
+		textMsg("om_p2p_human", "oc_p2p_human", "ou_p2p_peer", "hello friend", testNow.Add(-3*time.Minute)),
+	}})
+	f.data("/open-apis/im/v1/messages/om_p2p_bot", map[string]any{"items": []any{msgBotDM}})
+
+	f.handle("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("container_id") {
+		case "oc_ext_grp":
+			writeData(w, map[string]any{"items": []any{
+				msgMentionLeft,
+				textMsg("om_m2", "oc_ext_grp", "ou_ext2", "second external", testNow.Add(-4*time.Minute)),
+				textMsg("om_m3", "oc_ext_grp", "ou_ext3", "third external", testNow.Add(-3*time.Minute)),
+				textMsg("om_left", "oc_ext_grp", "ou_left", "before leaving", testNow.Add(-2*time.Minute)),
+			}})
+		case "oc_p2p_human":
+			writeData(w, map[string]any{"items": []any{
+				textMsg("om_p2p_human", "oc_p2p_human", "ou_p2p_peer", "hello friend", testNow.Add(-3*time.Minute)),
+				textMsg("om_p2p_mine", "oc_p2p_human", testOwner, "my reply", testNow.Add(-1*time.Minute)),
+			}})
+		case "oc_p2p_bot":
+			writeData(w, map[string]any{"items": []any{msgBotDM}})
+		default:
+			t.Errorf("unexpected container %q", r.URL.Query().Get("container_id"))
+		}
+	})
+
+	res, err := s.Run(t.Context(), b, staticToken("tok"), nil, newMemIndex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %+v", res.Errors)
+	}
+	byID := map[string]larksyncwire.Message{}
+	for _, m := range res.Messages {
+		byID[m.ID] = m
+	}
+	wantSenders := map[string]string{
+		"om_m1":        "External One",
+		"om_m2":        "External Two",
+		"om_m3":        "External Three",
+		"om_left":      "Former Member",
+		"om_p2p_human": "External Friend",
+		"om_p2p_bot":   "Helper Bot",
+	}
+	for id, want := range wantSenders {
+		if got := byID[id].SenderName; got != want {
+			t.Errorf("%s: SenderName = %q, want %q", id, got, want)
+		}
+	}
+	if byID["om_p2p_human"].ChatName != "External Friend" || byID["om_p2p_mine"].ChatName != "External Friend" {
+		t.Errorf("human p2p ChatName: peer=%q mine=%q", byID["om_p2p_human"].ChatName, byID["om_p2p_mine"].ChatName)
+	}
+	if byID["om_p2p_bot"].ChatName != "Helper Bot" {
+		t.Errorf("bot p2p ChatName = %q, want Helper Bot", byID["om_p2p_bot"].ChatName)
+	}
+	// Group members fetched once (2 pages) and cached; ou_ext2 & ou_ext3 served from cache without hitting contact/v3.
+	if n := f.count("/open-apis/im/v1/chats/oc_ext_grp/members"); n != 2 {
+		t.Errorf("oc_ext_grp members calls = %d, want 2 (1 paginated fetch)", n)
+	}
+	if n := f.count("/open-apis/contact/v3/users/ou_ext2") + f.count("/open-apis/contact/v3/users/ou_ext3"); n != 0 {
+		t.Errorf("cached external members still hit contact/v3 %d times", n)
+	}
+	var saved map[string]string
+	if err := json.Unmarshal([]byte(res.Cursors[p2pChatsResource]), &saved); err != nil {
+		t.Fatalf("p2p_chats cursor: %v", err)
+	}
+	if saved["oc_p2p_human"] != "External Friend" || saved["oc_p2p_bot"] != "Helper Bot" {
+		t.Errorf("saved p2p_chats = %v", saved)
+	}
+}
+
+// ResolveNamesWithFallback resolves external group members (cached per chat), unnamed human/bot p2p chats, and
+// message-carried sender/mention names while isolating scope refusals on optional chat-members lookups.
+func TestResolveNamesWithFallbackCoversExternalGroupsP2PAndMessageInfo(t *testing.T) {
+	clk := &fakeClock{t: testNow}
+	f := newFakeOpen(t, clk)
+	s := newTestSyncer(t, clk)
+	b := binding(f, "primary~a1", larksyncwire.TierFull)
+
+	for _, id := range []string{"ou_g1", "ou_g2", "ou_msg_only", "ou_dm_user"} {
+		f.handle("/open-apis/contact/v3/users/"+id, func(w http.ResponseWriter, _ *http.Request) {
+			writeCode(w, http.StatusBadRequest, 41001, "external user")
+		})
+	}
+	f.data("/open-apis/im/v1/chats/oc_g/members", map[string]any{
+		"items": []any{
+			map[string]any{"member_id": "ou_g1", "name": "Group One"},
+			map[string]any{"member_id": "ou_g2", "name": "Group Two"},
+		},
+	})
+	f.data("/open-apis/im/v1/chats/oc_dm_user", map[string]any{"chat_mode": "p2p", "name": "", "p2p_target_id": "ou_dm_user", "p2p_target_type": "user"})
+	f.data("/open-apis/im/v1/chats/oc_dm_user/members", map[string]any{
+		"items": []any{
+			map[string]any{"member_id": testOwner, "name": "Owner"},
+			map[string]any{"member_id": "ou_dm_user", "name": "DM Friend"},
+		},
+	})
+	f.data("/open-apis/im/v1/chats/oc_dm_bot", map[string]any{"chat_mode": "p2p", "name": "Alert Bot"})
+	f.data("/open-apis/im/v1/chats/oc_dm_owner_only", map[string]any{"chat_mode": "p2p", "name": ""})
+	f.data("/open-apis/im/v1/chats/oc_dm_owner_only/members", map[string]any{
+		"items": []any{
+			map[string]any{"member_id": testOwner, "name": "Owner"},
+			map[string]any{"member_id": "ou_quiet_peer", "name": "Quiet Peer"},
+		},
+	})
+	msgWithSenderName := textMsg("om_sample", "oc_g", "ou_msg_only", "hi", testNow.Add(-time.Minute))
+	msgWithSenderName["sender"] = map[string]any{"id": "ou_msg_only", "sender_type": "user", "name": "Inline Sender"}
+	f.data("/open-apis/im/v1/messages/om_sample", map[string]any{"items": []any{msgWithSenderName}})
+
+	got, err := s.ResolveNamesWithFallback(t.Context(), b, staticToken("tok"), larksyncwire.NameResolveRequest{
+		OpenIDs: []larksyncwire.OpenID{"ou_g1", "ou_g2", "ou_msg_only", "ou_dm_user"},
+		ChatSenders: map[string][]string{
+			"oc_g":       {"ou_g1", "ou_g2", "ou_msg_only"},
+			"oc_dm_user": {"ou_dm_user"},
+			"oc_dm_bot":  {"cli_alert"},
+		},
+		P2PChatIDs:     []larksyncwire.ChatID{"oc_dm_user", "oc_dm_bot", "oc_dm_owner_only"},
+		SampleMessages: map[string]string{"ou_msg_only": "om_sample"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantUsers := map[string]string{
+		"ou_g1":       "Group One",
+		"ou_g2":       "Group Two",
+		"ou_msg_only": "Inline Sender",
+		"ou_dm_user":  "DM Friend",
+		"cli_alert":   "Alert Bot",
+	}
+	for id, want := range wantUsers {
+		if got.UserNames[id] != want {
+			t.Errorf("UserNames[%s] = %q, want %q", id, got.UserNames[id], want)
+		}
+	}
+	wantP2P := map[string]string{
+		"oc_dm_user":       "DM Friend",
+		"oc_dm_bot":        "Alert Bot",
+		"oc_dm_owner_only": "Quiet Peer",
+	}
+	for cid, want := range wantP2P {
+		if got.P2PChatNames[cid] != want {
+			t.Errorf("P2PChatNames[%s] = %q, want %q", cid, got.P2PChatNames[cid], want)
+		}
+	}
+	if n := f.count("/open-apis/im/v1/chats/oc_g/members"); n != 1 {
+		t.Errorf("oc_g members called %d times, want 1", n)
+	}
+	if n := f.count("/open-apis/contact/v3/users/ou_g2"); n != 0 {
+		t.Errorf("ou_g2 should have hit oc_g member cache without calling contact/v3 (%d calls)", n)
+	}
+
+	// Missing chat-members scope degrades gracefully without returning ErrKindScope when contact/v3 has no scope error.
+	f2 := newFakeOpen(t, clk)
+	f2.handle("/open-apis/contact/v3/users/ou_ext", func(w http.ResponseWriter, _ *http.Request) {
+		writeCode(w, http.StatusBadRequest, 41001, "external user")
+	})
+	f2.handle("/open-apis/im/v1/chats/oc_denied/members", func(w http.ResponseWriter, _ *http.Request) {
+		writeCode(w, http.StatusBadRequest, 99991672, "missing im:chat.members:read")
+	})
+	f2.handle("/open-apis/im/v1/chats/oc_second/members", func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("members fallback should stop after ErrKindScope")
+	})
+	got2, err := s.ResolveNamesWithFallback(t.Context(), binding(f2, "primary~a1", larksyncwire.TierFull), staticToken("tok"), larksyncwire.NameResolveRequest{
+		OpenIDs:     []larksyncwire.OpenID{"ou_ext"},
+		ChatSenders: map[string][]string{"oc_denied": {"ou_ext"}, "oc_second": {"ou_ext"}},
+	})
+	if err != nil {
+		t.Fatalf("optional chat-members scope denial must not fail backfill: %v", err)
+	}
+	if len(got2.UserNames) != 0 {
+		t.Fatalf("unexpected names: %v", got2.UserNames)
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nwverse/persona/server/internal/db"
-	repository "github.com/nwverse/persona/server/internal/repositorywire"
 	"github.com/nwverse/persona/server/internal/taskworkspace"
 	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
@@ -92,22 +91,18 @@ func (d *Store) BeginTaskWorkspace(ctx context.Context, todo, op, manager string
 		if err != nil {
 			return err
 		}
-		if plan.Source.Manager != manager || len(plan.Repositories) == 0 {
+		if plan.Source.Manager != manager {
 			return workspaceProblem("invalid_input", op)
 		}
 		set, err := ReadTodoRepositoriesTx(ctx, tx, todo, nil)
 		if err != nil {
 			return err
 		}
-		ids := []string{}
-		for _, r := range plan.Source.Repositories.Repositories {
-			ids = append(ids, r.RepoID)
-		}
-		snapshot, err := repository.Snapshot(manager, todo, set.Revision, set.Repositories, ids)
+		matches, err := matchesWorkspaceSnapshot(plan, set)
 		if err != nil {
 			return err
 		}
-		if snapshot.Digest != plan.Source.Repositories.Digest {
+		if !matches {
 			return workspaceProblem("snapshot_stale", op)
 		}
 		current, err := readTaskWorkspace(ctx, tx, todo, "")

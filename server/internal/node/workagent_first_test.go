@@ -317,3 +317,64 @@ func TestPromptShown(t *testing.T) {
 		}
 	}
 }
+
+// confirmWorkFirst treats herdr-core's host.ErrDialogOpen the same way as classic herdr's host.ErrAgentBlocked on
+// background retries (lostDialog), while workAgentFirst keeps initial-prompt failures non-refusal so a start that
+// already created a terminal is not recorded as a 409/failed receipt that could spawn a duplicate terminal on retry.
+func TestWorkAgentFirstRecognizesDialogOpen(t *testing.T) {
+	t.Run("initial prompt blocked stays non-refusal", func(t *testing.T) {
+		n, _, hc, _ := hcNode(t)
+		hc.setTerminals(hcTerminal("t13", "antigravity", "blocked", 5151, "agy", hcCwd, "", "", ""))
+		hc.handle("terminal.send", func(map[string]any) any { return hcFail{"blocked"} })
+		err := n.workAgentFirst(context.Background(), "herdr-core:t13", "agy-herdr-core-t13", agyAgent, agyFirstMessage)
+		if err == nil || refusalCode(err) != "" {
+			t.Fatalf("workAgentFirst(blocked) = %v (code %q), want non-refusal error", err, refusalCode(err))
+		}
+	})
+
+	t.Run("retry blocked returns lostWorkDialog when delivery is unconfirmed", func(t *testing.T) {
+		withWorkFirstWaits(t, 40*time.Millisecond)
+		n, _, hc, _ := hcNode(t)
+		hc.setTerminals(hcTerminal("t13", "antigravity", "idle", 5151, "agy", hcCwd, "", "", ""))
+		hc.setScreen("t13", agyIdleScreen)
+		hc.handle("terminal.send", func(map[string]any) any { return hcFail{"blocked"} })
+		why := n.confirmWorkFirst(context.Background(), "herdr-core:t13", agyAgent, agyFirstMessage)
+		if why != lostWorkDialog() {
+			t.Fatalf("confirmWorkFirst blocked on herdr-core = %q, want %q", why, lostWorkDialog())
+		}
+	})
+
+	t.Run("retry blocked with unsubmitted draft visible keeps warning", func(t *testing.T) {
+		withWorkFirstWaits(t, 40*time.Millisecond)
+		n, _, hc, _ := hcNode(t)
+		hc.setTerminals(hcTerminal("t13", "antigravity", "idle", 5151, "agy", hcCwd, "", "", ""))
+		hc.setScreen("t13", agyIdleScreen)
+		hc.handle("terminal.send", func(map[string]any) any {
+			// A visible prompt or paste chip may still be an unsubmitted draft, so keep the Needs You warning.
+			hc.setScreen("t13", "│ > [Pasted text #1 +12 lines] │\nAllow command?\n")
+			return hcFail{"blocked"}
+		})
+		if why := n.confirmWorkFirst(context.Background(), "herdr-core:t13", agyAgent, agyFirstMessage); why != lostWorkDialog() {
+			t.Fatalf("confirmWorkFirst blocked with draft visible = %q, want %q", why, lostWorkDialog())
+		}
+	})
+
+	t.Run("retry blocked with reported agy conversation counts as taken", func(t *testing.T) {
+		withWorkFirstWaits(t, 40*time.Millisecond)
+		n, _, hc, _ := hcNode(t)
+		hc.setTerminals(hcTerminal("t13", "antigravity", "idle", 5151, "agy", hcCwd, "", "", ""))
+		hc.setScreen("t13", agyIdleScreen)
+		hc.handle("terminal.send", func(map[string]any) any {
+			n.mu.Lock()
+			if n.agyReports == nil {
+				n.agyReports = map[string]agyHookReport{}
+			}
+			n.agyReports["herdr-core:t13"] = agyHookReport{conversation: agyTestID, event: "PreInvocation", at: time.Now()}
+			n.mu.Unlock()
+			return hcFail{"blocked"}
+		})
+		if why := n.confirmWorkFirst(context.Background(), "herdr-core:t13", agyAgent, agyFirstMessage); why != "" {
+			t.Fatalf("confirmWorkFirst blocked with reported agy conversation = %q, want empty (taken)", why)
+		}
+	})
+}

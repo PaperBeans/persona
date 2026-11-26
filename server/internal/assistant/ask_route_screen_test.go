@@ -1,8 +1,10 @@
 package assistant
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -28,6 +30,14 @@ func commandScreen(id, session string) proto.Interaction {
 // without pushing to the owner, while a six-class dialog (folder trust) still rings the owner.
 func TestSupervisedCommandScreenStaysWithItsSupervisor(t *testing.T) {
 	e := newRouteEnv(t, nil, false)
+	// List the unsupervised screen sessions as blocked on mac so any concurrent
+	// syncScreenInteractions pass sees them as live screen dialogs rather than stale cards.
+	macSessions := append(append([]proto.Session(nil), e.agents...),
+		proto.Session{SessionID: "unrelated-session", MachineID: "mac", Title: "Plain terminal", Cwd: "/code/other", Status: proto.StatusBlocked, UpdatedAt: time.Now().UTC()},
+		proto.Session{SessionID: "unrelated-session-2", MachineID: "mac", Title: "Trust folder", Cwd: "/code/other2", Status: proto.StatusBlocked, UpdatedAt: time.Now().UTC()},
+	)
+	e.sessions("mac", macSessions...)
+	e.f.setSessions("mac", macSessions...)
 	plain := commandScreen("ordinary", "unrelated-session")
 	plainAnswer := e.raise(plain)
 	waitFor(t, "the unsupervised dialog routed to the main conversation", func() bool {
@@ -205,5 +215,74 @@ func TestSupervisorHeldAgentsAreNotTheUsers(t *testing.T) {
 		if it.SessionID == "held" {
 			t.Fatalf("the supervisor-held agent is listed: %+v", it)
 		}
+	}
+}
+
+// An out-of-order sequenced snapshot from a concurrent publish must not revert fleet.rep
+// or trigger a spurious sessionsChanged/syncScreenInteractions pass. Unsequenced direct
+// snapshots (Seq == 0) remain authoritative.
+func TestFleetTakeSnapshotIgnoresStaleSeq(t *testing.T) {
+	ft := newFleetTest(t)
+	s := ft.s
+	ft.sessions("mac", proto.Session{SessionID: "worker-1", MachineID: "mac", Status: proto.StatusBlocked})
+
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   10,
+		Todos: &TodoReport{Links: []TodoLink{{MachineID: "mac", SessionID: "worker-1", TodoID: "t1"}}},
+	})
+
+	ix := commandScreen("stale-check", "unlisted-session")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.waitInteraction(ctx, ix)
+		done <- r
+	}()
+	waitFor(t, "card stale-check", func() bool { _, ok := s.pendingIx(ix.ID); return ok })
+
+	// Stale sequenced snapshot arrives after Seq 10: must be dropped without reverting links
+	// or cancelling pending screen cards via a spurious sessionsChanged("mac").
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   9,
+		Todos: &TodoReport{Links: []TodoLink{}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotSeq := s.fleet.rep.seq
+	gotLink := s.fleet.rep.links[[2]string{"mac", "worker-1"}]
+	s.fleet.rep.mu.RUnlock()
+	if gotSeq != 10 || gotLink.TodoID != "t1" {
+		t.Fatalf("stale snapshot overwrote fleet.rep: seq=%d link=%+v", gotSeq, gotLink)
+	}
+	if _, ok := s.pendingIx(ix.ID); !ok {
+		t.Fatal("stale snapshot triggered sessionsChanged and cancelled pending screen card")
+	}
+	if err := s.resolve(ix.ID, proto.Resolution{Option: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	// Newer sequenced snapshot applies cleanly.
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   11,
+		Todos: &TodoReport{Links: []TodoLink{}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotSeq = s.fleet.rep.seq
+	gotLinks := len(s.fleet.rep.links)
+	s.fleet.rep.mu.RUnlock()
+	if gotSeq != 11 || gotLinks != 0 {
+		t.Fatalf("newer snapshot not applied: seq=%d links=%d", gotSeq, gotLinks)
+	}
+
+	// Unsequenced direct snapshot (Seq == 0) remains authoritative.
+	s.fleetTakeSnapshot(Snapshot{
+		Todos: &TodoReport{Links: []TodoLink{{MachineID: "mac", SessionID: "worker-2", TodoID: "t2"}}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotLink2 := s.fleet.rep.links[[2]string{"mac", "worker-2"}]
+	s.fleet.rep.mu.RUnlock()
+	if gotLink2.TodoID != "t2" {
+		t.Fatalf("unsequenced snapshot not applied: link=%+v", gotLink2)
 	}
 }

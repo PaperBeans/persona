@@ -5048,17 +5048,19 @@ var KBKinds = []string{"projects", "chats", "people", "docs", "meetings", "event
 // KBErrorCode: error.code of a knowledge-base call besides permission_denied (data {scope}, the one missing):
 // invalid_params, not_found, assistant_offline (the manager is away), kb_unavailable (not open yet), conflict
 // (kb.update touches fields the user or another extension holds; data KBConflict, nothing was written).
-// assistant_offline and kb_unavailable are worth trying again; conflict is for the user to decide.
+// assistant_offline and kb_unavailable are worth trying again; conflict is for the user to decide. deleted:
+// kb.put_recording of a recording the user deleted, which is not made again.
 const (
 	KBErrorCodeInvalidParams    = "invalid_params"
 	KBErrorCodeNotFound         = "not_found"
 	KBErrorCodeAssistantOffline = "assistant_offline"
 	KBErrorCodeKbUnavailable    = "kb_unavailable"
 	KBErrorCodeConflict         = "conflict"
+	KBErrorCodeDeleted          = "deleted"
 )
 
 // KBErrorCodes are the values of KBErrorCode, in order.
-var KBErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "kb_unavailable", "conflict"}
+var KBErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "kb_unavailable", "conflict", "deleted"}
 
 // KBConflict: the data of a conflict error: field → who holds it (user, or ext:<extension id>); a linked entity's
 // field is <kind>/<id>.<field>.
@@ -5456,6 +5458,142 @@ type KBUpdateResult struct {
 	// Fields the update carried that its kind does not use (a person's summary and log, for one), and links to make that
 	// the user removed: not applied, each with why.
 	Ignored []KBIgnoredField `json:"ignored,omitempty"`
+}
+
+// KBRecordingID: A recording's UUID, picked by the extension so a retry lands on the same recording.
+type KBRecordingID string
+
+// String returns the ID as it is on the wire.
+func (v KBRecordingID) String() string { return string(v) }
+
+// KBMinutesActionID: an action item's id, picked by the extension and stable across writes.
+type KBMinutesActionID string
+
+// String returns the ID as it is on the wire.
+func (v KBMinutesActionID) String() string { return string(v) }
+
+// KBTodoID: A to-do's id, set by the hub when the user makes a to-do of an action item.
+type KBTodoID string
+
+// String returns the ID as it is on the wire.
+func (v KBTodoID) String() string { return string(v) }
+
+// KBRecordingMeetingKind: whether a recording's meeting is a calendar item (events) or an imported meeting
+// (meetings).
+// A value this side does not know keeps its raw string and is not Valid.
+type KBRecordingMeetingKind string
+
+const (
+	KBRecordingMeetingKindEvents   KBRecordingMeetingKind = "events"
+	KBRecordingMeetingKindMeetings KBRecordingMeetingKind = "meetings"
+)
+
+// KBRecordingMeetingKinds are the values of KBRecordingMeetingKind, in order.
+var KBRecordingMeetingKinds = []KBRecordingMeetingKind{KBRecordingMeetingKindEvents, KBRecordingMeetingKindMeetings}
+
+// Valid reports whether v is one of KBRecordingMeetingKinds.
+func (v KBRecordingMeetingKind) Valid() bool {
+	switch v {
+	case KBRecordingMeetingKindEvents, KBRecordingMeetingKindMeetings:
+		return true
+	}
+	return false
+}
+
+// KBRecordingMeetingID: A calendar item's or imported meeting's id in the knowledge base.
+type KBRecordingMeetingID string
+
+// String returns the ID as it is on the wire.
+func (v KBRecordingMeetingID) String() string { return string(v) }
+
+// KBPutRecordingParams: kb.put_recording (kb.write): create or update the extension's own recording with its minutes
+// and, optionally, its transcript (docs/extensions/extensions.md "Writing recordings and minutes"). It is the
+// extension's: no other extension may write it, and no extension a recording the phone uploaded (permission_denied).
+// The same params again change nothing; a recording the user deleted is not made again (deleted). A recording with
+// minutes is kept past recording_days, its minutes until minutes_days.
+type KBPutRecordingParams struct {
+	// A UUID the extension picks; one derived from its own source id makes a retry land on the same recording.
+	ID    KBRecordingID `json:"id"`
+	Title string        `json:"title,omitempty"`
+	// An RFC 3339 time.
+	StartedAt time.Time `json:"started_at"`
+	// An RFC 3339 time, not before started_at.
+	EndedAt time.Time `json:"ended_at,omitzero"`
+	// An i18n code (zh-Hans, en, ja).
+	Language string              `json:"language,omitempty"`
+	Minutes  *KBRecordingMinutes `json:"minutes,omitempty"`
+	// Optional; n, source and echo are the hub's and are dropped. Without minutes, the hub makes minutes of it when the
+	// recording module is on.
+	Transcript []KBRecordingSegment `json:"transcript,omitempty"`
+	// Slugs of existing projects to link it to; a later write never removes a link.
+	Projects []string            `json:"projects,omitempty"`
+	Meeting  *KBRecordingMeeting `json:"meeting,omitempty"`
+}
+
+// KBRecordingMinutes: the minutes the extension wrote, stored as minutes.json and minutes.md. The hub sets version,
+// revision, generated_at, when, start and end. Minutes or a transcript is required.
+type KBRecordingMinutes struct {
+	Title     string            `json:"title,omitempty"`
+	Where     string            `json:"where,omitempty"`
+	Attendees []string          `json:"attendees,omitempty"`
+	Points    []KBMinutesPoint  `json:"points,omitempty"`
+	Decisions []KBMinutesItem   `json:"decisions,omitempty"`
+	Actions   []KBMinutesAction `json:"actions,omitempty"`
+	Open      []KBMinutesItem   `json:"open,omitempty"`
+	// An i18n code: what the minutes are written in.
+	Language string `json:"language,omitempty"`
+	// The minutes as Markdown: minutes.md, what searches and kb.get read. Required, not blank.
+	Markdown string `json:"markdown"`
+}
+
+// KBMinutesItem: A decision or an open question of the minutes.
+type KBMinutesItem struct {
+	Text string `json:"text"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+}
+
+// KBMinutesPoint: A point discussed; who only when the source names the person.
+type KBMinutesPoint struct {
+	Text string `json:"text"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+	Who   string  `json:"who,omitempty"`
+}
+
+// KBMinutesAction: an action item. id is the extension's, stable across writes (at most 64 characters): a to-do the
+// user made of it stays on it.
+type KBMinutesAction struct {
+	ID   KBMinutesActionID `json:"id"`
+	Who  string            `json:"who,omitempty"`
+	What string            `json:"what"`
+	// The deadline as said.
+	By string `json:"by,omitempty"`
+	// YYYY-MM-DD, when by is one date.
+	DueDate string `json:"due_date,omitempty"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+	// The hub's: the to-do made of it.
+	TodoID KBTodoID `json:"todo_id,omitempty"`
+}
+
+// KBRecordingMeeting: the calendar item (events) or imported meeting (meetings) the recording was; it must exist.
+type KBRecordingMeeting struct {
+	Kind KBRecordingMeetingKind `json:"kind"`
+	ID   KBRecordingMeetingID   `json:"id"`
+}
+
+type KBPutRecordingResult struct {
+	ID KBRecordingID `json:"id"`
+	// The hub's revision of the recording: 1 when created, one more for each write that changed it.
+	Revision int  `json:"revision"`
+	Created  bool `json:"created,omitempty"`
+	// The write was the same as the last one; nothing was written.
+	Unchanged      bool `json:"unchanged,omitempty"`
+	MinutesVersion int  `json:"minutes_version,omitempty"`
 }
 
 // KBOwnerParams: kb.owner takes nothing.
@@ -8316,6 +8454,13 @@ var newDef = map[string]func() any{
 	"KBHit":                         func() any { return new(KBHit) },
 	"KBUpdateParams":                func() any { return new(KBUpdateParams) },
 	"KBUpdateResult":                func() any { return new(KBUpdateResult) },
+	"KBPutRecordingParams":          func() any { return new(KBPutRecordingParams) },
+	"KBRecordingMinutes":            func() any { return new(KBRecordingMinutes) },
+	"KBMinutesItem":                 func() any { return new(KBMinutesItem) },
+	"KBMinutesPoint":                func() any { return new(KBMinutesPoint) },
+	"KBMinutesAction":               func() any { return new(KBMinutesAction) },
+	"KBRecordingMeeting":            func() any { return new(KBRecordingMeeting) },
+	"KBPutRecordingResult":          func() any { return new(KBPutRecordingResult) },
 	"KBOwnerParams":                 func() any { return new(KBOwnerParams) },
 	"KBOwner":                       func() any { return new(KBOwner) },
 	"KBChangedEvent":                func() any { return new(KBChangedEvent) },
@@ -8516,6 +8661,7 @@ var Calls = map[string]Call{
 	"kb.update":                       {Name: "kb.update", From: "program", Params: "KBUpdateParams", Result: "KBUpdateResult"},
 	"kb.owner":                        {Name: "kb.owner", From: "program", Params: "KBOwnerParams", Result: "KBOwner"},
 	"kb.recent":                       {Name: "kb.recent", From: "program", Params: "KBRecentParams", Result: "KBRecentResult"},
+	"kb.put_recording":                {Name: "kb.put_recording", From: "program", Params: "KBPutRecordingParams", Result: "KBPutRecordingResult"},
 	"event.kb.changed":                {Name: "event.kb.changed", From: "hub", Params: "KBChangedEvent", Result: "", Event: true},
 	"event.kb.forgotten":              {Name: "event.kb.forgotten", From: "hub", Params: "KBForgottenEvent", Result: "", Event: true},
 	"event.todo.changed":              {Name: "event.todo.changed", From: "hub", Params: "TodoChangedEvent", Result: "", Event: true},

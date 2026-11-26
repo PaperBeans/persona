@@ -266,6 +266,20 @@ func TestMergeLaunchersLeavesLauncherDefaultModelsEmpty(t *testing.T) {
 	if l := models[traexAgent]; l.Agent != traexAgent || l.DisplayName != "TRAE CLI" {
 		t.Errorf("TRAE CLI launcher kind or display name changed: %+v", l)
 	}
+	wantDisplay := map[string]string{
+		"claude":   "Claude Code",
+		"codex":    "Codex",
+		"omp":      "Oh My Pi",
+		"pi":       "",
+		"cursor":   "Cursor",
+		"agy":      "Antigravity CLI",
+		"cx-plain": "",
+	}
+	for name, want := range wantDisplay {
+		if got := models[name].DisplayName; got != want {
+			t.Errorf("%s display name = %q, want %q", name, got, want)
+		}
+	}
 }
 
 func TestAliasLauncherEnvironmentReset(t *testing.T) {

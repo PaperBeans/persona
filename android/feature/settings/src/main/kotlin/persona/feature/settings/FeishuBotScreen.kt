@@ -44,8 +44,13 @@ private fun feishuBotStatus(status: FeishuBotStatus?): Status = when {
  * Pairing, its features and a test message are on its channel's page (Settings › Channels › Lark bot), which links here.
  */
 @Composable
-internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
+internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit, larkBot: LarkBotEntry = LarkBotEntry.Offered) {
     val res = LocalResources.current
+    // The hub's Lark module is off (#15995): nothing here can work, so nothing is asked of the hub and no control shows.
+    if (larkBot == LarkBotEntry.ModuleOff) {
+        LarkBotOffPage(stringResource(R.string.settings_feishu_bot_title), onBack)
+        return
+    }
     if (api == null) {
         JListPage(title = stringResource(R.string.settings_feishu_bot_title), onBack = onBack) {
             item { JNotice(stringResource(R.string.settings_src_channels_demo)) }

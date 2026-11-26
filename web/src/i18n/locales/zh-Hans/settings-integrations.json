@@ -46,7 +46,7 @@
   "section_channel": "对话与推送",
   "section_inbox": "收件箱与同步",
   "section_extension_settings": "扩展设置",
-  "section_management": "插件管理",
+  "section_management": "扩展管理",
   "connection_fields_title": "连接配置",
   "channel_fields_title": "对话配置",
   "inbox_fields_title": "同步配置",
@@ -71,9 +71,15 @@
   "routing_hub_unsupported": "请更新当前助手以配置群聊/话题路由与静默超时。",
   "routing_saved": "已保存，新收到的消息将立即按此规则路由。",
   "connector_status_title": "连接状态",
-  "channel_unavailable": "无法加载对话渠道设置：{error}",
+  "channel_unavailable": "无法加载对话频道设置：{error}",
   "connector_unavailable": "无法加载连接器状态：{error}",
   "mail_description": "连接邮箱账号，让 Persona 可以阅读、检索并把重要邮件整理进收件箱。",
-  "lark_gateway_description": "查看主机飞书网关的实时状态与消息显示偏好。",
-  "feishu_bot_description": "在飞书/Lark 里和 Persona 对话，完成配对并管理推送与话题群设置。"
+  "lark_gateway_description": "查看飞书连接状态，选择消息的显示方式。",
+  "feishu_bot_description": "在飞书/Lark 里和 Persona 对话，完成配对并管理推送与话题群设置。",
+  "saved_repositories_title": "常用仓库",
+  "saved_repositories_hint": "前往「设置 › 助手资料」管理已保存的仓库绑定与别名。",
+  "saved_repositories_count_other": "{count} 个已保存",
+  "saved_repositories_empty": "未绑定",
+  "knowledge_scope_title": "知识库同步范围",
+  "knowledge_scope_hint": "前往「设置 › 知识库选择」选择要同步到知识库的会话、文件夹和文档。"
 }

@@ -115,6 +115,7 @@ func (s *Service) reorganizeTodos(ctx context.Context, in todoReorganizeRequest)
 	st := s.todoDB()
 	updated := make([]Todo, 0, len(affectedIDs))
 	updatedIdx := make(map[string]int, len(affectedIDs))
+	var afterChanged []Todo
 
 	for _, tid := range affectedIDs {
 		cur, ok := s.todoNow(tid)
@@ -127,8 +128,10 @@ func (s *Service) reorganizeTodos(ctx context.Context, in todoReorganizeRequest)
 			p := *targetPartOf
 			edit.PartOf = &p
 			if cur.PartOf != p && len(cur.After) > 0 {
-				empty := []string{}
-				edit.After = &empty
+				kept := s.filterValidReorganizeAfter(tid, cur.After)
+				if !slices.Equal(kept, cur.After) {
+					edit.After = &kept
+				}
 			}
 		}
 		if targetDirection != nil {
@@ -151,8 +154,15 @@ func (s *Service) reorganizeTodos(ctx context.Context, in todoReorganizeRequest)
 		out, _, _ := s.setTodoRow(tid, *row, nil)
 		updatedIdx[tid] = len(updated)
 		updated = append(updated, out)
+		if edit.After != nil {
+			afterChanged = append(afterChanged, out)
+		}
 	}
 	s.todos.writing.Unlock()
+
+	for _, t := range afterChanged {
+		s.syncAfterBlockers(ctx, t.ID, t.After, "", nil)
+	}
 
 	s.todosChanged(ctx)
 
@@ -261,6 +271,33 @@ func (s *Service) validateReorganizeLocked(ids []string, idSet map[string]bool, 
 		}
 	}
 	return affected, nil
+}
+
+// filterValidReorganizeAfter keeps every existing After dependency that still points to an existing, non-self
+// to-do without introducing a dependency cycle, pruning only self-references, missing targets, or cyclic edges.
+// Caller must hold s.todos.writing.
+func (s *Service) filterValidReorganizeAfter(tid string, after []string) []string {
+	s.todos.mu.RLock()
+	defer s.todos.mu.RUnlock()
+
+	book := s.todos.todos
+	kept := make([]string, 0, len(after))
+	seen := make(map[string]bool, len(after))
+	for _, raw := range after {
+		dep := strings.TrimSpace(raw)
+		if dep == "" || dep == tid || seen[dep] {
+			continue
+		}
+		if _, exists := book[dep]; !exists {
+			continue
+		}
+		if afterCycle(book, tid, []string{dep}) != "" {
+			continue
+		}
+		seen[dep] = true
+		kept = append(kept, dep)
+	}
+	return kept
 }
 
 // transferReorganizedTodo hands over supervision of tid to active leader lead if and only if tid is an open,

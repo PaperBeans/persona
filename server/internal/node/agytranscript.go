@@ -890,15 +890,21 @@ func agyNormalizeArgValue(v any, truncated, encoded bool) (any, bool) {
 			head, tail, omitted = agyArgPreview(v)
 		}
 		if encoded {
-			decoded, ok := agyDecodeArgString(head, omitted > 0)
-			if !ok {
-				return nil, false
+			if decoded, ok := agyDecodeArgString(head, omitted > 0); ok {
+				if omitted > 0 {
+					// The missing text and any retained suffix are counted in encoded bytes.
+					return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+				}
+				return decoded, true
 			}
-			if omitted > 0 {
-				// The missing text and any retained suffix are counted in encoded bytes.
-				return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+			// Compact exports also JSON-encode non-string values (e.g. "1", "true", "null", "[...]").
+			if omitted == 0 {
+				var value any
+				if err := json.Unmarshal([]byte(head), &value); err == nil {
+					return value, true
+				}
 			}
-			return decoded, true
+			return nil, false
 		}
 		if omitted > 0 {
 			return head + transcript.ClipNote(len(head)+omitted+len(tail)), true

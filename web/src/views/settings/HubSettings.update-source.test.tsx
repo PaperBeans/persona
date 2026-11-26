@@ -6,11 +6,12 @@ import { initI18n } from "../../i18n";
 import type { HubUpdateStatus } from "../../lib/hub-update";
 
 let current: HubUpdateStatus;
-let checked: HubUpdateStatus | undefined;
+let checked: HubUpdateStatus | Promise<HubUpdateStatus> | undefined;
 const updateApi = vi.fn(async (path: string, opts?: { json?: { source?: HubUpdateStatus["source"] } }) => {
   switch (path) {
     case "/hub/update": return current;
     case "/hub/update/check": return checked;
+    case "/hub/update/backups": return { backups: [] };
     case "/hub/update/history": return { history: [] };
     case "/hub/update/settings": return { ...current, source: opts?.json?.source, last_check: undefined, latest: undefined };
     default: return {};
@@ -57,6 +58,32 @@ afterEach(async () => {
 });
 
 describe("Settings › Hub update source", () => {
+  it("keeps the cached version visible during the opening preview and starts the latest target", async () => {
+    let finish!: (s: HubUpdateStatus) => void;
+    checked = new Promise(resolve => { finish = resolve; });
+    const offer = status({ supports_preview: true, source: "web-dev", latest: { ...latest, commit: "b".repeat(40), newer: true } });
+    await mount(offer);
+    expect(host.textContent).toContain("bbbbbbbbbbbb");
+    expect(button("Checking…")).toBeDefined();
+    expect(updateApi).toHaveBeenCalledWith("/hub/update/check", { method: "POST", json: { preview: true } });
+    await act(async () => finish({ ...offer, latest: { ...offer.latest!, commit: "c".repeat(40) } }));
+    expect(host.textContent).toContain("cccccccccccc");
+    current = { ...offer, state: "resolving" };
+    await act(async () => button("Update hub")!.click());
+    expect(updateApi).toHaveBeenCalledWith("/hub/update", { method: "POST", json: { target: "latest" } });
+    expect(host.textContent).toContain("Checking the latest version before updating");
+    expect(host.querySelector('[aria-label="Update pipeline"]')).toBeNull();
+    expect(updateApi.mock.calls.filter(([path]) => path === "/hub/update/check")).toHaveLength(1);
+  });
+
+  it.each([
+    ["web-dev", "available", false], ["web-dev", "building", true], ["web-dev", "resolving", true],
+    ["release", "available", true], ["beta", "available", true],
+  ] as const)("skips opening preview for %s / %s / support %s", async (source, state, supports_preview) => {
+    await mount(status({ source, state, supports_preview }));
+    expect(updateApi.mock.calls.some(([path]) => path === "/hub/update/check")).toBe(false);
+  });
+
   it.each(["release", "beta"] as const)("shows the %s version and time after checking from a newer development build", async source => {
     const version = source === "beta" ? "v1.1.0-beta.1" : latest.version;
     await mount(status({ source, last_check: undefined, latest: undefined }));

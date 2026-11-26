@@ -23,6 +23,14 @@ type channelAdmission struct {
 // overtake a durable receipt. A failed write rolls both changes back for redelivery.
 func (s *Service) admitChannelMessage(ctx context.Context, id string, m channel.Message) (*channelAdmission, error) {
 	v2 := s.integrationsV2On(ctx)
+	var v channel.View
+	if v2 {
+		var err error
+		v, _, err = s.pluginChannelNow(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+	}
 	c := &s.chans
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -40,7 +48,7 @@ func (s *Service) admitChannelMessage(ctx context.Context, id string, m channel.
 		if !c.loaded {
 			return nil, errChannelsUnread
 		}
-		thread = channelRouteKey(s.channelPrefLocked(id).ThreadMode, m)
+		thread = channelRouteKey(s.channelPrefLocked(id).ThreadMode.Effective(v.Capabilities.Threads), m)
 	}
 	a := &channelAdmission{key: channelAdmissionKey{channel: id, thread: thread, generation: c.generation[id]}}
 	// An empty thread is this channel's ordinary route. Its replies fold into the latest

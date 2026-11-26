@@ -42,6 +42,27 @@ func (s *settingsStore) PutPushGradingBase(_ context.Context, baseKey, _, mirror
 	return nil
 }
 
+func (s *settingsStore) SetPushGradingSwitch(_ context.Context, baseKey, mirrorKey string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if raw, ok := s.vals[baseKey]; ok {
+		var obj map[string]any
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return err
+		}
+		obj["enabled"] = enabled
+		updated, err := json.Marshal(obj)
+		if err != nil {
+			return err
+		}
+		s.vals[baseKey] = updated
+	}
+	rawSwitch, _ := json.Marshal(enabled)
+	s.vals[mirrorKey] = rawSwitch
+	s.puts++
+	return nil
+}
+
 func (s *settingsStore) PutPushGradingLayer(_ context.Context, _, key, _, manager, source string, value any, out any) (bool, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {

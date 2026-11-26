@@ -290,6 +290,18 @@ download route takes.
   the next free `name (2).ext` … `name (99).ext` is used instead.
 - The node writes into its own data directory, which the agent sandbox leaves readable (only its secrets are closed).
 
+## With the mail module off
+
+A hub that turns the mail module off (the `modules` row, or a build without it) has no `/api/v1/mail/…` route and no
+mail tools, and reads no new mail. What it already stored stays the user's and stays readable through Core's routes
+(`docs/architecture/core-and-modules.md`, "A module that is off keeps what the user has"): each mail item in the Inbox
+with its subject, sender, date, preview and `context` (the header lines and up to 3,000 characters of the newest
+mail's text, `GET /api/v1/inbox/{id}`), a translation it kept, and the mail filed into the knowledge base. The full
+body, the HTML and the attachments were never stored: they are fetched from the mail server as a mail opens, so they
+are not available until the module is back. Clients show the stored text and say so in one plain line, and leave out
+the controls that would write to the mailbox; the web's is described in `docs/web/web.md` ("Modules"), and the Apple
+and Android apps follow in #15995.
+
 ## Known limitations
 
 - **No IDLE push**: new mail waits for the App to refresh (polling or IMAP IDLE could be added later).

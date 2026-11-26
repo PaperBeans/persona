@@ -239,7 +239,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             profile = remote / "live-profile"
             for path in (checkout / "scripts/test", checkout / "scripts/mock", checkout / "server/internal/hub",
                          checkout / "spec", checkout / "apple", checkout / "web/src/i18n/locales/en",
-                         checkout / "docs", checkout / "sdk/go/ext", checkout / "sdk/go/wire/schema",
+                         checkout / "docs", checkout / "scripts/ci", checkout / "sdk/go/ext", checkout / "sdk/go/wire/schema",
                          checkout / "sdk/templates/go", checkout / "sdk/ts/src", checkout / "sdk/ts/node_modules/typescript",
                          checkout / "schema/extension/examples/invalid", tools, profile):
                 path.mkdir(parents=True)
@@ -249,6 +249,8 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             (checkout / "docs/guide.md").write_text("# Fixture guide\n")
             # kb's minutes tests read the web's locale files (web/src/i18n/locales/<lang>/*.json)
             (checkout / "web/src/i18n/locales/en/fixture.json").write_text('{"locale":true}\n')
+            # Domain-layer tests read this baseline from the copied server tree.
+            (checkout / "scripts/ci/wire_types_baseline.json").write_text('{"metrics":{},"wide":[],"exceptions":[]}\n')
             (checkout / "scripts/deploy").mkdir()
             (checkout / "scripts/deploy/db.sh").write_text("# synthetic db script\n")
             (checkout / "sdk/templates/go/persona-extension.json").write_text('{"template":true}\n')
@@ -457,6 +459,8 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                                      ["-a", "--delete", "schema/configuration/",
                                       "fake-hub:.cache/persona-test-checkout/schema/configuration/"])
                     self.assertFalse((remote_configuration / "stale.json").exists())
+                    self.assertEqual((remote_checkout / "scripts/ci/wire_types_baseline.json").read_text(),
+                                     (checkout / "scripts/ci/wire_types_baseline.json").read_text())
                     self.assertEqual(json.loads(agy_capture.read_text()),
                                      ["-a", "--delete", "integrations/antigravity/test/fixtures/",
                                       "fake-hub:.cache/persona-test-checkout/integrations/antigravity/test/fixtures/"])

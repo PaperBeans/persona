@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/todo/projection"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -50,7 +52,11 @@ func (s *Service) snapshotOpenTodos(ctx context.Context, web string) ([]prompts.
 		}
 	}
 	s.todos.mu.RUnlock()
-	open := snapshotFailedStarts(failed, all, time.Now())
+	cfg := s.settings(ctx)
+	if cfg.todosV2On() && len(failed) > 0 {
+		s.populateTodoActiveBlockers(ctx, all)
+	}
+	open := snapshotFailedStartsWithConfig(failed, all, time.Now(), s.location(ctx), cfg)
 	for _, t := range failed {
 		if open[t.ID] {
 			list = append(list, t)
@@ -75,8 +81,38 @@ func (s *Service) snapshotOpenTodos(ctx context.Context, web string) ([]prompts.
 // to-do (triageSupersededFailedStarts over all). The snapshot's open count is the app's, so a failed start no longer
 // takes one off it (#10365).
 func snapshotFailedStarts(failed []Todo, all []listedTodo, now time.Time) map[string]bool {
+	return snapshotFailedStartsWithConfig(failed, all, now, nil, Settings{})
+}
+
+func snapshotFailedStartsWithConfig(failed []Todo, all []listedTodo, now time.Time, loc *time.Location, cfg Settings) map[string]bool {
 	if len(failed) == 0 {
 		return nil
+	}
+	if cfg.todosV2On() {
+		facts := make([]projection.Facts, len(all))
+		for i := range all {
+			facts[i] = projectionFacts(all[i], nil, loc)
+			applyTodosV2FactsConfig(&facts[i], cfg)
+		}
+		views := projection.Views(facts, now)
+		applyActiveBlockersToViews(all, views, nil)
+		viewByID := make(map[string]assistantwire.TodoSummary, len(all))
+		for i := range all {
+			viewByID[all[i].ID] = views[i]
+		}
+		open := make(map[string]bool, len(failed))
+		for _, t := range failed {
+			v, ok := viewByID[t.ID]
+			if !ok {
+				f := projectionFacts(listedTodo{Todo: t}, nil, loc)
+				applyTodosV2FactsConfig(&f, cfg)
+				v = projection.View(f, now)
+			}
+			if projectionViewCountsAsOpen(v) {
+				open[t.ID] = true
+			}
+		}
+		return open
 	}
 	superseded := triageSupersededFailedStarts(all)
 	open := make(map[string]bool, len(failed))
@@ -127,7 +163,23 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 	}
 	var all []ranked
 	now := time.Now()
+	cfg := s.settings(ctx)
+	loc := s.location(ctx)
 	asks := s.todoAsks(ctx)
+	var blockersByTodo map[string][]todoActiveBlockerView
+	if cfg.todosV2On() && len(list) > 0 {
+		tmp := make([]listedTodo, len(list))
+		for i := range list {
+			tmp[i] = listedTodo{Todo: list[i]}
+		}
+		s.populateTodoActiveBlockers(ctx, tmp)
+		blockersByTodo = make(map[string][]todoActiveBlockerView)
+		for i := range tmp {
+			if len(tmp[i].ActiveBlockers) > 0 {
+				blockersByTodo[tmp[i].ID] = tmp[i].ActiveBlockers
+			}
+		}
+	}
 	lists := machineSessions{} // each machine listed once for all the tasks
 	for _, t := range list {
 		// The hold as the apps read it (currentDelivery): a parked wait or a supervisor's unreviewed hold is not the owner's.
@@ -160,7 +212,7 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 			// The hub snapshot follows the same owner / Accepted / Seen decision table as every client. In particular,
 			// dismissing a review keeps an independent delivery approval, reopening accepted work does not erase acceptance,
 			// and Seen files only an ordinary finished turn (#5707, #5732).
-			switch snapshotDoneRule(t, agents, ask, decision, now, s.location(ctx)) {
+			switch snapshotDoneRuleWithConfig(t, agents, ask, decision, blockersByTodo[t.ID], now, loc, cfg) {
 			case ruleOwnerDecides:
 				st = "owner_wait"
 			case ruleAccepted, ruleSeen:
@@ -394,6 +446,10 @@ func taskState(t Todo, agents []proto.Session) string {
 // transitions the snapshot needs: accepted and ordinarily Seen. Working, concern, open-PR and acceptance-required rows
 // keep their existing snapshot projection instead of getting a second, divergent copy of those rules here.
 func snapshotDoneRule(t Todo, agents []proto.Session, ask *todoAsk, decision *decisionReview, now time.Time, loc *time.Location) string {
+	return snapshotDoneRuleWithConfig(t, agents, ask, decision, nil, now, loc, Settings{})
+}
+
+func snapshotDoneRuleWithConfig(t Todo, agents []proto.Session, ask *todoAsk, decision *decisionReview, activeBlockers []todoActiveBlockerView, now time.Time, loc *time.Location, cfg Settings) string {
 	lookup := func(machine, session string) (proto.Session, bool) {
 		for _, c := range agents {
 			if c.MachineID == machine && c.SessionID == session {
@@ -402,7 +458,19 @@ func snapshotDoneRule(t Todo, agents []proto.Session, ask *todoAsk, decision *de
 		}
 		return proto.Session{}, false
 	}
-	return triageTodo(listedTodo{Todo: t, Ask: ask, DecisionReview: decision}, lookup, now, time.Time{}, loc, false).Rule
+	lt := listedTodo{Todo: t, Ask: ask, DecisionReview: decision, ActiveBlockers: activeBlockers}
+	if cfg.todosV2On() {
+		sessions := make(map[[2]string]proto.Session, len(agents))
+		for _, c := range agents {
+			sessions[[2]string{c.MachineID, c.SessionID}] = c
+		}
+		f := projectionFacts(lt, sessions, loc)
+		applyTodosV2FactsConfig(&f, cfg)
+		views := projection.Views([]projection.Facts{f}, now)
+		applyActiveBlockersToViews([]listedTodo{lt}, views, nil)
+		return todoTriageFromProjectionView(lt, views[0], lookup).Rule
+	}
+	return triageTodo(lt, lookup, now, time.Time{}, loc, false).Rule
 }
 
 // deliveryAwaitsReview is the snapshot's unaccepted live state at rest. A new working stretch is still work in

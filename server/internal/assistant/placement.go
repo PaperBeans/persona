@@ -36,6 +36,7 @@ type placementCandidate struct {
 	Hits        []placementHit `json:"filters,omitempty"`
 	LoadPerCore *float64       `json:"load_per_core,omitempty"`
 	FreeBytes   *int64         `json:"free_bytes,omitempty"`
+	SlotRatio   *float64       `json:"slot_ratio,omitempty"`
 	HealthRank  *int           `json:"health_rank,omitempty"`
 }
 

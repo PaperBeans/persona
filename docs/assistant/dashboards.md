@@ -81,7 +81,13 @@ restored; its drafts go unlisted.
 
 Once kept, a page's title and icon are the owner's (the page's **Rename**); an Agent changes the contents only. After
 the owner paused a page or restored an older version, writes are refused (`paused_by_owner`) and the model is told to
-ask first (phase 2 adds pausing and history; the refusal exists now).
+ask first. The owner can resume updates from the footer.
+
+## Version history
+
+Open **Version history** from a kept dashboard's footer to see when each retained version was written and who wrote it. Select an earlier version to inspect its title and content. Confirming a restore creates a new version and pauses updates. Use **Resume updates** when the conversation or routine should start writing again.
+
+Restoring a version changes the title and page content. Readings, alerts, routine settings and sidebar placement keep their current values. If another device updates the page before confirmation, reopen history and review the new current version before restoring. A title already used by another kept dashboard must be freed before restoring that title.
 
 ## Titles and icons
 
@@ -105,7 +111,7 @@ settings, security and the app's own places' icons.
 | Writes | 60 an hour a page, 600 an hour for all pages together (both survive restarts); past them `rate_limited` |
 | Taps | 10 a minute a page; the same tap within 30 seconds is the first |
 | Tap records | 90 days, 200 a page |
-| Versions | the latest 20 a page, stored, not shown yet |
+| Versions | the latest 20 per page, including the current version |
 
 ## Events
 
@@ -312,8 +318,7 @@ grantee kind `routine`, the routine's id, rights `data`, who granted it and when
 
 ### Later
 
-Not in phase 2 (they stay with Dashboards, #15417): the history of versions with restore (which pauses
-updates), copying a live card into a page (`from_view`), opening a page from a card's link, the number of pages in the
+Not in phase 2 (they stay with Dashboards, #15417): copying a live card into a page (`from_view`), opening a page from a card's link, the number of pages in the
 apps' delete-conversation confirmations, labelling a tap's message "from a dashboard", an alert push that opens its
 page, Overview's heading for these cards (they sit under Extensions on the web), and whether the switch turns on by
 default. Phase 3 attaches pages to spaces, directions and to-dos, gives task Agents a data-only `todo_page`, and adds

@@ -198,6 +198,7 @@ func (s *Service) finishExternalPlan(p *pending) {
 	if p.orphaned != nil {
 		p.orphaned.Stop()
 	}
+	p.stopReminderLocked()
 	s.fleet.mu.Unlock()
 	s.recordEnd(p.ix.ID, "dismissed", &proto.Resolution{Dismiss: true, AnsweredBy: proto.AnsweredByTerminal})
 	select {

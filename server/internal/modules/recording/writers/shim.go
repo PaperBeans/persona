@@ -528,10 +528,14 @@ func (s *store) putSummary(_, id, text string, _ bool) error {
 
 // The engine's members the writers call.
 
-// RecordingDays is the retention in days as it is in effect (the port computes it, default included), so
-// recordingDays, the knowledge base's default rule the upload names around it, has nothing left to do here.
+// RecordingDays is the text's retention in days as it is in effect (the port computes it, default included): 0 means
+// forever.
 func (e *engine) RecordingDays() int { return e.Store.core.RecordingDays() }
-func recordingDays(days int) int     { return days }
+
+// pastRetention: a recording that started at start is past a retention of days at now (never when days is 0).
+func pastRetention(start, now time.Time, days int) bool {
+	return days > 0 && start.Before(now.UTC().AddDate(0, 0, -days))
+}
 
 func (e *engine) now() time.Time                    { return e.Store.core.Now() }
 func (e *engine) logf(f string, a ...any)           { e.Store.core.Logf(f, a...) }

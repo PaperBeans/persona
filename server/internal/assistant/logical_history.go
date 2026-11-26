@@ -186,6 +186,16 @@ func logicalPageLimit(p historyParams) int {
 	return 80
 }
 
+func mergeLogicalSpan(coverage []conversationlog.Range, end int, seg conversationlog.Segment, from, to int) ([]conversationlog.Range, int, error) {
+	a, b, err := seg.Span(from, to)
+	if err != nil {
+		return coverage, end, err
+	}
+	var r conversationlog.Range
+	r.From, r.Through = a, b
+	return conversationlog.MergeRanges(coverage, r), max(end, b), nil
+}
+
 // Physical line intervals, not normalized-item counts, compose the public cursor.
 // A second read of the root detects activation or source rewrites during a page.
 func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversationStore, c *db.LogicalConversation, p historyParams) (historyPage, error) {
@@ -209,6 +219,14 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 			continue
 		}
 		if p.After != nil && seg.FrozenEnd != nil && seg.Offset+*seg.FrozenEnd <= *p.After {
+			continue
+		}
+		if seg.FrozenEnd != nil && *seg.FrozenEnd == 0 {
+			var err error
+			coverage, end, err = mergeLogicalSpan(coverage, end, seg, 0, 0)
+			if err != nil {
+				return page, err
+			}
 			continue
 		}
 		params := map[string]any{"session_id": seg.SessionID, "limit": limit, "lazy_images": p.LazyImages, "strict_read": p.Strict}
@@ -246,6 +264,14 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 		}
 		var source historyPage
 		if err := s.physicalHistoryCall(ctx, seg.MachineID, DeviceSessionItems, params, &source); err != nil {
+			if isMissingTranscriptErr(err) && s.isZeroTurnPreparedSegment(ctx, c, seg) {
+				var spanErr error
+				coverage, end, spanErr = mergeLogicalSpan(coverage, end, seg, 0, 0)
+				if spanErr != nil {
+					return page, spanErr
+				}
+				continue
+			}
 			return page, err
 		}
 		// A raw range can omit its generation. In a frozen segment, a newer source can supply a verified
@@ -260,6 +286,14 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 			}
 		}
 		if source.History == "" {
+			if len(source.Items) == 0 && intValue(source.ToSeq) == 0 && s.isZeroTurnPreparedSegment(ctx, c, seg) {
+				var spanErr error
+				coverage, end, spanErr = mergeLogicalSpan(coverage, end, seg, 0, 0)
+				if spanErr != nil {
+					return page, spanErr
+				}
+				continue
+			}
 			return page, logicalRefusal(ctx, "missing_generation")
 		}
 		if err := st.ObserveConversationSource(ctx, seg.MachineID, seg.SessionID, source.History); err != nil {
@@ -291,12 +325,11 @@ func (s *Service) logicalHistoryPage(ctx context.Context, st logicalConversation
 				to = max(to, it.Seq)
 			}
 		}
-		a, b, err := seg.Span(from, to)
+		var err error
+		coverage, end, err = mergeLogicalSpan(coverage, end, seg, from, to)
 		if err != nil {
 			return page, err
 		}
-		coverage = conversationlog.MergeRanges(coverage, conversationlog.Range{From: a, Through: b})
-		end = max(end, b)
 		if seg.FrozenEnd != nil {
 			end = max(end, seg.Offset+*seg.FrozenEnd)
 		}
@@ -429,6 +462,9 @@ func (s *Service) checkLogicalRead(ctx context.Context, st logicalConversationSt
 func (s *Service) logicalUserInputs(ctx context.Context, st logicalConversationStore, c *db.LogicalConversation, metaOnly bool) (json.RawMessage, error) {
 	out := proto.UserInputIndex{History: c.History, Inputs: []proto.UserInputPosition{}}
 	for _, seg := range visibleSegments(c) {
+		if seg.FrozenEnd != nil && *seg.FrozenEnd == 0 {
+			continue
+		}
 		params := map[string]any{"session_id": seg.SessionID, "user_inputs": true}
 		if metaOnly {
 			params["meta_only"] = true
@@ -439,6 +475,9 @@ func (s *Service) logicalUserInputs(ctx context.Context, st logicalConversationS
 		}
 		var source proto.UserInputIndex
 		if err := s.physicalHistoryCall(ctx, seg.MachineID, DeviceSessionItems, params, &source); err != nil {
+			if isMissingTranscriptErr(err) && s.isZeroTurnPreparedSegment(ctx, c, seg) {
+				continue
+			}
 			return nil, err
 		}
 		if source.Total != len(source.Inputs) || source.Inputs == nil {

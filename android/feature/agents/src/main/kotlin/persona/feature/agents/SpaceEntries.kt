@@ -42,6 +42,7 @@ import java.time.Instant
 import persona.core.designsystem.FeedbackNotice
 import persona.core.designsystem.FeedbackStyle
 import persona.core.designsystem.Tokens
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.rememberToastState
 import persona.feature.chat.CodexTakeoverBusyPill
 import persona.feature.chat.CodexTakeoverClient
@@ -165,7 +166,20 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
         val takeoverActions = if (takeoverClient != null && !row.session.archived) {
             codexTakeoverMenuActions(row.session, takeoverCoordinator, enabled = !operations.busy && onlineForRow)
         } else emptyList()
-        AgentSessionMenuItems(row, row.id in page.preferences.pins.sessions, page.preferences.mutes.mutes(row), operations.busy,
+        val forkAction: (() -> Unit)? = if (row.session.canFork && !row.session.archived && model.hasOperations) ({
+            model.fork(row.session) { forked -> navigator.navigate(ChatRoute(forked.machineId, forked.sessionId)) }
+        }) else null
+        if (!row.session.isLive) buildList {
+            add(JAction(stringResource(R.string.agents_action_open_read_only), onClick = { openRow(row) }))
+            addAll(takeoverActions)
+            forkAction?.let {
+                add(JAction(stringResource(persona.feature.chat.R.string.chat_menu_fork), PersonaIcons.forkChat,
+                    enabled = !operations.busy && onlineForRow, onClick = it))
+            }
+            if (row.session.canDelete) add(JAction(stringResource(R.string.agents_action_delete_chat), destructive = true, enabled = !operations.busy) {
+                operationDialog = AgentOperationDialog.Delete(row.session)
+            })
+        } else AgentSessionMenuItems(row, row.id in page.preferences.pins.sessions, page.preferences.mutes.mutes(row), operations.busy,
             onOpen = { openRow(row) }, onPin = { model.pin(row) }, onMute = { model.mute(row) },
             onRead = { model.markRead(listOf(row)) }, onRename = { operationDialog = AgentOperationDialog.Rename(row.session) },
             onStopLoop = { model.stopLoop(row.session) }, onHandoff = {
@@ -173,9 +187,7 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
                     navigator.navigate(ChatRoute(it.machineId, it.sessionId, kind = ConversationKind.Assistant))
                 })
             },
-            onFork = if (row.session.canFork && !row.session.archived && model.hasOperations) ({
-                model.fork(row.session) { forked -> navigator.navigate(ChatRoute(forked.machineId, forked.sessionId)) }
-            }) else null,
+            onFork = forkAction,
             forkOnline = onlineForRow,
             takeoverActions = takeoverActions,
             onInterrupt = { model.interrupt(row.session) },

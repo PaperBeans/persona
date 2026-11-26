@@ -454,6 +454,13 @@ struct AssistantView: View {
                 // A pushed inbox and its items belong to the old hub. Initial pairing (nil → a group) and reconnects stay.
                 if AssistantCurrentNavigation.clearsPushedPages(oldHub: old, newHub: new) { forgetPlaces() }
             }
+            #if os(iOS)
+            .onChange(of: model.hiddenNavigationPages) { _, hidden in
+                let current = embedded ? unified?.shownPlace : places.current
+                if let page = current?.navigationPage, hidden.contains(page) { leavePlace() }
+                if hidden.contains(.todos) { showTodos = false }
+            }
+            #endif
             .onChange(of: model.assistantManagerID) {
                 starterLauncher = nil // a launcher of the assistant shown before
                 starterModel = nil
@@ -578,6 +585,9 @@ struct AssistantView: View {
     /// animation, then the drawer closes: one motion, not a push and a slide while the drawer closes (#6599).
     private func show(_ page: ShellPage?) {
         guard let page else { return }
+        #if os(iOS)
+        if model.returnToStartIfHidden(page.navigationPage) { return }
+        #endif
         // A To-dos place the sidebar picked (#10465): To-dos opens on it at its root, what it kept being the place
         // before's. Its own row is All To-dos where To-dos is the place in front.
         let fresh = page == .todos && TodoWorkspace.shared.opening(inFront: todosInFront)
@@ -626,6 +636,9 @@ struct AssistantView: View {
     /// landed on the item's choice, so closing the item shows the list where the item lives (#9053, docs/assistant/inbox.md
     /// "Section bar"). What the Inbox kept open gives way to it. A page without places pushes the item alone, as before.
     private func openFromOutside(_ item: InboxItem) {
+        #if os(iOS)
+        if model.returnToStartIfHidden(.inbox) { return }
+        #endif
         guard placesByValue else { return navPath.wrappedValue.append(item) }
         // the item in front before the list beneath first appears, whichever of the two appears first
         InboxBarLanding.shared.appeared(item)

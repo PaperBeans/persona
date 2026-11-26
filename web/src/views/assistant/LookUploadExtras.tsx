@@ -10,6 +10,7 @@ import { Button, Collapse, cx, Switch } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { ACCENT_PRESETS, PRESET_COLORS } from "../../ui/look";
 import { useReducedMotion } from "./face-motion";
+import { useFileDrop } from "./lookDrop";
 import { Segmented } from "./parts";
 import { PersonaAvatar, PersonaDot } from "./Persona";
 
@@ -264,6 +265,115 @@ export function ThemeColorSection({
   );
 }
 
+/** One state picture row: accepts a dropped image directly onto the row and offers a state-labelled Choose / Change button. */
+function StateRow({
+  state,
+  title,
+  draft,
+  initialOwn,
+  mainPicked,
+  mainCrop,
+  editPersona,
+  disabled,
+  onPickFile,
+  onEditCrop,
+  onToggleMark,
+  onResetAuto,
+}: {
+  state: PersonaState;
+  title: string;
+  draft: StateDraft;
+  initialOwn: boolean;
+  mainPicked: PickedUploadImage | null;
+  mainCrop: Crop;
+  editPersona?: PersonaInfo;
+  disabled: boolean;
+  onPickFile: (state: PersonaState, file: File | undefined) => void;
+  onEditCrop: (state: PersonaState) => void;
+  onToggleMark: (state: PersonaState, on: boolean) => void;
+  onResetAuto: (state: PersonaState) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const drop = useFileDrop({ disabled, onFile: (file) => onPickFile(state, file) });
+  const isOwn = draft.mode === "own";
+
+  return (
+    <div className="py-0.5 first:pt-0 last:pb-0">
+      <div
+        data-state-row={state}
+        data-drop-over={drop.over ? "true" : undefined}
+        {...drop.props}
+        className={cx(
+          "-mx-2 rounded-control border px-2 py-1.5 transition-colors duration-150",
+          drop.over ? "border-dashed border-accent bg-accent-tint" : "border-transparent",
+        )}
+      >
+        <div className="flex items-center gap-2.5">
+          <StatePreviewDot
+            state={state}
+            draft={draft}
+            initialOwn={initialOwn}
+            mainPicked={mainPicked}
+            mainCrop={mainCrop}
+            editPersona={editPersona}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-meta font-medium text-ink">{title}</div>
+            <div className="truncate text-submeta text-ink-3">
+              {isOwn ? t("assistant-lookupload.state_custom") : t("assistant-lookupload.auto")}
+            </div>
+          </div>
+          <Button
+            size="sm"
+            tone="secondary"
+            disabled={disabled}
+            aria-label={t(isOwn ? "assistant-lookupload.state_change_label" : "assistant-lookupload.state_choose_label", { state: title })}
+            onClick={() => fileRef.current?.click()}
+          >
+            {isOwn ? t("assistant-lookupload.state_change") : t("assistant-lookupload.state_choose")}
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept={UPLOAD_TYPES.join(",")}
+            hidden
+            data-testid={`look-upload-state-file-${state}`}
+            onChange={(e) => {
+              onPickFile(state, e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        {isOwn && (
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 pl-12">
+            {state !== "idle" && (
+              <span className="flex items-center gap-2">
+                <span className="text-label whitespace-nowrap text-ink-2">{t("assistant-lookupload.state_mark")}</span>
+                <Switch
+                  on={draft.mark}
+                  onChange={(v) => onToggleMark(state, v)}
+                  disabled={disabled}
+                  label={t("assistant-lookupload.state_mark_label", { state: title })}
+                />
+              </span>
+            )}
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              {draft.picked && (
+                <Button size="sm" tone="quiet" disabled={disabled} onClick={() => onEditCrop(state)}>
+                  {t("assistant-lookupload.state_crop")}
+                </Button>
+              )}
+              <Button size="sm" tone="quiet" disabled={disabled} onClick={() => onResetAuto(state)}>
+                {t("assistant-lookupload.state_use_auto")}
+              </Button>
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Secondary disclosure entry: Pictures for each state (five rows, Automatic by default). */
 export function StatePicturesSection({
   open,
@@ -292,7 +402,6 @@ export function StatePicturesSection({
   onToggleMark: (state: PersonaState, on: boolean) => void;
   onResetAuto: (state: PersonaState) => void;
 }) {
-  const fileRefs = useRef<Partial<Record<PersonaState, HTMLInputElement | null>>>({});
   const customCount = PERSONA_STATES.filter((st) => drafts[st.id].mode === "own").length;
 
   return (
@@ -316,74 +425,23 @@ export function StatePicturesSection({
         <div className="border-t border-line px-3 py-2">
           <p className="pb-1.5 text-submeta leading-snug text-ink-3">{t("assistant-lookupload.states_hint")}</p>
           <div className="divide-y divide-line">
-            {PERSONA_STATES.map((st) => {
-              const draft = drafts[st.id];
-              const isOwn = draft.mode === "own";
-              return (
-                <div key={st.id} data-state-row={st.id} className="py-2">
-                  <div className="flex items-center gap-2.5">
-                    <StatePreviewDot
-                      state={st.id}
-                      draft={draft}
-                      initialOwn={initialOwn[st.id]}
-                      mainPicked={mainPicked}
-                      mainCrop={mainCrop}
-                      editPersona={editPersona}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-meta font-medium text-ink">{st.title}</div>
-                      <div className="truncate text-submeta text-ink-3">
-                        {isOwn ? t("assistant-lookupload.state_custom") : t("assistant-lookupload.auto")}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      tone="secondary"
-                      disabled={disabled}
-                      onClick={() => fileRefs.current[st.id]?.click()}
-                    >
-                      {isOwn ? t("assistant-lookupload.state_change") : t("assistant-lookupload.state_choose")}
-                    </Button>
-                    <input
-                      ref={(el) => { fileRefs.current[st.id] = el; }}
-                      type="file"
-                      accept={UPLOAD_TYPES.join(",")}
-                      hidden
-                      data-testid={`look-upload-state-file-${st.id}`}
-                      onChange={(e) => {
-                        onPickFile(st.id, e.target.files?.[0]);
-                        e.target.value = "";
-                      }}
-                    />
-                  </div>
-                  {isOwn && (
-                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 pl-12">
-                      {st.id !== "idle" && (
-                        <span className="flex items-center gap-2">
-                          <span className="text-label whitespace-nowrap text-ink-2">{t("assistant-lookupload.state_mark")}</span>
-                          <Switch
-                            on={draft.mark}
-                            onChange={(v) => onToggleMark(st.id, v)}
-                            disabled={disabled}
-                            label={t("assistant-lookupload.state_mark_label", { state: st.title })}
-                          />
-                        </span>
-                      )}
-                      <span className="ml-auto flex shrink-0 items-center gap-1">
-                        {draft.picked && (
-                          <Button size="sm" tone="quiet" disabled={disabled} onClick={() => onEditCrop(st.id)}>
-                            {t("assistant-lookupload.state_crop")}
-                          </Button>
-                        )}
-                        <Button size="sm" tone="quiet" disabled={disabled} onClick={() => onResetAuto(st.id)}>
-                          {t("assistant-lookupload.state_use_auto")}
-                        </Button>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {PERSONA_STATES.map((st) => (
+              <StateRow
+                key={st.id}
+                state={st.id}
+                title={st.title}
+                draft={drafts[st.id]}
+                initialOwn={initialOwn[st.id]}
+                mainPicked={mainPicked}
+                mainCrop={mainCrop}
+                editPersona={editPersona}
+                disabled={disabled}
+                onPickFile={onPickFile}
+                onEditCrop={onEditCrop}
+                onToggleMark={onToggleMark}
+                onResetAuto={onResetAuto}
+              />
+            ))}
           </div>
         </div>
       </Collapse>

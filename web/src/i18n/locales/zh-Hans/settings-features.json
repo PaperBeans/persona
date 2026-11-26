@@ -1,4 +1,8 @@
 {
+  "module_mail": "邮件",
+  "module_mail_hint": "使用已连接的账户收发邮件。",
+  "module_office": "办公文件预览",
+  "module_office_hint": "预览文档、电子表格和演示文稿。",
   "area_features": "功能",
   "features_group": "可选功能",
   "features_hint": "关掉不用的功能：它会从侧边栏和页面里消失，这个浏览器也不再加载它。你的数据原样保留。",

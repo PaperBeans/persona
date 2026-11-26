@@ -716,7 +716,30 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     var title: String {
         let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = trimmed?.isEmpty == false ? trimmed : nil
-        return Self.traeCLITitle(name: name, source: source, agent: runtimeAgent, baseURL: baseURL, displayName: label) ?? label ?? name
+        return Self.traeCLITitle(name: name, source: source, agent: runtimeAgent, baseURL: baseURL, displayName: label)
+            ?? Self.builtinTitle(name: name, displayName: label)
+    }
+    /// Canonical product titles shown for built-in launchers when no explicit custom `display_name` is set.
+    static let builtinTitles: [String: String] = [
+        "claude": "Claude Code",
+        "codex": "Codex",
+        "claude-desktop": "Claude Desktop",
+        "codex-app": "Codex App",
+        "traex": Session.traeCLIName,
+        "traecli": Session.traeCLIName,
+        "trae-cli": Session.traeCLIName,
+        "agy": "Antigravity CLI",
+        "omp": "Oh My Pi",
+        "cursor": "Cursor",
+        "gemini": "Gemini CLI",
+    ]
+    static func builtinTitle(name: String, displayName: String? = nil) -> String {
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = trimmed?.isEmpty == false ? trimmed : nil
+        if let label, label.caseInsensitiveCompare(name) != .orderedSame {
+            return label
+        }
+        return builtinTitles[name.lowercased()] ?? label ?? name
     }
     /// Older hubs and runtime providers can supply a legacy label. Keep other labels chosen by the user.
     static func traeCLITitle(name: String, source: String?, agent: String?, baseURL: String?, displayName: String?) -> String? {
@@ -3075,6 +3098,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     var ownerProposal: Bool?
     var noExpiry: Bool?
     var ownerApprovalPhrases: [String]?
+    /// True when the card has no interactive computer terminal or UI to hand back to; absent/false keeps hand-back.
+    var noHandBack: Bool?
     var ownerApprovalPhrase: String? {
         guard kind == .permission, ownerProposal == true, let approvalBatchID, !approvalBatchID.isEmpty,
               !machineID.isEmpty, !sessionID.isEmpty,
@@ -3125,7 +3150,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
              agentID = "agent_id", agentType = "agent_type", foldedUnderText = "folded_under",
              foldedUnderMachineIDText = "folded_under_machine_id", foldedAsText = "folded_as",
              foldedSideText = "folded_side", approvalBatchID = "approval_batch_id", approvalItemID = "approval_item_id",
-             ownerProposal = "owner_proposal", noExpiry = "no_expiry", ownerApprovalPhrases = "owner_approval_phrases"
+             ownerProposal = "owner_proposal", noExpiry = "no_expiry", ownerApprovalPhrases = "owner_approval_phrases",
+             noHandBack = "no_hand_back"
     }
 }
 

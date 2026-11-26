@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"slices"
@@ -616,7 +617,11 @@ func extensionReads(t *testing.T, e *todoEnv, id string, shown bool, words ...st
 // bytes.
 func rowsAs(t *testing.T, e *todoEnv, role string) (map[string]map[string]any, []byte) {
 	t.Helper()
-	w := e.doAs(role, "GET", "/api/v1/todos", "")
+	return readTodoRows(t, role, e.doAs(role, "GET", "/api/v1/todos", ""))
+}
+
+func readTodoRows(t *testing.T, role string, w *httptest.ResponseRecorder) (map[string]map[string]any, []byte) {
+	t.Helper()
 	var list struct {
 		Todos []map[string]any `json:"todos"`
 	}

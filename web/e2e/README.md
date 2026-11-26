@@ -595,3 +595,8 @@ the gateway's 用量 (none named) neutral, that the open page keeps `--ink`, tha
 and that every colored icon reads at 3:1 on the sidebar and on the hover fill, as the browser resolves them.
 `--monochrome-only` takes only the Monochrome part, to set its screenshots beside another build's. Screenshots and
 `results.json` go to the artifact directory; a five-minute watchdog ends the run, and the last line is the verdict.
+
+### Native fetch receiver and Settings
+
+After building the web bundle, run `node web/e2e/native-fetch-settings.mjs <artifact-directory>` with an output directory outside the checkout.
+The runner starts its own loopback HTTP hub fixture on an ephemeral port and opens the actual Managers settings page in installed Chrome, in light and dark mode. It uses a fresh browser context and synthetic credentials, blocks external requests, rejects HTTP writes, and leaves native browser fetch untouched. It checks that hub-provided manager data reaches the settings UI, that health and explicitly bound fetch succeed, and that the original member-call pattern really throws `Illegal invocation`. JSON results and screenshots stay outside the repository. This verifies browser transport and rendering against an isolated fixture, not a deployed hub or account.

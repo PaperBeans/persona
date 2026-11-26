@@ -200,7 +200,9 @@ func TestPageToolCallers(t *testing.T) {
 	if pageListed(s, "server", "main-1") {
 		t.Fatal("listed while Dashboards are off")
 	}
-	if off := s.guardDiscoveryCursor(ctx, "server", "main-1", true, "base"); off == on || on != "base:page" {
+	// Dashboards on adds the cursor's :page segment; off removes exactly that one (others, such as
+	// :external-sources, stay as they are).
+	if off := s.guardDiscoveryCursor(ctx, "server", "main-1", true, "base"); off == on || !strings.Contains(on, ":page") || off != strings.Replace(on, ":page", "", 1) {
 		t.Fatalf("the discovery cursor: on %q, off %q", on, off)
 	}
 	if _, err := callPage(s, "server", "main-1", map[string]any{"action": "list"}); err == nil || !strings.Contains(err.Error(), "Settings › Assistant") {

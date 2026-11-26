@@ -603,10 +603,20 @@ private fun ChatPage(
     }
     fun toggle(id: String) {
         val (next, opened) = toggleWork(WorkOpenState(openWork.toSet()), id)
+        val rowId = lines.firstOrNull { it.id == id }?.contentKey ?: id
+        val anchored = when {
+            opened -> chatList.beginToggle(rowId, riseToTop = chatList.followsEnd)
+            // Closing while the newest end is followed leaves the list there; elsewhere keep the header under the tap.
+            !chatList.followsEnd -> chatList.beginToggle(rowId, riseToTop = false)
+            else -> false
+        }
+        if (!anchored) chatList.endExpansion()
         chatList.setExpanded(next.open)
         if (opened) (projection.lines.firstOrNull { it.id == id } as? ChatLine.Work)?.steps
             ?.filterIsInstance<persona.core.domain.lines.WorkItem.Folded>()?.forEach { expand(it.item.item) }
+        if (opened) chatList.noteExpansionLoading(folding.isNotEmpty())
     }
+    LaunchedEffect(folding) { chatList.noteExpansionLoading(folding.isNotEmpty()) }
     // Restored open lines and folds arriving while expanded load just as a manual tap does.
     LaunchedEffect(projection) {
         openFoldsToFetch(projection.lines, folding, foldErrors.keys).forEach(::expand)

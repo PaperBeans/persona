@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-groups";
 import { repoOf } from "./agent-repos-core";
-import { backgroundWaiting, stateOf } from "./format";
+import { backgroundWaiting, activityOf } from "./format";
 import { buildTodoAgentGroups, interruptedAgent, makeSessionLookup, openAsk, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { todoLook, waitOf, type WaitReason } from "./todo-wait-reason";
 import { usageLimitAgent } from "./usage-limit";
@@ -91,7 +91,7 @@ export interface TodoTree {
 }
 
 export function agentTreeState(s: Session): TreeState {
-  const st = stateOf(s);
+  const st = activityOf(s);
   if (usageLimitAgent(s)) return "waiting"; // a limit resetting is a wait, not work (#1758)
   if (st === "needs_you" || interruptedAgent(s)) return "needs_you";
   if (s.starting) return "working";
@@ -125,7 +125,7 @@ export function worstTreeState(states: TreeState[]): TreeState {
  *  running; undefined keeps "Done" (agents seen, or a mix of seen and stopped). */
 export function agentGroupLabel(sessions: readonly Session[], state: TreeState): string | undefined {
   if (state !== "done" || !sessions.length) return undefined;
-  const states = sessions.map(stateOf);
+  const states = sessions.map(activityOf);
   if (states.includes("unread")) return stateName("unread");
   if (states.every((st) => st === "offline")) return stateName("offline");
   return undefined;

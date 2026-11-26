@@ -410,15 +410,18 @@ test('concurrent session.items and session.cursor calls coalesce and return cons
     node.peer.call('session.items', { session_id: sessionId, limit: 10 }),
     node.peer.call('session.items', { session_id: sessionId, turns: 2 }),
     node.peer.call('session.items', { session_id: sessionId, after_seq: 35 }),
-    node.peer.call('session.items', { session_id: sessionId, limit: 50 }),
+    node.peer.call('session.items', { session_id: sessionId, limit: 80 }),
     node.peer.call('session.watch', { session_id: sessionId }),
     node.peer.call('session.watch', { session_id: sessionId }),
   ])
-  assert.equal(p1.items.length, 10)
+  const visible = (page) => page.items.filter((it) => it.kind !== 'turn_duration')
+  assert.ok(p1.items.length >= 10)
   assert.equal(p1.to_seq, 40)
-  assert.equal(p2.items.length, 4)
-  assert.equal(p3.items.length, 5)
-  assert.equal(p4.items.length, 40)
+  assert.equal(visible(p2).length, 4)
+  assert.equal(p2.items.filter((it) => it.kind === 'turn_duration').length, 1)
+  assert.equal(visible(p3).length, 5)
+  assert.equal(visible(p4).length, 40)
+  assert.equal(p4.items.filter((it) => it.kind === 'turn_duration').length, 19)
   assert.equal(w1.ok, true)
   assert.equal(w2.ok, true)
 

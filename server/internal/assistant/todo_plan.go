@@ -303,11 +303,32 @@ func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo,
 		f(id)
 	}
 	reopening := e.Done != nil && !*e.Done
+	var fencedSessions [][2]string
 	if reopening {
-		// Keep a concurrent ledger writer from publishing an older state over the reopened row.
-		s.supervise.writeMu.Lock()
+		fencedSessions = todoProtectedSessions(cur, e.Responsible)
+	} else if e.SetResponsible && e.Responsible != nil && e.Responsible.Kind == db.ResponsibleSession && e.Responsible.SessionID != "" {
+		fencedSessions = [][2]string{{e.Responsible.MachineID, e.Responsible.SessionID}}
 	}
-	s.todos.writing.Lock()
+	for {
+		if reopening {
+			// Keep a concurrent ledger writer from publishing an older state over the reopened row.
+			s.supervise.writeMu.Lock()
+		}
+		s.todos.writing.Lock()
+		if ch := s.idleCloseFenceForSessions(fencedSessions); ch != nil {
+			s.todos.writing.Unlock()
+			if reopening {
+				s.supervise.writeMu.Unlock()
+			}
+			select {
+			case <-ch:
+				continue
+			case <-ctx.Done():
+				return Todo{}, ctx.Err()
+			}
+		}
+		break
+	}
 	unlock := func() {
 		s.todos.writing.Unlock()
 		if reopening {

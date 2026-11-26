@@ -27,11 +27,15 @@ struct RecordingLiveView: View {
 
     private var paused: Bool { capture.state == .paused }
 
+    /// The hub's recording module (#15214): off, a recording that still runs keeps its time, its lines, Pause and Stop,
+    /// and nothing that changes it (its kind, its name, Persona's part, a question, a bookmark).
+    private var recording: RecordingAllowance { RecordingModule.allowance }
+
     var body: some View {
         if let entry = library.entry(id) {
             layout(entry)
                 .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) {
-                    RecordingLiveBar(entry: entry, paused: paused)
+                    RecordingLiveBar(entry: entry, paused: paused, recording: recording)
                 }
                 .navigationDestination(isPresented: $showAttendee) {
                     // The main chat shows as chosen only when it was picked for this meeting, never by default (#3862).
@@ -95,7 +99,7 @@ struct RecordingLiveView: View {
         return HStack(alignment: .center, spacing: Theme.Space.m) {
             RecordingCornerButton(kind: .hide, identifier: "recording-live-hide") { hide() }
             title.frame(maxWidth: .infinity, alignment: .leading)
-            pageMenu(entry)
+            if recording.offersWrites { pageMenu(entry) }
         }
     }
 
@@ -151,7 +155,7 @@ struct RecordingLiveView: View {
     }
 
     @ViewBuilder private func strip(_ entry: RecordingEntry) -> some View {
-        if entry.isMeeting, entry.source == .phone, entry.attendance != nil || MeetingAttendees.offered(model) {
+        if recording.offersWrites, entry.isMeeting, entry.source == .phone, entry.attendance != nil || MeetingAttendees.offered(model) {
             RecordingPersonaStrip(entry: entry, showAttendee: $showAttendee, pendingRole: $pendingRole)
                 .padding(.horizontal, Theme.Space.page)
         }

@@ -3,11 +3,12 @@
 // hub with nothing on screen to tell. Signing out anyway keeps its id apart, so the next sign-in here names it in
 // `replaces` (lib/auth.ts pair) and the hub takes it off then.
 import { api, ApiError, errorText, setToken } from "./api";
+import { clearFeedCache } from "./feed-cache";
 import { forgetForwards } from "./forward-memory";
 import { forgetHandOffs } from "./handoff-memory";
 import { keepUnrevoked } from "./auth";
 import { BASE } from "./base";
-import { storedCredentials } from "./compatibility";
+import { storeCredentials, storedCredentials } from "./compatibility";
 import { reset } from "./store";
 
 /** A revoke the hub has not answered by then counts as not done (writes have no time limit of their own). */
@@ -24,8 +25,9 @@ export type Revoke =
 /** Revoke the credential this browser uses: the id it got signing in, else the one the hub says the request came with
  *  (a device token pasted on the sign-in page). */
 export async function revokeThisBrowser(): Promise<Revoke> {
-  let id = storedCredentials().tokenId;
+  let id = "";
   try {
+    id = storedCredentials().tokenId;
     if (!id) {
       const r = await api<{ current?: string }>("/auth/tokens", { timeout: REVOKE_TIMEOUT_MS }).catch((e: unknown): { current?: string } => {
         if (e instanceof ApiError && e.status === 404) return {}; // a hub from before device tokens
@@ -47,11 +49,26 @@ export async function revokeThisBrowser(): Promise<Revoke> {
 /** Forget this browser's credential and go to the sign-in page. `unrevoked`: the id of one the hub may still take. */
 export function signOutHere(unrevoked = "") {
   if (typeof window !== "undefined") {
-    window.personaDesktop?.clearNotifications?.();
-    // and the notch island's counts and agent titles (#7669); the page leaves before lib/desktop-island.ts could
-    window.personaDesktop?.setIslandState?.({ needsYou: 0, working: 0, unread: 0, rows: [], summary: "" });
+    try {
+      window.personaDesktop?.clearNotifications?.();
+    } catch {
+      // desktop bridge failures must not prevent clearing local credentials and signing out
+    }
+    try {
+      // and the notch island's counts and agent titles (#7669); the page leaves before lib/desktop-island.ts could
+      window.personaDesktop?.setIslandState?.({ needsYou: 0, working: 0, unread: 0, rows: [], summary: "" });
+    } catch {
+      // best-effort desktop cleanup
+    }
   }
-  setToken("");
+  try {
+    setToken("");
+  } catch {
+    // setToken("") reads storage via getToken() before clearFeedCache() and storeCredentials(""):
+    // still invalidate feed caches and attempt isolated per-key credential removal when reads throw.
+    clearFeedCache();
+    storeCredentials("");
+  }
   forgetHandOffs(); // where Hand to AI sent each source's items: ids on a hub this browser leaves (#2121)
   forgetForwards(); // and where forwards went (#3899)
   if (unrevoked) keepUnrevoked(unrevoked);

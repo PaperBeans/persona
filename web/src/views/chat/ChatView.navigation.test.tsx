@@ -32,6 +32,7 @@ const transcript = vi.hoisted(() => ({
 }));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 const { ChatView } = await import("./ChatView");
+const { ReadOnlyChatView } = await import("./ReadOnlyChatView");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const question: Item = { id: "question", seq: 1, role: "user", kind: "text", text: "First question" };
@@ -99,6 +100,20 @@ async function pickFoldedHit() {
   expect(transcript.expandFold).toHaveBeenCalledExactlyOnceWith(fold);
   return () => act(async () => release(true));
 }
+
+it("keeps transcript history and in-chat search in the standalone read-only viewer without a composer or session writes", async () => {
+  await act(async () => root.render(<ReadOnlyChatView mid="m" sid="one" onToggleSidebar={() => {}} />));
+  await imports();
+  expect(scroller().textContent).toContain(question.text);
+  expect(host.querySelector("[data-chat-readonly]")).not.toBeNull();
+  expect(host.querySelector("[data-composer-input]")).toBeNull();
+  expect(host.querySelector(`button[aria-label="${t("chat-chatview.more_actions")}"]`)).toBeNull();
+  const search = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-chatview.search_menu")}"]`)!;
+  expect(search).not.toBeNull();
+  await act(async () => search.click());
+  await imports();
+  expect(document.querySelector("[data-chat-search] input")).not.toBeNull();
+});
 
 it.each(["wheel", "touch", "scrollbar", "End key", "another chat", "another target"])(
   "a pending folded search hit yields to %s", async (action) => {

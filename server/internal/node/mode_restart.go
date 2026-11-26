@@ -199,12 +199,13 @@ func (n *Node) queueModeRestart(id, mode string) error {
 	return nil
 }
 
-// dropModeRestart drops a restart session id waits for, as a pick of another mode, picked, does. A pick of the mode the
-// session runs in now calls it off and changes nothing else (cancelled, #11089); any other replaces it.
-func (n *Node) dropModeRestart(id, picked string) {
+// dropModeRestart drops a restart session id waits for, as a pick of another mode, picked, does, and reports whether
+// a waiting restart was dropped. A pick of the mode the session runs in now calls it off and changes nothing else
+// (cancelled, #11089); any other replaces it.
+func (n *Node) dropModeRestart(id, picked string) bool {
 	mode := n.switches().restartMode(id)
 	if mode == "" {
-		return
+		return false
 	}
 	reason := proto.ModeRestartReasonReplaced
 	if now, _ := n.modesOf(id); now == picked {
@@ -214,6 +215,7 @@ func (n *Node) dropModeRestart(id, picked string) {
 	n.logf("session %s: waiting restart in permission mode %s dropped: %s picked (%s)", id, mode, picked, reason)
 	n.reportModeRestart(id, mode, proto.ModeRestartDropped, reason)
 	n.notifySessions()
+	return true
 }
 
 // reportModeRestart tells the manager what became of session id's restart in mode and why (a ModeRestartReason… code,

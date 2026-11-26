@@ -104,7 +104,7 @@ describe("New agent's launcher health", () => {
   it("lists the launcher the terminal can't run with its rows off and why, and picks one that can start", async () => {
     localStorage.setItem("new.launcher.mac", "work_gw"); // the last one used is blocked here now
     await open("a");
-    expect(pill().title).toContain("claude");
+    expect(pill().title).toContain("Claude Code");
     expect(note()).toBeNull();
     await openPanel();
     const blocked = group("work_gw")!;
@@ -127,7 +127,7 @@ describe("New agent's launcher health", () => {
     expect(panel()).not.toBeNull(); // not picked: the panel stays as it was
     act(() => fix("work_gw").click());
     expect(panel()).toBeNull();
-    expect(pill().title).toContain("claude");
+    expect(pill().title).toContain("Claude Code");
     const help = q('[data-testid="launcher-blocked-help"]')!;
     expect(help.textContent).toContain("终端里用不了");
     expect(help.textContent).toContain("「work_gw」");
@@ -150,7 +150,7 @@ describe("New agent's launcher health", () => {
   it("lists a provider left out here for its own-service rule with why, and How to fix opens its page", async () => {
     unavailable = [{ name: "deepseek", display_name: "DeepSeek", kind: "launcher", code: "launcher_own_service", reason: "Mac 已经有自己的 Claude Code 服务，而 DeepSeek 设置为跳过这样的电脑。请在它的“电脑”里打开“已有登录的电脑也用”，或换一个供应商" }];
     await open("o");
-    expect(pill().title).toContain("claude");
+    expect(pill().title).toContain("Claude Code");
     await openPanel();
     const skipped = group("DeepSeek")!;
     expect(skipped.textContent).toContain("已有登录的电脑也用");

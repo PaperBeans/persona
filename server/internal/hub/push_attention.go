@@ -1,6 +1,10 @@
 package hub
 
-import "github.com/nwverse/persona/server/internal/assistantwire"
+import (
+	"context"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+)
 
 // Attention modes, as the hub delivers pushes in them (#13503, docs/server/server.md "Attention modes"). The mode is the
 // assistant's to keep: the user sets it through the manager's routes, and the manager reports it in its profile
@@ -22,22 +26,17 @@ func (p *Pusher) attentionNow() assistantwire.Attention {
 	return p.attention().Effective(p.now())
 }
 
-// filtering: the grading filter runs for this push: an attention mode is in force, hub.ln_mode is on, or an active
-// extension grading layer exists.
-func (p *Pusher) filtering() bool {
-	if p == nil {
-		return false
-	}
-	return p.attentionNow().Active() || p.pushGradingOn() || p.hasAnyActiveGradingLayer()
-}
-
 // filteringFor reports whether push grading filtering runs for a push owned by manager: an active owner attention
-// mode, the owner's hub.ln_mode switch, or an active extension push grading layer belonging to manager.
+// mode, the owner's hub.ln_mode / hub.push_grading config, or an active singleton extension layer belonging to manager.
 func (p *Pusher) filteringFor(manager string) bool {
 	if p == nil {
 		return false
 	}
-	return p.attentionNow().Active() || p.pushGradingOn() || p.hasActiveGradingLayerFor(manager)
+	if p.attentionNow().Active() {
+		return true
+	}
+	cfg, _ := p.effectiveGradingFor(context.Background(), manager)
+	return cfg.Enabled
 }
 
 // attentionHushes: quiet mode is in force, so every push it lets go goes without a sound (hushed): the stricter of it

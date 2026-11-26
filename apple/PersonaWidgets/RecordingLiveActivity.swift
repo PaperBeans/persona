@@ -43,7 +43,8 @@ struct RecordingLiveActivity: Widget {
                         .padding(.horizontal, IslandMetrics.gap)
                         RecordingAnswer(state: state).foregroundStyle(.white.opacity(0.85)).padding(.horizontal, IslandMetrics.gap)
                         RecordingButtons(id: id, onDark: true, meeting: state.meeting, attends: state.persona != nil,
-                                         recording: state.phase == .recording, talking: state.talking, stopped: state.phase == .stopped)
+                                         recording: state.phase == .recording, talking: state.talking, stopped: state.phase == .stopped,
+                                         changes: state.offersChanges)
                             .padding(.horizontal, IslandMetrics.recordingIslandButtonsInset)
                     }
                     .environment(\.locale, LanguageStore.drawingLocale)
@@ -223,10 +224,12 @@ struct RecordingButtons: View {
     /// Stopped without the app (`ContentState.Phase.stopped`): End or Stop alone, whose tap opens the app, which ends the
     /// activity (nothing records any more).
     var stopped = false
+    /// False while the hub's recording module is off (`ContentState.offersChanges`, #15214): only End or Stop is drawn.
+    var changes = true
 
     var body: some View {
         HStack(spacing: IslandMetrics.buttonGap) {
-            if !stopped {
+            if !stopped, changes {
                 Button(intent: AddRecordingBookmarkIntent(recordingID: id)) { label("Bookmark", RecordingSymbol.bookmark) }
                     .buttonStyle(.bordered)
                     .tint(onDark ? .white : .primary)
@@ -379,7 +382,7 @@ struct RecordingLockScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
             RecordingAnswer(state: state, lines: RecordingAnswer.lockLines(state)).foregroundStyle(.secondary)
             RecordingButtons(id: id, meeting: state.meeting, attends: state.persona != nil, recording: state.phase == .recording,
-                             talking: state.talking, stopped: state.phase == .stopped)
+                             talking: state.talking, stopped: state.phase == .stopped, changes: state.offersChanges)
         }
         .padding(IslandMetrics.lockPadding)
     }

@@ -78,12 +78,16 @@ export interface PanelOptions {
  *  `switch_unsupported`, #8142). */
 export const switchesLauncher = (s: Session, o: PanelOptions): boolean => Boolean(o.switching) && !s.source_kind && sessionEngine(s) === "claude" && canSwitchModel(s);
 
-/** The engine a conversation moves to from `engine` ("" for an engine that doesn't switch). */
+const SWITCH_ENGINES = new Set(["claude", "codex", "agy"]);
+
+/** The engine a conversation moves to from `engine` ("" for an engine that doesn't switch). Kept for single-target callers. */
 export const otherEngine = (engine: string): string => (engine === "claude" ? "codex" : engine === "codex" ? "claude" : "");
 
-/** Whether `s` may move to a launcher of `engine`, the other engine, with its next message (#5054). */
-export const switchesEngine = (s: Session, engine: string, o: PanelOptions): boolean =>
-  Boolean(o.engineSwitch) && engine !== "" && engine === otherEngine(sessionEngine(s)) && engineSwitchable(s);
+/** Whether `s` may move to a launcher of `engine`, another engine, with its next message (#5054). */
+export const switchesEngine = (s: Session, engine: string, o: PanelOptions): boolean => {
+  const from = sessionEngine(s);
+  return Boolean(o.engineSwitch) && engine !== "" && engine !== from && SWITCH_ENGINES.has(from) && SWITCH_ENGINES.has(engine) && engineSwitchable(s);
+};
 
 /** The panel's providers and state for `s`: `launchers` the computer's (undefined before they are read), `listOf` what
  *  was read for each. The session's own launcher is always there, at its place in the list or first. */
@@ -111,9 +115,9 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
     const p: PanelProvider = { id: name, name: launcherTitle(name, all), engine: kind, models: null, defaultModel: defaultName, status: launcherBlock(launcher)?.reason };
     // the session's own provider is called what its row calls it (a Paseo provider's label, #8142)
     if (mine && s.agent_label) p.engineLabel = s.agent_label;
+    if (e.error) p.error = e.error;
+    if (e.loading || (e.list === undefined && !e.error)) p.loading = true;
     if (e.list === undefined) {
-      if (e.error) p.error = e.error;
-      else p.loading = true;
       // the model it runs stays there while its list is read or couldn't be: its flyout (effort, Fast, ultracode) works
       // as the old popover's tabs did with no list
       if (mine && shownModel) p.models = [panelModel({ id: shownModel, name: modelLabel(shownModel) }, kind, true, s, false)];

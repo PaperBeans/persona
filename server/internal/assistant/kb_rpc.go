@@ -14,6 +14,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -74,6 +75,13 @@ func (s *Service) kbRPCRequest(ctx context.Context, method string, raw json.RawM
 	sentOrigin := method == assistantwire.MethodKBExtensionDay
 	if sentOrigin {
 		method = assistantwire.MethodKBDay
+	}
+	switch method {
+	case assistantwire.MethodKBExtensionPutRecording:
+		out, err := s.kbPutRecording(ctx, raw)
+		return out, true, err
+	case assistantwire.MethodKBPutRecording: // without the envelope it is nobody's: the apps and the hub have no such write
+		return nil, true, kbInvalidParams(method, "only an extension writes its own recordings")
 	}
 	if method == assistantwire.MethodKBExtensionUpdate {
 		var env assistantwire.KBExtensionUpdate
@@ -267,6 +275,41 @@ func (s *Service) kbRPCRequest(ctx context.Context, method string, raw json.RawM
 		id, err := e.Apply(update.Kind, update.ID, update.Update)
 		return assistantwire.KBUpdateResult{ID: id, Ignored: ignored}, true, kbRPCError(err)
 	}
+}
+
+// kbPutRecording is an extension's kb.put_recording, in the manager's envelope that names the extension.
+func (s *Service) kbPutRecording(ctx context.Context, raw json.RawMessage) (any, error) {
+	method := assistantwire.MethodKBPutRecording
+	var env assistantwire.KBExtensionUpdate
+	if err := kbDecodeParams(method, raw, &env); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(env.Extension) == "" {
+		return nil, kbInvalidParams(method, "extension is required")
+	}
+	var w recordingwire.RecordingWrite
+	if err := kbDecodeParams(method, env.Params, &w); err != nil {
+		return nil, err
+	}
+	if s.kbReadOnly(ctx) {
+		return nil, kbError(kb.ErrReadOnly)
+	}
+	e, err := s.kbGet(ctx)
+	if err != nil {
+		return nil, kbRPCError(err)
+	}
+	res, err := e.PutExtensionRecording(w, env.StorageKey(), time.Now())
+	switch {
+	case err == nil:
+		return res, nil
+	case errors.Is(err, kb.ErrNotRecordingWriter):
+		return nil, &rpc.Error{Code: assistantwire.CodeKBNotWriter, Message: method + ": " + err.Error()}
+	case errors.Is(err, kb.ErrRecordingDeleted):
+		return nil, &rpc.Error{Code: assistantwire.CodeKBDeleted, Message: method + ": " + err.Error()}
+	case errors.Is(err, kb.ErrBadRecording):
+		return nil, kbInvalidParams(method, err.Error())
+	}
+	return nil, kbRPCError(err)
 }
 
 // kbCheckEvidence is why an update's evidence is invalid; "" when it is fine.

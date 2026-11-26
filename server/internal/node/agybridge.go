@@ -245,7 +245,7 @@ var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin, instan
 	if pkg == nil {
 		return nil, errors.New("this personad carries no Antigravity runtime package (built without go generate ./internal/runtimepkg)")
 	}
-	dir, err := writePackage(filepath.Join(filepath.Dir(rh.path), "runtime-packages", agyPackage), pkg)
+	dir, err := writePackageWithReservation(filepath.Join(filepath.Dir(rh.path), "runtime-packages", agyPackage+"-builtin"), pkg, true)
 	if err != nil {
 		return nil, fmt.Errorf("write Antigravity runtime: %w", err)
 	}

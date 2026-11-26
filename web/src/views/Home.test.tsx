@@ -212,6 +212,21 @@ describe("the overview", () => {
     });
   });
 
+  it("keeps the Computers row interaction style before and after the Rows view loads", async () => {
+    const row = /<a [^>]*href="\/machines\/mac"[^>]*class="[^"]*\bcard-interactive\b/;
+    expect(render([], [], { machines: [mac] })).toMatch(row);
+    await loadPages();
+    const { OVERVIEW_MACHINE_VIEW_KEY } = await import("./OverviewMachineView");
+    localStorage.setItem(OVERVIEW_MACHINE_VIEW_KEY, "rows");
+    try {
+      const html = render([], [], { machines: [mac] });
+      expect(html).toMatch(/role="radio" aria-checked="true" data-selected="true"[^>]*>行<\/button>/);
+      expect(html).toMatch(row);
+    } finally {
+      localStorage.removeItem(OVERVIEW_MACHINE_VIEW_KEY);
+    }
+  });
+
   it("offers the Cards and Rows display switch on the Computers heading, with Cards selected by default", async () => {
     await loadPages();
     const html = render([], [], { machines: [mac] });

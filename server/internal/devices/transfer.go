@@ -43,9 +43,10 @@ const (
 )
 
 type transfers struct {
-	mu    sync.Mutex
-	byID  map[string]*transfer
-	slots chan struct{} // capacity reserved before the machines' RPCs, not only once the transfer is listed (#3599)
+	mu          sync.Mutex
+	byID        map[string]*transfer
+	slots       chan struct{} // capacity reserved before the machines' RPCs, not only once the transfer is listed (#3599)
+	afterLaunch func(*transfer)
 }
 
 type transfer struct {
@@ -166,9 +167,12 @@ func (d *Devices) startTransfer(ctx context.Context, from, to *Machine, src prot
 	d.transfers.mu.Unlock()
 	d.logf("transfer %s: %s → %s, %d bytes", t.st.ID, from.cfg.ID, to.cfg.ID, info.Size)
 	d.pushTransfer(t, true)
-	reserved = false // runTransfer releases it when the transfer ends
 	initial := t.snapshot()
+	reserved = false // runTransfer releases it when the transfer ends
 	go d.runTransfer(run, t, from, to, proto.FileChunkRequest{Path: info.Path, Cwd: src.Cwd, Revision: info.Revision}, begin.UploadID)
+	if d.transfers.afterLaunch != nil {
+		d.transfers.afterLaunch(t)
+	}
 	return initial, nil
 }
 

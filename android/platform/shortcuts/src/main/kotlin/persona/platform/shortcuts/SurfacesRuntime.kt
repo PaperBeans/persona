@@ -54,6 +54,11 @@ class SurfacesRuntime @Inject constructor(
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             fleet.settled()
+            fleet.paired.debounce(REDRAW_DEBOUNCE_MILLIS)
+                .collect { AskPersonaWidget.refresh(context) }
+        }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fleet.settled()
             combine(sessions.sessions, fleet.paired) { list, paired ->
                 if (paired) list.groupBy { GroupKeys.namespaceOf(it.machineId) }.values.flatMap { rows ->
                     RecentAgents.pick(rows, sessions.supportsFeature(rows.first().machineId, "sessions_hierarchy"))

@@ -298,6 +298,13 @@ describe("待办列表：先发的 /todos 晚回来不盖掉新的 (#3540)", () 
     expect(st.todos.map((t) => t.title)).toEqual(["new", "added"]);
   });
 
+  it("drops a previous wait when the replacement returned by the hub omits it", () => {
+    const current = todo("t1", "Review the schedule");
+    getState().todos = [{ ...current, wait: { kind: "date", reason: "Waiting for Monday" } }];
+    putTodo({ ...current, done_at: "2026-11-10T09:00:00Z" });
+    expect(getState().todos[0].wait).toBeUndefined();
+  });
+
   it("confirmed completion fences older reads even when the follow-up read fails, but allows a later reopen", async () => {
     const reads: { resolve: (r: Response) => void; reject: (e: Error) => void }[] = [];
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve, reject) => reads.push({ resolve, reject }))));

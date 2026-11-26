@@ -20,7 +20,7 @@ func (u *updater) developmentBackups(ctx context.Context) ([]update.DevelopmentV
 	var out struct {
 		Backups []update.DevelopmentVersion `json:"backups"`
 	}
-	if err := u.runDevelopment(ctx, "backups", map[string]any{"runtime": u.h.cfg.dir}, &out); err != nil {
+	if err := u.runDevelopment(ctx, "backups", map[string]any{"runtime": u.h.cfg.dir}, &out, nil); err != nil {
 		return nil, err
 	}
 	if out.Backups == nil {
@@ -82,6 +82,7 @@ func (u *updater) beginDevelopmentRestore(ctx context.Context, id string) error 
 	u.release = r
 	u.running, u.now = true, false
 	u.opGen++
+	u.reserveDevelopmentLocked(ctx)
 	u.setLocked("applying_backup", "", "")
 	go u.installCandidate(ctx, false, r)
 	return nil

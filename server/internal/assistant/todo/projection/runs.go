@@ -431,6 +431,30 @@ func pendingReviewSince(f *Facts) time.Time {
 	return f.Supervision.UpdatedAt
 }
 
+// pendingReviewSLADuration returns the effective pending_review quiet window under todos_v2=true.
+// ok is false when quiet sinking is disabled (surfaces immediately to needs_you).
+func pendingReviewSLADuration(f *Facts) (time.Duration, bool) {
+	if f.PendingReviewSLADisabled {
+		return 0, false
+	}
+	if f.PendingReviewSLAHours > 0 {
+		return time.Duration(f.PendingReviewSLAHours) * time.Hour, true
+	}
+	return pendingReviewEscalateAfter, true
+}
+
+// canWaitSLADuration returns the effective can_wait auto-escalation window under todos_v2=true.
+// ok is false when auto-escalation is disabled (can_wait never ages into active needs_you).
+func canWaitSLADuration(f *Facts) (time.Duration, bool) {
+	if f.CanWaitSLADisabled {
+		return 0, false
+	}
+	if f.CanWaitSLAHours > 0 {
+		return time.Duration(f.CanWaitSLAHours) * time.Hour, true
+	}
+	return canWaitEscalateAfter, true
+}
+
 // openAsk is the to-do's own ask when a whole one waits.
 func openAsk(f *Facts) *Ask {
 	if a := f.Ask; a != nil && a.Verdict != "" && !a.AskedAt.IsZero() {

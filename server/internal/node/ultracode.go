@@ -504,9 +504,14 @@ func (n *Node) setUltracode(ctx context.Context, id string, on *bool, dismiss bo
 		n.notifySessions()
 		return nil
 	}
+	prevSince := u.Since
+	prevPending, prevNote := u.pending, u.note
+	prevFailures, prevRetryAt := u.failures, u.retryAt
 	u.pending, u.note = ultraBool(*on), ""
 	u.failures, u.retryAt = 0, time.Time{}
+	dismissed := false
 	if dismiss {
+		dismissed = !u.LostDismissed || u.LostAt != nil
 		u.LostDismissed = true
 		u.LostAt = nil
 	}
@@ -515,7 +520,24 @@ func (n *Node) setUltracode(ctx context.Context, id string, on *bool, dismiss bo
 		n.persistUltracode(id)
 	}
 	_, err = n.applyUltracode(ctx, id, pane)
+	if err != nil && !dismissed && prevPending != nil {
+		var re *rpc.Error
+		if errors.As(err, &re) && deliveredOf(re) == deliveredNone {
+			// Nothing was typed and no dismissal committed: restore the prior queued toggle only if the same Claude
+			// process generation is still running (never carry a queued toggle onto a newly resumed process).
+			n.mu.Lock()
+			u := n.ultracodeLocked(id)
+			if u.Since.Equal(prevSince) && u.pending == nil {
+				u.pending, u.note = prevPending, prevNote
+				u.failures, u.retryAt = prevFailures, prevRetryAt
+			}
+			n.mu.Unlock()
+		}
+	}
 	n.notifySessions()
+	if err != nil && dismissed {
+		return partialModesErr(err)
+	}
 	return err
 }
 

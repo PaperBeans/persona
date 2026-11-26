@@ -103,6 +103,10 @@ type Supervision struct {
 	// reading kept in memory only (the next report brings it back after a restart), and apart from UpdatedAt, which
 	// names the review a task waits for.
 	Progress *TaskProgress `json:"progress,omitempty"`
+	// OwnerWork is server-only evidence for the close guard (#15406): the latest owner-authored instruction and the
+	// latest Persona assignment per linked Agent session. Keeping it out of the wire shape prevents another Agent or
+	// an ordinary to-do reader from seeing an excerpt meant for the owner and the responsible supervisor.
+	OwnerWork []ownerSessionWork `json:"-"`
 }
 
 // assigned records a current ownership decision, rather than a pre-policy legacy ledger.
@@ -125,6 +129,10 @@ type TaskProgress struct {
 	// is Text (one line of at most 200 characters).
 	Detail string    `json:"detail,omitempty"`
 	At     time.Time `json:"at"`
+	// machine and session name the Agent that sent this report (in memory only, never on the wire), so a done report
+	// only settles left-over shells of the Agent that wrote it (#16418).
+	machine string
+	session string
 }
 
 // TaskReview is one review: the assistant's verdict, with each criterion's evidence or gap.
@@ -139,7 +147,8 @@ type TaskReview struct {
 	Note                string        `json:"note,omitempty"`
 	// UserCheck: an accepted review that still wants the owner to look themselves (task_review user_check): its
 	// "Please verify" waits for them instead of being passed by the supervisor (acceptance_supervisor.go, #3240).
-	UserCheck bool `json:"user_check,omitempty"`
+	UserCheck bool   `json:"user_check,omitempty"`
+	Link      string `json:"link,omitempty"` // Deliverable named by the supervisor for owner verification.
 	// A needs_user review's decision (#3804, decision.go): why only the owner can decide, what is to be decided, the
 	// option recommended, the options (the recommended first) and what waiting costs.
 	WhyOwner      string           `json:"why_owner,omitempty"`
@@ -249,6 +258,14 @@ func (v *Supervision) clone() *Supervision {
 		p := *v.Progress
 		out.Progress = &p
 	}
+	out.OwnerWork = make([]ownerSessionWork, len(v.OwnerWork))
+	for i, w := range v.OwnerWork {
+		out.OwnerWork[i] = w
+		if w.Instruction != nil {
+			instruction := *w.Instruction
+			out.OwnerWork[i].Instruction = &instruction
+		}
+	}
 	if v.AutoReview != nil {
 		a := *v.AutoReview
 		out.AutoReview = &a
@@ -325,6 +342,9 @@ func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
 	v := &Supervision{Supervisor: r.Supervisor, SupervisorSource: r.SupervisorSource, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
 		PendingSince: r.PendingSince, CardlessToldAt: r.CardlessToldAt, UpdatedAt: r.UpdatedAt}
 	_ = json.Unmarshal(r.Reviews, &v.Reviews)
+	if len(r.OwnerWork) > 0 {
+		_ = json.Unmarshal(r.OwnerWork, &v.OwnerWork)
+	}
 	v.StalledReworkRounds = v.stalledReworkRounds()
 	if len(r.AutoReview) > 0 {
 		var a AutoReview
@@ -407,6 +427,10 @@ func (v *Supervision) applyReworkAccounting(kind string) (round, stalled int) {
 func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	raw, _ := json.Marshal(v.Reviews)
 	var auto, waits json.RawMessage
+	ownerWork, _ := json.Marshal(v.OwnerWork)
+	if len(v.OwnerWork) == 0 {
+		ownerWork = json.RawMessage("[]")
+	}
 	if v.AutoReview != nil {
 		auto, _ = json.Marshal(v.AutoReview)
 	}
@@ -414,7 +438,8 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 		waits, _ = json.Marshal(v.Waits)
 	}
 	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, SupervisorSource: v.SupervisorSource, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
-		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, UpdatedAt: v.UpdatedAt}
+		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, OwnerWork: ownerWork,
+		PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, UpdatedAt: v.UpdatedAt}
 }
 
 // cleanDoneWhen is a task's criteria as kept: trimmed, no empty or repeated ones, at most 6 of at most 200 characters.
@@ -611,6 +636,24 @@ func (s *Service) noteProgress(ctx context.Context, id string, p TaskProgress) b
 		s.todosChanged(ctx)
 	}
 	return ok
+}
+
+// clearDoneProgress drops a prior turn's in-memory done report when a new turn begins on supervised task id, so an
+// earlier done report cannot settle shells left behind by a later turn (#16418).
+func (s *Service) clearDoneProgress(ctx context.Context, id string) {
+	s.todos.mu.Lock()
+	cur := s.todos.todos[id]
+	cleared := false
+	if cur != nil && cur.Supervision != nil && cur.Supervision.Progress != nil && cur.Supervision.Progress.Kind == upReportDone {
+		v := cur.Supervision.clone()
+		v.Progress = nil
+		cur.Supervision = v
+		cleared = true
+	}
+	s.todos.mu.Unlock()
+	if cleared {
+		s.todosChanged(ctx)
+	}
 }
 
 // ---- the snapshot ----

@@ -296,8 +296,8 @@ export function buildIntegrationCatalog(input: IntegrationCatalogInput): Integra
   const builtinItems: IntegrationItem[] = [];
 
   const mailConnector = input.connectors.find((c) => c.id === "mail");
-  if (input.hasMail || mailConnector) {
-    claimedConnectors.add("mail");
+  claimedConnectors.add("mail");
+  if (input.hasMail) {
     const mailSubs = claimSubscriptions((s) => !isPushSubscription(s) && s.connector === "mail");
     const accounts = input.mailAccounts ?? null;
     const hasError = accounts?.some((a) => a.status === "error") || mailConnector?.status === "error";

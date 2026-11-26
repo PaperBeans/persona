@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="shortcuts_widget_label">Agents</string>
     <string name="shortcuts_widget_description">几个 Agent 需要你、在工作、做完了</string>
+    <string name="shortcuts_ask_widget_description">直接打开与 Persona 的主对话并开始输入</string>
+    <string name="shortcuts_ask_widget_subtitle">主对话</string>
     <string name="shortcuts_approve_title">批准第一个待处理</string>
     <string name="shortcuts_loading">正在看有什么等你…</string>
     <string name="shortcuts_not_paired">还没配对。先打开 Persona，扫 hub 的配对二维码。</string>

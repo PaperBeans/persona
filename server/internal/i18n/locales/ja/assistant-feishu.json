@@ -163,5 +163,15 @@
   "source_report_full_notice_chat": "{minutes} 分後に元のメッセージにこの回答を返信します。取り消すには /noreply と返信してください。\n\n{text}",
   "source_report_file_notice": "{minutes} 分後に元のメッセージに添付の回答を返信します。取り消すにはここで /noreply を送ってください。",
   "source_report_file_notice_chat": "{minutes} 分後に元のメッセージに添付の回答を返信します。取り消すにはこのメッセージに /noreply と返信してください。",
-  "source_report_no_final": "タスクは完了しました。返信できる最終回答が見つかりませんでした。"
+  "source_report_no_final": "タスクは完了しました。返信できる最終回答が見つかりませんでした。",
+  "handoff_decision_source": "Lark ボット",
+  "handoff_decision_title": "{chat} の {sender}",
+  "handoff_decision_background": "質問: {question} — 下書き: {draft}",
+  "handoff_decision_post": "返信を投稿",
+  "handoff_decision_post_leads": "ボットがこの返信をグループに投稿します。全員が読めます。",
+  "handoff_decision_drop": "投稿しない",
+  "handoff_decision_drop_leads": "何も投稿せず、質問は取り下げます。",
+  "handoff_decision_cost": "{sender} は返事を待っています。",
+  "handoff_reply_header": "{sender} の質問: {question}",
+  "handoff_reply_footer": "{owner} の AI アシスタントが参考として回答しました。"
 }

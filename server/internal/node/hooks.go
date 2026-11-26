@@ -985,9 +985,6 @@ func (n *Node) askOnce(ctx context.Context, ix proto.Interaction) (proto.Resolut
 	if res.Dismiss {
 		return res, false, nil
 	}
-	if ix.EditableText != "" && res.EditedText != "" {
-		n.editedAnswers.Store(ix.ID, res.EditedText)
-	}
 	return res, true, nil
 }
 

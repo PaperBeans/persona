@@ -405,3 +405,83 @@ func TestStartAsyncUltracodeDoesNotDeadlockAnEarlyMessage(t *testing.T) {
 		t.Fatalf("order: %v", got)
 	}
 }
+
+// When session.ultracode commits dismiss_lost before the toggle is refused by agent_blocked, it returns a partial
+// unknown-delivery error (not delivered=none) so client_ops does not record the committed dismissal as failed.
+func TestUltracodeDismissLostWithBlockedToggleReturnsPartial(t *testing.T) {
+	n, f, home := herdrNode(t)
+	seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", home, ""))
+	plain, ansi := screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi")
+	f.setScreens("w1:p1", plain, ansi)
+	f.reply("agent.prompt", herdrFail{Code: "agent_blocked", Message: "interactive input required"})
+	lostAt := time.Now().UTC()
+	n.mu.Lock()
+	u := n.ultracodeLocked(sidA)
+	u.LostAt = &lostAt
+	u.LostDismissed = false
+	n.mu.Unlock()
+	_, err := request(t, n, "session.ultracode", map[string]any{"session_id": sidA, "ultracode": true, "dismiss_lost": true})
+	code, data := refusalOf(t, err)
+	if code != "dialog_open" || data["delivered"] != deliveredUnknown || data["partial"] != true || data["retryable"] != false {
+		t.Fatalf("dismiss+blocked = code=%q data=%v, want dialog_open delivered=unknown partial=true retryable=false", code, data)
+	}
+	n.mu.Lock()
+	u = n.ultracodeLocked(sidA)
+	dismissed := u.LostDismissed && u.LostAt == nil
+	n.mu.Unlock()
+	if !dismissed {
+		t.Fatalf("lost notice was not dismissed: %+v", u)
+	}
+
+	// When a replacement toggle without dismiss_lost is definitively refused (delivered=none), preserve the previously
+	// queued ultracode toggle instead of dropping it.
+	t.Run("refused replacement preserves prior queued toggle", func(t *testing.T) {
+		n2, f2, home2 := herdrNode(t)
+		seedAgents(t, n2, f2, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", home2, ""))
+		f2.setScreens("w1:p1", plain, ansi)
+		f2.reply("agent.prompt", herdrFail{Code: "agent_blocked", Message: "interactive input required"})
+		n2.mu.Lock()
+		u2 := n2.ultracodeLocked(sidA)
+		u2.pending = ultraBool(false)
+		u2.note = "waiting for turn"
+		n2.mu.Unlock()
+		_, err := request(t, n2, "session.ultracode", map[string]any{"session_id": sidA, "ultracode": true})
+		code, data := refusalOf(t, err)
+		if code != "dialog_open" || data["delivered"] != "none" {
+			t.Fatalf("refused replacement = code=%q data=%v, want dialog_open delivered=none", code, data)
+		}
+		n2.mu.Lock()
+		u2 = n2.ultracodeLocked(sidA)
+		restored := u2.pending != nil && !*u2.pending && u2.note == "waiting for turn"
+		n2.mu.Unlock()
+		if !restored {
+			t.Fatalf("prior queued toggle was lost: %+v", u2)
+		}
+	})
+
+	// If a new Claude process begins while a replacement toggle is refused, do not restore the old process's queue.
+	t.Run("refused replacement does not restore prior queue across process change", func(t *testing.T) {
+		n3, f3, home3 := herdrNode(t)
+		seedAgents(t, n3, f3, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", home3, ""))
+		f3.setScreens("w1:p1", plain, ansi)
+		n3.beginUltracodeProcess(sidA, false, true, time.Now().Add(-time.Second))
+		n3.mu.Lock()
+		u3 := n3.ultracodeLocked(sidA)
+		u3.pending = ultraBool(false)
+		n3.mu.Unlock()
+		f3.handle("agent.prompt", func(map[string]any) any {
+			n3.beginUltracodeProcess(sidA, true, false, time.Now())
+			return herdrFail{Code: "agent_blocked", Message: "interactive input required"}
+		})
+		_, err := request(t, n3, "session.ultracode", map[string]any{"session_id": sidA, "ultracode": true})
+		if code, data := refusalOf(t, err); code != "dialog_open" || data["delivered"] != "none" {
+			t.Fatalf("code=%q data=%v, want dialog_open delivered=none", code, data)
+		}
+		n3.mu.Lock()
+		pending := n3.ultracodeLocked(sidA).pending
+		n3.mu.Unlock()
+		if pending != nil {
+			t.Fatalf("old process's queued toggle leaked onto new process: %v", *pending)
+		}
+	})
+}

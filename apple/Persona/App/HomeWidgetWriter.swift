@@ -236,7 +236,7 @@ final class HomeWidgetWriter {
             .todos: data(s.todos),
             .usage: data(s.usage),
             .computers: data(s.machines),
-            .record: data(s.recording) + data(s.today),
+            .record: data(s.recording) + data(s.today) + data(s.recordingModule),
             .health: data(s.health),
             .water: intakePart(water: true),
             .protein: intakePart(water: false),
@@ -272,9 +272,11 @@ extension AppModel {
     func openWidget(_ kind: HomeKind) {
         switch kind {
         case .agents: selectedTab = .chats
-        case .inbox: selectedTab = .mail
+        case .inbox:
+            openNavigationEntry(.inbox)
         case .record: MeetingRecorder.openRecordings()
-        case .today, .todos: showShellPage(.todos)
+        case .today, .todos:
+            openNavigationEntry(.todos)
         case .usage, .computers: showShellPage(.machines)
         case .health, .water, .protein, .healthToday: showShellPage(.health)
         }
@@ -346,6 +348,8 @@ extension AppModel {
         s.health = data.health
         s.intake = data.intake
         s.activity = data.activity
+        // Only said when off, so the file is what it was with the module on (#15214).
+        if RecordingModule.allowance == .off { s.recordingModule = .off }
         return s
     }
 }

@@ -74,12 +74,91 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 func waitForWithin(t *testing.T, within time.Duration, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(within)
-	for !cond() {
-		if time.Now().After(deadline) {
+	if cond() {
+		return
+	}
+	deadline := time.NewTimer(within)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-tick.C:
+			if cond() {
+				return
+			}
+		case <-deadline.C:
+			if cond() {
+				return
+			}
 			t.Fatalf("never: %s", what)
 		}
-		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fastDelivery zeroes the insertion-gate delays in tests that assert immediate
+// negative upstream counts right after a deterministic tracker barrier.
+func fastDelivery(t *testing.T) {
+	t.Helper()
+	setVar(t, &delegationQuiet, 0)
+	setVar(t, &speechQuiet, 0)
+	setVar(t, &replyAudioIn, 0)
+}
+
+// pokeTracker sends a no-op machines event over the hub WebSocket so the
+// tracker loop runs checkAll/observe immediately instead of waiting for its 1 s tick.
+func pokeTracker(t *testing.T, hub *fakeHub) {
+	t.Helper()
+	waitFor(t, "the hub link to connect", func() bool {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		return len(hub.ws) > 0
+	})
+	hub.mu.Lock()
+	hub.pushLocked("", map[string]any{"type": "machines", "machines": []proto.Machine{}})
+	hub.mu.Unlock()
+}
+
+// pokeAndWaitLook triggers a tracker pass and waits for at least one session look after it.
+func pokeAndWaitLook(t *testing.T, hub *fakeHub, what string) {
+	t.Helper()
+	before := hub.lookCount()
+	pokeTracker(t, hub)
+	waitFor(t, what, func() bool { return hub.lookCount() > before })
+}
+
+// pokeAndFinish triggers two sequential tracker looks so protocol 1 tests know
+// the first look's checkAll and asks.tick have completely finished.
+func pokeAndFinish(t *testing.T, hub *fakeHub, what string) {
+	t.Helper()
+	pokeAndWaitLook(t, hub, what)
+	pokeAndWaitLook(t, hub, what+" (settled)")
+}
+
+// pokeAndSync triggers a tracker pass and drains t.ops via trackerDone (protocol 2).
+func pokeAndSync(t *testing.T, hub *fakeHub, a *app, logs *logCapture, tag string) {
+	t.Helper()
+	pokeAndWaitLook(t, hub, "tracker look for "+tag)
+	a.trackerDone(logs, tag)
+}
+
+// waitNoFrame watches app frames for within and fails immediately if any matches.
+func waitNoFrame(t *testing.T, a *app, within time.Duration, what string, match func(map[string]any) bool) {
+	t.Helper()
+	timer := time.NewTimer(within)
+	defer timer.Stop()
+	for {
+		select {
+		case f, ok := <-a.frames:
+			if !ok {
+				t.Fatal("the plugin closed the conversation")
+			}
+			if match(f) {
+				t.Fatalf("%s: %v", what, f)
+			}
+		case <-timer.C:
+			return
+		}
 	}
 }
 
@@ -97,6 +176,7 @@ func liveProvider(up *fakeUpstream) Config {
 // While the main conversation is busy with another channel's turn, the run waits for its own and says its answer, not
 // the other's (the old delegate read the conversation's last line as soon as it stopped working).
 func TestRunReadsItsOwnTurnWhileTheMainConversationIsBusy(t *testing.T) {
+	fastDelivery(t)
 	hub := newFakeHub(t)
 	hub.add("main1", proto.Item{Role: "user", Kind: proto.KindText, Text: "微信那边的问题", ClientMsgID: "wechat-1"})
 	hub.status("main1", "working")
@@ -107,18 +187,33 @@ func TestRunReadsItsOwnTurnWhileTheMainConversationIsBusy(t *testing.T) {
 		hub.mu.Unlock()
 		return http.StatusOK, `{}`
 	}
+	var readDone atomic.Bool
+	hub.onPageSent = func(session string, page []proto.Item) {
+		if session != "main1" {
+			return
+		}
+		for _, it := range page {
+			if it.TurnDuration != nil {
+				readDone.Store(true)
+				return
+			}
+		}
+	}
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "明天有什么会"})
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d1" && f["done"] == false })
 	hub.subscribed("main1")
+	logs.wait("call 1: run d1: sent")
 
 	// The other turn ends: not this run's answer.
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "微信那一轮的回答"})
 	hub.end("main1")
-	time.Sleep(1500 * time.Millisecond)
+	waitFor(t, "the other turn's end to be read", readDone.Load)
+	pokeAndFinish(t, hub, "the check after another turn's end")
 	if n := up.count(func(f map[string]any) bool {
 		return f["type"] == "session.commentary.append" && f["delegation_id"] != nil
 	}); n != 0 {
@@ -182,20 +277,23 @@ func TestLongAnswerIsSpokenWhole(t *testing.T) {
 // A second instruction while the first works is sent at once; once it is in, one answer covers both, on the newer
 // delegation, and the older one gets nothing (the model is told once).
 func TestFoldedRunsAnswerTogether(t *testing.T) {
+	fastDelivery(t)
 	hub := newFakeHub(t)
 	hub.manual = true
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "查明天的日程"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
 	hub.status("main1", "working")
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d1" && f["done"] == false })
 	a.send(map[string]any{"type": "text", "text": "顺便看看邮件"})
 	hub.waitSent(2)
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d2" && f["done"] == false })
-	time.Sleep(1200 * time.Millisecond) // the tracker has both before the turn ends
+	logs.wait("call 1: run d1: folded into run d2")
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "日程和邮件都看过了，没什么要紧的。"})
 	hub.end("main1")
 	got := content(up.nextMatch(on("dlg2")))
@@ -203,7 +301,10 @@ func TestFoldedRunsAnswerTogether(t *testing.T) {
 		t.Fatalf("result: %s", got)
 	}
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d1" && f["done"] == true })
-	time.Sleep(300 * time.Millisecond)
+	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d2" && f["done"] == true })
+	_ = a.c.Close(websocket.StatusNormalClosure, "bye")
+	up.next("session.close")
+	logs.wait("call 1: conversation closed")
 	if n := up.count(func(f map[string]any) bool { return f["delegation_id"] == "dlg1" }); n != 0 {
 		t.Fatalf("dlg1 was answered too (%d)", n)
 	}
@@ -217,16 +318,18 @@ func TestFoldedRunsKeepTheNewConversationsFirstAnswer(t *testing.T) {
 	hub.manual, hub.main, hub.sessions = true, "", map[string]*fakeSession{}
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "查明天的日程"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d1" && f["done"] == false })
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "明天下午三点有会。"})
 	a.send(map[string]any{"type": "text", "text": "顺便看看邮件"})
 	hub.waitSent(2)
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d2" && f["done"] == false })
-	time.Sleep(1200 * time.Millisecond) // the tracker has both before the turn ends
+	logs.wait("call 1: run d1: folded into run d2")
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "邮件没什么要紧的。"})
 	hub.end("main1")
 	got := content(up.nextMatch(on("dlg2")))
@@ -347,6 +450,7 @@ func TestUnpromptedDelegationIsRefused(t *testing.T) {
 // waits for it rather than refusing. The call stays open, nothing goes back on it until its answer.
 func TestAskPersonaWaitsForTheCaptionAndAnswersOnItsCall(t *testing.T) {
 	hub := newFakeHub(t)
+	started := make(chan *websocket.Conn, 1)
 	up := newFakeUpstream(t, func(u *fakeUpstream, c *websocket.Conn, f map[string]any) {
 		if f["type"] != "session.start" {
 			return
@@ -356,18 +460,21 @@ func TestAskPersonaWaitsForTheCaptionAndAnswersOnItsCall(t *testing.T) {
 		u.send(c, map[string]any{"type": "response.event", "delegation_id": "dlg7", "event": map[string]any{
 			"type": "function_call", "call_id": "c1", "name": "ask_persona", "arguments": `{"task":"查明天的日程"}`,
 		}})
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			u.send(c, map[string]any{"type": "session.input_transcript.delta", "delta": "帮我查一下明天的日程"})
-		}()
+		started <- c
 	})
 	pl := testPlugin(t, Config{Providers: []Provider{{ID: "rt", URL: up.url(), Models: []string{"m1"}, Tools: new(true)}}}, hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.until(func(f map[string]any) bool {
 		return f["type"] == "tool" && f["id"] == "c1" && f["label"] == "交给 Persona" && f["done"] == false
 	})
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "c1" && f["done"] == true })
+	logs.wait("call 1: delegation dlg7: a task for the main conversation")
+	if msgs := hub.messages(); len(msgs) != 0 {
+		t.Fatalf("sent before the caption arrived: %+v", msgs)
+	}
+	up.send(<-started, map[string]any{"type": "session.input_transcript.delta", "delta": "帮我查一下明天的日程"})
 	a.until(func(f map[string]any) bool { return f["type"] == "tool" && f["id"] == "d1" && f["done"] == false })
 	f := up.nextMatch(on("dlg7"))
 	if got := content(f); !strings.Contains(got, "明天下午三点有会") {
@@ -442,15 +549,24 @@ func TestTurnEndComesOverTheHubLink(t *testing.T) {
 	setVar(t, &lookEvery, time.Hour)
 	hub := newFakeHub(t)
 	hub.manual = true
+	var readDone atomic.Bool
+	hub.onPageSent = func(session string, page []proto.Item) {
+		if session == "main1" && len(page) == 1 && page[0].Role == "user" {
+			readDone.Store(true)
+		}
+	}
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "明天有什么会"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
 	hub.subscribed("main1")
-	waitFor(t, "the run's first check", func() bool { return hub.lookCount() >= 2 }) // the send looks once itself
-	time.Sleep(200 * time.Millisecond)
+	pokeTracker(t, hub)
+	waitFor(t, "the run's first check", readDone.Load)
+	pokeAndWaitLook(t, hub, "the run's first check to finish")
 	hub.status("main1", "working")
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "明天下午三点有会"})
 	ended := time.Now()
@@ -476,20 +592,32 @@ func TestHubLinkReconnects(t *testing.T) {
 	hub := newFakeHub(t)
 	hub.manual = true
 	hub.add("main1", proto.Item{Role: "user", Kind: proto.KindText, Text: "早先的一句"}, proto.Item{Role: "assistant", Kind: proto.KindText, Text: "早先的回答"})
+	var readDone atomic.Bool
+	hub.onPageSent = func(session string, page []proto.Item) {
+		if session == "main1" && len(page) == 1 && page[0].Role == "user" {
+			readDone.Store(true)
+		}
+	}
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "明天有什么会"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
 	hub.subscribed("main1")
-	waitFor(t, "the run's first check", func() bool { return hub.lookCount() >= 2 })
+	pokeTracker(t, hub)
+	waitFor(t, "the run's first check", readDone.Load)
+	pokeAndWaitLook(t, hub, "the run's first check to finish")
+	beforeDrop := hub.lookCount()
 	hub.dropWS()
 	waitFor(t, "a second subscribe", func() bool { n, _ := hub.subscribes("main1"); return n >= 2 })
 	if _, sub := hub.subscribes("main1"); sub["since_seq"] != float64(3) {
 		t.Fatalf("subscribed again with %v (the run's base is 2, its message 3)", sub)
 	}
-	time.Sleep(200 * time.Millisecond) // the catch-up check after the reconnect is done
+	waitFor(t, "the catch-up check after reconnect", func() bool { return hub.lookCount() > beforeDrop })
+	pokeAndWaitLook(t, hub, "the catch-up check to finish")
 	hub.status("main1", "working")
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "明天下午三点有会"})
 	hub.end("main1")
@@ -559,33 +687,54 @@ func TestChangedTranscriptEndsAShortTurnWhileTheHubLinkIsDown(t *testing.T) {
 // A card waiting on the user is said once (go look on the phone): not again while it waits, once more when it waits
 // again after working; then the turn's answer.
 func TestCardWaitingOnTheUserIsSaidOnce(t *testing.T) {
+	fastDelivery(t)
 	setVar(t, &lookEvery, 100*time.Millisecond)
 	setVar(t, &cardGrace, 300*time.Millisecond) // no card comes: said once that is past
+	var skew atomic.Int64
+	setVar(t, &clock, func() time.Time { return time.Now().Add(time.Duration(skew.Load())) })
 	hub := newFakeHub(t)
 	hub.manual = true
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "部署一下"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
+	hub.subscribed("main1")
 	hub.status("main1", "working")
+	logs.wait("call 1: run d1: working")
 	asked := func(f map[string]any) bool {
 		return f["type"] == "session.commentary.append" && f["delegation_id"] == nil && strings.Contains(content(f), "等用户回答或批准")
 	}
 	hub.edit("main1", func(s *fakeSession) { s.status, s.pending = "idle", 1 })
+	logs.wait("call 1: run d1: needs_you")
+	skew.Add(int64(cardGrace + time.Second))
+	pokeTracker(t, hub)
 	if got := content(up.nextMatch("go look on the phone", asked)); !strings.Contains(got, "「部署一下」") {
 		t.Fatalf("said: %s", got)
 	}
-	time.Sleep(600 * time.Millisecond) // several looks
+	skew.Add(int64(cardGrace + time.Second))
+	pokeAndFinish(t, hub, "several looks while waiting")
 	if n := up.count(asked); n != 1 {
 		t.Fatalf("said %d times while it waited", n)
 	}
+	workingCount := strings.Count(logs.String(), "call 1: run d1: working")
 	hub.edit("main1", func(s *fakeSession) { s.status, s.pending = "working", 0 })
-	time.Sleep(300 * time.Millisecond)
+	waitFor(t, "the run working again", func() bool {
+		return strings.Count(logs.String(), "call 1: run d1: working") > workingCount
+	})
+	needsCount := strings.Count(logs.String(), "call 1: run d1: needs_you")
 	hub.edit("main1", func(s *fakeSession) { s.status, s.pending = "idle", 1 })
+	waitFor(t, "the run waiting again", func() bool {
+		return strings.Count(logs.String(), "call 1: run d1: needs_you") > needsCount
+	})
+	skew.Add(int64(cardGrace + time.Second))
+	pokeTracker(t, hub)
 	up.nextMatch("go look on the phone, again", asked)
-	time.Sleep(600 * time.Millisecond)
+	skew.Add(int64(cardGrace + time.Second))
+	pokeAndFinish(t, hub, "several looks while waiting again")
 	if n := up.count(asked); n != 2 {
 		t.Fatalf("said %d times", n)
 	}
@@ -602,15 +751,20 @@ func TestCardWaitingOnTheUserIsSaidOnce(t *testing.T) {
 // needs_you, the card is said by its kind and no heartbeat says it still works, a status says it waits, and the call
 // does not pause; once the card is answered it works again, and its answer is said.
 func TestListedWorkingWhileACardWaits(t *testing.T) {
+	fastDelivery(t)
 	setVar(t, &lookEvery, 100*time.Millisecond)
 	setVar(t, &heartbeatAfter, time.Second)
 	setVar(t, &pauseAfter, 500*time.Millisecond)
+	var skew atomic.Int64
+	setVar(t, &clock, func() time.Time { return time.Now().Add(time.Duration(skew.Load())) })
 	hub := agentHub(t)
 	hub.manual = true
 	up := boundUpstream(t, false)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, boundStart("a1", nil))
 	a.until(ofType("ready"))
+	hub.subscribed("a1")
 	a.send(map[string]any{"type": "text", "text": "清理一下临时目录"})
 	m := hub.waitSent(1)
 	hub.status("a1", "working")
@@ -619,7 +773,11 @@ func TestListedWorkingWhileACardWaits(t *testing.T) {
 	hub.edit("a1", func(s *fakeSession) { s.pending = 1 }) // still listed working
 	a.runStates(m.ID, runNeedsYou)
 	up.nextMatch(saying("在等用户处理"))
-	time.Sleep(2500 * time.Millisecond) // past heartbeatAfter and pauseAfter
+	skew.Store(int64(2*heartbeatAfter + cardGrace + time.Second))
+	pokeAndSync(t, hub, a, logs, "card-waits-1")
+	pokeAndSync(t, hub, a, logs, "card-waits-2")
+	// pauseAfter is evaluated against wall time in conversation.speaker.
+	waitNoFrame(t, a, 2*pauseAfter, "paused while a card waits on the user", func(f map[string]any) bool { return f["type"] == "link" })
 	if n := up.count(saidWith("还在做")); n != 0 {
 		t.Fatalf("%d heartbeats while a card waits", n)
 	}
@@ -632,6 +790,7 @@ func TestListedWorkingWhileACardWaits(t *testing.T) {
 	if paused {
 		t.Fatal("paused while a card waits on the user")
 	}
+	skew.Store(0)
 	a.send(map[string]any{"type": "text", "text": "状态：到哪了"})
 	if got := content(up.nextMatch(on("dlg2"))); !strings.Contains(got, "在屏幕上等用户处理") || strings.Contains(got, "还在做") {
 		t.Fatalf("status: %s", got)
@@ -650,14 +809,19 @@ func TestListedWorkingWhileACardWaits(t *testing.T) {
 // not say it waits before cardGrace, and the card, once it comes, says itself, once. Blocked with no card at all past
 // cardGrace, the turn says it waits, once.
 func TestCardThatComesLateSaysItself(t *testing.T) {
+	fastDelivery(t)
 	setVar(t, &lookEvery, 100*time.Millisecond)
-	setVar(t, &cardGrace, 1500*time.Millisecond)
+	setVar(t, &cardGrace, 10*time.Second)
+	var skew atomic.Int64
+	setVar(t, &clock, func() time.Time { return time.Now().Add(time.Duration(skew.Load())) })
 	hub := agentHub(t)
 	hub.manual = true
 	up := boundUpstream(t, false)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, boundStart("a1", nil))
 	a.until(ofType("ready"))
+	hub.subscribed("a1")
 	a.send(map[string]any{"type": "text", "text": "跑一下迁移"})
 	m := hub.waitSent(1)
 	hub.status("a1", "working")
@@ -665,11 +829,14 @@ func TestCardThatComesLateSaysItself(t *testing.T) {
 	turn := saidWith("等用户回答或批准")
 	hub.edit("a1", func(s *fakeSession) { s.status = "blocked" }) // the dialog is up; its card not yet
 	a.runStates(m.ID, runNeedsYou)
-	time.Sleep(700 * time.Millisecond)
+	skew.Add(int64(cardGrace / 2))
+	pokeAndSync(t, hub, a, logs, "before-late-card")
 	hub.raise(proto.Interaction{ID: "s1", MachineID: "m", SessionID: "a1", Kind: proto.IxScreen, Summary: "Continue?"})
 	hub.edit("a1", func(s *fakeSession) { s.pending = 1 })
 	up.nextMatch(saying("在等用户处理"))
-	time.Sleep(2 * cardGrace)
+	skew.Add(int64(2 * cardGrace))
+	pokeAndSync(t, hub, a, logs, "past-card-grace-1")
+	pokeAndSync(t, hub, a, logs, "past-card-grace-2")
 	if n := up.count(turn); n != 0 {
 		t.Fatalf("the turn said it waits %d times besides its card", n)
 	}
@@ -678,12 +845,17 @@ func TestCardThatComesLateSaysItself(t *testing.T) {
 	a.runStates(m.ID, runWorking)
 	hub.edit("a1", func(s *fakeSession) { s.status = "blocked" }) // no card ever comes (a form the hub keeps from the extension)
 	a.runStates(m.ID, runNeedsYou)
-	time.Sleep(cardGrace / 2)
+	skew.Add(int64(cardGrace / 2))
+	pokeAndSync(t, hub, a, logs, "before-grace-no-card")
 	if n := up.count(turn); n != 0 {
 		t.Fatal("said it waits before cardGrace")
 	}
+	skew.Add(int64(cardGrace))
+	pokeTracker(t, hub)
 	up.nextMatch("the turn says it waits", turn)
-	time.Sleep(cardGrace)
+	skew.Add(int64(cardGrace))
+	pokeAndSync(t, hub, a, logs, "after-turn-said-1")
+	pokeAndSync(t, hub, a, logs, "after-turn-said-2")
 	if n := up.count(turn); n != 1 {
 		t.Fatalf("said %d times", n)
 	}
@@ -692,6 +864,7 @@ func TestCardThatComesLateSaysItself(t *testing.T) {
 // The conversation went away (closed, deleted) while its machine is online: after channel.MissingAfter the run gives up
 // and the model is told why there is no answer.
 func TestGoneConversationIsToldAsAFailure(t *testing.T) {
+	fastDelivery(t)
 	setVar(t, &lookEvery, 100*time.Millisecond)
 	var skew atomic.Int64
 	setVar(t, &clock, func() time.Time { return time.Now().Add(time.Duration(skew.Load())) })
@@ -699,18 +872,22 @@ func TestGoneConversationIsToldAsAFailure(t *testing.T) {
 	hub.manual = true
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "明天有什么会"})
 	hub.waitSent(1)
+	logs.wait("call 1: run d1: sent")
+	hub.subscribed("main1")
 	hub.mu.Lock()
 	delete(hub.sessions, "main1")
 	hub.mu.Unlock()
-	time.Sleep(300 * time.Millisecond)
+	pokeAndFinish(t, hub, "missing conversation checked")
 	if n := up.count(func(f map[string]any) bool { return f["delegation_id"] == "dlg1" }); n != 0 {
 		t.Fatal("gave up at once")
 	}
 	skew.Store(int64(channel.MissingAfter + time.Minute))
+	pokeTracker(t, hub)
 	got := content(up.nextMatch(on("dlg1")))
 	if !strings.Contains(got, "没有结果") || !strings.Contains(got, i18n.T(i18n.ZhHans, "channel-turns.gone")) {
 		t.Fatalf("result: %s", got)
@@ -785,6 +962,7 @@ func TestVoiceMessageIDs(t *testing.T) {
 // transcript ends with the previous turn's closing words: the model is told it was not delivered, never those words
 // (the old fallback read the whole tail and answered with them, #4513).
 func TestQueuedPastMostIsNotAnsweredWithThePreviousTurn(t *testing.T) {
+	fastDelivery(t)
 	setVar(t, &lookEvery, 100*time.Millisecond)
 	setVar(t, &readEvery, 100*time.Millisecond)
 	var skew atomic.Int64
@@ -798,19 +976,36 @@ func TestQueuedPastMostIsNotAnsweredWithThePreviousTurn(t *testing.T) {
 		sent.Store(true)
 		return http.StatusOK, `{}`
 	}
+	var readDone atomic.Bool
+	hub.onPageSent = func(session string, page []proto.Item) {
+		if session != "main1" {
+			return
+		}
+		for _, it := range page {
+			if it.TurnDuration != nil {
+				readDone.Store(true)
+				return
+			}
+		}
+	}
 	up := delegatingUpstream(t)
 	pl := testPlugin(t, liveProvider(up), hub.server(t))
+	logs := captureLog(t, pl)
 	a := dialApp(t, pl, map[string]any{"type": "start"})
 	a.until(ofType("ready"))
 	a.send(map[string]any{"type": "text", "text": "明天有什么会"})
 	waitFor(t, "the send", sent.Load)
+	logs.wait("call 1: run d1: sent")
+	hub.subscribed("main1")
 	hub.add("main1", proto.Item{Role: "assistant", Kind: proto.KindText, Text: "上一轮的收尾话"}) // after the run's base
 	hub.end("main1")
-	time.Sleep(400 * time.Millisecond)
+	waitFor(t, "the previous turn to be read", readDone.Load)
+	pokeAndFinish(t, hub, "checked before QueuedMost")
 	if n := up.count(func(f map[string]any) bool { return f["delegation_id"] == "dlg1" }); n != 0 {
 		t.Fatal("answered before QueuedMost")
 	}
 	skew.Store(int64(channel.QueuedMost + time.Minute))
+	pokeTracker(t, hub)
 	got := content(up.nextMatch(on("dlg1")))
 	if strings.Contains(got, "上一轮的收尾话") {
 		t.Fatalf("answered with the previous turn's words: %s", got)

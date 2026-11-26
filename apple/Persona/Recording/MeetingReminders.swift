@@ -51,11 +51,18 @@ import UserNotifications
         refreshing = Task {
             let now = Date.now
             // EventKit's reads are synchronous calls to its daemon: off the main thread (P1).
-            let events = Self.enabled ? await MeetingCalendar.eventsOffMain(from: now, to: now.addingTimeInterval(Self.horizon)) : []
+            // None with the hub's recording module off (#15214): a reminder's Start could start nothing, and the ones
+            // already scheduled are taken back.
+            let events = Self.reminds(enabled: Self.enabled, recording: RecordingModule.allowance) ? await MeetingCalendar.eventsOffMain(from: now, to: now.addingTimeInterval(Self.horizon)) : []
             let wanted = Self.plan(events, now: now, recording: recording)
             guard !Task.isCancelled else { return }
             await Self.ask(wanted)
         }
+    }
+
+    /// Whether meetings are reminded of: the setting is on and the hub's recording module is.
+    nonisolated static func reminds(enabled: Bool, recording: RecordingAllowance) -> Bool {
+        enabled && recording.offersWrites
     }
 
     /// One reminder: its notification's identifier, when it fires and the meeting it is for.

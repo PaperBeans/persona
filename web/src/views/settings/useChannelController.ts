@@ -20,7 +20,11 @@ export interface ChannelController {
   change: (what: string, body: ChannelUpdateBody) => Promise<void>;
   unbind: () => Promise<boolean>;
   runTest: () => Promise<void>;
-  adopt: (next: ChannelDetail) => void;
+  updateRouting: (body: Pick<ChannelUpdateBody, "thread_mode" | "thread_idle_hours">) => Promise<ChannelDetail | null>;
+}
+
+function notifyError(error: unknown) {
+  toast(errorText(error), "error");
 }
 
 /** Loads and mutates one channel with request sequencing, exclusive writes, and channel-switch fencing. */
@@ -46,6 +50,7 @@ export function useChannelController(channelId: string | null, manager?: string)
   const epochRef = useRef(0);
   const seq = useRef(0);
   const loadSeq = useRef(0);
+  const loadedGeneration = useRef(0);
   const activeWrite = useRef(0);
   const detailRef = useRef<ChannelDetail | null>(null);
   detailRef.current = detail;
@@ -66,7 +71,8 @@ export function useChannelController(channelId: string | null, manager?: string)
       if (!mounted.current || epoch !== epochRef.current || scope !== scopeRef.current || n !== seq.current) return;
       setDetail(next);
       setError("");
-      setReloadKey((k) => k + 1);
+      loadedGeneration.current++;
+      setReloadKey(loadedGeneration.current);
     } catch (e) {
       if (mounted.current && epoch === epochRef.current && scope === scopeRef.current && n === seq.current) {
         setError(errorText(e));
@@ -96,50 +102,48 @@ export function useChannelController(channelId: string | null, manager?: string)
     };
   }, [load]);
 
-  const adopt = useCallback((next: ChannelDetail) => {
-    forgetChannels();
-    if (!mounted.current || !channelId || scope !== scopeRef.current || next.id !== channelId) return;
-    seq.current++;
-    setDetail(next);
-    setError("");
-  }, [channelId, scope]);
-
-  const exclusive = useCallback(async (what: string, save: () => Promise<ChannelDetail | void>): Promise<boolean> => {
-    if (!channelId || scope !== scopeRef.current || activeWrite.current !== 0) return false;
+  const exclusive = useCallback(async <T extends ChannelDetail | void>(what: string, save: () => Promise<T>) => {
     const epoch = epochRef.current;
+    const current = () => mounted.current && scope === scopeRef.current && epoch === epochRef.current;
+    if (!channelId || !current() || activeWrite.current !== 0) return null;
     const n = ++seq.current;
     activeWrite.current = n;
     setBusy(what);
-    let stale = false;
-    let ok = false;
     try {
       const next = await save();
-      if (next) {
-        forgetChannels();
-        if (mounted.current && epoch === epochRef.current) {
-          if (n === seq.current) setDetail(next);
-          else stale = true;
-        }
+      if (next) forgetChannels();
+      if (!current() || (next && next.id !== channelId)) return null;
+      if (next && n !== seq.current) {
+        // A refresh raced the write. Re-read its committed result without publishing the stale response.
+        void load();
+        return { snapshot: null };
       }
-      ok = mounted.current && epoch === epochRef.current;
-    } catch (e) {
-      if (mounted.current && epoch === epochRef.current) toast(errorText(e), "error");
+      if (next) setDetail(next);
+      return { snapshot: next };
+    } catch (error) {
+      if (current()) throw error;
+      return null;
     } finally {
       if (activeWrite.current === n) activeWrite.current = 0;
-      if (mounted.current && epoch === epochRef.current) setBusy("");
+      if (current()) setBusy("");
     }
-    if (stale && mounted.current && epoch === epochRef.current) void load();
-    return ok;
   }, [channelId, load, scope]);
+
+  const updateRouting = useCallback<ChannelController["updateRouting"]>(async (body) => {
+    if (!channelId || reloadKey !== loadedGeneration.current) return null;
+    const result = await exclusive("routing", () => updateChannel(channelId, body));
+    return result?.snapshot ?? null;
+  }, [channelId, reloadKey, exclusive]);
 
   const change = useCallback(async (what: string, body: ChannelUpdateBody) => {
     if (!channelId) return;
-    await exclusive(what, () => updateChannel(channelId, body));
+    await exclusive(what, () => updateChannel(channelId, body)).catch(notifyError);
   }, [channelId, exclusive]);
 
   const unbind = useCallback(async () => {
     if (!channelId) return false;
-    return exclusive("unbind", () => unbindChannel(channelId));
+    const result = await exclusive("unbind", () => unbindChannel(channelId)).catch(notifyError);
+    return !!result;
   }, [channelId, exclusive]);
 
   const runTest = useCallback(async () => {
@@ -164,8 +168,8 @@ export function useChannelController(channelId: string | null, manager?: string)
         }
         throw e;
       }
-    });
+    }).catch(notifyError);
   }, [channelId, exclusive]);
 
-  return { detail, error, loading, busy, reloadKey, testFeedback, load, change, unbind, runTest, adopt };
+  return { detail, error, loading, busy, reloadKey, testFeedback, load, change, unbind, runTest, updateRouting };
 }

@@ -1,6 +1,7 @@
 package briefing
 
 import (
+	"cmp"
 	"context"
 	"time"
 
@@ -79,7 +80,8 @@ func (r *runner) Body(f *modapi.BriefSnapshot, title string) modapi.BriefBody {
 	}
 	for _, x := range f.Accept {
 		out := row(x)
-		out.Title, out.Detail, out.AskedAt = x.ID, f.Changed[x.ID], x.Asked
+		out.Title, out.Detail, out.AskedAt = x.ID, cmp.Or(x.Detail, f.Changed[x.ID]), x.Asked
+		out.EvidenceLink = x.EvidenceLink
 		if a, ok := f.Asks[x.ID]; ok {
 			out.Verdict, out.Outcome = a.Verdict, a.Outcome
 			if a.Decide {
@@ -90,6 +92,9 @@ func (r *runner) Body(f *modapi.BriefSnapshot, title string) modapi.BriefBody {
 			if title, ok := r.todos.TodoTitle(x.ID); ok {
 				out.Title = title
 			}
+		}
+		if out.Detail == out.Verdict || out.Detail == out.Title {
+			out.Detail = ""
 		}
 		b.Accept = append(b.Accept, out)
 	}

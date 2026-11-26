@@ -13,14 +13,28 @@ function browserName() {
  *  sign-in here names it in `replaces`, so the hub takes it off then. */
 export const UNREVOKED_KEY = "persona.unrevokedTokenId";
 
-export const unrevokedTokenId = (): string => localStorage.getItem(UNREVOKED_KEY) ?? "";
+export const unrevokedTokenId = (): string => {
+  try {
+    return localStorage.getItem(UNREVOKED_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
 
 export function keepUnrevoked(id: string) {
-  localStorage.setItem(UNREVOKED_KEY, id);
+  try {
+    localStorage.setItem(UNREVOKED_KEY, id);
+  } catch {
+    // blocked or full storage must not interrupt sign-out
+  }
 }
 
 export function forgetUnrevoked() {
-  if (localStorage.getItem(UNREVOKED_KEY) !== null) localStorage.removeItem(UNREVOKED_KEY);
+  try {
+    if (localStorage.getItem(UNREVOKED_KEY) !== null) localStorage.removeItem(UNREVOKED_KEY);
+  } catch {
+    // blocked storage must not interrupt sign-in
+  }
 }
 
 /** The name this browser's device token goes by on the hub, with the day it signed in: two browsers of the same kind

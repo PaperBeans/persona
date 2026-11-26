@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedAgentsDisplay } from "../../lib/agents-display";
+import { setToken } from "../../lib/api";
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
   g.ResizeObserver ??= class {
@@ -69,6 +70,8 @@ let root: Root;
 beforeEach(() => {
   localStorage.clear();
   reset();
+  // Establish the fixture's credential before seeding: a later first credential read resets the display store.
+  setToken("agents-filter-fixture");
   // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
   seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   resetAgentListFilters();
@@ -328,7 +331,7 @@ describe("an associated tab name in the complete Agents list (#7595)", () => {
   });
 
   it("keeps the plain fallback in an idle multi-session space without duplicating an associated identity", async () => {
-    const plain = { ...sessions[1], session_id: "plain", title: "Plain fallback", space_id: "w1", space_name: "demo", slot_name: "Workspace only", status: "idle" as const, state: "idle" as const, updated_at: undefined };
+    const plain = { ...sessions[1], session_id: "plain", title: "Plain fallback", space_id: "w1", space_name: "demo", slot_name: "Workspace only", status: "idle" as const, state: "idle" as const, turn_error: undefined, updated_at: undefined };
     const associated = { ...plain, session_id: "associated", title: "Associated", slot_id: "w1:t1", tab_id: "w1:t1", slot_name: "Release Review", pane_id: "w1:p1" };
     seed();
     getState().sessions = { mac: [plain, associated] };

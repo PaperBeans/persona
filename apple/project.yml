@@ -402,6 +402,8 @@ targets:
       - path: Shared/Design/PersonaFace.swift
       # Persona's Home Screen widgets (docs/apple/home-widgets.md): the snapshot the app writes, the views, their tokens.
       - path: Shared/HomeWidgets
+      # The hub's recording allowance in the widgets' snapshot and the recording activity's state (#15214).
+      - path: Shared/Recording/PhoneRecordingAllowance.swift
       - path: Shared/Design/HomeWidgetTokens.swift
       - path: Shared/Design/HealthIntakePalette.swift
       # The app's String Catalog and interface language (docs/apple/ios.md「Interface language」).
@@ -666,6 +668,8 @@ targets:
       - path: Shared/WatchPetSnapshot.swift
       # The All-Day Recording complication: the state the watch app wrote into the watch App Group.
       - path: Shared/Recording/AllDaySnapshot.swift
+      # The Record complication: the phone's word on its hub's recording module, kept in the watch App Group (#15214).
+      - path: Shared/Recording/PhoneRecordingAllowance.swift
       - path: Shared/Design/WatchFaceTokens.swift
       - path: Shared/WatchIntake.swift
       - path: Shared/WatchIntakeConfiguration.swift

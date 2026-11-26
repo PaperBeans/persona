@@ -295,6 +295,37 @@ test('companion advertises launchers/models/assistant without supervision_policy
   assert.ok(acp.calls.some((c) => c[0] === 'closeSession' && c[1].sessionId === sid))
 })
 
+test('live ACP keeps the last reply when the next segment is a chunked botmux marker', async (t) => {
+  const n = await startFakeNode(t)
+  const acp = new FakeAcpClient()
+  const companion = createTestCompanion({ socketPath: n.path, openDb: fakeV1Db().openDb, acp, pushDelayMs: 5 })
+  t.after(() => companion.stop())
+  let streamingPreview
+  acp.onPrompt = async (sessionId, blocks, client) => {
+    const update = (event) => client.emit('update', { sessionId, update: event })
+    const chunk = (text) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
+    chunk('Real words.\nBOTMUX_NOTHING_TO_SEND')
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call', kind: 'read', title: 'Read' })
+    chunk('BOTMUX_NOTHING_')
+    chunk('TO_SEND')
+    const before = n.all('runtime.sessions').length
+    companion.runtime.sessionsChanged()
+    await until('streaming row published', () => n.all('runtime.sessions').length > before)
+    streamingPreview = n.last('runtime.sessions').sessions.find(s => s.session_id === sessionId)?.last_text
+    return { stopReason: 'end_turn' }
+  }
+  await companion.start()
+  await n.ready
+  const { session } = await n.peer.call('session.start', { cwd: '/w/app', prompt: 'go' })
+  const id = session.session_id
+  await until('turn finished', () => n.last('runtime.sessions')?.sessions?.find(s => s.session_id === id)?.status === 'done')
+  assert.equal(streamingPreview, 'Real words.')
+  assert.equal(n.last('runtime.sessions').sessions.find(s => s.session_id === id).last_text, 'Real words.')
+  const page = await n.peer.call('session.items', { session_id: id, limit: 20 })
+  assert.deepEqual(page.items.filter(i => i.role === 'assistant' && i.kind === 'text').map(i => i.text),
+    ['Real words.\nBOTMUX_NOTHING_TO_SEND', 'BOTMUX_NOTHING_TO_SEND'])
+})
+
 test('the ACP companion exposes A2A tools and forwards calls from its own Agent session', async (t) => {
   const n = await startFakeNode(t, { tools: [{ name: 'a2a_report', description: 'Report a task result' }] })
   const acp = new FakeAcpClient()

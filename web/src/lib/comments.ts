@@ -181,7 +181,7 @@ export function isCommentHead(line: string): boolean {
 }
 
 /** The comment as the block the agent reads (before the `> ` marks): its number, where, the words or code, the note. */
-export function commentBlock(q: DraftQuote, n: number): string {
+export function commentBlock(q: DraftQuote, n: number, images?: readonly number[]): string {
   const c = q.comment;
   if (!c) return q.text;
   const note = clampComment(c.body).trim();
@@ -206,7 +206,9 @@ export function commentBlock(q: DraftQuote, n: number): string {
     const fence = fenceFor(q.text);
     out.push(fence + (s.lang ?? ""), q.text, fence);
   } else {
-    out.push(`Comment ${n}`, "Selected text:", ...q.text.split("\n").map((l) => `> ${l}`));
+    out.push(`Comment ${n}`);
+    if (images?.length) out.push(`Attached images for this comment (positions in this message): ${images.join(", ")}`);
+    out.push("Selected text:", ...q.text.split("\n").map((l) => `> ${l}`));
   }
   if (note) out.push("", note);
   return out.join("\n");
@@ -219,6 +221,7 @@ export function parseCommentBlock(block: string): DraftQuote | null {
   if (!head) return null;
   let i = 1;
   if (head[1] === "Comment") {
+    if (/^Attached images for this comment \(positions in this message\): \d+(, \d+)*$/.test(lines[i] ?? "")) i++;
     if (lines[i]?.trim() === "Selected text:") i++;
     const words: string[] = [];
     while (i < lines.length && /^ {0,3}>/.test(lines[i])) words.push(lines[i++].replace(/^ {0,3}> ?/, ""));

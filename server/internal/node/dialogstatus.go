@@ -140,5 +140,5 @@ func (n *Node) dialogShown(ctx context.Context, pane string) bool {
 // progress has since called the Agent working. Other lost-first reasons are not dialogs and stay closed.
 func (n *Node) lostFirstPromptDialog(id string) bool {
 	p, ok := n.lostFirst.get(id)
-	return ok && p.why == lostDialog
+	return ok && (p.why == lostDialog || p.why == lostWorkDialog())
 }

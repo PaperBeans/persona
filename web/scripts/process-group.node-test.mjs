@@ -223,7 +223,7 @@ test("real Vitest forks respect the cap and supervised parent death reaps only t
     const active = join(dir, `active-${name}`);
     const release = join(dir, `release-${name}`);
     await mkdir(active);
-    const command = [vitest, "run", "--config", config];
+    const command = [vitest, "run", "--configLoader", "runner", "--config", config];
     const args = supervised
       ? [runner, "--timeout-ms", "0", "--", process.execPath, ...command]
       : command;

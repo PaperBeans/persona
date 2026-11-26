@@ -297,7 +297,7 @@ describe("Model configuration model and effort", () => {
 
   it.each([
     ["claude", "Sonnet", "sonnet", "high"],
-    ["codex", "5.5", "gpt-5.5", "xhigh"],
+    ["codex", "GPT-5.5", "gpt-5.5", "xhigh"],
   ])("writes %s model and effort separately", async (agent, name, model, effort) => {
     agents = makeAgents({ provider: `launcher.${agent}` });
     await render();

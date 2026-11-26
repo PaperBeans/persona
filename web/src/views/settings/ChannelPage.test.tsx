@@ -150,6 +150,12 @@ describe("ChannelPage target override hint", () => {
     expect(byText(t("settings-channels.target_override_settings"))).toBeUndefined();
   });
 
+  it("explains where groups, topics and direct messages go in groups_and_topics mode", async () => {
+    await refreshWith({ ...detail(false, false), target_override: { mode: "groups_and_topics" } });
+    expect(host.textContent).toContain(t("settings-channels.target_override_groups_and_topics"));
+    expect(host.textContent).not.toContain(t("settings-channels.target_override_topics"));
+  });
+
   it("shows the group topic routing hint with an extension settings shortcut when active", async () => {
     await refreshWith({
       ...detail(false, false),

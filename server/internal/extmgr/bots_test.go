@@ -308,7 +308,9 @@ type botWorld struct {
 }
 
 // newBotWorld is a manager with the Feishu bot on (credentials typed in the app, the fake open platform), and the
-// assistant in its process.
+// assistant in its process. It returns once the bot's start-up calls are done (botStarted): turning the bot on starts
+// it, and a test that counts the bot's calls after its own setup then counts only what its own steps cause (#14219,
+// #14986, #16350). A test that starts the bot again (restartBot, new credentials, turning it off and on) waits itself.
 func newBotWorld(t *testing.T) *botWorld {
 	t.Helper()
 	needsLarkModule(t) // the world is the Feishu bot's, with its fake open platform
@@ -327,6 +329,7 @@ func newBotWorld(t *testing.T) *botWorld {
 		fmt.Sprintf(`{"enabled":true,"app_id":"cli_test","app_secret":"s3cret","domain":%q,"features":{"main":true,"cards":true}}`, api.srv.URL)); code != 200 {
 		t.Fatalf("enable: %d %v", code, out)
 	}
+	w.botStarted(t)
 	return w
 }
 

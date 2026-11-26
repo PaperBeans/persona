@@ -328,7 +328,8 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
   hub sends accepted and deployed work to Done 24 hours after it finished. Accepted or deployed work never reads as
   `pr_open`, as today; an open concern is never accepted or deployed.
 - **A plain "Please verify" is a finish, not `verify`**: it stays in Just finished as the SOP's "Decision table" keeps
-  it (see "Not produced yet").
+  it. A supervisor's explicit `accepted` + `user_check` puts the open task in Needs you with reason `verify` (row 3).
+  Its listed `ask` still supplies the existing round-bound Pass action.
 - **A park on someone else is `someone_else`**, with the park's line: row 8 places it, and its `waiting_on` names the
   reason row 10 has for it.
 - **Steps roll up only into Needs you, Working, Waiting and Can wait**, and only when ahead of the parent's own
@@ -356,8 +357,6 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
 The projection never answers these reasons, since today's list row carries no input for them; each comes with the
 fact it needs, adding a case here:
 
-- `verify` (6.3 row 3, a Check the result that blocks under Needs you): which asks block is open while #10047's work
-  on personal verification is in flight; a plain "Please verify" stays a finish (row 9).
 - `stopped_unfinished`: a run's end reason, which the session list does not carry yet.
 - `steps_proposed`, `signin` and `duplicate`: no such ask exists on the hub yet.
 - `queued`: a start the admission gate holds is kept in the plan (`PlanTask.Queue`), not on the listed to-do.

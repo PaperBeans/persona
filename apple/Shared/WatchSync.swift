@@ -121,6 +121,19 @@ nonisolated enum WatchPhoneCapabilities {
         storeRolling(ctx, in: defaults) + storeDay(ctx, full: full, in: defaults)
     }
 
+    /// The hub's recording allowance as the phone says it (`PhoneRecordingAllowance.contextKey`, #15214): the word is
+    /// kept as it came, so one this build doesn't know stays unknown, and a value that is no string is kept as its
+    /// description (unknown too). A full context without the key removes it: a phone from before the key, which
+    /// means allowed. Written to the watch's defaults (the views) and, with `group`, its App Group's (the Record
+    /// complication); returns 1 when the word changed, which is when the complication is reloaded.
+    @discardableResult static func storeRecording(_ ctx: [String: Any], full: Bool, in defaults: UserDefaults = .standard,
+                                                  group: UserDefaults? = nil) -> Int {
+        let word = ctx[PhoneRecordingAllowance.contextKey].map { PhoneRecordingAllowance(context: $0).wire }
+        let changed = keep(word, as: PhoneRecordingAllowance.storeKey, full: full, in: defaults)
+        if let group { _ = keep(word, as: PhoneRecordingAllowance.storeKey, full: full, in: group) }
+        return changed
+    }
+
     /// The rolling key alone; returns 1 when it wrote it.
     @discardableResult static func storeRolling(_ ctx: [String: Any], in defaults: UserDefaults = .standard) -> Int {
         guard let rolling = ctx["recordingRolling"] as? Bool, defaults.object(forKey: rollingKey) as? Bool != rolling else { return 0 }
@@ -258,6 +271,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
     /// Watch side: what the phone says of all-day recording changed (`recordingDay`, `recordingDayHub`,
     /// `recordingDayKeepDays`): its consent came or went, or how long the watch keeps chunks.
     var onDayCapabilities: (() -> Void)?
+    /// Watch side: the phone's word on its hub's recording module changed (`PhoneRecordingAllowance`, #15214).
+    var onRecordingAllowance: (() -> Void)?
 
     private var lastSummaryPush = Date.distantPast
     private var pendingSummary: WatchSummary?
@@ -265,6 +280,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
     #if os(iOS) || os(visionOS)
     /// What the app last gave `pushRecordingDay`, sent again at every activation.
     private var dayCapabilities: RecordingDayCapabilities?
+    /// What the app last gave `pushRecording`, sent again at every activation.
+    private var recordingAllowance: PhoneRecordingAllowance?
     /// Whether the watch app was installed at the last look (activation, a change of the watch's state).
     private var watchAppWasInstalled = false
     #endif
@@ -377,6 +394,16 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     #if os(iOS) || os(visionOS)
+    /// iPhone side: whether its hub's recording module is on (`PhoneRecordingAllowance`, #15214), in the application
+    /// context so a watch that wakes later still has the last word. Callable before the session activates: the latest
+    /// goes out at activation. A push that changes nothing is skipped.
+    func pushRecording(_ allowance: PhoneRecordingAllowance) {
+        recordingAllowance = allowance
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated,
+              WCSession.default.applicationContext[PhoneRecordingAllowance.contextKey] as? String != allowance.wire else { return }
+        update([PhoneRecordingAllowance.contextKey: allowance.wire])
+    }
+
     /// iPhone side: what it tells the watch about all-day recording (`RecordingDayCapabilities`): whether the user
     /// agreed (`recordingDay` 1, else 0), whether its hub lists `recording_day`, and how long the watch keeps
     /// unacknowledged chunks. Callable before the session activates: the latest values go out at activation. A push that
@@ -545,6 +572,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
     /// `WatchPhoneCapabilities.keepDays`).
     nonisolated static let phoneDayKey = WatchPhoneCapabilities.dayKey
     nonisolated static let phoneDayHubKey = WatchPhoneCapabilities.dayHubKey
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance.storeKey`); absent means allowed.
+    nonisolated static let phoneRecordingKey = PhoneRecordingAllowance.storeKey
     nonisolated static let phoneDayKeepDaysKey = WatchPhoneCapabilities.keepDaysKey
 
     /// `full`: the whole application context (at activation, or a new one arrived), which also says what the phone no
@@ -553,6 +582,9 @@ final class WatchSync: NSObject, WCSessionDelegate {
         WatchPhoneCapabilities.storeRolling(ctx)
         let dayChanged = WatchPhoneCapabilities.storeDay(ctx, full: full) > 0
         #if os(watchOS)
+        if WatchPhoneCapabilities.storeRecording(ctx, full: full, group: PhoneRecordingAllowance.groupDefaults()) > 0 {
+            onRecordingAllowance?()
+        }
         if let language = ctx["language"] as? String {
             LanguageStore.shared.follow(language)
             if AppLanguage.codes.contains(language) {
@@ -683,7 +715,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
             self.apply(ctx, full: true)
             #if os(iOS) || os(visionOS)
             self.watchAppWasInstalled = installed
-            self.update(Self.capabilityContext(day: self.dayCapabilities))
+            self.update(Self.capabilityContext(day: self.dayCapabilities, recording: self.recordingAllowance))
             #endif
             self.onActivated?()
             self.onRecordingEvent?()
@@ -693,10 +725,11 @@ final class WatchSync: NSObject, WCSessionDelegate {
     #if os(iOS) || os(visionOS)
     /// iPhone side: what the phone takes, for the watch's application context: rolling recordings, and all-day
     /// recording's keys only once the app said what they are (`pushRecordingDay`), so the context never carries a
-    /// consent nobody gave.
-    static func capabilityContext(day: RecordingDayCapabilities?) -> [String: Any] {
+    /// consent nobody gave. The same for the hub's recording allowance (`pushRecording`): absent until the app said it.
+    static func capabilityContext(day: RecordingDayCapabilities?, recording: PhoneRecordingAllowance? = nil) -> [String: Any] {
         var capabilities: [String: Any] = ["recordingRolling": true]
         if let day { capabilities.merge(day.context) { $1 } }
+        if let recording { capabilities[PhoneRecordingAllowance.contextKey] = recording.wire }
         return capabilities
     }
 
@@ -711,7 +744,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
             let arrived = installed && !self.watchAppWasInstalled
             self.watchAppWasInstalled = installed
             guard arrived else { return }
-            self.update(Self.capabilityContext(day: self.dayCapabilities))
+            self.update(Self.capabilityContext(day: self.dayCapabilities, recording: self.recordingAllowance))
         }
     }
     #endif

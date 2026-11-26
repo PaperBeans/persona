@@ -69,7 +69,7 @@ const agents = [
   agent("u1", "Release notes", "unread"),
 ];
 
-function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
+function render(over: { machine?: Machine; kind?: Exclude<AlertKind, "disk">; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
   act(() => root.render(
     <MachineAlertSheet
       machine={over.machine ?? laptop}
@@ -207,7 +207,7 @@ describe("the memory sheet", () => {
   });
 });
 
-describe("the disk sheet", () => {
+describe("cache recovery on a computer without a usage map", () => {
   const disk = (caches: { id: string; path: string; bytes: number; in_use: boolean }[]) => ({
     machine_id: "laptop", at: 1,
     disk: { volumes: [{ mount: "/", used: 450 * GB, total: 500 * GB }], folders: [{ path: "~/code", bytes: 120 * GB }], partial: true, caches },
@@ -224,7 +224,9 @@ describe("the disk sheet", () => {
       ] : [{ id: "go-build", path: "~/.cache/go-build", bytes: 6 * GB, in_use: true }]));
     };
     routes["POST /api/v1/machines/laptop/cleanup"] = () => json({ freed_bytes: 4.8 * GB, items: [{ id: "npm-cache", bytes: 2 * GB, status: "cleaned" }, { id: "xcode-derived-data", bytes: 3 * GB, status: "in_use" }] });
-    render({ kind: "disk", alerts: [{ kind: "disk", severity: "critical" }] });
+    routes["GET /api/v1/machines/laptop/storage/usage"] = () => json({ code: "node_outdated" }, 409);
+    const { UsageMap } = await import("./UsageMap");
+    await act(async () => root.render(<UsageMap machine={laptop} focus={{ mode: "reclaim", seq: 1 }} />));
     await flush();
     expect($("[data-testid=folders]")?.textContent).toContain("~/code");
     expect($("[data-testid=folders-partial]")).not.toBeNull();
@@ -289,29 +291,39 @@ describe("the version sheet", () => {
     await click($("[data-testid=redeploy]"));
     await click($("[data-testid=redeploy-confirm]"));
     expect(posts("/deploy")).toHaveLength(2);
+    show({ ...studio, deploying: true, deploy_phase: "draining", deploy_error: undefined });
+    await flush();
+    expect(state("transferring")).toBe("done");
+    expect(state("draining")).toBe("current");
+    expect(state("restarting")).toBe("todo");
+    expect($("[data-testid=deploy-draining-note]")?.textContent).toContain("等待当前任务空闲后重启");
     show({ ...studio, deploying: true, deploy_phase: "confirming", deploy_error: undefined });
     await flush();
+    expect(state("draining")).toBe("done");
     expect(state("confirming")).toBe("current");
+    expect($("[data-testid=deploy-draining-note]")).toBeNull();
     show({ ...studio, node_mismatch: false, node_version: "v1-202611141020" });
     await flush();
     expect($("[data-testid=deploy-done]")?.textContent).toContain("v1-202611141020");
     expect(state("done")).toBe("done");
   });
 
-  it("withdraws an open Redeploy confirmation when the computer starts updating elsewhere", async () => {
+  it("withdraws an open Redeploy confirmation when the computer starts updating or draining elsewhere", async () => {
     const show = (machine: Machine) => render({ machine, kind: "mismatch", agents: [] });
-    show(studio);
-    await flush();
-    await click($("[data-testid=redeploy]"));
-    const confirm = $("[data-testid=redeploy-confirm]") as HTMLButtonElement;
-    expect(confirm.disabled).toBe(false);
+    for (const phase of ["draining", "restarting"] as const) {
+      show(studio);
+      await flush();
+      await click($("[data-testid=redeploy]"));
+      const confirm = $("[data-testid=redeploy-confirm]") as HTMLButtonElement;
+      expect(confirm.disabled).toBe(false);
 
-    show({ ...studio, deploy_phase: "restarting" });
-    await flush();
-    expect($('[data-step="restarting"]')?.getAttribute("data-state")).toBe("current");
-    expect(confirm.isConnected && !confirm.disabled).toBe(false);
-    await act(async () => { confirm.click(); });
-    expect(posts("/deploy")).toHaveLength(0);
+      show({ ...studio, deploy_phase: phase });
+      await flush();
+      expect($(`[data-step="${phase}"]`)?.getAttribute("data-state")).toBe("current");
+      expect(confirm.isConnected && !confirm.disabled).toBe(false);
+      await act(async () => { confirm.click(); });
+      expect(posts("/deploy")).toHaveLength(0);
+    }
   });
 
   it("gives the hub's reason when it can't update the computer", async () => {
@@ -406,7 +418,7 @@ describe("the launcher sheet", () => {
     expect($("[data-launcher=codex]")?.textContent).toContain("连续失败 3 次");
     expect($("[data-launcher=team]")?.textContent).toContain("Team relay");
     expect($("[data-launcher=team]")?.textContent).toContain("401 invalid x-api-key");
-    expect($("[data-testid=healthy-launchers]")?.textContent).toBe("claude");
+    expect($("[data-testid=healthy-launchers]")?.textContent).toBe("Claude Code");
     await click($("[data-launcher=team] [data-testid=test-again]"));
     expect(posts("/launchers/health/check").map((c) => c.path)).toEqual(["/api/v1/launchers/health/check?machine=laptop&launcher=team"]);
     expect(got).toEqual([[expect.objectContaining({ launcher: "team", state: "ok" })]]);

@@ -13,6 +13,7 @@
 // isolation alone does not prove an authoritative policy channel. A pinned
 // version/config/ACP self-check must pass before supervision is advertised.
 
+import { assistantPreview } from '../../runtime-sdk/lib/assistant-preview.js'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
@@ -721,7 +722,7 @@ export function createOpencodeCompanion(options = {}) {
     flushActiveThought(s)
     if (s.activeText) {
       appendLiveItem(s, { role: 'assistant', kind: 'text', text: s.activeText })
-      s.lastText = snippet(s.activeText)
+      s.lastText = assistantPreview(s.activeText) ?? s.lastText
       s.hasAssistant = true
       s.activeText = ''
     }
@@ -770,7 +771,6 @@ export function createOpencodeCompanion(options = {}) {
         if (typeof txt === 'string' && txt) {
           flushActiveThought(s)
           s.activeText += txt
-          s.lastText = snippet(s.activeText)
           s.hasAssistant = true
           rt.stream(id, s.activeText)
         }
@@ -855,6 +855,7 @@ export function createOpencodeCompanion(options = {}) {
       ? 'blocked'
       : (s.running || s.queued > 0 ? 'working' : (s.hasAssistant || s.liveItems.length > 0 ? 'done' : 'idle'))
     const efforts = effortsForModel(s)
+    const lastText = s.activeText ? assistantPreview(s.activeText) ?? s.lastText : s.lastText
     const row = {
       session_id: s.id,
       title: s.title || basename(s.cwd) || 'opencode',
@@ -865,7 +866,7 @@ export function createOpencodeCompanion(options = {}) {
       space_id: s.cwd,
       space_name: basename(s.cwd),
       space_kind: 'opencode',
-      ...(s.lastText ? { last_text: s.lastText } : {}),
+      ...(lastText ? { last_text: lastText } : {}),
       ...(s.model ? { model: s.model } : {}),
       ...(s.effort ? { effort: s.effort } : {}),
       ...(efforts.length ? { efforts } : {}),

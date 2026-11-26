@@ -82,13 +82,20 @@ struct PersonaPicker: View {
         }
         .disabled(uploads.loading)
         .accessibilityLabel(String(localized: "New from Photo"))
-        .accessibilityHint(String(localized: "Makes an avatar from an image of your own"))
+        .accessibilityHint(String(localized: "Makes an avatar from an image of your own, or drop an image here"))
         .accessibilityIdentifier("persona-new")
+        .modifier(AvatarPictureDrop(enabled: !uploads.loading, radius: Theme.Radius.card, inset: -Theme.Space.xs,
+                                    accessibilityHint: nil, targetID: "new",
+                                    dropped: { data in
+                                        if let sheet = await uploads.dropOnNew(data) { cropping = sheet }
+                                    },
+                                    failed: uploads.failedToRead))
     }
 
     @ViewBuilder private var newCardMenu: some View {
-        Button { choosingPhoto = true } label: { Label(String(localized: "Choose from Photos"), systemImage: Theme.Icon.photos) }
-        Button { choosingFile = true } label: { Label(String(localized: "Choose Image File"), systemImage: Theme.Icon.file) }
+        AvatarPictureSourceButtons(slot: .mainNew) { source in
+            if source == .files { choosingFile = true } else { choosingPhoto = true }
+        }
     }
 
     private var newCardLabel: some View {
@@ -256,6 +263,13 @@ struct PersonaPicker: View {
         .modifier(UploadedAvatarEdit(persona: p, editable: uploads.canEdit(p) && !uploads.deleting.contains(p.id)) {
             cropping = uploads.edit(p)
         })
+        .modifier(AvatarPictureDrop(accepts: uploads.canEdit(p),
+                                    enabled: !uploads.loading && !uploads.deleting.contains(p.id),
+                                    radius: Theme.Radius.card, inset: -Theme.Space.xs, targetID: p.id,
+                                    dropped: { data in
+                                        if let sheet = await uploads.drop(data, on: p) { cropping = sheet }
+                                    },
+                                    failed: uploads.failedToRead))
     }
 }
 
