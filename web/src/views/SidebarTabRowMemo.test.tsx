@@ -38,6 +38,7 @@ const answers: Record<string, unknown> = { "/api/v1/sessions": { sessions }, "/a
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); }); // NodeMenu comes in a chunk of its own
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
 const leadRow = () => [...host.querySelectorAll("a")].find((a) => a.textContent?.includes("#1") && a.textContent.includes("主窗格"));

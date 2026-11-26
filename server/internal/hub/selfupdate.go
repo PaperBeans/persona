@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/hubedge"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -517,16 +516,23 @@ func (u *updater) confirm(ctx context.Context, p update.Pending) {
 		u.h.logf("update: %s -> %s: cannot claim confirmation: %v", p.FromVersion, p.ToVersion, err)
 		return
 	}
-	u.mu.Lock()
-	u.confirmed = true
-	u.mu.Unlock()
 	if u.edgeConfirmed != nil {
 		u.edgeConfirmed()
 	}
 	nodeErr := u.updateNodes(ctx, p.Nodes, p.FromVersion, p.Development)
+	// A co-located resident can have an old executable inode even when its
+	// relay returned during confirmation. It drains on a main-process HUP.
+	if nodeErr == nil && u.nodesEnabled() {
+		if err := syncLocalNode(ctx, identity.HomeDir(), u.services, &update.Manifest{Version: p.ToVersion, Build: p.ToBuild}); err != nil {
+			u.h.logf("update: local node reload: %v", err)
+		}
+	}
 	if p.Development != nil {
 		nodeErr = errors.Join(nodeErr, u.publishDevelopmentPackages(p))
 	}
+	u.mu.Lock()
+	u.confirmed = true
+	u.mu.Unlock()
 	why := ""
 	if nodeErr != nil {
 		why = su(u.h.userLang(), "err_computer_packages")
@@ -541,8 +547,8 @@ func (u *updater) confirm(ctx context.Context, p update.Pending) {
 		u.notify(su(l, "push_updated_title", i18n.Args{"version": p.ToVersion}), su(l, "push_updated_body"))
 	}
 	update.ClearDevelopmentAdoption(u.dir, p)
-	if p.Development != nil {
-		u.h.queueDevicesConfig(nodeErr == nil)
+	if p.Development != nil || u.nodesEnabled() || u.publishedBuild() != nil {
+		u.h.queueDevicesConfig(nodeErr == nil && u.nodesEnabled())
 	}
 	if p.WebPrev != "" && filepath.Dir(p.WebPrev) == filepath.Join(u.dir, "development") && strings.HasPrefix(filepath.Base(p.WebPrev), "web-previous-") {
 		_ = os.RemoveAll(p.WebPrev)
@@ -626,17 +632,6 @@ func (u *updater) updateNodes(ctx context.Context, staged, from string, developm
 		}
 		return nil
 	}
-	if !dev && !managed && from != "" && from != u.h.version {
-		// The release replaces the builds of the platforms it carries; one it does not carry (a Windows build next to
-		// a release published without one, a build left by hand) would otherwise stay unlabelled and pass for this
-		// hub's version, and Redeploy would send it to fail the node's self-check. Set aside first, the release's
-		// builds go in below, and the manager fetches the rest from the release of the hub's version.
-		if moved, err := setAsideOldNodes(dir); err != nil {
-			u.h.logf("update: set aside the node builds of %s: %v", from, err)
-		} else if len(moved) > 0 {
-			u.h.logf("update: node builds of %s set aside before the release's go in: %s", from, strings.Join(moved, ", "))
-		}
-	}
 	if dev && from != "" && from != u.h.version {
 		if development[0].BackupID != "" {
 			// A saved version may cover fewer platforms. Keep other usable
@@ -644,53 +639,23 @@ func (u *updater) updateNodes(ctx context.Context, staged, from string, developm
 			if err := labelUnstagedNodes(dir, staged, from); err != nil {
 				return err
 			}
-		} else if _, err := setAsideOldNodes(dir); err != nil {
+		}
+	}
+	if staged != "" && !managed {
+		build := u.h.build
+		build.Version = u.h.version
+		if err := update.PublishPackages(staged, dir, build); err != nil {
 			return err
 		}
 	}
-	var first error
-	if staged != "" && !managed {
-		files, _ := filepath.Glob(filepath.Join(staged, "personad-*"))
-		legacy, _ := filepath.Glob(filepath.Join(staged, compat.DaemonBinary+"-*"))
-		files = append(files, legacy...)
-		for _, f := range files {
-			if strings.HasSuffix(f, ".gz") || strings.HasSuffix(f, ".part") {
-				continue
-			}
-			if err := os.MkdirAll(identity.NodeBinaryDir(), 0o755); err == nil {
-				_, err = update.Swap(filepath.Join(identity.NodeBinaryDir(), filepath.Base(f)), f)
-				if err != nil && errors.Is(err, os.ErrNotExist) {
-					err = copyInto(f, filepath.Join(identity.NodeBinaryDir(), filepath.Base(f)))
-				}
-				if err != nil {
-					if first == nil {
-						first = err
-					}
-					u.h.logf("update: node binary %s: %v", filepath.Base(f), err)
-				} else {
-					// It is this build now: a version file put beside an older one (docs/operations/docker.md "Node builds") goes.
-					_ = os.Remove(filepath.Join(identity.NodeBinaryDir(), filepath.Base(f)+".version"))
-				}
-			} else if first == nil {
-				first = err
-			}
+	if !managed && from != "" && from != u.h.version && (!dev || development[0].BackupID == "") {
+		// Canonical replacements are already labelled. Set aside unlabelled
+		// packages for platforms this build did not supply.
+		if _, err := setAsideOldNodes(dir); err != nil {
+			return err
 		}
 	}
-	if first != nil {
-		return first
-	}
-	if !dev && u.nodesEnabled() {
-		u.h.updateNodes(ctx)
-	} // each computer retains the existing policy/guardian
 	return nil
-}
-
-func copyInto(from, to string) error {
-	b, err := os.ReadFile(from)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(to, b, 0o755)
 }
 
 // whyNot is why this hub cannot update itself (begin's error); whyNotReason is the reason alone (the view's why_not).

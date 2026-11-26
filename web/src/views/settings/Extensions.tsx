@@ -127,11 +127,12 @@ function OwnedExtension({ id: _id, manager, children }: { id: string; manager?: 
 }
 
 /** A page an extension draws (placement plugin_page), under the extension's name. `onBack`: none where the page's top
- *  bar has the way back (a phone). */
+ *  bar has the way back (a phone), or while that page has pushed one of its own: its Back returns to the page below. */
 function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: string; manager?: string; onBack?: () => void; onWide?: (wide: boolean) => void }) {
   usePinnedExtension(id, manager);
   const [d, setD] = useState<HubExtensionDetail | null>(null);
   const [n, setN] = useState(0);
+  const [depth, setDepth] = useState(1);
   useEffect(() => {
     extensionDetail(id).then(setD, () => {});
   }, [id]);
@@ -140,7 +141,7 @@ function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: st
   return (
     <>
       <div className="mb-3 flex items-center gap-2">
-        {onBack && (
+        {onBack && depth === 1 && (
           <Button tone="quiet" icon="chevronLeft" onClick={onBack} className="-ml-2">
             <span className="max-w-[240px] truncate">{d?.name ?? id}</span>
           </Button>
@@ -150,7 +151,7 @@ function ExtensionPage({ id, ui, manager, onBack, onWide }: { id: string; ui: st
       </div>
       {/* its extension id scopes what a graph's `key` keeps (lib/extension-owner.tsx) */}
       <ExtensionOwnerScope owner={id}>
-        <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} />
+        <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} onDepth={setDepth} />
       </ExtensionOwnerScope>
     </>
   );

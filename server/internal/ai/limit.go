@@ -34,14 +34,14 @@ const (
 )
 
 var (
-	quotaPause          = 30 * time.Minute // without a Retry-After
-	busyFirst           = 5 * time.Second  // the first busy pause; each busy answer in a row doubles it
-	busyMost            = 5 * time.Minute
-	afterMost           = 24 * time.Hour // a Retry-After longer than this is taken as this
-	growAfter           = 10             // successes under a cap before it is raised by one
-	capLift             = 8              // a cap raised past this is lifted
-	now                 = time.Now
-	logf                = log.Printf
+	quotaPause = 30 * time.Minute // without a Retry-After
+	busyFirst  = 5 * time.Second  // the first busy pause; each busy answer in a row doubles it
+	busyMost   = 5 * time.Minute
+	afterMost  = 24 * time.Hour // a Retry-After longer than this is taken as this
+	growAfter  = 10             // successes under a cap before it is raised by one
+	capLift    = 8              // a cap raised past this is lifted
+	now        = time.Now
+	logf       = log.Printf
 )
 
 // SetBusyPauseForTest makes a busy answer's first pause d instead of five seconds until t ends, for another package's
@@ -144,8 +144,8 @@ type gate struct {
 	putOff      int       // requests not sent while held
 	probing     bool      // the pause is over and one request is finding out, until the upstream answers it
 	strikes     int       // busy answers in a row
-	runTimedOut bool          // the previous eligible CLI run timed out
-	cap         int           // requests in flight at most, 0 for no cap
+	runTimedOut bool      // the previous eligible CLI run timed out
+	cap         int       // requests in flight at most, 0 for no cap
 	inflight    int
 	out         []time.Time   // when each request in flight went out, the longest out first, for the log (noTurn)
 	fine        int           // successes since the cap last changed

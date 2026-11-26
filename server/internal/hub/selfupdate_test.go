@@ -761,8 +761,8 @@ func TestUpdateNodesBinariesInPlace(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(nodes, "personad-darwin-arm64.gz")); !os.IsNotExist(err) {
 		t.Fatal("the download itself went in with the binaries")
 	}
-	if _, err := os.Stat(filepath.Join(nodes, "personad-darwin-arm64.version")); !os.IsNotExist(err) {
-		t.Fatal("the old build's version file stayed beside the release's")
+	if b, err := os.ReadFile(filepath.Join(nodes, "personad-darwin-arm64.version")); err != nil || string(b) != "v2\n" {
+		t.Fatalf("package version = %q, %v", b, err)
 	}
 	_ = local // the manager decides what to redeploy (internal/devices TestUpdateNodesSkipsTheHubsOwn)
 }

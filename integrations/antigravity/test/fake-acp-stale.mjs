@@ -40,6 +40,12 @@ if (command === 'models') {
 
 // The native conversation service: its port goes to the private log, as agy writes it.
 const service = createServer(async (req, res) => {
+  // Agent port discovery probes listeners with GET / (User-Agent persona-ports, docs/lessons/testing.md); it is not a
+  // native call and must not kill the fake.
+  if (req.method !== 'POST') {
+    res.writeHead(404).end('{"message":"Unknown native method"}')
+    return
+  }
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
   const params = JSON.parse(Buffer.concat(chunks).toString())

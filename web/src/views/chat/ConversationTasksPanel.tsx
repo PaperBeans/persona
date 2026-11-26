@@ -45,7 +45,7 @@ export function ConversationTasksPanel({ sid, manager, onClose }: { sid: string;
         }>{error}</Empty> : rows.length === 0 && needsYou.length === 0 ? <p className="text-sm text-ink-3">{t("sidepanel.conversation_tasks_empty")}</p> :
         <ul className="flex flex-col gap-2">
           {needsYou.map((item) => <li key={item.key}>
-            <NeedsYouBody item={item} />
+            <NeedsYouBody item={item} onOpenChat={onClose} />
             {item.kind === "task" && <TaskAgentLink todo={item.todo} lookup={lookup} />}
           </li>)}
           {rows.map((todo) => {

@@ -14,18 +14,18 @@ import { openLink } from "../../lib/links";
 import { useLinkManager } from "../../lib/manager-choice";
 import {
   blocks, initials, isHttps, numberProblem, percent, tableRows, toneOf,
-  type RowIcon, type UIAction, type UIItem, type UIMore, type UISection, type UITone, type UIView,
+  type UIAction, type UIItem, type UIMore, type UISection, type UITone, type UIView,
 } from "../../lib/extension-ui";
 import { presenceStyle, usePresence, type Present } from "../../ui/motion";
 import { Rolling } from "../../ui/Rolling";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { t } from "../../i18n";
 import { Button, cx, EASE, Loading, Spinner } from "../../ui/atoms";
-import { Icon, type IconName } from "../../ui/icons";
+import { Icon } from "../../ui/icons";
 import { Switch } from "../settings/SettingsParts";
 import { ChartFrame, LABEL_H, plotHeight } from "./ChartFrame";
 import { ExtensionChart } from "./view-sections-lazy";
-import { NEW_ICON_GLYPH } from "./icon-map";
+import { ROW_ICON } from "./icon-map";
 import { SegmentedTrack } from "../../ui/Segmented";
 import { colorOf, hue, hueTint } from "../../lib/extension-ui-v6";
 import { Badge, Carousel, DateInput, glyphOf, Grid, ImageItem, MultiChoice, MultilineInput, SliderLine, Sparkline, TrailingControl, useImage, useRowMenu, type V6Handlers } from "./ViewBody6";
@@ -692,14 +692,8 @@ function Field({ item: it, value, locked, onChange }: { item: UIItem; value: str
 
 // ── UI version 3 ─────────────────────────────────────────
 
-/** A row's icon from the fixed vocabulary, as one of the web's icons. */
-export const ROW_ICON: Record<RowIcon, IconName> = {
-  extension: "extension", plugin: "extension", chart: "chart", gauge: "gauge", list: "list", bell: "bell", doc: "read", calendar: "calendar",
-  money: "money", person: "person", chat: "chat", mail: "mail", link: "link", folder: "folder", star: "star", check: "check",
-  warning: "warning", clock: "clock", tag: "tag", search: "search", settings: "gear", branch: "branch", commit: "commit", code: "code",
-  pull_request: "pullRequest", merge: "merge", file: "read",
-  ...NEW_ICON_GLYPH,
-};
+/** A row's icon from the fixed vocabulary, as one of the web's icons (icon-map.ts, shared with a nav_page's, #16281). */
+export { ROW_ICON };
 
 /** What leads a row: its icon (UI version 6: in its color), a picture (its initials until it loads, or when it does not), or a thumbnail. */
 function RowLead({ item, onImageFailed }: { item: UIItem; onImageFailed?: () => void }) {

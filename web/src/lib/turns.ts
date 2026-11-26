@@ -100,6 +100,8 @@ export interface Segment {
   cut?: boolean;
   /** A settled user turn without a visible response or an explicit closing notice. */
   emptyResponse?: boolean;
+  /** The transcript recorded an assistant reply consisting of whitespace. */
+  blankReply?: boolean;
   /** What its items used (#5426, lib/turn-usage.ts): every item counts, those it does not show too (a tool's result, a
    *  Codex turn's duration, a stopped turn's notice); each subagent counts once in the chat, in the exchange that
    *  launched it (chatLines' lineUsage). Absent when none of them carries tokens. */
@@ -376,6 +378,7 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
         break;
       case "text":
         if (it.text?.trim()) cur.steps.push({ kind: "text", id: it.id, item: it });
+        else if (it.role === "assistant" && it.text) cur.blankReply = true;
         break;
       case "notice":
         cur.steps.push({ kind: "notice", id: it.id, item: it });

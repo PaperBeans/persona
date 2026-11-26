@@ -10,6 +10,7 @@ import { contextXML, withContexts } from "../../lib/context-xml";
 import { inlineBody } from "../../lib/inline-message";
 import type { ContextRef } from "../../lib/links";
 import { skillContext } from "../../lib/skill-mentions";
+import { RETRY_IDLE_GRACE_MS } from "./dock";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -499,5 +500,78 @@ describe("a message waiting for its turn to start (#2450)", () => {
     await esc();
     await flush();
     expect(interrupts()).toHaveLength(0);
+  });
+});
+
+describe("a follow-up waiting for its own outcome (#15859)", () => {
+  let now: number;
+  const at = (ms: number) => new Date(now + ms).toISOString();
+  const input = (): Item => ({ id: "u2", seq: 3, role: "user", kind: "text", text: "Check the next item", ts: at(0) });
+  const retry = () => [...host.querySelectorAll('span[role="status"]')]
+    .find(el => el.textContent === t("chat-empty-response.no_response"))?.parentElement?.querySelector("button");
+  const settleRender = () => act(async () => { await vi.dynamicImportSettled(); });
+  const update = async (session: Partial<Session> = {}, items = transcript.items) => {
+    await act(async () => {
+      captured.session = { ...captured.session, ...session };
+      transcript.items = items;
+      root.render(<ChatView mid="hub" sid="c1" />);
+    });
+    await settleRender();
+  };
+  const afterHandoff = async () => {
+    await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_IDLE_GRACE_MS + 20); });
+    await settleRender();
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    now = Date.now();
+    transcript.items = [
+      { id: "u1", seq: 1, role: "user", kind: "text", text: "Check the first item", ts: at(-3_000) },
+      { id: "a1", seq: 2, role: "assistant", kind: "text", text: "First check finished." },
+    ];
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([undefined, "Synthetic prior error"])("stays pending through the prior exit (%s)", async (turn_error) => {
+    await update({ state: "working", status: "working", state_since: at(-2_000) });
+    await update({}, [...transcript.items, input()]);
+    await update({ state: "idle", status: "done", state_since: at(300), turn_error });
+    expect(stopControl()).not.toBeNull();
+    expect(retry()).toBeUndefined();
+    await afterHandoff();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(retry()).toBeUndefined();
+    await update({ updated_at: at(2_500), turn_error: "Synthetic prior error" });
+    expect(retry()).toBeUndefined();
+
+    await update({ state: "working", status: "working", state_since: at(3_000), turn_error: undefined });
+    await update({ state: "idle", status: "done", state_since: at(3_200), turn_error: "Synthetic follow-up error" });
+    expect(retry()).toBeDefined();
+  });
+
+  it("does not turn a read receipt into completion for the current input", async () => {
+    await update({ state: "unread", status: "done", state_since: at(-500), updated_at: at(-500) });
+    await update({}, [...transcript.items, input()]);
+    // The local seen state can arrive first, followed by the hub's new state_since and seen_at.
+    await update({ state: "idle" });
+    await update({ state_since: at(300), seen_at: at(300) });
+    await afterHandoff();
+    expect(stopControl()).not.toBeNull();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(retry()).toBeUndefined();
+  });
+
+  it.each(["thinking", "text"] as const)("still settles a coalesced empty outcome with %s", async (kind) => {
+    await update({ state: "working", status: "working", state_since: at(-2_000) });
+    await update({ state: "unread", status: "done", state_since: at(600), updated_at: at(500) }, [
+      ...transcript.items, input(),
+      { id: "a2", seq: 4, role: "assistant", kind, text: kind === "text" ? "\n" : "Checking", ts: at(400) },
+    ]);
+    await update({ state: "idle", state_since: at(800), seen_at: at(800) });
+    await afterHandoff();
+    expect(host.textContent).toContain(t("chat-empty-response.no_response"));
+    expect(retry()).toBeDefined();
+    expect(stopControl()).toBeNull();
   });
 });

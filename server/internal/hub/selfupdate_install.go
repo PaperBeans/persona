@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"time"
 
@@ -232,11 +231,6 @@ func (u *updater) installCandidate(parent context.Context, auto bool, candidate 
 		fail(err)
 		return
 	}
-	nodes, err := u.stageNodesFrom(ctx, m, staged, bin, r.Source, r.Development != nil)
-	if err != nil {
-		fail(err)
-		return
-	}
 	if err := update.CheckBinary(ctx, bin, m); err != nil {
 		fail(err)
 		return
@@ -261,6 +255,11 @@ func (u *updater) installCandidate(parent context.Context, auto bool, candidate 
 			return
 		}
 		programs[name] = pb
+	}
+	nodes, err := u.stageNodesFrom(ctx, m, staged, bin, r.Source, r.Development != nil, programs)
+	if err != nil {
+		fail(err)
+		return
 	}
 	if r.Development != nil {
 		// Every program and Node package has an independent verified copy in
@@ -512,19 +511,6 @@ func (u *updater) pruneDownloads(keep int64) {
 		}
 		u.removeDownloads(filepath.Join(u.dir, e.Name()))
 	}
-}
-
-// nodePlatforms are the platforms the release publishes a node binary for, sorted. That is every platform in the
-// manifest, not only the ones the machines the hub knows now run: a machine added later, or one that had not connected
-// when the hub updated, is deployed to from these files (internal/devices nodeBinary), and nothing else fetches its
-// platform until the next update.
-func nodePlatforms(m *update.Manifest) []string {
-	out := make([]string, 0, len(m.Files))
-	for plat := range m.Files {
-		out = append(out, plat)
-	}
-	slices.Sort(out)
-	return out
 }
 
 func (u *updater) onlineIDs() []string {

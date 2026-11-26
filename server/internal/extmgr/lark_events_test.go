@@ -348,6 +348,9 @@ func TestLarkSyncRunEmitsBatchedAndPaginatedLarkMessages(t *testing.T) {
 	if evs[0].Messages[0].MessageID != "om_1" || evs[0].Messages[1].MessageID != "om_2" || evs[0].Messages[2].MessageID != "om_3" {
 		t.Fatalf("messages not sorted chronologically: %+v", evs[0].Messages)
 	}
+	if evs[0].Messages[0].Type != larksyncwire.MessageTypeText || evs[0].Messages[1].Type != larksyncwire.MessageTypeImage || evs[0].Messages[2].Type != larksyncwire.MessageTypePost {
+		t.Fatalf("unexpected message types: %+v", evs[0].Messages)
+	}
 
 	// 2. Large batch (250 messages > larkMessagesPageSize=100) -> 3 paginated events (100, 100, 50).
 	const largeCount = 250
@@ -462,5 +465,50 @@ func TestLarkSyncRunEmitsBatchedAndPaginatedLarkMessages(t *testing.T) {
 	w.h.extensions.events.mu.Unlock()
 	if kbPending != 1 {
 		t.Fatalf("KB queue had %d pending after Lark event flood, want 1", kbPending)
+	}
+}
+
+func TestLarkMessageEventPagesTypeNormalization(t *testing.T) {
+	base := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	evs := larkMessageEventPages("primary~feishu:tenant_example:ou_owner", []larksyncwire.Message{
+		{ID: "om_trimmed", ChatID: "oc_1", SenderID: "ou_1", Type: "  post  ", At: base},
+		{ID: "om_custom", ChatID: "oc_1", SenderID: "ou_1", Type: "sticker", At: base.Add(time.Second)},
+		{ID: "om_blank", ChatID: "oc_1", SenderID: "ou_1", Type: "   ", At: base.Add(2 * time.Second)},
+	}, 10)
+	if len(evs) != 1 || len(evs[0].Messages) != 3 {
+		t.Fatalf("unexpected pages: %+v", evs)
+	}
+	if got := evs[0].Messages[0].Type; got != larksyncwire.MessageTypePost {
+		t.Fatalf("trimmed type = %q, want %q", got, larksyncwire.MessageTypePost)
+	}
+	if got := evs[0].Messages[1].Type; got != larksyncwire.MessageType("sticker") {
+		t.Fatalf("custom type = %q, want %q", got, "sticker")
+	}
+	if got := evs[0].Messages[2].Type; got != "" {
+		t.Fatalf("blank type = %q, want empty", got)
+	}
+
+	fields := fieldsOf(evs[0])
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Messages) != 3 {
+		t.Fatalf("decoded messages = %d, want 3", len(decoded.Messages))
+	}
+	if got := decoded.Messages[0]["type"]; got != "post" {
+		t.Fatalf("decoded[0].type = %v, want %q", got, "post")
+	}
+	if got := decoded.Messages[1]["type"]; got != "sticker" {
+		t.Fatalf("decoded[1].type = %v, want %q", got, "sticker")
+	}
+	if _, hasType := decoded.Messages[2]["type"]; hasType {
+		t.Fatalf("blank message type must be omitted from JSON: %v", decoded.Messages[2])
 	}
 }

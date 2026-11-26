@@ -257,14 +257,19 @@ func (c *Client) rpcOnce(ctx context.Context, method string, params any, out any
 	if c.Socket == "" {
 		return errNoSocket
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeoutOf(method))
+	dctx, cancel := context.WithTimeout(ctx, timeoutOf(method))
 	defer cancel()
-	conn, err := dialSocket(ctx, c.Socket)
+	conn, err := dialSocket(dctx, c.Socket)
 	if err != nil {
+		// A caller that gave up while connecting gets its own error, not "no socket": the CLI fallback would only
+		// start herdr under a context that has already ended and report that failure instead (#16008).
+		if cerr := ctx.Err(); cerr != nil {
+			return fmt.Errorf("herdr %s: %w", method, cerr)
+		}
 		return fmt.Errorf("%w: %v", errNoSocket, err)
 	}
 	defer conn.Close()
-	return c.rpcConn(ctx, conn, method, params, out)
+	return c.rpcConn(dctx, conn, method, params, out)
 }
 
 func (c *Client) rpcConn(ctx context.Context, conn net.Conn, method string, params any, out any) error {

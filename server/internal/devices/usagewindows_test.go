@@ -1001,3 +1001,116 @@ func TestMergeUsageAccountsDoesNotClobberHealthyPoolOnSharedModelReset(t *testin
 		t.Fatalf("poll: healthy A0 Claude pool was not preserved intact: %+v", polled)
 	}
 }
+
+func TestMergeUsageAccountsAntigravityNamedAccountAndPlan(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	fiveG, weekG := now.Add(2*time.Hour), now.Add(3*24*time.Hour)
+	fiveC, weekC := now.Add(3*time.Hour), now.Add(4*24*time.Hour)
+	mw := func(label string, minutes int, used float64, resets time.Time, model string) proto.UsageWindow {
+		w := uw(label, minutes, used, resets)
+		w.Model = model
+		return w
+	}
+	legacyWins := []proto.UsageWindow{
+		mw("5h", 300, 20, fiveG, "Gemini Models"),
+		mw("7d", 10080, 30, weekG, "Gemini Models"),
+		mw("5h", 300, 5, fiveC, "Claude and GPT models"),
+		mw("7d", 10080, 10, weekC, "Claude and GPT models"),
+	}
+	namedWins := []proto.UsageWindow{
+		mw("5h", 300, 25, fiveG, "Gemini Models"),
+		mw("7d", 10080, 35, weekG, "Gemini Models"),
+		mw("5h", 300, 5, fiveC, "Claude and GPT models"),
+		mw("7d", 10080, 10, weekC, "Claude and GPT models"),
+	}
+
+	// Row ID stays stable when a native agy account gains its real name and plan.
+	legacyOnly := mergeUsageAccounts([]proto.UsageAccount{{
+		Provider: "agy", Name: "Antigravity", Local: true, Origin: "node-a/0", Machines: []string{"node-a"},
+		SampledAt: now.Add(-2 * time.Minute), Windows: legacyWins,
+	}}, now)
+	namedOnly := mergeUsageAccounts([]proto.UsageAccount{{
+		Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", Local: true, Origin: "node-b/0", Machines: []string{"node-b"},
+		SampledAt: now.Add(-time.Minute), Windows: namedWins,
+	}}, now)
+	if len(legacyOnly) != 1 || len(namedOnly) != 1 || legacyOnly[0].ID != namedOnly[0].ID {
+		t.Fatalf("expected stable row ID across unnamed and named agy samples: legacy=%+v named=%+v", legacyOnly, namedOnly)
+	}
+
+	// Rolling upgrade across two machines: whichever sample is newer, merged row preserves the account name and plan.
+	for _, tc := range []struct {
+		name     string
+		legacyAt time.Time
+		namedAt  time.Time
+		wantUsed float64
+	}{
+		{"named newer than legacy", now.Add(-4 * time.Minute), now.Add(-time.Minute), 25},
+		{"legacy newer than named", now.Add(-time.Minute), now.Add(-4 * time.Minute), 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeUsageAccounts([]proto.UsageAccount{
+				{Provider: "agy", Name: "Antigravity", Local: true, Origin: "node-a/0", Machines: []string{"node-a"}, SampledAt: tc.legacyAt, Windows: legacyWins},
+				{Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", Local: true, Origin: "node-b/0", Machines: []string{"node-b"}, SampledAt: tc.namedAt, Windows: namedWins},
+			}, now)
+			if len(got) != 1 {
+				t.Fatalf("expected 1 merged account, got %d: %+v", len(got), got)
+			}
+			acct := got[0]
+			if acct.Provider != "antigravity" || acct.Name != "alice@example.com" || acct.Plan != "Google AI Ultra" {
+				t.Fatalf("unexpected merged identity: %+v", acct)
+			}
+			if !slices.Equal(acct.Machines, []string{"node-a", "node-b"}) {
+				t.Fatalf("expected both machines, got %v", acct.Machines)
+			}
+			if acct.ID != legacyOnly[0].ID {
+				t.Fatalf("merged ID changed from %q to %q", legacyOnly[0].ID, acct.ID)
+			}
+			var gotGemini5h float64
+			for _, w := range acct.Windows {
+				if w.Label == "5h" && w.Model == "Gemini Models" {
+					gotGemini5h = w.UsedPercent
+				}
+			}
+			if gotGemini5h != tc.wantUsed {
+				t.Fatalf("expected newest 5h Gemini used=%v, got %v", tc.wantUsed, gotGemini5h)
+			}
+		})
+	}
+
+	// External Antigravity reconciliation folds matching windows and retains the local account name and plan on unmatched pools.
+	localNamed := proto.UsageAccount{
+		Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", Local: true, Origin: "node-a/0", Machines: []string{"node-a"},
+		SampledAt: now, Windows: []proto.UsageWindow{mw("7d", 10080, 35, weekG, "Gemini Models"), mw("7d", 10080, 10, weekC, "Claude and GPT models")},
+	}
+	extGemini := proto.UsageAccount{
+		Provider: "antigravity", Name: "Antigravity · Gemini", Pass: true, Origin: "ext#0", Sources: []string{"External"},
+		SampledAt: now.Add(-time.Minute), Windows: []proto.UsageWindow{uw("7d", 10080, 30, weekG)},
+	}
+	reconciled := reconcileAntigravityUsage(mergeUsageAccounts([]proto.UsageAccount{localNamed, extGemini}, now), now)
+	if len(reconciled) != 2 {
+		t.Fatalf("expected external row + remaining local pool, got %d: %+v", len(reconciled), reconciled)
+	}
+	var gotLocal, gotExt *proto.UsageAccount
+	for i := range reconciled {
+		if reconciled[i].Pass {
+			gotExt = &reconciled[i]
+		} else {
+			gotLocal = &reconciled[i]
+		}
+	}
+	if gotExt == nil || gotLocal == nil || gotExt.Windows[0].UsedPercent != 35 {
+		t.Fatalf("external row did not reconcile with named local account: ext=%+v local=%+v", gotExt, gotLocal)
+	}
+	if gotLocal.Name != "alice@example.com" || gotLocal.Plan != "Google AI Ultra" || len(gotLocal.Windows) != 1 || gotLocal.Windows[0].Model != "Claude and GPT models" {
+		t.Fatalf("remaining local pool lost account identity: %+v", gotLocal)
+	}
+
+	// Two distinct named Antigravity accounts with distinct resets remain separate with their own names and plans.
+	distinct := mergeUsageAccounts([]proto.UsageAccount{
+		{Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", Local: true, Origin: "node-a/0", Machines: []string{"node-a"}, SampledAt: now, Windows: []proto.UsageWindow{mw("7d", 10080, 40, weekG, "Gemini Models")}},
+		{Provider: "agy", Name: "bob@example.com", Plan: "Google AI Pro", Local: true, Origin: "node-b/0", Machines: []string{"node-b"}, SampledAt: now, Windows: []proto.UsageWindow{mw("7d", 10080, 15, weekG.Add(time.Hour), "Gemini Models")}},
+	}, now)
+	if len(distinct) != 2 || distinct[0].Name != "alice@example.com" || distinct[0].Plan != "Google AI Ultra" || distinct[1].Name != "bob@example.com" || distinct[1].Plan != "Google AI Pro" {
+		t.Fatalf("expected two distinct named accounts, got %+v", distinct)
+	}
+}

@@ -235,18 +235,23 @@ func (d *Devices) deployContext() context.Context {
 	return context.Background()
 }
 
-// Called with m.mu held: use the node protocol when SSH cannot reach the owner.
+// Called with m.mu held: residents that can update themselves use the same
+// idle handover over stdio relays, SSH, tailcat, services and Persona Link.
 func (m *Machine) rpcDeploymentLocked() bool {
-	return m.cfg.Kind == kindLink || m.cfg.Kind == kindService || m.derived || m.via == viaHub
+	return m.residentUpdateLocked() || m.cfg.Kind == kindLink || m.cfg.Kind == kindService || m.derived || m.via == viaHub
+}
+
+func (m *Machine) residentUpdateLocked() bool {
+	return m.info.NodeUpdate && nodeHas(m.info, nodeproto.NodeUpdate)
 }
 
 // canDeployLocked: nil when the machine's node can be updated from here, else why not (an i18n.Message, but for
 // the node's own reason, which comes in its words).
 func (m *Machine) canDeployLocked() error {
-	if m.cfg.Kind == "local" {
+	if m.cfg.Kind == "local" && !m.residentUpdateLocked() {
 		return i18n.Err("hub-machine.deploy_local")
 	}
-	if m.rpcDeploymentLocked() && !(nodeHas(m.info, nodeproto.NodeUpdate) && m.info.NodeUpdate) {
+	if m.rpcDeploymentLocked() && !m.residentUpdateLocked() {
 		if m.info.NodeUpdateReason != "" {
 			return errors.New(m.info.NodeUpdateReason)
 		}

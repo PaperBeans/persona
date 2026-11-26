@@ -13,7 +13,7 @@ import { t } from "../../i18n";
 import { cx, EASE, IconButton, Loading, Spinner } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { lazyPage } from "../../lib/lazy-page";
-import { NEW_ICON_GLYPH } from "./icon-map";
+import { ROW_ICON } from "./icon-map";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 
 // The extension page is its own chunk (#1794): App.tsx reaches this file for the sidebar's and the nav page's icons and
@@ -31,9 +31,9 @@ const OwnerScope = ({ extension, children }: { extension: string; children: Reac
   <ExtensionOwnerScope owner={extension}>{children}</ExtensionOwnerScope>
 );
 
-/** A nav_page's icon from the fixed vocabulary, as one of the web's icons (unknown: the extension's). */
-const NAV_ICON: Record<UIIcon, IconName> = { extension: "extension", plugin: "extension", chart: "chart", gauge: "gauge", list: "list", bell: "bell", doc: "read", calendar: "calendar", money: "money",
-  branch: "branch", code: "code", pull_request: "pullRequest", merge: "merge", map: "map", ...NEW_ICON_GLYPH };
+/** A nav_page's icon from the fixed vocabulary, as one of the web's icons: the glyph a row draws for the name (#16281),
+ *  and `map`; unknown: the extension's. */
+const NAV_ICON: Record<UIIcon, IconName> = { ...ROW_ICON, map: "map" };
 export const navIcon = (icon?: string): IconName => NAV_ICON[uiIcon(icon)];
 
 /** A badge's tone as the sidebar's badge colors. */
