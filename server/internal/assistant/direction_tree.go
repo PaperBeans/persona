@@ -80,13 +80,15 @@ type treeDirection struct {
 	Sessions  []directionSession `json:"sessions,omitempty"`
 }
 
-// treeCounts are how many of a direction's listed tasks are in each state.
+// treeCounts are how many of a direction's listed tasks are in each state. UserCheck is the subset of Review tasks
+// accepted by their supervisor awaiting owner verification (omitted when 0 so wire shapes stay backward-compatible).
 type treeCounts struct {
-	Working  int `json:"working"`
-	NeedsYou int `json:"needs_you"`
-	Stuck    int `json:"stuck"`
-	Review   int `json:"review"`
-	Planned  int `json:"planned"`
+	Working   int `json:"working"`
+	NeedsYou  int `json:"needs_you"`
+	Stuck     int `json:"stuck"`
+	Review    int `json:"review"`
+	UserCheck int `json:"user_check,omitempty"`
+	Planned   int `json:"planned"`
 }
 
 func (c *treeCounts) add(state string) {
@@ -609,6 +611,8 @@ func newTreeBuild(s *Service, main string, leads []string, all []listedTodo, lis
 			tb.workersUnder[at] = append(tb.workersUnder[at], id)
 		}
 	}
+	// Match projection.Counts step roll-up: when a top-level open parent carries a PartOf step, projection.Views rolls
+	// the step's NeedsYou onto the parent, so the step must not be double-counted in needs_you.
 	topOpen := map[string]bool{}
 	for _, id := range tb.open {
 		if _, nested := tb.workerAt[id]; !nested && tb.views[id].Phase != assistantwire.TodoPhaseDone {
@@ -722,11 +726,16 @@ func (tb *treeBuild) directionOf(t Todo) string {
 	return ""
 }
 
+// isUserCheck: an open task accepted by its supervisor awaiting optional owner verification (not blocking Needs you).
+func isUserCheck(t listedTodo) bool {
+	return t.DoneAt == nil && triageReviewState(t.Todo) == reviewUserCheck
+}
+
 // state is listed task t's state in the tree (first match wins). Needs you follows the authoritative to-do projection
-// so supervisor-held cards, supervised failed starts, deferred can_wait decisions and dismissed decisions stay out of
-// counts.needs_you and agree with GET /api/v1/todos counts.needs_you. An open personal verification (user_check) is
-// in the projection's Needs you (reason verify), so here too; a quiet or carried one, kept out of Needs you below, is
-// review.
+// (todo/projection), so sidebar direction counts, GET /api/v1/todos counts.needs_you, and main chat Needs you agree on
+// genuine owner-action items: supervisor-held (Delegating-only) cards, supervised failed starts and unescalated
+// interrupted runs, deferred can_wait decisions, user_check verification, and dismissed decisions all stay out of
+// needs_you. user_check sits in review (with counts.user_check) as the secondary "to verify" layer.
 func (tb *treeBuild) state(t listedTodo) string {
 	tr := tb.placed[t.ID]
 	v, hasView := tb.views[t.ID]
@@ -739,7 +748,7 @@ func (tb *treeBuild) state(t listedTodo) string {
 	switch {
 	case needsYou:
 		return treeNeedsYou
-	case t.DoneAt == nil && triageReviewState(t.Todo) == reviewUserCheck:
+	case isUserCheck(t):
 		return treeReview
 	case tr.Section != triageWorking && (t.Supervision.state(t.Todo) == reviewPending || verifyAsk):
 		return treeReview
@@ -770,6 +779,9 @@ func (tb *treeBuild) tree(names map[string]string) directionTree {
 		}
 		state := tb.state(t)
 		g.Counts.add(state)
+		if state == treeReview && isUserCheck(t) {
+			g.Counts.UserCheck++
+		}
 		agents := tb.agents(t.ID, map[[2]string]bool{})
 		g.Running = g.Running || treeRunning(agents)
 		g.Tasks = append(g.Tasks, treeTask{ID: t.ID, Title: t.Title, State: state, Agents: agents,

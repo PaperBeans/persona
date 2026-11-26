@@ -76,7 +76,7 @@ func (u *updater) beginDevelopmentRestore(ctx context.Context, id string) error 
 		return err
 	}
 	r := &update.Published{
-		Manifest:    &update.Manifest{Version: chosen.Version, Build: chosen.Build, Commit: chosen.Commit},
+		Manifest:    &update.Manifest{Version: chosen.Version, Build: chosen.Build, Commit: chosen.Commit, Edition: u.h.build.Edition.Marker()},
 		Development: &update.DevelopmentCandidate{Branch: "main", Commit: chosen.Commit, BackupID: chosen.ID, UpdatedAt: chosen.UpdatedAt},
 	}
 	u.release = r

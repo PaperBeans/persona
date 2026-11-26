@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -311,6 +312,20 @@ func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c
 	if c.Assistant && (w == nil || w.On != proto.WaitTransient && !(quotaWait && w.On == proto.WaitExternal)) {
 		return // Assistant participates only in mechanical model recovery and quota waits.
 	}
+	personWait := false // its closeout says it stopped on a person, background work or not
+	if w != nil && backgroundRule(c) {
+		// Background work it left running is no word that it goes on by itself when its own closeout says it stopped on
+		// a person: that closeout is read (the model's triage) and its turn settles (taskAgentSettled), so the
+		// supervisor or the owner hears of it rather than a wait that "wakes itself" (#14899). Read only with the triage
+		// on (above); triageTurnModel then takes the same read (triageRead keeps it for the turn).
+		_, reply := s.triageRead(ctx, machine, c)
+		if reply == "" {
+			reply = turnReplyText(c.LastText, false) // as triageTurnModel reads it
+		}
+		if co, _, ok := closeout.Parse(reply); ok && closeoutWaitsOnPerson(co) {
+			w, by, personWait = nil, "", true
+		}
+	}
 	if w == nil {
 		mctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
@@ -384,6 +399,11 @@ func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c
 		}
 	} else {
 		s.putWork(ctx, e)
+	}
+	if personWait && backgroundRunning(c) {
+		// Its turn end was put off for the background work (taskAgentSettled): settle it now that its state says why
+		// it stopped, so its task gets its receipt, judgment and supervision signal.
+		go s.taskTurnSettled(context.WithoutCancel(ctx), machine, c.SessionID)
 	}
 	if e.Work.Phase == proto.WorkDone {
 		s.work.mu.Lock()
@@ -547,6 +567,12 @@ func limitClock(reset, now time.Time, loc *time.Location) string {
 		return r.Format("15:04")
 	}
 	return r.Format("01-02 15:04")
+}
+
+// backgroundRule: triageRules' state for c, when it gave one, is its background work's or its /loop's: no turn error
+// came before those (triageRules).
+func backgroundRule(c proto.Session) bool {
+	return c.TurnError == "" && (runningInBackground(c) > 0 || c.Loop != nil)
 }
 
 func runningInBackground(c proto.Session) int {

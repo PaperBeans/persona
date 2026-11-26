@@ -13,6 +13,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.Session
+import persona.core.contracts.api.AgentWorkspace
 import persona.core.domain.sort.SessionRename
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.closeConfirmation
@@ -28,6 +29,13 @@ internal sealed interface AgentOperationDialog {
     data class RenameSpace(override val session: Session) : AgentOperationDialog
     data class Close(override val session: Session) : AgentOperationDialog
     data class Delete(override val session: Session) : AgentOperationDialog
+}
+
+@Composable
+internal fun workspaceCopyPathAction(workspace: AgentWorkspace?): JAction? {
+    val path = workspace?.cwd?.takeIf(String::isNotBlank) ?: return null
+    val copy = rememberCopy()
+    return JAction(stringResource(R.string.agents_copy_workspace_path), PhIcons.Copy, onClick = { copy(path, null) })
 }
 
 @Composable

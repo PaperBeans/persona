@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/jsonsubset"
@@ -124,5 +125,35 @@ func TestProjectionWaitMatchesWaitingPhaseAcrossAllViewCases(t *testing.T) {
 				t.Fatalf("phase is %q but Wait is non-nil: %+v", v.Phase, w)
 			}
 		})
+	}
+}
+
+func TestBuildPRWaitHandlesForgeReviewRequiredAndChecksFailure(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	f := Facts{
+		ID:        "todo_forge_pr",
+		Title:     "Real forge PR facts",
+		CreatedAt: now.Add(-time.Hour),
+		UpdatedAt: now.Add(-time.Minute),
+		PRURL:     "https://github.com/org/repo/pull/99",
+		PRStatus: &PRStatus{
+			URL:       "https://github.com/org/repo/pull/99",
+			State:     "open",
+			Draft:     false,
+			Review:    "required",
+			Checks:    "failure",
+			CheckedAt: now.Add(-time.Minute),
+		},
+	}
+	w := Wait(f, now)
+	if w == nil || w.Kind != assistantwire.TodoWaitKindPrMerge {
+		t.Fatalf("Wait() = %+v, want pr_merge", w)
+	}
+	want := []assistantwire.TodoWaitPRBlocker{
+		assistantwire.TodoWaitPRBlockerReviewRequired,
+		assistantwire.TodoWaitPRBlockerChecksFailing,
+	}
+	if !reflect.DeepEqual(w.PrBlockers, want) {
+		t.Fatalf("PrBlockers = %+v, want %+v", w.PrBlockers, want)
 	}
 }

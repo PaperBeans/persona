@@ -13,6 +13,7 @@ import {
   momentFeed,
   groupResults,
   hitView,
+  inboxOfRows,
   initial,
   kindOf,
   LIST_KINDS,
@@ -22,6 +23,7 @@ import {
   parseLogLine,
   parseMessageLine,
   parseRecent,
+  messageRowKey,
   parseTags,
   profile,
   projectInfo,
@@ -321,6 +323,19 @@ describe("detail", () => {
     ]);
     expect(parseRecent("每周三下午的设计评审群")).toEqual([{ day: null, messages: [{ time: "", sender: "", text: "每周三下午的设计评审群" }] }]);
     expect(parseRecent(undefined)).toEqual([]);
+  });
+
+  it("finds the Inbox item a recent row belongs to by the row the hub named (#15356)", () => {
+    const text = "## 2026-10-30\n- 10:20 Alice: Sure\n  tomorrow\n- 10:22 Bob: Thanks\n## 2026-10-31\n- 10:20 Alice: Sure\n  tomorrow\n";
+    const newer = { id: "i2", title: "Newer", updated_at: "2026-10-31T02:00:00Z", messages: [{ day: "2026-10-30", line: "- 10:20 Alice: Sure\n  tomorrow" }] };
+    const older = { id: "i1", title: "Older", updated_at: "2026-10-30T02:00:00Z", messages: [{ day: "2026-10-30", line: "- 10:20 Alice: Sure\n  tomorrow" }, { day: "2026-10-30", line: "- 10:22 Bob: Thanks" }] };
+    const rows = inboxOfRows([newer, older]);
+    const [d30, d31] = parseRecent(text);
+    expect(d30.messages.map((m) => rows.get(messageRowKey(d30.day, m))?.id)).toEqual(["i2", "i1"]);
+    // the same words on another day are another row
+    expect(d31.messages.map((m) => rows.get(messageRowKey(d31.day, m))?.id)).toEqual([undefined]);
+    expect(inboxOfRows(undefined).size).toBe(0);
+    expect(inboxOfRows([{ id: "i3", title: "None", updated_at: "" }]).size).toBe(0);
   });
 });
 

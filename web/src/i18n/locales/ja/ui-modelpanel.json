@@ -10,8 +10,10 @@
   "setup_customized": "カスタマイズ済み",
   "setup_saved": "保存した設定",
   "reset": "おすすめに戻す",
-  "fast": "Fast · 優先処理で高速 · 使用量が増えます",
+  "fast": "Fast · 使用量が増えます",
+  "claude_fast": "Fast は使用量が増えます。Claude Code がこの選択を以降のセッションの既定値として保存する場合があります。",
   "fast_short": "Fast",
+  "ultrafast": "超高速 · 使用量が増えます",
   "effort": "思考の強さ",
   "faster": "速さ重視",
   "smarter": "賢さ重視",
@@ -49,5 +51,6 @@
   "launchers": "ランチャー",
   "speed": "速度",
   "speed_standard": "標準",
+  "speed_ultrafast": "超高速",
   "no_levels": "このモデルには選べる思考の強さがありません"
 }

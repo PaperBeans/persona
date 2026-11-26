@@ -1,4 +1,7 @@
 {
+  "investigation_handoff_open": "关闭这个后续待办前，请先完成或重新交接这条调研发现：{finding}",
+  "investigation_review_required": "请确认本轮调研发现清单，再搁置或关闭这项工作。",
+  "investigation_findings_open": "请先为这些调研发现安排后续待办、请你决定，或补充完成证据：{findings}",
   "handoff_wait": "等「{task}」回传「{check}」的结果",
   "decision_review_changed": "这条决定已更新或已处理，请刷新后再试。",
   "decision_review_fields": "请求缺少有效的审核时间或撤销凭据。",
@@ -107,5 +110,7 @@
   "side_handover_archived": "任务「{title}」已转由主对话跟进：原对话「{origin}」已归档。",
   "side_handover_gone": "任务「{title}」已转由主对话跟进：原对话「{origin}」已不可用。",
   "placement_waiting": "正在等待自动选机。",
-  "placement_no_match": "当前没有在线电脑满足该任务的选机约束和容量闸线。"
+  "placement_no_match": "当前没有在线电脑满足该任务的选机约束和容量闸线。",
+  "inbox_link_removed": "收件箱话题已变化，自动关联已取消；任务仍可启动。",
+  "inbox_candidates": "可能相关的收件箱卡：{items}。未自动关联，请确认来源后再关联。"
 }

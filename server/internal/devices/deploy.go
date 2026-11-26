@@ -175,7 +175,7 @@ func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	}
 	// The build for its platform and kind of program (packages.go): looked up afresh, a release's manifest at most.
 	lookup, cancel := context.WithTimeout(m.d.deployContext(), packageLookup)
-	pkg, err := m.d.nodePackageFor(lookup, info.OS, info.Arch, info.Program)
+	pkg, err := m.d.nodePackageForInfo(lookup, info)
 	cancel()
 	m.d.changed() // what the machine should run may be another build now
 	if err != nil {

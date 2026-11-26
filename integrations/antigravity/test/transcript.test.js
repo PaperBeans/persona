@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { startFakeNode } from '../../runtime-sdk/testing/fake-node.js'
+import { extractBackground } from '../lib/background.js'
 import { readTranscript, readTranscriptSteps, rememberObservedWake, stepsToItems } from '../lib/map.js'
 import { createAgyRuntime } from '../lib/runtime.js'
 
@@ -160,6 +161,38 @@ test('a reused lower step index keeps earlier steps when the export goes on past
   const parallelWhole = logs(t)
   writeFileSync(join(parallelWhole.directory, 'transcript_full.jsonl'), readFileSync(parallelFile))
   assert.deepEqual(contents(readTranscript(parallelWhole.brain, true).steps), rewoundOrder)
+})
+
+test('a background result updates a restored step until a rewind replaces it', (t) => {
+  const { brain, directory } = logs(t)
+  const file = join(directory, 'transcript_full.jsonl')
+  const conversation = '00000000-0000-4000-8000-000000000001'
+  const id = `${conversation}/task-1`
+  const started = '2026-01-01T00:00:00Z'
+  const ended = '2026-01-01T00:00:01Z'
+  const line = (step_index, content, extra = {}) => JSON.stringify({
+    step_index, content, type: 'PLANNER_RESPONSE', status: 'DONE', created_at: started, ...extra,
+  }) + '\n'
+  const task = { type: 'GENERIC' }
+  const replacement = { created_at: ended }
+  writeFileSync(file, line(0, 'start') + line(1, 'first writer') +
+    line(2, `Tool is running as a background task with task id: ${id}`, { ...task, status: 'RUNNING' }) +
+    line(1, 'second writer', replacement) + line(3, 'first writer continued'))
+  const running = readTranscript(brain, true)
+  assert.deepEqual(extractBackground(running.steps, conversation).running.map((entry) => entry.id), [id])
+
+  appendFileSync(file, line(2, 'task output', { ...task, updated_at: ended }))
+  const completed = readTranscript(brain, true)
+  assert.equal(completed.branch, running.branch)
+  assert.deepEqual(completed.steps.map((step) => step.content), ['start', 'first writer', 'second writer', 'task output', 'first writer continued'])
+  assert.deepEqual(extractBackground(completed.steps, conversation).ended.map((entry) => [entry.id, entry.status]), [[id, 'completed']])
+
+  appendFileSync(file, line(2, 'second writer continued', replacement))
+  const expected = ['start', 'second writer', 'second writer continued', 'first writer continued']
+  assert.deepEqual(readTranscript(brain, true).steps.map((step) => step.content), expected)
+  const whole = logs(t)
+  writeFileSync(join(whole.directory, 'transcript_full.jsonl'), readFileSync(file))
+  assert.deepEqual(readTranscript(whole.brain, true).steps.map((step) => step.content), expected)
 })
 
 test('parsed transcript cache retains a full inventory of 80 sessions', async (t) => {

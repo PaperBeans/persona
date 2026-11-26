@@ -231,6 +231,9 @@ describe("todo rows on a sessions push", () => {
     expect(tag("tc")?.textContent).toBe(t("todos.concern"));
     expect(tag("td")?.textContent).toBe(t("todos.concern"));
     expect(tag("tb")).toBeNull();
+    const openConcernLine = host.querySelector('[data-todo="td"] [data-testid="todo-status-line"]')?.textContent ?? "";
+    expect(openConcernLine).toContain(t("todos.status_tracking"));
+    expect(openConcernLine).not.toContain(t("todos.not_handed"));
   });
 
   it("keeps a fresh reported concern in Just finished and reserves awaiting review for live delivery", async () => {

@@ -2,18 +2,16 @@
 // two-line plain summary, × to drop it; in a sent bubble, the leading `> ` block as a three-line card that opens to
 // the whole passage. The message itself still carries the `> ` block (lib/drafts.ts withQuoteBlock / splitQuote). A
 // task's card quotes as its title (and todo id, on the block's first line) and what its agent said last.
-import { Suspense, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { openSpot } from "../../lib/comments";
-import { parseQuote, parseQuotes, useQuotes, type DraftQuote } from "../../lib/drafts";
+import { parseQuote, parseQuotes, type CommentImagePicker, type DraftQuote } from "../../lib/drafts";
 import { getSession } from "../../lib/store";
 import { clock } from "../../lib/format";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { cx, EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
-import { CommentBlock, goToComment, LazyDraftCommentCard } from "./CommentCard";
-import type { CommentImagePicker } from "./DraftCommentCard";
-import { OverlayBoundary } from "../LazyOverlay";
+import { CommentBlock, CommentsChip, goToComment } from "./CommentCard";
 import { t } from "../../i18n";
 
 /** "Quoting Persona · 16:45" / "Quoting task "…" · 16:45": who said it, or which task, and when, as far as is known. */
@@ -53,26 +51,18 @@ export function QuoteBar({ quote, onRemove }: { quote: DraftQuote; onRemove: () 
   );
 }
 
-/** Everything waiting above the input: the message quote (at most one), then the comments numbered in order. */
+/** Everything waiting above the input: the message quote (at most one), then a single compact chip for all comments. */
 export function QuoteBars({ draftKey, quotes, onRemove, onAddCommentImages }: {
-  draftKey: string; quotes: readonly DraftQuote[]; onRemove: (id: string) => void; onAddCommentImages?: CommentImagePicker;
+  draftKey?: string; quotes: readonly DraftQuote[]; onRemove: (id: string) => void; onAddCommentImages?: CommentImagePicker;
 }) {
-  const { editing } = useQuotes(draftKey);
-  let n = 0;
+  const messageQuotes = quotes.filter((q) => !q.comment);
+  const comments = quotes.filter((q) => q.comment);
   return (
-    <div className="relative flex max-h-[25dvh] flex-col gap-1.5 overflow-y-auto overscroll-contain px-0.5 pt-0.5 [&>div]:shrink-0" data-quotes data-scroll-box>
-      {quotes.map((q) => {
-        const remove = () => onRemove(q.id!);
-        const preview = <QuoteBar quote={q} onRemove={remove} />;
-        return q.comment ? (
-          <OverlayBoundary key={q.id} open onClose={() => {}} fallback={preview}>
-            <Suspense fallback={preview}>
-              <LazyDraftCommentCard draftKey={draftKey} quote={q} n={++n} editing={editing === q.id} onRemove={remove}
-                onAddImages={q.comment.spot || q.comment.element ? undefined : onAddCommentImages} />
-            </Suspense>
-          </OverlayBoundary>
-        ) : <QuoteBar key={q.id} quote={q} onRemove={remove} />;
-      })}
+    <div className="relative flex flex-col gap-1.5 px-0.5 pt-0.5" data-quotes>
+      {messageQuotes.map((q) => (
+        <QuoteBar key={q.id} quote={q} onRemove={() => onRemove(q.id!)} />
+      ))}
+      {comments.length > 0 && <CommentsChip draftKey={draftKey} comments={comments} onRemove={onRemove} onAddImages={onAddCommentImages} />}
     </div>
   );
 }

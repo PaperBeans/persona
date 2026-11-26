@@ -16,6 +16,6 @@
   "link_to": "链接 → {target}",
   "link_broken": "链接断了 · 指向的 {target} 不存在",
   "show_in_files": "在文件面板中显示",
-  "open_terminal": "在这里打开终端",
-  "terminal_failed": "没打开终端：{error}"
+  "open_terminal": "在此打开 Shell",
+  "terminal_failed": "无法打开 Shell：{error}"
 }

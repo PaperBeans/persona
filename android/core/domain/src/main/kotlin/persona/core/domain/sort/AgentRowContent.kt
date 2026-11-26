@@ -100,7 +100,12 @@ fun AgentSession.rowContent(
     }
     if (context.located) context.machine?.takeIf(String::isNotBlank)?.let { place += CoreText.plain(it) }
     return AgentRowContent(
-        stateWord = (if (display.rowParts.stateAtFoot) cardStateWord(muted) else rowStateWord(muted)).takeUnless { context.stateSection },
+        stateWord = when {
+            seenPlace != null -> CoreText.of(Key.StateIdle)
+            context.stateSection -> null
+            display.rowParts.stateAtFoot -> cardStateWord(muted)
+            else -> rowStateWord(muted)
+        },
         source = s.agentSource?.takeIf { !s.assistant },
         place = place,
         model = s.rowModel,

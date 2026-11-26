@@ -45,6 +45,7 @@ func (s *Service) todoProjectionOf(ctx context.Context, list []listedTodo, now t
 	}
 	views, waits := projection.ViewsAndWaits(facts, now)
 	if len(facts) > 0 && facts[0].TodosV2 {
+		applyRepoGateToViews(list, views, waits)
 		applyActiveBlockersToViews(list, views, waits)
 		populateTodoChildSummaries(list, views)
 	}
@@ -94,6 +95,29 @@ func (s *Service) populateTodoActiveBlockers(ctx context.Context, list []listedT
 	for i := range list {
 		if blockers := byTodo[list[i].ID]; len(blockers) > 0 {
 			list[i].ActiveBlockers = blockers
+		}
+	}
+}
+
+// applyRepoGateToViews projects open to-dos with bound non-draft open delivery PRs into waiting (pr_open)
+// when they are still in TodoListSectionTodo (no active run, owner ask, park, or fresh pr_status observation).
+func applyRepoGateToViews(list []listedTodo, views []assistantwire.TodoSummary, waits []*assistantwire.TodoWait) {
+	for i := range list {
+		if i >= len(views) || !repoGateOpenNonDraftPR(list[i].RepoGate) {
+			continue
+		}
+		if list[i].DoneAt != nil && list[i].StartError == "" {
+			continue
+		}
+		if views[i].Section != assistantwire.TodoListSectionTodo {
+			continue
+		}
+		views[i].Phase = assistantwire.TodoPhaseWaiting
+		views[i].Section = assistantwire.TodoListSectionWaiting
+		views[i].Reason = assistantwire.TodoReasonPrOpen
+		views[i].Line = &assistantwire.TodoLine{Key: assistantwire.TodoLineKeyPrOpen}
+		if i < len(waits) {
+			waits[i] = repoGatePRWait(list[i].RepoGate)
 		}
 	}
 }

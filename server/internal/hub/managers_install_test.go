@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant"
@@ -501,5 +503,35 @@ func TestSecondManagerBesideTheAssistant(t *testing.T) {
 	}
 	if err := h.callBus(ctx, assistantwire.AssistantID, "echo", map[string]any{}, nil); err != nil {
 		t.Fatalf("the assistant after: %v", err)
+	}
+}
+
+// A core-only hub's install script downloads the core edition's personad (core-<archive>, core-SHA256SUMS), and a
+// full hub's script is what it always was: no core name in it.
+func TestManagerInstallScriptKeepsTheHubsEdition(t *testing.T) {
+	m := managerScript{ID: "m-0a1b2c", Name: "Work", Hub: "https://hub.example.com", Code: "mi_x", DL: "https://dl.example/dl"}
+	full := managerInstallScript(m)
+	if strings.Contains(full, "core-") {
+		t.Fatalf("the full edition's script names a core file:\n%s", full)
+	}
+	m.Edition = nodeproto.EditionFull
+	if managerInstallScript(m) != full {
+		t.Fatal("the zero edition and the full edition give different scripts")
+	}
+	m.Edition = nodeproto.EditionCore
+	core := managerInstallScript(m)
+	for _, want := range []string{
+		`fetch "$DL/core-$archive" "$tmp/$archive"`,
+		`fetch "$DL/core-SHA256SUMS" "$tmp/SHA256SUMS"`,
+		`-v s="core-$archive"`,
+	} {
+		if !strings.Contains(core, want) {
+			t.Errorf("the core edition's script lacks %q", want)
+		}
+	}
+	for _, never := range []string{`fetch "$DL/$archive"`, `fetch "$DL/SHA256SUMS"`} {
+		if strings.Contains(core, never) {
+			t.Errorf("the core edition's script still has %q", never)
+		}
 	}
 }

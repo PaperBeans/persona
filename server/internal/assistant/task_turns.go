@@ -645,7 +645,13 @@ func (s *Service) takeTurnAs(ctx context.Context, t Todo, last proto.Session, it
 			b.doc.Turns[t.ID] = cur
 			s.saveTurnsLocked(ctx)
 		}
+		if named {
+			s.projectReviewTurn(ctx, t, last, end, cur.State)
+		}
 		return cur, true
+	}
+	if named {
+		s.projectReviewTurn(ctx, t, last, end, state)
 	}
 	b.doc.Turns[t.ID] = fresh
 	delete(b.tries, t.ID)

@@ -142,6 +142,16 @@
   Remove the older copy, retain the newer obligations, and check both decision gating and the actual synthetic
   `DeviceAssistantSend` text. This proves literal deduplication, not a stable-policy refactor or provider-context savings.
 
+- Prompt-size checks read the MCP catalog goldens, not newly added tool files (#9762). Regenerate every assistant
+  catalog and check `TestGoldenMCPTools` before trusting the footprint. Measure changed tool and shared-prompt sources
+  too, so stale goldens cannot hide growth. Fitting the total budget does not register a new per-tool baseline key;
+  keep that remaining gate explicit when baseline edits are not authorized.
+
+- Bind manual send approvals as tightly as standing grants (#9762). After the card
+  resolves, serialize the sender recheck and transport with identity changes.
+  Handed-off Inbox suggestions stay manual even when their scope matches a grant.
+  A transport's already-delivered ID proves only a prior send, not delivery of a
+  new attempted text; audit that outcome separately and never report a fresh send.
 
 - Rechecking an Inbox task link must not replay event handling (#5680). Existing processing conversations and saved
   drafts skip the initial task judge; resetting their processing fields to force another pass can duplicate work.
@@ -305,7 +315,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 - Fake HOME is not isolation. Node follows launcher-selected `CLAUDE_CONFIG_DIR`; hardcoded profile launcher writes real transcripts, and cwd suffix `/.persona/assistant` makes real assistant chats appear in test hub, editable by test assistant (2026-11-01 chat-management tests). Copy launcher into fake HOME, redirect `CLAUDE_CONFIG_DIR` there, copy settings.json, define `_claude_launchers` in fake .bashrc, prompt only own created chats; delete full fake HOME afterward, keys included.
 - Unknown `assistant.send` session ID starts **blank new chat** rather than error if no transcript. Resume-or-report-failure calls (scheduled chats 2026-11-01) use `resume_only`; no process / transcript errors, hub creates / records new chat (`docs/assistant/assistant.md` “Scheduled tasks”). Busy state comes from hub working / needs_you and only listed sessions; retain long-lived chats in `keptSessions`, or 80 new transcripts on busy machine evict them.
 - **No per-message changing data in system prompt** (2026-11-01, `docs/assistant/assistant.md` “Live snapshots and prefix caching”). Prefix caching puts system / tools before history; one byte change rewrites hundreds of thousands of tokens after restart, first output 10 seconds to minutes. Snapshots accompany messages. Claude resume actually retains first system prompt until compaction, so old snapshot stale, not cache-invalidating. Real restart cache miss was **changed tools**: one removed MCP tool rewrites all, schema key order does not. Diagnose experimentally: copy real chat with new ID / temporary directory, change one thing per restart, inspect `message_start` cache_read_input_tokens.
-- Per-start compaction belongs in both the process environment and the final merged settings (#6481). Claude settings `env` can override the process. Preserve launcher settings / hooks, then pin the computed AUTO and MAX values last in both. A launcher AUTO value is not evidence of backend capacity. Match warm spares and restarts by explicit main-chat scope, not the assistant directory or model purpose; scheduled chats share both. Don't turn "nothing declared" into a Persona number (#3008, #3066): a guessed 200k, then fixed 200k / 400k targets, made 1M conversations compact at about 167k. The one Persona number left is explicit and narrow: `assistant.main_compact_window` (#7314) caps only the main conversation, only on a managed launcher that declares a larger window, and only when the manager sends it (absent or 0: no cap). Follow what the launcher declares, write nothing otherwise (Claude Code already holds AUTO to its own model window), and read the real window from `result.modelUsage.<model>.contextWindow` where Persona needs it (the idle threshold). Write values only where Persona owns the environment (a managed launcher): over a shell launcher they would override its own declarations.
+- Per-start compaction belongs in both the process environment and the final merged settings (#6481). Claude settings `env` can override the process. Preserve launcher settings / hooks, then pin the computed AUTO and MAX values last in both. A launcher AUTO value is not evidence of backend capacity. Match warm spares and restarts by explicit main-chat scope, not the assistant directory or model purpose; scheduled chats share both. Don't turn "nothing declared" into a Persona number (#3008, #3066): a guessed 200k, then fixed 200k / 400k targets, made 1M conversations compact at about 167k. The one Persona number left is explicit and narrow: `assistant.main_compact_window` (#7314) caps only the main conversation and the directions' lead conversations (#15318), only on a managed launcher that declares a larger window, and only when the manager sends it (absent or 0: no cap). The manager decides which conversations get it; the node applies what comes with a non-guest start, so a new kind of conversation is added in the manager alone. Before #15318 the node also required `is_main`, and leads woken all day by supervision grew to about 970k on a 1M launcher before anything compacted them. Follow what the launcher declares, write nothing otherwise (Claude Code already holds AUTO to its own model window), and read the real window from `result.modelUsage.<model>.contextWindow` where Persona needs it (the idle threshold). Write values only where Persona owns the environment (a managed launcher): over a shell launcher they would override its own declarations.
 
 - Headless `claude -p` auto-compacts via `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; idle compaction only interactive. `stream-json` `/compact` manually compacts. First resumed-process message sometimes does not compact, second does; one miss not proof unsupported.
 - `ssh_host` aliases exist only hub ~/.ssh/config. Giving remote assistant ssh <alias> supplies unusable command.
@@ -1030,6 +1040,17 @@ to-do's no-progress decision quoted another task. Find the run's own prompt by i
 reply after it, up to the next message that opened a turn. Refuse turns that a queued message mixed. Test with real
 transcript pages (`runChat`), not bare item lists.
 
+## Direct reply recovery across a hub switch (#10427)
+
+A node can lose a live conversation during a hub switch without publishing a normal turn end. Claude can append a
+synthetic placeholder only when the conversation resumes. Keep the latest verified app input ID alongside the
+recovery claim, and check that input when the node lists the conversation again. Read the current transcript,
+since indexed history can predate the echo that identifies the app input. A guarded send that finds the same
+transcript but no process leaves a retry notice. A Stop or later owner input makes the earlier attempt obsolete.
+An accepted Assistant input supersedes an older explicit Stop or Exit. Clear only the mark captured before the send,
+since an interrupt can record its intent before it gets the typing lock. Session metadata saved during delivery must
+preserve that newer mark.
+
 ## A node's own session rows never carry the assistant mark (#13879)
 
 `Session.Assistant` is set only when the hub decorates a list for the apps (`hub/assistant_link.go`). The manager's
@@ -1050,6 +1071,22 @@ Save the hold timestamp and promotion together. Clear the active record at the e
 turn's decision to the delayed push and channel mirror. Reading the conversation's current hold at notification
 time can pick up the next round. A restart test for promotion must show the hold still exists before it checks
 that a silent finish is refused.
+
+## A wait the Agent names outranks the state the hub guessed (#14899)
+
+A supervised Agent reported `blocked` / `unblock: other` ("someone has to fill in the web form") while two of its old
+polling shells were still running. Triage's background rule read the turn as "N background tasks running, it wakes
+itself" before it looked at the closeout, and the same background work kept the task's turn from settling, so no
+receipt, judgment or supervision signal went out. The task also sat in `needs_user` from an earlier decision the owner
+had dismissed, and `superviseJudged` returned early in that state. Nobody heard of the wait for three and a half hours.
+A rule that runs before the closeout is read must give way when the closeout names a person to wait for, and
+holding a decision open must not silence the task's later turns. The supervisor decides whether the news replaces the
+decision. A `done` closeout that still names the owner as the one to unblock it (`unblock: user` with a `waiting`
+line and no delivery) is a question, not finished work.
+
+Settling such a turn right after triage must not read the work state from the session lists: they pick up the
+triage's state only on the next publish, so the settle saw the previous turn's state and put the turn off again, with
+nothing left to wake it. The settle takes the triage's own entry for that turn (`withPersonWait`).
 
 ## An inbox row can carry more than one provider event (#15517)
 

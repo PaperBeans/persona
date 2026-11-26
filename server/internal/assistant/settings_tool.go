@@ -115,6 +115,10 @@ var moduleSettingKeys = map[string]bool{"assistant.briefing_waits": true}
 func (s *Service) allOwnSettings() []ownSetting {
 	getSet := []string{"get", "set"}
 	return []ownSetting{
+		{Setting: Setting{Key: outboundIdentityKey, Title: "Outward-message identity", Actions: getSet,
+			About: "default Lark message sender; bot preserves existing behavior; changing it never broadens a standing message grant",
+			Value: `"bot" or "user"; only supported identity-aware transports use this setting`},
+			get: s.outboundIdentity, set: s.setOutboundIdentity},
 		s.hiddenDirSetting(),
 		s.blockedHerdrSessionsSetting(),
 		{Setting: Setting{Key: modulesKey, Title: "Built-in modules", Actions: getSet,
@@ -122,8 +126,8 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: `{"disabled": ["<module id>", …]}; null or an empty list restores every compiled-in module`},
 			get: s.getModuleSwitch, set: s.setModuleSwitch},
 		{Setting: Setting{Key: standingAuthorizationsKey, Title: "Standing authorizations", Actions: getSet,
-			About: "user-confirmed actions for one computer and absolute directory tree; only the main conversation may set them, and every change requires the user’s own permission approval",
-			Value: "{revision, authorizations: [{id?, machine_id, directory, actions, conditions, quote, source, reversible}]}; get first; retain existing entries unchanged or remove them; omit id for new grants; granted_at is set by the server"},
+			About: "user-confirmed computer/directory actions or exact outward-message scopes; only the main conversation may set them, and every change requires the user’s own permission approval",
+			Value: "{revision, authorizations: [{id?, machine_id, directory, actions, conditions, quote, source, reversible, messages?}]}; messages: {channel: larkcli, target: exact oc_ chat or empty for all chats, scenario: inbox_reply or assistant_message, identity: bot or user}; message grants require actions [send], reversible true, empty conditions/computer/directory. Get first; retain existing entries unchanged or remove them; omit id for new grants; granted_at is set by the server"},
 			get: s.getStandingAuthorizations, set: s.setStandingAuthorizations},
 		{Setting: Setting{Key: "assistant.notes", Title: "关于我", Actions: getSet,
 			About: "what Persona knows about the user (设置 › 助手 › 关于我), Markdown appended to the assistant's instructions; new conversations read it",
@@ -239,12 +243,13 @@ func (s *Service) allOwnSettings() []ownSetting {
 				return fmt.Sprint(s.settings(ctx).foldRoutineRelayReplies()), nil
 			},
 			set: s.setFoldRoutineRelayReplies},
-		{Setting: Setting{Key: "assistant.main_compact_window", Title: "Main chat compaction window", Actions: getSet,
-			About: "400000 (the default): the main conversation is compacted at about this many tokens (and sent /compact when " +
-				"idle at 75% of it) instead of its model's whole window, when it runs on a launcher Persona manages that declares " +
-				"a larger one; fewer tokens re-read every turn and rewritten after a long pause, while early details stay in the " +
-				"task ledger and the old conversation. 0: the launcher's window, as for every other conversation and Agent. " +
-				"Applies from the main conversation's next message while it is idle",
+		{Setting: Setting{Key: "assistant.main_compact_window", Title: "Compaction window for the main chat and leader conversations", Actions: getSet,
+			About: "400000 (the default): the main conversation and each leader conversation (a direction's lead, " +
+				"assistant.leaders) are compacted at about this many tokens (and sent /compact when idle at 75% of it) instead " +
+				"of their model's whole window, when they run on a launcher Persona manages that declares a larger one; fewer " +
+				"tokens re-read every turn and rewritten after a long pause, while early details stay in the task ledger and the " +
+				"old conversation. 0: the launcher's window, as for every other conversation and Agent. Applies from each one's " +
+				"next message while it is idle",
 			Value: "0, or a whole number of tokens, 100000–10000000"},
 			get: func(ctx context.Context) (string, error) {
 				return fmt.Sprint(mainCompactWindowOf(s.settings(ctx))), nil
@@ -745,9 +750,10 @@ func (s *Service) ownSettingActionExact(ctx context.Context, call ToolCall, o ow
 	if toolName == "" {
 		toolName = "persona_settings"
 	}
-	outcome, err := s.waitPreparedCard(ctx, proto.Interaction{ID: "ix_" + randomHex(6), MachineID: call.MachineID, SessionID: call.SessionID,
+	card := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: call.MachineID, SessionID: call.SessionID,
 		Kind: proto.IxPermission, ToolName: toolName, Summary: proposal, ToolInput: shown, SessionTitle: "Persona",
-		CreatedAt: now, ExpiresAt: now.Add(settingCardWait)}, approvalops.Operation{
+		CreatedAt: now, ExpiresAt: now.Add(settingCardWait)}
+	op := approvalops.Operation{
 		Replacement: call.MachineID + "\x00" + call.SessionID + "\x00setting\x00" + o.Key,
 		Denied:      "The user declined the change: nothing changed.",
 		Unanswered:  prompts.RenderSettingUnanswered(),
@@ -770,7 +776,23 @@ func (s *Service) ownSettingActionExact(ctx context.Context, call ToolCall, o ow
 			}
 			return fresh.apply(ctx)
 		},
-	})
+	}
+	if call.MachineID == "" && call.SessionID == "" {
+		// Settings-page approvals have no conversation to receive questions.
+		answer, err := s.ask(ctx, card)
+		if err != nil {
+			return "", err
+		}
+		switch {
+		case answer.UserAllowed():
+			return op.Apply(ctx, answer)
+		case answer.UserDenied():
+			return op.Denied, nil
+		default:
+			return op.Unanswered, nil
+		}
+	}
+	outcome, err := s.waitPreparedCard(ctx, card, op)
 	return outcome.Text, err
 }
 

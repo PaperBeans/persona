@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"time"
 
@@ -174,8 +175,8 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	if !native {
 		steps = append([]string{}, all...)
 	}
-	// A /read's answer is read by the whole group: the process (commands, paths on the computer) and the web link to
-	// the conversation stay out of it (read.go).
+	// A /read's answer may be read by the whole group, posted there directly or by the owner: the process (commands,
+	// paths on the computer) and the web link to the conversation stay out of it (read.go).
 	read := readRun(r.Ext)
 	if read {
 		steps = nil
@@ -214,7 +215,17 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			fallbackCards = []botAnswerCard{{card: fallback.Note(foot)}}
 		}
 	}
-	// r is a copy of the run (channels_answer.go): its Ext is read without the lock.
+	// Unless the owner asked with the switch to answer in the group directly, a /read's answer goes to the owner's
+	// private chat, and into the group only when the owner posts it (read_held.go, #14437): the group
+	// sees nothing of it meanwhile but the reaction. r is a copy of the run (channels_answer.go): its Ext is read
+	// without the lock.
+	if read && r.Ext[readDirectKey] == "" {
+		if err := f.holdRead(ctx, r, cards, quiet, end); err != nil {
+			return err
+		}
+		f.markDone(ctx, r, final, end)
+		return nil
+	}
 	to := s.runTo(r.Ext)
 	var missing []int // the pieces that did not get out (1-based): said at the end, not sent again
 	defer func() {
@@ -330,8 +341,38 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			s.rememberRun(mid, r)
 		}
 	}
-	if !final {
+	f.markDone(ctx, r, final, end)
+	return nil
+}
+
+// holdRead holds a /read's answer for the owner (read_held.go): the cards the group would get, the first with how the
+// run ended, each under the key it goes into the group by (readAnswerKey). As in the group, a recalled request or an
+// unrelated held wait says nothing. Only a failure to reach the hub or to keep the answer is returned: the answer is
+// tried again.
+func (f feishuSink) holdRead(ctx context.Context, r *channel.Run, cards []botAnswerCard, quiet bool, end channel.End) error {
+	s := f.s
+	if len(cards) == 0 || quiet && (end == channel.EndRecalled || end == channel.EndUnrelated) {
 		return nil
+	}
+	endHeader(s.botLang(ctx), cards[0].card, end)
+	list, fallbacks, keys := make([]*botcard.Card, len(cards)), make([]string, len(cards)), make([]string, len(cards))
+	for i, ac := range cards {
+		list[i], fallbacks[i], keys[i] = ac.card, ac.fallback, readAnswerKey(r.ID, r.WaitFrom(), i)
+	}
+	if err := s.holdRead(ctx, r, list, fallbacks, keys, quiet); err != nil {
+		if s.unreachable(err) || errors.Is(err, errHeldStore) {
+			return err
+		}
+		s.logf("bots: hold a /read's answer: %v", err)
+	}
+	return nil
+}
+
+// markDone takes the reaction off the run's messages and marks them DONE once the run is over (final).
+func (f feishuSink) markDone(ctx context.Context, r *channel.Run, final bool, end channel.End) {
+	s := f.s
+	if !final {
+		return
 	}
 	for _, m := range append(r.Folded, channel.Folded{ReplyTo: r.ReplyTo, Ext: r.Ext}) {
 		if m.ReplyTo == "" {
@@ -347,7 +388,6 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			s.logf("bots: react: %v", err)
 		}
 	}
-	return nil
 }
 
 // answerKey is the key a run's answer goes out under as a new card (answer_new_card): one per progress card, as a

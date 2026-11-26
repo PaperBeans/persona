@@ -44,13 +44,13 @@ describe("a stopped Agent's read-only line", () => {
   it("resumes it from the terminal: no message, progress while it goes, the error in words when refused", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ error: "computer offline", code: "node_unreachable", delivered: "none" }), { status: 503 }));
     vi.stubGlobal("fetch", fetch);
-    act(() => button(t("chat-chatview.resume")).click());
+    act(() => button(t("session-terminalpanel.resume")).click());
     expect(onTerminal).toHaveBeenCalledTimes(1);
-    expect(button(t("chat-chatview.resume")).getAttribute("aria-busy")).toBe("true");
+    expect(button(t("session-terminalpanel.resume")).getAttribute("aria-busy")).toBe("true");
     await flush();
     const [url, init] = (fetch.mock.calls as unknown as [string, RequestInit][])[0];
     expect(url).toBe("/api/v1/sessions");
     expect(JSON.parse(String(init.body))).toEqual({ machine_id: "m1", resume_session_id: "s1" });
-    expect(el.querySelector('[role="alert"]')!.textContent).toBe(t("chat-chatview.resume_failed", { error: t("lib-api.computer_offline") }));
+    expect(el.querySelector('[role="alert"]')!.textContent).toBe(t("session-terminalpanel.resume_failed", { error: t("lib-api.computer_offline") }));
   });
 });

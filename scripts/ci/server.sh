@@ -91,6 +91,13 @@ fi
 if [ "$lane" = all ] || [ "$lane" = other ]; then
   ci_run 'Non-root extension container isolation' 420 python3 scripts/ci/extension-container.py
 fi
+if [ "$lane" = all ] || [ "$lane" = core-other ]; then
+  # The core edition installs from its packages (#16239, docs/operations/core-install.md): this machine's packages of
+  # both editions built as a release builds them, the document's commands run in a clean container against a disposable
+  # Postgres, the install stays core-only through an update check and a second installer run, and the full edition
+  # installs from the same directory unchanged.
+  ci_run 'Core-only install from packages' 900 python3 scripts/ci/core-install.py --timeout 840
+fi
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/persona-ci-db.XXXXXX")"
 container="persona-ci-db-$(basename "$fixture" | tr '[:upper:]' '[:lower:]')"

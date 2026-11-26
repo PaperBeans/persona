@@ -1,6 +1,10 @@
 package proto
 
-import "time"
+import (
+	"time"
+
+	"github.com/nwverse/persona/server/internal/nodeproto"
+)
 
 type Machine struct {
 	ID string `json:"id"`
@@ -206,6 +210,9 @@ type NodeInfo struct {
 	// machine's remote_bin).
 	Program    string `json:"program,omitempty"`
 	Executable string `json:"executable,omitempty"`
+	// Edition is the edition the node was built as (nodeproto.Edition): left out by a full build and by every node
+	// from before editions, "core" by a core-only one. An update brings a build of the same edition, never the other.
+	Edition nodeproto.Edition `json:"edition,omitempty"`
 	// Engine is the engine the node drives now; Engines, what it found (proto.Machine.Engines). Older nodes leave
 	// both out.
 	Engine  string   `json:"engine,omitempty"`

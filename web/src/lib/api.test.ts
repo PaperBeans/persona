@@ -68,6 +68,14 @@ describe("readable hub errors", () => {
     expect(new Headers(fetch.mock.calls[1][1].headers).get("X-Persona-Features")).toBe("agent_message_hold");
   });
 
+  it("adds an explicit query without changing the route used for routing and reports", async () => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}", { status: 200 })));
+    vi.stubGlobal("fetch", fetch);
+    await api("/todos", { token: "test-token", query: { closed_limit: "50" } });
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/todos?closed_limit=50");
+    expect(fetch.mock.calls[0][1].query).toBeUndefined();
+  });
+
   it.each([500, 501, 505, 599])("explains HTTP %s without discarding the server's reason", (status) => {
     expect(errorText(new ApiError(status, "storage failed", {}))).toBe(t("lib-api.server_error", { detail: `HTTP ${status}: storage failed` }));
   });

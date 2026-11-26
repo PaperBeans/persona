@@ -75,6 +75,8 @@ fun ChatLinkHost(
      * those read ahead, are read through it, as are links tapped in them; null: none named.
      */
     manager: String? = null,
+    /** Deferred scroll-state reader so callers avoid recomposing the whole page when scrolling starts or stops. */
+    scrolling: (() -> Boolean)? = null,
     content: @Composable (bottomInset: Dp) -> Unit,
 ) {
     val context = LocalContext.current
@@ -94,7 +96,8 @@ fun ChatLinkHost(
     var linkManager by remember { mutableStateOf<String?>(null) }
     /** "machine name :port" while the sheet shows one of the machine's ports (docs/operations/ports.md "Forwarding"). */
     var forwarded by remember { mutableStateOf<String?>(null) }
-    val ports by rememberUpdatedState(LocalChatPorts.current)
+    val portsState = rememberUpdatedState(LocalChatPorts.current)
+    val ports by portsState
     var unsupported by remember { mutableStateOf(false) }
     var external by remember { mutableStateOf<String?>(null) }
     var opening by remember { mutableIntStateOf(0) }
@@ -158,22 +161,7 @@ fun ChatLinkHost(
         context.applicationContext.registerComponentCallbacks(callbacks)
         onDispose { context.applicationContext.unregisterComponentCallbacks(callbacks) }
     }
-    LaunchedEffect(preloadUrls, isScrolling, lifecycleState) {
-        if (!isScrolling && lifecycleState.isAtLeast(Lifecycle.State.STARTED)) {
-            delay(600)
-            pool.warmUp()
-            // A machine's port is never preloaded: it would load the phone's own localhost (docs/operations/ports.md). Nor is a
-            // Feishu link the card shows natively: its page loads only on "Switch to web page" (its document is read ahead below).
-            preloadUrls.mapNotNull { ChatLinks.webUrl(it) }
-                .filter { PortLinks.link(it, ports?.hostnames.orEmpty()) == null && larkNativeLink(it, lark) == null }
-                .take(3).forEach { pool.preload(it) }
-        }
-    }
-    // Feishu documents among the links are read ahead into the reader's cache, as on the web (iOS skips them too).
-    val documentsAhead = remember(preloadUrls, lark) {
-        preloadUrls.mapNotNull { ChatLinks.webUrl(it) }.filter { larkNativeLink(it, lark) is LarkNativeLink.Document }.take(3)
-    }
-    if (documentsAhead.isNotEmpty() && !isScrolling && lifecycleState.isAtLeast(Lifecycle.State.STARTED)) LarkDocumentPrefetch(documentsAhead, manager)
+    ChatLinkPrefetch(preloadUrls, isScrolling, scrolling, lifecycleState, pool, portsState, lark, manager)
     val picks = if (onHandToPersona != null) listOf(ChatLinkPick.HandToPersona)
         else listOfNotNull(ChatLinkPick.Edit.takeIf { onEdit != null }, ChatLinkPick.Context.takeIf { onContext != null })
     // A web page is over the page: the page's glass goes opaque and the dock makes way (LocalWebSheets).
@@ -516,6 +504,39 @@ internal data class ChatPorts(
 )
 
 internal val LocalChatPorts = androidx.compose.runtime.compositionLocalOf<ChatPorts?> { null }
+
+/** Leaf scope for link prefetching so scroll start/stop never recomposes [ChatLinkHost] or its conversation content. */
+@Composable
+private fun ChatLinkPrefetch(
+    preloadUrls: List<String>,
+    isScrolling: Boolean,
+    scrolling: (() -> Boolean)?,
+    lifecycleState: Lifecycle.State,
+    pool: ChatWebViewPool,
+    ports: State<ChatPorts?>,
+    lark: persona.core.contracts.LarkFeatures,
+    manager: String?,
+) {
+    val activeScroll = scrolling?.invoke() ?: isScrolling
+    LaunchedEffect(preloadUrls, activeScroll, lifecycleState) {
+        if (!activeScroll && lifecycleState.isAtLeast(Lifecycle.State.STARTED)) {
+            delay(600)
+            pool.warmUp()
+            // A machine's port is never preloaded: it would load the phone's own localhost (docs/operations/ports.md). Nor is a
+            // Feishu link the card shows natively: its page loads only on "Switch to web page" (its document is read ahead below).
+            preloadUrls.mapNotNull { ChatLinks.webUrl(it) }
+                .filter { PortLinks.link(it, ports.value?.hostnames.orEmpty()) == null && larkNativeLink(it, lark) == null }
+                .take(3).forEach { pool.preload(it) }
+        }
+    }
+    // Feishu documents among the links are read ahead into the reader's cache, as on the web (iOS skips them too).
+    val documentsAhead = remember(preloadUrls, lark) {
+        preloadUrls.mapNotNull { ChatLinks.webUrl(it) }.filter { larkNativeLink(it, lark) is LarkNativeLink.Document }.take(3)
+    }
+    if (documentsAhead.isNotEmpty() && !activeScroll && lifecycleState.isAtLeast(Lifecycle.State.STARTED)) {
+        LarkDocumentPrefetch(documentsAhead, manager)
+    }
+}
 
 /** The link card's room in the host, in pixels: its height and where the card's top stops. */
 private data class LinkGeometry(val pixels: Float, val above: Float)

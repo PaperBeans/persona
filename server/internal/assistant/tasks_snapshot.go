@@ -180,6 +180,13 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 			}
 		}
 	}
+	var openIDs []string
+	for _, t := range list {
+		if t.DoneAt == nil {
+			openIDs = append(openIDs, t.ID)
+		}
+	}
+	reposByTodo := s.loadOpenTodoRepositories(ctx, openIDs)
 	lists := machineSessions{} // each machine listed once for all the tasks
 	for _, t := range list {
 		// The hold as the apps read it (currentDelivery): a parked wait or a supervisor's unreviewed hold is not the owner's.
@@ -217,6 +224,23 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 				st = "owner_wait"
 			case ruleAccepted, ruleSeen:
 				st = "done"
+			}
+			if st == "not_started" || st == "followup" {
+				var gate *repoGate
+				if bound := reposByTodo[t.ID]; len(bound) > 0 {
+					gate = aggregateRepoGate(buildRepoGateInputs(t, bound))
+				}
+				if prState := openPRSnapshotState(triageOpenPRs(t, now), gate); prState != "" {
+					st = prState
+				}
+			}
+			if st == "not_started" {
+				switch {
+				case review == reviewParked:
+					st = "parked"
+				case t.Kind == db.KindConcern:
+					st = "tracking"
+				}
 			}
 		}
 		if t.DoneAt != nil && st == "followup" && time.Since(t.UpdatedAt) > 24*time.Hour {
@@ -271,8 +295,21 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 		}
 		if t.Supervision != nil {
 			task.DoneWhen = len(t.Supervision.DoneWhen)
-			if p := t.Supervision.Progress; p != nil {
-				reported(&task, p, taskLead(st, agents), now)
+			if p := t.Supervision.Progress; p != nil && !isCodexRouteProgress(p) {
+				lead := taskLead(st, agents)
+				// A completed round's last reply says more than its earlier progress.
+				// Explicit conclusions, outstanding questions, and progress newer than
+				// the last result timestamp still have their own line.
+				resultReady := st == "done" || st == "auto_done" || st == "awaiting_review" ||
+					(t.Supervision.state(t) == reviewUserCheck && (st == "owner_wait" || st == "followup"))
+				resultAt := lead.UpdatedAt
+				if t.DoneAt != nil && t.DoneAt.After(resultAt) {
+					resultAt = *t.DoneAt
+				}
+				progressNewer := !p.At.IsZero() && !resultAt.IsZero() && p.At.After(resultAt)
+				if p.Kind != upReportProgress || task.Last == "" || !resultReady || progressNewer {
+					reported(&task, p, lead, now)
+				}
 			}
 		}
 		all = append(all, ranked{task: task, rank: rank, open: t.DoneAt == nil})
@@ -508,6 +545,9 @@ func taskStateLabel(st string) string {
 		// "cancelled" shares the ignored final line: every label here is model-read prompt text, and this keeps the
 		// hardcoded-Chinese baseline count unchanged instead of raising it.
 		// i18n-ignore: the model reads it; "stopped" is "interrupted" when Persona's Stop did it (snapshotTask)
-		"stopped":   "随对话一起被停下了（没做完：用户停了交出它的对话，它还没有任何输出；等用户让它继续）",
+		"stopped":      "随对话一起被停下了（没做完：用户停了交出它的对话，它还没有任何输出；等用户让它继续）",
+		"pr_conflicts": "PR 有冲突", "pr_changes_requested": "PR 待修改", "pr_checks_failed": "PR 检查失败", // i18n-ignore: the model reads these snapshot labels
+		"pr_in_review": "PR 评审中", "pr_checks_pending": "PR 检查中", "pr_waiting_merge": "等合入", // i18n-ignore: the model reads these snapshot labels
+		"parked": "已搁置", "tracking": "跟进中", // i18n-ignore: the model reads these snapshot labels
 		"cancelled": "已取消", "waiting": "在等（后台命令、子 Agent 或外部条件，hub 会叫醒它，不用管）", "usage_limit": "订阅的用量额度用完了，等额度重置（没做完；重置前发「继续」也会被拒）"}[st] // i18n-ignore: the model reads it
 }

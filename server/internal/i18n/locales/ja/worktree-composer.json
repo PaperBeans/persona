@@ -68,5 +68,6 @@
   "runtime_git_gone": "{path} はもう Git のワークツリーではありません（リポジトリ内の記録がなくなっています）。Persona は削除しません。{engine} で削除してください",
   "runtime_not_toplevel": "{path} はワークツリーの中のフォルダで、ワークツリーそのものではありません。Persona が削除するのはワークツリー全体だけです",
   "runtime_folder_left": "{engine} はワークスペースをアーカイブしましたが、フォルダ {path} は残っています。{engine} で、または手動で削除してください",
-  "runtime_remove_unanswered": "{engine} はワークツリーの削除中に応答しませんでした。再試行する前に、更新して削除されたか確認してください"
+  "runtime_remove_unanswered": "{engine} はワークツリーの削除中に応答しませんでした。再試行する前に、更新して削除されたか確認してください",
+  "orca_directory_workspace": "Orca は Git のワークツリーもブランチも作らず、既存のチェックアウト {path} にディレクトリ単位のワークスペースを作りました。このチェックアウトがすでに Orca のワークツリーとして開かれていると、Orca はこう動作します。workspace \"none\" を使えば、専用のワークツリーなしでタスクを開始できます"
 }

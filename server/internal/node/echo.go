@@ -488,6 +488,13 @@ func isCompactSend(s string) bool {
 	return len(f) > 0 && f[0] == "/compact"
 }
 
+func echoWordsMatch(words, sent []rune) bool {
+	if len(sent) < echoPrefix {
+		return string(words) == string(sent)
+	}
+	return len(words) >= echoPrefix && string(words[:echoPrefix]) == string(sent[:echoPrefix])
+}
+
 // echoFits: the line's words are what was typed — the same, or for a long text the same start. A message of only
 // pictures fits a line with none; a bare command fits the command with the arguments picked for it; /compact (with or
 // without instructions) fits the notice it became.
@@ -528,10 +535,14 @@ func echoFits(r *echoRecord, line []proto.Item) bool {
 	if bare := strings.TrimSpace(r.Text); strings.HasPrefix(bare, "/") && !strings.ContainsFunc(bare, unicode.IsSpace) && first == bare {
 		return true // a command picked its arguments in the terminal (/model opens a picker: "/model opus")
 	}
-	if len(sent) < echoPrefix {
-		return string(words) == string(sent)
+	if echoWordsMatch(words, sent) {
+		return true
 	}
-	return len(words) >= echoPrefix && string(words[:echoPrefix]) == string(sent[:echoPrefix])
+	// Antigravity prepends "/plan " to plain user prompts submitted while in plan mode.
+	if first == "/plan" && !strings.HasPrefix(strings.TrimSpace(r.Text), "/") && strings.HasPrefix(string(words), "/plan") {
+		return echoWordsMatch(words[len("/plan"):], sent)
+	}
+	return false
 }
 
 // mayBe: ln was written after r was typed, within the time its copy can come (from echoSlack before the send to

@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getState, reset } from "../lib/store";
 import { sendDraft } from "../lib/drafts";
-import { dropPick, NEW_CONVERSATION, pickedFast, pickEffort, pickFast, pickLauncher, pickModel } from "../lib/assistant-chat";
+import { dropPick, NEW_CONVERSATION, pickEffort, pickLauncher, pickModel, pickedServiceTier, pickServiceTier } from "../lib/assistant-chat";
 import { ASSISTANT_START_SERVICE_TIER_FEATURE } from "../lib/assistant-models";
 import { chooseManager } from "../lib/manager-choice";
 import type { Session } from "../lib/types";
@@ -143,19 +143,19 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("sends an explicit Fast choice with the first request, independently of effort, then clears it", async () => {
+  it.each(["priority", "ultrafast"])("sends the explicit %s tier with the first request, independently of effort, then clears it", async (tier) => {
     Object.assign(getState(), { features: [ASSISTANT_START_SERVICE_TIER_FEATURE] });
     pickLauncher(NEW_CONVERSATION, "codex");
     pickModel(NEW_CONVERSATION, "gpt-fast");
     pickEffort(NEW_CONVERSATION, "high");
-    pickFast(true);
+    pickServiceTier(tier);
     await act(async () => root.render(<PersonaAssistant fresh onToggleSidebar={() => {}} />));
     await flush();
     await send();
-    expect(sentBody()).toMatchObject({ launcher: "codex", model: "gpt-fast", effort: "high", service_tier: "priority" });
+    expect(sentBody()).toMatchObject({ launcher: "codex", model: "gpt-fast", effort: "high", service_tier: tier });
     await act(async () => starts[0].resolve({ session: { machine_id: "hub", session_id: "c2", title: "" } as Session }));
     await flush();
-    expect(pickedFast()).toBe(false);
+    expect(pickedServiceTier()).toBeUndefined();
   });
 
   it("a Fast-only Recent pick names the displayed launcher, model and effort in the first request", async () => {
@@ -202,7 +202,7 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     Object.assign(getState(), { features: [] });
     pickLauncher(NEW_CONVERSATION, "codex");
     pickModel(NEW_CONVERSATION, "gpt-fast");
-    pickFast(true);
+    pickServiceTier("priority");
     await act(async () => root.render(<PersonaAssistant fresh onToggleSidebar={() => {}} />));
     await flush();
     await send();
@@ -214,12 +214,12 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     Object.assign(getState(), { features: [ASSISTANT_START_SERVICE_TIER_FEATURE] });
     pickLauncher(NEW_CONVERSATION, "codex");
     pickModel(NEW_CONVERSATION, "gpt-fast");
-    pickFast(true);
+    pickServiceTier("priority");
     await act(async () => root.render(<PersonaAssistant fresh onToggleSidebar={() => {}} />));
     await flush();
     act(() => chooseManager("other-manager"));
     await flush();
-    expect(pickedFast()).toBe(false);
+    expect(pickedServiceTier()).toBeUndefined();
     await send();
     expect(sentBody()).not.toHaveProperty("service_tier");
   });
@@ -228,13 +228,13 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     Object.assign(getState(), { features: [ASSISTANT_START_SERVICE_TIER_FEATURE] });
     pickLauncher(NEW_CONVERSATION, "codex");
     pickModel(NEW_CONVERSATION, "gpt-fast");
-    pickFast(true);
+    pickServiceTier("priority");
     await act(async () => root.render(<PersonaAssistant fresh onToggleSidebar={() => {}} />));
     await flush();
     await send();
     await act(async () => starts[0].reject(new Error("no launcher")));
     await flush();
-    expect(pickedFast()).toBe(true);
+    expect(pickedServiceTier()).toBe("priority");
     expect(sentBody()).toHaveProperty("service_tier", "priority");
   });
 

@@ -917,6 +917,13 @@ func (r *Runner) SearchLimit(ctx context.Context, kind, query string, limit int)
 // SendText sends a plain text message as the bot identity. The idempotency key
 // is optional and is passed through to lark-cli when supplied.
 func (r *Runner) SendText(ctx context.Context, chatID, text, idempotencyKey string) (json.RawMessage, error) {
+	return r.SendTextAs(ctx, "bot", chatID, text, idempotencyKey)
+}
+
+func (r *Runner) SendTextAs(ctx context.Context, identity, chatID, text, idempotencyKey string) (json.RawMessage, error) {
+	if identity != "bot" && identity != "user" {
+		return nil, errors.New("unsupported message sender identity")
+	}
 	if strings.TrimSpace(chatID) == "" {
 		return nil, errors.New("chat_id is required")
 	}
@@ -927,12 +934,19 @@ func (r *Runner) SendText(ctx context.Context, chatID, text, idempotencyKey stri
 	if idempotencyKey != "" {
 		args = append(args, "--idempotency-key", idempotencyKey)
 	}
-	return r.RunAs(ctx, "bot", args...)
+	return r.RunAs(ctx, identity, args...)
 }
 
 // ReplyText replies to a known message as the bot identity. The caller may ask
 // for a topic reply; normal Inbox replies keep the source message's topic.
 func (r *Runner) ReplyText(ctx context.Context, messageID, text, idempotencyKey string, inThread bool) (json.RawMessage, error) {
+	return r.ReplyTextAs(ctx, "bot", messageID, text, idempotencyKey, inThread)
+}
+
+func (r *Runner) ReplyTextAs(ctx context.Context, identity, messageID, text, idempotencyKey string, inThread bool) (json.RawMessage, error) {
+	if identity != "bot" && identity != "user" {
+		return nil, errors.New("unsupported message sender identity")
+	}
 	if strings.TrimSpace(messageID) == "" {
 		return nil, errors.New("message_id is required")
 	}
@@ -946,7 +960,7 @@ func (r *Runner) ReplyText(ctx context.Context, messageID, text, idempotencyKey 
 	if inThread {
 		args = append(args, "--reply-in-thread")
 	}
-	return r.RunAs(ctx, "bot", args...)
+	return r.RunAs(ctx, identity, args...)
 }
 
 func (r *Runner) rawSearch(ctx context.Context, args []string) (json.RawMessage, error) {
@@ -1233,15 +1247,27 @@ func classifyFailure(result commandResult) *Error {
 			continue
 		}
 		var env struct {
+			Code  json.RawMessage `json:"code"`
+			Msg   string          `json:"msg"`
 			Error struct {
-				Type           string   `json:"type"`
-				Subtype        string   `json:"subtype"`
-				Message        string   `json:"message"`
-				MissingScopes  []string `json:"missing_scopes"`
-				MissingScopes2 []string `json:"missingScopes"`
+				Code           json.RawMessage `json:"code"`
+				Type           string          `json:"type"`
+				Subtype        string          `json:"subtype"`
+				Message        string          `json:"message"`
+				MissingScopes  []string        `json:"missing_scopes"`
+				MissingScopes2 []string        `json:"missingScopes"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(raw, &env) != nil || env.Error.Type == "" && env.Error.Subtype == "" {
+		if json.Unmarshal(raw, &env) != nil {
+			continue
+		}
+		words := strings.ToLower(env.Msg + " " + env.Error.Message + " " + env.Error.Subtype)
+		if strings.Trim(string(env.Code), `"`) == "230002" || strings.Trim(string(env.Error.Code), `"`) == "230002" ||
+			strings.Contains(words, "bot not in the chat") || strings.Contains(words, "bot is not in the group") ||
+			strings.Contains(words, "bot_not_in_chat") {
+			return &Error{Kind: KindBotNotInChat}
+		}
+		if env.Error.Type == "" && env.Error.Subtype == "" {
 			continue
 		}
 		sub := strings.ToLower(env.Error.Subtype)

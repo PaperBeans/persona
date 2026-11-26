@@ -1,17 +1,17 @@
 {
-  "title": "已归档的 Agent",
+  "title": "已归档会话",
   "back": "返回 Agent 列表",
   "refresh": "刷新",
-  "search_placeholder": "搜索已归档的 Agent",
+  "search_placeholder": "搜索已归档会话",
   "clear_search": "清除搜索",
   "description": "归档会保留电脑上的对话记录。恢复后会回到 Agent 列表；有新活动时也会自动回来。",
   "restore": "恢复",
   "restore_label": "恢复「{title}」",
-  "empty_title": "没有已归档的 Agent",
-  "empty_body": "在 Agent 的 ⋯ 菜单里选「归档」，它就不再出现在 Agent 列表里。",
+  "empty_title": "没有已归档的会话",
+  "empty_body": "在会话的 ⋯ 菜单中选择归档，即可将它从 Agents 列表中隐藏。",
   "no_results": "没有和「{query}」匹配的结果",
-  "load_failed": "加载已归档的 Agent 失败",
+  "load_failed": "无法加载已归档会话",
   "retry": "重试",
   "unsupported_title": "还不能归档",
-  "unsupported_body": "请更新 hub 和它的助手才能归档 Agent。"
+  "unsupported_body": "更新 hub 和它的助手后即可归档会话。"
 }

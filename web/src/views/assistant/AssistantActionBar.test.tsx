@@ -755,6 +755,64 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(entry("finished").textContent).toBe(`${label.finished}2`);
   });
 
+  it("shows the final Codex reply instead of startup progress, ignores legacy startup progress while active, and keeps newer real progress ahead of stale replies", async () => {
+    const startup = "Codex will start in the terminal to use the requested reasoning effort. Approvals and questions will use the terminal screen.";
+    const earlierReply = "Earlier turn draft.";
+    const newerProgress = "Rechecking the export checksums.";
+    const result = "The export now includes all rows.";
+    const t0 = "2026-11-10T08:00:00Z";
+    const t1 = "2026-11-10T08:01:00Z";
+    const t2 = "2026-11-10T08:02:00Z";
+    const t3 = "2026-11-10T08:03:00Z";
+    const delivered: Todo = {
+      id: "delivered", title: "Fix the export", origin: conversation, created_at: t0, updated_at: t0,
+      agents: [{ machine_id: "demo", session_id: "export-worker", linked_at: t0 }],
+      supervision: {
+        supervisor: conversation,
+        progress: { kind: "progress", text: startup, at: t1 },
+      },
+    };
+    moreTodos = [delivered];
+    await act(async () => refreshTodos());
+    // Active task with empty last_text and legacy Codex startup notice in supervision.progress: never show the notice.
+    act(() => upsertSession({ machine_id: "demo", session_id: "export-worker", title: "Export worker", cwd: "/demo",
+      status: "working", state: "working", updated_at: t0 }));
+    act(() => entry("running").click());
+    const row = () => host.querySelector('[data-task-slot="task:delivered"]')?.textContent;
+    expect(row()).not.toContain(startup);
+
+    // Delivered task whose real progress arrived after an earlier reply shows the newer progress, not the stale reply.
+    act(() => upsertSession({ machine_id: "demo", session_id: "export-worker", title: "Export worker", cwd: "/demo",
+      status: "idle", state: "unread", updated_at: t1, last_text: earlierReply }));
+    act(() => putTodo({
+      ...delivered, delivery: { state: "live", at: t2 },
+      supervision: { supervisor: conversation, progress: { kind: "progress", text: newerProgress, at: t2 } },
+    }));
+    expect(row()).toContain(newerProgress);
+    expect(row()).not.toContain(earlierReply);
+
+    // Once a newer final reply lands after that progress report, the reply wins over the older progress.
+    act(() => upsertSession({ machine_id: "demo", session_id: "export-worker", title: "Export worker", cwd: "/demo",
+      status: "idle", state: "unread", updated_at: t3, last_text: result }));
+    expect(row()).toContain(result);
+    expect(row()).not.toContain(newerProgress);
+
+    // Even if a legacy startup notice had a newer timestamp than the reply, it is still ignored and the reply wins.
+    act(() => putTodo({
+      ...delivered, delivery: { state: "live", at: t3 },
+      supervision: { supervisor: conversation, progress: { kind: "progress", text: startup, at: "2026-11-10T08:04:00Z" } },
+    }));
+    expect(row()).toContain(result);
+    expect(row()).not.toContain(startup);
+
+    act(() => putTodo({
+      ...delivered, done_at: t3, delivery: { state: "live", at: t3 }, supervision: { ...delivered.supervision!, state: "user_check",
+        reviews: [{ at: t3, verdict: "accepted" }], progress: { kind: "done", text: "Verified against the source.", at: t3 } },
+    }));
+    await act(async () => entry("finished").click());
+    expect(row()).toContain("Verified against the source.");
+  });
+
   it("keeps reopened accepted work Working while its Agent runs again", () => {
     act(() => entry("running").click());
     act(() => putTodo({ ...todo, done_at: undefined, supervision: { ...todo.supervision!, state: "accepted", reviews: [{ at, verdict: "accepted" }] } }));

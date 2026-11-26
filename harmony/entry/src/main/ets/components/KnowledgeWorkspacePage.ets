@@ -402,6 +402,10 @@ export struct KnowledgeWorkspacePage {
     return this.pageAvailable && this.visible && key === this.localOwner && this.recordingScope() === key;
   }
   private requestRecordingStart():void {
+    if (!this.model.isRecordingModuleAllowed()) {
+      this.getUIContext().getPromptAction().showToast({ message: tr('xiaoyi_recording_module_off') });
+      return;
+    }
     if (!this.pageAvailable || !this.visible || !this.recording.canStart()) return;
     if (!this.pickedHub()) {
       this.openRecording('',true).catch(() => undefined);
@@ -464,7 +468,7 @@ export struct KnowledgeWorkspacePage {
   }
 
   @Builder recordingSheet() {
-    Scroll() { KnowledgeRecordingView({ model:this.recording,onStart:():void => this.requestRecordingStart(),onDeleteLocal: (): void => this.deleteRecording() }) }
+    Scroll() { KnowledgeRecordingView({ model:this.recording,recordingAllowed:this.model.isRecordingModuleAllowed(),onStart:():void => this.requestRecordingStart(),onDeleteLocal: (): void => this.deleteRecording() }) }
       .width('100%').height('100%').align(Alignment.TopStart).backgroundColor(Colors.grouped)
   }
 
@@ -865,23 +869,35 @@ export struct KnowledgeWorkspacePage {
             .onClick(() => this.onAllMeetings()).id('recordings.all')
         }.margin({top:18})
       }.width('100%').contentStartOffset(35).layoutWeight(1).id('recordings.list')
-      Row() {
-        Button({type:ButtonType.Capsule}) {
-          Row({space:8}) {
-            SymbolGlyph($r('sys.symbol.waveform_circle')).fontSize(Tokens.interfaceFontVp(17, nativeEnvironment.fontScale)).fontWeight(600).fontColor([Colors.onAction])
-            Text(tr(this.recording.captureState === 'recording' ? 'knowledge_recording_active' : this.meetingKind==='meeting' ? 'phone_meeting_start' : 'phone_start_note'))
-              .fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17)).minFontSize(10.2).maxFontSize(17).fontWeight(600)
-              .fontColor(Colors.onAction).textAlign(TextAlign.Center).maxLines(1).flexShrink(1).id('recordings.capture.label')
-          }.width('100%').justifyContent(FlexAlign.Center)
-        }.width('100%').constraintSize({minHeight:meetingCaptureHeight(nativeEnvironment.fontScale, this.recordingPageHeight)})
-          .padding({left:14,right:14,top:6,bottom:6}).backgroundColor(this.recording.canStop() ? Colors.danger : Colors.action)
-          .borderWidth(Colors.systemControls && !this.recording.canStop() ? 0.67 : 0).borderColor(Colors.prominentRim)
-          .enabled(!this.model.demo && (this.recording.canStart() || this.recording.canStop()))
-          .onClick(() => {
-            if (this.recording.canStop()) this.openRecording().catch(() => undefined);
-            else this.requestRecordingStart();
-          }).id('recordings.capture')
-      }.width('100%').padding({top:4,bottom:4}).id('knowledge.recording.open')
+      if (this.model.isRecordingModuleAllowed() || this.recording.canStop()) {
+        Row() {
+          Button({type:ButtonType.Capsule}) {
+            Row({space:8}) {
+              SymbolGlyph($r('sys.symbol.waveform_circle')).fontSize(Tokens.interfaceFontVp(17, nativeEnvironment.fontScale)).fontWeight(600).fontColor([Colors.onAction])
+              Text(tr(this.recording.captureState === 'recording' ? 'knowledge_recording_active' : this.meetingKind==='meeting' ? 'phone_meeting_start' : 'phone_start_note'))
+                .fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17)).minFontSize(10.2).maxFontSize(17).fontWeight(600)
+                .fontColor(Colors.onAction).textAlign(TextAlign.Center).maxLines(1).flexShrink(1).id('recordings.capture.label')
+            }.width('100%').justifyContent(FlexAlign.Center)
+          }.width('100%').constraintSize({minHeight:meetingCaptureHeight(nativeEnvironment.fontScale, this.recordingPageHeight)})
+            .padding({left:14,right:14,top:6,bottom:6}).backgroundColor(this.recording.canStop() ? Colors.danger : Colors.action)
+            .borderWidth(Colors.systemControls && !this.recording.canStop() ? 0.67 : 0).borderColor(Colors.prominentRim)
+            .enabled(!this.model.demo && (this.recording.canStart() || this.recording.canStop()))
+            .onClick(() => {
+              if (this.recording.canStop()) this.openRecording().catch(() => undefined);
+              else this.requestRecordingStart();
+            }).id('recordings.capture')
+        }.width('100%').padding({top:4,bottom:4}).id('knowledge.recording.open')
+      } else {
+        Text(tr('xiaoyi_recording_module_off'))
+          .fontSize(Tokens.meta)
+          .maxFontScale(Tokens.interfaceScaleFor(Tokens.meta))
+          .fontColor(Colors.secondary)
+          .width('100%')
+          .padding({left:16,right:16,top:12,bottom:12})
+          .backgroundColor(Colors.surface)
+          .borderRadius(14)
+          .id('recordings.module.off')
+      }
     }.width('100%').height('100%').padding({left:16,right:16,top:4,bottom:14}).backgroundColor(Colors.grouped).id('recordings.home')
       .onAreaChange((_: Area, next: Area) => { const height = Number(next.height); if (height !== this.recordingPageHeight) this.recordingPageHeight = height; })
       .bindSheet($$this.recordingOpen,this.recordingSheet(),{title:{title:tr('knowledge_recording_open')},height:SheetSize.LARGE,showClose:true,

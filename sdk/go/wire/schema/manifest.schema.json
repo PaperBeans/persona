@@ -387,6 +387,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"$ref": "#/$defs/ID"},
+        "title": {"type": "string", "maxLength": 40, "description": "What the extension's contributions list calls it; the id when absent."},
         "dir": {"type": "string", "description": "The directory, relative to the package (or to the data directory with source data)."},
         "source": {"$ref": "#/$defs/ContentSource"}
       },
@@ -820,6 +821,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"$ref": "#/$defs/ID"},
+        "title": {"type": "string", "maxLength": 40, "description": "What the extension's contributions list calls it; the id when absent."},
         "skills": {"type": "array", "items": {"type": "string"}},
         "instructions": {"type": "string"},
         "gate": {"type": "string"}
@@ -832,6 +834,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"$ref": "#/$defs/ID", "description": "The server's name for the assistant; not persona or persona."},
+        "title": {"type": "string", "maxLength": 40, "description": "What the extension's contributions list calls it; the id when absent."},
         "command": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Looked up on PATH, then in ~/bin."},
         "env": {"type": "string", "pattern": "^PERSONA_[A-Z0-9_]{1,56}$", "description": "A PERSONA_ variable (PERSONA_ read too) that, when set, replaces the lookup: a path, or \"\" / 0 / off / false to leave the server out."},
         "args": {"type": "array", "items": {"type": "string"}},

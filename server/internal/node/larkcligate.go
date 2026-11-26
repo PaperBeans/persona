@@ -240,40 +240,6 @@ func (c larkCall) cliRead() bool {
 	return c.Method == "GET" || c.Method == "HEAD"
 }
 
-// larkRiskNote marks the card when lark-cli calls a command high-risk, or could not say how risky it is.
-func larkRiskNote(c larkCall) string {
-	switch {
-	case c.Method != "CLI":
-		return ""
-	case c.Risk == "high-risk-write":
-		return "（lark-cli 标为高风险）"
-	case c.Risk == "":
-		return "（lark-cli 没给出风险等级）"
-	}
-	return ""
-}
-
-// larkCLIActor is who a lark-cli write acts as, for the card: the app's bot with --as bot, the user otherwise (the
-// app usually has no send_as_user scope, so the assistant sends messages as the bot).
-func larkCLIActor(args []string) string {
-	if flagValue(args, "--as") == "bot" {
-		return "以机器人身份"
-	}
-	return "以你的身份"
-}
-
-// shellJoin is the arguments as the user would type them, for the card: quoted only where a shell needs it.
-func shellJoin(args []string) string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		if a == "" || strings.ContainsAny(a, " \t\n'\"\\$`|&;<>()*?[]{}#~!") {
-			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		}
-		out[i] = a
-	}
-	return strings.Join(out, " ")
-}
-
 // flagOn says a switch (--help, --dry-run…) is on. lark-cli's flags are pflag's: "--dry-run=false" turns it off,
 // and a flag written without "=" may take the next word as its value ("--text --dry-run" sends the text
 // "--dry-run"), so a bare switch counts only when the word before it is not a flag that may be waiting for one.

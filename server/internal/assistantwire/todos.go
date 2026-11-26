@@ -54,6 +54,8 @@ type TodoHandoff struct {
 	New       bool   `json:"new,omitempty"`
 	MachineID string `json:"machine_id,omitempty"`
 	Cwd       string `json:"cwd,omitempty"`
+	// Agent is the kind that will receive Text. An empty value keeps the legacy prompt order.
+	Agent string `json:"agent,omitempty"`
 }
 
 // TodoHandoffResult is assistant.todo_handoff's answer: the todo (Found false: no such todo) and Text with the todo's

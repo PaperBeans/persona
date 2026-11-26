@@ -1,4 +1,11 @@
 {
+  "decision_view_source": "在聊天中查看",
+  "decision_skip_label": "跳过",
+  "decision_collapse": "折叠",
+  "decision_skip_terminal": "请在电脑上回答这条终端问题。",
+  "decision_skip_terminal_chat": "这条终端问题可用「在聊天中回复」处理。",
+  "decision_skip_permission": "使用「拒绝」可阻止工具运行。",
+  "decision_skip_plan": "退回计划即可阻止执行。",
   "close_agent": "关掉这个 Agent",
   "close_agent_confirm": "关闭并归档",
   "close_agent_cancel": "取消",

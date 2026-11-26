@@ -110,9 +110,9 @@ func (n *Node) codexAssistantCommand(shell, launcher string, args []string) *exe
 		// Keep the assistant's MCP and provider flags before app-server. Running
 		// personad launch here bypasses the shell's codex wrapper and starts a TUI.
 		argv := append(append(prefix[1:], args...), "app-server")
-		return exec.Command(shell, append([]string{"-ic", `if [[ -n "${PERSONA_MODEL_SOURCE_BIN-}" && -n "${PERSONA_MODEL_SOURCE_HOSTS-}" ]]; then "${PERSONA_MODEL_SOURCE_BIN}" model-source codex "$@"; else builtin command codex "$@"; fi`, "persona"}, argv...)...)
+		return exec.Command(shell, append([]string{shellFlag(shell), `if [[ -n "${PERSONA_MODEL_SOURCE_BIN-}" && -n "${PERSONA_MODEL_SOURCE_HOSTS-}" ]]; then "${PERSONA_MODEL_SOURCE_BIN}" model-source codex "$@"; else builtin command codex "$@"; fi`, "persona"}, argv...)...)
 	}
-	return exec.Command(shell, append([]string{"-ic", codexShell(n.launcherForScript(launcher)), "persona"}, args...)...)
+	return exec.Command(shell, append([]string{shellFlag(shell), codexShell(n.launcherForScript(launcher)), "persona"}, args...)...)
 }
 
 func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, mode string, options ...modelExecution) (*assistantProc, error) {

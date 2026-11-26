@@ -29,7 +29,7 @@ import { useScrollMemory } from "../lib/scroll-memory";
 import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { useScoped } from "../lib/current-assistant";
 import { lazyPage } from "../lib/lazy-page";
-import { dropTodo, putTodo, refresh, refreshTodos, useStore } from "../lib/store";
+import { dropTodo, loadAllOlderClosed, loadOlderClosed, putTodo, refresh, refreshTodos, useStore } from "../lib/store";
 import {
   addTodoDecision,
   addTodoExternalPRBlocker,
@@ -58,6 +58,7 @@ import {
   todoDueText,
   shownStatus,
   strikesThrough,
+  todoRestLook,
   todoStatus,
   unlinkAgentFromTodo,
   unlinkSpaceFromTodo,
@@ -190,6 +191,13 @@ const sortLabel = (s: TodoListSort) => t(`todos.sort_${s}`);
 const kindFilterLabel = (k: TodoKindFilter) => t(`todos.kind_filter_${k}`);
 
 type TodoGrouping = "status" | "folder" | "direction" | "request";
+
+type ClosedHistory = {
+  hasMore: boolean;
+  loading: boolean;
+  error: string | null;
+  onLoad: () => void;
+};
 
 /** The grouping saved in this browser; status for none or an unknown one. */
 function todoGrouping(saved: string | null): TodoGrouping {
@@ -425,6 +433,24 @@ function TodoListView({
     () => (todosV2 ? parseSharedBlockers(rawSharedBlockers, visibleTodoIds) : []),
     [todosV2, rawSharedBlockers, visibleTodoIds],
   );
+  const closedCursors = useStore((s) => s.closedCursors);
+  const closedLoading = useStore((s) => s.closedLoading);
+  const closedError = useStore((s) => s.closedError);
+  const hasOlderClosed = useMemo(
+    () => Object.entries(closedCursors).some(([manager, cursor]) => cursor.has_more && sameManager(manager, repositoryManager)),
+    [closedCursors, repositoryManager],
+  );
+  const closedHistory = useMemo<ClosedHistory>(() => ({
+    hasMore: hasOlderClosed,
+    loading: closedLoading,
+    error: closedError,
+    onLoad: () => { void loadOlderClosed(repositoryManager); },
+  }), [hasOlderClosed, closedLoading, closedError, repositoryManager]);
+  // The calendar's Show done needs the otherwise-bounded dated history. This is an explicit, calendar-only read;
+  // the list and board remain bounded until it is asked for.
+  useEffect(() => {
+    if (calendarOn && calendarDone && hasOlderClosed) void loadAllOlderClosed(repositoryManager);
+  }, [calendarOn, calendarDone, hasOlderClosed, repositoryManager]);
   const [selectedBlockerKey, setSelectedBlockerKey] = useState<string | null>(null);
   const activeBlocker = useMemo(
     () => (todosV2 ? findSelectedBlocker(selectedBlockerKey, sharedBlockers) : undefined),
@@ -1414,7 +1440,7 @@ function TodoListView({
               >
                 {todosError}
               </Empty>
-            ) : (filteredUncompleted.length === 0 || (grouping === "direction" && directionSections.length === 0 && directionUnlisted === 0 && directionRest.length === 0)) && filteredCompleted.length === 0 && filteredCancelled.length === 0 ? (
+            ) : (filteredUncompleted.length === 0 || (grouping === "direction" && directionSections.length === 0 && directionUnlisted === 0 && directionRest.length === 0)) && filteredCompleted.length === 0 && filteredCancelled.length === 0 && !hasOlderClosed ? (
               offline && todos.length === 0 ? (
                 <OfflineState offline={offline} ring="ring-surface" className="py-14" />
               ) : search.trim() ? (
@@ -1479,7 +1505,7 @@ function TodoListView({
               <div className="flex flex-col gap-1" data-testid="todos-sections" data-todo-source={serverBoard ? "board" : fromView ? "view" : undefined}>
                 {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
                 {statusSectionOrder.map((sec) =>
-                  displayTriaged.sections[sec].length === 0 ? null : (
+                  displayTriaged.sections[sec].length === 0 && !((sec === "done" || sec === "cancelled") && hasOlderClosed) ? null : (
                     <TodoTriageSection
                       key={sec}
                       section={sec}
@@ -1499,6 +1525,7 @@ function TodoListView({
                       onRestore={onRestore}
                       onSeen={seenOn ? onSeen : undefined}
                       onMenu={openRowMenu}
+                      closedHistory={sec === "done" || sec === "cancelled" ? closedHistory : undefined}
                     />
                   ),
                 )}
@@ -1566,11 +1593,15 @@ function TodoListView({
                 ))}
 
                 {/* Completed Fold */}
-                {filteredCompleted.length > 0 && (
+                {(filteredCompleted.length > 0 || hasOlderClosed) && (
                   <div className="mt-2 border-t border-line/60 pt-2">
                     <button
                       type="button"
-                      onClick={() => setShowDone((v) => !v)}
+                      data-testid="todos-done-fold"
+                      onClick={() => {
+                        if (!showDone && closedHistory.hasMore) closedHistory.onLoad();
+                        setShowDone((v) => !v);
+                      }}
                       className="flex h-8 w-full items-center justify-between rounded-control px-2.5 text-[12px] text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
                     >
                       <span>{t("todos.done_section", { count: filteredCompleted.length })}</span>
@@ -1596,16 +1627,21 @@ function TodoListView({
                             onMenu={openRowMenu}
                           />
                         ))}
+                        <ClosedHistoryMore active={showDone} {...closedHistory} />
                       </div>
                     )}
                   </div>
                 )}
                 {/* Cancelled Fold: its own outcome and reason, never inside Completed (#5732) */}
-                {filteredCancelled.length > 0 && (
+                {(filteredCancelled.length > 0 || hasOlderClosed) && (
                   <div className="mt-2 border-t border-line/60 pt-2" data-testid="todos-cancelled-fold">
                     <button
                       type="button"
-                      onClick={() => setShowCancelled((v) => !v)}
+                      data-testid="todos-cancelled-fold"
+                      onClick={() => {
+                        if (!showCancelled && closedHistory.hasMore) closedHistory.onLoad();
+                        setShowCancelled((v) => !v);
+                      }}
                       className="flex h-8 w-full items-center justify-between rounded-control px-2.5 text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
                     >
                       <span>{t("todos.cancelled_section", { count: filteredCancelled.length })}</span>
@@ -1627,6 +1663,7 @@ function TodoListView({
                             onMenu={openRowMenu}
                           />
                         ))}
+                        <ClosedHistoryMore active={showCancelled} {...closedHistory} />
                       </div>
                     )}
                   </div>
@@ -2133,6 +2170,40 @@ function sectionTitle(section: TriageSection, rules: readonly TriageRule[]): str
   return t(`todos.section_${section}`);
 }
 
+/** Below an open Done or Cancelled section: cursor-loads older closed rows when it comes into view, with the same
+ *  request behind its button where IntersectionObserver is unavailable or a failed page waits to be retried. */
+function ClosedHistoryMore({ active, hasMore, loading, error, onLoad }: ClosedHistory & { active: boolean }) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active || !hasMore || loading || error) return;
+    const el = end.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    let asked = false;
+    const io = new IntersectionObserver((entries) => {
+      if (asked || !entries.some((entry) => entry.isIntersecting)) return;
+      asked = true;
+      onLoad();
+    }, { rootMargin: "160px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [active, hasMore, loading, error, onLoad]);
+  if (!active || (!hasMore && !loading && !error)) return null;
+  return (
+    <div ref={end} className="flex flex-col items-center gap-1 px-2.5 py-2" data-testid="todos-closed-history">
+      <button
+        type="button"
+        data-testid="todos-closed-history-more"
+        disabled={loading}
+        onClick={onLoad}
+        className="touch-hit rounded-control px-3 py-1 text-label font-medium text-accent-ink transition-colors hover:bg-hover disabled:text-ink-3"
+      >
+        {loading ? t("todos.closed_loading") : error ? t("todos.closed_retry") : t("todos.closed_more")}
+      </button>
+      {error && <span className="max-w-full text-center text-submeta text-ink-3">{error}</span>}
+    </div>
+  );
+}
+
 /** One status section (docs/assistant/todo-status-sop.md): a folding title with its count, a row per group of related
  *  to-dos. Every section starts open but Shelved and Done (#5707). */
 const TodoTriageSection = memo(function TodoTriageSection({
@@ -2151,6 +2222,7 @@ const TodoTriageSection = memo(function TodoTriageSection({
   onRestore,
   onSeen,
   onMenu,
+  closedHistory,
 }: {
   section: TriageSection;
   /** Whether it starts folded: Shelved and Done (plus Parked under todos_v2). */
@@ -2172,6 +2244,8 @@ const TodoTriageSection = memo(function TodoTriageSection({
   /** Got it on a Just finished row; unset while the hub keeps no seen marks. */
   onSeen?: (id: string) => void;
   onMenu: TodoRowMenuOpener;
+  /** Older Done/Cancelled rows beyond the default closed window (#15683). */
+  closedHistory?: ClosedHistory;
 }) {
   const holds = groups.some(
     (g) =>
@@ -2182,7 +2256,10 @@ const TodoTriageSection = memo(function TodoTriageSection({
   const title = sectionTitle(section, groups.flatMap((g) => [...g.triage.values()].map((t) => t.rule)));
   return (
     <section className="mt-1 first:mt-0" data-testid="todo-section" data-section={section} data-count={groups.length} data-todos={count}>
-      <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] hover:bg-hover">
+      <button type="button" aria-expanded={!folded} onClick={() => {
+        if (folded && closedHistory?.hasMore) closedHistory.onLoad();
+        toggle();
+      }} className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-label hover:bg-hover">
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
         <span className={cx("shrink-0 truncate font-semibold whitespace-nowrap", !(slim && folded && section === "parked") && "min-w-0 flex-1", SECTION_TONE[section])}>{title}</span>
         {slim && folded && section === "parked" && (
@@ -2214,6 +2291,7 @@ const TodoTriageSection = memo(function TodoTriageSection({
               onMenu={onMenu}
             />
           ))}
+          {closedHistory && <ClosedHistoryMore active={!folded} {...closedHistory} />}
         </div>
       )}
     </section>
@@ -2652,6 +2730,7 @@ const TodoListItem = memo(function TodoListItem({
   const openPR = todo.wait?.kind === "pr_merge" || legacyMerges.length > 0;
   // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
   const look = todoLook(todo, status, view.wait);
+  const hasRestStatus = todo.wait != null || Boolean(todoRestLook(todo, status));
   // its steps as the hub counts them (#11858, lib/todo-steps.ts): in place of Not started, or after its Agent count
   const steps = goalSummary ? undefined : stepsWords(todo, status);
   const held = heldDelivery(todo);
@@ -3196,7 +3275,7 @@ const TodoListItem = memo(function TodoListItem({
             {/* its steps were handed out: what is next once they are all closed, else nothing about handing it over */}
             {!todo.done_at && activeCount === 0 && (steps?.tail !== undefined ? (
               steps.tail && <span className="truncate text-ink-3" data-testid="todo-steps-next">· {steps.tail}</span>
-            ) : !responsible ? (
+            ) : !responsible && !hasRestStatus ? (
               <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
             ) : null)}
             {(section ?? view.section) === "just_done" && seenCanFile(todo) && onSeen ? (

@@ -37,6 +37,8 @@ interface AgentCreationService {
      * unified model configuration.
      */
     suspend fun newAgentModel(): ModelPurposeDetail? = null
+    /** The same purpose on the hub that owns a preselected computer. */
+    suspend fun newAgentModel(machineId: String): ModelPurposeDetail? = newAgentModel()
 
     /**
      * The models [launcher]'s agent offers in its own /model menu, for "New Agent"'s model picker: the node keeps the
@@ -79,7 +81,13 @@ interface AgentCreationService {
 }
 
 /** A complete response replaces the inventory. A partial response updates returned rows but does not remove missing ones. */
-data class AgentWorkspaceCatalog(val workspaces: List<AgentWorkspace>, val complete: Boolean = true)
+data class AgentWorkspaceCatalog(
+    val workspaces: List<AgentWorkspace>,
+    /** Completeness as used by the New Agent picker. The list tracks failures for each source separately. */
+    val complete: Boolean = true,
+    val failedSources: Set<String> = emptySet(),
+    val unscopedFailure: Boolean = false,
+)
 
 /**
  * One workspace of the hub's catalog (`GET /api/v1/workspaces`, docs/protocol/protocol.md): a start with

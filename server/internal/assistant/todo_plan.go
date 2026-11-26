@@ -335,6 +335,14 @@ func (s *Service) editTodo(ctx context.Context, id string, e db.TodoEdit) (Todo,
 			s.supervise.writeMu.Unlock()
 		}
 	}
+	if e.Done != nil && *e.Done {
+		if current, ok := s.todoNow(id); ok && current.DoneAt == nil {
+			if err := s.investigationCloseError(ctx, current); err != nil {
+				unlock()
+				return Todo{}, err
+			}
+		}
+	}
 	if links {
 		// Checked again with the graph held still: a write since the caller's check may have changed the request
 		// (todo_pieces.go). A *pieceError when it no longer holds.

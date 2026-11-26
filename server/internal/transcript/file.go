@@ -494,6 +494,13 @@ func (f *File) End() Span {
 	return Span{History: f.history(), To: f.lines}
 }
 
+// LoadedItems returns the items already read from the current history without opening older pages.
+func (f *File) LoadedItems() ([]proto.Item, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]proto.Item(nil), f.items...), f.history()
+}
+
 // TurnClosedAfter reports whether a non-hidden turn close occurred after seq in the lines f has parsed.
 func (f *File) TurnClosedAfter(seq int) bool {
 	f.mu.Lock()

@@ -65,6 +65,7 @@ describe("UI 版本 3：页面跳转", () => {
   it("reads a push on an action, its state as text", () => {
     expect(readAction({ id: "open", push: { state: { id: 3 }, title: "详情" } })).toEqual({ id: "open", push: { state: '{"id":3}', title: "详情" } });
     expect(readAction({ id: "open", push: { state: "s1", ui: "detail" } })).toEqual({ id: "open", push: { state: "s1", ui: "detail" } });
+    expect(readAction({ id: "open", open: "persona://task/t-42" })).toEqual({ id: "open", open: "persona://task/t-42" });
     expect(readAction({ confirm: "x" })).toBeUndefined();
   });
 

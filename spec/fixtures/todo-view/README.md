@@ -328,8 +328,11 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
   hub sends accepted and deployed work to Done 24 hours after it finished. Accepted or deployed work never reads as
   `pr_open`, as today; an open concern is never accepted or deployed.
 - **A plain "Please verify" is a finish, not `verify`**: it stays in Just finished as the SOP's "Decision table" keeps
-  it. A supervisor's explicit `accepted` + `user_check` puts the open task in Needs you with reason `verify` (row 3).
-  Its listed `ask` still supplies the existing round-bound Pass action.
+  it. A supervisor's explicit `accepted` + `user_check` is optional owner verification: #15680 (#15638) keeps it out of
+  the Needs you row and its urgent count and surfaces it as the calm "to verify" layer (the direction tree's `review`
+  state plus `counts.user_check`, and a calm web tray). Its listed `ask` still supplies the existing round-bound Pass
+  action. An older hub can still send the Needs you view with reason `verify`; clients honor that authoritative view
+  while the rolling upgrade lasts.
 - **A park on someone else is `someone_else`**, with the park's line: row 8 places it, and its `waiting_on` names the
   reason row 10 has for it.
 - **Steps roll up only into Needs you, Working, Waiting and Can wait**, and only when ahead of the parent's own

@@ -859,6 +859,48 @@ func TestAssistantOnARuntimeSendsASlashCommandOnItsOwn(t *testing.T) {
 	}
 }
 
+func TestAssistantOnAgyKeepsWorkflowCommandFirstAndContextLast(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	hello := assistantRuntimeHello()
+	hello["runtime"], hello["launcher"] = "agy", "agy"
+	host := dialRuntime(t, n, hello)
+	cwd := filepath.Join(n.home, ".persona", "assistant")
+	host.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": proto.Session{SessionID: "agy-a1", Cwd: cwd, Status: proto.StatusIdle}}, nil
+		}
+		return map[string]bool{"ok": true}, nil
+	}
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": "agy", "cwd": cwd, "text": "warm up"}); err != nil {
+		t.Fatal(err)
+	}
+	send := func(text string) (sent struct {
+		Text    string `json:"text"`
+		Context string `json:"context"`
+	}) {
+		t.Helper()
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": "agy-a1", "text": text}); err != nil {
+			t.Fatal(err)
+		}
+		all := host.got("session.send")
+		if err := json.Unmarshal(all[len(all)-1], &sent); err != nil {
+			t.Fatal(err)
+		}
+		return sent
+	}
+	if got := send(" \t/boost fix the race\nkeep the body"); got.Text != "/boost fix the race\nkeep the body" ||
+		!strings.Contains(got.Context, "测试时间") {
+		t.Fatalf("workflow prompt = %+v", got)
+	}
+	if got := send("/status"); got.Text != "/status" || got.Context != "" {
+		t.Fatalf("/status prompt = %+v", got)
+	}
+	if got := send("/tmp/report.md"); got.Text != "/tmp/report.md" || !strings.Contains(got.Context, "测试时间") {
+		t.Fatalf("path prompt = %+v", got)
+	}
+}
+
 func TestAssistantRuntimeStartPropagatesPermissionMode(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
@@ -1054,6 +1096,7 @@ func TestRemoteAgentMemoryToolsAndPlanMode(t *testing.T) {
 }
 
 func TestRemoteAgentGateWriteRequiresConfirmEvenInBypass(t *testing.T) {
+	needsLarkGate(t)
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
 

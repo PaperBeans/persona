@@ -19,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/connectorwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -314,16 +315,19 @@ func (in *fakeInbox) answer(ctx context.Context, p AppCall) (json.RawMessage, bo
 		})
 	case assistantwire.InboxReply:
 		var a struct {
-			Source string               `json:"source"`
-			Reply  connector.InboxReply `json:"reply"`
-			SendID string               `json:"send_id"`
+			Source         string               `json:"source"`
+			Reply          connector.InboxReply `json:"reply"`
+			SendID         string               `json:"send_id"`
+			SenderIdentity string               `json:"sender_identity"`
 		}
 		_ = json.Unmarshal(p.Params, &a)
 		inb, ok := connector.As[connector.Inbox](in.conn(a.Source))
 		if !ok {
 			return nil, true, errors.New("this item cannot be replied to")
 		}
-		out, err = in.sendOnce(a.SendID, func() error { return inb.Reply(ctx, a.Reply) })
+		out, err = in.sendOnce(a.SendID, func() error { return inb.Reply(connectorwire.WithSendIdentity(ctx, a.SenderIdentity), a.Reply) })
+	case assistantwire.InboxMessagePolicy:
+		out = map[string]bool{"sender_identity": true}
 	case assistantwire.InboxSettle:
 		var a struct {
 			Source  string   `json:"source"`

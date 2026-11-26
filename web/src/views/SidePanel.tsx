@@ -669,7 +669,7 @@ function body(p: Panel, onClose: () => void) {
     case "git":
       return <GitPanel key={directoryPanelKey(p)} mid={p.mid} sid={p.sid} cwd={p.cwd} at={p.at} onClose={onClose} />;
     case "review":
-      return <ReviewPanel key={directoryPanelKey(p)} mid={p.mid} sid={p.sid} cwd={p.cwd} scope={p.scope} at={p.at} opened={p} onClose={onClose} />;
+      return <ReviewPanel key={directoryPanelKey(p)} mid={p.mid} sid={p.sid} cwd={p.cwd} scope={p.scope} base={p.base} target={p.target} live={p.live} at={p.at} opened={p} onClose={onClose} />;
     case "changes":
       return <ChangesPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} opened={p} onClose={onClose} />;
     case "file":

@@ -361,7 +361,7 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 	var svc *Service
 	var ext *extmgr.Manager
 	// ConfigFile: its usage section (the account-pool gateways and their keys) is the devices', read and written there.
-	devs := devices.New(devices.Options{PackageHub: func() *bus.Client { return bh.Client() }, Store: database, ConfigFile: o.ConfigFile, TailcatKey: o.TailcatKey, ManagerID: o.ID,
+	devs := devices.New(devices.Options{Edition: build.Edition, PackageHub: func() *bus.Client { return bh.Client() }, Store: database, ConfigFile: o.ConfigFile, TailcatKey: o.TailcatKey, ManagerID: o.ID,
 		Logf:         log.New(stderr, "devices: ", log.LstdFlags).Printf,
 		ProjectState: func(st devicewire.States) devicewire.States { return svc.logicalProjectStates(st) },
 		Answer: func(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {

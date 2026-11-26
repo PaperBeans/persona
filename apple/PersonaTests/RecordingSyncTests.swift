@@ -295,17 +295,28 @@ private final class FakeRecordingHub: @unchecked Sendable {
         #expect(sync.store.textDays == 30, "the older hub's days fills the text field too")
     }
 
-    /// A `sync.json` from before #16444 has no `textDays`: it reads and the old shared window applies.
+    /// `RecordingSync.Store` as the app wrote it before #16444: no `audioDays`, no `textDays`.
+    nonisolated private struct StoreBefore16444: Encodable {
+        var synced: [UUID: Int64]
+        var rejected: [UUID: Int64] = [:]
+        var deletes: Set<UUID> = []
+        var days: Int
+        var daysKnown: Bool
+    }
+
+    /// A `sync.json` from before #16444 has no `textDays`: it reads and the old shared window applies. The file is
+    /// written the way the app wrote it, with `JSONEncoder` (#16642: a hand-written one had JSON objects where a
+    /// `[UUID: Int64]` is an array, and read as no file at all).
     @Test func anOldSyncFileStillReadsWithDaysForBothWindows() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let lib = RecordingLibrary(root: root)
-        let old: [String: Any] = [
-            "synced": [:], "rejected": [:], "deletes": [], "days": 30, "daysKnown": true,
-        ]
+        let recording = UUID()
+        let old = StoreBefore16444(synced: [recording: 3], days: 30, daysKnown: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: old).write(to: root.appendingPathComponent("sync.json"))
+        try JSONEncoder().encode(old).write(to: root.appendingPathComponent("sync.json"))
         let sync = RecordingSync(library: lib, api: { nil }, audioDaysChanged: { _ in })
+        #expect(sync.store.synced == [recording: 3] && sync.store.daysKnown, "the old file was read, not replaced by the defaults")
         #expect(sync.audioRetentionDays == 30 && sync.textRetentionDays == 30)
         #expect(sync.store.audioDays == nil, "an old file has no exact field")
     }

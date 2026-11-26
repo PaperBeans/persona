@@ -52,6 +52,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		s.noteUpstreamRow(machine, sess, now) // consecutive upstream 5xx / pool-exhaustion turns (fleet_upstream.go)
 		s.availSeen(machine, &sess, was, now) // the owner's wait for a reply (availability.go)
 		prev := was.Status
+		s.projectReviewSession(s.runCtx(), sess, prev)
 		wasWorking := prev == proto.StatusWorking || was.WorkingBeforeUnknown
 		reconnectStop := reconnected || was.ReconnectedBeforeUnknown
 		if a2aIdle(sess) && (!was.A2AIdle || reconnected) {
@@ -125,6 +126,9 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	mainSession, mainMachine := cfg.Main, cfg.mainRouteMachine()
 	for _, sess := range list {
 		s.refreshMainConversationAttention(sess, mainSession, mainMachine)
+	}
+	if len(list) > 0 && (len(before) == 0 || reconnected) {
+		go s.recheckMissingReplies(context.Background(), machine, list)
 	}
 	for _, ref := range inlineUpdates {
 		s.inOrder(func() { go s.registerInlineTurn(context.Background(), ref) })

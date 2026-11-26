@@ -189,6 +189,12 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	pendingPlacementBatchIdx := 0
 	for i := range p.Tasks {
 		t := &p.Tasks[i]
+		s.refreshSoftInbox(ctx, t)
+		if t.InboxNotice != "" {
+			if _, err := s.appendFeedOnce(ctx, p.ID+fmt.Sprintf("-inbox-%d", i), p.Conversation, feedNotice, p.ID, noticeBody{Text: i18n.T(s.lang(ctx), "assistant-tasks.inbox_link_removed")}); err != nil {
+				s.logf("Inbox link notice: %v", err)
+			}
+		}
 		if err := s.checkPlannedInbox(ctx, p.Conversation, *t); err != nil {
 			t.Error = err.Error()
 			continue
@@ -492,6 +498,9 @@ func (s *Service) supervisePlanTask(ctx context.Context, id, supervisor string, 
 			supervisor = v.Supervisor // a transfer that won before this write stays authoritative
 		} else if s.isLeader(ctx, supervisor) || s.liveSideSupervisor(ctx, supervisor) {
 			v.SupervisorSource = "plan"
+		}
+		if t.MultiIssueReport && v.Investigation == nil {
+			v.Investigation = &investigationFindings{}
 		}
 		if t.Continues == "" {
 			v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(t.DoneWhen), t.ExpectMinutes
@@ -873,6 +882,9 @@ func (s *Service) stopContinuedTaskAgents(ctx context.Context, todo Todo) ([]Tod
 		if !isStopped || agyCompanionIDRe.MatchString(a.SessionID) {
 			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			err := s.call(cctx, a.MachineID, deviceSessionStop, map[string]any{"session_id": a.SessionID}, nil)
+			if isNoTerminalStopError(err) {
+				err = s.call(cctx, a.MachineID, "session.close", map[string]any{"session_id": a.SessionID}, nil)
+			}
 			cancel()
 			// A list row that is live (listed and not stopped) contradicting the stop answer stays hard.
 			// "listed but stopped" only reaches here for the companion-uuid verification call and may be
@@ -895,6 +907,11 @@ func (s *Service) stopContinuedTaskAgents(ctx context.Context, todo Todo) ([]Tod
 		stopped = append(stopped, a)
 	}
 	return stopped, nil
+}
+
+func isNoTerminalStopError(err error) bool {
+	var re *rpc.Error
+	return errors.As(err, &re) && re.Code == "no_terminal"
 }
 
 // todoAgentReleaser is the store's letting go of one agent link (released_at only); a store without it keeps that in

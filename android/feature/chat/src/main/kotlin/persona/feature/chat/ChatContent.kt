@@ -96,6 +96,24 @@ internal fun ChatMarkdown(text: String, id: String = text,
     else ChatMarkdownBody(text, id, bodyStyle, color, viewKeys, streaming)
 }
 
+/** Public streaming Markdown renderer shared with overlays (e.g. Digital Assistant quick sheet). */
+@Composable
+fun StreamingReplyMarkdown(
+    text: String,
+    id: String = text,
+    streaming: Boolean = false,
+    bodyStyle: TextStyle = PersonaTheme.type.body,
+    color: Color = PersonaTheme.palette.ink,
+    selectable: Boolean = false,
+) = ChatMarkdown(
+    text = text,
+    id = id,
+    bodyStyle = bodyStyle,
+    color = color,
+    selectable = selectable,
+    streaming = streaming,
+)
+
 /**
  * [text] with its card blocks (docs/assistant/assistant-views.md "Card identity", the hub's fence rules): the Markdown around them as
  * Markdown, each ```persona-view as a card under its key ([viewKeys] maps its number in the text to `<item id>/<n>`;
@@ -425,6 +443,8 @@ internal fun ChatLineContent(
     turnLauncher: String? = null,
     /** Opens the session's terminal: the live work line's mark on Glass ([ChatTerminalPlaces.onWorkLine]). */
     onTerminal: (() -> Unit)? = null,
+    /** A work group's attached views are already shown above its expanded steps. */
+    showToolViews: Boolean = true,
 ) {
     val res = LocalResources.current
     if (turnFix != null) {
@@ -438,7 +458,7 @@ internal fun ChatLineContent(
             return TurnErrorFixCard(turnFix, raw, turnLauncher, retry)
         }
     }
-    when (line) {
+    val content: @Composable () -> Unit = { when (line) {
         is ChatLine.Row -> when (line.row.type) {
             "user" -> line.row.item?.item?.let { item ->
                 val source = persona.core.domain.sourceOf(item)
@@ -521,6 +541,13 @@ internal fun ChatLineContent(
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp.row).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))
+    } }
+    val blocks = LocalViewBlocks.current
+    val views = remember(line, showToolViews) { if (showToolViews) line.toolViews() else emptyList() }
+    if (blocks == null || views.isEmpty()) content()
+    else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        content()
+        for (view in views) DisableSelection { InterfaceContent { blocks.toolView(view) } }
     }
 }
 

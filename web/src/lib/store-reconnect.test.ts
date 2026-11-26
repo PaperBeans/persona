@@ -39,7 +39,7 @@ class FakeSocket {
 }
 
 const last = () => FakeSocket.all[FakeSocket.all.length - 1];
-const fetched = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.map((c) => String(c[0]));
+const fetched = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.map((c) => new URL(String(c[0]), "http://hub").pathname);
 
 let fetcher: ReturnType<typeof vi.fn>;
 
@@ -337,7 +337,7 @@ describe("a slow refresh() does not put back an older snapshot", () => {
     const turns: Held = Object.fromEntries(held.map((p) => [p, []]));
     const reply = (body: unknown) => ({ ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify(body) });
     fetcher.mockImplementation(async (url: string) => {
-      const path = String(url).replace(/^.*\/api\/v1/, "");
+      const path = new URL(String(url), "http://hub").pathname.replace(/^\/api\/v1/, "");
       if (turns[path]) return reply(await new Promise((r) => turns[path].push(r)));
       return reply(answers[path] ?? {});
     });

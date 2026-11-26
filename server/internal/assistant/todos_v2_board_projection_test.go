@@ -615,3 +615,68 @@ func TestTodosV2BoardProjectionHTTPGatingAndRollback(t *testing.T) {
 		t.Fatalf("todos_v2 rollback GET /api/v1/todos bytes diverged from baseline:\ngot:  %s\nwant: %s", rollbackResp.Body.String(), string(baselineBytes))
 	}
 }
+
+func TestTodosV2RepoGatePromotesBoundOpenPRToWaitingNotDraftOrRef(t *testing.T) {
+	base := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	list := []listedTodo{
+		{
+			Todo: Todo{ID: "open_pr_repo", Title: "Bound open PR", CreatedAt: base},
+			RepoGate: &repoGate{
+				State:        repoGateBlockedConflict,
+				TargetCount:  1,
+				BlockingRepo: "org/app",
+				BlockingPR:   "https://github.com/org/app/pull/12",
+				Reason:       "merge_conflicts",
+			},
+		},
+		{
+			Todo: Todo{ID: "draft_pr_repo", Title: "Bound draft PR", CreatedAt: base},
+			RepoGate: &repoGate{
+				State:        repoGateAwaitingReview,
+				TargetCount:  1,
+				BlockingRepo: "org/app",
+				BlockingPR:   "https://github.com/org/app/pull/13",
+				Reason:       "draft_pr",
+			},
+		},
+		{
+			Todo: Todo{ID: "ref_only_repo", Title: "Reference repo", CreatedAt: base},
+			RepoGate: &repoGate{
+				State:          repoGateReferenceOnly,
+				ReferenceCount: 1,
+				Reason:         "reference_only",
+			},
+		},
+	}
+	views := []assistantwire.TodoSummary{
+		{Phase: assistantwire.TodoPhaseTodo, Section: assistantwire.TodoListSectionTodo, Reason: assistantwire.TodoReasonRest},
+		{Phase: assistantwire.TodoPhaseTodo, Section: assistantwire.TodoListSectionTodo, Reason: assistantwire.TodoReasonRest},
+		{Phase: assistantwire.TodoPhaseTodo, Section: assistantwire.TodoListSectionTodo, Reason: assistantwire.TodoReasonRest},
+	}
+	waits := make([]*assistantwire.TodoWait, len(list))
+	applyRepoGateToViews(list, views, waits)
+
+	if views[0].Section != assistantwire.TodoListSectionWaiting || views[0].Reason != assistantwire.TodoReasonPrOpen {
+		t.Fatalf("open_pr_repo view = %+v, want waiting/pr_open", views[0])
+	}
+	if waits[0] == nil || waits[0].Kind != assistantwire.TodoWaitKindPrMerge ||
+		!reflect.DeepEqual(waits[0].PrBlockers, []assistantwire.TodoWaitPRBlocker{assistantwire.TodoWaitPRBlockerConflicts}) {
+		t.Fatalf("open_pr_repo wait = %+v, want pr_merge with conflicts", waits[0])
+	}
+	if views[1].Section != assistantwire.TodoListSectionTodo || waits[1] != nil {
+		t.Fatalf("draft_pr_repo unexpectedly promoted: view=%+v wait=%+v", views[1], waits[1])
+	}
+	if views[2].Section != assistantwire.TodoListSectionTodo || waits[2] != nil {
+		t.Fatalf("ref_only_repo unexpectedly promoted: view=%+v wait=%+v", views[2], waits[2])
+	}
+
+	// Fallback classifyBoardSection (View == nil) orders open-PR repo_gate items ahead of unstarted items.
+	secOpen, subOpen := classifyBoardSection(list[0])
+	secDraft, subDraft := classifyBoardSection(list[1])
+	if secOpen != boardSectionWaiting || subOpen != 0 {
+		t.Fatalf("classifyBoardSection(open_pr_repo) = (%q, %d), want (%q, 0)", secOpen, subOpen, boardSectionWaiting)
+	}
+	if secDraft != boardSectionWaiting || subDraft != 1 {
+		t.Fatalf("classifyBoardSection(draft_pr_repo) = (%q, %d), want (%q, 1)", secDraft, subDraft, boardSectionWaiting)
+	}
+}

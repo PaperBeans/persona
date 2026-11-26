@@ -519,6 +519,54 @@ func TestPlacementAssignEnforcesHardConstraintsAdmissionAndCAS(t *testing.T) {
 	}
 }
 
+func TestPlacementAssignPreservesTraexModelAndEffort(t *testing.T) {
+	e := newPlacementTestEnv(t)
+	e.f.launcherList = append(e.f.launcherList, proto.Launcher{Name: "traex", Agent: "traex"})
+	ctx := context.Background()
+	_ = e.doReq(http.MethodGet, "/api/v1/assistant/placement/pending", roleExtension, "sched-ext", "")
+
+	res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+		"tasks":[{
+			"title":"TRAE CLI terminal task",
+			"prompt":"Inspect the repository",
+			"cwd":"~/repo",
+			"launcher":"traex",
+			"model":"example-fast",
+			"effort":"xhigh",
+			"role":"worker",
+			"readonly":true,
+			"goal":"Check the repository",
+			"user_requested":true,
+			"why":"Use the chosen model on a Linux worker",
+			"placement_constraints":{"os":"linux"}
+		}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := e.s.loadPlan(ctx, extractPlanID(t, res))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := e.doReq(http.MethodPost, "/api/v1/assistant/placement/"+plan.Tasks[0].TodoID+"/assign",
+		roleExtension, "sched-ext", `{"machine":"linux-idle","reason":"selected by score","version":1}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	waitFor(t, "assigned TRAE CLI task starts", func() bool {
+		return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+	})
+	e.f.mu.Lock()
+	defer e.f.mu.Unlock()
+	if len(e.f.starts) != 1 || e.f.starts[0]["launcher"] != "traex" {
+		t.Fatalf("starts = %v, want one TRAE CLI start", e.f.starts)
+	}
+	start := e.f.starts[0]
+	if start["model"] != "example-fast" || start["effort"] != "xhigh" {
+		t.Fatalf("TRAE CLI start got model %q and effort %q, want example-fast and xhigh", start["model"], start["effort"])
+	}
+}
+
 func TestPlacementDeferCASAndVisibility(t *testing.T) {
 	e := newPlacementTestEnv(t)
 	ctx := context.Background()

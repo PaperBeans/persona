@@ -754,7 +754,7 @@ describe("交付与等待处理的状态标签 (#5732)", () => {
 
   it("open concern 的 live 不冒用普通交付状态", () => {
     const concern = { ...base, kind: "concern", delivery: { state: "live" as const, at: "2026-11-04T08:00:00Z" } };
-    expect(todoStatusLabel(concern, "not_started")).toBe("未开始");
+    expect(todoStatusLabel(concern, "not_started")).toBe("跟进中");
     expect(shownStatus(concern, "not_started")).toBe("not_started");
   });
 
@@ -1174,5 +1174,100 @@ describe("responsible party (#12712)", () => {
     };
     expect(todoStatus(withWorking, lookup)).toBe("working");
     expect(todoStatus(withNeeds, lookup)).toBe("needs_you");
+  });
+});
+
+describe("open PR, parked, and concern status labels when no active agent runs", () => {
+  const now = Date.parse("2026-11-26T12:00:00Z");
+  const fresh = "2026-11-26T11:55:00Z";
+  const stale = "2026-11-26T10:00:00Z";
+  const base: Todo = { id: "t", title: "Status test", created_at: "2026-11-26T09:00:00Z", updated_at: fresh };
+
+  it("shows accurate PR states instead of Not started for fresh open non-draft PRs", () => {
+    const withPR = (patch: Partial<NonNullable<Todo["pr_status"]>>): Todo => ({
+      ...base,
+      pr_url: "https://github.com/org/repo/pull/10",
+      pr_status: {
+        url: "https://github.com/org/repo/pull/10",
+        state: "open",
+        draft: false,
+        review: "approved",
+        checks: "success",
+        conflicts: false,
+        checked_at: fresh,
+        ...patch,
+      },
+    });
+    expect(todoStatusLabel(withPR({}), "not_started", now)).toBe("等合入");
+    expect(todoStatusLabel(withPR({ review: "required" }), "not_started", now)).toBe("评审中");
+    expect(todoStatusLabel(withPR({ checks: "pending" }), "not_started", now)).toBe("检查中");
+    expect(todoStatusLabel(withPR({ checks: "failure" }), "not_started", now)).toBe("检查未通过");
+    expect(todoStatusLabel(withPR({ review: "changes_requested" }), "not_started", now)).toBe("需要修改");
+    expect(todoStatusLabel(withPR({ conflicts: true, review: "changes_requested", checks: "failure" }), "not_started", now)).toBe("存在合并冲突");
+    // Also works for follow_up (stopped agent at rest) and other_prs.
+    expect(todoStatusLabel(withPR({ review: "required" }), "follow_up", now)).toBe("评审中");
+    const otherPR: Todo = {
+      ...base,
+      other_prs: [{ url: "https://github.com/org/repo/pull/11", state: "open", draft: false, review: "changes_requested", checks: "success", conflicts: false, checked_at: fresh }],
+    };
+    expect(todoStatusLabel(otherPR, "not_started", now)).toBe("需要修改");
+  });
+
+  it("keeps Draft, stale, merged, and closed PRs as Not started", () => {
+    const mk = (patch: Partial<NonNullable<Todo["pr_status"]>>): Todo => ({
+      ...base,
+      pr_url: "https://github.com/org/repo/pull/12",
+      pr_status: {
+        url: "https://github.com/org/repo/pull/12",
+        state: "open",
+        draft: false,
+        review: "required",
+        checks: "success",
+        conflicts: false,
+        checked_at: fresh,
+        ...patch,
+      },
+    });
+    expect(todoStatusLabel(mk({ draft: true }), "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel(mk({ checked_at: stale }), "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel(mk({ state: "merged" }), "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel(mk({ state: "closed" }), "not_started", now)).toBe("未开始");
+  });
+
+  it("maps target repo_gate open non-draft PR states while ignoring draft/missing/reference/ready", () => {
+    const withGate = (state: string, reason?: string): Todo => ({
+      ...base,
+      repo_gate: { state, target_count: 1, ready_count: 0, reference_count: 0, reason },
+    });
+    expect(todoStatusLabel(withGate("blocked_conflict", "merge_conflicts"), "not_started", now)).toBe("存在合并冲突");
+    expect(todoStatusLabel(withGate("blocked_changes", "changes_requested"), "not_started", now)).toBe("需要修改");
+    expect(todoStatusLabel(withGate("blocked_ci", "ci_failed"), "not_started", now)).toBe("检查未通过");
+    expect(todoStatusLabel(withGate("awaiting_review", "review_required"), "not_started", now)).toBe("评审中");
+    expect(todoStatusLabel(withGate("checks_pending", "checks_pending"), "not_started", now)).toBe("检查中");
+    expect(todoStatusLabel(withGate("checks_pending", "pr_open"), "not_started", now)).toBe("等合入");
+    expect(todoStatusLabel(withGate("awaiting_review", "draft_pr"), "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel(withGate("missing_pr", "missing_pr"), "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel({ ...base, repo_gate: { state: "reference_only", target_count: 0, ready_count: 0, reference_count: 1 } }, "not_started", now)).toBe("未开始");
+    expect(todoStatusLabel({ ...base, repo_gate: { state: "ready", target_count: 1, ready_count: 1, reference_count: 0 } }, "not_started", now)).toBe("未开始");
+  });
+
+  it("uses Tracking for open concerns without an active agent and preserves higher-priority states", () => {
+    const concern: Todo = { ...base, kind: "concern" };
+    expect(todoStatusLabel(concern, "not_started", now)).toBe("跟进中");
+    expect(todoStatusLabel(concern, "working", now)).toBe("工作中");
+    expect(todoStatusLabel(concern, "needs_you", now)).toBe("需要你");
+    expect(todoStatusLabel({ ...concern, done_at: fresh }, "done", now)).toBe("已完成");
+    const concernWithPR: Todo = {
+      ...concern,
+      pr_url: "https://github.com/org/repo/pull/20",
+      pr_status: { url: "https://github.com/org/repo/pull/20", state: "open", draft: false, review: "approved", checks: "success", conflicts: false, checked_at: fresh },
+    };
+    expect(todoStatusLabel(concernWithPR, "not_started", now)).toBe("等合入");
+    expect(todoStatusLabel({ ...concernWithPR, supervision: { supervisor: "main", state: "needs_user" } }, "not_started", now)).toBe("待处理");
+    const parked: Todo = {
+      ...base,
+      supervision: { supervisor: "main", state: "parked", parked: { reason: "Waiting on release", until: "2026-11-27T00:00:00Z", waiting_on: "external_event", count: 1 } },
+    };
+    expect(todoStatusLabel(parked, "not_started", now)).toBe("已搁置");
   });
 });

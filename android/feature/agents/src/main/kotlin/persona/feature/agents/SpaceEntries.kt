@@ -115,7 +115,7 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
     val toast = rememberToastState()
     val feedback = LocalAppFeedback.current
     var operationDialog by remember { mutableStateOf<AgentOperationDialog?>(null) }
-    var confirmRead by remember { mutableStateOf<List<AgentSession>?>(null) }
+    var confirmRead by remember { mutableStateOf<MarkAllSeenBatch?>(null) }
     var newAgent by rememberSaveable { mutableStateOf(false) }
     val creation = creationModel?.state?.collectAsStateWithLifecycle()?.value
     var now by remember { mutableStateOf(Instant.now()) }
@@ -201,11 +201,11 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
             onNewTab = { creationModel?.startIn(AgentSpacePreset(it.machineId, requireNotNull(workspace), it.cwd, it.name)); newAgent = true },
             spaceMenu = { shown ->
                 val session = shown.members.first().session
-                val unread = shown.members.filter { it.unseen }
+                val markAll = markAllSeenBatch(shown.members)
                 AgentSpaceMenu(session, shown.preferenceKey in page.preferences.pins.spaces, shown.preferenceKey in page.preferences.mutes.spaces,
                     operations.busy, onPin = { model.spacePin(session) }, onMute = { model.spaceMute(session) },
                     onRename = { operationDialog = AgentOperationDialog.RenameSpace(session) },
-                    onMarkRead = unread.takeIf { it.isNotEmpty() }?.let { rows -> { confirmRead = rows } })
+                    onMarkRead = markAll.takeIf { it.unread.isNotEmpty() }?.let { batch -> { confirmRead = batch } })
             },
             sessionMenu = rowMenu, title = route.title,
             onMachine = { navigator.navigate(MachineSpacesRoute(it)) },
@@ -229,7 +229,11 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
             preferHerdrTabName = page.preferences.prefersHerdrTabName(dialog.session)) { operationDialog = null }
     }
     if (takeoverClient != null) CodexTakeoverDialogs(takeoverCoordinator)
-    confirmRead?.let { rows -> MarkAllReadDialog(rows.size, onDismiss = { confirmRead = null }) { model.markRead(rows) } }
+    confirmRead?.let { markAll ->
+        MarkAllReadDialog(markAll.unread.size, onDismiss = { confirmRead = null }) {
+            model.markRead(markAll.unread, clear = true, release = markAll.release)
+        }
+    }
     if (newAgent) {
         if (creationModel != null) NewAgentDialog(creationModel, page.machines, connection == ConnectionState.Online,
             onAddProvider = { navigator.navigate(persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Providers)) },

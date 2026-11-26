@@ -94,6 +94,30 @@ export function preloadScript(files: PreloadFiles): string {
 })();`;
 }
 
+/** Font registration and the Hub read are deferred until after the app commits and the browser has painted it. */
+export function fontStartupScript(module: string): string {
+  return `(function () {
+  var root = document.getElementById("root");
+  if (/^screen\\/[^/]/.test(location.pathname.slice(new URL(document.baseURI).pathname.length))) return;
+  function start() {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        import(new URL(${JSON.stringify(`./${module}`)}, document.baseURI).href).then(function () { dispatchEvent(new Event("persona-font-startup")); }).catch(function () {});
+      });
+    });
+  }
+  if (root.childElementCount) start();
+  else {
+    var observer = new MutationObserver(function () {
+      if (!root.childElementCount) return;
+      observer.disconnect();
+      start();
+    });
+    observer.observe(root, { childList: true });
+  }
+})();`;
+}
+
 /** The smallest file worth a brotli copy: server/internal/webasset MinSize, below which the hub compresses nothing. */
 export const BROTLI_MIN_SIZE = 1024;
 

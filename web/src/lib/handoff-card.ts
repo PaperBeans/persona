@@ -60,6 +60,7 @@ export function handoffCardState(card: HandoffCardBody, conversation: string, it
   }
   if (isDone(item)) {
     if (!newest) return { state: "replaced" };
+    if (item.done_by === "source_replied") return { state: "self" };
     if (item.done_by === "replied") {
       const last = [...(item.chain ?? [])].reverse().find((e) => e.kind === "confirmed" || e.kind === "self_replied");
       if (last?.kind === "self_replied") return { state: "self" };

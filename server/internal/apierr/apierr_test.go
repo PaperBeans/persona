@@ -606,6 +606,52 @@ func TestStartTabRefusalsAreWorded(t *testing.T) {
 	}
 }
 
+// A Codex start that met its sign-in screen (node/codex_start.go): the hub words it with the machine (or "this
+// computer") and the fix, in every language, as a task's start_error and an HTTP refusal.
+func TestCodexNotLoggedInIsWorded(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		on := Sentence(lang, proto.CodeCodexNotLoggedIn, map[string]any{"machine_name": "Studio"})
+		here := Sentence(lang, proto.CodeCodexNotLoggedIn, nil)
+		for _, got := range []string{on, here} {
+			if !strings.Contains(got, "codex login") || strings.Contains(got, "{") {
+				t.Errorf("%s: %q", lang, got)
+			}
+		}
+		if !strings.Contains(on, "Studio") || strings.Contains(here, "Studio") {
+			t.Errorf("%s: %q / %q", lang, on, here)
+		}
+		body := LocalizedBody(http.StatusConflict, proto.CodeCodexNotLoggedIn, errors.New("node text"), lang)
+		if body["error"] != i18n.T(lang, "rpc-errors.codex_not_logged_in") || !strings.Contains(body["error"].(string), "codex login") {
+			t.Errorf("%s HTTP: %v", lang, body)
+		}
+	}
+}
+
+// The node's refusal as an HTTP answer (CallStatus): nothing was typed, so delivered "none" and not retryable, and the
+// hub's sentence names the machine OnMachine adds (else "this computer"), the node's words kept as the detail. There is
+// no action: the fix is a sign-in on that computer.
+func TestCallWordsCodexNotLoggedIn(t *testing.T) {
+	const raw = "Codex 停在登录界面"
+	refusal := &rpc.Error{Code: proto.CodeCodexNotLoggedIn, Message: raw}
+	for _, lang := range []i18n.Lang{"", i18n.En, i18n.Ja} {
+		for _, tc := range []struct {
+			err     error
+			machine string
+		}{{refusal, ""}, {OnMachine(fmt.Errorf("session.start: %w", refusal), "Studio"), "Studio"}} {
+			rec := httptest.NewRecorder()
+			body := call(t, langWriter{rec, lang}, rec, tc.err)
+			want := Sentence(lang, proto.CodeCodexNotLoggedIn, map[string]any{"machine_name": tc.machine})
+			if rec.Code != http.StatusConflict || body["code"] != proto.CodeCodexNotLoggedIn || body["error"] != want ||
+				body["detail"] != raw || body["delivered"] != "none" || body["retryable"] != false {
+				t.Errorf("%q %q: %d %v", lang, tc.machine, rec.Code, body)
+			}
+			if _, has := body["action"]; has {
+				t.Errorf("%q %q: action %v", lang, tc.machine, body["action"])
+			}
+		}
+	}
+}
+
 // shell_waiting is a session's start_error, a planned task's start failure and a refused message's 409 on every app
 // (#10365): only the web lists the question's answers, and only from a computer that offers them (not an older one,
 // nor a start that took a hand-off's values), so its words never say an answer is picked "here" or "in the chat".

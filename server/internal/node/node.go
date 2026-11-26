@@ -127,6 +127,8 @@ type Node struct {
 	uid          string // the computer's own id (machineuid.go); empty when it could not be read or made
 	// Program is what bin is (nodeproto.ProgramPersonad / ProgramPersonaNode), for node.info; "" says nothing.
 	Program string
+	// Edition is the edition bin was built as (nodeproto.EditionFull when nothing says), for node.info.
+	Edition nodeproto.Edition
 	// managed: launchers kept by the hub (managed.go)
 	managed managedLaunchers
 	// external is registered only by this node's trusted local configuration.
@@ -220,6 +222,7 @@ type Node struct {
 	fulls               map[string]*fullClient            // client id -> a full herdr client running for the web (fullclient.go)
 	focus               focusState                        // focus sync for the full views (focus.go)
 	suggests            map[string]*suggestState          // session id -> Claude's suggested next message (suggestion.go)
+	checkpoints         checkpointTracker                 // per-turn working-tree snapshots (checkpoint.go)
 	driving             map[string]bool                   // session id -> Persona is working its TUI (a picker it opened is not "blocked")
 	blockedAt           map[string]time.Time              // session id -> when host status first became blocked without clearing
 	dialogs             paneDialogs                       // pane -> the dialog its last screen read showed (dialogstatus.go)
@@ -1007,7 +1010,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		ResumeOnly       bool                          `json:"resume_only"`
 		OnlyRunning      bool                          `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
 		IsMain           bool                          `json:"is_main"`
-		MainCompact      int                           `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: with is_main (model_config.go)
+		MainCompact      int                           `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: the main or a leader conversation's (model_config.go)
 		FollowsSetting   bool                          `json:"follows_setting"`
 		Interject        bool                          `json:"interject_background"`
 		Public           bool                          `json:"public"` // a public mention turn: no owner live snapshot on this input
@@ -1162,6 +1165,15 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			}
 		}
 	}
+	if sessionSend || method == "session.start" && p.ResumeSessionID != "" {
+		id := p.SessionID
+		if method == "session.start" {
+			id = p.ResumeSessionID
+		}
+		if err := n.waitCheckpoint(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	if n.codexBlocked(p.SessionID) && (strings.HasPrefix(method, "session.") || strings.HasPrefix(method, "terminal.") || method == "assistant.send" || method == assistantwire.DeviceAssistantAnswerAgain || method == "assistant.permissions.reset") {
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能判断操作目标；未读取或发送", nil)
 	}
@@ -1298,7 +1310,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		return n.restoreModel(ctx, p.SessionID)
 	}
 	if method == "session.speed" {
-		return ok(n.setCodexSpeed(ctx, p.SessionID, p.ServiceTier))
+		return ok(n.setSessionSpeed(ctx, p.SessionID, p.ServiceTier))
 	}
 	if method == "session.ultracode" {
 		return ok(n.setUltracode(ctx, p.SessionID, p.Ultracode, p.DismissLost))
@@ -1313,7 +1325,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		// The companion's agy-<conversation> while an agy in a terminal has it open (agypresence.go, #13603): a message
 		// or an interrupt goes to the pane running it; nothing else may drive it from the companion.
 		if pane != "" && (method == "session.send" || method == "session.interrupt") {
-			if res, err, handled := n.workAgentCalls(ctx, method, pane, a, params, paneMessage{Text: p.Text, Images: p.Images}); handled {
+			if res, err, handled := n.workAgentCalls(ctx, method, pane, a, params, paneMessage{Text: p.Text, Images: p.Images, Source: p.MessageSource}); handled {
 				return res, err
 			}
 		}
@@ -1337,7 +1349,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 	} else if a, ok := n.agent(p.SessionID); ok && (a.Agent == cursorAgent || a.Agent == agyAgent) {
 		// Herdr drives the pane (workagent.go). Messages go through agent.prompt, and Persona sends Esc through
 		// herdr to interrupt. Agy reads the verified pane conversation when available. Cursor shows a terminal notice.
-		if res, err, handled := n.workAgentCalls(ctx, method, p.SessionID, a, params, paneMessage{Text: p.Text, Images: p.Images}); handled {
+		if res, err, handled := n.workAgentCalls(ctx, method, p.SessionID, a, params, paneMessage{Text: p.Text, Images: p.Images, Source: p.MessageSource}); handled {
 			return res, err
 		}
 	} else if r, ok := n.terminalOnly(p.SessionID); ok { // a pi or opencode without its extension, any other agent (opencode.go)
@@ -1920,8 +1932,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		}
 		// Only Claude Code has a session id before it starts; another agent picks its own (start_agent.go).
 		asyncAgent := n.startAgentType(p.Launcher, p.AgentType)
-		if p.Async && p.ResumeSessionID == "" && (p.AgentType == "" || p.AgentType == "claude") &&
-			asyncAgent != traexAgent && asyncAgent != ompAgent && asyncAgent != agyAgent {
+		if p.Async && p.ResumeSessionID == "" && asyncAgent == "claude" {
 			s, err := n.startAsyncIn(p.Host, p.SessionID, p.Cwd, p.Launcher, p.Prompt, p.WorkspaceID, p.PermissionMode, p.Effort, tab, modelExecution{CodexEffortFallback: p.CodexEffortFallback, Source: p.ModelSource, InPane: p.InPane, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket, Goal: goal, Speed: p.Speed, TaskInstructions: p.TaskInstructions, TaskAttachments: p.TaskAttachments, taskSpace: taskSpace})
 			return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation, taskSpace)
 		}
@@ -2646,12 +2657,14 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		}
 		if p.ThroughSeq > 0 { // a fold being opened: the lines it stands for
 			page, more := f.Range(p.FromSeq, p.ThroughSeq, 1000)
+			page = n.applyBotmuxTurns(ctx, p.SessionID, f, page, false)
 			n.toolViews.attach(p.SessionID, page, false, f)
 			n.ttft.annotate(p.SessionID, page, false)
 			return map[string]any{"items": items(page), "more": more}, nil
 		}
 		// Pages counted back from the end fold the agent's work for callers that ask (transcript.FoldWork).
 		fold := func(page []proto.Item) []proto.Item {
+			page = n.applyBotmuxTurns(ctx, p.SessionID, f, page, false)
 			n.toolViews.attach(p.SessionID, page, p.BeforeSeq == 0, f)
 			n.ttft.annotate(p.SessionID, page, p.BeforeSeq == 0)
 			if p.FoldWork {
@@ -2662,6 +2675,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		if p.AfterSeq != nil {
 			// more_after: the 500 cap cut it short; the caller asks again after the last seq (or takes the latest page).
 			page, more, span := f.After(*p.AfterSeq, 500)
+			page = n.applyBotmuxTurns(ctx, p.SessionID, f, page, true)
 			n.toolViews.attach(p.SessionID, page, true, f)
 			n.ttft.annotate(p.SessionID, page, true)
 			return withSpan(map[string]any{"items": items(page), "has_more": false, "more_after": more}, span, true), nil
@@ -3254,7 +3268,8 @@ func (n *Node) info(ctx context.Context) proto.NodeInfo {
 	return proto.NodeInfo{
 		Protocol:           nodeproto.Version,
 		Program:            n.Program,
-		Executable:         cmp.Or(n.exe, n.bin), // the update target: the file, never a link to it
+		Edition:            nodeproto.Edition(n.Edition.Marker()), // left out by a full build
+		Executable:         cmp.Or(n.exe, n.bin),                  // the update target: the file, never a link to it
 		ProtocolMin:        nodeproto.MinManagerVersion,
 		Capabilities:       n.capabilities(), // secret_env only from a resident node (secretenv.go)
 		NodeUpdate:         canUpdate,
@@ -3349,10 +3364,12 @@ func interactiveShell() (string, error) {
 	return "", errors.New("这台电脑上没有 Git Bash（Git for Windows）：Claude Code 在 Windows 上也要它，装上后再试")
 }
 
-// loginShell runs a command in an interactive zsh so ~/.zshrc functions and PATH are available (loginShellProgram:
-// bash without zsh, Git Bash on Windows).
+// loginShell runs a command in the user's shell the way their terminal starts it, so the rc files' functions and PATH
+// are available (loginShellProgram, shellFlag: zsh -ic, or bash -ic; on macOS the account's own bash or zsh, -lic; Git
+// Bash on Windows).
 func loginShell(ctx context.Context, script string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, loginShellProgram(), "-ic", script)
+	shell := loginShellProgram()
+	cmd := exec.CommandContext(ctx, shell, shellFlag(shell), script)
 	cmd.Stdin = nil
 	return cmd
 }

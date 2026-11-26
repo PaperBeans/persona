@@ -33,6 +33,13 @@ reaches this fallback, so test sessions with a removed tree's bare `cwd`. Check 
 cwd in a folder of a repository's own tree (`/code/app/.worktrees/feature/src`) has the same shape, and joining by the
 tree's name moved its Agent into an unrelated repository's section.
 
+## Approval waiting is not delivery waiting (#9762)
+
+Settings and the Sent ledger can share a localization namespace. Keep the
+permission-card waiting message separate from a pending delivery outcome;
+reusing `pending` silently replaced the approval instructions with a delivery
+badge. Exercise the pending card and the outcome badge independently.
+
 ## A folded launcher must retain its identity (#10249)
 
 When replacing a launcher rail, do not promote the current launcher's models into a separate Recommended group or

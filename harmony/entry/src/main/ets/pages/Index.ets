@@ -30,6 +30,7 @@ import { PhoneOutlineIcon } from '../design/PhoneOutlineIcon';
 import { phoneAppearancePage, phoneSettingsLink, pushPhoneSetting } from '../core/PhoneSettingsNavigation';
 import { SettingsDirectory, PhoneSettingsOptions } from '../components/SettingsDirectory';
 import { PhoneAlarmsSettings } from '../components/PhoneAlarmsSettings';
+import { XiaoYiSettingsPage } from '../components/XiaoYiSettingsPage';
 import { PhoneSettingsDevicePages } from '../components/PhoneSettingsDevicePages';
 import { PhoneDefaultPermissionSection } from '../components/PhoneDefaultPermissionSection';
 import { InboxSourcesNavigation } from '../models/InboxSources';
@@ -103,6 +104,7 @@ import { mainConversationData } from '../core/DefaultConversation';
 import { AssistantDetailPage } from '../components/AssistantDetailPage';
 import { tr, trError } from '../design/Strings';
 import { isHubStateKey } from '../core/StorageOwnership';
+import { formatSharedDraftText } from '../core/XiaoYiRoutes';
 
 interface ChatActionEntry extends SheetInfo {
   identity?: string;
@@ -1033,6 +1035,7 @@ struct Index {
     this.navigationRestoredScope = scope;
     if (this.meetingServices.pendingOpen && this.model.ready) { this.consumeMeetingReminder(); return; }
     if (this.model.projectsRequested && this.model.ready) { this.consumeProjectLaunch(); return; }
+    if (this.model.pendingXiaoYiRoute && this.model.ready) { this.consumeXiaoYiRoute(); return; }
     if (intent !== this.navigationIntent) this.savePath();
     if (this.model.section === 2 && !this.stack.size()) this.openResources('inbox');
     else if (this.model.section === 3 && !this.stack.size()) this.openSettingsRoot();
@@ -1042,6 +1045,81 @@ struct Index {
   }
   @Monitor('model.pairingLink') pairingChanged(): void { this.consumePairingLink(); }
   @Monitor('model.notificationTarget') notificationChanged(): void { this.consumeNotification(); }
+  @Monitor('model.pendingXiaoYiRoute', 'model.ready') xiaoYiRouteChanged(): void { this.consumeXiaoYiRoute(); }
+  private consumeXiaoYiRoute(): void {
+    if (!this.model.pendingXiaoYiRoute || !this.model.ready) return;
+    const raw = this.model.pendingXiaoYiRoute;
+    const parsed = Wire.parse(raw);
+    const dest = Wire.text(parsed, 'dest');
+    if (!dest) { this.model.pendingXiaoYiRoute = ''; return; }
+    if (dest !== 'settings_xiaoyi' && (!this.model.profile.id || this.navigationRestoredScope !== this.model.scope())) return;
+    this.model.pendingXiaoYiRoute = '';
+    this.spacesShown = false;
+    this.phoneSettingsShown = false;
+    if (dest === 'assistant') {
+      this.openSpace('persona');
+      return;
+    }
+    if (dest === 'agents') {
+      this.openSpace('agents');
+      return;
+    }
+    if (dest === 'session') {
+      const machine = Wire.text(parsed, 'machine'), session = Wire.text(parsed, 'session');
+      const profile = Wire.text(parsed, 'profile') || this.model.profile.id;
+      const manager = Wire.text(parsed, 'manager') || this.model.profile.manager;
+      if (profile && machine && session) {
+        this.model.openNotification(Wire.payload(['profile', 'manager', 'machine', 'session'], [profile, manager, machine, session])).catch(() => {});
+      }
+      return;
+    }
+    if (dest === 'todos') { this.openSpace('todo'); return; }
+    if (dest === 'knowledge') { this.openSpace('knowledge'); return; }
+    if (dest === 'health') { this.openSpace('health'); return; }
+    if (dest === 'inbox') { this.openSpace('inbox'); return; }
+    if (dest === 'recording') {
+      const autoStart = Wire.bool(parsed, 'autoStart');
+      if (!this.model.isRecordingModuleAllowed()) {
+        // Fail closed on recording starts when the Hub's recording module is off (#15985 / #15978);
+        // stored recordings stay readable and an active recording stays stoppable.
+        this.getUIContext().getPromptAction().showToast({ message: tr('xiaoyi_recording_module_off') });
+        this.openSpace('recordings');
+        return;
+      }
+      if (autoStart) {
+        this.openSpace('recordings');
+        return;
+      }
+      this.openSpace('recordings');
+      return;
+    }
+    if (dest === 'dictate') { this.openSpace('persona'); this.newConversation(); return; }
+    if (dest === 'settings_xiaoyi') {
+      if (!this.wide()) {
+        this.phoneSettingsQuery = '';
+        this.phoneSettingsTrail = pushPhoneSetting([], 'phone_xiaoyi');
+        if (this.model.profile.id) this.spacesShown = true;
+        this.phoneSettingsShown = true;
+      } else {
+        this.openSettings('phone_xiaoyi');
+      }
+      return;
+    }
+    if (dest === 'share') {
+      const sharedText = formatSharedDraftText(Wire.text(parsed, 'title'), Wire.text(parsed, 'text'), Wire.text(parsed, 'url'));
+      this.openSpace('persona');
+      if (sharedText) {
+        const owner = this.model, scope = owner.scope(), generation = owner.connectionGeneration();
+        this.openMain().then(() => {
+          if (this.model === owner && owner.owns(generation, scope)) {
+            const current = owner.draft.trim();
+            const next = !current ? sharedText : current.includes(sharedText) ? owner.draft : current + '\n\n' + sharedText;
+            owner.updateDraft(next);
+          }
+        }).catch(() => {});
+      }
+    }
+  }
   private consumeNotification(): void {
     if (!this.model.notificationTarget) return;
     const row = this.routeRow(this.model.notificationTarget); this.model.notificationTarget = '';
@@ -2159,6 +2237,8 @@ struct Index {
         List() { PhoneDefaultPermissionSection({model:this.model,elevated:true}) }.width('100%').layoutWeight(1).padding(16)
       } else if (this.phoneSettingsPage==='phone_native_alarms') {
         PhoneAlarmsSettings({elevated:true,active:this.phoneSettingsShown}).layoutWeight(1)
+      } else if (this.phoneSettingsPage==='phone_xiaoyi') {
+        XiaoYiSettingsPage({model:this.model,elevated:true}).layoutWeight(1)
       } else if (['phone_hubs','phone_pairing','about','storage','phone_live_screen','phone_health_reports'].includes(this.phoneSettingsPage)) {
         PhoneSettingsDevicePages({model:this.model,elevated:true,page:this.phoneSettingsPage,
           onOpen:(key:string)=>this.openFromPhoneSettings(key),onPair:()=>this.pairFromSettings()}).layoutWeight(1)
@@ -3184,6 +3264,8 @@ struct Index {
         List() { PhoneDefaultPermissionSection({model:this.settingsModel(param)}) }.width('100%').height('100%').padding(16)
       } else if (name==='settings' && this.settingsKind(param)==='phone_native_alarms') {
         PhoneAlarmsSettings({active:this.activeChild===this.childKey(name,param)})
+      } else if (name==='settings' && this.settingsKind(param)==='phone_xiaoyi') {
+        XiaoYiSettingsPage({model:this.settingsModel(param)})
       } else if (name==='settings' && ['phone_hubs','phone_pairing','about','storage','phone_live_screen','phone_health_reports'].includes(this.settingsKind(param))) {
         PhoneSettingsDevicePages({model:this.settingsModel(param),page:this.settingsKind(param),onOpen:(key:string)=>this.openSettings(key),onPair:()=>this.pairFromSettings()})
       } else if (name === 'settings' && ['phone_agent_options','phone_language_options'].includes(this.settingsKind(param))) {
@@ -3329,6 +3411,14 @@ struct Index {
         onAppear: () => { this.spacesLayoutReady = true; this.measureSpaces(); }, onDisappear: () => { this.spacesLayoutReady = false; if (this.wide()) this.spacesShown = false; } })
     }
     }
+    Column().width(0).height(0).bindSheet(!this.model.profile.id && !this.wide() && this.phoneSettingsShown, this.phoneSettings(), {
+      height: this.compactFormHeight(), showClose: false, dragBar: false, backgroundColor: Colors.sheetBackground,
+      onWillDismiss: (dismiss: DismissSheetAction) => {
+        if (dismiss.reason === DismissReason.PRESS_BACK && this.phoneSettingsPage) this.backPhoneSetting();
+        else { this.phoneSettingsShown = false; dismiss.dismiss(); }
+      },
+      onDisappear: () => { this.phoneSettingsShown = false; }
+    })
     Column().width(0).height(0).bindSheet($$this.directionPermissionsVisible,this.directionPermissionsSheet(),{
       title:{title:tr('phone_default_permissions')},height:SheetSize.LARGE,showClose:true,
       onDisappear:()=>{this.directionPermissionsVisible=false;this.directionPermissionsTarget='';}})

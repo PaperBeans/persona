@@ -269,6 +269,7 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 			n.SetUpdater(updater)
 			n.SetResidentReload(reload)
 			n.Program = b.Program
+			n.Edition = b.Edition
 		}
 		return n, err
 	}, conns, runtimeHost, transport)

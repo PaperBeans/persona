@@ -121,8 +121,8 @@ import Observation
 
     /// The retention `RecordingSync` stored at its last reconciliation; nil before the hub ever said it.
     static func storedAudioDays() -> Int? {
-        let store = RecordingSync.shared.store
-        return store.daysKnown ? store.audioRetentionDays : nil
+        let sync = RecordingSync.shared
+        return sync.store.daysKnown ? sync.audioRetentionDays : nil
     }
 
     /// Sends what changed since the last push (WatchSync also skips a context that already says it).

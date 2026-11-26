@@ -143,6 +143,44 @@ func todoListSums(answers []listAnswer) map[string]json.RawMessage {
 		}
 		out["shared_blockers"] = merged
 	}
+	if cursors := todoClosedCursors(answers); len(cursors) > 0 {
+		if out == nil {
+			out = map[string]json.RawMessage{}
+		}
+		raw, _ := json.Marshal(cursors)
+		out["closed_cursors"] = raw
+	}
+	return out
+}
+
+type todoClosedCursor struct {
+	NextCursor string `json:"next_cursor"`
+	HasMore    bool   `json:"has_more"`
+}
+
+// todoClosedCursors are the older-closed cursors each manager's default answer carries, keyed by the manager a
+// paginated read must name. A manager from before #15683 has none.
+func todoClosedCursors(answers []listAnswer) map[string]todoClosedCursor {
+	out := map[string]todoClosedCursor{}
+	for i := range answers {
+		rawHasMore, ok := mergedMember(&answers[i], "todos", "closed_has_more")
+		if !ok {
+			continue
+		}
+		var hasMore bool
+		if json.Unmarshal(rawHasMore, &hasMore) != nil || !hasMore {
+			continue
+		}
+		rawCursor, ok := mergedMember(&answers[i], "todos", "closed_next_cursor")
+		if !ok {
+			continue
+		}
+		var cursor string
+		if json.Unmarshal(rawCursor, &cursor) != nil || cursor == "" {
+			continue
+		}
+		out[answers[i].id] = todoClosedCursor{NextCursor: cursor, HasMore: true}
+	}
 	return out
 }
 

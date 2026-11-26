@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/botport"
 	"github.com/nwverse/persona/server/internal/cliport"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extmgr/githubport"
@@ -76,6 +75,9 @@ const subscriptionKickWait = 10 * time.Second
 // connector's thread); a write the gate leaves to the user is asked on the phone like mail_send, in that conversation.
 func (h *Manager) callConnector(ctx context.Context, by asker, name string, args json.RawMessage) proto.ToolResult {
 	h.requestLarkCLIRecovery(ctx)
+	if by.machine == "" || by.session == "" {
+		ctx = connector.WithoutOwnerCaller(ctx)
+	}
 	if inSpace(h.askerCwd(by)) { // a space conversation's writes: on the phone each time (hubglue.go inSpace)
 		ctx = connector.ConfirmEach(ctx)
 	}
@@ -724,10 +726,10 @@ func (h *Manager) registerConnectors() {
 			h.logf("larkcli connector: %v", err)
 		}
 	}
-	// The Lark user sync's reads reach the knowledge base through its own connector (larksync_connector.go): on every
-	// hub with the lark module; it hands over nothing until a binding has run.
-	if botport.Available(h.modules()) {
-		if err := h.addConnector(larkSyncConnector{h}); err != nil {
+	// The Lark user sync's reads reach the knowledge base through its own connector (internal/modules/lark/larksync):
+	// on every hub with the lark module; it hands over nothing until a binding has run.
+	if c := h.larkSyncConnector(); c != nil {
+		if err := h.addConnector(c); err != nil {
 			h.logf("larksync connector: %v", err)
 		}
 	}

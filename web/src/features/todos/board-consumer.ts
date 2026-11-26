@@ -231,10 +231,11 @@ export function consumeBoardStatusGroups(
       }
     }
 
-    sectionCounts[sec] =
-      !matchesFilter && allEntriesResolved && typeof group.visible_count === "number"
-        ? group.visible_count
-        : sections[sec].length;
+    sectionCounts[sec] = !matchesFilter
+      ? allEntriesResolved
+        ? typeof group.visible_count === "number" ? group.visible_count : sections[sec].length
+        : typeof group.total_count === "number" ? group.total_count : sections[sec].length
+      : sections[sec].length;
   }
 
   for (const sec of ALL_TRIAGE_SECTIONS) {

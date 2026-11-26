@@ -168,7 +168,7 @@
   "thread_unbind_confirm": "トピック「{name}」とこのToDoの紐づけを解除しますか？トピック内のメッセージは削除されません。解除後は、このToDoの進捗はトピックに投稿されず、トピックでの返信もこのToDoには届きません。",
   "thread_unbound": "トピックの紐づけを解除しました",
   "thread_unbind_failed": "紐づけを解除できませんでした：{error}",
-  "thread_empty": "このToDoにはトピックが紐づいていません。/topics で登録したグループチャットでトピックを作ると、新しいToDoが作られて紐づきます。エージェントにこのToDoをトピックに紐づけさせることもできます。",
+  "thread_empty": "このToDoにはトピックが紐づいていません。Agentに紐づけを頼めます。/topics で登録したグループで新しいToDoを作るには、トピックで /todo に続けてやりたいことを送ってください。",
   "thread_mark": "トピックに紐づいています",
   "check_section": "完了状況の確認",
   "check_action": "完了状況を確認",
@@ -377,6 +377,9 @@
   "v2_labs_badge": "Labs · v2",
   "v2_labs_badge_hint": "実験的な ToDo v2 を使用中 — 「設定 › Labs」からいつでも戻せます",
   "parked_folded_hint": "外部待ち",
+  "closed_more": "以前に終了した項目を表示",
+  "closed_loading": "以前に終了した項目を読み込み中…",
+  "closed_retry": "以前に終了した項目を再読み込み",
   "slim_repo_count": "{count} リポジトリ",
   "decision_queue_open": "{count}件をまとめて判断",
   "decision_queue_title": "判断キュー",
@@ -476,5 +479,13 @@
   "causal_trace_cat_blocker": "ブロッカー",
   "causal_trace_cat_recovery": "復旧",
   "causal_trace_cat_review": "レビュー",
-  "causal_trace_cat_pr": "PR"
+  "causal_trace_cat_pr": "PR",
+  "status_pr_conflicts": "マージ競合あり",
+  "status_pr_changes_requested": "修正依頼あり",
+  "status_pr_checks_failed": "チェック失敗",
+  "status_pr_in_review": "レビュー待ち",
+  "status_pr_checks_pending": "チェック中",
+  "status_pr_waiting_merge": "マージ待ち",
+  "status_parked": "保留中",
+  "status_tracking": "追跡中"
 }

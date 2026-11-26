@@ -5,7 +5,8 @@
 // summary, recap, the suggestion, the handling chain); "Original" and the chain's source entries open the thing itself,
 // "Handling" goes back, and browser Back follows the same step. A chat item's event sits above its chat and a mail event
 // above its message instead. Their original starts collapsed and unmounted so merely opening the event cannot report it
-// read; Original expands it, and the chain's source entries expand it before focusing a message (#3262, #5471).
+// read; Original expands it, and the chain's source entries expand it before focusing a message (#3262, #5471). An item
+// from a chat the knowledge base has opens that chat's page too ("Knowledge page", InboxKBChat.tsx, #15356).
 import { useEffect, useState } from "react";
 import { ItemManager, useKnownDefault } from "../../lib/manager-choice";
 import { hasEvent, itemAtUid } from "../../lib/inbox-events";
@@ -33,6 +34,7 @@ import { AgentWorking, ItemAvatar, Spark, Tag } from "./InboxParts";
 import { InboxExtensionBody } from "./InboxExtensionBody";
 import { InboxLine } from "./InboxLine";
 import { InboxTaskLinks } from "./InboxTaskLinks";
+import { KBChatButton } from "./InboxKBChat";
 import { EventBody, type SourceAt } from "./InboxEvent";
 import { chatOfItem, LarkThread } from "./LarkThread";
 import { useItemReadOnly } from "./item-write-gate";
@@ -232,6 +234,7 @@ function ItemDetail({ item, loaded }: { item?: InboxItem; loaded: boolean }) {
                 </Button>
               )}
               {item.source !== "assistant" && <Button tone="secondary" icon="spark" onClick={() => setDialog("handoff")}>{t("inbox-inboxdetail.hand_to_ai")}</Button>}
+              <KBChatButton item={item} />
             </div>
           </div>
         </div>

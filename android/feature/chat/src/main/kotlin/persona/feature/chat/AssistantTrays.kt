@@ -259,6 +259,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     onPlan: (TaskPlan) -> Unit = {},
     /** The main conversation folds background rounds (#4314): Needs you groups its rows by supervising conversation. */
     groupByOrigin: Boolean = false,
+    /** To Decide shares the footer bar but keeps its card count separate from the tray's rows. */
+    leading: (@Composable () -> Unit)? = null,
     /**
      * Optional dynamic cap for the expanded panel's scrollable list height given the tray's own measured non-list
      * vertical chrome (capsule bar, [under], outer spacing, and card vertical padding). Read in layout measurement so
@@ -612,6 +614,7 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            leading?.invoke()
             // Finished is there while it has rows, or its tray is open (an emptied tray stays reachable till it closes)
             for (tray in AssistantTray.entries.filter {
                 (it != AssistantTray.HeldPushes || showHeldEntry) &&

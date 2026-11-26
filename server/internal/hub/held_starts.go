@@ -189,7 +189,7 @@ func (h *Hub) busReplayHeldStart(ctx context.Context, c *busConn, raw json.RawMe
 	}
 	synReq.Header.Set("X-Persona-Op-Id", req.Call.OpID)
 	rec := &bufferedResponse{header: http.Header{}, lang: lang}
-	h.startSessionWith(rec, synReq, p, false)
+	h.startSessionWith(rec, synReq, p, false, false) // a held start played again is the owner's own; no "via" mark is kept with it
 
 	body := rec.body.Bytes()
 	status := rec.status

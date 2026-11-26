@@ -10,8 +10,10 @@
   "setup_customized": "Customized",
   "setup_saved": "Saved setup",
   "reset": "Reset to recommended",
-  "fast": "Fast · priority speed · uses more quota",
+  "fast": "Fast · uses more quota",
+  "claude_fast": "Fast uses more quota. Claude Code may also save this choice for future sessions.",
   "fast_short": "Fast",
+  "ultrafast": "Ultrafast · uses more quota",
   "effort": "Thinking effort",
   "faster": "Faster",
   "smarter": "Smarter",
@@ -49,5 +51,6 @@
   "launchers": "Launchers",
   "speed": "Speed",
   "speed_standard": "Standard",
+  "speed_ultrafast": "Ultrafast",
   "no_levels": "No thinking effort to choose for this model"
 }

@@ -139,6 +139,7 @@ type Meta struct {
 	ModelAt       time.Time
 	ServiceTier   string
 	ServiceTierAt time.Time
+	Speed         SpeedObservation
 	// Ultracode is independent of effort: nil means the transcript has no dated evidence. Since, when set by a
 	// caller, ignores observations from before the current Claude process (resume resets the session-only switch).
 	Ultracode        *bool

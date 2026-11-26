@@ -132,6 +132,23 @@ func (n *Node) bindPane(pane, id string) {
 	n.state.setPane(id, pane)
 }
 
+// forgetPane drops every binding of pane: the node's, and the pane an older session's record keeps, which the hub hands
+// back on every connection (stateFile.panes). pane is a tab the engine just made, so nothing that ran in a pane of that
+// id before runs in it. herdr numbers its workspaces again after its server restarts: without this, a Codex started in
+// such a tab was listed as that older session until its thread was known, which then stayed as an extra offline Codex
+// row in the new folder (#14682).
+func (n *Node) forgetPane(pane string) {
+	if pane == "" {
+		return
+	}
+	n.mu.Lock()
+	delete(n.panes, pane)
+	n.mu.Unlock()
+	if n.state != nil {
+		n.state.forgetPane(pane)
+	}
+}
+
 // guessSession picks a transcript for an agent herdr could not identify. Claude sets the terminal title to the
 // session's AI title, so a title match wins; otherwise the newest unclaimed transcript in the project directory.
 func (n *Node) guessSession(a host.Agent, taken map[string]host.Agent) string {

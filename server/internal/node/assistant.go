@@ -41,12 +41,12 @@ import (
 // Claude Code compacts on its own once the context nears the auto-compact window, also under -p (tested on 2.1.314), by
 // default the model's own window. Every conversation follows what the launcher declares (#3066:
 // CLAUDE_CODE_AUTO_COMPACT_WINDOW, CLAUDE_CODE_MAX_CONTEXT_TOKENS, a managed launcher's CompactWindow / MaxContext /
-// model window), else the model; only the main conversation on a managed launcher is held to the manager's
-// assistant.main_compact_window when that is smaller (#7314, assistant_compaction_policy.go). Codex alike with
-// model_auto_compact_token_limit. Claude Code's own idle compaction only runs in interactive sessions, so a process
-// about to be let go with more than 75% of its window in context (the declared one, else the one Claude Code reports;
-// assistantIdleCompact until either is known) is sent /compact first, while its cache is still warm: the next start
-// reads a summary instead, and nobody waits for it.
+// model window), else the model; only the main conversation and the leader conversations on a managed launcher are held
+// to the manager's assistant.main_compact_window when that is smaller (#7314, #15318, assistant_compaction_policy.go).
+// Codex alike with model_auto_compact_token_limit. Claude Code's own idle compaction only runs in interactive sessions,
+// so a process about to be let go with more than 75% of its window in context (the declared one, else the one Claude
+// Code reports; assistantIdleCompact until either is known) is sent /compact first, while its cache is still warm: the
+// next start reads a summary instead, and nobody waits for it.
 //
 // assistantIdleCompact is 75% of standardWindow, the smallest window Claude Code holds a current model to (and the one
 // it assumes for a model it does not know). Claude Code reports the real window at the end of every turn, before a
@@ -495,8 +495,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			defer finish()
 		}
 	}
+	var previousStopAt int64
 	if id != "" {
 		defer n.typing.lock(id)()
+		state, _ := n.state.get(id)
+		previousStopAt = state.StopCauseAt
 		if err := n.a2aSendReady(ctx, id); err != nil {
 			return "", err
 		}
@@ -762,7 +765,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			eff = execution.Effort
 		}
 		superviseRoundFrom(ctx).set(roundKept, roundWhyUnsupported) // a runtime keeps its own context (assistant_round.go)
-		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, callerModeExplicit, selected, execution.Model, eff, policy)
+		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, callerModeExplicit, selected, previousStopAt, execution.Model, eff, policy)
 	}
 	if len(options) == 0 || (execution.Fingerprint == "" && execution.Model == "") {
 		if launcher == "" || launcher == st.Launcher {
@@ -825,9 +828,13 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		execution = n.applyModelRecoveryReturn(ctx, id, askedModel, execution, holdExpired)
 	}
 	execution.IsMain = isMain && guest == nil
-	// Only a managed launcher's start applies the main conversation's window (capMain): on another one it would only
-	// change the fingerprint and restart the main conversation for nothing.
-	execution.MainCompactWindow = n.mainWindowOn(launcher, execution.IsMain, mainWindow)
+	// The window the manager holds the main conversation and each leader conversation to (#7314, #15318), never a
+	// guest's. Only a managed launcher's start applies it (capWindow): on another one it would only change the
+	// fingerprint and restart the conversation for nothing.
+	execution.MainCompactWindow = 0
+	if guest == nil {
+		execution.MainCompactWindow = n.mainWindowOn(launcher, mainWindow)
+	}
 	execution.SupervisionInstructions = st.SupervisionInstructions
 	if policyResolved {
 		execution.SupervisionInstructions = policy
@@ -1274,6 +1281,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			}
 			return "", fmt.Errorf("send to codex: %w", err)
 		}
+		n.state.clearStopAfterAssistantInput(id, previousStopAt)
 		n.commitModelChoice(id, execution)
 		commit()
 		awaitList(n.notifySessionsSoon())
@@ -1442,6 +1450,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if err := finishExternalStartup(ctx); err != nil {
 		return "", err
 	}
+	n.state.clearStopAfterAssistantInput(id, previousStopAt)
 	commit()
 	awaitList(n.notifySessionsSoon())
 	return id, nil

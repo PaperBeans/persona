@@ -165,7 +165,29 @@ type KBSettings struct {
 	// History is kb.history, the history import (KBHistory; nil: off). Only manager.json sets it, and a change never
 	// reopens the knowledge base: the import reads it afresh before every call.
 	History *KBHistory `json:"history,omitempty"`
+	// LarkMinutes is kb.lark_minutes, importing the owner's Lark minutes and document titles through lark-cli (nil or
+	// not enabled: off). Like History it is read afresh every round, so a change never reopens the knowledge base.
+	LarkMinutes *KBLarkMinutes `json:"lark_minutes,omitempty"`
 }
+
+// KBLarkMinutes is kb.lark_minutes (docs/assistant/knowledge.md "Lark minutes and documents"): meeting minutes and
+// document titles brought in through the owner's lark-cli login on the manager's computer. Off unless enabled.
+type KBLarkMinutes struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// SinceDays is how far back each run searches for minutes (0: 30).
+	SinceDays int `json:"since_days,omitempty"`
+	// IntervalMinutes is the least time between two runs (0: 60).
+	IntervalMinutes int `json:"interval_minutes,omitempty"`
+	// Binary is lark-cli's path or name ("" : lark-cli on PATH, else in the login shell's PATH).
+	Binary string `json:"binary,omitempty"`
+	// Profile is the lark-cli profile to read as ("" : its default profile).
+	Profile string `json:"profile,omitempty"`
+	// DocSearch discovers documents with these search keywords (empty: off; each run reads the first page of each).
+	DocSearch []string `json:"doc_search,omitempty"`
+}
+
+// On: the import is enabled.
+func (k *KBLarkMinutes) On() bool { return k != nil && k.Enabled }
 
 // CodeKBUnavailable: the knowledge base is not open yet (the user's time zone not known yet, another assistant process
 // has the data directory); the hub answers it like assistant_offline (503, try again).

@@ -128,14 +128,14 @@ What an extension contributes where is written in the manifest's `contributes`: 
 | `usage` (version 1, #12402) | `usage.` | `id`, `name`, `hosts?` (gateway host names, may start with `*.`) | Process speaks the protocol, permission `launcher_keys` | Rows of the **subscription usage bars** from a gateway whose usage answer has its own shape, see "Usage extensions" below |
 | `providers` (version 1) | `provider.` | `id`, `name`, `description?`, `kind?` (`launcher` / `api`), `api?` (`messages` / `responses`), `base_url`, `model?`, `small_model?`, `models?: [{id, name?}]`, `dynamic_models?`, `key_hint?` | Declarative is enough; `dynamic_models` needs the process to speak the protocol | **From Extension** in **Settings › Model Providers**, see "Model providers" below |
 | `api` (version 1) | `api.` | `id`, `prefix` (one path segment), `features?`, `events?`, `receipts?` (`[{method, path, kind}]`: writes that need send receipts) | `runtime.http`, `on_startup`; with `events`, the process must speak the protocol | A block of App-facing API `/api/v1/<prefix>/…`, see "App API" below |
-| `assistant` (version 1) | `assistant.` | `id`, `skills?` (directories in the package, each with `SKILL.md`), `instructions?` (an `.md` in the package), `gate?` (a `.json` in the package: the gate for one command in a skill) | These files exist in the package; `gate` requires `skills`, and when credentials are needed the process speaks the protocol | The assistant's skills, instructions and command gates, see "Assistant" below |
-| `mcp_servers` (version 1) | `mcp.` | `id` (`a-z0-9_-`, cannot be `persona` or the legacy server name), `command`, `env?`, `args?`, `requires?`, `allow?`, `deny?` | Declarative is enough; the command is installed on the computer that runs the assistant | One more MCP server for the Claude assistant (tool names `mcp__<id>__*`), see "MCP servers" below |
+| `assistant` (version 1) | `assistant.` | `id`, `title?` (≤ 40 characters, for the contribution switch), `skills?` (directories in the package, each with `SKILL.md`), `instructions?` (an `.md` in the package), `gate?` (a `.json` in the package: the gate for one command in a skill) | These files exist in the package; `gate` requires `skills`, and when credentials are needed the process speaks the protocol | The assistant's skills, instructions and command gates, see "Assistant" below |
+| `mcp_servers` (version 1) | `mcp.` | `id` (`a-z0-9_-`, cannot be `persona` or the legacy server name), `title?` (≤ 40 characters, for the contribution switch), `command`, `env?`, `args?`, `requires?`, `allow?`, `deny?` | Declarative is enough; the command is installed on the computer that runs the assistant | One more MCP server for the Claude assistant (tool names `mcp__<id>__*`), see "MCP servers" below |
 | `ui` (version 12) | `ui.` | `id`, `title`, `placement` (slot, see "UI slots": `extension_page` (old name `plugin_page`) / `launcher_section` / `nav_page` / `overview_card` / `capsule_card` / `machine_section` / `inbox_item` / `widget`), `hosts?` (only for `launcher_section`: gateway host names, may start with `*.`; omitted means any launcher, the extension decides), `icon?` and `icon_color?` (only `nav_page`), `opens?` (only `overview_card`, `capsule_card` and `widget`), `connector?` (only `inbox_item`, and required: the id of a connector contributed by the same extension), `group?` (only `nav_page`: `{"id", "title"}`, the sidebar group the page goes in, see "UI slots"), `families` / `refresh_minutes?` (only `widget`; `families` is required, see "System-level placements") | Process speaks the protocol; `launcher_section` needs permission `launcher_keys` | A page in the extension's details, a section on the launcher page, main navigation, overview, machine details, the details of an Inbox item, widgets and watch faces outside the App; see "Declarative UI", "UI slots", "System-level placements" below |
 | `agent_sources` (version 1) | `agentsrc.` | `id` (`a-z0-9_-`, also the source segment of session ids `<id>:<sessionKey>`), `name`, `providers?` (`a-z0-9_`, e.g. `grok_bot`) | Process speaks the protocol, `on_startup` | Personal Agents on the Agents page (the hub has no sources of its own; all come from extensions), see "Personal Agent sources" below |
 | `channel` (version 1) | `channel.` | `id` (`^[a-z][a-z0-9_]{0,31}$`, cannot be 8 hex digits), `name`, `kind` (`im`), `connector?` (binding and status come from this connector of the same extension), `bind?` (`qr` / `code` / `fields`), `description?`, `capabilities` (receive images / files / voice, `format`, `max_text`, `asks`, `push`, `typing`, `progress`, `threads`) | Process speaks the protocol; `on_startup` when there is no `connector` | A channel for talking to Persona: the hub runs the shared pipeline (into the chat, tracking the turn, sending the answer back, questions), and the extension only talks to the IM; see [channels.md](channels.md) |
 | `events` (version 1) | `event.` | `id`, `subscribe` (a list of event names, see "Events") | Process speaks the protocol, `on_startup` | Only tells the extension what happened on the hub, see "Events" below |
 | `shortcuts` (version 1) | `shortcut.` | `id`, `title` (1–40 characters), `description?` (≤ 200 characters), `params?` (≤ 8 `{name, title, kind: text / number / toggle / choice, choices?, required?}`), `ui?` (a full page from the same extension) | Process speaks the protocol | Actions in Shortcuts and Siri (iPhone, Mac, Apple Watch), see "System-level placements" below |
-| `skills` (version 1) | — | `id`, `dir` (a directory in the package with `SKILL.md`), `source?` (`package` / `data`: with `data`, `dir` is in the extension's data directory and holds one skill per subdirectory) | Declarative is enough | The assistant's skills, delivered the same way as `assistant.skills`, see "Declarative contributions" and "Assistant content from the data directory" below |
+| `skills` (version 1) | — | `id`, `title?` (≤ 40 characters, for the contribution switch), `dir` (a directory in the package with `SKILL.md`), `source?` (`package` / `data`: with `data`, `dir` is in the extension's data directory and holds one skill per subdirectory) | Declarative is enough | The assistant's skills, delivered the same way as `assistant.skills`, see "Declarative contributions" and "Assistant content from the data directory" below |
 | `prompts` (version 1) | — | `id`, `kind`: `instructions` (`file`: an `.md` in the package, or in the data directory with `source: "data"`) / `quick` (`title`, `text`) / `project_context` (`dir` in the data directory) / `inbox_context` (`file` in the data directory, `never_quote?`); `source?` (`package` / `data`, not for `quick`; the two context kinds are always `data`) | Declarative is enough | Instructions appended to the assistant's CLAUDE.md; quick prompts in the App's input box; a new Agent's project background; the Inbox's triage and draft prompts; see "Declarative contributions" and "Assistant content from the data directory" |
 | `themes` (version 1) | — | `id`, `name`, `light` / `dark`: `#RRGGBB` for the role colors `accent` (required), `positive`, `caution`, `danger`, `ai` | Declarative is enough | One more option in **Settings › Appearance › Theme Color**, see "Declarative contributions" |
 | `looks` (version 1) | — | `id` (`^[a-z0-9][a-z0-9-]{0,31}$`), `name`, `names?`, `subtitle?`, `subtitles?`, `avatar` (`sizes`: PNG, `svg?`, `safe?`, `dark?`), `colors?`, `dot?`, `app_icon_fallback` (id of a built-in avatar) | Declarative is enough; the package has the images it names | One more **Avatar** in settings: Persona's name, picture, colors and status dot, plus the App icon where it can be changed; see "Avatars" below |
@@ -1684,6 +1684,21 @@ An option the command does not take, a missing argument or an extra one is refus
 `new`, `test` and `pack` below do not need the hub; everything else needs the hub running.
 What the commands print reads in the terminal's language (`PERSONA_LANG`, else `LC_ALL` / `LC_MESSAGES` / `LANG`; English when none is set or it is `C`), and they ask the hub for its text (errors, permission lines, statuses) in the same language, not in the user language an app last set ([i18n.md](../protocol/i18n.md), "Command line"). `show` stays JSON. The quotes below are the English text.
 
+Commands that can change an extension (`install`, `upgrade`, `rollback`, `attach` / `detach`, `enable` / `disable`,
+`sandbox`, `auth login` / `logout`, `config`, `secret`, `auto-upgrade`, `contribution`, `market` writes, `dev` and
+`uninstall`) print the resolved state directory and loopback hub before their preview or first request:
+
+```text
+PERSONA_HOME: /absolute/path/to/state
+Hub: http://127.0.0.1:18660
+```
+
+`--yes` skips the confirmation, not this target line. For scripts, add `--expect-home <absolute path>` and/or
+`--expect-hub <host:port>` to make a wrong target impossible: a mismatch fails before any preview, HTTP request or
+filesystem change, and the error names both the expected and actual target. Without either flag, an ordinary install
+keeps its existing behavior apart from the extra target line. The old `JARVIS_HOME` environment name is still accepted;
+when neither variable is set, the default is `$HOME/.persona` (or the old state directory when that is what exists).
+
 ```text
 personad extension list                              One line each: id, version, source, status, name; errors are shown on failing ones, and ones needing setup show "; still needs: …"
 personad extension show <id>                         Details as JSON: permissions, settings, whether secrets are set, its data directory (data_dir)
@@ -2598,6 +2613,13 @@ extension needs no prefix, rename or migration; existing page links and saved sw
 Extensions **do not run code in the app**: they return a View (a few fixed kinds of items), which iOS, Mac, Android and web each draw with their own design system (correct in every interface style and in light and dark),
 and button actions go back to the extension. Views and components are defined in `schema/extension/view.schema.json` (the types on all four clients are generated from it, see [schema/extension/README.md](../../schema/extension/README.md));
 the hub first checks against the schema (`wire.Validate`, `sdk/go/wire`), then checks what the schema cannot express (item count per page, no duplicate field names, consistent labels across chart series), in `server/internal/extension/ui.go`.
+
+A full page (`nav_page`, `extension_page`) may also use an action's `open` to navigate to an existing Persona **session**
+(`persona://session/<machine>/<session>`) or **to-do** (`persona://task/<id>`). A tap only routes, using the same validated
+targets and in-app routes as assistant cards: it sends no message, changes no destination data, returns no destination
+content to the extension, and Back returns to the page with its state. Every other `open` target (https, knowledge files,
+machine files) and the other assistant-only action fields (`reply`, `pop`, a page `push`) stay unavailable to extensions;
+cards (`overview_card`, `capsule_card`) keep no `open` at all.
 
 **Where it goes** (the `placement` of a `ui` contribution): see the slot table in the next section, "UI slots". The first two:
 
@@ -3521,8 +3543,9 @@ extension sees that). One new component, `scene`, authoritative in `schema/exten
 its `Scene*` definitions, `x-since: 11`); the example is `schema/extension/examples/View.v11-scene-flat.json`. **An app sends
 11 only when it draws all of the below** (and all of 10). **iOS** (#12544) draws `scene` in
 `apple/Persona/Views/Settings/ExtensionScene.swift` (`ExtensionSceneGeometry.swift`, `ExtensionSceneModel.swift`) and sends `11`
-for pages and cards (`pageVersion` and `cardVersion`, including Share as Image's direct still snapshot); **web** (#12641) and
-**Android** (#12642) stay on `10` and get the downgrade below until their renderers land.
+for pages and cards (`pageVersion` and `cardVersion`, including Share as Image's direct still snapshot). **Android** (#12642)
+draws the scene in both places with Compose; `HttpExtensionManagement.UI_VERSION` is `11`. **Web** (#12641) still requests `10`
+and receives the downgrade below.
 
 Extensions still run no code in the app and send no model file: they say what the shapes are, and each app builds them with
 its own engine. A list of simple shapes is the contract because no 3D file format is drawn by every client (SceneKit reads
@@ -3571,6 +3594,8 @@ replaces a scene in place (`items`) makes an older app draw the whole page again
 An interactive 2D geographic map showing routes, points of interest, markers and external map links in UI slots or out-of-band inline chat `tool_views`. The app sends `12` in `context.ui_version`; `hub.extension_points.ui` is `12`. A client that draws `map` but does not yet draw an earlier component (such as `scene` from version 11) declares `context.unsupported: ["scene"]` so the hub runs the matching downgrade while leaving `map` intact. One new component, `map`, authoritative in `schema/extension/view.schema.json` (`MapComponent`, `MapViewport`, `MapCoordinate`, `MapMarker`, `MapRoute`, `MapLink`, `x-since: 12`); example: `schema/extension/examples/View.v12-map-route.json`.
 
 **Coordinates**: WGS-84 decimal degrees everywhere (`lat` in `[-90, 90]`, `lon` in `[-180, 180]`), regardless of vendor coordinate systems (for example, an extension reading GCJ-02 or BD-09 converts to WGS-84 before returning). Renderers draw with native map views matching the shell's light and dark appearance.
+
+Android draws the supplied points and routes on its own map canvas. An inline view opens the full-screen controls for pan, zoom, route selection and camera reset. The same renderer draws read-only tool views in the transcript, including views on folded work. The Android client declares `tool_views` for both HTTP transcript reads and the live socket. It advertises UI version 12 and requests fallback components for `scene`.
 
 | Field | What it does |
 | --- | --- |

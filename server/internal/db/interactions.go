@@ -142,6 +142,66 @@ func (d *DB) FinishInteraction(ctx context.Context, id, status string, res *prot
 	return err
 }
 
+// ApprovedSetting is the exact change a manager-owned permission card authorizes.
+// Revision checks a versioned document. Otherwise Before checks a scalar value,
+// with Default supplying its effective value before the first write.
+type ApprovedSetting struct {
+	Key      string
+	Revision *int64
+	Before   string
+	Default  string
+	Value    any
+}
+
+// FinishSettingInteraction claims a live card and commits its outcome and setting together.
+// A competing answer or an expired card changes nothing. A stale setting ends the card as failed.
+func (d *DB) FinishSettingInteraction(ctx context.Context, id, status string, answer proto.Resolution, change *ApprovedSetting) (outcome string, err error) {
+	raw, err := json.Marshal(answer)
+	if err != nil {
+		return "", err
+	}
+	err = pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE interactions SET status = $2, resolution = $3, resolved_at = now()
+			WHERE id = $1 AND status = 'pending' AND (payload->>'expires_at')::timestamptz > now()`, id, status, raw)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		outcome = status
+		if change == nil {
+			return nil
+		}
+		value, err := json.Marshal(change.Value)
+		if err != nil {
+			return err
+		}
+		table := d.settingsTable()
+		var updated bool
+		if change.Revision != nil {
+			updated, err = compareSetting(ctx, tx, table, change.Key, *change.Revision, value)
+		} else if change.Before == change.Default {
+			tag, err = tx.Exec(ctx, `INSERT INTO `+table+` AS s (key, value, updated_at)
+				VALUES ($1, $2::jsonb, now())
+				ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = now()
+				WHERE s.value = to_jsonb($3::text)`, change.Key, value, change.Before)
+			updated = tag.RowsAffected() == 1
+		} else {
+			tag, err = tx.Exec(ctx, `UPDATE `+table+` SET value = $2::jsonb, updated_at = now()
+				WHERE key = $1 AND value = to_jsonb($3::text)`, change.Key, value, change.Before)
+			updated = tag.RowsAffected() == 1
+		}
+		if err != nil || updated {
+			return err
+		}
+		outcome = "failed"
+		_, err = tx.Exec(ctx, `UPDATE interactions SET status = 'failed', resolution = NULL WHERE id = $1`, id)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return outcome, nil
+}
+
 // LateAnswer records on expired card id an answer that came after it expired (proto.Resolution.Late): answers (by
 // question) are added to those recorded late before, and by / reason (proto.Resolution.AnsweredBy, Reason) say who
 // answered. The card stays "expired"; resolved_at becomes when the answer came. A card that did not expire is left as

@@ -490,6 +490,7 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
         override suspend fun operation(operationId: String, machineId: String) = creation(of(machineId)).operation(operationId)
         // "Follow model configuration" reads the selected group's agent.new purpose.
         override suspend fun newAgentModel() = creations.getOrNull(chosen)?.newAgentModel()
+        override suspend fun newAgentModel(machineId: String) = creation(of(machineId)).newAgentModel(machineId)
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean) =
             creation(of(machineId)).launcherModels(machineId, launcher, refresh)
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean, host: String?) =

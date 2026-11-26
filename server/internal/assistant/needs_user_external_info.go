@@ -251,3 +251,29 @@ func formatInboxExternalInfo(in prompts.SuperviseInbox) (source, summary string)
 	}
 	return source, summary
 }
+
+// needsUserAgentTurn wakes t's supervisor when one of t's agents ended a turn while t still waits on an open owner
+// decision (#14899): the agent may have gone on (the supervisor sent it more, or it went on by itself) and found what
+// answers or replaces the question. The turn that raised the decision is no news, nor is one its review came after.
+// Nothing is changed on the task or its card; the supervisor decides as for any external information (#13112).
+func (s *Service) needsUserAgentTurn(ctx context.Context, t Todo, c taskDoneCheck, err error) {
+	e, ok := s.turnOf(ctx, t.ID)
+	if !ok || e.Session == "" || e.At.IsZero() {
+		return
+	}
+	if r := triageLatestReview(t.Supervision); r != nil && r.Verdict == reviewNeedsUser && !e.At.After(r.At) {
+		return
+	}
+	summary := c.Reason
+	if err != nil && summary == "" {
+		summary = fmt.Sprintf("agent %s/%s ended a turn; it could not be judged: %s", e.Machine, short(e.Session), clip(err.Error(), 120))
+	}
+	if summary == "" {
+		summary = fmt.Sprintf("agent %s/%s ended a turn (%s)", e.Machine, short(e.Session), cmp.Or(c.Verdict, "unjudged"))
+	}
+	source := fmt.Sprintf("agent turn %s/%s", e.Machine, short(e.Session))
+	key := fmt.Sprintf("agent_turn:%s/%s@%s", e.Machine, e.Session, e.At.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
+	if s.emitNeedsUserExternalInfo(ctx, t, source, summary, key) {
+		s.logf("task %s: agent turn while the owner decides: supervisor told", t.ID)
+	}
+}

@@ -81,7 +81,7 @@ function BoundedAgentList({ onToggleSidebar }: { onToggleSidebar: () => void }) 
     <Header title={t("agents-agentsview.title")} sub={t("agents-agentsview.subtitle")} onToggleSidebar={onToggleSidebar} />
     <div className="min-h-0 flex-1 overflow-y-auto"><div className={SESSION_LIST_STYLE.personalPage}>
       {loaded && !error && sessions.length > 0 && <SourceNotice hints={hints} />}
-      <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal label={accounts.label} accountMark={accounts.accountMark} renderRow={(s) => <div className={SESSION_LIST_STYLE.personalRow}>
+      <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal label={accounts.label} accountMark={accounts.accountMark} providerOptions={accounts.providerOptions} renderRow={(s) => <div className={SESSION_LIST_STYLE.personalRow}>
         <a href={href({ name: "agents", id: s.id })} onClick={(e) => onLinkClick(e, { name: "agents", id: s.id })} className="flex min-w-0 flex-1 items-center gap-2">
           <AgentAvatar s={s} size={SESSION_LIST_METRICS.avatar} /><span className={SESSION_LIST_STYLE.personalTitle}>{s.title || t("lib-format.untitled_session")}</span>
           {s.unreadCount > 0 && <span className={SESSION_LIST_STYLE.personalBadge}>{s.unreadCount}</span>}

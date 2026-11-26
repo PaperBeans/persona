@@ -5,6 +5,22 @@ The Inbox tab is Persona's information entry point: Lark messages and mail from 
 
 Android's navigation badge counts each unread open item in Needs you once, including separate items from the same source conversation; Web and Apple use the same item-level rule. The current hub `status` decides, with the existing tier fallback; FYI, Noise, In progress, read and completed items do not count. Reading an item never files it: read-but-pending items remain in their hub sections and keep their completion state, and Android has no separate read-pending section. Zero keeps the existing hidden-badge behavior. The roster's `inbox_needs_you` and the home page's pending count retain their separate meaning: open items requiring action, including ones already read. A receipt can precede the next item-list update, so Android's badge also reads the reconciled `InboxConversations` state rather than only the cached item flags.
 
+## Opt-in automatic replies (#9762)
+
+Suggested replies still wait for Send by default. A scoped `send` standing
+authorization can enable plain-text Lark via lark-cli replies for an exact
+group/chat (or explicitly all chats in that channel), scenario `inbox_reply`,
+and one sender identity. Configure and revoke it in Web Settings > Persona;
+see [Scoped outward messages](assistant.md#scoped-outward-messages-9762).
+
+The suggestion must be persisted before the existing version-checked
+confirmation path consumes it. Handbacks, document writes, conclusions, and
+Agent/to-do suggestions remain manual. Each automatic attempt is durably
+audited before transport. Each source message permits only one automatic reply
+attempt per sender, even across rewording, suggestion versions, or a manager restart.
+Failure or uncertain delivery needs inspection and a deliberate manual retry.
+Revocation and identity changes serialize with the final grant check/send.
+
 ## Ownership: the manager owns the Inbox (2026-11-04)
 
 The Inbox belongs to the **manager** (assistant process `personad assistant`; `docs/assistant/assistant.md`, "Boundary with hub"): items and their state (pre-admission triage,
@@ -1303,3 +1319,28 @@ serves: everyone reading the Inbox on the Assistant side; it adds no setting and
   iPhone's Watch summary carries up to 20 items (`WatchSummary.inbox`); while open, Watch fetches `/api/v1/inbox` directly every 8 seconds. New items vibrate.
 - Open `WatchInboxItemView`: summary, latest message; AI reply drafts first and displays it, then Send (`/reply`); Done.
 - DEBUG: Watch `-openInboxFirst YES` opens the first item.
+
+
+### Chat-created tasks and recent Inbox topics (#15557)
+
+For people turning a chat request or screenshot into a task, `task_plan` also looks for a recent matching group item
+when `inbox_item` is omitted. An explicit validated handoff takes priority; `inbox_item: "none"` disables this lookup.
+Main chat, an explicit supervisor assignment and a direction receiving the owner's verified quote use the same path.
+Only the title, prompt and manager-verified original request are evidence; generated context and image pixels are not.
+
+The manager considers open, visible action group items that arrived within 24 hours (legacy rows fall back to their
+source update time), excluding merged members, mutes and existing task links. The normalized group name must match
+as a complete name, together with a sender, full non-root URL or a distinguishing verbatim passage. Group-only matches,
+short stock phrases and ambiguous topics yield suggestions rather than a link. URL matching never collapses a domain.
+
+Two sources remain separate. A shared source-local message position is usable only in its account and conversation;
+cross-source equivalence needs an individual received message's sender, exact distinguishing text or complete URL,
+and timestamps within two minutes. Mere context overlap or a general Related link is not proof. A unique pairwise
+verified topic uses a deterministic primary item and existing Related navigation; both reply routes and per-source
+processing states survive. Neither planning nor binding files the item or sends a source reply.
+
+The plan stores manager-owned evidence and a content fingerprint. Start checks freshness, visibility, ownership,
+uniqueness and source changes again, including after a restart and card edits. An invalid soft link is removed and a
+localized notice is recorded in the conversation; the task can still start. Admission repeats the ownership check
+under the Inbox lock, so competing automatic links cannot replace a winner. The existing task/Inbox rollback handles
+failed persistence. Explicit handoffs retain their existing admission and legacy-link correction behavior.

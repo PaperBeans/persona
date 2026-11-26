@@ -177,13 +177,18 @@ disabling the registry takes effect when the node is restarted; it does not rewr
 
 ## Which shell
 
-The node runs the list script and shell-defined launchers in an interactive shell (`loginShellProgram`): zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`;
-always bash without zsh (Git Bash on Windows). Bash runs as `bash -ic` and reads `~/.bashrc`, not `~/.bash_profile` / `~/.profile`: aliases kept there aren't listed.
+The node runs the list script and shell-defined launchers, and asks a launcher's CLI for its model list, in the user's shell started the way their terminal starts it (`loginShellProgram` and `shellFlag`, `node/os_other.go`; #16217):
+
+- **macOS**: the account's login shell when it is bash or zsh, whatever rc files the other shell has, run as a login, interactive shell (`-lic`), as Terminal opens every window. zsh then reads `/etc/zprofile` (`path_helper`, which puts the system directories first), `~/.zprofile` (Homebrew's `shellenv`) and `~/.zshrc`; bash reads `~/.bash_profile` (or `~/.bash_login`, `~/.profile`; not `~/.bashrc` unless one of them sources it). A bash user with none of those three files would get nothing of theirs from a login shell, so that bash runs as `-ic` and reads `~/.bashrc`. A node under launchd has no `$SHELL` and only `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and macOS keeps accounts in Directory Services, not `/etc/passwd`, so the node asks `dscl . -read /Users/<user> UserShell` once (it builds without cgo, so no `getpwuid`).
+- **Linux**: zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`, run interactively (`-ic`): zsh reads `~/.zshrc`, bash `~/.bashrc`, not `~/.bash_profile` / `~/.profile`, so aliases kept there aren't listed. A bash user with a `~/.zshrc` keeps zsh here: an account that can't change its login shell often starts zsh from `~/.bashrc`.
+- Always bash without zsh; Git Bash on Windows (`-ic`, `~/.bashrc`).
+
+Settings › Model providers names the file the launchers came from accordingly (`~/.zshrc`, `~/.bashrc`, or `~/.bash_profile` for a login bash on macOS).
 Bash has no zsh `(z)` / `(Q)`, and macOS's bundled bash 3.2 has no `BASH_ALIASES`, so under bash the script prints `alias -p`, and the node splits words and strips quotes by the shell's rules itself (nothing expanded or run, `node/launchers_shell.go`) before handing them to the same parser.
 
 ### The terminal's shell is another environment (#1642)
 
-The node **lists** launchers, and runs "Test availability", the launcher health checks, probes and repairs, in its own login shell (`loginShellProgram -ic`). A start **types** the launcher into a new herdr tab, whose shell is whatever herdr opens there. When the two read different startup files, a launcher the list shows does not exist where it runs:
+The node **lists** launchers, and runs "Test availability", the launcher health checks, probes and repairs, in its own login shell (`loginShellProgram`, "Which shell" above). A start **types** the launcher into a new herdr tab, whose shell is whatever herdr opens there. When the two read different startup files, a launcher the list shows does not exist where it runs:
 
 - herdr's panes run inside a container (sharing the home directory) whose `~/.bashrc` detects the container and returns early, before the launchers are defined;
 - the node lists from zsh (`~/.zshrc`, zsh installed and a `~/.zshrc` there) while the account's login shell, and so the tab, is bash;
@@ -217,6 +222,8 @@ node gathers two things in one login-shell invocation (`zsh -ic`, loading `~/.zs
 The script frames what it prints with begin/end markers, and node reads only between them: what rc files print while the shell starts (Ubuntu's `/etc/bash.bashrc` sudo hint) or an exit trap prints afterwards is never a launcher (#6310).
 
 - **Output of `_claude_launchers`**: Existing `~/.zshrc` helper functions (one fixed-width line per name, gateway, model) still work and come first.
+  When a listed name resolves to a PATH wrapper, its row keeps the helper's metadata and gets the wrapper's config directory for node-local matching.
+  A shell alias or function of the same name takes precedence over the file.
 - **Aliases** (since 2026-11-01): zsh tokenizes and unquotes each alias (`${(@Q)${(z)…}}`); node recognizes only those **whose final program is `claude`**.
   They may have preceding variables (`alias dmcc="ANTHROPIC_BASE_URL=… ANTHROPIC_AUTH_TOKEN=… claude --dangerously-skip-permissions"`), pass through
   `env` (including `-u` / `-i`) / `command` / `exec` / `noglob`, use absolute paths, or run `export …;` first within the same alias. Gateway comes from `ANTHROPIC_BASE_URL`,
@@ -233,6 +240,12 @@ The script frames what it prints with begin/end markers, and node reads only bet
   Only the first file of a name on PATH counts, as for the shell; a name the shell has as a function or alias (both run before a file) is not a script launcher,
   and neither is `claude` / `codex` / `omp` itself. The scan stats only regular files and links, reads two bytes before the rest, and gets 3 seconds (a hung
   network mount): past them the last scan's scripts stand.
+  A thin wrapper such as `claude-work` can also exec a shell helper by absolute path or alongside the wrapper,
+  with literal arguments and `"$@"` at the end. The node reads one helper within the same bounds. It resolves simple
+  positional parameters, assignments and exports, and recognizes `dirname "$0"` and `dirname "$(readlink -f "$0")"`
+  as script locations. If the helper execs Claude Code with a known `CLAUDE_CONFIG_DIR` and no configured endpoint,
+  the node can attribute a terminal session with an empty endpoint to the one launcher with that directory.
+  Configuration directories stay on the node. Sourced files, dynamic paths and further helper hops are outside this scan.
 - **Codex** (since 2026-11-02): If `codex` is on PATH, add `codex`, plus aliases running only one `codex` command, after the Claude entries, with `agent: "codex"`.
   On a Mac where the login shell finds no `codex` (and has no alias or function of that name), the ChatGPT app's bundled CLI
   (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is plain `codex` instead, run by that path (#10437).

@@ -663,6 +663,17 @@ func codexThreadOrigin(src codexSource) codexOrigin {
 	return readCodexOrigin(src.path)
 }
 
+// A shared app-server can stamp the node's initialize name on an App-created chat (#10438).
+func (o codexOrigin) sharedAppStamp() bool {
+	return o.originator == "persona" && o.source == "vscode" && !o.sub
+}
+
+// Use the usual desktop safeguards for a desktop origin or an ambiguous stamp
+// corroborated by the same home's sidebar.
+func (o codexOrigin) desktopThread(src codexSource, pass *codexListPass) bool {
+	return o.desktop || o.sharedAppStamp() && pass.appState(src.home).listed(src.thread)
+}
+
 // codexDesktopChat identifies an App chat independently of whether the App still exposes its control bus.
 // An unavailable bus must not turn an App chat into a CLI session or invite a second writer.
 func codexDesktopChat(src codexSource) bool { return codexDesktopChatIn(src, nil) }
@@ -674,7 +685,8 @@ func codexDesktopChatIn(src codexSource, pass *codexListPass) bool {
 		return ok && !t.origin().sub
 	}
 	o := readCodexOrigin(src.path)
-	return o.desktop && !o.sub && !o.exec && (o.persona || o.userChat || pass.appState(src.home).listed(src.thread))
+	return !o.exec && !o.sub && o.parent == "" &&
+		(o.persona || o.userChat || (o.desktop || o.sharedAppStamp()) && pass.appState(src.home).listed(src.thread))
 }
 
 // loadedOwner is the App window that owns the thread, the App asked to open it when none does: it loads a thread it is

@@ -205,6 +205,7 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			s.Capabilities.Interrupt = true
 		}
 		pluginPerms := n.ccPluginPermissionsCapable(id, c.pid)
+		pluginPassedOver := n.ccPluginClassicPassedOver(id, c.pid)
 		if s.Capabilities != nil && pluginPerms {
 			s.Capabilities.Approve = true
 		}
@@ -249,7 +250,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 			s.Capabilities.Approve = true
 		}
 		if status == proto.StatusBlocked && s.AttentionReason == "" && !hasActiveCard {
-			if source == proto.SourceClaudeDesktop && pluginPerms {
+			if pluginPassedOver {
+				s.AttentionReason = proto.AttentionClaudePluginPassedOver
+			} else if source == proto.SourceClaudeDesktop && pluginPerms {
 				s.AttentionReason = proto.AttentionClaudeDesktopComputer
 			} else {
 				s.AttentionReason = proto.AttentionClaudeComputer // no dialog read from a pane (yet)

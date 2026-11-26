@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
@@ -48,7 +49,9 @@ async function fixture(t, options = {}) {
   t.after(async () => { await runtime.stop(); rmSync(home, { recursive: true, force: true }) })
   runtime.start()
   await n.ready
-  const calls = () => readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+  const callsPath = join(home, 'calls.jsonl')
+  writeFileSync(callsPath, '')
+  const calls = () => readFileSync(callsPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
   const modelsCalls = () => {
     try {
       return readFileSync(join(home, 'models-calls.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line).at)
@@ -254,10 +257,60 @@ test('an explicit caller model overrides the configured default', async (t) => {
   assert.equal(result.session.effort, 'low')
 })
 
-test('resuming a session does not replace its native model with the configured default', async (t) => {
+test('changing permissions alone does not apply the configured model', async (t) => {
   const { n, calls } = await fixture(t, { noStart: true })
   await n.peer.call('session.modes', { session_id: 'agy-11111111-2222-3333-4444-555555555555', permission_mode: 'default' })
   assert.equal(calls().filter((call) => call.method === 'session/set_model').length, 0)
+})
+
+const resumedSession = 'agy-11111111-2222-3333-4444-555555555555'
+
+test('history stays passive and the first resumed prompt applies the native default', async (t) => {
+  const { n, calls } = await fixture(t, { noStart: true })
+  await n.peer.call('session.items', { session_id: resumedSession })
+  assert.deepEqual(calls(), [])
+
+  await n.peer.call('session.send', { session_id: resumedSession, text: 'Continue' })
+  await until('resumed prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  const requests = calls().filter((call) => call.method?.startsWith('session/'))
+  assert.deepEqual(requests.map(({ method }) => method), ['session/resume', 'session/set_model', 'session/prompt'])
+  assert.equal(requests[1].params.modelId, entries[1].modelId)
+})
+
+test('a model explicitly picked for a resumed send wins over the default', async (t) => {
+  const { n, calls } = await fixture(t, { noStart: true })
+  await n.peer.call('session.send', { session_id: resumedSession, text: 'Continue', model: entries[2].modelId })
+  await until('resumed prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.deepEqual(calls().filter((call) => call.method === 'session/set_model').map((call) => call.params.modelId), [entries[2].modelId])
+})
+
+test('a model selected with session modes survives the next send on the same connection', async (t) => {
+  const { n, calls } = await fixture(t, { noStart: true })
+  await n.peer.call('session.modes', { session_id: resumedSession, model: entries[2].modelId })
+  await n.peer.call('session.send', { session_id: resumedSession, text: 'Continue' })
+  await until('resumed prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.deepEqual(calls().filter((call) => call.method === 'session/set_model').map((call) => call.params.modelId), [entries[2].modelId])
+})
+
+test('a resumed prompt with no configured model keeps the ACP model', async (t) => {
+  const { n, calls, settings } = await fixture(t, { noStart: true })
+  settings({})
+  await n.peer.call('session.send', { session_id: resumedSession, text: 'Continue' })
+  await until('resumed prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.equal(calls().some((call) => call.method === 'session/set_model'), false)
+})
+
+test('a native turn already in progress does not receive an automatic model change', async (t) => {
+  const { n, home, calls } = await fixture(t, { noStart: true })
+  const db = new DatabaseSync(join(home, 'settings', 'conversation_summaries.db'))
+  db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
+  db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, 1, 0, 0, '', '[]', '')")
+    .run(resumedSession.slice(4), 'CASCADE_RUN_STATUS_RUNNING')
+  db.close()
+
+  await n.peer.call('session.send', { session_id: resumedSession, text: 'Continue' })
+  await until('resumed prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.equal(calls().some((call) => call.method === 'session/set_model'), false)
 })
 
 test('refused auto automatically approves git status, rg and an MCP read without phone cards', async (t) => {

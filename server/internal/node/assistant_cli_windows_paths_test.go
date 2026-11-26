@@ -54,10 +54,10 @@ func checkScriptWords(t *testing.T, script string, want ...string) {
 	}
 }
 
-// icScript is the -ic script of cmd's arguments.
+// icScript is the -ic (-lic on macOS, shellFlag) script of cmd's arguments.
 func icScript(t *testing.T, args []string) string {
 	t.Helper()
-	i := slices.Index(args, "-ic")
+	i := slices.Index(args, shellFlag(args[0]))
 	if i < 0 || i+2 >= len(args) || args[i+2] != "persona" {
 		t.Fatalf("not a -ic launch: %q", args)
 	}

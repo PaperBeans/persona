@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -293,6 +294,50 @@ func TestTodosListCountsAddedUp(t *testing.T) {
 	}
 }
 
+func TestTodosCompleteListKeepsAllRowsAndItsETag(t *testing.T) {
+	h, srv, _, _, ra, rb := todoViewHub(t)
+	rows := make([]string, 60)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"id":"todo_complete_%02d","title":"Done %d","created_at":"2026-10-01T09:%02d:00Z","updated_at":"2026-10-01T10:00:00Z","done_at":"2026-10-01T10:00:00Z"}`, i, i, i)
+	}
+	board := `{"status_groups":[],"direction_groups":[],"sidebar_tree":[],"counts":{"needs_you":0,"in_progress":0,"pending_review":0,"waiting":0,"someday":0,"done":60,"open_total":0}}`
+	ra.set(`{"todos":[`+strings.Join(rows, ",")+`],"counts":`+todoCountsJSON(0, 0, 0, map[string]int{"done": 60})+`,"board":`+board+`}`, "", 0)
+	rb.set(`{"todos":[]}`, "", 0)
+
+	resp, body := todoViewGet(t, h, srv, "/api/v1/todos", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("complete list: %d %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Todos []map[string]any `json:"todos"`
+		Board *struct {
+			Counts struct {
+				Done int `json:"done"`
+			} `json:"counts"`
+		} `json:"board"`
+		ClosedNextCursor string         `json:"closed_next_cursor"`
+		ClosedHasMore    bool           `json:"closed_has_more"`
+		ClosedCursors    map[string]any `json:"closed_cursors"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Todos) != 60 || out.Board == nil || out.Board.Counts.Done != 60 {
+		t.Fatalf("complete response: %d rows, board %+v", len(out.Todos), out.Board)
+	}
+	if out.ClosedNextCursor != "" || out.ClosedHasMore || len(out.ClosedCursors) != 0 {
+		t.Fatalf("complete response has closed pagination fields: %+v", out)
+	}
+	tag := resp.Header.Get("ETag")
+	if tag == "" {
+		t.Fatal("complete response has no ETag")
+	}
+	again, againBody := todoViewGet(t, h, srv, "/api/v1/todos", map[string]string{"If-None-Match": tag})
+	if again.StatusCode != http.StatusNotModified || len(againBody) != 0 {
+		t.Fatalf("same complete response: %d %s, want 304 with no body", again.StatusCode, againBody)
+	}
+}
+
 // The merge writes the added-up counts byte for byte as decoding every answer and encoding the merge again does, on
 // every shape the scan meets.
 func TestTodoCountsMergeMatchesDecoding(t *testing.T) {
@@ -342,6 +387,14 @@ func TestTodoCountsMergeMatchesDecoding(t *testing.T) {
 		listOf("m-b", 200, `{"todos":[],"counts":{"open":2,"sections":{"later":1,"todo":2},"assistant_needs":4,"note":"b","x":1}}`)})
 	if got, want := string(sums["counts"]), `{"open":3,"needs_you":1,"in_progress":0,"sections":{"needs_you":1,"later":3,"todo":2},"assistant_needs":7,"note":"a","x":1}`; !sameJSONValue(got, want) {
 		t.Fatalf("two newer managers' %s, want %s", got, want)
+	}
+	sums = todoListSums([]listAnswer{
+		listOf("assistant", 200, `{"todos":[],"closed_next_cursor":"ca","closed_has_more":true}`),
+		listOf("m-b", 200, `{"todos":[],"closed_next_cursor":"cb","closed_has_more":true}`),
+		listOf("m-c", 200, `{"todos":[]}`),
+	})
+	if got, want := string(sums["closed_cursors"]), `{"assistant":{"next_cursor":"ca","has_more":true},"m-b":{"next_cursor":"cb","has_more":true}}`; !sameJSONValue(got, want) {
+		t.Fatalf("closed cursors %s, want %s", got, want)
 	}
 }
 

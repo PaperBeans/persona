@@ -306,9 +306,28 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		UnlockStage        string          `json:"unlock_stage"`
 		UnlockContracts    []string        `json:"unlock_contracts"`
 		RepositoryBindings json.RawMessage `json:"repository_bindings"`
+		TopicMessageID     string          `json:"topic_message_id"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %w", err)
+	}
+	title := strings.TrimSpace(a.Title)
+	if title == "" {
+		return "", errors.New("title is required")
+	}
+	if a.TopicMessageID != "" {
+		if a.Due != "" || a.Remind != "" || a.Priority != "" || a.Project != "" || a.Kind != "" ||
+			a.Audience != "" || a.DirectionID != "" || a.PartOf != nil || a.After != nil || a.RepositoryBindings != nil {
+			return "", errors.New("creating a Lark topic to-do takes only title, notes and topic_message_id")
+		}
+		run, ok := s.decidingTopicRun(ctx, machine, self, a.TopicMessageID)
+		if !ok {
+			return "", errors.New("topic_message_id must identify a pending Lark topic message for this main conversation")
+		}
+		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_create", "", title, args); err != nil || !ok {
+			return todoNotAllowed(outcome, err)
+		}
+		return s.larkModule().DecideTopicTodo(ctx, run, title, strings.TrimSpace(a.Notes))
 	}
 	bindings, err := parseCreateBindings(a.RepositoryBindings)
 	if err != nil {
@@ -316,10 +335,6 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	}
 	if err := s.resolveCreateBindings(ctx, bindings); err != nil { // before the store, outside todos.writing
 		return "", s.taskRepositoryToolError(ctx, err)
-	}
-	title := strings.TrimSpace(a.Title)
-	if title == "" {
-		return "", errors.New("title is required")
 	}
 	kind, err := todoKind(a.Kind)
 	if err != nil {
@@ -416,7 +431,8 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 			s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
 		}
 		return "Created under your direction (you supervise it; to have an Agent do it, use task_plan with todo_id " + t.ID +
-			"): " + todoLine(t, now, loc), nil
+			"): " + todoLine(t, now, loc) +
+			reuseHintText("todo_create", s.activeReuseHints(ctx, self, 3)), nil
 	}
 	if plan.PartOf != nil && *plan.PartOf != "" && self != "" && s.workerRefusal(ctx, machine, self) == nil {
 		// a piece the conversation will hand out itself: its own, so that task_plan's todo_id can run an Agent on it
@@ -443,7 +459,8 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	if len(t.After) > 0 {
 		s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
 	}
-	return "Created: " + todoLine(t, now, loc), nil
+	return "Created: " + todoLine(t, now, loc) +
+		reuseHintText("todo_create", s.activeReuseHints(ctx, self, 3)), nil
 }
 
 func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args json.RawMessage) (string, error) {

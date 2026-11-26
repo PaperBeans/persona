@@ -60,8 +60,8 @@ func (n *Node) startAgentType(launcher, declared string) string {
 	if l, ok := n.managedLauncher(launcher); ok && l.AgentType() == traexAgent {
 		return traexAgent
 	}
-	if n.agentKindOf(launcher, "") == agyAgent {
-		return agyAgent
+	if kind := n.agentKindOf(launcher, ""); kind == agyAgent || kind == traexAgent {
+		return kind
 	}
 	return launcherAgentType(launcher)
 }
@@ -145,12 +145,23 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 		argShells = nil
 	}
 	command := n.launcherCommand(launcher)
-	var model string
-	if selected := executionOption(options).Model; kind == ompAgent && resume == "" && selected != "" {
-		model = selected
+	var model, effort string
+	execution := executionOption(options)
+	if kind == traexAgent && resume == "" {
+		model, effort = execution.Model, execution.Effort
+		if model != "" {
+			command += " -m " + shellQuote(model)
+		}
+		if effort != "" {
+			command += " -c " + shellQuote("model_reasoning_effort="+effort)
+		}
+	} else if kind == ompAgent && resume == "" && execution.Model != "" {
+		model = execution.Model
 		command += " --model " + shellQuote(model)
+	}
+	if model != "" || effort != "" {
 		if prompt != "" {
-			command += " --" // omp takes the first message as positional text, even when it begins with a dash.
+			command += " --" // The first message is positional text, even when it begins with a dash.
 		}
 	}
 	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(command, resume, prompt, argShells...))
@@ -202,11 +213,18 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 				continue
 			}
 		}
-		n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, StartedAt: time.Now().UTC()})
+		if kind == traexAgent && resume != "" {
+			previous, _ := n.state.get(id)
+			model, effort = previous.Model, previous.ModelEffort
+		}
+		n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, StartedAt: time.Now().UTC()})
+		if effort != "" {
+			n.noteModes(id, "", effort)
+		}
 		n.bindPane(pane, id)
 		session := n.sessionFor(id, agent)
 		session.Agent = kind
-		n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, ID: id, Model: model})
+		n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, ID: id, Model: model, Effort: effort})
 		return session, nil
 	}
 }

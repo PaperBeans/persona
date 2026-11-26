@@ -276,24 +276,34 @@ function GroupRows<T>({ group, dimension, scope, source, renderRow, onExcluded, 
   useEffect(() => {
     if (page.rows.length) onRows?.(page.rows);
   }, [page.rows, onRows]);
+  const heading = `${group.count}/${group.needs}`;
+  const countAtStart = useRef(group.count);
+  const headingRead = useRef<string | null>(null);
   useEffect(() => {
+    countAtStart.current = group.count;
+    headingRead.current = null;
     void list.setFilters(filters).catch(() => {});
     // the hub's message for the hint onShownHint acts on (registered first, so it is the one the hint is for); after a
-    // hidden stretch the last of several, which then does not chain from where the list stands, so the list reads
+    // hidden stretch pass no hint so SectionList always reconciles instead of skipping a chain across hidden time
     let hint: ListChangeHint | undefined;
     const offHint = onHubEvent(event, (msg) => { hint = msg; });
-    const off = onShownHint(event, () => list.invalidate(hint));
+    const off = onShownHint(event, (replayed) => list.invalidate(replayed ? undefined : hint));
     return () => { offHint(); off(); list.reset(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- countAtStart captures the group count at filter start; later heading changes run the effect below
   }, [list, filters, event]);
   // What no hint names, a session joining the section, shows in its heading's numbers (the read that named the groups):
-  // when they change, the section reads. Before its first read is in, that read brings them.
-  const heading = `${group.count}/${group.needs}`;
-  const headingRead = useRef(heading);
+  // when they change, the section reads. If the group's count changes while the first read is still in flight, catch up
+  // once `page.loaded` flips true (without treating the initial async `needs` badge fetch as a stale read).
   useEffect(() => {
-    if (headingRead.current === heading) return;
+    if (!page.loaded) return;
+    const prev = headingRead.current;
     headingRead.current = heading;
-    if (list.getSnapshot().loaded) list.invalidate();
-  }, [list, heading]);
+    if (prev === null) {
+      if (group.count !== countAtStart.current) list.invalidate();
+      return;
+    }
+    if (prev !== heading) list.invalidate();
+  }, [list, heading, group.count, page.loaded]);
   const [limit, setLimit] = useState<number>(SESSION_LIST_METRICS.groupPreview);
   const unheldRows = useMemo(
     () => excludeIdentities?.size ? page.rows.filter((row) => !excludeIdentities.has(identity(row))) : page.rows,

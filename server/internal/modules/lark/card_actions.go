@@ -41,6 +41,8 @@ func (s core) botCardAction(ctx context.Context, a *botcard.CardAction, action s
 		return nil
 	case "ix":
 		return s.answerFromCard(ctx, a, action)
+	case "rd": // a /read's answer held for the owner: post it into the group, or not (read_held.go)
+		return s.readHeldAction(ctx, a)
 	case "accept":
 		// The hub checked the owner pressed it; marking a task verified approves nothing. The decision is the core's
 		// (its acceptance ledger and decisions), and so is what the toast says.

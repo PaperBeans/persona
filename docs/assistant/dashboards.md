@@ -58,6 +58,27 @@ On with no kept page, nothing on any screen changes.
 4. **Update.** The conversation answers with `page update`: the whole View again, with the version it read
    (`version_conflict` otherwise). The apps showing the page draw it again (`extension_ui` invalidate); nothing is pushed.
 
+### Keep a live card as a dashboard
+
+An owner can ask the conversation to keep a card it already showed. For example, after displaying a reading list,
+the conversation can offer that list as a dashboard without generating the entries again:
+
+```json
+{
+  "action": "create",
+  "title": "Weekend reading",
+  "why": "Come back to the books you picked for the weekend.",
+  "from_view": {"id": "view_0123456789abcdef", "version": 2}
+}
+```
+
+Use the live card ID and the version the owner saw. The manager reads that version from the calling conversation on
+its machine and checks the contents against the dashboard rules. If the card has changed, inspect it again before
+offering the updated content. An unsupported card produces an error before any draft is created.
+
+The usual preview offers **Keep in Dashboards**. It contains a snapshot of the card's contents. Later edits to the
+card and answers submitted to it stay in the conversation.
+
 ## Ownership and writers
 
 | Page of | Who writes it | Where taps go |
@@ -318,7 +339,7 @@ grantee kind `routine`, the routine's id, rights `data`, who granted it and when
 
 ### Later
 
-Not in phase 2 (they stay with Dashboards, #15417): copying a live card into a page (`from_view`), opening a page from a card's link, the number of pages in the
+Not in phase 2 (they stay with Dashboards, #15417): opening a page from a card's link, the number of pages in the
 apps' delete-conversation confirmations, labelling a tap's message "from a dashboard", an alert push that opens its
 page, Overview's heading for these cards (they sit under Extensions on the web), and whether the switch turns on by
 default. Phase 3 attaches pages to spaces, directions and to-dos, gives task Agents a data-only `todo_page`, and adds

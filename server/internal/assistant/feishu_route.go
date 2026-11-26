@@ -3,8 +3,10 @@ package assistant
 import (
 	"context"
 	"errors"
+	"maps"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -25,6 +27,22 @@ func (s *Service) startBotRun(ctx context.Context, rt resolvedTarget, t botTarge
 	}
 	if reaction != "" {
 		run.Ext["reaction"] = reaction
+	}
+	if run.Ext[assistantwire.FeishuTopicMayOpenTodo] != "" {
+		c := &s.chans
+		c.mu.Lock()
+		if c.topicStarting == nil {
+			c.topicStarting = make(map[string]chan struct{})
+		}
+		done := make(chan struct{})
+		c.topicStarting[messageID] = done
+		c.mu.Unlock()
+		defer func() {
+			c.mu.Lock()
+			delete(c.topicStarting, messageID)
+			close(done)
+			c.mu.Unlock()
+		}()
 	}
 	if rt.isNew {
 		sess, err := s.Start(ctx, StartParams{Text: text, Images: images, Main: rt.main, Origin: OriginChannel, OriginRef: channel.Feishu})
@@ -61,6 +79,42 @@ func (s *Service) startBotRun(ctx context.Context, rt resolvedTarget, t botTarge
 	}
 	s.startChannelRun(run)
 	return nil
+}
+
+// decidingTopicRun looks up a message accepted for main-decides routing in this conversation.
+// Folded messages keep their own eligibility and original reply anchor.
+func (s *Service) decidingTopicRun(ctx context.Context, machine, session, message string) (channel.Run, bool) {
+	c := &s.chans
+	c.mu.Lock()
+	pending := c.topicStarting[message]
+	c.mu.Unlock()
+	if pending != nil {
+		select {
+		case <-pending:
+		case <-ctx.Done():
+			return channel.Run{}, false
+		}
+	}
+	if !s.isMain(ctx, session) {
+		return channel.Run{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s.loadChannelStateLocked(ctx)
+	for _, r := range c.st.Runs {
+		if r.Channel != channel.Feishu || r.MachineID != machine || r.SessionID != session || r.Recalled {
+			continue
+		}
+		if r.ReplyTo == message && r.Ext[assistantwire.FeishuTopicMayOpenTodo] != "" {
+			return channel.Run{ReplyTo: message, SessionID: session, Ext: maps.Clone(r.Ext)}, true
+		}
+		for _, earlier := range r.Folded {
+			if earlier.ReplyTo == message && earlier.Ext[assistantwire.FeishuTopicMayOpenTodo] != "" {
+				return channel.Run{ReplyTo: message, SessionID: session, Ext: maps.Clone(earlier.Ext)}, true
+			}
+		}
+	}
+	return channel.Run{}, false
 }
 
 // feishuTopic is the chat and thread a message was said in.

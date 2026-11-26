@@ -30,6 +30,11 @@ const (
 	usageHubStaleAfter      = 30 * time.Minute // a sample older than this is shown as stale
 	usageHubMaxAge          = 3 * 24 * time.Hour
 	usagePassResetTolerance = 60 * time.Second // reset-time jitter tolerance when matching a local sample to a pass-through extension row
+
+	// usageHubKept: the usage route answers with a merged answer up to this old at once and refreshes it behind
+	// (usageWindowsHub.read): the apps poll every minute, twice usageHubFresh, so nearly every poll found it expired
+	// and waited for every online computer (up to usageHubAsk each, #13348).
+	usageHubKept = 3 * time.Minute
 )
 
 // usageSource is a machine as the aggregator sees it.
@@ -96,6 +101,26 @@ func (d *Devices) usageSources() []usageSource {
 	return out
 }
 
+// read is poll for the usage route. A merged answer past usageHubFresh but younger than usageHubKept is returned at
+// once and polled again in the background, so the app that reads it does not wait for the machines; the next read gets
+// the new one. None yet, an older one, or one invalidated (a gateway answered, the sources were edited: invalidate zeroes
+// u.at, so it reads as too old) is polled first, as before. The scheduler's capacity view keeps calling poll itself.
+func (u *usageWindowsHub) read(ctx context.Context, sources []usageSource, now time.Time) []proto.UsageAccount {
+	u.mu.Lock()
+	kept, age, busy := u.merged, now.Sub(u.at), u.loading != nil
+	if kept == nil || age < usageHubFresh || age >= usageHubKept {
+		u.mu.Unlock()
+		return u.poll(ctx, sources, now)
+	}
+	if !busy {
+		done := make(chan struct{})
+		u.loading = done
+		go u.refresh(ctx, sources, now, done) // it detaches each machine's call from ctx, bounded by usageHubAsk
+	}
+	u.mu.Unlock()
+	return kept
+}
+
 // poll asks the online machines (in parallel) and returns the merged accounts. Concurrent callers share one poll.
 func (u *usageWindowsHub) poll(ctx context.Context, sources []usageSource, now time.Time) []proto.UsageAccount {
 	u.mu.Lock()
@@ -118,7 +143,12 @@ func (u *usageWindowsHub) poll(ctx context.Context, sources []usageSource, now t
 	done := make(chan struct{})
 	u.loading = done
 	u.mu.Unlock()
+	return u.refresh(ctx, sources, now, done)
+}
 
+// refresh is the poll in flight that the caller marked as u.loading (done): it asks the machines, merges their answers
+// with the gateways' and balances, and closes done.
+func (u *usageWindowsHub) refresh(ctx context.Context, sources []usageSource, now time.Time, done chan struct{}) []proto.UsageAccount {
 	answers := make([]*usageAnswer, len(sources))
 	var wg sync.WaitGroup
 	for i, s := range sources {
@@ -1043,7 +1073,7 @@ func (d *Devices) usageWindowRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/usage/windows", func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		hidden := d.usageGW.config().HiddenProviders
-		writeJSON(w, usageWindowsAnswer(hideUsageProviders(d.usageWin.poll(r.Context(), d.usageSources(), now), hidden), hidden, now))
+		writeJSON(w, usageWindowsAnswer(hideUsageProviders(d.usageWin.read(r.Context(), d.usageSources(), now), hidden), hidden, now))
 	})
 }
 

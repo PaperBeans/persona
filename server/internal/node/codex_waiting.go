@@ -112,6 +112,9 @@ func (n *Node) waitCodexBox(ctx context.Context, pane string, maxWait time.Durat
 		if err := n.codexStartupFailure(ctx, pane, text, exit); err != nil {
 			return err
 		}
+		if codexSignInScreen(text) { // no input box comes before someone signs in (codex_start.go)
+			return codexNotLoggedIn()
+		}
 		if n.answerCodexStartDialog(ctx, pane, text) {
 			continue
 		}

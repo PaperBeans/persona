@@ -167,6 +167,14 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 			st.Owner, st.PairedAt = set.Owner.OpenID, set.Owner.At
 			st.Chats = botSendChats(set)
 			st.HomeChat = set.homeChat()
+			for _, chat := range set.TopicChats {
+				if mode := chat.TodoMode.Effective(); mode != assistantwire.TopicAnswerOnly {
+					if st.TopicTodoModes == nil {
+						st.TopicTodoModes = make(map[string]assistantwire.TopicTodoMode)
+					}
+					st.TopicTodoModes[chat.ChatID] = mode
+				}
+			}
 		}
 		if h.cfg != nil {
 			st.PublicURL = h.cfg.PublicURL

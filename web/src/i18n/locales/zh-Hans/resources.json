@@ -8,7 +8,7 @@
   "registry_help": "高级设置：每项需要 id、capacity、mirror（machine、target，可选 port 和 identity）。repositories 将项目名映射到 Git 地址。保存空列表可关闭镜像。",
   "save": "保存",
   "cancel": "取消",
-  "capacity": "{used} 条运行中 / {capacity} 个槽位",
+  "capacity": "运行中 {used} 个，上限 {capacity} 个",
   "unknown": "未知",
   "never": "尚无成功镜像",
   "stale": "镜像已过期 {seconds} 秒",

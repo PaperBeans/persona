@@ -126,6 +126,14 @@ func (s *Service) kbRoutes() {
 				out["agents"] = agents
 			}
 		}
+		// A chat's Inbox items (kb_inbox.go), for the user's own apps: none, nothing said.
+		if d.Kind == kb.KindChat && fullRole(r) {
+			if c, ok := e.Store.Chat(d.ID); ok {
+				if items := s.kbChatInbox(r.Context(), c, d.Recent, e.Store.ChatZone(c.ID)); len(items) > 0 {
+					out["inbox"] = items
+				}
+			}
+		}
 		apierr.WriteJSON(w, out)
 	})
 	// What the knowledge base knows about one chat, for a prompt about it (a plugin's /agent): the chat's summary and

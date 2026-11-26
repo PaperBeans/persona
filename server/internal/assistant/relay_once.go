@@ -47,8 +47,12 @@ func relayMsgID(to string, msg relayMsg) string {
 }
 
 // relayInDoubt: the send may have gone in though no answer said so — the time ran out, or the link dropped while it
-// went. A refusal (the conversation is gone, its launcher cannot start) is no doubt: nothing went in.
+// went. A refusal (the conversation is gone, its launcher cannot start) and an explicit not-sent / not-written
+// transport error are no doubt: nothing went in.
 func relayInDoubt(err error) bool {
+	if errors.Is(err, rpc.ErrNotSent) || errors.Is(err, rpc.ErrNotWritten) {
+		return false
+	}
 	return replyInDoubt(err) || errors.Is(err, rpc.ErrClosed)
 }
 

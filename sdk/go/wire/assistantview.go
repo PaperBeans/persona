@@ -262,11 +262,50 @@ func CheckAssistantOpen(target string) error {
 	return errors.New("open: the target has the wrong kind or number of path segments")
 }
 
-func AssistantOnlyAction(a *Action) bool {
-	return a != nil && (a.Reply != "" || a.Open != "" || a.Pop || a.Push != nil && a.Push.Page != "")
+// CheckExtensionOpen accepts the two internal destinations a full extension page may open: a Persona session
+// (persona://session/<machine>/<session>) and a to-do (persona://task/<id>). It applies the same structural checks as
+// CheckAssistantOpen; every other kind stays assistant-only.
+func CheckExtensionOpen(target string) error {
+	if err := CheckAssistantOpen(target); err != nil {
+		return err
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return errors.New("open: a URL is required")
+	}
+	switch u.Host {
+	case "session", "task":
+		return nil
+	}
+	return errors.New("open: an extension page may open only a persona session or task")
 }
 
-func StripAssistantFields(v *View) []string {
+func AssistantOnlyAction(a *Action) bool {
+	return assistantOnlyAction(a, false)
+}
+
+func assistantOnlyAction(a *Action, keepPageNavigation bool) bool {
+	if a == nil {
+		return false
+	}
+	if a.Reply != "" || a.Pop || a.Push != nil && a.Push.Page != "" {
+		return true
+	}
+	if a.Open == "" {
+		return false
+	}
+	// A full extension page may navigate to the two internal destinations below (review of #14617): its own
+	// rendering stays declarative, and a tap only routes. Every other assistant-only open target stays stripped.
+	return !(keepPageNavigation && CheckExtensionOpen(a.Open) == nil)
+}
+
+func StripAssistantFields(v *View) []string { return stripAssistantFields(v, false) }
+
+// StripAssistantFieldsForPage is StripAssistantFields for a full extension page (extension_page/plugin_page and
+// nav_page): it keeps an action whose only assistant-only field is an open of a persona session or to-do.
+func StripAssistantFieldsForPage(v *View) []string { return stripAssistantFields(v, true) }
+
+func stripAssistantFields(v *View, keepPageNavigation bool) []string {
 	var dropped []string
 	drop := func(name string) {
 		for _, old := range dropped {
@@ -287,15 +326,15 @@ func StripAssistantFields(v *View) []string {
 		drop("pages")
 		v.Pages = nil
 	}
-	if v.Search != nil && AssistantOnlyAction(&v.Search.Action) {
+	if v.Search != nil && assistantOnlyAction(&v.Search.Action, keepPageNavigation) {
 		drop("assistant_action")
 		v.Search = nil
 	}
-	if v.Filter != nil && AssistantOnlyAction(&v.Filter.Action) {
+	if v.Filter != nil && assistantOnlyAction(&v.Filter.Action, keepPageNavigation) {
 		drop("assistant_action")
 		v.Filter = nil
 	}
-	if v.Tabs != nil && AssistantOnlyAction(&v.Tabs.Action) {
+	if v.Tabs != nil && assistantOnlyAction(&v.Tabs.Action, keepPageNavigation) {
 		drop("assistant_action")
 		v.Tabs = nil
 	}
@@ -303,11 +342,11 @@ func StripAssistantFields(v *View) []string {
 	for i := range v.Sections {
 		s := &v.Sections[i]
 		hadItems := len(s.Items) > 0
-		if s.More != nil && AssistantOnlyAction(&s.More.Action) {
+		if s.More != nil && assistantOnlyAction(&s.More.Action, keepPageNavigation) {
 			drop("assistant_action")
 			s.More = nil
 		}
-		if s.Link != nil && AssistantOnlyAction(&s.Link.Action) {
+		if s.Link != nil && assistantOnlyAction(&s.Link.Action, keepPageNavigation) {
 			drop("assistant_action")
 			s.Link = nil
 		}
@@ -317,34 +356,34 @@ func StripAssistantFields(v *View) []string {
 				drop("html")
 				continue
 			}
-			if AssistantOnlyAction(e.Action) {
+			if assistantOnlyAction(e.Action, keepPageNavigation) {
 				drop("assistant_action")
 				if e.Type == "button" || e.Type == "segmented" {
 					continue
 				}
 				e.Action = nil
 			}
-			if e.Button != nil && AssistantOnlyAction(&e.Button.Action) {
+			if e.Button != nil && assistantOnlyAction(&e.Button.Action, keepPageNavigation) {
 				drop("assistant_action")
 				e.Button = nil
 			}
 			// a graph's nodes keep their place; only their assistant-only action goes
 			for k := range e.Nodes {
-				if AssistantOnlyAction(e.Nodes[k].Action) {
+				if assistantOnlyAction(e.Nodes[k].Action, keepPageNavigation) {
 					drop("assistant_action")
 					e.Nodes[k].Action = nil
 				}
 			}
 			// and so do a scene's pins
 			for k := range e.Pins {
-				if AssistantOnlyAction(e.Pins[k].Action) {
+				if assistantOnlyAction(e.Pins[k].Action, keepPageNavigation) {
 					drop("assistant_action")
 					e.Pins[k].Action = nil
 				}
 			}
 			// and a map's markers
 			for k := range e.Markers {
-				if AssistantOnlyAction(e.Markers[k].Action) {
+				if assistantOnlyAction(e.Markers[k].Action, keepPageNavigation) {
 					drop("assistant_action")
 					e.Markers[k].Action = nil
 				}

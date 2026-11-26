@@ -62,6 +62,13 @@ program in the following order (`server/internal/devices/packages.go`).
 3. **The fallback, on by default**: with no build of the hub's version anywhere (an `edge`, dev or pull request image), the newest release (`dl/latest.json`) when it has a package for the running program that this manager can drive. The manager checks the manifest's `node_protocol`, `node_protocol_min` and `node_capabilities`, judged like a connected node's handshake (`docs/protocol/protocol.md` ("Node handshake")). Such a node runs another build than the hub, and that is up to date: the machine shows the build it runs, and no update is offered while it runs it. A fallback build is never sent by itself (on connect or after the hub's update): it is offered on the machine's card and sent only on **Redeploy**, as nobody chose to run another version than the hub's. Builds of the hub's own version, its own or its release's, go out by themselves as before when automatic node updates are on (`auto_update_nodes`, below).
 4. **Nothing**: **Redeploy** is not offered (`can_deploy` false) and `deploy_reason` says why and what to do, in the app's language.
 
+**Editions** ([core-install.md](core-install.md), "Updates stay core-only"): a node says in `node.info` whether it is
+the core edition (`edition: "core"`; a full build and every older node say nothing). The manager reads only its own
+edition's manifests (`core-manifest.json`, `core-latest.json` for a core-only hub) and sends a node only a build of
+the node's edition: a build in the node binary dir is checked by the build tag its Go build info records, and a node
+of the other edition than the hub gets no release build (`deploy_reason` says so). The node checks the staged file
+the same way before it replaces its program.
+
 The Persona Link connector a switch from SSH sends ([link.md](link.md) "Switching from SSH") is found the same way, of the hub's version only: `persona-link-<os>-<arch>` in the node binary dir when its `.version` says the hub's (`scripts/deploy/deploy.sh` puts it there beside the node builds), else the release's (`dl/<version>/`, listed under `links` in its manifest), with the same checks and cache. There is no fallback to another release; without one the switch is not offered for that platform (`no_package`).
 
 A fetched build is used only after it checks out, the way hub self-update checks its own (nothing is signed, `docs/operations/hub-update.md` ("Security: no signing")): size and sha256 of the archive and sha256 of the unpacked binary, from the manifest over HTTPS; its Go build info says that OS, architecture and kind of program; on the manager's own platform it runs and its `version -v` says the release's version and build. Other platforms' builds cannot run on the hub. Downloads go through `node_packages.proxy` (an `http://` proxy, `internal/netproxy`; the environment's proxies are not used) with a timeout, are staged and checked beside the cache, and land in `<data dir>/cache/nodes/<version>/` with a record of what they are only then (nothing half written is ever used); the cache serves them again, also while the site does not answer. Lookups are remembered for ten minutes, a site that does not answer for one; the machine list never waits for one: it is looked up in the background, the build found before standing meanwhile, and **Redeploy** looks it up afresh. While the site does not answer, the build found or fetched before stands (after a restart, the newest cached fallback this manager drives); a queued update waits, and a node already running what it was sent is confirmed. A mirror must answer 404 for a file it does not have: any other error counts as the site being away.
@@ -98,7 +105,7 @@ Updates are offered only for resident nodes with a supported way to recover the 
 
 ## Protocol and install boundaries
 
-`node.info` gains the optional `node_update`, `node_update_reason` and `update_draining` (present with `{id, target}` while a resident node is draining active work for an accepted update), and nodes that report draining advertise `node_update_drain_v1` in `capabilities`. Old nodes do not report them and are treated as unsupported or legacy-confirming. The existing `POST /api/v1/machines/{mid}/deploy` is unchanged; the machine model gains `can_deploy`, `deploy_reason` and `deploy_phase` (`waiting_idle`, `transferring`, `draining`, `restarting`, `confirming`), and old clients that ignore the new fields still work.
+`node.info` gains the optional `node_update`, `node_update_reason`, `update_draining` (present with `{id, target}` while a resident node is draining active work for an accepted update), and `edition` (above). Nodes that report draining advertise `node_update_drain_v1` in `capabilities`. Old nodes do not report these fields and are treated as unsupported or legacy-confirming. The existing `POST /api/v1/machines/{mid}/deploy` is unchanged; the machine model gains `can_deploy`, `deploy_reason` and `deploy_phase` (`waiting_idle`, `transferring`, `draining`, `restarting`, `confirming`), and old clients that ignore the new fields still work.
 
 node RPC:
 
@@ -134,7 +141,11 @@ content (#12528), so the first run of a file the process has not seen pass gets 
 later runs get the short limit again (5 s for this preflight, 20 s for the update's own staging and signing checks,
 which follow the same rule). Each check is one run, so 60 s is the most it waits, and a replacement that never answers
 still fails. A check that ran out of time says `node-update-check timed out after …`, which tells it apart from a
-version, platform or program mismatch. If preflight fails, the resident keeps serving and
+version, platform or program mismatch. `node.update.commit` answers only after the upload's checks, and with a signer those of up to
+two signed copies, each a new file. The hub's deploy and its relay therefore wait for that answer for
+`nodeupdate.CommitWait` (three first runs, two signings with their checks of the signature, and a margin: 4 min 40 s) and 10 s more, instead of taking a slow scan for a lost
+answer and showing a failed check as the two-minute `not_confirmed`. The relay's one client, `scripts/release/promote_node_release.py`, reads
+that commit for `COMMIT_WAIT` (300 s), and a hub test keeps it at least the relay's wait. If preflight fails, the resident keeps serving and
 logs the exact error along with the replacement's reported version, OS, architecture, program and listener handover
 support when it could read them. For an RPC deployment, the node sends `node.update.preflight_failed` with the
 transaction `id` and `error`. The hub ends the matching deploy job with that error, and the local watchdog still

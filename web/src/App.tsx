@@ -55,6 +55,8 @@ import { onOpenNewAgent, type NewAgentPreset } from "./lib/new-agent";
 import { closeHelp, useHelpOpen } from "./lib/shortcut-help";
 import { closePalette, openPalette, usePalette } from "./lib/palette";
 import { sidebarRail, sidebarShown, useLayout } from "./lib/layout";
+import { useMacChrome } from "./lib/mac-chrome";
+import { MacBayTools, MacMainContour } from "./views/MacChrome";
 import { SIDEBAR_LABEL, useShortcuts } from "./lib/use-shortcuts";
 import { Sidebar, SidebarRail } from "./views/Sidebar";
 import { SidebarResize } from "./views/SidebarResize";
@@ -461,10 +463,18 @@ function Shell() {
   const drawerBox = useRef<HTMLDivElement>(null);
   const sidebarId = useId();
   const scrim = useRef<HTMLDivElement>(null);
-  const mainBox = useRef<HTMLElement>(null);
+  const mainBox = useRef<HTMLElement | null>(null);
+  const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
+  const setMainRef = useCallback((el: HTMLElement | null) => {
+    mainBox.current = el;
+    setMainEl(el);
+  }, []);
   const a11y = drawerA11y(narrow, drawer);
   // folded to its icons on a wide screen (⌘⌥B, kept in this browser); a narrow screen keeps the full drawer
   const rail = !narrow && sidebarRail(layout);
+  const macChrome = useMacChrome();
+  const macWindowed = macChrome.unifiedTitlebar && !macChrome.fullScreen && !narrow;
+  const macBay: "rail" | "hidden" | null = macWindowed ? (rail ? "rail" : !sidebarShown(layout) ? "hidden" : null) : null;
   useEffect(() => {
     if (!narrow) setDrawer(false);
   }, [narrow]);
@@ -660,7 +670,14 @@ function Shell() {
 
   return (
     // #root is 100dvh (index.html); with a soft keyboard up (iOS) the shell is only the part above it (lib/viewport.ts)
-    <div ref={shell} data-app-shell data-sidebar-hidden={!sidebarShown(layout) || undefined} className="flex h-full overflow-hidden bg-page">
+    <div
+      ref={shell}
+      data-app-shell
+      data-sidebar-hidden={!sidebarShown(layout) || undefined}
+      data-mac-chrome={macChrome.unifiedTitlebar ? (macChrome.fullScreen ? "fullscreen" : "windowed") : undefined}
+      data-mac-bay={macBay ?? (macWindowed ? "expanded" : undefined)}
+      className="flex h-full overflow-hidden bg-page"
+    >
       {/* wide: a fixed column; narrow: a drawer over the page, clear of a landscape notch and the home indicator */}
       <div
         ref={drawerBox}
@@ -689,7 +706,8 @@ function Shell() {
         className={cx("fixed inset-0 z-20 bg-black/20 transition-opacity duration-200 lg:hidden", drawer ? "opacity-100 starting:opacity-0" : "pointer-events-none opacity-0", !scrimShown && "hidden")}
         onClick={close}
       />
-      <main ref={mainBox} inert={a11y.modal || undefined} className="relative flex min-w-0 flex-1 flex-col">
+      <main ref={setMainRef} inert={a11y.modal || undefined} className="relative flex min-w-0 flex-1 flex-col">
+        {macChrome.unifiedTitlebar && <MacMainContour mainEl={mainEl} bay={macBay} />}
         {/* dropped after loading: which phase, and a click explains with "Retry now" (views/ConnectionPill.tsx). A strip
             over the page that pushes it down while it shows, never a layer over its header, its fields or its title
             (web usability audit item 87); its details open over the page. */}
@@ -702,6 +720,7 @@ function Shell() {
           <PageBoundary page={href(route)}><Suspense fallback={<PageLoading />}><PerAssistant route={route}>{main}</PerAssistant></Suspense></PageBoundary>
         </div>
       </main>
+      {macBay && <MacBayTools bay={macBay} onSearch={() => openPalette("jump")} />}
       <SidebarRowHoverHost />
       <SidePanelHost />
       {paletteOpened && (

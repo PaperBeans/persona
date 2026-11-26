@@ -26,6 +26,7 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/transcript"
 	"github.com/nwverse/persona/server/internal/update"
 )
 
@@ -915,15 +916,24 @@ func (m *Machine) forgetSeqLocked(id string) {
 
 // setSessions keeps the node's session list (the hub gets it as the node sent it, devices.event).
 func (m *Machine) setSessions(list []proto.Session) {
-	for i := range list {
-		list[i].MachineID = m.cfg.ID
-	}
+	m.takeRows(list)
 	m.mu.Lock()
 	m.sessions = list
 	m.sessionsListed = true
 	m.sessionRevision++
 	m.lastSeen = time.Now().UTC()
 	m.mu.Unlock()
+}
+
+// takeRows makes a node's listed rows the manager's, in place, before they are kept: on this machine, and each title
+// one a list can carry (transcript.ListTitle, #16343). A node from before that cut sends whatever its agents stored as
+// a title, a whole opening prompt among them; every reader of the kept list (the assistant, the archive, the list the
+// hub and the apps get) then has the cut one.
+func (m *Machine) takeRows(list []proto.Session) {
+	for i := range list {
+		list[i].MachineID = m.cfg.ID
+		list[i].Title = transcript.ListTitle(list[i].Title)
+	}
 }
 
 func (m *Machine) sessionList() []proto.Session {

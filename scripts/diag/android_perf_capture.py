@@ -10,6 +10,10 @@ def adb_command(serial, *args, timeout, capture=False):
                               stderr=subprocess.DEVNULL, text=True, timeout=timeout, check=True).stdout
     except subprocess.CalledProcessError as error:
         raise SystemExit(f"adb {' '.join(args[:2])} failed (exit {error.returncode})") from None
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"adb {' '.join(args[:2])} timed out after {timeout:g}s") from None
+    except FileNotFoundError:
+        raise SystemExit("adb not found on PATH") from None
 
 
 def frame_counts(text):

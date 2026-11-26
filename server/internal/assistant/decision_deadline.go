@@ -131,6 +131,9 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 	b.mu.Unlock()
 	slices.Sort(due)
 	for _, id := range due {
+		if s.supervisorSettlePending(id, now) {
+			continue // the owner's exact choice is on its way (decision_supervisor_reply.go): no default meanwhile
+		}
 		if t, ok := s.todoNow(id); ok {
 			if t.Supervision.legacyOwnerPriorityReview() != nil {
 				continue // an old park never authorizes replaying its superseded recommendation
@@ -144,8 +147,11 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 		if !ok || !taskDeadlineDue(&a, now) {
 			continue
 		}
+		if f := s.deadlineDefaultHook; f != nil {
+			f(id)
+		}
 		if a.Reversible && a.Recommend != "" {
-			result, err := s.acceptTryAs(ctx, id, "", true)
+			result, err := s.acceptDefault(ctx, id, now)
 			switch {
 			case err != nil:
 				// Not retried (acceptTryAs keeps the deadline handled): the owner decides instead.
@@ -158,24 +164,52 @@ func (s *Service) sweepTaskDeadlines(now time.Time) {
 			}
 			continue
 		}
-		b.mu.Lock()
-		cur := b.asks[id]
-		if cur == nil || !cur.AskedAt.Equal(a.AskedAt) || !taskDeadlineDue(cur, now) {
-			b.mu.Unlock()
+		cp, ok := s.deadlineHandled(ctx, id, a.AskedAt, now)
+		if !ok {
 			continue
 		}
-		cur.DueAt = now.UTC()
-		if err := s.saveAcceptErrLocked(ctx); err != nil {
-			cur.DueAt = time.Time{}
-			b.mu.Unlock()
-			s.logf("task %s: deadline: save: %v", id, err)
-			continue
-		}
-		cp := *cur
-		b.mu.Unlock()
 		s.logf("task %s: deadline passed on a decision that cannot be undone: reminded, not taken", id)
 		s.remindOverdue(ctx, id, cp)
 	}
+}
+
+// acceptDefault takes decision id's recommendation because its deadline passed unanswered (acceptTryAs, by default),
+// unless the owner's exact choice is on its way. The sweep's own look at that (supervisorSettlePending) is taken
+// before this lock; the choice is registered under the card's action lock (holdSupervisorChoice), so the look is
+// repeated here under the same lock, where one that came in between is seen and none can come before the default
+// is recorded.
+func (s *Service) acceptDefault(ctx context.Context, id string, now time.Time) (acceptResult, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	if s.supervisorSettlePending(id, now) {
+		return acceptResult{}, nil
+	}
+	return s.acceptTryAsDismissalLocked(ctx, id, "", time.Time{}, true)
+}
+
+// deadlineHandled marks the deadline of task id's decision asked at handled, for the reminder of one that cannot be
+// undone; false when the round moved on, the mark could not be saved, or the owner's exact choice is on its way
+// (looked at under the card's action lock, as acceptDefault does).
+func (s *Service) deadlineHandled(ctx context.Context, id string, asked, now time.Time) (acceptAsk, bool) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	if s.supervisorSettlePending(id, now) {
+		return acceptAsk{}, false
+	}
+	b := &s.accept
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cur := b.asks[id]
+	if cur == nil || !cur.AskedAt.Equal(asked) || !taskDeadlineDue(cur, now) {
+		return acceptAsk{}, false
+	}
+	cur.DueAt = now.UTC()
+	if err := s.saveAcceptErrLocked(ctx); err != nil {
+		cur.DueAt = time.Time{}
+		s.logf("task %s: deadline: save: %v", id, err)
+		return acceptAsk{}, false
+	}
+	return *cur, true
 }
 
 // deadlineAnswered marks the deadline of task id's decision asked at handled, because the owner answered it with a

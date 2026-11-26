@@ -304,6 +304,9 @@ func (n *Node) reportResume(ctx context.Context, h *herdrHost, pane string, spec
 			n.launches[pane] = cur
 		}
 		n.mu.Unlock()
+		if spec.AgyConversation != "" {
+			n.noteAgyConversationMode(spec.ID, spec.AgyConversation, spec.Mode)
+		}
 	}
 	argv, ok := n.agentResumeArgv(spec, spec.ID)
 	if !ok {
@@ -437,7 +440,7 @@ func (n *Node) backfillResume(agents []host.Agent) {
 		if n.launches == nil {
 			n.launches = map[string]agentLaunch{}
 		}
-		n.launches[a.PaneID] = agentLaunch{Agent: kind, Launcher: st.Launcher, Model: st.Model, Effort: st.ModelEffort, ID: id, AgyConversation: agy, TaskInstructions: codexKeptTaskInstructions(st), TaskInstructionFile: st.TaskInstructionFile} // claimed: once
+		n.launches[a.PaneID] = agentLaunch{Agent: kind, Launcher: st.Launcher, Model: st.Model, Effort: st.ModelEffort, Mode: agyBackfillMode(kind, st.AppMode), ID: id, AgyConversation: agy, TaskInstructions: codexKeptTaskInstructions(st), TaskInstructionFile: st.TaskInstructionFile} // claimed: once
 		work = append(work, todo{a.PaneID, id, st, kind, agy})
 	}
 	n.mu.Unlock()
@@ -483,7 +486,7 @@ func (n *Node) backfillResume(agents []host.Agent) {
 				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks),
 					TaskInstructionFile: w.st.TaskInstructionFile, Model: n.claudeModelArg(w.st.Launcher, w.st.Model), Effort: w.st.ModelEffort, Plugins: n.claudeLoadsPlugins(ctx), ID: w.id}
 			} else {
-				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Model: w.st.Model, Effort: w.st.ModelEffort, ID: w.id, AgyConversation: w.agy, TaskInstructions: codexKeptTaskInstructions(w.st)}
+				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Model: w.st.Model, Effort: w.st.ModelEffort, Mode: agyBackfillMode(w.kind, w.st.AppMode), ID: w.id, AgyConversation: w.agy, TaskInstructions: codexKeptTaskInstructions(w.st)}
 			}
 			n.mu.Lock()
 			if cur, ok := n.launches[w.pane]; !ok || cur.ID != w.id || cur.AgyConversation != w.agy {
@@ -495,6 +498,40 @@ func (n *Node) backfillResume(agents []host.Agent) {
 			n.reportResume(ctx, h, w.pane, spec)
 		}
 	}()
+}
+
+// agyBackfillMode returns the persisted permission mode to restore into an agy pane's resume_argv across node
+// restarts; non-agy agents keep Mode empty and legacy agy records with empty AppMode stay empty (no escalation).
+func agyBackfillMode(kind, mode string) string {
+	if kind != agyAgent {
+		return ""
+	}
+	return mode
+}
+
+// noteAgyConversationMode mirrors a Persona-started agy pane's permission mode to its verified companion row ID
+// (agy-<uuid>) so if the pane later stops or is not restored across a reboot, continuing the conversation through
+// the companion keeps the same permission mode instead of falling back to local settings.json.
+func (n *Node) noteAgyConversationMode(paneSessionID, conversation, mode string) {
+	if n.state == nil || conversation == "" || mode == "" {
+		return
+	}
+	st, ok := n.state.get(paneSessionID)
+	if !ok || st.Launcher == "" || st.AppMode == "" {
+		return
+	}
+	convID := agyAgent + "-" + conversation
+	if _, exists := n.state.get(convID); exists {
+		return
+	}
+	n.state.put(convID, sessionState{
+		Launcher:    st.Launcher,
+		Cwd:         st.Cwd,
+		Model:       st.Model,
+		ModelEffort: st.ModelEffort,
+		AppMode:     mode,
+		StartedAt:   st.StartedAt,
+	})
 }
 
 // resumeLocks makes the resume reports of one herdr pane take turns (reportResume).

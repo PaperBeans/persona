@@ -124,6 +124,10 @@ type Host interface {
 	ConclusionQuestion(ctx context.Context, ev *botcard.MessageEvent, content *botcard.Content, f assistantwire.FeishuFeatures) bool
 	AcceptReply(ctx context.Context, messageID, text string, media bool, parent, root string) bool
 	ApproveOwnerAction(ctx context.Context, ev botcard.MessageEvent, text, action string) bool
+	// ProjectReviewOwnerInput queues the owner's paired-chat message ref ("feishu:<message id>"), sent to the
+	// conversation machine/session, for a configured project review that takes owner inputs; nil when none takes it.
+	// An error means it could not be committed, and the message is not taken.
+	ProjectReviewOwnerInput(ctx context.Context, ref, machine, session string) error
 
 	// The commands (commands.go, models.go): stopping a conversation's turn (kind is the toast's), the lists to pick
 	// a conversation or an agent from, what a /status card shows, the standing board, and the main conversation's

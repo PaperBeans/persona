@@ -45,8 +45,8 @@ export interface ModelPanelProps {
   /** Applies a whole setup (a row, a favorite, a recent entry); true when it was applied: the panel then records it in
    *  Recent and closes. false: the caller has said why; the panel stays open with the old setup. */
   onPick: (config: PanelConfig) => Promise<boolean>;
-  /** A flyout edit (effort, Fast) on the model that runs now: applied at once, the flyout stays open. */
-  onApplyCurrent?: (patch: { effort?: string; fast?: boolean }) => Promise<boolean>;
+  /** A live effort or speed edit on the current model keeps the panel open. */
+  onApplyCurrent?: (patch: PanelOverride) => Promise<boolean>;
   /** Refreshes a provider's catalog (also used for Retry). */
   onReload?: (provider: string) => void;
   /** Forgets a typed model ID (#1644). */
@@ -473,7 +473,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
       if (d && row.setup.effort && row.setup.effort !== d) patch.effort = d;
       // no default known: back to none, the model's own (an Agent not started yet; a running one sends nothing for it)
       else if (!d && row.setup.effort) patch.effort = "";
-      if (row.setup.fast) patch.fast = false;
+      if (row.setup.speed && row.setup.speed !== "standard" && row.model.speeds?.some((choice) => choice.id === "standard")) patch.speed = "standard";
       if (Object.keys(patch).length && !(await applyLive(row, patch))) return;
     }
     store.resetOverride(row.provider.id, row.model.id);
@@ -883,8 +883,8 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
             {columns && <LevelColumn row={levelRow} disabled={levelOff(levelRow)} onLevel={(effort) => levelRow && void chooseLevel(levelRow, effort)} />}
           </div>
           <div className="flex shrink-0 items-center gap-2 border-t border-line px-3.5 py-[9px]">
-            {columns && levelRow?.model.fast && levelRow.kind !== "preset" && (
-              <SpeedSwitch fast={Boolean(levelRow.setup.fast)} disabled={picking || Boolean(applying) || !rowCustomizable(levelRow, state, live)} onFast={(on) => void edit(levelRow, { fast: on })} />
+            {columns && levelRow?.model.speeds && levelRow.kind !== "preset" && (
+              <SpeedSwitch options={levelRow.model.speeds} speed={levelRow.setup.speed} disabled={picking || Boolean(applying) || !rowCustomizable(levelRow, state, live)} onSpeed={(speed) => void edit(levelRow, { speed })} />
             )}
             {columns && levelRow?.kind === "model" && levelRow.current && currentExtra && <div data-panel-extra className="min-w-0">{currentExtra}</div>}
             <button
@@ -906,7 +906,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
           rowEl={fly.el}
           panelEl={panel.current}
           row={flyRow}
-          setup={applying?.key === flyRow.key ? { ...flyRow.setup, ...applying.patch } : flyRow.setup}
+          setup={applying?.key === flyRow.key && applying.patch.effort !== undefined ? { ...flyRow.setup, effort: applying.patch.effort } : flyRow.setup}
           mode={flyMode(flyRow)}
           starred={flyRow.kind === "favorite" || flash === flyRow.key}
           disabled={picking || Boolean(applying)}
@@ -920,7 +920,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
             void apply(() => onPick(setup), setup);
           }}
           onEffort={(effort) => void edit(flyRow, { effort })}
-          onFast={(on) => void edit(flyRow, { fast: on })}
+          onSpeed={(speed) => void edit(flyRow, { speed })}
           onReset={() => void reset(flyRow)}
           onStar={() => star(flyRow)}
           onClose={closeFly}

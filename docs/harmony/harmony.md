@@ -2,7 +2,7 @@
 
 The [historical preview notice](prototype.html) explains that the earlier four-tab layout is retired. The current native implementation is in [harmony/](../../harmony/README.md), and this guide describes its behavior.
 
-Persona's HarmonyOS client uses ArkTS and native ArkUI on HarmonyOS 7 / API 26. It runs on straight phones, conventional foldables and wide foldables; watches are outside this client. The Hub remains the only application backend. Agents run on the user's computers, with their existing runtime and host capabilities.
+Persona's HarmonyOS client uses ArkTS and native ArkUI on HarmonyOS 7 / API 26. It runs on straight phones, conventional foldables and wide foldables; watches are outside this client. The Hub remains the only application backend. Agents run on the user's computers, with their existing runtime and host capabilities. For HarmonyOS 7 XiaoYi integration (On-Device A2A, Intents Kit, API 26 Skills, ShareKit, and the OpenClaw WebSocket bridge), see [docs/harmony/xiaoyi.md](xiaoyi.md).
 
 ## Product and information architecture
 
@@ -101,6 +101,10 @@ Each chat draft has a revision. A submitted message is persisted in the local ou
 A known acknowledgement clears only the captured draft revision. Newer edits survive, including identical text typed again. An unknown result blocks that destination until it is reconciled; another chat can still send. Reconnection never silently creates a replacement operation. Explicit confirmation of a local-only crash window may release it only after the server's receipt lookup proves there is no recorded operation.
 
 Attachments remain local until explicit Send. Native photo/document pickers grant access to the user's selected files; sandbox copies have bounded size and validated decoded image content. A system photo editor receives read permission and returns a new selected attachment, preserving the original. System preview provides image zoom and supported PDF, Office, HTML and media viewing.
+
+The photo picker uses the remaining picture count for this chat's Agent. Older hubs use the protocol defaults of 20 pictures,
+a 1600 px long side and a 32 MiB message body. Photos that exceed the count or the encoded message budget go to the session's
+computer as files. The chat tells the sender which limit was reached. Documents and videos keep their separate file slots.
 
 Received images open an authenticated conversation-scoped system gallery. Editing one stages a new outgoing image in that conversation's draft. A native editor may pause the application and cause a reconnect; the stable pairing revision, Hub, manager and draft identity determine whether its result still belongs there. Forgetting, re-pairing or changing the destination rejects the result. An acknowledged draft keeps its referenced file even if navigation occurs while storage acknowledgement is returning.
 

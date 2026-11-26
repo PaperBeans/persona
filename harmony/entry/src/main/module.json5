@@ -44,11 +44,70 @@
               {
                 "scheme": "persona",
                 "host": "password-login"
+              },
+              {
+                "scheme": "persona",
+                "host": "open"
+              }
+            ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "type": "text/plain"
+              },
+              {
+                "type": "text/uri-list"
               }
             ]
           }
         ],
         "orientation": "auto_rotation_unspecified"
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "PersonaAgentExtensionAbility",
+        "srcEntry": "./ets/xiaoyi/agent/PersonaAgentExtensionAbility.ets",
+        "type": "agent",
+        "description": "$string:EntryAbility_desc",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.agent",
+            "resource": "$profile:agent_config"
+          }
+        ]
+      },
+      {
+        "name": "PersonaAgentUIAbility",
+        "srcEntry": "./ets/xiaoyi/agent/PersonaAgentUIAbility.ets",
+        "type": "agentUI",
+        "description": "$string:EntryAbility_desc",
+        "exported": true
+      }
+    ],
+    "skillProfiles": [
+      {
+        "name": "persona-assistant",
+        "abilityName": "EntryAbility",
+        "version": "1.0.0",
+        "visibility": "public",
+        "srcEntries": [
+          "../../skills/persona-assistant/scripts/AssistantSkill.ets"
+        ]
+      },
+      {
+        "name": "persona-workspace",
+        "abilityName": "EntryAbility",
+        "version": "1.0.0",
+        "visibility": "public",
+        "srcEntries": [
+          "../../skills/persona-workspace/scripts/WorkspaceSkill.ets"
+        ]
       }
     ],
     "requestPermissions": [

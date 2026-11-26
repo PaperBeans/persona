@@ -18,6 +18,7 @@
   "entered": "（已输入）",
   "separator": "，",
   "ended_expired": "这个请求已经过期，回答没有送到",
+  "question_closed": "问题已关闭，未作答",
   "ended_cancelled": "电脑上已经撤回了这个请求，回答没有送到",
   "ended_dismissed": "这个请求已经交回电脑处理，回答没有送到",
   "ended_generic": "这个请求已经结束，回答没有送到",

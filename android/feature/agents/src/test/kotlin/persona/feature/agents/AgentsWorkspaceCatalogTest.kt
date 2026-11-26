@@ -17,11 +17,12 @@ internal open class PaseoCatalogTestService : AgentCreationService {
     var rows: List<AgentWorkspace> = emptyList()
     var failure: Exception? = null
     var complete = true
+    var failedSources: Set<String> = emptySet()
     val reads = mutableListOf<String>()
     override suspend fun workspaceCatalog(machineId: String): AgentWorkspaceCatalog {
         reads += machineId
         failure?.let { throw it }
-        return AgentWorkspaceCatalog(rows.filter { it.machineId == machineId }, complete)
+        return AgentWorkspaceCatalog(rows.filter { it.machineId == machineId }, complete, failedSources)
     }
     override suspend fun launchers(machineId: String) = emptyList<AgentLauncher>()
     override suspend fun directories(machineId: String, path: String) = error("Not used")
@@ -51,6 +52,30 @@ class AgentsWorkspaceCatalogTest {
         service.rows = emptyList()
         catalog.refresh(service, machines)
         assertTrue(catalog.rows.value.isEmpty())
+    }
+
+    @Test fun partialReadsRetainOnlyTheFailingSourcesRows() = runTest {
+        val paseo = workspace()
+        val herdr = paseo.copy(source = "herdr")
+        val machines = listOf("computer" to true)
+        val service = PaseoCatalogTestService().apply { rows = listOf(paseo, herdr) }
+        val catalog = AgentsWorkspaceCatalog()
+        catalog.refresh(service, machines)
+        assertEquals(setOf("herdr", "paseo"), catalog.rows.value.map { it.source }.toSet())
+        service.rows = emptyList()
+        service.failedSources = setOf("herdr")
+        catalog.refresh(service, machines)
+        assertEquals(listOf(herdr), catalog.rows.value)
+        service.failedSources = emptySet()
+        catalog.refresh(service, machines)
+        assertTrue(catalog.rows.value.isEmpty())
+        service.rows = listOf(paseo, herdr)
+        catalog.refresh(service, machines)
+        service.rows = emptyList()
+        service.failedSources = setOf("paseo")
+        service.complete = false
+        catalog.refresh(service, machines)
+        assertEquals(listOf(paseo), catalog.rows.value)
     }
 
     @Test fun offlineAndReconnectReadTheHubAndKeepSourceIdentity() = runTest {

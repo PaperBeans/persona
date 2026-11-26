@@ -445,7 +445,9 @@ func classifyBoardSection(t listedTodo) (section string, subOrder int) {
 		return boardSectionNeedsYou, 0
 	case t.Supervision != nil && t.Supervision.State == reviewPending:
 		return boardSectionPendingReview, 0
-	case t.Supervision != nil && t.Supervision.State == reviewParked:
+	case t.Supervision != nil && t.Supervision.State == reviewParked,
+		t.Wait != nil,
+		repoGateOpenNonDraftPR(t.RepoGate):
 		return boardSectionWaiting, 0
 	default:
 		for _, a := range t.Agents {

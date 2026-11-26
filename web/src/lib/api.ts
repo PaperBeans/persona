@@ -169,7 +169,7 @@ export class HubTimeoutError extends Error {
   }
 }
 
-type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void; readBlob?: (response: Response, signal?: AbortSignal | null) => Promise<Blob>; allowHtmlResponse?: boolean; dedupe?: boolean };
+type ApiOptions = RequestInit & { json?: unknown; query?: Record<string, string>; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void; readBlob?: (response: Response, signal?: AbortSignal | null) => Promise<Blob>; allowHtmlResponse?: boolean; dedupe?: boolean };
 
 /** Detach in-flight GET entries so subsequent reads issue a fresh request (writes, store mutations, resets). */
 export function invalidateInFlightGets(prefix?: string): void {
@@ -208,6 +208,11 @@ function dedupeKey(path: string, owner: string | undefined, init: ApiOptions, he
   return JSON.stringify([path, owner ?? "", init.token ?? "", init.allowHtmlResponse ? 1 : 0, init.credentials ?? "", init.cache ?? "", entries]);
 }
 
+function withQuery(path: string, query?: Record<string, string>): string {
+  const q = new URLSearchParams(query);
+  return q.size ? `${path}${path.includes("?") ? "&" : "?"}${q}` : path;
+}
+
 /** `tokenOwner`: explicit credentials opt into 401 recovery only while both the token and credential generation are current.
  *  `isAuthContextCurrent`: an optional additional lifetime fence for a request scoped to a view or manager.
  *  `timeout`: ms before a read gives up with HubTimeoutError (default READ_TIMEOUT_MS for GET, none otherwise; 0: none).
@@ -224,15 +229,16 @@ export function apiBlob(path: string, init: ApiOptions & { timeout?: number } = 
 }
 
 async function call<T>(path: string, init: ApiOptions & { timeout?: number }, binary: boolean): Promise<T> {
-  const { timeout, dedupe, ...rest } = init;
+  const { timeout, dedupe, query, ...rest } = init;
+  const requestPath = withQuery(path, query);
   const read = (init.method ?? "GET").toUpperCase() === "GET";
   if (!read) inFlightGets.clear();
   const limit = timeout ?? (read ? READ_TIMEOUT_MS : 0);
   const canDedupe = !binary && read && dedupe !== false && init.body === undefined && init.json === undefined && !init.isAuthContextCurrent;
-  if (canDedupe) return callSharedGet<T>(path, rest, limit);
+  if (canDedupe) return callSharedGet<T>(requestPath, rest, limit);
   if (!limit) {
     try {
-      return await request<T>(path, rest, binary);
+      return await request<T>(requestPath, rest, binary);
     } finally {
       if (!read) inFlightGets.clear();
     }
@@ -251,7 +257,7 @@ async function call<T>(path: string, init: ApiOptions & { timeout?: number }, bi
   try {
     for (let tries = 0; ; tries++) {
       try {
-        return await request<T>(path, { ...rest, signal: controller.signal }, binary);
+        return await request<T>(requestPath, { ...rest, signal: controller.signal }, binary);
       } catch (e) {
         // asking again is safe for a read: a gap gets a couple more tries, all inside the read's own time limit
         if (!read || tries >= readRetryMs().length || !isTransient(e)) throw e;

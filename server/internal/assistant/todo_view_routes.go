@@ -25,13 +25,17 @@ import (
 // the same bytes and the list's ETag (#9590) holds while nothing changes. The manager names CapabilityTodoView and
 // CapabilityTodoPlaces in its hello; the hub adds the counts and places of several managers up.
 
-// todosList is GET /api/v1/todos's answer: the rows, each with its view, the list's counts,
-// and optional todos_v2 shared external blockers.
+// todosList is GET /api/v1/todos's answer: the rows, each with its view, the list's counts, optional todos_v2 shared
+// external blockers and board projection, and the cursor for closed rows beyond the bounded default window.
 type todosList struct {
 	Todos          []listedTodo               `json:"todos"`
 	Counts         assistantwire.TodoCounts   `json:"counts"`
 	SharedBlockers []projection.SharedBlocker `json:"shared_blockers,omitempty"`
 	Board          *todoBoardProjection       `json:"board,omitempty"`
+	// ClosedNextCursor and ClosedHasMore let a client ask the existing paginated read for closed rows older than the
+	// default window. They are absent when the whole closed list is already in Todos.
+	ClosedNextCursor string `json:"closed_next_cursor,omitempty"`
+	ClosedHasMore    bool   `json:"closed_has_more,omitempty"`
 }
 
 // listedTodos are the to-dos as GET /api/v1/todos lists them, newest created first: each formatted, with its decision

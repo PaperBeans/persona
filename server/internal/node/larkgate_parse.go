@@ -40,7 +40,15 @@ type larkExtraPATH func() []string
 
 // classifyLarkWith is classifyLark for a caller with a login shell in view.
 func classifyLarkWith(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH) larkVerdict {
-	v := classifyLarkDepth(cmd, gates, cwd, risk, extraPATH, 0)
+	return classifyLarkRelaxed(cmd, gates, cwd, risk, extraPATH, false)
+}
+
+// classifyLarkRelaxed is classifyLarkWith for a conversation whose permission mode lets classified calls through
+// (relax: an assistant conversation in bypassPermissions, larkCheck). It also reads, as the usual reading cannot, a
+// loop over a file's words that only runs lark-cli reads (larkFileReadLoops) and a note written through a literal
+// path variable (normalizeLarkCommandRelaxed, larkWritesFileVars), #15860. Every other mode keeps the usual reading.
+func classifyLarkRelaxed(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH, relax bool) larkVerdict {
+	v := classifyLarkDepth(cmd, gates, cwd, risk, extraPATH, 0, relax)
 	// A relative @file body or query input is read from cwd at check time. Whatever else the command runs may run
 	// the call elsewhere (cd in any spelling, env -C, sudo -D, a subshell) or change the file first (a redirect, an
 	// earlier command), so its contents are known only for a lone call (larkLoneGateCall, #8404).
@@ -180,13 +188,13 @@ func larkReadFormattingPipeline(cmd string, gates []proto.CommandGate) bool {
 	return true
 }
 
-func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH, depth int) larkVerdict {
-	return classifyLarkAt(cmd, gates, cwd, risk, extraPATH, depth, false)
+func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH, depth int, relax bool) larkVerdict {
+	return classifyLarkAt(cmd, gates, cwd, risk, extraPATH, depth, false, relax)
 }
 
 // classifyLarkAt is classifyLarkDepth for a command run here or, remote, on another machine through ssh: there PATH
 // names that machine's directories, which say nothing about the programs here.
-func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH, depth int, remote bool) larkVerdict {
+func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk larkRisk, extraPATH larkExtraPATH, depth int, remote, relax bool) larkVerdict {
 	var v larkVerdict
 	if depth > 16 {
 		v.other, v.unparsed, v.unknown = true, true, true
@@ -226,7 +234,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 	if commands, ok := literalLarkLoopCommands(cmd, gates); ok {
 		v.unknown, v.other = false, true
 		for _, command := range commands {
-			child := classifyLarkDepth(command, gates, cwd, risk, extraPATH, depth+1)
+			child := classifyLarkDepth(command, gates, cwd, risk, extraPATH, depth+1, relax)
 			merge(child)
 			v.unsure = v.unsure || child.unsure
 			v.unparsed = v.unparsed || child.unparsed
@@ -239,7 +247,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		return v
 	}
 	resolvedPrefixes := map[int]bool{}
-	cmd = normalizeLarkCommandTracked(cmd, cwd, gates, resolvedPrefixes)
+	cmd = normalizeLarkCommandRelaxed(cmd, cwd, gates, resolvedPrefixes, relax)
 	v.unknown = shellCommandUnknown(cmd, false, depth)
 	segs, ok := shellcmd.Split(cmd)
 	if !ok {
@@ -293,7 +301,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 				if syntax.NewPrinter().Print(&text, stmt) != nil || strings.TrimSpace(text.String()) == strings.TrimSpace(cmd) {
 					return false // never recursively classify the same unsplittable text
 				}
-				child := classifyLarkAt(text.String(), gates, cwd, risk, extraPATH, depth+1, remote)
+				child := classifyLarkAt(text.String(), gates, cwd, risk, extraPATH, depth+1, remote, relax)
 				merge(child)
 				v.other = true
 				v.unsure = v.unsure || child.unsure
@@ -330,8 +338,16 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 	if tree, err := syntax.NewParser().Parse(strings.NewReader(cmd), ""); err == nil {
 		_, sequential = larkFlatStmts(tree.Stmts)
 	}
+	// fileLoops: every loop over a command substitution in the command iterates over a file's words and only reads
+	// Lark (larkFileReadLoops, #15860); only a bypass conversation reads it so (classifyLarkRelaxed).
+	fileLoops := relax && larkFileReadLoops(cmd, risk)
+	// noteVars: the literal values a note's path may name (larkWritesFileVars); nil keeps every variable path a write.
+	var noteVars map[string]string
+	if relax && varsStable {
+		noteVars = vars
+	}
 	for position, s := range segs {
-		writes, notes := larkWritesFile(s.Redirect)
+		writes, notes := larkWritesFileVars(s.Redirect, noteVars)
 		flow = append(flow, larkFlow{text: s.Text, writes: writes, notes: notes})
 		seg := &flow[len(flow)-1]
 		seg.resolved = resolvedPrefixes[position]
@@ -349,7 +365,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 				// value is evaluated as an expression, which may hold a substitution of its own).
 				nestedUnsure, fileReads = true, false
 				for _, c := range inner {
-					child := classifyLarkDepth(c, gates, cwd, risk, extraPATH, depth+1)
+					child := classifyLarkDepth(c, gates, cwd, risk, extraPATH, depth+1, relax)
 					if len(child.calls) > 0 || child.unknown || child.unparsed {
 						v.other = true
 					}
@@ -357,7 +373,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 				}
 				continue
 			}
-			child := classifyLarkDepth(nested, gates, cwd, risk, extraPATH, depth+1)
+			child := classifyLarkDepth(nested, gates, cwd, risk, extraPATH, depth+1, relax)
 			if len(child.calls) > 0 || child.unknown || child.unparsed {
 				v.other = true
 			}
@@ -374,7 +390,10 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		// the dynamic-argument rule below. In any other command's argument (curl's) a file read stays unsure: it could
 		// carry the file elsewhere.
 		cliFileRead := s.ArgSubst && nestedUnsure && fileReads && larkSegmentCLI(s.Words)
-		if s.ArgSubst && nestedUnsure && !cliFileRead {
+		// The header of a loop over a file's words, when every such loop only reads Lark (fileLoops): its body is
+		// classified segment by segment below, as any loop's.
+		loopFileRead := fileLoops && len(s.Words) > 0 && s.Words[0] == "for"
+		if s.ArgSubst && nestedUnsure && !cliFileRead && !loopFileRead {
 			v.unsure, v.other = true, true
 		}
 		if v.deny != "" {
@@ -446,10 +465,10 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		switch {
 		case shellScriptIndex(words) >= 0:
 			v.other = true
-			merge(classifyLarkDepth(words[shellScriptIndex(words)], gates, cwd, risk, extraPATH, depth+1))
+			merge(classifyLarkDepth(words[shellScriptIndex(words)], gates, cwd, risk, extraPATH, depth+1, relax))
 		case name == "eval":
 			v.other = true
-			merge(classifyLarkDepth(strings.Join(words[1:], " "), gates, cwd, risk, extraPATH, depth+1))
+			merge(classifyLarkDepth(strings.Join(words[1:], " "), gates, cwd, risk, extraPATH, depth+1, relax))
 		case codeBuiltinRuns(name, words) && (gateNamed(gates, s.Text) || gateNamedFields(gates, words)):
 			v.other, v.unknown = true, true
 		case isLarkCLI(name):
@@ -520,7 +539,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 				continue
 			}
 			// lark-cli there acts as the user too: only what the gate can read as reads stays out of the way.
-			child := classifyLarkAt(remote, gates, "", risk, extraPATH, depth+1, true)
+			child := classifyLarkAt(remote, gates, "", risk, extraPATH, depth+1, true, relax)
 			for _, c := range child.calls {
 				child.unknown = child.unknown || !c.CLI // a gated command there is not this machine's gate
 			}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Pictures put in the box and never sent free their object URLs when the box goes away or shows another
 // conversation (#2378), including ones still being read or a send that fails after the box moved on.
-import { act } from "react";
+import { act, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPages } from "../../lib/lazy-page";
@@ -11,6 +11,9 @@ import { Composer, type Outgoing } from "./Composer";
 import { onPermissionPicker } from "../../lib/permissions-command";
 import { t } from "../../i18n";
 import { setPublishedImageLimits } from "../../lib/image-limits";
+import type { CommentImagePicker } from "../../lib/drafts";
+import { ChatActionsContext } from "./chat-actions";
+import { CommentMarks } from "./CommentMarks";
 
 // a picture is scaled on a canvas (lib/image-scale.ts), which jsdom has not: each read waits on a promise the test
 // settles, with the picture as the message carries it or null for one the page cannot read
@@ -88,12 +91,50 @@ const trayImages = () => host.querySelectorAll("img").length;
 
 describe("inline selection comment images", () => {
   const key = "selection-comment";
-  const screenshot = (name = "detail.png") => new File(["png"], name, { type: "image/png" });
-  const comment = (text = "Selected words", body = "Keep this detail") => {
-    act(() => void addQuote(key, { text, comment: { body } }));
+  function Chat({ onSend }: { onSend?: (message: Outgoing) => Promise<boolean> }) {
+    const scroller = useRef<HTMLDivElement>(null);
+    const imagePicker = useRef<CommentImagePicker | null>(null);
+    return (
+      <ChatActionsContext.Provider value={{ draftKey: key, title: "Example", canCompose: true, speaker: "Persona", images: () => [] }}>
+        <div ref={scroller} data-test-transcript>
+          {["Selected words", "First passage", "Second passage", "New passage"].map((text, i) => <p key={text} data-items={`message-${i}`}>{text}</p>)}
+          <CommentMarks scroller={scroller} onAddImages={async (...args) => imagePicker.current?.(...args)} />
+        </div>
+        <Composer draftKey={key} commentImagesRef={imagePicker} placeholder="" onSend={onSend} />
+      </ChatActionsContext.Provider>
+    );
+  }
+  const renderChat = (onSend?: (message: Outgoing) => Promise<boolean>) => {
+    act(() => root.render(<Chat onSend={onSend} />));
+    host.querySelector("[data-test-transcript]")!.getBoundingClientRect = () => new DOMRect(0, 0, 800, 400);
   };
-  const cards = () => [...host.querySelectorAll<HTMLElement>("[data-comment-card]")];
-  const note = () => host.querySelector<HTMLTextAreaElement>("[data-comment-card] textarea")!;
+  const screenshot = (name = "detail.png") => new File(["png"], name, { type: "image/png" });
+  const bar = () => document.querySelector<HTMLElement>("[data-comment-bar]")!;
+  const note = () => bar().querySelector("textarea")!;
+  const comment = async (text = "Selected words", body = "Keep this detail") => {
+    const passage = [...host.querySelectorAll("p[data-items]")].find((p) => p.textContent === text)!;
+    const range = document.createRange();
+    range.selectNodeContents(passage.firstChild!);
+    await act(async () => {
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      await new Promise(requestAnimationFrame);
+    });
+    act(() => {
+      note().focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(note(), body);
+      note().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  const save = () => act(() => bar().querySelector<HTMLButtonElement>("[data-comment-save]")!.click());
+  const reopen = (n: number, fromChip = false) => {
+    if (fromChip) {
+      act(() => host.querySelector<HTMLButtonElement>("[data-comment-chip]")!.click());
+      act(() => document.querySelector<HTMLButtonElement>(`[data-comment-edit="${n}"]`)!.click());
+    } else act(() => host.querySelector<HTMLButtonElement>(`[data-comment-pin="${n}"]`)!.click());
+  };
   const press = (key: string) => act(() => note().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
   const paste = (files: File[], items: { kind: string; getAsFile: () => File | null }[] = []) => {
     const event = new Event("paste", { bubbles: true, cancelable: true });
@@ -102,16 +143,16 @@ describe("inline selection comment images", () => {
     return event.defaultPrevented;
   };
   const attach = (file: File) => {
-    const input = host.querySelector<HTMLInputElement>('[data-comment-card] input[type="file"]')!;
+    const input = bar().querySelector<HTMLInputElement>('input[type="file"]')!;
     const open = vi.spyOn(input, "click");
-    const button = cards().at(-1)!.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-comments.add_images")}"]`)!;
+    const button = bar().querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-comments.add_images")}"]`)!;
     act(() => button.click());
     expect(open).toHaveBeenCalledOnce();
     Object.defineProperty(input, "files", { value: [file] });
     act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
   };
   const remove = (name: string) => {
-    const button = cards().at(-1)!.querySelector<HTMLButtonElement>(`button[aria-label="${t("ui-attachmenttray.remove", { name })}"]`)!;
+    const button = bar().querySelector<HTMLButtonElement>(`button[aria-label="${t("ui-attachmenttray.remove", { name })}"]`)!;
     act(() => button.click());
   };
   const send = () => act(async () => host.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click());
@@ -119,15 +160,27 @@ describe("inline selection comment images", () => {
   beforeEach(() => {
     setQuotes(key, []);
     vi.mocked(toast).mockClear();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, "createRange").mockImplementation(() => {
+      const range = createRange();
+      const rect = new DOMRect(60, 40, 80, 18);
+      range.getClientRects = () => [rect] as unknown as DOMRectList;
+      range.getBoundingClientRect = () => rect;
+      return range;
+    });
   });
   afterEach(() => {
+    document.getSelection()?.removeAllRanges();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     setPublishedImageLimits(undefined);
     act(() => setQuotes(key, []));
   });
 
   it("pastes clipboard files once, falls back to file items, and leaves normal text paste alone", async () => {
-    render(key);
-    comment();
+    renderChat();
+    await comment();
     expect(paste([])).toBe(false);
     const item = { kind: "file", getAsFile: vi.fn(() => screenshot("from-item.png")) };
     expect(paste([screenshot()], [item])).toBe(true);
@@ -136,54 +189,58 @@ describe("inline selection comment images", () => {
     expect(paste([], [{ ...item, kind: "string" }, item])).toBe(true);
     await settle(1);
     expect(item.getAsFile).toHaveBeenCalledOnce();
-    expect([...cards()[0].querySelectorAll("img")].map((img) => img.alt)).toEqual(["detail.png", "from-item.png"]);
+    expect([...bar().querySelectorAll("img")].map((img) => img.alt)).toEqual(["detail.png", "from-item.png"]);
     expect(storedQuotes(key)[0]).not.toHaveProperty("images");
   });
 
   it("picks an image, keeps its preview when reopening the draft, and revokes removed and cancelled previews", async () => {
-    render(key);
-    comment();
+    renderChat();
+    await comment();
     attach(screenshot());
     await settle(0);
-    press("Enter");
-    act(() => cards()[0].querySelectorAll("button")[1].click());
+    save();
+    expect(revoke).toHaveBeenCalledWith("blob:test/1");
+    reopen(1);
     expect(note().value).toBe("Keep this detail");
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(bar().querySelector("img")?.alt).toBe("detail.png");
     attach(screenshot("other.png"));
     await settle(1);
     remove("detail.png");
-    expect(revoke).toHaveBeenCalledWith("blob:test/1");
-    press("Escape");
     expect(revoke).toHaveBeenCalledWith("blob:test/2");
-    expect(cards()[0].querySelector("img")?.alt).toBe("detail.png");
-    remove("detail.png");
+    press("Escape");
     expect(revoke).toHaveBeenCalledWith("blob:test/3");
-    expect(trayImages()).toBe(0);
+    reopen(1, true);
+    expect(bar().querySelector("img")?.alt).toBe("detail.png");
+    remove("detail.png");
+    expect(revoke).toHaveBeenCalledWith("blob:test/4");
+    expect(bar().querySelectorAll("img")).toHaveLength(0);
   });
 
   it("waits for a pending image and discards its result if the new comment is cancelled", async () => {
     const onSend = vi.fn(async () => true);
-    render(key, onSend);
-    comment();
+    renderChat(onSend);
+    await comment();
+    putImage(key);
     paste([screenshot()]);
     await send();
     expect(onSend).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(t("chat-comments.preparing_images"));
     press("Escape");
     await settle(0);
-    expect(cards()).toHaveLength(0);
-    expect(create).not.toHaveBeenCalled();
+    expect(getQuotes(key).list).toHaveLength(0);
+    expect(bar()).toBeNull();
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("sends composer images first and numbers each comment's images in payload order", async () => {
     const onSend = vi.fn(async (_m: Outgoing) => true);
-    render(key, onSend);
+    renderChat(onSend);
     putImage(key);
-    comment("First passage", "First note");
+    await comment("First passage", "First note");
     paste([screenshot()]);
     await settle(0, { mime: "image/jpeg", data: btoa("first") });
-    press("Enter");
-    comment("Second passage", "Second note");
+    save();
+    await comment("Second passage", "Second note");
     attach(screenshot("second.png"));
     await settle(1, { mime: "image/png", data: btoa("second") });
     await send();
@@ -199,15 +256,15 @@ describe("inline selection comment images", () => {
     expect(parseQuotes(blocks).map((q) => [q.text, q.comment?.body])).toEqual([
       ["First passage", "First note"], ["Second passage", "Second note"],
     ]);
-    expect(cards()).toHaveLength(0);
+    expect(host.querySelector("[data-comment-chip]")).toBeNull();
     expect(revoke).toHaveBeenCalledTimes(3);
   });
 
   it("shares the message image count with the composer in both directions", async () => {
     setPublishedImageLimits({ per_message: 1 });
-    render(key);
+    renderChat();
     putImage(key);
-    comment();
+    await comment();
     paste([screenshot()]);
     expect(reads).toHaveLength(0);
     expect(toast).toHaveBeenCalledWith(t("chat-composer.too_many_images", { max: 1 }), "error");
@@ -217,8 +274,8 @@ describe("inline selection comment images", () => {
     await settle(0);
     putImage(key);
     await act(async () => {});
-    expect(trayImages()).toBe(1);
-    expect(cards()[0].querySelector("img")?.alt).toBe("detail.png");
+    expect(trayImages()).toBe(0);
+    expect(bar().querySelector("img")?.alt).toBe("detail.png");
   });
 
   it("restores a refused send's images alongside a newer draft and can retry", async () => {
@@ -226,21 +283,24 @@ describe("inline selection comment images", () => {
     const onSend = vi.fn<(m: Outgoing) => Promise<boolean>>()
       .mockImplementationOnce(() => new Promise((resolve) => { refuse = resolve; }))
       .mockResolvedValue(true);
-    render(key, onSend);
-    comment();
+    renderChat(onSend);
+    await comment();
     paste([screenshot()]);
     await settle(0);
     await send();
     expect(onSend.mock.calls[0][0].restoreCommentDraft).toBe(true);
     expect(revoke).toHaveBeenCalledWith("blob:test/1");
-    comment("New passage", "New note");
+    await comment("New passage", "New note");
+    save();
+    reopen(1);
     await act(async () => refuse(false));
-    expect(cards()).toHaveLength(2);
-    expect(cards()[0].querySelector("img")?.src).toBe("blob:test/2");
+    expect(getQuotes(key).list).toHaveLength(2);
     expect(note().value).toBe("New note");
+    reopen(1);
+    expect(bar().querySelector("img")?.src).toBe("blob:test/2");
     await send();
     expect(onSend.mock.calls[1][0].images).toEqual(onSend.mock.calls[0][0].images);
-    expect(cards()).toHaveLength(0);
+    expect(host.querySelector("[data-comment-chip]")).toBeNull();
   });
 });
 

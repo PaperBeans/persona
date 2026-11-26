@@ -181,7 +181,8 @@ func fileStamp(path string) string {
 // readCodexAppThreads reads the unarchived rows of ids (validID only: they are put in the query as they are), plus
 // the migrated App's sidebar chats and their subagents, which have no legacy sidebar key (#6388). Exec runs are not
 // sidebar chats; subagent rows must stay available so their origin and guardian filters still work once the rollout
-// is gone (#8191). That second read is a separate query so a schema without the originator column keeps the explicit
+// is gone (#8191). Shared app-server chats can carry the paired persona/vscode stamp (#10438).
+// That second read is a separate query so a schema without the originator column keeps the explicit
 // sidebar answer instead of failing it.
 func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[string]codexAppThread, error) {
 	byID := map[string]codexAppThread{}
@@ -192,7 +193,10 @@ func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[stri
 		}
 		byID = rows
 	}
-	migrated, err := readCodexThreads(ctx, db, `archived = 0 AND source != '' AND source != 'exec' AND originator IN ('Codex Desktop', 'codex_work_desktop')`)
+	migrated, err := readCodexThreads(ctx, db, `archived = 0 AND (
+		(originator IN ('Codex Desktop', 'codex_work_desktop') AND source != '' AND source != 'exec')
+		OR (originator = 'persona' AND source = 'vscode')
+	)`)
 	if err == nil {
 		for id, t := range migrated {
 			// Subagent metadata is needed for parent folding and guardian suppression. Other inferred sources are not

@@ -35,6 +35,8 @@ export interface UIAction {
   confirm?: string;
   /** Send every field's value along. */
   submit?: boolean;
+  /** A full extension page may open an https URL or a persona session/task target in the app (#14617). */
+  open?: string;
   /** UI version 3: open another page of the extension on top of this one, without asking the extension first. */
   push?: UIPush;
   /** UI version 4: values the action carries, sent with the fields' and the component's (these win on a name). */

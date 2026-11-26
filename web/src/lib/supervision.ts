@@ -1,4 +1,5 @@
 import { formatDate, t } from "../i18n";
+import { isLegacyCodexRouteNotice } from "./compatibility";
 import type { Todo } from "./todos";
 import type { Interaction } from "./types";
 
@@ -281,19 +282,25 @@ export function checkCount(sup: Supervision | undefined): string {
   return `${list.filter((c) => c.mark === "met").length}/${list.length}`;
 }
 
+function isLegacyStartupProgress(p: TaskProgress | undefined): boolean {
+  return p?.kind === "progress" && isLegacyCodexRouteNotice(p.text);
+}
+
 /** "Step 3/5 · …", "Asked Persona: …": the agent's latest report in a line for a card, in the hub's paraphrase when it
  *  has one (#3181), else in the agent's words; undefined when it has none. */
 export function progressLine(sup: Supervision | undefined): string | undefined {
   const p = sup?.progress;
-  const text = p?.line?.trim() || p?.text;
-  if (!p || !text) return undefined;
+  if (!p || isLegacyStartupProgress(p)) return undefined;
+  const text = p.line?.trim() || p.text;
+  if (!text) return undefined;
   return reportLine(p.kind, text, p.step, p.steps);
 }
 
 /** The agent's latest report as it wrote it, for the task's details (Markdown); undefined when it has none. */
 export function reportText(sup: Supervision | undefined): string | undefined {
   const p = sup?.progress;
-  return p?.detail?.trim() || p?.text?.trim() || undefined;
+  if (!p || isLegacyStartupProgress(p)) return undefined;
+  return p.detail?.trim() || p.text?.trim() || undefined;
 }
 
 /** A report (on a card, or a feed item of kind "report") in a line. */

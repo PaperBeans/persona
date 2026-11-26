@@ -714,10 +714,12 @@ func (s *Service) assignPendingPlacement(
 			if err := startModesRefused(cmp.Or(candidate.Launcher, resolvedLauncher), fit.agent, asked, own.effort); err != nil {
 				return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable", err: err}
 			}
-			candidate.Effort = ""
 			if asked != "" {
 				candidate.Permission = ""
 			}
+		}
+		if !startTakesEffort(fit.agent) {
+			candidate.Effort = ""
 		}
 	}
 	if candidate.Permission == "" && takesModes {

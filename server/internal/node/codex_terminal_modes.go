@@ -113,7 +113,9 @@ func (n *Node) codexTerminalRow(id string, s *proto.Session, m quickMeta) {
 	s.Efforts = codexEffortLevels
 	if e, listed := codexModelEffortsIn(t.home, s.Model); listed {
 		s.Efforts = e.levels
-		s.ServiceTiers = codexSpeedChoices(e.tiers)
+		if n.terminalSpeedAvailable(s) {
+			s.ServiceTiers = codexSpeedChoices(e.tiers)
+		}
 	}
 	if len(s.Efforts) == 0 {
 		s.Effort = ""
@@ -123,7 +125,13 @@ func (n *Node) codexTerminalRow(id string, s *proto.Session, m quickMeta) {
 // codexTerminalSettingsOf uses native settings as soon as the rollout records a model. A rollout with only startup
 // metadata has no turn settings yet, so read the launcher's options in the home identified by that rollout.
 func (n *Node) codexTerminalSettingsOf(id string, t codexTerminal, m quickMeta) codexTerminalSettings {
-	settings := codexTerminalSettings{model: m.model, effort: m.effort, tier: m.serviceTier}
+	settings := codexTerminalSettings{model: m.model, effort: m.effort, tier: codexTierID(m.serviceTier)}
+	if m.speed.Model != "" && !m.speed.At.Before(m.modelAt) {
+		settings.model = m.speed.Model
+	}
+	if m.speed.Tier != "" && m.speed.At.After(m.serviceTierAt) {
+		settings.tier = m.speed.Tier
+	}
 	if settings.model != "" {
 		return settings
 	}
@@ -157,10 +165,7 @@ func (n *Node) codexTerminalSettingsOf(id string, t codexTerminal, m quickMeta) 
 	tier, _ := cfg["service_tier"].(string)
 	settings.model = cmp.Or(settings.model, model)
 	settings.effort = cmp.Or(settings.effort, effort)
-	settings.tier = cmp.Or(settings.tier, tier, "default")
-	if settings.tier == "fast" {
-		settings.tier = "priority"
-	}
+	settings.tier = codexTierID(cmp.Or(settings.tier, tier, "default"))
 	if settings.model == "" {
 		for _, entry := range readCodexHomeModels(t.home) {
 			if entry.Default {
@@ -240,13 +245,17 @@ func (n *Node) applyCodexTerminalSettings(ctx context.Context, id string, t code
 
 // typeCodexSettings types cmd into the Codex in t after the checks a message gets, then waits for the outcome: nil once
 // the rollout records the requested settings, Codex's refusal once the screen shows one, else,
-// after codexSettingsWait, the unconfirmed error. The session's typing lock is held only while typing.
+// after codexSettingsWait, the unconfirmed error. Model and effort changes take the input lock only while typing.
+// Speed changes hold it in setSessionSpeed until confirmation.
 func (n *Node) typeCodexSettings(ctx context.Context, id string, t codexTerminal, cmd string, target codexTerminalSettings) error {
-	unlock := n.typing.lock(id) // one at a time with the messages: a send in flight types into the same box
+	unlock := func() {}
+	if target.tier == "" {
+		unlock = n.typing.lock(id)
+	}
 	var once sync.Once
 	release := func() { once.Do(unlock) }
 	defer release()
-	if err := n.checkPane(ctx, t.pane, "codex", ""); err != nil {
+	if err := n.codexReady(ctx, t.pane, target.tier != ""); err != nil {
 		return err // a draft in the box, a dialog on the screen, the agent gone: nothing typed
 	}
 	before, _ := n.readPane(ctx, t.pane, "visible", 60)

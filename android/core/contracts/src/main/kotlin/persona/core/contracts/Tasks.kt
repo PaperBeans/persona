@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
+import persona.core.contracts.generated.TodoWait
 
 // Tasks dispatched from an assistant conversation (docs/assistant/unified-entry.md; docs/protocol/protocol.md "Tasks and the chat feed"): the plans the
 // assistant hands the user, the todos that are tasks, and the items the hub inserts into a conversation (its feed).
@@ -87,9 +88,9 @@ data class FeedItem(
 
     /**
      * `message`: the reply went out — from this card or from the inbox, on any device (the hub records it on the
-     * card, #1519): when, and what it said (a card sent before the hub recorded it: its draft). Null while not sent.
+     * card, #1519): when, and the recorded text if available. Null while not sent.
      */
-    val sent: SentReply? get() = field("sent_at")?.let { SentReply(it, field("sent")?.takeIf(String::isNotEmpty) ?: field("draft").orEmpty()) }
+    val sent: SentReply? get() = field("sent_at")?.let { SentReply(it, field("sent").orEmpty()) }
 
     /**
      * `message`: the thing the card is about was dealt with elsewhere and nothing went out from this card (#4797):
@@ -230,6 +231,8 @@ data class Todo(
     /** Nobody is working on it (#3618): every agent of this open to-do is gone and nothing brings one back; null otherwise
      *  and from an older hub. */
     val orphaned: TodoOrphaned? = null,
+    /** The hub-computed reason this task waits (#16168): render it directly; null when it is not waiting or from an older hub. */
+    @SerialName("wait") val wait: TodoWait? = null,
     /** Empty for an ordinary to-do or task; "concern" for one of the owner's concerns. Unknown values stay ordinary. */
     val kind: String = "",
 ) {

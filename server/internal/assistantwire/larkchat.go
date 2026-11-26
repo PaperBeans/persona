@@ -170,6 +170,9 @@ type ChatOpenTodo struct {
 	Where                string
 }
 
+// FeishuTopicMayOpenTodo holds the pairing of a run started in an unbound main_decides topic.
+const FeishuTopicMayOpenTodo = "topic_may_open_todo"
+
 // What noting a topic message as its to-do's decision came to (larkhost.Host.TopicDecision).
 const (
 	DecisionNotNoted = ""          // not noted (no store, or a failure that was logged): the words still go on

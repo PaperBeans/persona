@@ -192,6 +192,7 @@ type Layer interface {
 // apps show of it), what the core asks of it, and its records (Book), which the core's cards and the briefing's
 // waits still read.
 type Chat interface {
+	DecideTopicTodo(ctx context.Context, run channel.Run, title, notes string) (string, error)
 	// Message takes the owner's message (feishu.message); Action answers a press of one of the bot's cards
 	// (feishu.card_action, or a companion's), action being the owner's action for it; Owner is feishu.owner,
 	// Recalled feishu.recalled and View feishu.view.
@@ -338,6 +339,10 @@ type Host interface {
 	ConclusionQuestion(ctx context.Context, ev *botcard.MessageEvent, content *botcard.Content, f assistantwire.FeishuFeatures) bool
 	AcceptReply(ctx context.Context, messageID, text string, media bool, parent, root string) bool
 	ApproveOwnerAction(ctx context.Context, ev botcard.MessageEvent, text, action string) bool
+	// ProjectReviewOwnerInput queues the owner's paired-chat message ref ("feishu:<message id>"), sent to the
+	// conversation machine/session, for a configured project review that takes owner inputs; nil when none takes it.
+	// An error means it could not be committed, and the message is not taken.
+	ProjectReviewOwnerInput(ctx context.Context, ref, machine, session string) error
 
 	// The commands (commands.go, models.go): stopping a conversation's turn (kind is the toast's), the lists to pick
 	// a conversation or an agent from, what a /status card shows, the standing board, and the main conversation's
@@ -467,6 +472,9 @@ func (None) AsksCatchUp(context.Context, map[string]bool)      {}
 // The chat without a channel: a bot switched off. Nothing is taken or answered, nothing waits, no target is set, and
 // its records are empty: what is kept in them is dropped.
 func (None) Message(context.Context, assistantwire.FeishuMessage) error { return nil }
+func (None) DecideTopicTodo(context.Context, channel.Run, string, string) (string, error) {
+	return "", ErrNoChannel
+}
 func (None) Action(context.Context, *botcard.CardAction, string) *botcard.CardResponse {
 	return nil
 }

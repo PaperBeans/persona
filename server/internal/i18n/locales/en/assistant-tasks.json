@@ -1,4 +1,7 @@
 {
+  "investigation_handoff_open": "Complete or reassign the investigation finding before closing this follow-up: {finding}",
+  "investigation_review_required": "Review the current investigation findings before parking or closing this task.",
+  "investigation_findings_open": "Give these investigation findings a follow-up, owner decision, or completion evidence first: {findings}",
   "handoff_wait": "Waiting for {task} to check {check}",
   "decision_review_changed": "This decision has changed or was already handled. Refresh before trying again.",
   "decision_review_fields": "This request is missing a valid review time or Undo receipt.",
@@ -107,5 +110,7 @@
   "side_handover_archived": "Task “{title}” moved to the main conversation because “{origin}” was archived.",
   "side_handover_gone": "Task “{title}” moved to the main conversation because “{origin}” is no longer available.",
   "placement_waiting": "Waiting for automatic computer placement.",
-  "placement_no_match": "No online computer currently matches this task's placement constraints and capacity limits."
+  "placement_no_match": "No online computer currently matches this task's placement constraints and capacity limits.",
+  "inbox_link_removed": "The Inbox topic changed. Its automatic link was removed; the task can still start.",
+  "inbox_candidates": "Possible Inbox items: {items}. No automatic link was made; confirm the source before linking."
 }

@@ -118,6 +118,10 @@ type BotFeatures struct {
 	// files as the owner, then does the task and answers under that message (#11803, bots_read.go). Off by default, and
 	// for settings saved before it: they have no such key.
 	ReadGroup bool `json:"read_group"`
+	// ReadGroupDirect: a /read's answer goes straight under the owner's message in the group, as it did before #14437.
+	// Off by default, and for settings saved before it (they have no such key): the answer goes to the owner's private
+	// chat first, and into the group only when the owner presses its button (the lark module's read_held.go).
+	ReadGroupDirect bool `json:"read_group_direct"`
 }
 
 var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true, TopicCot: true}
@@ -198,8 +202,9 @@ type botHub struct {
 	// bindGate serializes Feishu binding, including registration network calls, independently of mu.
 	// A channel lets a waiting client's context cancel without waiting for the current bind.
 	bindGate chan struct{}
-	// sync is the user sync: the bots' apps reading as the owner every day (larksync.go).
-	sync larkSync
+	// sync is the user sync service provided by the lark module (larksync_host.go).
+	syncMu sync.Mutex
+	sync   botport.SyncService
 }
 
 func (b *botHub) clock() time.Time {
@@ -511,7 +516,7 @@ func (h *Manager) botView(ctx context.Context) feishuBotView {
 		v.Pairing = &botPairView{Code: p.Code, ExpiresAt: p.Expires.Unix()}
 	}
 	for _, c := range s.TopicChats {
-		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat(), RequireOwnerMention: c.RequireOwnerMention})
+		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat(), RequireOwnerMention: c.RequireOwnerMention, TodoMode: c.TodoMode.Effective()})
 	}
 	botAppID := appID
 	b.mu.Unlock()
@@ -580,10 +585,11 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			// An entry may carry home: true (the home topic group, "/topics home"); when no entry says anything about home,
 			// the one the list has stays.
 			TopicChats *[]struct {
-				ChatID              string `json:"chat_id"`
-				Name                string `json:"name"`
-				Home                *bool  `json:"home"`
-				RequireOwnerMention *bool  `json:"require_owner_mention"`
+				ChatID              string                       `json:"chat_id"`
+				Name                string                       `json:"name"`
+				Home                *bool                        `json:"home"`
+				RequireOwnerMention *bool                        `json:"require_owner_mention"`
+				TodoMode            *assistantwire.TopicTodoMode `json:"todo_mode"`
 			} `json:"topic_chats"`
 			// NudgeAfter is minutes before the one nudge under an unanswered card; 0 turns nudges off, absent leaves it.
 			// Read as raw JSON so that anything but a whole number in range gets the same answer (nudgeAfterValue).
@@ -641,7 +647,15 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 				if c.Home != nil {
 					keepHome = false
 				}
-				topics = append(topics, BotChat{ChatID: c.ChatID, Name: c.Name, Home: c.Home != nil && *c.Home})
+				chat := BotChat{ChatID: c.ChatID, Name: c.Name, Home: c.Home != nil && *c.Home}
+				if c.TodoMode != nil {
+					if !c.TodoMode.Valid() {
+						writeErr(w, http.StatusBadRequest, i18n.Err("hub-bots.topic_todo_mode_bad"))
+						return
+					}
+					chat.TodoMode = *c.TodoMode
+				}
+				topics = append(topics, chat)
 			}
 			// Everything is checked before anything is written: a list sent with a change that makes it impossible
 			// (a new App ID unpairs the owner) must not leave the rest of the request applied.

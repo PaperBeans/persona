@@ -250,6 +250,37 @@ nonisolated struct KBDetailResponse: Decodable, Sendable {
     var detail: KBDetail
     var agents: [Session]?
     var matches: [KBMatch]?
+    /// A chat's Inbox items (#15356, docs/assistant/knowledge.md "A chat's Inbox items"); nil for none, and from a hub
+    /// before them.
+    var inbox: [KBInboxItem]?
+}
+
+/// An Inbox item a chat's page lists: what its row draws, and `messages`, the rows of the page's `recent` it holds, each
+/// by its day and its lines as written there (the hub matched them on time, sender and text).
+nonisolated struct KBInboxItem: Decodable, Identifiable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var tier: String?
+    /// An open item's section (action, working, fyi, noise) as the Inbox has it.
+    var status: String?
+    var summary: String?
+    var preview: String?
+    var updatedAt: Date?
+    var doneAt: Date?
+    var messages: [Row]?
+
+    /// A row of the chat's recent messages: its day ("2026-10-30") and its lines, "- 10:15 name: text" and any indented
+    /// ones after it.
+    nonisolated struct Row: Decodable, Hashable, Sendable {
+        var day: String
+        var line: String
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, tier, status, summary, preview, messages
+        case updatedAt = "updated_at"
+        case doneAt = "done_at"
+    }
 }
 
 /// A change made in the app; tagging set here is kept over the automatic one.

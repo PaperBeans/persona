@@ -23,6 +23,12 @@ The knowledge base currently holds no recordings at all, so nothing is being cap
 6. Action items are **suggested to-dos**. Nothing is created until the user confirms.
 7. The web Knowledge › Recordings detail shows the minutes; the iOS (#2694) and Android (#2738) details do the same, and all three offer Add to to-dos, Add all and Regenerate (iOS since #4062). Asking the assistant "what were the minutes of the meeting just now" resolves through `kb_get` / `kb_search`.
 
+## Review a transcript on the web
+
+Open the recording in Knowledge, then open the review controls in the transcript section. Search for a phrase and move to the previous or next matching passage, or show just the bookmarked moments. The recording detail scrolls to the selected passage, including when several segments have the same timestamp.
+
+Download the transcript as a timestamped text file to read it locally. The download includes the full retained transcript and its bookmarks, regardless of the active search. After speech has expired, only retained bookmarks are available. With no retained lines, there is nothing to download.
+
 ## Who does what
 
 | | iOS / watch (#2694) | Hub (the assistant) |

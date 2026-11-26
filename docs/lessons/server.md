@@ -407,6 +407,22 @@ write is logged and left for the next report, never retried in a tight loop. Bot
 `nodeWorkers`, whose shutdown wait is bounded. Tests hold the node or `PutSetting`, prove a later message or bus event
 is still handled, then release the dependency and join the workers before checking the final value and call count.
 
+## A node's event handler in the manager must not wait for that node (2026-11-26, #16214)
+
+The manager takes a node's events on the read loop of that node's connection: `rpc.Peer.Serve` calls `OnEvent` in
+place, and devices pass the event to the assistant's `NodeEvent` from there. Only that loop reads the node's answers.
+`setSessions` (a `sessions.changed`) classified the main conversation's latest round by reading its history from the
+same node, so after every finished main-chat turn the read waited for an answer nobody could read and ran into its
+15 s deadline. Meanwhile nothing else the node sent was read: pongs, answers to the apps' reads, item pushes, the
+reply's live text and the turn's end. The log shows it as one `session.items result=deadline took=14.998s` followed by
+a burst of answers that each took about 15 s, with `ping` deadlines in between. The transcript's size played no part:
+the pages it read took under a millisecond on a 100 MB transcript.
+
+Anything a node's event needs from that node runs on a goroutine of its own: one at a time per conversation, taking the
+newest revision asked for, and the list is published again when its result changes a row. Test it as the hub's read
+loops are tested: hold every call to the node, check that the event is still taken, then release it and wait for the
+result (`server/internal/assistant/conversation_attention_readloop_test.go`).
+
 ## App connection bookkeeping uses ordered background snapshots (2026-11-15, #6889)
 
 `client_hello` and `register_phone` also waited in the app connection's read loop: `hub.client_apps` did a settings

@@ -68,6 +68,11 @@ func (n *Node) paneFor(ctx context.Context, id string) (string, error) {
 }
 
 func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, opts sendOpts) error {
+	// A new turn must not start while the previous turn's checkpoint is still reading the working tree: otherwise
+	// edits made by this turn would be attributed to the previous one (#12533).
+	if err := n.waitCheckpoint(ctx, id); err != nil {
+		return err
+	}
 	if exitCommand(text) {
 		release := n.recovery.lock(id)
 		defer release()

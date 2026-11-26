@@ -488,7 +488,8 @@ func (s *Service) kbLoop(ctx context.Context) {
 // kbRounds is when the archive lane last did what it does less often than every run (only that lane touches it).
 type kbRounds struct {
 	items, prune, links time.Time
-	tagMore             bool // item tagging stopped at its cap with untagged items left
+	lark                time.Time // the Lark minutes and documents import (kb_lark.go)
+	tagMore             bool      // item tagging stopped at its cap with untagged items left
 }
 
 // kbPrepare is what a round checks before it starts lanes, quickly, on the loop's goroutine: nothing when the
@@ -569,6 +570,8 @@ func (s *Service) kbArchiveLane(ctx context.Context, e *kb.Engine, r *kbRounds) 
 	case r.tagMore: // untagged items left past the last run's cap
 		s.kbRun(ctx, func() { r.tagMore = s.kbTagItems(ctx, e, r.tagMore) })
 	}
+	// The owner's Lark minutes and document titles, through lark-cli (kb.lark_minutes, off by default).
+	s.kbRun(ctx, func() { s.kbLarkMinutes(ctx, e, r) })
 	daily := time.Since(r.prune) >= 24*time.Hour
 	if daily {
 		r.prune = time.Now()

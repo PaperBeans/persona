@@ -16,10 +16,154 @@ import (
 
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/operations/backup"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/update"
+	"github.com/nwverse/persona/server/internal/update/updatetest"
 )
+
+// assertDevelopmentBinaryEditions runs the installer check against real full and core executables of the manifest's
+// version. Its own edition passes; the other is refused in either direction.
+func assertDevelopmentBinaryEditions(t *testing.T, m *update.Manifest) {
+	t.Helper()
+	line := fmt.Sprintf("%s\nchannel release, build %d", m.Version, m.Build)
+	source := fmt.Sprintf("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Print(%q) }\n", line)
+	full := updatetest.ProgramSource(t, nodeproto.ProgramPersonad, "", "", source)
+	core := updatetest.CoreProgramSource(t, nodeproto.ProgramPersonad, "", "", source)
+	for _, tc := range []struct {
+		name    string
+		bin     string
+		edition nodeproto.Edition
+	}{{"full", full, nodeproto.EditionFull}, {"core", core, nodeproto.EditionCore}} {
+		err := update.CheckBinary(context.Background(), tc.bin, m)
+		if tc.edition.Marker() == m.Edition && err != nil {
+			t.Fatalf("a %s hub refused its own %s build: %v", m.Edition, tc.name, err)
+		}
+		if tc.edition.Marker() != m.Edition && (err == nil || !strings.Contains(err.Error(), "edition")) {
+			t.Fatalf("manifest edition %q accepted a %s build: %v", m.Edition, tc.name, err)
+		}
+	}
+}
+
+func TestDevelopmentCheckManifestKeepsHubEdition(t *testing.T) {
+	for _, edition := range []nodeproto.Edition{nodeproto.EditionFull, nodeproto.EditionCore} {
+		t.Run(string(edition), func(t *testing.T) {
+			h := newTestHub(t)
+			h.build.Edition = edition
+			u := h.upd
+			h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}}
+			candidate := &update.DevelopmentCandidate{Branch: "main", Commit: strings.Repeat("b", 40)}
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
+				*result.(*update.DevelopmentCandidate) = *candidate
+				return nil
+			}
+			r, err := u.checkDevelopment(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Manifest.Edition != edition.Marker() {
+				t.Fatalf("development manifest edition %q, hub %q", r.Manifest.Edition, edition)
+			}
+			assertDevelopmentBinaryEditions(t, r.Manifest)
+			// Reusing the same published candidate must not drop the edition either.
+			again, err := u.checkDevelopment(context.Background())
+			if err != nil || again.Manifest.Edition != edition.Marker() {
+				t.Fatalf("repeated check edition %q: %v", again.Manifest.Edition, err)
+			}
+		})
+	}
+}
+
+func TestDevelopmentBackupManifestKeepsHubEdition(t *testing.T) {
+	for _, edition := range []nodeproto.Edition{nodeproto.EditionFull, nodeproto.EditionCore} {
+		t.Run(string(edition), func(t *testing.T) {
+			h := newTestHub(t)
+			h.build.Edition = edition
+			u := h.upd
+			u.loaded, u.settings.Source = true, "web-dev"
+			h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}}
+			chosen := update.DevelopmentVersion{ID: "snapshot-fixture", Version: "web-dev-backup", Build: 202611010001,
+				Commit: strings.Repeat("b", 40), UpdatedAt: "2026-11-01T10:00:00Z"}
+			started, unblock := make(chan struct{}), make(chan struct{})
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
+				if operation == "prepare_backup" {
+					close(started)
+					<-unblock
+					return errors.New("stop after capturing the restore manifest")
+				}
+				if operation == "preflight" {
+					return nil
+				}
+				if operation != "backups" {
+					return fmt.Errorf("unexpected operation %s", operation)
+				}
+				encoded, _ := json.Marshal(map[string]any{"backups": []update.DevelopmentVersion{chosen}})
+				return json.Unmarshal(encoded, result)
+			}
+			if err := u.beginDevelopmentRestore(context.Background(), chosen.ID); err != nil {
+				t.Fatal(err)
+			}
+			<-started
+			u.mu.Lock()
+			manifest := *u.release.Manifest
+			u.mu.Unlock()
+			close(unblock)
+			waitFor(t, "the fixture restore to stop", func() bool { return u.view().State == "failed" })
+			if manifest.Edition != edition.Marker() {
+				t.Fatalf("backup manifest edition %q, hub %q", manifest.Edition, edition)
+			}
+			assertDevelopmentBinaryEditions(t, &manifest)
+		})
+	}
+}
+
+func TestDevelopmentBuildManifestKeepsEditionAndLocalNames(t *testing.T) {
+	for _, edition := range []nodeproto.Edition{nodeproto.EditionFull, nodeproto.EditionCore} {
+		t.Run(string(edition), func(t *testing.T) {
+			h := newTestHub(t)
+			u := h.upd
+			artifacts := t.TempDir()
+			m := &update.Manifest{Version: "web-dev-backup", Build: 202611010001, Commit: strings.Repeat("b", 40), Edition: edition.Marker()}
+			line := fmt.Sprintf("%s\nchannel release, build %d", m.Version, m.Build)
+			source := fmt.Sprintf("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Print(%q) }\n", line)
+			build := updatetest.ProgramSource(t, nodeproto.ProgramPersonad, "", "", source)
+			if edition == nodeproto.EditionCore {
+				build = updatetest.CoreProgramSource(t, nodeproto.ProgramPersonad, "", "", source)
+			}
+			binary, err := os.ReadFile(build)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plat := runtime.GOOS + "-" + runtime.GOARCH
+			if err := os.WriteFile(filepath.Join(artifacts, "personad-"+plat+".gz"), gz(binary), 0600); err != nil {
+				t.Fatal(err)
+			}
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
+				if operation != "prepare_backup" {
+					return fmt.Errorf("unexpected operation %s", operation)
+				}
+				encoded, _ := json.Marshal(map[string]any{"artifacts": artifacts})
+				return json.Unmarshal(encoded, result)
+			}
+			r := &update.Published{Manifest: m, Development: &update.DevelopmentCandidate{Commit: m.Commit, BackupID: "snapshot-fixture"}}
+			if err := u.buildDevelopment(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			file := r.Manifest.Files[plat]
+			if r.Manifest.Edition != edition.Marker() || file.Served != "" {
+				t.Fatalf("local manifest edition %q, served %q", r.Manifest.Edition, file.Served)
+			}
+			downloaded, err := u.download(context.Background(), r.Manifest, file, t.TempDir(), r.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := update.CheckBinary(context.Background(), downloaded, r.Manifest); err != nil {
+				t.Fatalf("the hub's own %s development build: %v", edition, err)
+			}
+		})
+	}
+}
 
 func TestDevelopmentProgressStatusAndCleanup(t *testing.T) {
 	for _, c := range []struct{ operation, first, step, next string }{

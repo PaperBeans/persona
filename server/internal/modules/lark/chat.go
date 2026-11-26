@@ -62,7 +62,11 @@ var (
 )
 
 // feishuTopic is the chat and thread a message was said in (the core's feishu_route.go names it too).
-type feishuTopic struct{ Chat, Thread string }
+type feishuTopic struct {
+	Chat, Thread string
+	UnboundMode  assistantwire.TopicTodoMode
+	Pairing      string
+}
 
 // target is where what is sent for that topic goes: its chat, as a reply into the thread. The zero topic (nil) is the
 // private chat, where nothing changes.

@@ -237,6 +237,8 @@ func (s *Service) ApproveOwnerAction(context.Context, botcard.MessageEvent, stri
 	return false
 }
 
+func (s *Service) ProjectReviewOwnerInput(context.Context, string, string, string) error { return nil }
+
 func (s *Service) InterruptConversation(_ context.Context, rt assistantwire.ChatResolved) (string, string) {
 	d := s.ch()
 	s.tmu.Lock()

@@ -52,7 +52,7 @@ const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.
 /** fetch for a hub with `mac` and its one agent; GET /todos answers with `todos`. */
 const hub = (todos: () => Promise<Response>) =>
   vi.fn((url: string) => {
-    if (url.endsWith("/api/v1/todos")) return todos();
+    if (new URL(url, "http://hub").pathname.endsWith("/api/v1/todos")) return todos();
     if (url.endsWith("/api/v1/sessions")) return json({ sessions: [agent] });
     if (url.endsWith("/api/v1/machines")) return json({ machines: [mac] });
     return json({});
@@ -129,7 +129,7 @@ describe("按待办 before the todos have loaded", () => {
 
   it("draws the todos as soon as GET /todos answers, while GET /sessions is still on its way", async () => {
     const slow = vi.fn((url: string) => {
-      if (url.endsWith("/api/v1/todos")) return json({ todos: [todo] });
+      if (new URL(url, "http://hub").pathname.endsWith("/api/v1/todos")) return json({ todos: [todo] });
       if (url.endsWith("/api/v1/sessions")) return new Promise<Response>(() => {});
       if (url.endsWith("/api/v1/machines")) return json({ machines: [mac] });
       return json({});
@@ -274,7 +274,7 @@ describe("按待办's 最近（未运行）", () => {
     const gone: Session = { ...agent, session_id: "s2", title: "旧的发布检查", status: "offline", state: "offline" };
     let sessions = [agent, gone];
     vi.stubGlobal("fetch", vi.fn((url: string) => {
-      if (url.endsWith("/api/v1/todos")) return json({ todos: [todo] });
+      if (new URL(url, "http://hub").pathname.endsWith("/api/v1/todos")) return json({ todos: [todo] });
       if (url.endsWith("/api/v1/sessions")) return json({ sessions });
       if (url.endsWith("/api/v1/machines")) return json({ machines: [mac] });
       return json({});
@@ -336,7 +336,7 @@ describe("relative-time Agents filters", () => {
     vi.setSystemTime(start);
     const aging = { ...agent, updated_at: new Date(start.getTime() - 24 * 60 * 60 * 1000 + 30_000).toISOString() };
     vi.stubGlobal("fetch", vi.fn((url: string) => {
-      if (url.endsWith("/api/v1/todos")) return json({ todos: [todo] });
+      if (new URL(url, "http://hub").pathname.endsWith("/api/v1/todos")) return json({ todos: [todo] });
       if (url.endsWith("/api/v1/sessions")) return json({ sessions: [aging] });
       if (url.endsWith("/api/v1/machines")) return json({ machines: [mac] });
       return json({});

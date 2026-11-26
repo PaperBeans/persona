@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -47,6 +48,42 @@ class ScreenshotComparisonTests(unittest.TestCase):
         result = self.compare()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("不同  frame.png", result.stdout)
+
+    def test_diff_directory_cannot_alias_an_input(self):
+        before = self.before / "frame.png"
+        after = self.after / "frame.png"
+        shots.write_png(before, 1, 1, b"\x00\x00\x00\xff")
+        shots.write_png(after, 1, 1, b"\xff\xff\xff\xff")
+        originals = before.read_bytes(), after.read_bytes()
+        alias = self.before.parent / "alias"
+        alias.symlink_to(self.after, target_is_directory=True)
+        for target in (self.before, self.after, alias):
+            with self.subTest(target=target.name):
+                result = self.compare("--diff", str(target))
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual((before.read_bytes(), after.read_bytes()), originals)
+
+    def test_diff_replaces_link_without_writing_through_it(self):
+        before = self.before / "frame.png"
+        after = self.after / "frame.png"
+        shots.write_png(before, 1, 1, b"\x00\x00\x00\xff")
+        shots.write_png(after, 1, 1, b"\xff\xff\xff\xff")
+        originals = before.read_bytes(), after.read_bytes()
+        for link in ("hard", "symbolic"):
+            with self.subTest(link=link):
+                destination = self.before.parent / link
+                destination.mkdir()
+                output = destination / "frame.png"
+                if link == "hard":
+                    os.link(before, output)
+                else:
+                    output.symlink_to(after)
+                result = self.compare("--diff", str(destination))
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual((before.read_bytes(), after.read_bytes()), originals)
+                self.assertFalse(output.is_symlink())
+                self.assertEqual(shots.decode_png(output.read_bytes()).rgba, shots.MAGENTA)
+                self.assertEqual(list(destination.iterdir()), [output])
 
 
 if __name__ == "__main__":

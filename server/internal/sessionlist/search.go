@@ -391,7 +391,7 @@ func (i *Index) searchResult(o Options, decoded map[*record]decodedDocument) (*r
 		}
 		r.searchHits[rowID] = hit
 		r.events = append(r.events, event{id: rowID, updated: row.item.UpdatedAt, value: row})
-		addCount(&r.counts, row.item, o.Roots, o.CrossMachineHierarchy, 1)
+		addCount(&r.counts, row.item, f, 1)
 		return nil
 	})
 	if err != nil {

@@ -430,6 +430,11 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   never reopens the knowledge base: the import reads it again before every call, so `enabled: false` stops it before its next call.
   `kb.history` keeps only the switch and the pacing: which chats are read, how much of each and how far back (`history.<source>.back_days`) are the knowledge base's
   selection, which the manager keeps in its settings table, not here,
+  `lark_minutes` (the owner's Lark minutes and document titles through lark-cli, **off unless `enabled` is `true`**; `docs/assistant/knowledge.md` "Lark minutes and documents"):
+  `{"enabled": true, "since_days": 30, "interval_minutes": 60, "binary": "lark-cli", "profile": "", "doc_search": ["<keyword>"]}`. `since_days` is how far back each run searches (default 30),
+  `interval_minutes` the least time between two runs (default 60), `binary` lark-cli's path when the manager's `PATH` cannot find it (the adapter also tries the login shell's `PATH`),
+  `profile` a lark-cli profile (empty: its default), and `doc_search` the keywords that discover documents (empty: off). The import needs the user's own `lark-cli` login on the manager's computer (minutes, docs, drive scopes);
+  a failure is logged and never stops the round. Changing it does not reopen the knowledge base: it is read again every round.
   `ai` (model for compression and tagging, same fields as `ai`; defaults to `inbox.triage_ai`, then `ai`), `extra_dirs` (note directories you maintain on the manager's machine, the hub machine for the built-in manager,
   e.g. a git repo of facts / lessons: `kb_search` also searches Markdown in these directories (read-only, skips dot directories such as `.git`), and the assistant's CLAUDE.md mentions them; `~/` is that machine's home).
   Use `remote_folders` for named sources on other connected personal computers. See [Remote knowledge folders](../assistant/knowledge.md#remote-knowledge-folders-kbremote_folders) for fields and exclusions.
@@ -545,6 +550,7 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
   The assistant's Lark write rules also go here: `connector` is `lark`, `action` is "method path", e.g. `{"connector":"lark","action":"POST /conversations/*/messages","decision":"allow"}`,
   or lark-cli's `{"connector":"lark","action":"CLI /im/+messages-send","decision":"allow"}` (`*` matches one path segment, `**` the rest, `"*"` any call; `match` matches top-level body fields).
   These precede the old `lark_gate`, followed by built-in rules (`docs/assistant/assistant.md` ("Lark: skill supplied by the Lark extension")).
+- `connector_auto_confirm` (optional, off by default): opt-in hub-side policies allowing a verified extension installation to participate in **guarded conditional auto-confirm** for exact actions (`docs/protocol/connector-protocol.md` "Guarded conditional auto-confirm", `server/internal/connector/auto_confirm.go`). Each entry requires exact `extension` (hub-verified extension id), exact `connector` (connector id), and a non-empty list of exact `actions` (each prefixed `<connector>_`, no wildcards); optional fields are `name` (label recorded in `sent_as_user`, default `<extension>/<connector>`), `protocol` (default `guarded-auto-confirm-v1`), `min_version` / `max_version` (inclusive `MAJOR.MINOR.PATCH` semver bounds), `sources` (default `["installed", "builtin"]`; `"hub.json"` must be opted in explicitly; unpackaged remote-socket extensions are never eligible), `market_key` (pin to verified catalog key), `max_ttl_seconds` (1–300, default 120), and `disabled`. An invalid list stops the manager from starting, like `connector_gate`. Explicit `deny` / `confirm` rules in `connector_gate`, repeated JSON argument keys, `ConfirmEach` (space/health) conversations and non-owner callers (guests, work machines, coding Agents, pairing tokens) always take precedence and never auto-confirm.
 - `sent_ledger_days` (optional): how many days the ledger of what was written as the user is kept (`docs/extensions/connectors.md` "Sent as the user"); omitted or 0 means 90, below 0 keeps it for good.
 - `sent_recall_hours` (optional): how many hours after a send its message can still be taken back (`docs/extensions/connectors.md` "Sent as the user", Recall); omitted or 0 means 24, below 0 no limit. A connector may allow less (GitHub's comments have no limit of their own).
 - `github` (optional): GitHub connector. `{"auth": {"from_machine": "<machine id>"}}`: use `gh`'s login on that machine (the hub runs `gh auth token` via the node,
@@ -578,6 +584,88 @@ A manager's own sections of the configuration are in its `manager.json`, not in 
 - `extension_market.proxy` (optional): an HTTP or SOCKS5 proxy for extension marketplace catalog reads, package downloads and HTTPS git clones, independent of the GitHub connector. Write `http://[user:password@]host:port` or `socks5://[user:password@]host:port` (default ports 80 and 1080). It covers GitHub, ordinary HTTPS markets, OCI registries and mirrors. An explicit value overrides `github.proxy`, the process proxy environment and `NO_PROXY`; an invalid value fails rather than falling back to a direct connection. SSH git clones do not use it. When omitted, GitHub keeps using `github.proxy` and other market traffic follows the manager process environment, as before. Proxy credentials belong only in this 0600 manager.json. Restart the manager after changing it.
 - `extension_market.ca_file` (optional): a path to a PEM file containing one or more CA certificates for a private HTTPS extension marketplace. Use an absolute path so lookup does not depend on the manager's working directory, for example `"extension_market":{"ca_file":"/etc/persona/market-ca.pem"}`. The certificates are appended to the system root pool only for the extension marketplace HTTP client used for catalog reads and package downloads; other manager HTTP clients, process-wide trust and git clones are unchanged. HTTPS git clones that need the same CA must configure Git separately (for example `http.sslCAInfo`). The added roots are trusted for every host this client contacts, including GitHub, registries, mirrors and redirect targets, so configure only CAs you control and use a name-constrained CA when the trust must be narrower. Certificate and hostname verification stays enabled, and marketplaces must still use HTTPS or GitHub. The file must be a regular file no larger than 1 MiB. An unreadable, non-regular or oversized file, or one with no parseable PEM certificates, fails all marketplace operations that use this client, including the official marketplace, with a clear error instead of silently using the system-only pool. When omitted, TLS behavior is unchanged. Remove the setting and restart the manager to return to system roots only; restart after every change to the file or setting.
 - `trusted_extension_markets` (deprecated): retained for configuration decoding only during the one-release warning window; startup logs a deprecation warning when entries are present. Nonofficial signing metadata and saved keys no longer grant a sandbox exemption; installed extensions keep the default sandbox unless the owner explicitly chooses otherwise (`docs/extensions/extensions.md` ("Sandbox", "Naming and compatibility")).
+
+### Project review
+
+The optional `project_review` section of `manager.json` is disabled by default. Use a dedicated
+Codex target with its own model selection. List the project slugs the owner has approved for
+review. The manager uses its task ledger's current project and active Agent links, including
+later assignments and replacements.
+
+```json
+{
+  "project_review": {
+    "enabled": true,
+    "target": {"machine_id": "server", "session_id": "review-session"},
+    "model": "gpt-6.2-sol",
+    "projects": ["project-example"],
+    "app_inputs": true,
+    "feishu_owner_inputs": false,
+    "review_unassigned_tasks": false
+  }
+}
+```
+
+App input uses Persona's authenticated full-device paths for starts and messages. It covers the
+first prompt of a new assistant conversation or Agent, and accepted messages with a stable client
+ID, including in the main chat. Any non-empty client ID counts; one that is not a plain reference
+(letters, digits and `_.:/@-`, up to 256 characters) is named in the event by its hash. A manager that enabled App input can receive pending hub relays
+after reconnecting. The optional Feishu input uses the built-in bot and requires the paired owner
+in an approved chat. It produces an unscoped review notification. Generic extensions, terminal
+input, guest and health conversations, meeting turns, and scheduled or internal sends are outside
+these input paths. Existing-session App clients without a stable message ID also fall outside them.
+
+The manager observes named execution receipts, the fleet's waiting, interruption and failure
+states, and the existing supervision watchdog. It collapses repeated notices while a blocking
+episode is open. Observed progress allows a later blocking episode. Unassigned tasks can produce
+unscoped signals through `review_unassigned_tasks`. App input in assistant conversations and
+outside one current authorized task produces an unscoped signal. Captured events that lose their
+project authorization before send also become unscoped. No conversation text is copied. An
+unscoped prompt contains an opaque event ID and asks for acknowledgment without looking up a
+project or changing state. The target has its usual runtime permissions, so enable these sources
+only for a dedicated review session you trust.
+
+The manager keeps one persistent queue for the dedicated target. It checks the target's runtime
+and model before sending and advances when the matching transcript has a successful response in
+that model. It saves the transcript position before sending. Each send has its own client message
+ID: the hub refuses to send an ID again once it lost track of that ID's outcome, so a send that
+timed out or lost its connection is retried under a new ID. A send the hub confirmed is awaited, not
+repeated, unless its echo is still missing from the transcript ten minutes after the confirmation
+while the target is idle; then it is sent again under a new ID. A later turn does not overwrite the original receipt. The queue requires the receipt's
+exact event ID and the originating turn's end marker. A review turn that closes without a valid
+receipt (stopped, interrupted by another message, or a reply without the receipt line) is sent
+again after that turn. After five sends the event is settled as `send_unconfirmed`,
+`send_echo_missing` or `review_receipt_missing`, so one event cannot hold the queue; the row keeps the outcome and its
+`sends` count for inspection. A `facts_recorded` receipt is the Agent's statement of
+the outcome. Delivery does not verify a ledger write or change task acceptance. Keep the dedicated
+session available by its original ID.
+
+The hub and manager both need binaries that include project review and their respective Postgres
+migrations. Apply changes with the manager's service restart. To pause intake and delivery, set
+`enabled` to `false` and let the restarted manager connect to the hub. Applying that setting leaves
+the delivery history and outstanding rows in Postgres. Turning App input off (or disabling the
+section) drops the App inputs the hub has not yet passed to that manager, so turning it back on
+does not replay them. Changes to project authorization are rechecked before delivery. An event
+whose authorization ends after its scoped attempt was reserved is resent as triage only; its row's
+`scope_downgraded` records that, and either receipt then settles it, since the scoped attempt may
+have landed first.
+For an audit, use the manager's `project_review_deliveries` table. Its event ID, attempts, sends, last
+outcome and settlement timestamp show what was queued, retried or processed.
+
+Boundaries of this version:
+
+- Scheduled routines and follow-ups are not owner input: they start or wake conversations inside the manager, not
+  through the authenticated App paths. A follow-up that wakes a task's Agent still produces that task's usual
+  completion or blocking event once its turn ends, like any other turn of a reviewed task.
+- The review target never reviews its own messages or turns, and messages the manager sends to it are not owner input.
+- Messages and Agent starts the App marks with `via` (Siri, Shortcuts, an App Intent, the share sheet) are
+  delivered as usual but are not owner input.
+- Terminal input typed straight into an Agent, generic extension channels, guest, health and meeting conversations,
+  and App clients that send a message without a stable client message ID are not captured.
+- A hub restart while a start's `session.start` call to the node is still in flight can lose that start's first
+  prompt, because the hub learns the session ID only from the node's answer; the record is written as soon as the
+  answer arrives, before the hub waits for the listing or links the to-do. Later messages in that session are captured.
+- The target must be a Codex session in the configured model; other runtimes are not supported as targets yet.
 
 <a id="ddnspublicddns"></a>
 

@@ -21,6 +21,19 @@ func (s *stateFile) stopped(id string, cause proto.StopCause) {
 	})
 }
 
+// clearStopAfterAssistantInput retires the Stop or Exit from before an accepted input.
+// An interrupt can be recorded before it takes the typing lock, so keep any newer mark.
+func (s *stateFile) clearStopAfterAssistantInput(id string, previousStopAt int64) {
+	s.update(id, func(st *sessionState) bool {
+		if st.StopCauseAt != previousStopAt || (st.StopCause != proto.StopUser && st.StopCause != proto.StopExit) {
+			return false
+		}
+		st.StopCause = proto.StopUnknown
+		st.StopCauseAt = max(time.Now().UnixNano(), st.StopCauseAt+1)
+		return true
+	})
+}
+
 // A new running observation invalidates the previous stopped-session capability.
 func (n *Node) observedRunning(id string) {
 	release, ok := n.recovery.tryLock(id)

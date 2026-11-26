@@ -13,7 +13,7 @@ import { codedFailure, helpTopic, passesBySelf, refreshReadiness, type CodedFail
 import { conversationPage } from "../lib/conversation-page";
 import { navigate } from "../lib/router";
 import { hubHas, refreshAssistant, useStore } from "../lib/store";
-import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedFast, pickedLauncher, pickedModel, pickEffort, pickFast, pickLauncher, usePickedLauncher } from "../lib/assistant-chat";
+import { effectiveLauncher, NEW_CONVERSATION, pickedEffort, pickedLauncher, pickedModel, pickedServiceTier, pickEffort, pickLauncher, pickServiceTier, usePickedLauncher } from "../lib/assistant-chat";
 import { ASSISTANT_START_SERVICE_TIER_FEATURE } from "../lib/assistant-models";
 import { adoptedConversation, noteSent, outboxMessage } from "../lib/outbox";
 import { CLEAR_MAIN_FEATURE, isClearCommand, mainCommands, useMainCleared } from "../lib/main-clear";
@@ -289,7 +289,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
     const launcher = pickedLauncher(NEW_CONVERSATION);
     // written for the manager shown now: its retries go there even if the switcher moves meanwhile
     const chosen = chosenManager() ?? undefined;
-    const body = { prompt: out.text, images: out.images.length ? out.images : undefined, launcher, model: launcher ? pickedModel(NEW_CONVERSATION) : undefined, effort: pickedEffort(NEW_CONVERSATION), service_tier: startServiceTier && !chosen && pickedFast() ? "priority" : undefined, main: main || undefined };
+    const body = { prompt: out.text, images: out.images.length ? out.images : undefined, launcher, model: launcher ? pickedModel(NEW_CONVERSATION) : undefined, effort: pickedEffort(NEW_CONVERSATION), service_tier: startServiceTier && !chosen ? pickedServiceTier() : undefined, main: main || undefined };
     const headers = ownerHeaders(chosen);
     const from = shownManager();
     // one op id for this message, its quiet retries included (#1382); sent again after a refusal, it gets a new one
@@ -304,7 +304,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
         noteSent(r.session.machine_id, r.session.session_id, out);
         if (launcher) pickLauncher(NEW_CONVERSATION, undefined);
         pickEffort(NEW_CONVERSATION, undefined);
-        pickFast(false);
+        pickServiceTier(undefined);
         void refreshAssistant().catch(() => {});
         navigate(conversationPage(r.session.session_id, r.session.machine_id, from));
         return true;

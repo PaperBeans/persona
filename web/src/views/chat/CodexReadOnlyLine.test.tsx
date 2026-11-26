@@ -86,7 +86,7 @@ describe("CodexReadOnlyLine", () => {
     expect(host.querySelector("[data-codex-readonly-line]")).toBeTruthy();
     const labels = [...host.querySelectorAll("button")].map((b) => b.textContent?.trim());
     expect(labels).toContain(t("chat-chatview.terminal"));
-    expect(labels).toContain(t("chat-chatview.resume"));
+    expect(labels).toContain(t("session-terminalpanel.resume"));
     expect(labels).toContain(t("chat-takeover.takeover"));
     const more = host.querySelector(`button[aria-label="${t("chat-chatview.more_actions")}"]`);
     expect(more).toBeTruthy();

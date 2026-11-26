@@ -54,6 +54,16 @@ export interface DesktopIslandState {
   readonly summary: string;
 }
 
+/** Window frame state for the macOS unified titlebar (#16607). */
+export interface DesktopWindowChrome {
+  readonly unifiedTitlebar: boolean;
+  readonly fullScreen: boolean;
+  readonly focused: boolean;
+}
+
+/** Optional macOS window surface style synced with Settings › Advanced › Appearance. */
+export type DesktopSurfaceStyle = "default" | "liquid-glass";
+
 export interface DesktopBridge {
   readonly version: 1;
   readonly platform: string;
@@ -82,4 +92,9 @@ export interface DesktopBridge {
   /** What the shell kept, as JSON lines of code-chosen words and numbers, and how many crash dumps it has kept on this
    *  computer since (counted, never read). */
   readDevDiagnostics?(): Promise<{ lines: string[]; crashDumps: number }>;
+  /** Unified macOS titlebar window state (#16607); absent in older shells. */
+  windowChrome?(): DesktopWindowChrome;
+  onWindowChromeChange?(callback: (chrome: DesktopWindowChrome) => void): () => void;
+  /** Syncs the optional macOS Liquid Glass vibrancy with Settings › Advanced › Appearance (#16607). */
+  setSurfaceStyle?(style: DesktopSurfaceStyle): void;
 }

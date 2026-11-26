@@ -102,7 +102,8 @@ type Supervision struct {
 	// Progress: what its agent last reported to the supervisor (report_to_supervisor, agent_control.go). A live
 	// reading kept in memory only (the next report brings it back after a restart), and apart from UpdatedAt, which
 	// names the review a task waits for.
-	Progress *TaskProgress `json:"progress,omitempty"`
+	Progress      *TaskProgress          `json:"progress,omitempty"`
+	Investigation *investigationFindings `json:"investigation_findings,omitempty"`
 	// OwnerWork is server-only evidence for the close guard (#15406): the latest owner-authored instruction and the
 	// latest Persona assignment per linked Agent session. Keeping it out of the wire shape prevents another Agent or
 	// an ordinary to-do reader from seeing an excerpt meant for the owner and the responsible supervisor.
@@ -258,9 +259,11 @@ func (v *Supervision) clone() *Supervision {
 	if out.DoneWhen == nil {
 		out.DoneWhen = []string{}
 	}
-	if v.Progress != nil {
+	if v.Progress != nil && !isCodexRouteProgress(v.Progress) {
 		p := *v.Progress
 		out.Progress = &p
+	} else {
+		out.Progress = nil
 	}
 	out.OwnerWork = make([]ownerSessionWork, len(v.OwnerWork))
 	for i, w := range v.OwnerWork {
@@ -286,6 +289,7 @@ func (v *Supervision) clone() *Supervision {
 		at := *v.CardlessToldAt
 		out.CardlessToldAt = &at
 	}
+	out.Investigation = v.Investigation.clone()
 	out.Parked = out.parked()
 	return &out
 }
@@ -350,6 +354,10 @@ func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
 		_ = json.Unmarshal(r.OwnerWork, &v.OwnerWork)
 	}
 	v.StalledReworkRounds = v.stalledReworkRounds()
+	if len(r.InvestigationFindings) != 0 {
+		v.Investigation = &investigationFindings{}
+		_ = json.Unmarshal(r.InvestigationFindings, v.Investigation)
+	}
 	if len(r.AutoReview) > 0 {
 		var a AutoReview
 		if json.Unmarshal(r.AutoReview, &a) == nil {
@@ -430,7 +438,7 @@ func (v *Supervision) applyReworkAccounting(kind string) (round, stalled int) {
 
 func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	raw, _ := json.Marshal(v.Reviews)
-	var auto, waits json.RawMessage
+	var auto, waits, investigation json.RawMessage
 	ownerWork, _ := json.Marshal(v.OwnerWork)
 	if len(v.OwnerWork) == 0 {
 		ownerWork = json.RawMessage("[]")
@@ -441,7 +449,10 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	if v.Waits != nil {
 		waits, _ = json.Marshal(v.Waits)
 	}
-	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, SupervisorSource: v.SupervisorSource, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
+	if v.Investigation != nil {
+		investigation, _ = json.Marshal(v.Investigation)
+	}
+	return db.TodoSupervisionRow{TodoID: todoID, InvestigationFindings: investigation, Supervisor: v.Supervisor, SupervisorSource: v.SupervisorSource, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
 		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, OwnerWork: ownerWork,
 		PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, UpdatedAt: v.UpdatedAt}
 }
@@ -625,8 +636,11 @@ func (s *Service) updateSupervisionGuardedLockedAt(ctx context.Context, id strin
 }
 
 // noteProgress keeps p as supervised task id's progress (in memory, no ledger write: see Supervision.Progress) and
-// tells the apps; false when id is no supervised task.
+// tells the apps; false when id is no supervised task or p is a legacy startup notice.
 func (s *Service) noteProgress(ctx context.Context, id string, p TaskProgress) bool {
+	if isCodexRouteProgress(&p) {
+		return false
+	}
 	s.todos.mu.Lock()
 	cur := s.todos.todos[id]
 	ok := cur != nil && cur.Supervision != nil

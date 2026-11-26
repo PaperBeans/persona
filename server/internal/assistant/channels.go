@@ -75,6 +75,8 @@ type channelsBook struct {
 	st       channelsState
 	stLoaded bool
 	live     map[string]*chanLive // run id -> its live progress (not persisted)
+	// A topic tool can arrive before the node acknowledges the message that prompted it.
+	topicStarting map[string]chan struct{}
 	// answered: conversation -> when its last run was answered (no "finished" push, no mirror for it)
 	answered map[[2]string]time.Time
 	// notified: channel + conversation (machine, session) -> when its notify_user copy arrived

@@ -28,6 +28,7 @@ import (
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -55,6 +56,9 @@ type nodeStateStore interface {
 
 // Options are what Devices needs from the manager it runs in.
 type Options struct {
+	// Edition is the edition this manager was built as (update.Build.Edition; the zero value is the full build): the
+	// only release manifests it reads, and the only edition of node build it fetches (packages.go).
+	Edition nodeproto.Edition
 	// ProjectState lets the owning manager retain transport identities independently of computers.
 	ProjectState func(devicewire.States) devicewire.States
 	// PackageHub supplies the bound address, TLS transport and manager credential for confirmed development packages.

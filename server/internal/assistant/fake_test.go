@@ -1717,7 +1717,7 @@ type told struct {
 
 // launcherAgent is the agent a launcher starts in these tests: the one its name starts with, else claude.
 func launcherAgent(name string) string {
-	for _, other := range []string{"codex", "gemini"} {
+	for _, other := range []string{"codex", "gemini", "traex"} {
 		if strings.HasPrefix(name, other) {
 			return other
 		}

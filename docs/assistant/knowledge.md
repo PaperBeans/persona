@@ -270,7 +270,7 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
    Any other failure puts the chat off for 10 minutes, doubled with each failure in a row up to 6 hours (`compress_failures` / `compress_retry_at` in `meta.json`, cleared on success);
    a paused model connection, or no model set up for it, does not count: the chat stays due without a log line of its own, and the round's compression stops there (#10435; before, no model counted as a failure of each chat, put it off up to 6 hours and logged a line for each). Before this, a chat whose batch the model refused was sent again every round, every two minutes for days.
 3. **Evolution (evo)**: merge projects mentioned in compression into `projects/` (names or aliases equal after stripping punctuation and case are merged; otherwise create), append progress to `log.md`
-   and mark dirty. Only aliases belonging to this project are accepted: names / aliases of other unmerged projects, single characters or two-letter abbreviations, and generic terms are rejected; at most 12 automatic aliases per project
+   and mark dirty. A chat the user holds to no project (`held_off_projects` in its `meta.json`, below) is not linked into any of them, nor are its people; its progress is still logged (before, it was linked again into every project it named that had not excluded it). Only aliases belonging to this project are accepted: names / aliases of other unmerged projects, single characters or two-letter abbreviations, and generic terms are rejected; at most 12 automatic aliases per project
    (#2546: previously, several projects accumulated hundreds of aliases after a week and crossed into each other). Manual aliases from `kb_update` have no limit; `remove_aliases` deletes them. If several unmerged projects match a name,
    exact names outrank aliases; ties use most recently updated, not directory order.
    Aliases collected before these rules are pruned when the knowledge base opens (`PruneProjectAliases`): another unmerged project's name or slug, the project's own name, repeats, generic ones,
@@ -668,6 +668,45 @@ The flow the tool descriptions ask for: list the plan, show it, apply the owner'
 Replies go through `server/internal/i18n/locales/*/assistant-kb_history.json`; with `kb.history` off the tools say so and ask no connector anything. In the health space only
 `kb_history_status` works: the others change what goes into the knowledge base.
 
+### Lark minutes and documents (`kb.lark_minutes`, 2026-11-21)
+
+The manager can bring the owner's Feishu / Lark **meeting minutes** and **document titles** into the knowledge base
+through `lark-cli` on the manager's computer, with the adapter the Lark connector uses (`server/internal/larkcli`,
+`server/internal/assistant/kblark`). It runs in the archive lane (`kb_lark.go`), inside the manager process — not as an
+external timer — and is **off by default**.
+
+What it does, each run:
+
+- **Minutes**: `minutes +search --participant-ids me` over `since_days` (default 30; at most 20 pages of 30), then
+  `minutes +detail --summary --todo --chapter` for a minute whose note is not there yet. Each minute becomes one
+  `meetings/lark-minutes-<token>` item: `Title` from the first line of `display_info`, `URL` from `app_link`, `At` from
+  the start time in `description` (read in the archive's zone), `Where` `lark-cli`, `Source` `larkcli`. The note keeps
+  one line of the summary, the first three to-dos and the first five chapter titles — **never the transcript**.
+- **Document titles**: documents under `docs/` with no title whose link is a Lark / Feishu one get it from
+  `drive +inspect` (at most 10 a run). The title is written and the document is listed by `GET /api/v1/kb/docs`.
+- **Document discovery** (`doc_search`, empty: off): each keyword's first `docs +search` page becomes `docs/<token>`
+  items, through the same selection rules as the connectors' documents.
+
+De-duplication and user edits: a minute's id is its token, so a re-import updates the item rather than adding one.
+What the source does not send (tags, projects, first seen) is kept, the item is tagged again, and a note already there
+— the owner's or an earlier run's — is never overwritten. A note the import writes is locked (`locked_fields: note`),
+so item tagging does not replace it; `kb_update` still can.
+
+Scheduling and failures: `interval_minutes` (default 60) is the least time between two runs. A missing or failing
+`lark-cli` (not installed, not signed in, no permission, timeout) is logged and the round goes on; nothing else waits
+for it. A minute whose detail cannot be read is stored without a note and retried next run. Read-only mode skips the
+import entirely. `binary` sets lark-cli's path when it is not on the service's `PATH` (the adapter also tries the login
+shell's `PATH`, where npm global installs live), and `profile` names a lark-cli profile (empty: its default one).
+
+Enable it in the built-in manager's `manager.json` and restart the manager
+(`systemctl --user restart persona-manager-assistant`; the hub restarts it with the hub too):
+
+```json
+"kb": {
+  "lark_minutes": { "enabled": true, "since_days": 30, "interval_minutes": 60 }
+}
+```
+
 ### Time zones
 
 Archive dates and times (daily files, each line's "- 15:04", timeline "- 2006-01-02 15:04", Moments timestamps) are in the user's local time. The user's timezone is the one reported by the phone to assistant settings
@@ -868,13 +907,15 @@ The manager's `manager.json` (`~/.persona/managers/assistant/manager.json` for t
   "attachment_days": 30,
   "attachment_days_by_source": { "<source>": 3650 },
   "history": { "enabled": false, "sources": { "<connector id>": { "profile": "careful" } } },
+  "lark_minutes": { "enabled": false, "since_days": 30, "interval_minutes": 60, "doc_search": [] },
   "ai": { "base_url": "<gateway address>", "api_key_file": "<key file>", "model": "<model>" }
 }
 ```
 
 If `kb.ai` is omitted, use `inbox.triage_ai`, then `ai`. `attachment_days_by_source` overrides `attachment_days` for the sources it names; both are capped at `text_days`
 ("History import" above), so a source whose images are imported for years needs `text_days` that long too.
-`kb.history` turns on the history import (off when missing; `docs/operations/config.md`). `enabled: false` disables everything. Only the manager reads this section ("Who owns what" above; the hub neither reads it nor hands it over), and its model configuration takes `kb.ai` as the default for the `kb.*` purposes.
+`kb.history` turns on the history import (off when missing; `docs/operations/config.md`). `kb.lark_minutes` turns on the Lark minutes and document-title import ("Lark minutes and documents" above; off when missing).
+`enabled: false` disables everything. Only the manager reads this section ("Who owns what" above; the hub neither reads it nor hands it over), and its model configuration takes `kb.ai` as the default for the `kb.*` purposes.
 
 <a id="扩展整理知识库1908"></a>
 
@@ -921,6 +962,7 @@ Removing one wrong person or chat used to lock the **whole** list on both entrie
 - **Extensions** cannot make an excluded link: `kb.update` drops it from `people` / `chats` / `projects`, applies the rest, and names it in `ignored`. An extension's own removals exclude nothing.
 - **Linking again by hand** lifts the exclusion on both entries. `allow_people` / `allow_chats` / `allow_projects` (user paths only: HTTP `PUT` and `kb_update`) lift it without linking, so Persona may link it again on its own. They follow the kind's lists (projects: people, chats; chats: people, projects; people: chats, projects; docs, meetings, events and recordings: projects); others land in `ignored`.
 - **Whole-list lock**: `lock_lists: true` also locks the lists a removal touches, on both entries (`locked_fields`), as before. `lock_lists: false` keeps out only the removed link. Unset, a removal locks as `lock` says (unset or `true` locks): what older clients asked for, so they keep getting it. The web, iPhone, iPad and assistant `kb_update` send `false` unless the user asks for the lock. Existing `locked_fields` keep their meaning; nothing is migrated.
+- **Held to no project**: the user's removal from a chat's own side that locks its lists (`lock_lists: true`, or unset with `lock` unset or `true`) and leaves it no project sets `held_off_projects` on the chat. It applies only while the chat's `projects` stay locked: compression links the chat into none of the projects it names, new ones included, and adds none of its people (Evolution above); a project it names still gets the progress logged. The user linking a project to it by hand (from either side) or allowing one again (`allow_projects`, or `allow_chats` on a project) clears it; an extension's link (`kb.update`) does not. A lock alone does not hold a chat: linking by hand locks by default, and a removal with `lock_lists: false` leaves that lock, so such a chat is still linked into new projects. Automatic writes keep the flag.
 - **Detail**: `GET /api/v1/kb/{kind}/{id}` (and `kb.get`) adds `removed`, the excluded links named as `links` are, for the app to list with Allow again.
 - **Merges** keep what the user removed from either project off the kept one, both ways, unless the kept project links it; the merge record (`merge.excluded`) lets an unmerge give it back. Forgetting a source drops its ids from `excluded` too.
 
@@ -1095,7 +1137,7 @@ and a disabled knowledge base (`kb.enabled: false`) returns 503 as before.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/v1/kb/{kind}?tag=` | Sorted list (`items`) and common tags (`tags`); kind is projects / chats / people / docs / meetings / events / recordings / topics (topics: the most points first, `extra` is the count; docs, meetings and events: `extra` is the link and `source` the connector that supplied it, #8872) |
-| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages, a topic's `points`, the links the user removed as `removed`); projects also include `agents` |
+| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages, a topic's `points`, the links the user removed as `removed`); projects also include `agents`; a chat also `inbox`, its Inbox items ("A chat's Inbox items" below) |
 | `PUT /api/v1/kb/{kind}/{id}` | Edit (fields as in `kb_update`); create a project if absent |
 | `DELETE /api/v1/kb/projects/{id}` | Soft-delete a project ("Deleting a project" above); returns its trash entry (`id`, `kind`, `slug`, `name`, `deleted_at`, `unlinked`); 404 for unknown or merged projects |
 | `DELETE /api/v1/kb/recordings/{id}` | Delete a stored recording (files, index row, project links; a tombstone stays for `recording_audio_days`); `{"deleted": bool}`, `false` when there was none; 400 for an id that is no UUID. The knowledge base's own route: it answers with or without the recording module ("Recordings without the recording module" above) |
@@ -1108,6 +1150,50 @@ and a disabled knowledge base (`kb.enabled: false`) returns 503 as before.
 | `GET /api/v1/kb/moments/{id}` | One archived Moments post (`post`, `markdown`: body + all comments), opened from a project's Related Moments |
 | `GET /api/v1/kb/chats/{id}/context` | What the knowledge base knows about a chat (`chat_id`, `chat_name`, `kind`, `summary`, first three projects as `projects: [{name, summary}]`), same context the hub puts in prompts; read-only, used by plugin /agent (#1484) |
 | `GET /api/v1/kb/chats/{id}/days/{day}` | All messages for a chat day (`messages[].n` is the file line number), and neighboring days with messages (`prev` / `next`) |
+
+## A chat's Inbox items
+
+A chat's page leads to the Inbox items that came from it, and an item leads back to the chat's page (#15356,
+`assistant/kb_inbox.go`). Neither side keeps a message id, so a message is matched on its time, sender and text.
+
+- **Which items**: an item is a chat's when its connector and thread are the chat's `connector` (in an older file, its
+  `source`) and `source_id`, whatever the connector, or when the chat is the one the AI twin reads for it (`kbChatOf` in
+  `assistant/inbox_agent.go`: a Feishu chat, a mail correspondent, a subscription's thread). The chat's `connector` is the
+  connector that wrote it whatever name it is filed under, its id or one of its manifest's archive sources, so a chat
+  filed under an archive source counts too. Nothing else relates an Inbox thread to an archive chat of another id. A row
+  merged into another counts for the one it was merged into, which is the row the Inbox lists: that one is listed on the
+  chat of each row it stands for, and on each it holds the messages the row of that chat received (a merged row keeps its
+  own chain and its source keeps collecting into it). An item the source visibility boundary quarantined
+  (`visibility_excluded`, [inbox.md](inbox.md) ("One item = one row")) is listed too, as the Inbox lists it: that boundary
+  keeps a chat's content from collection and the AI, not from the owner, and this page asks no model.
+- **`GET /api/v1/kb/chats/{id}`** adds `inbox`: the chat's items as the Inbox list has them (with `sources=all`: the open ones
+  and the done ones the list still carries), the open ones first, each group newest first, at most 50. Each has `id`,
+  `title`, `tier`, `status` (an open item's section), `summary`, `preview`, `updated_at`, `done_at` and `messages`: the rows
+  of the page's `recent` that it holds, each as `{day, line}`, the row's lines exactly as `recent` has them, so a client
+  finds the row by reading `line` as it reads `recent`. A row is an item's when its sender and text are a message the
+  item's chain received (a message the chain cut, ending in "…", by its start; spacing aside) and its minute, in the
+  chat's zone, is that message's own time or, for a message the chain keeps without one, within its batch: from the
+  received entry before it (the item's start for the first) to its own entry. A row goes to the newest item that holds it.
+  A chat with no items has no `inbox`.
+- **`GET /api/v1/inbox/{id}`** adds `kb_chat: {id, path}` when the knowledge base has the item's chat: the one its
+  connector archives the thread under (`<connector>-<thread>`, else a chat ending in `-<thread>` that it wrote under an
+  archive source) or the one the AI twin reads; `path` is its page
+  (`deeplink.KnowledgeEntry`). Not in the Inbox list: the apps read it when an item is opened.
+- **Who gets them**: only the user's own apps (a full-access device). An extension's token reads the knowledge base and
+  the Inbox by its own scopes (`kb.read`, `inbox.read`), so neither route tells it about the other; the watch reads
+  neither.
+- **The web**: a chat's page shows **In Inbox** with the open items (title, summary, tier pill, time), the done ones folded
+  under **N done**, each opening its item, and a row of its last 7 days that an item holds opens that item
+  (`web/src/views/knowledge/KBInbox.tsx`); an item's page has **Knowledge page** (`web/src/views/inbox/InboxKBChat.tsx`).
+  Both write their links with the route table's builder (`web/src/lib/deep-links.ts`).
+- **The iPhone** (`apple/Persona/Views/Knowledge/KBChatInbox.swift`, `apple/Persona/Views/Inbox/InboxKBChat.swift`): the
+  same **In Inbox** section on a chat's page, the done ones folded under **N done**, and in **Messages from the Last 7
+  Days** a row an item holds opens that item, drawn as a link with an Inbox mark at its end; the text is drawn as before when no item
+  holds a row. An item opens in the Inbox as a link to it does (`/inbox/<id>`, [deep-links.md](../protocol/deep-links.md)),
+  naming the Inbox list's own stamp of it; a chat's page in a sheet closes first, and while the hub's navigation hides
+  the Inbox page the section and the row marks are left out. An item's **More** menu has **Knowledge Page** when its read
+  names a chat, for an item of the current assistant, opening that chat's page over the item as a link to it does.
+  Details in [ios.md](../apple/ios.md) ("A chat's Inbox items").
 
 ## Search
 

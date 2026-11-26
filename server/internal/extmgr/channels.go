@@ -265,7 +265,7 @@ func (h *Manager) feishuChannelFromBotView(ctx context.Context, v feishuBotView)
 		{ID: "reports", On: f.Reports}, {ID: "board", On: f.Board}, {ID: "only_conclusions", On: f.OnlyConclusions},
 		{ID: "report_steps", On: f.ReportSteps}, {ID: "answer_new_card", On: f.AnswerNewCard},
 		{ID: "topic_cot", On: f.TopicCot}, {ID: "workbench", On: f.Workbench},
-		{ID: "read_group", On: f.ReadGroup},
+		{ID: "read_group", On: f.ReadGroup}, {ID: "read_group_direct", On: f.ReadGroupDirect},
 	}
 	for i := range out.Features {
 		id := out.Features[i].ID
@@ -508,7 +508,7 @@ func (h *Manager) configureFeishu(ctx context.Context, enabled *bool, features m
 		for id, on := range features {
 			switch id {
 			case "main", "cards", "all_cards", "pushes", "sync", "agents", "reports", "board", "workbench",
-				"only_conclusions", "report_steps", "answer_new_card", "topic_cot", "read_group":
+				"only_conclusions", "report_steps", "answer_new_card", "topic_cot", "read_group", "read_group_direct":
 				patch[id] = on
 			default:
 				return errors.New(i18n.T(h.botLang(ctx), "hub-channels.no_feature", i18n.Args{"feature": id}))

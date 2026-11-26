@@ -40,6 +40,38 @@ function askPermission(sessionId, toolCallId, toolCall = { title: 'run_command',
   return id
 }
 
+function askElicitation(sessionId, toolCallId, params = {}) {
+  const id = `elicit-${nextId++}`
+  record({ askedElicitation: id, sessionId })
+  send({
+    jsonrpc: '2.0',
+    id,
+    method: 'elicitation/create',
+    params: {
+      sessionId,
+      toolCallId,
+      mode: 'form',
+      message: 'The agent has a question.',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          q1: {
+            type: 'string',
+            title: 'Pick a fruit',
+            oneOf: [
+              { const: '1', title: '(Recommended) Apple' },
+              { const: '2', title: 'Banana' },
+            ],
+          },
+          q1_other: { type: 'string', title: 'Other', description: 'Optional free-form answer to: Pick a fruit' },
+        },
+      },
+      ...params,
+    },
+  })
+  return id
+}
+
 function endIfDone(sessionId) {
   const turn = turns.get(sessionId)
   if (!turn || !turn.cancelled || turn.open.size > 0) return
@@ -104,6 +136,11 @@ function onRequest(msg) {
         } else {
           turn.open.add(askPermission(sessionId, 'call-1', toolCall, options))
         }
+      }
+      if (mode.startsWith('elicit ')) {
+        const { toolCallId = 'elicit-call-1', params: elicitParams, endOnAnswer = true } = JSON.parse(mode.slice('elicit '.length))
+        turn.endOnAnswer = !!endOnAnswer
+        turn.open.add(askElicitation(sessionId, toolCallId, elicitParams))
       }
       if (mode === 'updates' || mode === 'unrelated-updates') {
         let count = 0

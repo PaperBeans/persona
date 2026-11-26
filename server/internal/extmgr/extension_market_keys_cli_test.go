@@ -143,7 +143,7 @@ func TestExtensionMarketKeyArgs(t *testing.T) {
 		{[]string{"market", "key", "add", "m", "ed25519:a", "extra"}, false},
 		{[]string{"market", "key"}, false},
 	} {
-		if err := checkExtensionArgs(c.args); (err == nil) != c.ok {
+		if _, err := checkExtensionArgs(c.args); (err == nil) != c.ok {
 			t.Errorf("%v: %v", c.args, err)
 		}
 	}

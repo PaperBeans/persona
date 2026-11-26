@@ -1,4 +1,7 @@
 {
+  "to_decide": "待选择",
+  "previous_decision": "上一张卡片",
+  "next_decision": "下一张卡片",
   "workspace": "工作区",
   "workspace_new": "新建",
   "workspace_existing": "使用已有",
@@ -16,6 +19,9 @@
   "tray_empty_parked": "没有搁置中的事",
   "tray_review": "等 Persona 验收",
   "tray_empty_review": "没有等 Persona 验收的任务",
+  "tray_verify": "待验收",
+  "tray_empty_verify": "没有待你验收的任务",
+  "verify_pass": "通过",
   "tray_finished": "已完成",
   "pr_blocker_review_required": "需要审查",
   "pr_blocker_changes_requested": "需要修改",

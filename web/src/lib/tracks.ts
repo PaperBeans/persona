@@ -273,6 +273,7 @@ let state: TracksState = { tracks: null, supported: null };
 const listeners = new Set<() => void>();
 let loading: Promise<void> | null = null;
 let helloOff: (() => void) | null = null;
+let visOff: (() => void) | null = null;
 
 function set(next: TracksState) {
   state = next;
@@ -303,14 +304,21 @@ function subscribe(l: () => void) {
   listeners.add(l);
   if (listeners.size === 1) {
     if (state.supported === null) void loadTracks();
-    // read again on every hello: one that failed while the hub was away, or tracks another device changed
+    // read again on every hello or return to foreground: one that failed while the hub was away, or tracks another device changed
     helloOff ??= onHubEvent("hello", () => void loadTracks());
+    if (!visOff && typeof document !== "undefined") {
+      const onVis = () => { if (document.visibilityState === "visible") void loadTracks(); };
+      document.addEventListener("visibilitychange", onVis);
+      visOff = () => document.removeEventListener("visibilitychange", onVis);
+    }
   }
   return () => {
     listeners.delete(l);
     if (!listeners.size) {
       helloOff?.();
       helloOff = null;
+      visOff?.();
+      visOff = null;
     }
   };
 }
@@ -338,6 +346,8 @@ export function useTrackTitle(slug: string): string {
 export function resetTracksForTest() {
   helloOff?.();
   helloOff = null;
+  visOff?.();
+  visOff = null;
   loading = null;
   listeners.clear();
   state = { tracks: null, supported: null };

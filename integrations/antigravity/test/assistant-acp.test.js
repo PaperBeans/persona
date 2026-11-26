@@ -9,8 +9,11 @@ import { fileURLToPath } from 'node:url'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { toAgyId } from '../lib/map.js'
 import { createAgyRuntime } from '../lib/runtime.js'
+import '../lib/prompt-order.js'
 
 const fake = fileURLToPath(new URL('./fake-acp-policy.mjs', import.meta.url))
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB9sAAAAASUVORK5CYII='
+const BAD_PNG = Buffer.from(PNG, 'base64').subarray(0, 8).toString('base64')
 
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-isolation-'))
@@ -53,6 +56,35 @@ test('Assistant context is embedded data, never a slash command appended to the 
   await call('send', session, { assistant: true, text: '/compact' })
   await until('manual command completed', () => calls().filter((entry) => entry.ended === toAgyId(session)).length === 3)
   assert.deepEqual(request('session/prompt', session).params.prompt, [{ type: 'text', text: '/compact' }])
+})
+
+test('agy workflow commands keep their first text block at byte 0 and put context resources last', async (t) => {
+  const { calls, start, call, request } = await fixture(t)
+  const session = await start({ assistant: true })
+  const snapshot = '<persona-context>\ncontext for the workflow\n</persona-context>'
+
+  await call('send', session, {
+    assistant: true,
+    text: ' \t/boost fix the race\nkeep the body',
+    context: snapshot,
+    images: [
+      { mime: 'image/png', data: PNG },
+      { mime: 'image/png', data: BAD_PNG },
+    ],
+  })
+  await until('workflow prompt completed', () => calls().some((entry) => entry.ended === toAgyId(session)))
+  const blocks = request('session/prompt', session).params.prompt
+  assert.deepEqual(blocks.map((block) => block.type), ['text', 'image', 'text', 'resource'])
+  assert.equal(blocks[0].text, '/boost fix the race\nkeep the body')
+  assert.match(blocks[2].text, /incomplete or damaged/)
+  assert.deepEqual(blocks[3].resource.text, snapshot)
+
+  await call('send', session, { assistant: true, text: '/tmp/report.md', context: snapshot })
+  await until('path prompt completed', () => calls().filter((entry) => entry.ended === toAgyId(session)).length === 2)
+  assert.deepEqual(request('session/prompt', session).params.prompt, [
+    { type: 'resource', resource: { uri: 'persona-context:///snapshot.txt', mimeType: 'text/plain', text: snapshot } },
+    { type: 'text', text: '/tmp/report.md' },
+  ])
 })
 
 test('plain Assistant snapshots are wrapped as resource content without changing user whitespace', async (t) => {

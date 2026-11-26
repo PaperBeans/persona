@@ -10,6 +10,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExt
 import { ApiError, credentialOwner, errorText, getToken, onCredentialChange } from "../../lib/api";
 import { extIdOf } from "../../lib/extension-api";
 import { openLink } from "../../lib/links";
+import { openTargetOf } from "../../ui/AssistantCard";
 import {
   actUI, fieldValues, httpOnlyUI, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
   type UIAction, type UIContext, type UIFilter, type UIItem, type UIMore, type UIPage, type UIPlace, type UIPush, type UISearch, type UITabs, type UIView,
@@ -590,6 +591,12 @@ export function LegacyExtensionUI({
 
   // resolves to whether the action was done: false when it did not go (a field not a number) or failed
   const run = async (action: UIAction, extra?: Record<string, string>): Promise<boolean> => {
+    // A full page may open an existing Persona session or to-do (#14617): route locally, like an assistant card.
+    // The hub only keeps session and task targets on extension pages; other forms still go through ui.action.
+    if (action.open) {
+      openTargetOf(action.open, linkManager);
+      return true;
+    }
     if (action.push) {
       push(action.push);
       return true;

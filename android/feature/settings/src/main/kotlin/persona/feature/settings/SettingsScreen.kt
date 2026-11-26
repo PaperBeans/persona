@@ -492,6 +492,7 @@ private fun SettingsPageContent(
             machines = services.machines.takeUnless { services.demo }, attempts = services.pairingAttempts,
             mainReadiness = services.readiness.takeUnless { services.demo }, skipWelcome = true)
         "capsule" -> CapsuleSettingsPage(services.capsule, back)
+        "digital-assistant" -> DigitalAssistantSettingsPage(services.digitalAssistantModel, connection, services.demo, back)
         "knowledge-selection" -> KnowledgeSelectionPage(knowledgeSelection, connectorsService, back)
         // The current assistant's computers alone: their Claude Code / Codex / Antigravity settings.
         "claude" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, owns = { assistant.ownsOn(it.id, it.manager) })

@@ -52,6 +52,14 @@ The app and its tray use the Persona helper, the same art as the iPhone, Mac and
 
 `desktop/src/tray-icon.ts` picks the tray file by platform; `desktop/scripts/copy-assets.mjs` copies `src/assets` into `dist/assets`. `desktop/test/icons.test.ts` checks every file is there at its sizes and that `electron-builder.yml` names the app icons. The taskbar's Needs-you overlay stays the plain dot in `src/badge-art.ts`.
 
+## Unified macOS titlebar
+
+On macOS (`#16607`), the main window uses `titleBarStyle: "hiddenInset"` with `trafficLightPosition: { x: 14, y: 19 }` so the traffic lights sit inside the same surface rather than above a separate OS title bar strip:
+
+- **Expanded sidebar**: displays the 44 px window drag strip at the top of the sidebar column; the main inset card keeps standard rounded corners.
+- **Collapsed rail / hidden sidebar**: the web shell activates a 44 px co-linear Apple G2 continuous-curvature control bay (`web/src/lib/mac-chrome.ts`, `web/src/views/MacChrome.tsx`) holding the sidebar expand button and quick search right beside the traffic lights, keeping the header's 45 px divider co-linear with the bay floor across Settings and list pages. Fullscreen retracts the bay and restores standard rounded corners.
+- **Bridge and opt-in Liquid Glass**: `windowChrome`, `onWindowChromeChange` and `setSurfaceStyle` are optional additive v1 methods on `DesktopBridge`. Default appearance stays opaque; when the user chooses **Liquid Glass** under Settings › Advanced › Appearance, the Electron shell enables `under-window` macOS vibrancy cleanly and restores solid backing when switched back to **Default**. Older shells without those methods keep plain frame behavior automatically.
+
 ## Island at the MacBook notch
 
 On a Mac the desktop app can show the Agents' state at the notch (#7669), as the iPhone shows it in the Dynamic Island

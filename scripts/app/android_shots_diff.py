@@ -19,6 +19,7 @@ import fnmatch
 from io import BytesIO
 import struct
 import sys
+from tempfile import NamedTemporaryFile
 import zlib
 from pathlib import Path
 
@@ -111,8 +112,17 @@ def write_png(path, width, height, rgba):
 
     def chunk(kind, body):
         return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xffffffff)
-    path.write_bytes(PNG_SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
-                     chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+    data = (PNG_SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+    temporary = None
+    try:
+        with NamedTemporaryFile(dir=path.parent, prefix=".screenshot-diff-", delete=False) as output:
+            temporary = Path(output.name)
+            output.write(data)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def compare(before, after, tolerance=0, ignored=()):
@@ -175,6 +185,8 @@ def main():
     names_before = {p.name for p in args.before.glob("*.png")}
     names_after = {p.name for p in args.after.glob("*.png")}
     if args.diff:
+        if args.diff.resolve() in (args.before.resolve(), args.after.resolve()):
+            parser.error("--diff 不能指向原始截图目录")
         args.diff.mkdir(parents=True, exist_ok=True)
     same, different, unreadable = [], [], []
     for name in sorted(names_before & names_after):

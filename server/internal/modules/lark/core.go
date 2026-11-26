@@ -35,6 +35,8 @@ type turns struct {
 	handoff *handoffBook
 	// detached are the cards closed when their node went away (asks.go).
 	detached detachedCards
+	// held are the /read answers held for the owner (read_held.go).
+	held readHeldBook
 	// board, wb and comp are the standing board (board.go), the pinned workbench (workbench_pin.go) and the
 	// companion bots' notices (companions.go), each with its own lock.
 	board standingBoard
@@ -165,6 +167,10 @@ const readChatKey = "read_chat"
 
 // readRun: the run answers a "/read" in a group.
 func readRun(ext map[string]string) bool { return ext[readChatKey] != "" }
+
+// readDirectKey is set ("1") on a /read's run asked with the read_group_direct switch on: its answer goes straight
+// into the group. Without it the answer is held for the owner (read_held.go, #14437).
+const readDirectKey = "read_direct"
 
 // cloneExt is a copy of a run's channel values.
 func cloneExt(m map[string]string) map[string]string {

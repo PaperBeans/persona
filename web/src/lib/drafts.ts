@@ -24,6 +24,9 @@ export interface CommentImage extends DraftImage {
   id: string;
 }
 
+/** A selection without a saved quote can supply its id when the first picture is ready. */
+export type CommentImagePicker = (target: string | (() => string | undefined), files: File[], signal: AbortSignal) => Promise<void>;
+
 /** What "Quote" holds above the input: the quoted words, who said them, when; for a task's card, which task. */
 export interface DraftQuote {
   text: string;

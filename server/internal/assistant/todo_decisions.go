@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/agentprompt"
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -100,6 +101,12 @@ func (s *Service) todoDecisionRoutes() {
 		if err := decisionOrigin(r, &row, strings.TrimSpace(in.Source), strings.TrimSpace(in.Ref)); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
+		}
+		if fullRole(r) && row.Source == db.DecisionManual &&
+			strings.HasPrefix(row.Question, findingDropQuestionPrefix) && row.Choice == "Drop" {
+			// A model can relay an answer and write a manual decision, but this
+			// provenance is minted only for a direct owner-app decision.
+			row.SourceMessage = findingOwnerDecisionPrefix + row.ID
 		}
 		if row.Question == "" || row.Choice == "" {
 			apierr.Write(w, http.StatusBadRequest, errors.New("question and choice cannot be empty"))
@@ -509,11 +516,17 @@ func contextText(s string) string {
 // withTodoDecisions puts the todo's and its continuation ancestors' decisions before text handed to an agent;
 // text as it is without any.
 func (s *Service) withTodoDecisions(ctx context.Context, todoID, text string) string {
+	return s.withTodoDecisionsForAgent(ctx, todoID, "", text)
+}
+
+// withTodoDecisionsForAgent is withTodoDecisions for a known agent kind. An agy workflow
+// command keeps its body at byte 0 and receives the decisions after it.
+func (s *Service) withTodoDecisionsForAgent(ctx context.Context, todoID, agent, text string) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
 	if c := s.todoHandoffDecisionsContext(ctx, todoID); c != "" {
-		return c + "\n\n" + text
+		return agentprompt.WithContext(agent, text, c)
 	}
 	return text
 }

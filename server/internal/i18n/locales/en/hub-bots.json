@@ -8,6 +8,7 @@
   "cannot_reach_app": "Can't reach this app: {error} (check the App ID / App Secret, and turn on the bot capability for the app in the developer console)",
   "topic_chats_many": "At most {n} group chats can be turned on",
   "topic_chat_bad": "A group chat's id is empty, has spaces, or is listed twice",
+  "topic_todo_mode_bad": "Choose a valid to-do setting for this group",
   "topic_chat_home_many": "Only one group chat can be the home topic group",
   "topic_needs_owner": "Pair the bot first: the group chats are the owner's list",
   "topic_chats_new_app": "Send the group chats in a separate request: a new App ID unpairs the owner",

@@ -156,6 +156,12 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		s.signal(superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v), Detail: detail})
 		return
 	}
+	if st == reviewNeedsUser && c.Verdict != verdictNeedsUser {
+		// The owner's decision is still open, but its agent went on and ended another turn: what it found may answer
+		// or replace the question (#14899). An owner wait was told as one above (noteOwnerWait).
+		s.needsUserAgentTurn(ctx, t, c, err)
+		return
+	}
 	if st == reviewNeedsUser || st == reviewParked {
 		return // the supervisor knows it waits: for the user, or parked until its time (parked.go)
 	}
@@ -293,6 +299,18 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	}
 	s.forgetSupervisePending(keys...)
 	b.mu.Unlock()
+	if t.Supervision != nil && t.Supervision.Investigation != nil {
+		// A new working turn needs its own declaration. Older findings remain in the ledger.
+		if _, _, err := s.updateSupervisionGuarded(ctx, t.ID, func(cur Todo) bool { return cur.DoneAt == nil }, func(v *Supervision) bool {
+			if v.Investigation == nil || v.Investigation.Stale || v.Investigation.Version == 0 {
+				return false
+			}
+			v.Investigation.Stale = true
+			return true
+		}); err != nil {
+			s.logf("task %s: invalidate investigation review: %v", t.ID, err)
+		}
+	}
 	if st := t.Supervision.state(t); st != reviewPending && st != reviewParked && st != reviewTimedOut && st != reviewClosing && (t.Supervision == nil || t.Supervision.Waits == nil) {
 		return
 	}

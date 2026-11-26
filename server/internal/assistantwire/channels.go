@@ -43,7 +43,9 @@ const (
 	// EventSessionItems and EventSessionDelta: SessionItems / SessionDelta, one way: a conversation the assistant
 	// follows (DeviceSessionFollow) has new items, or is writing text.
 	EventSessionItems = "session.items"
-	EventSessionDelta = "session.delta"
+	// EventInlineViewPage carries candidate cards from a transcript page the hub read for an app (SessionItems).
+	EventInlineViewPage = "session.inline_view_page"
+	EventSessionDelta   = "session.delta"
 	// EventFeishuOwner: FeishuOwner, one way: the Feishu bot was paired with its owner, or unpaired.
 	EventFeishuOwner = "feishu.owner"
 	// EventFeishuRecalled: FeishuRecalled, one way: the owner recalled a message in the bot's private chat.
@@ -359,6 +361,9 @@ type FeishuFeatures struct {
 	// ReadGroup: "@bot /read <task>" from the owner in a group reads the group before the task (#11803,
 	// FeishuFromRead).
 	ReadGroup bool `json:"read_group"`
+	// ReadGroupDirect: a /read's answer goes straight into the group under the owner's message. Off: it goes to the
+	// owner's private chat first, and into the group only when the owner presses its button (#14437).
+	ReadGroupDirect bool `json:"read_group_direct"`
 }
 
 // FeishuStatus is feishu.status's answer.
@@ -380,6 +385,8 @@ type FeishuStatus struct {
 	// HomeChat is the home topic group (#6146): the opted-in group the owner marked with "/topics home", else the first
 	// one opted in; "" while none is. It is one of Chats. Where a request from a group that is not opted in opens its topic.
 	HomeChat string `json:"home_chat,omitempty"`
+	// TopicTodoModes holds the non-default to-do policies of opted-in groups, keyed by chat ID.
+	TopicTodoModes map[string]TopicTodoMode `json:"topic_todo_modes,omitempty"`
 	// NudgeAfter is the bot's setting nudge_after (#6084): minutes a card waits unanswered before the one nudge under it,
 	// 0 off. nil (a status from before the setting) is NudgeAfterDefault.
 	NudgeAfter *int `json:"nudge_after,omitempty"`
@@ -387,6 +394,25 @@ type FeishuStatus struct {
 	SourceReportDelayMinutes *int `json:"source_report_delay_minutes,omitempty"`
 	// SourceReportFullReply is the owner's opt-in to posting the task's final answer in its source group.
 	SourceReportFullReply bool `json:"source_report_full_reply,omitempty"`
+}
+
+type TopicTodoMode string
+
+const (
+	TopicAnswerOnly  TopicTodoMode = "answer_only"
+	TopicMainDecides TopicTodoMode = "main_decides"
+	TopicAlwaysTodo  TopicTodoMode = "always_todo"
+)
+
+func (m TopicTodoMode) Valid() bool {
+	return m == TopicAnswerOnly || m == TopicMainDecides || m == TopicAlwaysTodo
+}
+
+func (m TopicTodoMode) Effective() TopicTodoMode {
+	if !m.Valid() {
+		return TopicAnswerOnly
+	}
+	return m
 }
 
 // NudgeAfterDefault is nudge_after when never set: minutes a card of the Lark bot waits before it is nudged.

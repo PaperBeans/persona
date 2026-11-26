@@ -1,6 +1,6 @@
 {
   "title": "命名 herdr 会话",
-  "footer": "选择所选电脑上要从 Persona 中排除的命名 herdr 会话（herdr --session <name>）。屏蔽后，Persona 不再展示或采集其中的窗格、工作区、hook、授权卡片、运行中的进程和已记住的会话记录，herdr 本身继续运行。取消屏蔽即可重新显示。默认 server 与 persona-* 数据目录会话由系统自动管理。",
+  "footer": "在所选电脑上选择要从 Persona 隐藏的具名 herdr 会话（herdr --session <name>）。屏蔽后，Persona 不再显示其标签页、工作空间、钩子、审批卡片、运行中的进程和保存的对话记录，herdr 仍继续运行。取消屏蔽即可重新显示。默认服务和 persona-* 数据目录会话会自动管理。",
   "machine": "电脑",
   "session": "会话名",
   "placeholder": "agent",

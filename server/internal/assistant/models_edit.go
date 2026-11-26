@@ -82,6 +82,9 @@ func (s *Service) modelProviderCompatible(p ModelPurpose, v ModelProvider, store
 	if compat.Source(v.Source) == proto.SourceClaudeDesktop {
 		return p.ID == "agent.new" // a new session in Claude's desktop app: Agents' only (models_desktop.go)
 	}
+	if p.ID == purposeAgent && v.Kind == "launcher" && v.Agent == "traex" {
+		return false // Inbox execution uses assistant.send and requires origin-aware tools from process startup.
+	}
 	compatible := v.Kind == p.Kind
 	if p.Kind == "launcher" && v.Kind == "api" { // a direct Messages API provider starts Claude on its gateway (#2455)
 		compatible = messagesAPI(v.API)
@@ -180,6 +183,9 @@ func effortLevelsForKind(kind string) []string {
 // sentinel, without enabling minimal or ultra for Messages-backed HTTP launchers, Claude, Antigravity, or direct HTTP
 // API providers.
 func effortLevelsForPurpose(kind string, provider *ModelProvider, agent string) []string {
+	if kind == "launcher" && provider != nil && provider.Agent == "traex" {
+		return proto.CodexEffortLevels
+	}
 	if kind == "api" && provider != nil && provider.Kind == "launcher" && cmp.Or(agent, provider.Agent) == "codex" && (provider.Source != "persona" || !messagesAPI(provider.API)) {
 		return append(slices.Clone(proto.CodexEffortLevels), "off", "none")
 	}
@@ -266,11 +272,12 @@ func (s *Service) targetMachineLauncher(ctx context.Context, machine, name strin
 		}
 	}
 	// When the cached machine snapshot does not contain name (or machine is absent from the cache), query the live
-	// node through pickerLaunchers so newly added launchers on machine are validated against their real capabilities
-	// and hub.json overrides rather than falling back to a hub.json-only default or cross-machine provider union.
+	// node through pickerLaunchers (bypassing the positive cache and backfilling on success) so newly added launchers
+	// on machine are validated against their real capabilities and hub.json overrides rather than falling back to a
+	// hub.json-only default or cross-machine provider union.
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if live, err := s.pickerLaunchers(cctx, machine); err == nil {
+	if live, err := s.pickerLaunchers(withLauncherRefresh(cctx), machine); err == nil {
 		if l, ok := find(live); ok {
 			return l, true
 		}
@@ -443,7 +450,7 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 				if err := s.call(ctx, machine, assistantwire.DeviceLaunchersModelCheck, s.launcherParams(ctx, machine, strings.TrimPrefix(b.Provider, "launcher."), params), &result); err != nil {
 					return i18n.Err("assistant-models.err_check_model", i18n.Args{"error": i18n.Localize(err, s.requestCtxLang(ctx))})
 				}
-				if p.CategoryID == "agent.new" && result.Agent != "claude" && result.Agent != "codex" && result.Agent != "agy" && result.Agent != "omp" {
+				if p.CategoryID == "agent.new" && result.Agent != "claude" && result.Agent != "codex" && result.Agent != "agy" && result.Agent != "omp" && !(p.ID == "agent.new" && result.Agent == "traex") {
 					return i18n.Err("assistant-models.err_agent_launcher")
 				}
 				if p.ID == purposeMeetingRoom && result.Agent != "" && result.Agent != "claude" {

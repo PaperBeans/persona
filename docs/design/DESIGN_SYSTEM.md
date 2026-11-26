@@ -190,7 +190,7 @@ Needs you is blue on every client (`docs/design/DECISIONS.md`, 11-11). Android r
 | `ModeTone` (permission modes, #3719) | asks first: secondary ink; plans: teal `#0E7C86`/`#4FD1C5`; acts within limits (Auto-Edit, Auto): `Hue.purple`; allows everything: `danger`. None is an agent state's color | `apple/Shared/Design/Theme.swift` (`Theme.ModeTone`) |
 | `Shell` (same in every style) | composer `#FFFFFF`/`#1F1F21`, stroke `#E3E3E3`/`#3A3A3C`, ink `#0D0D0D`/`#F2F2F2`, segment `#E6E6E6`/`#3A3A3C`, drawer `#F9F9F9`/`#171717` | `apple/Shared/Design/Theme.swift:840-873` |
 | `ChatBox` | user `#E3EDFD`/`#1C2F47`, persona `#F0F0F3`/`#2A2A2E` | `apple/Shared/Design/ChatLayoutTokens.swift:18-23` |
-| `UsageColor` | input, output, cache write, cache read; color-blind checked; same on web. Web also has `--project-other`, By project's non-development projects (#16530, development takes the accent) | `apple/Shared/Design/UsageColor.swift:8-15`, `web/src/styles.css` |
+| `UsageColor` | input, output, cache write, cache read; color-blind checked; same on web. `projectOther` (web `--project-other`), By project's non-development projects (#16530, development takes the accent); a By project chart's other columns at `Theme.Heat.unpicked` (55%) | `apple/Shared/Design/UsageColor.swift:8-19`, `web/src/styles.css` |
 | `Syntax` | eight colors, each 4.5:1 on `codeBackground` | `apple/Shared/Design/Theme.swift:888` |
 
 Android mirrors `Shell`, `ChatBox` and the roles hex for hex (`android/core/designsystem/src/main/kotlin/persona/core/designsystem/HomeTokens.kt`).
@@ -244,7 +244,7 @@ Dynamic Type behavior:
 - The interface's cap is `Theme.interfaceLargestTypeSize` (`.xxxLarge`, section 6.2); reading content lifts it (`.readingContent()`). Named caps below it: `Theme.Shell.topBarLargestTypeSize` is `.xxxLarge` (`apple/Shared/Design/Theme.swift:865`), for the top bars and the Agents search field that rises into their row (#10165); `compactSwitchLargestTypeSize` is `.large`. Other caps are literal at the call site: `xxLarge` for a glyph inside a 44 pt button, `xLarge` for badges (DS-14).
 - Documented fixed-size exceptions: Dynamic Island (`apple/Shared/Design/IslandMetrics.swift`), watch face (`apple/Shared/Design/WatchFaceTokens.swift`), Lark rich content that carries sender sizes, and the browser sign-in number (`Theme.Font.signInNumber`, 64 pt rounded bold with fixed-width digits, `apple/Shared/Design/BrowserLoginTokens.swift`, #10293): two digits read off the iPhone to be typed in a browser, already far above the interface's cap at every size.
 
-Web Appearance also offers opt-in interface/code font choices (#10243), independent of text size. Reuse settings rows and native selectors; reveal a single installed-family field only for Custom. Both Default values preserve the original stacks, and resets restore each family independently. User choices precede theme defaults while retaining the existing CJK/symbol fallbacks. No remote fonts are added; terminal size and CJK width correction stay separate. Details: `docs/web/web.md`, “Theme color and text size”.
+Web Appearance offers interface and code font choices (#10243, #14456), independent of text size. The defaults use Hub-hosted Inter and JetBrains Mono for Latin characters and the existing fallback stacks for other glyphs. The reading serif preset applies to rendered prose, and the Georgia preset still applies to the interface. Reuse settings rows, native selectors, the switch, and the chat prose and code styles. The live preview shows how the choices work together and flags possible fallback. Custom reveals an installed-family field and, on browsers that support it, a button to browse local fonts. Share choices across the owner's browsers by default, with an explicit browser override for machine-specific choices. Details in `docs/web/web.md`, “Theme color and text size”.
 
 ### 2.3 Spacing
 
@@ -466,11 +466,13 @@ on-demand model panel, not the everyday Assistant home (#6887).
   length", and ✕. While the clipboard holds a picture not yet offered, the focused composer offers **Paste** (the accent's
   capsule on iOS, a Secondary button on Android) and ✕ **Don't paste** at its top, once per copy; the field itself pastes
   only text. Android: the video row in every style, the Paste chip on Glass (`ComposerPaste.kt`).
-- Web selection comments (#14518): while writing a comment on selected chat text, paste an image into its field or
-  use the labeled image button beside the keyboard hint. The card reuses the composer's attachment tiles and their
-  remove controls so the picture stays with the text it illustrates. Saving or reopening the note keeps its images.
-  Escape discards a new comment or restores the note and images from before the edit. All pictures in the draft share
-  the message's limits. Selecting text preloads the draft editor, which also loads when a saved comment opens.
+- Web selection comments (#11585, #14518): selecting chat text opens a floating comment bar by the passage, or
+  above the keyboard on a narrow or touch screen. Save leaves a numbered pin beside the passage. One compact
+  chip above the composer lists draft comments and opens the same editor as the pin. Paste a picture into the
+  comment field or use its labeled image button. The editor reuses the composer's removable attachment tiles.
+  Saving and reopening a note keeps its pictures. Escape discards a new comment or restores the note and pictures
+  from before the edit. All pictures in the draft share the message's limits. The editor starts loading when a
+  passage is selected or the comments list is opened.
 - Files (iOS `FileAttachmentsBar`, #8361): + › Files never types into the draft. Each file is a card in a row above the
   field that scrolls sideways like the photos' strip, 6 pt apart: `box56` tall and `box160` wide (a new size: a name of
   about 14 characters whole, and the next card showing) on `Fill.well` with the card radius,
@@ -832,7 +834,9 @@ The web Health home's Today (web, #13176; `web/src/modules/health/HealthToday.ts
 
 An extension's graph (UI version 10's `graph`, #9727; `docs/extensions/extensions.md`, "UI version 10") is a canvas of nodes joined by edges, for work split into parts and plans whose steps wait for others; the same on the web, iOS and Android. Each node is one box of the graph node token's size (about 224 × 64 at the default text size, growing with the text, never with the content): a card surface (`surface` on the web, `.card()` on iOS, the group panel on Android) with the card radius and hairline border; the icon at the start in the quiet ink (the node's color when it has one); the title one line in the body's medium weight; the subtitle one line in the meta size and quiet ink; the badge as a chip at the end of the title line; progress as a 3-tall bar along the foot in the accent (the node's color when it has one). The node's `tone` (role color) or `color` (named color) is a 3-wide bar on its leading edge, never its text and never a fill. A selected node has a 2-wide accent ring. Edges are 1-wide curves in the hairline ink; a group's frame is a `Fill` tertiary rounded rectangle behind its members with its title above in the caption style. The fold control is a 24-high capsule (a circle for the chevron, widening for `+N`) on the children side (44 pt / 48 dp hit target): a chevron, or `+N` once folded. The canvas is the page's background with no grid; its floating buttons (Zoom out, Zoom in, Fit, Full screen) are the design system's icon buttons in one glass/surface group at the bottom end. Layout is in slots shared by every client (`spec/fixtures/graph-layout/`), so the same graph has the same shape everywhere; only the node pitch is each client's token. A canvas, not a longer list: a list shows the parts but not the shape, and a 300-part tree is a long scroll; native drawing, not an extension's picture or HTML, so nodes can be pressed, read aloud and drawn in every style. On the web, a page, Full screen and a card's Full screen additionally carry the control-room chrome around that canvas, while a compact card preview stays a still 200 px thumbnail: a collapsible outline of the visible nodes down the leading side (widening from 208 px to 260 px at `60rem` and 300 px at `80rem` via container queries as the workspace takes the wide 1680 px extension page width), an in-place node inspector beside the canvas (facts, detail, links opened in the side panel), and a collapsible parallel wall-clock timeline beneath it (whose label column widens from 148 px to 200 px at `60rem`), all in the design system's surfaces, rows and tokens. A wide run of sibling leaves packs several to a column instead of one long line, and a graph whose fit is below 65% opens at 75%, centred on the selected or first running, caution or danger node, so the opening view stays readable; Fit still goes down to 25%. On iOS, `Theme.Size.graphWheelZoomSensitivity` sets Command/Control+wheel zoom sensitivity; button-down pointer drags use the ordinary drag gesture.
 
-An extension's 3D scene (UI version 11's `scene`, #12544; `docs/extensions/extensions.md`, "UI version 11") is an orthographic cutaway model of simple shapes (`box`, `cylinder`, `prism` in metres) with room labels on the floor and device pins where each device stands, for a home whose rooms, lamps and air conditioners are easier to find by place than in a flat device list. An `image` cannot be turned, zoomed or tapped by device, `graph` is 2D node-and-edge layout, and extension HTML runs in a sandboxed web view rather than the app's own chrome and accessibility tree. On iOS (`apple/Persona/Views/Settings/ExtensionScene.swift`, `ExtensionSceneGeometry.swift`, `ExtensionSceneModel.swift`), a page draws the live SceneKit viewport (as tall as the model needs at the card's width and the opening pitch plus `Size.scenePageChrome` for pins and the control bar, at most `Size.scenePageShare` of the visible height, clamped to `scenePageMinHeight...scenePageMaxHeight` scaled with text; the model fills the frame at every yaw, `ExtensionSceneBounds.fitHalfHeight`, inside `.card()` radius and hairline stroke; leading-edge drags inside `Size.edgeBackZone` yield to the navigation back swipe), while a compact card draws a cached still snapshot (`Size.scenePreviewHeight`) that opens the same model in a `.fullScreenCover` (`SheetClose`, Escape, and auto-dismiss on a pin's push or confirmation). A full-screen view taller than it is wide opens an untouched camera at least `Theme.Scene.tallViewPitch` steep (a wide home fills the width at any pitch, so looking down more lets it take more of the height; #14335), and Reset returns to that; the page's card keeps the scene's own pitch. Shapes carry the extension's content colors (`#RRGGBB`) and materials (`matte`, `wood`, `tile`, `metal`, `screen`, `glass`), lit by directional daylight/moonlight plus up to 16 active lamp pins (`Theme.Scene`); dark mode softens the lighting without changing shape colors. Because 3D shapes behind an overlay can be pure white or black, pin pills and room labels sit on the opaque `Theme.groupedCard` (`buiSurface` in BeautifulUI) capsule with `Theme.cardStroke` rather than translucent glass, keeping >= 4.5:1 ink contrast in every style; each pin has a 44 pt hit target and a `tone` or named `color` dot. A pin with an `icon` is drawn as its dot and icon only, the same size every frame, so turning or zooming never swaps a pill between long and short (#14356); its name and plain-language `state` words (`On`, `Off`, `26 °C`) are in VoiceOver, the long-press menu and the Large Content Viewer. A pin without an icon shows its name and state, decluttered front-to-back without hiding its tap action (`ExtensionScenePinLayout`; a pill's width is estimated from `Size.scenePinBaseWidth`, `scenePinStateGap` and its text, capped at `scenePinTextMaxWidth`; nearer pins draw over farther ones from `Theme.Scene.pinLayerBase`; a pill whose spot is on screen is moved just enough to stay `Theme.Scene.pinEdgeInset` inside the viewport). The floating control bar at the bottom trailing corner (`Zoom Out`, `Zoom In`, `Reset View`, `Full Screen`) uses `.chromeSurface(in: Capsule())`, and VoiceOver reads the canvas (`alt` and room `labels` with Turn/Tilt/Reset custom actions), then `pins` in source order, then the controls. Web (#12641) and Android (#12642) follow separately and receive `downgrade11` until implemented.
+An extension's 3D scene (UI version 11's `scene`, #12544; `docs/extensions/extensions.md`, "UI version 11") is an orthographic cutaway model of simple shapes (`box`, `cylinder`, `prism` in metres) with room labels on the floor and device pins where each device stands, for a home whose rooms, lamps and air conditioners are easier to find by place than in a flat device list. An `image` cannot be turned, zoomed or tapped by device, `graph` is 2D node-and-edge layout, and extension HTML runs in a sandboxed web view rather than the app's own chrome and accessibility tree. On iOS (`apple/Persona/Views/Settings/ExtensionScene.swift`, `ExtensionSceneGeometry.swift`, `ExtensionSceneModel.swift`), a page draws the live SceneKit viewport (as tall as the model needs at the card's width and the opening pitch plus `Size.scenePageChrome` for pins and the control bar, at most `Size.scenePageShare` of the visible height, clamped to `scenePageMinHeight...scenePageMaxHeight` scaled with text; the model fills the frame at every yaw, `ExtensionSceneBounds.fitHalfHeight`, inside `.card()` radius and hairline stroke; leading-edge drags inside `Size.edgeBackZone` yield to the navigation back swipe), while a compact card draws a cached still snapshot (`Size.scenePreviewHeight`) that opens the same model in a `.fullScreenCover` (`SheetClose`, Escape, and auto-dismiss on a pin's push or confirmation). A full-screen view taller than it is wide opens an untouched camera at least `Theme.Scene.tallViewPitch` steep (a wide home fills the width at any pitch, so looking down more lets it take more of the height; #14335), and Reset returns to that; the page's card keeps the scene's own pitch. Shapes carry the extension's content colors (`#RRGGBB`) and materials (`matte`, `wood`, `tile`, `metal`, `screen`, `glass`), lit by directional daylight/moonlight plus up to 16 active lamp pins (`Theme.Scene`); dark mode softens the lighting without changing shape colors. Because 3D shapes behind an overlay can be pure white or black, pin pills and room labels sit on the opaque `Theme.groupedCard` (`buiSurface` in BeautifulUI) capsule with `Theme.cardStroke` rather than translucent glass, keeping >= 4.5:1 ink contrast in every style; each pin has a 44 pt hit target and a `tone` or named `color` dot. A pin with an `icon` is drawn as its dot and icon only, the same size every frame, so turning or zooming never swaps a pill between long and short (#14356); its name and plain-language `state` words (`On`, `Off`, `26 °C`) are in VoiceOver, the long-press menu and the Large Content Viewer. A pin without an icon shows its name and state, decluttered front-to-back without hiding its tap action (`ExtensionScenePinLayout`; a pill's width is estimated from `Size.scenePinBaseWidth`, `scenePinStateGap` and its text, capped at `scenePinTextMaxWidth`; nearer pins draw over farther ones from `Theme.Scene.pinLayerBase`; a pill whose spot is on screen is moved just enough to stay `Theme.Scene.pinEdgeInset` inside the viewport). The floating control bar at the bottom trailing corner (`Zoom Out`, `Zoom In`, `Reset View`, `Full Screen`) uses `.chromeSurface(in: Capsule())`, and VoiceOver reads the canvas (`alt` and room `labels` with Turn/Tilt/Reset custom actions), then `pins` in source order, then the controls. Web (#12641) receives `downgrade11` until its renderer is available.
+
+Android (#12642, `ExtensionScene.kt`) fits an orthographic Compose viewport to the shapes. The 200 dp card preview opens the same scene in `JFullScreen`. Turning and zooming are immediate, and a touched camera is saved under the scene's key until Reset. Pin chips use the opaque surface and 48 dp touch targets. TalkBack reads the alternate description, room labels and pin readouts in source order, with turn and tilt actions on the canvas. Zoom and Reset stay in the existing button style below the viewport.
 
 The web task plan's workspace row (#3659) reuses the assistant form `fieldClass`, native labelled selects/inputs, and
 the existing plan Edit dialog. The compact policy choice stays on the plan card because it authorizes where a task
@@ -937,7 +941,12 @@ existing overview list style.
 
 ### 3.4 Lists and rows
 
-- Web History (#10240) is an Agents destination for non-running sessions, grouped by local activity day. It shares folded sidebar state and visibility before filtering; day counts equal the displayed filtered rows, including only loaded content-search matches. The primary switch stays Assistant / Agents. Agents + owns New Agent, New terminal and Open terminals; History never starts on a remembered terminal inventory (details in `docs/web/web.md`).
+- **Android Agents seen rows** (#12584): reading a visible Unread or Just finished row keeps it in place as Seen for the
+  current visit. Fresh work takes its usual position and only unread work contributes to the Unread count. By state offers
+  **Clear Seen (N)** for its retained rows. Pull to refresh or change the list scope to start a new visit. Appearance →
+  Agents list → Seen Agents switches between keeping rows in place and moving them when a chat closes.
+
+- Web History (#10240) is an Agents destination for non-running sessions, grouped by local activity day. It shares folded sidebar state and visibility before filtering; day counts equal the displayed filtered rows, including only loaded content-search matches. The primary switch stays Assistant / Agents. Agents + offers New agent, New shell and Browse tabs; History never starts on a remembered terminal inventory (details in `docs/web/web.md`).
 
 - **Native workspace pins** (#9300): the Agents workspace tree shows a host-pinned workspace with the existing pin mark,
   ordered before its unpinned siblings (newest pin first, then the existing stable order). Its repository moves ahead
@@ -1241,7 +1250,7 @@ reply's) have it; Apple and HarmonyOS follow in their own issues and show these 
 
 #### Rows read during a visit
 
-Reading a queue of finished Agents is open, read, back, the next one (#12514; web #12585). On iPhone, iPad and the web every row the Agents
+Reading a queue of finished Agents is open, read, back, the next one (#12514; web #12585; Android #12584). On iPhone, iPad, Android and the web every row the Agents
 list showed as Unread or Just finished during the visit keeps that place once it is seen, opened or marked there or
 seen elsewhere (`docs/protocol/agent-states.md` ("Seen")), in every grouping and under a quick filter, so the next one
 is still right below and nothing slides from under the finger. A chat that finished while it was open was never in that
@@ -1271,8 +1280,8 @@ Why: one concept had two rules. The Unread filter kept a read row (`kept`) and t
 a read task (#10922), but By Status moved it to the folded Seen section as soon as the chat was left, also on a tapped
 notification or a switch of tab (Principle 4). Rejected: a new filter chip (the bar is an approved layout, "List
 controls"); dimming the row (a new look); marking seen only after a delay (it still moves when the chat is left).
-Android (#12584) and HarmonyOS with the shared core (#12583) keep the behavior before #12514 until then;
-the shared cases are in `spec/fixtures/sort/next/held_set.json` (replayed by iOS and the web).
+HarmonyOS with the shared core (#12583) keeps the behavior before #12514 until then; the shared cases are in
+`spec/fixtures/sort/next/held_set.json` (replayed by iOS, Android and the web).
 
 #### The work-item row
 
@@ -1310,6 +1319,9 @@ On the web a list keeps no standing search field of its own beside the app's one
 - **iOS Agents Search In** (#7443): the list's ⋯ menu (beside Group By, Sort and Display) has a Search In submenu, its row naming the current scope under it, with the web's Filter › Search in scopes in its order and words, Full Text checked by default. A scope other than Full Text lives inside the search field as a system search token (`UISearchToken` on the phone's field, `searchable(tokens:)` on the iPad's), its scope's symbol and name at the field's start in place of the prompt, so a narrowed search shows at rest and while typing; deleting the token, as in any search field, or picking Full Text sets it back; × with words typed clears only the words. It narrows only a search: the closed search's list is whole. No chip, no change to the header's layout. The Sidebar layout's field searches chats and Agents together and cannot hold the token: it stays Full Text and its menu leaves Search In out.
 - **Inbox section bar** (#9053, `docs/assistant/inbox.md` "Section bar"; the To-dos list draws the same states as a Filter at its foot, 3.4, since it lands on all of them): a filter of states, drawn with each client's quick-filter component (iOS `CapsuleFilterBar`, Android `QuickFilterBar`, the web Agents filter bar's look) with Needs you, In progress, FYI, Done and All. Needs you and All always show; the others while they have rows or are chosen; Collapsed stays under All. Needs you carries the `.needs` `CountBadge`, In progress and FYI the neutral one, Done and All none. It opens on Needs you on each entry and is not kept across visits; All is the stacked page as before, the filter's reset. Grouping sits in the bar's trailing menu, not in a row of its own; on Android it is "Group by" in the Inbox's ⋯ sheet, since `QuickFilterBar` has no trailing control and its five choices already run past a phone's width (hidden while In progress or Done is chosen, as the menu is). Why: the stacked page put FYI and Done several screens below a long Needs you; a bar that lands on Needs you keeps what needs the user first and one tap from everything else (3.4 "Sessions that need the user": the Needs you count stays in sight from every choice).
 
+- **By project on iOS and Android** (#13558): same-named projects on one computer show their parent folder in regular weight.
+  The heading's add action uses the existing New Agent form with the computer, folder and usual launcher selected.
+  It appears for known folders on online computers. On iOS an idle project's heading offers the action in its menu.
 - **HarmonyOS Agents groups** (#8966): the existing native grouping Select offers By Status (default), By Machine and By Project. It reuses the native list, Select and 48 vp control tokens, not a new style or a second flat/repository/worktree taxonomy. The shared Rust projection owns pinned, quiet, folded and filtered rows and their counts. Group headers expose the current localized state/machine/space title, state counts and a 48 vp Expand/Collapse control; quiet projects have an explicit idle-projects heading. Default idle sections stay folded; the header expands them and their rows with the core's `folded`, `expanded_idle` and `expanded_quiet` settings. A folded header still exposes Needs You. All labels ship in en, zh-Hans and ja. The previous native sorter and debug shadow are deleted; no release-only platform-specific sorter remains. These rules serve people monitoring Agents and follow iOS, rather than adding an independent HarmonyOS presentation.
 
 A list row found by what is inside it, not by its own name (a Persona chat found by a message, #6283), keeps its title and puts the sentence that matched in place of its second line, the match marked as search in chat marks it (the accent tint), the line starting a few characters before the match so a narrow row still shows it (each client cuts for its own width, #7045); opening it goes to that message, ringed as a search hit. A row found by its name keeps its usual second line and opens as usual. Local matches show at once; what the server finds merges in, and a short line under the field says when the server's results may be incomplete. A search over what the device already holds whole has no server pass and no such line: the iOS To-dos list's (3.4; iOS, hubs with `todo_view`, from #10465's switch-on), since the phone holds every to-do; it opens a to-do found by its notes as usual, its page lighting nothing yet.
@@ -1706,12 +1718,12 @@ chat (#5033), where the panel only offers models and says plainly which one the 
   mark of the Agent the launcher runs (#5497: `AgentMark` at 15 px, `ink-2` for the one-colour marks, 4 px before the
   name; an Agent with no mark of its own gets the generic `agent` icon, never a letter, unless its runtime names it
   (#8142), when it is drawn as the Agents list draws it), the model name (truncates), the canonical effort label in the
-  text colour 4 px after it, a filled bolt for Fast and the workflow
-  `UltraMark` (`ink-2`), a 14 px chevron (`ink-2`). Widths by the composer card (`@container/composer`): ≥ 600 px 72–320 px;
+  text colour 4 px after it, the shared speed mark when present, the workflow
+  `UltraMark` (`ink-2`), and a 14 px chevron (`ink-2`). Widths by the composer card (`@container/composer`): ≥ 600 px 72–320 px;
   < 600 px the width its words need (name ≤ 108 px without a trailing bracketed qualifier, a context size kept as a short
   mark, "Opus 5.5 1M"; the whole name in the tooltip;
   shrinking only when the row is short, the name truncating first, the effort only once the name has no room); < 520 px 12 px text, marks a step smaller; < 420 px 64 px, the
-  mark and chevron only. States: loading (a 13 px `Spinner` and "Loading model…"), failed (the `warning` icon in `--red`),
+  engine mark, speed mark when set, and chevron. States: loading (a 13 px `Spinner` and "Loading model…"), failed (the `warning` icon in `--red`),
   pending (#5035, a switch to another launcher that the next message carries out: a 12 px clock in `ink-3` first, then
   the target engine's mark and the launcher's name in `ink-3` up to 96 px, hidden under 600 px, before the target's model and
   effort; the engine's name in its place when the engine changes; the tooltip "Current: …" over "Next message: …"),
@@ -1767,9 +1779,10 @@ chat (#5033), where the panel only offers models and says plainly which one the 
   (160 px; entries 32 px high with the mark, the launcher's own name, an accent dot on the current one, the quota
   percentage and an ⓘ whose tooltip says why one can't take a pick), the models (single-line rows, a check on the one
   that runs, no effort word), and the thinking efforts of the model picked (156 px; one 32 px button per level, a check
-  on the one in use, "Recommended" after the default). The footer gives that model's speed as a two-segment Standard /
-  Fast control on `--hover-2` and Claude Code's ultracode where offered. A pick there keeps the panel open; outside or
-  Esc closes it. The reason a launcher can't take a pick shows once, above its models, never as a line under each one. Customize opens a 264 px flyout to the panel's left: the effort slider, Fast, the engine, an exact catalog
+  on the one in use, "Recommended" after the default). The footer gives the model an ordered speed selector on
+  `--hover-2` when the session offers choices, and Claude Code's ultracode where offered. Standard / Fast stay a
+  compact pair, and Ultrafast and other advertised tiers get their own segments. A pick there keeps the panel open; outside or
+  Esc closes it. The reason a launcher can't take a pick shows once, above its models, never as a line under each one. Customize opens a 264 px flyout to the panel's left: the effort slider, the same speed selector, the engine, an exact catalog
   reference-price line where known, and a footer that says whether the setup is the recommended one, customized or
   saved. A launcher summary adds its weekly-remaining bar only when the existing launcher quota answer supplies a
   weekly ratio; its tooltip names the window and reset time.
@@ -2558,16 +2571,14 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   any other, also while a permission holds the Agent (iOS sends it the same way). Each style keeps its own card: on
   Android, Glass a floating card inset like the composer, Brief a rounded card with a light shadow, Board a bordered card
   under its amber rule.
-  A Persona conversation's own requests (its model's tool approvals, `ask_user`) are the same: the stack above its
+  A Persona conversation's own requests (its model's tool approvals, `ask_user`) are the same: the pending area above its
   composer, under the Needs you / In progress entries and the route chip, on every client (#4883: on the web and Android
   they sat only in the closed Needs you tray, and an owner waited minutes on an approval no screen in the chat showed).
   Needs you still counts them, and its row for one closes the tray onto the card instead of drawing it a second time.
   On the web, a card the conversation's own turn waits on (its own session's request, not one of a worker or side
-  session folded under it: `lib/turn-asks.ts`, #11794) is never folded: each stands open above the Needs you / In
-  progress capsules, all of them at once, and Needs you neither counts nor lists it again. The cards of sessions folded
-  under the conversation keep the stack and the tray as above. iOS and Android keep the stack for both until they follow.
-  The stack holds the conversation's own cards alone, as one slot on the web: its first card with "2 / 6" (where it stands in the run), the next taking its place when it is answered, and what was just answered one line over it that goes 3 seconds after the last answer (details with the interaction cards in `docs/web/web.md`).
-  **To Decide** (iOS and iPadOS, #12831): in an assistant conversation the conversation's own cards and its tasks'
+  session folded under it: `lib/turn-asks.ts`, #11794) opens in To Decide by default (#12857). Only the owner can fold
+  the pager. Cards from workers or side sessions outside its tasks continue to use the waiting stack and the tray.
+  **To Decide** (iOS and iPadOS #12831, Web #12857): in an assistant conversation the conversation's own cards and its tasks'
   questions and approvals are one pager over the composer (`QuestionDock`), opened from a **To Decide** entry (zh-Hans
   待选择, `QuestionDockEntry`) first in the row of entries, drawn as they are (`DockCapsule`, the needs-you tone; the
   selected look while the pager is open). One card at a time, the conversation's own first and then the tasks' oldest
@@ -2580,17 +2591,24 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   terminal, a tool approval and a plan approval show it greyed with one line in `cautionText` saying why and what to use
   ("Reply in Chat Instead", Deny, send it back); every other card keeps the rule below (Skip where the request can be
   cancelled). A Needs You row for the conversation's own card closes the tray and opens the pager on that card; the
-  pager and a tray show one at a time, the pager stepping aside while a tray is open. The pager is capped as a lone
-  question card (#6277), owns the grabber (#12306), and in a voice call stays open at half the page. The three numbers
+  pager and a tray show one at a time, the pager stepping aside while a tray is open. The iOS pager is capped as a lone
+  question card (#6277), owns the grabber (#12306), and in a voice call stays open at half the page. The Web pager scrolls inside the composer's existing height limit. The three numbers
   are To Decide (the pager's cards), Needs you (its rows) and, in an Agent's chat, "N pending". An Agent's chat keeps the
-  stack; the wrap-up chips stay chips after the entries. The two paragraphs below are the web and Android, and iOS
-  before #12831.
+  stack; the wrap-up chips stay chips after the entries.
+  In an Agent's chat on the web, the stack holds the conversation's own cards alone, as one slot: its first card with
+  "2 / 6" (where it stands in the run), the next taking its place when it is answered, and what was just answered one
+  line over it that goes 3 seconds after the last answer (details with the interaction cards in `docs/web/web.md`).
+  **Android** (#12858) uses the same pager order, collapsed selection, and Skip rules with `AssistantTrayEntry`,
+  `DecisionDock`, and `RequestEditor`. Its task source opens over the Assistant tab, where Back restores the pager.
+  The existing message jump highlights the source. A card from a terminal without a tool ID goes to the latest question
+  in its source chat when available. Agent conversations use their existing pending stack.
   Android command-input requests (#14568) show the command and its linkable output in the existing chat card and Agents
   request sheet. The field starts masked when the request calls for it, offers Show / Hide, and stays out of Autofill.
   Send hands the line to the command and clears the field. Not now replies without a line. At standard text sizes the
   existing decision footer keeps both actions visible while the command, output and field scroll. At large sizes they
   scroll with the form. The keyboard action puts the keyboard away. A refusal stays attached to the pending request.
-  What the conversation's tasks ask is a card of its own above the entries (iOS `TaskQuestions` until #12831, #4339 C10): the oldest
+  Before the native pager, what the conversation's tasks asked was a card of its own above the entries (iOS
+  `TaskQuestions`, #4339 C10): the oldest
   question of their Agents, under its task's name with the ask mark in the needs-you tone and, at the end of that line,
   "N more" for the tasks' other questions; it is answered there, and the next comes up once it is. The three numbers
   count three things and say so: "N pending" the conversation's own cards in the stack, "N more" the tasks' other
@@ -2598,15 +2616,8 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   drafts). An open plan is also a card among the conversation's lines (iOS `FeedLine`, web `FeedLineView` #8193, Android on Glass `GlassPlanCard`), at the
   end of the exchange it happened in: its tasks, where each would run, "Start these directly", then Start, Edit and Don't start;
   once started the hand-off cards take its place, and a dismissed one reads "Not started · N tasks". A task's or an Agent's row in the tray opens that task's or Agent's detail, as iOS's rows do, where its page
-  and its cards are; it never brings a card into the stack, which is the conversation's own. The two places of cards
-  share the room the footer leaves above the composer: on Android each takes at most half the page, and with both on
-  screen each has at least half of that room, a card that needs less leaving the rest to the other, so the composer
-  stays on the page. iOS (#9392) caps the task question as it caps the stack (`FooterRoom.cardsRoom`): alone, as a lone
-  question card (#6277), with the conversation's own cards on screen half of that room each, and with the keyboard down a
-  place that takes less (a folded card, #12306) leaves the rest to the other, as on Android; its card fits itself to its
-  share and scrolls inside, its task's name and title row in view. It was uncapped, and on iPad and the open iPhone Duo
-  it took the whole page, its top under the top bar. Before #12306 a folded card kept its half empty, and on the open
-  iPhone Duo held sideways the task's question showed one option and the start of its description.
+  and its cards are. In the former native layout the two places of cards shared the footer room above the composer.
+  Each had half the room when both were open. A shorter card left its unused space to the other (#9392, #12306).
   **Card height by hand** (iOS and iPadOS, #12306): with the keyboard down, a lone question card over the composer (the
   task's question, or the conversation's own lone question; beside each other the task's question) has a grabber on its
   top edge, the sheets' grabber in a strip the card's width (`interaction-grabber`). Dragged, the card follows the finger
@@ -2936,12 +2947,25 @@ No HTTP codes, key algorithms, CLI flags or raw error text in the primary line. 
 | Hub | product term; "the hub machine" for the machine |
 | Computer | the user's own machine; "Machine" only for list and monitoring entries |
 | Node | never in user-facing English |
-| Agent | lowercase mid-sentence; "Agents" for the tab |
-| Session | what an Agent runs, titled by what it is doing. Not "task", which names the work Persona hands out |
 | Persona | the product and the main assistant |
 | Assistant | one of the hub's assistants, each with its own chats, inbox and computers (`manager` in code, the protocol and docs); zh-Hans 助手, ja アシスタント. Never "manager" in user-facing text |
 | Lark | in en and ja, except where Feishu is a separate option |
 | sign in / sign-in | verb / noun |
+
+#### Tabs, agents and sessions
+
+These words serve people who work with coding agents in Agents. Assistant uses everyday language such as “chat” where the distinction is unnecessary.
+
+| Term | Meaning in the UI |
+| --- | --- |
+| Tab | A herdr tab or its equivalent on another terminal host. Use “tab” for the running container, including when referring to where an agent runs. |
+| Agent | A running AI CLI such as Claude Code or Codex. In English, use lowercase mid-sentence and **Agents** for the navigation destination. |
+| Shell | A tab without an agent. |
+| Session | An agent's conversation, during or after execution. A session can outlive its tab. A task is the work assigned to the agent. |
+| History | Ended sessions. The tab inventory has its own label, **Tabs**. |
+| Start | The action that launches an agent. Launcher, model, effort and optional preset belong in the start flow. |
+
+Reserve “terminal” for the terminal view. Describe a split within a tab as a terminal split. Keep “slot” and “pane” out of this UI copy. The web's **In a tab** filter counts the sidebar agents currently associated with a running tab and shows those same agents. Shell rows are outside that selection.
 
 Full glossary: `docs/protocol/i18n.md`. Languages: en, zh-Hans, ja. Apple strings live in `apple/Shared/Localization/Localizable.xcstrings`; hub strings in the server locale files. Keys with a bracketed suffix are translator-context tags; the English value strips them. Japanese uses no space between Japanese and Latin text (the catalogs do not follow this yet; DS-29). Do not concatenate sentences.
 
@@ -3523,11 +3547,15 @@ changing (principle 3).
 
 ## Codex speed controls (#3865)
 
-An Agent's Codex thread sets its speed with Fast in the model panel's flyout of the model it runs (#5032, the model pill
-and unified model panel in 3.8); a Persona chat running Codex does the same since #5033, its effort chip and Speed
-submenu retired. Fast is a toggle showing the current value, and its label explains the increased usage. A change
-waits for native acknowledgment and the session push; turning Fast off is the reversible choice. Settings > Agents >
-Codex uses the existing agent-settings row for the native default. No account or session is automatically switched to Fast.
+In the web model panel, Agents can change the speed of a writable Codex thread or a supported Claude Code
+terminal session. The same segmented control sits in the wide footer and the narrow flyout. The track sizes to its
+labels and wraps whole segments if space runs out. It lists only advertised choices and keeps the acknowledged
+selection visible while a change is pending. The composer pill, model row and speed selector share `SpeedMark`.
+Standard has no mark. Fast uses the filled `bolt`, and Ultrafast uses `bolt-double`, two offset filled bolts drawn in
+one icon. Both icons share the same height and stroke weight. The pill names Fast and Ultrafast in its tooltip and
+accessible label. A faster option explains the extra usage, and Claude Code's Fast detail explains that the runtime
+may save the preference for future sessions. To undo a speed change, pick the previous option. Settings > Agents > Codex still owns the
+native default for new Codex sessions.
 
 The iOS main Assistant conversation offers the same current-session choice inside its existing composer Model / Thinking
 Effort menu (#10244), not in Settings and not on other chats. A native **Speed** section is present only when the session
@@ -3541,10 +3569,10 @@ component, style or navigation pattern.
 
 A new Persona conversation on the web reuses that same model flyout (#6240), inside Agents-facing customization rather
 than adding an everyday-facing setting. While the default manager is in use, the hub feature
-`assistant_start_service_tier` comes from that manager's hello, and a selected model whose native `service_tiers`
-advertise `priority` has its Fast toggle available before the first message; other models, managers and older hubs do not
-show it. The local Fast choice and reasoning effort are independent (principle 5), enabling Fast pins the displayed
-launcher, model and effort, and an untouched start preserves the native default (principle 1). The first request carries
+`assistant_start_service_tier` comes from that manager's hello, and a selected Codex model whose native `service_tiers`
+advertise Fast or Ultrafast offers those speeds before the first message. Other models, managers and older hubs do not
+show it. The local speed choice and reasoning effort are independent (principle 5). Picking a faster speed pins the displayed
+launcher, model and effort. An untouched start preserves the native default (principle 1). The first request carries
 only an explicit choice, which must be natively acknowledged before the first turn; a refusal is recoverable and never
 silently means Standard (principles 3 and 7). A successful start, Follow default, a dropped pick or a manager change
 clears the one-off draft; a refused start retains it. New Agent has no start speed control.
@@ -3565,6 +3593,8 @@ speed, persona, style or theme color. Android reuses PairingHeading, JCard, JTex
 Apple reuses the pairing Form, Section, Picker, toolbar and Theme tokens.
 
 ## Meeting page (#3862)
+
+In a Web recording's transcript, keep search and bookmark navigation together behind a review control. Show the active match and match count where the owner moves between passages. Jumps stay inside the recording detail scroller. The local text download includes timestamps and follows the same transcript retention rules as the detail.
 
 ### The floating meeting window (#8731 V5)
 
@@ -4543,6 +4573,8 @@ New copy ships in English, Simplified Chinese and Japanese. Evidence:
 ## Lark topic group policy (#10238)
 
 Settings › Connectors › Lark bot › Topic groups serves owners who want one group to require their explicit bot mention. It reuses Group, Row, Switch, Button, the native select and settings input styles; policy defaults off. Each group shows its saved switch. Enrollment allows choosing the policy before adding the group; a strict first enrollment stays separate from the home choice. The home select shows the effective home or the private-chat fallback. Both writes wait for the existing acknowledged save; failures preserve saved values and enrollment drafts. No primary chat screen or model setting changes.
+
+Each enrolled group on the web has a labeled native select for when to open a to-do (#11813). It defaults to **Answer only** and uses the same acknowledged save as the mention switch. The home choice is saved separately.
 
 ## Shared botmux display setting (#10241)
 

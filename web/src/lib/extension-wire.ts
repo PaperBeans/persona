@@ -378,6 +378,8 @@ export interface Contributes {
  */
 export interface SkillItem {
   id: string;
+  /** What the extension's contributions list calls it; the id when absent. */
+  title?: string;
   /** The directory, relative to the package (or to the data directory with source data). */
   dir: string;
   source?: ContentSource;
@@ -827,6 +829,8 @@ export interface APIReceipt {
 
 export interface AssistantItem {
   id: string;
+  /** What the extension's contributions list calls it; the id when absent. */
+  title?: string;
   skills?: string[];
   instructions?: string;
   gate?: string;
@@ -840,6 +844,8 @@ export interface AssistantItem {
 export interface MCPServerItem {
   /** The server's name for the assistant; not persona or persona. */
   id: string;
+  /** What the extension's contributions list calls it; the id when absent. */
+  title?: string;
   /** Looked up on PATH, then in ~/bin. */
   command: string;
   /**
@@ -2926,8 +2932,8 @@ export interface Action {
    */
   reply?: string;
   /**
-   * Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the
-   * app.
+   * Assistant only, except that a full extension page may open persona://session/<machine>/<session> or
+   * persona://task/<id>: an https URL or a validated persona session, task, kb or file target, opened inside the app.
    */
   open?: string;
   /** Assistant only: return one page within the card. */

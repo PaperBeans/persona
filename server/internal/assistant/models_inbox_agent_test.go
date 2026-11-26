@@ -3,6 +3,7 @@ package assistant
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -11,6 +12,42 @@ import (
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+func TestTraexIsOfferedForTerminalAgentsButNotInboxExecution(t *testing.T) {
+	s, f, _ := modelService(t)
+	f.zshrc = map[string][]proto.Launcher{"server": {{Name: "traex", Agent: "traex", Source: "zshrc"}}}
+	f.agentModels = map[string][]proto.AgentModel{"traex": {{ID: "example-fast", Name: "Example Fast", Efforts: []string{"xhigh"}}}}
+
+	if p := purposeOf(t, s, "agent.new"); !slices.Contains(p.ProviderIDs, "launcher.traex") {
+		t.Fatalf("terminal provider missing: %+v", p)
+	}
+	if p := purposeOf(t, s, purposeAgent); slices.Contains(p.ProviderIDs, "launcher.traex") {
+		t.Fatalf("TRAE CLI offered for Inbox execution: %+v", p)
+	}
+	w := request(s, http.MethodGet, "/api/v1/model-config/providers/launcher.traex/models", "")
+	var catalog proto.LauncherModels
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &catalog) != nil || catalog.Agent != "traex" ||
+		len(catalog.Models) != 1 || catalog.Models[0].ID != "example-fast" || !slices.Equal(catalog.Models[0].Efforts, []string{"xhigh"}) {
+		t.Fatalf("provider catalog: %d %s", w.Code, w.Body.String())
+	}
+	body := `{"revision":0,"provider":"launcher.traex","model":"example-fast","effort":"xhigh"}`
+	if w := modelRequest(s, http.MethodPatch, purposeAgent, body); w.Code != http.StatusBadRequest {
+		t.Fatalf("Inbox write: %d %s", w.Code, w.Body.String())
+	}
+	if w := modelRequest(s, http.MethodPatch, "agent.new", body); w.Code != http.StatusOK {
+		t.Fatalf("terminal write: %d %s", w.Code, w.Body.String())
+	}
+	if p := purposeOf(t, s, "agent.new"); p.Effective.Model != "example-fast" || p.Effective.Effort != "xhigh" {
+		t.Fatalf("terminal configuration did not keep picker values: %+v", p.Effective)
+	}
+	params, err := s.AgentStartParams(context.Background(), AgentStartParams{MachineID: "server"})
+	if err != nil || params["launcher"] != "traex" || params["model"] != "example-fast" || params["effort"] != "xhigh" {
+		t.Fatalf("saved terminal configuration did not reach session.start: %+v, %v", params, err)
+	}
+	if p := purposeOf(t, s, purposeAgent); p.Status != mc(s.requestCtxLang(context.Background()), "status_provider_incompatible") {
+		t.Fatalf("inherited terminal provider has no incompatibility status: %+v", p)
+	}
+}
 
 // The AI twin's opt-in override (#4232), checked through the twin's own start (startInboxAgent) and the parameters the
 // node is started with, not only through resolution.

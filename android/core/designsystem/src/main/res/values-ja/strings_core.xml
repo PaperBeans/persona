@@ -62,8 +62,8 @@
     <string name="designsystem_core_field_invalid">入力内容と形式を確認してください</string>
     <string name="designsystem_core_computer_fallback">コンピューター</string>
     <string name="designsystem_core_close_agent_title">このエージェントを閉じますか？</string>
-    <string name="designsystem_core_close_agent_message_tab">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、ターミナルのタブ「%5$s」を閉じます（分割されたタブではこのペインだけ）。作業中の処理は中断されます。チャットは残り、あとでAgentsの「履歴」から続けられます。</string>
-    <string name="designsystem_core_close_agent_message_pane">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、そのターミナルペインを閉じます。作業中の処理は中断されます。チャットは残り、あとでAgentsの「履歴」から続けられます。</string>
+    <string name="designsystem_core_close_agent_message_tab">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、タブ「%5$s」を閉じます。ターミナルが分割されている場合は、該当する部分だけが閉じます。進行中の作業は停止します。セッションは残り、Agentsの履歴から再開できます。</string>
+    <string name="designsystem_core_close_agent_message_pane">「%1$s」\n%2$s\n\n%3$sの%4$sを終了し、そのターミナルを閉じます。進行中の作業は停止します。セッションは残り、Agentsの履歴から再開できます。</string>
     <string name="designsystem_core_close_agent_message_runtime">「%1$s」\n%2$s\n\n%3$sでこのセッションを終了します。作業中の処理は中断されます。</string>
     <string name="designsystem_core_delete_session_title">このチャットを削除しますか？</string>
     <string name="designsystem_core_delete_session_on_machine_command">「%1$s」はすべてのデバイスの一覧から消えます。%2$sのチャット記録は削除されません。あとでコンピューターで%3$sを使って続けると、また表示されます。</string>

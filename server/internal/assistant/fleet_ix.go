@@ -753,6 +753,11 @@ func (s *Service) orphanLocked(p *pending) bool {
 		return true
 	}
 	wait := min(resumeGrace, time.Until(p.ix.ExpiresAt))
+	status := "cancelled"
+	if outboundSettingsCard(p.ix) {
+		wait = time.Until(p.ix.ExpiresAt)
+		status = "expired"
+	}
 	if wait <= 0 {
 		return false
 	}
@@ -766,7 +771,7 @@ func (s *Service) orphanLocked(p *pending) bool {
 		}
 		s.fleet.mu.Unlock()
 		if still {
-			s.recordEnd(p.ix.ID, "cancelled", nil)
+			s.recordEnd(p.ix.ID, status, nil)
 			s.finishInteraction(p.ix.ID)
 		}
 	})
@@ -923,6 +928,9 @@ func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bo
 // resolveApproved is resolve for an app's answer the hub relayed, with the device it vouched may approve a hand-off
 // card (nil: none). Only this way does a hand-off card take more than a no (secret_handoff.go).
 func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
+	if strings.HasPrefix(id, outboundSettingsCardPrefix) {
+		return s.resolveOutboundSettingsCard(ctx, id, r)
+	}
 	if mine, err := s.sessionReviewResolve(ctx, id, r, approver); mine {
 		return err
 	}
@@ -946,6 +954,9 @@ func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolu
 
 func (s *Service) resolveAnswer(ctx context.Context, id string, r proto.Resolution, remember bool, authorization *standingResolution,
 	approver *assistantwire.HandoffApprover) error {
+	if strings.HasPrefix(id, outboundSettingsCardPrefix) {
+		return errOutboundOwnerAnswer
+	}
 	return s.logicalInteractionAnswer(ctx, id, r, func() error { return s.resolveActiveAnswer(ctx, id, r, remember, authorization, approver) })
 }
 
@@ -1580,7 +1591,7 @@ var errReservedCard = errors.New("the tool names " + proto.SecretRunTool + " and
 
 // reservedCard: ix calls itself the password card or the hand-off card.
 func reservedCard(ix proto.Interaction) bool {
-	return ix.ToolName == proto.SecretRunTool || ix.ToolName == proto.SecretHandoffTool
+	return ix.ToolName == proto.SecretRunTool || ix.ToolName == proto.SecretHandoffTool || strings.HasPrefix(ix.ID, outboundSettingsCardPrefix)
 }
 
 // askHub is fleet.ask: a card one of the hub's own features asks (a mail send, Cua's apps, persona_settings),
@@ -1898,6 +1909,7 @@ func (s *Service) keepAlways(ix proto.Interaction, r proto.Resolution) {
 // NodeDetached: a machine's node connection ended (devices.Options.Detached): the cards waiting on it that cannot be
 // claimed again end (resumable ones wait for their hook through the next connection), its list shows it.
 func (s *Service) NodeDetached(machine string) {
+	s.invalidateLauncherListCache(machine)
 	s.noteNodeOffline(machine, time.Now())
 	if !s.fleetOn() {
 		return

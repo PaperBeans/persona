@@ -2766,7 +2766,7 @@ Context/mark_viewed/auto-load use nonbusy `ExtensionUiState.fetch`, response ite
 
 ### UI version 8: dashboard columns (#9158)
 
-Specification [extensions.md](../extensions/extensions.md) ("UI version 8"). `HttpExtensionManagement.UI_VERSION` is `10` (this
+Specification [extensions.md](../extensions/extensions.md) ("UI version 8"). `HttpExtensionManagement.UI_VERSION` is `11` (this
 version plus the gauge and graph versions below), and the native
 stream (`ExtensionUIStreamController`) sends the same. `ExtensionColumns.kt`: the pure decisions (`count` by the pane's content width with
 `cardColumn` and `Space.m`, at most 3; `rows` in reading order, `span: "full"` a row of its own; `perLine` and `lines` for a section's rows
@@ -2804,6 +2804,18 @@ JAVA_TOOL_OPTIONS=-Dpersona.shots=/tmp/persona-extension-graph ./gradlew :featur
 
 The 42 PNGs go to that directory (default `feature/settings/build/extension-graph-shots/`). They are Compose/JVM evidence, not
 emulator, physical-device or production validation; attach them to the PR, never commit them.
+
+### UI version 11: extension scenes (#12642)
+
+`ExtensionSceneGeometry.kt` prepares indexed box, cylinder and prism geometry from the shared wire types.
+`ExtensionScene.kt` uses the same orthographic scene in a page and as a 200 dp preview that opens full screen.
+Drags orbit, pinches zoom, and the existing controls zoom, reset or open the scene. Changes to labels and pin
+states preserve a touched camera. The shape colors are content. Dark mode changes the lighting, while annotations
+and controls use the theme's opaque surface and text colors.
+
+`ExtensionSceneGeometryTest` checks the geometry, model coordinates and camera. `ExtensionSceneShotsTest` uses
+the shared flat example to draw page and compact captures in all three styles and both appearances. It also checks
+camera persistence and the values carried by a pin's action. The images go to `feature/settings/build/extension-scene-shots/`.
 
 ### Dashboards and watch pages (#15017, #13020)
 

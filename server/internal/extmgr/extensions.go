@@ -1368,7 +1368,13 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 			extensionConnectors.Store(c.ID, p.Record.Source)
 		}
 		cfg := proc.Config{ID: c.ID, Name: c.Name, Manifest: ps.knownOnly(id, connectorManifest(c)), Secrets: secrets, KB: kbase,
-			Logf: ps.logf, Link: link}
+			Logf: ps.logf, Link: link, Identity: &connector.ExtensionIdentity{
+				Extension: p.Record.ID,
+				Version:   p.Record.Version,
+				Source:    p.Record.Source,
+				MarketKey: p.Record.MarketKey,
+				Remote:    p.Record.Remote != nil,
+			}}
 		cfg.RecallNotBefore = hp.recallNotBefore // the program is not asked about a send before this install, whoever asks
 		if p.Record.Granted.GhLogin && ps.h != nil {
 			cfg.GhToken = ps.h.ghTokenFor

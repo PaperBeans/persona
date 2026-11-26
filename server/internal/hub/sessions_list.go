@@ -531,7 +531,7 @@ func rowText(s string, max int) string {
 // arrays (subagents, background, workflows, queued, ports) left out, what the chat routes serve. s's pointer fields
 // stay untouched: only scalars and slices change, and writeSessionLists encodes through a scratch copy.
 func legacyListCut(s *proto.Session) {
-	s.Title = rowText(s.Title, 256)
+	s.Title = rowText(s.Title, proto.TitleMax)
 	s.LastText = rowText(s.LastText, 180)
 	s.Activity = rowText(s.Activity, 120)
 	s.StartError = rowText(s.StartError, startErrorRow(*s))
@@ -624,7 +624,7 @@ func (s *runtimeRowSummary) MarshalJSONTo(enc *jsontext.Encoder) error {
 func runtimeSummary(s proto.Session) runtimeRowSummary {
 	out := proto.Session{
 		Manager: s.Manager, MachineID: s.MachineID, SessionID: s.SessionID,
-		Title: rowText(s.Title, 256), Cwd: s.Cwd, WorkspaceCwd: s.WorkspaceCwd, RepoRoot: s.RepoRoot, Worktree: s.Worktree, Branch: s.Branch,
+		Title: rowText(s.Title, proto.TitleMax), Cwd: s.Cwd, WorkspaceCwd: s.WorkspaceCwd, RepoRoot: s.RepoRoot, Worktree: s.Worktree, Branch: s.Branch,
 		Status: s.Status, State: s.State, UpdatedAt: s.UpdatedAt, StateSince: s.StateSince, SeenAt: s.SeenAt,
 		LastText: rowText(s.LastText, 180), Activity: rowText(s.Activity, 120), ActivityAt: s.ActivityAt,
 		AwaitsReply: s.AwaitsReply, BackgroundWorking: s.BackgroundWorking, BackgroundWaiting: s.BackgroundWaiting, BackgroundStalledSince: s.BackgroundStalledSince,

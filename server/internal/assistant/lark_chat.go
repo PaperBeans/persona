@@ -238,6 +238,10 @@ func (h larkHost) ApproveOwnerAction(ctx context.Context, ev botcard.MessageEven
 	return h.s.botApproveOwnerAction(ctx, ev, text, action)
 }
 
+func (h larkHost) ProjectReviewOwnerInput(ctx context.Context, ref, machine, session string) error {
+	return h.s.projectReviewFeishuInput(ctx, ref, SessionRef{MachineID: machine, SessionID: session})
+}
+
 // ---- the commands ----
 
 func (h larkHost) InterruptConversation(ctx context.Context, rt assistantwire.ChatResolved) (string, string) {

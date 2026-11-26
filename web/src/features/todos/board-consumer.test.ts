@@ -140,6 +140,25 @@ describe("board-consumer", () => {
     expect(secMap.get("child_done")).toBe("done");
   });
 
+  it("keeps the complete Done count when a full board names rows outside the bounded list", () => {
+    const recent = makeTodo("recent", "Recent done", { done_at: iso(1) });
+    const board: TodoBoardProjection = {
+      status_groups: [{
+        key: "done",
+        total_count: 55,
+        visible_count: 55,
+        entries: [{ todo_id: "recent" }, ...Array.from({ length: 54 }, (_, i) => ({ todo_id: `older-${i}` }))],
+      }],
+      direction_groups: [],
+      sidebar_tree: [],
+      counts: { needs_you: 0, in_progress: 0, pending_review: 0, waiting: 0, someday: 0, done: 55, open_total: 0 },
+    };
+
+    const res = consumeBoardStatusGroups([recent], board);
+    expect(res.sectionCounts.done, "the server's complete count, not the bounded row count").toBe(55);
+    expect(res.goalFold.triaged.sections.done).toHaveLength(1);
+  });
+
   it("applies local UI filters on top of board.status_groups and surfaces matching folded children", () => {
     const todos: Todo[] = [
       makeTodo("goal_1", "Parent goal"),

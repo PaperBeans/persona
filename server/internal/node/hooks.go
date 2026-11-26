@@ -827,13 +827,17 @@ func hookEventParams(in hookInput, stopSig string, reportOnly bool) map[string]a
 
 // promptSource says who a UserPromptSubmit's prompt is from, for the manager (a meeting's batch is not the user's own
 // message: docs/assistant/meeting-minutes.md "Feeding the attending session"): the kind of message source it carries
-// (meeting, conversation, task…), "notification" for a background task reporting back, else "user".
+// (meeting, conversation, task…), "notification" for a background task reporting back, "side_conversation" for an
+// unrelated agent_send wrapped by RenderSideConversation, else "user".
 func promptSource(prompt string) string {
 	if src := prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: prompt}); src != nil && src.Kind != "" {
 		return src.Kind
 	}
 	if strings.Contains(prompt, "<task-notification>") {
 		return "notification"
+	}
+	if prompts.IsSideConversation(prompt) {
+		return proto.SourceSideConversation
 	}
 	return "user"
 }

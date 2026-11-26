@@ -977,8 +977,9 @@ internal fun MessageCard(item: FeedItem, host: AssistantTaskHost, todos: List<To
                 Text(stringResource(when { done -> R.string.chat_tasks_message_replied; dismissed -> R.string.chat_tasks_draft_dismissed
                     filed -> R.string.chat_tasks_message_filed_title; else -> R.string.chat_tasks_message_drafted }), style = PersonaTheme.type.caption,
                     color = when { done -> PersonaTheme.palette.done.text; filed || dismissed -> PersonaTheme.palette.ink2; else -> PersonaTheme.palette.accent })
-                if (sent != null) Text(sent.text, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
-                else if (filed || dismissed) Text(item.field("draft").orEmpty(), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2)
+                if (sent != null) {
+                    if (sent.text.isNotEmpty()) Text(sent.text, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
+                } else if (filed || dismissed) Text(item.field("draft").orEmpty(), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2)
                 else BasicTextField(draft, { draft = it }, Modifier.fillMaxWidth(),
                     textStyle = PersonaTheme.type.body.copy(color = PersonaTheme.palette.ink),
                     cursorBrush = SolidColor(PersonaTheme.palette.accent))
@@ -1061,8 +1062,11 @@ private fun GlassMessageCard(item: FeedItem, host: AssistantTaskHost, todo: Todo
                 // Sent: what the hub says went out, which may have been edited on another device.
                 if (editing && open) BasicTextField(draft, onDraft, Modifier.fillMaxWidth().testTag("message-card-field"),
                     textStyle = type.body.copy(color = palette.ink), cursorBrush = SolidColor(palette.accent))
-                else Text(sent?.text ?: draft.ifEmpty { item.field("draft").orEmpty() }, style = type.body,
-                    color = if (filed || dismissed) palette.ink2 else palette.ink)
+                else {
+                    val displayed = sent?.text ?: draft.ifEmpty { item.field("draft").orEmpty() }
+                    if (displayed.isNotEmpty()) Text(displayed, style = type.body,
+                        color = if (filed || dismissed) palette.ink2 else palette.ink)
+                }
             }
             if (blank != null) Text(stringResource(R.string.chat_tasks_message_blank, blank), style = type.caption, color = palette.danger.text)
             if (filed) Text(stringResource(R.string.chat_tasks_message_filed), style = type.caption, color = palette.ink2)

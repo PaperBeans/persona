@@ -14,6 +14,12 @@ permission prompts, `ExitPlanMode`, and `AskUserQuestion` cards through `classic
 explicitly authorizes `permissions: true` on `/poll`. It reads no file but its own manifest and stays quiet when no
 node is running.
 
+On a computer with managed settings, Claude Code's `cc-plugin-sec-default` guard can pass every `classic.*` event over
+the user-tier plugin. Persona does not try to work around that policy: after a main-loop turn uses tools without a
+`classic.PreToolUse` reaching the plugin, the plugin reports `classic_passed_over: true`. The node then keeps permission
+bridging off for that session and the row says to approve on the computer or start the session from Persona in a
+terminal engine. Question cards (`clq_`) are unchanged.
+
 ## Packaging
 
 - Plugin name: `persona`. Version: `version` in `.claude-plugin/plugin.json` (semver). The installer compares it; the
@@ -52,7 +58,7 @@ another session, gets `403`.
 `POST /claude-plugin/v1/poll`
 
 ```json
-{"session_id": "<uuid>", "plugin_version": "0.3.0", "engine_version": "2.1.330", "capabilities": ["busy_input", "interrupt", "settings", "permissions"], "wait_ms": 25000}
+{"session_id": "<uuid>", "plugin_version": "0.3.1", "engine_version": "2.1.331", "capabilities": ["busy_input", "interrupt", "settings", "permissions"], "classic_passed_over": true, "wait_ms": 25000}
 ```
 
 - Held until work comes or `wait_ms` passes (at most 25 s; Claude Code's fetch gives up at 30 s), then asked
@@ -65,6 +71,10 @@ another session, gets `403`.
   `permissions: true` is returned only when the session is served by the plugin and not managed by `persona-hooks` or an
   external tmux pane. `retry_ms`, when present, is how long to wait before the next poll: a session the node does not
   deliver to this way (one in a Persona terminal, the assistant's own) is told to come back much later.
+- `classic_passed_over: true` is sent after a main-loop turn used tools but no `classic.PreToolUse` arrived.
+  Claude Code's managed-settings guard can do that to every `classic.*` hook in a user-tier plugin. The node then
+  returns no `permissions: true` for that session, refuses direct `/permission` calls with `passthrough`, withdraws any
+  active plugin card, and leaves `clq_` question cards alone. The field is omitted while classic hooks reach the plugin.
 - `403 {"error": "not_this_session"}`: the caller is not the claude that has this session open. `404`, or an answer
   that is not HTTP: a node without this protocol. The plugin backs off (up to a minute) and tries again.
 
@@ -74,8 +84,8 @@ another session, gets `403`.
 {"session_id": "<uuid>", "req_id": "<id>", "wait_ms": 25000, "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_..."}
 ```
 
-- Only called after `/poll` authorizes `permissions: true` and after giving fast local command hooks (`next(e)`) a
-  500 ms grace window. Pairs `tool_use_id` from `classic.PreToolUse`.
+- Only called after `/poll` authorizes `permissions: true`, the plugin has not reported `classic_passed_over`, and after
+  giving fast local command hooks (`next(e)`) a 500 ms grace window. Pairs `tool_use_id` from `classic.PreToolUse`.
 - `200`: `{"action": "renew"}` (keep renewing with the same `req_id` under the 30 s fetch cap),
   `{"action": "decide", "decision": {"behavior": "allow" | "deny", ...}}`, or `{"action": "passthrough"}` (fall back
   to the computer UI).

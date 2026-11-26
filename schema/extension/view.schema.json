@@ -1154,7 +1154,7 @@
         "confirm": {"type": "string", "description": "Ask the user first, in these words."},
         "submit": {"type": "boolean", "description": "Send the page's fields as values."},
         "reply": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "Assistant only: send this text back to the same conversation. The hub reads it from the saved view, not from the client."},
-        "open": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "Assistant only: an https URL or a validated persona/persona session, task, kb or file target, opened inside the app."},
+        "open": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "Assistant only, except that a full extension page may open persona://session/<machine>/<session> or persona://task/<id>: an https URL or a validated persona session, task, kb or file target, opened inside the app."},
         "pop": {"type": "boolean", "description": "Assistant only: return one page within the card."},
         "push": {"$ref": "#/$defs/Push", "x-since": 3,
           "description": "Open a page on top of this one instead of calling ui.action (an app of UI version 3; an older one calls ui.action with id)."},

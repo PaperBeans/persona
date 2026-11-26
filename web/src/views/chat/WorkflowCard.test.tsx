@@ -8,7 +8,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia = ((query: string) => ({
@@ -19,6 +19,7 @@ vi.hoisted(() => {
   })) as unknown as typeof window.matchMedia;
 });
 
+import { loadPages } from "../../lib/lazy-page";
 import { closePanel, getPanel } from "../../lib/panel";
 import { getState, reset, upsertSession, useStore } from "../../lib/store";
 import { emptyTaskIndex } from "../../lib/tasks";
@@ -30,7 +31,8 @@ import { TWEEN_MS } from "../../ui/motion";
 import { ChatContext, type ChatContextValue } from "./chat-context";
 import { RunningStatusView } from "./RunningStatusBar";
 import { SegmentView } from "./SegmentView";
-import { WorkflowCallCard, WorkflowCard } from "./WorkflowCard";
+import { WorkflowCallCard } from "./WorkflowCard";
+import { WorkflowCard } from "./WorkflowRun";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -87,6 +89,9 @@ let root: Root;
 let frames = new Map<number, FrameRequestCallback>();
 let nextFrame = 0;
 let clock = 0;
+
+// What opens below a card is its own chunk (WorkflowRun.tsx): in, so a test draws it as a reader does once it has come.
+beforeAll(() => loadPages());
 
 beforeEach(() => {
   frames = new Map();

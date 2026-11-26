@@ -654,7 +654,7 @@ func (s *Service) runtimeAssistantLauncher(ctx context.Context, machine, launche
 	var res struct {
 		Launchers []proto.Launcher `json:"launchers"`
 	}
-	if err := s.call(ctx, machine, DeviceLaunchersList, map[string]any{}, &res); err != nil {
+	if err := s.cachedLauncherList(ctx, machine, launcherListReadOpts{}, &res); err != nil {
 		return false
 	}
 	return slices.ContainsFunc(res.Launchers, func(l proto.Launcher) bool { return l.Name == launcher && l.Assistant })
