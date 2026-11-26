@@ -3,6 +3,8 @@
   "waiting_idle_message": "正在等待这台电脑上的 Agent 空闲后更新 node…",
   "transferring": "传输中",
   "transferring_message": "正在把 hub 这一版的 node 传到这台电脑…",
+  "draining": "待空闲重启",
+  "draining_message": "新版本已安装，正在等待当前任务空闲后重启…",
   "restarting": "重启中",
   "restarting_message": "正在重启这台电脑上的 node…",
   "confirming": "确认中",

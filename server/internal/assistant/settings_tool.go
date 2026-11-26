@@ -381,12 +381,23 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.inboxSignalsOn(ctx)), nil },
 			set: s.setInboxSignals},
+		{Setting: Setting{Key: "assistant.auto_supervision_mode", Title: "Automatic supervision messages", Actions: getSet,
+			About: "all (the default): the assistant sends every follow-up message about supervised tasks on its own (they wake the " +
+				"main conversation, a leader or the background supervisor, and each costs a model turn). outcomes: only the one-shot " +
+				"ones a supervisor has to act on, when a task finishes for review, stops unfinished, fails, its Agent reports done, " +
+				"blocked or a question, or a decision or the user's attention is needed; the routine checks while a task runs " +
+				"(stalled, no progress, estimates, review nudges, schedule checks, the parked summary, PR and Inbox side signals) " +
+				"are dropped, and those still waiting are withdrawn once. off: it sends none, queues none and schedules none, and " +
+				"what was waiting is withdrawn once. Not affected: the task ledger and states, the user's own questions and " +
+				"task_review, approval and permission cards, and the safety checks. A wider mode takes only what happens " +
+				"afterwards. Applies at once",
+			Value: "all, outcomes or off"},
+			get: func(ctx context.Context) (string, error) { return s.supervisionMode(ctx), nil },
+			set: s.setAutoSupervisionMode},
 		{Setting: Setting{Key: "assistant.auto_supervision_messages", Title: "Automatic supervision messages", Actions: getSet,
-			About: "on (the default): the assistant sends its follow-up messages about supervised tasks on its own (they wake the main " +
-				"conversation, a leader or the background supervisor, and each costs a model turn). off: it sends none, queues none and " +
-				"schedules none, and what was waiting is withdrawn once. Not affected: the task ledger and states, the user's own " +
-				"questions and task_review, approval and permission cards, and the safety checks. Turning it back on takes only what " +
-				"happens afterwards. Applies at once",
+			About: "older on/off form of assistant.auto_supervision_mode: reads true unless the mode is off; true sets the mode " +
+				"to all, false to off (withdrawing what was waiting once). Prefer assistant.auto_supervision_mode (all / outcomes / " +
+				"off). Applies at once",
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.autoSupervisionOn(ctx)), nil },
 			set: s.setAutoSupervisionMessages},
@@ -839,7 +850,7 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 	"assistant.machine_fallbacks": "title_machine_fallbacks", "assistant.machine_fallback_minutes": "title_machine_fallback_minutes",
 	"assistant.recording_days": "title_recording_days", "assistant.recording_audio_days": "title_recording_audio_days", "assistant.recording_text_days": "title_recording_text_days", "assistant.delivery_gate": "title_delivery_gate", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context", "assistant.chat_reply_relay": "title_chat_reply_relay",
-	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.auto_supervision_messages": "title_auto_supervision_messages", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", modelProfileBindingsKey: "title_model_bindings", "model_profiles.tiers": "title_model_tiers",
+	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.auto_supervision_messages": "title_auto_supervision_messages", "assistant.auto_supervision_mode": "title_auto_supervision_mode", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", modelProfileBindingsKey: "title_model_bindings", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
@@ -1392,11 +1403,48 @@ func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownC
 		"assistant.inbox_signals is %v from the next new Inbox message on (signals already waiting go out only while it is on).")
 }
 
+// setAutoSupervisionMessages is the older on/off form: true is the mode all, false off. A value already in effect is a
+// no-op, so true leaves outcomes as it is.
 func (s *Service) setAutoSupervisionMessages(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	return s.setBoolSetting(ctx, v, s.autoSupervisionOn, "assistant.auto_supervision_messages is unchanged", func(l i18n.Lang, before, after string) string {
 		return i18n.T(l, "assistant-settings_tool.change_auto_supervision_messages", i18n.Args{"before": before, "after": after})
-	}, func(v *Settings) **bool { return &v.AutoSupervisionMessages },
-		"assistant.auto_supervision_messages is %v now (settingsChanged applies the switch at once; turning it off withdraws what waited, turning it on replays nothing).")
+	}, func(v *Settings) **bool {
+		v.AutoSupervisionMode = "" // the saved switch decides again (supervisionModeOf): true is all, false off
+		return &v.AutoSupervisionMessages
+	}, "assistant.auto_supervision_messages is %v now (settingsChanged applies the switch at once; turning it off withdraws what waited, turning it on replays nothing).")
+}
+
+// setAutoSupervisionMode changes which automatic supervision messages are sent (supervise_switch.go). The older switch
+// is kept in step (mode != off) for older readers and downgrades.
+func (s *Service) setAutoSupervisionMode(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var mode string
+	if err := json.Unmarshal(v, &mode); err != nil || !slices.Contains(supervisionModes, mode) {
+		return nil, errors.New("value must be all, outcomes or off")
+	}
+	before := s.supervisionMode(ctx)
+	if mode == before {
+		return &ownChange{summary: "assistant.auto_supervision_mode is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	name := func(l i18n.Lang, m string) string {
+		return i18n.T(l, "assistant-settings_tool.auto_supervision_mode_"+m)
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_auto_supervision_mode", i18n.Args{"before": name(l, before), "after": name(l, mode)})
+	},
+		apply: func(ctx context.Context) (string, error) {
+			on := mode != supervisionModeOff
+			if _, err := s.updateSettings(ctx, func(v *Settings) error {
+				v.AutoSupervisionMode, v.AutoSupervisionMessages = mode, &on
+				return nil
+			}); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			return fmt.Sprintf("assistant.auto_supervision_mode is %s now (applied at once; what the new mode drops is withdrawn, nothing withdrawn is replayed).", mode), nil
+		}}, nil
 }
 
 func (s *Service) setInboxTodoForward(ctx context.Context, v json.RawMessage) (*ownChange, error) {

@@ -632,6 +632,11 @@ func (d *DB) ObserveConversationRevision(ctx context.Context, machine, session s
 		if err != nil || c == nil {
 			return err
 		}
+		for _, seg := range c.Segments {
+			if seg.MachineID == machine && seg.SessionID == session && seg.SourceRevision == revision {
+				return nil
+			}
+		}
 		var epoch int64
 		if err = tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 FOR UPDATE NOWAIT`, c.MachineID, c.SessionID).Scan(&epoch); err != nil {
 			return err
@@ -713,8 +718,12 @@ func (d *DB) ConversationInputReceipt(ctx context.Context, machine, session, id 
 // Claim exactly one queue head. A sending/in-doubt head fences later input until
 // reconciled: process restarts cannot blindly repeat an ambiguous model turn.
 func (d *DB) ClaimConversationInput(ctx context.Context, machine, session string, epoch int64) (*ConversationInput, error) {
+	pending, err := conversationInputPending(ctx, d.pool, machine, session)
+	if err != nil || !pending {
+		return nil, err
+	}
 	var out *ConversationInput
-	err := conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+	err = conversationTransaction(ctx, d, func(tx pgx.Tx) error {
 		var current int64
 		if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&current); err != nil {
 			return err

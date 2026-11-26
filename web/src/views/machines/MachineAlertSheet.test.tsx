@@ -291,29 +291,39 @@ describe("the version sheet", () => {
     await click($("[data-testid=redeploy]"));
     await click($("[data-testid=redeploy-confirm]"));
     expect(posts("/deploy")).toHaveLength(2);
+    show({ ...studio, deploying: true, deploy_phase: "draining", deploy_error: undefined });
+    await flush();
+    expect(state("transferring")).toBe("done");
+    expect(state("draining")).toBe("current");
+    expect(state("restarting")).toBe("todo");
+    expect($("[data-testid=deploy-draining-note]")?.textContent).toContain("等待当前任务空闲后重启");
     show({ ...studio, deploying: true, deploy_phase: "confirming", deploy_error: undefined });
     await flush();
+    expect(state("draining")).toBe("done");
     expect(state("confirming")).toBe("current");
+    expect($("[data-testid=deploy-draining-note]")).toBeNull();
     show({ ...studio, node_mismatch: false, node_version: "v1-202611141020" });
     await flush();
     expect($("[data-testid=deploy-done]")?.textContent).toContain("v1-202611141020");
     expect(state("done")).toBe("done");
   });
 
-  it("withdraws an open Redeploy confirmation when the computer starts updating elsewhere", async () => {
+  it("withdraws an open Redeploy confirmation when the computer starts updating or draining elsewhere", async () => {
     const show = (machine: Machine) => render({ machine, kind: "mismatch", agents: [] });
-    show(studio);
-    await flush();
-    await click($("[data-testid=redeploy]"));
-    const confirm = $("[data-testid=redeploy-confirm]") as HTMLButtonElement;
-    expect(confirm.disabled).toBe(false);
+    for (const phase of ["draining", "restarting"] as const) {
+      show(studio);
+      await flush();
+      await click($("[data-testid=redeploy]"));
+      const confirm = $("[data-testid=redeploy-confirm]") as HTMLButtonElement;
+      expect(confirm.disabled).toBe(false);
 
-    show({ ...studio, deploy_phase: "restarting" });
-    await flush();
-    expect($('[data-step="restarting"]')?.getAttribute("data-state")).toBe("current");
-    expect(confirm.isConnected && !confirm.disabled).toBe(false);
-    await act(async () => { confirm.click(); });
-    expect(posts("/deploy")).toHaveLength(0);
+      show({ ...studio, deploy_phase: phase });
+      await flush();
+      expect($(`[data-step="${phase}"]`)?.getAttribute("data-state")).toBe("current");
+      expect(confirm.isConnected && !confirm.disabled).toBe(false);
+      await act(async () => { confirm.click(); });
+      expect(posts("/deploy")).toHaveLength(0);
+    }
   });
 
   it("gives the hub's reason when it can't update the computer", async () => {

@@ -41,6 +41,7 @@ describe("machine deployment", () => {
   it.each([
     ["waiting_idle", "等待空闲", "Agent 空闲"],
     ["transferring", "传输中", "传到这台电脑"],
+    ["draining", "待空闲重启", "等待当前任务空闲后重启"],
     ["restarting", "重启中", "重启"],
     ["confirming", "确认中", "确认与 hub 的版本一致"],
   ] as const)("keeps %s visible through offline/version transitions and prevents duplicate deployments", (deploy_phase, label, text) => {
@@ -51,7 +52,7 @@ describe("machine deployment", () => {
 
   it("treats only restart and confirmation disconnects as expected, and restores recovery after failure", () => {
     const offline = machine({ kind: "link", online: false, can_deploy: true });
-    for (const deploy_phase of ["waiting_idle", "transferring", undefined] as const) {
+    for (const deploy_phase of ["waiting_idle", "transferring", "draining", undefined] as const) {
       expect(machineDeployment({ ...offline, deploying: true, deploy_phase }).expectedDisconnect).toBe(false);
     }
     for (const deploy_phase of ["restarting", "confirming"] as const) {

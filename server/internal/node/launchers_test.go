@@ -267,12 +267,12 @@ func TestMergeLaunchersLeavesLauncherDefaultModelsEmpty(t *testing.T) {
 		t.Errorf("TRAE CLI launcher kind or display name changed: %+v", l)
 	}
 	wantDisplay := map[string]string{
-		"claude":  "Claude Code",
-		"codex":   "Codex",
-		"omp":     "Oh My Pi",
-		"pi":      "",
-		"cursor":  "Cursor",
-		"agy":     "Antigravity CLI",
+		"claude":   "Claude Code",
+		"codex":    "Codex",
+		"omp":      "Oh My Pi",
+		"pi":       "",
+		"cursor":   "Cursor",
+		"agy":      "Antigravity CLI",
 		"cx-plain": "",
 	}
 	for name, want := range wantDisplay {

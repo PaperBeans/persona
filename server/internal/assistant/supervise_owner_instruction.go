@@ -21,8 +21,8 @@ const (
 	ownerReportTurns           = 6
 )
 
-// OwnerInstruction is the short, verified excerpt of an owner's message to one Agent session.
-type OwnerInstruction struct {
+// ownerInstruction is the short, verified excerpt of an owner's message to one Agent session.
+type ownerInstruction struct {
 	At          time.Time `json:"at"`     // display and transcript matching only; never ordered against an assignment
 	Source      string    `json:"source"` // app or terminal
 	ClientMsgID string    `json:"client_msg_id,omitempty"`
@@ -32,15 +32,15 @@ type OwnerInstruction struct {
 	NeedsReport bool `json:"needs_report,omitempty"`
 }
 
-// OwnerSessionWork keeps the latest instruction and Persona assignment for one linked session.
-type OwnerSessionWork struct {
+// ownerSessionWork keeps the latest instruction and Persona assignment for one linked session.
+type ownerSessionWork struct {
 	MachineID   string            `json:"machine_id"`
 	SessionID   string            `json:"session_id"`
 	AssignedAt  time.Time         `json:"assigned_at,omitzero"`
-	Instruction *OwnerInstruction `json:"instruction,omitempty"`
+	Instruction *ownerInstruction `json:"instruction,omitempty"`
 }
 
-func (v *Supervision) ownerSessionWork(machine, session string) *OwnerSessionWork {
+func (v *Supervision) ownerSessionWork(machine, session string) *ownerSessionWork {
 	for i := range v.OwnerWork {
 		if v.OwnerWork[i].MachineID == machine && v.OwnerWork[i].SessionID == session {
 			return &v.OwnerWork[i]
@@ -62,7 +62,7 @@ func (v *Supervision) recordOwnerInstruction(machine, session, source, clientMsg
 	at = at.UTC()
 	work := v.ownerSessionWork(machine, session)
 	if work == nil {
-		v.OwnerWork = append(v.OwnerWork, OwnerSessionWork{MachineID: machine, SessionID: session})
+		v.OwnerWork = append(v.OwnerWork, ownerSessionWork{MachineID: machine, SessionID: session})
 		work = &v.OwnerWork[len(v.OwnerWork)-1]
 	}
 	// A stable message id proves a redelivery; without one, the exact same timestamp and content do. This dedupe never
@@ -71,7 +71,7 @@ func (v *Supervision) recordOwnerInstruction(machine, session, source, clientMsg
 		work.Instruction.Excerpt == excerpt && (clientMsgID != "" || work.Instruction.At.Equal(at)) {
 		return false
 	}
-	work.Instruction = &OwnerInstruction{At: at, Source: source, ClientMsgID: clientMsgID, Excerpt: excerpt, NeedsReport: true}
+	work.Instruction = &ownerInstruction{At: at, Source: source, ClientMsgID: clientMsgID, Excerpt: excerpt, NeedsReport: true}
 	return true
 }
 
@@ -82,7 +82,7 @@ func (v *Supervision) recordAssignment(machine, session string, at time.Time) bo
 	at = at.UTC()
 	work := v.ownerSessionWork(machine, session)
 	if work == nil {
-		v.OwnerWork = append(v.OwnerWork, OwnerSessionWork{MachineID: machine, SessionID: session, AssignedAt: at})
+		v.OwnerWork = append(v.OwnerWork, ownerSessionWork{MachineID: machine, SessionID: session, AssignedAt: at})
 		return true
 	}
 	if !work.AssignedAt.IsZero() && !at.After(work.AssignedAt) {
@@ -207,7 +207,7 @@ func (s *Service) ownerInstructionBlock(ctx context.Context, t Todo) (matched, w
 }
 
 // ownerInstructionReport returns why the instruction is unresolved, or "" after a later settled report.
-func (s *Service) ownerInstructionReport(ctx context.Context, machine, session string, instruction OwnerInstruction) string {
+func (s *Service) ownerInstructionReport(ctx context.Context, machine, session string, instruction ownerInstruction) string {
 	var page struct {
 		Items []proto.Item `json:"items"`
 	}

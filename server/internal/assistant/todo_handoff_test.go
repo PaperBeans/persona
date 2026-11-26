@@ -87,7 +87,7 @@ func reportHandoffTest(s *Service, session, kind string, receipt map[string]stri
 
 func TestConfirmedTaskHandoffsWakeOnlyMatchingOrigin(t *testing.T) {
 	ctx := context.Background()
-	d, err := db.Open(ctx, newDatabase(t), db.AllSets)
+	d, err := db.Open(ctx, newMigratedDatabase(t, db.AllSets), db.AllSets)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,5 +38,14 @@
   "bg_stalled_hours_other": "后台命令 {count} 小时没有动静",
   "bg_stalled_days_one": "后台命令 {count} 天没有动静",
   "bg_stalled_days_other": "后台命令 {count} 天没有动静",
-  "bg_stalled_hint": "它的后台命令一直没有占用 CPU，也没有输出新内容，可能卡住了。仍按「工作中」计算：运行中的工具算在干活，是否停掉由你决定。"
+  "bg_stalled_hint": "它的后台命令一直没有占用 CPU，也没有输出新内容，可能卡住了。仍按「工作中」计算：运行中的工具算在干活，是否停掉由你决定。",
+  "phase_idle": "空闲",
+  "error": "出错",
+  "background": "正在后台工作",
+  "model_error": "模型返回了错误",
+  "terminal_dialog": "等待你在终端回应",
+  "cards_held": "等待审核",
+  "cards_other": "{count} 个待处理请求",
+  "restarted": "电脑已重启",
+  "restarted_resumable": "电脑已重启，可继续会话"
 }

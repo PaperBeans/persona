@@ -57,9 +57,9 @@ export function heldAsWorking(sessions: Session[], interactions: readonly Intera
   if (!held.size) return sessions;
   let changed = false;
   const out = sessions.map((s) => {
-    if (stateOf(s) !== "needs_you" || !held.has(`${s.machine_id}/${s.session_id}`)) return s;
+    if (s.view || stateOf(s) !== "needs_you" || !held.has(`${s.machine_id}/${s.session_id}`)) return s;
     changed = true;
-    return { ...s, state: "working" as const };
+    return { ...s, state: "working" as const, pending_interactions: 0 };
   });
   return changed ? out : sessions;
 }

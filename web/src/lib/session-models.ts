@@ -11,7 +11,7 @@ import { t } from "../i18n";
 import { ApiError, credentialOwner, errorText, onCredentialChange } from "./api";
 import { agentId, sessionAgent } from "./agent-kind";
 import { modelShort } from "./context-usage";
-import { sessionCan, stateOf } from "./format";
+import { sessionCan, activityOf, stateOf } from "./format";
 import { runsAssistant, type AssistantLauncher } from "./assistant-chat";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
@@ -27,7 +27,7 @@ export interface ModelList {
   list?: LauncherModels | null;
   /** A read is on its way. */
   loading?: boolean;
-  /** The last read failed and there is no list to show. */
+  /** The first read or a requested refresh failed. */
   error?: string;
 }
 
@@ -219,14 +219,14 @@ function slot(first: boolean): Promise<() => void> {
   });
 }
 
-/** Reads a launcher's list: once (the pill), or `again` behind the one shown (an opening, Retry). */
-export function readModels(mid: string, launcher: string, o: { again?: boolean; first?: boolean; purpose?: "assistant"; host?: string } = {}): Promise<void> {
+/** Reads a launcher's list once, `again` on opening, or with `refresh` to skip the computer's cache. */
+export function readModels(mid: string, launcher: string, o: { again?: boolean; first?: boolean; purpose?: "assistant"; host?: string; refresh?: boolean } = {}): Promise<void> {
   const scope = catalogScope(o.purpose);
   const key = listKey(mid, launcher, o.purpose, scope, o.host);
   const reading = reads.get(key);
   if (reading) return reading.promise;
   const had = lists.get(key);
-  if (had?.list !== undefined && !o.again) return Promise.resolve();
+  if (had?.list !== undefined && !o.again && !o.refresh) return Promise.resolve();
   lists.set(key, { list: had?.list, loading: true });
   changed();
   const sharedKey = JSON.stringify(launcherKeyParts(mid, launcher, scope));
@@ -235,7 +235,9 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
     try {
       if (scope.owner !== credentialOwner()) return;
       // This read owns a queued generation; the per-key cache above, not an older GET, coalesces its callers.
-      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager, dedupe: false });
+      const r = await launcherModels(mid, launcher, {
+        purpose: o.purpose, host: o.host, manager: scope.manager, refresh: o.refresh, dedupe: false,
+      });
       for (const id of hidden) {
         if (r?.models.some((m) => m.id === id && m.custom)) {
           forgetting.get(sharedKey)?.get(id)?.restore.set(key, withoutCustom(r, id).restore);
@@ -245,8 +247,11 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
     } catch (e) {
       // Keep the catalog on a failed refresh. A new omp start still needs the node to confirm its capability.
       const list = lists.get(key)?.list;
-      lists.set(key, list === undefined ? { error: errorText(e) } :
-        { list: list?.supports_start_model ? { ...list, supports_start_model: false } : list });
+      const error = list === undefined || o.refresh ? errorText(e) : undefined;
+      lists.set(key, {
+        ...(list !== undefined && { list: list?.supports_start_model ? { ...list, supports_start_model: false } : list }),
+        ...(error && { error }),
+      });
     } finally {
       done();
       reads.delete(key);
@@ -358,13 +363,13 @@ export const ENGINE_SWITCH_FEATURE = "engine_switch";
 export function engineSwitchable(s: Session): boolean {
   const engine = sessionEngine(s);
   if (engine === "claude") return !s.source_kind && canSwitchModel(s);
-  return (engine === "codex" || engine === "agy") && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
+  return (engine === "codex" || engine === "agy") && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && activityOf(s) !== "offline";
 }
 
 /** What the pill and the panel can change on the session now: its model (Claude Code in a terminal, a runtime that says
  *  so), its effort (the composer's chips used to; a Codex thread on its app-server too). Neither: the pill is a label. */
 export function sessionSwitches(s: Session): { model: boolean; effort: boolean } {
-  const live = stateOf(s) !== "offline";
+  const live = activityOf(s) !== "offline";
   return { model: canSwitchModel(s), effort: live && (hasModes(s) || hasEffortOnly(s)) };
 }
 

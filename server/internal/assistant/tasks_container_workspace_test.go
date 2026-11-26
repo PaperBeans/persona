@@ -1083,7 +1083,7 @@ func TestTaskPlanContainerLegacyModesUnchanged(t *testing.T) {
 }
 
 func TestTaskPlanContainerWorkspaceRealPostgres(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}

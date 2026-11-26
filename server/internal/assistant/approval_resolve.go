@@ -267,7 +267,7 @@ func (s *Service) finishPrepared(p *pending, status string) {
 	}
 	if kept != nil {
 		s.channelsEnded(p.ix, kept)
-		go s.InteractionResolved(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: *kept, Status: status})
+		s.interactionResolvedSoon(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: *kept, Status: status})
 	}
 	if p.resolved != nil {
 		close(p.resolved)

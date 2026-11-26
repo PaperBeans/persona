@@ -894,6 +894,13 @@ func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, 
 		}
 		return nil
 	}
+	if c.Switch != nil && c.Switch.Phase != "active" {
+		return nil
+	}
+	pending, err := st.ConversationInputPending(ctx, c.MachineID, c.SessionID)
+	if err != nil || !pending {
+		return err
+	}
 	vanishedActiveTarget := c.Switch != nil && c.Switch.Phase == "active" && s.isVanishedZeroTurnSegment(ctx, c, a)
 	input, err := st.ClaimConversationInput(ctx, c.MachineID, c.SessionID, c.Epoch)
 	if err != nil || input == nil {

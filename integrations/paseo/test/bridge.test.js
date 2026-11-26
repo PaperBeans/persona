@@ -2577,6 +2577,66 @@ test('duplicate projects at one physical root resolve deterministically; an expl
   assert.equal(fake.requestsOf('agent.create.request').at(-1).workspaceId, w.id)
 })
 
+test('symlink-alias duplicate projects at one physical root resolve deterministically to the canonical path', async (t) => {
+  const f = projectFixture(t)
+  const { fake, node } = await setup(t)
+  let projects = [f.project('prj_canonical', f.repo), f.project('prj_alias', f.alias)]
+  fake.handlers['project.list.request'] = () => ({ payload: { projects } })
+  for (const order of [projects, [...projects].reverse()]) {
+    projects = order
+    await makeTree(node, f.alias)
+    assert.equal(fake.requestsOf('workspace.create.request').at(-1).source.projectId, 'prj_canonical')
+    await call(node, 'session.start', { cwd: f.alias, launcher: 'my-codex' })
+    assert.equal(fake.requestsOf('workspace.create.request').at(-1).source.projectId, 'prj_canonical')
+  }
+})
+
+test('symlink-alias duplicates with no record at the physical path prefer the project with more workspaces, then the lowest ID', async (t) => {
+  const f = projectFixture(t)
+  const alias2 = join(f.dir, 'alias2')
+  symlinkSync(f.repo, alias2)
+  const w = workspaceDescriptor({ workspaceDirectory: alias2, projectId: 'prj_zbusy' })
+  const { fake, node } = await setup(t, { workspaces: [w] })
+  await until('the workspace', () => node.last('runtime.workspaces'))
+  let projects = [f.project('prj_aidle', f.alias), f.project('prj_zbusy', alias2)]
+  fake.handlers['project.list.request'] = () => ({ payload: { projects } })
+  for (const order of [projects, [...projects].reverse()]) {
+    projects = order
+    await makeTree(node, f.repo)
+    assert.equal(fake.requestsOf('workspace.create.request').at(-1).source.projectId, 'prj_zbusy', 'more workspaces beats a lower ID')
+  }
+  projects = [f.project('prj_b', f.alias), f.project('prj_a', alias2)]
+  for (const order of [projects, [...projects].reverse()]) {
+    projects = order
+    await makeTree(node, f.repo)
+    assert.equal(fake.requestsOf('workspace.create.request').at(-1).source.projectId, 'prj_a', 'equal workspaces fall back to the lowest ID')
+  }
+})
+
+test('a linked worktree start picks the canonical record among its main checkout\'s symlink duplicates', async (t) => {
+  const f = projectFixture(t)
+  const tree = join(f.dir, 'linked')
+  f.git(f.repo, 'worktree', 'add', '-b', 'linked', tree)
+  const { fake, node } = await setup(t)
+  let projects = [f.project('prj_legacy', tree), f.project('prj_alias', f.alias), f.project('prj_main', f.repo)]
+  fake.handlers['project.list.request'] = () => ({ payload: { projects } })
+  for (const order of [projects, [...projects].reverse()]) {
+    projects = order
+    await call(node, 'session.start', { cwd: tree, launcher: 'my-codex' })
+    assert.deepEqual(fake.requestsOf('workspace.create.request').at(-1).source, { kind: 'directory', path: tree, projectId: 'prj_main' })
+  }
+})
+
+test('path-only creation with no existing Paseo project canonicalizes symlink cwd before calling Paseo', async (t) => {
+  const f = projectFixture(t)
+  const { fake, node } = await setup(t)
+  fake.handlers['project.list.request'] = () => ({ payload: { projects: [] } })
+  await makeTree(node, f.alias)
+  assert.equal(fake.requestsOf('workspace.create.request').at(-1).source.cwd, f.repo)
+  await call(node, 'session.start', { cwd: f.alias, launcher: 'my-codex' })
+  assert.equal(fake.requestsOf('agent.create.request').at(-1).config.cwd, f.repo)
+})
+
 for (const [name, reply] of [
   ['RPC failure', { type: 'rpc_error', payload: { error: 'List unavailable', code: 'unavailable' } }],
   ['missing list', { payload: {} }],

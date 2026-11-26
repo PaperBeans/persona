@@ -115,9 +115,9 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
     const p: PanelProvider = { id: name, name: launcherTitle(name, all), engine: kind, models: null, defaultModel: defaultName, status: launcherBlock(launcher)?.reason };
     // the session's own provider is called what its row calls it (a Paseo provider's label, #8142)
     if (mine && s.agent_label) p.engineLabel = s.agent_label;
+    if (e.error) p.error = e.error;
+    if (e.loading || (e.list === undefined && !e.error)) p.loading = true;
     if (e.list === undefined) {
-      if (e.error) p.error = e.error;
-      else p.loading = true;
       // the model it runs stays there while its list is read or couldn't be: its flyout (effort, Fast, ultracode) works
       // as the old popover's tabs did with no list
       if (mine && shownModel) p.models = [panelModel({ id: shownModel, name: modelLabel(shownModel) }, kind, true, s, false)];

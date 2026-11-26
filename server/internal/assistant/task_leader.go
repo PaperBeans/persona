@@ -590,7 +590,7 @@ func (e leaderEscalated) Unwrap() error { return e.err }
 // batch, including members suppressed by delivered dedup history (#5732). sent determines the text actually carried;
 // receipts includes the filtered members whose turn receipts close on delivery.
 func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string, all, sent, receipts []superviseSignal, delivered func(context.Context)) error {
-	if !s.autoSupervisionOn(ctx) {
+	if !supervisionSignalsAllowed(s.supervisionMode(ctx), sent) {
 		return errSupervisionSuppressed // the last look before the send (supervise_switch.go)
 	}
 	ctx = supervisionSourceContext(ctx, sent)
@@ -648,7 +648,7 @@ func (s *Service) leaderDelivered(ctx context.Context, lead TodoAgent, entries [
 // sendToLeaderNow is one attempt to put text into the leader's session, resuming it if closed; it waits up to
 // leaderResumeTime. Each attempt has its own time, so it can be called from a goroutine that outlives any request.
 func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text string, kept []superviseSignal) error {
-	if !s.autoSupervisionOn(ctx) {
+	if !supervisionSignalsAllowed(s.supervisionMode(ctx), kept) {
 		return errSupervisionSuppressed // also a retry or resume that was already running
 	}
 	ctx = supervisionSourceContext(ctx, kept)
@@ -665,8 +665,8 @@ func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text stri
 // acknowledges the complete original batch, including filtered members (#5732, #9607).
 func (s *Service) escalateLeaderMessage(lead TodoAgent, all, sent, receipts []superviseSignal, text string, uncertain bool, delivered func(context.Context)) {
 	ctx := context.Background()
-	if !s.autoSupervisionOn(ctx) {
-		return // automatic supervision messages are off: no escalation and no retry loop
+	if !supervisionSignalsAllowed(s.supervisionMode(ctx), sent) {
+		return // the mode drops it (off, or only routine checks under outcomes): no escalation and no retry loop
 	}
 	for _, g := range sent {
 		if w, ok := s.todoNow(g.Todo); ok {

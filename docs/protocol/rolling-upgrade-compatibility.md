@@ -421,6 +421,18 @@ going offline and a hub restart (D10 and D13 of `docs/plans/plan-derived-counts.
 | Manager or hub rolled back | The hello lists no `counts_view`, or the reconnected manager's entry has no `counts_view: true`: the fallback from that message on |
 | Several paired hubs | Each hub on its own; the app adds them up |
 
+## Node update draining (`node_update_drain_v1`, #16517)
+
+`node_update_drain_v1` is additive and keeps the node protocol floor unchanged. A resident node that announces it emits `node.update.draining` (`{id, target}`) and includes `update_draining` in `node.info` while draining active work after `node.update.commit`, then includes `{id, target}` in `node.restarting` at handover. Both the manager's two-minute confirmation timer and the local rollback watchdog's deadline start at handover instead of on the commit reply.
+
+| Pair | Behavior |
+| --- | --- |
+| New manager and capable node | After `node.update.commit`, the manager enters `deploy_phase: "draining"` and waits until `node.restarting` (or a sustained disconnect) before starting the two-minute confirmation timer. A hub restart while draining resumes tracking from `node.info.update_draining` instead of misclassifying the old-version draining node as `rolled_back`. A late reconnect that confirms the target version clears any persisted `failed` deploy record in Postgres. |
+| New manager and older node | The node omits `node_update_drain_v1`, `node.update.draining`, and `node.info.update_draining`. The manager keeps the legacy post-commit `confirming` flow and two-minute timeout; late reconnects that confirm the target version still clear persisted `failed` records. |
+| Older manager and new node | The older manager ignores `node.update.draining`, `node.info.update_draining`, and the extra fields on `node.restarting`, keeping its existing confirmation flow. Locally, the new node still protects its drain from premature watchdog rollback and arms a fresh post-`exec` deadline at handover. |
+| New node with older backup watchdog (disk drift) | Because the watchdog process is launched from the backup binary on disk, `BeginDrain` both marks `draining: true` in the marker and slides `deadline` forward while the draining resident is alive, so even an older backup binary that ignores `draining` never rolls back a live draining resident. Adopted external binaries (#15708) refresh only their adoption deadline and never create a backup or watchdog. |
+| Older client and new hub | `deploy_phase: "draining"` is an optional string alongside `deploying: true`; clients that do not know `"draining"` keep treating the machine as actively deploying until completion. |
+
 ## Apple 端交接
 
 原生协议兼容跟踪 #6192；本地状态与系统身份跟踪 #6152。Apple 的实现应遵循上述能力和字节约定；本清单不替它们宣称 Keychain、Intent、偏好、Shortcut、旧 controls、活动或 watch 在途数据已经验证。

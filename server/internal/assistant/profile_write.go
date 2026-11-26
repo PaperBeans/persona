@@ -199,6 +199,10 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("delivery_gate must be off, merged or live"))
 		return
 	}
+	if in.AutoSupervisionMode != "" && !slices.Contains(supervisionModes, in.AutoSupervisionMode) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("auto_supervision_mode must be all, outcomes or off"))
+		return
+	}
 	if in.TodosV2AutoSeen != "" && !slices.Contains(todosV2AutoSeenModes, in.TodosV2AutoSeen) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous"))
 		return
@@ -527,8 +531,16 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.SupervisionBatchMinutes != nil {
 			v.SupervisionBatchMinutes = in.SupervisionBatchMinutes
 		}
-		if in.AutoSupervisionMessages != nil {
+		if in.AutoSupervisionMode != "" {
+			// The mode wins over the older switch in the same body, and keeps it in step for older readers.
+			on := in.AutoSupervisionMode != supervisionModeOff
+			v.AutoSupervisionMode, v.AutoSupervisionMessages = in.AutoSupervisionMode, &on
+		} else if in.AutoSupervisionMessages != nil {
 			v.AutoSupervisionMessages = in.AutoSupervisionMessages
+			v.AutoSupervisionMode = supervisionModeOff
+			if *in.AutoSupervisionMessages {
+				v.AutoSupervisionMode = supervisionModeAll
+			}
 		}
 		if in.DefaultPermissionMode != "" {
 			v.DefaultPermissionMode = in.DefaultPermissionMode

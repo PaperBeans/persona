@@ -130,8 +130,9 @@ the task remains listed after the answer and disappears after exit without openi
 Git resolves a symlink spelling to its physical checkout. Paseo 0.16's project registry matches root paths by spelling,
 so handing it only that checkout can allocate a second project. An explicit workspace supplies the project without folder
 resolution; folder-only creation requires a fresh project list. A main-checkout project takes priority over legacy records
-rooted at a linked worktree or its subdirectories. At the selected physical root, duplicate records use the lowest project
-ID rather than registry order. Different matching non-main roots remain ambiguous for new creation. An unavailable list is not
+rooted at a linked worktree or its subdirectories. At the selected physical root, duplicate records prefer the one registered
+at the physical path, then more workspaces, then the lowest project ID, never registry order. With no match, creation passes
+Paseo the physical path so a symlink spelling cannot seed another duplicate. Different matching non-main roots remain ambiguous for new creation. An unavailable list is not
 an empty list. Use checkout roots rather than remotes so independent clones remain independent. Read symlinks afresh for writes,
 outside the display cache. Main-project preference must not make an existing worktree workspace depend on that fresh read: on
 failure or ambiguity, an implicit start falls back to the old owner-less lookup and rethrows only when no workspace matches.

@@ -34,14 +34,14 @@ const (
 )
 
 var (
-	quotaPause = 30 * time.Minute // without a Retry-After
-	busyFirst  = 5 * time.Second  // the first busy pause; each busy answer in a row doubles it
-	busyMost   = 5 * time.Minute
-	afterMost  = 24 * time.Hour // a Retry-After longer than this is taken as this
-	growAfter  = 10             // successes under a cap before it is raised by one
-	capLift    = 8              // a cap raised past this is lifted
-	now        = time.Now
-	logf       = log.Printf
+	quotaPause          = 30 * time.Minute // without a Retry-After
+	busyFirst           = 5 * time.Second  // the first busy pause; each busy answer in a row doubles it
+	busyMost            = 5 * time.Minute
+	afterMost           = 24 * time.Hour // a Retry-After longer than this is taken as this
+	growAfter           = 10             // successes under a cap before it is raised by one
+	capLift             = 8              // a cap raised past this is lifted
+	now                 = time.Now
+	logf                = log.Printf
 )
 
 // SetBusyPauseForTest makes a busy answer's first pause d instead of five seconds until t ends, for another package's
@@ -103,7 +103,7 @@ func IsPaused(err error) bool {
 	return errors.As(err, &p)
 }
 
-// Held is the pause on cfg's connection, nil when requests go out.
+// Held is the pause on cfg's connection or CLI launcher gate, nil when requests go out.
 func Held(cfg Config) *Pause {
 	if cfg.RunLauncher != "" {
 		return held(runKey(cfg))
@@ -144,12 +144,12 @@ type gate struct {
 	putOff      int       // requests not sent while held
 	probing     bool      // the pause is over and one request is finding out, until the upstream answers it
 	strikes     int       // busy answers in a row
-	cap         int       // requests in flight at most, 0 for no cap
+	runTimedOut bool          // the previous eligible CLI run timed out
+	cap         int           // requests in flight at most, 0 for no cap
 	inflight    int
 	out         []time.Time   // when each request in flight went out, the longest out first, for the log (noTurn)
 	fine        int           // successes since the cap last changed
 	wake        chan struct{} // closed on every change, for requests waiting under the cap
-	runTimedOut bool          // the previous eligible CLI run timed out
 
 	// The requests put off for want of a turn since the last log line about them (noTurn): how many, since when,
 	// and when that line was written.
@@ -210,9 +210,22 @@ func sharedGate(k gateID, host string) *gate {
 		if u, err := url.Parse(host); err == nil && u.Host != "" {
 			host = u.Host
 		}
+	} else {
+		host = runGateHost(k.machine, k.launcher, k.model)
 	}
 	g, _ := gates.LoadOrStore(k, &gate{host: host, wake: make(chan struct{})})
 	return g.(*gate)
+}
+
+func runGateHost(machine, launcher, model string) string {
+	host := launcher
+	if machine != "" {
+		host = machine + "/" + host
+	}
+	if model != "" {
+		host += ":" + model
+	}
+	return host
 }
 
 func gateFor(baseURL, key string) *gate {
@@ -391,12 +404,16 @@ func (g *gate) run(ctx context.Context, r Request, run func(context.Context, Req
 	return run(ctx, r)
 }
 
-// Two consecutive normal-budget timeouts hold the launcher. After that, a timed-out
-// probe renews the hold immediately. Only the probe can change an existing hold.
+// Two consecutive full-budget timeouts hold the launcher. After that, a timed-out
+// probe renews the hold immediately. Only the probe can change an existing hold;
+// a timeout already in flight when another run holds it is put off with that hold.
 func (g *gate) doneRun(t turn, normalBudget, canceled bool, err error) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	reason, detail := "", ""
+	if g.held && !t.probe && normalBudget && !canceled && errors.Is(err, context.DeadlineExceeded) {
+		return g.finish(t, false, false, err, ReasonBusy, 0, "repeated launcher timeouts")
+	}
 	if !g.held || t.probe {
 		switch {
 		case canceled || errors.Is(err, context.Canceled):

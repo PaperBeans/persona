@@ -108,7 +108,7 @@ func TestAgentSendTellsManagerTheOwnerSpoke(t *testing.T) {
 						want = "terminal-reply-1"
 					}
 				}
-				if got.ClientMsgID != want {
+				if got.ClientMsgID.String() != want {
 					t.Fatalf("owner client_msg_id for %s (#13041): %+v, want %q", tc.name, got, want)
 				}
 			case <-timer.C:
@@ -218,7 +218,7 @@ func TestAssistantConversationSendCarriesOwnerText(t *testing.T) {
 					t.Fatalf("assistant-conversation owner text for %s: %q, want %q", tc.name, got.Text, tc.text)
 				}
 				// The owner's text names its send (#13041); owner provenance (#15641) is for Agents only.
-				if want := map[bool]string{true: "dir-reply-1"}[tc.text != ""]; got.ClientMsgID != want || got.Source != "" || got.At.IsZero() {
+				if want := map[bool]string{true: "dir-reply-1"}[tc.text != ""]; got.ClientMsgID.String() != want || got.Source != "" || got.At.IsZero() {
 					t.Fatalf("assistant-conversation spoke for %s: %+v, want client_msg_id %q and no source", tc.name, got, want)
 				}
 			case <-timer.C:

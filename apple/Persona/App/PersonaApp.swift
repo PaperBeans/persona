@@ -43,6 +43,12 @@ struct PersonaApp: App {
                 .onContinueUserActivity(PersonaCalls.activityTypes[0]) { PersonaCalls.shared.continueActivity($0) }
                 .onContinueUserActivity(PersonaCalls.activityTypes[1]) { PersonaCalls.shared.continueActivity($0) }
                 #endif
+                #if os(iOS)
+                .onChange(of: model.hiddenNavigationPages) {
+                    QuickAction.publish()
+                    if case .todo? = model.linkSheet { model.returnToStartIfHidden(.todos) }
+                }
+                #endif
                 .task(id: model.fleetLook) { LiveActivityController.shared.look(model.fleetLook) { model.fleetFaces } }
                 .onOpenURL { url in
                     #if os(iOS)
@@ -68,6 +74,10 @@ struct PersonaApp: App {
                         model.toast = Toast(String(localized: "To sign in a browser, scan its code in Settings › Devices › Scan Browser Sign-in Code."))
                         return
                     }
+                    #if os(iOS)
+                    if let (group, page) = model.hubPage(url), page.navigationPage != nil,
+                       model.openNavigationLink(page, group: group) != nil { return }
+                    #endif
                     // A page of Persona's (persona://open<path>, an older persona:// form, #9926): only opens it.
                     if let opened = model.openOwnLink(url) {
                         if case .sheet(let page) = opened { model.linkSheet = page }
@@ -102,6 +112,7 @@ struct PersonaApp: App {
                 model.resumeLinks()
                 model.refreshExtensionSurfaces()
                 #if os(iOS)
+                model.refreshPageVisibility()
                 HomeWidgetWriter.shared.tellHub() // whether the hub should wake it for its widgets (#5721)
                 #endif
                 // Rolling recordings expire even when no segment arrives and the recording page stays closed.

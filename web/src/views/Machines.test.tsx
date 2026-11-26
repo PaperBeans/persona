@@ -333,7 +333,7 @@ describe("Machines", () => {
       await flush();
       expect(buttons(t("lib-machine-deploy.redeploy"))[0]?.disabled).toBe(false);
     });
-    for (const phase of ["waiting_idle", "transferring", "restarting", "confirming"] as const) {
+    for (const phase of ["waiting_idle", "transferring", "draining", "restarting", "confirming"] as const) {
       show(phase); // phase alone is sufficient, including when an older hub omits `deploying`
       const [redeploy] = buttons(t(`lib-machine-deploy.${phase}`));
       expect(redeploy?.disabled).toBe(true);

@@ -5933,6 +5933,63 @@ export interface KBUpdateResult {
 }
 
 /**
+ * A recording's UUID, picked by the extension so a retry lands on the same recording.
+ */
+export type KBRecordingID = string & { readonly __brand: "KBRecordingID" };
+/** A KBRecordingID from its raw string. */
+export function kBRecordingID(raw: string): KBRecordingID {
+  return raw as KBRecordingID;
+}
+
+/**
+ * An action item's id, picked by the extension and stable across writes.
+ */
+export type KBMinutesActionID = string & { readonly __brand: "KBMinutesActionID" };
+/** A KBMinutesActionID from its raw string. */
+export function kBMinutesActionID(raw: string): KBMinutesActionID {
+  return raw as KBMinutesActionID;
+}
+
+/**
+ * A to-do's id, set by the hub when the user makes a to-do of an action item.
+ */
+export type KBTodoID = string & { readonly __brand: "KBTodoID" };
+/** A KBTodoID from its raw string. */
+export function kBTodoID(raw: string): KBTodoID {
+  return raw as KBTodoID;
+}
+
+/**
+ * Whether a recording's meeting is a calendar item (events) or an imported meeting (meetings).
+ */
+export type KBRecordingMeetingKind = "events" | "meetings";
+export const KBRECORDING_MEETING_KINDS: readonly KBRecordingMeetingKind[] = ["events", "meetings"];
+
+/** A KBRecordingMeetingKind this app does not know, kept as it came. */
+export interface UnknownKBRecordingMeetingKind {
+  unknown: string;
+}
+
+/** A raw KBRecordingMeetingKind: one this app knows, or UnknownKBRecordingMeetingKind with the raw value. */
+export function parseKBRecordingMeetingKind(raw: string): KBRecordingMeetingKind | UnknownKBRecordingMeetingKind {
+  const known = KBRECORDING_MEETING_KINDS.find((value) => value === raw);
+  if (known !== undefined) {
+    return known;
+  }
+  const unknown: UnknownKBRecordingMeetingKind = { unknown: raw };
+  return unknown;
+}
+
+/**
+ * A calendar item's or imported meeting's id in the knowledge base.
+ */
+export type KBRecordingMeetingID = string & { readonly __brand: "KBRecordingMeetingID" };
+/** A KBRecordingMeetingID from its raw string. */
+export function kBRecordingMeetingID(raw: string): KBRecordingMeetingID {
+  return raw as KBRecordingMeetingID;
+}
+
+/**
  * kb.put_recording (kb.write): create or update the extension's own recording with its minutes and, optionally, its
  * transcript (docs/extensions/extensions.md "Writing recordings and minutes"). It is the extension's: no other
  * extension may write it, and no extension a recording the phone uploaded (permission_denied). The same params again
@@ -5941,7 +5998,7 @@ export interface KBUpdateResult {
  */
 export interface KBPutRecordingParams {
   /** A UUID the extension picks; one derived from its own source id makes a retry land on the same recording. */
-  id: string;
+  id: KBRecordingID;
   title?: string;
   /** An RFC 3339 time. */
   started_at: string;
@@ -6004,7 +6061,7 @@ export interface KBMinutesPoint {
  * stays on it.
  */
 export interface KBMinutesAction {
-  id: string;
+  id: KBMinutesActionID;
   who?: string;
   what: string;
   /** The deadline as said. */
@@ -6015,19 +6072,19 @@ export interface KBMinutesAction {
   at: number;
   photo?: number;
   /** The hub's: the to-do made of it. */
-  todo_id?: string;
+  todo_id?: KBTodoID;
 }
 
 /**
  * The calendar item (events) or imported meeting (meetings) the recording was; it must exist.
  */
 export interface KBRecordingMeeting {
-  kind: string;
-  id: string;
+  kind: KBRecordingMeetingKind;
+  id: KBRecordingMeetingID;
 }
 
 export interface KBPutRecordingResult {
-  id: string;
+  id: KBRecordingID;
   /** The hub's revision of the recording: 1 when created, one more for each write that changed it. */
   revision: number;
   created?: boolean;

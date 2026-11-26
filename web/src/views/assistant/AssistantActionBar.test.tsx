@@ -122,6 +122,48 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(writes).toContain("/api/v1/todos/verify-task/accept");
   });
 
+  it("shows and answers the step behind a direction's rolled-up Needs you row", async () => {
+    const ask = {
+      outcome: "decide" as const, asked_at: at, verdict: "Release approval needed", question: "Which release should go out?",
+      recommend: "Preview", options: [{ label: "Preview" }, { label: "Stable" }],
+    };
+    const projectedAsk = { id: `todo:decision@${at}`, home: "todo" as const, kind: "decision" as const, round: at };
+    const view = { phase: "needs_you" as const, section: "needs_you" as const, reason: "owner_decides" as const, rank: 0 };
+    todo = {
+      ...todo, title: "Publish the update", kind: "task", agents: [], supervision: undefined,
+      view: { ...view, steps: { total: 1, done: 0 }, asks: [{ ...projectedAsk, id: `step:release-step/${projectedAsk.id}` }] },
+    };
+    const step: Todo = {
+      id: "release-step", title: "Choose the release", kind: "task", origin: "worker-supervisor", part_of: todo.id,
+      created_at: at, updated_at: at, agents: [{ machine_id: "demo", session_id: "worker", linked_at: at }],
+      supervision: { state: "needs_user", supervisor: "worker-supervisor" }, ask, view: { ...view, asks: [projectedAsk] },
+    };
+    moreTodos = [step];
+    mainChat = "main-chat";
+    await act(async () => refresh());
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
+    const selector = '[data-needs-row="task:tray-task"]';
+    const collapsed = host.querySelector(selector);
+    expect(collapsed?.textContent).toContain(step.title);
+    expect(collapsed?.textContent).toContain(stateName("needs_you"));
+    expect(collapsed?.textContent).not.toContain(t("lib-state-labels.not_started"));
+    expect(host.querySelectorAll("[data-needs-row]")).toHaveLength(1);
+    await openRows("task:tray-task");
+    await expect.poll(() => host.querySelector(`${selector} [data-decision-question]`)?.textContent).toBe(ask.question);
+    const row = host.querySelector(selector)!;
+    await act(async () => row.querySelector<HTMLButtonElement>("button[data-needs-title]")!.click());
+    expect(getPanel()).toEqual({ kind: "task", todo: step.id });
+
+    const option = [...row.querySelectorAll("button")].find((button) => button.textContent === "Stable");
+    expect(option).toBeDefined();
+    await act(async () => option!.click());
+    const answers = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith("/accept") && init?.method === "POST");
+    expect(answers.map(([url, init]) => [url, JSON.parse(String(init?.body))])).toEqual([
+      [`/api/v1/todos/${step.id}/accept`, { asked_at: at, option: "Stable" }],
+    ]);
+  });
+
   it.each([false, true])("opens a quiet verification whose Pass round has not arrived (main=%s)", async (main) => {
     const verification: Todo = {
       id: "verify-without-pass", title: "Inspect the finished work", quiet: true, origin: "dispatch-chat", created_at: at, updated_at: at,

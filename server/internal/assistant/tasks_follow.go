@@ -235,7 +235,7 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string, row startRow
 			s.saveSendsOut(ctx) // the hold too: after a restart, the turn is the task's (recoverSendsOut)
 			return
 		case closedTurnStays:
-			if s.tasks.firstClosedTurnLog(&closed, mid, sid, ignoredClosedStart) {
+			if s.shouldLogClosedTurn(closed, mid, sid, false) {
 				s.logf(ignoredClosedStart, closed.ID)
 			}
 			return
@@ -252,6 +252,7 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string, row startRow
 		}
 		s.logf("task %s: reopened: its agent works again", t.ID)
 	}
+	s.clearDoneProgress(ctx, t.ID)
 	s.taskWorks(ctx, t)
 }
 
@@ -298,6 +299,41 @@ const (
 	closedTurnOpens                   // the task opens again, and the turn is followed
 	closedTurnHeld                    // a send that may reopen it is out: its answer decides (agentSendNote.sent)
 )
+
+const closedTurnLoggedCap = 512
+
+type closedTurnLogKey struct {
+	todoID  string
+	doneAt  int64
+	machine string
+	session string
+	ended   bool
+}
+
+// shouldLogClosedTurn reports whether the ignored-turn diagnostic for closed task t and agent mid/sid has not yet been
+// logged at t's current DoneAt. Returning true only on the first occurrence per (task, DoneAt, agent, start/end) keeps
+// first-turn observability while stopping reused long-lived sessions from spamming identical log lines on every
+// unrelated turn (#16421). Reopening and later closing the task produces a new DoneAt and logs fresh.
+func (s *Service) shouldLogClosedTurn(t Todo, mid, sid string, ended bool) bool {
+	var doneAt int64
+	if t.DoneAt != nil {
+		doneAt = t.DoneAt.UnixNano()
+	}
+	key := closedTurnLogKey{todoID: t.ID, doneAt: doneAt, machine: mid, session: sid, ended: ended}
+	s.tasks.mu.Lock()
+	defer s.tasks.mu.Unlock()
+	if s.tasks.closedTurnLogged == nil {
+		s.tasks.closedTurnLogged = make(map[closedTurnLogKey]struct{})
+	}
+	if _, seen := s.tasks.closedTurnLogged[key]; seen {
+		return false
+	}
+	if len(s.tasks.closedTurnLogged) >= closedTurnLoggedCap {
+		clear(s.tasks.closedTurnLogged)
+	}
+	s.tasks.closedTurnLogged[key] = struct{}{}
+	return true
+}
 
 // closedTurnReopens: what a new turn of agent mid/sid does to closed task t (taskWorking). One the hub's judge closed
 // on its own opens again: that close is provisional (nobody accepted it, the judge may have been early), and more for
@@ -494,8 +530,9 @@ func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard
 		// A session opened manually on the Agents page is not adopted just because its turn did work (#5732).
 		if closed, found := s.closedTaskOf(ctx, machine, sid); found {
 			// Its closed task's agent still: a turn nobody sent for the task, or one running when it was accepted
-			// (#7539). Nothing is made of its end; this line says it was seen.
-			if s.tasks.firstClosedTurnLog(&closed, machine, sid, droppedClosedEnd) {
+			// (#7539). Nothing is made of its end; log once per close cycle so reused long-lived sessions do not
+			// spam logs on every subsequent unrelated turn (#16421).
+			if s.shouldLogClosedTurn(closed, machine, sid, true) {
 				s.logf(droppedClosedEnd, closed.ID, machine, short(sid))
 			}
 		}
@@ -536,7 +573,7 @@ func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard
 	agents = currentTaskAgents(agents, supersededAgents(t, agents)) // not an agent it was handed over from (#6483)
 	var last, cut proto.Session
 	for _, c := range agents {
-		if c.State == proto.StateWorking || c.State == proto.StateNeedsYou || c.PendingInteractions > 0 {
+		if !taskAgentSettledIn(t, agents, c) { // as taskAgentsSettled read it: a done report's left-over shells do not hold it
 			return settleLater
 		}
 		if w := c.Work; w != nil && w.Phase == proto.WorkBlocked && w.On == proto.WaitTransient && w.WakeAt != nil {

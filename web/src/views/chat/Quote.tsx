@@ -7,16 +7,14 @@ import { openSpot } from "../../lib/comments";
 import { parseQuote, parseQuotes, useQuotes, type DraftQuote } from "../../lib/drafts";
 import { getSession } from "../../lib/store";
 import { clock } from "../../lib/format";
-import { lazyPage } from "../../lib/lazy-page";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { cx, EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
-import { CommentBlock, goToComment } from "./CommentCard";
+import { CommentBlock, goToComment, LazyDraftCommentCard } from "./CommentCard";
+import type { CommentImagePicker } from "./DraftCommentCard";
 import { OverlayBoundary } from "../LazyOverlay";
 import { t } from "../../i18n";
-
-const CommentCard = lazyPage(() => import("./DraftCommentCard").then((m) => m.CommentCard));
 
 /** "Quoting Persona · 16:45" / "Quoting task "…" · 16:45": who said it, or which task, and when, as far as is known. */
 export function quoteSource(q: DraftQuote): string {
@@ -56,7 +54,9 @@ export function QuoteBar({ quote, onRemove }: { quote: DraftQuote; onRemove: () 
 }
 
 /** Everything waiting above the input: the message quote (at most one), then the comments numbered in order. */
-export function QuoteBars({ draftKey, quotes, onRemove }: { draftKey: string; quotes: readonly DraftQuote[]; onRemove: (id: string) => void }) {
+export function QuoteBars({ draftKey, quotes, onRemove, onAddCommentImages }: {
+  draftKey: string; quotes: readonly DraftQuote[]; onRemove: (id: string) => void; onAddCommentImages?: CommentImagePicker;
+}) {
   const { editing } = useQuotes(draftKey);
   let n = 0;
   return (
@@ -67,7 +67,8 @@ export function QuoteBars({ draftKey, quotes, onRemove }: { draftKey: string; qu
         return q.comment ? (
           <OverlayBoundary key={q.id} open onClose={() => {}} fallback={preview}>
             <Suspense fallback={preview}>
-              <CommentCard draftKey={draftKey} quote={q} n={++n} editing={editing === q.id} onRemove={remove} />
+              <LazyDraftCommentCard draftKey={draftKey} quote={q} n={++n} editing={editing === q.id} onRemove={remove}
+                onAddImages={q.comment.spot || q.comment.element ? undefined : onAddCommentImages} />
             </Suspense>
           </OverlayBoundary>
         ) : <QuoteBar key={q.id} quote={q} onRemove={remove} />;

@@ -2,7 +2,8 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { t } from "../../i18n";
-import { api, errorText } from "../../lib/api";
+import { errorText } from "../../lib/api";
+import { followHinted } from "../../lib/hinted-read";
 import { onShownHint } from "../../lib/shown-hints";
 import { filterQuery, SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
 import { boundedCounts } from "../../lib/sessions";
@@ -211,8 +212,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const rootPage = useSyncExternalStore(root.subscribe, root.getSnapshot, root.getSnapshot);
   // Counts without state keep other state tabs reachable; machine scopes disambiguate computer-local groups.
   const facetFilters = useMemo(() => ({ ...(q ? { q } : {}), ...(provider ? { provider } : {}), ...(spaceMachine ? { machine_id: spaceMachine } : {}), ...narrowed, ...exclude }), [q, provider, spaceMachine, narrowed, exclude]);
-  // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and once per hint; they
-  // do not follow the root's counts, which land for that same hint (a second read of the same counts every time).
+  // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and after hints (one read
+  // per hint window, lib/hinted-read.ts); they do not follow the root's counts, which land for that same hint.
   const facetScoped = Object.keys(facetFilters).length > 0;
   const facetQuery = useMemo(() => countsQuery(facetFilters), [facetFilters]);
   // With no state tab and no browsed value the filtered list's own per-hint counts read is the facet query: follow it.
@@ -231,18 +232,10 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }, [facetsFromList, page.counts]);
   useEffect(() => {
     if (!facetScoped || facetsFromList) return;
-    let live = true;
-    let sequence = 0;
-    const controller = new AbortController();
-    const read = () => {
-      const request = ++sequence;
-      void api<ListCounts>(`${countsPath}${facetQuery}`, { signal: controller.signal }).then((counts) => {
-        if (live && request === sequence && counts.state && counts.group && counts.project && counts.machine) { setFacets(counts); setFacetError(""); }
-      }, (e) => { if (live && request === sequence) setFacetError(errorText(e)); });
-    };
-    read();
-    const off = onShownHint(event, read);
-    return () => { live = false; controller.abort(); off(); };
+    // read now and after hints, one read per window for every list in the page that follows the same counts (#15910)
+    return followHinted<ListCounts>(event, `${countsPath}${facetQuery}`, (counts) => {
+      if (counts?.state && counts.group && counts.project && counts.machine) { setFacets(counts); setFacetError(""); }
+    }, (e) => setFacetError(errorText(e)));
   }, [countsPath, event, facetScoped, facetsFromList, facetQuery, facetAttempt]);
   useEffect(() => {
     // Keep the last counts while a refresh or a new scope is loading, including a root rebaseline.
@@ -259,17 +252,9 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }, [scopeFromFacets, facets]);
   useEffect(() => {
     if (scopeQuery === "counts=1" || scopeFromFacets) return;
-    let sequence = 0;
-    const abort = new AbortController();
-    const read = () => {
-      const request = ++sequence;
-      void api<ListCounts>(`${countsPath}${scopeQuery}`, { signal: abort.signal }).then((counts) => {
-        if (request === sequence && counts.state) { setScopeCounts(counts); setScopeError(""); }
-      }, (e) => { if (request === sequence) setScopeError(errorText(e)); });
-    };
-    read();
-    const off = onShownHint(event, read);
-    return () => { sequence++; abort.abort(); off(); };
+    return followHinted<ListCounts>(event, `${countsPath}${scopeQuery}`, (counts) => {
+      if (counts?.state) { setScopeCounts(counts); setScopeError(""); }
+    }, (e) => setScopeError(errorText(e)));
   }, [scopeQuery, scopeFromFacets, countsPath, event]);
   useEffect(() => {
     // Even a grouped, filtered list needs the root counts for the unfiltered chips.
@@ -297,8 +282,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   // The scope's counts as the page shows them (holdCounts): only against the rows the same answer brought (the root's,
   // or the filtered list's own page, on a hub that sends a page's counts with it), so a newer count is never taken for
   // an older row's or the other way round. Counts read on their own (a scope only the hub can count, such as hidden
-  // botmux sessions in a grouping) are the hub's: they are read again on every hint, the one after the hub records a
-  // seen too.
+  // botmux sessions in a grouping) are the hub's: they are read again after hints (lib/hinted-read.ts), the one after
+  // the hub records a seen too.
   const coupled = !root.usesPageCounts() ? undefined
     : scopeQuery === "counts=1" ? (rootPage.counts ? { counts: rootPage.counts, rows: rootPage.rows } : undefined)
     : scopeFromFacets && facetsFromList && page.counts ? { counts: page.counts, rows: page.rows } : undefined;
@@ -560,7 +545,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
             onChoose={chooseGroup} />}
           {personal && <SearchField value={providerQuery} onChange={setProviderQuery} placeholder={t("paged-agents.provider")} tone="inset" icon={false} className="min-w-0 flex-1" />}
         </div>}
-        <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="-mx-1 flex min-w-0 items-center justify-between gap-2 px-2">
           <p className="min-w-0 truncate text-xs text-ink-3" data-session-total>{shownTotal === null ? "\u00a0" : t("paged-agents.count", { count: shownTotal })}</p>
           {/* a display choice of the one flat list: its groups are sections of their own */}
           {activeAt && !sections && <ActiveWindowMenu value={win} onChange={chooseWindow} />}

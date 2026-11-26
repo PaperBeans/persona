@@ -380,7 +380,18 @@ it("follows the conversation owner's computer update and pending restart without
   expect(updateNotice()).toBeNull();
   expect(renders).toEqual({ info: 0, chips: 0, modes: 0 });
 
-  for (const phase of ["waiting_idle", "transferring", "restarting", "confirming"] as const) {
+  for (const phase of ["waiting_idle", "transferring"] as const) {
+    await update(phase);
+    await waitForUpdateNotice(t(`chat-assistantupdate.${phase}`));
+    expect(updateNotice()?.getAttribute("role")).toBe("status");
+    expect(updateNotice()?.textContent).toContain(t("chat-assistantupdate.reconnect"));
+  }
+  await update("draining");
+  await waitForUpdateNotice(t("chat-assistantupdate.draining"));
+  expect(updateNotice()?.getAttribute("role")).toBe("status");
+  expect(updateNotice()?.textContent).toContain(t("chat-assistantupdate.restart_when_idle"));
+  expect(updateNotice()?.textContent).not.toContain(t("chat-assistantupdate.reconnect"));
+  for (const phase of ["restarting", "confirming"] as const) {
     await update(phase);
     await waitForUpdateNotice(t(`chat-assistantupdate.${phase}`));
     expect(updateNotice()?.getAttribute("role")).toBe("status");

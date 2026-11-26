@@ -1089,7 +1089,7 @@ func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Re
 			back := s.fleet.interactions[id] == p
 			s.fleet.mu.Unlock()
 			if back { // a Codex card the node could not answer is open again (codexPending): it is not over
-				go s.InteractionResolved(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
+				s.interactionResolvedSoon(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
 				return err
 			}
 		} else {
@@ -1102,7 +1102,7 @@ func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Re
 		}
 		s.recordEndBy(id, status, by, &kept)
 		s.finished(p)
-		go s.InteractionResolved(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
+		s.interactionResolvedSoon(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
 		return err
 	}
 	if authorization != nil {
@@ -1120,7 +1120,7 @@ func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Re
 	if ownerOnlyTimedCard(p.ix) {
 		s.clearOwnerActionCardWait(p.ix)
 	}
-	go s.InteractionResolved(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
+	s.interactionResolvedSoon(context.Background(), InteractionResolved{Interaction: p.ix, Resolution: told, Status: status})
 	if remember {
 		s.keepAlways(p.ix, r) // kept before the hook hears: its next card may follow at once
 	}

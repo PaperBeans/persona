@@ -23,6 +23,8 @@
   "forget": "Forget “{id}”",
   "loading": "Loading models…",
   "retry": "Retry",
+  "refresh_models": "Refresh models",
+  "refresh_provider_models": "Refresh models for {provider}",
   "weekly_left": "{label} · {percent}% left",
   "price_tier": "Reference price tier {tier} of 3",
   "price_per_million": "Per 1M tokens",

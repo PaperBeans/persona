@@ -3,7 +3,7 @@
 // folds under (`folded_under`) and gives that session a rollup of their states (`children`, docs/protocol/protocol.md
 // "Session hierarchy"). The web leaves the children out of every list and count, shows the parent in its folded state,
 // and draws each child as a card in the parent's chat, where its requests are answered too.
-import { stateOf } from "./format";
+import { activityOf, stateOf } from "./format";
 import { foldedStateWith, foldHome, foldsUnder, hubSides } from "./side-fold";
 import type { AgentState, Interaction, Session } from "./types";
 
@@ -115,7 +115,7 @@ export function childRollup(s: Session | undefined, childrenRows?: readonly Sess
     const runningIds = new Set(embeddedIds);
     for (const child of childrenRows) {
       if (child.folded_as === "side") continue;
-      const st = stateOf(child);
+      const st = activityOf(child);
       if (st === "working" || Boolean(child.background_working)) {
         runningIds.add(rowKey(child.machine_id, child.session_id));
       }

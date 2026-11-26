@@ -231,6 +231,9 @@ const (
 // Known: k is one of the kinds above.
 func (k CalendarKind) Known() bool { return k == CalendarEvents || k == CalendarMeetings }
 
+// Valid reports whether k is a known calendar kind.
+func (k CalendarKind) Valid() bool { return k.Known() }
+
 // ProjectSlug is a project's slug in the knowledge base, as a recording's Projects lists it.
 type ProjectSlug string
 

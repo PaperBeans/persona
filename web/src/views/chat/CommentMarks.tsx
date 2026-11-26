@@ -12,7 +12,7 @@ import { focusKind } from "../../lib/shortcuts";
 import { cx, EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { scrollBehavior } from "../../ui/stream/motion";
-import { NumberDot } from "./CommentCard";
+import { LazyDraftCommentCard, NumberDot } from "./CommentCard";
 import { useChatActions } from "./chat-actions";
 import { t } from "../../i18n";
 import { composing } from "../../lib/send-history";
@@ -151,6 +151,7 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
   // C, with words picked and the keyboard not in a field
   useEffect(() => {
     if (!pill) return;
+    if (!LazyDraftCommentCard.ready()) void LazyDraftCommentCard.preload().catch(() => {});
     const press = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "c" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || composing(e)) return;
       if (focusKind(e.target) !== "page") return;

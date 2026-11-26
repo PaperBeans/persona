@@ -1044,7 +1044,7 @@ func (s *Service) watchTurn(ctx context.Context, t Todo, agents []proto.Session)
 		retry, retrying := b.retry[key]
 		// A closed row can still need its settlement read retried.
 		if b.closed[ref] == lookOf(c) && (!retrying || retry.look != lookOf(c)) ||
-			!taskAgentSettled(probe[i]) || limitTakenUp(c, now) {
+			!taskAgentSettledIn(t, probe, probe[i]) || limitTakenUp(c, now) {
 			continue
 		}
 		for _, e := range b.doc.InboxEvents {

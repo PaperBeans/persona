@@ -119,9 +119,9 @@ const GLYPH = {
   data: <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />,
 };
 
-/** The icon of a name in a listing: folders filled in the accent color, files by kind. */
+/** The icon of a name in a listing: restrained neutral folder and file glyphs by kind. */
 export function FileGlyph({ name, dir, size = 16 }: { name: string; dir?: boolean; size?: number }) {
-  if (dir) return <Icon name="folder" size={size} className="shrink-0 text-accent" style={{ fill: "color-mix(in srgb, currentColor 18%, transparent)" }} />;
+  if (dir) return <Icon name="folder" size={size} className="shrink-0 text-ink-3" />;
   const g = glyphOf(name);
   if (g === "code" || g === "data" || g === "sheet") {
     return (

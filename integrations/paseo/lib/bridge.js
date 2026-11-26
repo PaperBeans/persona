@@ -2065,11 +2065,16 @@ export function createPaseoBridge(deps = {}, options = {}) {
     return { checkouts: paseoCheckouts(worktreesBase(), root) }
   }
 
+  const physicalPath = (path) => {
+    try { return realpathSync(path) } catch { return resolve(path) }
+  }
+
   /**
    * Resolve creation ownership from a fresh, complete project list. Path aliases are the same directory; a linked
    * worktree prefers its main checkout's project. Names and remotes never identify a project (clones stay separate).
-   * Duplicate records at that physical root use a stable ID order; distinct non-main roots stay ambiguous.
-   * An unavailable list is never permission to allocate another project.
+   * Duplicate records at one physical root (symlink spellings such as /home/me and /mnt/home/me) resolve to one stable pick:
+   * the record registered at the physical path itself, then the one with more workspaces, then the lowest ID.
+   * Distinct non-main roots stay ambiguous. An unavailable list is never permission to allocate another project.
    */
   async function projectAt(dir) {
     let res
@@ -2084,10 +2089,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     }
     if (!res.projects.length) return undefined
     // Do not use the display cache: a symlink may have moved since the last session list.
-    const physical = (path) => {
-      try { return realpathSync(path) } catch { return resolve(path) }
-    }
-    const roots = new Set([physical(dir)])
+    const roots = new Set([physicalPath(dir)])
     let checkoutRoot
     let mainRoot
     try {
@@ -2096,9 +2098,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
         { encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024, env: { ...process.env, LC_ALL: 'C' } })
       const [top, common] = stdout.trim().split('\n')
       if (!top || !common) throw new Error('Git returned no checkout identity')
-      checkoutRoot = physical(top)
+      checkoutRoot = physicalPath(top)
       roots.add(checkoutRoot)
-      const gitDir = physical(resolve(dir, common))
+      const gitDir = physicalPath(resolve(dir, common))
       mainRoot = basename(gitDir) === '.git' ? dirname(gitDir) : gitDir
       roots.add(mainRoot)
     } catch (err) {
@@ -2106,22 +2108,39 @@ export function createPaseoBridge(deps = {}, options = {}) {
         throw new RpcError('Cannot identify this checkout. Retry before creating anything.', 'project_unavailable')
       }
     }
-    const matches = new Map() // physical registered root -> active project IDs at that exact root
+    const matches = new Map() // physical registered root -> active projects at that exact root
     for (const p of res.projects) {
       if (p.archivedAt) continue
-      const root = physical(p.projectRootPath)
+      const root = physicalPath(p.projectRootPath)
       if (!roots.has(root)) continue
-      if (!matches.has(root)) matches.set(root, [])
-      matches.get(root).push(p.projectId)
+      if (!matches.has(root)) matches.set(root, new Map())
+      matches.get(root).set(p.projectId, p)
+    }
+    const workspaceCount = (projectId) => {
+      let count = 0
+      for (const d of workspaces.values()) if (d.projectId === projectId) count++
+      return count
+    }
+    // Several records at one physical root are symlink aliases of the same directory, not a real ambiguity.
+    const pick = (root) => {
+      const found = [...matches.get(root).values()]
+      if (found.length === 1) return found[0].projectId
+      const rank = (p) => [resolve(p.projectRootPath) === root ? 0 : 1, -workspaceCount(p.projectId)]
+      found.sort((a, b) => {
+        const [ra, rb] = [rank(a), rank(b)]
+        return ra[0] - rb[0] || ra[1] - rb[1] || (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0)
+      })
+      log(`paseo: resolved ${found.length} duplicate projects at ${root} to ${found[0].projectId}`)
+      return found[0].projectId
     }
     // Only a linked worktree's legacy project yields to its main checkout's. A distinct project explicitly registered
-    // at a selected subdirectory of the main checkout stays ambiguous. Duplicates at one root use their lowest ID.
-    const preferred = mainRoot && checkoutRoot !== mainRoot && matches.get(mainRoot)
-    if (preferred?.length) return preferred.sort()[0]
+    // at a selected subdirectory of the main checkout stays ambiguous.
+    if (mainRoot && checkoutRoot !== mainRoot && matches.has(mainRoot)) return pick(mainRoot)
     if (matches.size > 1) {
       throw new RpcError('More than one Paseo project matches this folder. Choose a workspace in the intended project.', 'project_ambiguous')
     }
-    return matches.values().next().value?.sort()[0]
+    const [only] = matches.keys()
+    return only === undefined ? undefined : pick(only)
   }
 
   /** Paseo's worktrees root: its config's worktrees.root, else <Paseo home>/worktrees (its config.js resolveWorktreesRoot). */
@@ -2169,6 +2188,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     if (from && !from.projectId) throw new RpcError('Paseo did not report this workspace\'s project. Refresh the list.', 'project_unavailable')
     const projectId = from ? from.projectId : await projectAt(cwd)
     if (projectId) source.projectId = projectId
+    else if (!from) source.cwd = physicalPath(cwd)
     const req = { source }
     if (typeof params.key === 'string' && params.key) req.idempotencyKey = params.key.slice(0, 512)
     const res = await paseo.request('workspace.create.request', req, { timeoutMs: Math.max(deadline - Date.now(), 1000) })
@@ -2370,6 +2390,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
           if (!workspaces.get(d.id)?.project) keepWorkspace(d)
           workspaceId = d.id
           scheduleWorkspaces(0)
+        } else {
+          // No existing Paseo project yet: canonicalize cwd so Paseo registers the physical root, not a symlink alias.
+          config.cwd = physicalPath(cwd)
         }
       }
       return attempt(true, true)

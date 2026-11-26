@@ -135,7 +135,7 @@ function NewAgentPanel({ mid, host, startHost, launchers, choice, runs, configur
       scope="agent"
       onPick={onPick}
       onApplyCurrent={onApplyCurrent}
-      onReload={(provider) => void readModels(mid, provider, { again: true, first: provider === runs, host: catalogHost(provider) })}
+      onReload={(provider) => void readModels(mid, provider, { refresh: true, first: provider === runs, host: catalogHost(provider) })}
       onForget={onForget}
       currentExtra={ultracode}
       follow={follow && { ...follow, onFollow: () => (onFollow(), true) }}

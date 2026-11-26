@@ -840,8 +840,8 @@ func (s *Service) queueRelay(to string, msg relayMsg) int {
 // signal is accepted only after its queued message and outbox acknowledgment are saved together. A failed write rolls
 // both in-memory forms back so the durable failed-start outbox and ordinary pending scheduler retry the same generation.
 func (s *Service) queueRelayDurable(to string, msg relayMsg) (int, error) {
-	if msg.Tool == superviseTool && !s.autoSupervisionOn(context.Background()) {
-		return 0, errSupervisionSuppressed // nothing new waits in a queue while automatic supervision messages are off
+	if !supervisionRelayAllowed(s.supervisionMode(context.Background()), msg) {
+		return 0, errSupervisionSuppressed // nothing the mode drops waits in a queue (supervise_switch.go)
 	}
 	b := &s.relays
 	b.mu.Lock()
@@ -956,7 +956,7 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 // sendRelay performs the assistant.send RPC for a relayed message without marking supervision delivery complete.
 // Supervision callers confirm the user item in the destination transcript before completing delivery (#12567).
 func (s *Service) sendRelay(ctx context.Context, machine, to string, msg relayMsg) (superviseRoundReply, bool, error) {
-	if msg.Tool == superviseTool && !s.autoSupervisionOn(ctx) {
+	if !supervisionRelayAllowed(s.supervisionMode(ctx), msg) {
 		return superviseRoundReply{}, false, errSupervisionSuppressed // the last look before the send: a timer or a drain that was already running
 	}
 	if msg.Tool == superviseTool && s.runtimeWithoutSupervisionPolicy(ctx, machine, to) {

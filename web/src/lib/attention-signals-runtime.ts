@@ -22,7 +22,7 @@ import {
 import { stripBase } from "./base";
 import { requestRoute } from "./card-focus";
 import { homeKey } from "./folded-rows";
-import { attentionReason, interactionCanAnswer, sessionTitle, stateOf } from "./format";
+import { attentionReason, interactionCanAnswer, sessionTitle, activityOf } from "./format";
 import { hubNotice } from "./hub-notify";
 import { defaultManager } from "./manager-choice";
 import { failedTagsOver, listenForNotificationClicks } from "./notification-answer";
@@ -369,7 +369,7 @@ export function createAttentionRuntime(initial: AttentionSnapshot, opts: Attenti
       if (getState().pushGrading) return;
       const keys = batch.keys;
       batch = { keys: [], firstAt: 0 };
-      const unread = new Map(latest.filter((x) => stateOf(x) === "unread").map((x) => [agentKey(x), sessionTitle(x)]));
+      const unread = new Map(latest.filter((x) => activityOf(x) === "unread").map((x) => [agentKey(x), sessionTitle(x)]));
       if (finishedBatch(keys, unread).kind === "none") return;
       // it replaces the batch notification on screen: the agents that one named and are still unseen stay in it
       const shown = finishedBatch([...batched, ...keys], unread);
@@ -420,7 +420,7 @@ export function createAttentionRuntime(initial: AttentionSnapshot, opts: Attenti
         timers.delete(timer);
         if (getState().pushGrading) return;
         const s = find(done.key);
-        if (!s || stateOf(s) !== "unread") return;
+        if (!s || activityOf(s) !== "unread") return;
         if (!first) speak("finished", done.key);
         gather(done.key);
       }, SETTLE_MS);

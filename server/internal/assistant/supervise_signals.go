@@ -943,8 +943,8 @@ func (s *Service) signal(g superviseSignal) {
 
 // signalReplacing records g and, when old is still pending, atomically replaces that older stretch in the outbox.
 func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
-	if !s.autoSupervisionOn(context.Background()) {
-		return // automatic supervision messages are off: nothing is gathered, scheduled or told (supervise_switch.go)
+	if !s.supervisionAllowed(context.Background(), g) {
+		return // the mode drops it (off, or a routine check under outcomes): nothing is gathered, scheduled or told (supervise_switch.go)
 	}
 	if g.Todo != "" {
 		if t, ok := s.todoNow(g.Todo); ok && s.reporterStopped(context.Background(), t.Origin) {
@@ -1010,7 +1010,7 @@ func (s *Service) releaseReportsLocked(g superviseSignal) []string {
 
 // queueSignalReplacing also removes the older stretch it supersedes from the durable outbox.
 func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) {
-	if !s.autoSupervisionOn(context.Background()) {
+	if !s.supervisionAllowed(context.Background(), g) {
 		return // the same for a signal that skipped signal (supervise_switch.go)
 	}
 	if g.Kind != sigAsk {

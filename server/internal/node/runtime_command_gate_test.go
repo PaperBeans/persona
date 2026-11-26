@@ -1290,7 +1290,9 @@ func TestRuntimeAssistantLarkPendingAndDenyPropagation(t *testing.T) {
 	t.Run("phone deny with note preserves trimmed Message and leaves Reason empty", func(t *testing.T) {
 		allow := false
 		hub.mu.Lock()
-		hub.resolve = func(proto.Interaction) proto.Resolution { return proto.Resolution{Allow: &allow, Message: "  Use a shorter reply  "} }
+		hub.resolve = func(proto.Interaction) proto.Resolution {
+			return proto.Resolution{Allow: &allow, Message: "  Use a shorter reply  "}
+		}
 		hub.mu.Unlock()
 		res := ask("call-note-deny", sendCmd)
 		if res.Allow == nil || *res.Allow || res.Message != "Use a shorter reply" || res.Reason != "" {

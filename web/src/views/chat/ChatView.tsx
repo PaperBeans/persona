@@ -6,7 +6,7 @@ import { decisionLaterKey } from "../../lib/assistant-entries";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
-import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDisplayTab, sessionMenuActions, sourceSubtitle, sessionTitle, sessionTitleDetail, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
+import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDisplayTab, sessionMenuActions, sourceSubtitle, sessionTitle, sessionTitleDetail, shortPath, activityOf, stateOf, tabLabel, uuid } from "../../lib/format";
 import { useHerdrTabName } from "../../lib/agents-display";
 import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type Route, type SessionView } from "../../lib/router";
@@ -462,7 +462,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   // a side session's own chat (in its parent's panel): its own children fold under that parent, naming it (folded_side)
   const sideParent = session && isSide(session) ? session.folded_under : undefined;
   // the space's other agents, its child sessions folded into their parents (#5120: a child is never one of them)
-  const siblings = useStore((s) => (session?.space_id ? foldRows(s.sessions[mid] ?? []).filter((x) => x.space_id === session.space_id && stateOf(x) !== "offline") : []));
+  const siblings = useStore((s) => (session?.space_id ? foldRows(s.sessions[mid] ?? []).filter((x) => x.space_id === session.space_id && activityOf(x) !== "offline") : []));
   // its own requests and those of the child sessions folded under it (#5120, including cross-machine children via
   // folded_under_machine_id): a child's are answered here, in the order they came, each saying which child asks; a
   // side session's chat (#7944) takes the cards of the rows that belong to it
@@ -514,7 +514,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   // what other pages sent here ("Ask Persona", "Hand to AI"…): shown like this page's own sending bubbles (lib/outbox.ts)
   const outbox = useStore((s) => s.outbox[outboxKey(mid, sid)] ?? []);
   const online = useStore((s) => s.conn === "online");
-  const state = session ? stateOf(session) : "unknown";
+  const state = session ? activityOf(session) : "unknown";
   const canQueueSend = queuesWhileWorking(session);
   useEffect(() => {
     if (canQueueSend) void preloadQueuePanel().catch(() => {});
@@ -1579,7 +1579,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
         return false;
       }
     }
-    return deliver(out, uuid(), out.edit?.clearDraft, 0, Boolean(out.edit));
+    return deliver(out, uuid(), out.edit?.clearDraft, 0, Boolean(out.edit || out.restoreCommentDraft));
   };
   const sendMessageNow = useRef(sendMessage);
   sendMessageNow.current = sendMessage;
@@ -2423,8 +2423,8 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   // the permission picker after the + (#5324), where the mode can be switched: a Persona conversation whatever its state
   // (the hub applies it, #2416), an agent with modes while it runs; Plan mode is the + panel's check row. An agent that
   // lists its own modes (#8261) gets the picker with those two, and no Plan mode.
-  const modesOn = Boolean(session) && (Boolean(assistant) || (hasModes(session) && stateOf(session!) !== "offline"));
-  const listedOn = Boolean(session) && !assistant && Boolean(listedModesOf(session)) && stateOf(session!) !== "offline";
+  const modesOn = Boolean(session) && (Boolean(assistant) || (hasModes(session) && activityOf(session!) !== "offline"));
+  const listedOn = Boolean(session) && !assistant && Boolean(listedModesOf(session)) && activityOf(session!) !== "offline";
   const leading = useMemo(() => (session && (modesOn || listedOn) ? <PermissionPicker session={session} assistant={assistant} /> : null), [session, modesOn, listedOn, assistant]);
   const planMode = usePlanMode(modesOn ? session : undefined, assistant);
   // the model pill: an Agent's (#5032), a Persona conversation's (#5033, its pick kept for the conversation)
@@ -3415,7 +3415,7 @@ export const Header = memo(function Header({
     .map((s) => ({
       key: s.session_id,
       label: `${tabLabel(s) || sessionTitle(s)} · ${sessionTitle(s)}`,
-      state: stateOf(s),
+      state: activityOf(s),
       checked: s.session_id === session?.session_id,
       onSelect: () => navigate({ name: "session", mid: s.machine_id, sid: s.session_id }),
     }));

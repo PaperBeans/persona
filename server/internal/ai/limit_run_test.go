@@ -224,6 +224,46 @@ func TestRunGateCapsConcurrencyAndRecoversAfterOneProbe(t *testing.T) {
 	})
 }
 
+func TestRunGateInFlightTimeoutsShareTheHold(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := runConfig(t)
+		if err := runResult(t.Context(), cfg, context.DeadlineExceeded); err != context.DeadlineExceeded {
+			t.Fatal(err)
+		}
+		started := make(chan struct{}, 2)
+		release := make(chan struct{})
+		done := make(chan error, 2)
+		for range 2 {
+			go func() {
+				c := NewRun(cfg, func(context.Context, Request) (Reply, error) {
+					started <- struct{}{}
+					<-release
+					return Reply{}, context.DeadlineExceeded
+				})
+				_, err := c.Chat(t.Context(), Request{})
+				done <- err
+			}()
+		}
+		synctest.Wait()
+		if len(started) != 2 {
+			t.Fatalf("%d calls started, want 2", len(started))
+		}
+		close(release)
+		for range 2 {
+			if err := <-done; !IsPaused(err) {
+				t.Fatalf("concurrent timeout = %v, want PausedError", err)
+			}
+		}
+		p := Held(cfg)
+		if p == nil || p.Reason != ReasonBusy || time.Until(p.Until) != busyFirst {
+			t.Fatalf("pause = %v, want one busy strike for %v", p, busyFirst)
+		}
+		if _, _, inflight, out, cap := gateState(gateForRun(cfg)); inflight != 0 || out != 0 || cap != 1 {
+			t.Fatalf("after hold: inflight = %d, out = %d, cap = %d", inflight, out, cap)
+		}
+	})
+}
+
 func TestLauncherProbePanicReturnsSlot(t *testing.T) {
 	clk := fakeClock(t)
 	cfg := runConfig(t)

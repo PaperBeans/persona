@@ -370,6 +370,10 @@ type tasksState struct {
 	// sendsAcceptedUnread: by task, the latest acceptance made before the sends kept before were read (sendsAccepted),
 	// applied to them as they are read (loadSendsOut); under mu.
 	sendsAcceptedUnread map[string]time.Time
+	// closedTurnLogged tracks ignored-turn diagnostic lines already emitted for closed tasks so reused long-lived
+	// sessions do not spam repeated "left closed" / "ended a turn: dropped" lines on every unrelated turn (#16421);
+	// keyed by (task, DoneAt, agent, start/end), guarded by mu, and capped in size.
+	closedTurnLogged map[closedTurnLogKey]struct{}
 	// retrying: the tasks whose agent is starting (again), one start at a time: a Retry after a failed start (#1396), a
 	// Continue, a new agent after all of the task's stopped (startTaskSuccessor), or a plan taking the to-do over
 	// (todo_id, takeTodoForTask: taking). A message on the card that would start another waits for that one and goes

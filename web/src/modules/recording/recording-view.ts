@@ -240,4 +240,3 @@ function formatSeconds(sec: number): string {
   const h = Math.floor(s / 3600);
   return h > 0 ? `${h}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}` : `${Math.floor(s / 60)}:${pad(s % 60)}`;
 }
-

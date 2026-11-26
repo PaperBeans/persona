@@ -26,7 +26,7 @@ import { base64File, releaseAttachments } from "../../lib/attachments";
 import { imageLimitsFor, MAX_PICTURE_SOURCE, pictureRoom, type ImageLimits } from "../../lib/image-limits";
 import { addFiles as addComposerFiles, filesBusy, MAX_FILES, readyFiles, restoreFiles, splitFileTags, takeReadyFiles, useComposerFiles, withFiles } from "../../lib/composer-files";
 import { activateComposer, addContext, getContexts, newContext, registerComposer, removeContext, useContexts, withContexts, type ContextRef, type ComposerHandle } from "../../lib/links";
-import { addQuote, getQuotes, onDraftEvent, parseQuotes, removeQuote, replaceNeedsConfirm, sendDraft, setQuotes, splitQuotes, storeDraft, useQuotes, withQuoteBlock, type DraftEvent, type DraftImage } from "../../lib/drafts";
+import { addQuote, getQuotes, onDraftEvent, parseQuotes, removeQuote, replaceNeedsConfirm, restoreQuotes, sendDraft, setCommentImages, setQuotes, splitQuotes, storeDraft, useQuotes, withQuoteBlock, type DraftEvent, type DraftImage } from "../../lib/drafts";
 import type { EditedImage } from "../../lib/image-edit";
 import { mentionAt, sessionQuote, workspaceContext, type MentionToken } from "../../lib/mentions";
 import { machineWithHub } from "../../lib/mesh";
@@ -91,6 +91,8 @@ export interface Outgoing {
   /** A real Quote action, not typed Markdown, a comment or an edit's restored quote (#10346): keep an earlier reader's
    *  place; already at the end, the send follows as usual. UI-only, never part of the hub's wire body. */
   quoteReply?: boolean;
+  /** Confirmed refusals return a message with comment images to the composer. UI-only. */
+  restoreCommentDraft?: boolean;
   /** An edit of the last message, sent after its rewind (#4605): the old prompt, which Claude may have put back in its
    *  box, cleared exactly before typing. A refusal leaves the edit in the box unsent, not as a failed bubble. */
   edit?: { clearDraft: string };
@@ -148,11 +150,16 @@ function joinDrafts(first: InlineDocument, second: InlineDocument): InlineDocume
 
 /** A picked picture made ready for a message (scaled down as on the iPhone, lib/image-scale.ts, loaded here), or null when
  *  the page cannot read it or bring it under the limits: it goes as a file. */
-async function readImage(file: File, limits: ImageLimits): Promise<Attachment | null> {
+async function fitDraftImage(file: File, limits: ImageLimits): Promise<DraftImage | null> {
   if (file.size > MAX_PICTURE_SOURCE) return null;
   const { fitPicture } = await import("../../lib/image-scale");
   const fit = await fitPicture(file, limits);
-  return fit && { ...fit, id: uuid(), name: file.name || "image.png", url: URL.createObjectURL(file) };
+  return fit && { ...fit, name: file.name || "image.png" };
+}
+
+async function readImage(file: File, limits: ImageLimits): Promise<Attachment | null> {
+  const image = await fitDraftImage(file, limits);
+  return image && { ...image, id: uuid(), url: URL.createObjectURL(file) };
 }
 
 function fromDraftImage(img: DraftImage, id = uuid(), edited?: EditedImage): Attachment {
@@ -356,9 +363,17 @@ export const Composer = memo(function Composer({
   attsNow.current = atts;
   // pictures being read for this box, counted against a message's pictures before they land (their size unknown yet)
   const reading = useRef(0);
+  const commentReads = useMemo(() => new Set<object>(), [draftKey]);
   const limits = () => imageLimitsFor(agent);
   // whether a picture of `size` base64 characters fits beside those in the box and those being read (#12973)
-  const roomForImage = (size: number) => pictureRoom([...attsNow.current.map((a) => a.data.length), ...Array<number>(reading.current).fill(0)], size, limits());
+  const roomForImage = (size: number) => {
+    const comments = getQuotes(draftKey).list.flatMap((q) => q.images ?? []);
+    const held = [...attsNow.current, ...comments].map((a) => a.data.length);
+    return pictureRoom([...held, ...Array<number>(reading.current + commentReads.size).fill(0)], size, limits());
+  };
+  const imageRoomError = (why: "count" | "bytes") => {
+    toast(why === "count" ? t("chat-composer.too_many_images", { max: limits().per_message }) : t("chat-composer.images_too_large"), "error");
+  };
   // appends at once to the ref as well, so a second paste or draft image in the same tick sees it
   const appendImage = (a: Attachment) => {
     void ImageEditor.preload().catch(() => {});
@@ -370,7 +385,7 @@ export const Composer = memo(function Composer({
   const spillImages = (files: File[], why: "count" | "bytes") => {
     if (!files.length) return;
     if (!machineId) {
-      toast(why === "count" ? t("chat-composer.too_many_images", { max: limits().per_message }) : t("chat-composer.images_too_large"), "error");
+      imageRoomError(why);
       return;
     }
     const r = addComposerFiles(draftKey, machineId, files, uploadDest);
@@ -849,6 +864,48 @@ export const Composer = memo(function Composer({
     }
   };
 
+  const addCommentImages = async (id: string, files: File[], signal: AbortSignal) => {
+    const current = () => !signal.aborted && mounted.current && keyNow.current === draftKey && canWriteDraft()
+      && getQuotes(draftKey).list.some((q) => q.id === id && q.comment);
+    for (const file of files) {
+      if (!current()) return;
+      if (!file.type.startsWith("image/")) {
+        toast(t("chat-composer.images_only"), "error");
+        continue;
+      }
+      const room = roomForImage(0);
+      if (room !== "ok") {
+        imageRoomError(room);
+        return;
+      }
+      const read = {};
+      const release = () => commentReads.delete(read);
+      commentReads.add(read);
+      signal.addEventListener("abort", release, { once: true });
+      let image: DraftImage | null = null;
+      try {
+        image = await fitDraftImage(file, limits());
+      } catch {
+        // A failed decode or read uses the same message as an unsupported image.
+      } finally {
+        release();
+        signal.removeEventListener("abort", release);
+      }
+      if (!current()) return;
+      if (!image) {
+        toast(t("chat-composer.image_unreadable", { name: file.name }), "error");
+        continue;
+      }
+      const fittedRoom = roomForImage(image.data.length);
+      if (fittedRoom !== "ok") {
+        imageRoomError(fittedRoom);
+        continue;
+      }
+      const added = { ...image, id: uuid() };
+      setCommentImages(draftKey, id, (images) => [...images, added]);
+    }
+  };
+
   const canSend = (draft.trim().length > 0 || pastedBlocks.length > 0 || atts.length > 0 || filesReady || contexts.length > 0 || quote) && !uploading && !disabled && !loadingDraft;
   // Claude's suggested next message (iOS SuggestionPill): while the box is empty and the agent waits for a message
   // (not working, not on a card); a tap fills it
@@ -898,17 +955,32 @@ export const Composer = memo(function Composer({
     }
     const refs = getContexts(draftKey);
     const q = getQuotes(draftKey).list;
+    if (commentReads.size) {
+      toast(t("chat-comments.preparing_images"));
+      return;
+    }
     // a file still on its way holds the message, as a video does on the phone (#8361); the words stay in the box
     if (filesBusy(draftKey)) {
       toast(t("chat-composer.files_uploading"));
       return;
     }
     const hasFiles = readyFiles(draftKey).length > 0;
+    const sent = attsNow.current;
     const sentPasted = pastedBlocks;
     const fullDoc = sentPasted.length ? joinInline([sentPasted.map((b) => b.text).join("\n\n")], text.trim() ? ["\n\n"] : [], text.trim() ? value : []) : value;
     const fullText = codec?.inlineBody(fullDoc) ?? editorText(fullDoc);
     const selected = codec?.inlineReferences(value) ?? [];
-    if (editor || disabled || blocked || loadingDraft || (!fullText.trim() && !atts.length && !hasFiles && !refs.length && !q.length)) return;
+    if (editor || disabled || blocked || loadingDraft || (!fullText.trim() && !sent.length && !hasFiles && !refs.length && !q.length)) return;
+    const commentImages = q.flatMap((quote) => quote.images ?? []);
+    const images = [...sent, ...commentImages].map(({ mime, data }) => ({ mime, data }));
+    const lastImage = images.at(-1);
+    if (lastImage) {
+      const room = pictureRoom(images.slice(0, -1).map((a) => a.data.length), lastImage.data.length, limits());
+      if (room !== "ok") {
+        imageRoomError(room);
+        return;
+      }
+    }
     // Any message spends the suggestion shown: it stays on the hub until the agent starts (#4644).
     if (suggestion) setSentPill(suggestion);
     // An edit of the last message: the rewind to before the old one first, the box kept as it is (read-only meanwhile).
@@ -925,12 +997,12 @@ export const Composer = memo(function Composer({
     // The message shows at once, so the box empties at once too: waiting for the hub to
     // hand it to the agent (seconds when it starts up) left the same words in both places. A send that never went
     // (onSend false) puts them back; one that failed stays in the chat as a failed bubble.
-    const sent = atts;
     const sentFiles = takeReadyFiles(draftKey);
     setDraft([]);
     draftNow.current = [];
     unsaved.current = null;
     storeDraft(draftKey, "");
+    attsNow.current = [];
     setAtts([]);
     setPastedBlocks([]);
     refs.forEach((r) => removeContext(draftKey, r.id));
@@ -942,16 +1014,17 @@ export const Composer = memo(function Composer({
     if (hasFinePointer() && (!at || at === document.body || box.current?.contains(at))) input.current?.focus({ preventScroll: true });
     // picked contexts ride in front as <persona-context> tags (docs/protocol/protocol.md "Tags in messages"), the quote as `> ` lines,
     // files after the words as <persona-file> tags, the words as typed (with none, a line saying to look at them)
-    const said = !fullText.trim() && !sent.length && sentFiles.length ? t("chat-composer.see_files") : fullText;
-    const body = withFiles(withQuoteBlock(q, said), sentFiles);
+    const said = !fullText.trim() && !images.length && sentFiles.length ? t("chat-composer.see_files") : fullText;
+    const body = withFiles(withQuoteBlock(q, said, sent.length), sentFiles);
     const quoteReply = !edit && q.some((x) => !x.comment);
     const leading = [...refs.filter((r) => r.kind !== "skill" || !selected.some((s) => s.kind === "skill" && s.attrs?.ref === r.attrs?.ref)),
       ...selected.filter((r) => r.kind !== "file")];
     // Only scheduled prompts can execute leading file selections. Live chats keep their native @path, with the
     // file's display metadata after the prose where promptcontent.Files does not see a selection.
     const liveFiles = selected.filter((r) => r.kind === "file");
-    const wire = withContexts(leading, body, sent.length > 0) + (liveFiles.length ? `\n\n${liveFiles.map(contextXML).join("\n")}` : "");
-    const ok = await onSend({ text: wire, images: sent.map((a) => ({ mime: a.mime, data: a.data })),
+    const wire = withContexts(leading, body, images.length > 0) + (liveFiles.length ? `\n\n${liveFiles.map(contextXML).join("\n")}` : "");
+    const ok = await onSend({ text: wire, images,
+      ...(commentImages.length ? { restoreCommentDraft: true } : {}),
       ...(now && queues ? { sendNow: true } : {}),
       ...(quoteReply ? { quoteReply: true } : {}), ...(committed ? { edit: committed } : {}) });
     if (!canWriteDraft()) { releaseAttachments(sent); return; }
@@ -980,7 +1053,7 @@ export const Composer = memo(function Composer({
         else sendDraft(draftKey, { type: "unsent", text: restored });
       }
       // the quotes back above this conversation's box (kept for it when the box shows another one or closed)
-      if (q.length && !getQuotes(draftKey).list.length) setQuotes(draftKey, q);
+      restoreQuotes(draftKey, q);
     }
   };
 
@@ -1110,6 +1183,7 @@ export const Composer = memo(function Composer({
           <QuoteBars
             draftKey={draftKey}
             quotes={quotes}
+            onAddCommentImages={disabled || editor || loadingDraft ? undefined : addCommentImages}
             onRemove={(id) => {
               removeQuote(draftKey, id);
               input.current?.focus();
@@ -1119,10 +1193,11 @@ export const Composer = memo(function Composer({
         {(atts.length > 0 || files.length > 0) && (
           <div data-composer-attachments className="flex flex-wrap items-center gap-2 px-0.5 pt-0.5 empty:hidden">
             <AttachmentTiles attachments={atts} onOpen={(id) => setEditing(atts.find((a) => a.id === id) ?? null)} onRemove={(id) => {
-              const att = atts.find((a) => a.id === id);
+              const att = attsNow.current.find((a) => a.id === id);
               // an edited picture's source and edits go with it
               if (att) releaseAttachments([att]);
-              setAtts((cur) => cur.filter((a) => a.id !== id));
+              attsNow.current = attsNow.current.filter((a) => a.id !== id);
+              setAtts(attsNow.current);
             }} />
             <FileTiles draftKey={draftKey} files={files} />
           </div>
@@ -1385,7 +1460,7 @@ export const Composer = memo(function Composer({
               onClick={() => void submit()}
               className={ROUND}
             >
-              <Icon name="up" size={15} stroke={2.4} />
+              <Icon name="up" size={16} stroke={2.4} />
             </button>
           )}
         </div>

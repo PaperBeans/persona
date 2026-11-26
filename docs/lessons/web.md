@@ -10,6 +10,12 @@ and a body that breaks off, into `HubUnreachableError`. Only that, or a TypeErro
 message, is a gap (`isNetworkFailure`). Any other TypeError says what broke ("Something went wrong on this page: …") and
 is not retried. When code needs to know whether a request reached the hub, use `isNetworkFailure`, not `instanceof TypeError`.
 
+## Reopening a model picker can reuse the computer's catalog (#15481)
+
+The browser's repeat read and the computer's forced discovery are separate. Use the opening read for fast results
+and send `refresh=1` for an explicit refresh or Retry. Keep the previous list visible while the request runs, and
+verify that a changed catalog replaces its rows in the same opening.
+
 ## A text shimmer needs an opaque source color (#15367)
 
 Setting `color: transparent` also clears any gradient stop that reads `currentColor`.

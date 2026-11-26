@@ -236,7 +236,7 @@ func TestTodosV2RuntimeHardeningMergeTrainRestartPersistence(t *testing.T) {
 }
 
 func TestTodosV2RuntimeHardeningMergeTrainRestartPersistencePostgres(t *testing.T) {
-	dsn := newDatabase(t)
+	dsn := newMigratedDatabase(t, db.ManagerSet)
 	ctx := t.Context()
 
 	database, err := db.Open(ctx, dsn, db.ManagerSet)

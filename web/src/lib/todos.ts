@@ -7,7 +7,7 @@ import type { TodoWait } from "./todo-wait-wire";
 import type { TodoSummary } from "./todo-view-wire";
 import { api, ApiError, enc } from "./api";
 import { parseAPIError, retryable, unrecoverableError } from "./api-errors";
-import { stateOf } from "./format";
+import { activityOf, stateOf } from "./format";
 import { foldedState } from "./child-sessions";
 import { foldRows } from "./folded-rows";
 import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-groups";
@@ -113,6 +113,15 @@ export interface TodoActiveBlocker {
   target_ref: string;
   state: string;
   attempts?: number;
+}
+
+/** Server-computed read-only direct child progress summary on parent goals under todos_v2 (#16432). */
+export interface TodoChildSummary {
+  total: number;
+  open: number;
+  needs_you: number;
+  working: number;
+  done: number;
 }
 
 /** Server-owned board projection section keys returned under todos_v2 (#15774, #15800). */
@@ -300,6 +309,8 @@ export interface Todo {
   repo_gate?: TodoRepoGate;
   /** Active persistent blocker edges blocking this to-do, populated only when todos_v2 === true (#16135, #16138). */
   active_blockers?: TodoActiveBlocker[];
+  /** Read-only direct child progress summary on parent goals, populated only when todos_v2 === true (#16432). */
+  child_summary?: TodoChildSummary;
 }
 
 /** Whether this closed to-do was cancelled, including the legacy supervision-only representation. */
@@ -682,7 +693,7 @@ export function todoStatus(todo: Todo, lookup?: SessionLookup): TodoStatus {
  *  (background_working), or the hub waits out another agent, a deploy / CI / a time, or a moment's model failure
  *  for it and wakes it (work blocked on anything but the user). */
 export function agentWaits(s: Session): boolean {
-  const st = stateOf(s);
+  const st = activityOf(s);
   if (st === "working") return Boolean(s.background_working);
   const w = s.work;
   return st !== "needs_you" && st !== "unread" && w?.phase === "blocked" && (w.on === "agent" || w.on === "external" || w.on === "transient");
@@ -703,7 +714,7 @@ export function waitingLine(todo: Todo, lookup?: SessionLookup): string | undefi
 /** The agent stopped on a model API error (the hub's turn_error): cut off, not finished (#1516). */
 export function interruptedAgent(s?: Session): boolean {
   if (!s?.turn_error || usageLimitAgent(s)) return false;
-  const st = stateOf(s);
+  const st = activityOf(s);
   return st === "unread" || st === "idle";
 }
 
@@ -847,7 +858,7 @@ function byDate(a: Session, b: Session): number {
 }
 
 function sessionRank(s: Session, mutes: AgentMutes): number {
-  const state = stateOf(s);
+  const state = activityOf(s);
   const waiting = ["idle", "unknown"].includes(state) && Boolean(s.loop || s.background?.length || s.subagents?.some((a) => a.running));
   const isMuted = mutes.sessions.includes(`${s.machine_id}/${s.session_id}`) || Boolean(s.space_name && mutes.spaces.includes(`${s.machine_id}/${s.space_name}`));
   if (state === "needs_you") return 0;
@@ -1049,6 +1060,119 @@ export async function submitTodoDecisionsBatch(
   };
 }
 
+/** One same-cause pending decision cluster returned by GET /api/v1/todos/decisions/groups (#16433). */
+export interface TodoDecisionGroup {
+  key: string;
+  cause_kind: string;
+  label: string;
+  url?: string;
+  todo_ids: string[];
+  count: number;
+}
+
+/** Response returned by GET /api/v1/todos/decisions/groups (#16433). */
+export interface TodoDecisionGroupsResponse {
+  groups: TodoDecisionGroup[];
+  total_pending: number;
+}
+
+/** Fetch server-computed same-cause decision groups; only call when todos_v2 === true (#16433). */
+export async function fetchTodoDecisionGroups(signal?: AbortSignal): Promise<TodoDecisionGroupsResponse> {
+  const res = await api<TodoDecisionGroupsResponse>("/todos/decisions/groups", {
+    headers: currentHeaders(),
+    signal,
+  });
+  const groups = Array.isArray(res?.groups) ? res.groups : [];
+  return {
+    groups,
+    total_pending:
+      typeof res?.total_pending === "number"
+        ? res.total_pending
+        : groups.reduce((acc, g) => acc + (g.count || g.todo_ids?.length || 0), 0),
+  };
+}
+
+/** One queued PR entry in GET /api/v1/todos/mergetrain (#16432, #16433). */
+export interface MergeTrainQueueItem {
+  todo_id: string;
+  pr_number?: number;
+  pr_url?: string;
+  state: string;
+  policy?: string;
+  approved?: boolean;
+  position: number;
+  rebase_failures?: number;
+  last_error?: string;
+}
+
+/** Per-to-do queue position badge in GET /api/v1/todos/mergetrain (#16432, #16433). */
+export interface MergeTrainTodoBadge {
+  repo_key: string;
+  position: number;
+  ahead_pr_url?: string;
+  state: string;
+}
+
+/** Per-repository merge-train queue snapshot in GET /api/v1/todos/mergetrain (#16432, #16433). */
+export interface MergeTrainRepoQueue {
+  repo_key: string;
+  head?: MergeTrainQueueItem;
+  queue: MergeTrainQueueItem[];
+  escalated?: MergeTrainQueueItem[];
+}
+
+/** Response returned by GET /api/v1/todos/mergetrain (#16432, #16433). */
+export interface TodoMergeTrainResponse {
+  repos: MergeTrainRepoQueue[];
+  by_todo: Record<string, MergeTrainTodoBadge>;
+}
+
+/** Fetch read-only same-repo merge-train queue positions; only call when todos_v2 === true (#16433). */
+export async function fetchTodoMergeTrain(signal?: AbortSignal): Promise<TodoMergeTrainResponse> {
+  const res = await api<TodoMergeTrainResponse>("/todos/mergetrain", {
+    headers: currentHeaders(),
+    signal,
+  });
+  return {
+    repos: Array.isArray(res?.repos) ? res.repos : [],
+    by_todo: res?.by_todo && typeof res.by_todo === "object" ? res.by_todo : {},
+  };
+}
+
+/** One read-only causal audit event returned by GET /api/v1/todos/{id}/trace (#16433). */
+export interface TodoCausalTraceEvent {
+  id: string;
+  at: string;
+  category: string;
+  kind: string;
+  summary: string;
+  ref?: string;
+  url?: string;
+}
+
+/** Response returned by GET /api/v1/todos/{id}/trace (#16433). */
+export interface TodoCausalTraceResponse {
+  todo_id: string;
+  title: string;
+  events: TodoCausalTraceEvent[];
+  count: number;
+}
+
+/** Fetch on-demand read-only causal audit trace for a to-do; only call when todos_v2 === true (#16433). */
+export async function fetchTodoCausalTrace(id: string, signal?: AbortSignal): Promise<TodoCausalTraceResponse> {
+  const res = await api<TodoCausalTraceResponse>(`/todos/${enc(id)}/trace`, {
+    headers: currentHeaders(),
+    signal,
+  });
+  const events = Array.isArray(res?.events) ? res.events : [];
+  return {
+    todo_id: typeof res?.todo_id === "string" ? res.todo_id : id,
+    title: typeof res?.title === "string" ? res.title : "",
+    events,
+    count: typeof res?.count === "number" ? res.count : events.length,
+  };
+}
+
 // ── API helpers ──────────────────────────────────────────────
 
 /** A new to-do; `due` makes it due at a moment or on a day (one made on the calendar, #2029). */
@@ -1243,7 +1367,7 @@ export function dockAgents(sessions: Session[], todos: Todo[], conversation: str
   const out: DockAgent[] = [];
   for (const s of sessions) {
     if (s.assistant) continue;
-    const state = stateOf(s);
+    const state = activityOf(s);
     if (state !== "needs_you" && state !== "working") continue;
     if (taskAgents.has(`${s.machine_id}/${s.session_id}`)) continue;
     if (s.todo && !manual.has(s.todo.id)) continue;

@@ -122,7 +122,8 @@ func sameOrigin(a, b *url.URL) bool {
 }
 
 // NewRun sends requests through a launcher callback. Each configured launcher shares a gate
-// with other clients running the same model on the same computer.
+// with other clients running the same model on the same computer, so consecutive full-budget
+// timeouts back off and cap concurrency instead of piling onto a wedged launcher.
 func NewRun(cfg Config, run func(context.Context, Request) (Reply, error)) *Client {
 	if cfg.RunLauncher != "" && run != nil {
 		g := gateForRun(cfg)

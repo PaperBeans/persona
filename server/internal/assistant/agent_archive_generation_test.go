@@ -71,7 +71,7 @@ func archiveGenerationDrainNative(s *Service, sid string) {
 
 func archiveGenerationFixture(t *testing.T, row proto.Session) (*fleetTest, *db.DB, *archiveGenerationStore) {
 	t.Helper()
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}

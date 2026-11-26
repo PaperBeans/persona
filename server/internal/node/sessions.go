@@ -78,6 +78,14 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	onList := n.onAgentsList // replaced whole with n.agents (setAgentsAt), never changed in place
 	n.mu.Unlock()
 
+	// Hand the row agents to the pass so per-row transcript lookup can skip the TRAE probe for non-TRAE rows.
+	if pass != nil {
+		pass.agentKinds = make(map[string]string, len(agents))
+		for id, a := range agents {
+			pass.agentKinds[id] = a.Agent
+		}
+	}
+
 	agyConversations := map[string]string{}
 	agyRuntimeIDs := map[string]string{}
 	for id, agent := range agents {

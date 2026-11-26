@@ -64,7 +64,7 @@ func TestUserCheckReopenRollsBackWithLedgerFailure(t *testing.T) {
 	for _, path := range []string{"edit", "reopen"} {
 		t.Run(path, func(t *testing.T) {
 			ctx := t.Context()
-			dsn := newDatabase(t)
+			dsn := newMigratedDatabase(t, db.ManagerSet)
 			store, err := db.Open(ctx, dsn, db.ManagerSet)
 			if err != nil {
 				t.Fatal(err)
@@ -124,7 +124,7 @@ func TestUserCheckReopenRollsBackWithLedgerFailure(t *testing.T) {
 
 func TestUserCheckAlreadyReopenedKeepsWorkingAfterRestart(t *testing.T) {
 	ctx := t.Context()
-	dsn := newDatabase(t)
+	dsn := newMigratedDatabase(t, db.ManagerSet)
 	store, err := db.Open(ctx, dsn, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)

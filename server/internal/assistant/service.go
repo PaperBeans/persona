@@ -1300,6 +1300,12 @@ func (s *Service) afterSettle(ctx context.Context, settled func(context.Context,
 	time.AfterFunc(s.settleDelay(ctx), func() { settled(ctx, machine, sid) })
 }
 
+// interactionResolvedSoon is InteractionResolved on its own goroutine: whoever ended the card does not wait for the
+// hook. The run is counted, so a test's fixture can wait for it before it puts back what the hook reads.
+func (s *Service) interactionResolvedSoon(ctx context.Context, r InteractionResolved) {
+	s.fleet.resolvedRuns.Go(func() { s.InteractionResolved(ctx, r) })
+}
+
 // InteractionResolved: the user dealt with a card of a task's agent: the conversation keeps a record of it, and the
 // todo of the agent the calls made in it (its decisions).
 func (s *Service) InteractionResolved(ctx context.Context, r InteractionResolved) {

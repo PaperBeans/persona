@@ -49,6 +49,9 @@ internal object SurfaceLinks {
     /** The Persona tab with the cursor in its composer ("Ask Persona"). */
     fun ask(context: Context): Intent = view(context, Uri.parse(AskPersonaLink))
 
+    /** A tap on the Ask Persona widget: the main chat composer when paired, otherwise the pairing page. */
+    fun askWidget(context: Context, paired: Boolean): Intent = if (paired) ask(context) else app(context)
+
     /** Agents › To-dos with "New to-do" open ("New to-do"). */
     fun newTodo(context: Context): Intent = view(context, Uri.parse(NewTodoLink))
 

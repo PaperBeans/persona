@@ -3,7 +3,7 @@ import { onConversationDeleted } from "./conversation-deleted";
 import { useSyncExternalStore } from "react";
 import { credentialOwner, getToken, onCredentialChange, sessionPath } from "./api";
 import { BASE } from "./base";
-import { stateOf } from "./format";
+import { activityOf } from "./format";
 import { MANAGER_HEADER, managerHeaderFor, onManagerChoice, shownManager } from "./manager-choice";
 import type { Item, Session } from "./types";
 import { sameMessage } from "./echo";
@@ -78,7 +78,7 @@ function create(mid: string, sid: string, id: string, old = flights.get(key(mid,
     flights.delete(key(first.mid, first.sid, first.id));
   }
   const row = deps.getSession(mid, sid);
-  const e: Flight = { mid, sid, id, scope: scope(), phase: "sending", feedback: "sending", since: row?.state_since, state: row && stateOf(row), queued: row?.queued ?? [], failure: row?.failure_reason, at: old?.at, retry: Boolean(old) };
+  const e: Flight = { mid, sid, id, scope: scope(), phase: "sending", feedback: "sending", since: row?.state_since, state: row && activityOf(row), queued: row?.queued ?? [], failure: row?.failure_reason, at: old?.at, retry: Boolean(old) };
   const page = pages.get(key(mid, sid, ""));
   e.baseSeq = page?.scope === e.scope ? page.seq : undefined;
   e.work = row?.work?.phase;
@@ -216,7 +216,7 @@ function handoffAuthority() {
     if (!e.feedback || !current(e)) continue;
     const row = deps.getSession(e.mid, e.sid);
     if (!row) continue;
-    const state = stateOf(row);
+    const state = activityOf(row);
     const queued = e.text && (row.queued ?? []).filter(q => sameMessage(q, e.text!)).length > e.queued.filter(q => sameMessage(q, e.text!)).length;
     const fresh = e.state !== "working" && (row.state_since !== e.since || state !== e.state);
     const executing = (fresh || e.phase === "delivered" || e.echoed) && (state === "working" || state === "needs_you");

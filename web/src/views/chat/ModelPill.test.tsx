@@ -9,6 +9,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
+import { agentName } from "../../lib/agent-kind";
 import type { PanelProvider } from "../../lib/model-panel";
 import { requestModelPicker } from "../../lib/model-switch";
 import { readModels, sessionSwitches } from "../../lib/session-models";
@@ -68,12 +69,22 @@ describe("the pill's states", () => {
     const host = document.createElement("div");
     host.innerHTML = markup(<ModelPill current={{ engine, provider: engine, model, effort }} onOpen={() => {}} />);
     const button = host.querySelector("button")!;
+    const engineTitle = agentName(engine);
     expect(button.getAttribute("aria-label")).toBe(t("chat-modelpill.aria_effort", { model: name, effort: label }));
-    expect(button.title).toContain(` · ${name} · ${engine} · ${label}`);
+    expect(button.title).toBe(engineTitle === engine ? `${engineTitle} · ${name} · ${label}` : `${engineTitle} · ${name} · ${engine} · ${label}`);
     expect(button.querySelector("[data-pill-effort]")?.textContent).toBe(label);
     expect(button.textContent).toContain(name);
     if (pillShortName(name) !== name) expect(button.querySelector("[data-pill-short]")?.textContent).toBe(pillShortName(name));
     expect(button.textContent).not.toMatch(/\((Medium|Minimal|Max|Ultra)\)/);
+  });
+
+  it("omits the provider segment in the tooltip when it matches the engine name, while keeping distinct launchers", () => {
+    const builtin = markup(<ModelPill current={{ engine: "claude", provider: "Claude Code", model: "Opus 5.5", effort: "high" }} onOpen={() => {}} />);
+    expect(builtin).toContain('title="Claude Code · Opus 5.5 · High"');
+    const launcher = markup(<ModelPill current={{ engine: "claude", provider: "claude", launcherName: "Claude Code", model: "Opus 5.5", effort: "high" }} onOpen={() => {}} />);
+    expect(launcher).toContain('title="Claude Code · Opus 5.5 · High"');
+    const desktop = markup(<ModelPill current={{ engine: "claude", provider: "Claude Desktop", model: "Opus 5.5", effort: "high" }} onOpen={() => {}} />);
+    expect(desktop).toContain('title="Claude Code · Opus 5.5 · Claude Desktop · High"');
   });
 
   it("takes the composer card's widths: its words' width under 600, a step smaller under 520, the mark and chevron alone under 420", () => {
@@ -381,7 +392,7 @@ describe("an Agent's pill", () => {
     await act(async () => panel.props!.onReload!("agy"));
     await flush();
     expect(calls.filter((c) => c.url.includes("/launchers/agy/models")).map((c) => c.url.split("?")[1]))
-      .toEqual(["host=agy", "host=agy", "host=agy"]);
+      .toEqual(["host=agy", "host=agy", "refresh=1&host=agy"]);
   });
 
   it("reads each provider's cached quota for this computer, without forcing a refresh", async () => {
@@ -513,7 +524,7 @@ describe("an Agent's pill", () => {
     act(() => root.render(<AgentModelPill session={getSession(s.machine_id, "s1")!} />));
     await flush();
     expect(pill()!.getAttribute("data-model-pill")).toBe("pending");
-    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · Haiku 5.5 · Claude Code · Low" }));
+    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · Haiku 5.5 · Low" }));
     // a refusal puts it back as it was, with the hub's words
     calls.length = 0;
     modesAnswer = () => json({ error: "这个启动器用的是另一个配置目录", code: "switch_config_dir" }, 409);

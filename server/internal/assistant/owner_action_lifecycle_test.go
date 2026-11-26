@@ -30,7 +30,7 @@ func TestPersistentOwnerActionSurvivesFormerDeadlineCallerAndRestart(t *testing.
 			name = "Allow executes at most once"
 		}
 		t.Run(name, func(t *testing.T) {
-			url := newDatabase(t)
+			url := newMigratedDatabase(t, db.AllSets)
 			database, err := db.Open(t.Context(), url, db.AllSets)
 			if err != nil {
 				t.Fatal(err)
@@ -234,7 +234,7 @@ func TestPersistentOwnerActionSurvivesFormerDeadlineCallerAndRestart(t *testing.
 }
 
 func TestOwnerActionConcurrentConsumersPostgres(t *testing.T) {
-	url := newDatabase(t)
+	url := newMigratedDatabase(t, db.AllSets)
 	first, err := db.Open(t.Context(), url, db.AllSets)
 	if err != nil {
 		t.Fatal(err)

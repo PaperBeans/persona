@@ -305,7 +305,8 @@ describe('ACP session recovery', () => {
     assert.deepEqual(requests[1].params.additionalDirectories, [process.cwd() + '/../shared'])
   })
 
-  for (const message of ['Session not found', 'Invalid session', 'session_not_found', 'invalid_session']) {
+  // agy 1.5.x says this when its process no longer has the session loaded (after a model service error, for example).
+  for (const message of ['Session not found', 'Invalid session', 'session_not_found', 'invalid_session', 'Failed to read session da824ba1-9904-4416-9917-491d8bcc8fd1; retry, or load it with session/load']) {
     it(`evicts cached sessions after ${message}`, async () => {
       const client = new AgyAcpClient()
       client.ensureStarted = async () => {}

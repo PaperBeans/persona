@@ -67,6 +67,16 @@ describe("machineAlerts", () => {
     expect(kinds(machineAlerts({ machine: machine({ node_mismatch: true, deploy_error: "copy failed" }) }))).toEqual(["deploy_failed:warning"]);
   });
 
+  it("marks draining deployments as waiting to restart while online, and still reports unexpected disconnects", () => {
+    const draining = machineAlerts({ machine: machine({ online: true, deploy_phase: "draining", deploying: true, node_mismatch: true }) });
+    expect(draining).toEqual([{ kind: "mismatch", severity: "info", busy: true, draining: true }]);
+    expect(alertTitle(draining[0]!)).toBe("待空闲重启");
+    expect(alertLabel(draining[0]!)).toBe("待空闲重启");
+
+    const dropped = machineAlerts({ machine: machine({ online: false, deploy_phase: "draining", deploying: true, node_mismatch: true, error: "link offline" }) });
+    expect(kinds(dropped)).toEqual(["offline:critical", "mismatch:info"]);
+  });
+
   it("labels each alert with its number, and an offline card's chip with what it opens", () => {
     expect(alertLabel({ kind: "memory", severity: "critical", value: 95.2 })).toBe("内存占用 · 95%");
     expect(alertLabel({ kind: "launcher", severity: "warning", count: 2 })).toBe("启动器异常 · 2");

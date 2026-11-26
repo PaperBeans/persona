@@ -325,7 +325,7 @@ export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClo
           }}
         >
         {dropDir && <DropHint dir={dropDir} />}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" key={finding ? "find" : tree ? `tree:${dir}` : dir}>
+        <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto" key={finding ? "find" : tree ? `tree:${dir}` : dir}>
           {finding ? (
             <FindResults mid={mid} dir={shown} query={query} onOpen={(hit) => (hit.dir ? go(joinPath(shown, hit.path)) : setOpen([joinPath(shown, hit.path)]))} />
           ) : tree ? (

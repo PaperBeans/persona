@@ -59,7 +59,9 @@ describe("更多 in the sidebar", () => {
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();
     const more = moreButton()!;
-    expect(more.textContent).toContain("2");
+    expect(more.textContent?.trim()).toBe("更多");
+    expect(more.getAttribute("aria-label")).toContain("2");
+    expect(more.getAttribute("title")).toContain("2");
     expect(more.getAttribute("aria-expanded")).toBe("false");
     // the folded More holds its pages without drawing them (a folded group mounts no rows); opened, they are there
     const kb = () => [...host.querySelectorAll("a")].find((a) => a.textContent?.includes("知识库"));

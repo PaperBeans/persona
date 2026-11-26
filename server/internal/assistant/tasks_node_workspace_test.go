@@ -37,7 +37,7 @@ func TestTaskDispatchPreparesWorkspaceOnNode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
-			database, err := db.Open(ctx, newDatabase(t), db.ManagerSet)
+			database, err := db.Open(ctx, newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 			if err != nil {
 				t.Fatal(err)
 			}

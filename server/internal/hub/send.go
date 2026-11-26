@@ -21,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // Sending a message from the phone (docs/protocol/protocol.md "Sending messages"). The app sends each message with its own
@@ -346,7 +347,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		// must not settle before delivery waits for it (#13041).
 		if isText && personSent(r.Context()) {
 			spoke.Text = text
-			spoke.ClientMsgID = clientMsgID
+			spoke.ClientMsgID = wireids.ClientMsgID(clientMsgID)
 			// Owner provenance (#15641) marks owner input to an Agent only, never the assistant's own conversations.
 			if terminal {
 				spoke.Source = assistantwire.OwnerInputTerminal

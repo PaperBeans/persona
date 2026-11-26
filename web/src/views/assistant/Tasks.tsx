@@ -984,7 +984,10 @@ function foldedRow(item: NeedsYouItem): { title: string; line?: string; kicker: 
 /** What a Needs you row's open state is kept under: its key and the round it asks, so the same task or Agent asking
  *  again comes back folded while a row that only blinks out (hidden for a moment, then restored) keeps its state. */
 function openKey(item: NeedsYouItem): string {
-  if (item.kind === "task") return `${item.key}@${item.todo.supervision?.reviews?.at(-1)?.at || item.todo.decision_review?.review_at || openAsk(item.todo)?.asked_at || item.asks.map((ix) => ix.id).join(",")}`;
+  if (item.kind === "task") {
+    const round = item.todo.supervision?.reviews?.at(-1)?.at || item.todo.decision_review?.review_at || openAsk(item.todo)?.asked_at || item.asks.map((ix) => ix.id).join(",");
+    return `${item.key}@${round}${item.steps?.map(openKey).join(",") ?? ""}`;
+  }
   if (item.kind === "agent") return `${item.key}@${item.asks.map((ix) => ix.id).join(",")}`;
   return item.key;
 }
@@ -1013,16 +1016,21 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
     const stop = window.setTimeout(() => growing.disconnect(), 1000);
     return () => { window.clearTimeout(stop); growing.disconnect(); };
   }, [open]);
-  const folded = foldedRow(item);
+  const steps = item.kind === "task" ? item.steps : undefined;
+  const firstStep = steps?.[0];
+  const showStep = firstStep && item.kind === "task" && !item.asks.length && !openAsk(item.todo) && !isDecision(item.todo);
+  const shown = showStep ? firstStep : item;
+  const folded = foldedRow(shown) ?? (steps?.length && shown.kind === "task" ?
+    { title: shown.todo.title, kicker: stateName("needs_you") } : undefined);
   // Whether the To-dos page counts this to-do as open (#3331): no attribute on rows that are no to-do. The chip badge
   // is summed from this same flag, so the trays and the header tell one number.
   const countsOpenAttr = item.kind === "task" ? { "data-counts-open": item.countsOpen ? "true" : "false" } : {};
   if (!folded) return <NeedsYouBody item={item} />;
   const openTitle = item.kind === "agent" ? () => openAgent(item.session.machine_id, item.session.session_id)
-    : item.kind === "task" ? () => {
-      const ask = item.asks[0];
-      if (ask && reviewState(item.todo) !== "user_check") openAgent(ask.machine_id, ask.session_id);
-      else openTask(item.todo.id);
+    : shown.kind === "task" ? () => {
+      const ask = shown.asks[0];
+      if (ask && !showStep && reviewState(shown.todo) !== "user_check") openAgent(ask.machine_id, ask.session_id);
+      else openTask(shown.todo.id);
     } : undefined;
   const label = <>
     <StatusMark state="needs_you" />
@@ -1059,7 +1067,13 @@ function NeedsYouRow({ item, open, onToggle }: { item: NeedsYouItem; open: boole
   return (
     <div ref={ref} data-needs-row={item.key} data-needs-open {...countsOpenAttr} className="flex scroll-m-2 flex-col gap-1">
       {head}
-      <NeedsYouBody item={item} nested />
+      <NeedsYouBody item={shown} nested />
+      {steps?.filter((step) => step !== shown).map((step) => (
+        <div key={openKey(step)} className="flex min-w-0 flex-col gap-1">
+          <OpenEntry title={step.todo.title} onOpen={() => openTask(step.todo.id)} />
+          <NeedsYouBody item={step} nested />
+        </div>
+      ))}
     </div>
   );
 }

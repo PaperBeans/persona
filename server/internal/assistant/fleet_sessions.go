@@ -635,7 +635,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		}
 		list[i].State, list[i].BackgroundWorking = stateWithBackground(agentState(list[i], list[i].SeenAt), list[i])
 		list[i].BackgroundWaiting = backgroundWaiting(list[i])
-		if !list[i].BackgroundWorking || backgroundIsWork(list[i]) {
+		if !list[i].BackgroundWorking && !stalledAfterTurn(list[i]) || backgroundIsWork(list[i]) {
 			list[i].BackgroundStalledSince = 0 // only background commands that are all there is to the work can have stalled
 		}
 		list[i].TurnError, list[i].TurnErrorKind = turnError(list[i])

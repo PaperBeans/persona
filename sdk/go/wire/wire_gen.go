@@ -5460,6 +5460,52 @@ type KBUpdateResult struct {
 	Ignored []KBIgnoredField `json:"ignored,omitempty"`
 }
 
+// KBRecordingID: A recording's UUID, picked by the extension so a retry lands on the same recording.
+type KBRecordingID string
+
+// String returns the ID as it is on the wire.
+func (v KBRecordingID) String() string { return string(v) }
+
+// KBMinutesActionID: an action item's id, picked by the extension and stable across writes.
+type KBMinutesActionID string
+
+// String returns the ID as it is on the wire.
+func (v KBMinutesActionID) String() string { return string(v) }
+
+// KBTodoID: A to-do's id, set by the hub when the user makes a to-do of an action item.
+type KBTodoID string
+
+// String returns the ID as it is on the wire.
+func (v KBTodoID) String() string { return string(v) }
+
+// KBRecordingMeetingKind: whether a recording's meeting is a calendar item (events) or an imported meeting
+// (meetings).
+// A value this side does not know keeps its raw string and is not Valid.
+type KBRecordingMeetingKind string
+
+const (
+	KBRecordingMeetingKindEvents   KBRecordingMeetingKind = "events"
+	KBRecordingMeetingKindMeetings KBRecordingMeetingKind = "meetings"
+)
+
+// KBRecordingMeetingKinds are the values of KBRecordingMeetingKind, in order.
+var KBRecordingMeetingKinds = []KBRecordingMeetingKind{KBRecordingMeetingKindEvents, KBRecordingMeetingKindMeetings}
+
+// Valid reports whether v is one of KBRecordingMeetingKinds.
+func (v KBRecordingMeetingKind) Valid() bool {
+	switch v {
+	case KBRecordingMeetingKindEvents, KBRecordingMeetingKindMeetings:
+		return true
+	}
+	return false
+}
+
+// KBRecordingMeetingID: A calendar item's or imported meeting's id in the knowledge base.
+type KBRecordingMeetingID string
+
+// String returns the ID as it is on the wire.
+func (v KBRecordingMeetingID) String() string { return string(v) }
+
 // KBPutRecordingParams: kb.put_recording (kb.write): create or update the extension's own recording with its minutes
 // and, optionally, its transcript (docs/extensions/extensions.md "Writing recordings and minutes"). It is the
 // extension's: no other extension may write it, and no extension a recording the phone uploaded (permission_denied).
@@ -5467,8 +5513,8 @@ type KBUpdateResult struct {
 // minutes is kept past recording_days, its minutes until minutes_days.
 type KBPutRecordingParams struct {
 	// A UUID the extension picks; one derived from its own source id makes a retry land on the same recording.
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
+	ID    KBRecordingID `json:"id"`
+	Title string        `json:"title,omitempty"`
 	// An RFC 3339 time.
 	StartedAt time.Time `json:"started_at"`
 	// An RFC 3339 time, not before started_at.
@@ -5520,9 +5566,9 @@ type KBMinutesPoint struct {
 // KBMinutesAction: an action item. id is the extension's, stable across writes (at most 64 characters): a to-do the
 // user made of it stays on it.
 type KBMinutesAction struct {
-	ID   string `json:"id"`
-	Who  string `json:"who,omitempty"`
-	What string `json:"what"`
+	ID   KBMinutesActionID `json:"id"`
+	Who  string            `json:"who,omitempty"`
+	What string            `json:"what"`
 	// The deadline as said.
 	By string `json:"by,omitempty"`
 	// YYYY-MM-DD, when by is one date.
@@ -5531,17 +5577,17 @@ type KBMinutesAction struct {
 	At    float64 `json:"at"`
 	Photo int     `json:"photo,omitempty"`
 	// The hub's: the to-do made of it.
-	TodoID string `json:"todo_id,omitempty"`
+	TodoID KBTodoID `json:"todo_id,omitempty"`
 }
 
 // KBRecordingMeeting: the calendar item (events) or imported meeting (meetings) the recording was; it must exist.
 type KBRecordingMeeting struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind KBRecordingMeetingKind `json:"kind"`
+	ID   KBRecordingMeetingID   `json:"id"`
 }
 
 type KBPutRecordingResult struct {
-	ID string `json:"id"`
+	ID KBRecordingID `json:"id"`
 	// The hub's revision of the recording: 1 when created, one more for each write that changed it.
 	Revision int  `json:"revision"`
 	Created  bool `json:"created,omitempty"`

@@ -833,15 +833,14 @@ func (s *Service) setAdmission(ctx context.Context, v json.RawMessage) (*ownChan
 	if s.store() == nil {
 		return nil, errors.New("no database on this hub")
 	}
-	before, _ := json.Marshal(s.admissionSettings(ctx))
+	was := s.admissionSettings(ctx)
+	before, _ := json.Marshal(was)
 	after, _ := json.Marshal(in)
 	if bytes.Equal(before, after) {
 		return &ownChange{summary: "assistant.admission did not change"}, nil
 	}
-	return &ownChange{cardText: func(l i18n.Lang) string {
-		return i18n.T(l, "assistant-settings_tool.change_admission", i18n.Args{
-			"before": clipped(l, string(before)), "after": clipped(l, string(after))})
-	},
+	hubMachine := s.settings(ctx).MachineID
+	return &ownChange{cardText: func(l i18n.Lang) string { return admissionChangeCard(l, was, in, hubMachine) },
 		apply: func(ctx context.Context) (string, error) {
 			if err := s.putSetting(ctx, admissionSettingsKey, &in); err != nil {
 				return "", err

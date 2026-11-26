@@ -77,6 +77,7 @@ fun ChatLinkHost(
     val context = LocalContext.current
     val resources = LocalResources.current
     val webFeatures = LocalChatWebFeatures.current
+    val webDownloader = LocalChatWebDownloader.current
     val pool = remember(context, webFeatures) { ChatWebViewPool(context, webFeatures) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -265,6 +266,11 @@ fun ChatLinkHost(
                     DisposableEffect(view) {
                         view.onPick = picked
                         view.onExternal = { external = it }
+                        view.onDownload = { request ->
+                            val _ = handleWebDownload(context, resources, webDownloader, request, forwarded != null) { notice, style ->
+                                val _ = feedback?.notice(notice, style)
+                            }
+                        }
                         onDispose { pool.release(view) }
                     }
                 }
