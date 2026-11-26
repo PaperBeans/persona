@@ -566,7 +566,7 @@ Once the server declares `client_ops`, clients may send `X-Persona-Op-Id: <UUID>
 | `start` | `POST /api/v1/sessions` |
 | `assistant_start` | `POST /api/v1/assistant/conversations` (hub feature `assistant_start_ops`) |
 | `resolve` | `POST /api/v1/interactions/{id}/resolve` |
-| `clarify` | `POST /api/v1/interactions/{id}/clarify` |
+| `clarify` | `POST /api/v1/interactions/{id}/clarify`: one that never reached a manager (`assistant_offline`), was cut off on the way (`assistant_in_doubt`) or that its computer got nothing of (`delivered: "none"`, `retryable: true`, #13360) keeps no receipt, so the unchanged retry (the same `client_msg_id`) asks again |
 | `choose` | `POST /api/v1/interactions/{id}/choose` (also accepts a body `client_id`; see "Answering a question from its notification") |
 | `interrupt` / `close` / `rename` / `modes` | `POST /api/v1/sessions/{mid}/{sid}/interrupt`, `/close`, `/rename`, `/modes` |
 | `rewind` / `restore_model` / `fork` | `POST /api/v1/sessions/{mid}/{sid}/rewind`, `/restore-model`, `/fork` |
@@ -595,7 +595,7 @@ Lark sends and Inbox replies also derive receipts from the body's `client_id`; s
 
 When a new session is started with an operation ID, the hub keeps finishing an accepted start after the caller disconnects and stores the receipt. Replaying the same ID won't start it again; an existing HTTP result is returned as-is even if marked `unknown`, and leftover operations with no result still return `202 {"state":"unknown"}`. Android persists the ID and parameters before sending, and queries the ID if the response is lost. Neither a 404 nor an unknown result proves it didn't start, so it keeps the pending-confirmation record and doesn't POST again. Only a clearly failed receipt allows editing the form and starting a new operation. Clients without the header keep the old behavior.
 
-A new assistant conversation (`assistant_start`, #1349) works the same way: an accepted start finishes after the caller disconnects, a repeat with the same ID gets the first answer (also when it was `502 assistant_in_doubt`, recorded as `unknown`), and nothing is started twice. `503 assistant_offline` keeps no receipt (nothing reached the assistant), so the same ID can try again once it is back. iOS / Mac send one ID per first message and, on a hub with `assistant_start_ops`, try it again through a gap (no network, a timeout, the hub restarting, `202 pending`) for up to a minute; on an older hub they send no ID and don't retry gaps.
+A new assistant conversation (`assistant_start`, #1349) works the same way: an accepted start finishes after the caller disconnects, a repeat with the same ID gets the first answer (also when it was `502 assistant_in_doubt`, recorded as `unknown`), and nothing is started twice. `503 assistant_offline` keeps no receipt (nothing reached the assistant), and neither does the manager's answer that the assistant's computer got nothing (`503 node_unreachable` with `delivered: "none"` and `retryable: true`, its node away for a moment, #13360), so the same ID can try again once they are back. iOS / Mac send one ID per first message and, on a hub with `assistant_start_ops`, try it again through a gap (no network, a timeout, the hub restarting, `202 pending`) for up to a minute; on an older hub they send no ID and don't retry gaps.
 
 ## Device connections and lock screen test
 
@@ -1175,11 +1175,11 @@ Provider responses carry only the description and `has_key`, never secrets. Defa
                 "expires_at":"...",          // Monitor: stops by itself at this time (the "expires in 30m" in the result); absent if not stated
                 "run_id":"wf_c1d9daf8-cd2",  // workflow: which run in workflows it is; only running workflows are here (old clients still treat it as a background task)
                 "moved_from_foreground":true}], // shell: a foreground command Claude Code's timeout moved to the background, not one started there or backgrounded by hand; the node judges it stalled sooner (#16418). Omitted otherwise and by older nodes
- "background_ended":[{"id":"b85polnoj","kind":"shell|monitor","description":"…","command":"…", // recent ended shell / Monitor outcomes, oldest first, at most 8 and from the last day
+ "background_ended":[{"id":"b85polnoj","kind":"shell|agent|monitor|workflow","description":"…","command":"…", // outcomes from the last day, oldest first. Claude Code retains up to 8 shell and Monitor outcomes. Antigravity retains up to 20 outcomes across all four kinds
                       "output_file":"/private/tmp/…/b85polnoj.output","started_at":"...","ended_at":"...",
                       "status":"completed|failed|stopped|killed|ended","exit_code":0}], // exit_code only when the transcript states it; stopped work need not have one
  // Full session info only; bounded / summary list rows omit background_ended. Older nodes and hubs omit it: clients must not infer an outcome when a task only leaves background.
- // Agents and workflows keep their existing history fields. Ended entries never count as running background work.
+ // Claude Code subagents and workflows use their own history fields. Ended entries never count as running background work.
  // Claude Code workflows (multi-agent scripts the Workflow tool runs in the background, #2935, docs/protocol/agent-states.md "Background workflows"): the last day's, newest first.
  // Running ones (running=true) count as background work: the hub computes state as working, doesn't push "done", doesn't judge the to-do complete or auto-close this Agent. Old nodes don't have this field
  // phase_stats follows phases order, including phases with no agents yet, then appends undeclared phases; title="" means unknown. done counts journal results only; failed counts the journal's failed lines (#5511, omitted when 0; older nodes counted them as done); agents stopped when the run ended are in none of done / failed / running.
@@ -2085,6 +2085,8 @@ clients' fallbacks are in [counts.md](counts.md); the hub's part is its "The hub
 | PUT | `/api/v1/workspace-board/settings` | `{enabled}` → `{enabled,can_write}`; `full` only, missing `enabled` returns 400 |
 | GET | `/api/v1/navigation` | `{"start"?, "pages"?, "overview"?}`: the page the apps open on, the sidebar's arrangement (#9071) and Overview's extension cards (#9745) with its own sections (#10905), one per hub, so the owner's for all their devices; each is left out until something is stored, see "Navigation" |
 | PUT | `/api/v1/navigation` | `{start?, pages?, overview?}` → the record; `full` only; none of them, or one of another shape, returns 400 |
+| GET | `/api/v1/settings/web-fonts` | The default manager's shared web font choices `{sans, mono}`. Each choice is `{preset, family?}` and starts at `{"preset":"default"}` |
+| PUT | `/api/v1/settings/web-fonts` | Full access only. Send one of `{sans: {preset, family?}}` or `{mono: {preset, family?}}` and receive both choices. Only `custom` accepts a family name |
 | GET | `/api/v1/workspaces` | `{workspaces:[Workspace],errors?:[{machine_id,error}]}`; workspace discovery independent of Agents, keeps the last known info on failure, readable by `answer` |
 | POST | `/api/v1/machines/{mid}/reconnect` | Reconnect that machine's node |
 | GET · POST | `/api/v1/machines/{mid}/codex/{sid}/takeover` | Signed-in full-device route; generic device-call APIs are denied. GET → `{token,cwd,transcript_path,continuation_prompt}` with a single-use two-minute token. POST requires `{token,confirm_stop:true}` only while the original writer is running; `false` is accepted once it has exited. The manager verifies process identity and terminal instance, then sends one Ctrl+D only with empty composer and no modal or queued input. It waits for process exit, a complete stable transcript ending, and a fresh writer scan; any failed check or timeout refuses. No signals or forced termination. Takeover resumes the same thread/session ID in a new terminal tab. The separate continue option alone starts an independent session with context and attached to-do preserved. `encrypted_context` is continuation-only. |
@@ -3329,7 +3331,7 @@ Server → client:
 | `interaction_resolved` | `id`; when the assistant answered on the user's behalf, also `answered_by: "assistant"` (#1602), plus `reason` (why it answered that way) and `answers` (what it answered; re-answering starts from here, #3029) |
 | `interaction_reanswered` | `id`, `resolution` (`{answers}`): the user changed the assistant's answer, and the new answer has been sent to that Agent (#3029) |
 | `fleet` | `fleet` (the Live Activity summary, matching the content of HTTP `/api/v1/fleet`) |
-| `hook_event` | The node hook event's original fields; the hub adds `machine_id` and sets `type: hook_event`; used to refresh session run state; `Stop` carries `stop_sig` (a reply signature the hub uses to dedupe "done" pushes, see `agent-states.md` ("Hook turn signals")); global report-only hooks (`../integrations/claude-integration.md` ("Global report-only hooks")) carry `report_only: true`, so the hub doesn't take them to mean the session has Persona's hooks; `UserPromptSubmit` carries `prompt_source`, who the prompt is from (its message source's kind, such as `meeting` or `conversation`; `notification` for a background task's report; else `user`), never the prompt itself; otherwise as before |
+| `hook_event` | The node hook event's original fields; the hub adds `machine_id` and sets `type: hook_event`; used to refresh session run state; `Stop` carries `stop_sig` (a reply signature the hub uses to dedupe "done" pushes, see `agent-states.md` ("Hook turn signals")); global report-only hooks (`../integrations/claude-integration.md` ("Global report-only hooks")) carry `report_only: true`, so the hub doesn't take them to mean the session has Persona's hooks; `UserPromptSubmit` carries `prompt_source`, who the prompt is from (its message source's kind, such as `meeting` or `conversation`; `notification` for a background task's report; `side_conversation` for an unrelated `agent_send` wrapped by `RenderSideConversation`; else `user`), never the prompt itself; otherwise as before. An older node that still reports a side conversation as `user` is covered by the hub's own provenance check, so the new value needs no rolling-upgrade handling |
 | `tool_call` | `call_id`, `name`, `args` (only sent to phones that did `register_phone` and provide that tool) |
 | `desktops` | `desktops`: connected desktop clients (the Mac App), `[{"device","name","since"}]`; `device` is its device credential id (empty for those connected with a pairing credential, which can't be signed out individually). Sent once on connect, then pushed to all clients whenever a desktop client connects / disconnects (feature `desktops`). The iPhone uses it to show "Persona is signed in on a Mac"; it declares `desktops_link` for Persona Link entries ([ios.md](../apple/ios.md) "Mac signed in"). A client that lists `desktops_link` (feature `desktops_link`) also gets the active Persona Link desktops, `{"kind":"link","machine_id","device":"","name","since"}`: `machine_id` the computer, `name` what the hub calls it, `since` when this run of presence began (RFC 3339); entries without `kind` are the desktop App. Such a client gets the list again when one starts, ends or lapses, and once more when its `client_hello` adds `desktops_link`; a client that doesn't list it gets the list as before |
 | `notify` | `kind: interaction / done / assistant / alert`, `machine_id`, `session_id`, `title`, `subtitle`, `body`; a decision's push (an `assistant` notify) also carries `todo: {id, asked_at, recommend, manager, ask?, lockscreen?, options?}` (`TodoDecidePush`; the last three from a manager that says how the push may answer it, #10465; [todos.md](../assistant/todos.md) "Waiting for the owner"), a meeting's minutes push `recording_id` (the push payload too; "Recording sync"); interactions also carry `interaction_id`, alerts the caller's `id` when it gave one, an extension's as `ext:` and a hash (`POST /api/v1/notify`; Android replaces the earlier alert with the same `id`, #5614); a manager push may also carry `level` (`P0`/`P1`/`P2`) and `related_key` for the hub's push grading filter (held P1/P2/dedup alerts are withheld from APNs, `notify`, and Web Push while lists and held-push briefings keep updating); `quiet: true` when the device is inside its quiet hours (post it without sound); only sent to connections that declared `ws_notify`; one selected while a device without push was offline comes after its next `client_hello`, see below |
@@ -3338,6 +3340,8 @@ Server → client:
 | `mail_accounts` | No payload: the assistant added or removed a mail account (`persona_settings`, confirmed on the phone); clients re-read `GET /api/v1/mail/accounts` ("Mail API" below). The HTTP account endpoints don't send it |
 | `look` | `{"id","effective"}`: the selected avatar changed (chosen on another device, or back to the default after an extension was uninstalled); every client switches to `effective` (#3200) |
 | `personas` | No payload; the avatar list changed (a tiered avatar changed tier, an extension with avatars was installed / uninstalled / disabled); clients re-fetch `GET /api/v1/personas` and switch once the new package has fully downloaded (`docs/apple/persona.md` ("Tiered avatars")) |
+| `mutes` | No payload; the muted spaces/sessions changed (`PUT /api/v1/mutes` or space rename); clients re-read `GET /api/v1/mutes` |
+| `pins` | No payload; the pinned spaces/sessions changed (`PUT /api/v1/pins` or space rename); clients re-read `GET /api/v1/pins` |
 | `error` | `machine_id`, `session_id`, `error`; e.g. a subscription replay failed, and the client checks the session against it |
 | `pong` | `id` (a string, echoing the client's application-level ping) |
 
@@ -3929,7 +3933,9 @@ The web's paged Agents list draws **By to-do** with it (`docs/web/web.md` "By to
 
 #### Quick filters (`sessions_quick_filters`, #6662)
 
-`hello.features` advertises **`sessions_quick_filters`**. Only then does a runtime page or counts read take **`waiting=0|1`** and **`exclude_pane_source=<origin>`**. The web's paged Agents list draws the complete list's quick filters with them (`docs/web/web.md` "Paging hubs"): Needs you `state=needs_you`, Unread `state=unread`, Working `state=working&waiting=0`, Waiting in the background `state=working&waiting=1`, Lark group `pane_source=feishu`, Terminal `pane_source=terminal`, their numbers from one counts read (Working is `state.working` less `background_waiting`); hiding botmux adds `exclude_pane_source=feishu` to every read. Older hubs ignore both keys, so clients send them only when the feature is advertised and otherwise keep the state chips.
+`hello.features` advertises **`sessions_quick_filters`**. Only then does a runtime page or counts read take **`waiting=0|1`** and **`exclude_pane_source=<origin>`**. The web's paged Agents list draws the complete list's quick filters with them (`docs/web/web.md` "Paging hubs"): Needs you `state=needs_you`, Unread `state=unread`, Working `state=working&waiting=0`, Waiting in the background `state=working&waiting=1`, Lark group `pane_source=feishu`, In a tab `pane_source=terminal`. Their numbers come from one counts read (Working is `state.working` less `background_waiting`). Hiding botmux adds `exclude_pane_source=feishu` to every read. Older hubs ignore both keys, so clients send them only when the feature is advertised and otherwise keep the state chips.
+
+With `agents_only=1`, the `terminal` filter and its count omit rows whose effective state is `offline`, even if a saved terminal reference remains. Those sessions still appear in unfiltered results and retain their origin in general session queries.
 
 #### Just finished rows (`sessions_just_finished`, #9751)
 
@@ -3941,7 +3947,7 @@ The web's paged Agents list draws **By to-do** with it (`docs/web/web.md` "By to
 GET /api/v1/sessions?summary=1&limit=50&since=<URL-encoded checkpoint>
 ```
 
-The page has the same envelope. `sessions` contains the latest copies of changed/new matching rows; `remove` includes deleted rows and rows leaving the filter. The `added` array identifies only rows created after the baseline, using the same identity encoding as `remove`; an existing row that changed or entered the filter is not added. Current hubs send it on every full and delta page, including as `[]` when no row was created, so a client can distinguish that from an older hub omitting the field. Multiple changes to one identity collapse to its final state. For runtime rows, each removal is a **JSON tuple encoded as a string**, e.g. `"[\"demo\",\"session/with/slashes\"]"`; decode it as `[machine_id, session_id]`, never split on `/`. Personal-agent removals are their existing opaque `id` strings.
+The page has the same envelope. `sessions` contains the latest copies of changed/new matching rows; `remove` includes deleted rows and rows leaving the filter. The `added` array identifies rows created or newly entering the active filter after the baseline (`!before && after`), using the same identity encoding as `remove`; a row that already matched the filter at baseline and only changed is not added. Current hubs send it on every full and delta page, including as `[]` when no row entered, so a client can distinguish that from an older hub omitting the field. Multiple changes to one identity collapse to its final state. For runtime rows, each removal is a **JSON tuple encoded as a string**, e.g. `"[\"demo\",\"session/with/slashes\"]"`; decode it as `[machine_id, session_id]`, never split on `/`. Personal-agent removals are their existing opaque `id` strings.
 
 Retained deltas cover at most 128 revisions and 16,384 changed identities, evicting whole revisions. A restart or an older checkpoint returns HTTP **409**, `code: "revision_expired"`; obtain a fresh baseline, never silently treat it as a successful empty delta. Frozen delta cursors remain valid even if the underlying journal is subsequently evicted.
 
@@ -6160,6 +6166,30 @@ The mail details page first reads the body and attachment list, then submits `{"
 //                               "in_reply_to","references":[…]}
 ```
 
+## Outward-message settings (#9762)
+
+These assistant-manager routes require a full owner device, never an extension
+or answer-only device. Changes use an owner permission card, not a direct
+unaudited write.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET | `/api/v1/assistant/outbound-messages` | `{identity: "bot" \| "user", approval_id?}`; default `bot`, for Lark via lark-cli only. An optional `approval_id` identifies the latest pending request. With query `approval=<id>`, returns `{status: "pending" \| "approved" \| "declined" \| "failed"}` for that card. |
+| POST | `/api/v1/assistant/outbound-messages` | `{identity}` requests a default-sender change; `{revision, scope: {channel: "larkcli", target, scenario: "inbox_reply" \| "assistant_message", identity}}` requests a reversible `send` standing authorization. Empty `target` means all chats in this channel. Returns HTTP 202 with `{approval_id, status: "pending"}` after saving the card, or `{status: "unchanged"}` if the sender is already selected. An authenticated owner decision within 24 hours commits the exact change and card outcome together. The card survives a restart; a change to the original setting or registry revision needs a fresh card. Resolving a stale approval returns 409 `outbound_settings_changed`, and the receipt reports `failed`. Existing standing-authorizations GET/DELETE remains the inspect/revoke API. |
+
+`app.call` AppInbox adds `inbox.message_policy {}` ->
+`{sender_identity: true}`. `inbox.reply` accepts optional outer
+`sender_identity: "bot" | "user"` only for source `larkcli`; other sources reject
+an override. Preflight before using overrides with an older extension manager.
+`inbox_bot_not_in_chat` is a known non-delivery refusal, never an identity fallback.
+
+`message_send {channel: "larkcli", target, text, idempotency_key}` is the
+assistant's controlled outward-message tool. It applies a matching message
+standing authorization or shows a permission card. Its durable ledger records
+the target/sender, exact text, and `let_through` authorization/approval ID,
+scenario, and outcome (`pending`, `sent`, `failed_or_unknown`). Pending/failed
+attempts never claim delivery or silently retry.
+
 ## Inbox API
 
 The hub collects Lark, mail and connector data in the background and hands it to the manager (assistant) to aggregate into entries (`docs/assistant/inbox.md` ("Ownership: the manager owns the Inbox"): entries in `server/internal/assistant/inbox.go`, sources in `server/internal/extmgr/inbox.go`). The hub forwards these endpoints to it; when the manager isn't connected they return `503 assistant_offline`.
@@ -6189,7 +6219,7 @@ The hub collects Lark, mail and connector data in the background and hands it to
 | POST | `/api/v1/inbox/{id}/reply` | `{text, changes?, client_id?, expected_uid?, expected_version?}` (if the assistant connection breaks mid-send: 502 `assistant_in_doubt`, `delivered:"unknown"`; it may already have been sent, and retrying the same one won't send twice; a send that did not go out answers why, `delivered:"none"`: `409 inbox_cannot_reply`, `503 inbox_source_unavailable` / `inbox_source_signed_out` / `inbox_send_unrecorded`, `502 inbox_send_denied` / `inbox_send_failed`, `429 inbox_send_rate_limited` with `retry_after`, [inbox.md](../assistant/inbox.md) ("Send failures")): send to the original Lark chat / as a mail reply / as a cloud-document comment (where `doc.reply` points), and mark handled (`done_by=replied`); returns the entry. For cloud documents, `changes:[{ref,field,value}]` changes statuses before commenting; `text` may be empty for status-only changes. With `client_id`, a receipt is saved, and Lark passes it through as upstream `clientId`; without it, `clientId` is computed from the entry id and text (UUIDv5), so retries after a hub restart don't duplicate it either. A Lark entry's same reply is sent only once: replies to the same entry are queued; an entry already handled by reply with the same text returns success directly without sending again. Different text is sent normally. Lark destination: DMs go into the chat; non-empty `lark.thread_kind` replies to `reply_to` within its topic; group @mentions (`kind=mention`) reply quoting `reply_to`; other groups and old data without `reply_to` still send into the chat |
 | POST | `/api/v1/inbox/{id}/suggestion` | `{version, action, text?, client_id?}`: act on the current suggestion (submitted by the manager's handling chat, [inbox.md](../assistant/inbox.md) ("AI twin: handling chats and suggestions")): `confirm` (execute as is, or after editing when `text` is supplied) / `reject` (return to the handling chat) / `instruct` (`text` required, return for a new suggestion) → this item. Confirmed replies use the same send-once path as `/reply`, but do not mark done (`handling.state=waiting`). Reply attempts are retained in optional `item.suggestion_attempts` with version, outcome, safe code/retryability, frozen actual text, update time and conversation; internal send identity and target bindings are not listed. Only confirmed retryable non-delivery may retry the same current version and frozen payload/identity. Sending or unknown attempts refuse a fresh-ID retry, including after reload. Error responses can include the authoritative `item`; a new suggestion is not overwritten by an older attempt completing. See [inbox.md](../assistant/inbox.md) ("Send failures"). `409 {code:"suggestion_stale", error, item}` when `version` is not current or no suggestion remains; `409 inbox_item_done`; `400`; `403` for answer-only devices except text confirmation of replies or conclusions; `502 assistant_in_doubt` and the send-failure codes as in `/reply`. Old hubs lack it (404 / 405) |
 | POST | `/api/v1/inbox/{id}/retry` | No body. Asks the owning manager to resume an open item with failed AI twin handling. Returns the updated item once the request is saved, with `handling.state` set to `looking` or `agent`. `409 {code, error, item}` with `inbox_retry_stale` if the item has moved on or `inbox_retry_disabled` if settings or policy prevent the retry. `404` unknown item, `403` answer-only device, `503` manager or storage unavailable. Extension scope `inbox.write`. |
-| POST | `/api/v1/inbox/{id}/handoff` | Hand to AI with write-back ([inbox.md](../assistant/inbox.md) ("Item actions")), in two forms. `{text, client_id?, reuse_pending?}` sends `text` after a block naming the item to its main conversation (`session.send_once` with `client_id` as the message id; without one, a UUIDv5 of the item and text), or starts the main conversation with it. `{session:{machine_id, session_id}, kind:"agent"|"conversation", title?, client_id?}` without `text` only records a hand-off the client already sent: nothing is sent or woken, processing and done state stay unchanged, and the chain gets `agent` or `handling` with the session link and `via:user`. Both forms record `handoffs` so that conversation may write back with `inbox_suggest` `item`, and answer `{item, session:{machine_id, session_id}}`. The sending form's optional `reuse_pending:true` is for default Wrap up: reveal a waiting suggestion or reuse pending work for the same incoming item without another model message. New incoming work is distinct, and explicitly typed instructions keep normal handoff semantics (the default is false). Older managers may ignore this optional field. The same `client_id` again answers as before without recording or sending again; the record-only form derives a missing id from the item, session and kind. For the sending form, the hub keeps a receipt by `client_id` as for `/reply`, and answers `502 assistant_in_doubt` when the link to the manager breaks mid-request (retrying the same one won't send twice). `400` without text in the sending form, or with text / missing session ids / an invalid kind in the record-only form; `404` for an unknown item. A failed send or start records nothing and is answered as `POST /api/v1/assistant/conversations` answers it (a refusal the node codes `409` with its code, offline `503`, otherwise `502`, a work machine included). Not for answer-only devices (403). Old hubs and managers lack it (404 / 405) |
+| POST | `/api/v1/inbox/{id}/handoff` | Hand to AI with write-back ([inbox.md](../assistant/inbox.md) ("Item actions")), in two forms. `{text, client_id?, reuse_pending?}` sends `text` after a block naming the item to its main conversation (`session.send_once` with `client_id` as the message id; without one, a UUIDv5 of the item and text), or starts the main conversation with it. `{session:{machine_id, session_id}, kind:"agent"|"conversation", title?, client_id?}` without `text` only records a hand-off the client already sent: nothing is sent or woken, processing and done state stay unchanged, and the chain gets `agent` or `handling` with the session link and `via:user`. Both forms record `handoffs` so that conversation may write back with `inbox_suggest` `item`, and answer `{item, session:{machine_id, session_id}}`. The sending form's optional `reuse_pending:true` is for default Wrap up: reveal a waiting suggestion or reuse pending work for the same incoming item without another model message. New incoming work is distinct, and explicitly typed instructions keep normal handoff semantics (the default is false). Older managers may ignore this optional field. The same `client_id` again answers as before without recording or sending again; the record-only form derives a missing id from the item, session and kind. For the sending form, the hub keeps a receipt by `client_id` as for `/reply`, and answers `502 assistant_in_doubt` when the link to the manager breaks mid-request (retrying the same one won't send twice); an answer that its computer got nothing (`delivered: "none"`, `retryable: true`) keeps no receipt either, so the same `client_id` sends it once that computer is back (#13360). `400` without text in the sending form, or with text / missing session ids / an invalid kind in the record-only form; `404` for an unknown item. A failed send or start records nothing and is answered as `POST /api/v1/assistant/conversations` answers it (a refusal the node codes `409` with its code, offline `503`, otherwise `502`, a work machine included). Not for answer-only devices (403). Old hubs and managers lack it (404 / 405) |
 | POST | `/api/v1/inbox/{id}/doc/status` | `{ref, field, value}`: set this row's status in a cloud document to `value` (must be an option for that column); read the latest value before writing (if someone just changed it, fails with 409); returns the reread entry |
 | POST | `/api/v1/inbox/refresh` | collect once immediately, returning the list and `triage` (`?sources=all` as above); new plugin-connector entries enter the list after background triage finishes, without waiting for it. When the collect call itself fails, nothing was read now and it answers `502 {code:"inbox_refresh_failed", error, detail, retryable:true}` instead of the list (`error` a sentence in the request's language, `detail` the collect's error), so a refresh never looks like it worked when it did not; a source that could not be read within a round that did run is still `200`, named in `triage.sources[].read_error`. Older hubs answer `200` with the list as it was |
 | PUT | `/api/v1/inbox/{id}/parent` | `{kind, id}` sets this entry's parent (`kind` is `inbox` / `todo` / `session`); `null` or `{}` removes it → this `InboxItem`; missing entry or parent 404, invalid parent 400, would create a cycle 409 ([inbox.md](../assistant/inbox.md)) |
@@ -6199,6 +6229,8 @@ The hub collects Lark, mail and connector data in the background and hands it to
 | POST | `/api/v1/translate` | `{texts:[string]≤30, target}` → `{texts}`, preserving order; missing model outputs are empty strings. target is BCP 47 (zh-Hans, en, ja…, `docs/apple/ios.md` ("Translation")). Like the Inbox, this belongs to the assistant (forwarded through the hub), using the "Translation" use in model configuration |
 | POST | `/api/v1/translate/message` | `{text, target}` → `{text}`: translates one complete reply through purpose `translate`, preserving Markdown. Accepts 1–32000 characters; empty or oversized input is 400 (never silently clipped). Uses the existing translation model/cache, partitioned from clipped short texts and invalidated when its model binding changes. An empty model answer is 502. |
 | POST | `/api/v1/translate/mail` | `{account_id, uid, mailbox, target}` → `{subject, text, clipped?, model_fingerprint?}`: the assistant asks the hub to read this mail (HTML-only mail becomes text preserving paragraphs and links), then translates it itself; returns the Inbox's existing translation if it used the same model; body at most 12000 characters. An account the manager doesn't have is 404 `mail_account_unknown`, as on the mail routes; other failures to read or translate the mail are 502 |
+
+A manual lark-cli Inbox reply can include the displayed `expected_sender_identity` (`bot` or `user`). If the current identity differs, the reply returns HTTP 409 `outbound_sender_changed` with `delivered: "none"`. Refresh the sender before confirming again.
 
 Mail replies may carry `expected_uid` and/or `expected_version` from the details response. The version binds the account, mailbox, UID in the thread, message identifier and sender. A changed target returns HTTP 409, `code=mail_reply_target_changed`, `delivered=none`, `retryable=false`; nothing was sent this time. The App keeps the draft, loads the latest mail, and after the user confirms the new recipients makes a new request with a new `client_id`. When the network result is unknown, it checks the receipt using the original request, target and `client_id`. Omitting the validation fields preserves old behavior, so existing iOS needs no changes; persistent receipt rules are unchanged.
 
@@ -7057,6 +7089,63 @@ The Assistant view's `workspace_naming_version` advertises naming support and `s
 contains the built-in rules. A preview's `branch_sources` rows have `repo_id`, `kind`
 (`repository_default`, `explicit_branch` or `non_branch_ref`) and optional `branch`. A
 repository's default branch is left unnamed during preview.
+
+## BotMux messages
+
+A botmux session's transcript (`docs/integrations/engines.md` "botmux") holds what botmux handed the agent, wrapped in blocks for the model, and the
+agent's replies as `botmux send` shell calls. The node sets `botmux` on each decoded item in two layers — **structured turns first, wrapper parsing as
+per-turn fallback** — while `text` always keeps the transcript's words so clients can show the original:
+
+1. **Structured turns (`botmux.session-turns.v1`)**: when the local botmux dashboard serves `GET /api/sessions/:id/turns` (schema
+   `botmux.session-turns.v1`, `server/internal/node/hostbotmux_turns.go`, `server/internal/transcript/botmux_turns.go`), the node reads turns
+   incrementally by `seq` cursor and matches each turn to its transcript entry by `anchor.cliEntryId` or `anchor.inputSha256`. Matched turns populate
+   `botmux` from the structured record: inbound text, sender display name and type, attachment count and safe `attachment_meta`, placement (`thread`),
+   mentioned display names, and the full text of replies (including `--content-file` and `--card-file` replies whose body is not on the command line).
+   Only display names leave the node; `openId` and `messageId` are never forwarded.
+2. **Wrapper parsing fallback (`server/internal/transcript/botmux.go`)**: used whenever `GET /api/sessions/:id/turns` returns `404` (older botmux) or a
+   specific turn has no structured record (e.g., turns recorded before a botmux upgrade). Cases for both layers live in `spec/fixtures/botmux/cases.json`.
+
+```json
+{"role":"user","kind":"text","text":"<botmux_reminder>…</botmux_reminder>\n\n<user_message>\nship it\n</user_message>\n\n<sender … />",
+ "botmux":{"kind":"message","text":"ship it","sender":"Alex Chen","sender_type":"user","thread":true}}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `message`: a Lark or `owner_actor` message; `trigger`: a turn handed to botmux's `/api/trigger` as an external event (`source` names who); `reply`: the agent's `botmux send` (on a `tool_use` item) |
+| `text` | The words without botmux's blocks and hint lines |
+| `sender`, `sender_type` | The Lark sender's display name and kind; never its `open_id` or email |
+| `quoted`, `topic_context` | The message quoted another one; the topic had messages before the agent joined it (botmux's hint lines, Chinese or English) |
+| `thread`, `attachments`, `attachment_meta`, `mentions` | Posted in a topic (`placement.kind: "thread"` / `<message_location placement="thread">`); attachment count and safe `{kind, name?, mime_type?}` metadata (no local paths or IDs); mentioned display names |
+| `final`, `voice` | A reply sent with `--response-kind final` (`responseKind: "final"`); as voice |
+| `truncated` | The item was clipped inside the words: `text` is their start |
+
+A fold that hides `botmux send` calls lists their replies in `fold.botmux`, in order (structured turns are applied before `FoldWork`, so file/card
+replies also appear in `fold.botmux`).
+
+**Version probe and sending (`botmux_external_trigger`).** The node probes capabilities through the read-only `GET /api/sessions/:id/turns` endpoint
+and caches the result per botmux instance (invalidated on dashboard restart, token rotation, or CLI binary upgrade). Session listing starts a
+background probe when capabilities are unknown or expired, keeping the last known result for that instance until the probe succeeds. It never probes with a real
+message and never retries a delivered turn. When `capabilities` includes `ownerActor`, `POST /api/trigger` sends top-level `actor: "owner"` with
+`target.kind: "turn"`, `botId`, and `sessionId` (omitting `envelope.payload` and `envelope.rawText`), and verifies the echoed `actor: "owner"` in the
+response. On older botmux instances (below 3.59.23, `404` or `ownerActor` absent), sends use the external-event trigger and the session row sets
+`botmux_external_trigger: true` so clients show a one-line upgrade notice (`3.59.23+`) in the composer.
+
+**Wrapper fallback rules** (checked against botmux 3.59.6 through 3.59.20):
+
+- A message is read from a `<user_message>` with only top-level blocks around it (each block ends at the closing tag of its own name, so nested
+  blocks such as `<identity>` are fine; facts come only from the top-level `<sender />`, `<mentions>`, `<attachments>` and `<message_location />`),
+  a trigger turn with a top-level `<botmux_task trusted="true">` (including the hook-mode prefix), or bare words followed by `<botmux_formatting>`.
+  A task tag inside `<user_message>` is message text. Trigger source attribution comes only from the top-level task block.
+- A reply is a single `botmux send` whose words are its arguments, or a here-document (also behind a lone `-`). Flags follow botmux's own table
+  (`src/cli/send-invocation.ts`): switches take no value, `--urgent` / `--attention` only `=value`, the others the next word or `=value`. A flag botmux
+  does not know, a missing value, `--`, `--help`, `--dry-run`, and a body from `--content-file`, `--card-file` or `--card-json` give no `botmux` in
+  wrapper-only mode, since botmux would refuse the send or its words are not in the command. Each `--image(s)`, `--file(s)` and `--video(s)` counts as one attachment.
+- Anything else, botmux 1.x's plain preamble, hook-mode lines (already bare), a reply read from a file or a pipe without a structured turn record, and
+  items from older nodes carry no `botmux`: clients show them as before.
+
+Web can show the raw transcript or decode it (the default): a message shows `botmux.text` with its facts as tags, a reply shows as the
+agent's message sent to Lark, and each can be opened to its original. Session visibility follows the shared Agents display setting.
 
 ## Backend task workspace RPC
 

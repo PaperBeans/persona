@@ -32,7 +32,7 @@
   "preview_invalid": "删除预览与当前工作区不符，请关闭并核对当前工作区。",
   "previewing": "正在核对工作树…",
   "retry_preview": "重新核对",
-  "sessions_end": "此工作区中运行的 Agent 和终端将结束。",
+  "sessions_end": "此工作空间中运行的 Agent 和 Shell 都会停止。",
   "folder_kept": "只移除文件夹工作区条目，目录及其文件都会保留。",
   "files_deleted": "检出目录及其中的文件将被删除。",
   "dirty_one": "有 {count} 个文件包含未提交的修改，这些修改将丢失。",

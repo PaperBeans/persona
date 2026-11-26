@@ -6,7 +6,7 @@ import { storedValue } from "../../lib/compatibility";
 // Its bottom row is cindy's toolbar (#5324, at the owner's request): a bare round + that opens the + / @ panel
 // (ComposerPanel.tsx) and the `leading` permission picker on the left; the model pill, a second Stop while the agent
 // works and something is typed, a module's action (core/module-host.ts composer.trailingAction) and one round Send / Queue / Stop button on the right.
-import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { useQuickPrompts } from "../../lib/extension-declared";
 import { promptCommands, type ComposerCommand as Command } from "../../lib/extension-prompts";
@@ -26,7 +26,7 @@ import { base64File, releaseAttachments } from "../../lib/attachments";
 import { imageLimitsFor, MAX_PICTURE_SOURCE, pictureRoom, type ImageLimits } from "../../lib/image-limits";
 import { addFiles as addComposerFiles, filesBusy, MAX_FILES, readyFiles, restoreFiles, splitFileTags, takeReadyFiles, useComposerFiles, withFiles } from "../../lib/composer-files";
 import { activateComposer, addContext, getContexts, newContext, registerComposer, removeContext, useContexts, withContexts, type ContextRef, type ComposerHandle } from "../../lib/links";
-import { addQuote, getQuotes, onDraftEvent, parseQuotes, removeQuote, replaceNeedsConfirm, restoreQuotes, sendDraft, setCommentImages, setQuotes, splitQuotes, storeDraft, useQuotes, withQuoteBlock, type DraftEvent, type DraftImage } from "../../lib/drafts";
+import { addQuote, getQuotes, onDraftEvent, parseQuotes, removeQuote, replaceNeedsConfirm, restoreQuotes, sendDraft, setCommentImages, setQuotes, splitQuotes, storeDraft, useQuotes, withQuoteBlock, type CommentImagePicker, type DraftEvent, type DraftImage } from "../../lib/drafts";
 import type { EditedImage } from "../../lib/image-edit";
 import { mentionAt, sessionQuote, workspaceContext, type MentionToken } from "../../lib/mentions";
 import { machineWithHub } from "../../lib/mesh";
@@ -172,6 +172,7 @@ function fromDraftImage(img: DraftImage, id = uuid(), edited?: EditedImage): Att
 // memo: a chat renders again for each transcript item, and this box takes none of them (ChatView keeps its props stable)
 export const Composer = memo(function Composer({
   draftKey,
+  commentImagesRef,
   editor,
   placeholder,
   machineId,
@@ -203,6 +204,7 @@ export const Composer = memo(function Composer({
   top,
 }: {
   draftKey: string;
+  commentImagesRef?: Ref<CommentImagePicker | null>;
   /** Prompt editing shares the draft document format and keeps its own wire serialization. */
   editor?: { text: string; refs: ContextRef[]; onChange: (text: string, refs: ContextRef[]) => void; label: string };
   placeholder: string;
@@ -864,9 +866,11 @@ export const Composer = memo(function Composer({
     }
   };
 
-  const addCommentImages = async (id: string, files: File[], signal: AbortSignal) => {
+  const addCommentImages: CommentImagePicker = async (target, files, signal) => {
+    if (disabled || editor || loadingDraft) return;
+    let id = typeof target === "string" ? target : undefined;
     const current = () => !signal.aborted && mounted.current && keyNow.current === draftKey && canWriteDraft()
-      && getQuotes(draftKey).list.some((q) => q.id === id && q.comment);
+      && (!id || getQuotes(draftKey).list.some((q) => q.id === id && q.comment));
     for (const file of files) {
       if (!current()) return;
       if (!file.type.startsWith("image/")) {
@@ -901,10 +905,13 @@ export const Composer = memo(function Composer({
         imageRoomError(fittedRoom);
         continue;
       }
+      if (!id && typeof target === "function") id = target();
+      if (!id || !current()) return;
       const added = { ...image, id: uuid() };
       setCommentImages(draftKey, id, (images) => [...images, added]);
     }
   };
+  useImperativeHandle(commentImagesRef, () => addCommentImages);
 
   const canSend = (draft.trim().length > 0 || pastedBlocks.length > 0 || atts.length > 0 || filesReady || contexts.length > 0 || quote) && !uploading && !disabled && !loadingDraft;
   // Claude's suggested next message (iOS SuggestionPill): while the box is empty and the agent waits for a message

@@ -34,6 +34,21 @@ For a to-do handoff, copy handoff_receipt from the request and report the head y
         "check": { "type": "string" }
       }
     },
+    "findings": {
+      "type":"array",
+      "description":"For a multi-issue investigation done/blocked report, declare actionable findings; [] declares there are none. Keep IDs stable across reports.",
+      "maxItems":30,
+      "items":{
+        "type":"object",
+        "required":["id","summary","next","source"],
+        "properties":{
+          "id":{"type":"string","maxLength":48},
+          "summary":{"type":"string","maxLength":200},
+          "next":{"type":"string","maxLength":200},
+          "source":{"type":"string","maxLength":600}
+        }
+      }
+    },
     "criteria": {
       "type": "array",
       "maxItems": 6,

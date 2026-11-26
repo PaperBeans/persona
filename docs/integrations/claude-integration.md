@@ -822,6 +822,20 @@ installs and updates it.
 - **The plugin** submits text, owner turn interrupts and session settings: no command, no file but its own manifest,
   nothing written. It refuses a slash command, an empty or overlong text and a message past its deadline, tells the node
   why (`ack`), and keeps quiet (the debug log only) while no node answers, backing off up to a minute.
+- **Managed settings can keep the classic hooks away**: on a computer whose device management installs a Claude Code
+  `managed-settings.json`, the built-in `cc-plugin-sec-default@builtin` guard can seat itself in the `prepend` tier and
+  pass every `classic.*` event over user-tier plugins to the `append` tier. Persona cannot and does not work around that
+  organization policy. After a main-loop turn uses tools but no `classic.PreToolUse` reaches the plugin, the plugin adds
+  `classic_passed_over: true` to `/poll`; the node stops authorizing plugin permissions for that session, refuses a
+  direct `/permission` call with `passthrough`, withdraws any active plugin permission card, and does not set
+  `capabilities.approve` from the plugin alone. A blocked row says the request must be approved on the computer or the
+  session started from Persona in a terminal engine (herdr, Orca, and the rest) to approve from the phone, in `en`,
+  `zh-Hans` and `ja`. Question cards (`clq_`) are unchanged because they never depended on the classic hook. `turn.*`,
+  `session.start` and command hooks below the guard are unaffected. The closest upstream reports are
+  [anthropics/claude-code#105457](https://github.com/anthropics/claude-code/issues/105457),
+  [anthropics/claude-code#111404](https://github.com/anthropics/claude-code/issues/111404) and
+  [anthropics/claude-code#109411](https://github.com/anthropics/claude-code/issues/109411). This deliberately does not
+  use `tool.check` to lift permission prompts.
 - **Not covered**: a desktop session the node opens to send to (`sendThroughDesktopApp`) has usually not polled yet, so
   its first message goes through the inbox. A claude with no inbox does not use the plugin either: there would be no
   fallback. Public sharing omits the plugin's lines, as any line without the human origin (`transcript.shareHuman`).

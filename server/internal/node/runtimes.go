@@ -166,6 +166,8 @@ type runtimeConn struct {
 	resume       map[string][]string
 	transcripts  map[string]string
 	codexThreads map[string]string
+	// agyPaneBackground holds running tasks projected for a live terminal when the ACP row hides them.
+	agyPaneBackground map[string][]proto.BackgroundTask
 	// workspaces are its own workspaces, as its last runtime.workspaces said (caps.workspaces, runtimeworkspaces.go);
 	// workspacesSaid: it said them on this connection (a workspace missing from them is gone).
 	workspaces     []runtimeWorkspace
@@ -355,13 +357,7 @@ func (h *runtimeConn) runtimePreviews() func(id, text string) string {
 // runtimeWork keeps a row's subagents and background tasks to what the apps can use: subagents with a valid id, each
 // readable as "<session>@<id>" (whatever the runtime wrote there), background tasks with an id; text clipped, the
 // lists bounded. A runtime's background task has no output file of this machine's to open.
-func runtimeWork(s *proto.Session, preview func(id, text string) string) {
-	clip := func(t string) string {
-		if r := []rune(t); len(r) > maxRuntimeTaskText {
-			return string(r[:maxRuntimeTaskText]) + "…"
-		}
-		return t
-	}
+func runtimeWork(s *proto.Session, agy bool, preview func(id, text string) string) {
 	subs := s.Subagents[:0:0]
 	seen := map[string]bool{}
 	for _, a := range s.Subagents {
@@ -370,28 +366,48 @@ func runtimeWork(s *proto.Session, preview func(id, text string) string) {
 		}
 		seen[a.ID] = true
 		a.SessionID = s.SessionID + "@" + a.ID
-		a.Description, a.LastText, a.Type, a.Model = clip(a.Description), clip(preview(a.SessionID, a.LastText)), clip(a.Type), clip(a.Model)
+		a.Description = clipRuntimeTaskText(a.Description)
+		a.LastText = clipRuntimeTaskText(preview(a.SessionID, a.LastText))
+		a.Type, a.Model = clipRuntimeTaskText(a.Type), clipRuntimeTaskText(a.Model)
 		subs = append(subs, a)
 	}
 	s.Subagents = subs
 	if len(s.Subagents) == 0 {
 		s.Subagents = nil
 	}
-	bg := s.Background[:0:0]
-	for _, t := range s.Background {
-		if len(bg) == maxRuntimeBackground || strings.TrimSpace(t.ID) == "" {
+	s.Background = runtimeBackground(s.Background, maxRuntimeBackground, agy)
+	if agy {
+		s.SetBackgroundEnded(runtimeBackground(s.BackgroundEnded(), agyBackgroundEndedLimit, agy))
+	}
+}
+
+func clipRuntimeTaskText(t string) string {
+	if r := []rune(t); len(r) > maxRuntimeTaskText {
+		return string(r[:maxRuntimeTaskText]) + "…"
+	}
+	return t
+}
+
+// runtimeBackground bounds and sanitizes task metadata from the runtime wire.
+func runtimeBackground(source []proto.BackgroundTask, limit int, agy bool) []proto.BackgroundTask {
+	var bg []proto.BackgroundTask
+	for _, t := range source {
+		if len(bg) == limit {
+			break
+		}
+		if strings.TrimSpace(t.ID) == "" {
 			continue
 		}
-		if t.Kind != "agent" {
+		switch {
+		case t.Kind == "agent":
+		case agy && (t.Kind == "monitor" || t.Kind == "workflow"):
+		default:
 			t.Kind = "shell"
 		}
-		t.ID, t.Description, t.Command, t.OutputFile = clip(t.ID), clip(t.Description), clip(t.Command), ""
+		t.ID, t.Description, t.Command, t.OutputFile = clipRuntimeTaskText(t.ID), clipRuntimeTaskText(t.Description), clipRuntimeTaskText(t.Command), ""
 		bg = append(bg, t)
 	}
-	s.Background = bg
-	if len(s.Background) == 0 {
-		s.Background = nil
-	}
+	return bg
 }
 
 // setResume records how the engine resumes the sessions this runtime lists (resume_argv), replacing the last list's.
@@ -412,6 +428,11 @@ func (h *runtimeConn) resumeArgv(id string) []string {
 func (h *runtimeConn) row(id string) (proto.Session, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.rowLocked(id)
+}
+
+// rowLocked looks up a session while the caller holds h.mu.
+func (h *runtimeConn) rowLocked(id string) (proto.Session, bool) {
 	for _, s := range h.sessions {
 		if s.SessionID == id {
 			return s, true

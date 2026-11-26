@@ -63,6 +63,18 @@ describe("supervision", () => {
     expect(reportLine("done", "PR 已合并")).toBe("说做完了：PR 已合并");
   });
 
+  it("ignores legacy Codex terminal startup notices stored in supervision progress (#14822)", () => {
+    for (const text of [
+      "Codex will start in the terminal to use the requested reasoning effort. Approvals and questions will use the terminal screen.",
+      "为使用指定的推理强度，Codex 将通过终端启动。审批和提问将通过终端画面处理。",
+      "指定された推論レベルを使うため、Codex はターミナルで起動します。承認や質問はターミナル画面を通じて行います。",
+    ]) {
+      const legacy = sup({ progress: { kind: "progress", text, line: "终端启动说明" } });
+      expect(progressLine(legacy)).toBeUndefined();
+      expect(reportText(legacy)).toBeUndefined();
+    }
+  });
+
   it("words the report in the hub's paraphrase when it has one, and keeps the original for the details (#3181)", () => {
     const progress = { kind: "progress" as const, step: 3, steps: 5, text: "Ran the **migration** on staging: 41 tables moved", line: "迁移跑完，41 张表已搬" };
     expect(progressLine(sup({ progress }))).toBe("第 3/5 步 · 迁移跑完，41 张表已搬");

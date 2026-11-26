@@ -1185,8 +1185,15 @@ A chat's page leads to the Inbox items that came from it, and an item leads back
 - **The web**: a chat's page shows **In Inbox** with the open items (title, summary, tier pill, time), the done ones folded
   under **N done**, each opening its item, and a row of its last 7 days that an item holds opens that item
   (`web/src/views/knowledge/KBInbox.tsx`); an item's page has **Knowledge page** (`web/src/views/inbox/InboxKBChat.tsx`).
-  Both write their links with the route table's builder (`web/src/lib/deep-links.ts`). The iPhone follows in a later
-  change of #15356.
+  Both write their links with the route table's builder (`web/src/lib/deep-links.ts`).
+- **The iPhone** (`apple/Persona/Views/Knowledge/KBChatInbox.swift`, `apple/Persona/Views/Inbox/InboxKBChat.swift`): the
+  same **In Inbox** section on a chat's page, the done ones folded under **N done**, and in **Messages from the Last 7
+  Days** a row an item holds opens that item, drawn as a link with an Inbox mark at its end; the text is drawn as before when no item
+  holds a row. An item opens in the Inbox as a link to it does (`/inbox/<id>`, [deep-links.md](../protocol/deep-links.md)),
+  naming the Inbox list's own stamp of it; a chat's page in a sheet closes first, and while the hub's navigation hides
+  the Inbox page the section and the row marks are left out. An item's **More** menu has **Knowledge Page** when its read
+  names a chat, for an item of the current assistant, opening that chat's page over the item as a link to it does.
+  Details in [ios.md](../apple/ios.md) ("A chat's Inbox items").
 
 ## Search
 

@@ -51,6 +51,26 @@ func closeoutDone(c proto.Closeout, artifacts []proto.WorkArtifact, lang i18n.La
 	return w
 }
 
+// closeoutAsksOwner: a closeout that says done yet names the owner as the one to unblock what it waits for or lacks,
+// with no delivery behind it (a delivery's own hold reaches the owner as one, delivery.go). Its turn is no finished
+// work: it asks the owner something, so the model reads it as any unfinished turn is read (#14899).
+func closeoutAsksOwner(c proto.Closeout) bool {
+	return c.Status == proto.CloseoutDone && c.Unblock == unblockUser && (c.Waiting != "" || c.Missing != "") &&
+		(c.Delivery == "" || c.Delivery == deliveryNone)
+}
+
+// closeoutWaitsOnPerson: the closeout says its turn stopped on a person, the owner or someone else, not on work of its
+// own still running (#14899).
+func closeoutWaitsOnPerson(c proto.Closeout) bool {
+	switch c.Unblock {
+	case unblockUser:
+		return c.Status != proto.CloseoutDone || closeoutAsksOwner(c)
+	case unblockOther:
+		return c.Status == proto.CloseoutBlocked || c.Status == proto.CloseoutNotDone
+	}
+	return false
+}
+
 // withCloseout lays a closeout that is not "done" over what the model read from the same reply. The agent's own word
 // that it is not finished wins over a model that read the reply as done: the state is then unsure, as for any turn
 // nobody can call finished, with the closeout kept for whoever looks.

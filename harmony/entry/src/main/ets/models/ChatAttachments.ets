@@ -877,7 +877,9 @@ export class ChatAttachments {
       } catch (error) {
         // A hub predating chat uploads can reject the destination before accepting any bytes.
         if (destination !== 'attachment' || !(error instanceof HttpFailure) || error.status !== 400 ||
-          error.code !== 'unknown_upload_destination' || error.resultUnknown || error.resultPending || !valid()) throw error;
+          error.code !== 'unknown_upload_destination' || error.resultUnknown || error.resultPending || !valid()) {
+          throw error instanceof Error ? error : new Error('chat_attachment_upload_failed');
+        }
         receipt = await repository.upload(path, bytes, valid, limit);
       }
     } catch (error) {
@@ -900,6 +902,7 @@ export class ChatAttachments {
     const fallback = new ImageLimits();
     const encoded = await ChatAttachments.encodeSource(image.createImageSource(bytes), '',
       Math.floor((fallback.requestBytes - 200000) * 0.70 / fallback.perMessage), fallback.maxSide);
+    if (!encoded) throw new Error('chat_attachment_image_too_large');
     return new ChatImagePayload(encoded.mime, new util.Base64Helper().encodeToStringSync(new Uint8Array(encoded.data)));
   }
 

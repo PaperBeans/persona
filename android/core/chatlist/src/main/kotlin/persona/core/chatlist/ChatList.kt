@@ -259,7 +259,7 @@ fun ChatListEffects(
                     }
                 }
                 if (movedAway) {
-                    state.position = state.position.copy(followsEnd = false)
+                    if (state.position.followsEnd) state.position = state.position.copy(followsEnd = false)
                     freeze()
                 }
             }
@@ -292,8 +292,8 @@ fun ChatListEffects(
                         activeDrags += interaction
                         userScrollPending = true
                         if (!state.restored) state.epoch++
-                        state.dragged = true
-                        state.restored = true
+                        if (!state.dragged) state.dragged = true
+                        if (!state.restored) state.restored = true
                         reconcileFollow()
                     }
                     is DragInteraction.Stop -> {

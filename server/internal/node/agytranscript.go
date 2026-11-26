@@ -47,6 +47,7 @@ type agyStep struct {
 	Source                   string          `json:"source"`
 	Status                   string          `json:"status"`
 	CreatedAt                string          `json:"created_at"`
+	UpdatedAt                string          `json:"updated_at"`
 	Content                  string          `json:"content"`
 	ClientMsgID              string          `json:"client_msg_id"`
 	Thinking                 string          `json:"thinking"`
@@ -70,6 +71,7 @@ type agyStep struct {
 	branch                   string
 	record                   [32]byte
 	rendered                 [32]byte
+	backgroundStart          string
 }
 
 type agyStepMemo struct {
@@ -282,11 +284,23 @@ func (f *agyFold) add(raw []byte) {
 			for floor >= 0 && steps[floor].seq > step.seq {
 				floor--
 			}
+			updatesRunning := false
+			if floor >= 0 {
+				prev := steps[floor]
+				if prev.seq == step.seq && step.Type == prev.Type && prev.CreatedAt == step.CreatedAt {
+					updatesRunning = isAgyStepRunning(prev.Status)
+					if prev.Type == "GENERIC" {
+						step.backgroundStart = prev.backgroundStart
+						if step.backgroundStart == "" && updatesRunning && agyBackgroundNotice(prev.Content) != "" {
+							step.backgroundStart = prev.Content
+						}
+					}
+				}
+			}
 			if step.seq < last.seq && (floor < 0 || steps[floor].seq != step.seq) {
 				at = floor + 1
 				rev.native = fmt.Sprintf("%x", step.record[:10])
-			} else if step.seq < last.seq && floor >= 0 && steps[floor].seq == step.seq &&
-				isAgyStepRunning(steps[floor].Status) && step.Type == steps[floor].Type && step.CreatedAt == steps[floor].CreatedAt {
+			} else if step.seq < last.seq && (updatesRunning || step.backgroundStart != "") {
 				// An earlier RUNNING step (such as a background tool call) finished after later steps were logged.
 				// Update it in place without treating it as a branch rewind or discarding later steps.
 				step.branch = steps[floor].branch

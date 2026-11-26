@@ -192,6 +192,10 @@ func normalizeRuntimeRows(h *runtimeConn, list []proto.Session, preview func(id,
 		if s.Agent == "" {
 			s.Agent = agent
 		}
+		agy := agent == agyAgent && s.Agent == agyAgent && !daemon
+		if agy && agyStopped(s.Status) {
+			s.Background = nil
+		}
 		if s.AgentLabel == "" && (s.Agent == rt || (agent != "" && s.Agent == agent && agent != "claude") || daemon && s.Agent != "claude") {
 			// The runtime runs its own agent (DSH, opencode-<pid>): the apps call it by the runtime's name. A daemon is called by the
 			// name its config gives, whatever agent it runs (a platform running DSH), unless that is Claude Code.
@@ -292,7 +296,7 @@ func normalizeRuntimeRows(h *runtimeConn, list []proto.Session, preview func(id,
 		}
 		s.LastText = preview(s.SessionID, s.LastText)
 		runtimeLastText(&s)
-		runtimeWork(&s, preview)
+		runtimeWork(&s, agy, preview)
 		out = append(out, s)
 	}
 	clear(list[len(out):]) // the rows left out hold no strings

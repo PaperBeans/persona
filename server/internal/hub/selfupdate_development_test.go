@@ -54,7 +54,7 @@ func TestDevelopmentCheckManifestKeepsHubEdition(t *testing.T) {
 			u := h.upd
 			h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}}
 			candidate := &update.DevelopmentCandidate{Branch: "main", Commit: strings.Repeat("b", 40)}
-			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, result any, _ func(update.DevelopmentProgress)) error {
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
 				*result.(*update.DevelopmentCandidate) = *candidate
 				return nil
 			}
@@ -86,7 +86,7 @@ func TestDevelopmentBackupManifestKeepsHubEdition(t *testing.T) {
 			chosen := update.DevelopmentVersion{ID: "snapshot-fixture", Version: "web-dev-backup", Build: 202611010001,
 				Commit: strings.Repeat("b", 40), UpdatedAt: "2026-11-01T10:00:00Z"}
 			started, unblock := make(chan struct{}), make(chan struct{})
-			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(update.DevelopmentProgress)) error {
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
 				if operation == "prepare_backup" {
 					close(started)
 					<-unblock
@@ -139,7 +139,7 @@ func TestDevelopmentBuildManifestKeepsEditionAndLocalNames(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(artifacts, "personad-"+plat+".gz"), gz(binary), 0600); err != nil {
 				t.Fatal(err)
 			}
-			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(update.DevelopmentProgress)) error {
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, operation string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
 				if operation != "prepare_backup" {
 					return fmt.Errorf("unexpected operation %s", operation)
 				}

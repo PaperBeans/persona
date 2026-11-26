@@ -73,8 +73,8 @@
     <string name="designsystem_core_field_invalid">Check what you entered and its format</string>
     <string name="designsystem_core_computer_fallback">the computer</string>
     <string name="designsystem_core_close_agent_title">Close this agent?</string>
-    <string name="designsystem_core_close_agent_message_tab">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its terminal tab “%5$s” (in a split tab, only its pane). Work in progress stops; the chat is kept, and you can continue it later from History in Agents.</string>
-    <string name="designsystem_core_close_agent_message_pane">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its terminal pane. Work in progress stops; the chat is kept, and you can continue it later from History in Agents.</string>
+    <string name="designsystem_core_close_agent_message_tab">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its tab “%5$s”. In a split terminal, only its part closes. Work in progress stops. The session is kept, and you can resume it from History in Agents.</string>
+    <string name="designsystem_core_close_agent_message_pane">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its terminal. Work in progress stops. The session is kept, and you can resume it from History in Agents.</string>
     <string name="designsystem_core_close_agent_message_runtime">“%1$s”\n%2$s\n\nThis ends the session on %3$s. Work in progress stops.</string>
     <string name="designsystem_core_delete_session_title">Delete this chat?</string>
     <string name="designsystem_core_delete_session_on_machine_command">“%1$s” will be removed from the list on every device. The chat record on %2$s is not deleted; continue it there with %3$s and it comes back.</string>

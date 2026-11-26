@@ -8599,6 +8599,270 @@
     {
       "name": "session_models_empty",
       "value": "This launcher has no models available to switch to."
+    },
+    {
+      "name": "phone_xiaoyi",
+      "value": "XiaoYi"
+    },
+    {
+      "name": "phone_search_alias_phone_xiaoyi",
+      "value": "xiaoyi a2a intent skill assistant voice"
+    },
+    {
+      "name": "xiaoyi_section_capabilities",
+      "value": "Capabilities"
+    },
+    {
+      "name": "xiaoyi_section_preferences",
+      "value": "Preferences & Safety"
+    },
+    {
+      "name": "xiaoyi_section_diagnostics",
+      "value": "Self-Check"
+    },
+    {
+      "name": "xiaoyi_agent_card_label",
+      "value": "On-Device Agent"
+    },
+    {
+      "name": "xiaoyi_intents_count_label",
+      "value": "Registered Intents"
+    },
+    {
+      "name": "xiaoyi_skills_runtime_label",
+      "value": "Installed Skills"
+    },
+    {
+      "name": "xiaoyi_suggestions_toggle",
+      "value": "XiaoYi Suggestions"
+    },
+    {
+      "name": "xiaoyi_suggestions_hint",
+      "value": "Share privacy-safe status hints with XiaoYi when pending items arrive."
+    },
+    {
+      "name": "xiaoyi_suggestions_unregistered",
+      "value": "XiaoYi Suggestions require an app build registered on Xiaoyi Open Platform."
+    },
+    {
+      "name": "xiaoyi_lock_screen_notice",
+      "value": "Approvals from XiaoYi always require your phone to be unlocked. High-risk Auto-Run plans stay inside Persona."
+    },
+    {
+      "name": "xiaoyi_diag_run",
+      "value": "Run Self-Check"
+    },
+    {
+      "name": "xiaoyi_diag_running",
+      "value": "Checking…"
+    },
+    {
+      "name": "xiaoyi_diag_hub_paired",
+      "value": "Paired Hub"
+    },
+    {
+      "name": "xiaoyi_diag_credential",
+      "value": "Asset Store Token"
+    },
+    {
+      "name": "xiaoyi_diag_transport",
+      "value": "Direct Hub Access"
+    },
+    {
+      "name": "xiaoyi_diag_pass",
+      "value": "Ready"
+    },
+    {
+      "name": "xiaoyi_diag_attention",
+      "value": "Needs attention"
+    },
+    {
+      "name": "xiaoyi_diag_ssh_warning",
+      "value": "SSH tunnel only"
+    },
+    {
+      "name": "xiaoyi_diag_reachable",
+      "value": "Reachable ({online}/{total} online)"
+    },
+    {
+      "name": "xiaoyi_card_working",
+      "value": "{count} working"
+    },
+    {
+      "name": "xiaoyi_card_needs_you",
+      "value": "{count} need you"
+    },
+    {
+      "name": "xiaoyi_card_approve",
+      "value": "Allow / Approve"
+    },
+    {
+      "name": "xiaoyi_card_submitting",
+      "value": "Submitting…"
+    },
+    {
+      "name": "xiaoyi_card_confirm_prompt",
+      "value": "Confirm this request? Your phone must be unlocked."
+    },
+    {
+      "name": "xiaoyi_card_approved_done",
+      "value": "Confirmed."
+    },
+    {
+      "name": "xiaoyi_card_open_persona",
+      "value": "Open in Persona"
+    },
+    {
+      "name": "xiaoyi_card_continue",
+      "value": "Continue in Persona"
+    },
+    {
+      "name": "xiaoyi_card_open_failed",
+      "value": "Could not open Persona."
+    },
+    {
+      "name": "xiaoyi_sent_still_thinking",
+      "value": "Sent to Persona. It is still thinking."
+    },
+    {
+      "name": "xiaoyi_task_sent_summary",
+      "value": "Sent to {session} ({machine})."
+    },
+    {
+      "name": "xiaoyi_approved_summary",
+      "value": "Approved: {summary}"
+    },
+    {
+      "name": "xiaoyi_todo_saved_summary",
+      "value": "To-do saved: {title}"
+    },
+    {
+      "name": "xiaoyi_water_logged_summary",
+      "value": "Logged {amount} ml. Today: {today} / {goal} ml."
+    },
+    {
+      "name": "xiaoyi_push_queued_summary",
+      "value": "Queued to send when your Hub is reachable."
+    },
+    {
+      "name": "xiaoyi_push_sent_summary",
+      "value": "Sent to Persona."
+    },
+    {
+      "name": "xiaoyi_push_sent_no_dest_summary",
+      "value": "Sent to Persona. Turn on Inbox or Knowledge in Settings > Subscriptions."
+    },
+    {
+      "name": "xiaoyi_opening_recording",
+      "value": "Opening Persona Meeting Recording."
+    },
+    {
+      "name": "xiaoyi_opening_persona",
+      "value": "Opening Persona."
+    },
+    {
+      "name": "xiaoyi_kb_no_hits",
+      "value": "No knowledge matches found for \"{query}\"."
+    },
+    {
+      "name": "xiaoyi_not_paired",
+      "value": "Not paired yet. Open Persona and connect your Hub first."
+    },
+    {
+      "name": "xiaoyi_auth_expired",
+      "value": "The pairing has expired. Open Persona to pair again."
+    },
+    {
+      "name": "xiaoyi_already_handled",
+      "value": "This request was already handled."
+    },
+    {
+      "name": "xiaoyi_ssh_open_app",
+      "value": "This Hub connects over an SSH tunnel. Open Persona to run this action."
+    },
+    {
+      "name": "xiaoyi_unlock_required",
+      "value": "Unlock your phone before approving requests."
+    },
+    {
+      "name": "xiaoyi_offline",
+      "value": "Cannot reach the Hub right now. Check your network connection."
+    },
+    {
+      "name": "xiaoyi_machine_offline",
+      "value": "{target} is offline. Check that your computer is awake and Persona Link is running."
+    },
+    {
+      "name": "xiaoyi_machine_not_found",
+      "value": "Could not find a computer named {target}."
+    },
+    {
+      "name": "xiaoyi_no_online_machine",
+      "value": "No computer is online right now."
+    },
+    {
+      "name": "xiaoyi_no_live_session",
+      "value": "No active session found on {target}. Open Persona to start one."
+    },
+    {
+      "name": "xiaoyi_hub_update_required",
+      "value": "Please update your Persona Hub to use this action."
+    },
+    {
+      "name": "xiaoyi_need_app_for_new_session",
+      "value": "Start a session on {target} in Persona once so XiaoYi knows your folder and launcher."
+    },
+    {
+      "name": "xiaoyi_nothing_pending",
+      "value": "Nothing needs your approval right now."
+    },
+    {
+      "name": "xiaoyi_needs_screen",
+      "value": "Open Persona to answer this request."
+    },
+    {
+      "name": "xiaoyi_nothing_to_send",
+      "value": "Nothing to send."
+    },
+    {
+      "name": "xiaoyi_water_not_enabled",
+      "value": "First add Water tracking in Health inside Persona."
+    },
+    {
+      "name": "xiaoyi_recording_module_off",
+      "value": "Meeting recording is off on this hub."
+    },
+    {
+      "name": "xiaoyi_diag_recording_module",
+      "value": "Meeting recording module"
+    },
+    {
+      "name": "xiaoyi_diag_on",
+      "value": "On"
+    },
+    {
+      "name": "xiaoyi_diag_off",
+      "value": "Off"
+    },
+    {
+      "name": "xiaoyi_agent_card_ready",
+      "value": "Ready · {count} capabilities"
+    },
+    {
+      "name": "xiaoyi_diag_preview_card",
+      "value": "Preview XiaoYi Card"
+    },
+    {
+      "name": "xiaoyi_timeout",
+      "value": "The Hub is taking longer than expected. Open Persona to view progress."
+    },
+    {
+      "name": "xiaoyi_rate_limited",
+      "value": "Too many items pushed recently. Try again later."
+    },
+    {
+      "name": "xiaoyi_failed",
+      "value": "Unable to complete the request. Open Persona to check details."
     }
   ]
 }

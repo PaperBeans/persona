@@ -66,7 +66,7 @@ func (h *Manager) Run(ctx context.Context) error {
 	go h.extensionMetricsLoop(ctx)
 	go h.pageLoop(ctx)
 	go h.sentLedgerLoop(ctx)
-	go h.larkSyncLoop(ctx) // the Lark user sync's daily runs (larksync_run.go)
+	go h.larkSyncLoop(ctx) // the Lark user sync's daily runs (larksync_host.go)
 	h.apiMux = http.NewServeMux()
 	h.registerRoutes(h.apiMux)
 	close(h.started)
@@ -749,6 +749,9 @@ func (h *Manager) CallTool(ctx context.Context, machine, session, name string, a
 	case assistant && h.memoryWithheld(name): // memory_sources.go
 		return memoryWithheldResult(name), true
 	case h.connectors.Offers(name) && (assistant || h.connectors.ForAgents(name)):
+		if !assistant {
+			ctx = connector.WithoutOwnerCaller(ctx)
+		}
 		return h.callConnector(ctx, asker{machine, session}, name, args), true
 	case assistant && name == larkImageTool:
 		return h.callLarkImage(ctx, args), true

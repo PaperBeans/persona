@@ -101,7 +101,7 @@ export function ChatSearch({
   );
   const controlledResultsStale = hasControlledResults && controlledResultQuery !== query;
   const searching = hasControlledResults
-    ? Boolean(controlledSearching) || controlledResultsStale
+    ? query.trim() !== "" && (Boolean(controlledSearching) || controlledResultsStale)
     : controlledSearching ?? effectiveApplied !== query;
   const activeQuery = hasControlledResults ? query : effectiveApplied;
   // only while the panel shows: the query stays after a pick, and the chat keeps changing under it. A controlled

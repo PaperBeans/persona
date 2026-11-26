@@ -235,8 +235,6 @@ data class Todo(
     @SerialName("wait") val wait: TodoWait? = null,
     /** Empty for an ordinary to-do or task; "concern" for one of the owner's concerns. Unknown values stay ordinary. */
     val kind: String = "",
-    /** Hub-projected wait summary (PR merge blockers, parked wait, etc.); null on older hubs or non-waiting items. */
-    val wait: TodoWait? = null,
 ) {
     val isDone: Boolean get() = doneAt != null
     /** Closed by cancellation, including the legacy supervision-only representation; never counted as completed (#5732). */

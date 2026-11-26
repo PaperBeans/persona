@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act } from "react";
+import { act, useCallback, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MacBayTools } from "../views/MacChrome";
+import { MacBayTools, MacMainContour } from "../views/MacChrome";
 import { getLayout, setSidebarCollapsed, toggleMaximized } from "./layout";
 import { appleG2Contour, useMacChrome } from "./mac-chrome";
 
@@ -59,13 +59,35 @@ describe("macOS unified titlebar bridge & Apple G2 contour", () => {
     expect(plain.clip.startsWith("M 14,0 ")).toBe(true);
 
     const rail = appleG2Contour(900, 600, "rail");
-    expect(rail.clip.startsWith("M 110,0 ")).toBe(true);
-    expect(rail.clip).toContain("14,44 H 78 C 89.5,44");
-    expect(rail.stroke).toContain("14,44.5 H 78.5");
+    expect(rail.clip.startsWith("M 116,0 ")).toBe(true);
+    expect(rail.clip).toContain("14,44 H 84 C 95.5,44");
+    expect(rail.stroke).toContain("14,44.5 H 84.5");
 
     const hidden = appleG2Contour(900, 600, "hidden");
-    expect(hidden.clip.startsWith("M 160,0 ")).toBe(true);
-    expect(hidden.clip).toContain("14,44 H 128");
+    expect(hidden.clip.startsWith("M 166,0 ")).toBe(true);
+    expect(hidden.clip).toContain("14,44 H 134");
+  });
+
+  it("clips <main> immediately on initial mount in rail mode (Cmd+R reload regression)", () => {
+    function ShellProbe() {
+      const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
+      const setRef = useCallback((el: HTMLElement | null) => {
+        if (el) {
+          Object.defineProperty(el, "clientWidth", { value: 900, configurable: true });
+          Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+        }
+        setMainEl(el);
+      }, []);
+      return (
+        <main ref={setRef}>
+          <MacMainContour mainEl={mainEl} bay="rail" />
+        </main>
+      );
+    }
+    act(() => root.render(<ShellProbe />));
+    const main = host.querySelector("main")!;
+    expect(main.style.clipPath).toContain("M 116,0 ");
+    expect(host.querySelector("[data-mac-contour]")).not.toBeNull();
   });
 
   it("expands from rail and exits maximized hidden state when MacBayTools expand button is clicked", () => {

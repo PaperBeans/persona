@@ -1,4 +1,7 @@
 {
+  "lark_sender_bot": "以机器人身份回复「{chat}」，会话里的成员都能看到。",
+  "lark_sender_user": "以你本人的身份回复「{chat}」，会话里的成员都能看到。",
+  "lark_sender_default": "使用设置中的发送身份回复「{chat}」，会话里的成员都能看到。",
   "title_moment": "评论公司圈",
   "title_comment": "评论 {title}",
   "title_reply_to": "回复 {title}",

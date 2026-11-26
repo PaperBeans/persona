@@ -286,25 +286,47 @@ func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause 
 // stoppable checks that session id's agent may be stopped now (retire: only a still one) and holds its typing lock
 // (unlock releases it) when ok; ok false with no error when it is not running.
 func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, ok bool, err error) {
-	if !validID(id) && !n.agyPaneRow(id) {
-		// A runtime's session (agy-b-<conversation>, its runtime id first) that no runtime lists any more reaches here:
-		// a session of a runtime that does is answered by that runtime before this (runtimeFor). Nothing runs it on this
-		// computer, so it is not running, as for a hex id with no pane; a continuation that stops its to-do's old Agent
-		// first goes on (#16376). A pane's row of another work agent (cursor) is not this: it runs, and is refused as
-		// before; so is an id of any other shape.
-		if _, running := n.agent(id); !running && runtimeIDRe.MatchString(id) {
-			return nil, a, false, nil
-		}
-		return nil, a, false, fmt.Errorf("invalid session id %q", id)
-	}
 	no := func(code, why string) (func(), host.Agent, bool, error) {
 		if retire {
 			code = notRetirable // what hubs before #4754 know
 		}
 		return nil, a, false, refusal(code, why, nil)
 	}
+	h, _, known := n.runtimes.belongs(id)
+	if !validID(id) && !n.agyPaneRow(id) {
+		// session.stop and session.retire are dispatched before runtimeFor (node.go), so a live or known external
+		// runtime session with a non-hex id (opencode-*, hermes-*, pi-*, paseo-*, etc.) must be refused here rather
+		// than falling through to "not running" or "invalid session id".
+		if h != nil || known {
+			if n.isAssistantSession(id) || n.runtimeAssistant(id) {
+				return no(notRetirable, "assistant conversations are not stopped")
+			}
+			return no(noTerminal, "this session belongs to another tool")
+		}
+		// A runtime's session (agy-b-<conversation>, opencode-*, hermes-*, etc.) that no runtime lists any more
+		// reaches here. Fail closed while a matching runtime is still starting or has connected without pushing
+		// its initial runtime.sessions list yet; otherwise nothing runs it on this computer, so it is not running
+		// (#16376). A pane's row of another work agent (cursor) is not this: it runs, and is refused as before;
+		// so is an id of any other shape.
+		if _, running := n.agent(id); !running && runtimeIDRe.MatchString(id) {
+			if n.isAssistantSession(id) || n.runtimeAssistant(id) {
+				return no(notRetirable, "assistant conversations are not stopped")
+			}
+			if n.restarting(id) {
+				return no(notRetirable, "still starting")
+			}
+			if r := n.starts.get(id); r != nil && r.ended.IsZero() {
+				return no(notRetirable, "still starting")
+			}
+			if label, pending := n.pendingRuntimeForStop(id); pending {
+				return nil, a, false, errRuntimeAway(label)
+			}
+			return nil, a, false, nil
+		}
+		return nil, a, false, fmt.Errorf("invalid session id %q", id)
+	}
 	_, terminalOnly := n.terminalOnly(id)
-	switch h, _, known := n.runtimes.belongs(id); {
+	switch {
 	case n.isAssistantSession(id) || n.runtimeAssistant(id):
 		return no(notRetirable, "assistant conversations are not stopped")
 	case n.externalCodex(id) || h != nil || known || terminalOnly:
@@ -712,4 +734,22 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 func (n *Node) agyPaneRow(id string) bool {
 	a, ok := n.agent(id)
 	return ok && a.Agent == agyAgent && a.PaneID != "" && id == otherSession(a)
+}
+
+// pendingRuntimeForStop reports whether a runtime matching id's "<runtime>-" prefix is still starting up or has
+// connected without pushing its initial runtime.sessions list yet, so stop fails closed with runtime_away instead
+// of assuming the session is already gone.
+func (n *Node) pendingRuntimeForStop(id string) (string, bool) {
+	if n.runtimes != nil {
+		if label, pending := n.runtimes.unlistedRuntimeByPrefix(id); pending {
+			return label, true
+		}
+		if n.runtimes.hasListedRuntimePrefix(id) {
+			return "", false
+		}
+	}
+	if rtID, pending := n.pendingAutoCompanionRuntime(id); pending {
+		return rtID, true
+	}
+	return "", false
 }

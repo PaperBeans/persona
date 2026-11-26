@@ -13,6 +13,7 @@ export struct KnowledgeRecordingView {
   @Event onStart:()=>void=()=>{};
   @Local roomQuestion:string='';
   @Require @Param model: KnowledgeRecording;
+  @Param recordingAllowed: boolean = true;
   @Event onDeleteLocal: () => void = () => {};
 
   @Local elapsed: number = 0;
@@ -183,8 +184,9 @@ export struct KnowledgeRecordingView {
         Text(this.duration()).fontSize(32).maxFontScale(Tokens.interfaceScaleFor(32)).fontWeight(FontWeight.Bold).fontColor(Colors.ink).id('knowledge.recording.duration')
         if (this.model.canStop()) Button(tr('knowledge_recording_stop')).maxFontScale(Tokens.interfaceFontMaxScale).width('100%').height(43).fontColor(Color.White).backgroundColor(Colors.danger)
           .onClick(() => this.model.stop().catch(() => false)).id('knowledge.recording.stop')
-        else Button(tr('phone_record_start')).maxFontScale(Tokens.interfaceFontMaxScale).width('100%').height(43).fontColor(Color.White).backgroundColor(Colors.danger)
+        else if (this.recordingAllowed) Button(tr('phone_record_start')).maxFontScale(Tokens.interfaceFontMaxScale).width('100%').height(43).fontColor(Color.White).backgroundColor(Colors.danger)
           .enabled(this.model.canStart()).onClick(() => this.onStart()).id('knowledge.recording.start')
+        else Text(tr('xiaoyi_recording_module_off')).fontSize(14).maxFontScale(Tokens.interfaceScaleFor(14)).fontColor(Colors.secondary).width('100%').id('knowledge.recording.module_off')
         if (this.model.hubAudio.phase==='device' && this.model.entry?.askedTranscription!=='hub') Text(tr('phone_record_audio_local')).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(Colors.secondary).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(15).backgroundColor(Colors.surface).borderRadius(15)
       if (this.hasHubTranscription()) this.hubTranscription()

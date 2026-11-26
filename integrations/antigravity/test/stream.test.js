@@ -42,6 +42,60 @@ async function fixture(t, options = {}, startParams = {}) {
   return { node, directory, calls, update, chunk, promptCount, runtime }
 }
 
+test('AGY companion publishes background lifecycles and clears running work when ACP exits', { timeout: 20_000 }, async (t) => {
+  const { node, directory, update } = await fixture(t)
+  const logs = join(directory, 'config', 'brain', RAW, '.system_generated', 'logs')
+  mkdirSync(logs, { recursive: true })
+  const file = join(logs, 'transcript.jsonl')
+  const row = () => node.last('runtime.sessions')?.sessions.find(session => session.session_id === SESSION)
+  const started = new Date(Date.now() - 60_000).toISOString()
+  const ended = new Date().toISOString()
+  const taskID = n => `${RAW}/task-${n}`
+  const step = (step_index, type, data) => ({ step_index, type, created_at: started, ...data })
+  const start = (index, n, description) => step(index, 'GENERIC', {
+    status: 'RUNNING',
+    content: `Created At: ${started}\nTool is running as a background task with task id: ${taskID(n)}\nTask Description: ${description}`,
+  })
+  const append = (...steps) => appendFileSync(file, steps.map(record => JSON.stringify(record)).join('\n') + '\n')
+  append(step(0, 'PLANNER_RESPONSE', { tool_calls: [
+    { name: 'run_command', args: { CommandLine: JSON.stringify('echo ready') } },
+    { name: 'schedule', args: { CronExpression: JSON.stringify('*/30 * * * *') } },
+    { name: 'run_workflow' },
+    { name: 'invoke_subagent' },
+  ] }),
+  start(2, 2, 'Cron: */30 * * * * Check status'), start(1, 1, 'Wait for ready'),
+  start(3, 3, 'Run checks'), start(4, 4, 'Review changes'))
+  const running = await until('background tasks on the companion row', () => row()?.background?.length === 4 && row(), 5000)
+  assert.deepEqual(running.background.map(task => [task.id, task.kind, task.started_at]), [
+    [taskID(1), 'shell', started], [taskID(2), 'monitor', started],
+    [taskID(3), 'workflow', started], [taskID(4), 'agent', started],
+  ])
+  assert.equal(running.background[0].command, 'echo ready')
+  assert.equal(running.background[1].description, 'Cron: */30 * * * * Check status')
+  assert.equal(running.loop, undefined)
+
+  append(step(5, 'SYSTEM_MESSAGE', { created_at: ended, content: `Task id "${taskID(1)}" finished with result: Ready` }),
+    step(6, 'PLANNER_RESPONSE', { created_at: ended, tool_calls: [
+      { name: 'manage_task', args: { Action: JSON.stringify('kill'), TaskId: JSON.stringify(taskID(2)) } },
+      { name: 'manage_task', args: { Action: 'status', TaskId: taskID(4) } },
+    ] }))
+  await until('completion and kill are reported', () => row()?.background_ended?.length === 2, 5000)
+  // The native export updates an earlier step in place, without increasing the transcript sequence.
+  append(step(3, 'GENERIC', { status: 'ERROR', updated_at: ended, content: 'Workflow failed' }))
+  const finished = await until('same-sequence outcome is published', () => row()?.background_ended?.length === 3 && row(), 5000)
+  assert.deepEqual(finished.background_ended.map(task => [task.id, task.kind, task.status, task.ended_at]), [
+    [taskID(1), 'shell', 'completed', ended], [taskID(2), 'monitor', 'killed', ended],
+    [taskID(3), 'workflow', 'failed', ended],
+  ])
+  assert.equal(finished.background_ended[2].description, 'Run checks')
+  assert.deepEqual(finished.background.map(task => task.id), [taskID(4)])
+
+  update({ exit: true })
+  const stopped = await until('exit clears the running task', () => row() && !row().background && row(), 5000)
+  assert.deepEqual(stopped.background_ended, finished.background_ended)
+  assert.deepEqual(stopped.agy_pane_background, finished.background)
+})
+
 test('AGY streams one assistant message at a time across tool calls', { timeout: 20_000 }, async (t) => {
   const { node, update, chunk, promptCount } = await fixture(t)
   await node.peer.call('session.send', { session_id: SESSION, text: 'Make the change.' })

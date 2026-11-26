@@ -14,7 +14,7 @@
   "unreadable": "这个浏览器不允许 Persona 读取已保存的设置，因此使用默认值，更改也可能无法保存。",
   "terminal_group": "终端",
   "terminal_renderer": "终端渲染方式",
-  "terminal_renderer_hint": "单窗格视图中终端的绘制方式。WebGL 使用显卡绘制，输出很多或字号较小时可能更流畅，但并非所有浏览器都支持。完整视图不受影响。",
+  "terminal_renderer_hint": "设置单个终端视图的渲染方式。WebGL 使用显卡，在输出多或文字较小时可能更流畅，但并非所有浏览器都支持。此设置不影响完整视图。",
   "terminal_renderer_standard": "标准",
   "terminal_renderer_webgl": "WebGL",
   "terminal_renderer_activation": "更改后新打开的终端。已经打开的终端保持原来的渲染方式和已输入的内容，直到重新打开它或刷新页面。",

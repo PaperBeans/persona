@@ -1015,18 +1015,22 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
 /// skills per extension).
 public nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
     public var id: String
+    /// What the extension's contributions list calls it; the id when absent.
+    public var title: String?
     /// The directory, relative to the package (or to the data directory with source data).
     public var dir: String
     public var source: String?
 
-    public init(id: String = "", dir: String = "", source: String? = nil) {
+    public init(id: String = "", title: String? = nil, dir: String = "", source: String? = nil) {
         self.id = id
+        self.title = title
         self.dir = dir
         self.source = source
     }
 
     enum CodingKeys: String, CodingKey {
         case id
+        case title
         case dir
         case source
     }
@@ -1034,6 +1038,7 @@ public nonisolated struct ExtensionSkillItem: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.dir = (try? c.decodeIfPresent(String.self, forKey: .dir)) ?? ""
         self.source = try? c.decodeIfPresent(String.self, forKey: .source)
     }
@@ -2216,12 +2221,15 @@ public nonisolated struct ExtensionAPIReceipt: Codable, Hashable, Sendable {
 
 public nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
     public var id: String
+    /// What the extension's contributions list calls it; the id when absent.
+    public var title: String?
     public var skills: [String]?
     public var instructions: String?
     public var gate: String?
 
-    public init(id: String = "", skills: [String]? = nil, instructions: String? = nil, gate: String? = nil) {
+    public init(id: String = "", title: String? = nil, skills: [String]? = nil, instructions: String? = nil, gate: String? = nil) {
         self.id = id
+        self.title = title
         self.skills = skills
         self.instructions = instructions
         self.gate = gate
@@ -2229,6 +2237,7 @@ public nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case title
         case skills
         case instructions
         case gate
@@ -2237,6 +2246,7 @@ public nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.skills = try? c.decodeIfPresent([String].self, forKey: .skills)
         self.instructions = try? c.decodeIfPresent(String.self, forKey: .instructions)
         self.gate = try? c.decodeIfPresent(String.self, forKey: .gate)
@@ -2249,6 +2259,8 @@ public nonisolated struct ExtensionAssistantItem: Codable, Hashable, Sendable {
 public nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
     /// The server's name for the assistant; not persona or persona.
     public var id: String
+    /// What the extension's contributions list calls it; the id when absent.
+    public var title: String?
     /// Looked up on PATH, then in ~/bin.
     public var command: String
     /// A PERSONA_ variable (PERSONA_ read too) that, when set, replaces the lookup: a path, or "" / 0 / off / false
@@ -2262,8 +2274,9 @@ public nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
     /// Tools never callable. Any other tool goes by the conversation's permission mode.
     public var deny: [String]?
 
-    public init(id: String = "", command: String = "", env: String? = nil, args: [String]? = nil, requires: [String]? = nil, allow: [String]? = nil, deny: [String]? = nil) {
+    public init(id: String = "", title: String? = nil, command: String = "", env: String? = nil, args: [String]? = nil, requires: [String]? = nil, allow: [String]? = nil, deny: [String]? = nil) {
         self.id = id
+        self.title = title
         self.command = command
         self.env = env
         self.args = args
@@ -2274,6 +2287,7 @@ public nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case title
         case command
         case env
         case args
@@ -2285,6 +2299,7 @@ public nonisolated struct ExtensionMCPServerItem: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.title = try? c.decodeIfPresent(String.self, forKey: .title)
         self.command = (try? c.decodeIfPresent(String.self, forKey: .command)) ?? ""
         self.env = try? c.decodeIfPresent(String.self, forKey: .env)
         self.args = try? c.decodeIfPresent([String].self, forKey: .args)

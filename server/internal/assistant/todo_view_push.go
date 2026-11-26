@@ -272,12 +272,13 @@ func (s *Service) todoRunsChanged(machine string) {
 	}
 	b := &s.tview
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.machines == nil {
 		b.machines = map[string]bool{}
 	}
 	b.machines[machine] = true
 	s.todoViewSettleLocked()
+	b.mu.Unlock()
+	s.directionTreeSoon()
 }
 
 // todoRunsOn: an open to-do has an active run on machine (activeBySession, as the direction tree reads it).

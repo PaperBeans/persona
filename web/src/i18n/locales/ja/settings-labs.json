@@ -14,7 +14,7 @@
   "unreadable": "このブラウザでは保存済みの設定を Persona が読み取れないため、既定値を使っています。変更も保存できない場合があります。",
   "terminal_group": "ターミナル",
   "terminal_renderer": "ターミナルの描画方式",
-  "terminal_renderer_hint": "シングルペイン表示のターミナルの描画方法です。WebGL はグラフィックカードで描画し、出力が多いときや文字が小さいときに滑らかになることがありますが、すべてのブラウザで使えるわけではありません。フル表示には影響しません。",
+  "terminal_renderer_hint": "単一ターミナルの表示方式です。WebGLはGPUを使い、大量の出力や小さな文字を滑らかに表示できる場合があります。一部のブラウザーでは使えません。全体表示には影響しません。",
   "terminal_renderer_standard": "標準",
   "terminal_renderer_webgl": "WebGL",
   "terminal_renderer_activation": "変更後に開いたターミナル。すでに開いているターミナルは、開き直すかページを再読み込みするまで、描画方式も入力した内容もそのままです。",

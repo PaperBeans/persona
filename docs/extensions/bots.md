@@ -125,8 +125,8 @@ The two complement each other and have separate switches.
 The bot reads and writes as itself (a tenant token). Separately, the owner can let a bot's app read **as them** once, and
 from then on a daily sync copies what changed in their Lark into the knowledge base: chats and their history (threads and
 attachments included), Drive, Docs, Sheets, Base, Wiki and Minutes. It is the built-in Lark channel's own feature
-(`server/internal/modules/lark/larkauth` and `server/internal/modules/lark/larksync`, with the manager's side in
-`server/internal/extmgr/larksync.go` and its neighbours); it needs no extension and no lark-cli.
+(`server/internal/modules/lark/larkauth` and `server/internal/modules/lark/larksync`, wired to the manager through
+`server/internal/extmgr/larksync_host.go`); it needs no extension and no lark-cli.
 
 ### Two steps on one page
 
@@ -292,11 +292,11 @@ finishes everything. A timeout, rate limit or passing failure in this step only 
 stays `ok`, the run is not counted as failed, and the reason goes into `names_warning`, with `names_rounds` counting the
 rounds. Only what the owner has to fix shows in health: a missing contact scope (`scope_missing`) or a refused grant
 (`needs_reauth`). Coverage: `server/internal/modules/lark/larksync/names_progress_test.go`,
-`server/internal/extmgr/larksync_names_test.go`.
+`server/internal/modules/lark/larksync/service_names_test.go`.
 
 Regression coverage: `server/internal/larksyncwire/scopes_test.go` checks the audited permission alternatives;
 `scripts/test/test_lark_sync_scope_guides.py` checks every locale of the three setup guides against both packs;
-`server/internal/extmgr/larksync_impoll_test.go` covers scope refusal followed by authorization and scheduler recovery;
+`server/internal/modules/lark/larksync/service_impoll_test.go` covers scope refusal followed by authorization and scheduler recovery;
 client sync model/component tests cover the reauthorization prompt and action.
 
 

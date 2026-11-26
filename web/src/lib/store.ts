@@ -1265,6 +1265,12 @@ function onMessage(msg: Record<string, unknown>) {
     case "agents.prefs":
       void refreshAgentPrefs();
       break;
+    case "mutes":
+      void refreshMutes();
+      break;
+    case "pins":
+      void refreshPins();
+      break;
     case "agents":
       agentsChanged(Array.isArray(msg.session_ids) ? (msg.session_ids as string[]) : []);
       break;
@@ -1309,6 +1315,24 @@ async function save<K extends "mutes" | "pins">(key: K, path: string, next: Stat
 /** "Mute" (optimistic): PUT /mutes; throws when the hub refuses, with the mutes put back. */
 export function saveMutes(mutes: AgentMutes): Promise<void> {
   return save("mutes", "/mutes", mutes, mutesSaves);
+}
+
+async function refreshMutes() {
+  if (mutesSaves.out) return;
+  const at = mutesSaves.rev;
+  try {
+    const v = await api<AgentMutes>("/mutes", { dedupe: false });
+    if (at === mutesSaves.rev && !mutesSaves.out) set({ mutes: { spaces: v.spaces ?? [], sessions: v.sessions ?? [], allowed: v.allowed ?? [] } });
+  } catch { /* keep current mutes until next sync */ }
+}
+
+async function refreshPins() {
+  if (pinsSaves.out) return;
+  const at = pinsSaves.rev;
+  try {
+    const v = await api<Partial<AgentPins>>("/pins", { dedupe: false });
+    if (at === pinsSaves.rev && !pinsSaves.out) set({ pins: pinsOf(v) });
+  } catch { /* keep current pins until next sync */ }
 }
 
 /** One machine as the hub answered a change to it (PUT …/engine), over what the list has: the hub's next \`machines\`

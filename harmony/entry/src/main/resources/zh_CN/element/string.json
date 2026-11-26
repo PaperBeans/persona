@@ -8599,6 +8599,270 @@
     {
       "name": "session_models_empty",
       "value": "此启动器没有可切换的模型。"
+    },
+    {
+      "name": "phone_xiaoyi",
+      "value": "小艺"
+    },
+    {
+      "name": "phone_search_alias_phone_xiaoyi",
+      "value": "小艺 智能体 意图 技能 语音 助手"
+    },
+    {
+      "name": "xiaoyi_section_capabilities",
+      "value": "能力注册"
+    },
+    {
+      "name": "xiaoyi_section_preferences",
+      "value": "偏好与安全"
+    },
+    {
+      "name": "xiaoyi_section_diagnostics",
+      "value": "连通性自检"
+    },
+    {
+      "name": "xiaoyi_agent_card_label",
+      "value": "端侧智能体"
+    },
+    {
+      "name": "xiaoyi_intents_count_label",
+      "value": "已声明意图"
+    },
+    {
+      "name": "xiaoyi_skills_runtime_label",
+      "value": "已注册技能"
+    },
+    {
+      "name": "xiaoyi_suggestions_toggle",
+      "value": "小艺建议"
+    },
+    {
+      "name": "xiaoyi_suggestions_hint",
+      "value": "有待确认事项时向小艺分享脱敏状态提示，不包含敏感正文。"
+    },
+    {
+      "name": "xiaoyi_suggestions_unregistered",
+      "value": "小艺建议需在华为小艺开放平台完成意图注册后生效。"
+    },
+    {
+      "name": "xiaoyi_lock_screen_notice",
+      "value": "通过小艺执行批准时始终要求手机已解锁；高风险自动放行方案仅可在 Persona 应用内确认。"
+    },
+    {
+      "name": "xiaoyi_diag_run",
+      "value": "立即自检"
+    },
+    {
+      "name": "xiaoyi_diag_running",
+      "value": "正在检查…"
+    },
+    {
+      "name": "xiaoyi_diag_hub_paired",
+      "value": "Hub 配对"
+    },
+    {
+      "name": "xiaoyi_diag_credential",
+      "value": "凭据可读性"
+    },
+    {
+      "name": "xiaoyi_diag_transport",
+      "value": "直连通道"
+    },
+    {
+      "name": "xiaoyi_diag_pass",
+      "value": "正常"
+    },
+    {
+      "name": "xiaoyi_diag_attention",
+      "value": "需处理"
+    },
+    {
+      "name": "xiaoyi_diag_ssh_warning",
+      "value": "仅 SSH 隧道"
+    },
+    {
+      "name": "xiaoyi_diag_reachable",
+      "value": "已连通（{online}/{total} 台在线）"
+    },
+    {
+      "name": "xiaoyi_card_working",
+      "value": "{count} 进行中"
+    },
+    {
+      "name": "xiaoyi_card_needs_you",
+      "value": "{count} 待确认"
+    },
+    {
+      "name": "xiaoyi_card_approve",
+      "value": "允许 / 批准"
+    },
+    {
+      "name": "xiaoyi_card_submitting",
+      "value": "提交中…"
+    },
+    {
+      "name": "xiaoyi_card_confirm_prompt",
+      "value": "确认执行此批准？请确保手机处于解锁状态。"
+    },
+    {
+      "name": "xiaoyi_card_approved_done",
+      "value": "已确认。"
+    },
+    {
+      "name": "xiaoyi_card_open_persona",
+      "value": "在 Persona 中打开"
+    },
+    {
+      "name": "xiaoyi_card_continue",
+      "value": "在 Persona 中继续"
+    },
+    {
+      "name": "xiaoyi_card_open_failed",
+      "value": "无法打开 Persona。"
+    },
+    {
+      "name": "xiaoyi_sent_still_thinking",
+      "value": "已发给 Persona，正在思考中。"
+    },
+    {
+      "name": "xiaoyi_task_sent_summary",
+      "value": "已发送到 {session}（{machine}）。"
+    },
+    {
+      "name": "xiaoyi_approved_summary",
+      "value": "已批准：{summary}"
+    },
+    {
+      "name": "xiaoyi_todo_saved_summary",
+      "value": "已记下待办：{title}"
+    },
+    {
+      "name": "xiaoyi_water_logged_summary",
+      "value": "已记录 {amount} 毫升，今日 {today} / {goal} 毫升。"
+    },
+    {
+      "name": "xiaoyi_push_queued_summary",
+      "value": "Hub 暂不可达，已加入队列稍后发送。"
+    },
+    {
+      "name": "xiaoyi_push_sent_summary",
+      "value": "已发送到 Persona。"
+    },
+    {
+      "name": "xiaoyi_push_sent_no_dest_summary",
+      "value": "已发送。请在设置 › 订阅源中开启收件箱或知识库投递。"
+    },
+    {
+      "name": "xiaoyi_opening_recording",
+      "value": "正在打开 Persona 会议录音。"
+    },
+    {
+      "name": "xiaoyi_opening_persona",
+      "value": "正在打开 Persona。"
+    },
+    {
+      "name": "xiaoyi_kb_no_hits",
+      "value": "知识库中未找到与“{query}”相关的内容。"
+    },
+    {
+      "name": "xiaoyi_not_paired",
+      "value": "尚未配对，请先打开 Persona 连接你的 Hub。"
+    },
+    {
+      "name": "xiaoyi_auth_expired",
+      "value": "配对凭据已失效，请打开 Persona 重新配对。"
+    },
+    {
+      "name": "xiaoyi_already_handled",
+      "value": "该请求已被处理。"
+    },
+    {
+      "name": "xiaoyi_ssh_open_app",
+      "value": "当前 Hub 仅通过 SSH 隧道连接，请打开 Persona 应用操作。"
+    },
+    {
+      "name": "xiaoyi_unlock_required",
+      "value": "请先解锁手机，再批准待确认请求。"
+    },
+    {
+      "name": "xiaoyi_offline",
+      "value": "当前无法连接 Hub，请检查网络或 VPN。"
+    },
+    {
+      "name": "xiaoyi_machine_offline",
+      "value": "{target} 当前离线，请检查电脑是否在线及 Persona Link 是否运行。"
+    },
+    {
+      "name": "xiaoyi_machine_not_found",
+      "value": "未找到名为 {target} 的电脑。"
+    },
+    {
+      "name": "xiaoyi_no_online_machine",
+      "value": "当前没有在线的电脑。"
+    },
+    {
+      "name": "xiaoyi_no_live_session",
+      "value": "{target} 上没有活跃会话，请打开 Persona 新建会话。"
+    },
+    {
+      "name": "xiaoyi_hub_update_required",
+      "value": "当前 Hub 版本过旧，请更新 Persona Hub 后重试。"
+    },
+    {
+      "name": "xiaoyi_need_app_for_new_session",
+      "value": "请先在 Persona 中于 {target} 上启动一次会话，以记住目录和启动器。"
+    },
+    {
+      "name": "xiaoyi_nothing_pending",
+      "value": "当前没有需要你批准的事项。"
+    },
+    {
+      "name": "xiaoyi_needs_screen",
+      "value": "此请求需要在屏幕中交互，请打开 Persona 处理。"
+    },
+    {
+      "name": "xiaoyi_nothing_to_send",
+      "value": "没有可发送的内容。"
+    },
+    {
+      "name": "xiaoyi_water_not_enabled",
+      "value": "请先在 Persona 的健康空间中添加饮水记录项。"
+    },
+    {
+      "name": "xiaoyi_recording_module_off",
+      "value": "这台 hub 关闭了会议录音。"
+    },
+    {
+      "name": "xiaoyi_diag_recording_module",
+      "value": "会议录音模块"
+    },
+    {
+      "name": "xiaoyi_diag_on",
+      "value": "已开启"
+    },
+    {
+      "name": "xiaoyi_diag_off",
+      "value": "已关闭"
+    },
+    {
+      "name": "xiaoyi_agent_card_ready",
+      "value": "已就绪 · {count} 项能力"
+    },
+    {
+      "name": "xiaoyi_diag_preview_card",
+      "value": "预览小艺卡片"
+    },
+    {
+      "name": "xiaoyi_timeout",
+      "value": "Hub 响应超时，请打开 Persona 查看最新进度。"
+    },
+    {
+      "name": "xiaoyi_rate_limited",
+      "value": "短时间内推送过多，请稍后再试。"
+    },
+    {
+      "name": "xiaoyi_failed",
+      "value": "操作未能完成，请打开 Persona 查看详情。"
     }
   ]
 }

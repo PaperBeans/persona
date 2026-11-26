@@ -1425,7 +1425,7 @@ export async function setAllDone(items: InboxItem[], action: BulkAction | boolea
 /** "Send": the hub replies in the chat / by mail / in the document (moving the rows' status in `changes` first) and
  * files the item as done. Filed at once; a failure puts the item back and keeps the text and the unticked changes for
  * the draft card and dialog. */
-export async function sendReply(item: InboxItem, text: string, changes: DocChange[] = []): Promise<boolean> {
+export async function sendReply(item: InboxItem, text: string, changes: DocChange[] = [], expectedSender?: "bot" | "user"): Promise<boolean> {
   const key = itemKey(item);
   if (state.sending.includes(key)) return false;
   const before = listed(item);
@@ -1439,7 +1439,7 @@ export async function sendReply(item: InboxItem, text: string, changes: DocChang
   unsentReplies.delete(key);
   droppedChanges.delete(key);
   try {
-    const r = await api<InboxItem>(`${itemPath(item.id)}/reply`, { method: "POST", json: { text, changes: changes.length ? changes : undefined }, headers: itemRequest(item) });
+    const r = await api<InboxItem>(`${itemPath(item.id)}/reply`, { method: "POST", json: { text, changes: changes.length ? changes : undefined, expected_sender_identity: expectedSender }, headers: itemRequest(item) });
     const hub = r?.id === item.id ? keepStamp(r, item) : undefined;
     settleMark(key, mark, true, hub);
     if (hub) replaceItem(withPending([hub])[0]);

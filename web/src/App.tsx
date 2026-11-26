@@ -463,7 +463,12 @@ function Shell() {
   const drawerBox = useRef<HTMLDivElement>(null);
   const sidebarId = useId();
   const scrim = useRef<HTMLDivElement>(null);
-  const mainBox = useRef<HTMLElement>(null);
+  const mainBox = useRef<HTMLElement | null>(null);
+  const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
+  const setMainRef = useCallback((el: HTMLElement | null) => {
+    mainBox.current = el;
+    setMainEl(el);
+  }, []);
   const a11y = drawerA11y(narrow, drawer);
   // folded to its icons on a wide screen (⌘⌥B, kept in this browser); a narrow screen keeps the full drawer
   const rail = !narrow && sidebarRail(layout);
@@ -701,8 +706,8 @@ function Shell() {
         className={cx("fixed inset-0 z-20 bg-black/20 transition-opacity duration-200 lg:hidden", drawer ? "opacity-100 starting:opacity-0" : "pointer-events-none opacity-0", !scrimShown && "hidden")}
         onClick={close}
       />
-      <main ref={mainBox} inert={a11y.modal || undefined} className="relative flex min-w-0 flex-1 flex-col">
-        {macChrome.unifiedTitlebar && <MacMainContour mainRef={mainBox} bay={macBay} />}
+      <main ref={setMainRef} inert={a11y.modal || undefined} className="relative flex min-w-0 flex-1 flex-col">
+        {macChrome.unifiedTitlebar && <MacMainContour mainEl={mainEl} bay={macBay} />}
         {/* dropped after loading: which phase, and a click explains with "Retry now" (views/ConnectionPill.tsx). A strip
             over the page that pushes it down while it shows, never a layer over its header, its fields or its title
             (web usability audit item 87); its details open over the page. */}

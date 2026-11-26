@@ -518,8 +518,9 @@ func (s *stateFile) put(id string, v sessionState) bool {
 		if old.CreationID != "" {
 			v.CreationID, v.Incarnation = old.CreationID, old.Incarnation
 		}
-		if v.StopCauseAt == 0 && old.StopCauseAt != 0 {
-			v.StopCauseAt = max(time.Now().UnixNano(), old.StopCauseAt+1)
+		// A send can save its metadata after an interrupt recorded a newer Stop.
+		if v.StopCauseAt < old.StopCauseAt {
+			v.StopCause, v.StopCauseAt = old.StopCause, old.StopCauseAt
 		}
 		if v.RanAt == 0 {
 			v.RanAt = old.RanAt // owned by recordRunning

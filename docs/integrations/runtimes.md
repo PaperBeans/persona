@@ -621,6 +621,19 @@ carries `title_source: "prompt"`, so the node keeps that provenance for the agy 
 A preview whose first line is Persona's context (`Content of persona-context:…`, `<persona-context …>`) gives no title:
 agy keeps only that line, so the block cannot be removed whole.
 
+Antigravity CLI sessions show background work in Agents for both herdr panes and the ACP companion (#13594). Each
+running command, scheduled task, workflow or subagent counts once. Scheduled tasks use the Monitor row, including
+the cron description when available. Persona's `/loop` control applies to Claude Code's scheduler.
+
+The readers match a task's ID across the native start, finish, cancellation and kill records. A tool result that
+changes from running to done or error also ends its task. Up to 20 outcomes from the last day stay in Completed.
+Running background tasks keep their loaded ACP worker alive through the idle timeout.
+When a pane stops or the ACP session is no longer loaded, its running tasks disappear. Losing the session does
+not record an outcome. A joined live pane uses the companion's inventory after the native rewind cut. When ACP
+does not have that session loaded, its companion row carries projected running tasks in `agy_pane_background`
+for the live pane only. Without a companion row, the pane reads its local export. The node links a task log when
+the local export names the corresponding file in that conversation's task directory.
+
 A session is listed `unknown` when the evidence cannot say working, idle or done (`transcriptState` in
 `integrations/antigravity/lib/map.js`). It is never guessed as idle: an idle native summary closes a turn only when its
 step count covers the last exported step. The companion logs why, as reason counts, each time the tally across listed

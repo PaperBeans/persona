@@ -76,6 +76,9 @@ type Config struct {
 	// Recall does not offer it to the program. Zero: no such limit (built-in and hub.json extensions, which are never
 	// replaced by another under the same id).
 	RecallNotBefore time.Time
+	// Identity, when set, is the hub-verified installation provenance of the extension running this connector
+	// (populated by extmgr from extension.Record, never from extension self-reports).
+	Identity *connector.ExtensionIdentity
 }
 
 // Restarts of the program after it exits: doubling from the first to the last, back to the first once it ran a while.
@@ -129,6 +132,14 @@ func New(cfg Config) *Conn {
 }
 
 func (c *Conn) ID() string { return c.cfg.ID }
+
+// ExtensionIdentity is the hub-verified installation identity of the extension running this connector, when set.
+func (c *Conn) ExtensionIdentity() (connector.ExtensionIdentity, bool) {
+	if c.cfg.Identity == nil || c.cfg.Identity.Extension == "" {
+		return connector.ExtensionIdentity{}, false
+	}
+	return *c.cfg.Identity, true
+}
 
 func (c *Conn) Name() string {
 	c.mu.Lock()

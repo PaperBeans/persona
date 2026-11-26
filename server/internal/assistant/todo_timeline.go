@@ -236,7 +236,7 @@ func (s *Service) todoFeed(ctx context.Context, id string, ext bool) ([]timeline
 			return nil, err
 		}
 		for _, r := range rows {
-			items = append(items, FeedItem{ID: r.ID, Conversation: r.Conversation, At: r.At, Kind: r.Kind, Body: r.Body})
+			items = append(items, FeedItem{ID: r.ID, Conversation: r.Conversation, At: r.At, Kind: r.Kind, Ref: cmp.Or(r.Ref, id), Body: r.Body})
 		}
 	} else {
 		s.tasks.mu.Lock()

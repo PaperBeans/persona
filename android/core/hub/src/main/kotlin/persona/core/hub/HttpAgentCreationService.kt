@@ -164,7 +164,7 @@ class HttpAgentCreationService(
             else -> throw IllegalStateException("Malformed workspace catalog errors")
         }
         // Existing hubs flatten source failures to machine_id/error; never parse their localized error text.
-        val failed = errors.any { element ->
+        val failedSources = errors.mapNotNull { element ->
             val error = element as? JsonObject ?: throw IllegalStateException("Malformed workspace catalog error")
             val errorMachine = (error["machine_id"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf(String::isNotBlank)
                 ?: throw IllegalStateException("Malformed workspace catalog error machine")
@@ -173,12 +173,16 @@ class HttpAgentCreationService(
                 is JsonPrimitive -> value.takeIf { it.isString }?.content ?: throw IllegalStateException("Malformed workspace catalog error source")
                 else -> throw IllegalStateException("Malformed workspace catalog error source")
             }
-            errorMachine == machineId && (source.isNullOrBlank() || source == "paseo")
+            source.orEmpty().takeIf { errorMachine == machineId }
         }
         // Every computer's workspaces: decoded off the caller's (the form's main) thread.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             AgentWorkspaceCatalog(JsonCodec.decodeFromJsonElement<List<AgentWorkspace>>(workspaces)
-                .filter { it.machineId == machineId }, complete = !failed)
+                .filter { it.machineId == machineId },
+                complete = failedSources.none { it.isBlank() || it == "paseo" },
+                failedSources = failedSources.filter(String::isNotBlank).toSet(),
+                unscopedFailure = failedSources.any(String::isBlank),
+            )
         }
     }
 

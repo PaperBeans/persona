@@ -134,6 +134,7 @@ describe("the sidebar's paged Agents by to-do", () => {
   });
 
   it("shows the complete list's quick filters where the hub selects them, and reads each chip as the complete list matches it", async () => {
+    await import("./BotmuxModeChip");
     localStorage.setItem("persona.agentFilter", "working");
     const fetch = await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "sessions_quick_filters"]);
     const chips = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radiogroup"][aria-label="快速筛选"] button')];
@@ -148,7 +149,26 @@ describe("the sidebar's paged Agents by to-do", () => {
     expect(reads().some((q) => q.get("pane_source") === "feishu" && !q.has("state"))).toBe(true);
     // The Settings write hides its origin from every read; a stale selection
     // resolves to All without changing either saved preference.
-    expect(host.querySelector('button[aria-pressed]')?.textContent ?? "").not.toContain("botmux");
+    const botmuxMode = () => host.querySelector<HTMLButtonElement>("button[data-botmux-mode]");
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("decode");
+    fetch.mockClear();
+    await act(async () => botmuxMode()?.click());
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("all");
+    expect(localStorage.getItem("persona.agentFilter")).toBe("feishu");
+    expect(reads()).toHaveLength(0);
+    await act(async () => botmuxMode()?.click());
+    await flush();
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("hide");
+    expect(showBotmux).toBe(false);
+    expect(chips().some((button) => button.textContent!.startsWith("飞书群"))).toBe(false);
+    expect(reads().length).toBeGreaterThan(0);
+    expect(reads().every((query) => query.get("exclude_pane_source") === "feishu")).toBe(true);
+    await act(async () => botmuxMode()?.click());
+    await flush();
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("decode");
+    expect(showBotmux).toBe(true);
+    expect(chips().map((button) => button.getAttribute("aria-label"))).toContain("飞书群 1");
+    await act(async () => botmuxMode()?.click());
     fetch.mockClear();
     await act(async () => saveAgentsDisplay(false));
     await flush();
@@ -156,12 +176,20 @@ describe("the sidebar's paged Agents by to-do", () => {
     expect(reads().length).toBeGreaterThan(0);
     expect(reads().every((q) => q.get("exclude_pane_source") === "feishu")).toBe(true);
     expect(chips().some((b) => b.textContent!.startsWith("飞书群"))).toBe(false);
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("hide");
     expect(chips().find((b) => b.getAttribute("aria-checked") === "true")!.textContent).toBe("全部");
     // Another browser switched it back; the next refresh restores the rows/filter.
     showBotmux = true;
     await act(async () => refreshAgentsDisplay()); await flush();
     expect(chips().map((b) => b.getAttribute("aria-label"))).toContain("飞书群 1");
-
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("all");
+    showBotmux = false;
+    await act(async () => refreshAgentsDisplay()); await flush();
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("hide");
+    await act(async () => botmuxMode()?.click()); await flush();
+    expect(showBotmux).toBe(true);
+    expect(botmuxMode()?.dataset.botmuxMode).toBe("decode");
+    expect(chips().map((button) => button.getAttribute("aria-label"))).toContain("飞书群 1");
   });
 
   it("uses the same setting for complete lists without changing inventory or the old filter", async () => {

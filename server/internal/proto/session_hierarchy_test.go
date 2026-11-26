@@ -414,3 +414,31 @@ func TestSessionHierarchyCrossMachineWire(t *testing.T) {
 		t.Fatalf("same-machine interaction wrote folded_under_machine_id: %s", plainIx)
 	}
 }
+
+func TestSessionBotmuxExternalTriggerWire(t *testing.T) {
+	var s Session
+	s.SessionID = "botmux-1"
+	if s.BotmuxExternalTrigger() || s.Hierarchy != nil {
+		t.Fatalf("zero session should have false flag and nil hierarchy")
+	}
+	s.SetBotmuxExternalTrigger(true)
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"botmux_external_trigger":true`) {
+		t.Fatalf("missing top-level botmux_external_trigger: %s", b)
+	}
+	var back Session
+	if err := json.Unmarshal(b, &back); err != nil || !back.BotmuxExternalTrigger() || !reflect.DeepEqual(back, s) {
+		t.Fatalf("round trip mismatch: %+v vs %+v (err=%v)", back.Hierarchy, s.Hierarchy, err)
+	}
+	clone := s
+	clone.SetBotmuxExternalTrigger(false)
+	if clone.BotmuxExternalTrigger() || clone.Hierarchy != nil || !s.BotmuxExternalTrigger() {
+		t.Fatalf("clearing clone failed copy-on-write or empty cleanup: clone=%+v orig=%+v", clone.Hierarchy, s.Hierarchy)
+	}
+	if bFalse, _ := json.Marshal(clone); strings.Contains(string(bFalse), "botmux_external_trigger") {
+		t.Fatalf("false flag must be omitted on wire: %s", bFalse)
+	}
+}

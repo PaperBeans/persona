@@ -667,6 +667,7 @@ func (s *Service) storeManagedWithKeys(ctx context.Context, list []storedLaunche
 			return err
 		}
 	}
+	s.invalidateLauncherListCache("")
 	if publicationErr != nil {
 		s.logf("launchers: saved providers; node publication deferred: %v", publicationErr)
 		return nil

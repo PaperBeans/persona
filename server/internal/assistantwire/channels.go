@@ -43,7 +43,9 @@ const (
 	// EventSessionItems and EventSessionDelta: SessionItems / SessionDelta, one way: a conversation the assistant
 	// follows (DeviceSessionFollow) has new items, or is writing text.
 	EventSessionItems = "session.items"
-	EventSessionDelta = "session.delta"
+	// EventInlineViewPage carries candidate cards from a transcript page the hub read for an app (SessionItems).
+	EventInlineViewPage = "session.inline_view_page"
+	EventSessionDelta   = "session.delta"
 	// EventFeishuOwner: FeishuOwner, one way: the Feishu bot was paired with its owner, or unpaired.
 	EventFeishuOwner = "feishu.owner"
 	// EventFeishuRecalled: FeishuRecalled, one way: the owner recalled a message in the bot's private chat.

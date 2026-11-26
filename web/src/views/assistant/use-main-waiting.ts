@@ -12,7 +12,7 @@ import { answeredLookup, answeredSessions } from "./answered-lookup";
 const EMPTY_FEED: FeedItem[] = [];
 const EMPTY_CARDS: TaskCardMetadata[] = [];
 const EMPTY_ASKS: Interaction[] = [];
-const EMPTY_ENTRIES: AssistantEntries = { needsYou: [], running: [], shelved: [], parked: [], review: [], finished: [] };
+const EMPTY_ENTRIES: AssistantEntries = { needsYou: [], verify: [], running: [], shelved: [], parked: [], review: [], finished: [] };
 
 /** The main conversation's own waiting list, shared by its sidebar row and the in-chat tray. */
 export function useMainWaiting(main?: Session) {

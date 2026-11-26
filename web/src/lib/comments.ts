@@ -167,9 +167,9 @@ export function codeQuote(a: { file: string; path: string; from: number; to: num
   return { text: cut.lines.join("\n"), comment: { body: "", spot } };
 }
 
-/** The words picked in the transcript as a quote. */
+/** The words picked in the transcript as a quote (untrimmed to match anchorOf's exact slice). */
 export function textQuote(words: string, anchor: TextAnchor | undefined, from?: string, ts?: string): DraftQuote {
-  return { text: words.trim(), from, ts, comment: { body: "", ...(anchor ? { anchor } : {}) } };
+  return { text: words, from, ts, comment: { body: "", ...(anchor ? { anchor } : {}) } };
 }
 
 // i18n-ignore: the block below is written into the message for the agent and read back by parseCommentBlock

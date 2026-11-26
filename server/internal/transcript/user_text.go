@@ -214,7 +214,7 @@ func userText(mk func(int, string, string) proto.Item, s string, meta *Meta) []p
 		return nil
 	}
 	it := mk(0, "user", proto.KindText)
-	it.Text = clip(text)
+	clipUserText(&it, text)
 	return []proto.Item{it}
 }
 

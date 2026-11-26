@@ -1,4 +1,7 @@
 {
+  "investigation_handoff_open": "このフォローアップを終了する前に、調査項目を完了するか引き継ぎ先を変更してください。{finding}",
+  "investigation_review_required": "この作業を保留または終了する前に、今回の調査結果を確認してください。",
+  "investigation_findings_open": "次の調査項目には、フォローアップ、確認できる利用者の判断、または完了の証拠が必要です。{findings}",
   "handoff_wait": "「{task}」から「{check}」の確認結果を待っています",
   "decision_review_changed": "この判断は更新されたか、対応済みです。更新してから再試行してください。",
   "decision_review_fields": "有効なレビュー日時または取り消し用の情報がありません。",
@@ -107,5 +110,7 @@
   "side_handover_archived": "元の会話「{origin}」がアーカイブされたため、タスク「{title}」のフォローをメイン会話に引き継ぎました。",
   "side_handover_gone": "元の会話「{origin}」が利用できなくなったため、タスク「{title}」のフォローをメイン会話に引き継ぎました。",
   "placement_waiting": "自動的なコンピューター配置を待機しています。",
-  "placement_no_match": "現在、このタスクの配置制約と容量制限を満たすオンラインのコンピューターがありません。"
+  "placement_no_match": "現在、このタスクの配置制約と容量制限を満たすオンラインのコンピューターがありません。",
+  "inbox_link_removed": "受信トレイの話題が変わったため、自動リンクを解除しました。タスクは開始できます。",
+  "inbox_candidates": "関連する可能性のある受信トレイの項目：{items}。自動リンクは行っていません。リンクする前に送信元を確認してください。"
 }

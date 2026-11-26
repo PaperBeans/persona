@@ -25,6 +25,8 @@ type TodoSupervisionRow struct {
 	Reviews          json.RawMessage `json:"reviews"`
 	// AutoReview is the latest independent review run (#2173), JSON the assistant owns; nil when none ran.
 	AutoReview json.RawMessage `json:"auto_review,omitempty"`
+	// InvestigationFindings is the assistant’s durable report and finding dispositions.
+	InvestigationFindings json.RawMessage `json:"investigation_findings,omitempty"`
 	// Waits is the done judge's finding that the latest stretch of work stopped on the owner's decision (#1277), JSON the
 	// assistant owns; nil when it does not hold.
 	Waits json.RawMessage `json:"waits,omitempty"`
@@ -75,7 +77,7 @@ func AlignTodoCriteria(doneWhen []string, criteria []TodoCriterion) []TodoCriter
 
 // ListTodoSupervision returns every supervised task's ledger.
 func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, error) {
-	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at
+	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings
 		FROM todo_supervision`)
 	if err != nil {
 		return nil, err
@@ -85,7 +87,7 @@ func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, err
 	for rows.Next() {
 		var r TodoSupervisionRow
 		var when, auto, waits, ownerWork, criteria []byte
-		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &ownerWork, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt); err != nil {
+		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &ownerWork, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt, &r.InvestigationFindings); err != nil {
 			return nil, err
 		}
 		if len(auto) > 0 {
@@ -131,14 +133,14 @@ func (d *DB) PutTodoSupervision(ctx context.Context, r TodoSupervisionRow) error
 	if len(r.Waits) > 0 {
 		waits = r.Waits
 	}
-	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
+	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
 		ON CONFLICT (todo_id) DO UPDATE SET supervisor = EXCLUDED.supervisor, done_when = EXCLUDED.done_when,
 			expect_minutes = EXCLUDED.expect_minutes, state = EXCLUDED.state, round = EXCLUDED.round,
 			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, waits = EXCLUDED.waits, owner_work = EXCLUDED.owner_work,
 			updated_at = EXCLUDED.updated_at, criteria = EXCLUDED.criteria,
-			pending_since = EXCLUDED.pending_since, supervisor_source = EXCLUDED.supervisor_source, cardless_told_at = EXCLUDED.cardless_told_at`,
-		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, ownerWork, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt)
+			pending_since = EXCLUDED.pending_since, supervisor_source = EXCLUDED.supervisor_source, cardless_told_at = EXCLUDED.cardless_told_at, investigation_findings = EXCLUDED.investigation_findings`,
+		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, ownerWork, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt, r.InvestigationFindings)
 	if err != nil {
 		return err
 	}

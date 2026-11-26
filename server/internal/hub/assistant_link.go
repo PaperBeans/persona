@@ -144,8 +144,9 @@ var storedTerminalTexts = []string{
 
 // startConversationOnce relays a new conversation's start (its first message) with an operation receipt (#1349): an app
 // whose answer was lost asks again with the same X-Persona-Op-Id and gets the first answer instead of a second
-// conversation. An accepted start finishes even if the caller went away. Offline nothing reached the assistant, so no
-// receipt is kept (the same op id tries again once it is back); cut off on the way it may have started
+// conversation. An accepted start finishes even if the caller went away. Offline nothing reached the assistant, and
+// answered that its node got nothing (node_unreachable, delivered "none") nothing started, so no receipt is kept (the
+// same op id tries again once they are back, clientOpRetry); cut off on the way it may have started
 // (assistant_in_doubt, kept as unknown).
 func (h *Hub) startConversationOnce() http.HandlerFunc {
 	receipt := h.withClientOp("assistant_start", func(w http.ResponseWriter, r *http.Request) {

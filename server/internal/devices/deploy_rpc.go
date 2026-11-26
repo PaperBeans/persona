@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -618,7 +619,7 @@ func (m *Machine) transferAndCommitNodeUpdate(ctx context.Context, bin string, r
 	// Preflight, draining, or handover events can arrive as soon as the node writes the commit reply.
 	watch := newNodeDeployWatch(begin.ID, record.Target)
 	clearWatch := m.setDeployWatch(watch)
-	commit, cancelCommit := context.WithTimeout(ctx, 30*time.Second)
+	commit, cancelCommit := context.WithTimeout(ctx, deployCommitWait())
 	err = peer.Call(commit, "node.update.commit", map[string]any{"id": begin.ID, "handoff_grace_seconds": handoffGraceSeconds}, nil)
 	cancelCommit()
 	commitLost := false
@@ -642,6 +643,12 @@ func (m *Machine) transferAndCommitNodeUpdate(ctx context.Context, bin string, r
 		commitLost:   commitLost,
 	}, nil
 }
+
+// deployCommitWait is how long a deploy waits for node.update.commit's answer. The node answers only after the
+// upload's self-checks, which endpoint protection scanning a new file can hold for up to a minute each
+// (nodeupdate.CommitWait). Waiting less takes a slow answer for a lost one: the deploy then waits for a reconnect, and a
+// check that failed shows as not_confirmed two minutes later instead of as itself.
+func deployCommitWait() time.Duration { return nodeupdate.CommitWait() + 10*time.Second }
 
 // waitNodeDrain waits while a drain-capable resident node drains active work before handover.
 // The 2-minute confirmation timer does not start until handover (node.restarting) or a sustained disconnect.

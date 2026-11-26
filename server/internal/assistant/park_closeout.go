@@ -375,7 +375,9 @@ func (s *Service) parkCloseout(ctx context.Context, t Todo, c proto.Session, now
 		return false
 	}
 	parked := false
-	_, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+	_, _, err := s.updateSupervisionGuarded(ctx, t.ID, func(cur Todo) bool {
+		return s.investigationTransitionError(ctx, cur, cur.Supervision, p.Evidence) == nil
+	}, func(v *Supervision) bool {
 		cur, exists := s.todoNow(t.ID)
 		if !exists || cur.DoneAt != nil || v.state(cur) != "" && v.state(cur) != reviewRework || v.Waits != nil ||
 			!v.UpdatedAt.Equal(t.Supervision.UpdatedAt) ||

@@ -160,6 +160,7 @@ func (s *Service) inboxRoutes() {
 			ClientID        string      `json:"client_id"`
 			ExpectedUID     *uint32     `json:"expected_uid"`
 			ExpectedVersion *string     `json:"expected_version"`
+			ExpectedSender  string      `json:"expected_sender_identity"`
 			Card            string      `json:"card"` // the message card it is sent from (sendFromCard)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" && len(in.Changes) == 0 {
@@ -173,8 +174,16 @@ func (s *Service) inboxRoutes() {
 				return
 			}
 		}
+		ctx := r.Context()
+		if in.ExpectedSender != "" {
+			if !validMessageIdentity(in.ExpectedSender) {
+				apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-outbound.scope_changed"))
+				return
+			}
+			ctx = context.WithValue(ctx, inboxExpectedSenderKey{}, in.ExpectedSender)
+		}
 		send := func() (InboxItem, error) {
-			return s.replyInboxCheckedRole(r.Context(), r.PathValue("id"), strings.TrimSpace(in.Text), in.ClientID, in.Card != "", fullRole(r), in.ExpectedUID, in.ExpectedVersion, in.Changes...)
+			return s.replyInboxCheckedRole(ctx, r.PathValue("id"), strings.TrimSpace(in.Text), in.ClientID, in.Card != "", fullRole(r), in.ExpectedUID, in.ExpectedVersion, in.Changes...)
 		}
 		var it InboxItem
 		var err error
@@ -184,6 +193,8 @@ func (s *Service) inboxRoutes() {
 			it, err = send()
 		}
 		switch {
+		case errors.Is(err, errInboxSenderChanged):
+			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "outbound_sender_changed", "error": i18n.T(i18n.OfWriter(w), "assistant-outbound.scope_changed"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errMailReplyTargetChanged):
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "mail_reply_target_changed", "error": i18n.T(i18n.OfWriter(w), "assistant-inbox.mail_target_changed"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errDraftDismissed):

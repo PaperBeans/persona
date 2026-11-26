@@ -290,9 +290,10 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 	}
 	text, isText := p["text"].(string)
 	clientMsgID, _ := p["client_msg_id"].(string)
-	if isText {
+	if isText && strings.TrimSpace(text) != "" || p["images"] != nil {
 		r = h.captureHumanSubmission(r, text)
 	}
+	indirect := viaMarked(p["via"]) // Siri or the share sheet: delivered, but not the owner's own input for project review
 	for _, reserved := range []string{"creation_id", "incarnation", "caller", "submission", "share_authority", "skill_owner"} {
 		delete(p, reserved)
 	}
@@ -379,6 +380,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 			// Older owner messages to it are kept undelivered: this one is kept behind them, never sent first.
 			if id, _ := asSent["client_msg_id"].(string); id != "" && rpcCodeOf(err) == assistantwire.CodeUndeliveredAhead {
 				if status, body, ok := h.keepUndelivered(r.Context(), m, sid, asSent, assistantwire.CodeUndeliveredAhead, ""); ok {
+					h.recordAcceptedProjectReviewInput(r.Context(), r, m.cfg.ID, sid, id, nil, indirect)
 					writeRaw(w, status, body)
 					return
 				}
@@ -512,7 +514,17 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 			}
 		}
 		if h.store != nil {
-			if err := h.store.SettleSend(context.WithoutCancel(ctx), id, outcome); err != nil {
+			commit := context.WithoutCancel(ctx)
+			recorded, err := h.settleProjectReviewOwner(commit, r, m.cfg.ID, sid, id, outcome, indirect)
+			if recorded && err != nil {
+				// The receipt outranks the review notice: left in "sending", a retry of this id would be answered
+				// "unknown" and a later drain could type the text again. Settle it alone; the notice is lost.
+				h.logf("send %s: project review owner input not queued: %v", id, err)
+			}
+			if !recorded || err != nil {
+				err = h.store.SettleSend(commit, id, outcome)
+			}
+			if err != nil {
 				h.logf("send %s: %v", id, err)
 			}
 		}

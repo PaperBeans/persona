@@ -291,6 +291,7 @@ func (s *Service) launcherRoutes() {
 			apierr.Write(w, http.StatusInternalServerError, err)
 			return
 		}
+		s.invalidateLauncherListCache("")
 		apierr.WriteJSON(w, map[string]any{"ok": true, "hidden": true})
 	})
 	// "Test": one real request through the launcher on a machine (default: the assistant's).
@@ -352,6 +353,7 @@ func (s *Service) launcherRoutes() {
 			apierr.Write(w, http.StatusInternalServerError, err)
 			return
 		}
+		s.invalidateLauncherListCache("")
 		apierr.WriteJSON(w, map[string]any{"ok": true})
 	})
 }
@@ -453,6 +455,11 @@ func (s *Service) hiddenLauncherInventory(ctx context.Context, machine, name str
 	return list, known, known && slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name })
 }
 
+func queryRefresh(r *http.Request) bool {
+	v := strings.TrimSpace(r.URL.Query().Get("refresh"))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 // machineLauncherRoutes are "New Agent"'s pickers on one machine: its launchers with the agent each starts
 // (sessionLaunchers), and a launcher's /model list (node/launcher_models.go; the node keeps a list 10 minutes,
 // ?refresh=1 asks the CLI again) with the ids the user typed for it before (models_custom.go).
@@ -470,6 +477,7 @@ func (s *Service) machineLauncherRoutes() {
 		// engine that runs only its own launchers (Paseo), its providers alone (#8140). The main chat's menu lists the
 		// computer's own launchers: the assistant runs them on its command line, whatever the engine.
 		purpose := r.URL.Query().Get("purpose")
+		refresh := queryRefresh(r)
 		host := ""
 		if purpose == "" || purpose == "agent.new" {
 			host = agentStartHost(d, r.URL.Query().Get("host"))
@@ -484,9 +492,13 @@ func (s *Service) machineLauncherRoutes() {
 				// Leave a short window for own-service checks even when the shell uses its full sync timeout.
 				ctx = context.WithValue(ctx, pickerDiscoveryDeadline{}, time.Now().Add(launcherSyncTimeout+time.Second))
 			}
-			all, list, unavailable, err = s.assistantPickerLaunchers(ctx, d, r.URL.Query().Get("refresh") == "1", s.requestLang(r))
+			all, list, unavailable, err = s.assistantPickerLaunchers(ctx, d, refresh, s.requestLang(r))
 		case "task":
-			all, err = s.pickerLaunchersOn(ctx, mid, "")
+			callCtx := ctx
+			if refresh {
+				callCtx = withLauncherRefresh(ctx)
+			}
+			all, err = s.pickerLaunchersOn(callCtx, mid, "")
 			if err == nil {
 				list, err = s.assistantLaunchersOf(ctx, mid, all)
 				if err == nil {
@@ -494,7 +506,11 @@ func (s *Service) machineLauncherRoutes() {
 				}
 			}
 		default:
-			list, err = s.pickerLaunchersOn(ctx, mid, host)
+			callCtx := ctx
+			if refresh {
+				callCtx = withLauncherRefresh(ctx)
+			}
+			list, err = s.pickerLaunchersOn(callCtx, mid, host)
 			list = slices.DeleteFunc(list, func(l ConfiguredLauncher) bool {
 				return proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource
 			})

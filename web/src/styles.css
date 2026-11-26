@@ -772,10 +772,10 @@ select:not([multiple], [size], .appearance-none) {
     -webkit-app-region: no-drag;
   }
   [data-app-shell][data-mac-bay="rail"] > main > .min-h-0 header.h-14 {
-    padding-left: 124px;
+    padding-left: 130px;
   }
   [data-app-shell][data-mac-bay="hidden"] > main > .min-h-0 header.h-14 {
-    padding-left: 174px;
+    padding-left: 180px;
   }
   [data-app-shell]:is([data-mac-bay="rail"], [data-mac-bay="hidden"]) > main > .min-h-0 > * > :not(:first-child) header.h-14 {
     padding-left: 1rem;
@@ -784,35 +784,66 @@ select:not([multiple], [size], .appearance-none) {
 
 /* ── Opt-in Liquid Glass surface style (Settings › Advanced › Appearance, #16607) ────────────────────────── */
 :root[data-surface-style="liquid-glass"] {
-  --canvas: rgba(242, 243, 247, 0.76);
-  --page: rgba(250, 250, 253, 0.86);
-  --surface: rgba(255, 255, 255, 0.80);
-  --inset: rgba(241, 242, 246, 0.72);
-  --hover: rgba(17, 17, 19, 0.055);
-  --hover-2: rgba(255, 255, 255, 0.86);
-  --line: rgba(17, 17, 19, 0.085);
-  --line-strong: rgba(17, 17, 19, 0.14);
-  --mac-rim-top: rgba(255, 255, 255, 0.88);
+  --glass-t: 0.68;
+  --glass-blur: calc(6px + var(--glass-t) * 24px);
+  --glass-sat: calc(115% + var(--glass-t) * 75%);
+  --canvas: rgba(242, 244, 248, calc(0.92 - var(--glass-t) * 0.56));
+  --page: rgba(250, 250, 253, calc(0.96 - var(--glass-t) * 0.24));
+  --surface: rgba(255, 255, 255, calc(0.94 - var(--glass-t) * 0.30));
+  --inset: rgba(241, 243, 247, calc(0.86 - var(--glass-t) * 0.36));
+  --hover: rgba(17, 17, 19, 0.065);
+  --hover-2: rgba(255, 255, 255, 0.82);
+  --line: rgba(17, 17, 19, 0.09);
+  --line-strong: rgba(17, 17, 19, 0.15);
+  --mac-rim-top: rgba(255, 255, 255, 0.90);
 }
 :root.dark[data-surface-style="liquid-glass"] {
-  --canvas: rgba(14, 15, 19, 0.72);
-  --page: rgba(20, 21, 25, 0.84);
-  --surface: rgba(28, 29, 35, 0.76);
-  --inset: rgba(14, 15, 18, 0.62);
-  --hover: rgba(255, 255, 255, 0.065);
-  --hover-2: rgba(255, 255, 255, 0.11);
-  --line: rgba(255, 255, 255, 0.095);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --mac-rim-top: rgba(255, 255, 255, 0.16);
+  --canvas: rgba(12, 16, 24, calc(0.90 - var(--glass-t) * 0.62));
+  --page: rgba(18, 20, 26, calc(0.95 - var(--glass-t) * 0.30));
+  --surface: rgba(28, 31, 40, calc(0.92 - var(--glass-t) * 0.36));
+  --inset: rgba(12, 14, 20, calc(0.82 - var(--glass-t) * 0.42));
+  --hover: rgba(255, 255, 255, 0.08);
+  --hover-2: rgba(255, 255, 255, 0.13);
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --mac-rim-top: rgba(255, 255, 255, 0.22);
+}
+:root[data-surface-style="liquid-glass"][data-desktop-glass="1"],
+:root[data-surface-style="liquid-glass"][data-desktop-glass="1"] body {
+  background: transparent;
+}
+:root[data-surface-style="liquid-glass"]:not([data-desktop-glass="1"]) body {
+  background:
+    radial-gradient(circle at 16% 18%, rgba(56, 189, 248, 0.24), transparent 45%),
+    radial-gradient(circle at 86% 14%, rgba(167, 139, 250, 0.20), transparent 46%),
+    linear-gradient(135deg, #e5eaf4 0%, #edf1f8 55%, #e2e8f4 100%);
+}
+:root.dark[data-surface-style="liquid-glass"]:not([data-desktop-glass="1"]) body {
+  background:
+    radial-gradient(circle at 16% 18%, rgba(56, 189, 248, 0.22), transparent 45%),
+    radial-gradient(circle at 86% 14%, rgba(167, 139, 250, 0.20), transparent 46%),
+    linear-gradient(135deg, #0b1120 0%, #141c2f 55%, #0e1526 100%);
+}
+:root[data-surface-style="liquid-glass"] [data-app-shell] :is([data-sidebar-root], [data-sidebar-rail], [data-sidebar-sticky]) {
+  background: transparent;
+}
+:root[data-surface-style="liquid-glass"] [data-app-shell] [data-sidebar-sticky] {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+:root[data-surface-style="liquid-glass"] .sidebar-group-heading {
+  background: transparent;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 :root[data-surface-style="liquid-glass"] [data-app-shell] {
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 :root[data-surface-style="liquid-glass"] [data-app-shell] > main,
 :root[data-surface-style="liquid-glass"] [data-app-shell] > aside {
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: inset 0 1px 0 var(--mac-rim-top);
 }
 :root[data-surface-style="liquid-glass"] [data-app-shell]:is([data-mac-bay="rail"], [data-mac-bay="hidden"]) > main {
@@ -828,6 +859,7 @@ select:not([multiple], [size], .appearance-none) {
 }
 @media (prefers-reduced-transparency: reduce) {
   :root[data-surface-style="liquid-glass"] {
+    background: #f1f1f4;
     --canvas: #f1f1f4;
     --page: #f7f7f9;
     --surface: #ffffff;
@@ -836,6 +868,7 @@ select:not([multiple], [size], .appearance-none) {
     --mac-rim-top: transparent;
   }
   :root.dark[data-surface-style="liquid-glass"] {
+    background: #0b0b0c;
     --canvas: #0b0b0c;
     --page: #111113;
     --surface: #161618;
@@ -843,9 +876,14 @@ select:not([multiple], [size], .appearance-none) {
     --line: #202024;
     --mac-rim-top: transparent;
   }
+  :root[data-surface-style="liquid-glass"] body {
+    background: var(--page);
+  }
   :root[data-surface-style="liquid-glass"] [data-app-shell],
   :root[data-surface-style="liquid-glass"] [data-app-shell] > main,
-  :root[data-surface-style="liquid-glass"] [data-app-shell] > aside {
+  :root[data-surface-style="liquid-glass"] [data-app-shell] > aside,
+  :root[data-surface-style="liquid-glass"] [data-app-shell] [data-sidebar-sticky],
+  :root[data-surface-style="liquid-glass"] .sidebar-group-heading {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }

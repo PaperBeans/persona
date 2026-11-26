@@ -3701,7 +3701,7 @@ nonisolated enum DeleteSessionText {
 /// Where an agent was opened (`Session.source`, #2526).
 nonisolated enum SessionSource: String, Sendable {
     case feishu, terminal
-    var label: String { self == .feishu ? String(localized: "Lark Group [Models e86099]") : String(localized: "Terminal") }
+    var label: String { self == .feishu ? String(localized: "Lark Group [Models e86099]") : String(localized: "In a Tab") }
 }
 
 nonisolated extension Int64 {

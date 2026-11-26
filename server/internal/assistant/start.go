@@ -1204,6 +1204,8 @@ func (s *Service) startRoutes() {
 			guestTools, in.ReportTasks = in.Guest.Tools, false // it hands nothing out
 		}
 		origin, ref := requestOrigin(r, in.Purpose)
+		// As the owner wrote it, before workspace mentions are filled in (project_review.go).
+		ownerText := in.Prompt
 		own := false // only the user's words in it, as filled in (workspace_mention.go fillWorkspaces)
 		if in.Guest == nil && in.Via != "handoff" {
 			in.Prompt, own = s.fillWorkspaces(ctx, in.Prompt) // as SendParams does for the next messages
@@ -1222,6 +1224,18 @@ func (s *Service) startRoutes() {
 		case err != nil:
 			apierr.Call(w, err)
 			return
+		}
+		if in.Guest == nil && in.Space == "" && own && in.Via == "" &&
+			assistantwire.HumanStartOf(r.Context()) && (strings.TrimSpace(ownerText) != "" || len(in.Images) > 0) {
+			ref := SessionRef{MachineID: sess.MachineID, SessionID: sess.SessionID}
+			bound, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			err := s.projectReviewOwnerInput(bound, assistantwire.ProjectReviewOwnerInput{
+				SessionRef: ref, MessageID: assistantwire.ProjectReviewMessageID("first-assistant:" + sess.SessionID), At: sess.UpdatedAt, Unscoped: true,
+			})
+			cancel()
+			if err != nil {
+				s.logf("project review: record first assistant input: %v", err)
+			}
 		}
 		if in.Purpose == "" && in.Guest == nil && in.Main {
 			// Only the main conversation keeps its start as a per-conversation pick (#6911).
@@ -1328,6 +1342,7 @@ func (s *Service) SendParams(ctx context.Context, p SendParams) (map[string]any,
 // messageParams is SendParams for a message that is the owner's own (owner), or one the manager writes in their
 // place (a channel's "answer again"), which preempts nothing.
 func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (map[string]any, error) {
+	received := time.Now()
 	if err := s.conversationAvailable(ctx, p.MachineID, p.SessionID); err != nil {
 		return nil, err
 	}
@@ -1370,8 +1385,14 @@ func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (
 		s.humanSent.voidSend(p.SessionID, id)
 	case err == nil && p.Human: // a paired device can also vouch for handoffUserTurn
 		s.humanSent.note(p.SessionID, id, sent)
+		if said {
+			s.rememberReplyInput(ctx, p.MachineID, p.SessionID, id, received)
+		}
 	case err == nil:
 		s.humanSent.noteForReply(p.SessionID, id, sent)
+		if said {
+			s.rememberReplyInput(ctx, p.MachineID, p.SessionID, id, received)
+		}
 	}
 	if err == nil && approvalTarget != "" && owner && p.Human && !p.ReplyInput && own && !marked {
 		handled, approvalErr := s.resolveAppOwnerReply(ctx, p.MachineID, p.SessionID, id, approvalTarget, text)

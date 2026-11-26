@@ -415,6 +415,17 @@ export function ownerNeeds(todos: Todo[], lookup: SessionLookup | undefined, now
     }
     const t = placed.get(td.id)!;
     if (td.quiet || !countsAsOpen(td, t)) continue;
+    // Completed tasks awaiting optional owner verification (`user_check`) and unescalated model errors on supervised
+    // tasks stay out of the urgent Needs you badge, matching the hub projection.
+    const rawStatus = todoStatus(td, lookup);
+    const userCheckUrgent =
+      rawStatus === "needs_you" ||
+      (rawStatus === "interrupted" && !td.supervision?.supervisor) ||
+      heldDelivery(td)?.unblock === "user" ||
+      waitsForOwner(td) ||
+      Boolean(openAsk(td)?.questions?.length);
+    if (!td.done_at && reviewState(td) === "user_check" && !userCheckUrgent) continue;
+    if (td.supervision?.supervisor && rawStatus === "interrupted" && !waitsForOwner(td) && heldDelivery(td)?.unblock !== "user") continue;
     const wait = waits(td, t);
     if (wait) counted.set(td.id, wait);
     else if (!td.origin && !agentOnIt(t) && !carried(td.id)) counted.set(td.id, "unattended");

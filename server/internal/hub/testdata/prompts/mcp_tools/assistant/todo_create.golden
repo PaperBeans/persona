@@ -1,6 +1,6 @@
 {
   "name": "todo_create",
-  "description": "Record agreed work or reminders now; run work via task_plan. Open title/due duplicates return the existing to-do; edit its bindings via todo_repositories_get/set. Leader chats record work in their direction and complete unassigned work via todo_complete. Bindings are atomic, using repositories_list IDs and revision. No file or progress changes.",
+  "description": "Record agreed work or reminders now; run work via task_plan. Open title/due duplicates return the existing to-do; edit its bindings via todo_repositories_get/set. Leader chats record work in their direction and complete unassigned work via todo_complete. Bindings are atomic, using repositories_list IDs and revision. No file or progress changes. A result naming an active related Agent means reuse it, not a new dispatch.",
   "input_schema": {
     "type": "object",
     "required": [

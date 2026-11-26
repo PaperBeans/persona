@@ -96,4 +96,21 @@ class AgentSpaceTest {
         assertEquals(setOf("elsewhere"), machinePinned.rows.map { it.session.sessionId }.toSet())
         assertEquals("/work/main/site", machinePinned.projectFolder?.path)
     }
+    @Test fun searchingByMachineKeepsOnlyMatchingProjectsAndRows() {
+        fun row(id: String, spaceId: String, cwd: String, title: String) =
+            AgentSession(Session(machineId = "mac", sessionId = id, state = "working", spaceId = spaceId,
+                spaceName = spaceId, cwd = cwd, title = title))
+        val rows = listOf(
+            row("match", "desk", "/work/main/site", "unique needle"),
+            row("desk-other", "desk", "/work/main/site", "other desk work"),
+            row("unrelated", "other", "/work/other/docs", "unrelated work"),
+        )
+        val mac = Machine("mac", online = true, home = "/Users/sample")
+
+        val searched = buildAgentList(rows, listOf(mac),
+            settings = AgentListSettings(grouping = AgentGrouping.MachineSpace, query = "needle"))
+
+        assertEquals(listOf("mac/desk"), searched.groups.map { it.id })
+        assertEquals(listOf("match"), searched.groups.single().visibleRows.map { it.session.sessionId })
+    }
 }

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useState } from "react";
 import { t } from "../i18n";
 import { setSidebarCollapsed, toggleMaximized } from "../lib/layout";
 import { appleG2Contour } from "../lib/mac-chrome";
@@ -13,7 +13,7 @@ export function MacBayTools({ bay, onSearch }: { bay: "rail" | "hidden"; onSearc
     <div
       data-mac-bay-tools
       className="pointer-events-auto absolute z-50 flex h-7 items-center gap-0.5 max-lg:hidden"
-      style={{ left: 76, top: 11 }}
+      style={{ left: 80, top: 11 }}
     >
       <span aria-hidden className="mr-1 h-3.5 w-px bg-line" />
       <CollapseButton
@@ -44,34 +44,33 @@ function applyMainClip(el: HTMLElement, value: string): void {
 }
 
 /** Clips `<main>` with the 44 px Apple G2 continuous-curvature path and strokes its crisp 1 px border + top specular rim. */
-export function MacMainContour({ mainRef, bay }: { mainRef: RefObject<HTMLElement | null>; bay: "rail" | "hidden" | null }) {
+export function MacMainContour({ mainEl, bay }: { mainEl: HTMLElement | null; bay: "rail" | "hidden" | null }) {
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   useLayoutEffect(() => {
-    const el = mainRef.current;
-    if (!el) return;
+    if (!mainEl) return;
     if (!bay) {
-      applyMainClip(el, "");
+      applyMainClip(mainEl, "");
       return;
     }
     const measure = () => {
-      const w = Math.round(el.clientWidth);
-      const h = Math.round(el.clientHeight);
+      const w = Math.round(mainEl.clientWidth);
+      const h = Math.round(mainEl.clientHeight);
       if (w >= 100 && h >= 100) {
         const { clip } = appleG2Contour(w, h, bay);
-        applyMainClip(el, `path("${clip}")`);
+        applyMainClip(mainEl, `path("${clip}")`);
         setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
       }
     };
     measure();
-    if (typeof ResizeObserver === "undefined") return () => applyMainClip(el, "");
+    if (typeof ResizeObserver === "undefined") return () => applyMainClip(mainEl, "");
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
+    ro.observe(mainEl);
     return () => {
       ro.disconnect();
-      applyMainClip(el, "");
+      applyMainClip(mainEl, "");
     };
-  }, [mainRef, bay]);
+  }, [mainEl, bay]);
 
   if (!bay || size.w < 100 || size.h < 100) return null;
   const { stroke, rim } = appleG2Contour(size.w, size.h, bay);

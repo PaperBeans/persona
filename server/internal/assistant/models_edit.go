@@ -272,11 +272,12 @@ func (s *Service) targetMachineLauncher(ctx context.Context, machine, name strin
 		}
 	}
 	// When the cached machine snapshot does not contain name (or machine is absent from the cache), query the live
-	// node through pickerLaunchers so newly added launchers on machine are validated against their real capabilities
-	// and hub.json overrides rather than falling back to a hub.json-only default or cross-machine provider union.
+	// node through pickerLaunchers (bypassing the positive cache and backfilling on success) so newly added launchers
+	// on machine are validated against their real capabilities and hub.json overrides rather than falling back to a
+	// hub.json-only default or cross-machine provider union.
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if live, err := s.pickerLaunchers(cctx, machine); err == nil {
+	if live, err := s.pickerLaunchers(withLauncherRefresh(cctx), machine); err == nil {
 		if l, ok := find(live); ok {
 			return l, true
 		}

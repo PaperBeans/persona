@@ -1,6 +1,7 @@
 import { pendingPlanCounts } from "../lib/pending-plan-counts";
 import { loadFeed, useFeed } from "../lib/feed";
-import { saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useShowFilter, useSortByActivity, type AgentsDisplay, type DisplayChange } from "../lib/agents-display";
+import { saveAgentsDisplay, useAgentsDisplay, useAgentsDisplayEditable, useBotmuxHidden, useBotmuxShown, useShowFilter, useSortByActivity, type AgentsDisplay, type DisplayChange } from "../lib/agents-display";
+import { useBotmuxMode } from "../lib/botmux-mode";
 import { activityOrder, useActivityDates } from "../lib/agent-sort";
 import { useSidebarEngaged } from "../lib/sidebar-engaged";
 import { setChatList, useChatList } from "../lib/agent-chat-list";
@@ -35,7 +36,7 @@ import { firstAndCurrent } from "../lib/persona-nav";
 import { recentConversations } from "../lib/conversation-origins";
 import { isBackgroundSupervisor } from "../lib/background-supervisor";
 import { setRecentMore, useRecentCount, useRecentMore } from "../lib/sidebar-recent";
-import { countsLabel, directionExternal, directionLabel, useDirectionNames, useLeaderCounts, visibleSectionCounts } from "../lib/direction-names";
+import { countsLabel, directionExternal, directionHint, directionLabel, useDirectionNames, useLeaderCounts, userCheckLabel, visibleSectionCounts } from "../lib/direction-names";
 import { resolveSidebarDirections, sidebarConversations, SidebarDirectionsSection, type SidebarDirectionEntry } from "./SidebarDirections";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
@@ -126,6 +127,7 @@ const HubNoticeLine = memo(HubNoticeLineContent);
 const NodePrompt = memo(NodePromptContent);
 const SidebarUsage = memo(SidebarUsageContent);
 const LinkTodoDialog = memo(lazyDialog(() => import("./LinkTodoDialog").then((m) => m.LinkTodoDialog)));
+const BotmuxModeChip = lazy(() => import("./BotmuxModeChip"));
 // Menus and edit controls load on intent; the ordinary sidebar keeps its first-screen budget (#12017).
 const ConversationRowMenu = lazy(() => import("./ConversationRowMenu"));
 const SidebarConversationArrange = lazy(() => import("./assistant/SidebarConversationArrange"));
@@ -426,7 +428,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   const directionRow = (d: SidebarDirectionEntry) => {
     if (d.conversation) {
       const c = d.conversation;
-      return <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={directionName(d)} hint={countsLabel(counts.get(c.session_id), t) || undefined} hintFull showState={false} workingMark={counts.get(c.session_id)?.running ?? false} keepTrailing onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />;
+      return <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={directionName(d)} hint={directionHint(counts.get(c.session_id), t) || undefined} hintFull showState={false} workingMark={counts.get(c.session_id)?.running ?? false} keepTrailing onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />;
     }
     const { machine_id: mid, session_id: sid } = d.external ?? {};
     const key = mid && sid ? `s:${mid}/${sid}` : `j:${d.id}`;
@@ -440,11 +442,11 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
       state: "idle",
       assistant: !mid || !sid,
     };
-    return <SessionRow key={d.id} s={s} k={key} reg={reg} hover={hover} active={activeKey === key} to={mid && sid ? { name: "session", mid, sid } : null} go={go} label={label} hint={countsLabel(counts.get(d.id), t) || undefined} hintFull showState={false} workingMark={counts.get(d.id)?.running ?? false} keepTrailing />;
+    return <SessionRow key={d.id} s={s} k={key} reg={reg} hover={hover} active={activeKey === key} to={mid && sid ? { name: "session", mid, sid } : null} go={go} label={label} hint={directionHint(counts.get(d.id), t) || undefined} hintFull showState={false} workingMark={counts.get(d.id)?.running ?? false} keepTrailing />;
   };
 
   const recentRow = (c: Session) => (
-    <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={conversationTitle(c)} hint={countsLabel(counts.get(c.session_id), t) || undefined} hintFull keepTrailing showState={false} onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
+    <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={conversationTitle(c)} hint={directionHint(counts.get(c.session_id), t) || undefined} hintFull keepTrailing showState={false} onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
   );
 
   return (
@@ -493,10 +495,12 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
               <>
                 {/* folded, what the leaders have going stays: the working arc while anything under one runs, and their
                     tasks waiting on you (#6626: the arc, never "在做 N" as well) */}
-                {(countsLabel(leaderTotal, t) || (personaFolded && leaderTotal.running)) && (
+                {(countsLabel(leaderTotal, t) || userCheckLabel(leaderTotal, t) || (personaFolded && leaderTotal.running)) && (
                   <span data-direction-counts data-running={leaderTotal.running || undefined} className="flex min-w-0 items-center gap-1 text-[11px] tabular-nums text-ink-3">
                     {leaderTotal.running && <StatusMark state="working" size="sm" />}
-                    <span className="truncate">{countsLabel(leaderTotal, t)}</span>
+                    {countsLabel(leaderTotal, t) && <span className="truncate font-semibold text-attention">{countsLabel(leaderTotal, t)}</span>}
+                    {countsLabel(leaderTotal, t) && userCheckLabel(leaderTotal, t) && <span aria-hidden>·</span>}
+                    {userCheckLabel(leaderTotal, t) && <span data-direction-user-check className="truncate">{userCheckLabel(leaderTotal, t)}</span>}
                   </span>
                 )}
                 <SectionAdd icon="compose" label={t("sidebar.new_chat")} to={{ name: "persona-new" }} go={go} active={activeKey === "j:new"} />
@@ -1340,8 +1344,8 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
     setKept((cur) => removeKept(cur, keys));
     hover(null);
   }, [hover]);
-  // Settings › Appearance › Show terminals in sidebar (off): the plain shells of each machine's terminal host, under its agents in "By machine"
-  const showTerminals = useSidebarTerminals() && shownGrouping === "machine";
+  // Shells belong under their computer in "By machine". The tab filter lists only the Agents it counts.
+  const showTerminals = useSidebarTerminals() && shownGrouping === "machine" && filter !== "terminal";
   const { listing: panes, refresh: refreshPanes } = usePanes(machines, showTerminals);
   const shellTrees = useMemo(() => {
     if (!showTerminals) return undefined;
@@ -1607,10 +1611,15 @@ const GroupingBar = memo(function GroupingBar({ groupings, selection, onChoose }
 /** Quick filters describe the visible inventory; an empty Lark filter is never offered. */
 const FilterBar = memo(function FilterBar({ selection, counts, onChoose }: { selection: AgentFilter; counts: FilterCounts; onChoose: (f: AgentFilter) => void }) {
   const keys = shownFilters(selection, counts);
-  if (keys.length < 2) return null;
+  const format = useBotmuxMode();
+  const shown = useBotmuxShown();
+  const editable = useAgentsDisplayEditable();
+  const botmuxMode = shown !== true ? "hide" : format;
+  const showBotmuxChip = counts.feishu > 0 || shown === false;
+  if (keys.length < 2 && !showBotmuxChip) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-0.5 px-1">
-      <div role="radiogroup" aria-label={t("sidebar.quick_filters")} className="contents">
+      {keys.length > 1 && <div role="radiogroup" aria-label={t("sidebar.quick_filters")} className="contents">
       {keys.map((k) => {
         const f = AGENT_FILTERS.find((x) => x.key === k)!;
         const on = k === selection;
@@ -1634,7 +1643,8 @@ const FilterBar = memo(function FilterBar({ selection, counts, onChoose }: { sel
           </button>
         );
       })}
-      </div>
+      </div>}
+      {showBotmuxChip && <Suspense fallback={null}><BotmuxModeChip mode={botmuxMode} disabled={!editable} /></Suspense>}
     </div>
   );
 });

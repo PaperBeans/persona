@@ -21,10 +21,10 @@ export function StoppedAgentLine({ mid, sid, onTerminal }: { mid: string; sid: s
           busy={resume.phase === "resuming"}
           onClick={() => void resumeInTerminal(mid, sid, onTerminal)}
         >
-          {t("chat-chatview.resume")}
+          {t("session-terminalpanel.resume")}
         </Button>
       </span>
-      {resume.phase === "failed" && <p role="alert" className="w-full break-words text-red">{t("chat-chatview.resume_failed", { error: resume.error })}</p>}
+      {resume.phase === "failed" && <p role="alert" className="w-full break-words text-red">{t("session-terminalpanel.resume_failed", { error: resume.error })}</p>}
     </div>
   );
 }

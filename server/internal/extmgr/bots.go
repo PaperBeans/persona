@@ -198,8 +198,9 @@ type botHub struct {
 	// bindGate serializes Feishu binding, including registration network calls, independently of mu.
 	// A channel lets a waiting client's context cancel without waiting for the current bind.
 	bindGate chan struct{}
-	// sync is the user sync: the bots' apps reading as the owner every day (larksync.go).
-	sync larkSync
+	// sync is the user sync service provided by the lark module (larksync_host.go).
+	syncMu sync.Mutex
+	sync   botport.SyncService
 }
 
 func (b *botHub) clock() time.Time {

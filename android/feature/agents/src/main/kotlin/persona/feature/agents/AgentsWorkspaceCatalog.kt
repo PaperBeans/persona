@@ -8,8 +8,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import persona.core.contracts.api.AgentCreationService
 import persona.core.contracts.api.AgentWorkspace
+import persona.core.domain.sort.inRepositoryCatalog
 
-/** One pairing's read-only Paseo catalog. A failed refresh keeps its last source state; a successful empty read clears it. */
+/** One pairing's read-only repository workspace catalog. An incomplete read keeps the last source state. */
 internal class AgentsWorkspaceCatalog {
     private val _rows = MutableStateFlow<List<AgentWorkspace>>(emptyList())
     val rows = _rows.asStateFlow()
@@ -28,17 +29,17 @@ internal class AgentsWorkspaceCatalog {
                 // The hub retains the source inventory in its database, so an offline computer can still restore it.
                 val result = service.workspaceCatalog(machine)
                 val incoming = result.workspaces
-                    .filter { it.machineId == machine && it.source == "paseo" && it.sourceId.isNotEmpty() }
-                    .distinctBy { it.sourceId }
-                if (result.complete) incoming else {
-                    val merged = old[machine].orEmpty().associateByTo(linkedMapOf()) { Triple(it.machineId, it.source, it.sourceId) }
-                    incoming.forEach { merged[Triple(it.machineId, it.source, it.sourceId)] = it }
-                    merged.values.toList()
-                }
+                    .filter { it.machineId == machine && it.inRepositoryCatalog && it.sourceId.isNotEmpty() }
+                    .distinctBy { it.source to it.sourceId }
+                val allIncomplete = result.unscopedFailure || (!result.complete && result.failedSources.isEmpty())
+                val incomplete = old[machine].orEmpty().filter { allIncomplete || it.source in result.failedSources }
+                val merged = incomplete.associateByTo(linkedMapOf()) { Triple(it.machineId, it.source, it.sourceId) }
+                incoming.forEach { merged[Triple(it.machineId, it.source, it.sourceId)] = it }
+                merged.values.toList()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { old[machine].orEmpty() }
             if (online) rows else rows.map { it.copy(online = false, available = false) }
-        } }.awaitAll().flatten().sortedWith(compareBy<AgentWorkspace> { it.machineId }.thenBy { it.sourceId })
+        } }.awaitAll().flatten().sortedWith(compareBy<AgentWorkspace> { it.machineId }.thenBy { it.source }.thenBy { it.sourceId })
         if (read == generation) _rows.value = next
     }
 }

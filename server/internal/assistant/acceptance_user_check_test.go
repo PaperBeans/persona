@@ -161,8 +161,13 @@ func TestUserCheckPassHTTPCompletesTheTask(t *testing.T) {
 	view, _ := row["view"].(map[string]any)
 	ask, _ := row["ask"].(map[string]any)
 	at, _ := ask["asked_at"].(string)
-	if view["section"] != assistantwire.TodoListSectionNeedsYou || view["reason"] != assistantwire.TodoReasonVerify || at == "" {
-		t.Fatalf("verification should be actionable under Needs you: %v", row)
+	// #15680 (#15638) keeps personal verification in the calm to-verify layer, not red Needs you; #16002's Pass-round
+	// repair is preserved through the listed ask's asked_at, which the /accept Pass below must complete.
+	if view["section"] == assistantwire.TodoListSectionNeedsYou || view["reason"] == assistantwire.TodoReasonVerify {
+		t.Fatalf("verification must stay out of Needs you under #15680: %v", row)
+	}
+	if at == "" {
+		t.Fatalf("verification keeps its Pass round asked_at for the /accept action: %v", row)
 	}
 	body := `{"asked_at":"` + at + `"}`
 	rec := httptest.NewRecorder()

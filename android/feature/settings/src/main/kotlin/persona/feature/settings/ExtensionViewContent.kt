@@ -461,6 +461,7 @@ internal fun StandaloneItem(item: ExtensionViewItem, state: ExtensionViewState, 
         // UI version 10: a card or an in-place reply block shows the same still preview as an overview card.
         "graph" -> ExtensionGraph(item, state, handle, top, compact = LocalExtensionCard.current || LocalExtensionPreviewCompact.current)
         "map" -> ExtensionMap(item, state, handle, top, compact = LocalExtensionCard.current || LocalExtensionPreviewCompact.current)
+        "scene" -> ExtensionScene(item, state, handle, top, compact = LocalExtensionCard.current || LocalExtensionPreviewCompact.current)
     }
 }
 
@@ -470,7 +471,7 @@ internal fun StandaloneItem(item: ExtensionViewItem, state: ExtensionViewState, 
  */
 internal val LocalViewHtml = staticCompositionLocalOf<(@Composable (ExtensionViewItem, Modifier) -> Unit)?> { null }
 
-/** Graphs and maps show previews in embedded cards and replies. */
+/** Graphs, maps and scenes show previews in embedded cards and replies. */
 private val LocalExtensionPreviewCompact = staticCompositionLocalOf { false }
 
 /**
@@ -605,6 +606,7 @@ private fun CardItem(item: ExtensionViewItem, state: ExtensionViewState, handle:
         // UI version 10: a still preview; only its whole surface opens the full-screen canvas.
         "graph" -> ExtensionGraph(item, state, handle, compact = true)
         "map" -> ExtensionMap(item, state, handle, compact = true)
+        "scene" -> ExtensionScene(item, state, handle, compact = true)
     }
 }
 

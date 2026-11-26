@@ -29,6 +29,6 @@
   "close": "关闭…",
   "archive_busy": "正忙：等它做完再归档",
   "close_busy": "正忙：工作、等待、跑循环或跑服务时不能关闭",
-  "archived_agents": "已归档的 Agent",
+  "archived_agents": "已归档会话",
   "worktree_source_unavailable": "请先在支持工作树的终端引擎中打开此仓库。"
 }

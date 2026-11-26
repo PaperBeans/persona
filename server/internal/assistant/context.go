@@ -378,6 +378,7 @@ func (s *Service) ProfileChanged(context.Context) {
 	s.prefs.mu.Lock()
 	s.prefs.at = time.Time{}
 	s.prefs.mu.Unlock()
+	s.invalidateLauncherListCache("")
 	// A manager.json pin may have changed the supervision interval even though the saved settings did not.
 	s.rescheduleSupervision()
 }

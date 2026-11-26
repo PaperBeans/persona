@@ -285,6 +285,8 @@ const (
 // Routes are the routes the assistant answers (net/http patterns): the hub relays the apps' requests on them as
 // http.request. The assistant registers exactly these (assistant.TestRoutesAreTheWireOnes).
 var Routes = []string{
+	"GET /api/v1/settings/web-fonts",
+	"PUT /api/v1/settings/web-fonts",
 	"POST /api/v1/skills/import",
 	"POST /api/v1/assistant/health/workouts",
 	"GET /api/v1/sessions/archived",
@@ -296,6 +298,8 @@ var Routes = []string{
 	"DELETE /api/v1/assistant/conversations/{id}",
 	"GET /api/v1/assistant/conversations/{id}/always",
 	"GET /api/v1/assistant/standing-authorizations",
+	"GET /api/v1/assistant/outbound-messages",
+	"POST /api/v1/assistant/outbound-messages",
 	"GET /api/v1/assistant/north-star",
 	"DELETE /api/v1/assistant/standing-authorizations/{id}",
 	"POST /api/v1/assistant/rule-suggestions/{id}/always",

@@ -33,7 +33,7 @@ Domains are examples; replace with your configuration. HTTP addresses should be 
 | --- | --- |
 | `listen` | HTTP default `:18660`, retained for LAN / VPN. The hub's own commands on its machine (`hub pair`, `hub admin`, `hub peer`, `hub setup`, `hub doctor`, `personad extension`) call it from loopback, where it takes their master token: on `127.0.0.1` when it listens on every address or `listen` names a host, at the address `listen` names when that is loopback or one of this machine's. An address the machine doesn't have (a DHCP lease that moved on) is never called, so the token stays on the machine |
 | `public_url` | Primary pairing URL (see the [local app QR exception](../protocol/protocol.md#temporary-pairing)), also added to candidates; keep an address old clients can reach |
-| `public.tls_listen` | Empty string disables TLS; setting it adds separate HTTPS / WSS listening |
+| `public.tls_listen` | Empty string disables TLS; setting it adds separate HTTPS / WSS listening. An IPv4 host, `0.0.0.0` included, binds IPv4 only; use an empty host (`:18662`) to listen on every address |
 | `public.cert_file` / `public.key_file` | Both empty means managed self-signed certificates; custom certificates require both file paths, preferably absolute |
 | `public.advertise` | Additional candidates; full HTTPS URLs recommended, also accepts domains, IPs, or hosts with ports. Missing scheme / port is filled from current listener. Advertising does not start listeners, open firewalls, or update DNS |
 | `public.advertise_ipv6` | Unset or `true` automatically advertises local global IPv6 candidates |

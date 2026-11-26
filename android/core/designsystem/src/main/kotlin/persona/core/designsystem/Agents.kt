@@ -272,6 +272,7 @@ fun AgentTreeHeader(
     onAction: (() -> Unit)? = null,
     actionIcon: PhIcon? = null,
     actionLabel: String? = null,
+    actionText: String? = null,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
@@ -303,7 +304,11 @@ fun AgentTreeHeader(
             }
             StateCounts(counts, waiting, lighter)
             if (onMonitor != null) { Spacer(Modifier.width(Tokens.Space.xs)); HeadingAction(PhIcons.Gauge, stringResource(R.string.designsystem_machine_monitor), onMonitor) }
-            if (onAction != null) { Spacer(Modifier.width(Tokens.Space.xs)); HeadingAction(actionIcon ?: PhIcons.CaretRight, actionLabel ?: stringResource(R.string.designsystem_details), onAction) }
+            if (onAction != null) {
+                Spacer(Modifier.width(Tokens.Space.xs))
+                if (actionText != null) JTextButton(actionText, onAction)
+                else HeadingAction(actionIcon ?: PhIcons.CaretRight, actionLabel ?: stringResource(R.string.designsystem_details), onAction)
+            }
         }
     }
 }

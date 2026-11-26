@@ -182,8 +182,9 @@ private fun ChatPage(
     val startedThreads by pageSources.startedThreads
     val writtenAt by pageSources.writtenAt
     val sendReceipts = pageSources.sendReceipts
+    val keptReceipts = remember(sendReceipts) { sendReceipts.filter { it.state == "kept" } }
     val pageSession = rememberChatPageSession(key, chrome, renderStyle, historyReadOnly, historyFooter, historySession, res,
-        sessionList, listedSessions, adoptedSessions, sendReceipts.filter { it.state == "kept" })
+        sessionList, listedSessions, adoptedSessions, keptReceipts)
     val child = pageSession.child
     val workflowAgent = pageSession.workflowAgent
     val historyOnly = pageSession.historyOnly
@@ -284,12 +285,14 @@ private fun ChatPage(
     val messages = held.outbox
     val keptSession = session.takeIf { renderStyle == ChatRenderStyle.Assistant || session?.assistant == true }
     var undeliveredEdits by remember(key) { mutableStateOf<Map<String, UndeliveredEdit>>(emptyMap()) }
-    val keptMessages = shownUndelivered(keptSession, snapshot.items, messages).mapNotNull { message ->
-        val edit = undeliveredEdits[message.id]
-        when {
-            edit == null -> message
-            edit.before == message -> edit.shown
-            else -> message
+    val keptMessages = remember(keptSession, snapshot.items, messages, undeliveredEdits) {
+        shownUndelivered(keptSession, snapshot.items, messages).mapNotNull { message ->
+            val edit = undeliveredEdits[message.id]
+            when {
+                edit == null -> message
+                edit.before == message -> edit.shown
+                else -> message
+            }
         }
     }
     // A successful action is visible while the row is unchanged; any newer authoritative value replaces it.
@@ -429,8 +432,8 @@ private fun ChatPage(
     val headerScroll = pageHeaderFold.headerScroll
     val openWork = pageHeaderFold.openWork
     val pageAwait = rememberChatPageAwait(snapshot, sendReceipts, readOnly, session, messages)
-    var timelineVersion by pageAwait.timelineVersion
     val timelineVersionState = pageAwait.timelineVersion
+    val projectionVersionState = pageAwait.projectionVersion
     val timeline = pageAwait.timeline
     val awaiting = pageAwait.awaiting
     val awaitingStatus = pageAwait.awaitingStatus
@@ -441,8 +444,9 @@ private fun ChatPage(
     val waitingOnYou = turnWaitsOnYou(session, key, requests)
     // Which items the lines were last built from: until the first build finishes, the page is still loading, not empty.
     var projectedFrom by remember { mutableStateOf<List<Item>?>(null) }
+    val projectionVersion = projectionVersionState.intValue
     val projection by produceState(persona.core.domain.lines.ChatSnapshot(emptyList(), emptyList(), persona.core.domain.lines.TaskIndex()),
-        snapshot.items, live, openWork, timelineVersion) {
+        snapshot.items, live, openWork, projectionVersion) {
         val items = snapshot.items
         value = withContext(Dispatchers.Default) {
             timeline.lines(items, live, openWork.toSet())
@@ -477,9 +481,15 @@ private fun ChatPage(
     LaunchedEffect(key, repository, renderStyle, session != null, session?.permissionMode, session?.bypassPending) {
         session?.let { modeChangeStore.watch(key, it, agentChat = renderStyle != ChatRenderStyle.Assistant) }
     }
-    val modeChangesUntil = remember(timelineVersion, projection) { modeChangesCutoff(timeline.isFrozen(), projection.lines) }
+    val modeChanges = modeChangeStore.changes
+    val modeChangesUntil = if (renderStyle == ChatRenderStyle.Assistant || modeChanges.isEmpty()) {
+        null
+    } else {
+        val frozenVersion = timelineVersionState.intValue
+        remember(frozenVersion, projection) { modeChangesCutoff(timeline.isFrozen(), projection.lines) }
+    }
     val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
-        openWork, projection, feed, taskPlans, taskCardProjection, childCards.list, modeChanges = modeChangeStore.changes,
+        openWork, projection, feed, taskPlans, taskCardProjection, childCards.list, modeChanges = modeChanges,
         modeChangesUntil = modeChangesUntil)
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
@@ -488,12 +498,15 @@ private fun ChatPage(
     val earlierEngines = rememberEarlierEngines(repository, key, windows, sourceSnapshot,
         ready = snapshot.olderBoundaryKnown && !snapshot.hasOlder && !snapshot.loading)
 
-    val searchableItems by produceState(emptyList<Item>(), liveItems, timelineVersion, search.visible) {
+    val searchableItems by produceState(emptyList<Item>(), liveItems, search.visible) {
         if (!search.visible) return@produceState
-        val projection = ChatSearchProjection()
-        liveItems.revisions.collect { revision ->
+        val searchProjection = ChatSearchProjection()
+        kotlinx.coroutines.flow.combine(
+            liveItems.revisions,
+            snapshotFlow { timelineVersionState.intValue },
+        ) { revision, version -> revision to version }.collect { (revision, version) ->
             val items = withContext(Dispatchers.Default) {
-                projection.update(revision, timeline.isFrozen()) {
+                searchProjection.update(revision, timeline.isFrozen(), version) {
                     timeline.searchItems(revision.current())
                 }
             }
@@ -565,6 +578,20 @@ private fun ChatPage(
             composer.focusRequest++
         }
     }
+    BindPendingAssistDraft(
+        key = key,
+        context = context,
+        composer = composer,
+        readOnly = readOnly,
+        canSend = canSend,
+        existingContextIds = { linkContexts.mapTo(mutableSetOf()) { it.id } },
+        onContext = { ref -> linkContexts = linkContexts + ref },
+        onPhotoLimit = {
+            val limitNotice = res.getString(R.string.chat_composer_photo_limit, imageLimits.perMessage)
+            if (feedback?.notice(limitNotice) != true) notice = limitNotice
+        },
+        limits = imageLimits,
+    )
     val pairingLoader = pageReader.pairingLoader
     val loader = pageReader.loader
     val markdownCache = pageReader.markdownCache
@@ -594,6 +621,30 @@ private fun ChatPage(
             catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
         }
     }
+    val currentSnapshotItems by rememberUpdatedState(snapshot.items)
+    val currentLive by rememberUpdatedState(live)
+    val currentOpenWork by rememberUpdatedState(openWork)
+    val currentProjectedFrom by rememberUpdatedState(projectedFrom)
+    fun freezeTimeline() {
+        if (timeline.isFrozen()) return
+        val frozenItems = currentItems()
+        if (!timeline.freezeChanged(frozenItems)) return
+        timelineVersionState.intValue++
+        if (currentProjectedFrom !== currentSnapshotItems ||
+            !timeline.matchesLastProjection(currentSnapshotItems, currentLive, currentOpenWork)
+        ) {
+            projectionVersionState.intValue++
+        }
+    }
+    fun followTimeline() {
+        if (!timeline.followChanged()) return
+        timelineVersionState.intValue++
+        if (currentProjectedFrom !== currentSnapshotItems ||
+            !timeline.matchesLastProjection(currentSnapshotItems, currentLive, currentOpenWork)
+        ) {
+            projectionVersionState.intValue++
+        }
+    }
     fun followEnd() {
         chatList.returnToLatest()
     }
@@ -606,7 +657,9 @@ private fun ChatPage(
             try {
                 val page = repository.expandFold(key, item.seq, fold.throughSeq)
                 require(page.isNotEmpty() && page.none { it.kind == "fold" })
-                timeline.unfold(item, page); timelineVersion++
+                timeline.unfold(item, page)
+                timelineVersionState.intValue++
+                projectionVersionState.intValue++
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { foldErrors = foldErrors + (item.id to res.getString(R.string.chat_screen_fold_failed)) }
             finally { folding = folding - item.id }
@@ -637,7 +690,7 @@ private fun ChatPage(
     val computer = remember(glass, readOnly, snapshot.items, machines, key.machineId) {
         if (glass && !readOnly) persona.core.domain.ComputerActivity.latest(snapshot.items, key.machineId, machines) else null
     }
-    val computerLine = computer?.let { a -> computerWorkLine(lines, a.toolUseId) }
+    val computerLine = remember(computer, lines) { computer?.let { a -> computerWorkLine(lines, a.toolUseId) } }
     val computerPill: (@Composable (Modifier) -> Unit)? = computer?.let { a -> { modifier -> ChatComputerPill(a, onOpen = computerLine?.let { line -> {
         if (!line.open) toggle(line.id)
         if (!chatList.followsEnd) scope.launch { chatList.scrollToRecord(line.contentKey) }
@@ -753,7 +806,7 @@ private fun ChatPage(
     val messageMenu = messageMenuState
     val viewerState = messageActions.viewer
     var viewer by viewerState
-    val lastUserId = snapshot.items.lastOrNull { it.role == "user" && it.kind == "text" }?.id
+    val lastUserId = remember(snapshot.items) { snapshot.items.lastOrNull { it.role == "user" && it.kind == "text" }?.id }
     val continueText = stringResource(R.string.chat_screen_continue_message)
     val rowActions = messageActions.actions
     val exhausted = messageActions.exhausted
@@ -897,14 +950,15 @@ private fun ChatPage(
             addAll(earlierKeys)
         }
     }
+    val rowAliases = remember(lines) { lines.associate { it.id to it.contentKey } }
     ChatListEffects(chatList, listKeys,
         ready = !snapshot.loading && (snapshot.items.isEmpty() || lines.isNotEmpty() ||
             (renderStyle.compactToolSummary && projectedFrom === snapshot.items && assistantPresentation.foreground.isEmpty())) &&
             (unreadEntry == null || markdownReadyFor == snapshot.items), entry = unreadEntry,
-        rowAliases = lines.associate { it.id to it.contentKey },
+        rowAliases = rowAliases,
         hasOlder = snapshot.hasOlder, loadingOlder = snapshot.loadingOlder,
-        onFreeze = { timeline.freeze(currentItems()); timelineVersion++ },
-        onFollow = { timeline.follow(); timelineVersion++ },
+        onFreeze = ::freezeTimeline,
+        onFollow = ::followTimeline,
         loadOlder = {
             try { repository.loadOlder(key) } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (feedback?.failure(e) != true) notice = operationFeedback(e).text.resolve(res) }
@@ -956,9 +1010,11 @@ private fun ChatPage(
         LocalStarredChatContext provides starredChat,
         LocalSubagentHarness provides session?.let { subagentHarness(it, res) }) {
         // Under the files pane or the terminal's cover: hidden from screen readers too.
+        val isListScrolling = remember(list) { { list.isScrollInProgress } }
         ChatLinkHost(Modifier.fillMaxSize().background(PersonaTheme.palette.background)
             .then(if (embedded) Modifier else Modifier.imePadding())
-            .then(if (chrome.covered) Modifier.clearAndSetSemantics {} else Modifier), preloadUrls, list.isScrollInProgress,
+            .then(if (chrome.covered) Modifier.clearAndSetSemantics {} else Modifier),
+            preloadUrls = preloadUrls,
             onContext = { if (readOnly || !canSend) notice = res.getString(R.string.chat_screen_read_only_context) else linkContexts = linkContexts + it },
             onEdit = { selection, instruction ->
                 if (readOnly || !canSend) notice = res.getString(R.string.chat_screen_read_only_edit)
@@ -966,7 +1022,8 @@ private fun ChatPage(
                     sender.send(key, ChatLinkContext.editMessage(selection, instruction, context.resources), selection.id)
                     followEnd()
                 }
-            }, onVisibilityChanged = { linkVisible = it; if (it) { fullText = null; statusSheet = false } }, manager = linkManager) { linkInset ->
+            }, onVisibilityChanged = { linkVisible = it; if (it) { fullText = null; statusSheet = false } },
+            manager = linkManager, scrolling = isListScrolling) { linkInset ->
             val windowHeightPx = LocalWindowInfo.current.containerSize.height
             val pageDensity = LocalDensity.current
             val footerChrome = LocalChromeInsets.current
@@ -1082,7 +1139,7 @@ private fun ChatPage(
                                         statusState = status, onDetails = { statusSheet = true },
                                         onBackgroundTasks = openBackgroundList,
                                         onOpenTodo = chrome.onOpenTodo, agentShares = chrome.agentShares, worktrees = chrome.worktrees,
-                                        onSearch = { search.open(chatList) { timeline.freeze(currentItems()); timelineVersion++ } },
+                                        onSearch = { search.open(chatList, ::freezeTimeline) },
                                         onTerminal = agentTerminal, onTerminalHelp = if (hasTerminal && terminal == null) ({ terminalHelp = true }) else null,
                                         onResumeInTerminal = resumeInTerminal,
                                         turnStart = runningSince,
@@ -1122,7 +1179,7 @@ private fun ChatPage(
                             else header()
 
                             ChatTasks(projection.tasks, lines, chatList,
-                                onFreeze = { timeline.freeze(currentItems()); timelineVersion++ },
+                                onFreeze = ::freezeTimeline,
                                 onVisibilityChanged = { taskPageVisible = it },
                                 onExpandFold = ::expand, foldErrors = foldErrors,
                                 // Glass agent chats surface the plan via the floating PlanPill above the composer (matching iOS)
@@ -1205,7 +1262,9 @@ private fun ChatPage(
                                 // Not while a "/" quick message is being picked: the list opens above the field, and with the
                                 // keyboard up the queue, the list and the status line together climbed over the top bar.
                                 if (renderStyle != ChatRenderStyle.Assistant && SlashCommand.suggestions(composer.value.text, clear = true).isEmpty())
-                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh, imageLimits = imageLimits)
+                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh,
+                                        imageLimits = imageLimits,
+                                        onRestoreContexts = { restored -> linkContexts = restored.fold(linkContexts, ::withQuote) })
                                 // A source that only lets the phone read says so where the typing would be.
                                 if (!canSend && session != null) ChatSourceNote(session)
                                 val showDecisions = {
@@ -1304,7 +1363,9 @@ private fun ChatPage(
                                 if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.mainSuggestions(composer.value.text,
                                         clear = canSend && LocalMainChatClear.current != null,
                                         permissions = SessionModes.offersPermissions(session, glass, modeSheet), resources = res).isEmpty())
-                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh, imageLimits = imageLimits)
+                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh,
+                                        imageLimits = imageLimits,
+                                        onRestoreContexts = { restored -> linkContexts = restored.fold(linkContexts, ::withQuote) })
                                 if (embedded && assistantChat) LocalMainChatGuidance.current?.invoke()
                                 val offlineHint = if (agentChat) offlineAgentPlaceholder(session, machine, heldActions != null) else null
                                 LargeWindowComposer(key, composer, session?.status == "working" && !(agentChat && machine?.online == false),
@@ -1411,7 +1472,7 @@ private fun ChatPage(
                 ) { pagePaddingValues ->
                     ChatPageReaderContent(pagePaddingValues, closeoutShown, closeoutWork, key, chatList, search, lines, list, listKeys,
                         foldsHeader, headerScroll, contentPlans, renderStyle, planSheetState, sheetPlanState, glass, agentChat,
-                        scope, timeline, timelineVersionState, currentItems, pageReader.newestVisibleItem, readThrough, snapshot,
+                        scope, timeline, timelineVersionState, ::freezeTimeline, pageReader.newestVisibleItem, readThrough, snapshot,
                         deferCount = snapshot.streamingItemIds.isNotEmpty(), placed = placed, pendingDay = pendingDay,
                         heldRows = held.rows, heldActions = heldActions.takeUnless { readOnly },
                         undeliveredRows = keptMessages, undeliveredBusy = undeliveredBusy,
@@ -1576,7 +1637,7 @@ private fun AssistantTrayDetailSheets(
 @Composable
 internal fun ChatJumpToLatest(
     timeline: ChatTimeline,
-    timelineVersion: Int,
+    timelineVersion: State<Int>,
     items: List<Item>,
     newestVisibleItem: State<Item?>,
     readThrough: Item?,
@@ -1584,9 +1645,12 @@ internal fun ChatJumpToLatest(
     agentChat: Boolean,
     onClick: () -> Unit,
 ) {
-    // A changing visible row only invalidates this button. Freeze and follow change the timeline in place.
+    // A changing visible row or timeline state only invalidates this button, never the chat page.
     val count by remember(timeline, timelineVersion, items, newestVisibleItem, readThrough, deferCount) {
-        derivedStateOf { timeline.newMessageCount(items, newestVisibleItem.value, readThrough, defer = deferCount) }
+        derivedStateOf {
+            val _ = timelineVersion.value
+            timeline.newMessageCount(items, newestVisibleItem.value, readThrough, defer = deferCount)
+        }
     }
     if (agentChat) AgentChatJumpToLatest(count, onClick)
     else JumpToLatest(count, onClick, Modifier.sizeIn(minWidth = Tokens.MinTouch.android, minHeight = Tokens.MinTouch.android))

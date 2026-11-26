@@ -481,6 +481,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		prompt += "\n\n" + prompts.RenderWorkspaceRepositories(string(rows), answerLanguage(s.hello(ctx).Locale))
 	}
 	var rules []string
+	if current, ok := s.todoNow(t.TodoID); t.MultiIssueReport || ok && current.Supervision != nil && current.Supervision.Investigation != nil {
+		rules = append(rules, prompts.RenderTaskInvestigation())
+	}
 	if strings.TrimSpace(t.Context) != "" {
 		prompt += "\n\n" + t.Context
 	}
@@ -949,6 +952,21 @@ func (s *Service) startWithCodexRouteNotice(ctx context.Context, todoID, agent s
 
 const codexRouteNoticeKey = "assistant-tasks.codex_effort_terminal"
 
+// isCodexRouteNoticeText reports whether text matches the hub's Codex terminal
+// fallback notice in any supported language.
+func isCodexRouteNoticeText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return slices.ContainsFunc(i18n.Langs, func(lang i18n.Lang) bool {
+		return trimmed == i18n.T(lang, codexRouteNoticeKey)
+	})
+}
+
+// isCodexRouteProgress reports whether p is a legacy Codex terminal fallback
+// notice previously stored in Supervision.Progress.
+func isCodexRouteProgress(p *TaskProgress) bool {
+	return p != nil && p.Kind == upReportProgress && isCodexRouteNoticeText(p.Text)
+}
+
 // readTaskNotice preserves the stored event ID and time for clients merging old feed pages.
 // Older hubs recorded this notice as an Agent's progress report.
 func readTaskNotice(item FeedItem) FeedItem {
@@ -956,8 +974,7 @@ func readTaskNotice(item FeedItem) FeedItem {
 		return item
 	}
 	var report reportBody
-	if json.Unmarshal(item.Body, &report) == nil && report.Kind == upReportProgress &&
-		slices.ContainsFunc(i18n.Langs, func(lang i18n.Lang) bool { return report.Text == i18n.T(lang, codexRouteNoticeKey) }) {
+	if json.Unmarshal(item.Body, &report) == nil && report.Kind == upReportProgress && isCodexRouteNoticeText(report.Text) {
 		item.Kind = feedNotice
 	}
 	return item

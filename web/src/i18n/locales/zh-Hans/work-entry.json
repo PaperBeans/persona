@@ -1,7 +1,7 @@
 {
   "title": "历史记录",
   "sessions": "历史记录",
-  "content": "会话或终端内容",
+  "content": "会话或标签页",
   "back": "返回历史记录",
   "terminal_unavailable": "当前无法打开终端",
   "pick_session": "打开一个会话",

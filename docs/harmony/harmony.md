@@ -2,7 +2,7 @@
 
 The [historical preview notice](prototype.html) explains that the earlier four-tab layout is retired. The current native implementation is in [harmony/](../../harmony/README.md), and this guide describes its behavior.
 
-Persona's HarmonyOS client uses ArkTS and native ArkUI on HarmonyOS 7 / API 26. It runs on straight phones, conventional foldables and wide foldables; watches are outside this client. The Hub remains the only application backend. Agents run on the user's computers, with their existing runtime and host capabilities.
+Persona's HarmonyOS client uses ArkTS and native ArkUI on HarmonyOS 7 / API 26. It runs on straight phones, conventional foldables and wide foldables; watches are outside this client. The Hub remains the only application backend. Agents run on the user's computers, with their existing runtime and host capabilities. For HarmonyOS 7 XiaoYi integration (On-Device A2A, Intents Kit, API 26 Skills, ShareKit, and the OpenClaw WebSocket bridge), see [docs/harmony/xiaoyi.md](xiaoyi.md).
 
 ## Product and information architecture
 

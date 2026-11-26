@@ -213,7 +213,8 @@ type APIItem struct {
 // AssistantItem is a contribution to assistant: skills and a part of the assistant's instructions, in the package
 // (docs/extensions/extensions.md "Assistant").
 type AssistantItem struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"` // display-only, for the contribution switch
 	// Skills are directories in the package, each a skill (SKILL.md first), put in with the assistant's.
 	Skills []string `json:"skills,omitempty"`
 	// Instructions is a markdown file in the package, added to the assistant's CLAUDE.md.
@@ -230,7 +231,8 @@ type AssistantItem struct {
 // nothing is added. Installing the extension trusts it to run that command on the assistant's machine, as its
 // skills' scripts do; a shell or an interpreter, which would run whatever Args say, is refused.
 type MCPServerItem struct {
-	ID string `json:"id"` // the server's name for the assistant
+	ID    string `json:"id"`              // the server's name for the assistant
+	Title string `json:"title,omitempty"` // display-only, for the contribution switch
 	// Command is looked up on PATH, then in ~/bin; Env names a PERSONA_ variable that, when set,
 	// replaces the lookup: a path, or "" / 0 / off / false to leave the server out on that machine.
 	Command  string   `json:"command"`
@@ -581,6 +583,9 @@ var Points = map[string]Point{
 		if !idPattern.MatchString(a.ID) {
 			return a.ID, fmt.Errorf("assistant id %q: a-z0-9_-", a.ID)
 		}
+		if utf8.RuneCountInString(a.Title) > 40 {
+			return a.ID, fmt.Errorf("assistant %s: title: at most 40 characters", a.ID)
+		}
 		if a.Gate != "" {
 			if err := checkPackagePath(a.Gate); err != nil || !strings.HasSuffix(a.Gate, ".json") {
 				return a.ID, fmt.Errorf("assistant %s: gate is a .json file inside the package", a.ID)
@@ -612,6 +617,9 @@ var Points = map[string]Point{
 		}
 		if !idPattern.MatchString(m.ID) || compat.IsMCPServer(m.ID) {
 			return m.ID, fmt.Errorf("mcp_servers id %q: a-z0-9_-, not persona or persona", m.ID)
+		}
+		if utf8.RuneCountInString(m.Title) > 40 {
+			return m.ID, fmt.Errorf("mcp_servers %s: title: at most 40 characters", m.ID)
 		}
 		if !cliName.MatchString(m.Command) || slices.Contains(reservedCommands, m.Command) || slices.Contains(mcpRunners, m.Command) {
 			return m.ID, fmt.Errorf("mcp_servers %s: command %q: a lowercase command name (letters, digits, -), not one the assistant has already nor a shell or interpreter", m.ID, m.Command)

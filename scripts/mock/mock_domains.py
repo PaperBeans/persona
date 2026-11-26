@@ -57,6 +57,7 @@ DOMAINS = [
     "desktops_mock",  # desktop client registration (hub/desktops.go), GET /mock/desktops, MOCK_DESKTOPS
     "bg_stalled_mock",  # an Agent whose background work stalled, still Working (#13744), MOCK_BG_STALLED
     "side_unread_mock",  # side sessions with unseen replies for the sidebar's Unread row (#13496), MOCK_SIDE_UNREAD
+    "herdr_repositories_mock",  # herdr repository grouping fixtures (#13505), MOCK_HERDR_REPOSITORIES
     "project_headings_mock",  # same-named projects for the native By Project headings (#13558), MOCK_PROJECT_HEADINGS
     "github_mock",  # GitHub's sign-ins and MOCK_GITHUB_INBOX's thread page (/api/v1/connectors/github/…)
     "kb_selection_mock",  # Settings › Knowledge selection (/api/v1/kb/selection), MOCK_KB_SELECTION
@@ -82,6 +83,7 @@ DOMAINS = [
     "machine_load_mock",  # moderate CPU with work queued on some cores: MOCK_LOAD_QUEUE (#12519)
     "todo_wait_reasons_mock",  # to-dos waiting for different reasons with the hub's typed `wait` (#16168), MOCK_TODO_WAIT_REASONS
     "dashboards_mock",  # Dashboards: the -pages places and pages, the `dashboards` switch (#15017), MOCK_DASHBOARDS
+    "kb_chat_inbox_mock",  # a chat's Inbox items on its knowledge page and its items' kb_chat (#15356), MOCK_KB_CHAT_INBOX
 ]
 
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")

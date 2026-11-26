@@ -126,22 +126,30 @@ fun AgentRepoHeader(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     actionsLabel: String? = null,
+    main: Boolean = false,
+    offline: Boolean = false,
+    pinned: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val kind = stringResource(R.string.designsystem_repository)
+    val primary = stringResource(R.string.designsystem_worktree_primary)
+    val offlineText = stringResource(R.string.designsystem_worktree_offline)
+    val pinnedText = stringResource(R.string.designsystem_project_pinned)
     val foldState = stringResource(if (folded) R.string.designsystem_folded else R.string.designsystem_expanded)
     val separator = stringResource(R.string.designsystem_separator)
     RepoTreeLine(
         level = 0, onClick = onToggle, onLongClick = onLongClick, onLongClickLabel = actionsLabel, modifier = modifier,
         spoken = {
             heading()
-            contentDescription = listOf(title, kind).joinToString(separator)
+            contentDescription = listOfNotNull(title, kind, primary.takeIf { main }, offlineText.takeIf { offline },
+                pinnedText.takeIf { pinned }).joinToString(separator)
             stateDescription = foldState
         },
-        mark = { JIcon(PersonaIcons.folder, null, size = Tokens.Space.l, tint = palette.ink2) },
+        mark = { JIcon(if (main) PhIcons.House else PersonaIcons.folder, null, size = Tokens.Space.l, tint = palette.ink2) },
     ) {
-        Text(title, style = PersonaTheme.type.bodyStrong, color = palette.ink, maxLines = 1,
+        Text(title, style = PersonaTheme.type.bodyStrong, color = if (offline) palette.ink2 else palette.ink, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (pinned) JIcon(PersonaIcons.pinned, null, size = TreeWorktreeMark, tint = palette.ink2)
         FoldChevron(folded)
     }
 }

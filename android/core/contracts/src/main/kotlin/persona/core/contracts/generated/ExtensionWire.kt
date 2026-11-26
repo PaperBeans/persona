@@ -585,6 +585,10 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
 data class ExtensionSkillItem(
     val id: String = "",
     /**
+     * What the extension's contributions list calls it; the id when absent.
+     */
+    val title: String? = null,
+    /**
      * The directory, relative to the package (or to the data directory with source data).
      */
     val dir: String = "",
@@ -1166,6 +1170,10 @@ data class ExtensionAPIReceipt(
 @Serializable
 data class ExtensionAssistantItem(
     val id: String = "",
+    /**
+     * What the extension's contributions list calls it; the id when absent.
+     */
+    val title: String? = null,
     val skills: List<String>? = null,
     val instructions: String? = null,
     val gate: String? = null,
@@ -1182,6 +1190,10 @@ data class ExtensionMCPServerItem(
      * The server's name for the assistant; not persona or persona.
      */
     val id: String = "",
+    /**
+     * What the extension's contributions list calls it; the id when absent.
+     */
+    val title: String? = null,
     /**
      * Looked up on PATH, then in ~/bin.
      */

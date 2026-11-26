@@ -13,7 +13,7 @@ import { markModelChanges, type ModelChange } from "./model-change";
 import { sourceKey, sourceOf, userSourceSentinel } from "./message-source";
 import { attachedAgentNotices, taskCalls } from "./task-association";
 import { addUsage, countUsage, itemUsage, markFirstUsage, type TurnUsage } from "./turn-usage";
-import type { Injected, Item, MessageSource, TokenUsage } from "./types";
+import type { Botmux, Injected, Item, MessageSource, TokenUsage } from "./types";
 
 export type Step =
   | { kind: "tool"; id: string; use: Item; result?: Item; images: Item[] }
@@ -55,6 +55,8 @@ export interface UserMessage {
   promptHidden?: boolean;
   /** Inside an opened background round: drawn as its source block, not as the raw model input supervision shows. */
   sourceInTrace?: boolean;
+  /** What botmux wrapped, as the node read it (Item.botmux): drawn as written in Lark while the chip decodes (lib/botmux.ts). */
+  botmux?: Botmux;
   /** An explicitly promoted main-chat round keeps this conversation input behind its source disclosure by default. */
   promotedRelay?: boolean;
 }
@@ -323,6 +325,7 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
       cur.user!.client_msg_id ??= it.client_msg_id || undefined;
       if (it.kind === "image") cur.user!.images.push(it);
       else {
+        if (it.botmux) cur.user!.botmux ??= it.botmux;
         const p = parseUserText(it.text ?? "");
         if (p.text) {
           cur.user!.text = cur.user!.text ? `${cur.user!.text}\n${p.text}` : p.text;

@@ -837,6 +837,49 @@ func (h agyHistory) pageWith(p agyPageParams, id string, tv *toolViewTracker) an
 	return withSpan(map[string]any{"items": nonNil(items), "has_more": start > 0}, span, false)
 }
 
+// agyEchoBase returns the current agy pane transcript sequence before a send is typed so echo matching only claims
+// USER_INPUT records written after this send.
+func (n *Node) agyEchoBase(id, pane string) echoAfter {
+	conversation := n.agyConversation(id, pane)
+	if conversation == "" {
+		return echoAfter{in: echoInTranscript}
+	}
+	mu := n.pushLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	if n.agyConversation(id, pane) != conversation {
+		return echoAfter{in: echoInTranscript}
+	}
+	dir := n.agyDataRoot()
+	root, err := agyBrain(dir, conversation)
+	if err != nil {
+		return echoAfter{in: echoInTranscript}
+	}
+	defer root.Close()
+	h, _, err := n.agyRead(root, filepath.Join(dir, conversation), conversation, nil)
+	if err != nil {
+		return echoAfter{in: echoInTranscript}
+	}
+	return echoAfter{seq: h.seq, in: echoInTranscript, history: h.token}
+}
+
+// agyEchoItems matches expected sends against a real agy pane transcript (never placeholder agyNotice items) and
+// tags matched lines with their client_msg_id and message source.
+func (n *Node) agyEchoItems(id string, items []proto.Item) []proto.Item {
+	if !n.echoes.known(id) || len(items) == 0 {
+		return items
+	}
+	if from, ok := n.echoes.waitingFrom(id, echoInTranscript); ok {
+		start := agyAfter(items, from)
+		if start < len(items) {
+			for _, r := range n.echoes.match(id, echoInTranscript, items[start:]) {
+				n.notifyEcho(r)
+			}
+		}
+	}
+	return n.echoes.tag(id, echoInTranscript, items)
+}
+
 func (n *Node) agyPaneCall(ctx context.Context, method, id, pane string, raw json.RawMessage) (any, error, bool) {
 	switch method {
 	case "session.unwatch":
@@ -872,6 +915,9 @@ func (n *Node) agyPaneCall(ctx context.Context, method, id, pane string, raw jso
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("read Antigravity transcript: %w", err), true
+		}
+		if err == nil && n.agyConversation(id, pane) == conversation {
+			h.items = n.agyEchoItems(id, h.items)
 		}
 		if method == "session.image" {
 			media, found := h.media[p.ItemID]
@@ -972,7 +1018,7 @@ func (n *Node) agyPaneSessionInfo(id, pane string) map[string]any {
 				delete(info, "usage_unknown")
 			}
 			row := proto.Session{SessionID: id, Model: u.model}
-			n.setAgyTranscriptContext(&row, u)
+			n.setAgyTranscriptContext(&row, u.agyTranscriptUsage)
 			breakdown = row.ContextBreakdown()
 		}
 		if breakdown != nil {
@@ -1047,6 +1093,7 @@ func (n *Node) pollAgyPane(w *watch) {
 		if h.token == "" || n.agyConversation(w.id, a.pane) != conversation {
 			return
 		}
+		h.items = n.agyEchoItems(w.id, h.items)
 	}
 	since := a.since
 	reset := a.history != "" && a.history != h.token || since > h.seq

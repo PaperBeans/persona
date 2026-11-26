@@ -559,7 +559,7 @@
   },
   {
     "name": "agent_send",
-    "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why when its context is needed. Any stop but the user's allows resume, an unknown one too. User or exit stops need the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. An unstarted branch starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nGive task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why when its context is needed. Any stop but the user's allows resume, an unknown one too. User or exit stops need the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. An unstarted branch starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nGive task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result. A stopped Agent resumes onto its own open to-do with `todo_id` (never with `task`).\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
     "input_schema": {
       "type": "object",
       "required": [
@@ -589,6 +589,10 @@
         "resume_why": {
           "type": "string",
           "description": "shown to the user"
+        },
+        "todo_id": {
+          "type": "string",
+          "description": "with resume: the stopped Agent's open unassigned to-do to re-link; omit for task adoption"
         },
         "dismiss_notice": {
           "type": "boolean",
@@ -1389,6 +1393,43 @@
           "type": "string"
         }
       }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "message_send",
+    "description": "Send Lark text (default bot), not via CLI/ask_user. Use a revocable channel/chat/scenario/identity grant or owner approval. Repository grants do not apply. If bot cannot send, report it without changing identity. Reuse idempotency_key on retries. Check destination after uncertain delivery. Other approvals stay.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "enum": [
+            "larkcli"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "description": "oc_ chat ID; resolve read-only."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Maximum 16000 UTF-8 bytes."
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "channel",
+        "target",
+        "text",
+        "idempotency_key"
+      ],
+      "additionalProperties": false
     },
     "defer_loading": true
   },
@@ -2489,7 +2530,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Use task_plan for code, repo research and multi-step work (one task per independent piece). Check machines_list, KB, agents_list and preferences for editable choices and one-line reasons. Main/lead plans start at once; elsewhere read-only, user_requested and preapproved kinds do; others and owner_step wait for 开始. Queued receipt means dispatched; check to-do outcome and use agent_send.\n\nExplicit machine keeps fixed (default, refuses unavailable launchers) or flexible (moves portable work on failed health checks, explain why). Omit machine for automatic placement with optional placement_constraints. Planning leads own their tasks; main owns its own and receives needs_user escalations. Main may pick a lead; agent_transfer persists ownership. Incompatible leads need supervision_policy first. Check returned supervisor and similar work. Pass todo_id for caller's unassigned to-do (Lark topic, split, failed start).\n\nStarted tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides. Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.\n\nEdits need readonly=false and write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds read-only constraint. Claude-family and companion agy use bypassPermissions; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review.\n\nResolve repository via repositories_list (repository_get when useful); an explicit repository URL or path takes precedence. Saved bindings are references only; never infer machine/cwd. Non-repository tasks need no lookup (not a mandatory dispatch preflight). Closing terminal on acceptance is owner-only.\n\nSaved workspace naming plan on existing todo: {\"backend\":{\"operation_id\":\"\u003cid\u003e\"}}. Multi-repo container: {\"container\":{\"selected_repo_ids\":[...]}} (or operation_id with todo_id). Optional host picks enabled engine; selected repos must be ready.\n\nWorkspace: \"new\" isolates checkout; {\"new\":{\"branch\":\"task/my-change\"}} names branch; {\"existing\":\"\u003ccwd or id\u003e\",\"queue\":true} picks one (queue:true or owner in after queues FIFO, else busy refuses); \"none\" creates nothing. Omitted: readonly=none; writable Git follows assistant.task_workspace_preference, busy cwd uses new. Explicit existing never switches silently. Reusing explicit new branch needs clean checkout, no live Agent/owner. Engine owns creation; never run git worktree add. Default branch: task/\u003ctodo id\u003e. Failed creation starts no Agent; workspaces stay after acceptance. Follow org read-only refusals.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "description": "Use task_plan for code, repo research and multi-step work (one task per independent piece). Check machines_list, KB, agents_list and preferences for editable choices and one-line reasons. Main/lead plans start at once; elsewhere read-only, user_requested and preapproved kinds do; others and owner_step wait for 开始. Queued receipt means dispatched; check to-do outcome and use agent_send.\n\nExplicit machine keeps fixed (default, refuses unavailable launchers) or flexible (moves portable work on failed health checks, explain why). Omit machine for automatic placement with optional placement_constraints. Planning leads own their tasks; main owns its own and receives needs_user escalations. Main may pick a lead; agent_transfer persists ownership. Incompatible leads need supervision_policy first. Check returned supervisor and similar work, reusing an active same-directory Agent before starting a new one. Pass todo_id for caller's unassigned to-do (Lark topic, split, failed start).\n\nStarted tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides. Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.\n\nEdits need readonly=false and write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds read-only constraint. Claude-family and companion agy use bypassPermissions; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review.\n\nResolve repository via repositories_list (repository_get when useful); an explicit repository URL or path takes precedence. Saved bindings are references only; never infer machine/cwd. Non-repository tasks need no lookup (not a mandatory dispatch preflight). Closing terminal on acceptance is owner-only.\n\nSaved workspace naming plan on existing todo: {\"backend\":{\"operation_id\":\"\u003cid\u003e\"}}. Multi-repo container: {\"container\":{\"selected_repo_ids\":[...]}} (or operation_id with todo_id). Optional host picks enabled engine; selected repos must be ready.\n\nWorkspace: \"new\" isolates checkout; {\"new\":{\"branch\":\"task/my-change\"}} names branch; {\"existing\":\"\u003ccwd or id\u003e\",\"queue\":true} picks one (queue:true or owner in after queues FIFO, else busy refuses); \"none\" creates nothing. Omitted: readonly=none; writable Git follows assistant.task_workspace_preference, busy cwd uses new. Explicit existing never switches silently. Reusing explicit new branch needs clean checkout, no live Agent/owner. Engine owns creation; never run git worktree add. Default branch: task/\u003ctodo id\u003e. Failed creation starts no Agent; workspaces stay after acceptance. Follow org read-only refusals.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2769,6 +2810,10 @@
                 "type": "boolean",
                 "description": "large tasks only (Claude Code 2.1.284+ multi-agent); small: false; never in prompt/title"
               },
+              "multi_issue_report": {
+                "type": "boolean",
+                "description": "Only for a report investigating several issues; requires a findings list before park or close."
+              },
               "readonly": {
                 "type": "boolean",
                 "description": "true only for read-only tasks; false for authorized edits. Adds「本任务只读：不改项目文件、不提交、不对外写入」when true"
@@ -2940,8 +2985,52 @@
             "rework",
             "needs_user",
             "parked",
-            "cancelled"
+            "cancelled",
+            "findings"
           ]
+        },
+        "findings_review": {
+          "type": "object",
+          "description": "verdict=findings: omit to read; supply the displayed version to confirm and record dispositions without moving task state.",
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "dispositions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "follow_up_todo_id": {
+                    "type": "string",
+                    "description": "Independent supervised to-do with the finding’s exact next action in done_when."
+                  },
+                  "wait_target": {
+                    "type": "string",
+                    "description": "A single finding may match the park evidence's target."
+                  },
+                  "done_evidence": {
+                    "type": "string",
+                    "description": "Evidence that this finding was resolved."
+                  },
+                  "owner_drop_decision_id": {
+                    "type": "string",
+                    "description": "Owner's manual decision, question 'Drop investigation finding \u003cid\u003e?', choice 'Drop', with reason."
+                  }
+                }
+              }
+            }
+          }
         },
         "rework_kind": {
           "type": "string",
@@ -3832,7 +3921,7 @@
   },
   {
     "name": "todo_create",
-    "description": "Record agreed work or reminders now; run work via task_plan. Open title/due duplicates return the existing to-do; edit its bindings via todo_repositories_get/set. Leader chats record work in their direction and complete unassigned work via todo_complete. Bindings are atomic, using repositories_list IDs and revision. No file or progress changes.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "description": "Record agreed work or reminders now; run work via task_plan. Open title/due duplicates return the existing to-do; edit its bindings via todo_repositories_get/set. Leader chats record work in their direction and complete unassigned work via todo_complete. Bindings are atomic, using repositories_list IDs and revision. No file or progress changes. A result naming an active related Agent means reuse it, not a new dispatch.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
     "input_schema": {
       "type": "object",
       "required": [

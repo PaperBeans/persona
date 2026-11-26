@@ -322,6 +322,12 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 		b.mu.Unlock()
 		return acceptResult{}, nil
 	}
+	if ownerCheck && !decideAsk(a) && !a.Conclusion && t.DoneAt == nil {
+		if err := s.investigationCloseError(ctx, t); err != nil {
+			b.mu.Unlock()
+			return acceptResult{}, err
+		}
+	}
 	completeDismissal := func() {}
 	if a.OutsideID != "" {
 		asked := a.AskedAt.UTC().Format(timeKeyLayout)
@@ -374,6 +380,9 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 					}
 					b.mu.Unlock()
 					s.askChanged(ctx)
+					if isInvestigationGuardError(err) {
+						return acceptResult{}, err
+					}
 					return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
 				}
 			}

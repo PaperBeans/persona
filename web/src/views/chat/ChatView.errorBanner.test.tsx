@@ -230,6 +230,7 @@ describe("the error an Agent's chat stopped on", () => {
   it("leaves the host's failure note to say why the turn stopped: one card over the composer", async () => {
     captured.session = { ...IDLE, failure_reason: "⚠️ API Error: 529 overloaded" };
     await draw();
+    await act(async () => { await import("./BotmuxMessages"); });
     expect(host.querySelector('[data-chat-dock] [data-testid="chat-failure"]')).not.toBeNull();
     expect(banner()).toBeNull();
     expect(inChat()).not.toBeNull();
@@ -238,6 +239,7 @@ describe("the error an Agent's chat stopped on", () => {
   it("stays away after the failure note's Retry: the note goes, 继续 is sent, and no banner takes its place", async () => {
     captured.session = { ...IDLE, failure_reason: "⚠️ API Error: 529 overloaded" };
     await draw();
+    await act(async () => { await import("./BotmuxMessages"); });
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="chat-failure-retry"]')!.click());
     await flush();
     expect(bodies.map((b) => b.text)).toEqual(["继续"]);

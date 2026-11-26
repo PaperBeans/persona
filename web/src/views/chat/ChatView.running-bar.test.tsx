@@ -291,3 +291,67 @@ describe("Agent chats never render duplicate competing Working… timers (#12380
     expect(host.textContent).not.toContain("处理中…");
   });
 });
+
+describe("launch handoff pending message state (#16657)", () => {
+  it("renders an accepted launch handoff bubble as sent, shows Processing only before working, and settles on client_msg_id", async () => {
+    const { getState, putLaunch } = await import("../../lib/store");
+    const launch = {
+      id: "local-16657",
+      machineId: "hub",
+      cwd: "/code",
+      launcher: "agy",
+      text: "Check the broken view",
+      attachments: [],
+      phase: "ready" as const,
+      session: { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "idle" as const, state: "idle" as const, launcher: "agy" },
+      outgoing: { text: "Check the broken view", images: [{ mime: "image/png", data: "iVBORw0KGgo=" }] },
+      uploaded: {},
+      startOpId: "start-16657",
+      startPromptOpId: "start-prompt-16657",
+      messageId: "msg-launch-16657",
+      handoffAt: Date.now(),
+    };
+    putLaunch(launch);
+    try {
+      // Before the hub reports working and before the transcript echoes the first prompt:
+      // POST /messages has already succeeded, so the handed-off bubble is "sent" (not dimmed "sending")
+      // and the inline feedback says "Processing…" rather than "Sending…".
+      captured.session = { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "idle", state: "idle", launcher: "agy" } as Session;
+      transcript.items = [];
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      const bubble = host.querySelector("[data-user-bubble]");
+      expect(bubble?.getAttribute("data-send-state")).toBe("sent");
+      expect(sendFeedback()?.getAttribute("data-message-feedback")).toBe("processing");
+
+      // Once the session is already working (even before the transcript echoes the prompt):
+      // never show a competing "Sending…" spinner underneath the live work state.
+      captured.session = { ...captured.session, status: "working", state: "working", state_since: "2026-11-13T01:00:01Z" } as Session;
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      expect(host.querySelector("[data-user-bubble]")?.getAttribute("data-send-state")).toBe("sent");
+      expect(sendFeedback()).toBeNull();
+
+      // Once the transcript item arrives with the matching client_msg_id (even without the attached image in the
+      // transcript item), the pending launch bubble settles immediately with no duplicate bubble.
+      transcript.items = [{
+        id: "u1#0",
+        seq: 1,
+        role: "user",
+        kind: "text",
+        text: "Check the broken view",
+        client_msg_id: "msg-launch-16657",
+        ts: "2026-11-13T01:00:00Z",
+      }];
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      const bubbles = host.querySelectorAll("[data-user-bubble]");
+      expect(bubbles).toHaveLength(1);
+      expect(bubbles[0]?.hasAttribute("data-send-state")).toBe(false);
+      expect(sendFeedback()).toBeNull();
+      expect(getState().launches[launch.id]?.outgoing).toBeUndefined();
+    } finally {
+      putLaunch({ ...launch, phase: "failed", outgoing: undefined, handoffAt: undefined });
+    }
+  });
+});

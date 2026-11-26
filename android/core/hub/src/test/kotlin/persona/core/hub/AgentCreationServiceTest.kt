@@ -237,11 +237,18 @@ class AgentCreationServiceTest {
                 assertTrue(error, runCatching { service.workspaceCatalog("computer") }.isFailure)
             }
             server.enqueue(MockResponse().setBody("""{"workspaces":[],"errors":[{"machine_id":"computer","source":" ","error":"Offline"}]}"""))
-            assertFalse(service.workspaceCatalog("computer").complete)
+            val unscoped = service.workspaceCatalog("computer")
+            assertFalse(unscoped.complete)
+            assertTrue(unscoped.unscopedFailure)
             for (error in listOf("""{"machine_id":"other","error":"Offline"}""", """{"machine_id":"computer","source":"orca","error":"Offline"}""")) {
                 server.enqueue(MockResponse().setBody("""{"workspaces":[],"errors":[$error]}"""))
                 assertTrue(service.workspaceCatalog("computer").complete)
             }
+            server.enqueue(MockResponse().setBody("""{"workspaces":[],"errors":[{"machine_id":"computer","source":"herdr","error":"Offline"}]}"""))
+            val herdrPartial = service.workspaceCatalog("computer")
+            assertTrue(herdrPartial.complete)
+            assertEquals(setOf("herdr"), herdrPartial.failedSources)
+            assertFalse(herdrPartial.unscopedFailure)
         }
     }
 

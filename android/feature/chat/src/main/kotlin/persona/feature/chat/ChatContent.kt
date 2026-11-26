@@ -96,6 +96,24 @@ internal fun ChatMarkdown(text: String, id: String = text,
     else ChatMarkdownBody(text, id, bodyStyle, color, viewKeys, streaming)
 }
 
+/** Public streaming Markdown renderer shared with overlays (e.g. Digital Assistant quick sheet). */
+@Composable
+fun StreamingReplyMarkdown(
+    text: String,
+    id: String = text,
+    streaming: Boolean = false,
+    bodyStyle: TextStyle = PersonaTheme.type.body,
+    color: Color = PersonaTheme.palette.ink,
+    selectable: Boolean = false,
+) = ChatMarkdown(
+    text = text,
+    id = id,
+    bodyStyle = bodyStyle,
+    color = color,
+    selectable = selectable,
+    streaming = streaming,
+)
+
 /**
  * [text] with its card blocks (docs/assistant/assistant-views.md "Card identity", the hub's fence rules): the Markdown around them as
  * Markdown, each ```persona-view as a card under its key ([viewKeys] maps its number in the text to `<item id>/<n>`;

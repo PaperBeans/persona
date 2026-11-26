@@ -40,6 +40,7 @@ function settingIcon(id:string):Resource {
     case 'phone_live_screen': return $r('sys.symbol.desktop');
     case 'phone_native_alarms': return $r('sys.symbol.bell');
     case 'phone_health_reports': return $r('sys.symbol.heart');
+    case 'phone_xiaoyi': return Symbols.persona;
     case 'phone_hubs': return $r('sys.symbol.link');
     case 'phone_pairing': return $r('sys.symbol.qrcode');
     case 'phone_settings_advanced': return $r('sys.symbol.slider_horizontal_2');

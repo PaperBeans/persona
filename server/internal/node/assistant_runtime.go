@@ -128,7 +128,7 @@ func (n *Node) assistantEnvForRuntimeLease(h *runtimeConn, cwd, session string) 
 // instructions only a runtime needs (memory, Feishu). Runtimes that advertise caps.supervision_policy receive manager-owned
 // supervision_instructions as an explicit protocol field on session.start and session.send; non-capable runtimes keep
 // the runtimePolicyDropped boundary (refusing supervision deliveries, dropping policy for owner messages).
-func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict, modeExplicit bool, selected []assistantskills.Entry, modelEffortPolicy ...string) (string, error) {
+func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict, modeExplicit bool, selected []assistantskills.Entry, previousStopAt int64, modelEffortPolicy ...string) (string, error) {
 	hasInput := strings.TrimSpace(text) != "" || len(images) != 0
 	if id != "" && hasInput && n.runtimes.compacting(id) {
 		return "", runtimeCompactingRefusal(ctx)
@@ -328,6 +328,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		}
 		return "", fmt.Errorf("%s: %w", h.label(), err)
 	}
+	n.state.clearStopAfterAssistantInput(id, previousStopAt)
 	if h.agent() == agyAgent {
 		n.clearAgyStopped(id, sentAt)
 	}

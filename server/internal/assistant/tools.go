@@ -39,7 +39,7 @@ import (
 // (docs/assistant/prompts.md).
 var toolNames = []string{"resource_status", "ask_user", "ask_user_withdraw", "notify_user", "supervision_finish", "schedule_followup", "schedule_routine", "schedule_state_set", "delete_routine", "list_followups",
 	"cancel_followup", "list_places", "save_place", "machines_list", "machine_redeploy", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_transfer", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
-	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run", "skill_import",
+	"inbox_folders", "inbox_move", "inbox_post", "message_send", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run", "skill_import",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback", "model_profile_capture", "model_probe", "launcher_import",
 	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get", pageToolName,
 	"conversations_list", "conversations_switch", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
@@ -285,6 +285,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", errors.New("inbox_post is not available to a dashboard routine; update the dashboard with page patch instead")
 		}
 		return s.toolInboxPost(ctx, machine, self, args) // inbox_post.go
+	case "message_send":
+		return s.toolMessageSend(ctx, machine, self, args)
 	case "notify_user":
 		if s.isPageRoutineConversation(ctx, machine, self) {
 			return "", errors.New("notify_user is not available to a dashboard routine; update the dashboard with page patch and Persona handles alerts")
@@ -442,6 +444,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			// user (agent_resume.go, #8099). Ignored for an agent that runs.
 			Resume    bool   `json:"resume"`
 			ResumeWhy string `json:"resume_why"`
+			// ResumeTodoID: with resume, re-link this stopped agent onto the still-open to-do it last worked on,
+			// instead of adopting it as a new task (agent_resume.go, #13192).
+			ResumeTodoID string `json:"todo_id"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", fmt.Errorf("arguments: %w", err)
@@ -473,23 +478,47 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 		}
 		resume := ""
+		// A same-session resume onto the agent's own still-open to-do (#13192): non-empty only while the link is
+		// reactivated, so a failed start can release it again (sendFailed).
+		resumeTodo := ""
 		if stoppedAgent(c) { // read-only (#4754): a message does not start it; only a resume asked for does (#8099)
 			if exitText(a.Text) {
 				return fmt.Sprintf("%s has already stopped: nothing was sent.", agentLabel(c)), nil
 			}
 			if !a.Resume {
+				if strings.TrimSpace(a.ResumeTodoID) != "" {
+					return "", errors.New("todo_id on agent_send only works with resume: send again with resume true and resume_why")
+				}
 				return "", stoppedRefusal(c)
 			}
 			resume = cleanWhy(a.ResumeWhy)
+			if a.Task != nil && strings.TrimSpace(a.ResumeTodoID) != "" {
+				return "", errors.New("task and todo_id are alternatives: task adopts the agent as a new task, todo_id resumes it onto its existing to-do")
+			}
+			if strings.TrimSpace(a.ResumeTodoID) != "" {
+				todo, err := s.resumeTodoForAgent(ctx, self, am, c, a.ResumeTodoID)
+				if err != nil {
+					return "", fmt.Errorf("%w. Nothing was started or sent", err)
+				}
+				resumeTodo = todo.ID
+			}
 			if err := s.resumeAllowed(ctx, self, am, c, resume, a.Task); err != nil {
+				if resumeTodo != "" {
+					s.rollbackResumeTodo(context.WithoutCancel(ctx), resumeTodo, am.ID, c.SessionID)
+				}
 				return "", err
 			}
+		} else if strings.TrimSpace(a.ResumeTodoID) != "" {
+			return "", errors.New("todo_id on agent_send is for a stopped agent: this one is running, send it without todo_id")
 		}
 		atts, err := cleanAttachments(a.Attachments)
 		if err == nil {
 			atts, err = s.checkAttachments(ctx, machine, self, atts)
 		}
 		if err != nil {
+			if resumeTodo != "" {
+				s.rollbackResumeTodo(context.WithoutCancel(ctx), resumeTodo, am.ID, c.SessionID)
+			}
 			return "", fmt.Errorf("%w; nothing was sent", err)
 		}
 		if a.Task != nil { // refused before the user is asked to confirm a send that would not go
@@ -508,8 +537,14 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			words = strings.Join(append([]string{a.Task.Title, a.Text}, a.Task.DoneWhen...), "\n\n")
 		}
 		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, name, words, summary, args); err != nil {
+			if resumeTodo != "" {
+				s.rollbackResumeTodo(context.WithoutCancel(ctx), resumeTodo, am.ID, c.SessionID)
+			}
 			return "", err
 		} else if !ok {
+			if resumeTodo != "" {
+				s.rollbackResumeTodo(context.WithoutCancel(ctx), resumeTodo, am.ID, c.SessionID)
+			}
 			return outboundNotDone(outcome, "The user declined on the phone: nothing was sent to that agent.", "nothing was sent to that agent"), nil
 		}
 		var task *handedTask
@@ -564,6 +599,13 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if resume != "" {
 			receipt, err := s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task)
 			if err != nil {
+				if resumeTodo != "" && startResultUnknown(err) {
+					// The node may still start the session: keep the link so its next turn stays supervised.
+					return "", err
+				}
+				if resumeTodo != "" {
+					s.rollbackResumeTodo(context.WithoutCancel(ctx), resumeTodo, am.ID, c.SessionID)
+				}
 				return "", err
 			}
 			return finish(receipt), nil

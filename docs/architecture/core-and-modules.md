@@ -815,6 +815,16 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
   `BoardChanged` may hold its own lock (`channels_handler.go`, `todos.go`): the call takes only the chat's lock and the
   board's `mu`, as `boardChanged` did, and never waits for `run`. The acceptance rounds cross as data
   (`Host.WorkbenchBoard`'s rows).
+- **The user sync is the module's** (`server/internal/modules/lark/larksync/service.go` and `service_*.go`):
+  settings and sealed-token management, OAuth v3 user authorization and refresh, sync-only bot device-code
+  registration, HTTP routes (`/api/v1/bots/feishu/sync*`), scheduler loop, and the `larksync` outbox connector
+  (`Changes`, `Items`, `Status`). Core (`server/internal/extmgr/larksync_host.go`) holds only the minimal adapter
+  implementing `botport.SyncHost` (`server/internal/botport/botport.go`) and delegates the five external call sites
+  through `botport.SyncService`, while `server/internal/larksyncwire/types.go` holds the shared settings keys, sealed
+  field lists, outbox row structs, and `larksyncwire.Store` contract implemented by `internal/db`. With the `lark`
+  module off or built out, the routes answer 404, the `larksync` connector is absent, the loop is a no-op, primary
+  registration falls back to `docs_standard`, and stored `bots.feishu.sync*` settings remain untouched
+  (`server/internal/extmgr/larksync_module_test.go`).
 - **Tests**: the turns' own tests run in the module on a fake core (`server/internal/modules/lark/service_test.go`:
   the channels' runs, their finishing, folding and dropping, and the hub's transport; `chat_fake_test.go`: the chat's
   host methods as the core answers the plain case); the assistant's tests of the turns through the channels' pipeline

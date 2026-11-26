@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -144,6 +145,8 @@ func NewBusHub(o BusOptions) *BusHub {
 	if own, err := readOwnConfig(o.ConfigFile); err == nil { // it read as the manager started (moveConfig)
 		b.own = own
 	}
+	reviewEnabled := b.own.ProjectReview.Enabled
+	reviewAppInputs := reviewEnabled && b.own.ProjectReview.AppInputs
 	host, _ := os.Hostname()
 	id := o.ID
 	if id == "" {
@@ -161,17 +164,21 @@ func NewBusHub(o BusOptions) *BusHub {
 		Uncompressed: o.Deploy == "child" || o.Deploy == DeployService && id == assistantwire.AssistantID && loopbackHub(o.Hub),
 		HelloMethod:  assistantwire.MethodHello,
 		HelloParams: func() any {
+			capabilities := []string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
+				assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentSessionIdleArchive, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
+				assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
+				assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
+				assistantwire.CapabilityTaskInput, assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHealthIntake, assistantwire.CapabilityHealthItems, assistantwire.CapabilityHealthStrength, assistantwire.CapabilityHealthTell, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
+				assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityCountsView, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
+				assistantwire.CapabilityTodoRevision, assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability, devicewire.DevelopmentPackagesCapability, devicewire.PublishedPackagesCapability}
+			if reviewEnabled {
+				capabilities = append(capabilities, assistantwire.CapabilityProjectReview)
+			}
 			b.mu.Lock()
 			svc := b.svc
 			b.mu.Unlock()
 			params := map[string]any{"id": id, "host": host, "os": runtime.GOOS, "arch": runtime.GOARCH,
-				"deploy": o.Deploy, "version": o.Version, "capabilities": withPages(withHealth(withRecording([]string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
-					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentSessionIdleArchive, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
-					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
-					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityTaskInput, assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHealthIntake, assistantwire.CapabilityHealthItems, assistantwire.CapabilityHealthStrength, assistantwire.CapabilityHealthTell, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
-					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityCountsView, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
-					assistantwire.CapabilityTodoRevision, assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability, devicewire.DevelopmentPackagesCapability, devicewire.PublishedPackagesCapability}, svc), svc), id, svc)}
+				"deploy": o.Deploy, "version": o.Version, "capabilities": withPages(withHealth(withRecording(capabilities, svc), svc), id, svc), "project_review_app_inputs": reviewAppInputs}
 			if uid := b.machineUID(); uid != "" {
 				params["machine_uid"] = uid
 			}
@@ -234,6 +241,13 @@ func (b *BusHub) Run(ctx context.Context, svc *Service) error {
 func (b *BusHub) Serve(ctx context.Context, svc *Service) error {
 	if svc.devs != nil {
 		b.opts.Devices = svc.devs
+	}
+	if config := b.own.ProjectReview; config.Enabled {
+		store, ok := b.opts.Outbox.(*db.DB)
+		if !ok {
+			return errors.New("project_review requires the manager's Postgres store")
+		}
+		svc.projectReview = &projectReview{projectReviewConfig: config, db: store, wake: make(chan struct{}, 1)}
 	}
 	b.mu.Lock()
 	b.svc, b.ctx = svc, ctx
@@ -651,6 +665,12 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		return map[string]any{"session": sess}, nil
+	case assistantwire.MethodProjectReviewOwnerInput:
+		var p assistantwire.ProjectReviewOwnerInput
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		return struct{}{}, s.projectReviewOwnerInput(ctx, p)
 	case assistantwire.MethodSendParams:
 		var p SendParams
 		if err := decode(&p); err != nil {
@@ -1097,6 +1117,12 @@ func (b *BusHub) event(ctx context.Context, ev busEvent) error {
 			return err
 		}
 		s.followedItems(p.MachineID, ev.params)
+	case assistantwire.EventInlineViewPage:
+		var p SessionItems
+		if err := decode(&p); err != nil {
+			return err
+		}
+		go s.repairInlineViewPage(context.WithoutCancel(ctx), p)
 	case assistantwire.EventSessionDelta:
 		var p SessionDelta
 		if err := decode(&p); err != nil {

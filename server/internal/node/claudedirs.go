@@ -442,7 +442,7 @@ func (n *Node) refreshClaudeDirs() {
 	runs := map[string]claudeRun{}
 	twice := map[string]bool{}
 	for pid, e := range envs {
-		launcher := e.BaseURL != "" || e.Model != "" || e.FastUnavailable || e.Vertex
+		launcher := e.BaseURL != "" || e.Model != "" || e.ConfigDir != "" || e.FastUnavailable || e.Vertex
 		if !launcher && !e.Cmd {
 			continue
 		}
@@ -486,8 +486,8 @@ func (n *Node) refreshClaudeDirs() {
 	}
 }
 
-// sessionEnv is the scanned environment of the live claude running session id (false when none was seen or it set
-// neither ANTHROPIC_BASE_URL nor ANTHROPIC_MODEL).
+// sessionEnv is the scanned environment of the live claude running session id. It returns false when the scan
+// found no launcher or fast-mode information for the session.
 func (n *Node) sessionEnv(id string) (procEnv, bool) {
 	d := n.cdirs
 	if d == nil {

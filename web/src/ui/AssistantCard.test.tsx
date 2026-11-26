@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CardConversation, CardItem, LiveCard, VIEWS_FEATURE } from "./AssistantCard";
-import { applyAction, applyBlock, applyView, resetCards, updateDraft } from "../lib/assistant-views";
+import { applyAction, applyBlock, applySnapshot, applyView, resetCards, updateDraft } from "../lib/assistant-views";
 import { getState } from "../lib/store";
 import { Markdown } from "./Markdown";
 import { UserBubble } from "../views/chat/SegmentView";
@@ -44,6 +44,23 @@ describe("正文卡片", () => {
     expect(before).toContain("回复完成并经 hub 确认后可以回答");
     applyBlock("c1", "item-1/0");
     const after = draw(text);
+    expect(after).not.toContain("回复完成并经 hub 确认后可以回答");
+    expect(enabledButtons(after)).toBeGreaterThan(enabledButtons(before));
+  });
+
+  it("unlocks an Antigravity reply when the feed acknowledges its exported item ID", () => {
+    const conversation = "agy-fixture";
+    const item = "8@0123456789abcdef0123#1";
+    const previous = "8@abcdef0123456789abcd#0/0";
+    const text = fence(decision);
+    applySnapshot(conversation, { view_blocks: [previous] });
+    applySnapshot("other-conversation", { view_blocks: [`${item}/0`] });
+    const before = draw(text, { conversation, item });
+    expect(before).toContain(`data-card-key="${item}/0"`);
+    expect(before).toContain("回复完成并经 hub 确认后可以回答");
+
+    applySnapshot(conversation, { view_blocks: [previous, `${item}/0`] });
+    const after = draw(text, { conversation, item });
     expect(after).not.toContain("回复完成并经 hub 确认后可以回答");
     expect(enabledButtons(after)).toBeGreaterThan(enabledButtons(before));
   });

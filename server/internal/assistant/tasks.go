@@ -52,6 +52,12 @@ type PlanTask struct {
 	InboxItem string `json:"inbox_item,omitempty"`
 	// InboxHandoff is the hub-owned operation validated when the plan was made.
 	InboxHandoff string `json:"inbox_handoff,omitempty"`
+	InboxOptOut  bool   `json:"inbox_opt_out,omitempty"`
+	// Soft-match provenance is set by the manager, never imported from a tool call.
+	InboxMatch      string   `json:"inbox_match,omitempty"`
+	InboxMatchText  string   `json:"inbox_match_text,omitempty"`
+	InboxCandidates []string `json:"inbox_candidates,omitempty"`
+	InboxNotice     string   `json:"inbox_notice,omitempty"`
 	// MachinePolicy defaults to fixed; only explicit flexible tasks may move to another machine.
 	MachinePolicy string `json:"machine_policy,omitempty"`
 	// PlacementConstraints restricts automatic machine selection when Machine is omitted.
@@ -98,8 +104,9 @@ type PlanTask struct {
 	RetryFromAllowAll bool   `json:"retry_from_allow_all,omitempty"`
 	// Ultracode: the agent starts with Claude Code's ultracode on (#12). A pointer so that an edit from the card can
 	// turn it off, and one from a client that does not know it keeps the assistant's choice.
-	Ultracode *bool `json:"ultracode,omitempty"`
-	Readonly  bool  `json:"readonly,omitempty"`
+	Ultracode        *bool `json:"ultracode,omitempty"`
+	Readonly         bool  `json:"readonly,omitempty"`
+	MultiIssueReport bool  `json:"multi_issue_report,omitempty"`
 	// UserRequested: the user asked for this very task in the turn that planned it (#2559); with
 	// assistant.start_requested_tasks on it starts without the card's "Start".
 	UserRequested bool `json:"user_requested,omitempty"`

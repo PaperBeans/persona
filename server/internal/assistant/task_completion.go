@@ -14,9 +14,7 @@ import (
 )
 
 var (
-	sideConversationContext = lazyre.New(`<persona-context\b[^>]*\bkind\s*=\s*["']side-conversation["'][^>]*>`)
-	sideConversationMarker  = lazyre.New(`<persona-side-conversation\s*/>`)
-	loopInspectionRequest   = lazyre.New(`^/loop(?:\s|$)`)
+	loopInspectionRequest = lazyre.New(`^/loop(?:\s|$)`)
 )
 
 // A runtime's user role also carries peer messages and automated injections. Those
@@ -46,7 +44,7 @@ func taskTurnSource(t Todo, items []proto.Item) (from, source string) {
 		if it.Role == "user" && it.Kind == proto.KindText && loopInspectionRequest.MatchString(text) {
 			return from, "inspection"
 		}
-		if sideConversationContext.MatchString(text) || sideConversationMarker.MatchString(text) {
+		if prompts.IsSideConversation(text) {
 			return from, "side-conversation"
 		}
 		if strings.Contains(text, "<cross-session-message") || strings.Contains(text, "<teammate-message") {
@@ -175,16 +173,48 @@ func taskAgentSettled(c proto.Session) bool { return taskAgentSettledReported(c,
 
 // taskAgentSettledReported is taskAgentSettled; reportedDone/reportAt: c reported its task done in this round at
 // reportAt, so background commands left behind from before that report that only wait, were moved from the foreground
-// or stalled do not hold it (backgroundLeftOver).
+// or stalled do not hold it (backgroundLeftOver). A turn that stopped on a person also settles with its background
+// work left running (#14899).
 func taskAgentSettledReported(c proto.Session, reportedDone bool, reportAt time.Time) bool {
 	if c.Status != proto.StatusDone && c.Status != proto.StatusIdle || c.State == proto.StateNeedsYou || c.PendingInteractions > 0 {
 		return false
 	}
-	if (c.State == proto.StateWorking || backgroundRunning(c)) && !backgroundLeftOver(c, reportedDone, reportAt) {
+	if (c.State == proto.StateWorking || backgroundRunning(c)) &&
+		!backgroundLeftOver(c, reportedDone, reportAt) && !stoppedOnPerson(c) {
 		return false
 	}
 	w := c.Work
 	return w == nil || w.Phase != proto.WorkBlocked || w.On != proto.WaitTransient || w.WakeAt == nil
+}
+
+// stoppedOnPerson: c's current turn, as its work state has it, ended with a closeout that says it stopped on a person.
+// Background work it left running then does not keep that turn from settling: its end is no stretch still going on but
+// a wait its task's supervisor or owner must hear of (#14899).
+func stoppedOnPerson(c proto.Session) bool {
+	w := c.Work
+	return w != nil && w.Closeout != nil && !w.TurnAt.IsZero() && sameTurn(c, w.TurnAt) && closeoutWaitsOnPerson(*w.Closeout)
+}
+
+// withPersonWait is agents with the work state the triage put for an agent's current turn when that turn, left with
+// background work, stopped on a person (stoppedOnPerson) and its listed row does not carry that state yet: the lists
+// take the triage's state only with the next publish (publishSoon), and the triage settles such a turn at once
+// (triageTurn, #14899). Every other row stays as listed.
+func (s *Service) withPersonWait(agents []proto.Session) []proto.Session {
+	for i, c := range agents {
+		if !backgroundRunning(c) || stoppedOnPerson(c) {
+			continue
+		}
+		if e, ok := s.workEntry([2]string{c.MachineID, c.SessionID}); ok && sameTurn(c, e.TurnAt) {
+			w := e.Work
+			if w.TurnAt.IsZero() {
+				w.TurnAt = e.TurnAt
+			}
+			if c.Work = &w; stoppedOnPerson(c) {
+				agents[i] = c
+			}
+		}
+	}
+	return agents
 }
 
 // backgroundLeftOver (#16418): c's turn is over and all it still has running are background commands nothing waits

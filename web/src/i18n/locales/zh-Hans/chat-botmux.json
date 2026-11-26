@@ -1,0 +1,21 @@
+{
+  "via": "从 {source} 发送",
+  "triggered": "外部触发",
+  "sent": "已发到飞书",
+  "sent_final": "飞书最终回复",
+  "bot": "{name}（机器人）",
+  "quoted": "引用了消息",
+  "topic": "话题有前情",
+  "attachments_one": "{count} 个附件",
+  "attachments_other": "{count} 个附件",
+  "voice": "语音",
+  "truncated": "已截断",
+  "original": "原文",
+  "hide_original": "收起原文",
+  "external_trigger_notice": "旧版 botmux：从 Persona 发送的消息会以外部事件触发而非主人身份，升级到 3.59.23+ 可启用完整支持。",
+  "raw": "botmux · 原文",
+  "show_raw": "显示 botmux 会话原文",
+  "hide": "隐藏 botmux 会话",
+  "hidden": "botmux · 已隐藏",
+  "decode": "显示解码后的 botmux 会话"
+}

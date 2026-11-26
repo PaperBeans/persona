@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="agents_action_archive">Archive agent</string>
-    <string name="agents_archives_title">Archived agents</string>
-    <string name="agents_archives_search">Find archived agents</string>
+    <string name="agents_action_archive">Archive session</string>
+    <string name="agents_archives_title">Archived sessions</string>
+    <string name="agents_archives_search">Find archived sessions</string>
     <string name="agents_archives_restore">Restore</string>
     <string name="agents_archives_refresh">Refresh</string>
-    <string name="agents_archives_empty">No archived agents</string>
-    <string name="agents_archives_no_matches">No matching agents</string>
+    <string name="agents_archives_empty">No archived sessions</string>
+    <string name="agents_archives_no_matches">No matching sessions</string>
     <string name="agents_archives_empty_hint">Archived Claude and Codex sessions appear here.</string>
     <string name="agents_archives_description">Archiving keeps the conversation on its computer. Restore it to return it to Agents. New activity also brings it back.</string>
-    <string name="agents_archive_confirm">Archive “%1$s”? Its transcript stays on the computer. You can find and restore it in Archived agents.</string>
-    <string name="agents_notice_archived">Agent archived</string>
+    <string name="agents_archive_confirm">Archive “%1$s”? Its transcript stays on the computer. You can find and restore it in Archived sessions.</string>
+    <string name="agents_notice_archived">Session archived</string>
     <string name="agents_notice_restored">Agent restored</string>
     <string name="agents_child_tasks">Subtasks (%1$d)</string>
     <string name="agents_child_tasks_kind">subtasks</string>
@@ -110,7 +110,7 @@
     <string name="agents_menu_collapse_all">Collapse all</string>
     <string name="agents_menu_expand_all">Expand all</string>
     <string name="agents_menu_machines">Machine monitor</string>
-    <string name="agents_menu_terminals">Terminal</string>
+    <string name="agents_menu_terminals">Tabs</string>
     <string name="agents_menu_note">Pins and mutes sync to the hub; read marks only affect this device.</string>
     <string name="agents_filter_all">All</string>
     <string name="agents_filter_needs_you">Needs you</string>
@@ -179,6 +179,7 @@
     <string name="agents_repo_main_checkout">Main worktree</string>
     <string name="agents_repo_worktree">Worktree</string>
     <string name="agents_repo_actions">Repository actions</string>
+    <string name="agents_copy_workspace_path">Copy workspace path</string>
     <!-- A computer's repositories with nothing going on, one row each (iOS "Idle Repositories", #4338 A8) -->
     <string name="agents_idle_repositories">Idle repositories</string>
     <string name="agents_card_question">Claude has a question</string>
@@ -590,7 +591,7 @@
     <string name="agents_source_feishu">Lark group</string>
     <string name="agents_source_feishu_open">Open this topic in Lark</string>
     <string name="agents_filter_feishu">Lark groups</string>
-    <string name="agents_filter_terminal">Terminal</string>
+    <string name="agents_filter_terminal">In a tab</string>
     <string name="agents_menu_sort">Sort: %1$s</string>
     <string name="agents_sort_state">Status first</string>
     <string name="agents_sort_updated">Recently updated</string>

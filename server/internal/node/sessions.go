@@ -92,7 +92,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if agent.Agent == agyAgent {
 			if conversation := n.agyConversation(id, agent.PaneID); conversation != "" {
 				agyConversations[id] = conversation
-				if agent.AgentStatus != proto.StatusOffline && agent.AgentStatus != proto.StatusInterrupted {
+				if !agyStopped(agent.AgentStatus) {
 					agyRuntimeIDs[id] = agyAgent + "-" + conversation
 				}
 			}
@@ -161,7 +161,14 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			seen[id] = true
 			continue
 		}
-		viaBotmux := host.ParsePane(a.PaneID).Kind == host.Botmux
+		pane := host.ParsePane(a.PaneID)
+		viaBotmux := pane.Kind == host.Botmux
+		if viaBotmux {
+			if h, ok := n.hosts.Get(host.Botmux).(*botmuxHost); ok {
+				s.SetBotmuxExternalTrigger(h.externalTriggerNotice())
+				h.refreshCapsAsync(pane.ID)
+			}
+		}
 		switch {
 		case viaBotmux && (a.Agent == "codex" || a.Agent == traexAgent):
 			// The thread's name, else botmux's title of the topic; messages go through botmux, neither route.
@@ -350,7 +357,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			hasRuntimeRow := false
 			if runtimeID := agyRuntimeIDs[id]; runtimeID != "" {
 				seen[runtimeID] = true
-				if runtimeRow, _, ok := n.runtimes.rowOf(runtimeID); ok {
+				if runtimeRow, ok := n.runtimes.agyPaneRuntimeRow(runtimeID); ok {
 					hasRuntimeRow = true
 					if s.Model == "" {
 						s.Model = runtimeRow.Model
@@ -370,6 +377,9 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 					if s.LastText == "" && runtimeRow.LastText != "" {
 						s.LastText = runtimeRow.LastText
 					}
+					// The companion has already applied the native rewind cut.
+					agyBackgroundTasks{running: runtimeRow.Background, ended: runtimeRow.BackgroundEnded()}.apply(&s)
+					n.agyRuntimeTaskLogs(&s, agyConversations[id])
 					if bd := runtimeRow.ContextBreakdown(); bd != nil {
 						if existing := s.ContextBreakdown(); existing == nil || existing.Source != proto.ContextBreakdownExact {
 							s.SetContextBreakdown(bd)
@@ -464,6 +474,12 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			}
 		} else if s.Agent == agyAgent {
 			n.resolveAgyContextWindow(s)
+			if s.SourceInstanceID == agyRuntimeID {
+				agyBackgroundTasks{running: s.Background, ended: s.BackgroundEnded()}.apply(s)
+				if conversation, ok := strings.CutPrefix(s.SessionID, agyAgent+"-"); ok {
+					n.agyRuntimeTaskLogs(s, conversation)
+				}
+			}
 		}
 		seen[s.SessionID] = true
 		if j != i {

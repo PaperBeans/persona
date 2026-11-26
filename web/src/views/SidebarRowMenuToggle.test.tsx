@@ -94,6 +94,21 @@ async function renderSidebar() {
   await flush();
 }
 
+it("lists just the counted Agents when In a tab is selected and shells are enabled", async () => {
+  await renderSidebar();
+  expect(link("Shell pane")).toBeDefined();
+  expect(link("Build docs")).toBeDefined();
+
+  const chip = host.querySelector<HTMLButtonElement>(`[role="radio"][aria-label="${t("lib-agent-filter.terminal")} 2"]`);
+  expect(chip).not.toBeNull();
+  await press(chip!);
+  expect(chip!.getAttribute("aria-checked")).toBe("true");
+  expect(link("Lead pane")).toBeDefined();
+  expect(link("Split pane")).toBeDefined();
+  expect(link("Build docs")).toBeUndefined();
+  expect(link("Shell pane")).toBeUndefined();
+});
+
 const personaRow = () => host.querySelector(`a[aria-description="${t("sidebar.persona_main")}"]`) ?? undefined;
 const rows: [string, () => Element | undefined][] = [
   ["the Persona main row", personaRow],

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -1336,7 +1337,8 @@ func TestCodexFallbackNoticeKeepsAgentResult(t *testing.T) {
 	}
 
 	const result = "The export now includes all rows."
-	f.sessions["box"] = []proto.Session{{MachineID: "box", SessionID: "worker", State: proto.StateUnread, LastText: result}}
+	replyAt := at.Add(20 * time.Second)
+	f.sessions["box"] = []proto.Session{{MachineID: "box", SessionID: "worker", State: proto.StateUnread, LastText: result, UpdatedAt: replyAt}}
 	assertSnapshot := func(wantReport string) {
 		t.Helper()
 		rows := s.snapshotTasks(ctx, "")
@@ -1351,21 +1353,69 @@ func TestCodexFallbackNoticeKeepsAgentResult(t *testing.T) {
 	assertSnapshot("")
 
 	// During work a real progress report is still useful. After an accepted round
-	// reaches the owner's verification, the final reply is the task's result.
+	// reaches the owner's verification, an older progress report yields to the final reply.
 	const progress = "Checking the export."
 	f.sessions["box"][0].State = proto.StateWorking
-	s.noteProgress(ctx, todo.ID, TaskProgress{Kind: upReportProgress, Text: progress, At: at})
+	s.noteProgress(ctx, todo.ID, TaskProgress{Kind: upReportProgress, Text: progress, At: at.Add(10 * time.Second)})
 	assertSnapshot(progress)
 	f.sessions["box"][0].State = proto.StateUnread
 	todo, _ = s.todoNow(todo.ID)
 	todo.Supervision.State = reviewUserCheck
-	todo.Supervision.Reviews = []TaskReview{{At: at, Verdict: reviewAccepted, UserCheck: true}}
+	todo.Supervision.Reviews = []TaskReview{{At: replyAt, Verdict: reviewAccepted, UserCheck: true}}
 	putTodo(s, todo)
 	assertSnapshot("")
 
+	// A real progress report that arrives after the session's last reply is not hidden by the stale text.
+	const laterProgress = "Rechecking the export checksums."
+	s.noteProgress(ctx, todo.ID, TaskProgress{Kind: upReportProgress, Text: laterProgress, At: replyAt.Add(15 * time.Second)})
+	assertSnapshot(laterProgress)
+
+	// Once a newer session reply lands after that progress report, the reply wins again.
+	f.sessions["box"][0].UpdatedAt = replyAt.Add(30 * time.Second)
+	assertSnapshot("")
+
 	const conclusion = "Verified the export against the source."
-	s.noteProgress(ctx, todo.ID, TaskProgress{Kind: upReportDone, Text: conclusion, At: at})
+	s.noteProgress(ctx, todo.ID, TaskProgress{Kind: upReportDone, Text: conclusion, At: replyAt.Add(40 * time.Second)})
 	assertSnapshot(conclusion)
+}
+
+func TestLegacyCodexFallbackProgressIgnored(t *testing.T) {
+	for _, lang := range i18n.Langs {
+		t.Run(string(lang), func(t *testing.T) {
+			ctx := t.Context()
+			s, f := newTaskService(t)
+			at := time.Now().UTC().Add(-time.Minute)
+			text := i18n.T(lang, "assistant-tasks.codex_effort_terminal")
+			legacy := Todo{
+				ID: "todo_legacy_progress", Origin: "owner", CreatedAt: at, UpdatedAt: at,
+				Agents: []TodoAgent{{MachineID: "box", SessionID: "worker"}},
+				Supervision: &Supervision{
+					Supervisor: "owner",
+					Progress:   &TaskProgress{Kind: upReportProgress, Text: text, At: at.Add(30 * time.Second)},
+				},
+			}
+			// Even while working with empty LastText and a newer progress timestamp, the legacy startup notice
+			// must not surface in todoNow, formatTodo, or snapshotTasks.
+			if got := formatTodo(legacy); got.Supervision != nil && got.Supervision.Progress != nil {
+				t.Fatalf("formatTodo kept legacy startup progress: %+v", got.Supervision.Progress)
+			}
+			putTodo(s, legacy)
+			f.sessions["box"] = []proto.Session{{MachineID: "box", SessionID: "worker", State: proto.StateWorking, UpdatedAt: at}}
+			if got, ok := s.todoNow(legacy.ID); !ok || got.Supervision == nil || got.Supervision.Progress != nil {
+				t.Fatalf("todoNow kept legacy startup progress: ok=%v sup=%+v", ok, got.Supervision)
+			}
+			rows := s.snapshotTasks(ctx, "")
+			if len(rows) != 1 || rows[0].Reported != nil {
+				t.Fatalf("snapshotTasks surfaced legacy startup progress: %+v", rows)
+			}
+			if s.noteProgress(ctx, legacy.ID, TaskProgress{Kind: upReportProgress, Text: text, At: at.Add(40 * time.Second)}) {
+				t.Fatal("noteProgress accepted legacy startup notice")
+			}
+			if got, _ := s.todoNow(legacy.ID); got.Supervision.Progress != nil {
+				t.Fatalf("noteProgress stored legacy startup notice: %+v", got.Supervision.Progress)
+			}
+		})
+	}
 }
 
 func TestLegacyCodexFallbackReportReadsAsNotice(t *testing.T) {
@@ -1404,6 +1454,38 @@ func TestLegacyCodexFallbackReportReadsAsNotice(t *testing.T) {
 			timeline, err := s.todoFeed(ctx, todo.ID, false)
 			if err != nil || len(timeline) != 1 || timeline[0].ID != done.ID {
 				t.Errorf("task timeline %+v, err %v", timeline, err)
+			}
+		})
+	}
+}
+
+type legacyFeedByRefStore struct {
+	*memStore
+	rows []db.FeedRow
+}
+
+func (f *legacyFeedByRefStore) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
+	return slices.Clone(f.rows), nil
+}
+
+func TestLegacyCodexFallbackTimelineStoreFiltersNotice(t *testing.T) {
+	for _, lang := range i18n.Langs {
+		t.Run(string(lang), func(t *testing.T) {
+			ctx := t.Context()
+			at := time.Now().UTC().Add(-time.Minute)
+			legacyBody, _ := json.Marshal(reportBody{Kind: upReportProgress, Text: i18n.T(lang, "assistant-tasks.codex_effort_terminal")})
+			doneBody, _ := json.Marshal(reportBody{Kind: upReportDone, Text: "Export verified."})
+			st := &legacyFeedByRefStore{
+				memStore: &memStore{},
+				rows: []db.FeedRow{
+					{ID: "done", Conversation: "owner", At: at.Add(time.Second), Kind: feedReport, Ref: "todo_effort", Body: doneBody},
+					{ID: "legacy", Conversation: "owner", At: at, Kind: feedReport, Body: legacyBody},
+				},
+			}
+			s, _ := newTaskServiceOn(t, st)
+			timeline, err := s.todoFeed(ctx, "todo_effort", false)
+			if err != nil || len(timeline) != 1 || timeline[0].ID != "done" {
+				t.Fatalf("store-backed task timeline %+v, err %v", timeline, err)
 			}
 		})
 	}

@@ -3,6 +3,60 @@
 Persona in the "Persona" tab is Claude Code running **headlessly** in `~/.persona/assistant` on the hub machine (`claude -p` + stream-json; see
 `docs/integrations/claude-integration.md` ("Headless assistant")). A Codex launcher uses `codex app-server` instead ("Codex" below); a launcher for an assistant-capable Agent runtime (DSH) runs in that runtime ("Agent runtime (DSH)" below). This doc covers what it can do, how it works, and the trade-offs behind its design; what it lacked before the 2026-10-26 capability upgrade is in `docs/archive/assistant/assistant-records.md`.
 
+## Scoped outward messages (#9762)
+
+Web Settings > Persona > **Outward messages** selects **Bot** or **Me** for Lark
+via lark-cli. The default remains Bot; automatic sending remains off. Other
+connectors and direct CLI writes retain their existing behavior and approval
+rules. The sender selector does not grant account permissions.
+
+To enable automatic sending:
+
+1. Choose a sender and approve its change on the permission card, if changing it.
+2. Enter an exact Lark group/chat ID, or explicitly select every chat in this
+   channel. Choose **Suggested Inbox replies** or **Assistant-authored messages**.
+3. Request approval. The permission card names channel, target, scenario, sender,
+   audit, and revocation. Nothing takes effect until the owner's own approval.
+4. The settings page shows that the request is waiting for approval. The card
+   stays available for 24 hours, across a page reload or a hub restart. Once
+   approved, the page refreshes **Standing authorizations**. Revoke it there at any
+   time. Revocation stops future sends, not an already started transport call.
+
+The same configuration is available through `persona_settings`:
+`assistant.outbound_identity` is `"bot"` or `"user"`. A new
+`assistant.standing_authorizations` entry may instead contain
+`messages: {channel: "larkcli", target: "oc_example", scenario: "inbox_reply",
+identity: "bot"}`, with `actions: ["send"]`, `reversible: true`, empty conditions,
+and no computer/directory. An empty target explicitly authorizes all chats in
+that one channel. Read the current registry revision and preserve unrelated
+entries. Existing IDs are immutable; a changed scope needs a new approval.
+Computer/directory grants never authorize this message path.
+
+The assistant uses `message_send {channel, target, text, idempotency_key}` rather
+than asking `ask_user` and then invoking a CLI. Unmatched sends get a normal
+permission card; matched sends use their approved identity. Inbox automation
+only consumes a persisted, current, plain-text reply suggestion: never handbacks,
+handed-off conversations' suggestions, document changes, tasks, or conclusions.
+Changing the default sender cannot broaden a grant bound to another identity.
+A pending send card is also bound to its displayed sender, recipient, and text.
+Changing the default before that card's send begins refuses the old approval.
+
+Before a controlled send, the manager persists its complete attempted text,
+recipient, identity, scenario, and approval/grant ID in the existing Sent ledger.
+An audit failure prevents sending. Outcomes are `pending`, `sent`,
+`failed_or_unknown`, or `already_delivered`; pending is not proof of delivery.
+An extension manager's already-delivered send ID means this attempt sent nothing,
+not that its attempted text was delivered. The ledger and error distinguish that
+case from a fresh send. A durable send claim
+survives manager reconstruction. A failed/uncertain automatic attempt is not
+silently retried, even if an Inbox reply to the same incoming message is reworded. Inspect the
+ledger and original destination before a deliberate manual retry.
+
+Sender overrides require the extension manager's `inbox.message_policy`
+preflight. An older manager cannot silently ignore the selected identity.
+A bot-not-in-chat error asks the owner to add the bot; no failure changes to
+the user's account. This feature never auto-approves tool-permission cards.
+
 ## Claude assistant profile compatibility (#3345)
 
 Claude CLI assistant starts explicitly select a config directory per conversation, rather than inheriting the node service's `CLAUDE_CONFIG_DIR`. Terminal Agents, Codex and external runtimes retain their existing launch rules. A scoped node stays in its own profile.

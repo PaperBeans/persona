@@ -116,7 +116,13 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   // read again after a reconnect (#4954's rule, as the scheduled tasks are): always when the read failed while the hub
   // was away, else when the hub could not resume, as the pushes missed meanwhile are not replayed
   const failed = error !== "";
-  useEffect(() => onHubEvent("hello", (msg) => (failed || !isResumed(msg)) && void load()), [load, failed]);
+  useEffect(() => {
+    const offHello = onHubEvent("hello", (msg) => (failed || !isResumed(msg)) && void load());
+    const offDirs = onHubEvent("directions", () => document.visibilityState === "visible" && void load());
+    const onVis = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { offHello(); offDirs(); document.removeEventListener("visibilitychange", onVis); };
+  }, [load, failed]);
   const [retrying, setRetrying] = useState(false);
   const [retried, setRetried] = useState(0);
   const retry = () => {

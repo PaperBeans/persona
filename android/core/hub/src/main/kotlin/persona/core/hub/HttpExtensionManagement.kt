@@ -490,7 +490,7 @@ class HttpExtensionManagement internal constructor(
          * date / time / multichoice / multiline fields, title styles, named colours and more icons (#5464); 7 a section's
          * key, which only the native stream reads; 8 the columns layout of a dashboard page and a section's span, icon,
          * link and rows side by side (#9158); 9 gauge rings on grid and carousel tiles (#9337); 10 native graph canvases
-         * (#9727); 12 adds interactive maps. The client declares scene unsupported so it receives the fallback.
+         * (#9727); 11 native scenes (#12544); 12 interactive maps. The client draws scenes and maps directly.
          */
         const val UI_VERSION = 12
         /** Exceeds the hub's 20 s uiTimeout (server/internal/extmgr/extension_ui.go) and matches iOS APIClient / ExtensionUIStreamController (30 s). */
@@ -506,7 +506,7 @@ class HttpExtensionManagement internal constructor(
 
         /** This phone's time zone (IANA) and the app's language with the phone's region (a BCP 47 tag), the platform and the UI version it draws. */
         fun deviceContext() = ExtensionUiContext(tz = java.util.TimeZone.getDefault().id, locale = persona.core.contracts.ClientLanguage.localeTag(),
-            platform = "android", uiVersion = UI_VERSION, unsupported = listOf("scene"))
+            platform = "android", uiVersion = UI_VERSION)
 
         private val json = "application/json; charset=utf-8".toMediaType()
         private val ExtensionId = Regex("[A-Za-z0-9_-]{1,64}")

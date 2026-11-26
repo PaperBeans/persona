@@ -2588,6 +2588,17 @@ nonisolated struct APIClient: Sendable {
         struct Body: Decodable { var usage: UsageHours }
         return try await currentAssistantSettings().get("/api/v1/usage/hours", query: ["days": String(days)], as: Body.self).usage
     }
+    /// Today's, the last 3 and the last 7 days' tokens by project across computers (`GET /api/v1/usage/projects`, #16530,
+    /// docs/server/machines.md "Token usage by project"). 404 from a hub before it.
+    func usageProjects() async throws -> UsageProjects {
+        struct Body: Decodable { var usage: UsageProjects }
+        return try await currentAssistantSettings().get("/api/v1/usage/projects", as: Body.self).usage
+    }
+    /// One project's breakdown for the same ranges (`GET /api/v1/usage/projects/detail`).
+    func usageProjectDetail(_ key: String) async throws -> UsageProjectDetail {
+        struct Body: Decodable { var usage: UsageProjectDetail }
+        return try await currentAssistantSettings().get("/api/v1/usage/projects/detail", query: ["key": key], as: Body.self).usage
+    }
     /// Whether this device has the Home Screen widgets, alone: while its app is not open, the hub wakes it to write them
     /// again when the agents' counts change (#5721). An older hub keeps the field and does nothing with it.
     func setHasWidgets(device: String, _ has: Bool) async throws {

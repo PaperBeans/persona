@@ -105,6 +105,12 @@ func (s *Service) briefRoutes() {
 			apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return
 		}
+		if isInvestigationGuardError(err) {
+			// Unconfirmed or open investigation findings block closing the task, not Agent delivery.
+			// Use 422 so older apps keep the button retryable (unlike 409) and do not show a 502 delivery failure.
+			writeTypedNothing(w, http.StatusUnprocessableEntity, "investigation_findings_pending", err)
+			return
+		}
 		if delivered := writeDelivered(err); err != nil && delivered != "none" {
 			// The words may be with the Agent already, or are (todo_write_outcome.go): a failure every app shows, never
 			// "nothing was changed", so the owner looks before taking it again. The button works again (the round still

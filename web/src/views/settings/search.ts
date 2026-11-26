@@ -73,10 +73,10 @@ const SHARED_INDEX: SearchGroup[] = [
   { tab: "general", group: t("settings.source_code"), hint: t("settings.about_persona"), anchor: "about-persona" },
   // Advanced › Appearance (#13398): the non-default looks. General keeps the default appearance and text size.
   { tab: "advanced", group: t("settings.appearance"), anchor: "appearance" },
-  { tab: "advanced", group: t("ui-look.surface_style"), hint: words(t("ui-look.surface_default"), t("ui-look.surface_liquid_glass")), anchor: "surface-style" },
+  { tab: "advanced", group: t("ui-look.surface_style"), hint: words(t("ui-look.surface_default"), t("ui-look.surface_liquid_glass"), t("ui-look.glass_translucency")), anchor: "surface-style" },
   { tab: "advanced", group: t("ui-look.accent"), anchor: "theme-color" },
   { tab: "advanced", group: t("ui-extensionthemepicker.label"), anchor: "extension-theme" },
-  { tab: "advanced", group: t("ui-look.font"), hint: words(t("ui-look.font_sans"), t("ui-look.font_mono")), anchor: "font" },
+  { tab: "advanced", group: t("ui-look.font"), hint: words(t("ui-look.font_sans"), t("ui-look.font_mono"), t("ui-look.font_browser")), anchor: "font" },
   { tab: "advanced", group: t("ui-look.sidebar_icons"), hint: words(t("ui-look.sidebar_icons_monochrome"), t("ui-look.sidebar_icons_colored")), anchor: "sidebar-icons" },
   // the assistant's profile
   { tab: "persona", group: t("settings-assistantsettings.routines"), hint: t("settings-assistantsettings.proactive_title"), anchor: "routines" },

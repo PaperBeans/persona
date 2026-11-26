@@ -102,6 +102,12 @@ func (s *Service) todoDecisionRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		if fullRole(r) && row.Source == db.DecisionManual &&
+			strings.HasPrefix(row.Question, findingDropQuestionPrefix) && row.Choice == "Drop" {
+			// A model can relay an answer and write a manual decision, but this
+			// provenance is minted only for a direct owner-app decision.
+			row.SourceMessage = findingOwnerDecisionPrefix + row.ID
+		}
 		if row.Question == "" || row.Choice == "" {
 			apierr.Write(w, http.StatusBadRequest, errors.New("question and choice cannot be empty"))
 			return

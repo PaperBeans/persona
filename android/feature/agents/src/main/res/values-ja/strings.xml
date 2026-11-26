@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="agents_action_archive">エージェントをアーカイブ</string>
-    <string name="agents_archives_title">アーカイブ済みエージェント</string>
-    <string name="agents_archives_search">アーカイブ済みエージェントを検索</string>
+    <string name="agents_action_archive">セッションをアーカイブ</string>
+    <string name="agents_archives_title">アーカイブ済みセッション</string>
+    <string name="agents_archives_search">アーカイブ済みセッションを検索</string>
     <string name="agents_archives_restore">復元</string>
     <string name="agents_archives_refresh">更新</string>
-    <string name="agents_archives_empty">アーカイブはありません</string>
-    <string name="agents_archives_no_matches">一致するエージェントはありません</string>
+    <string name="agents_archives_empty">アーカイブ済みのセッションはありません</string>
+    <string name="agents_archives_no_matches">一致するセッションはありません</string>
     <string name="agents_archives_empty_hint">アーカイブした Claude と Codex のセッションがここに表示されます。</string>
     <string name="agents_archives_description">アーカイブしてもコンピューター上の会話は残ります。復元すると Agents に戻ります。新しい活動がある場合も自動で戻ります。</string>
-    <string name="agents_archive_confirm">「%1$s」をアーカイブしますか？コンピューター上の記録は残り、アーカイブ一覧から復元できます。</string>
-    <string name="agents_notice_archived">アーカイブしました</string>
+    <string name="agents_archive_confirm">「%1$s」をアーカイブしますか？会話の記録はコンピューターに残ります。「アーカイブ済みセッション」から復元できます。</string>
+    <string name="agents_notice_archived">セッションをアーカイブしました</string>
     <string name="agents_notice_restored">復元しました</string>
     <string name="agents_child_tasks">サブタスク（%1$d）</string>
     <string name="agents_child_tasks_kind">サブタスク</string>
@@ -95,7 +95,7 @@
     <string name="agents_menu_collapse_all">すべて折りたたむ</string>
     <string name="agents_menu_expand_all">すべて展開</string>
     <string name="agents_menu_machines">マシン監視</string>
-    <string name="agents_menu_terminals">ターミナル</string>
+    <string name="agents_menu_terminals">タブ</string>
     <string name="agents_menu_note">ピン留めとミュートはハブに同期されます。既読はこのデバイスの一覧だけに反映されます。</string>
     <string name="agents_filter_all">すべて</string>
     <string name="agents_filter_needs_you">要対応</string>
@@ -163,6 +163,7 @@
     <string name="agents_repo_main_checkout">メインのワークツリー</string>
     <string name="agents_repo_worktree">ワークツリー</string>
     <string name="agents_repo_actions">リポジトリの操作</string>
+    <string name="agents_copy_workspace_path">ワークスペースのパスをコピー</string>
     <string name="agents_idle_repositories">アイドル中のリポジトリ</string>
     <string name="agents_card_question">Claudeから質問があります</string>
     <string name="agents_card_question_by">%1$sから質問があります</string>
@@ -567,7 +568,7 @@
     <string name="agents_source_feishu">Lark グループ</string>
     <string name="agents_source_feishu_open">このトピックを Lark で開く</string>
     <string name="agents_filter_feishu">Lark グループ</string>
-    <string name="agents_filter_terminal">ターミナル</string>
+    <string name="agents_filter_terminal">タブで実行中</string>
     <string name="agents_menu_sort">並び順：%1$s</string>
     <string name="agents_sort_state">状態優先</string>
     <string name="agents_sort_updated">最近の更新</string>

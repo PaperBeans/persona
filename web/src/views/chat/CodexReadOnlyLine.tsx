@@ -28,7 +28,7 @@ function StoppedTerminalControls({ mid, sid, onTerminal }: StoppedCodexTerminal)
         busy={resume.phase === "resuming"}
         onClick={() => void resumeInTerminal(mid, sid, onTerminal)}
       >
-        {t("chat-chatview.resume")}
+        {t("session-terminalpanel.resume")}
       </Button>
     </>
   );
@@ -37,7 +37,7 @@ function StoppedTerminalControls({ mid, sid, onTerminal }: StoppedCodexTerminal)
 function StoppedResumeError({ mid, sid }: Pick<StoppedCodexTerminal, "mid" | "sid">) {
   const resume = useResume(mid, sid);
   if (resume.phase !== "failed") return null;
-  return <p role="alert" className="w-full break-words text-red">{t("chat-chatview.resume_failed", { error: resume.error })}</p>;
+  return <p role="alert" className="w-full break-words text-red">{t("session-terminalpanel.resume_failed", { error: resume.error })}</p>;
 }
 
 export function CodexReadOnlyLine({

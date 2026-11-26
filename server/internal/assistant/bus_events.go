@@ -11,8 +11,8 @@ import (
 
 // The hub's events wait in one line, in the order they came, and one goroutine takes them (takeEvents). Up to
 // eventsRoom wait as they are. While more wait (what takes them is held up: a slow database, a slow call):
-//   - what the next one makes up for is dropped (a delta, a followed conversation's items: its answer is read from
-//     the transcript);
+//   - what a later event or transcript read makes up for is dropped (a delta, a followed conversation's items,
+//     or a page read that repairs inline view registrations);
 //   - an event that says the whole of something (eventKey) takes the place of the one of its key that waits;
 //   - every other event still waits in its turn, until eventsMost wait.
 //
@@ -119,7 +119,7 @@ func (b *BusHub) queueEvent(event string, params json.RawMessage) {
 	case n < eventsRoom:
 		q.line.PushBack(ev)
 		b.pending.Add(1)
-	case event == assistantwire.EventSessionDelta || event == assistantwire.EventSessionItems:
+	case event == assistantwire.EventSessionDelta || event == assistantwire.EventSessionItems || event == assistantwire.EventInlineViewPage:
 		q.mu.Unlock()
 		if event == assistantwire.EventSessionDelta {
 			b.takeDelta(params)

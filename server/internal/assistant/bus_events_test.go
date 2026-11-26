@@ -180,6 +180,19 @@ func TestBusFullLineStartsNoGoroutines(t *testing.T) {
 	}
 }
 
+func TestBusInlineViewPageDropsOnlyUnderBacklog(t *testing.T) {
+	b := NewBusHub(BusOptions{Logf: testLogf(t)})
+	b.queueEvent(assistantwire.EventInlineViewPage, numbered(1))
+	if got := takeWaiting(t, b); got.name != assistantwire.EventInlineViewPage {
+		t.Fatalf("queued event = %s, want inline view page", got.name)
+	}
+	fill(b, eventsRoom)
+	b.queueEvent(assistantwire.EventInlineViewPage, numbered(2))
+	if got := eventsWaiting(b); got != eventsRoom {
+		t.Fatalf("%d events waiting, want %d after dropping the inline view page", got, eventsRoom)
+	}
+}
+
 // What the hub says of one conversation's state is handled in the order it came, however long the line was, and
 // none of it is lost (#15906: past 1024 waiting, the events reached the line in the order the scheduler ran their
 // goroutines).

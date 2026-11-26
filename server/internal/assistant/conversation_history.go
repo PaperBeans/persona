@@ -158,7 +158,7 @@ type historyPage struct {
 // historyCall covers both manager-internal reads and hub-proxied node calls. It
 // leaves live execution, strict source exports and input-index projections on the runtime.
 func (s *Service) historyCall(ctx context.Context, machine, method string, raw json.RawMessage) (result json.RawMessage, handled bool, err error) {
-	if ctx.Value(historySourceKey{}) != nil || liveHistoryRead(ctx) {
+	if ctx.Value(historySourceKey{}) != nil || liveHistoryRead(ctx) || ctx.Value(inlineViewSourceKey{}) != nil {
 		return nil, false, nil
 	}
 	if method != DeviceSessionItems && method != DeviceAssistantHandoff && method != "session.item" && method != "session.image" {

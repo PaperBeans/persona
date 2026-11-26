@@ -188,6 +188,7 @@ machines.read        GET /api/v1/assistant/machine-resources
 -                    GET /api/v1/assistant/memory
 -                    GET /api/v1/assistant/north-star
 -                    GET /api/v1/assistant/organization/snapshot
+-                    GET /api/v1/assistant/outbound-messages
 tasks.schedule       GET /api/v1/assistant/placement/pending
 -                    GET /api/v1/assistant/places
 -                    GET /api/v1/assistant/readiness
@@ -536,6 +537,7 @@ leaders.write        POST /api/v1/assistant/directions/{id}/progress
 -                    POST /api/v1/assistant/main/clear
 -                    POST /api/v1/assistant/main/new
 -                    POST /api/v1/assistant/origins/backfill
+-                    POST /api/v1/assistant/outbound-messages
 tasks.schedule       POST /api/v1/assistant/placement/{todo_id}/assign
 tasks.schedule       POST /api/v1/assistant/placement/{todo_id}/defer
 -                    POST /api/v1/assistant/places

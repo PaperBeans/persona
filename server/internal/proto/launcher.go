@@ -16,6 +16,9 @@ type Launcher struct {
 	// RuntimeFallback is node-local discovery provenance: an ordinary CLI command yields to a connected runtime
 	// offering the same launcher. Explicit shell definitions never do. This flag is not part of the wire protocol.
 	RuntimeFallback bool `json:"-"`
+	// ConfigDir is the launcher's literal CLAUDE_CONFIG_DIR (when known), kept node-local for matching terminal
+	// sessions whose ANTHROPIC_BASE_URL is empty or ambiguous. Not part of the wire protocol.
+	ConfigDir string `json:"-"`
 	// Agent is what it starts when not Claude Code: "codex" (plain codex, or an alias running it; docs/integrations/codex.md
 	// "Starting from the phone").
 	Agent string `json:"agent,omitempty"`

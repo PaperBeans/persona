@@ -65,7 +65,7 @@ func (s *Service) triageTurnModel(ctx context.Context, v *workView, machine stri
 			return unfinished(&proto.WorkState{Closeout: &co, Artifacts: workArtifacts(coArtifacts), By: "rule"}, s.lang(ctx)), false, nil
 		}
 	}
-	if hasCloseout && co.Status == proto.CloseoutDone {
+	if hasCloseout && co.Status == proto.CloseoutDone && !closeoutAsksOwner(co) {
 		return closeoutDone(co, coArtifacts, s.lang(ctx)), false, nil // its own closeout says so: no model
 	}
 	others, byShort := triageOthers(machine, c.SessionID, v.sessions(machine))

@@ -495,8 +495,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			defer finish()
 		}
 	}
+	var previousStopAt int64
 	if id != "" {
 		defer n.typing.lock(id)()
+		state, _ := n.state.get(id)
+		previousStopAt = state.StopCauseAt
 		if err := n.a2aSendReady(ctx, id); err != nil {
 			return "", err
 		}
@@ -762,7 +765,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			eff = execution.Effort
 		}
 		superviseRoundFrom(ctx).set(roundKept, roundWhyUnsupported) // a runtime keeps its own context (assistant_round.go)
-		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, callerModeExplicit, selected, execution.Model, eff, policy)
+		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, callerModeExplicit, selected, previousStopAt, execution.Model, eff, policy)
 	}
 	if len(options) == 0 || (execution.Fingerprint == "" && execution.Model == "") {
 		if launcher == "" || launcher == st.Launcher {
@@ -1278,6 +1281,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			}
 			return "", fmt.Errorf("send to codex: %w", err)
 		}
+		n.state.clearStopAfterAssistantInput(id, previousStopAt)
 		n.commitModelChoice(id, execution)
 		commit()
 		awaitList(n.notifySessionsSoon())
@@ -1446,6 +1450,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if err := finishExternalStartup(ctx); err != nil {
 		return "", err
 	}
+	n.state.clearStopAfterAssistantInput(id, previousStopAt)
 	commit()
 	awaitList(n.notifySessionsSoon())
 	return id, nil

@@ -3,7 +3,6 @@ import { useAssistantIdentity } from "../../lib/assistant-identity";
 import { useAssistantTitle, useManagerOffline } from "../ManagerParts";
 import { defaultManager, LinkManager, useShownManager } from "../../lib/manager-choice";
 import { decisionLaterKey } from "../../lib/assistant-entries";
-import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
 import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDisplayTab, sessionMenuActions, sourceSubtitle, sessionTitle, sessionTitleDetail, shortPath, activityOf, stateOf, tabLabel, uuid } from "../../lib/format";
@@ -45,7 +44,7 @@ import { openAsk, unlinkAgentFromTodo, waitsForOwner } from "../../lib/todos";
 import { t as tr } from "../../i18n";
 import { lastEditablePrompt, promptsOf, rewindBlock, rewindDone, rewindSession, rewindTarget, type RewindRestore } from "../../lib/rewind";
 import { EDIT_SEND_SETTLE_MS } from "../../lib/edit-last-key";
-import { sendDraft } from "../../lib/drafts";
+import { sendDraft, type CommentImagePicker } from "../../lib/drafts";
 import { chatLines, freshWords, isUserInput, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
 import { foldsBackgroundRounds, relayNeedsAttention } from "../../lib/background-fold";
 import type { Interaction, Item, Session, Subagent } from "../../lib/types";
@@ -53,10 +52,7 @@ import { REVIEW_FEATURE } from "../../lib/types";
 import { anchoredScroll, followsAgain, isScrollbarPress, jumpLabel, leavesOnKey, leavesOnScrollbarDrag, leavesOnTouch, leavesOnWheel, followsAfterUnfold, UNFOLD_PAUSE, type ScrollAnchor } from "../../lib/disclosure";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Menu, toast, useMenu, useNow, type MenuItem } from "../../ui/atoms";
 import { BackgroundStallHint } from "../../ui/BackgroundStallHint";
-import { StatusMark } from "../../ui/StatusMark";
 import { Icon } from "../../ui/icons";
-import { StoppedAgentLine } from "./StoppedAgentLine";
-import { CodexReadOnlyLine } from "./CodexReadOnlyLine";
 const TakeoverAction = lazy(() => import("./TakeoverAction"));
 import { scrollBehavior } from "../../ui/stream/motion";
 import { segmentChanges, shiftAbove, type SizeChange } from "./offscreen";
@@ -71,7 +67,7 @@ import { PendingCards, TurnCards } from "./Interactions";
 import { splitTurnAsks } from "../../lib/turn-asks";
 import { focusedCard, focusedFirst } from "../../lib/card-focus";
 import { COMPOSER_INPUT, lostWith } from "../../lib/dock-focus";
-import { FailureNote, showsFailureNote } from "./FailureNote";
+import { showsFailureNote } from "./failure-note-state";
 import { LazyCloseoutCard } from "./closeout-chunks";
 import { shownCloseout } from "../../lib/closeout";
 import { AWAIT_MS, awaitingTurn, COMMAND_DOCK_MAX, DOCK_MAX, pickupStateForWait, RETRY_IDLE_GRACE_MS, turnStart } from "./dock";
@@ -184,6 +180,9 @@ const CommandWaitingNotice = lazyPage(() => import("./CommandWaitingNotice").the
 const ShellQuestion = lazy(() => import("../ShellQuestionCard"));
 // only in a conversation that moved between Claude Code and Codex (#5054): its earlier sessions, read above the live one
 const EarlierStretches = lazy(() => import("./EarlierStretches"));
+const BotmuxComposerNotes = lazy(() => import("./BotmuxMessages").then((m) => ({ default: m.BotmuxComposerNotes })));
+const StoppedAgentLine = lazy(() => import("./StoppedAgentLine").then((m) => ({ default: m.StoppedAgentLine })));
+const CodexReadOnlyLine = lazy(() => import("./CodexReadOnlyLine").then((m) => ({ default: m.CodexReadOnlyLine })));
 const ChatNavRail = lazy(() => import("./ChatNavRail").then((m) => ({ default: m.ChatNavRail })));
 const TranscriptWindowPager = lazy(() => import("./TranscriptWindowPager"));
 // Recovery cards are rare: their rendering and words load only when the session actually carries a fallback record.
@@ -508,7 +507,8 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
     const out = launch?.outgoing;
     if (!launch || !out || (!out.text && !out.images.length)) return [];
     const id = launch.messageId;
-    return [{ id, raw: out.text, images: out.images, before: [], at: Date.now(), msg: { id: `pending:${id}`, ...parseUserText(out.text), images: out.images.map((image, i) => ({ id: `pending:${id}#${i}`, seq: 0, role: "user", kind: "image", image })) } }];
+    const at = launch.handoffAt ?? Date.now();
+    return [{ id, raw: out.text, images: out.images, before: [], at, acceptedAt: at, msg: { id: `pending:${id}`, ...parseUserText(out.text), images: out.images.map((image, i) => ({ id: `pending:${id}#${i}`, seq: 0, role: "user", kind: "image", image })) } }];
   });
   const [draftRefusal, setDraftRefusal] = useState<{ id: string; draft: string; clearable?: string } | null>(null);
   // what other pages sent here ("Ask Persona", "Hand to AI"…): shown like this page's own sending bubbles (lib/outbox.ts)
@@ -2256,6 +2256,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   const [retriedOn, setRetried] = useState<{ chat: string; reason?: string }>();
   const retried = retriedOn?.chat === `${mid}/${sid}` ? retriedOn.reason : undefined;
   const failureNote = Boolean(session && !assistant && showsFailureNote(session, { retried }));
+  const botmuxNotes = Boolean(session && !assistant && (failureNote || attentionReason(session) || session.also_open_in?.length));
   // a turn that failed on the refusal fallback's missing model (#2528): "Continue" would send it to the same model; the
   // main conversation's setup gate would only open its missing step, as it does for every send while it holds (`deliver`)
   const canRetry =
@@ -2383,14 +2384,18 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
     const live = lines.flatMap((l) => l.kind === "supervision" ? l.lines : [l]).findLast((l) => l.kind === "segment" && l.live);
     return live?.kind === "segment" ? live.seg : undefined;
   }, [lines]);
+  const waitingPending = shownPending.some((p) => p.waits);
+  const postingPending = shownPending.some((p) => p.posting);
+  const acceptedPending = !postingPending && shownPending.length > 0 && state !== "working" && !liveSeg;
   const hasFeedback = Boolean(
-    shownPending.some((p) => p.waits) ||
-    (sendFeedback !== undefined ? Boolean(sendFeedback) : shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0)),
+    waitingPending ||
+    (sendFeedback !== undefined ? Boolean(sendFeedback) : postingPending || acceptedPending || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0)),
   );
   // Keep empty-transcript "Loading chat" and inline "Processing…" mutually exclusive so at most one loader shows.
   const loadingChat = tr.loading && !tr.items.length && !opening && !hasFeedback;
   const processing = !hasFeedback && !loadingChat && Boolean(assistant || session?.assistant) && state === "working" && !backgroundOnly &&
     !liveSeg && (tr.loading || (opening && !tr.streaming));
+  const feedbackProcessing = sendFeedback === "processing" || processing || (sendFeedback === undefined && acceptedPending);
   const runStart = (liveSeg ? turnStart(liveSeg) : undefined) ?? stateSince;
   // what the turn is doing, for the bar's words (cindy's status): kept as it was while it says the same
   const lastStep = useRef<RunStep | undefined>(undefined);
@@ -2547,6 +2552,10 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
   const overviewDetail = panelDrawn && (backgroundPanelOf(panel, mid, sid)?.from === "overview" || subagentPanel?.from === "overview");
   const isAssistant = Boolean(assistant || session?.assistant);
   const composerDisabled = Boolean(offlineLine) || (!noRow && !hydrating && !sessionCan(session, "send"));
+  const commentImagesRef = useRef<CommentImagePicker | null>(null);
+  const addCommentImages = useCallback<CommentImagePicker>(async (target, files, signal) => {
+    await commentImagesRef.current?.(target, files, signal);
+  }, []);
   const composerBlocked = gate.blocked ?? noRowBlock;
   const agentCompactBlocked = Boolean(composerDisabled || composerBlocked || hasTaskRoute);
   // Assistant compaction calls the hub HTTP endpoint directly, so composer send disables (e.g. offlineLine) do not gate it.
@@ -2826,7 +2835,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
             {/* what is on its way, and failed messages with nothing sent after them, in the order they were written */}
             {!detached && [...shownPending.map((p) => ({ at: p.at, el: (
               <div key={p.id} className="flex flex-col gap-3">
-                <UserBubble msg={p.msg} mid={mid} sid={sid} pending sendState="sending" />
+                <UserBubble msg={p.msg} mid={mid} sid={sid} pending={Boolean(p.posting)} sendState={p.posting ? "sending" : "sent"} />
               </div>
             ) })), ...placed.rest.map((e) => ({ at: e.at, el: <OutboxBubbles key={`outbox:${e.id}`} mid={mid} sid={sid} entries={[e]} canRetry={!refusedNoRow} /> })),
               ...keptUndelivered.map((m) => ({ at: Date.parse(m.at) || 0, el: (
@@ -2839,8 +2848,8 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
               .sort((a, b) => a.at - b.at)
               .map((x) => x.el)}
             {!detached && !loadingChat && (hasFeedback || processing) && (
-              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || (processing ? "processing" : "sending")}>
-                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : sendFeedback === "processing" || processing ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
+              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || (feedbackProcessing ? "processing" : "sending")}>
+                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={waitingPending ? t("ultracode.send_waits") : feedbackProcessing ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
               </div>
             )}
             {detached ? hasLater && (
@@ -2849,7 +2858,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
               </Suspense>
             ) : <ChatTail {...slotPage} />}
           </div>
-          <CommentMarks scroller={scroller} jump={landRow} />
+          <CommentMarks scroller={scroller} jump={landRow} onAddImages={canCompose && !composerDisabled && !editingLast ? addCommentImages : undefined} />
           </ChatActionsContext.Provider>
         </div>
         {/* NavRail uses the natural left gutter beside the centered transcript. */}
@@ -2919,24 +2928,20 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
         {failure ? <FailureCard failure={failure} onClose={() => setSendFailure(null)} onHelp={gate.help} onConfirm={gate.confirm} /> : <ReadinessCard gate={gate} />}
         <ChatOnlyNote gate={gate} />
         {gate.dialog}
-        {session && !assistant && <AttentionNote session={session} />}
-        {session && !assistant && <ConflictNote session={session} />}
-        {/* a resume turned ultracode off (#3428): one line with "Turn back on" */}
-        {session && !assistant && <UltracodeLostNote session={session} />}
-        {session && failureNote && (
-          <FailureNote
-            session={session}
-            onRetry={() => {
+        {session && botmuxNotes && (
+          <Suspense fallback={null}>
+            <BotmuxComposerNotes session={session} retry={failureNote ? () => {
               const chat = `${mid}/${sid}`;
               const reason = failureReason(session);
               setRetried({ chat, reason });
-              // a retry that did not go brings the note back
               void retryError().then((went) => {
-                if (!went) setRetried((r) => (r?.chat === chat && r.reason === reason ? undefined : r));
+                if (!went) setRetried((retry) => retry?.chat === chat && retry.reason === reason ? undefined : retry);
               });
-            }}
-          />
+            } : undefined} />
+          </Suspense>
         )}
+        {/* a resume turned ultracode off (#3428): one line with "Turn back on" */}
+        {session && !assistant && <UltracodeLostNote session={session} />}
         {chatBar.bar("dock")}
         {/* the error the chat stopped on, right over the composer as cindy places it (#5313); keyed by the error, so a new
             one opens with its details folded */}
@@ -2977,19 +2982,21 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
           </Suspense>
         )}
         {session && (codexFooterTakeover || takeoverPending) && (
-          <CodexReadOnlyLine
-            session={session}
-            visible={codexFooterTakeover}
-            stopped={codexStoppedTakeover ? { mid, sid, onTerminal: openTerminal } : undefined}
-            takeOverRequested={takeOverRequested}
-            onTakeOverConsumed={consumeTakeOver}
-            continueRequested={continueTakeoverRequested}
-            onContinueConsumed={consumeContinueTakeover}
-            onPendingChange={setTakeoverPending}
-          />
+          <Suspense fallback={null}>
+            <CodexReadOnlyLine
+              session={session}
+              visible={codexFooterTakeover}
+              stopped={codexStoppedTakeover ? { mid, sid, onTerminal: openTerminal } : undefined}
+              takeOverRequested={takeOverRequested}
+              onTakeOverConsumed={consumeTakeOver}
+              continueRequested={continueTakeoverRequested}
+              onContinueConsumed={consumeContinueTakeover}
+              onPendingChange={setTakeoverPending}
+            />
+          </Suspense>
         )}
         {stoppedLine && !codexStoppedTakeover ? (
-          <StoppedAgentLine mid={mid} sid={sid} onTerminal={openTerminal} />
+          <Suspense fallback={null}><StoppedAgentLine mid={mid} sid={sid} onTerminal={openTerminal} /></Suspense>
         ) : !codexFooterTakeover && !assistant && !offlineLine && !refusedNoRow && session && !canCompose && (embedded || session.is_subagent || Boolean(embeddedSub)) ? (
           <div role="status" data-subagent-readonly-line className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-card bg-inset px-3 py-2 text-xs text-ink-2">
             <span className="min-w-0 flex-1 break-words">{sourceSubtitle(session) || session.read_only_reason || t("chat-chatview.view_only")}</span>
@@ -2997,6 +3004,7 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
         ) : !codexFooterTakeover && (
         <Composer
           draftKey={draftKey}
+          commentImagesRef={commentImagesRef}
           placeholder={offlineLine ? offlineLine : waitsFirst ? t("chat-chatview.codex_first_placeholder") : refusedNoRow ? t(gone ? "chat-chatview.session_gone_placeholder" : "chat-chatview.connecting_placeholder") : viewOnlyRow(session) ? t("chat-chatview.view_only") : computerAway && awayLine ? awayLine : state === "working" || state === "needs_you" ? t("chat-chatview.queue_placeholder") : assistant ? askPlaceholder ?? t("chat-chatview.ask_placeholder", { name: persona.name }) : state === "offline" ? t("chat-chatview.resume_placeholder") : t("chat-chatview.agent_placeholder")}
           machineId={mid}
           agent={session?.agent}
@@ -3204,38 +3212,6 @@ export function footerRows(session: Session, assistant?: boolean): MenuItem[] {
     ...(assistant ? [] : ([["folder", t("chat-sessiondialogs.folder"), shortPath(session.cwd)]] as [string, string, string | undefined][])),
   ];
   return rows.filter(([, , v]) => v).map(([key, what, v]) => ({ key, label: v!, hint: what, wrap: true, onSelect: key === "source" ? () => {} : () => void copyText(key === "folder" ? session.cwd! : v!) }));
-}
-
-/** The session is live in another engine host too (#2576): this one owns it, and messages go here only. */
-function ConflictNote({ session }: { session: Session }) {
-  const text = alsoOpenText(session);
-  if (!text) return null;
-  return (
-    <div role="status" data-testid="chat-also-open" className="flex items-start gap-2 rounded-[12px] bg-orange-tint px-3 py-2 text-[12.5px]" style={{ animation: "fade-up 200ms ease-out both" }}>
-      <span className="flex h-[18px] shrink-0 items-center text-orange"><Icon name="warning" size={13} /></span>
-      <span className="line-clamp-2 min-w-0 flex-1 text-ink-2">{text}</span>
-    </div>
-  );
-}
-
-/** Above the composer while a session needs you and its host says why (a botmux attention, iOS AttentionNote):
- *  the reason and "Open in Lark" its topic. */
-function AttentionNote({ session }: { session: Session }) {
-  const reason = attentionReason(session);
-  if (!reason) return null;
-  const link = externalLink(session);
-  return (
-    <div role="status" data-testid="chat-attention" className="flex items-start gap-2 rounded-[12px] border-l-2 border-attention bg-inset px-3 py-2 text-[12.5px]" style={{ animation: "fade-up 200ms ease-out both" }}>
-      <span className="flex h-[18px] shrink-0 items-center"><StatusMark state="needs_you" /></span>
-      <span className="line-clamp-3 min-w-0 flex-1 text-ink-2">{reason}</span>
-      {link && (
-        <a href={link} target="_blank" rel="noopener noreferrer" className="flex shrink-0 items-center gap-1 whitespace-nowrap font-medium text-accent hover:underline">
-          <Icon name="external" size={12} />
-          {t("chat-chatview.open_in_lark")}
-        </a>
-      )}
-    </div>
-  );
 }
 
 // memo: a chat renders again for each transcript item, and the header shows none of them

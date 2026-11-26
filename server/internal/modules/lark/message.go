@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,16 @@ func (s core) FeishuMessage(ctx context.Context, p FeishuMessage) error {
 	st, err := s.feishuStatus(ctx)
 	if err != nil {
 		return &rpc.Error{Code: CodeTryAgain, Message: "the bot's status: " + err.Error()}
+	}
+	// This is the internal, paired Feishu bot handover. Other extensions enter through channelReceive.
+	// The bound chat check was made at the bot, before it called this method.
+	// The core decides whether a project review takes it (Host.ProjectReviewOwnerInput).
+	if p.From == "" && st.Enabled && st.Owner != "" && ev.Message.MessageID != "" &&
+		ev.Sender.SenderType == "user" && ev.Sender.SenderID.OpenID == st.Owner && slices.Contains(st.Chats, ev.Message.ChatID) {
+		target := s.botTargetFor(ev.Message.RootID, ev.Message.ParentID)
+		if err := s.h.ProjectReviewOwnerInput(ctx, "feishu:"+ev.Message.MessageID, target.MachineID, target.SessionID); err != nil {
+			return &rpc.Error{Code: CodeTryAgain, Message: "could not commit project review input"}
+		}
 	}
 	first, err := s.claimBotMessage(ev.Message.MessageID)
 	if err != nil {

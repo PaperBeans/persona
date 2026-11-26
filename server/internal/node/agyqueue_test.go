@@ -103,8 +103,12 @@ func TestAgyBusyQueueLifecycleAndClear(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if _, err := requestCtx(t, ctx, n, "session.send", map[string]any{"session_id": agyTestRow, "text": prompt}); err != nil {
+	res, err := requestCtx(t, ctx, n, "session.send", map[string]any{"session_id": agyTestRow, "text": prompt, "client_msg_id": "msg-queued-1"})
+	if err != nil {
 		t.Fatalf("busy agy send failed: %v", err)
+	}
+	if res["ok"] != true || res["queued"] != true {
+		t.Fatalf("busy agy send response = %#v, want ok=true queued=true", res)
 	}
 
 	findRow := func() *proto.Session {
@@ -140,6 +144,10 @@ func TestAgyBusyQueueLifecycleAndClear(t *testing.T) {
 	mu.Unlock()
 	if row = findRow(); len(row.Queued) != 0 {
 		t.Fatalf("Session.Queued after USER_INPUT consume = %q, want empty", row.Queued)
+	}
+	items, _ := agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].ClientMsgID != "msg-queued-1" {
+		t.Fatalf("consumed queued item = %+v, want client_msg_id=%q", items, "msg-queued-1")
 	}
 }
 

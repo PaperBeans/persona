@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeproto"
+	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -64,7 +65,7 @@ func (h *Hub) nodeUpdateRelay(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errors.New("machine owner changed"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(withCaller(r.Context(), p.ManagerID), 45*time.Second)
+	ctx, cancel := context.WithTimeout(withCaller(r.Context(), p.ManagerID), nodeUpdateRelayLimit(method))
 	defer cancel()
 	var info proto.NodeInfo
 	if err := m.call(ctx, "node.info", map[string]any{}, &info); err != nil {
@@ -101,6 +102,16 @@ func (h *Hub) nodeUpdateRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, out)
+}
+
+// nodeUpdateRelayLimit bounds one relayed call. The node answers node.update.commit once the upload passed its
+// self-checks, which a scan of a new file can hold for a minute each (nodeupdate.CommitWait): cut off sooner, the
+// manager takes a slow answer for a lost one.
+func nodeUpdateRelayLimit(method string) time.Duration {
+	if method == "node.update.commit" {
+		return nodeupdate.CommitWait() + 10*time.Second
+	}
+	return 45 * time.Second
 }
 
 func (h *Hub) nodeUpdateRelayRoutes(api *http.ServeMux) {

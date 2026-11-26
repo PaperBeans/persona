@@ -47,6 +47,9 @@ export interface FinishedItem { kind: "task"; key: string; card: TaskCardMetadat
 
 export interface AssistantEntries {
   needsYou: NeedsYouItem[];
+  /** Completed tasks accepted by their supervisor awaiting optional owner verification (`user_check`): visible with
+   *  one-click Pass/Accept in a calm secondary tray, without inflating the urgent red Needs you count. */
+  verify: Extract<NeedsYouItem, { kind: "task" }>[];
   running: RunningItem[];
   /** Open tasks with no progress for 48 hours and nothing running (the To-dos page's shelved, #3331): folded under
    *  In progress, not counted. */
@@ -111,8 +114,13 @@ export function entryStatus(todo: Todo, lookup: SessionLookup, plans: Record<str
  *  supervisor's to do, however long it has waited (#8678). */
 export function taskAwaitsDecision(todo: Todo): boolean {
   if (todo.done_at) return false;
-  if (openAsk(todo)) return true;
-  return todo.supervision?.state === "needs_user" || todo.supervision?.state === "user_check";
+  const ask = openAsk(todo);
+  const review = reviewState(todo);
+  if (review === "user_check") {
+    return Boolean(ask && (ask.questions?.length || ask.outcome === "decide" || ask.outcome === "cannot"));
+  }
+  if (ask) return true;
+  return review === "needs_user";
 }
 
 /** The task waits for its supervisor's review and nothing of it runs: an open `pending_review` whose status is a
@@ -161,6 +169,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
 
   const asking: NeedsYouTask[] = [];
   const deciding: RankedTask[] = [];
+  const verify: { item: Extract<NeedsYouItem, { kind: "task" }>; rank: number; at: string }[] = [];
   const open: { item: RunningItem; rank: number; at: string }[] = [];
   const shelved: { item: RunningItem; at: string }[] = [];
   const parked: { item: RunningItem; at: string }[] = [];
@@ -228,14 +237,27 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     // supervised task's failed start is its supervisor's to retry or remedy, and an Agent whose every card its
     // supervisor holds waits on that conversation, not on the user
     const supervised = !!todo.supervision?.supervisor;
+    // #15763: a card set the supervisor holds (delegating) is that conversation's whenever this task has no
+    // direct owner card of its own, supervised or routed by handNonOwnerCard.
     const held = routed.length > 0 && ownAsks.length === 0;
-    const waits = status === "failed" ? bucket === "open" && !supervised : !todo.done_at && WAITS_ON_YOU.has(status) && !held;
+    // #15638: an interrupted run (e.g. a transient 503) under a direction supervisor stays with that supervisor
+    // until it escalates; an unsupervised personal terminal still waits on its owner.
+    const supervisedInterrupted = status === "interrupted" && supervised;
+    const waits = status === "failed"
+      ? bucket === "open" && !supervised
+      : !todo.done_at && WAITS_ON_YOU.has(status) && !supervisedInterrupted && !held;
     const decision = taskAwaitsDecision(todo);
     const deliveryApproval = heldDelivery(todo)?.unblock === "user";
-    // The global badge skips quiet tasks. Explicit reviews can still ask the owner in the conversation tray.
+    const userCheck = !todo.done_at && reviewState(todo) === "user_check";
+    // The global badge skips quiet tasks. Explicit reviews can still ask the owner in the conversation tray. A quiet
+    // user_check the hub itself still lists as needs_you (reason verify) is un-quieted here so that authoritative view
+    // is honored — this also covers an older hub during rolling upgrade. With #15680's projection the hub instead sends
+    // a non-needs_you view for user_check, so `hub` is false below and it falls through to the calm To verify layer.
     const supervisesHere = todo.supervision?.supervisor === conversation;
-    const quietOwnerAskHere = todo.quiet && (isMain || supervisesHere) && (reviewState(todo) === "user_check" ||
-      taskReviewDecisionAsk(todo) && !input.deferred?.[decisionLaterKey(todo)]);
+    const quietOwnerAskHere = todo.quiet && (isMain || supervisesHere) &&
+      (reviewState(todo) === "user_check" ||
+        Boolean(taskReviewDecisionAsk(todo) && !input.deferred?.[decisionLaterKey(todo)]));
+    // The hub's view decides when there is one, so this tray, the To-dos badge and the hub's needs_you agree.
     const hub = hubNeedsYou(quietOwnerAskHere ? { ...todo, quiet: false } : todo, openOf);
     const item: NeedsYouTask = { kind: "task", key, todo, status, asks, countsOpen };
     // Only the review decision is hidden; a live Agent question still has its home.
@@ -250,6 +272,9 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     else if (hub ?? (waits || decision || deliveryApproval)) {
       if (!hiddenDecision) deciding.push({ item, rank: todoRank(todo, status), at: card.at });
     }
+    // Completed tasks awaiting optional owner verification (`user_check`) sit in their own calm To verify entry rather
+    // than inflating urgent red Needs you or disappearing into In progress.
+    else if (userCheck) verify.push({ item: { kind: "task", key, todo, status, asks, countsOpen }, rank: todoRank(todo, status), at: card.at });
     // its supervisor's review (#8678): Persona's own work, not the owner's and not a wait on the upstream maintainer, so
     // its own group whatever the To-dos page files it under, even with a fresh open PR; once reviewed (accepted, or parked
     // on the PR) the PR rule below files it
@@ -326,6 +351,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   });
   return {
     needsYou,
+    verify: verify.sort(newest).map((row) => row.item),
     running: [...open.sort(newest).map((row) => row.item), ...agentsRunning],
     shelved: shelved.sort(newest).map((row) => row.item),
     parked: parked.sort(newest).map((row) => row.item),

@@ -2391,12 +2391,13 @@ private struct AgentsList: View {
     @ViewBuilder private func repoCard(_ r: RepoTree.Repo) -> some View {
         let folded = isFolded(r.id)
         Section {
-            Button { toggleFold(r.id) } label: { RepoCardHeader(name: r.name, folded: folded) }
+            Button { toggleFold(r.id) } label: {
+                RepoCardHeader(name: r.name, folded: folded, workspace: r.flattenedWorkspace)
+            }
                 .buttonStyle(.plain)
                 .contextMenu { repoMenu(r) }
                 .accessibilityIdentifier("agents.project")
-                .accessibilityLabel([r.name, folded ? String(localized: "Collapsed [Readiness Card ee6046]") : String(localized: "Expanded")]
-                    .joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
+                .accessibilityLabel(repositoryLabel(r, folded: folded))
                 .selectionDisabled()
                 .modifier(FoldAnchor(id: r.id, reader: feed.reader))
                 .modifier(ButtonRowInsets(edges: rowInsets(level: 0)))
@@ -2416,6 +2417,7 @@ private struct AgentsList: View {
     /// What the ⋯ and the to-do's mark beside a repository's header offered: when its agents are all in one herdr space
     /// (the usual case), that space's pin, mute, rename, open and to-do; otherwise Mark All as Seen.
     @ViewBuilder private func repoMenu(_ r: RepoTree.Repo) -> some View {
+        if let workspace = r.flattenedWorkspace { worktreeMenu(workspace) }
         let prepared = lookup.projection?.repositories[r.id]
         if let space = prepared?.space {
             SpaceHeaderMenu(group: space, isMuted: model.isMuted, rename: { renamingSpace = space }, open: { openFromList(SpaceRoute(id: space.id)) },
@@ -2569,23 +2571,29 @@ private struct AgentsList: View {
         let prepared = lookup.projection?.repositories[r.id]
         let space = prepared?.space
         let unread = prepared?.unread ?? []
+        let workspace = r.flattenedWorkspace
         return HStack(spacing: Theme.Space.xs) {
             Button { toggleFold(r.id) } label: {
                 HStack(spacing: Theme.Space.s) {
-                    ThemedIcon(Theme.Icon.folder).foregroundStyle(Theme.WorkspaceSidebar.muted)
-                    Text(r.name).font(Theme.WorkspaceSidebar.titleUnread).foregroundStyle(Theme.WorkspaceSidebar.foreground).lineLimit(1)
+                    ThemedIcon(workspace?.main == true ? Theme.Icon.home : Theme.Icon.folder).foregroundStyle(Theme.WorkspaceSidebar.muted)
+                    Text(r.name).font(Theme.WorkspaceSidebar.titleUnread).lineLimit(1)
+                        .foregroundStyle(workspace?.unavailable == true ? Theme.WorkspaceSidebar.muted : Theme.WorkspaceSidebar.foreground)
+                    if workspace?.latestPinnedAt != nil {
+                        ThemedIcon(Theme.Icon.pinned).font(Theme.WorkspaceSidebar.meta).foregroundStyle(Theme.accent).accessibilityHidden(true)
+                    }
                     Spacer(minLength: 0)
                     FoldChevron(folded: isFolded)
                 }.contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("agents.project")
-            .accessibilityLabel([r.name, isFolded ? String(localized: "Collapsed [Readiness Card ee6046]") : String(localized: "Expanded")].joined(separator: ", "))
+            .accessibilityLabel(repositoryLabel(r, folded: isFolded))
             if let space {
                 TodoSpaceTag(group: space) { todoID in openFromList(TodoDetailRoute(id: todoID)) }
             }
-            if space != nil || !unread.isEmpty {
+            if workspace != nil || space != nil || !unread.isEmpty {
                 Menu {
+                    if let workspace { worktreeMenu(workspace) }
                     if let space {
                         SpaceHeaderMenu(group: space, isMuted: model.isMuted, rename: { renamingSpace = space }, open: { openFromList(SpaceRoute(id: space.id)) },
                                         linkTodo: { linkingSpace = space }).equatable()
@@ -2601,6 +2609,17 @@ private struct AgentsList: View {
             }
         }
         .task(id: repoScope(r)) { await model.sessionLists.loadCounts(repoScope(r)) }
+    }
+
+    private func repositoryLabel(_ repo: RepoTree.Repo, folded: Bool) -> String {
+        var labels = [repo.name]
+        if let workspace = repo.flattenedWorkspace {
+            if workspace.main { labels.append(String(localized: "Main worktree")) }
+            if workspace.latestPinnedAt != nil { labels.append(String(localized: "Pinned [Personal Agent List View fb47db]")) }
+            if workspace.unavailable { labels.append(String(localized: "This computer is offline")) }
+        }
+        labels.append(folded ? String(localized: "Collapsed [Readiness Card ee6046]") : String(localized: "Expanded"))
+        return labels.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label"))
     }
 
     /// A working tree in its repository's card: its row and agents (`worktreeRow`), then the spaces nested under it

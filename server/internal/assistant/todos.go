@@ -567,6 +567,17 @@ func (s *Service) quietTask(ctx context.Context, origin string) bool {
 // made (a topic that turned out to be taken, the lark module's thread_open.go) both go through it.
 func (s *Service) removeTodo(ctx context.Context, id string) error {
 	s.todos.writing.Lock()
+	if current, ok := s.todoNow(id); ok {
+		err := s.receivedFindingsCloseError(current, nil)
+		if err == nil && current.Supervision != nil && current.Supervision.Investigation != nil &&
+			current.Supervision.Investigation.Version != 0 {
+			err = s.investigationTransitionError(ctx, current, current.Supervision, nil)
+		}
+		if err != nil {
+			s.todos.writing.Unlock()
+			return err
+		}
+	}
 	if st := s.todoDB(); st != nil {
 		if err := st.DeleteTodo(ctx, id); err != nil {
 			s.todos.writing.Unlock()
@@ -830,6 +841,9 @@ func formatTodo(t Todo) Todo {
 	})
 	out.Agents = append(out.Agents, curr...)
 	out.Agents = append(out.Agents, past...)
+	if out.Supervision != nil && isCodexRouteProgress(out.Supervision.Progress) {
+		out.Supervision = out.Supervision.clone()
+	}
 	if out.Supervision != nil && out.Supervision.State == reviewNeedsUser && triageReviewState(out) != reviewNeedsUser {
 		out.Supervision = out.Supervision.clone()
 		out.Supervision.State = "" // its old review stays in history; only a fresh review may ask the owner again
@@ -1282,7 +1296,7 @@ func (s *Service) todoRoutes() {
 		if err != nil {
 			if errors.Is(err, db.ErrTodoNotFound) {
 				apierr.Write(w, http.StatusNotFound, err)
-			} else if errors.Is(err, errOutsideDecisionPending) {
+			} else if errors.Is(err, errOutsideDecisionPending) || isInvestigationGuardError(err) {
 				apierr.WriteCode(w, http.StatusConflict, "outside_decision_pending", err)
 			} else if errors.Is(err, db.ErrConcernUnreported) {
 				apierr.Write(w, http.StatusConflict, err) // report its outcome instead: POST …/decisions {source: "reported"}
@@ -1314,7 +1328,7 @@ func (s *Service) todoRoutes() {
 		if err := s.deleteTodo(r.Context(), id); err != nil {
 			if errors.Is(err, db.ErrTodoNotFound) {
 				apierr.Write(w, http.StatusNotFound, err)
-			} else if errors.Is(err, errOutsideDecisionPending) {
+			} else if errors.Is(err, errOutsideDecisionPending) || isInvestigationGuardError(err) {
 				apierr.WriteCode(w, http.StatusConflict, "outside_decision_pending", err)
 			} else {
 				apierr.Write(w, http.StatusInternalServerError, err)
@@ -2138,6 +2152,11 @@ func (s *Service) autoDoneTodo(ctx context.Context, id, reason string, work time
 		}
 	}
 	defer unlock()
+	if current, ok := s.todoNow(id); ok && current.DoneAt == nil {
+		if err := s.investigationCloseError(ctx, current); err != nil {
+			return false, err
+		}
+	}
 	now := time.Now().UTC()
 	var row db.TodoRow
 	st := s.todoDB()

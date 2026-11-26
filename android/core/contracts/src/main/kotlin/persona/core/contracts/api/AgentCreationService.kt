@@ -81,7 +81,13 @@ interface AgentCreationService {
 }
 
 /** A complete response replaces the inventory. A partial response updates returned rows but does not remove missing ones. */
-data class AgentWorkspaceCatalog(val workspaces: List<AgentWorkspace>, val complete: Boolean = true)
+data class AgentWorkspaceCatalog(
+    val workspaces: List<AgentWorkspace>,
+    /** Completeness as used by the New Agent picker. The list tracks failures for each source separately. */
+    val complete: Boolean = true,
+    val failedSources: Set<String> = emptySet(),
+    val unscopedFailure: Boolean = false,
+)
 
 /**
  * One workspace of the hub's catalog (`GET /api/v1/workspaces`, docs/protocol/protocol.md): a start with

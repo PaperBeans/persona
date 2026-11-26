@@ -660,6 +660,173 @@ func TestDirectionTreeSessionsChangedSchedulesABuild(t *testing.T) {
 	}
 }
 
+func TestDirectionTreeUnifiesNeedsYouWithProjectionAndSeparatesUserCheck(t *testing.T) {
+	e := treeEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	recent := now.Add(-15 * time.Minute)
+
+	e.f.setSessions("mac",
+		proto.Session{MachineID: "mac", SessionID: "s-idle", Title: "Done run", Status: proto.StatusIdle, State: proto.StateIdle, StateSince: recent, UpdatedAt: recent},
+		proto.Session{MachineID: "mac", SessionID: "s-503-sup", Title: "Supervised 503", Status: proto.StatusIdle, State: proto.StateIdle, StateSince: recent, UpdatedAt: recent, TurnError: "API Error: 503 Service Unavailable", TurnErrorKind: proto.TurnErrorTransient},
+		proto.Session{MachineID: "mac", SessionID: "s-503-own", Title: "Unsupervised 503", Status: proto.StatusIdle, State: proto.StateIdle, StateSince: recent, UpdatedAt: recent, TurnError: "API Error: 503 Service Unavailable", TurnErrorKind: proto.TurnErrorTransient},
+		proto.Session{MachineID: "mac", SessionID: "s-held", Title: "Supervisor-held card", Status: proto.StatusBlocked, State: proto.StateNeedsYou, StateSince: recent, UpdatedAt: recent, PendingInteractions: 1},
+		proto.Session{MachineID: "mac", SessionID: "s-owner-ask", Title: "Direct owner card", Status: proto.StatusBlocked, State: proto.StateNeedsYou, StateSince: recent, UpdatedAt: recent, PendingInteractions: 1},
+	)
+	e.s.fleet.mu.Lock()
+	if e.s.fleet.interactions == nil {
+		e.s.fleet.interactions = map[string]*pending{}
+	}
+	e.s.fleet.interactions["ix_tree_held"] = &pending{ix: proto.Interaction{
+		ID: "ix_tree_held", MachineID: "mac", SessionID: "s-held",
+		Kind: proto.IxPermission, ToolName: "Bash", Delegating: true,
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.interactions["ix_tree_owner"] = &pending{ix: proto.Interaction{
+		ID: "ix_tree_owner", MachineID: "mac", SessionID: "s-owner-ask",
+		Kind: proto.IxQuestion, ToolName: "AskUserQuestion", Delegating: false,
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.mu.Unlock()
+
+	// Six user_check tasks (B-class): awaiting owner verification, not blocking red Needs you.
+	var userCheckIDs []string
+	for i := range 6 {
+		id := e.task("Read-only verification "+string(rune('A'+i)), func(td *Todo) {
+			td.Supervision = &Supervision{
+				Supervisor: "conv_lead_a",
+				State:      reviewUserCheck,
+				UpdatedAt:  recent,
+				Reviews:    []TaskReview{{At: recent, Verdict: reviewAccepted, UserCheck: true}},
+			}
+			td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-idle", Title: "Done run"}}
+		})
+		userCheckIDs = append(userCheckIDs, id)
+	}
+	// One supervised 503 interrupted agent (C-class): supervisor handles it until escalated.
+	sup503ID := e.task("Supervised 503 task", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-503-sup", Title: "Supervised 503"}}
+	})
+	// One supervisor-held delegating card (C-class): held by supervisor.
+	heldID := e.task("Supervisor-held task", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-held", Title: "Supervisor-held card"}}
+	})
+	// Two genuine A-class tasks under lead A: one needs_user decision, one direct owner card.
+	decideID := e.task("Owner decision task", func(td *Todo) {
+		td.Supervision = &Supervision{
+			Supervisor: "conv_lead_a",
+			State:      reviewNeedsUser,
+			UpdatedAt:  recent,
+			Reviews:    []TaskReview{{At: recent, Verdict: reviewNeedsUser, Reason: "Choose rollout"}},
+		}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-idle", Title: "Done run"}}
+	})
+	directCardID := e.task("Direct owner ask task", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-owner-ask", Title: "Direct owner card"}}
+	})
+	// One unsupervised 503 interrupted task (in secretary group): must STILL alert owner in Needs you.
+	unsup503ID := e.task("Personal terminal 503 task", func(td *Todo) {
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-503-own", Title: "Unsupervised 503"}}
+	})
+
+	tr := e.s.directionTree(ctx, now)
+	leadA := tr.Directions[0]
+	sec := tr.Directions[2]
+
+	stateOf := func(d treeDirection) map[string]string {
+		m := map[string]string{}
+		for _, tk := range d.Tasks {
+			m[tk.ID] = tk.State
+		}
+		return m
+	}
+	stA := stateOf(leadA)
+	for _, id := range userCheckIDs {
+		if stA[id] != treeReview {
+			t.Errorf("user_check task %s state = %q, want %q", id, stA[id], treeReview)
+		}
+	}
+	if stA[sup503ID] != treeWorking {
+		t.Errorf("supervised 503 task state = %q, want %q", stA[sup503ID], treeWorking)
+	}
+	if stA[heldID] != treeWorking {
+		t.Errorf("supervisor-held card task state = %q, want %q", stA[heldID], treeWorking)
+	}
+	if stA[decideID] != treeNeedsYou {
+		t.Errorf("needs_user decision task state = %q, want %q", stA[decideID], treeNeedsYou)
+	}
+	if stA[directCardID] != treeNeedsYou {
+		t.Errorf("direct owner ask task state = %q, want %q", stA[directCardID], treeNeedsYou)
+	}
+	if stSec := stateOf(sec); stSec[unsup503ID] != treeNeedsYou {
+		t.Errorf("unsupervised 503 task state = %q, want %q", stSec[unsup503ID], treeNeedsYou)
+	}
+
+	if leadA.Counts.NeedsYou != 2 || leadA.Counts.UserCheck != 6 || leadA.Counts.Review != 6 || leadA.Counts.Working != 2 {
+		t.Fatalf("leadA counts = %+v, want NeedsYou=2 UserCheck=6 Review=6 Working=2", leadA.Counts)
+	}
+	if got := leadA.Counts.Working + leadA.Counts.NeedsYou + leadA.Counts.Stuck + leadA.Counts.Review + leadA.Counts.Planned; got != len(leadA.Tasks) {
+		t.Fatalf("leadA 5-state sum = %d, len(tasks) = %d", got, len(leadA.Tasks))
+	}
+	if sec.Counts.NeedsYou != 1 || sec.Counts.UserCheck != 0 {
+		t.Fatalf("sec counts = %+v, want NeedsYou=1 UserCheck=0", sec.Counts)
+	}
+
+	// Cross-surface invariant: direction tree NeedsYou total equals projection Counts.NeedsYou.
+	listed := e.s.treeTodos()
+	projCounts := e.s.todoProjectionOf(ctx, listed, now).counts()
+	treeNeedsTotal := 0
+	for _, d := range tr.Directions {
+		treeNeedsTotal += d.Counts.NeedsYou
+	}
+	if treeNeedsTotal != projCounts.NeedsYou {
+		t.Fatalf("tree total NeedsYou = %d, projection Counts.NeedsYou = %d (must match)", treeNeedsTotal, projCounts.NeedsYou)
+	}
+}
+
+func TestDirectionTreeDoesNotDoubleCountCarriedPartOfStepInNeedsYou(t *testing.T) {
+	e := treeEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	recent := now.Add(-5 * time.Minute)
+
+	e.f.setSessions("mac", proto.Session{
+		MachineID: "mac", SessionID: "s-step-ask", Title: "Step asking", Status: proto.StatusBlocked, State: proto.StateNeedsYou,
+		PendingInteractions: 1, UpdatedAt: recent, StateSince: recent,
+	})
+	e.s.fleet.mu.Lock()
+	if e.s.fleet.interactions == nil {
+		e.s.fleet.interactions = map[string]*pending{}
+	}
+	e.s.fleet.interactions["ix_step_q"] = &pending{ix: proto.Interaction{
+		ID: "ix_step_q", MachineID: "mac", SessionID: "s-step-ask", Kind: proto.IxQuestion, ToolName: "AskUserQuestion",
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.mu.Unlock()
+
+	parentID := e.task("Parent task", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+	})
+	e.task("Child step asking owner", func(td *Todo) {
+		td.PartOf = parentID
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-step-ask", Title: "Step asking"}}
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+	})
+
+	tr := e.s.directionTree(ctx, now)
+	leadA := tr.Directions[0]
+	if leadA.Counts.NeedsYou != 1 {
+		t.Fatalf("leadA counts.NeedsYou = %d, want 1 (parent carries PartOf step without double-counting)", leadA.Counts.NeedsYou)
+	}
+	projCounts := e.s.todoProjectionOf(ctx, e.s.treeTodos(), now).counts()
+	if leadA.Counts.NeedsYou != projCounts.NeedsYou {
+		t.Fatalf("leadA NeedsYou = %d, projection Counts.NeedsYou = %d (must match)", leadA.Counts.NeedsYou, projCounts.NeedsYou)
+	}
+}
+
 func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
 	e := treeEnv(t)
 	ctx := context.Background()
@@ -781,10 +948,13 @@ func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
 	if alphaTasks[failedStartID].State != treeWorking {
 		t.Errorf("supervised failed start state = %q, want %q", alphaTasks[failedStartID].State, treeWorking)
 	}
-	// An open personal verification is the owner's to pass: the projection lists it under Needs you (reason verify,
-	// #16002), and the tree follows the projection.
-	if alphaTasks[userCheckID].State != treeNeedsYou {
-		t.Errorf("user_check task state = %q, want %q", alphaTasks[userCheckID].State, treeNeedsYou)
+	// An open personal verification is the optional "to verify" layer (#15638/#15680): calm review and
+	// counts.user_check, kept out of red Needs you on every surface, including the authoritative projection.
+	if alphaTasks[userCheckID].State != treeReview {
+		t.Errorf("user_check task state = %q, want %q", alphaTasks[userCheckID].State, treeReview)
+	}
+	if dirAlpha.Counts.UserCheck != 1 {
+		t.Errorf("dir-alpha counts = %+v, want UserCheck=1 for the personal verification", dirAlpha.Counts)
 	}
 	if alphaTasks[genuineDecideID].State != treeNeedsYou {
 		t.Errorf("owner decision task state = %q, want %q", alphaTasks[genuineDecideID].State, treeNeedsYou)
@@ -792,8 +962,8 @@ func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
 	if !dirAlpha.Running {
 		t.Errorf("dir-alpha Running = false, want true while supervisor handles held agent cards")
 	}
-	if dirAlpha.Counts.NeedsYou != 2 {
-		t.Fatalf("dir-alpha counts = %+v, want NeedsYou=2 (the owner decision and the personal verification)", dirAlpha.Counts)
+	if dirAlpha.Counts.NeedsYou != 1 {
+		t.Fatalf("dir-alpha counts = %+v, want NeedsYou=1 (the owner decision; the personal verification is calm user_check)", dirAlpha.Counts)
 	}
 	if got := dirAlpha.Counts.Working + dirAlpha.Counts.NeedsYou + dirAlpha.Counts.Stuck + dirAlpha.Counts.Review + dirAlpha.Counts.Planned; got != len(dirAlpha.Tasks) {
 		t.Fatalf("dir-alpha 5-state sum = %d, len(tasks) = %d", got, len(dirAlpha.Tasks))
@@ -811,11 +981,11 @@ func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
 	for _, d := range tr.Directions {
 		treeNeeds += d.Counts.NeedsYou
 	}
-	if treeNeeds != projCounts.NeedsYou || treeNeeds != 3 {
-		t.Fatalf("before escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 3", treeNeeds, projCounts.NeedsYou)
+	if treeNeeds != projCounts.NeedsYou || treeNeeds != 2 {
+		t.Fatalf("before escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 2", treeNeeds, projCounts.NeedsYou)
 	}
 
-	// Escalate the folded sub-agent's card to the user: counts must move to 3 in dir-alpha and 4 overall.
+	// Escalate the folded sub-agent's card to the user: counts must move to 2 in dir-alpha and 3 overall.
 	e.s.fleet.mu.Lock()
 	e.s.fleet.interactions["ix-alpha-sub-ro"].ix.Delegating = false
 	e.s.fleet.mu.Unlock()
@@ -826,16 +996,16 @@ func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
 	if alphaAfter[foldedHeldID].State != treeNeedsYou || alphaAfter[foldedHeldID].Agents[0].State != proto.StateNeedsYou {
 		t.Fatalf("after escalation: folded task=%+v, want task/agent needs_you", alphaAfter[foldedHeldID])
 	}
-	if dirAlphaAfter.Counts.NeedsYou != 3 {
-		t.Fatalf("after escalation: dir-alpha counts=%+v, want NeedsYou=3", dirAlphaAfter.Counts)
+	if dirAlphaAfter.Counts.NeedsYou != 2 {
+		t.Fatalf("after escalation: dir-alpha counts=%+v, want NeedsYou=2", dirAlphaAfter.Counts)
 	}
 	projAfter := e.s.todoProjectionOf(ctx, e.s.treeTodos(), now).counts()
 	treeNeedsAfter := 0
 	for _, d := range trAfter.Directions {
 		treeNeedsAfter += d.Counts.NeedsYou
 	}
-	if treeNeedsAfter != projAfter.NeedsYou || treeNeedsAfter != 4 {
-		t.Fatalf("after escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 4", treeNeedsAfter, projAfter.NeedsYou)
+	if treeNeedsAfter != projAfter.NeedsYou || treeNeedsAfter != 3 {
+		t.Fatalf("after escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 3", treeNeedsAfter, projAfter.NeedsYou)
 	}
 }
 

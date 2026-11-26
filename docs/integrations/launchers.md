@@ -222,6 +222,8 @@ node gathers two things in one login-shell invocation (`zsh -ic`, loading `~/.zs
 The script frames what it prints with begin/end markers, and node reads only between them: what rc files print while the shell starts (Ubuntu's `/etc/bash.bashrc` sudo hint) or an exit trap prints afterwards is never a launcher (#6310).
 
 - **Output of `_claude_launchers`**: Existing `~/.zshrc` helper functions (one fixed-width line per name, gateway, model) still work and come first.
+  When a listed name resolves to a PATH wrapper, its row keeps the helper's metadata and gets the wrapper's config directory for node-local matching.
+  A shell alias or function of the same name takes precedence over the file.
 - **Aliases** (since 2026-11-01): zsh tokenizes and unquotes each alias (`${(@Q)${(z)…}}`); node recognizes only those **whose final program is `claude`**.
   They may have preceding variables (`alias dmcc="ANTHROPIC_BASE_URL=… ANTHROPIC_AUTH_TOKEN=… claude --dangerously-skip-permissions"`), pass through
   `env` (including `-u` / `-i`) / `command` / `exec` / `noglob`, use absolute paths, or run `export …;` first within the same alias. Gateway comes from `ANTHROPIC_BASE_URL`,
@@ -238,6 +240,12 @@ The script frames what it prints with begin/end markers, and node reads only bet
   Only the first file of a name on PATH counts, as for the shell; a name the shell has as a function or alias (both run before a file) is not a script launcher,
   and neither is `claude` / `codex` / `omp` itself. The scan stats only regular files and links, reads two bytes before the rest, and gets 3 seconds (a hung
   network mount): past them the last scan's scripts stand.
+  A thin wrapper such as `claude-work` can also exec a shell helper by absolute path or alongside the wrapper,
+  with literal arguments and `"$@"` at the end. The node reads one helper within the same bounds. It resolves simple
+  positional parameters, assignments and exports, and recognizes `dirname "$0"` and `dirname "$(readlink -f "$0")"`
+  as script locations. If the helper execs Claude Code with a known `CLAUDE_CONFIG_DIR` and no configured endpoint,
+  the node can attribute a terminal session with an empty endpoint to the one launcher with that directory.
+  Configuration directories stay on the node. Sourced files, dynamic paths and further helper hops are outside this scan.
 - **Codex** (since 2026-11-02): If `codex` is on PATH, add `codex`, plus aliases running only one `codex` command, after the Claude entries, with `agent: "codex"`.
   On a Mac where the login shell finds no `codex` (and has no alias or function of that name), the ChatGPT app's bundled CLI
   (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is plain `codex` instead, run by that path (#10437).

@@ -19353,6 +19353,10 @@ def paged_sessions(query):
     def just_finished(s):
         return state_of(s) == "idle" and bool((s.get("work") or {}).get("just_finished"))
 
+    def pane_source(s):
+        source = pane_origin(s)
+        return "" if agents_only and source == "terminal" and state_of(s) == "offline" else source
+
     def matching(rows):
         rows = [s for s in rows if (not agents_only or agent_row(s))
                 and (not roots or not s.get("folded_under")) and (not under or s.get("folded_under") == under)
@@ -19365,7 +19369,7 @@ def paged_sessions(query):
                 and (not todo or (s.get("todo") or {}).get("id", "") == ("" if todo == "none" else todo))
                 and (not waiting or bool(s.get("background_waiting")) == (waiting in ("1", "true")))
                 and (not just or just_finished(s) == (just in ("1", "true")))
-                and (not origin or pane_origin(s) == origin) and (not not_origin or pane_origin(s) != not_origin)
+                and (not origin or pane_source(s) == origin) and (not not_origin or pane_source(s) != not_origin)
                 and (not search or search in "\n".join(str(s.get(k, "")) for k in ("title", "cwd", "space_name", "slot_name", "last_text")).lower())]
         rows.sort(key=LIST_TUPLE)
         rows.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
@@ -19390,8 +19394,10 @@ def paged_sessions(query):
                 active[mid] = active.get(mid, 0) + 1
             values = {"machine": s["machine_id"], "project": s.get("repo_root") or s.get("workspace_cwd") or s.get("cwd", ""),
                       "group": s.get("space_id") or s.get("workspace_id", ""), "state": state_of(s), "todo": (s.get("todo") or {}).get("id", ""),
-                      "pane_source": pane_origin(s)}
+                      "pane_source": pane_source(s)}
             for key, value in values.items():
+                if key == "pane_source" and not value:
+                    continue
                 counts[key][value] = counts[key].get(value, 0) + 1
         return counts, 200
     since = query.get("since", [None])[0]

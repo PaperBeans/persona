@@ -8599,6 +8599,270 @@
     {
       "name": "session_models_empty",
       "value": "このランチャーには切り替え可能なモデルがありません。"
+    },
+    {
+      "name": "phone_xiaoyi",
+      "value": "XiaoYi"
+    },
+    {
+      "name": "phone_search_alias_phone_xiaoyi",
+      "value": "XiaoYi エージェント インテント スキル 音声"
+    },
+    {
+      "name": "xiaoyi_section_capabilities",
+      "value": "連携機能"
+    },
+    {
+      "name": "xiaoyi_section_preferences",
+      "value": "設定とセキュリティ"
+    },
+    {
+      "name": "xiaoyi_section_diagnostics",
+      "value": "接続セルフチェック"
+    },
+    {
+      "name": "xiaoyi_agent_card_label",
+      "value": "オンデバイス Agent"
+    },
+    {
+      "name": "xiaoyi_intents_count_label",
+      "value": "登録済みインテント"
+    },
+    {
+      "name": "xiaoyi_skills_runtime_label",
+      "value": "登録済みスキル"
+    },
+    {
+      "name": "xiaoyi_suggestions_toggle",
+      "value": "XiaoYi おすすめ"
+    },
+    {
+      "name": "xiaoyi_suggestions_hint",
+      "value": "確認待ちがあるときに機密情報を含まない状態ヒントを共有します。"
+    },
+    {
+      "name": "xiaoyi_suggestions_unregistered",
+      "value": "XiaoYi おすすめを利用するにはプラットフォームへのインテント登録が必要です。"
+    },
+    {
+      "name": "xiaoyi_lock_screen_notice",
+      "value": "XiaoYi からの承認には端末のロック解除が必要です。高リスクの自動実行は Persona アプリ内でのみ許可できます。"
+    },
+    {
+      "name": "xiaoyi_diag_run",
+      "value": "セルフチェックを実行"
+    },
+    {
+      "name": "xiaoyi_diag_running",
+      "value": "確認中…"
+    },
+    {
+      "name": "xiaoyi_diag_hub_paired",
+      "value": "ペアリング済み Hub"
+    },
+    {
+      "name": "xiaoyi_diag_credential",
+      "value": "トークン読み取り"
+    },
+    {
+      "name": "xiaoyi_diag_transport",
+      "value": "直接接続"
+    },
+    {
+      "name": "xiaoyi_diag_pass",
+      "value": "正常"
+    },
+    {
+      "name": "xiaoyi_diag_attention",
+      "value": "要確認"
+    },
+    {
+      "name": "xiaoyi_diag_ssh_warning",
+      "value": "SSH トンネルのみ"
+    },
+    {
+      "name": "xiaoyi_diag_reachable",
+      "value": "接続可能（{online}/{total} 台オンライン）"
+    },
+    {
+      "name": "xiaoyi_card_working",
+      "value": "{count} 件実行中"
+    },
+    {
+      "name": "xiaoyi_card_needs_you",
+      "value": "{count} 件確認待ち"
+    },
+    {
+      "name": "xiaoyi_card_approve",
+      "value": "許可 / 承認"
+    },
+    {
+      "name": "xiaoyi_card_submitting",
+      "value": "送信中…"
+    },
+    {
+      "name": "xiaoyi_card_confirm_prompt",
+      "value": "このリクエストを承認しますか？（端末のロック解除が必要です）"
+    },
+    {
+      "name": "xiaoyi_card_approved_done",
+      "value": "承認しました。"
+    },
+    {
+      "name": "xiaoyi_card_open_persona",
+      "value": "Persona で開く"
+    },
+    {
+      "name": "xiaoyi_card_continue",
+      "value": "Persona で続ける"
+    },
+    {
+      "name": "xiaoyi_card_open_failed",
+      "value": "Persona を開けませんでした。"
+    },
+    {
+      "name": "xiaoyi_sent_still_thinking",
+      "value": "Persona に送信しました。応答を作成中です。"
+    },
+    {
+      "name": "xiaoyi_task_sent_summary",
+      "value": "{session}（{machine}）に送信しました。"
+    },
+    {
+      "name": "xiaoyi_approved_summary",
+      "value": "承認しました: {summary}"
+    },
+    {
+      "name": "xiaoyi_todo_saved_summary",
+      "value": "ToDo を保存しました: {title}"
+    },
+    {
+      "name": "xiaoyi_water_logged_summary",
+      "value": "{amount} ml 記録しました。今日: {today} / {goal} ml。"
+    },
+    {
+      "name": "xiaoyi_push_queued_summary",
+      "value": "Hub に接続でき次第送信するようキューに保存しました。"
+    },
+    {
+      "name": "xiaoyi_push_sent_summary",
+      "value": "Persona に送信しました。"
+    },
+    {
+      "name": "xiaoyi_push_sent_no_dest_summary",
+      "value": "送信しました。設定 › サブスクリプションで配信先を有効にしてください。"
+    },
+    {
+      "name": "xiaoyi_opening_recording",
+      "value": "Persona の会議録音を開いています。"
+    },
+    {
+      "name": "xiaoyi_opening_persona",
+      "value": "Persona を開いています。"
+    },
+    {
+      "name": "xiaoyi_kb_no_hits",
+      "value": "「{query}」に一致するナレッジは見つかりませんでした。"
+    },
+    {
+      "name": "xiaoyi_not_paired",
+      "value": "未ペアリングです。先に Persona を開いて Hub に接続してください。"
+    },
+    {
+      "name": "xiaoyi_auth_expired",
+      "value": "ペアリングの有効期限が切れています。Persona で再ペアリングしてください。"
+    },
+    {
+      "name": "xiaoyi_already_handled",
+      "value": "このリクエストはすでに処理済みです。"
+    },
+    {
+      "name": "xiaoyi_ssh_open_app",
+      "value": "この Hub は SSH トンネル専用です。Persona アプリを開いて実行してください。"
+    },
+    {
+      "name": "xiaoyi_unlock_required",
+      "value": "承認を実行する前に端末のロックを解除してください。"
+    },
+    {
+      "name": "xiaoyi_offline",
+      "value": "現在 Hub に接続できません。ネットワーク設定を確認してください。"
+    },
+    {
+      "name": "xiaoyi_machine_offline",
+      "value": "{target} はオフラインです。PC と Persona Link を確認してください。"
+    },
+    {
+      "name": "xiaoyi_machine_not_found",
+      "value": "{target} という名前のコンピューターが見つかりません。"
+    },
+    {
+      "name": "xiaoyi_no_online_machine",
+      "value": "オンラインのコンピューターがありません。"
+    },
+    {
+      "name": "xiaoyi_no_live_session",
+      "value": "{target} に実行中のセッションがありません。Persona で開始してください。"
+    },
+    {
+      "name": "xiaoyi_hub_update_required",
+      "value": "この操作を利用するには Persona Hub を更新してください。"
+    },
+    {
+      "name": "xiaoyi_need_app_for_new_session",
+      "value": "先に Persona アプリで {target} のセッションを一度開始してください。"
+    },
+    {
+      "name": "xiaoyi_nothing_pending",
+      "value": "現在承認待ちのリクエストはありません。"
+    },
+    {
+      "name": "xiaoyi_needs_screen",
+      "value": "このリクエストには画面操作が必要です。Persona を開いてください。"
+    },
+    {
+      "name": "xiaoyi_nothing_to_send",
+      "value": "送信する内容がありません。"
+    },
+    {
+      "name": "xiaoyi_water_not_enabled",
+      "value": "先に Persona のヘルスケアで水分トラッキングを有効にしてください。"
+    },
+    {
+      "name": "xiaoyi_recording_module_off",
+      "value": "このhubでは会議の録音がオフです。"
+    },
+    {
+      "name": "xiaoyi_diag_recording_module",
+      "value": "会議録音モジュール"
+    },
+    {
+      "name": "xiaoyi_diag_on",
+      "value": "オン"
+    },
+    {
+      "name": "xiaoyi_diag_off",
+      "value": "オフ"
+    },
+    {
+      "name": "xiaoyi_agent_card_ready",
+      "value": "準備完了 · {count} 機能"
+    },
+    {
+      "name": "xiaoyi_diag_preview_card",
+      "value": "小芸カードをプレビュー"
+    },
+    {
+      "name": "xiaoyi_timeout",
+      "value": "Hub からの応答がタイムアウトしました。Persona で進行状況を確認してください。"
+    },
+    {
+      "name": "xiaoyi_rate_limited",
+      "value": "短時間の送信が多すぎます。しばらくしてから再試行してください。"
+    },
+    {
+      "name": "xiaoyi_failed",
+      "value": "リクエストを完了できませんでした。Persona で詳細を確認してください。"
     }
   ]
 }
