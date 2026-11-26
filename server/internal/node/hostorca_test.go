@@ -401,6 +401,101 @@ func TestOrcaSendsToForegroundTraeCLI(t *testing.T) {
 	}
 }
 
+// A foreground agy in an Orca terminal is an agy pane (#16531). Persona's own hook names its conversation (the only
+// source on macOS, which has no presence lock to read), so the companion's agy-<conversation> row merges into the
+// pane's, and a message or an interrupt for it goes to the terminal instead of being refused as agy_in_terminal while
+// that agy holds the conversation's presence lock. A background agy is no agent pane.
+func TestOrcaSendsToForegroundAgy(t *testing.T) {
+	n, _, o, procs, _ := orcaNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const pane, pid, command = "tab1:leaf1", 4646, "/usr/local/bin/agy"
+	paneID := "orca:" + pane
+	oldPresence := agyPresenceOf
+	agyPresenceOf = func(int) string { return "" } // no open presence lock is read: the hook alone names the conversation
+	t.Cleanup(func() { agyPresenceOf = oldPresence })
+	withAgyPresenceHooks(t, func(path string) agyLockState {
+		if filepath.Base(path) == agyTestID+".lock" {
+			return agyLockHeld // the terminal's agy has the conversation open
+		}
+		return agyLockMissing
+	}, nil)
+	acpRow := "agy-" + agyTestID
+	n.runtimes = newRuntimeRegistry()
+	companion := n.runtimes.add(nil) // a call that reached it would fail: it has no peer
+	companion.ready, companion.hello.Runtime = true, agyAgent
+	n.runtimes.setSessions(companion, []proto.Session{{SessionID: acpRow, Agent: agyAgent, Cwd: orcaCwd, Status: proto.StatusIdle}})
+	file := agyTestFile(t, n.agyDataRoot(), agyTestID, `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-01-01T00:00:00Z","content":"<USER_REQUEST>\nFix the auth bug\n</USER_REQUEST>"}`+"\n")
+	o.SetTerminals(orcaTerm("term_1", "tab1", "leaf1", ""))
+	o.SetScreen("term_1", "> \n")
+	setProcess := func(state string) {
+		args := fmt.Sprintf("%d %s 01:00 %s", pid, state, command)
+		env := fmt.Sprintf("%d %s ORCA_PANE_KEY=%s", pid, command, pane)
+		procs.set(pane, parseOrcaPSEnv(env, parseOrcaPSArgs(args, time.Now()), nil)[pane]...)
+	}
+	setProcess("S+")
+	if r := n.hookReport(paneID, "PreInvocation", agyTestID); r["ok"] != true {
+		t.Fatalf("hook report refused: %v", r)
+	}
+	n.mu.Lock() // older than agyReportGrace: only a pane listed as running agy keeps it
+	r := n.agyReports[paneID]
+	r.at = time.Now().Add(-time.Minute)
+	n.agyReports[paneID] = r
+	n.mu.Unlock()
+
+	paneRow := otherSession(host.Agent{Agent: agyAgent, PaneID: paneID})
+	var agyRows []string
+	for _, s := range listSessions(t, n) {
+		if s.Agent == agyAgent {
+			agyRows = append(agyRows, s.SessionID+"@"+s.PaneID)
+		}
+	}
+	if len(agyRows) != 1 || agyRows[0] != paneRow+"@"+paneID {
+		t.Fatalf("agy rows %v, want the Orca pane's %s alone", agyRows, paneRow)
+	}
+
+	// The terminal plays agy: the submit appends the typed message to its conversation.
+	o.Handle("terminal.send", func(p map[string]any) any {
+		text, _ := p["text"].(string)
+		if text == "\r" {
+			line := fmt.Sprintf(`{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":%q,"content":"<USER_REQUEST>\nhello from the phone\n</USER_REQUEST>"}`+"\n", time.Now().UTC().Format(time.RFC3339Nano))
+			f, err := os.OpenFile(file, os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return orcarttest.Fail{Code: "test_write_failed"}
+			}
+			_, err = f.WriteString(line)
+			if cerr := f.Close(); err != nil || cerr != nil {
+				return orcarttest.Fail{Code: "test_write_failed"}
+			}
+		}
+		return map[string]any{"send": map[string]any{"handle": p["terminal"], "accepted": true, "bytesWritten": len(text)}}
+	})
+	o.Reset()
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": acpRow, "text": "hello from the phone"}); err != nil {
+		t.Fatalf("send to a conversation an Orca terminal's agy has open: %v", err)
+	}
+	if _, err := request(t, n, "session.interrupt", map[string]any{"session_id": acpRow}); err != nil {
+		t.Fatalf("interrupt of a conversation an Orca terminal's agy has open: %v", err)
+	}
+	writes := o.Writes()
+	if len(writes) != 3 || writes[0].Text != pasteStart+"hello from the phone"+pasteEnd || writes[1].Text != "\r" ||
+		writes[2].Text != "\x1b" {
+		t.Fatalf("expected a bracketed paste, a separate submit and an escape in the terminal, got %+v", writes)
+	}
+
+	// The same agy, no longer in its terminal's foreground group: refused with nothing typed (by the pane's own check
+	// while the last list still has the pane, else as a conversation a terminal holds).
+	setProcess("S")
+	o.Reset()
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": acpRow, "text": "again"}); err == nil {
+		t.Fatal("a background agy's conversation took a message")
+	} else if code, data := refusalOf(t, err); code != "not_delivered" && code != codeAgyInTerminal || data["delivered"] != "none" {
+		t.Fatalf("expected a refusal before typing, got %v", err)
+	}
+	if writes := o.Writes(); len(writes) != 0 {
+		t.Fatalf("wrote into the terminal without agy in front: %+v", writes)
+	}
+}
+
 // Orca turning the input down (nothing written) is a refusal the app can retry: a permission dialog is dialog_open,
 // no agent in front / a gone or read-only terminal is not_delivered.
 func TestOrcaSendRefusedByOrca(t *testing.T) {

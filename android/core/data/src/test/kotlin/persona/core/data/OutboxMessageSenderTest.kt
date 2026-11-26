@@ -799,6 +799,56 @@ class OutboxMessageSenderTest {
         sender.close()
     }
 
+    /**
+     * An agy open in a terminal (409 `agy_in_terminal`, delivered none, #16531): the refused message keeps the hub's
+     * sentence with its code, and Undo puts both back; a retry leaves none of it. A refusal without words, a bare status,
+     * the code itself, an internal failure's detail, a refusal without a code and a wait keep no words.
+     */
+    @Test fun aRefusalKeepsTheHubsWordsWithItsCode() = runTest {
+        val words = "This Antigravity conversation is open in agy in a terminal on that computer. Nothing was sent."
+        val store = MemoryOutboxStore()
+        val transport = FakeTransport(online = true)
+        val sender = OutboxMessageSender(scope, store, transport, backgroundScope)
+        transport.answers += MessageTransportResult.HubError("agy_in_terminal", "none", words, retryable = false)
+        sender.send(session, "to agy", "agy")
+        runCurrent()
+        val refused = sender.outbox.value.single { it.clientMessageId == "agy" }
+        assertEquals(DeliveryState.Refused, refused.state)
+        assertEquals("agy_in_terminal", refused.error)
+        assertEquals(words, refused.reason)
+        assertTrue(sender.cancel("agy"))
+        runCurrent()
+        sender.restore(refused)
+        runCurrent()
+        assertEquals(refused, sender.outbox.value.single { it.clientMessageId == "agy" })
+        transport.answers += MessageTransportResult.Accepted
+        assertTrue(sender.retry("agy"))
+        runCurrent()
+        assertEquals(OutboxState.Sent, store.state("agy"))
+        assertEquals(null, store.entries.value.single { it.clientMessageId == "agy" }.reason)
+
+        val cases = listOf(
+            "no words" to MessageTransportResult.HubError("agy_in_terminal", "none", retryable = false),
+            "a bare status" to MessageTransportResult.HubError("agy_in_terminal", "none", "HTTP 409", retryable = false),
+            "the code itself" to MessageTransportResult.HubError("agy_in_terminal", "none", "agy_in_terminal", retryable = false),
+            "an internal detail" to MessageTransportResult.HubError("internal", "none", "rpc: connection closed", retryable = false),
+            "no code" to MessageTransportResult.HubError(null, "none", "Refused without a code", retryable = false),
+            "a wait" to MessageTransportResult.HubError("assistant_offline", "none", "The assistant is restarting", retryable = true),
+        )
+        for ((index, case) in cases.withIndex()) {
+            val (label, answer) = case
+            transport.answers += answer
+            sender.send(session, label, "case-$index")
+            runCurrent()
+            val entry = store.entries.value.single { it.clientMessageId == "case-$index" }
+            val expected = if (answer.retryable) OutboxState.WaitingForNetwork else OutboxState.Refused
+            assertEquals(label, expected, entry.state)
+            assertEquals(label, null, entry.reason)
+            if (answer.retryable) assertTrue(sender.cancel("case-$index"))
+        }
+        sender.close()
+    }
+
     @Test fun interruptedAndUnknownRequestsOnlyRetryWithDurableHubDeduplication() = runTest {
         val store = MemoryOutboxStore()
         store.enqueue(OutboxEntry("message-a", session, "hello", state = OutboxState.Sending, createdAt = 100))

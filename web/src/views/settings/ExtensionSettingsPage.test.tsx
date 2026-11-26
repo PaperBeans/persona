@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExtensionSettingsPage } from "./ExtensionSettingsPage";
-import { Extensions } from "./Extensions";
+import { Extensions, Permissions } from "./Extensions";
 import type { HubExtensionDetail } from "../../lib/extensions";
 import { resetManagerChoice } from "../../lib/manager-choice";
 import { setRoster } from "../../lib/managers";
@@ -204,6 +205,38 @@ describe("host-owned extension settings", () => {
     const info = host.querySelector('[data-extension-section="information"]')!;
     expect(info.textContent).toContain("未提供"); expect(info.textContent).toContain("程序自报版本（未批准）");
     expect(info.textContent).toContain("2.0.0"); expect(info.textContent).not.toContain("/example/socket");
+  });
+
+  it("names the extension type and explains the runtime without showing hub keys", async () => {
+    render({ ...BASE, kind: "connectors" }); await flush();
+    const info = host.querySelector('[data-extension-section="information"]')!;
+    expect(info.textContent).toContain("扩展类型");
+    expect(info.textContent).toContain("连接器");
+    expect(info.textContent).toContain("hub 没有提供这个扩展程序的运行方式");
+    expect(info.textContent).not.toContain("connectors");
+  });
+
+  it("explains network hosts and the agent-runtime socket in user terms", async () => {
+    const html = renderToStaticMarkup(<Permissions permissions={[
+      { key: "network", title: "访问网络", detail: "notes.example.com（在沙箱里时只能连这些）" },
+      { key: "agent_runtimes", title: "接入节点", detail: "在沙箱里只多一个通到节点 runtime.sock 的口子" },
+    ]} />);
+    expect(html).toContain("它可联系的网站");
+    expect(html).toContain("这些地址是扩展声明的外部服务");
+    expect(html).toContain("在 Agents 里显示它的 Agent");
+    expect(html).toContain("Persona 的本地 Agent 服务");
+    expect(html).not.toContain("runtime.sock");
+  });
+
+  it("states an outside-market source once and keeps the lifecycle reasons short", async () => {
+    render({ ...BASE, source: "installed", origin: "file:/example/package", auto_upgrade: undefined }); await flush();
+    const info = host.querySelector('[data-extension-section="information"]')!;
+    expect(info.querySelectorAll("[data-extension-source-notice]")).toHaveLength(1);
+    expect(info.textContent).toContain("这个扩展不是从扩展市场安装的");
+    const updates = host.querySelector('[data-extension-section="updates"]')!;
+    expect(updates.textContent?.match(/请到来源端查看新版本/g)).toHaveLength(1);
+    expect(host.querySelector('[data-extension-section="danger"]')?.textContent).toContain("请在来源端移除");
+    expect(host.textContent?.match(/这个扩展不是从扩展市场安装的/g)).toHaveLength(1);
   });
 
   it("opens the common uninstall confirmation with version and keeps data unless explicitly changed", async () => {

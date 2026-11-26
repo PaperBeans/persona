@@ -6,7 +6,7 @@ import {
   machineStatus, extensionState, extensionTone, readNumber, rebaseDraft, runNote, same, secretState, setupSecret, setAt, setExtensionConfig, setExtensionConfigPreservingEntries, setExtensionEnabled, setExtensionSecret, sourceText,
   stateLine, valueAt, morePermissions, extensionUpgrades, setExtensionAutoUpgrade, setExtensionUpgrades, upgradeAction, upgradeDetail, upgradeNote,
   type HubExtension, type ExtensionField, type ExtensionUpgrade, type JsonObject, nodeProgramStatus, exitText, saveFooter, channelOf, sandboxState,
-  entryID, entryItems, entryKey, fieldPath, isEntryList,
+  entryID, entryItems, entryKey, fieldPath, isEntryList, extensionTypeText, permissionTitle, permissionDetail,
 } from "./extensions";
 
 const extension = (status: string, extra: Partial<HubExtension> = {}): HubExtension => ({ id: `p-${status}`, name: status, kind: "connectors", status, ...extra });
@@ -85,6 +85,19 @@ describe("扩展的文字", () => {
     expect(stateLine(extension("running", { version: "1.2.0", source: "installed" }))).toBe("启动 · 1.2.0 · 已安装");
     expect(stateLine(extension("running", { source: "hub.json" }))).toBe("启动 · manager.json");
     expect(sourceText("other")).toBeUndefined();
+  });
+  it("names extension kinds and permissions in words, without hub keys or socket filenames", () => {
+    expect(extensionTypeText("connectors")).toBe("连接器");
+    expect(extensionTypeText("agent_sources")).toBe("Agent 来源");
+    expect(extensionTypeText("a_new_point")).toBe("其他扩展");
+    expect(extensionTypeText()).toBeUndefined();
+    expect(permissionTitle({ key: "network", title: "访问网络" })).toBe("它可联系的网站");
+    expect(permissionTitle({ key: "agent_runtimes", title: "接入节点" })).toBe("在 Agents 里显示它的 Agent");
+    expect(permissionTitle({ key: "secrets", title: "使用密钥" })).toBe("使用密钥");
+    const runtime = permissionDetail({ key: "agent_runtimes", detail: "only runtime.sock" });
+    expect(runtime).toContain("本地 Agent 服务");
+    expect(runtime).not.toContain("runtime.sock");
+    expect(permissionDetail({ key: "network", detail: "notes.example.com" })).toBe("notes.example.com");
   });
   it("says whether an attached extension is online, since when, and the version its program says", () => {
     const at = new Date();

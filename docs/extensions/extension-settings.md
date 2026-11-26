@@ -51,10 +51,13 @@ Show rows in this order:
 | **Version** | Current installed version; **Not provided** when missing. Do not infer a version from a repository URL. |
 | **Extension ID** | Stable machine-readable extension ID, selectable for support. |
 | **Source** | **Built-in**, **Configured (manager.json)**, **Attached**, **Development**, or **Installed** according to manager-owned metadata. |
+| **Extension type** | The extension's contribution category in plain words, such as **Connector** or **Voice chat**. The hub's internal category key is never shown. |
 | **Runtime** | Declared runtime kind, or **Not provided**. Runtime connectivity is a separate status, not Enabled. |
 | **Installed from** | Host-provided installation provenance when available; **Not provided** otherwise. Never expose local installation directories or credentials as provenance. |
 
 The page title and description come from the localized extension manifest; the information labels and source classifications come from the host. Manager identity, when needed to disambiguate copies, is host chrome, not extension content. Optional **Publisher**, **Command-line tools**, **Homepage** and **Warning** rows follow the required identity rows when that metadata is present. Homepages must be valid HTTPS links; warnings retain the manager's explanation.
+
+An extension installed outside an extension market gets one plain sentence here saying that Persona will not update it automatically and where to update, remove, or configure it. Updates and Danger zone then state only their own consequence (“Check its source for a new version.” / “Remove it at its source.”), so the same source notice is not repeated down the page.
 
 Keep the host's existing contribution switches, isolation status, declared permissions, dependencies and pack-member details. These form an advanced, host-owned part of Information after the identity rows; extensions cannot supply or override their controls. They must not interrupt the extension configuration form or appear after the Danger zone. Disclosure sections may reduce visual noise, but do not hide a failed isolation state or a dependency blocker.
 
@@ -86,7 +89,7 @@ Keep the host's existing contribution switches, isolation status, declared permi
 
 ## Web implementation and API boundary
 
-`web/src/views/settings/ExtensionSettingsPage.tsx` owns the five standard sections and lifecycle controls. Every extension-detail route in `web/src/views/settings/Extensions.tsx` renders it; authentication, schema fields, secrets and custom-page links are passed only into its configuration area. Host-rendered contribution, isolation and permission details follow the identity summary. The market's package-preview page is an installation/consent workflow, not another extension settings page; connector and channel settings retain their separate business switches.
+`web/src/views/settings/ExtensionSettingsPage.tsx` owns the five standard sections and lifecycle controls. Every extension-detail route in `web/src/views/settings/Extensions.tsx` renders it; authentication, schema fields, secrets and custom-page links are passed only into its configuration area. Host-rendered contribution, isolation and permission details follow the identity summary. The Web page maps the hub's contribution-category `kind` to **Extension type** and shows **Runtime** as **Not provided**, rather than presenting an internal category key as a runtime. Network permissions lead with plain words and say that the listed hosts are the services the extension declared; the personal agent-runtime permission explains what it reaches without exposing `runtime.sock`. The market's package-preview page is an installation/consent workflow, not another extension settings page; connector and channel settings retain their separate business switches.
 
 No new server fields are needed for this web implementation: the established `source`, `origin`, `read_only`, `attached`, `auto_upgrade`, `auto_upgrade_paused`, `upgrade` and `previous_version` responses already distinguish the supported full-rights market operations. `origin` is manager-owned installation metadata, not a manifest setting. Web does not offer owner-only local/attached management actions or infer privileges from an arbitrary source URL. Global automatic-upgrade state and manual catalog refresh explicitly target the same manager as the extension. Actual authorization remains enforced by the existing manager endpoints.
 
