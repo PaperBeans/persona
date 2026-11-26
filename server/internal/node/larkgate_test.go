@@ -179,6 +179,49 @@ EOF`, "other"},
 	}
 }
 
+// zsh precommand modifiers must not hide a gated call, and emulate -c is opaque when its code names a gate.
+func TestLarkGateZshPrecommandModifiersAndCodeBuiltins(t *testing.T) {
+	gates := olGate("")
+	for _, tc := range []struct {
+		name, command string
+		method        string
+		unknown       bool
+	}{
+		{"noglob read", `noglob ex GET /links/open`, "GET", false},
+		{"nocorrect read", `nocorrect ex GET /links/open`, "GET", false},
+		{"dash read", `- ex GET /links/open`, "GET", false},
+		{"noglob write", `noglob ex POST /conversations/7123/messages '{"text":"hi"}'`, "POST", false},
+		{"nocorrect write", `nocorrect ex POST /messages/99/recall`, "POST", false},
+		{"dash write", `- ex POST /conversations/7123/messages '{"text":"hi"}'`, "POST", false},
+		{"emulate read", `emulate zsh -c 'ex GET /links/open'`, "", true},
+		{"emulate write", `emulate sh -c 'ex POST /conversations/7123/messages'`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := classifyLark(tc.command, gates, "", nil)
+			if tc.unknown {
+				if !v.other || !v.unknown || len(v.calls) != 0 || v.deny != "" {
+					t.Fatalf("%s: got %+v, want an opaque whole command", tc.command, v)
+				}
+				return
+			}
+			if v.other || v.unknown || v.unparsed || v.unsure || v.deny != "" || len(v.calls) != 1 {
+				t.Fatalf("%s: got %+v, want one classified call", tc.command, v)
+			}
+			if v.calls[0].Method != tc.method {
+				t.Fatalf("%s: method %q, want %q", tc.command, v.calls[0].Method, tc.method)
+			}
+			if got := larkDecision(olCfg(), v.calls[0]); got != "confirm" {
+				t.Fatalf("%s: decision %q, want confirm", tc.command, got)
+			}
+			if tc.method == "POST" {
+				if _, write := gateWrite(gates, tc.command); !write {
+					t.Fatalf("%s: write was not classified as a write", tc.command)
+				}
+			}
+		})
+	}
+}
+
 // What the phone shows for a write: what it does, method, path and the body to send; a file body is read.
 func TestLarkSummary(t *testing.T) {
 	cwd := t.TempDir()

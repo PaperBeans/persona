@@ -450,6 +450,8 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		case name == "eval":
 			v.other = true
 			merge(classifyLarkDepth(strings.Join(words[1:], " "), gates, cwd, risk, extraPATH, depth+1))
+		case codeBuiltinRuns(name, words) && (gateNamed(gates, s.Text) || gateNamedFields(gates, words)):
+			v.other, v.unknown = true, true
 		case isLarkCLI(name):
 			// As for gated calls (parseGateCall): literal assignments earlier in the command resolve; what stays a
 			// variable may be a flag value of a read, never a command word, an api route or anything of a write.
@@ -566,6 +568,24 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 		v.other = true
 	}
 	return v
+}
+
+// codeBuiltinRuns reports a zsh builtin that executes code supplied as an argument. The code is not
+// parsed here: when it names a gate, the whole command must be confirmed rather than treated as ordinary.
+func codeBuiltinRuns(name string, words []string) bool {
+	if name != "emulate" {
+		return false
+	}
+	for i := 1; i < len(words); i++ {
+		if words[i] == "--" {
+			return false
+		}
+		if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
+			strings.Contains(words[i][1:], "c") {
+			return i+1 < len(words)
+		}
+	}
+	return false
 }
 
 // larkFilterSubstitution reports whether a command substitution only formats

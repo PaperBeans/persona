@@ -534,9 +534,10 @@ class OkHttpHubConnection(
         /** Longer than the client's 15 s, for answers the hub waits on a machine for (a CLI starting). */
         readTimeoutSeconds: Long? = null,
         sharingFence: HubSharingFence? = null,
+        allowNotModified: Boolean = false,
     ): Response {
         val (call, owner) = prepareRequest(path, method, body, headers, expectedRoute, readTimeoutSeconds, sharingFence)
-        return checkedResponse(call.awaitResponse(buffered), owner, sharingFence)
+        return checkedResponse(call.awaitResponse(buffered), owner, sharingFence, allowNotModified)
     }
 
     /** The call owns its body through validation and consumption, including cancellation after its headers. */
@@ -586,9 +587,11 @@ class OkHttpHubConnection(
         return client.newCall(request) to owner
     }
 
-    private fun checkedResponse(response: Response, owner: Owner, sharingFence: HubSharingFence?): Response {
+    private fun checkedResponse(
+        response: Response, owner: Owner, sharingFence: HubSharingFence?, allowNotModified: Boolean = false,
+    ): Response {
         try { sharingFence?.requireCurrent() } catch (error: Exception) { response.close(); throw error }
-        if (!response.isSuccessful) {
+        if (!response.isSuccessful && !(allowNotModified && response.code == 304)) {
             val error = response.use { if (sharingFence != null) sharingFailure(it) else HubFailure.from(it) }
             recordRequestFailure(error, owner)
             throw error
