@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // signal wakes the waiters of a test's counts: more is closed at the next change.
@@ -643,5 +645,49 @@ func TestClientDialsAgainOnceItsPeerIsClosed(t *testing.T) {
 	}
 	if n := f.dials.Load(); n != 2 {
 		t.Errorf("%d dials, want the first and the one after the peer was closed", n)
+	}
+}
+
+// A peer closed with no error (rpc.Peer.Close(nil), an orderly close) still ends the connection with a reason:
+// session returns rpc.ErrClosed, and Run logs it instead of "<nil>".
+func TestClientSaysWhyWhenItsPeerClosesWithoutAnError(t *testing.T) {
+	f := &fakeHub{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	var log logLines
+	c := &Client{Hub: srv.URL, Token: "t", HelloMethod: "manager.hello", Logf: log.logf}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	type result struct {
+		helloed bool
+		err     error
+	}
+	ended := make(chan result, 1)
+	go func() {
+		helloed, err := c.session(ctx)
+		ended <- result{helloed, err}
+	}()
+	if err := c.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c.Peer().Close(nil)
+	select {
+	case r := <-ended:
+		if !r.helloed || !errors.Is(r.err, rpc.ErrClosed) {
+			t.Fatalf("session after a nil close: helloed %v, err %v; want helloed and rpc.ErrClosed", r.helloed, r.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("session did not end once its peer was closed")
+	}
+
+	c.Backoff = 10 * time.Millisecond
+	rctx, _, _ := runClient(t, c)
+	if err := c.Wait(rctx); err != nil {
+		t.Fatal(err)
+	}
+	c.Peer().Close(nil)
+	log.waitFor(t, tryEnded, 1, 10*time.Second)
+	if log.count("<nil>") != 0 || log.count(rpc.ErrClosed.Error()) != 1 {
+		t.Fatalf("Run's log after a nil close: %q; want the reason %q", log.all(), rpc.ErrClosed)
 	}
 }

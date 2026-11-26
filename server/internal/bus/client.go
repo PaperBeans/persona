@@ -279,8 +279,13 @@ func (c *Client) session(ctx context.Context) (helloed bool, err error) {
 	case <-p.Done():
 		// Closed (rpc.Peer.Close): by its own read loop as it ended, or by the service to have everything read
 		// again on a new connection. The socket goes with it (ws.CloseNow above): a closed peer left on an open
-		// socket answers nothing, and nothing would dial again until the hub hung up.
-		return true, closeReason(p.Err())
+		// socket answers nothing, and nothing would dial again until the hub hung up. Close takes a nil error too
+		// (an orderly close): it still ends the connection, and Run hears why rather than nil.
+		err := p.Err()
+		if err == nil {
+			err = rpc.ErrClosed
+		}
+		return true, closeReason(err)
 	}
 }
 
