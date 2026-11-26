@@ -248,7 +248,7 @@ func (n *Node) lookAtSnapshot(ctx context.Context, h host.Host, epoch uint64, st
 			if aerr != nil {
 				return nil, false, serr
 			}
-			n.enrichHerdrAgyPresence(ctx, h, agents)
+			n.enrichAgyPresence(ctx, h, agents)
 			return agents, false, nil
 		}
 	}
@@ -271,7 +271,7 @@ func (n *Node) lookAtSnapshot(ctx context.Context, h host.Host, epoch uint64, st
 	n.mu.Unlock()
 	// Panes running an agent the host does not detect (a compatible CLI) become agents of our own.
 	agents = append(snap.Agents, n.traexAgents(ctx, snap.Panes, snap.Agents)...)
-	n.enrichHerdrAgyPresence(ctx, h, agents)
+	n.enrichAgyPresence(ctx, h, agents)
 	// Retain active Claude agents when Herdr temporarily drops agent detection during tool or subshell execution (#1641).
 	return append(agents, n.claudeGraceAgents(snap.Panes, agents)...), true, nil
 }

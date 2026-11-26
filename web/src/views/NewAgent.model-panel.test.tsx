@@ -177,8 +177,11 @@ describe("New agent's model panel (#5104)", () => {
     await open();
     await openPanel();
     if (wide) act(() => q<HTMLButtonElement>('[data-panel-side="agy"]')!.click());
-    const group = q('[data-panel-section][aria-label="agy"]')!;
-    const refresh = () => group.querySelector<HTMLButtonElement>(`[aria-label="${t("ui-modelpanel.refresh_provider_models", { provider: "agy" })}"]`)!;
+    const providerName = "Antigravity CLI";
+    const group = q(`[data-panel-section="provider"][aria-label="${providerName}"]`)!;
+    expect(group).not.toBeNull();
+    const refreshLabel = t("ui-modelpanel.refresh_provider_models", { provider: providerName });
+    const refresh = () => group.querySelector<HTMLButtonElement>(`button[aria-label="${refreshLabel}"]`)!;
     const fetchBefore = vi.mocked(fetch).getMockImplementation()!;
     let answer!: (response: Response) => void;
     const reply = new Promise<Response>((resolve) => { answer = resolve; });

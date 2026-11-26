@@ -14,6 +14,16 @@ Both `deploy.sh` and the old SSH deploy run the staged `.new` file's `version` c
 
 ## Node packages
 
+Hub self-update and `deploy.sh` publish platform packages of `personad`, `persona-node`, `persona-manager` and
+`persona-link` by atomic rename. The publisher refreshes the legacy daemon name with a relative symlink, including
+replacing prior publisher-owned copies. A node package directory supplied by a release publisher stays under that
+publisher's control.
+
+Resident nodes that support in-place updates use the same idle handover on local, SSH, tailcat and Persona Link
+connections. A local stdio node takes its manager's build when it starts. The legacy SSH installer signals the main
+process of the resident service using the executable it replaced. Nodes that cannot reload through their supervisor
+can still be updated through their supported installer.
+
 ### Confirmed Web development builds
 
 The Hub tells each independent assistant which development commit it has confirmed, along

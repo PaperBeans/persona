@@ -1707,7 +1707,9 @@ terminal never saw it, and the companion's turn overwrote the stored steps from 
 probe it by taking even a shared `flock` (`LOCK_SH|LOCK_NB`), because a starting `agy` tries `LOCK_EX|LOCK_NB` once and
 runs its whole session without a lock if that fails (#14561). On Linux, read `/proc/locks` for the file's device and
 inode; where no lock table can be read, fall back to the presence file plus recent transcript writes by another process.
-Calls that drive the conversation go to the pane, or are refused (`agy_in_terminal`) while held.
+Calls that drive the conversation go to the pane, or are refused (`agy_in_terminal`) while held. So every engine that can
+run agy must list it as a pane and learn the pane's conversation: Orca did neither, and every message to an agy open in
+an Orca terminal was refused (#16531).
 
 ## First tool discovery can precede the session list (#14855)
 

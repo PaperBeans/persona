@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/identity"
@@ -205,19 +206,24 @@ func TestResumeOnlyRuntimeSessionProbesReadyRuntimeOutsideRecentList(t *testing.
 func TestResumeOnlyWaitsForStateLoadBeforeDeciding(t *testing.T) {
 	n, _ := runtimeNode(t)
 	const sid = "agy-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	n.state.beginLoad()
-	go func() {
-		time.Sleep(25 * time.Millisecond)
-		n.state.merge(map[string]sessionState{
-			sid: {Launcher: agyRuntimeID, Cwd: identity.AssistantDir(n.home), StartedAt: time.Now().UTC()},
-		})
+	record := sessionState{Launcher: agyRuntimeID, Cwd: identity.AssistantDir(n.home), StartedAt: time.Now().UTC()} // the real clock, not the bubble's
+	synctest.Test(t, func(t *testing.T) {
+		// The load begins inside the bubble, so a check waiting on it is durably blocked and synctest.Wait returns.
+		n.state.beginLoad()
+		done := make(chan error, 1)
+		go func() { done <- n.checkAssistantResumable(context.Background(), sid, "") }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("decided before the state loaded: %v", err)
+		default:
+		}
+		n.state.merge(map[string]sessionState{sid: record})
 		n.state.endLoad()
-	}()
-
-	err := n.checkAssistantResumable(context.Background(), sid, "")
-	if err == nil || rpcCode(err) != "runtime_away" {
-		t.Fatalf("err = %v (code %q), want runtime_away after state load", err, rpcCode(err))
-	}
+		if err := <-done; err == nil || rpcCode(err) != "runtime_away" {
+			t.Fatalf("err = %v (code %q), want runtime_away after state load", err, rpcCode(err))
+		}
+	})
 }
 
 func TestResumeOnlyStillReportsGoneForTrulyMissingSessions(t *testing.T) {

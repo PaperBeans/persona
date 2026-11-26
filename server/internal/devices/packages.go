@@ -83,6 +83,7 @@ type nodePackage struct {
 type packageKey struct {
 	goos, arch, program, hub, base string
 	development                    devicewire.DevelopmentTarget
+	published                      devicewire.DevelopmentTarget
 	hold                           bool
 }
 
@@ -138,6 +139,9 @@ func (d *Devices) packageKey(goos, arch, program string) packageKey {
 	if cfg.DevelopmentTarget != nil {
 		key.development = *cfg.DevelopmentTarget
 		key.hold = key.hold || !key.development.Valid() || key.development.Version != cfg.HubVersion
+	}
+	if cfg.PublishedTarget != nil && cfg.PublishedTarget.ValidPublished() && cfg.PublishedTarget.Version == key.hub {
+		key.published = *cfg.PublishedTarget
 	}
 	return key
 }
@@ -336,8 +340,8 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 	// Resident preflight requires the running program's identity, even if it is installed under another name.
 	for _, dir := range localNodeDirs() {
 		for _, local := range localNodeNames(k.program, plat) {
-			path := filepath.Join(dir, local)
-			if !fileExists(path) {
+			path := update.PackagePath(dir, local)
+			if path == "" {
 				continue
 			}
 			version, inferred := k.hub, false
@@ -365,6 +369,14 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 				}
 			}
 			return nodePackage{Version: version, Program: k.program, goos: k.goos, arch: k.arch, path: path}, nil
+		}
+	}
+	if k.published.Commit != "" {
+		hosted := k
+		hosted.development = k.published
+		pkg, err := d.lookupDevelopment(ctx, hosted)
+		if !errors.Is(err, errNoPublishedPackage) {
+			return pkg, err
 		}
 	}
 	if k.base == "" || k.hub == "dev" || !safeVersion.MatchString(k.hub) {
@@ -448,21 +460,14 @@ func releaseNodeIncompatible(m *update.Manifest) string {
 // nodeBinaryName is a cached or bundled personad for plat. A Windows executable keeps .exe; it must be looked up
 // with the same suffix that the release download and hub update retain.
 func nodeBinaryName(program, plat string) string {
-	if strings.HasPrefix(plat, "windows-") {
-		return program + "-" + plat + ".exe"
-	}
-	return program + "-" + plat
+	return update.PackageName(program, plat)
 }
 
 // localNodeNames are the names a build of program for plat may have in a local node dir, the current one first. A
 // Windows build left by a hub or a person from before Windows builds kept their .exe has none; it is still taken when
 // it is the version it would be sent as (carriesVersion).
 func localNodeNames(program, plat string) []string {
-	name := nodeBinaryName(program, plat)
-	if legacy, ok := strings.CutSuffix(name, ".exe"); ok {
-		return []string{name, legacy}
-	}
-	return []string{name}
+	return update.PackageNames(program, plat)
 }
 
 // localBuildRecent is the window in which equal-sized replacements may still share an mtime on a coarse filesystem

@@ -16,13 +16,18 @@ The configs live outside the repo: releases run in a clean worktree (`docs/opera
 
 ## Naming and configuration
 
-Persona is the only supported spelling. The canonical binary is `personad`, the connector is `persona-link`, runtime state defaults to `~/.persona`, and build/deploy configuration defaults to `~/.config/persona/config.json`. `PERSONA_HOME` and `PERSONA_CONFIG` are the only brand-prefixed overrides. No previous-brand variable, directory, command or URL aliases are read or created.
+Use Persona names for new installs. The canonical binary is `personad`, the connector is `persona-link`, runtime state defaults to `~/.persona`, and build/deploy configuration defaults to `~/.config/persona/config.json`. Use `PERSONA_HOME` and `PERSONA_CONFIG` for explicit overrides. Existing installs can keep the service names, state roots and configuration supported by the [rolling-upgrade compatibility matrix](../protocol/rolling-upgrade-compatibility.md).
 
-See [the naming contract](rename.md) and [the approval-gated cutover](persona-cutover.md). Existing installations require explicit, one-time service/config/data/MCP migration before running this version. A source merge does not change live services. Back up and identify the actual storage first; two independent stores must never be merged automatically.
+The [in-place upgrade checklist](upgrade.md#in-place-upgrade-for-existing-installs) records the supported
+compatibility path and the checks to prepare for an existing install. It does not authorize a production
+update by itself; the production-authorization boundary remains unresolved in
+[#1102](https://github.com/nwverse/persona/issues/1102). The [historical cutover](persona-cutover.md)
+describes an earlier coordinated replacement and keeps its own prohibition. Preserve the active storage and
+select the intended root explicitly if there are two independent stores.
 
-Actual registered bundle / application IDs, App Groups, iCloud containers and keychain access groups come from private configuration and stay unchanged. Naming their carrier variables `PERSONA_*` does not change their values. Other runtime contracts, caches and persisted preferences need the cutover described above. The avatar model remains `persona`: the two bundled choices are Mochi (`persona`) and Milk Frog (`nwverse`); retired choices resolve to Mochi, see [Avatars](../apple/persona.md).
+Keep the registered bundle and application IDs, App Groups, iCloud containers and keychain access groups in the private configuration. The [naming contract](rename.md) describes the native compatibility path for persisted preferences and system identities. The avatar model uses `persona`. The two bundled choices are Mochi (`persona`) and Milk Frog (`nwverse`). Retired choices resolve to Mochi, as described in [Avatars](../apple/persona.md).
 
-The role-specific root resolver reads only canonical service definitions, including HOME-only environment-file overrides; it does not execute shell configuration or expose credentials. Missing required files fail closed. Queries are read-only, and `--prepare` initializes only the selected root without compatibility links.
+The role-specific root resolver reads installed systemd units and their root overrides. For a macOS hub, use the root from its actual LaunchAgent. See [Recover the runtime directory per service](rename.md#recover-the-runtime-directory-per-service). Queries are read-only and missing required files fail closed. `--prepare` initializes the selected root and can add the current-name alias for an existing default root under the former name.
 
 ## Who owns a setting
 

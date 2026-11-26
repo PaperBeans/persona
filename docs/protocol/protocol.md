@@ -5346,6 +5346,12 @@ binding with its bearer token. HTTP 410 withdraws the target. A 404 carrying the
 `X-Persona-Development-Commit` permits a source build for a missing package. During adoption the
 Hub sends `development_hold` and disables fleet deployment. The manager rechecks the target before activation.
 
+Managers that announce `devices.published_packages` can receive `devices.published_target` for
+a serving release or direct deploy. It carries the same build identity and package path, with
+no source repository. The manifest at that path lists size and SHA-256 for canonical raw
+executables. A missing platform can use a release manifest with the same commit, version
+and build. Receivers recheck the target and verify the executable before staging an update.
+
 Native Linux and macOS independent managers follow the confirmed build when `auto_update_nodes` is on.
 A machine's optional `deploy_source` records `hub_package` or `local_build` once the manager has verified
 the binary used for that deployment. See [Node packages](../operations/node-update.md#node-packages).

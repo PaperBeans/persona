@@ -646,6 +646,11 @@ removing version markers through it corrupts the immutable release manifest.
 Protect both enabled installs and disabled-policy cleanup, and let the publisher
 activate its verified directory after Hub health confirmation.
 
+When a managed program is atomically replaced, the installed path can point to the new
+inode while the service runs the old one. Inspect the live executable and its supervisor's
+main PID. Send a resident node's idle reload once per observed pair of inodes, and let a
+manager's service watcher wait for the confirmed Hub build and its own idle boundary (#16517).
+
 ## Durable storage receipts do not extend authority (#1187)
 
 Check current declared keys and queue/blob flags before replay lookup, including

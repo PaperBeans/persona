@@ -152,7 +152,8 @@ class OutboxMessageSender(
 
     override val outbox = store.entries.map { entries ->
         entries.filter { it.state !in hidden }.map {
-            OutboxMessage(it.clientMessageId, it.session, it.text, it.state.delivery, it.error, it.mainTarget, it.createdAt, it.opId)
+            OutboxMessage(it.clientMessageId, it.session, it.text, it.state.delivery, it.error, it.mainTarget, it.createdAt, it.opId,
+                it.reason)
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -258,7 +259,7 @@ class OutboxMessageSender(
             else -> return
         }
         // The sender's own scope: the toast's Undo can come after the chat page that showed it has gone.
-        scope.launch { if (job.isActive) change(message.clientMessageId, setOf(OutboxState.Cancelled), to, message.error) }
+        scope.launch { if (job.isActive) change(message.clientMessageId, setOf(OutboxState.Cancelled), to, message.error, message.reason) }
     }
 
     override suspend fun discard(clientMessageId: String): Boolean =
@@ -291,9 +292,12 @@ class OutboxMessageSender(
         clientMessageId, undecided,
         if (delivered) OutboxState.Sent else OutboxState.Refused)
 
-    private suspend fun change(id: String, from: Set<OutboxState>, to: OutboxState, error: String? = null): Boolean = lifecycle.withLock {
+    /** [reason]: the hub's sentence for the refusal [error], which Undo puts back with it. */
+    private suspend fun change(
+        id: String, from: Set<OutboxState>, to: OutboxState, error: String? = null, reason: String? = null,
+    ): Boolean = lifecycle.withLock {
         check(job.isActive) { "Pairing scope is closed" }
-        store.transition(id, from, to, error).also {
+        (if (reason == null) store.transition(id, from, to, error) else store.transition(id, from, to, error, null, reason)).also {
             if (it) {
                 if (to == OutboxState.Cancelled) receiptState.discard(id)
                 wake.trySend(Unit)
@@ -706,7 +710,11 @@ class OutboxMessageSender(
             return Settlement(entry.state, publish = true)
         }
         val state = classify(result)
-        val error = (result as? MessageTransportResult.HubError)?.let { it.code ?: it.error }
+        val failure = result as? MessageTransportResult.HubError
+        val error = failure?.let { it.code ?: it.error }
+        // The hub's own sentence for a refusal, kept with its code: the chat shows it for a code it has no words for
+        // (agy open in a terminal, #16531), as iOS and the web do.
+        val reason = failure?.takeIf { state == OutboxState.Refused }?.hubWords()
         val current = store.entries.first().firstOrNull { it.clientMessageId == id } ?: return Settlement(state, publish = false)
         // The operation that started this attempt may have been superseded by the composer's fresh retry id.
         // Its late result must not write into the new attempt or change the visible message back to Sending.
@@ -721,9 +729,11 @@ class OutboxMessageSender(
             // that older attempt put an already settled visible message back into Sending.
             if (current.state in settled) return Settlement(current.state, publish = false)
         }
-        val moved = if ((result as? MessageTransportResult.HubError)?.delivered == "none") {
-            store.transition(id, from, state, error, newOperationId())
-        } else store.transition(id, from, state, error)
+        val moved = when {
+            failure?.delivered != "none" -> store.transition(id, from, state, error)
+            reason != null -> store.transition(id, from, state, error, newOperationId(), reason)
+            else -> store.transition(id, from, state, error, newOperationId())
+        }
         val publish = result == MessageTransportResult.Accepted && (moved || store.entries.first().any {
             it.clientMessageId == id && it.state in settled
         })
@@ -892,6 +902,14 @@ class OutboxMessageSender(
 
         /** The hub takes UUIDs only as operation ids. */
         fun newOperationId(): String = java.util.UUID.randomUUID().toString()
+
+        /**
+         * The hub's own sentence for a coded refusal (its `error`, in the request's `Accept-Language`): none without a
+         * code, for an `internal` failure's detail, the bare code, or the status the transport put in for a missing body.
+         */
+        private fun MessageTransportResult.HubError.hubWords(): String? = error?.trim()?.takeIf {
+            code != null && code != "internal" && it.isNotEmpty() && it != code && !it.startsWith("HTTP ")
+        }
 
         fun classify(result: MessageTransportResult): OutboxState = when (result) {
             MessageTransportResult.Held -> OutboxState.Held

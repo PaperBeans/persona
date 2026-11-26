@@ -419,7 +419,7 @@ class HttpInboxAssistantTransport private constructor(
 
     companion object {
         // Different repositories and pairing scopes can refresh at the same time.
-        private val jsonDecodeGate = Semaphore(1)
+        internal val jsonDecodeGate = Semaphore(1)
 
         private fun fixedRequest(baseUrl: String, token: String, client: OkHttpClient): suspend (String, String, RequestBody?, Boolean) -> Response {
             val base = baseUrl.toHttpUrl()

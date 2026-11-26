@@ -80,8 +80,8 @@ func TestConfigRemote(t *testing.T) {
 	}
 	for body, want := range map[string]string{
 		"[core]\n\tbare = false\n[remote \"fork\"]\n\turl = ssh://example.com/me/app.git\n[remote \"origin\"]\n\turl = https://github.com/acme/app\n": "origin https://github.com/acme/app",
-		"[remote \"fork\"]\n\turl = a\n[remote \"upstream\"]\n\turl = b\n":                                                                         "upstream b",
-		"[remote \"mine\"]\n\tURL = \"git@example.com:x/y.git\" ; a comment\n\turl = second\n":                                                     "mine git@example.com:x/y.git",
+		"[remote \"fork\"]\n\turl = a\n[remote \"upstream\"]\n\turl = b\n":                                                                            "upstream b",
+		"[remote \"mine\"]\n\tURL = \"git@example.com:x/y.git\" ; a comment\n\turl = second\n":                                                        "mine git@example.com:x/y.git",
 		"[core]\n\tbare = false\n": " ",
 	} {
 		if name, url, read := configRemote(write(body)); !read || name+" "+url != want {

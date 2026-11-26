@@ -273,7 +273,20 @@ func (c *Client) session(ctx context.Context) (helloed bool, err error) {
 	}
 	c.setPeer(p)
 	defer c.setPeer(nil)
-	return true, closeReason(<-served)
+	select {
+	case err := <-served:
+		return true, closeReason(err)
+	case <-p.Done():
+		// Closed (rpc.Peer.Close): by its own read loop as it ended, or by the service to have everything read
+		// again on a new connection. The socket goes with it (ws.CloseNow above): a closed peer left on an open
+		// socket answers nothing, and nothing would dial again until the hub hung up. Close takes a nil error too
+		// (an orderly close): it still ends the connection, and Run hears why rather than nil.
+		err := p.Err()
+		if err == nil {
+			err = rpc.ErrClosed
+		}
+		return true, closeReason(err)
+	}
 }
 
 // closeReason says why the hub closed the connection: a revoked token or a refused handshake is ErrRejected.

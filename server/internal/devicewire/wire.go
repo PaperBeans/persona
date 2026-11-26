@@ -208,6 +208,7 @@ type Config struct {
 	NodePackagesURL   string             `json:"node_packages_url,omitempty"`
 	NodePackagesProxy string             `json:"node_packages_proxy,omitempty"`
 	DevelopmentTarget *DevelopmentTarget `json:"development_target,omitempty"`
+	PublishedTarget   *DevelopmentTarget `json:"published_target,omitempty"`
 	DevelopmentHold   bool               `json:"development_hold,omitempty"`
 	// LinkPingMS / LinkPingTimeoutMS: the heartbeats of the links and streams, hub.json's link section (0: the
 	// protocol's, link.PingEvery / PingTimeout; tests shorten them). The manager tells Persona Link them too.

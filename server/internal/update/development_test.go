@@ -143,7 +143,7 @@ func TestDevelopmentBackupFailureRotation(t *testing.T) {
 		})
 		var failure backupFailure
 		if !errors.As(err, &failure) || failure.Reason != reason || strings.Join(steps, ",") != "preflight" {
-			t.Fatalf("unexpected failure or steps: %+v %v", failure, steps)
+			t.Fatalf("unexpected failure or steps: reason %q, want %q; steps %v; err %v", failure.Reason, reason, steps, err)
 		}
 	}
 	run("directory")
@@ -152,14 +152,16 @@ func TestDevelopmentBackupFailureRotation(t *testing.T) {
 		t.Fatal("missing first failure", err)
 	}
 	cfg.Backup.Directory = ""
-	input["hub_database"] = "password=fixture-secret invalid-key=private"
+	// Rejected before libpq is loaded (a NUL byte), so the case is the same on a host without libpq; the secret must
+	// still stay out of the log.
+	input["hub_database"] = "password=fixture-secret\x00invalid-key=private"
 	run("database")
 	previous, err := os.ReadFile(filepath.Join(dir, "backup.prev.log"))
 	if err != nil || string(previous) != string(old) {
 		t.Fatal("previous log was not preserved", err)
 	}
 	current, err := os.ReadFile(filepath.Join(dir, "backup.log"))
-	if err != nil || !strings.Contains(string(current), "invalid database connection parameters") || strings.Contains(string(current), "fixture-secret") {
+	if err != nil || !strings.Contains(string(current), "invalid database connection") || strings.Contains(string(current), "fixture-secret") {
 		t.Fatal("incorrect current log", err)
 	}
 }

@@ -165,7 +165,6 @@ function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
         <span className="min-w-0 truncate">{w.text}</span>
         <span aria-hidden className="h-px min-w-4 flex-1 bg-line" />
       </div>
-      </div>
     );
   }
   const text = isInterruptNotice(item) ? t("chat-chatview.interrupted") : item.text ?? "";

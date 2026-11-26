@@ -255,6 +255,14 @@ func (n *Node) stopWithCause(ctx context.Context, id string, retire bool, cause 
 // (unlock releases it) when ok; ok false with no error when it is not running.
 func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, ok bool, err error) {
 	if !validID(id) && !n.agyPaneRow(id) {
+		// A runtime's session (agy-b-<conversation>, its runtime id first) that no runtime lists any more reaches here:
+		// a session of a runtime that does is answered by that runtime before this (runtimeFor). Nothing runs it on this
+		// computer, so it is not running, as for a hex id with no pane; a continuation that stops its to-do's old Agent
+		// first goes on (#16376). A pane's row of another work agent (cursor) is not this: it runs, and is refused as
+		// before; so is an id of any other shape.
+		if _, running := n.agent(id); !running && runtimeIDRe.MatchString(id) {
+			return nil, a, false, nil
+		}
 		return nil, a, false, fmt.Errorf("invalid session id %q", id)
 	}
 	no := func(code, why string) (func(), host.Agent, bool, error) {

@@ -327,6 +327,9 @@ func (d *Devices) Configure(cfg devicewire.Config) {
 		if first { // after a start from the own list: what its connections could not do without the hub
 			d.afterOwnList(ctx)
 		}
+		if cfg.AutoUpdateNodes && (!old.AutoUpdateNodes || old.HubVersion != cfg.HubVersion) {
+			go d.updateNodes(ctx)
+		}
 	}
 	d.fleetRegroup()
 	// Where the hub is, what it is called, whether the computer waits to be confirmed: Persona Link shows them.
@@ -382,6 +385,10 @@ func (d *Devices) config() devicewire.Config {
 }
 
 func (d *Devices) hubVersion() string { return d.config().HubVersion }
+
+// AdvertisedHubVersion is the last build advertised on the authenticated bus.
+// The service watcher also rechecks it after its own bus has shut down.
+func (d *Devices) AdvertisedHubVersion() string { return d.hubVersion() }
 
 // errPendingUnknown: the hub has not said which machines wait to be confirmed.
 var errPendingUnknown = errors.New("the hub has not said which computers wait to be confirmed")

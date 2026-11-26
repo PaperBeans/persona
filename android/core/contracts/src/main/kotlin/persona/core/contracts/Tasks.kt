@@ -510,6 +510,18 @@ fun todoHandOffPrompt(title: String, notes: String, instruction: String): String
 @Serializable(with = TodosResponseSerializer::class)
 data class TodosResponse(val todos: List<Todo> = emptyList())
 
+/**
+ * Streaming wire envelope for `GET /api/v1/todos` (complete or paginated with `?limit`/`?cursor`).
+ * Uses the generated serializer so the whole payload is never materialized into a `JsonObject` DOM;
+ * each [Todo] element still decodes through [TodoSerializer].
+ */
+@Serializable
+data class TodosPageResponse(
+    val todos: List<Todo> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String? = null,
+    @SerialName("has_more") val hasMore: Boolean? = null,
+)
+
 /** A lifecycle card's stable identity; incremental feeds upsert these without replacing the held set. */
 @Serializable
 data class AssistantTaskCard(
@@ -542,7 +554,15 @@ data class FeedResponse(
     @SerialName("task_cards") val taskCards: List<AssistantTaskCard>? = null,
     /** Stable pagination: null on older hubs, empty at EOF, otherwise an opaque continuation cursor. */
     @SerialName("next_cursor") val nextCursor: String? = null,
-)
+) {
+    companion object {
+        /**
+         * Generated serializer for streaming `InputStream` decoding without materializing a whole-response
+         * `JsonObject` DOM; nested [FeedItem] and [TaskPlan] entries still decode through their [WireSerializer]s.
+         */
+        fun streamingSerializer(): kotlinx.serialization.KSerializer<FeedResponse> = generatedSerializer()
+    }
+}
 
 /** The todos changed: pull them again. */
 @KeepGeneratedSerializer
