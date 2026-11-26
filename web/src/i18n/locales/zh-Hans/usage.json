@@ -52,9 +52,13 @@
   "protect_label": "剩余 {percent}% 时暂停调度",
   "pin_account": "将 {name} 固定到侧栏",
   "unpin_account": "取消将 {name} 固定到侧栏",
+  "pin_window": "将 {name} {window} 固定到侧栏",
+  "unpin_window": "取消将 {name} {window} 固定到侧栏",
+  "pin_window_model": "将 {name} {window}（{model}）固定到侧栏",
+  "unpin_window_model": "取消将 {name} {window}（{model}）固定到侧栏",
   "pin_title": "固定到侧栏",
   "unpin_title": "取消固定",
-  "pinned_summary": "侧栏已固定 {count} 个账号",
-  "pinned_fallback": "固定账号暂不可用 · 已自动展示",
+  "pinned_summary": "侧栏已固定 {count} 项",
+  "pinned_fallback": "固定项暂不可用 · 已自动展示",
   "reset_pinned": "恢复默认"
 }

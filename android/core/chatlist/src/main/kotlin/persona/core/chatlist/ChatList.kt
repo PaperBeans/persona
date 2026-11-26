@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
@@ -18,9 +19,21 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private data class ScrollEdgeSnapshot(
+    val index: Int,
+    val offset: Int,
+    val firstVisibleKey: Any?,
+    val newestKey: String?,
+    val canScrollBackward: Boolean,
+    val scrolling: Boolean,
+)
 
 @Stable
 class ChatListState internal constructor(
@@ -117,6 +130,9 @@ fun ChatListEffects(
     val atLatest by rememberUpdatedState(canFollowEnd)
     val focusManager by rememberUpdatedState(LocalFocusManager.current)
     val keyboard by rememberUpdatedState(LocalSoftwareKeyboardController.current)
+    val density = LocalDensity.current.density
+    val leaveThreshold by rememberUpdatedState((LEAVE_BOTTOM_THRESHOLD_DP * density).roundToInt())
+    val returnTolerance by rememberUpdatedState((RETURN_BOTTOM_TOLERANCE_DP * density).roundToInt())
     SideEffect { state.rowIds = rowIds }
     val owner = LocalLifecycleOwner.current
     val lifecycle by owner.lifecycle.currentStateAsState()
@@ -133,19 +149,124 @@ fun ChatListEffects(
         onDispose { owner.lifecycle.removeObserver(observer); state.epoch++; state.persist() }
     }
     LaunchedEffect(state) {
-        state.list.interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Start) {
-                // As on iOS (`ChatView`'s `.interacting` scroll phase): a real drag on the conversation puts the keyboard
-                // away and takes the focus from whatever field has it, a request card's too. Only a finger past the touch
-                // slop starts a DragInteraction: a tap and a scroll the app starts (following the newest message, a jump)
-                // do not, and they leave the keyboard up (#4210).
-                focusManager.clearFocus()
-                keyboard?.hide()
-                state.epoch++
-                state.dragged = true
-                state.restored = true
-                state.position = state.position.copy(followsEnd = false)
-                freeze()
+        val activeDrags = mutableSetOf<DragInteraction.Start>()
+        var userScrollPending = false
+        var settleAfterStop: Job? = null
+        var handledLatestRequest = state.latestRequest
+
+        fun scrollEdge(): ScrollEdgeSnapshot {
+            val index = state.list.firstVisibleItemIndex
+            return ScrollEdgeSnapshot(
+                index = index,
+                offset = state.list.firstVisibleItemScrollOffset,
+                firstVisibleKey = state.list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.key,
+                newestKey = latestRows.firstOrNull(),
+                canScrollBackward = state.list.canScrollBackward,
+                scrolling = state.list.isScrollInProgress,
+            )
+        }
+        var anchor = scrollEdge()
+
+        fun reconcileFollow(edge: ScrollEdgeSnapshot = scrollEdge()) {
+            val dragging = activeDrags.isNotEmpty()
+
+            if (state.latestRequest != handledLatestRequest) {
+                handledLatestRequest = state.latestRequest
+                userScrollPending = false
+                anchor = edge
+            }
+            if (state.programmaticScroll) {
+                if (!dragging) userScrollPending = false
+                anchor = edge
+                return
+            }
+
+            val newestChanged = edge.newestKey != anchor.newestKey
+            val leftBottom = hasLeftBottom(edge.index, edge.offset, edge.canScrollBackward, leaveThreshold)
+            val followingGesture = (dragging || userScrollPending) && state.followsEnd
+            val rebasedIndex = if (followingGesture && leftBottom) {
+                // LazyColumn retains the old key when new rows are prepended. Its index can grow with no drag.
+                state.list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == anchor.firstVisibleKey }?.index
+            } else null
+            if (followingGesture && leftBottom) {
+                val movedAway = when {
+                    rebasedIndex != null -> {
+                        val offset = if (anchor.index == 0 && rebasedIndex > 0) maxOf(anchor.offset, leaveThreshold) else anchor.offset
+                        movedAwayFromBottom(edge.index, edge.offset, rebasedIndex, offset)
+                    }
+                    !newestChanged -> movedAwayFromBottom(edge.index, edge.offset, anchor.index, anchor.offset)
+                    else -> {
+                        // A fling can carry the anchor offscreen. Compare the keys' order, since some rendered
+                        // rows are absent from rowIds and its indexes then differ from the layout indexes.
+                        val rows = latestRows
+                        val anchorRank = (anchor.firstVisibleKey as? String)?.let(rows::indexOf) ?: -1
+                        val currentRank = (edge.firstVisibleKey as? String)?.let(rows::indexOf) ?: -1
+                        anchorRank >= 0 && currentRank > anchorRank
+                    }
+                }
+                if (movedAway) {
+                    state.position = state.position.copy(followsEnd = false)
+                    freeze()
+                }
+            }
+
+            if (!dragging && !edge.scrolling && settleAfterStop == null) {
+                val settledAtBottom = isAtBottom(edge.index, edge.offset, edge.canScrollBackward, returnTolerance)
+                val missedFollow = state.followsEnd && userScrollPending && newestChanged && !settledAtBottom &&
+                    rebasedIndex == edge.index && edge.offset == anchor.offset
+                if (atLatest && state.dragged && state.restored && (missedFollow || (!state.followsEnd && settledAtBottom))) {
+                    state.returnToLatest()
+                    handledLatestRequest = state.latestRequest
+                }
+                userScrollPending = false
+                anchor = edge
+            }
+        }
+
+        launch {
+            state.list.interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> {
+                        // As on iOS (`ChatView`'s `.interacting` scroll phase): a real drag on the conversation puts the keyboard
+                        // away and takes the focus from whatever field has it, a request card's too. Only a finger past the touch
+                        // slop starts a DragInteraction: a tap and a scroll the app starts (following the newest message, a jump)
+                        // do not, and they leave the keyboard up (#4210).
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                        settleAfterStop?.cancel()
+                        settleAfterStop = null
+                        activeDrags += interaction
+                        userScrollPending = true
+                        if (!state.restored) state.epoch++
+                        state.dragged = true
+                        state.restored = true
+                        reconcileFollow()
+                    }
+                    is DragInteraction.Stop -> {
+                        activeDrags -= interaction.start
+                        if (activeDrags.isEmpty() && userScrollPending) {
+                            // Compose emits Stop before starting the fling in a separate coroutine.
+                            settleAfterStop?.cancel()
+                            settleAfterStop = launch {
+                                withFrameNanos { }
+                                settleAfterStop = null
+                                reconcileFollow()
+                            }
+                        }
+                        reconcileFollow()
+                    }
+                    is DragInteraction.Cancel -> {
+                        activeDrags -= interaction.start
+                        reconcileFollow()
+                    }
+                }
+            }
+        }
+
+        launch {
+            snapshotFlow { scrollEdge() }.collect { edge ->
+                state.capture()
+                reconcileFollow(edge)
             }
         }
     }
@@ -196,14 +317,6 @@ fun ChatListEffects(
             state.programmaticScroll = true
             try { state.list.scrollToItem(0) } finally { state.programmaticScroll = false }
         }
-    }
-    LaunchedEffect(state) {
-        snapshotFlow { Triple(state.list.firstVisibleItemIndex, state.list.firstVisibleItemScrollOffset, state.list.isScrollInProgress) }
-            .distinctUntilChanged().collect { (index, offset, scrolling) ->
-                state.capture()
-                if (atLatest && state.dragged && state.restored && !state.programmaticScroll && !scrolling && index == 0 && offset == 0 && !state.followsEnd)
-                    state.returnToLatest()
-            }
     }
     LaunchedEffect(state, hasOlder, loadingOlder, rowIds, foreground) {
         if (!foreground) return@LaunchedEffect

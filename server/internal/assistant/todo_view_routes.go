@@ -119,6 +119,7 @@ func (s *Service) viewed(ctx context.Context, list []listedTodo, now time.Time) 
 	p := s.todoProjectionOf(ctx, list, now)
 	for i := range list {
 		list[i].View = &p.views[i]
+		list[i].Wait = p.waits[i]
 	}
 	return p
 }

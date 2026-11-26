@@ -167,7 +167,7 @@ describe("routine run history loading", () => {
 
     expect(host.textContent).toContain(task.title);
     expect(history().textContent).toMatch(failedText);
-    expect(history().textContent).not.toContain(run.title);
+    expect(history().textContent).toContain(run.title);
     expect(history().textContent).not.toContain("加载中");
     expect(retry()).toBeDefined();
 
@@ -186,6 +186,7 @@ describe("routine run history loading", () => {
     runsReply = () => pending;
     await render();
     expect(history().textContent).toContain("加载中");
+    expect(rowOf(task.title!)).toBeDefined();
 
     runsReply = () => json({ runs: [run] });
     await refresh();
@@ -240,6 +241,12 @@ it("pauses a routine without changing its saved selections or execution settings
     time: task.time, weekdays: [], enabled: false, every_minutes: 0, permission_mode: "",
   });
   expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+  await act(async () => root.render(null));
+  down = true;
+  await render();
+  expect(host.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
+  expect(host.textContent).toContain("hub unreachable");
 });
 
 describe("a change the hub refuses while the list cannot be read again", () => {

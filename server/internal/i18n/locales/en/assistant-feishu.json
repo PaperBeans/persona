@@ -163,5 +163,15 @@
   "source_report_full_notice_chat": "This answer will go under the original message in {minutes} minutes. Reply with /noreply to cancel.\n\n{text}",
   "source_report_file_notice": "The attached answer will go under the original message in {minutes} minutes. Send /noreply here to cancel.",
   "source_report_file_notice_chat": "The attached answer will go under the original message in {minutes} minutes. Reply to this with /noreply to cancel.",
-  "source_report_no_final": "The task is complete. Its final answer was unavailable."
+  "source_report_no_final": "The task is complete. Its final answer was unavailable.",
+  "handoff_decision_source": "Lark bot",
+  "handoff_decision_title": "{sender} in {chat}",
+  "handoff_decision_background": "Asked: {question} — Draft: {draft}",
+  "handoff_decision_post": "Post the reply",
+  "handoff_decision_post_leads": "The bot posts this reply in the group, where everyone can read it.",
+  "handoff_decision_drop": "Don't post",
+  "handoff_decision_drop_leads": "Nothing is posted and the question is dropped.",
+  "handoff_decision_cost": "{sender} keeps waiting for an answer.",
+  "handoff_reply_header": "{sender} asked: {question}",
+  "handoff_reply_footer": "Answered by {owner}'s AI assistant, for reference."
 }

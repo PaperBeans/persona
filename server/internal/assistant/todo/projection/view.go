@@ -23,6 +23,7 @@ import (
 // Someday; a zero time is none.
 type placement struct {
 	assistantwire.TodoSummary
+	wait                 *assistantwire.TodoWait
 	deadline, wake, back time.Time
 }
 
@@ -376,13 +377,16 @@ func (r *reading) ownAsk() (assistantwire.OwnerAsk, *Ask) {
 func canWaitDecision(a *Ask) bool { return a.Outcome == outcomeDecide && a.ForBriefing }
 
 // canWaitAsk reports whether decision ask a stays in the Can wait fold at r.now.
-// Under todos_v2, non-critical can_wait decisions age into active Needs you after 48 hours.
+// Under todos_v2, non-critical can_wait decisions age into active Needs you after the configured SLA
+// (default 48h; disabled when CanWaitSLADisabled is true).
 func (r *reading) canWaitAsk(a *Ask) bool {
 	if !canWaitDecision(a) {
 		return false
 	}
-	if r.f.TodosV2 && !a.AskedAt.IsZero() && !r.now.Before(a.AskedAt.Add(canWaitEscalateAfter)) {
-		return false
+	if r.f.TodosV2 && !a.AskedAt.IsZero() {
+		if d, ok := canWaitSLADuration(r.f); ok && !r.now.Before(a.AskedAt.Add(d)) {
+			return false
+		}
 	}
 	return true
 }
@@ -416,7 +420,13 @@ func (r *reading) ownerDecides() (placement, bool) {
 			return p, true
 		}
 		if r.pendingReviewWaiting() {
-			if since := pendingReviewSince(r.f); !since.IsZero() && !r.now.Before(since.Add(pendingReviewEscalateAfter)) {
+			since := pendingReviewSince(r.f)
+			d, ok := pendingReviewSLADuration(r.f)
+			if !ok {
+				p.Line, p.Since = line(assistantwire.TodoLineKeyDecision), utc(since)
+				return p, true
+			}
+			if !since.IsZero() && !r.now.Before(since.Add(d)) {
 				p.Line, p.Since = line(assistantwire.TodoLineKeyDecision), utc(since)
 				return p, true
 			}
@@ -528,6 +538,7 @@ func (r *reading) parked() (placement, bool) {
 	if rv := latestReview(sv); rv != nil && rv.Verdict == reviewParked {
 		p.Since = utc(rv.At)
 	}
+	p.wait = buildParkedWait(sv)
 	p.wake = sv.Parked.Until
 	return p, true
 }
@@ -611,6 +622,7 @@ func (r *reading) waiting() (placement, bool) {
 	if prs := openPRs(r.f, r.now); len(prs) > 0 && !r.settled() {
 		p := r.at(assistantwire.TodoPhaseWaiting, assistantwire.TodoListSectionWaiting, assistantwire.TodoReasonPrOpen)
 		p.Line = line(assistantwire.TodoLineKeyPrOpen)
+		p.wait = buildPRWait(prs[0])
 		return p, true
 	}
 	if rn, ok := firstRun(r.runs, runLimited); ok {
@@ -620,6 +632,7 @@ func (r *reading) waiting() (placement, bool) {
 			p.Line = line(assistantwire.TodoLineKeyUsageLimit, "run", rn.title(), assistantwire.TodoLineArgResetsAt, stamp(*reset))
 			p.wake = reset.Add(usageLimitGrace)
 		}
+		p.wait = buildUsageLimitWait(rn)
 		return p, true
 	}
 	if rn, ok := firstRun(r.runs, runWaits); ok {
@@ -629,6 +642,7 @@ func (r *reading) waiting() (placement, bool) {
 		if w := rn.s.Work.WakeAt; w != nil {
 			p.wake = *w
 		}
+		p.wait = buildRunWaitsWait(rn)
 		return p, true
 	}
 	return placement{}, false
@@ -707,9 +721,13 @@ func (r *reading) withSteps(own placement) placement {
 			own.Steps.Done++
 		} else if !f.closed() {
 			step := s
-			if r.f.TodosV2 && !s.TodosV2 {
+			if r.f.TodosV2 {
 				cp := *s
 				cp.TodosV2 = true
+				cp.PendingReviewSLAHours = r.f.PendingReviewSLAHours
+				cp.PendingReviewSLADisabled = r.f.PendingReviewSLADisabled
+				cp.CanWaitSLAHours = r.f.CanWaitSLAHours
+				cp.CanWaitSLADisabled = r.f.CanWaitSLADisabled
 				step = &cp
 			}
 			sr := read(step, r.now)
@@ -750,6 +768,10 @@ func (r *reading) withSteps(own placement) placement {
 	out.Seen = r.seenSince(latest(r.last, latestOf(parts)))
 	if lead.step != nil {
 		out.Line = withArg(out.Line, "step", lead.step.Title)
+		if out.wait != nil {
+			out.wait = cloneWait(out.wait)
+			out.wait.Step = lead.step.Title
+		}
 		out.Inactive, out.Steps, out.back = time.Time{}, own.Steps, time.Time{}
 	}
 	return out
@@ -869,17 +891,25 @@ func moments(f *Facts, now time.Time) []time.Time {
 	if f.TodosV2 {
 		if reviewState(f) == reviewPending {
 			if since := pendingReviewSince(f); !since.IsZero() {
-				add(since.Add(pendingReviewEscalateAfter))
+				if d, ok := pendingReviewSLADuration(f); ok {
+					add(since.Add(d))
+				}
 			}
 		}
 		if a := openAsk(f); a != nil && canWaitDecision(a) && !a.AskedAt.IsZero() {
-			add(a.AskedAt.Add(canWaitEscalateAfter))
+			if d, ok := canWaitSLADuration(f); ok {
+				add(a.AskedAt.Add(d))
+			}
 		}
 	}
 	for i := range f.Steps {
-		if f.TodosV2 && !f.Steps[i].TodosV2 {
+		if f.TodosV2 {
 			cp := f.Steps[i]
 			cp.TodosV2 = true
+			cp.PendingReviewSLAHours = f.PendingReviewSLAHours
+			cp.PendingReviewSLADisabled = f.PendingReviewSLADisabled
+			cp.CanWaitSLAHours = f.CanWaitSLAHours
+			cp.CanWaitSLADisabled = f.CanWaitSLADisabled
 			out = append(out, moments(&cp, now)...)
 		} else {
 			out = append(out, moments(&f.Steps[i], now)...)

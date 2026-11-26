@@ -76,7 +76,7 @@ func (s *Service) syncCodexInteractions(machine string, params json.RawMessage) 
 			}
 		}
 		m[ix.ID] = pd
-		added = append(added, ix)
+		added = append(added, pd.ix)
 	}
 	now := time.Now()
 	quiet := map[string]bool{}
@@ -133,6 +133,7 @@ func (s *Service) syncCodexInteractions(machine string, params json.RawMessage) 
 // Codex no longer asks it (prompt_changed), the node's next list has what is there now.
 func (s *Service) codexPending(machine string, ix proto.Interaction) *pending {
 	ix.AlwaysHonored, ix.ToolTitle, ix.ToolNameTitle = nil, "", "" // the manager's word, never a node's (nodeCard)
+	ix.NoHandBack = false                                          // Codex TUI cards can always be handed back to the terminal
 	p := &pending{ix: ix, codex: true}
 	p.local = func(answerCtx context.Context, r proto.Resolution) error {
 		if r.Dismiss { // handed back to the computer: the same question asked again later is announced (#3766)

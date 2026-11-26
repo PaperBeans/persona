@@ -80,6 +80,20 @@ func (r *recordingIdleAuditStore) PutSetting(ctx context.Context, key string, va
 
 func (r *recordingIdleAuditStore) AddExtensionAudit(_ context.Context, id, action, actor string, detail json.RawMessage) error {
 	r.mu.Lock()
+	if action == idleArchiveAuditActionSuccess || action == idleArchiveAuditActionRefused {
+		var next idleArchivePluginAuditDetail
+		if err := json.Unmarshal(detail, &next); err != nil {
+			r.mu.Unlock()
+			return err
+		}
+		for _, row := range r.rows {
+			var prior idleArchivePluginAuditDetail
+			if json.Unmarshal(row.detail, &prior) == nil && prior.AuditID == next.AuditID {
+				r.mu.Unlock()
+				return nil
+			}
+		}
+	}
 	r.rows = append(r.rows, struct {
 		plugin, action, actor string
 		detail                json.RawMessage

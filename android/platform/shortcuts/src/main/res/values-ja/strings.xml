@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="shortcuts_widget_label">Agents</string>
     <string name="shortcuts_widget_description">あなたの対応待ち・作業中・完了したエージェント</string>
+    <string name="shortcuts_ask_widget_description">Personaとのメインチャットを開いてすぐに入力</string>
+    <string name="shortcuts_ask_widget_subtitle">メインチャット</string>
     <string name="shortcuts_approve_title">最初の保留中を承認</string>
     <string name="shortcuts_loading">対応待ちを確認しています…</string>
     <string name="shortcuts_not_paired">まだペアリングされていません。Personaを開いて、ハブのペアリング用QRコードをスキャンしてください。</string>

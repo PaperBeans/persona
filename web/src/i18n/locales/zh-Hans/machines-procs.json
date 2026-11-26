@@ -1,7 +1,6 @@
 {
   "title": "端口与进程",
   "subtitle": "按需查看监听端口与运行中的进程，命令行敏感参数会自动脱敏。",
-  "machine_label": "机器",
   "no_online_machines": "当前没有在线机器可供检查。",
   "tab_ports": "监听端口",
   "tab_processes": "进程列表",

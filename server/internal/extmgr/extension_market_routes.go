@@ -84,6 +84,7 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 		}
 		writeErrCode(w, http.StatusBadRequest, code, err)
 	}
+	h.marketKeyRoutes(api, base, gate, fail)
 	api.HandleFunc("GET "+base+"/markets", gate(func(w http.ResponseWriter, r *http.Request) {
 		h.awaitFirstReads(r.Context())
 		writeJSON(w, map[string]any{"markets": marketsOut(r, h.marketViews())})
@@ -95,6 +96,8 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 			// TokenFrom: use the token of this registered market (one account's token reading several private
 			// repositories), never seen by the caller.
 			TokenFrom string `json:"token_from,omitempty"`
+			// Keys: the private market's trusted public keys ("ed25519:<base64>"); its catalog must verify with one.
+			Keys []string `json:"keys,omitempty"`
 		}
 		if !readExtensionJSON(w, r, &in) {
 			return
@@ -116,7 +119,7 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 			}
 			in.Token = tok
 		}
-		v, err := h.marketAdd(r.Context(), in.Spec, in.Token)
+		v, err := h.marketAdd(r.Context(), in.Spec, in.Token, in.Keys...)
 		if err != nil {
 			fail(w, err, "market_failed")
 			return

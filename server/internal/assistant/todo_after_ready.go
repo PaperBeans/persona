@@ -391,11 +391,20 @@ func todoHasOpenPR(t Todo, delivery []string) bool {
 // todoStageGateNode projects a live Todo into a pure stagegate.Node for todos_v2 dependency evaluation.
 // Cancelled and failed-start to-dos never report Done, Accepted, Stage, or Contracts so evaluation always fails closed.
 func todoStageGateNode(t Todo, requireAccepted bool, delivery []string) stagegate.Node {
+	return todoStageGateNodeWithRule(t, requireAccepted, delivery, nil)
+}
+
+func todoStageGateNodeWithRule(t Todo, requireAccepted bool, delivery []string, overrideRule *todoStageUnlockRule) stagegate.Node {
 	afterIDs := cleanIDs(t.After)
 	effectiveRequireAccepted := requireAccepted || t.RequireAcceptedAfter
 	var edges []stagegate.Edge
 	if len(afterIDs) > 0 {
-		if rule, ok := parseTodoStageUnlockRule(t); ok {
+		rule, hasRule := parseTodoStageUnlockRule(t)
+		if !hasRule && overrideRule != nil && (overrideRule.Stage != "" || len(overrideRule.Contracts) > 0) {
+			rule = *overrideRule
+			hasRule = true
+		}
+		if hasRule {
 			sortedIDs := slices.Clone(afterIDs)
 			slices.Sort(sortedIDs)
 			edges = make([]stagegate.Edge, 0, len(sortedIDs))
@@ -527,10 +536,21 @@ func (s *Service) checkTodoAfterReadyStageGate(ctx context.Context, candidate To
 	}
 	slices.Sort(ids)
 
+	var candidateUnlockRule *todoStageUnlockRule
+	if _, hasNotesRule := parseTodoStageUnlockRule(candidate); !hasNotesRule {
+		if rule, ok := s.todoStageUnlockRuleFromBlockers(ctx, candidate.ID); ok {
+			candidateUnlockRule = &rule
+		}
+	}
+
 	nodes := make([]stagegate.Node, 0, len(ids))
 	nodeByID := make(map[string]stagegate.Node, len(ids))
 	for _, id := range ids {
-		n := todoStageGateNode(reachable[id], reqAcceptedByID[id], deliveryByID[id])
+		var ruleOverride *todoStageUnlockRule
+		if id == candidate.ID {
+			ruleOverride = candidateUnlockRule
+		}
+		n := todoStageGateNodeWithRule(reachable[id], reqAcceptedByID[id], deliveryByID[id], ruleOverride)
 		nodes = append(nodes, n)
 		nodeByID[id] = n
 	}
@@ -873,7 +893,8 @@ func (s *Service) pruneTodoReadyWakes(ctx context.Context) {
 // maybeEmitTodoReady evaluates candidate and, if ready and not already woken for its current after set, queues a
 // todo_ready supervision signal for its owning supervisor conversation.
 func (s *Service) maybeEmitTodoReady(ctx context.Context, candidate Todo) {
-	if _, ready := s.todoAfterReadyState(ctx, candidate); !ready {
+	prereqs, ready := s.todoAfterReadyState(ctx, candidate)
+	if !ready {
 		return
 	}
 	key := todoReadyKey(candidate)
@@ -898,11 +919,20 @@ func (s *Service) maybeEmitTodoReady(ctx context.Context, candidate Todo) {
 		todoReadyKey(current) != key {
 		return
 	}
+	var extraPRs []string
+	for _, p := range prereqs {
+		extraPRs = append(extraPRs, p.MergedPRs...)
+	}
+	detail := ""
+	if prURLs := s.collectUpstreamPRURLs(ctx, candidate.ID, current.After, nil, extraPRs); len(prURLs) > 0 {
+		detail = "upstream PRs: " + strings.Join(prURLs, ", ")
+	}
 	s.signal(superviseSignal{
-		Todo: candidate.ID,
-		Kind: sigTodoReady,
-		Key:  key,
-		To:   to,
+		Todo:   candidate.ID,
+		Kind:   sigTodoReady,
+		Key:    key,
+		To:     to,
+		Detail: detail,
 	})
 }
 

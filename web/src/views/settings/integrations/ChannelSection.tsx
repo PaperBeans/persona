@@ -1,34 +1,27 @@
 // Channel state and unified sections (Account & Connection binding + Chat & Delivery routing) for IntegrationDetail (#14847).
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { t } from "../../../i18n";
-import type { ChannelDetail } from "../../../lib/channels";
+import { settingsTarget, type ChannelDetail } from "../../../lib/channels";
 import { Loading } from "../../../ui/atoms";
-import { ChannelBindingBlock, ChannelDeliveryControls, ChannelStateInline } from "../Channels";
+import { ChannelBindingBlock, ChannelDeliveryControls, ChannelTargetControls, ChannelStateInline } from "../Channels";
 import { ConfigurationForm } from "../configuration/ConfigurationForm";
-import { Group, SettingsHint } from "../SettingsParts";
+import { Group, Row, SettingsHint } from "../SettingsParts";
 import { useChannelController, type ChannelController } from "../useChannelController";
-import { channelRoutingSource } from "./model";
+import { channelRoutingSource, type IntegrationTarget } from "./model";
 
 export { ChannelBindingBlock, ChannelStateInline, useChannelController, type ChannelController };
 
 /** Chat & Delivery controls: enable, target, thread_mode & thread_idle_hours, features, capabilities, test message. */
-export function ChannelDeliveryBlock({ ctl, onSettings }: { ctl: ChannelController; onSettings?: (url: string) => void }) {
+export function ChannelDeliveryBlock({ ctl, target, targetOnly, onSettings }: {
+  ctl: ChannelController;
+  target: IntegrationTarget;
+  targetOnly?: boolean;
+  onSettings?: (url: string) => void;
+}) {
   const detailRef = useRef<ChannelDetail | null>(ctl.detail);
   detailRef.current = ctl.detail;
 
   const d = ctl.detail;
-  const routingSource = useMemo(() => {
-    if (!d) return null;
-    return channelRoutingSource(
-      d.id,
-      ctl.reloadKey,
-      () => detailRef.current ?? d,
-      ctl.adopt,
-    );
-    // Keep the ConfigurationForm controller mounted across its own saves; only remount on channel change or explicit reload.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d?.id, ctl.reloadKey, ctl.adopt]);
-
   if (!d) {
     if (ctl.error) {
       return (
@@ -47,17 +40,33 @@ export function ChannelDeliveryBlock({ ctl, onSettings }: { ctl: ChannelControll
     return null;
   }
 
-  return (
+  const link = d.settings_url && settingsTarget(d.settings_url);
+  const selfLink = link && !link.anchor && link.sub === target.id && link.tab === (target.kind === "extension" ? "extensions" : "connectors");
+  const openSettings = selfLink ? undefined : onSettings;
+  const settingsUrl = d.settings_url;
+
+  const showRouting = d.source === "plugin" && (d.kind === "im" || d.kind === "mention") && d.installed && !d.read_only;
+  const controls = targetOnly ? <ChannelTargetControls ctl={ctl} onSettings={openSettings} /> : (
     <ChannelDeliveryControls
       ctl={ctl}
-      onSettings={onSettings}
+      onSettings={openSettings}
       afterTarget={
-        routingSource && d.kind !== "app" ? (
-          <div className="mb-6" data-channel-routing>
-            <ConfigurationForm source={routingSource} />
-          </div>
+        showRouting ? (
+          <fieldset className="mb-6 min-w-0" data-channel-routing disabled={!!ctl.busy && ctl.busy !== "routing"}>
+            <ConfigurationForm source={channelRoutingSource(d.id, ctl.reloadKey, () => detailRef.current ?? d, ctl.updateRouting)} />
+          </fieldset>
         ) : undefined
       }
     />
+  );
+  return (
+    <>
+      {controls}
+      {d.read_only && settingsUrl && openSettings && (
+        <Group footer={t("settings-channels.settings_elsewhere")}>
+          <Row label={t("settings-channels.more_settings")} onClick={() => openSettings(settingsUrl)} />
+        </Group>
+      )}
+    </>
   );
 }

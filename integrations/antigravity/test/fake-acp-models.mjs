@@ -84,8 +84,8 @@ const mixedPermissions = [
     ],
   },
 ]
-const askPermissions = (request, permissions) => {
-  pendingPermissions = { promptId: request.id, open: new Set() }
+const askPermissions = (request, permissions, result = { stopReason: 'end_turn' }) => {
+  pendingPermissions = { promptId: request.id, open: new Set(), result }
   for (const permission of permissions) {
     pendingPermissions.open.add(permission.id)
     appendFileSync(`${directory}/calls.jsonl`, `${JSON.stringify({ method: 'fake/permission', id: permission.id })}\n`)
@@ -103,9 +103,9 @@ const askPermissions = (request, permissions) => {
 const answerPermission = (request) => {
   if (!pendingPermissions?.open.delete(request.id)) return false
   if (pendingPermissions.open.size === 0) {
-    const promptId = pendingPermissions.promptId
+    const { promptId, result } = pendingPermissions
     pendingPermissions = undefined
-    send({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'end_turn' } })
+    send({ jsonrpc: '2.0', id: promptId, result })
   }
   return true
 }
@@ -116,7 +116,7 @@ const complete = (request, result, error) => {
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: 'auto' } } })
     setImmediate(() => send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: 'default' } } }))
   }
-  if (['session/set_model', 'session/set_mode'].includes(method) && !error) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions: configuration() } } })}\n`)
+  if ((method === 'session/set_mode' || (method === 'session/set_model' && !settings().omitSetModelConfigUpdate)) && !error) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions: configuration() } } })}\n`)
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -138,8 +138,25 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (method === 'session/resume' && settings().resetModeOnResume) mode = 'default'
     reportWindow()
     settingsAgentMode = nativeSettings().agentMode || 'default'
+    if (method === 'session/resume' && settings().configUpdateOnResume) {
+      const configOptions = settings().configUpdateOnResume === 'effortOnly'
+        ? [{ id: 'thought_level', currentValue: effort }]
+        : settings().configUpdateOnResume === 'modelOnly'
+          ? [{ id: 'model', category: 'model', currentValue: model.replace(effortSuffix, '') }]
+          : configuration()
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions } } })
+    }
     const modes = settings().availableModes ? { currentModeId: mode, availableModes: settings().availableModes } : { currentModeId: mode }
-    result = { sessionId: id, models: { availableModels: settings().models, currentModelId: model }, modes, configOptions: configuration() }
+    result = {
+      sessionId: id,
+      models: { availableModels: settings().models, currentModelId: model },
+      ...(method === 'session/resume' && settings().omitResumeModes ? {} : { modes }),
+      ...(method === 'session/resume' && settings().omitResumeConfig ? {} : { configOptions: configuration() }),
+    }
+    if (method === 'session/resume' && settings().askPermissionOnResume) {
+      askPermissions(request, readPermissions.slice(0, 1), result)
+      return
+    }
   }
   if (method === 'session/prompt') {
     syncSettingsMode()

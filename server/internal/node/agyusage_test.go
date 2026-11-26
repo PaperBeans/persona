@@ -842,4 +842,11 @@ func TestAgyPaneUpdatedAtFromRuntimeAndTranscript(t *testing.T) {
 	if paneIdx < 0 || olderIdx < 0 || paneIdx >= olderIdx {
 		t.Fatalf("expected live herdr agy pane (idx=%d) to sort ahead of older companion row (idx=%d)", paneIdx, olderIdx)
 	}
+
+	companion := proto.Session{SessionID: agyAgent + "-" + agyTestID, Agent: agyAgent, Cwd: home, Status: proto.StatusDone,
+		UpdatedAt: newerAt.Add(time.Minute), LastText: "BOTMUX_NOTHING_TO_SEND"}
+	n.runtimes.setSessions(runtime, normalizeRuntimeSessions(runtime, []proto.Session{companion}))
+	if got := findPane(); got.LastText != "Latest reply" || !got.UpdatedAt.Equal(companion.UpdatedAt) {
+		t.Fatalf("pane after a delivery marker: last text %q, updated %v", got.LastText, got.UpdatedAt)
+	}
 }

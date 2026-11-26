@@ -11,6 +11,7 @@ vi.hoisted(() => {
 });
 vi.mock("../lib/store", async (original) => ({
   ...(await original<typeof import("../lib/store")>()),
+  getState: () => ({ features: viewport.inboxSources ? ["inbox_sources"] : [] }),
   useStore: (select: (state: {
     features: string[];
     machines: unknown[];
@@ -42,9 +43,21 @@ vi.mock("./settings/ModelConfiguration", () => ({
     </div>
   ),
 }));
-vi.mock("./settings/KnowledgeSelection", () => ({ KnowledgeSelection: () => <div data-page="knowledge-selection" /> }));
+vi.mock("./settings/KnowledgeSelection", () => ({
+  KnowledgeSelection: () => (
+    <div data-page="knowledge-selection">
+      <section data-settings-group="knowledge-items"><div /></section>
+    </div>
+  ),
+}));
 vi.mock("./settings/TranslationSettings", () => ({ TranslationSettings: () => <div data-page="translation" /> }));
-vi.mock("./settings/AssistantSettings", () => ({ AssistantSettings: () => <div data-page="persona" /> }));
+vi.mock("./settings/AssistantSettings", () => ({
+  AssistantSettings: () => (
+    <div data-page="persona">
+      <section data-settings-group="repositories"><div /></section>
+    </div>
+  ),
+}));
 vi.mock("./settings/SidebarPages", () => ({ SidebarPagesGroup: () => <div data-page="sidebar-pages" /> }));
 vi.mock("./settings/StartPage", () => ({ StartPageGroup: () => <div data-page="start-page" /> }));
 vi.mock("../lib/pwa", async (original) => ({ ...(await original<typeof import("../lib/pwa")>()), useInstall: () => "installed" }));
@@ -66,9 +79,13 @@ vi.mock("./settings/HubConnector", () => ({
 }));
 vi.mock("./settings/SentSettings", () => ({ SentSettings: () => <div data-page="sent" /> }));
 vi.mock("./settings/Integrations", () => ({
-  Integrations: ({ open, onOpen }: { open: string | null; onOpen: (id: string | null) => void }) => (
+  Integrations: ({ open, onOpen, onSettings }: { open: string | null; onOpen: (id: string | null, drillDown?: boolean) => void; onSettings?: (url: string) => void }) => (
     <div data-page="integrations" data-open={open ?? ""}>
+      <button type="button" data-related-connector onClick={() => onOpen("connector:larkcli@work", true)} />
+      <button type="button" data-related-sources onClick={() => onOpen("-sources@work/scoped", true)} />
       <button type="button" data-integrations-sources onClick={() => onOpen("-sources")} />
+      <button type="button" data-integrations-repos onClick={() => onSettings?.("settings/persona#repositories")} />
+      <button type="button" data-integrations-kb onClick={() => onSettings?.("settings/knowledge#knowledge-items")} />
     </div>
   ),
 }));
@@ -679,11 +696,81 @@ describe("Settings category navigation", () => {
       box.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const groupBtn = [...nav().querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent?.includes(`${t("settings-nav.tab_integrations")}›${t("settings-nav.tab_sources")}`),
+      (b) => b.textContent?.includes(`${t("settings-nav.tab_integrations")}›${t("settings-integrations.view_sources")}`),
     )!;
     expect(groupBtn).toBeTruthy();
     await act(async () => groupBtn.click());
     expect(location.pathname + location.search).toBe("/settings?tab=integrations&integration=-sources");
     expect(host.querySelector('[data-page="integrations"]')?.getAttribute("data-open")).toBe("-sources");
+  });
+
+  it.each([["connector", "connector:larkcli@work"], ["sources", "-sources@work/scoped"]])(
+    "returns through the parent integration from phone %s settings using header or browser Back", async (kind, child) => {
+    viewport.phone = true;
+    viewport.integrationsV2 = true;
+    await mount("/settings?tab=integrations&integration=builtin%3Afeishu-bot%40work");
+    const parent = location.href;
+    for (const browserBack of [false, true]) {
+      await act(async () => host.querySelector<HTMLButtonElement>(`[data-related-${kind}]`)!.click());
+      expect(new URLSearchParams(location.search).get("integration")).toBe(child);
+      await popped(() => browserBack ? history.back() : host.querySelector<HTMLButtonElement>("header button")!.click());
+      expect(location.href).toBe(parent);
+    }
+  });
+
+  it.each([["persona", "repositories"], ["knowledge", "knowledge-items"]])(
+    "restores %s group #%s on reload and follows content resizes for 500ms", async (tab, group) => {
+      vi.useFakeTimers();
+      const resize = vi.fn();
+      const stop = vi.fn();
+      let align!: () => void;
+      vi.stubGlobal("ResizeObserver", class {
+        constructor(callback: () => void) { align = callback; }
+        observe = resize;
+        disconnect = stop;
+      });
+      const scroll = vi.fn();
+      Element.prototype.scrollIntoView = scroll;
+      try {
+        await mount(`/settings?tab=${tab}#${group}`);
+        const target = host.querySelector<HTMLElement>(`[data-settings-group="${group}"]`)!;
+        expect(resize).toHaveBeenCalledWith(host.querySelector('[role="region"]')!.firstElementChild);
+        expect(target.firstElementChild?.getAttribute("style")).toContain("var(--accent)");
+        expect(scroll.mock.contexts.filter(el => el === target)).toHaveLength(1);
+        align();
+        expect(scroll.mock.contexts.filter(el => el === target)).toHaveLength(2);
+        vi.advanceTimersByTime(499);
+        expect(stop).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(stop).toHaveBeenCalledTimes(1);
+      } finally { vi.useRealTimers(); }
+    },
+  );
+
+  it("handles Integrations onSettings #anchor jumps to Assistant repositories and Knowledge items smoothly in-app", async () => {
+    viewport.integrationsV2 = true;
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+
+    // Jump from Integrations to Settings › Assistant #repositories
+    await mount("/settings?tab=integrations&integration=builtin%3Agithub");
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-integrations-repos]")!.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=persona");
+    expect(location.hash).toBe("#repositories");
+    const reposGroup = host.querySelector<HTMLElement>('[data-settings-group="repositories"]')!;
+    expect(reposGroup).not.toBeNull();
+    expect(scrolled).toContain(reposGroup);
+    expect(reposGroup.querySelector<HTMLElement>(":scope > div")!.style.boxShadow).toContain("var(--accent)");
+
+    // Jump from Integrations to Settings › Knowledge #knowledge-items
+    scrolled.length = 0;
+    await act(async () => category(t("settings-nav.tab_integrations")).click());
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-integrations-kb]")!.click());
+    expect(location.pathname + location.search).toBe("/settings?tab=knowledge");
+    expect(location.hash).toBe("#knowledge-items");
+    const kbGroup = host.querySelector<HTMLElement>('[data-settings-group="knowledge-items"]')!;
+    expect(kbGroup).not.toBeNull();
+    expect(scrolled).toContain(kbGroup);
+    expect(kbGroup.querySelector<HTMLElement>(":scope > div")!.style.boxShadow).toContain("var(--accent)");
   });
 });

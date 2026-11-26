@@ -833,8 +833,10 @@ struct WatchInteractionView: View {
                 case .elicitation: // an MCP form or link is answered on the phone, which keeps it off the watch: its message only
                     Text(interaction.watchSummary).font(.footnote)
                 }
-                Button("Handle on Computer") { act(.dismissed) }
-                    .lineLimit(1).minimumScaleFactor(0.8).font(.caption2).foregroundStyle(.secondary)
+                if interaction.noHandBack != true {
+                    Button("Handle on Computer") { act(.dismissed) }
+                        .lineLimit(1).minimumScaleFactor(0.8).font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .buttonStyle(.bordered)

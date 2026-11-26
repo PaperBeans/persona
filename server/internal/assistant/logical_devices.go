@@ -24,7 +24,6 @@ type logicalConversationStore interface {
 	BeginConversationSwitch(context.Context, string, string, db.ConversationSwitch) error
 	PrepareConversationSegment(context.Context, string, string, string, conversationlog.Segment, int) error
 	ActivateConversationSegment(context.Context, string, string, string, int64) error
-	ResolveConversationSwitch(context.Context, string, string, string, string, string) error
 	ConversationSwitch(context.Context, string, string, string) (*db.ConversationSwitch, error)
 	ObserveConversationSource(context.Context, string, string, string) error
 	ObserveConversationRevision(context.Context, string, string, int64) error
@@ -46,6 +45,8 @@ type logicalSwitchStore interface {
 	ConversationPreparation(context.Context, string, string, string) (json.RawMessage, bool, error)
 	ConversationPendingHandoff(context.Context, string, string, string) (json.RawMessage, error)
 	ClaimConversationPreparation(context.Context, string, string, string) (bool, error)
+	ConversationPreparedSession(context.Context, string, string, string, string, int64) (string, error)
+	ResolveConversationPreparation(context.Context, string, string, string, string, string) error
 	ConversationUnresolvedInput(context.Context, string, string) (*db.ConversationInput, error)
 	ConversationInputPending(context.Context, string, string) (bool, error)
 	AcceptIdleConversationSwitch(context.Context, string, string, string, int64) (bool, error)
@@ -62,12 +63,13 @@ type logicalSourceKey struct{}
 type logicalHistoryOnlyKey struct{}
 
 type logicalDeviceState struct {
-	mu      sync.Mutex
-	at      time.Time
-	rows    []db.LogicalConversation
-	index   map[[2]string]*db.LogicalConversation
-	running map[[2]string]bool
-	watches map[[2]string]json.RawMessage
+	mu         sync.Mutex
+	at         time.Time
+	rows       []db.LogicalConversation
+	index      map[[2]string]*db.LogicalConversation
+	running    map[[2]string]bool
+	sweepAfter [2]string
+	watches    map[[2]string]json.RawMessage
 }
 
 // Reads may use a short-lived projection index. Authority and execution never do:

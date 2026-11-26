@@ -176,23 +176,42 @@ func (s *Service) allOwnSettings() []ownSetting {
 			get: func(ctx context.Context) (string, error) { return readonlyModeOf(s.settings(ctx)), nil },
 			set: s.setReadonlyMode},
 		{Setting: Setting{Key: "assistant.task_workspace_preference", Title: "Task workspace preference", Actions: getSet,
-			About: "prefer-existing (default): reuse the task directory if free; prefer-new: isolate writable Git tasks. Read-only defaults to none, busy directories to new; explicit task workspace wins. Paths come from the machine engine",
+			About: "prefer-existing (default) reuses a free task directory. prefer-new isolates writable Git tasks. Read-only tasks use their original directory. Busy Git directories use a new workspace. Explicit choices take precedence. New workspaces follow naming rules on supported computers",
 			Value: "prefer-existing or prefer-new"},
 			get: func(ctx context.Context) (string, error) { return s.taskWorkspacePreference(ctx), nil },
 			set: s.setTaskWorkspacePreference},
-		{Setting: Setting{Key: "assistant.recording_days", Title: "录音在知识库里保留", Actions: getSet,
-			About: "how many days the phone's and watch's recording transcripts stay in the knowledge base (kind recordings); older " +
-				"transcripts are deleted from it, and the phone deletes its local recordings too (audio and text). " +
-				"Meeting minutes follow assistant.minutes_days instead. 14 by default",
-			Value: "a whole number of days, 1–365"},
-			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.recordingDays(ctx)), nil },
-			set: s.setRecordingDays},
-		{Setting: Setting{Key: "assistant.minutes_days", Title: "Keep meeting minutes", Actions: getSet,
-			About: "how many days a meeting recording's minutes stay in the knowledge base. Past assistant.recording_days its " +
-				"transcript, summary and live log are deleted and only the minutes (and the recording's metadata) stay, still " +
-				"searchable and readable with kb_get, until this many days after the meeting; then the rest goes too. Never " +
-				"fewer than assistant.recording_days for finite windows. 0 (or forever) keeps minutes until the user deletes them, " +
+		{Setting: Setting{Key: "assistant.recording_audio_days", Title: "Keep recording audio", Actions: getSet,
+			About: "how many days recording audio is kept: the phone and watch delete their local recordings (audio and their " +
+				"copy of the text) older than this; the hub keeps no meeting audio past its minutes. 14 by default. " +
+				"The text in the knowledge base follows assistant.recording_text_days",
+			Value: "0 or forever, or a whole number of days, 1–3650"},
+			get: func(ctx context.Context) (string, error) {
+				return minutesDaysLabel(s.lang(ctx), s.recordingAudioDays(ctx)), nil
+			},
+			set: s.setRecordingAudioDays},
+		{Setting: Setting{Key: "assistant.recording_text_days", Title: "Keep recording text", Actions: getSet,
+			About: "how many days a recording's text stays in the knowledge base (kind recordings): its transcript, summary and " +
+				"live log, whether a phone, a watch or an extension wrote it (meeting notes, imported transcripts). Past it the " +
+				"text is deleted; minutes follow assistant.minutes_days. 0 (or forever) keeps it until the user deletes it, " +
 				"which is the default",
+			Value: "0 or forever, or a whole number of days, 1–3650"},
+			get: func(ctx context.Context) (string, error) {
+				return minutesDaysLabel(s.lang(ctx), s.recordingTextDays(ctx)), nil
+			},
+			set: s.setRecordingTextDays},
+		{Setting: Setting{Key: "assistant.recording_days", Title: "Keep recording audio (old name)", Actions: getSet,
+			About: "old name of assistant.recording_audio_days, kept for compatibility: reads and sets the same value",
+			Value: "0 or forever, or a whole number of days, 1–3650"},
+			get: func(ctx context.Context) (string, error) {
+				return minutesDaysLabel(s.lang(ctx), s.recordingAudioDays(ctx)), nil
+			},
+			set: s.setRecordingAudioDays},
+		{Setting: Setting{Key: "assistant.minutes_days", Title: "Keep meeting minutes", Actions: getSet,
+			About: "how many days a meeting recording's minutes stay in the knowledge base. Past a finite " +
+				"assistant.recording_text_days its transcript, summary and live log are deleted and only the minutes (and the " +
+				"recording's metadata) stay, still searchable and readable with kb_get, until this many days after the meeting; " +
+				"then the rest goes too. Never fewer than assistant.recording_text_days (forever while the text is kept " +
+				"forever). 0 (or forever) keeps minutes until the user deletes them, which is the default",
 			Value: "0 or forever, or a whole number of days, 1–3650"},
 			get: func(ctx context.Context) (string, error) {
 				return minutesDaysLabel(s.lang(ctx), s.minutesDays(ctx)), nil
@@ -362,12 +381,23 @@ func (s *Service) allOwnSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.inboxSignalsOn(ctx)), nil },
 			set: s.setInboxSignals},
+		{Setting: Setting{Key: "assistant.auto_supervision_mode", Title: "Automatic supervision messages", Actions: getSet,
+			About: "all (the default): the assistant sends every follow-up message about supervised tasks on its own (they wake the " +
+				"main conversation, a leader or the background supervisor, and each costs a model turn). outcomes: only the one-shot " +
+				"ones a supervisor has to act on, when a task finishes for review, stops unfinished, fails, its Agent reports done, " +
+				"blocked or a question, or a decision or the user's attention is needed; the routine checks while a task runs " +
+				"(stalled, no progress, estimates, review nudges, schedule checks, the parked summary, PR and Inbox side signals) " +
+				"are dropped, and those still waiting are withdrawn once. off: it sends none, queues none and schedules none, and " +
+				"what was waiting is withdrawn once. Not affected: the task ledger and states, the user's own questions and " +
+				"task_review, approval and permission cards, and the safety checks. A wider mode takes only what happens " +
+				"afterwards. Applies at once",
+			Value: "all, outcomes or off"},
+			get: func(ctx context.Context) (string, error) { return s.supervisionMode(ctx), nil },
+			set: s.setAutoSupervisionMode},
 		{Setting: Setting{Key: "assistant.auto_supervision_messages", Title: "Automatic supervision messages", Actions: getSet,
-			About: "on (the default): the assistant sends its follow-up messages about supervised tasks on its own (they wake the main " +
-				"conversation, a leader or the background supervisor, and each costs a model turn). off: it sends none, queues none and " +
-				"schedules none, and what was waiting is withdrawn once. Not affected: the task ledger and states, the user's own " +
-				"questions and task_review, approval and permission cards, and the safety checks. Turning it back on takes only what " +
-				"happens afterwards. Applies at once",
+			About: "older on/off form of assistant.auto_supervision_mode: reads true unless the mode is off; true sets the mode " +
+				"to all, false to off (withdrawing what was waiting once). Prefer assistant.auto_supervision_mode (all / outcomes / " +
+				"off). Applies at once",
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.autoSupervisionOn(ctx)), nil },
 			set: s.setAutoSupervisionMessages},
@@ -495,6 +525,46 @@ func (s *Service) allOwnSettings() []ownSetting {
 				"off by default; only the owner changes it, in Settings › Assistant",
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.dashboardsOn(ctx)), nil }},
+		{Setting: Setting{Key: todosV2AutoSeenSettingKey, Title: "Auto-clear unseen badge on completed tasks (todos_v2)", Actions: getSet,
+			About: "controls whether autonomously completed to-dos auto-clear unseen badges under todos_v2=true: all_autonomous (default), subtasks (part_of children only), or off; no effect when todos_v2 is off",
+			Value: "off, subtasks or all_autonomous"},
+			get: func(ctx context.Context) (string, error) { return s.settings(ctx).todosV2AutoSeenMode(), nil },
+			set: s.setTodosV2AutoSeen},
+		{Setting: Setting{Key: todosV2PendingReviewSLASettingKey, Title: "Pending review quiet SLA hours (todos_v2)", Actions: getSet,
+			About: "how many hours pending_review tasks stay quiet in Working under todos_v2=true before escalating to Needs you: 0 (off, immediate Needs you), 12, 24 (default), or 48; no effect when todos_v2 is off",
+			Value: "0, 12, 24 or 48"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2PendingReviewSLAHours()), nil
+			},
+			set: s.setTodosV2PendingReviewSLAHours},
+		{Setting: Setting{Key: todosV2CanWaitSLASettingKey, Title: "Can-wait decision aging SLA hours (todos_v2)", Actions: getSet,
+			About: "how many hours non-critical can_wait decisions wait under todos_v2=true before aging into Needs you: 0 (off, never auto-escalate), 24, 48 (default), or 72; no effect when todos_v2 is off",
+			Value: "0, 24, 48 or 72"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2CanWaitSLAHours()), nil
+			},
+			set: s.setTodosV2CanWaitSLAHours},
+		{Setting: Setting{Key: todosV2FoldChildrenSettingKey, Title: "Fold child tasks under parent goals (todos_v2)", Actions: getSet,
+			About: "on (default): non-urgent child tasks fold under their top-level parent goal in todos_v2 board projection; off: show child tasks flat; no effect when todos_v2 is off",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2FoldChildrenOn()), nil
+			},
+			set: s.setTodosV2FoldChildren},
+		{Setting: Setting{Key: todosV2QuietHoursSettingKey, Title: "Quiet hours for routine notifications (todos_v2)", Actions: getSet,
+			About: "optional 24-hour local-time quiet window (HH:MM-HH:MM, e.g. 22:00-08:00 or 13:00-15:00) under todos_v2=true during which routine non-card, non-P0, non-notify_user pushes downgrade to LevelP2; empty string disables quiet hours (default); P0, cards, approvals, and notify_user are never muted; no effect when todos_v2 is off",
+			Value: `"" (off) or "HH:MM-HH:MM"`},
+			get: func(ctx context.Context) (string, error) {
+				return s.settings(ctx).todosV2QuietHours(), nil
+			},
+			set: s.setTodosV2QuietHours},
+		{Setting: Setting{Key: todosV2DigestWindowMinutesSettingKey, Title: "Routine notification digest window in minutes (todos_v2)", Actions: getSet,
+			About: "optional burst-coalescing window in minutes under todos_v2=true: 0 (off, default), 30, 60, or 120; follow-up routine non-card, non-P0, non-notify_user pushes for the same session/direction within the window downgrade to LevelP2; P0, cards, approvals, and notify_user are never muted; no effect when todos_v2 is off",
+			Value: "0, 30, 60 or 120"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(s.settings(ctx).todosV2DigestWindowMinutes()), nil
+			},
+			set: s.setTodosV2DigestWindowMinutes},
 		s.trustSetting(),
 		s.urgentRulesSetting(), // urgent_call_rules.go
 	}
@@ -778,9 +848,9 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher", "assistant.limit_fallbacks": "title_limit_fallbacks",
 	"assistant.machine_fallbacks": "title_machine_fallbacks", "assistant.machine_fallback_minutes": "title_machine_fallback_minutes",
-	"assistant.recording_days": "title_recording_days", "assistant.delivery_gate": "title_delivery_gate", "assistant.done_needs_delivery": "title_done_needs_delivery",
+	"assistant.recording_days": "title_recording_days", "assistant.recording_audio_days": "title_recording_audio_days", "assistant.recording_text_days": "title_recording_text_days", "assistant.delivery_gate": "title_delivery_gate", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context", "assistant.chat_reply_relay": "title_chat_reply_relay",
-	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.auto_supervision_messages": "title_auto_supervision_messages", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", modelProfileBindingsKey: "title_model_bindings", "model_profiles.tiers": "title_model_tiers",
+	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.auto_supervision_messages": "title_auto_supervision_messages", "assistant.auto_supervision_mode": "title_auto_supervision_mode", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", modelProfileBindingsKey: "title_model_bindings", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
@@ -793,6 +863,15 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 // dashboardsSettingKey is the Dashboards switch as persona_settings names it (Settings.Dashboards, `dashboards` in
 // GET/PUT /api/v1/assistant).
 const dashboardsSettingKey = "assistant.dashboards"
+
+const (
+	todosV2AutoSeenSettingKey            = "assistant.todos_v2_auto_seen"
+	todosV2PendingReviewSLASettingKey    = "assistant.todos_v2_pending_review_sla_hours"
+	todosV2CanWaitSLASettingKey          = "assistant.todos_v2_can_wait_sla_hours"
+	todosV2FoldChildrenSettingKey        = "assistant.todos_v2_fold_children"
+	todosV2QuietHoursSettingKey          = "assistant.todos_v2_quiet_hours"
+	todosV2DigestWindowMinutesSettingKey = "assistant.todos_v2_digest_window_minutes"
+)
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -1056,28 +1135,58 @@ func (s *Service) setKBTopics(ctx context.Context, v json.RawMessage) (*ownChang
 		"assistant.kb_topics is %v from the knowledge base's next round on.")
 }
 
-func (s *Service) setRecordingDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
-	var days int
-	if err := json.Unmarshal(v, &days); err != nil || days < minRecordingDays || days > maxRecordingDays {
-		return nil, errors.New("value must be a whole number of days, 1–365")
+// parseRetentionDays reads a retention value of persona_settings: 0 or "forever", or 1–3650 days.
+func parseRetentionDays(v json.RawMessage) (int, bool) {
+	var word string
+	if json.Unmarshal(v, &word) == nil && strings.EqualFold(strings.TrimSpace(word), "forever") {
+		return 0, true
 	}
-	before := s.recordingDays(ctx)
+	var days int
+	if strings.TrimSpace(string(v)) == "null" || json.Unmarshal(v, &days) != nil || !recordingDaysValid(&days, false) {
+		return 0, false
+	}
+	return days, true
+}
+
+// setRecordingAudioDays changes recording_audio_days (also the old recording_days): the phone's window.
+func (s *Service) setRecordingAudioDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setRecordingRetention(ctx, v, s.recordingAudioDays(ctx), "assistant.recording_audio_days",
+		"change_recording_audio_days", func(v *Settings, days *int) { v.RecordingAudioDays = days },
+		"the phone deletes its own recordings older than that")
+}
+
+// setRecordingTextDays changes recording_text_days: how long the knowledge base keeps a recording's text.
+func (s *Service) setRecordingTextDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setRecordingRetention(ctx, v, s.recordingTextDays(ctx), "assistant.recording_text_days",
+		"change_recording_text_days", func(v *Settings, days *int) { v.RecordingTextDays = days },
+		"recording text older than that leaves the knowledge base")
+}
+
+func (s *Service) setRecordingRetention(ctx context.Context, v json.RawMessage, before int, key, card string,
+	save func(*Settings, *int), effect string) (*ownChange, error) {
+	days, ok := parseRetentionDays(v)
+	if !ok {
+		return nil, i18n.Err("assistant-profile.bad_recording_days")
+	}
 	if days == before {
-		return &ownChange{summary: "「录音在知识库里保留」没有变化"}, nil
+		return &ownChange{summary: key + " is unchanged"}, nil
 	}
 	if s.store() == nil {
 		return nil, errors.New("no database on this hub")
 	}
 	return &ownChange{cardText: func(l i18n.Lang) string {
-		return i18n.T(l, "assistant-settings_tool.change_recording_days", i18n.Args{"before": before, "after": days})
+		return i18n.T(l, "assistant-settings_tool."+card, i18n.Args{"before": minutesDaysLabel(l, before), "after": minutesDaysLabel(l, days)})
 	},
 		apply: func(ctx context.Context) (string, error) {
-			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.RecordingDays = &days; return nil }); err != nil {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { save(v, &days); return nil }); err != nil {
 				return "", err
 			}
 			s.settingsChanged(ctx)
 			s.kbWake() // a shorter retention prunes now
-			return fmt.Sprintf("assistant.recording_days is %d: recordings older than that leave the knowledge base.", days), nil
+			if days == 0 {
+				return key + " is forever: nothing is deleted for its age.", nil
+			}
+			return fmt.Sprintf("%s is %d days: %s.", key, days, effect), nil
 		}}, nil
 }
 
@@ -1089,8 +1198,8 @@ func minutesDaysLabel(l i18n.Lang, days int) string {
 	return i18n.T(l, "assistant-settings_tool.minutes_days_value", i18n.Args{"days": days})
 }
 
-// setMinutesDays compares the saved setting, not its recording_days floor. A finite value below that floor is saved
-// for when recording_days becomes shorter. Unset and 0 both mean forever; the card names the effective before/after.
+// setMinutesDays compares the saved setting, not its recording_text_days floor. A finite value below that floor is
+// saved for when recording_text_days becomes shorter. Unset and 0 both mean forever; the card names the effective before/after.
 func (s *Service) setMinutesDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	var days int
 	var word string
@@ -1099,7 +1208,7 @@ func (s *Service) setMinutesDays(ctx context.Context, v json.RawMessage) (*ownCh
 		return nil, i18n.Err("assistant-profile.bad_minutes_days")
 	}
 	cur := s.settings(ctx)
-	saved, recording := minutesDaysSetting(cur), recordingDaysOf(cur)
+	saved, recording := minutesDaysSetting(cur), recordingTextDaysOf(cur)
 	before, after := kb.MinutesDaysFor(saved, recording), kb.MinutesDaysFor(days, recording)
 	args := func(l i18n.Lang) i18n.Args {
 		return i18n.Args{"before": minutesDaysLabel(l, before), "after": minutesDaysLabel(l, after),
@@ -1294,11 +1403,48 @@ func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownC
 		"assistant.inbox_signals is %v from the next new Inbox message on (signals already waiting go out only while it is on).")
 }
 
+// setAutoSupervisionMessages is the older on/off form: true is the mode all, false off. A value already in effect is a
+// no-op, so true leaves outcomes as it is.
 func (s *Service) setAutoSupervisionMessages(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	return s.setBoolSetting(ctx, v, s.autoSupervisionOn, "assistant.auto_supervision_messages is unchanged", func(l i18n.Lang, before, after string) string {
 		return i18n.T(l, "assistant-settings_tool.change_auto_supervision_messages", i18n.Args{"before": before, "after": after})
-	}, func(v *Settings) **bool { return &v.AutoSupervisionMessages },
-		"assistant.auto_supervision_messages is %v now (settingsChanged applies the switch at once; turning it off withdraws what waited, turning it on replays nothing).")
+	}, func(v *Settings) **bool {
+		v.AutoSupervisionMode = "" // the saved switch decides again (supervisionModeOf): true is all, false off
+		return &v.AutoSupervisionMessages
+	}, "assistant.auto_supervision_messages is %v now (settingsChanged applies the switch at once; turning it off withdraws what waited, turning it on replays nothing).")
+}
+
+// setAutoSupervisionMode changes which automatic supervision messages are sent (supervise_switch.go). The older switch
+// is kept in step (mode != off) for older readers and downgrades.
+func (s *Service) setAutoSupervisionMode(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var mode string
+	if err := json.Unmarshal(v, &mode); err != nil || !slices.Contains(supervisionModes, mode) {
+		return nil, errors.New("value must be all, outcomes or off")
+	}
+	before := s.supervisionMode(ctx)
+	if mode == before {
+		return &ownChange{summary: "assistant.auto_supervision_mode is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	name := func(l i18n.Lang, m string) string {
+		return i18n.T(l, "assistant-settings_tool.auto_supervision_mode_"+m)
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		return i18n.T(l, "assistant-settings_tool.change_auto_supervision_mode", i18n.Args{"before": name(l, before), "after": name(l, mode)})
+	},
+		apply: func(ctx context.Context) (string, error) {
+			on := mode != supervisionModeOff
+			if _, err := s.updateSettings(ctx, func(v *Settings) error {
+				v.AutoSupervisionMode, v.AutoSupervisionMessages = mode, &on
+				return nil
+			}); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			return fmt.Sprintf("assistant.auto_supervision_mode is %s now (applied at once; what the new mode drops is withdrawn, nothing withdrawn is replayed).", mode), nil
+		}}, nil
 }
 
 func (s *Service) setInboxTodoForward(ctx context.Context, v json.RawMessage) (*ownChange, error) {
@@ -1350,6 +1496,188 @@ func (s *Service) setChatReplyRelay(ctx context.Context, v json.RawMessage) (*ow
 		return out, err
 	}
 	return ch, nil
+}
+
+func (s *Service) setTodosV2AutoSeen(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var mode string
+	if err := json.Unmarshal(v, &mode); err != nil {
+		return nil, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous")
+	}
+	mode = strings.TrimSpace(mode)
+	if !slices.Contains(todosV2AutoSeenModes, mode) {
+		return nil, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous")
+	}
+	before := s.settings(ctx).todosV2AutoSeenMode()
+	if mode == before {
+		return &ownChange{summary: todosV2AutoSeenSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %s → %s", todosV2AutoSeenSettingKey, before, mode)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2AutoSeen = mode; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %s (applies when todos_v2 is enabled).", todosV2AutoSeenSettingKey, mode), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2PendingReviewSLAHours(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var hours *int
+	if err := json.Unmarshal(v, &hours); err != nil || hours == nil || !slices.Contains(todosV2PendingReviewSLAOptions, *hours) {
+		return nil, errors.New("todos_v2_pending_review_sla_hours must be 0, 12, 24 or 48")
+	}
+	next := *hours
+	before := s.settings(ctx).todosV2PendingReviewSLAHours()
+	if next == before {
+		return &ownChange{summary: todosV2PendingReviewSLASettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %d → %d", todosV2PendingReviewSLASettingKey, before, next)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2PendingReviewSLAHours = &next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %d (applies when todos_v2 is enabled).", todosV2PendingReviewSLASettingKey, next), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2CanWaitSLAHours(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var hours *int
+	if err := json.Unmarshal(v, &hours); err != nil || hours == nil || !slices.Contains(todosV2CanWaitSLAOptions, *hours) {
+		return nil, errors.New("todos_v2_can_wait_sla_hours must be 0, 24, 48 or 72")
+	}
+	next := *hours
+	before := s.settings(ctx).todosV2CanWaitSLAHours()
+	if next == before {
+		return &ownChange{summary: todosV2CanWaitSLASettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %d → %d", todosV2CanWaitSLASettingKey, before, next)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2CanWaitSLAHours = &next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %d (applies when todos_v2 is enabled).", todosV2CanWaitSLASettingKey, next), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2FoldChildren(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var onPtr *bool
+	if err := json.Unmarshal(v, &onPtr); err != nil || onPtr == nil {
+		return nil, errors.New("value must be true or false")
+	}
+	on := *onPtr
+	before := s.settings(ctx).todosV2FoldChildrenOn()
+	if on == before {
+		return &ownChange{summary: todosV2FoldChildrenSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %v → %v", todosV2FoldChildrenSettingKey, before, on)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2FoldChildren = &on; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %v (applies when todos_v2 is enabled).", todosV2FoldChildrenSettingKey, on), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2QuietHours(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var rawPtr *string
+	if err := json.Unmarshal(v, &rawPtr); err != nil || rawPtr == nil {
+		return nil, errors.New("todos_v2_quiet_hours must be empty or HH:MM-HH:MM (24-hour range with distinct start and end)")
+	}
+	next := strings.TrimSpace(*rawPtr)
+	if next != "" {
+		if _, ok := parseTodosV2QuietHours(next); !ok {
+			return nil, errors.New("todos_v2_quiet_hours must be empty or HH:MM-HH:MM (24-hour range with distinct start and end)")
+		}
+	}
+	before := s.settings(ctx).todosV2QuietHours()
+	if next == before {
+		return &ownChange{summary: todosV2QuietHoursSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	display := func(val string) string {
+		if val == "" {
+			return "off"
+		}
+		return val
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %s → %s", todosV2QuietHoursSettingKey, display(before), display(next))
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2QuietHours = next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %s (applies when todos_v2 is enabled).", todosV2QuietHoursSettingKey, display(next)), nil
+		},
+	}, nil
+}
+
+func (s *Service) setTodosV2DigestWindowMinutes(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var mins *int
+	if err := json.Unmarshal(v, &mins); err != nil || mins == nil || !slices.Contains(todosV2DigestWindowOptions, *mins) {
+		return nil, errors.New("todos_v2_digest_window_minutes must be 0, 30, 60 or 120")
+	}
+	next := *mins
+	before := s.settings(ctx).todosV2DigestWindowMinutes()
+	if next == before {
+		return &ownChange{summary: todosV2DigestWindowMinutesSettingKey + " is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return fmt.Sprintf("Change %s: %d → %d", todosV2DigestWindowMinutesSettingKey, before, next)
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TodosV2DigestWindowMinutes = &next; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.todosChanged(ctx)
+			return fmt.Sprintf("%s is %d (applies when todos_v2 is enabled).", todosV2DigestWindowMinutesSettingKey, next), nil
+		},
+	}, nil
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

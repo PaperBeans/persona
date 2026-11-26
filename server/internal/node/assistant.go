@@ -294,6 +294,151 @@ func (n *Node) assistantResumable(id string) bool {
 	return (p != nil && p.alive()) || n.transcriptPath(id) != ""
 }
 
+func (n *Node) isManagedRuntimeLauncher(name string) bool {
+	if name == "" {
+		return false
+	}
+	if m, ok := n.managedLauncher(name); ok && m.AgentType() == "agy" {
+		return true
+	}
+	if n.autoCompanions && !shellLauncherNames()[name] && (name == agyRuntimeID || name == opencodeRuntimeID) {
+		return true
+	}
+	return false
+}
+
+func (n *Node) pendingAutoCompanionRuntime(id string) (string, bool) {
+	if !n.autoCompanions || !runtimeSessionID(id) {
+		return "", false
+	}
+	for _, rtID := range []string{agyRuntimeID, opencodeRuntimeID} {
+		if strings.HasPrefix(id, rtID+"-") {
+			return rtID, true
+		}
+	}
+	return "", false
+}
+
+// runtimeResumablePending reports whether id looks like an existing runtime conversation whose runtime has not yet
+// connected or finished pushing its first session list after a node restart.
+func (n *Node) runtimeResumablePending(id, launcher string) bool {
+	if id == "" || n.runtimes == nil {
+		return false
+	}
+	var st sessionState
+	var hasState bool
+	if n.state != nil {
+		st, hasState = n.state.get(id)
+	}
+	rl := launcherOr(st.Launcher, launcher)
+	rt := n.assistantRuntime(rl)
+	if rt == nil && launcher != "" && launcher != rl {
+		rt = n.assistantRuntime(launcher)
+	}
+	if rt == nil && runtimeSessionID(id) {
+		rt, _ = n.runtimes.assistantRuntimeByPrefix(id)
+	}
+	if rt != nil {
+		return !rt.listedSessions()
+	}
+	if hasState && (runtimeSessionID(id) || st.EngineRuntime != "" || st.RemoteAgent || n.isManagedRuntimeLauncher(rl)) {
+		return true
+	}
+	if n.isManagedRuntimeLauncher(launcher) {
+		return true
+	}
+	if runtimeSessionID(id) {
+		if _, pending := n.runtimes.unlistedAssistantRuntime(); pending {
+			return true
+		}
+		if _, pending := n.pendingAutoCompanionRuntime(id); pending {
+			return true
+		}
+	}
+	return false
+}
+
+// checkAssistantResumable verifies that a resume_only send may continue conversation id.
+// Unlike assistantResumable, it distinguishes a truly missing conversation ("is gone") from a runtime conversation
+// whose owning runtime has not connected or pushed its initial session list yet after a restart (errRuntimeAway),
+// and probes a ready runtime for older sessions outside its recent session window before concluding gone.
+func (n *Node) checkAssistantResumable(ctx context.Context, id, launcher string) error {
+	if n.assistantResumable(id) {
+		return nil
+	}
+	if id == "" {
+		return fmt.Errorf("conversation %s is gone", id)
+	}
+	if n.state != nil && n.state.isLoading() {
+		if err := n.state.loaded(ctx); err != nil {
+			return err
+		}
+		if n.assistantResumable(id) {
+			return nil
+		}
+	}
+	if n.runtimes == nil {
+		return fmt.Errorf("conversation %s is gone", id)
+	}
+	var st sessionState
+	var hasState bool
+	if n.state != nil {
+		st, hasState = n.state.get(id)
+	}
+	rl := launcherOr(st.Launcher, launcher)
+	rt := n.assistantRuntime(rl)
+	if rt == nil && launcher != "" && launcher != rl {
+		rt = n.assistantRuntime(launcher)
+	}
+	if rt == nil && runtimeSessionID(id) {
+		rt, _ = n.runtimes.assistantRuntimeByPrefix(id)
+	}
+	if rt != nil {
+		if !rt.listedSessions() {
+			return errRuntimeAway(cmp.Or(rt.label(), rl, "runtime"))
+		}
+		if !hasState {
+			return fmt.Errorf("conversation %s is gone", id)
+		}
+		if gone := n.runtimes.goneOf(id); gone != nil {
+			return fmt.Errorf("conversation %s is gone", id)
+		}
+		if rt.peer == nil {
+			return errRuntimeAway(cmp.Or(rt.label(), rl, "runtime"))
+		}
+		cctx, cancel := context.WithTimeout(ctx, runtimeClaimTimeout)
+		var page struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		err := rt.peer.Call(cctx, "session.items", map[string]any{"session_id": id, "limit": 1}, &page)
+		cancel()
+		if hasSession(err) {
+			n.runtimes.claim(rt, id)
+			return nil
+		}
+		if rpcCode(err) == codeNotFound {
+			n.runtimes.unclaim(id, err)
+			return fmt.Errorf("conversation %s is gone", id)
+		}
+		return errRuntimeAway(cmp.Or(rt.label(), rl, "runtime"))
+	}
+	if hasState && (runtimeSessionID(id) || st.EngineRuntime != "" || st.RemoteAgent || n.isManagedRuntimeLauncher(rl)) {
+		return errRuntimeAway(cmp.Or(rl, st.EngineRuntime, "runtime"))
+	}
+	if n.isManagedRuntimeLauncher(launcher) {
+		return errRuntimeAway(launcher)
+	}
+	if runtimeSessionID(id) {
+		if label, pending := n.runtimes.unlistedAssistantRuntime(); pending {
+			return errRuntimeAway(cmp.Or(rl, label, "runtime"))
+		}
+		if rtID, pending := n.pendingAutoCompanionRuntime(id); pending {
+			return errRuntimeAway(cmp.Or(rl, rtID, "runtime"))
+		}
+	}
+	return fmt.Errorf("conversation %s is gone", id)
+}
+
 type sendTraceKey struct{}
 
 type assistantSendTiming struct {
@@ -376,9 +521,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 	}
 	recovery, restart := assistantRecoveryOf(ctx)
+	recoverySwitched := false
 	if recovery != nil {
 		n.mu.Lock()
 		valid := n.recoveries[id] == recovery
+		recoverySwitched = valid && recovery.switched
 		p := n.procs[id]
 		n.mu.Unlock()
 		if !valid {
@@ -554,12 +701,14 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			launcher, options = "", nil // it keeps what it started on (the hub sends none either)
 		}
 	}
+	crossEngineResume := false
 	if own, switched := n.assistantResumeLauncher(ctx, id, launcher, st); switched && !strictRuntime {
 		if executionOption(options).Strict {
 			return "", errors.New("task execution context differs from this conversation; start a new conversation")
 		}
 		n.logger.Printf("assistant %s: resumes on %s, the kind of agent it was started on, not on %s", short(id), launcherOr(own, st.Launcher), launcher)
 		launcher, options = own, nil // the model picked for the other launcher is not this one's
+		crossEngineResume = true
 	}
 	execution := executionOption(options)
 	execution.Public = public
@@ -620,7 +769,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			// What it ran, with this message's claude_interactive: the manager's switch, sent with every message, not a
 			// model pick (assistant_tui.go). Without it a message that picks no model (a supervision message, a relay)
 			// started claude -p, and restarted a conversation that runs interactive Claude Code.
-			execution = modelExecution{Source: execution.Source, CacheKeepalive: execution.CacheKeepalive, Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting}
+			execution = modelExecution{Source: execution.Source, CacheKeepalive: execution.CacheKeepalive, Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, OriginKnown: originKnown, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting || (crossEngineResume && requested.FollowsSetting), PersistedModel: st.Model != "" && guest == nil}
 		}
 	}
 	if launcher != "" && st.Launcher != "" && launcher != st.Launcher && execution.Fingerprint == "" {
@@ -630,6 +779,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	execution.Public = public
 	if effort != "" {
 		execution.Effort = effort
+	}
+	if execution.PersistedModel && execution.Model != "" && !proto.ValidModelID(execution.Model) {
+		execution.Model, execution.Effort, execution.UseEffort, execution.Fingerprint, execution.PersistedModel = "", effort, true, "launcher-default", false
 	}
 	if err := execution.checkModel(); err != nil {
 		return "", err
@@ -645,6 +797,13 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	}
 	if err := n.ensureManaged(ctx, launcher); err != nil { // the conversation's own provider (managed.go)
 		return "", err
+	}
+	if execution.PersistedModel && execution.Model != "" {
+		n.sanitizePersistedModel(ctx, id, launcher, st, &execution, crossEngineResume, isMain || st.IsMain || execution.FollowsSetting, effort)
+	}
+	if crossEngineResume && execution.Model == "" && execution.Fingerprint == "" && guest == nil {
+		execution.UseEffort = true
+		execution.Fingerprint = "launcher-default"
 	}
 	execution.IsMain = isMain && guest == nil
 	protected := strictProtectedExecution(execution) || n.recoveryProtected(id)
@@ -982,6 +1141,10 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	fresh := p == nil
 	if p == nil {
 		if p, err = n.spawnAssistantWith(id, cwd, launcher, resume && n.transcriptPath(id) != "", false, round, execution); err != nil {
+			if execution.PersistedModel && execution.Model != "" && assistantModelRouteUnavailable(err.Error()) {
+				n.noteModelRouteUnavailable(id, launcher, execution.Model)
+				n.clearStalePersistedModel(id, launcher, execution.Model)
+			}
 			return "", err
 		}
 	}
@@ -1004,13 +1167,22 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 		n.noteModes(id, mode, effort)
 	}
-	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.ModelSource != execution.Source || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
+	fromRecovery := execution.FromRecovery || recoverySwitched
+	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || (!fromRecovery && (st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || (st.ModelFromRecovery && !execution.PersistedModel))) || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.ModelSource != execution.Source || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
 		started := st.StartedAt
 		if started.IsZero() {
 			started = time.Now().UTC()
 		}
+		launcherChanged := !known || st.Launcher != launcher
 		st.Launcher, st.Cwd, st.StartedAt = launcher, cwd, started
-		st.Model, st.ModelFingerprint, st.ModelEffort = execution.Model, execution.Fingerprint, execution.Effort
+		if !fromRecovery || launcherChanged {
+			st.Model, st.ModelFingerprint, st.ModelEffort = execution.Model, execution.Fingerprint, execution.Effort
+			if fromRecovery {
+				st.ModelFromRecovery = true
+			} else if !execution.PersistedModel {
+				st.ModelFromRecovery = false
+			}
+		}
 		st.Origin = origin
 		st.OriginKnown = execution.OriginKnown
 		st.ModelSource = execution.Source
@@ -1088,12 +1260,18 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		p.model.NewModelChoice = execution.NewModelChoice
 		if recovery != nil || !wasBusy {
 			p.turnRecovery = recovery
+			p.model.PersistedModel = execution.PersistedModel
+			p.model.FromRecovery = fromRecovery
 		}
 		p.mu.Unlock()
 		if err := p.cx.deliver(ctx, live, text, images, selected...); err != nil {
 			p.mu.Lock()
 			p.busy = p.cx.turn() != ""
 			p.mu.Unlock()
+			if execution.PersistedModel && execution.Model != "" && assistantModelRouteUnavailable(err.Error()) {
+				n.noteModelRouteUnavailable(id, launcher, execution.Model)
+				n.clearStalePersistedModel(id, launcher, execution.Model)
+			}
 			return "", fmt.Errorf("send to codex: %w", err)
 		}
 		n.commitModelChoice(id, execution)
@@ -1169,6 +1347,8 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		p.model.NewModelChoice = execution.NewModelChoice
 		if recovery != nil || !wasBusy {
 			p.turnRecovery = recovery
+			p.model.PersistedModel = execution.PersistedModel
+			p.model.FromRecovery = fromRecovery
 		}
 		p.mu.Unlock()
 		var timeout *assistantControlTimeoutError
@@ -1536,9 +1716,11 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			recovering := n.recoverAssistantResult(p, ev.IsError, ev.Result, kinds...)
 			if !recovering {
 				n.clearAssistantRecovery(p, !ev.IsError)
-				// A turn that ended well is newer evidence than an exhausted chain: the failure card's cause and reset
-				// time must not survive onto a later error, so drop the marker on any successful result (#7824).
-				if !ev.IsError {
+				if ev.IsError {
+					n.handleModelRouteFailure(p, ev.Result)
+				} else {
+					// A turn that ended well is newer evidence than an exhausted chain: the failure card's cause and reset
+					// time must not survive onto a later error, so drop the marker on any successful result (#7824).
 					if r := n.modelRecovery(p.id); r != nil && r.ChainExhausted {
 						n.clearModelRecovery(p.id)
 					}

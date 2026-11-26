@@ -572,7 +572,7 @@ describe("messages kept across a reload", () => {
   });
 
   it.each(retryPrompts)("restores $kind after a reload, and Retry preserves the same identity and payload", async ({ text }) => {
-    keepFailed("m", "s", { id: "a1", text, images: [], at: 1000, launcher: "codex" }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a1", text, images: [], at: 1000, launcher: "codex" }, new TypeError("Failed to fetch"));
     expect(store.size).toBe(1);
     reload();
     restoreOutbox("m", "s");
@@ -705,7 +705,7 @@ describe("messages kept across a reload", () => {
     noteSent("m", "s", { text: "Accepted in this tab" });
     const accepted = outbox()["m/s"][0];
     forgetOutgoing("m/s", accepted.id); // another tab saw the transcript first
-    keepFailed("m", "s", { id: "failed", text: "Another message", images: [], at: Date.now() }, new TypeError("network"));
+    keepFailed("m", "s", { id: "failed", text: "Another message", images: [], at: Date.now() }, new TypeError("Failed to fetch"));
     expect(store.has(`outbox-msg:m/s/${accepted.id}`)).toBe(false);
     expect(store.has("outbox-msg:m/s/failed")).toBe(true);
   });
@@ -836,14 +836,14 @@ describe("messages kept across a reload", () => {
   });
 
   it("forgets a deleted message", () => {
-    keepFailed("m", "s", { id: "a5", text: "别发了", images: [], at: 1000 }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a5", text: "别发了", images: [], at: 1000 }, new TypeError("Failed to fetch"));
     discardOutbox("m", "s", "a5");
     expect(store.size).toBe(0);
   });
 
   it("puts a deleted message back where it was on Undo, kept for reloads again (#4626)", () => {
-    keepFailed("m", "s", { id: "a6", text: "第一条", images: [], at: 1000 }, new TypeError("network"));
-    keepFailed("m", "s", { id: "a7", text: "第二条", images: [], at: 2000 }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a6", text: "第一条", images: [], at: 1000 }, new TypeError("Failed to fetch"));
+    keepFailed("m", "s", { id: "a7", text: "第二条", images: [], at: 2000 }, new TypeError("Failed to fetch"));
     const undo = discardOutbox("m", "s", "a6")!;
     expect(outbox()["m/s"].map((e) => e.id)).toEqual(["a7"]);
     expect(store.size).toBe(1);

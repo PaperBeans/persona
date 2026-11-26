@@ -27,7 +27,7 @@ export type Tab = CoreTab | ModuleTab;
 export const TABS: CoreTab[] = ["general", "persona", "prompts", "notifications", "models", "agents", "integrations", "channels", "connectors", "sources", "extensions", "shortcuts", "advanced", "devices", "hub", "managers", "knowledge", "avatar", "labs"];
 export const AGENT_KINDS = ["claude", "codex", "agy", "omp", "grok"] as const;
 export type AgentTab = (typeof AGENT_KINDS)[number];
-export type SettingsSection = "providers" | "model-config" | "translation" | "seen-rows" | AgentTab;
+export type SettingsSection = "providers" | "model-config" | "translation" | "seen-rows" | "repositories" | "knowledge-items" | AgentTab;
 /** A host-owned secondary page, not a connector ID. */
 export const SENT_SUB = "-sent";
 
@@ -248,11 +248,13 @@ export function redirectLegacySettings(
   }
 
   if (!changed) return null;
-  const frag = section ? `#settings-${section}` : hash;
+  const frag = section && section !== "repositories" && section !== "knowledge-items" ? `#settings-${section}` : hash;
   return `/settings?${q.toString()}${frag}`;
 }
 
 function sectionOfHash(hash: string, tab: Tab): SettingsSection | null {
+  if (tab === "persona" && hash === "#repositories") return "repositories";
+  if (tab === "knowledge" && hash === "#knowledge-items") return "knowledge-items";
   const section = hash.startsWith("#settings-") ? hash.slice("#settings-".length) : "";
   if (tab === "models" && (section === "providers" || section === "model-config")) return section;
   if (tab === "agents" && (AGENT_KINDS as readonly string[]).includes(section)) return section as AgentTab;
@@ -294,6 +296,7 @@ export function categoryState(state: unknown): Record<string, unknown> | null {
   if (!openedFromList(state)) return null;
   const rest = { ...(state as Record<string, unknown>) };
   delete rest[FROM_SUB];
+  delete rest.integrationParent;
   return rest;
 }
 

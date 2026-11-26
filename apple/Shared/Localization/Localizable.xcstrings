@@ -406,6 +406,75 @@
         }
       }
     },
+    "Browsers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browsers"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブラウザー"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览器"
+          }
+        }
+      }
+    },
+    "Integrations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Integrations"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連携・制限付きアクセス"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "集成与受限访问"
+          }
+        }
+      }
+    },
+    "Scoped Access": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scoped Access"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス制限"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受限访问"
+          }
+        }
+      }
+    },
     "\"%@\" is %@ long and still over 200 MB at 540p, so it can't be sent. Trim it in Photos first.": {
       "localizations": {
         "zh-Hans": {
@@ -3603,6 +3672,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 用量到上限了"
+          }
+        }
+      }
+    },
+    "%@ reached its usage limit [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ reached its usage limit"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@が利用上限に達しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 达到使用额度"
           }
         }
       }
@@ -17694,6 +17786,29 @@
       },
       "extractionState": "manual"
     },
+    "A red ring around it": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A red ring around it"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四周一圈红环"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まわりに赤いリング"
+          }
+        }
+      }
+    },
     "A related push already alerted in the last 12 hours [Push Intercepts]": {
       "localizations": {
         "en": {
@@ -17990,6 +18105,29 @@
         }
       }
     },
+    "A state without a picture of its own is made from the avatar's picture, with its mark. The mark shows which state it is: turn it off only when your picture shows that by itself.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A state without a picture of its own is made from the avatar's picture, with its mark. The mark shows which state it is: turn it off only when your picture shows that by itself."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有单独图片的状态由形象的图片生成，并带上它的标记。标记表示这是哪种状态：只有你的图片本身就能看出状态时才关掉它。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "専用の画像がない状態は、アバターの画像から作られ、その状態のマークが付きます。マークはどの状態かを示すものです。画像だけで状態がわかる場合にだけオフにしてください。"
+          }
+        }
+      }
+    },
     "A terminal needs you": {
       "localizations": {
         "en": {
@@ -18012,6 +18150,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "A thought bubble at the top": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A thought bubble at the top"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上方一个思考气泡"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上に考えごとの吹き出し"
+          }
+        }
+      }
     },
     "A title and prompt are required; your changes weren't saved": {
       "localizations": {
@@ -18976,6 +19137,41 @@
         }
       }
     },
+    "Access ends in %lld days. Authorize again to keep syncing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Access ends in %lld day. Authorize again to keep syncing."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Access ends in %lld days. Authorize again to keep syncing."
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセスはあと %lld 日で終わります。同期を続けるには再認可してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "授权还有 %lld 天到期，重新授权后可继续同步。"
+          }
+        }
+      }
+    },
     "Access, status and Hand to Persona [Extensions Views 1224]": {
       "extractionState": "manual",
       "localizations": {
@@ -19069,6 +19265,29 @@
       },
       "extractionState": "manual"
     },
+    "Account %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account %lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウント %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账号 %lld"
+          }
+        }
+      }
+    },
     "Account [Home Widgets]": {
       "extractionState": "manual",
       "localizations": {
@@ -19088,6 +19307,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "アカウント"
+          }
+        }
+      }
+    },
+    "Account connected. The first sync starts soon.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account connected. The first sync starts soon."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウントを接続しました。まもなく最初の同期が始まります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账号已连接，很快会开始第一次同步。"
           }
         }
       }
@@ -19565,6 +19807,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "ToDoに追加（%1$lld件）"
+          }
+        }
+      }
+    },
+    "Add Account or Bot": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Account or Bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウントまたはボットを追加"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加账号或机器人"
           }
         }
       }
@@ -20460,6 +20725,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Add an Account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add an Account"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウントを追加"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加账号"
+          }
+        }
+      }
     },
     "Add an email account in Manage Accounts first": {
       "localizations": {
@@ -21828,6 +22116,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "调整"
+          }
+        }
+      }
+    },
+    "Adjust Crop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust Crop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调整裁剪"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り抜きを調整"
           }
         }
       }
@@ -26180,6 +26491,29 @@
         }
       }
     },
+    "Also the chats you are in and their messages. Work accounts usually need an admin to approve this first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also the chats you are in and their messages. Work accounts usually need an admin to approve this first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "参加しているチャットとそのメッセージも含みます。会社のアカウントでは通常、先に管理者の承認が必要です。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另外还有你所在的群聊和私聊消息。企业账号通常要先由管理员审批。"
+          }
+        }
+      }
+    },
     "Also when Persona isn't open": {
       "extractionState": "manual",
       "localizations": {
@@ -27161,6 +27495,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "iPhone 自己同意后才会被操控：在那台 iPhone 的 Persona 里打开 设置 › 连接器 › 这台 iPhone。"
+          }
+        }
+      }
+    },
+    "An orange arc along the edge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An orange arc along the edge"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沿边缘的一段橙色弧线"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふちに沿ったオレンジの弧"
           }
         }
       }
@@ -31792,6 +32149,75 @@
         }
       }
     },
+    "Authorize Again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authorize Again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再認可"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新授权"
+          }
+        }
+      }
+    },
+    "Authorize Again [Lark Sync state]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authorize Again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再認可が必要"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要重新授权"
+          }
+        }
+      }
+    },
+    "Authorize Again [Lark Sync title]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authorize Again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再認可"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新授权"
+          }
+        }
+      }
+    },
     "Auto": {
       "comment": "Codex reasoning summary\nHow a compaction started\nPermission mode: the agent judges the risk itself\nThinking effort level",
       "localizations": {
@@ -32776,6 +33202,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "后退"
+          }
+        }
+      }
+    },
+    "Back %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@に再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 恢复"
           }
         }
       }
@@ -34263,6 +34712,29 @@
         }
       }
     },
+    "Blocked by [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocked by"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブロック要因"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阻塞原因"
+          }
+        }
+      }
+    },
     "Blocked by rule %@": {
       "localizations": {
         "en": {
@@ -34603,6 +35075,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "两种形象都使用默认桌面图标。旧的备用图标会切回默认。"
+          }
+        }
+      }
+    },
+    "Both come from the picture unless you choose your own.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Both come from the picture unless you choose your own."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不另外选的话，两者都取自图片。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分で選ばない限り、どちらも画像から作られます。"
           }
         }
       }
@@ -40635,6 +41130,29 @@
         }
       }
     },
+    "Change Picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change Picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更换图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画像を変更"
+          }
+        }
+      }
+    },
     "Change Token": {
       "localizations": {
         "en": {
@@ -41092,6 +41610,29 @@
         }
       }
     },
+    "Changes requested [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes requested"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修正依頼あり"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要修改"
+          }
+        }
+      }
+    },
     "Changes stashed": {
       "extractionState": "manual",
       "localizations": {
@@ -41343,6 +41884,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Chat Bot [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chat Bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チャットボット"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聊天机器人"
+          }
+        }
+      }
     },
     "Chat History [Lark Summary Cards b790c0]": {
       "localizations": {
@@ -42536,6 +43100,52 @@
         }
       }
     },
+    "Check-in due (%@) [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check-in due (%@)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "確認期限を過ぎました（%@）"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已到跟进时间（%@）"
+          }
+        }
+      }
+    },
+    "Check-in due [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check-in due"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "確認期限超過"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已过截止时间"
+          }
+        }
+      }
+    },
     "Checked %@; opening again within a minute reuses this result": {
       "localizations": {
         "en": {
@@ -42880,6 +43490,29 @@
         }
       }
     },
+    "Checks failing [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks failing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェック失敗"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查未通过"
+          }
+        }
+      }
+    },
     "Checks for itself": {
       "extractionState": "manual",
       "localizations": {
@@ -42921,6 +43554,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "检出到 %@"
+          }
+        }
+      }
+    },
+    "Checks running [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks running"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェック実行中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查运行中"
           }
         }
       }
@@ -49955,6 +50611,29 @@
       },
       "extractionState": "manual"
     },
+    "Connect Account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect Account"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウントを接続"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接账号"
+          }
+        }
+      }
+    },
     "Connect Another": {
       "localizations": {
         "en": {
@@ -52144,6 +52823,29 @@
       },
       "extractionState": "manual"
     },
+    "Continue Setup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Setup"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を続ける"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续设置"
+          }
+        }
+      }
+    },
     "Continue anyway (%@)": {
       "localizations": {
         "en": {
@@ -52188,6 +52890,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Continue in Lark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue in Lark"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark で続ける"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "去飞书继续"
+          }
+        }
+      }
     },
     "Continue in Original Chat": {
       "localizations": {
@@ -52323,6 +53048,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "引き継ぎ元：%@"
+          }
+        }
+      }
+    },
+    "Continues Next Time [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continues Next Time"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次回に続行"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下次继续"
           }
         }
       }
@@ -52899,6 +53647,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Copy Address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Address"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アドレスをコピー"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制地址"
+          }
+        }
+      }
     },
     "Copy All [Code File Source 197a4d]": {
       "localizations": {
@@ -55627,6 +56398,29 @@
       },
       "extractionState": "manual"
     },
+    "Couldn't continue the setup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't continue the setup"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を続けられませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法继续设置"
+          }
+        }
+      }
+    },
     "Couldn't create pane": {
       "localizations": {
         "en": {
@@ -56839,6 +57633,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Couldn't load the daily sync: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't load the daily sync: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "毎日の同期を読み込めませんでした：%@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读不到每日同步：%@"
+          }
+        }
+      }
     },
     "Couldn't load the extension's model list (%@). These are the models it declares.": {
       "localizations": {
@@ -58583,6 +59400,52 @@
       },
       "extractionState": "manual"
     },
+    "Couldn't remove the account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't remove the account"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウントを削除できませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能移除账号"
+          }
+        }
+      }
+    },
+    "Couldn't remove the bot": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't remove the bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボットを削除できませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能移除机器人"
+          }
+        }
+      }
+    },
     "Couldn't remove the link.": {
       "extractionState": "manual",
       "localizations": {
@@ -59888,6 +60751,29 @@
         }
       }
     },
+    "Couldn't start syncing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't start syncing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期を開始できませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能开始同步"
+          }
+        }
+      }
+    },
     "Couldn't start the audio session: %@": {
       "localizations": {
         "en": {
@@ -60161,6 +61047,29 @@
       },
       "extractionState": "manual"
     },
+    "Couldn't turn off syncing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't turn off syncing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期をオフにできませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能关闭同步"
+          }
+        }
+      }
+    },
     "Couldn't turn off: %@": {
       "localizations": {
         "en": {
@@ -60206,6 +61115,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Couldn't turn on syncing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't turn on syncing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期をオンにできませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能开启同步"
+          }
+        }
+      }
     },
     "Couldn't turn on: %@": {
       "localizations": {
@@ -60983,6 +61915,29 @@
       },
       "extractionState": "manual"
     },
+    "Create by Scanning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create by Scanning"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スキャンして作成"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扫码新建"
+          }
+        }
+      }
+    },
     "Create on GitHub": {
       "localizations": {
         "en": {
@@ -61720,6 +62675,29 @@
         }
       }
     },
+    "Current picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在の画像"
+          }
+        }
+      }
+    },
     "Current setting, not in the list: %@": {
       "localizations": {
         "en": {
@@ -62085,6 +63063,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Daily Sync to Your Knowledge Base": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily Sync to Your Knowledge Base"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "毎日ナレッジベースに同期"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每天同步到知识库"
+          }
+        }
+      }
     },
     "Daily average %@ (%lld days with data)": {
       "localizations": {
@@ -65931,6 +66932,29 @@
       },
       "extractionState": "manual"
     },
+    "Details [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Details"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待機理由"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待原因"
+          }
+        }
+      }
+    },
     "Dev servers · .claude/launch.json": {
       "localizations": {
         "en": {
@@ -68291,6 +69315,29 @@
         }
       }
     },
+    "Documents and Meeting Minutes [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Documents and Meeting Minutes"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ドキュメントと議事録"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文档和会议纪要"
+          }
+        }
+      }
+    },
     "Documents follow the same order. Only days you set here add a deletion date; with none, documents are kept as before.": {
       "extractionState": "manual",
       "localizations": {
@@ -68425,6 +69472,41 @@
           "stringUnit": {
             "state": "translated",
             "value": "你打开过的文档"
+          }
+        }
+      }
+    },
+    "Documents: %lld [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld document"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld documents"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ドキュメント %lld 件"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 篇文档"
           }
         }
       }
@@ -70587,6 +71669,29 @@
         }
       }
     },
+    "Drop an image here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop an image here"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画像をここにドロップ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将图片拖放到此处"
+          }
+        }
+      }
+    },
     "Drop to add to the message": {
       "localizations": {
         "en": {
@@ -71586,6 +72691,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "「このスペースについて」を編集"
+          }
+        }
+      }
+    },
+    "Edit Avatar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Avatar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑形象"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アバターを編集"
           }
         }
       }
@@ -74970,6 +76098,29 @@
         }
       }
     },
+    "Every day around %@, Persona reads what changed in the chats, documents and meeting minutes these accounts can see, and adds it to your knowledge base. Nothing is posted or changed in Lark.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every day around %@, Persona reads what changed in the chats, documents and meeting minutes these accounts can see, and adds it to your knowledge base. Nothing is posted or changed in Lark."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "毎日 %@ ごろ、Persona はこれらのアカウントが見られるチャット、ドキュメント、議事録の変更を読み取り、ナレッジベースに追加します。Lark で投稿したり内容を変えたりすることはありません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每天 %@ 左右，Persona 会读取这些账号能看到的聊天、文档和会议纪要里的新变化，存进你的知识库。不会在飞书里发消息或改动任何内容。"
+          }
+        }
+      }
+    },
     "Every meeting starts with Persona in it, answering on screen. Remove it from a meeting on the Meetings page.": {
       "localizations": {
         "en": {
@@ -75379,6 +76530,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "このスペースで生まれた内容はすべて、これらの個人情報を含むものとして扱われ、スペースの外では慎重に使われます。"
+          }
+        }
+      }
+    },
+    "Everything, Including Chat History [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything, Including Chat History"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チャット履歴を含むすべて"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部，包括聊天记录"
           }
         }
       }
@@ -80227,6 +81401,29 @@
       },
       "extractionState": "manual"
     },
+    "For example, Work": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For example, Work"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例：仕事"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如：工作"
+          }
+        }
+      }
+    },
     "For example: Family, Money, Home": {
       "extractionState": "manual",
       "localizations": {
@@ -81549,6 +82746,29 @@
         }
       }
     },
+    "From step: %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From step: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ：%@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自步骤：%@"
+          }
+        }
+      }
+    },
     "From subagent · %@": {
       "extractionState": "manual",
       "localizations": {
@@ -81594,6 +82814,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "From the avatar's picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From the avatar's picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取自形象的图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アバターの画像から"
+          }
+        }
+      }
     },
     "From then on, the app connects to the hub directly only. You'll need to remove the authorized_keys line on the server yourself.": {
       "localizations": {
@@ -82232,6 +83475,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在从「%1$@」取…"
+          }
+        }
+      }
+    },
+    "Getting ready…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting ready…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "準備しています…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备…"
           }
         }
       }
@@ -83495,6 +84761,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "关系图"
+          }
+        }
+      }
+    },
+    "Gray, with z's rising": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gray, with z's rising"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "变灰，冒出 z"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グレーになり、zが浮かぶ"
           }
         }
       }
@@ -87555,6 +88844,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "I've Added It, Continue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've Added It, Continue"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加したので続ける"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已添加，继续"
+          }
+        }
+      }
     },
     "IDs and legal [Info Category]": {
       "extractionState": "manual",
@@ -94528,6 +95840,29 @@
       },
       "extractionState": "manual"
     },
+    "Keep Current Picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Current Picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留当前图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在の画像のままにする"
+          }
+        }
+      }
+    },
     "Keep Editing": {
       "localizations": {
         "en": {
@@ -95606,6 +96941,29 @@
         }
       }
     },
+    "Knowledge sync permissions [Lark bot setup]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For knowledge sync, also approve these user scopes: offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly. Publish the permissions, get admin approval if required, then authorize again to add missing permissions. Sender-name repair retries automatically after authorization."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如需知识同步，还要开通以下用户权限：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。发布权限并完成所需的管理员审批后，需要重新授权以补齐权限；人名补救会在授权后自动重跑。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ナレッジ同期には、次のユーザー権限も許可します：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。権限を公開し、必要な管理者承認を得た後、不足する権限を追加するため再認可してください。送信者名の補完は認可後に自動で再試行されます。"
+          }
+        }
+      }
+    },
     "Knowledge, details, copy directory and chat info": {
       "localizations": {
         "en": {
@@ -96271,29 +97629,6 @@
       },
       "extractionState": "manual"
     },
-    "Lark is turned off on the hub machine, so the Lark bot can't be set up or changed here. Everything you already have stays.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lark is turned off on the hub machine, so the Lark bot can't be set up or changed here. Everything you already have stays."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ハブのマシンでLarkがオフのため、ここではLarkボットの設定や変更はできません。すでにある内容はそのまま残ります。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "hub 所在的机器上关闭了飞书，所以这里不能设置或更改飞书机器人。已有的内容都会保留。"
-          }
-        }
-      }
-    },
     "Lark account": {
       "localizations": {
         "en": {
@@ -96455,6 +97790,29 @@
         }
       }
     },
+    "Lark is turned off on the hub machine, so the Lark bot can't be set up or changed here. Everything you already have stays.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark is turned off on the hub machine, so the Lark bot can't be set up or changed here. Everything you already have stays."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでLarkがオフのため、ここではLarkボットの設定や変更はできません。すでにある内容はそのまま残ります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上关闭了飞书，所以这里不能设置或更改飞书机器人。已有的内容都会保留。"
+          }
+        }
+      }
+    },
     "Lark is unavailable right now. Try again later.": {
       "localizations": {
         "en": {
@@ -96500,6 +97858,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Lark opens and asks whether Persona may read as you. Afterwards you come back here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark opens and asks whether Persona may read as you. Afterwards you come back here."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark が開き、Persona があなたとして読み取ってよいか確認します。終わるとここに戻ります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会打开飞书，询问是否允许 Persona 以你的身份读取。完成后会回到这里。"
+          }
+        }
+      }
     },
     "Lark returned data Persona can't read.": {
       "localizations": {
@@ -96971,6 +98352,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Last Sync Failed [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Sync Failed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の同期に失敗"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次同步失败"
+          }
+        }
+      }
     },
     "Last Synced": {
       "localizations": {
@@ -103362,6 +104766,29 @@
         }
       }
     },
+    "Makes an avatar from an image of your own, or drop an image here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Makes an avatar from an image of your own, or drop an image here"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分の画像からアバターを作成するか、画像をここにドロップします"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用你自己的图片制作形象，或将图片拖放到此处"
+          }
+        }
+      }
+    },
     "Manage": {
       "localizations": {
         "en": {
@@ -104992,25 +106419,25 @@
         }
       }
     },
-    "Meeting recording is off on this hub.": {
+    "Meeting recording": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Meeting recording is off on this hub."
+            "value": "Meeting recording"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このhubでは会議の録音がオフです。"
+            "value": "会議の録音"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 hub 关闭了会议录音。"
+            "value": "会议录音"
           }
         }
       }
@@ -105038,6 +106465,29 @@
         }
       }
     },
+    "Meeting recording is off on this hub.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meeting recording is off on this hub."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このhubでは会議の録音がオフです。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 hub 关闭了会议录音。"
+          }
+        }
+      }
+    },
     "Meeting recording is off on this hub. The recordings you already have stay here to read or delete.": {
       "extractionState": "manual",
       "localizations": {
@@ -105057,29 +106507,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "这台 hub 关闭了会议录音。已有的录音都还在这里，可以查看，也可以删除。"
-          }
-        }
-      }
-    },
-    "Meeting recording": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meeting recording"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "会議の録音"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "会议录音"
           }
         }
       }
@@ -105642,6 +107069,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "合入改动"
+          }
+        }
+      }
+    },
+    "Merge conflicts [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge conflicts"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンフリクトあり"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存在合并冲突"
           }
         }
       }
@@ -106719,6 +108169,41 @@
           "stringUnit": {
             "state": "translated",
             "value": "対応が必要なメッセージと最新のもの。"
+          }
+        }
+      }
+    },
+    "Messages: %lld [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld message"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld messages"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メッセージ %lld 件"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 条消息"
           }
         }
       }
@@ -110455,6 +111940,29 @@
       },
       "extractionState": "manual"
     },
+    "Name (optional)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name (optional)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前（任意）"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名称（可选）"
+          }
+        }
+      }
+    },
     "Name After Calendar Meetings": {
       "localizations": {
         "en": {
@@ -111463,6 +112971,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Needs review [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs review"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュー待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待审核"
+          }
+        }
+      }
     },
     "Needs you [Session Overview]": {
       "extractionState": "manual",
@@ -113394,6 +114925,29 @@
         }
       }
     },
+    "New from Photo makes an avatar from an image of your own. To change or delete one you made, use the buttons in its corners.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New from Photo makes an avatar from an image of your own. To change or delete one you made, use the buttons in its corners."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“从照片新建”会用你自己的图片做一个形象。要修改或删除你做的形象，请用它角上的按钮。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「写真から作成」で自分の画像からアバターを作れます。作ったアバターを変更・削除するには、その角のボタンを使います。"
+          }
+        }
+      }
+    },
     "New from Photo makes an avatar from an image of your own. To delete one you made, use the delete button in its corner.": {
       "extractionState": "manual",
       "localizations": {
@@ -114082,6 +115636,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Next: %@ [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次回：%@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下次：%@"
+          }
+        }
+      }
     },
     "No": {
       "localizations": {
@@ -115636,6 +117213,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "No account connected yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No account connected yet."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだアカウントが接続されていません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有连接账号。"
+          }
+        }
+      }
     },
     "No actions recorded [Standing Authorization]": {
       "extractionState": "manual",
@@ -120333,6 +121933,29 @@
       },
       "extractionState": "manual"
     },
+    "Not Connected Yet [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Connected Yet"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未接続"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没连接"
+          }
+        }
+      }
+    },
     "Not Installed": {
       "localizations": {
         "en": {
@@ -120699,6 +122322,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Not Synced Yet [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not synced yet"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ同期していません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没同步过"
+          }
+        }
+      }
     },
     "Not This iPhone": {
       "localizations": {
@@ -128955,6 +130601,29 @@
       },
       "extractionState": "manual"
     },
+    "One more thing first: in the app's settings in the Lark developer console, add this address under Security settings › Redirect URLs. Then continue.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One more thing first: in the app's settings in the Lark developer console, add this address under Security settings › Redirect URLs. Then continue."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その前にもう一つ：Lark 開発者コンソールのこのアプリの「セキュリティ設定 › リダイレクト URL」に次のアドレスを追加してから続けてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还差一步：在飞书开发者后台这个应用的「安全设置 › 重定向 URL」里加上下面这个地址，然后继续。"
+          }
+        }
+      }
+    },
     "One of its addresses isn't added, since Persona has no such kind of provider.": {
       "localizations": {
         "en": {
@@ -130695,6 +132364,29 @@
       },
       "extractionState": "manual"
     },
+    "Open App Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open App Settings"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリの設定を開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开应用设置"
+          }
+        }
+      }
+    },
     "Open Apple Account": {
       "extractionState": "manual",
       "localizations": {
@@ -130969,6 +132661,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Open Message [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Message"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信メッセージを開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看已发消息"
+          }
+        }
+      }
     },
     "Open Minutes": {
       "extractionState": "manual",
@@ -131881,6 +133596,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Open Source [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Source"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リンクを開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开来源链接"
+          }
+        }
+      }
     },
     "Open Space": {
       "localizations": {
@@ -135766,6 +137504,29 @@
       },
       "extractionState": "manual"
     },
+    "Parked [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parked"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已挂起"
+          }
+        }
+      }
+    },
     "Part of it couldn't be used.": {
       "localizations": {
         "en": {
@@ -136485,6 +138246,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "一時停止"
+          }
+        }
+      }
+    },
+    "Paused [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已暂停"
           }
         }
       }
@@ -139563,6 +141347,29 @@
         }
       }
     },
+    "Persona reads Lark through an app you allow to read as you. Create a new one by scanning, or give the chat bot this permission.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona reads Lark through an app you allow to read as you. Create a new one by scanning, or give the chat bot this permission."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona は、あなたとして読み取ることを許可したアプリを通じて Lark を読みます。スキャンして新しく作成するか、チャットボットにこの権限を与えてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona 通过一个你允许它以你身份读取的应用来读飞书。可以扫码新建一个，也可以给聊天机器人加上这个权限。"
+          }
+        }
+      }
+    },
     "Persona reads it directly": {
       "extractionState": "manual",
       "localizations": {
@@ -139905,6 +141712,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Persona wasn't allowed to read as you. You can try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona wasn't allowed to read as you. You can try again."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona があなたとして読み取ることは許可されませんでした。もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有允许 Persona 以你的身份读取，可以再试一次。"
+          }
+        }
+      }
     },
     "Persona will ask you again before it does this in %@ on %@: %@. Work already done isn't affected. To grant it again, ask Persona in the main chat.": {
       "extractionState": "manual",
@@ -141513,6 +143343,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Pictures for Each State": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pictures for Each State"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各状态的图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状態ごとの画像"
+          }
+        }
+      }
     },
     "Pictures: %lld": {
       "localizations": {
@@ -148096,6 +149949,29 @@
         }
       }
     },
+    "Reauthorize to Add Missing Permissions [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reauthorize to add missing permissions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要重新授权以补齐权限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不足する権限の追加には再認可が必要"
+          }
+        }
+      }
+    },
     "Rebase": {
       "extractionState": "manual",
       "localizations": {
@@ -151328,6 +153204,29 @@
         }
       }
     },
+    "Remove Bot [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボットを削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除机器人"
+          }
+        }
+      }
+    },
     "Remove Comment": {
       "localizations": {
         "en": {
@@ -151739,6 +153638,29 @@
         }
       }
     },
+    "Remove [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除"
+          }
+        }
+      }
+    },
     "Remove [Meeting Room]": {
       "localizations": {
         "en": {
@@ -152076,6 +153998,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "「%1$@」と「%2$@」のリンクを解除しますか？"
+          }
+        }
+      }
+    },
+    "Remove this account?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this account?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアカウントを削除しますか？"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除这个账号？"
+          }
+        }
+      }
+    },
+    "Remove this bot?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this bot?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このボットを削除しますか？"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除这个机器人？"
           }
         }
       }
@@ -160923,6 +162891,52 @@
       },
       "extractionState": "manual"
     },
+    "Scan with the Lark app and confirm. This page moves on by itself.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan with the Lark app and confirm. This page moves on by itself."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark アプリでスキャンして確認してください。このページは自動で次へ進みます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用飞书扫码并确认，这个页面会自动进入下一步。"
+          }
+        }
+      }
+    },
+    "Scan with the Lark app, or open the link and enter the code, then allow Persona to read as you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan with the Lark app, or open the link and enter the code, then allow Persona to read as you."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark アプリでスキャンするか、リンクを開いてコードを入力し、Persona があなたとして読み取ることを許可してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用飞书扫码，或打开链接输入验证码，然后允许 Persona 以你的身份读取。"
+          }
+        }
+      }
+    },
     "Scene": {
       "extractionState": "manual",
       "localizations": {
@@ -161082,6 +163096,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Scheduled wake [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled wake"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開予定"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计划唤醒时间"
+          }
+        }
+      }
     },
     "Screen & System Audio Recording: Cua Driver is allowed": {
       "localizations": {
@@ -161933,29 +163970,6 @@
       },
       "extractionState": "manual"
     },
-    "Search looks through the titles and notes of all your to-dos, including done ones. [To-dos Search]": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search looks through the titles and notes of all your to-dos, including done ones."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "完了したものも含め、すべてのToDoのタイトルとメモから探します。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜索范围是所有待办的标题和说明，已完成的也在内。"
-          }
-        }
-      }
-    },
     "Search in: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -161975,6 +163989,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "検索範囲：%1$@"
+          }
+        }
+      }
+    },
+    "Search looks through the titles and notes of all your to-dos, including done ones. [To-dos Search]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search looks through the titles and notes of all your to-dos, including done ones."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了したものも含め、すべてのToDoのタイトルとメモから探します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索范围是所有待办的标题和说明，已完成的也在内。"
           }
         }
       }
@@ -165600,6 +167637,52 @@
       },
       "extractionState": "manual"
     },
+    "Sent via %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent via %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@で送信済み"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已通过 %@ 发送"
+          }
+        }
+      }
+    },
+    "Sent via %@ · %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent via %1$@ · %2$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@で送信済み · %2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已通过 %1$@ 发送 · %2$@"
+          }
+        }
+      }
+    },
     "Sent, waiting for a reply": {
       "localizations": {
         "en": {
@@ -166054,6 +168137,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "服务令牌"
+          }
+        }
+      }
+    },
+    "Service [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Service"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サービス"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务"
           }
         }
       }
@@ -166861,6 +168967,29 @@
         }
       }
     },
+    "Set up the chat bot above first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up the chat bot above first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先に上でチャットボットを設定してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先在上方设置好聊天机器人。"
+          }
+        }
+      }
+    },
     "Set · %@": {
       "localizations": {
         "en": {
@@ -167133,6 +169262,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "设置 › 扩展"
+          }
+        }
+      }
+    },
+    "Setup isn't finished yet. [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup isn't finished yet."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定がまだ終わっていません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没设置完。"
+          }
+        }
+      }
+    },
+    "Setup wasn't finished. Remove this bot and add it again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup wasn't finished. Remove this bot and add it again."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定が完了しませんでした。このボットを削除して、もう一度追加してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置没有完成。请移除这个机器人后重新添加。"
           }
         }
       }
@@ -171248,6 +173423,29 @@
         }
       }
     },
+    "Since %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Since %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@から"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "始于 %@"
+          }
+        }
+      }
+    },
     "Since %@ · %@": {
       "extractionState": "manual",
       "localizations": {
@@ -171935,6 +174133,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Some Permissions Missing [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some Permissions Missing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一部の権限がありません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缺少部分权限"
+          }
+        }
+      }
     },
     "Some dependencies are unresolved. Add the markets that provide them, then preview again.": {
       "localizations": {
@@ -175918,6 +178139,29 @@
         }
       }
     },
+    "State Mark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "State Mark"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态标记"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状態のマーク"
+          }
+        }
+      }
+    },
     "Status": {
       "localizations": {
         "en": {
@@ -176285,6 +178529,75 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Step 1 of 2: Create the App": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 1 of 2: Create the App"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ 1/2：アプリを作成"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 1 步，共 2 步：创建应用"
+          }
+        }
+      }
+    },
+    "Step 1 of 2: Give the Chat Bot Permission": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 1 of 2: Give the Chat Bot Permission"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ 1/2：チャットボットに権限を追加"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 1 步，共 2 步：给聊天机器人加权限"
+          }
+        }
+      }
+    },
+    "Step 2 of 2: Allow Reading as You": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 2 of 2: Allow Reading as You"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ 2/2：あなたとしての読み取りを許可"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 2 步，共 2 步：允许以你的身份读取"
+          }
+        }
+      }
     },
     "Steps": {
       "localizations": {
@@ -180389,6 +182702,52 @@
       },
       "extractionState": "manual"
     },
+    "Sync %@ every day": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync %@ every day"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ を毎日同期"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每天同步 %@"
+          }
+        }
+      }
+    },
+    "Sync Bot [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期ボット"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步机器人"
+          }
+        }
+      }
+    },
     "Sync Main Chat": {
       "localizations": {
         "en": {
@@ -180411,6 +182770,52 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Sync Now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今すぐ同期"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即同步"
+          }
+        }
+      }
+    },
+    "Sync Time [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Time"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期の時刻"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步时间"
+          }
+        }
+      }
     },
     "Sync from iPhone": {
       "localizations": {
@@ -180550,6 +182955,29 @@
       },
       "extractionState": "manual"
     },
+    "Synced %@ [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synced %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@に同期"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@同步过"
+          }
+        }
+      }
+    },
     "Synced to Knowledge": {
       "localizations": {
         "en": {
@@ -180619,6 +183047,52 @@
       },
       "extractionState": "manual"
     },
+    "Syncing Now [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing Now"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在同步"
+          }
+        }
+      }
+    },
+    "Syncing started": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing started"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期を開始しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已开始同步"
+          }
+        }
+      }
+    },
     "Syncing to Knowledge": {
       "extractionState": "manual",
       "localizations": {
@@ -180638,6 +183112,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在同步到知识库"
+          }
+        }
+      }
+    },
+    "Syncing…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期中…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步中…"
           }
         }
       }
@@ -186402,6 +188899,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "形象做好了，但没能下载到这台设备，再试一次。"
+          }
+        }
+      }
+    },
+    "The avatar was saved, but this device couldn't download it. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The avatar was saved, but this device couldn't download it. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "形象已保存，但这台设备没能下载它。请重试。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アバターは保存されましたが、このデバイスにダウンロードできませんでした。もう一度お試しください。"
           }
         }
       }
@@ -197102,6 +199622,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "This avatar has no theme color yet. Choose one to give it one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This avatar has no theme color yet. Choose one to give it one."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个形象还没有主题色。选一个即可为它加上。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアバターにはまだテーマカラーがありません。選ぶと設定されます。"
+          }
+        }
+      }
     },
     "This block isn't supported yet. View it in Lark.": {
       "localizations": {
@@ -208297,6 +210840,29 @@
       },
       "extractionState": "manual"
     },
+    "Try Again [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再試行"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
     "Try Anyway": {
       "extractionState": "manual",
       "localizations": {
@@ -211592,6 +214158,29 @@
       },
       "extractionState": "manual"
     },
+    "Unknown [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不明"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知"
+          }
+        }
+      }
+    },
     "Unknown [Session Modes 4d8c1c]": {
       "localizations": {
         "en": {
@@ -212715,6 +215304,29 @@
         }
       }
     },
+    "Until %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Until %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@まで"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等到 %@"
+          }
+        }
+      }
+    },
     "Until [Notification Settings View 9a07c3]": {
       "extractionState": "manual",
       "localizations": {
@@ -212734,6 +215346,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "終了"
+          }
+        }
+      }
+    },
+    "Until [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Until"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "期限"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截止时间"
           }
         }
       }
@@ -213071,6 +215706,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Up to Date [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up to Date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已是最新"
+          }
+        }
+      }
     },
     "Up to date": {
       "extractionState": "manual",
@@ -215337,6 +217995,29 @@
         }
       }
     },
+    "Usage limit reached [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage limit reached"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "利用上限に到達"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "达到使用额度"
+          }
+        }
+      }
+    },
     "Usage per core": {
       "localizations": {
         "en": {
@@ -215423,6 +218104,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ で開始"
+          }
+        }
+      }
+    },
+    "Use Automatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Automatic"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "改用自动"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動に戻す"
           }
         }
       }
@@ -215726,6 +218430,29 @@
         }
       }
     },
+    "Use a new bot for an account in another company or another Lark account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a new bot for an account in another company or another Lark account."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "別の会社のアカウントや別の Lark アカウントには、新しいボットを使います。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他公司的账号或另一个飞书账号，用新建的机器人。"
+          }
+        }
+      }
+    },
     "Use a whole number from 1 to 36500, or leave it empty.": {
       "extractionState": "manual",
       "localizations": {
@@ -215884,6 +218611,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "用一个词，只能用文字、数字和“-”“_”“.”。"
+          }
+        }
+      }
+    },
+    "Use the Chat Bot": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the Chat Bot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チャットボットを使う"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用聊天机器人"
           }
         }
       }
@@ -217546,6 +220296,29 @@
       },
       "extractionState": "manual"
     },
+    "View PR [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View PR"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRを表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看 PR"
+          }
+        }
+      }
+    },
     "View Photo": {
       "extractionState": "manual",
       "localizations": {
@@ -218763,6 +221536,29 @@
         }
       }
     },
+    "Waiting [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待機中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待中"
+          }
+        }
+      }
+    },
     "Waiting for %@ · Speak to resume": {
       "localizations": {
         "en": {
@@ -218820,6 +221616,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Waiting for Admin Approval [Lark Sync]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for Admin Approval"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理者の承認待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待管理员审批"
+          }
+        }
+      }
     },
     "Waiting for Apple Watch": {
       "localizations": {
@@ -219234,6 +222053,52 @@
         }
       }
     },
+    "Waiting for reply [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for reply"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返信待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待回复"
+          }
+        }
+      }
+    },
+    "Waiting for review [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for review"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レビュー待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待审核"
+          }
+        }
+      }
+    },
     "Waiting for the agents on this computer to go idle…": {
       "extractionState": "manual",
       "localizations": {
@@ -219596,6 +222461,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "等你确认回复"
+          }
+        }
+      }
+    },
+    "Waiting for you to confirm in Lark…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for you to confirm in Lark…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lark での確認を待っています…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等你在飞书里确认…"
           }
         }
       }
@@ -219967,6 +222855,29 @@
         }
       }
     },
+    "Waiting on %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@を待機中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待 %@"
+          }
+        }
+      }
+    },
     "Waiting on Your Computer": {
       "localizations": {
         "en": {
@@ -219989,6 +222900,167 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Waiting on [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待機対象"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在等谁 / 等什么"
+          }
+        }
+      }
+    },
+    "Waiting on another Agent [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on another Agent"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "別のAgent待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待其他 Agent"
+          }
+        }
+      }
+    },
+    "Waiting on another to-do [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on another to-do"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "別のTo-Do待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待关联待办"
+          }
+        }
+      }
+    },
+    "Waiting on external event [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on external event"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外部イベント待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待外部事件"
+          }
+        }
+      }
+    },
+    "Waiting since %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting since %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@から待機中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自 %@ 开始等待"
+          }
+        }
+      }
+    },
+    "Waiting to merge %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to merge %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@のマージ待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待合并 %@"
+          }
+        }
+      }
+    },
+    "Waiting to merge [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to merge"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マージ待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待合并"
+          }
+        }
+      }
     },
     "Waiting to send": {
       "localizations": {
@@ -220058,6 +223130,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Waiting until date [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting until date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日時待ち"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待到期"
+          }
+        }
+      }
     },
     "Waiting-for-You Board in Lark": {
       "localizations": {
@@ -220151,6 +223246,29 @@
       },
       "extractionState": "manual"
     },
+    "Wakes %@ [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wakes %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@に再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 唤醒"
+          }
+        }
+      }
+    },
     "Wakes an agent waiting on a deploy, CI or another agent to check again": {
       "extractionState": "manual",
       "localizations": {
@@ -220170,6 +223288,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "在等部署、CI 或另一个 Agent 的，到点叫醒它再查"
+          }
+        }
+      }
+    },
+    "Wakes when [Todo Wait]": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wakes when"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開条件"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唤醒条件"
           }
         }
       }
@@ -220841,6 +223982,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "What Persona May Read": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What Persona May Read"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona が読めるもの"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona 可以读什么"
+          }
+        }
+      }
     },
     "What Persona can do": {
       "localizations": {
@@ -222717,6 +225881,29 @@
       },
       "extractionState": "manual"
     },
+    "When the daily sync starts, in the hub's time.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When the daily sync starts, in the hub's time."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "毎日の同期を始める時刻です（ハブのマシンの時刻）。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每天开始同步的时间，按 hub 所在机器的时间。"
+          }
+        }
+      }
+    },
     "When the market has a new version, it installs while the extension is idle, and asks you first if it wants more permissions. If it doesn't start after installing, it goes back to the previous version.": {
       "localizations": {
         "en": {
@@ -224266,6 +227453,29 @@
         }
       },
       "extractionState": "manual"
+    },
+    "With Theme Color set to Match Avatar in Settings › Appearance, the app's buttons, links and your messages take this color.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With Theme Color set to Match Avatar in Settings › Appearance, the app's buttons, links and your messages take this color."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在“设置 › 外观”中把主题色设为“跟随形象”时，App 的按钮、链接和你的消息会使用这个颜色。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「設定 › 外観」でテーマカラーを「アバターと同じ」にすると、アプリのボタン、リンク、あなたのメッセージがこの色になります。"
+          }
+        }
+      }
     },
     "With a Summary [Knowledge Map]": {
       "extractionState": "manual",
@@ -227196,6 +230406,29 @@
         }
       }
     },
+    "Your Color": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Color"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自选颜色"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分で選ぶ色"
+          }
+        }
+      }
+    },
     "Your Lark account changed, so the message wasn't sent. Switch back to the original account and try again.": {
       "localizations": {
         "en": {
@@ -227307,6 +230540,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "你发出的消息"
+          }
+        }
+      }
+    },
+    "Your Picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的图片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分の画像"
           }
         }
       }
@@ -227442,6 +230698,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "現在の設定は使用中プロファイル（%@）と異なっています。あとで戻したときに次の項目が上書きされないよう、先に現在の設定を保存できます："
+          }
+        }
+      }
+    },
+    "Your documents, sheets, wiki pages and meeting minutes. Work accounts may need an admin to approve this first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your documents, sheets, wiki pages and meeting minutes. Work accounts may need an admin to approve this first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなたのドキュメント、シート、Wiki ページ、議事録です。会社のアカウントでは先に管理者の承認が必要な場合があります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的文档、表格、知识库页面和会议纪要。企业账号可能要先由管理员审批。"
           }
         }
       }
@@ -237335,2361 +240614,68 @@
         }
       }
     },
-    "A red ring around it" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A red ring around it"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "四周一圈红环"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "まわりに赤いリング"
-          }
-        }
-      }
-    },
-    "A state without a picture of its own is made from the avatar's picture, with its mark. The mark shows which state it is: turn it off only when your picture shows that by itself." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A state without a picture of its own is made from the avatar's picture, with its mark. The mark shows which state it is: turn it off only when your picture shows that by itself."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有单独图片的状态由形象的图片生成，并带上它的标记。标记表示这是哪种状态：只有你的图片本身就能看出状态时才关掉它。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "専用の画像がない状態は、アバターの画像から作られ、その状態のマークが付きます。マークはどの状態かを示すものです。画像だけで状態がわかる場合にだけオフにしてください。"
-          }
-        }
-      }
-    },
-    "A thought bubble at the top" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A thought bubble at the top"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上方一个思考气泡"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上に考えごとの吹き出し"
-          }
-        }
-      }
-    },
-    "Adjust Crop" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjust Crop"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "调整裁剪"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "切り抜きを調整"
-          }
-        }
-      }
-    },
-    "An orange arc along the edge" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An orange arc along the edge"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沿边缘的一段橙色弧线"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ふちに沿ったオレンジの弧"
-          }
-        }
-      }
-    },
-    "Both come from the picture unless you choose your own." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Both come from the picture unless you choose your own."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不另外选的话，两者都取自图片。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自分で選ばない限り、どちらも画像から作られます。"
-          }
-        }
-      }
-    },
-    "Change Picture" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change Picture"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更换图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "画像を変更"
-          }
-        }
-      }
-    },
-    "Current picture" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Current picture"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "現在の画像"
-          }
-        }
-      }
-    },
-    "Drop an image here" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Drop an image here"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "画像をここにドロップ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将图片拖放到此处"
-          }
-        }
-      }
-    },
-    "Edit Avatar" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Edit Avatar"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "编辑形象"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アバターを編集"
-          }
-        }
-      }
-    },
-    "From the avatar's picture" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "From the avatar's picture"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取自形象的图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アバターの画像から"
-          }
-        }
-      }
-    },
-    "Gray, with z's rising" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gray, with z's rising"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "变灰，冒出 z"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "グレーになり、zが浮かぶ"
-          }
-        }
-      }
-    },
-    "Keep Current Picture" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep Current Picture"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保留当前图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "現在の画像のままにする"
-          }
-        }
-      }
-    },
-    "Makes an avatar from an image of your own, or drop an image here" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Makes an avatar from an image of your own, or drop an image here"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自分の画像からアバターを作成するか、画像をここにドロップします"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用你自己的图片制作形象，或将图片拖放到此处"
-          }
-        }
-      }
-    },
-    "New from Photo makes an avatar from an image of your own. To change or delete one you made, use the buttons in its corners." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "New from Photo makes an avatar from an image of your own. To change or delete one you made, use the buttons in its corners."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“从照片新建”会用你自己的图片做一个形象。要修改或删除你做的形象，请用它角上的按钮。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「写真から作成」で自分の画像からアバターを作れます。作ったアバターを変更・削除するには、その角のボタンを使います。"
-          }
-        }
-      }
-    },
-    "Pictures for Each State" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pictures for Each State"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "各状态的图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状態ごとの画像"
-          }
-        }
-      }
-    },
-    "State Mark" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "State Mark"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状态标记"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状態のマーク"
-          }
-        }
-      }
-    },
-    "The avatar was saved, but this device couldn't download it. Try again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The avatar was saved, but this device couldn't download it. Try again."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "形象已保存，但这台设备没能下载它。请重试。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アバターは保存されましたが、このデバイスにダウンロードできませんでした。もう一度お試しください。"
-          }
-        }
-      }
-    },
-    "This avatar has no theme color yet. Choose one to give it one." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This avatar has no theme color yet. Choose one to give it one."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个形象还没有主题色。选一个即可为它加上。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このアバターにはまだテーマカラーがありません。選ぶと設定されます。"
-          }
-        }
-      }
-    },
-    "Use Automatic" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use Automatic"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "改用自动"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自動に戻す"
-          }
-        }
-      }
-    },
-    "With Theme Color set to Match Avatar in Settings › Appearance, the app's buttons, links and your messages take this color." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "With Theme Color set to Match Avatar in Settings › Appearance, the app's buttons, links and your messages take this color."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在“设置 › 外观”中把主题色设为“跟随形象”时，App 的按钮、链接和你的消息会使用这个颜色。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「設定 › 外観」でテーマカラーを「アバターと同じ」にすると、アプリのボタン、リンク、あなたのメッセージがこの色になります。"
-          }
-        }
-      }
-    },
-    "Your Color" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your Color"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自选颜色"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自分で選ぶ色"
-          }
-        }
-      }
-    },
-    "Your Picture" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your Picture"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的图片"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自分の画像"
-          }
-        }
-      }
-    },
-    "Access ends in %lld days. Authorize again to keep syncing." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Access ends in %lld day. Authorize again to keep syncing."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Access ends in %lld days. Authorize again to keep syncing."
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アクセスはあと %lld 日で終わります。同期を続けるには再認可してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "授权还有 %lld 天到期，重新授权后可继续同步。"
-          }
-        }
-      }
-    },
-    "Account %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Account %lld"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウント %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "账号 %lld"
-          }
-        }
-      }
-    },
-    "Account connected. The first sync starts soon." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Account connected. The first sync starts soon."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウントを接続しました。まもなく最初の同期が始まります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "账号已连接，很快会开始第一次同步。"
-          }
-        }
-      }
-    },
-    "Add Account or Bot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add Account or Bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウントまたはボットを追加"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "添加账号或机器人"
-          }
-        }
-      }
-    },
-    "Add an Account" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add an Account"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウントを追加"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "添加账号"
-          }
-        }
-      }
-    },
-    "Also the chats you are in and their messages. Work accounts usually need an admin to approve this first." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Also the chats you are in and their messages. Work accounts usually need an admin to approve this first."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "参加しているチャットとそのメッセージも含みます。会社のアカウントでは通常、先に管理者の承認が必要です。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "另外还有你所在的群聊和私聊消息。企业账号通常要先由管理员审批。"
-          }
-        }
-      }
-    },
-    "Authorize Again" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authorize Again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再認可"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新授权"
-          }
-        }
-      }
-    },
-    "Authorize Again [Lark Sync state]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authorize Again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再認可が必要"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要重新授权"
-          }
-        }
-      }
-    },
-    "Authorize Again [Lark Sync title]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authorize Again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再認可"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新授权"
-          }
-        }
-      }
-    },
-    "Chat Bot [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chat Bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "チャットボット"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "聊天机器人"
-          }
-        }
-      }
-    },
-    "Connect Account" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connect Account"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウントを接続"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "连接账号"
-          }
-        }
-      }
-    },
-    "Continue Setup" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue Setup"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "設定を続ける"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "继续设置"
-          }
-        }
-      }
-    },
-    "Continue in Lark" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue in Lark"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark で続ける"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "去飞书继续"
-          }
-        }
-      }
-    },
-    "Continues Next Time [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continues Next Time"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "次回に続行"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下次继续"
-          }
-        }
-      }
-    },
-    "Copy Address" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copy Address"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アドレスをコピー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制地址"
-          }
-        }
-      }
-    },
-    "Couldn't continue the setup" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't continue the setup"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "設定を続けられませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法继续设置"
-          }
-        }
-      }
-    },
-    "Couldn't load the daily sync: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't load the daily sync: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "毎日の同期を読み込めませんでした：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读不到每日同步：%@"
-          }
-        }
-      }
-    },
-    "Couldn't remove the account" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't remove the account"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アカウントを削除できませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能移除账号"
-          }
-        }
-      }
-    },
-    "Couldn't remove the bot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't remove the bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ボットを削除できませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能移除机器人"
-          }
-        }
-      }
-    },
-    "Couldn't start syncing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't start syncing"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期を開始できませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能开始同步"
-          }
-        }
-      }
-    },
-    "Couldn't turn off syncing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't turn off syncing"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期をオフにできませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能关闭同步"
-          }
-        }
-      }
-    },
-    "Couldn't turn on syncing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't turn on syncing"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期をオンにできませんでした"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能开启同步"
-          }
-        }
-      }
-    },
-    "Create by Scanning" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Create by Scanning"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "スキャンして作成"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "扫码新建"
-          }
-        }
-      }
-    },
-    "Daily Sync to Your Knowledge Base" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Daily Sync to Your Knowledge Base"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "毎日ナレッジベースに同期"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每天同步到知识库"
-          }
-        }
-      }
-    },
-    "Documents and Meeting Minutes [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Documents and Meeting Minutes"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ドキュメントと議事録"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "文档和会议纪要"
-          }
-        }
-      }
-    },
-    "Documents: %lld [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld document"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld documents"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ドキュメント %lld 件"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 篇文档"
-          }
-        }
-      }
-    },
-    "Every day around %@, Persona reads what changed in the chats, documents and meeting minutes these accounts can see, and adds it to your knowledge base. Nothing is posted or changed in Lark." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every day around %@, Persona reads what changed in the chats, documents and meeting minutes these accounts can see, and adds it to your knowledge base. Nothing is posted or changed in Lark."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "毎日 %@ ごろ、Persona はこれらのアカウントが見られるチャット、ドキュメント、議事録の変更を読み取り、ナレッジベースに追加します。Lark で投稿したり内容を変えたりすることはありません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每天 %@ 左右，Persona 会读取这些账号能看到的聊天、文档和会议纪要里的新变化，存进你的知识库。不会在飞书里发消息或改动任何内容。"
-          }
-        }
-      }
-    },
-    "Everything, Including Chat History [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Everything, Including Chat History"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "チャット履歴を含むすべて"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部，包括聊天记录"
-          }
-        }
-      }
-    },
-    "For example, Work" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "For example, Work"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "例：仕事"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "例如：工作"
-          }
-        }
-      }
-    },
-    "Getting ready…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Getting ready…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "準備しています…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在准备…"
-          }
-        }
-      }
-    },
-    "I've Added It, Continue" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "I've Added It, Continue"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "追加したので続ける"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已添加，继续"
-          }
-        }
-      }
-    },
-    "Lark opens and asks whether Persona may read as you. Afterwards you come back here." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark opens and asks whether Persona may read as you. Afterwards you come back here."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark が開き、Persona があなたとして読み取ってよいか確認します。終わるとここに戻ります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会打开飞书，询问是否允许 Persona 以你的身份读取。完成后会回到这里。"
-          }
-        }
-      }
-    },
-    "Last Sync Failed [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Last Sync Failed"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "前回の同期に失敗"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次同步失败"
-          }
-        }
-      }
-    },
-    "Messages: %lld [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld message"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld messages"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "メッセージ %lld 件"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条消息"
-          }
-        }
-      }
-    },
-    "Name (optional)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Name (optional)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "名前（任意）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "名称（可选）"
-          }
-        }
-      }
-    },
-    "Knowledge sync permissions [Lark bot setup]": {
-      "extractionState": "manual",
+    "Handed off from Inbox [Action Bar]": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "For knowledge sync, also approve these user scopes: offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly. Publish the permissions, get admin approval if required, then authorize again to add missing permissions. Sender-name repair retries automatically after authorization."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "如需知识同步，还要开通以下用户权限：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。发布权限并完成所需的管理员审批后，需要重新授权以补齐权限；人名补救会在授权后自动重跑。"
+            "value": "Handed off from Inbox"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ナレッジ同期には、次のユーザー権限も許可します：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。権限を公開し、必要な管理者承認を得た後、不足する権限を追加するため再認可してください。送信者名の補完は認可後に自動で再試行されます。"
-          }
-        }
-      }
-    },
-    "Reauthorize to Add Missing Permissions [Lark Sync]": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reauthorize to add missing permissions"
+            "value": "受信箱から引き継ぎ"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要重新授权以补齐权限"
+            "value": "从收件箱移交当前对话"
+          }
+        }
+      }
+    },
+    "Nothing to wrap up [Action Bar]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing to wrap up"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "不足する権限の追加には再認可が必要"
+            "value": "まとめる項目はありません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有待收尾的收件箱条目"
           }
         }
       }
     },
-    "Next: %@ [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Next: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "次回：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下次：%@"
-          }
-        }
-      }
-    },
-    "No account connected yet." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No account connected yet."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "まだアカウントが接続されていません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没有连接账号。"
-          }
-        }
-      }
-    },
-    "Not Connected Yet [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not Connected Yet"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未接続"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没连接"
-          }
-        }
-      }
-    },
-    "Not Synced Yet [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not synced yet"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "まだ同期していません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没同步过"
-          }
-        }
-      }
-    },
-    "One more thing first: in the app's settings in the Lark developer console, add this address under Security settings › Redirect URLs. Then continue." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "One more thing first: in the app's settings in the Lark developer console, add this address under Security settings › Redirect URLs. Then continue."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "その前にもう一つ：Lark 開発者コンソールのこのアプリの「セキュリティ設定 › リダイレクト URL」に次のアドレスを追加してから続けてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还差一步：在飞书开发者后台这个应用的「安全设置 › 重定向 URL」里加上下面这个地址，然后继续。"
-          }
-        }
-      }
-    },
-    "Open App Settings" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open App Settings"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリの設定を開く"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开应用设置"
-          }
-        }
-      }
-    },
-    "Paused [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paused"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一時停止中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已暂停"
-          }
-        }
-      }
-    },
-    "Persona reads Lark through an app you allow to read as you. Create a new one by scanning, or give the chat bot this permission." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona reads Lark through an app you allow to read as you. Create a new one by scanning, or give the chat bot this permission."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona は、あなたとして読み取ることを許可したアプリを通じて Lark を読みます。スキャンして新しく作成するか、チャットボットにこの権限を与えてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona 通过一个你允许它以你身份读取的应用来读飞书。可以扫码新建一个，也可以给聊天机器人加上这个权限。"
-          }
-        }
-      }
-    },
-    "Persona wasn't allowed to read as you. You can try again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona wasn't allowed to read as you. You can try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona があなたとして読み取ることは許可されませんでした。もう一度お試しください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有允许 Persona 以你的身份读取，可以再试一次。"
-          }
-        }
-      }
-    },
-    "Remove Bot [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove Bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ボットを削除"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除机器人"
-          }
-        }
-      }
-    },
-    "Remove [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "削除"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除"
-          }
-        }
-      }
-    },
-    "Remove this account?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove this account?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このアカウントを削除しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除这个账号？"
-          }
-        }
-      }
-    },
-    "Remove this bot?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove this bot?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このボットを削除しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除这个机器人？"
-          }
-        }
-      }
-    },
-    "Scan with the Lark app and confirm. This page moves on by itself." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan with the Lark app and confirm. This page moves on by itself."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark アプリでスキャンして確認してください。このページは自動で次へ進みます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用飞书扫码并确认，这个页面会自动进入下一步。"
-          }
-        }
-      }
-    },
-    "Scan with the Lark app, or open the link and enter the code, then allow Persona to read as you." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan with the Lark app, or open the link and enter the code, then allow Persona to read as you."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark アプリでスキャンするか、リンクを開いてコードを入力し、Persona があなたとして読み取ることを許可してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用飞书扫码，或打开链接输入验证码，然后允许 Persona 以你的身份读取。"
-          }
-        }
-      }
-    },
-    "Service [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Service"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "サービス"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "服务"
-          }
-        }
-      }
-    },
-    "Set up the chat bot above first." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Set up the chat bot above first."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "先に上でチャットボットを設定してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先在上方设置好聊天机器人。"
-          }
-        }
-      }
-    },
-    "Setup isn't finished yet. [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Setup isn't finished yet."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "設定がまだ終わっていません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没设置完。"
-          }
-        }
-      }
-    },
-    "Setup wasn't finished. Remove this bot and add it again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Setup wasn't finished. Remove this bot and add it again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "設定が完了しませんでした。このボットを削除して、もう一度追加してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "设置没有完成。请移除这个机器人后重新添加。"
-          }
-        }
-      }
-    },
-    "Some Permissions Missing [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Some Permissions Missing"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一部の権限がありません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "缺少部分权限"
-          }
-        }
-      }
-    },
-    "Step 1 of 2: Create the App" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Step 1 of 2: Create the App"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ステップ 1/2：アプリを作成"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 1 步，共 2 步：创建应用"
-          }
-        }
-      }
-    },
-    "Step 1 of 2: Give the Chat Bot Permission" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Step 1 of 2: Give the Chat Bot Permission"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ステップ 1/2：チャットボットに権限を追加"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 1 步，共 2 步：给聊天机器人加权限"
-          }
-        }
-      }
-    },
-    "Step 2 of 2: Allow Reading as You" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Step 2 of 2: Allow Reading as You"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ステップ 2/2：あなたとしての読み取りを許可"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 2 步，共 2 步：允许以你的身份读取"
-          }
-        }
-      }
-    },
-    "Sync %@ every day" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sync %@ every day"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ を毎日同期"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每天同步 %@"
-          }
-        }
-      }
-    },
-    "Sync Bot [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sync Bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期ボット"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同步机器人"
-          }
-        }
-      }
-    },
-    "Sync Now" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sync Now"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "今すぐ同期"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "立即同步"
-          }
-        }
-      }
-    },
-    "Sync Time [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sync Time"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期の時刻"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同步时间"
-          }
-        }
-      }
-    },
-    "Synced %@ [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synced %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@に同期"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@同步过"
-          }
-        }
-      }
-    },
-    "Syncing Now [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing Now"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在同步"
-          }
-        }
-      }
-    },
-    "Syncing started" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing started"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期を開始しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已开始同步"
-          }
-        }
-      }
-    },
-    "Syncing…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期中…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同步中…"
-          }
-        }
-      }
-    },
-    "Try Again [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try Again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再試行"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重试"
-          }
-        }
-      }
-    },
-    "Unknown [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unknown"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不明"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未知"
-          }
-        }
-      }
-    },
-    "Up to Date [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Up to Date"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最新"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已是最新"
-          }
-        }
-      }
-    },
-    "Use a new bot for an account in another company or another Lark account." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use a new bot for an account in another company or another Lark account."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "別の会社のアカウントや別の Lark アカウントには、新しいボットを使います。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其他公司的账号或另一个飞书账号，用新建的机器人。"
-          }
-        }
-      }
-    },
-    "Use the Chat Bot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use the Chat Bot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "チャットボットを使う"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用聊天机器人"
-          }
-        }
-      }
-    },
-    "Waiting for Admin Approval [Lark Sync]" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for Admin Approval"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "管理者の承認待ち"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等待管理员审批"
-          }
-        }
-      }
-    },
-    "Waiting for you to confirm in Lark…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for you to confirm in Lark…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lark での確認を待っています…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等你在飞书里确认…"
-          }
-        }
-      }
-    },
-    "What Persona May Read" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What Persona May Read"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona が読めるもの"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Persona 可以读什么"
-          }
-        }
-      }
-    },
-    "When the daily sync starts, in the hub's time." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "When the daily sync starts, in the hub's time."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "毎日の同期を始める時刻です（ハブのマシンの時刻）。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每天开始同步的时间，按 hub 所在机器的时间。"
-          }
-        }
-      }
-    },
-    "Your documents, sheets, wiki pages and meeting minutes. Work accounts may need an admin to approve this first." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your documents, sheets, wiki pages and meeting minutes. Work accounts may need an admin to approve this first."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "あなたのドキュメント、シート、Wiki ページ、議事録です。会社のアカウントでは先に管理者の承認が必要な場合があります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的文档、表格、知识库页面和会议纪要。企业账号可能要先由管理员审批。"
+    "Wrap Up [Action Bar]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrap Up"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まとめる"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收尾"
           }
         }
       }

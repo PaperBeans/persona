@@ -18,6 +18,7 @@ const LIMITED = "读不到 github:nwverse/persona-extensions：被限流了（HT
 let host: HTMLDivElement;
 let root: Root;
 let markets: Market[];
+let calls: { path: string; method: string; body: unknown }[] = [];
 
 const flush = async () => {
   // the catalog loads after a timer (its search debounce)
@@ -28,9 +29,21 @@ const text = () => host.textContent ?? "";
 beforeEach(() => {
   resetExtensionRoot();
   setCsrf("tok");
-  setTransport(async (url) => {
+  calls = [];
+  setTransport(async (url, init) => {
     const path = url.replace("/api/v1/admin", "").replace(/\?.*$/, "");
     const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
+    const method = init?.method ?? "GET";
+    if (path.startsWith("/extensions/-/markets/") && path.includes("/keys")) {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ path, method, body });
+      const m = markets[0];
+      const keys = { ...(m.trusted_keys ?? {}) };
+      if (method === "POST") keys["2222222222222222"] = body.key;
+      else delete keys[path.split("/").pop()!];
+      markets = [{ ...m, trusted_keys: keys }];
+      return reply(markets[0]);
+    }
     if (path === "/extensions") return reply({ extensions: [] });
     if (path === "/extensions/-/markets") return reply({ markets });
     if (path === "/extensions/-/catalog") return reply({ extensions: [] });
@@ -100,6 +113,37 @@ describe("the admin page's markets", () => {
     markets = [{ ...github("team", "HTTP 403"), has_token: true }];
     await open();
     expect(text()).not.toContain("GitHub 不带 token 时每小时只能读 60 次");
+  });
+
+  it("shows a private market's signing keys and edits them", async () => {
+    const key = { key: "ed25519:" + "A".repeat(43) + "=", key_id: "1111111111111111" };
+    markets = [{ ...github("private"), signature: { state: "signed", key_id: key.key_id }, trusted_keys: { [key.key_id]: key.key } }];
+    await open();
+    expect(text()).toContain("1 把公钥");
+    act(() => button("签名公钥")!.click());
+    await flush();
+    const dialog = () => document.querySelector('[role="dialog"]')?.textContent ?? "";
+    expect(dialog()).toContain("签名公钥 · private");
+    expect(dialog()).toContain(key.key_id);
+    expect(dialog()).toContain("签了当前索引");
+    expect(dialog()).toContain("只有官方市场的公钥才免沙箱");
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "ed25519:" + "B".repeat(43) + "=");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const add = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === "添加") as HTMLButtonElement;
+    act(() => add.click());
+    await flush();
+    expect(calls).toEqual([{ path: "/extensions/-/markets/private/keys", method: "POST", body: { key: "ed25519:" + "B".repeat(43) + "=" } }]);
+    expect(dialog()).toContain("2222222222222222");
+  });
+
+  it("offers no signing keys for the official market", async () => {
+    markets = [official()];
+    await open();
+    expect(button("签名公钥")).toBeUndefined();
   });
 
   it("says there are no extensions when every market was read", async () => {

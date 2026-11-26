@@ -111,10 +111,12 @@ func (n *Node) runtimeStartOn(ctx context.Context, h *runtimeConn, p runtimeStar
 		h.mu.Lock()
 		supported := h.hello.Caps.BackendWorkspaceRoot
 		h.mu.Unlock()
-		if !supported {
+		if !supported && !b.taskDispatch {
 			return nil, nil, refusal("backend_workspace_unsupported", "This runtime cannot start in a prepared task directory.", nil)
 		}
-		params["backend_workspace_root"] = true
+		if supported {
+			params["backend_workspace_root"] = true
+		}
 		if err := b.beforeDispatch(p.SessionID); err != nil {
 			return nil, nil, err
 		}

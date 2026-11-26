@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"net/url"
 	"strings"
@@ -35,6 +36,7 @@ import (
 type todoAsk struct {
 	Outcome   string    `json:"outcome,omitempty"`
 	Verdict   string    `json:"verdict"`
+	Summary   string    `json:"summary,omitempty"`
 	Recommend string    `json:"recommend,omitempty"`
 	Link      string    `json:"link,omitempty"`
 	AskedAt   time.Time `json:"asked_at"`
@@ -69,18 +71,30 @@ const (
 	defaultNever = "never"
 )
 
+// todoActiveBlockerView is a persistent active blocker edge attached to a listedTodo under todos_v2.
+type todoActiveBlockerView struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	TargetRef string `json:"target_ref"`
+	State     string `json:"state"`
+	Attempts  int    `json:"attempts,omitempty"`
+}
+
 // listedTodo is a to-do as GET /api/v1/todos lists it: with its ask while one waits (none: no `ask`, which a client that
 // does not know it never reads), and, while it is open and nobody works on it, why (`orphaned`, tasks_orphan.go); on
 // the routes, its view (todo_view_routes.go).
 type listedTodo struct {
 	Todo
 	PrerequisiteBlockers []string                   `json:"prerequisite_blockers,omitzero"`
+	ActiveBlockers       []todoActiveBlockerView    `json:"active_blockers,omitempty"`
 	Ask                  *todoAsk                   `json:"ask,omitempty"`
 	DecisionReview       *decisionReview            `json:"decision_review,omitempty"`
 	Orphaned             *TodoOrphan                `json:"orphaned,omitempty"`
 	View                 *assistantwire.TodoSummary `json:"view,omitempty"`
+	Wait                 *assistantwire.TodoWait    `json:"wait,omitempty"`
 	RepoGate             *repoGate                  `json:"repo_gate,omitempty"`
 	ItemType             string                     `json:"item_type,omitempty"`
+	ChildSummary         *todoChildSummary          `json:"child_summary,omitempty"`
 }
 
 // askEvidenceLink returns raw when it is a valid http(s) URL and not merely the to-do's own /todos/<id> page.
@@ -108,13 +122,53 @@ func isSelfTodoLink(u, web, todoID string) bool {
 	return strings.TrimRight(parsed.EscapedPath(), "/") == selfPath || strings.TrimRight(parsed.Path, "/") == "/todos/"+todoID
 }
 
+// verificationDetails takes the owner's summary and deliverable from the current verification round.
+func (w awaitingAccept) verificationDetails(web, verdict string) (summary, link string) {
+	if w.ask.Conclusion {
+		return "", ""
+	}
+	summary = strings.TrimSpace(w.ask.Reason)
+	var reviewedLink string
+	if r := w.review; r != nil {
+		summary = cmp.Or(summary, strings.TrimSpace(r.Reason), strings.TrimSpace(r.Note))
+		reviewedLink = r.Link
+	}
+	if summary == strings.TrimSpace(verdict) {
+		summary = ""
+	}
+	for _, raw := range []string{reviewedLink, w.ask.Link} {
+		link = askEvidenceLink(raw, web, w.todo)
+		if link == "" {
+			continue
+		}
+		u, _ := url.Parse(link) // askEvidenceLink has validated it.
+		path := strings.TrimRight(u.EscapedPath(), "/")
+		if path == "/todos" && u.Query().Get("id") == w.todo {
+			continue // An older hub linked to a task with a query parameter.
+		}
+		u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
+		target := strings.TrimRight(u.String(), "/")
+		if isSelfTodoLink(target, web, w.todo) || (w.session != "" &&
+			(target == sessionLink(web, w.machine, w.session, false) || (web == "" && path == deeplink.Session(w.machine, w.session)))) {
+			continue
+		}
+		return summary, link
+	}
+	return summary, ""
+}
+
 // todoAsks are the open asks by to-do id, in the request's language: the ones the briefing lists (not passed, not ended,
 // not from before the to-do's latest reopen).
 func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 	l, loc, web := s.botLang(ctx), s.location(ctx), s.webBase(ctx)
 	out := map[string]todoAsk{}
 	for _, w := range s.awaitingAcceptance(ctx) {
-		a := todoAsk{Outcome: w.ask.Outcome, Verdict: verdictText(l, &w.ask, w.delivery), Link: askEvidenceLink(w.ask.Link, web, w.todo), AskedAt: w.ask.AskedAt, Risk: askRisk(&w.ask)}
+		a := todoAsk{Outcome: w.ask.Outcome, Verdict: verdictText(l, &w.ask, w.delivery), AskedAt: w.ask.AskedAt, Risk: askRisk(&w.ask)}
+		if !w.ask.Conclusion {
+			a.Summary, a.Link = w.verificationDetails(web, a.Verdict)
+		} else {
+			a.Link = askEvidenceLink(w.ask.Link, web, w.todo)
+		}
 		if decideAsk(&w.ask) {
 			a.Recommend = w.ask.Recommend
 			if w.ask.OutsideID == "" {

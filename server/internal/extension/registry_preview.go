@@ -153,6 +153,12 @@ func (r *Registry) PreviewMarket(ctx context.Context, mk *Market, marketID strin
 			return nil, i18n.Err("extension-market_security.signature")
 		}
 		verifiedKey = e.verifiedKey
+	} else if len(mk.TrustedKeys) > 0 {
+		// A private market with owner keys: the entry must come from a catalog one of them verified, unchanged since.
+		if e.verifiedKey == "" || !slices.Contains(mk.TrustedKeys, e.verifiedKey) || e.verifiedEntry != entryFingerprint(e) {
+			return nil, i18n.Err("extension-market_security.private_signature")
+		}
+		verifiedKey = e.verifiedKey
 	}
 	pkg := e.PackageFor(Platform())
 	if pkg == nil {
@@ -181,7 +187,7 @@ func (r *Registry) PreviewMarket(ctx context.Context, mk *Market, marketID strin
 		}
 		return nil, fmt.Errorf("下载的包（%s %s）的完整清单和市场索引（%s %s）不一致", m.ID, m.Version, e.Parsed.ID, e.Parsed.Version)
 	}
-	pv.Market, pv.marketSpec, pv.marketKey = marketID, mk.Spec.String(), mk.TrustedKey
+	pv.Market, pv.marketSpec, pv.marketKey = marketID, mk.Spec.String(), TrustPin(mk.Spec.String(), mk.TrustedKey, mk.TrustedKeys)
 	pv.verifiedMarketKey = verifiedKey
 	pv.RenameFrom, pv.replaces = renameFrom, e.Replaces
 	return pv, nil

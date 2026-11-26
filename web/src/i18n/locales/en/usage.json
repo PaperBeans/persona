@@ -52,9 +52,13 @@
   "protect_label": "pauses scheduling at {percent}% remaining",
   "pin_account": "Pin {name} to sidebar",
   "unpin_account": "Unpin {name} from sidebar",
+  "pin_window": "Pin {name} {window} to sidebar",
+  "unpin_window": "Unpin {name} {window} from sidebar",
+  "pin_window_model": "Pin {name} {window} ({model}) to sidebar",
+  "unpin_window_model": "Unpin {name} {window} ({model}) from sidebar",
   "pin_title": "Pin to sidebar",
   "unpin_title": "Unpin from sidebar",
   "pinned_summary": "Pinned in sidebar: {count}",
-  "pinned_fallback": "Pinned accounts unavailable · showing automatic",
+  "pinned_fallback": "Pinned items unavailable · showing automatic",
   "reset_pinned": "Reset to automatic"
 }

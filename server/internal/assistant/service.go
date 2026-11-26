@@ -19,6 +19,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/kernel"
+	"github.com/nwverse/persona/server/internal/assistant/kernel/seam"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -217,6 +218,11 @@ type Service struct {
 	mux            *http.ServeMux
 	routes         []string
 	routeFallbacks []string // internal path-only fallbacks: not relayed, but included in module conflict checks
+	// kernel is the registry the modules register through (kernel/seam; seam_slots.go): sealed once New returns, it
+	// answers their bus methods and runs their hooks. routing is the Kernel a module's route functions register
+	// through while routesThrough runs them.
+	kernel  *seam.Registry
+	routing *seam.Kernel
 
 	standingJudgeModel jsonModel  // nil: the configured agent.delegate model; tests can supply a deterministic model.
 	standingMu         sync.Mutex // standing_authorizations.go: revocation and automatic answers serialize
@@ -233,6 +239,10 @@ type Service struct {
 	prepared     map[string]preparedState
 
 	epoch string
+	// todosV2BootEpoch is the stable per-process boot epoch for todos_v2 restart recovery (#16099).
+	// Lazily initialized when a zero-value Service{} is constructed in tests.
+	todosV2BootEpoch     atomic.Pointer[string]
+	todosV2RecoverySwept atomic.Bool
 	// born is when this manager started: a background supervisor started before it may be in a profile with no login
 	// (backgroundSignedOut).
 	born  time.Time
@@ -370,6 +380,7 @@ type Service struct {
 	viewEvents viewNotifications // views.go: only coalesced notifications; contents are stored first
 	pages      pagesRuntime      // pages_actions.go, pages_events.go: the pages' events, taps and turns (Dashboards)
 	viewMemo   viewMemo          // views.go: encoded cards for the feed snapshot, checked against the database
+	inlineFull inlineFullBook    // views_inline.go: truncated replies whose full text was already scanned
 
 	devs                 Devices // the computers (devices.go); nil: no fleet
 	mcpWaitMu            sync.Mutex
@@ -433,6 +444,8 @@ func New(o Options) *Service {
 	s := &Service{moduleSwitch: moduleswitch.Off(o.ModulesOff...), hub: o.Hub, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(), born: time.Now(),
 		devs: o.Devices, trustSrc: o.Trust, agentDirs: o.AgentDirs, herdrSessions: o.HerdrSessions, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig, urgentWake: make(chan struct{}, 1),
 		a2aWake: make(chan struct{}, 1), a2aLogicalWrites: make(chan struct{}, 4)}
+	bootEpoch := "boot_" + randomHex(8)
+	s.todosV2BootEpoch.Store(&bootEpoch)
 	s.setStore(o.Store)
 	s.inbox.lang = func() i18n.Lang { return s.lang(context.Background()) }
 	s.remoteImages = remoteimage.New(remoteimage.Options{CacheDir: o.RemoteImageCache, Logf: o.Logf, DoH: s.remoteImageDoH})
@@ -523,7 +536,7 @@ func New(o Options) *Service {
 	s.kbRoutes()
 	s.searchRoutes()
 	s.historyRoutes()
-	s.inboxRoutes()
+	reg.Register(newInboxModule(s)) // the Inbox's routes, bus methods, hooks and snapshot part (inbox_module.go)
 	s.modelConfigRoutes()
 	s.modelProfileRoutes()
 	s.launcherRoutes()
@@ -540,8 +553,18 @@ func New(o Options) *Service {
 	return s
 }
 
-// handle adds one of the routes the hub relays.
+// handle adds one of the routes the hub relays; while routesThrough runs a module's route functions, it registers
+// the route through that module's Kernel instead (seam_slots.go).
 func (s *Service) handle(pattern string, fn http.HandlerFunc) {
+	if k := s.routing; k != nil {
+		k.Route(seam.NewRoute(pattern, fn))
+		return
+	}
+	s.serveRoute(pattern, fn)
+}
+
+// serveRoute serves pattern with fn, among the routes the hub relays.
+func (s *Service) serveRoute(pattern string, fn http.HandlerFunc) {
 	s.routes = append(s.routes, pattern)
 	if _, path, _ := strings.Cut(pattern, " "); strings.HasPrefix(path, "/api/v1/todos/{id}") {
 		fn = s.todoScoped(fn) // what an extension is not shown of a to-do, at every route of one (todo_scope.go)
@@ -830,6 +853,7 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 		unlock := s.lockTaskSpace(taskRoot)
 		defer unlock()
 	}
+	assignmentAt := time.Now().UTC()
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return beforeNodeWrite(method, err)
@@ -851,6 +875,15 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	}
 	if err == nil {
 		round.sent(s, res) // whose round it is, for the owner's next message (owner_preempt.go)
+	}
+	if err == nil && (method == DeviceSessionSend || method == DeviceSessionSendOnce) {
+		if sent, ok := params.(map[string]any); ok {
+			if id, _ := sent["session_id"].(string); id != "" {
+				actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				s.notePersonaAssignment(actx, device, id, assignmentAt)
+				cancel()
+			}
+		}
 	}
 	laterTaken(err == nil)
 	if sent, ok := params.(map[string]any); ok && method == DeviceAssistantSend {
@@ -982,6 +1015,7 @@ func (s *Service) pushResult(ctx context.Context, n Notification) (NotifyResult,
 	}
 	// A track's push_cap holds the level (track_attention.go).
 	s.capTrackPush(ctx, &n)
+	s.applyTodosV2PushAttention(ctx, &n)
 	if n.Asked { // the conversation pushed what matters itself: its own finished push is left out (fleet_push.go)
 		s.noteAsked(n.SessionID)
 	}
@@ -1125,8 +1159,7 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	if cfg.Main != "" { // not snap.Profile: that is left out while a settings read fails
 		view(cfg.Main, cfg.MachineID).Title = mainTitle // never its first message, a model's name or a rename (#1313)
 	}
-	snap.Inbox = s.inboxReport(ctx)
-	snap.Partial = snap.Partial || snap.Inbox == nil
+	s.kernel.Snapshot(ctx, &snap) // the modules' parts (the Inbox's), before snap.Work: fleetTakeSnapshot reads both
 	snap.Work = s.workReport(ctx) // before the cards: they are read back with it
 	snap.Partial = snap.Partial || snap.Work == nil
 	snap.Interactions = append(s.pendingQuestions(), s.workCards()...)
@@ -1229,7 +1262,7 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 	if !meeting {
 		// An assistant turn that failed is logged; a conversation conversation_new opened tells its parent (spawned.go).
 		s.afterSettle(context.WithoutCancel(ctx), s.assistantTurnSettled, r.MachineID, r.SessionID)
-		s.afterSettle(context.WithoutCancel(ctx), s.inboxAgentTurnSettled, r.MachineID, r.SessionID)
+		s.turnSettledHooks(context.WithoutCancel(ctx), r) // the modules' (the Inbox's Agents; seam_slots.go)
 		// What the turn said is tagged with its information categories (info_tag.go).
 		s.afterSettle(context.WithoutCancel(ctx), s.infoTagTurnSettled, r.MachineID, r.SessionID)
 		// A usage limit moves a conversation the owner relies on to a backup launcher (limit_fallback.go).
@@ -1245,6 +1278,12 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 // a goroutine asleep through the window would hold a stack per pending turn end (#2472). Each call is its own run.
 func (s *Service) afterSettle(ctx context.Context, settled func(context.Context, string, string), machine, sid string) {
 	time.AfterFunc(s.settleDelay(ctx), func() { settled(ctx, machine, sid) })
+}
+
+// interactionResolvedSoon is InteractionResolved on its own goroutine: whoever ended the card does not wait for the
+// hook. The run is counted, so a test's fixture can wait for it before it puts back what the hook reads.
+func (s *Service) interactionResolvedSoon(ctx context.Context, r InteractionResolved) {
+	s.fleet.resolvedRuns.Go(func() { s.InteractionResolved(ctx, r) })
 }
 
 // InteractionResolved: the user dealt with a card of a task's agent: the conversation keeps a record of it, and the

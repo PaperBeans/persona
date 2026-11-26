@@ -24,7 +24,7 @@ Decided for the first version (#4741); each changes only with a new decision the
 2. **Raw audio lives only on the user's devices**: on the phone it is deleted 3 days after the day's final recap; on
    every device it is gone at most 7 days after the day (or `recording_days`, when shorter). The watch keeps only
    audio the phone has not acknowledged yet ("Retention and privacy").
-3. **The transcript follows `recording_days`** (14 days by default); **the recap follows `minutes_days`** (forever by
+3. **The transcript follows `recording_text_days`** on the hub (forever by default, #16412) and the phone's audio window (`recording_audio_days`, formerly `recording_days`, 14 days by default) on the phone; **the recap follows `minutes_days`** (forever by
    default) and survives trimming like minutes do.
 4. **The recap joins the 21:30 evening routine** as a facts section, and also gets one push a day when it is ready,
    like minutes.
@@ -309,7 +309,7 @@ full-state `PUT /api/v1/recordings/{id}` and then grows by appends:
   revision; an older request (a slow retry) stores its new positions and changes nothing else. Absent means
   unchanged; `ended_at` and `complete` go back only through a `PUT`.
 - `200 {"id", "revision", "next", "status"}`: `status` `stored`, or `expired` (the day started before the
-  `recording_days` window, or the recording was trimmed; nothing written). `next` is the hub's count after this
+  `recording_text_days` window, or the recording was trimmed; nothing written). `next` is the hub's count after this
   request; `revision` the stored one.
 - **The phone's side of it**: one request per recording in flight at a time; every request's `revision` above the last
   it sent (`max(now in ms, last + 1)`); the body under 1 MiB (on `413 too_large` it halves the batch). When a `200`'s
@@ -562,11 +562,12 @@ the user either way.
   after the phone's own deadline for that day's audio (the earliest of the three above) is acknowledged, discarded
   and settled as `lost`; one that arrives before it is transcribed and appended even after a final recap (the next
   final recap includes it).
-- **Transcript** (`segments.json`, `transcript.md`, `recap_notes.json`) follows `recording_days`, counted from
-  `started_at` as for every recording, on the hub and (through reconciliation's `days`) on the phone; the text of a day
-  older than that is not uploaded. With a very short `recording_days` the final recap may not come before the
+- **Transcript** (`segments.json`, `transcript.md`, `recap_notes.json`) follows `recording_text_days` on the hub and
+  the audio window (reconciliation's `days`, `recording_audio_days`) on the phone, counted from `started_at` as for every
+  recording; the text of a day
+  older than that is not uploaded. With a very short window the final recap may not come before the
   transcript expires; the recap written by then is kept.
-- **Recap** (`recap.json`, `recap.md`) is kept like minutes: past `recording_days` the hub trims a day recording that
+- **Recap** (`recap.json`, `recap.md`) is kept like minutes: past a finite `recording_text_days` the hub trims a day recording that
   has `recap.json` to `meta.json` and the recap (the kept set becomes `meta.json`, `minutes.json`, `minutes.md`,
   `meeting.json`, `recap.json`, `recap.md`), and removes it only past a finite `minutes_days` (forever by default). A
   trimmed day recording keeps its recap readable and searchable and its to-dos confirmable; `POST …/minutes` is

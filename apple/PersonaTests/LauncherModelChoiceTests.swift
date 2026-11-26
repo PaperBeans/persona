@@ -140,21 +140,22 @@ import PersonaWire
         ]}
         """)
         var c = LauncherModelChoice(list: l, picked: raw)
-        #expect(c.title == "6.1 Sol")
+        #expect(c.title == "GPT-6.1 Sol")
         #expect(c.selected?.displayName == SessionModes.modelName(raw))
         #expect(c.selected?.id == raw && c.selected?.name == "GPT-6.1-Sol")
         #expect(c.sent == raw && c.detail == raw)
         #expect(l.models[2].displayName == "我的日常模型")
         #expect(l.models[3].displayName == "gpt-6.1-sol") // explicit alias, not a raw id
-        #expect(l.models[4].displayName == "6.1 Codex")
+        #expect(l.models[4].displayName == "GPT-6.1 Codex")
         #expect(l.models[5].displayName == "GLM 5.3")
         let customDefault = AgentModel(id: "custom-model", name: "gpt-6.1-sol", isDefault: true)
         #expect(LauncherModelChoice(list: LauncherModels(agent: "codex", models: [customDefault])).defaultDetail == "gpt-6.1-sol")
         #expect(c.matching("6.1 Sol").contains { $0.id == raw })
+        #expect(c.matching("GPT-6.1 Sol").contains { $0.id == raw })
         c.picked = ""
-        #expect(c.title == "默认" && c.sent == nil && c.defaultDetail == "6.1")
+        #expect(c.title == "默认" && c.sent == nil && c.defaultDetail == "GPT-6.1")
         c.configured = raw
-        #expect(c.defaultDetail == "模型配置：6.1 Sol" && c.configured == raw)
+        #expect(c.defaultDetail == "模型配置：GPT-6.1 Sol" && c.configured == raw)
         c.picked = "not-listed" // typed for Codex (#1644)
         #expect(c.title == "not-listed" && c.unlisted == "not-listed" && c.sent == "not-listed")
         let request = APIClient.StartRequest(machineID: "example-box", cwd: "/code", launcher: "codex", model: raw)

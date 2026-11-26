@@ -24,8 +24,8 @@ func TestMCPLegacyBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Unified-ledger tools, origin-scoped withdrawal, health_strength (#14713), file_transfer, a2a_read (#13831), page (Dashboards, #15017) and
-	// model_profile_capture (#15288) were introduced after the frozen legacy inventory.
-	newTools := []string{"decision_record", "decisions_query", "space_state_update", "lark_image", "ask_user_withdraw", "conversations_switch", "health_strength", "file_transfer", "a2a_read", "page", "model_profile_capture", "model_probe", "launcher_import", "external_sources_read", "external_sources_write"}
+	// model_profile_capture (#15288) and bot_group_reply (#16096) were introduced after the frozen legacy inventory.
+	newTools := []string{"decision_record", "decisions_query", "space_state_update", "lark_image", "ask_user_withdraw", "conversations_switch", "health_strength", "file_transfer", "a2a_read", "page", "model_profile_capture", "model_probe", "launcher_import", "external_sources_read", "external_sources_write", "bot_group_reply", "todo_split", "todo_merge"}
 	for _, name := range newTools {
 		if _, exists := expected[name]; exists {
 			t.Fatalf("%s is not a legacy tool", name)

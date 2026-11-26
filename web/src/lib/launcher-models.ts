@@ -251,13 +251,13 @@ export function defaultModel(models: AgentModel[]): AgentModel | undefined {
   return models.find((m) => m.default);
 }
 
-/** Display only: explicit aliases win; raw GPT ids lose the prefix and separate their variant words. */
+/** Display only: explicit aliases win; raw GPT ids keep the GPT- prefix and separate their variant words. */
 export function modelName(m: { id: string; name?: string }): string {
   const name = m.name?.trim() ? m.name : m.id;
   if (name.toLowerCase() !== m.id.toLowerCase()) return name;
   const gpt = /^gpt-([a-z0-9]+(?:\.[a-z0-9]+)*(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)*)$/i.exec(name);
   if (!gpt) return name;
-  return gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
+  return `GPT-${gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ")}`;
 }
 
 /** A catalog variant encodes its default effort in its model ID. */

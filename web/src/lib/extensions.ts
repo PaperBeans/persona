@@ -314,8 +314,8 @@ type ListAnswer = { extensions?: HubExtension[]; plugins?: HubExtension[]; can_i
 
 export const listExtensions = () => api<ListAnswer>(extRoot()).then((r) => listOf(r));
 /** The list with what this hub allows: installing at all (a database), and markets (docs/extensions/extensions.md "Extension marketplace"). */
-export const listExtensionsInfo = () =>
-  api<ListAnswer>(extRoot()).then((r) => ({
+export const listExtensionsInfo = (isAuthContextCurrent?: () => boolean) =>
+  api<ListAnswer>(extRoot(), { isAuthContextCurrent }).then((r) => ({
     extensions: listOf(r),
     canInstall: !!r.can_install,
     markets: !!r.markets,

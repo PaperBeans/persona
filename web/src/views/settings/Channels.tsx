@@ -30,6 +30,8 @@ const fieldClass = "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] tex
 
 function targetOverrideText(override: ChannelTargetOverride): string {
   switch (override.mode) {
+    case "groups_and_topics":
+      return t("settings-channels.target_override_groups_and_topics");
     case "topics":
       return t("settings-channels.target_override_topics");
     case "threads":
@@ -244,6 +246,57 @@ export function ChannelBindingBlock({ ctl, showAccountMark = true }: { ctl: Chan
   );
 }
 
+/** The default destination and any active routing override. */
+export function ChannelTargetControls({ ctl, onSettings }: { ctl: ChannelController; onSettings?: (url: string) => void }) {
+  const [picking, setPicking] = useState(false);
+  const d = ctl.detail;
+  useEffect(() => {
+    setPicking(false);
+  }, [d?.id]);
+  if (!d) return null;
+
+  const editable = !d.read_only && d.source !== "market";
+  return (
+    <>
+      {editable && d.target && (
+        <Group title={t("settings-channels.target_title")} footer={t("settings-channels.target_footer")}>
+          <Row label={t("settings-channels.target_row")} onClick={() => !ctl.busy && setPicking(true)}>
+            <span className="max-w-[220px] truncate">{targetText(d.target)}</span>
+          </Row>
+          {d.target_override && (
+            <SettingsHint>
+              {targetOverrideText(d.target_override)}
+              {d.settings_url && onSettings && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    onClick={() => onSettings(d.settings_url!)}
+                    className="font-medium whitespace-nowrap text-accent-ink hover:underline"
+                  >
+                    {d.source === "plugin"
+                      ? t("settings-channels.target_override_extension_settings")
+                      : t("settings-channels.target_override_settings")}
+                  </button>
+                </>
+              )}
+            </SettingsHint>
+          )}
+        </Group>
+      )}
+      <TargetPicker
+        open={picking}
+        current={d.target}
+        onClose={() => setPicking(false)}
+        onPick={(target) => {
+          setPicking(false);
+          void ctl.change("target", { target });
+        }}
+      />
+    </>
+  );
+}
+
 /** Shared channel controls: error alert, enable switch, target picker, features, recent activity, capabilities, and test action. */
 export function ChannelDeliveryControls({
   ctl,
@@ -256,11 +309,7 @@ export function ChannelDeliveryControls({
   afterEnable?: ReactNode;
   afterTarget?: ReactNode;
 }) {
-  const [picking, setPicking] = useState(false);
   const d = ctl.detail;
-  useEffect(() => {
-    setPicking(false);
-  }, [d?.id]);
   if (!d) return null;
 
   const editable = !d.read_only && d.source !== "market";
@@ -290,32 +339,7 @@ export function ChannelDeliveryControls({
 
       {afterEnable}
 
-      {editable && d.target && (
-        <Group title={t("settings-channels.target_title")} footer={t("settings-channels.target_footer")}>
-          <Row label={t("settings-channels.target_row")} onClick={() => !ctl.busy && setPicking(true)}>
-            <span className="max-w-[220px] truncate">{targetText(d.target)}</span>
-          </Row>
-          {d.target_override && (
-            <SettingsHint>
-              {targetOverrideText(d.target_override)}
-              {d.settings_url && onSettings && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    onClick={() => onSettings(d.settings_url!)}
-                    className="font-medium whitespace-nowrap text-accent-ink hover:underline"
-                  >
-                    {d.source === "plugin"
-                      ? t("settings-channels.target_override_extension_settings")
-                      : t("settings-channels.target_override_settings")}
-                  </button>
-                </>
-              )}
-            </SettingsHint>
-          )}
-        </Group>
-      )}
+      <ChannelTargetControls ctl={ctl} onSettings={onSettings} />
 
       {afterTarget}
 
@@ -389,16 +413,6 @@ export function ChannelDeliveryControls({
           </div>
         </Group>
       )}
-
-      <TargetPicker
-        open={picking}
-        current={d.target}
-        onClose={() => setPicking(false)}
-        onPick={(target) => {
-          setPicking(false);
-          void ctl.change("target", { target });
-        }}
-      />
     </>
   );
 }

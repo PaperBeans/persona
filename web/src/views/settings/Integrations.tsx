@@ -2,14 +2,16 @@
 // Aggregates built-in services, channels, connectors, standalone push sources, and installed extensions
 // into one deduplicated list with capability filter chips, subscription health alerts, Extension Market access,
 // inline IntegrationDetail (#14868) mounting, and a lazy-loaded Data Flow view (#15423).
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { hubServes, moduleFeature } from "../../core/module-host";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { loadMailAccounts, useMailboxEnabled } from "../../lib/mail";
 import { t } from "../../i18n";
 import { ExternalSourceSettingsEntry } from "../../features/external-sources/ExternalSourceSettingsEntry";
 import type { MailAccount } from "../../lib/agent-settings";
 import { api, enc, errorText } from "../../lib/api";
 import { listChannels, type Channel } from "../../lib/channels";
 import { connectorBrand, listConnectors, type HubConnector } from "../../lib/connectors";
+import { stripBase } from "../../lib/base";
+import { navigate, subscribeRoute } from "../../lib/router";
 import { scoped, useScope } from "../../lib/current-assistant";
 import { hubHasExt } from "../../lib/extension-api";
 import { onAuthChange, withAuth } from "../../lib/extension-auth";
@@ -19,7 +21,7 @@ import { extensionDetail, extensionTone, listExtensionsInfo, type HubExtension, 
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { botStatus, type FeishuBotStatus } from "../../lib/feishu-bot";
 import { lazyPage } from "../../lib/lazy-page";
-import { defaultManager, otherManager, pinManagerAt, useChosenManager } from "../../lib/manager-choice";
+import { chooseManager, defaultManager, otherManager, pinManagerAt, useChosenManager } from "../../lib/manager-choice";
 import { isResumed } from "../../lib/reconnect";
 import { onHubEvent, useLarkOn, useStore } from "../../lib/store";
 import {
@@ -35,15 +37,13 @@ import { ExtensionLogo } from "../../ui/ExtensionLogo";
 import { Icon } from "../../ui/icons";
 import { Segmented } from "../assistant/parts";
 import { OfflineState, useShownOffline } from "../ManagerParts";
-import { MarketCatalog, MarketItem, Markets } from "./ExtensionMarket";
-import { ExtensionUI } from "./ExtensionView";
-import { IntegrationDetail } from "./IntegrationDetail";
 import { OwnerMark } from "./OwnerMark";
 import { SentSettings } from "./SentSettings";
 import { Group, Pill, Row, SettingsHint } from "./SettingsParts";
 import {
   formatIntegrationsSub,
   isIntegrationDetailRoute,
+  normalizeIntegrationFilter,
   parseIntegrationsSub,
   type IntegrationFilter,
   type IntegrationsRoute,
@@ -61,18 +61,22 @@ import {
   type LarkGatewaySummary,
 } from "./integrations/catalog";
 
+const IntegrationDetail = lazyPage(() => import("./IntegrationDetail").then((m) => m.IntegrationDetail));
+const MarketCatalog = lazyPage(() => import("./ExtensionMarket").then((m) => m.MarketCatalog));
+const MarketItem = lazyPage(() => import("./ExtensionMarket").then((m) => m.MarketItem));
+const Markets = lazyPage(() => import("./ExtensionMarket").then((m) => m.Markets));
+const ExtensionUI = lazyPage(() => import("./ExtensionView").then((m) => m.ExtensionUI));
+
 // Lazily load SourcesUI (and its SourcesGraph chunk) only when opening the Data Flow view or a push source detail.
 const LazySourcesUI = lazyPage(() => import("../subscriptions/SourcesUI").then((m) => m.SourcesUI));
 
 export interface IntegrationsProps {
   open: string | null;
-  onOpen: (sub: string | null) => void;
-  /** Desktop split-pane layout (`min-width: 900px`): list stays beside the open integration detail. */
+  onOpen: (sub: string | null, drillDown?: boolean) => void;
+  /** Desktop split-pane layout (when the Settings host has room): list stays beside the open integration detail. */
   twoCol?: boolean;
   /** The page's top bar already provides Back (phone), so subviews omit their own Back button. */
   headerBack?: boolean;
-  /** Initial capability filter (for example when redirected from legacy `/settings/channels` or `/settings/connectors`). */
-  initialFilter?: IntegrationFilter;
   /** Navigate to a Settings URL linked from a channel override notice. */
   onSettings?: (url: string) => void;
   /** Report whether an open extension plugin_page needs the wide page container. */
@@ -180,7 +184,6 @@ function PushSourceDetailPane({
   reloadKey: number;
   onReload: () => void;
 }) {
-  useLayoutEffect(() => pinManagerAt(["/subscriptions"], otherManager(manager)), [manager]);
   const title = item?.name ?? t("subscriptions.title_sources");
   return (
     <div data-integration-detail={item?.id ?? "source"} data-integration-kind="source">
@@ -219,7 +222,7 @@ function PushSourceDetailPane({
       )}
 
       <Suspense fallback={<Loading />}>
-        <LazySourcesUI key={`${state}:${reloadKey}`} title={title} state={state} />
+        <LazySourcesUI key={`${manager ?? ""}:${state}:${reloadKey}`} title={title} state={state} manager={manager} />
       </Suspense>
       {item?.kind === "source" && <ExternalSourceSettingsEntry provider="subscription" channel="" manager={manager} />}
     </div>
@@ -228,13 +231,14 @@ function PushSourceDetailPane({
 
 /** Full-width Data Flow pane (`-sources` / `-sources@<manager>`), pinning `/subscriptions` when a manager is named. */
 function SourcesFlowPane({
+  onOpenSource,
   manager,
   reloadKey,
 }: {
   manager?: string;
   reloadKey: number;
+  onOpenSource?: (page: string) => void;
 }) {
-  useLayoutEffect(() => (manager ? pinManagerAt(["/subscriptions"], otherManager(manager)) : undefined), [manager]);
   return (
     <>
       {manager && (
@@ -247,6 +251,7 @@ function SourcesFlowPane({
           key={`${manager ?? ""}:${reloadKey}`}
           title={t("subscriptions.title_sources")}
           initialView="graph"
+          onOpenSource={onOpenSource}
           manager={manager}
         />
       </Suspense>
@@ -288,127 +293,111 @@ function IntegrationExtensionPage({
         <IconButton icon="retry" label={t("settings-extensions.redraw")} onClick={() => setReloadCount((x) => x + 1)} />
       </div>
       <ExtensionOwnerScope owner={id}>
-        <ExtensionUI key={reloadCount} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} />
+        <Suspense fallback={<Loading />}>
+          <ExtensionUI key={reloadCount} extension={id} ui={ui} title={title} manager={manager} onWide={onWide} />
+        </Suspense>
       </ExtensionOwnerScope>
     </>
   );
 }
 
-export function Integrations({
+export function Integrations(props: IntegrationsProps) {
+  const picked = useChosenManager();
+  return <IntegrationsForManager key={picked ?? ""} {...props} picked={picked} />;
+}
+
+function IntegrationsForManager({
+  picked,
   open,
   onOpen,
   twoCol = false,
   headerBack = false,
-  initialFilter = "all",
   onSettings,
   onPageWide,
-}: IntegrationsProps) {
+}: IntegrationsProps & { picked: string | null }) {
   const route = useMemo(() => parseIntegrationsSub(open), [open]);
-  const go = useCallback((next: IntegrationsRoute) => onOpen(formatIntegrationsSub(next)), [onOpen]);
+  const go = (next: IntegrationsRoute) => onOpen(formatIntegrationsSub(next));
+  const drillDown = (next: IntegrationsRoute) => onOpen(formatIntegrationsSub(next), true);
 
-  const picked = useChosenManager();
   const owner = otherManager(picked ?? undefined);
+  const effectiveManager = ("manager" in route ? route.manager : undefined) ?? owner;
   const scope = useScope();
   const offline = useShownOffline();
 
   const hasExtensions = useStore((s) => hubHasExt(s.features, "manager"));
   const hasChannels = useStore((s) => s.features.includes("channels"));
   const hasConnectors = useStore((s) => s.features.includes("connectors"));
-  const hasMail = useStore((s) => hubServes(moduleFeature("mail"), s));
+  const hasMail = useMailboxEnabled();
   const hasLark = useLarkOn();
   const hasSubscriptions = useSubscriptionsShown();
   const hasInboxSources = useInboxSourcesShown();
 
-  const [filter, setFilter] = useState<IntegrationFilter>(initialFilter);
-  useEffect(() => {
-    if (initialFilter !== "all") setFilter(initialFilter);
-  }, [initialFilter]);
+  const filter = useSyncExternalStore(subscribeRoute, () => normalizeIntegrationFilter(new URLSearchParams(location.search).get("filter")));
+  const setFilter = (next: IntegrationFilter) => {
+    const url = new URL(location.href);
+    if (next === "all") url.searchParams.delete("filter");
+    else url.searchParams.set("filter", next);
+    navigate(stripBase(url.pathname) + url.search + url.hash, true);
+  };
 
   const [extensions, setExtensions] = useState<HubExtension[]>([]);
   const [markets, setMarkets] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [connectors, setConnectors] = useState<HubConnector[]>([]);
   const [subscriptions, setSubscriptions] = useState<HubSubscription[]>([]);
-  const [mailAccounts, setMailAccounts] = useState<MailAccount[] | null>(null);
-  const [larkStatus, setLarkStatus] = useState<LarkGatewaySummary | null>(null);
+  const [mailAccounts, setMailAccounts] = useState<MailAccount[] | null>();
+  const [larkStatus, setLarkStatus] = useState<LarkGatewaySummary | null>();
   const [feishuBotStatus, setFeishuBotStatus] = useState<FeishuBotStatus | null>(null);
-  const [hasFeishuBot, setHasFeishuBot] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [partialErrors, setPartialErrors] = useState<string[]>([]);
   const [sourcesReload, setSourcesReload] = useState(0);
 
+  const seq = useRef(0);
   const loadSubscriptionsOnly = useCallback(async () => {
     if (!hasSubscriptions && !hasInboxSources) {
       setSubscriptions([]);
       return;
     }
+    const mine = seq.current;
     const list = await listSubscriptions(owner).catch(() => null);
-    if (list) setSubscriptions(list);
+    if (mine === seq.current && list) setSubscriptions(list);
   }, [hasSubscriptions, hasInboxSources, owner]);
 
-  const seq = useRef(0);
   const loadAll = useCallback(async () => {
     const mine = ++seq.current;
     setLoading(true);
-    const errors: string[] = [];
+    setPartialErrors([]);
+    // Publish each result on arrival. Only the empty state and final counts need every answer.
+    const publish = <T,>(apply: (result: T) => void) => (result: T) => {
+      if (mine === seq.current) apply(result);
+    };
+    const report = publish((error: unknown) => setPartialErrors((errors) => [...errors, errorText(error)]));
 
-    const [extRes, chRes, connRes, mailRes, larkRes, botRes, subsRes] = await Promise.all([
+    const applyExtensions = (extensions: HubExtension[], markets: boolean) => {
+      setExtensions(extensions);
+      setMarkets(markets);
+    };
+    await Promise.all([
       hasExtensions
-        ? listExtensionsInfo().catch((e) => {
-            errors.push(errorText(e));
-            return null;
-          })
-        : Promise.resolve(null),
-      hasChannels
-        ? listChannels(owner).catch((e) => {
-            errors.push(errorText(e));
-            return null;
-          })
-        : Promise.resolve(null),
-      hasConnectors
-        ? listConnectors().catch((e) => {
-            errors.push(errorText(e));
-            return null;
-          })
-        : Promise.resolve(null),
-      hasMail
-        ? api<{ accounts?: MailAccount[] }>("/mail/accounts").then((r) => r.accounts ?? [], () => null)
-        : Promise.resolve(null),
-      hasLark
-        ? api<LarkGatewaySummary>("/lark/status").catch(() => null)
-        : Promise.resolve(null),
-      botStatus().catch(() => null),
-      hasSubscriptions || hasInboxSources
-        ? listSubscriptions(owner).catch(() => null)
-        : Promise.resolve(null),
+        ? listExtensionsInfo().then(publish((result) => applyExtensions(result.extensions, result.markets)), report)
+        : applyExtensions([], false),
+      hasChannels ? listChannels(owner).then(publish(setChannels), report) : setChannels([]),
+      hasConnectors ? listConnectors().then(publish(setConnectors), report) : setConnectors([]),
+      hasMail ? loadMailAccounts(owner).catch(() => null).then(publish(setMailAccounts)) : setMailAccounts(null),
+      hasLark ? api<LarkGatewaySummary>("/lark/status").catch(() => null).then(publish(setLarkStatus)) : setLarkStatus(null),
+      botStatus().catch(() => null).then(publish(setFeishuBotStatus)),
+      loadSubscriptionsOnly(),
     ]);
 
     if (mine !== seq.current) return;
-    if (extRes) {
-      setExtensions(extRes.extensions);
-      setMarkets(extRes.markets);
-    } else if (!hasExtensions) {
-      setExtensions([]);
-      setMarkets(false);
-    }
-    if (chRes) setChannels(chRes);
-    else if (!hasChannels) setChannels([]);
-    if (connRes) setConnectors(connRes);
-    else if (!hasConnectors) setConnectors([]);
-    if (subsRes) setSubscriptions(subsRes);
-    else if (!hasSubscriptions && !hasInboxSources) setSubscriptions([]);
-    setMailAccounts(mailRes);
-    setLarkStatus(larkRes);
-    setFeishuBotStatus(botRes);
-    setHasFeishuBot(botRes !== null);
-    setPartialErrors(errors);
     setLoaded(true);
     setLoading(false);
-  }, [hasExtensions, hasChannels, hasConnectors, hasMail, hasLark, hasSubscriptions, hasInboxSources, owner]);
+  }, [hasExtensions, hasChannels, hasConnectors, hasMail, hasLark, loadSubscriptionsOnly, owner]);
 
   useEffect(() => {
     void loadAll();
+    return () => { seq.current++; };
   }, [loadAll]);
 
   // Refresh subscriptions when a subscription state changes on the hub (at most once per second).
@@ -465,15 +454,15 @@ export function Integrations({
         channels,
         connectors: ownConnectors,
         subscriptions,
-        hasMail,
-        hasLark,
-        hasFeishuBot,
+        hasMail: hasMail && mailAccounts !== undefined,
+        hasLark: hasLark && larkStatus !== undefined,
+        hasFeishuBot: feishuBotStatus !== null,
         mailAccounts,
         larkStatus,
         feishuBotStatus,
         ownerManager: owner,
       }),
-    [ownExtensions, channels, ownConnectors, subscriptions, hasMail, hasLark, hasFeishuBot, mailAccounts, larkStatus, feishuBotStatus, owner],
+    [ownExtensions, channels, ownConnectors, subscriptions, hasMail, hasLark, mailAccounts, larkStatus, feishuBotStatus, owner],
   );
 
   const counts = useMemo(
@@ -507,32 +496,40 @@ export function Integrations({
   // Full-width subviews (Market catalog, Market item, Manage markets, Extension UI page, Sent records).
   if (route.kind === "catalog") {
     return (
-      <MarketCatalog
-        backLabel={t("settings-integrations.back")}
-        onBack={headerBack ? undefined : () => onOpen(null)}
-        onOpen={(it) => go({ kind: "item", market: it.market, id: it.id })}
-        onManageMarkets={() => go({ kind: "markets" })}
-      />
+      <Suspense fallback={<Loading />}>
+        <MarketCatalog
+          backLabel={t("settings-integrations.back")}
+          onBack={headerBack ? undefined : () => onOpen(null)}
+          onOpen={(it) => go({ kind: "item", market: it.market, id: it.id })}
+          onManageMarkets={() => go({ kind: "markets" })}
+        />
+      </Suspense>
     );
   }
   if (route.kind === "item") {
     return (
-      <MarketItem
-        key={open ?? ""}
-        market={route.market}
-        id={route.id}
-        manager={route.manager ?? owner}
-        onBack={
-          headerBack
-            ? undefined
-            : () => go(route.manager ? { kind: "extension", id: route.id, manager: route.manager } : { kind: "catalog" })
-        }
-        onInstalled={(id) => go({ kind: "extension", id, manager: route.manager })}
-      />
+      <Suspense fallback={<Loading />}>
+        <MarketItem
+          key={open ?? ""}
+          market={route.market}
+          id={route.id}
+          manager={effectiveManager}
+          onBack={
+            headerBack
+              ? undefined
+              : () => go(route.manager ? { kind: "extension", id: route.id, manager: route.manager } : { kind: "catalog" })
+          }
+          onInstalled={(id) => go({ kind: "extension", id, manager: effectiveManager })}
+        />
+      </Suspense>
     );
   }
   if (route.kind === "markets") {
-    return <Markets onBack={headerBack ? undefined : () => go({ kind: "catalog" })} />;
+    return (
+      <Suspense fallback={<Loading />}>
+        <Markets onBack={headerBack ? undefined : () => go({ kind: "catalog" })} />
+      </Suspense>
+    );
   }
   if (route.kind === "page") {
     return (
@@ -540,7 +537,7 @@ export function Integrations({
         key={`${open ?? ""}@${route.manager ?? ""}`}
         id={route.id}
         ui={route.ui}
-        manager={route.manager ?? owner}
+        manager={effectiveManager}
         onBack={headerBack ? undefined : () => go({ kind: "extension", id: route.id, manager: route.manager })}
         onWide={onPageWide}
       />
@@ -661,19 +658,27 @@ export function Integrations({
           { v: "list", label: t("settings-integrations.view_list") },
           { v: "sources", label: t("settings-integrations.view_sources") },
         ]}
-        onChange={(v) => go(v === "sources" ? { kind: "sources" } : { kind: "list" })}
+        onChange={(v) => {
+          if (v === "sources") go({ kind: "sources", manager: otherManager(effectiveManager) });
+          else {
+            chooseManager(effectiveManager ?? null);
+            go({ kind: "list" });
+          }
+        }}
       />
     </div>
   ) : null;
 
   // Full-width global Data Flow view (`route.kind === "sources"` without `state`):
-  // natural single-scroll container so SourcesGraph can use the full wide canvas, with untouched InboxForwardSetting.
+  // natural single-scroll container so SourcesGraph can use the full wide canvas, with the forwarding setting.
   if (isSourcesView) {
     return (
       <div data-integrations-sources-view>
         {listHeader}
-        {viewSwitch}
-        <SourcesFlowPane manager={route.manager} reloadKey={sourcesReload} />
+        {!headerBack && viewSwitch}
+        <SourcesFlowPane manager={effectiveManager} reloadKey={sourcesReload}
+          onOpenSource={headerBack ? (page) => drillDown({ kind: "sources", state: page, manager: effectiveManager }) : undefined}
+        />
       </div>
     );
   }
@@ -685,7 +690,7 @@ export function Integrations({
       data-integrations-filters
       className={cx(
         compactList
-          ? "-mx-1 -my-0.5 flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain px-1 py-0.5 scrollbar-none"
+          ? "-mx-1 -my-0.5 flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain px-1 py-0.5 integrations-chip-scroll"
           : "mb-4 flex flex-wrap items-center gap-1.5",
       )}
     >
@@ -725,7 +730,7 @@ export function Integrations({
         </div>
       )}
 
-      {!loaded && (
+      {!loaded && filtered.length === 0 && (
         <Group anchor="integrations">
           <div className="px-4 py-3">
             <Loading />
@@ -765,7 +770,7 @@ export function Integrations({
         </Group>
       )}
 
-      {loaded && builtins.length > 0 && (
+      {builtins.length > 0 && (
         <Group
           anchor="integrations"
           title={
@@ -779,7 +784,7 @@ export function Integrations({
         </Group>
       )}
 
-      {loaded && pushSources.length > 0 && (
+      {pushSources.length > 0 && (
         <Group
           anchor="push-sources"
           title={
@@ -793,7 +798,7 @@ export function Integrations({
         </Group>
       )}
 
-      {loaded && installedExtensions.length > 0 && (
+      {installedExtensions.length > 0 && (
         <Group
           anchor={builtins.length === 0 && pushSources.length === 0 ? "integrations" : "extensions"}
           title={
@@ -817,23 +822,25 @@ export function Integrations({
     <PushSourceDetailPane
       state={sourceDetailState}
       item={resolvedSourceItem}
-      manager={route.kind === "sources" ? (route.manager ?? owner) : owner}
+      manager={effectiveManager}
       onBack={headerBack || twoCol ? undefined : () => onOpen(null)}
       reloadKey={sourcesReload}
       onReload={() => setSourcesReload((n) => n + 1)}
     />
   ) : showDetail && resolvedTarget ? (
-    <IntegrationDetail
-      target={resolvedTarget}
-      integrationsV2={true}
-      onBack={headerBack || twoCol ? undefined : () => onOpen(null)}
-      onUninstalled={() => onOpen(null)}
-      onPage={(extId, uiId, manager) => go({ kind: "page", id: extId, ui: uiId, manager })}
-      onUpgrade={(market, extId, manager) => go({ kind: "item", market, id: extId, manager })}
-      onSettings={onSettings}
-      onOpenConnector={(id, manager) => go({ kind: "connector", id, manager })}
-      onOpenSources={(sourceState, manager) => go({ kind: "sources", ...(sourceState ? { state: sourceState } : {}), ...(manager ? { manager } : {}) })}
-    />
+    <Suspense fallback={<Loading />}>
+      <IntegrationDetail
+        target={resolvedTarget}
+        integrationsV2={true}
+        onBack={headerBack || twoCol ? undefined : () => onOpen(null)}
+        onUninstalled={() => onOpen(null)}
+        onPage={(extId, uiId, manager) => go({ kind: "page", id: extId, ui: uiId, manager })}
+        onUpgrade={(market, extId, manager) => go({ kind: "item", market, id: extId, manager })}
+        onSettings={onSettings}
+        onOpenConnector={(id, manager) => drillDown({ kind: "connector", id, manager })}
+        onOpenSources={(sourceState, manager) => drillDown({ kind: "sources", ...(sourceState ? { state: sourceState } : {}), ...(manager ? { manager } : {}) })}
+      />
+    </Suspense>
   ) : null;
 
   if (detailPane && !twoCol) {

@@ -264,7 +264,7 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 	}
 	app, err := h.larkSyncApp(ctx, &st, b.BotID)
 	if err != nil {
-		h.larkSyncFinish(ctx, key, mode, larksyncwire.Result{}, err, nil, false, 0, 0, b.AuthorizedAt)
+		h.larkSyncFinish(ctx, key, mode, larksyncwire.Result{}, err, nil, false, 0, 0, b.AuthorizedAt, larkSyncNamesRound{})
 		return err
 	}
 	reader := h.readerOf(rt)
@@ -287,7 +287,7 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 		App: app, Backfill: larkSyncBackfill, Budget: budget, AuthorizedAt: b.AuthorizedAt, GrantedScopes: slices.Clone(b.GrantedScopes)}
 	cursors, err := store.LarkSyncCursors(ctx, key)
 	if err != nil {
-		h.larkSyncFinish(ctx, key, mode, larksyncwire.Result{}, nil, err, false, 0, 0, b.AuthorizedAt)
+		h.larkSyncFinish(ctx, key, mode, larksyncwire.Result{}, nil, err, false, 0, 0, b.AuthorizedAt, larkSyncNamesRound{})
 		return err
 	}
 	linksBackfillVer := 0
@@ -329,6 +329,7 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 	madeProgress := false
 	backfillVer := 0
 	committedLinksBackfillVer := 0
+	var names larkSyncNamesRound
 	if runErr == nil {
 		moved := larkSyncMovedCursors(res)
 		if remediatedQueue != "" {
@@ -342,17 +343,30 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 		commitErr = store.CommitLarkSyncRun(ctx, key, moved, idx.records(), rows)
 		if commitErr == nil {
 			committedLinksBackfillVer = linksBackfillVer
+			if len(res.Messages) > 0 {
+				h.emitLarkMessages(binding.Key, res.Messages)
+			}
 			if tier == larksyncwire.TierFull && b.BackfillVersion < larkSyncBackfillVersion {
 				book := cursors[larksyncwire.SenderNamesCursor]
 				if v, ok := moved[larksyncwire.SenderNamesCursor]; ok {
 					book = v
 				}
-				repaired, done, repairErr := h.larkSyncBackfillSenderNames(ctx, store, binding, &st, reader, token, handed, book)
+				progress := cursors[larksyncwire.SenderNamesProgressCursor]
+				repaired, done, repairErr := h.larkSyncBackfillSenderNames(ctx, store, binding, &st, reader, token, handed, book, progress)
 				chats += repaired
+				names.ran = true
 				if repairErr != nil {
-					res.Errors = append(res.Errors, larksyncwire.ResourceError{
-						Resource: "sender_names", Kind: larkSyncKindOf(repairErr), Detail: larkSyncDetail(repairErr),
-					})
+					if kind := larkSyncKindOf(repairErr); larkSyncNamesBlocking(kind) {
+						// Only what the owner must fix (authorize again, approve the contact scope) reaches the
+						// binding's health; the scope reset below keeps new unnamed messages eligible.
+						res.Errors = append(res.Errors, larksyncwire.ResourceError{
+							Resource: larksyncwire.SenderNamesCursor, Kind: kind, Detail: larkSyncDetail(repairErr),
+						})
+					} else {
+						// A lookup that timed out, was rate limited or failed passingly only degrades naming: the
+						// messages are already committed, and the next round resumes from the saved progress.
+						names.warning = strings.TrimSpace(larksyncwire.SenderNamesCursor + " " + kind + " " + larkSyncDetail(repairErr))
+					}
 				}
 				if done {
 					backfillVer = larkSyncBackfillVersion
@@ -360,7 +374,7 @@ func (h *Manager) larkSyncRunHeld(ctx context.Context, key, mode string, rt *lar
 			}
 		}
 	}
-	if gone := h.larkSyncFinish(ctx, key, mode, res, runErr, commitErr, madeProgress, backfillVer, committedLinksBackfillVer, b.AuthorizedAt); gone {
+	if gone := h.larkSyncFinish(ctx, key, mode, res, runErr, commitErr, madeProgress, backfillVer, committedLinksBackfillVer, b.AuthorizedAt, names); gone {
 		// The binding was removed while it ran: what the run committed stays in the knowledge base, its cursors go.
 		h.larkSyncForget(ctx, key)
 		return errLarkSyncNoBinding
@@ -399,6 +413,11 @@ func larkSyncMadeProgress(prev map[string]string, res larksyncwire.Result, moved
 // members, chat info, and message-carried fallbacks) or legacy NameResolver, updates im:p2p_chats cursors when DM
 // names are learned, and emits repair chat batches so kb.Engine.Ingest updates lines, Person.Name, and DM Chat.Name
 // in place. done is true when the binding can be marked at larkSyncBackfillVersion.
+//
+// It runs in rounds (one per sync run until done): each round's lookups have their own budget (larkSyncNamesBudget,
+// apart from the run's), stop where the budget runs out, and save how far they got
+// (larksyncwire.SenderNamesProgressCursor, progress is its stored value) together with the names learned (the name
+// book), so the next round resumes instead of starting over.
 func (h *Manager) larkSyncBackfillSenderNames(
 	ctx context.Context,
 	store larkSyncStore,
@@ -408,6 +427,7 @@ func (h *Manager) larkSyncBackfillSenderNames(
 	token func(ctx context.Context) (string, error),
 	handed func() string,
 	nameBook string,
+	progress string,
 ) (repairedChats int, done bool, repairErr error) {
 	chatResolver, hasChatResolver := reader.(larksyncwire.ChatNameResolver)
 	legacyResolver, hasLegacyResolver := reader.(larksyncwire.NameResolver)
@@ -620,7 +640,7 @@ func (h *Manager) larkSyncBackfillSenderNames(
 	}
 
 	resolveBinding := binding
-	resolveBinding.Budget = 2 * time.Minute
+	resolveBinding.Budget = larkSyncNamesBudget
 	req := larksyncwire.NameResolveRequest{
 		OpenIDs:        typedOpenIDs,
 		ChatSenders:    chatSenders,
@@ -629,6 +649,7 @@ func (h *Manager) larkSyncBackfillSenderNames(
 		SampleTimes:    sampleTimes,
 		SampleChats:    sampleChats,
 		NameBook:       nameBook,
+		Progress:       progress,
 	}
 	runResolve := func() (larksyncwire.NameResolveResult, error) {
 		if hasChatResolver {
@@ -647,10 +668,31 @@ func (h *Manager) larkSyncBackfillSenderNames(
 	}
 	if err != nil {
 		h.logf("lark sync: %s: sender-name backfill resolve: %v", binding.Key, err)
+	} else if res.Partial {
+		h.logf("lark sync: %s: sender-name backfill round ran out of its budget; the next round resumes", binding.Key)
+	}
+	// Complete when every lookup was tried without an error (unresolvable users included) and the round was not cut
+	// short by its budget.
+	complete := err == nil && !res.Partial
+	// What the round learned is kept whatever happened to it: the progress and the name book.
+	var cursorUpdates map[string]string
+	if res.Progress != progress {
+		cursorUpdates = map[string]string{larksyncwire.SenderNamesProgressCursor: res.Progress}
+	}
+	if res.NameBook != "" && res.NameBook != nameBook {
+		if cursorUpdates == nil {
+			cursorUpdates = map[string]string{}
+		}
+		cursorUpdates[larksyncwire.SenderNamesCursor] = res.NameBook
 	}
 	if len(res.UserNames) == 0 && len(res.P2PChatNames) == 0 {
-		// Complete when every lookup finished without a fatal/scope/deadline error (e.g. only deleted/unresolvable users).
-		return 0, err == nil, err
+		if len(cursorUpdates) > 0 {
+			if cerr := store.CommitLarkSyncRun(ctx, binding.Key, cursorUpdates, nil, nil); cerr != nil {
+				h.logf("lark sync: %s: sender-name backfill progress: %v", binding.Key, cerr)
+				return 0, false, cerr
+			}
+		}
+		return 0, complete, err
 	}
 
 	byChat := map[string]*connector.ChatBatch{}
@@ -711,7 +753,6 @@ func (h *Manager) larkSyncBackfillSenderNames(
 		}
 		repairRows = append(repairRows, db.LarkSyncOutbox{Kind: db.LarkSyncChat, CanonicalKey: "chat:" + cid, Payload: raw})
 	}
-	var cursorUpdates map[string]string
 	if len(resolvedDMNames) > 0 {
 		if existingCursors, cerr := store.LarkSyncCursors(ctx, binding.Key); cerr == nil {
 			const p2pKey = larksyncwire.ResIM + ":p2p_chats"
@@ -728,7 +769,10 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			}
 			if changed {
 				if raw, merr := json.Marshal(saved); merr == nil {
-					cursorUpdates = map[string]string{p2pKey: string(raw)}
+					if cursorUpdates == nil {
+						cursorUpdates = map[string]string{}
+					}
+					cursorUpdates[p2pKey] = string(raw)
 				}
 			}
 		}
@@ -739,7 +783,25 @@ func (h *Manager) larkSyncBackfillSenderNames(
 			return 0, false, cerr
 		}
 	}
-	return len(repairRows), err == nil, err
+	return len(repairRows), complete, err
+}
+
+// larkSyncNamesRound is what a run's sender-name backfill round left for the binding: whether one ran, and why it
+// stopped short ("" when it did not). It never fails the run.
+type larkSyncNamesRound struct {
+	ran     bool
+	warning string
+}
+
+// larkSyncNamesBlocking says whether a sender-name lookup error of kind is the owner's to fix (authorize again,
+// approve a scope) and so shows in the binding's health. Anything else (a timeout, a rate limit, a passing failure)
+// only degrades naming.
+func larkSyncNamesBlocking(kind string) bool {
+	switch kind {
+	case larksyncwire.ErrKindAuth, larksyncwire.ErrKindInvalidGrant, larksyncwire.ErrKindScope:
+		return true
+	}
+	return false
 }
 
 // larkSyncPrepareDroppedLinksBackfill performs a one-time, read-only scan of already-synced chat outbox messages for
@@ -1023,7 +1085,7 @@ func larkSyncOutboxRows(b larksyncwire.Binding, res larksyncwire.Result, now tim
 // (ModeIM) advance NextIMRunAt without disturbing the daily full run's NextRunAt; when a ModeIM run was partial only
 // because a large chat hit its budget/cap while still making forward progress, NextIMRunAt stays at 15 minutes
 // (larkSyncIMEvery) instead of backing off for an hour. gone: the binding was removed meanwhile.
-func (h *Manager) larkSyncFinish(ctx context.Context, key, mode string, res larksyncwire.Result, runErr, commitErr error, madeProgress bool, backfillVer, linksBackfillVer int, authorizedAt time.Time) (gone bool) {
+func (h *Manager) larkSyncFinish(ctx context.Context, key, mode string, res larksyncwire.Result, runErr, commitErr error, madeProgress bool, backfillVer, linksBackfillVer int, authorizedAt time.Time, names larkSyncNamesRound) (gone bool) {
 	now := h.bots.sync.clock()
 	_, err := h.larkSyncChange(context.WithoutCancel(ctx), func(st *larkSyncState) error {
 		b := st.binding(key)
@@ -1047,8 +1109,16 @@ func (h *Manager) larkSyncFinish(ctx context.Context, key, mode string, res lark
 		if linksBackfillVer > b.LinksBackfillVersion {
 			b.LinksBackfillVersion = linksBackfillVer
 		}
+		if names.ran {
+			b.NamesWarning = cutUTF8(names.warning, 300)
+			if backfillVer >= larkSyncBackfillVersion {
+				b.NamesRounds = 0
+			} else {
+				b.NamesRounds++
+			}
+		}
 		for _, e := range res.Errors {
-			if e.Resource == "sender_names" && e.Kind == larksyncwire.ErrKindScope {
+			if e.Resource == larksyncwire.SenderNamesCursor && e.Kind == larksyncwire.ErrKindScope {
 				// New unnamed messages can arrive after an earlier repair completed. Keep those eligible
 				// for repair when the owner restores contact access, not just pre-upgrade messages.
 				b.BackfillVersion = 0

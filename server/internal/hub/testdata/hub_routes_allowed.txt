@@ -148,6 +148,7 @@ POST /api/v1/hub/recovery/bundles/{id}/inspect # hub installation administration
 POST /api/v1/hub/recovery/bundles/{id}/verify # hub installation administration: audited temporary-database verification
 POST /api/v1/hub/update
 POST /api/v1/hub/update/backups/{id}/apply # hub installation administration: shared self-update transaction
+POST /api/v1/hub/update/cancel # hub installation administration: in-memory cancellation intent
 POST /api/v1/hub/update/check
 POST /api/v1/interactions/{id}/choose
 POST /api/v1/interactions/{id}/clarify # owner-only relay to the prepared operation's manager, like resolve

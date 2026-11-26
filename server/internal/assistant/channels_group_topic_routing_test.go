@@ -256,8 +256,8 @@ func TestChannelRoutingGatedByIntegrationsV2AndLosslessRollback(t *testing.T) {
 	rec = channelAPIRequest(t, s, http.MethodGet, "/api/v1/channels/examplechat", "full", "")
 	detail = channel.Detail{}
 	_ = json.Unmarshal(rec.Body.Bytes(), &detail)
-	if detail.TargetOverride == nil || detail.TargetOverride.Mode != channel.TargetOverrideTopics {
-		t.Fatalf("integrations_v2=true per_group_and_topic target_override = %+v, want topics", detail.TargetOverride)
+	if detail.TargetOverride == nil || detail.TargetOverride.Mode != channel.TargetOverrideGroupsAndTopics {
+		t.Fatalf("integrations_v2=true per_group_and_topic target_override = %+v, want groups_and_topics", detail.TargetOverride)
 	}
 	if err := s.channelForward(ctx, "examplechat", channel.Message{
 		ID: "on_again_rotated", Text: "rotated group", ChatID: "oc_g1", ChatKind: channel.ChatKindGroup,
@@ -287,26 +287,21 @@ func TestChannelRoutingModesWhenIntegrationsV2Enabled(t *testing.T) {
 		setIntegrationsV2(t, s, true)
 		ctx := context.Background()
 
-		// Both unset (default) and explicit channel_default send everything to channel target m1.
-		for _, mode := range []channel.ThreadMode{"", channel.ThreadModeChannelDefault} {
-			if mode != "" {
-				rec := channelAPIRequest(t, s, http.MethodPut, "/api/v1/channels/examplechat", "full", `{"thread_mode":"channel_default"}`)
-				if rec.Code != http.StatusOK {
-					t.Fatalf("PUT channel_default: %d %s", rec.Code, rec.Body.String())
-				}
+		rec := channelAPIRequest(t, s, http.MethodPut, "/api/v1/channels/examplechat", "full", `{"thread_mode":"channel_default"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT channel_default: %d %s", rec.Code, rec.Body.String())
+		}
+		for _, msg := range []channel.Message{
+			{ID: "d1", Text: "direct", ChatID: "oc_dm", ChatKind: channel.ChatKindDirect},
+			{ID: "g1", Text: "group", ChatID: "oc_g1", ChatKind: channel.ChatKindGroup},
+			{ID: "t1", Text: "topic", ChatID: "oc_g1", ChatKind: channel.ChatKindTopic, TopicID: "omt_1"},
+			{ID: "l1", Text: "legacy", Thread: "legacy:t1"},
+		} {
+			if err := s.channelForward(ctx, "examplechat", msg); err != nil {
+				t.Fatalf("%s: %v", msg.ID, err)
 			}
-			for _, msg := range []channel.Message{
-				{ID: "d1_" + string(mode), Text: "direct", ChatID: "oc_dm", ChatKind: channel.ChatKindDirect},
-				{ID: "g1_" + string(mode), Text: "group", ChatID: "oc_g1", ChatKind: channel.ChatKindGroup},
-				{ID: "t1_" + string(mode), Text: "topic", ChatID: "oc_g1", ChatKind: channel.ChatKindTopic, TopicID: "omt_1"},
-				{ID: "l1_" + string(mode), Text: "legacy", Thread: "legacy:t1"},
-			} {
-				if err := s.channelForward(ctx, "examplechat", msg); err != nil {
-					t.Fatalf("%s: %v", msg.ID, err)
-				}
-				if f.sent() != 0 || lastSendOnceSession(f) != "m1" {
-					t.Fatalf("mode=%q msg=%s: starts=%d session=%q, want 0 starts and m1", mode, msg.ID, f.sent(), lastSendOnceSession(f))
-				}
+			if f.sent() != 0 || lastSendOnceSession(f) != "m1" {
+				t.Fatalf("msg=%s: starts=%d session=%q, want 0 starts and m1", msg.ID, f.sent(), lastSendOnceSession(f))
 			}
 		}
 	})

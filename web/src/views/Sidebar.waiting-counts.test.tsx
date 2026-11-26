@@ -40,6 +40,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 };
 
@@ -52,8 +53,9 @@ beforeEach(async () => {
   root = createRoot(host);
 });
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount());
+  await act(async () => { await vi.dynamicImportSettled(); });
   host.remove();
   reset();
   resetDirectionNames();

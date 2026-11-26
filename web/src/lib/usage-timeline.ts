@@ -1,14 +1,11 @@
 // Popover-only timeline, prefix-stripping, and pause helpers: kept out of usage-windows.ts so the
 // cold first screen (UsageBars) never pays for popover logic (src/startup-preload.ts FIRST_SCREEN_BUDGET).
+import { providerTitle, sortedWindows, timelinePosition, type ProviderGroup } from "./usage-popover";
 import {
   canonicalUsageProvider,
   protectReserve,
-  providerTitle,
   remainingPercent,
-  sortedWindows,
-  timelinePosition,
   windowMinutes,
-  type ProviderGroup,
   type UsageAccount,
   type UsageWindow,
 } from "./usage-windows";

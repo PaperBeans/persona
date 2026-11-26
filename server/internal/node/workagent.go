@@ -154,6 +154,12 @@ func workAgentResume(kind, cmd, id string) string {
 // reports the agent, checked until the agent takes it (workAgentFirst). A pi whose extension never lists the session is
 // quit; its tab stays at the shell, and typing the message into pi is refused.
 func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName string) (*proto.Session, error) {
+	return n.startWorkAgentWithResume(ctx, launch, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName, "")
+}
+
+// startWorkAgentWithResume is startWorkAgent with an optional native Antigravity conversation UUID to resume
+// (`agy --conversation <uuid>`), used when switching back to a parked Antigravity stretch (engine_switch.go).
+func (n *Node) startWorkAgentWithResume(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName, resumeConv string) (*proto.Session, error) {
 	herdrName, program, ok := workAgent(kind)
 	if !ok {
 		return nil, fmt.Errorf("unsupported agent type %q", kind)
@@ -200,10 +206,18 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 	if kind == agyAgent {
 		command = n.launcherCommand(launcher)
 	}
-	cmd := withHerdrAgent(typedHerdrAgent(launch, herdrName, shells...), workAgentCommand(command, program, model, effort, mode))
+	rawCmd := workAgentCommand(command, program, model, effort, mode)
+	if kind == agyAgent && uuidRe.MatchString(resumeConv) {
+		rawCmd = workAgentResume(agyAgent, rawCmd, resumeConv)
+	}
+	cmd := withHerdrAgent(typedHerdrAgent(launch, herdrName, shells...), rawCmd)
+	cmd = n.agentStartCommand(cmd, shellQuote, shells...)
+	if cdFirst(ctx) {
+		cmd = cdThen(cwd, cmd, shells...)
+	}
 	// The command goes through the start file, so a line break in it cannot meet a shell that runs each line on its
 	// own (typedstart.go).
-	typed, err := n.typeStartMode(ctx, launch, created, ws, "", n.agentStartCommand(cmd, shellQuote, shells...), false, shells...)
+	typed, err := n.typeStartMode(ctx, launch, created, ws, "", cmd, false, shells...)
 	if err != nil {
 		if typed == nil {
 			return nil, err
@@ -233,6 +247,9 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 	if prompt != "" {
 		// Typed once, then checked in the background until the agent is seen taking it (workagent_first.go, #11345).
 		if err := n.workAgentFirst(ctx, pane, id, herdrName, prompt); err != nil {
+			if _, ok := engineHistoryOf(ctx); ok && !maybeDelivered(err) {
+				n.state.setEngineHistory(id, nil)
+			}
 			return nil, fmt.Errorf("send first message: %w", err)
 		}
 	}
@@ -286,7 +303,11 @@ func (n *Node) noteWorkAgent(ctx context.Context, launch host.Launcher, pane, id
 	if len(startTitle) > 0 {
 		title = startTitle[0]
 	}
-	n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, AppMode: mode, StartTitle: title, StartedAt: time.Now().UTC()})
+	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, AppMode: mode, StartTitle: title, StartedAt: time.Now().UTC()}
+	if legs, ok := engineHistoryOf(ctx); ok {
+		st.EngineHistory = legs
+	}
+	n.putAgentState(ctx, launch, id, st)
 	n.bindPane(pane, id)
 	n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, Model: model, Effort: effort, Mode: mode, ID: id})
 }
@@ -483,6 +504,18 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 		// one typed again.
 		unlock := n.typing.lock(id)
 		defer unlock()
+		if a.Agent == agyAgent {
+			var opts sendOpts
+			_ = json.Unmarshal(params, &opts)
+			if opts.ApplySwitch {
+				_ = n.state.loaded(ctx)
+				if ps := n.pendingSwitch(id); ps != nil && ps.Agent != "" {
+					if handled, err := n.applyEngineSwitch(ctx, id, a.PaneID, agyAgent, *ps, msg.Text, msg.Images, opts); handled {
+						return okResult(nil), err, true
+					}
+				}
+			}
+		}
 		if len(msg.Images) > 0 {
 			paths, err := n.saveImages(msg.Images)
 			if err != nil {

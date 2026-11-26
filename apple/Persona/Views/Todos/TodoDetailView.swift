@@ -257,6 +257,12 @@ struct TodoDetailView: View {
                 .padding(.vertical, Theme.Space.xs)
             }
 
+            if let wait = todo.wait {
+                TodoWaitSection(wait: wait, openDetail: openDetail) { url in
+                    link = LinkTarget(url: url)
+                }
+            }
+
             TodoPlanSection(todo: todo).id(todo.id) // due date, reminder, priority (#1683)
 
             if todo.supervision != nil {

@@ -482,7 +482,7 @@ func i18nArgsLoad() i18n.Args {
 
 // An old started plan with a current queue record must still be a retry candidate (#7405).
 func TestAdmissionQueueRetryStartsWhenGateOpensOnOlderPlan(t *testing.T) {
-	url := newDatabase(t)
+	url := newMigratedDatabase(t, db.ManagerSet)
 	database, err := db.Open(context.Background(), url, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +516,7 @@ func TestAdmissionQueueRetryStartsWhenGateOpensOnOlderPlan(t *testing.T) {
 
 // A durable queue record outlives the recent-update window, so a long outage must not abandon it (#7722).
 func TestAdmissionQueueTimesOutAfterLookbackDowntime(t *testing.T) {
-	url := newDatabase(t)
+	url := newMigratedDatabase(t, db.ManagerSet)
 	database, err := db.Open(context.Background(), url, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)

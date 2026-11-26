@@ -77,10 +77,10 @@ type turnClose struct {
 
 // turnEndOf finds the end of the latest turn in items (a session's last turn as its node pages it); false while that
 // turn is open, or when the transcript has no end to go by. A turn ends where the runtime says so: Codex's
-// task_complete and Claude Code's turn_duration (both a turn_duration item), or the user's stop (the interrupted
-// notice, Codex's turn_aborted). Anything after that end that the agent wrote or that starts a turn (a message, a
-// wake, a background task's notice, an injected line) belongs to a turn still going, or to one that left no end: it is
-// not the turn that ended. A notice of the transcript's own after the end (a compaction) changes nothing.
+// task_complete, Claude Code's turn_duration, and Antigravity's agy_turn_end (all turn_duration items), or the user's
+// stop (the interrupted notice, Codex's turn_aborted). Anything after that end that the agent wrote or that starts a
+// turn (a message, a wake, a background task's notice, an injected line) belongs to a turn still going, or to one that
+// left no end: it is not the turn that ended. A notice of the transcript's own after the end (a compaction) changes nothing.
 func turnEndOf(items []proto.Item) (turnClose, bool) {
 	for i := len(items) - 1; i >= 0; i-- {
 		it := items[i]
@@ -95,6 +95,36 @@ func turnEndOf(items []proto.Item) (turnClose, bool) {
 			return turnClose{Key: it.ID, At: it.TS}, it.ID != ""
 		case it.Kind == proto.KindText, it.Kind == proto.KindToolUse, it.Kind == proto.KindToolResult, it.Kind == proto.KindThinking,
 			it.Kind == proto.KindImage, it.Role == "user", it.Wake, it.Task != nil, it.Injected != nil:
+			return turnClose{}, false
+		}
+	}
+	return turnClose{}, false
+}
+
+// turnEndForSession returns turnEndOf(items), or — for older non-Claude/non-Codex runtimes whose transcripts do not
+// yet include a turn_duration item — recognizes a completed assistant text reply when the runtime explicitly reports
+// StatusDone. Strict turnEndOf remains required for StatusUnknown, StatusIdle, reconnect verification, Claude Code,
+// and Codex.
+func turnEndForSession(row proto.Session, items []proto.Item) (turnClose, bool) {
+	if end, closed := turnEndOf(items); closed {
+		return end, true
+	}
+	if row.Status != proto.StatusDone || row.Agent == "" && row.Launcher == "" ||
+		row.Agent == "claude" || row.Agent == "codex" ||
+		row.Launcher == "claude" || row.Launcher == "codex" {
+		return turnClose{}, false
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		switch {
+		case it.Kind == proto.KindText && it.Role == "assistant" && !it.Narration:
+			if it.ID == "" || it.TS.IsZero() || strings.TrimSpace(it.Text) == "" {
+				return turnClose{}, false
+			}
+			return turnClose{Key: "reply:" + it.ID, At: it.TS}, true
+		case it.Kind == proto.KindNotice && it.Text != userStoppedNotice && !it.Wake && it.Task == nil && it.Injected == nil:
+			continue
+		default:
 			return turnClose{}, false
 		}
 	}
@@ -1140,7 +1170,7 @@ func (s *Service) recoverTurn(ctx context.Context, t Todo, last proto.Session) (
 	if !read {
 		return false
 	}
-	end, closed := turnEndOf(items)
+	end, closed := turnEndForSession(last, items)
 	ref := SessionRef{MachineID: last.MachineID, SessionID: last.SessionID}
 	b := &s.tasks.turns
 	b.mu.Lock()
@@ -1148,10 +1178,11 @@ func (s *Service) recoverTurn(ctx context.Context, t Todo, last proto.Session) (
 		delete(b.closed, ref)
 		e, known := b.doc.Turns[t.ID]
 		b.mu.Unlock()
-		if known && e.State == turnDone && e.Judged == nil && e.JudgeFailures > 0 && e.Key == "" &&
+		if known && e.State == turnDone && e.Judged == nil && e.Key == "" &&
+			(e.JudgeFailures > 0 || last.Status == proto.StatusDone || last.Status == proto.StatusIdle) &&
 			e.Machine == last.MachineID && e.Session == last.SessionID && e.sameRow(last) {
-			// This unnamed turn's receipt already proved that its agents stopped. Its failed judgment is resumed here even
-			// when an older runtime never writes a native end; taskCompletionCurrent still rejects any newer work.
+			// This unnamed turn's receipt already proved that its agents stopped. Its unfinished judgment is resumed here
+			// even when an older runtime never writes a native end; taskCompletionCurrent still rejects any newer work.
 			return s.resumeTurn(ctx, t, e)
 		}
 		return true // open, or nothing to go by: looked at again when its row moves

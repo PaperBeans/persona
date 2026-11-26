@@ -216,8 +216,11 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 	if _, ok := s.settingsLastGood(ctx); ok {
 		t.Fatal("never read + failure: want !ok")
 	}
-	if d := s.recordingDaysNow(); d != kb.DefaultRecordingDays {
+	if d := s.recordingAudioDaysNow(); d != kb.DefaultRecordingDays {
 		t.Fatalf("never read + failure: days=%d, want %d", d, kb.DefaultRecordingDays)
+	}
+	if d := s.recordingTextDaysNow(); d != 0 { // the text is never pruned on a value that could not be read
+		t.Fatalf("never read + failure: text days=%d, want forever", d)
 	}
 
 	// The user picked 365; a failure past the 5s freshness keeps serving 365 instead of falling back to 14.
@@ -228,7 +231,7 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 	if v, ok := s.settingsLastGood(ctx); !ok || v.RecordingDays == nil || *v.RecordingDays != 365 {
 		t.Fatalf("failure with last-good: ok=%v days=%v", ok, v.RecordingDays)
 	}
-	if d := s.recordingDaysNow(); d != 365 {
+	if d := s.recordingAudioDaysNow(); d != 365 {
 		t.Fatalf("failure with last-good: days=%d, want 365", d)
 	}
 
@@ -243,19 +246,19 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	expire()
-	if d := s.recordingDaysNow(); d != 30 {
+	if d := s.recordingAudioDaysNow(); d != 30 {
 		t.Fatalf("successful refresh: days=%d, want 30", d)
 	}
 
 	// Failing again serves the new last-good value (30); once the database recovers the read works again.
 	expire()
 	st.setFailSetting(errors.New("database busy"))
-	if d := s.recordingDaysNow(); d != 30 {
+	if d := s.recordingAudioDaysNow(); d != 30 {
 		t.Fatalf("failure after refresh: days=%d, want 30", d)
 	}
 	st.setFailSetting(nil)
 	expire()
-	if d := s.recordingDaysNow(); d != 30 {
+	if d := s.recordingAudioDaysNow(); d != 30 {
 		t.Fatalf("recovered: days=%d, want 30", d)
 	}
 }

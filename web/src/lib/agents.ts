@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { api, errorText, invalidateInFlightGets } from "./api";
 import { SessionList, compareListIds } from "./session-list";
+import type { MarkedAgent } from "./agent-kind";
 import { toast } from "../ui/atoms";
 
 export interface AgentSession {
@@ -81,7 +82,16 @@ export interface AgentSourceStatus {
   enabled: boolean;
   error?: string;
   setup?: "missing" | "disabled" | "no_accounts" | string;
-  accounts?: unknown[];
+  accounts?: AgentAccount[];
+}
+
+/** One of a source's accounts as `/agents` lists it: the personal list's Browse by account groups by `accountId`. */
+export interface AgentAccount {
+  accountId: string;
+  provider?: string;
+  displayName?: string;
+  status?: string;
+  sessionCount?: number;
 }
 
 const SETUP_HINTS: Record<string, string> = {
@@ -199,10 +209,37 @@ export async function restoreAgentSession(s: Pick<AgentSession, "id" | "title">,
 
 // ── pure helpers (tested) ───────────────────────────────
 
-const PROVIDER_LABEL: Record<string, string> = { grok_bot: "Grok Bot", muse: "Muse", cue: "Cue", dots: "Dots", claude_duet: "Claude Duet" };
+const PROVIDER_LABEL: Record<string, string> = { grok_bot: "Grok Bot", muse: "Muse", muse2api: "Muse", cue: "Cue", dots: "Dots", claude_duet: "Claude Duet", gemini_tasks: "Gemini", groq: "Groq" };
 export function providerLabel(p: string): string {
   if (p === "bot") return t("lib-agents.bot");
   return PROVIDER_LABEL[p] ?? (p || t("lib-agents.other"));
+}
+
+// The agent mark (ui/AgentMark.tsx) a provider's product is drawn with, for the providers whose product has one bundled:
+// Dots drives ChatGPT, whose mark is the OpenAI Blossom the Codex mark already is. The others draw their label's letter.
+const PROVIDER_MARK: Record<string, MarkedAgent> = { grok_bot: "grok", dots: "codex", claude_duet: "claude", gemini_tasks: "gemini" };
+
+/** The `agent` to hand AgentMark for a provider: its product's mark, else its label, whose first letter is drawn ("" would
+ *  be Claude Code's). */
+export function providerMarkAgent(p: string): string {
+  return PROVIDER_MARK[p] ?? providerLabel(p);
+}
+
+/** What the personal list knows of the account a group is keyed by: its name and provider. The name is the account's own
+ *  (`displayName`), else its provider's label; an account `/agents` does not list is named after the provider of its
+ *  loaded sessions, and only one known nowhere by its id. `provider` is "" when nothing says which it is. */
+export function accountGroup(id: string, sources: readonly AgentSourceStatus[] | null | undefined, sessions: readonly Pick<AgentSession, "accountId" | "provider">[]): { name: string; provider: string } {
+  for (const src of sources ?? []) {
+    for (const a of Array.isArray(src.accounts) ? src.accounts : []) {
+      if (!a || typeof a !== "object" || a.accountId !== id) continue;
+      const provider = typeof a.provider === "string" ? a.provider : "";
+      const named = typeof a.displayName === "string" ? a.displayName.trim() : "";
+      if (named) return { name: named, provider };
+      if (provider) return { name: providerLabel(provider), provider };
+    }
+  }
+  const provider = sessions.find((s) => s.accountId === id && s.provider)?.provider ?? "";
+  return provider ? { name: providerLabel(provider), provider } : { name: id, provider: "" };
 }
 
 export const totalUnread = (list: AgentSession[]) => list.reduce((n, s) => n + (s.unreadCount || 0), 0);

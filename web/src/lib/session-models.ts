@@ -358,7 +358,7 @@ export const ENGINE_SWITCH_FEATURE = "engine_switch";
 export function engineSwitchable(s: Session): boolean {
   const engine = sessionEngine(s);
   if (engine === "claude") return !s.source_kind && canSwitchModel(s);
-  return engine === "codex" && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
+  return (engine === "codex" || engine === "agy") && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
 }
 
 /** What the pill and the panel can change on the session now: its model (Claude Code in a terminal, a runtime that says

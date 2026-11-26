@@ -32,6 +32,7 @@
   "wrong_offset": "The node confirmed the wrong update transfer offset.",
   "install_update_failed": "Could not install the node update: {err}",
   "not_confirmed": "The new node did not reconnect and confirm its version within two minutes. Local recovery will roll back after confirmation times out. Check the computer’s status and try again.",
+  "drain_timeout": "The node stayed busy draining active work for too long and did not restart in time. Check the computer’s running tasks and try again.",
   "hub_changed": "The hub version changed, so the previous node update was stopped. Start the update again.",
   "rolled_back": "The node still runs the old version after updating and may have rolled back. Check the computer’s status and retry manually.",
   "node_temporary": "This connection uses a temporary node. Install the resident node service first.",

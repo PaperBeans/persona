@@ -233,6 +233,16 @@ describe("chatLines", () => {
     expect(empty([first, thinking, blank, notice(4, "已中断")])).toBe(false);
   });
 
+  it("calls no turn empty while the items may predate the transcript (a cached page before its newest read)", () => {
+    const items = [u(1, "Check this"), tool(2, "search"), res(3, "search")];
+    const empty = (opts: { stale?: boolean }) => {
+      const [line] = chatLines(items, opts);
+      return line.kind === "segment" && line.seg.emptyResponse === true;
+    };
+    expect(empty({})).toBe(true);
+    expect(empty({ stale: true })).toBe(false);
+  });
+
   it("omits the empty-response fallback after a silent supervision finish", () => {
     const finish = { ...tool(2, "finish"), tool_name: "mcp__persona__supervision_finish", tool_input: { visibility: "silent" } };
     const receipt = { ...res(3, "finish"), text: '{"visibility":"silent"}' };

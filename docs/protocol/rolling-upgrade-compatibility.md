@@ -51,6 +51,15 @@
 
 基线的 `/api/v1/…` 入口、普通 WebSocket `type` 与 node／manager RPC 方法不因产品名切换而整体改名；新增业务能力仍按各自协商规则处理。协议版本没有因本兼容层提高。注册 Bundle ID、系统 controls／Intent 等原生身份由 #6152／#6192 记录，本清单不以服务端测试代替其系统升级证据。
 
+### Unified integrations and channel settings
+
+| Field | Mixed-version behavior |
+| --- | --- |
+| `integrations_v2`, `expected_integrations_v2` | A missing boolean in the selected assistant’s profile keeps legacy Settings and a read-only Labs row. Older clients omit both fields on sparse updates. A supporting manager defaults the flag off and rejects a stale expected value with 409. |
+| `thread_mode`, `thread_idle_hours` | The web offers editing on installed extension channels reporting a supported mode. Older clients preserve both values on partial writes. Switching off uses legacy message threads and 30 days of inactivity. Switching back on reuses saved preferences. In split modes older plugins can still supply the opaque `thread` key. |
+| `target_override` | Optional detail metadata. Clients can display the reported `topics`, `groups_and_topics`, or `threads` precedence hint. An absent hint needs no placeholder. Older clients ignore it and can still edit the default target. |
+| `configuration.*.section` | A manifest property can group a field under `connection`, `channel`, `inbox`, or `advanced`. Omitted or empty keeps the existing form valid. Older clients ignore the returned form hint. Extensions declaring the hint need a matching minimum hub version in `engines.persona` for install-time validation. |
+
 ### Agent tab naming (#15387)
 
 | Pair | What happens |
@@ -144,6 +153,19 @@ unrecognized enum to `unknown`. The four terminal messages are a presentation ma
 `unknown | approval | answer | computer` is the entire wire state. Nothing is persisted, and removing the pending call
 before its final socket write prevents late updates after the answer. The peer-combination table and terminal messages
 are in [protocol.md](protocol.md) ("MCP tools (`personad mcp`)").
+
+### Task workspace sources
+
+The read-only `task.workspace.capabilities` probe adds optional `empty_repositories` and `local_git` fields.
+The base `task_workspace_v1` capability and the node protocol floor stay the same.
+
+| Pair or state | Behavior |
+| --- | --- |
+| New manager and capable node | New isolated task dispatches use node naming and preparation. A local Git source is frozen to its actual commit. A folder-only workspace uses the empty-container capability. |
+| New manager and older node | Ordinary dispatch keeps its engine checkout path when the probe omits local support or is unknown. A transport error remains a failure of that attempt. A bound-remote backend plan keeps using the original capability. |
+| Older manager and new node | The manager still sends the original preparation and launch fields or calls the engine's checkout methods. A legacy checkout keeps its existing path and ownership rules. |
+| Node rolled back after a workspace operation was saved | A retry keeps the saved operation and computer. If the peer cannot read the selected source, the operation can continue after the node is updated. The manager does not replay the start through the engine. |
+| Older client and new manager | Optional `system_defaults` and `branch_sources` can be ignored. The naming-plan digest and fields for existing remote plans are unchanged. |
 
 ### Assistant conversations on the CLI only (#9799)
 
@@ -398,6 +420,18 @@ going offline and a hub restart (D10 and D13 of `docs/plans/plan-derived-counts.
 | Hub restarts or switches versions | The new hub has no view until each manager connects again and tells its last one; an app keeps the views it has, and one with none draws the fallback until then |
 | Manager or hub rolled back | The hello lists no `counts_view`, or the reconnected manager's entry has no `counts_view: true`: the fallback from that message on |
 | Several paired hubs | Each hub on its own; the app adds them up |
+
+## Node update draining (`node_update_drain_v1`, #16517)
+
+`node_update_drain_v1` is additive and keeps the node protocol floor unchanged. A resident node that announces it emits `node.update.draining` (`{id, target}`) and includes `update_draining` in `node.info` while draining active work after `node.update.commit`, then includes `{id, target}` in `node.restarting` at handover. Both the manager's two-minute confirmation timer and the local rollback watchdog's deadline start at handover instead of on the commit reply.
+
+| Pair | Behavior |
+| --- | --- |
+| New manager and capable node | After `node.update.commit`, the manager enters `deploy_phase: "draining"` and waits until `node.restarting` (or a sustained disconnect) before starting the two-minute confirmation timer. A hub restart while draining resumes tracking from `node.info.update_draining` instead of misclassifying the old-version draining node as `rolled_back`. A late reconnect that confirms the target version clears any persisted `failed` deploy record in Postgres. |
+| New manager and older node | The node omits `node_update_drain_v1`, `node.update.draining`, and `node.info.update_draining`. The manager keeps the legacy post-commit `confirming` flow and two-minute timeout; late reconnects that confirm the target version still clear persisted `failed` records. |
+| Older manager and new node | The older manager ignores `node.update.draining`, `node.info.update_draining`, and the extra fields on `node.restarting`, keeping its existing confirmation flow. Locally, the new node still protects its drain from premature watchdog rollback and arms a fresh post-`exec` deadline at handover. |
+| New node with older backup watchdog (disk drift) | Because the watchdog process is launched from the backup binary on disk, `BeginDrain` both marks `draining: true` in the marker and slides `deadline` forward while the draining resident is alive, so even an older backup binary that ignores `draining` never rolls back a live draining resident. Adopted external binaries (#15708) refresh only their adoption deadline and never create a backup or watchdog. |
+| Older client and new hub | `deploy_phase: "draining"` is an optional string alongside `deploying: true`; clients that do not know `"draining"` keep treating the machine as actively deploying until completion. |
 
 ## Apple 端交接
 

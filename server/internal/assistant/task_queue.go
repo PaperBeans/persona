@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
@@ -26,7 +27,20 @@ const (
 	admissionQueueMaxWait = 30 * time.Minute
 	// admissionQueueLookback bounds the recent-update side of the database scan; a serialized queue survives downtime.
 	admissionQueueLookback = time.Hour
+	// blockerWaitQueueKey marks a planned task deferred until its persistent external PR blockers clear (#16198).
+	blockerWaitQueueKey = "todo_blockers"
 )
+
+func (s *Service) blockerWaitQueue(refs []string) *TaskQueue {
+	now := time.Now().UTC()
+	return &TaskQueue{
+		Key:      blockerWaitQueueKey,
+		Reason:   "waiting for external PR: " + strings.Join(refs, ", "),
+		QueuedAt: now,
+		NextAt:   now,
+		Blockers: append([]string(nil), refs...),
+	}
+}
 
 // TaskQueue records a plan task waiting for an admission-gate retry. It is serialized inside the plan's task blob, so
 // a hub restart resumes the wait: the loop reads NextAt back and retries when it is due.
@@ -90,7 +104,7 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 
 func admissionQueueEntry(now time.Time, reason, key string, retry bool, before *TaskQueue) TaskQueue {
 	q := TaskQueue{Reason: reason, Key: key, Attempt: 1, QueuedAt: now, NextAt: now.Add(admissionQueueInterval), Retry: retry}
-	if before != nil && before.Key != requestGateKey && before.Key != workspaceQueueKey && before.Key != pendingPlacementQueueKey {
+	if before != nil && before.Key != requestGateKey && before.Key != workspaceQueueKey && before.Key != pendingPlacementQueueKey && before.Key != blockerWaitQueueKey {
 		q.QueuedAt, q.Attempt, q.Retry, q.Gateway = before.QueuedAt, before.Attempt+1, before.Retry, before.Gateway
 		// Group and quota waits have separate budgets. A new resource refusal starts a new stretch.
 		if before.Key == gatewayQuotaWaitKey || before.Key == admissionGroupFullKey && key != admissionGroupFullKey {
@@ -158,6 +172,9 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 				}
 				continue
 			}
+			if s.settings(cctx).todosV2On() && s.hasActiveTodoBlockers(cctx, pt.TodoID) {
+				continue
+			}
 			if pt.RequestGate != "" {
 				s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, q.Retry, nil)
 				continue
@@ -172,9 +189,9 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 	s.sweepWorkspaceQueues(cctx)
 }
 
-// queueBounded says the generic attempt and time bounds apply. Group, prerequisite, quota, workspace and placement waits manage their own.
+// queueBounded says the generic attempt and time bounds apply. Group, prerequisite, quota, workspace, placement and blocker waits manage their own.
 func queueBounded(q *TaskQueue) bool {
-	return q.Key != admissionGroupFullKey && q.Key != requestGateKey && q.Key != gatewayQuotaWaitKey && q.Key != workspaceQueueKey && q.Key != pendingPlacementQueueKey
+	return q.Key != admissionGroupFullKey && q.Key != requestGateKey && q.Key != gatewayQuotaWaitKey && q.Key != workspaceQueueKey && q.Key != pendingPlacementQueueKey && q.Key != blockerWaitQueueKey
 }
 
 func queueExpired(q *TaskQueue, now time.Time) bool {

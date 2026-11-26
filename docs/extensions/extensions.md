@@ -92,10 +92,12 @@ so the old extension-system terms **keep working** where listed below. This does
 
 **Manager-configuration `plugins` retirement (#2656)**: the release that introduces the deprecation warning keeps reading legacy `plugins` entries for that one release, preserving the merge order and `extensions`-wins behavior. The next release stops reading `plugins` and uses only `extensions`; the release after that removes the alias and its merge code. This schedule applies only to the manager-configuration key, not to the other compatibility entries in this table.
 
+**Manager-configuration `trusted_extension_markets` retirement (#2656)**: the release that introduces the deprecation warning keeps decoding legacy `trusted_extension_markets` entries for that one release while logging a startup warning whenever entries are present (they continue to grant no sandbox exemption; see "Sandbox"). The next release stops decoding `trusted_extension_markets`, and the release after that removes the legacy field from manager configuration and migration key lists.
+
 **Marketplace move**: after a marketplace repository is renamed or moved (for example, `<org>/<old repository>` → `<org>/<new repository>`), extensions installed from it have the source `market:<market id>/<extension id>`, and the market id must not change.
 Use `personad extension market set-spec <market id> <new URL>` (API `PUT /api/v1/extensions/-/markets/{id}` `{spec}`) to change the URL in place. It first reads the new URL once with the market's existing token; if that fails, nothing changes.
 
-**How long the other compatibility items stay**: apart from the manager-configuration `plugins` schedule above, the compatibility layer stays at least until **2027-05-05** (six months, covering the 90-day lifetime of released TestFlight builds and old Android versions), and until the hub logs show **30 consecutive days with no calls** to the old API.
+**How long the other compatibility items stay**: apart from the manager-configuration retirement schedules above, the compatibility layer stays at least until **2027-05-05** (six months, covering the 90-day lifetime of released TestFlight builds and old Android versions), and until the hub logs show **30 consecutive days with no calls** to the old API.
 The hub counts every call to an old path per route (`legacyCalls` in `extension_compat.go`; on the first call each day it logs the previous day's counts as one line, `extensions: old plugin API calls since …`; step 7 wires this into the admin UI).
 That decides whether it can be removed. Removal gets its own issue: drop the items in the table above one by one, and rewrite stored manifests to `extension_protocol`.
 The `persona-plugin.json` generated in packages follows the same deadline: after 2027-05-05, and once nobody runs a pre-rename hub anymore, `personad extension pack` and the package.sh packaging scripts of the two extension repositories stop generating it.
@@ -508,12 +510,15 @@ To call the hub's HTTP API, an extension lists the scopes it uses in `permission
 | `tasks.schedule` | Schedule pending tasks to available computers | `GET /api/v1/assistant/placement/pending`, `POST /api/v1/assistant/placement/{todo_id}/assign`, `POST /api/v1/assistant/placement/{todo_id}/defer`, plus the `placement.pending` wake event. Calling `GET /api/v1/assistant/placement/pending` refreshes the extension's 60-second active scheduling lease; without an active lease (or past the 15-second fallback window), the kernel falls back to its built-in machine selection. Never exposes task prompts or hidden privacy-space tasks. Granted by name only, not by the legacy `hub_api` or every-scope grant |
 | `agents.archive_idle` | Guarded archive and terminal close for long-idle coding-agent sessions with audit logging | `POST /api/v1/sessions/{mid}/{sid}/archive-idle` and `GET /api/v1/sessions/archive-idle/audit` (own extension's entries only). Strictly verifies live computer reachability and continuous manager-local monotonic inactivity `> idle_minutes` on the current connection, hard-refuses working/busy/unknown/unverified sessions, the main conversation, direction leads (including outside directions), assistant conversations, open-todo sessions, external/desktop/subagent rows, and unresolved-card sessions, fences concurrent task/direction bindings and guards node terminal close against activity changes, persists a write-ahead audit attempt before irreversible close (aborting with `503` without closing if audit persistence fails, and queuing durable retry with `503` if post-close outcome finalization fails), rolls back provisional archives if terminal close fails or is refused, and hides privacy spaces (`404`). Granted by name only, not by `agents.control`, legacy `hub_api`, or every-scope grants |
 | `todos.write` | Create and edit to-dos, attach chats to to-dos | `POST /api/v1/todos`, `PATCH /api/v1/todos/{id}`, a to-do's `agents/{mid}/{sid}` and `spaces/{mid}/{space…}` (`PUT` / `DELETE`), `POST /api/v1/todos/{id}/decisions` (outcome decisions only, see [todos.md](../assistant/todos.md) "API overview"), `PUT /api/v1/todos/{id}/repositories` and `PUT /api/v1/todos/{id}/repositories/{repo_id}/links` (replace repository associations and issue/PR links); creating and editing to-dos and adding decisions not with terminal control characters (see below); deleting to-dos, superseding decisions, completion checks and retries still require full access; none of a to-do it is not shown, nor a run or space it may not take onto one (404, see "Never shown to extensions") |
+| `bots.feishu.identity` | Read the paired Lark bot's public identity | `GET /api/v1/bots/feishu/identity`; the bot's name, app id and whether it can reply, never a secret (`docs/extensions/bots.md`, "Proxy replies handed off from a group") |
+| `bots.feishu.handoff` | Hand a group question to the Lark bot | `POST /api/v1/bots/feishu/handoffs`; the bot replies in the group. Granted by name only: it makes the bot write where other people read, and can interrupt the owner (`docs/extensions/bots.md`) |
 | `decisions.raise` | Ask the owner for a decision | `POST /api/v1/decisions`, `GET /api/v1/decisions/{id}`, `POST /api/v1/decisions/{id}/withdraw`; raise a rich pending Needs-you decision, poll only the caller's own answer and withdraw it ([todos.md](../assistant/todos.md) "Decisions raised outside a supervisor"). It does not open any owner answer route and is never included in legacy every-scope access |
 | `assistant.read` | Read your Persona chats (your messages and its replies) | No HTTP route: the `assistant.conversations` / `assistant.messages` RPC (see "Assistant conversations"). `assistant.ask` does not include it |
 | `spaces` (#14574) | Manage domain-space metadata and SPACE.md, and list a space's chats (title and latest message) | List and create tracks, change a track and its `SPACE.md`, list a space's open conversations (`GET /api/v1/assistant/tracks/{slug}/conversations`, #15991: 404 for a space hidden from extensions, and each conversation the extension's information policy hides left out), and read or change a visible conversation's categories; no custom-kind writes. Explicit by name only, never included in the legacy every-scope grant. Other conversation reads and starts still require `assistant.ask`; sensitive tracks remain hidden by their existing policy. |
 | `assistant.entries.read` | Read unified ledger entries | `assistant.entries.list` RPC and `GET /api/v1/assistant/entries`; see "Unified entries ledger" |
 | `assistant.memory.read` | Read what Persona remembers about you (read-only; another track's memory only as the user lets this extension read it) | No HTTP route: the `assistant.memory` RPC (see "Assistant memory"). Writing and deleting memory stay with full credentials; `assistant.read` does not include it |
 | `assistant.events` | Tell your Persona main chat what it observes (events it can pass on to you; it cannot start or change chats) | No HTTP route: the `assistant.event` RPC (see "Assistant events"). Neither `assistant.ask` nor `assistant.read` includes it |
+| `lark.messages.read` | Receive newly synced Lark message metadata events | No HTTP route: gates the `lark.messages` event (see "Lark message events"). Carries binding, chat ID, message ID, sender open ID, time and type — never message bodies. Granted by name only, not covered by the legacy `hub_api` or every-scope grant |
 | `models` | Use the model you pick for it in Settings › Model configuration (never the key) | No HTTP route: the `model.complete` RPC (see "Model calls"). Not covered by the legacy `hub_api` full access |
 | `transcription` | Turn its own audio into text with the transcription you chose for meetings (never the key, never other audio) | No HTTP route: the `transcription.*` RPC (see "Transcription for extensions"). Not covered by the legacy `hub_api` full access |
 | `market.refresh_own` | Refresh the extension marketplace it was installed from | `POST /api/v1/extensions/-/self/market/refresh` only. Not covered by an all-scope token or the legacy `hub_api` grant: the manifest must name it and the owner must approve it |
@@ -555,7 +560,7 @@ Scopes cover what an extension calls with its token. The owner's own answers tha
 - **Compatibility**: old extensions with `hub_api: true` still get the hub's full token (only in env vars), with an extra warning on install and upgrade, "hub_api is the legacy form"; extensions in manager.json still get the full token. On a manager other than the built-in one, both get a token of every scope instead (none of the routes open to full credentials only): that manager has no token of the hub's to hand on. Every other extension's token there opens the scopes it asked for and no more.
   An attached package ("Attaching an installed package") granted `hub_api` gets a token of every scope too, on any manager, in `initialize` only: its program is not the manager's child, so it never gets the hub's own token.
   One installed from `remote:` and granted `hub_api` gets no hub token (one granted scopes gets a token of those).
-  A token of every scope has every scope but `agents.archive_idle`, `agents.permission_mode`, `assistant.start_defaults`, `decisions.raise`, `dispatch.guard`, `push.grading`, `tasks.schedule` and `market.refresh_own`, which an extension gets only by naming them in `permissions.hub` (`extension.EveryScope`). A manifest that names any scope gets a token of exactly the named scopes, even with `hub_api` set (`Permissions.FullHub`), so an extension that needs one of them lists every scope it uses.
+  A token of every scope has every scope but `agents.archive_idle`, `agents.permission_mode`, `assistant.start_defaults`, `bots.feishu.handoff`, `decisions.raise`, `dispatch.guard`, `lark.messages.read`, `push.grading`, `tasks.schedule` and `market.refresh_own`, which an extension gets only by naming them in `permissions.hub` (`extension.EveryScope`). A manifest that names any scope gets a token of exactly the named scopes, even with `hub_api` set (`Permissions.FullHub`), so an extension that needs one of them lists every scope it uses.
   The `hub_api` grant covers every scope but those named-only scopes: upgrading from `hub_api` to a new version that asks for only a few scopes needs no new consent, unless one of them is one of those named-only scopes (which `added_permissions` then lists); the reverse does.
 - The permission summary includes the scopes (normalized: sorted, deduplicated); for extensions without `hub` the summary is the same as before. An upgrade that adds scopes needs consent again, and `added_permissions` shows "Use more of the hub's features".
 
@@ -563,7 +568,7 @@ Scopes cover what an extension calls with its token. The owner's own answers tha
 
 ### Knowledge base RPC (#1908)
 
-An extension's program can call the seven methods below directly, without passing a token over HTTP. Permissions are still declared only in `permissions.hub`; the hub checks against the permissions actually granted,
+An extension's program can call the eight methods below directly, without passing a token over HTTP. Permissions are still declared only in `permissions.hub`; the hub checks against the permissions actually granted,
 not the ones requested in the manifest. `kb.write` does not imply `kb.read`. The legacy `hub_api` full access stays compatible. Every call is forwarded by the hub to the manager's knowledge base,
 so the extension does not need to read the hub's or the manager's data directory.
 
@@ -576,15 +581,16 @@ so the extension does not need to read the hub's or the manager's data directory
 | `kb.search` | `{query,messages?,limit?}` | `{hits}` | `kb.read` |
 | `kb.update` | `{kind,id,...fields to update,evidence?,unlock?}` | `{id,before?,ignored?}` | `kb.write` |
 | `kb.owner` | `{}` | `{name,aliases,handles:[{kind,value}]}` | `kb.read` |
+| `kb.put_recording` | `{id,started_at,title?,ended_at?,language?,minutes?,transcript?,projects?,meeting?}` | `{id,revision,created?,unchanged?,minutes_version?}`: the extension's own recording ("Writing recordings and minutes" below) | `kb.write` |
 
-The params, answers, error codes and events are described in `schema/extension/kb.schema.json`; the Go SDK has them as `ext.Hub`'s `KBList`, `KBRecent`, `KBGet`, `KBDay`, `KBSearch`, `KBUpdate` and `KBOwner`.
+The params, answers, error codes and events are described in `schema/extension/kb.schema.json`; the Go SDK has them as `ext.Hub`'s `KBList`, `KBRecent`, `KBGet`, `KBDay`, `KBSearch`, `KBUpdate`, `KBPutRecording` and `KBOwner`.
 
 kind is `projects`, `chats`, `people`, `docs`, `meetings`, `events`, `recordings` or `topics` (knowledge points by subject; `kb.get` adds `points`, `docs/assistant/knowledge.md` "Topics"). list returns 30 by default, at most 200, with offset starting at 0;
 if not finished, continue with next_offset. Paging is not a snapshot when things change between requests, so extensions should deduplicate and re-read when needed. search searches messages by default, 40 by default, at most 200;
 get includes a chat's most recent 12000 bytes of messages by default, cut at a message or line start, or inside a long line at a whole character when the next start would drop more than half of them (a recording's transcript: its first 12000 characters); recent_chars may be 0, at most 20000. Empty lists return `[]`.
 `kb.get` does not include live Agents; reading Agent state still needs the matching permission. A missing scope returns `permission_denied` with `scope` in the error data;
-unknown fields, missing required fields or bad formats return `invalid_params`, a missing entity returns `not_found`, a write touching what someone else holds returns `conflict`, a manager that is offline returns `assistant_offline`, and a knowledge base that isn't ready returns `kb_unavailable`.
-Internal methods such as `kb.forget`, `kb.context`, `kb.posts_*` are not on this allowlist, and even extensions with full access can't call them this way.
+unknown fields, missing required fields or bad formats return `invalid_params`, a missing entity returns `not_found`, a write touching what someone else holds returns `conflict`, `kb.put_recording` of a recording that is not the extension's returns `permission_denied` (no data) and of one the user deleted `deleted`, a manager that is offline returns `assistant_offline`, and a knowledge base that isn't ready returns `kb_unavailable`.
+Internal methods such as `kb.forget`, `kb.context`, `kb.posts_*`, `kb.extension_update` and `kb.extension_put_recording` are not on this allowlist, and even extensions with full access can't call them this way.
 
 `since` / `until` are RFC 3339 times (an entity's update time: a chat's last message, a document's, meeting's or event's time, a recording's start). `kb.recent` defaults to chats, docs, meetings, events and recordings,
 50 a page, at most 200; list entries for chats carry `source` (lark, mail, wechat, github…), so one pass covers every source; read a chat's text with `kb.day` and the rest with `kb.get`.
@@ -610,6 +616,30 @@ The locked fields it writes become its own with `evidence` (`[{chat, day, n?, no
 
 The update fields follow the existing knowledge base update API, plus `pinned`, `lock` and `remove_people/remove_chats/remove_aliases/remove_projects`.
 A link the user removed (`excluded` in the entity's meta, `removed` in `kb.get`) is not made again: it is dropped from `people` / `chats` / `projects` and named in `ignored`, and the rest applies ("Removed links" in `docs/assistant/knowledge.md`).
+
+### Writing recordings and minutes
+
+An extension that takes meeting notes elsewhere (a minutes service, an imported call) stores them with `kb.put_recording` (`kb.write`) as a recording of the knowledge base, next to the phone's,
+instead of writing the hub's data directory. The manager forwards it as the calling extension's (internally `kb.extension_put_recording`, which an extension cannot call), and the knowledge base
+(`server/internal/kb/recording_extension.go`) writes it through the same commit as a phone's upload:
+
+- **Whose it is**: the recording keeps `writer: {by: "ext:<id>", sum, at}` in its `meta.json`. Only that extension may write it again. A recording the phone uploaded (no `writer`) or another extension's
+  answers `permission_denied` and nothing is written. One the user deleted keeps its tombstone and answers `deleted`: it is not made again. The user can rename, tag or delete it like any recording.
+- **The id** is a UUID the extension picks: derive it from its own source id (a UUID v5, say) so a retry or a rerun lands on the same recording. The hub keeps `revision`: 1 when created, one more for each
+  write that changed something. The same params again answer `unchanged: true` and write nothing (`sum` is the digest of the normalized params), so retries are safe.
+- **The minutes** (`minutes: {markdown, title?, where?, attendees?, points?, decisions?, actions?, open?, language?}`) become `minutes.json` (`recordingwire.Minutes`; the hub sets `version`, `revision`,
+  `generated_at`, `when`, `start` and `end`) and `minutes.md` (the Markdown as given: what searches and `kb.get` read). Each action needs an `id` (at most 64 characters) that stays the same across writes:
+  a to-do the user made of an action keeps its `todo_id` when the minutes are written again. `meta.minutes_rev` is the revision written, so `minutes_state` is `ready` and the recording module makes no
+  minutes of its own. Minutes or a transcript is required.
+- **Retention**: the recording is a meeting (`kind: meeting`, complete). Its text follows `recording_text_days` like the phone's (forever by default, #16412). Past a finite one a
+  recording with minutes is trimmed to them and kept until `minutes_days` (forever by default, `docs/assistant/meeting-minutes.md` "Privacy"); one with only a transcript goes. A recording
+  older than a finite `recording_text_days` is accepted (an extension may write old meetings), but without minutes the next retention round deletes it.
+- **The transcript** (`transcript: [{start, end, text}]`, at most 20000 segments) is optional; `n`, `source` and `echo` are the hub's and are dropped. Without minutes, the recording module makes minutes of it
+  when it is on, at the user's model cost; the hub never writes the short summary of an extension's recording (`summarized_rev` is set), nor matches it to a calendar item itself.
+- **Links**: `projects` are slugs (or names) of existing projects; each gets `recordings/<id>` in its items, and a later write never removes a link (one the user removed is not made again). `meeting:
+  {kind: "events" | "meetings", id}` names the calendar item or imported meeting it was, which must exist; it replaces the previous one.
+- **Search**: the files are found by the searches at once (the search index reads changed files), the entity index is updated, and the apps are told (`metadata`, `messages`, `summary`).
+- **Bounds**: the params are at most 1 MiB, strict (an unknown field is `invalid_params`), at most 20 projects and 200 items in each minutes list; `ended_at` is not before `started_at`.
 
 Project list rows and detail include `freshness`, canonical `sources`, and `project_mode` when the owner made the
 project reference-only. Check `freshness.needs_review` before relying on a conclusion, and inspect the field's own
@@ -1363,7 +1393,7 @@ Nothing else is reachable: no other host or port, no direct connection, and no p
 | | Default |
 | --- | --- |
 | Installed package verified against an **official marketplace** entry signed by the final key id `3cce0f471911a1cf`, with that marketplace's catalog still verified | Off |
-| Everything else: other marketplaces (unsigned ones included), `dir:`, `file:`, `https://…`, uploads | On |
+| Everything else: other marketplaces (unsigned ones and private ones verified with owner keys included, see "Private market keys"), `dir:`, `file:`, `https://…`, uploads | On |
 | **Installed before #1856 was deployed** (when the hub first starts with the sandbox) | Recorded as "off" and runs as before; use the command below to turn it on |
 
 The verified installed key is saved atomically with the extension record in Postgres (`market_key`). It comes only from an unchanged, verified catalog entry and a checksum-checked package, not from manifest metadata or the market's current identity. Existing installs without this snapshot remain untrusted by default; moving their market to an official address cannot retroactively exempt them. An unsigned upgrade clears the snapshot. An upgrade keeps the replaced version's own origin and key (`previous_origin`, `previous_market_key`), and a rollback restores exactly those: going back to unsigned code never inherits the newer version's verified key, and a row upgraded before these columns existed rolls back with no key at all. Retired official keys never grant the default exemption; explicit owner choices, including recorded pre-sandbox choices, remain unchanged.
@@ -1672,11 +1702,15 @@ personad extension config <id> key=value …           Values that parse as JSON
 personad extension secret <id> <name> [--delete]     The value is read from stdin (not echoed in a terminal; first line from a pipe), never as a command-line argument; an empty one is refused (--delete removes it)
 personad extension uninstall <id> [--keep-data] [--cascade] [--members]   --members: also uninstall a bundle's members
 personad extension market list                       Registered marketplaces: id, name, extension count, signing, address (the official one is marked "official")
-personad extension market add <spec> [--token | --token-from=<marketplace id>]
-                                                     --token: read the token from stdin; --token-from: use the token of that registered marketplace (not shown)
+personad extension market add <spec> [--token | --token-from=<marketplace id>] [--key=ed25519:… …]
+                                                     --token: read the token from stdin; --token-from: use the token of that registered marketplace (not shown);
+                                                     --key (repeatable): a public key the index must be signed with, see "Private market keys"
 personad extension market set-spec <id> <spec>       The marketplace moved (repo renamed): the id stays, and what was installed from it still counts as its own, see "Naming and compatibility"
 personad extension market remove <id> | refresh <id>
 personad extension market token <id> [--clear]       Replace the token (read from stdin, not echoed) and reload; --clear removes it. Setting one helps even for a public GitHub marketplace, see "Extension marketplace", "GitHub rate limits"
+personad extension market key list <id>              A private marketplace's trusted public keys: key id and key
+personad extension market key add <id> <ed25519:…>   Trust one more key (rotation: add the new one, sign with both, remove the old one)
+personad extension market key remove <id> <key id>   Stop trusting a key; with none left the marketplace is unsigned again
 personad extension search [keyword]                  Each result printed as market:<marketplace id>/<extension id>, with installed / upgradable
 personad extension install market:<marketplace id>/<extension id>  Install from a marketplace; if already installed, this upgrades it
 personad extension auto-upgrade on|off [<id>]        Master switch for auto-upgrading marketplace extensions; with an id, the switch for that one extension
@@ -1685,6 +1719,9 @@ personad extension audit [<id>] [--limit=N]         The audit, newest first: who
 
 # Writing extensions (see "Writing extensions: SDK, templates and command line"); without <dir> it is the current directory
 personad extension new <id> [--template go|ts] [--name <name>] [--dir <dir>]   go template by default; name and dir both default to the id
+personad extension keygen --out <file>               A new Ed25519 market signing key: the private key to <file> (PKCS #8 PEM, 0600, never overwritten), the public key printed
+personad extension sign-index <persona-extensions.json> --key <file> [--key <file>…] [--out <file>]
+                                                     Sign a market index in the official envelope format (offline; re-signing keeps the exact payload bytes)
 personad extension dev [<dir>]                       Attach it to this hub to try it out; rebuilds and restarts on change; needs the hub running
 personad extension test [<dir>]                      Build for this machine and run it through the hub's checks
 personad extension pack [<dir>] [--platforms linux-amd64,…] [--out <dir>] [--split]
@@ -1767,12 +1804,15 @@ A GitHub marketplace can commit installable archives alongside its catalog: no R
 
 | Endpoint | What it does |
 | --- | --- |
-| `GET /api/v1/extensions/-/markets` | `{markets: [{id, spec, name, description, homepage, has_token, extensions (count), warnings, error, fetched_at, added_at, official?, signature: {state, key_id?}}]}` (`signature`, see "Signing" below, is also on the old path); the official marketplace comes first with `official: true`, the rest by registration time |
-| `POST /api/v1/extensions/-/markets` `{spec, token?, token_from?}` | Reads the index once first; if it cannot be read it is not registered (400, `error` gives the reason: bad address, private needs a token, wrong token); returns the marketplace. `token_from` is the id of another registered marketplace whose token to use (one account's token reading several private repos); the caller never sees the token, and only one of it and `token` may be given; on the command line `market add <spec> --token-from=<marketplace id>` |
+| `GET /api/v1/extensions/-/markets` | `{markets: [{id, spec, name, description, homepage, has_token, extensions (count), warnings, error, fetched_at, added_at, official?, signature: {state, key_id?}, trusted_keys?: {<key id>: "ed25519:…"}}]}` (`signature`, see "Signing" below, is also on the old path); the official marketplace comes first with `official: true`, the rest by registration time |
+| `POST /api/v1/extensions/-/markets` `{spec, token?, token_from?, keys?}` | Reads the index once first; if it cannot be read (or, with `keys`, does not verify with one of them) it is not registered (400, `error` gives the reason: bad address, private needs a token, wrong token); returns the marketplace. `token_from` is the id of another registered marketplace whose token to use (one account's token reading several private repos); the caller never sees the token, and only one of it and `token` may be given; on the command line `market add <spec> --token-from=<marketplace id>` |
 | `DELETE /api/v1/extensions/-/markets/{id}` | Stop reading this marketplace; extensions installed from it stay, but their auto-upgrade pauses with `auto_upgrade_paused: "market_removed"`. Add its original registration address again to restore upgrades under the saved settings |
 | `POST /api/v1/extensions/-/markets/{id}/refresh` | Re-read the index now; on a bad signature returns 400 `market_signature` (the last good index is kept) |
 | `POST /api/v1/extensions/-/self/market/refresh` | **Extension token with `market.refresh_own` only**, routed to that token's manager. The current install record alone chooses the market; there is no market parameter and no admin or legacy alias. An accepted call starts (or joins) the existing deduplicated background read and returns 202 at once. Missing scope returns 403; an install not from a market (including an attached one) returns 409 `not_from_market`; an origin market no longer registered returns 404 `not_found`. At most one self-refresh request per market is accepted every 10 minutes, shared by all its extensions; inside the window it returns 429 `rate_limited` with `Retry-After` in seconds. Scheduled and full-access reads keep their existing behavior |
 | `PUT /api/v1/extensions/-/markets/{id}/token` `{token}` | Replace the token (empty string removes it) and re-read |
+| `GET /api/v1/extensions/-/markets/{id}/keys` | `{keys: {<key id>: "ed25519:…"}}`: a private marketplace's trusted public keys (see "Private market keys") |
+| `POST /api/v1/extensions/-/markets/{id}/keys` `{key}` | Trust one more `ed25519:<base64>` key; re-verifies the saved catalog at once and re-reads it in the background; returns the marketplace. 400 `invalid_key` for a malformed key, the official key, more than 8 keys or the official marketplace |
+| `DELETE /api/v1/extensions/-/markets/{id}/keys/{key id}` | Stop trusting a key (by key id or the whole key); the saved catalog is re-verified at once, so a catalog signed only by it is quarantined immediately. 404 when the marketplace has no such key |
 | `GET /api/v1/extensions/-/catalog?q=&market=&refresh=1` | `{markets, extensions: [CatalogItem], platform}`. `q` searches id, name, description, publisher, tags and every translation's name and description (case-insensitive); indexes older than 6 hours are re-read in the background, `refresh=1` waits for all of them to be re-read |
 | `GET /api/v1/extensions/-/catalog/{mid}/{id}/icon?sha256=<package digest>` | Authenticated bundled PNG for a currently trusted registered catalog entry; lazily downloads/verifies the selected package through the existing package cache. Never installs or executes it. Missing, stale, invalid or unavailable artwork returns 404. |
 | `GET /api/v1/extensions/{id}/-/icon?v=<installed version>` | Authenticated PNG read from that installed/local extension root's regular `assets/icon.png`; no symlinks or escaping paths. Missing, stale or invalid artwork returns 404. |
@@ -1867,11 +1907,36 @@ The signature covers **the exact UTF-8 bytes of the JSON-decoded `payload` strin
 
 Only the official marketplace requires signature verification, using the compiled-in key rather than catalog-supplied keys. GitHub, git and direct HTTPS catalog aliases, token-bearing reads, manual re-registration and cached catalogs all use that gate. A failed signature blocks installation and upgrades, including the last good catalog and every bundle member. Only a catalog that was actually read counts: a missing envelope, a malformed one, a bad signature or another signer marks the market `invalid`. A read that gets no catalog (404, 401, another HTTP status, a timeout or network failure) records the error and changes nothing else: the last verified catalog and its `signed` state stay, and installs keep using it. The two are typed failures (`extension.ErrCatalogUnavailable`, `extension.ErrCatalogUnverified`), never told apart by message text; the refresh endpoint answers `market_unreachable` for the first and `market_signature` for the second, and a later network failure does not lift a quarantine. An official market cannot move to an unofficial address to bypass verification. Preview-time source and signing-key snapshots are checked again at commit.
 
-Nonofficial catalogs normally publish a plain index with **no `signatures` field**. Legacy `signing_key`, saved TOFU keys and key-change states are neither trust grants nor permanent locks. A structurally valid embedded nonofficial envelope may be parsed, but is reported as unsigned and acquires no saved key or sandbox exemption. There is no market trust CLI command or HTTP endpoint.
+Nonofficial catalogs normally publish a plain index with **no `signatures` field**. Legacy `signing_key`, saved TOFU keys and key-change states are neither trust grants nor permanent locks. A structurally valid embedded nonofficial envelope on a marketplace without owner keys may be parsed, but is reported as unsigned and acquires no saved key or sandbox exemption. The hub never learns a key from a catalog (no trust on first use): the only way a nonofficial marketplace becomes verified is the owner configuring its keys ("Private market keys" below).
 
 Postgres retains the complete envelope and payload string, not a regenerated index. Every manager restart re-verifies cached envelopes. Legacy official caches that cannot be verified remain isolated and refresh in the background. Unknown saved owner pins remain unchanged and isolated until an approved migration; failed database operations remain retryable. The once-added marker prevents deleted official marketplaces from being silently re-added.
 
 Release integration fixes the official key id at `3cce0f471911a1cf` and the final source address at `https://github.com/nwverse/persona-extensions`. Embedding signatures does not rotate that key. Publishing private keys stay outside repository files, logs and tests and are available only to the signing step. Repository cutover, package publication and visibility changes are separate release gates; a passing fixture is not final-key or production verification.
+
+### Private market keys
+
+A nonofficial marketplace the owner publishes (a private repository, a site of their own) can be given one or more Ed25519 public keys, at most 8, so that rotation can overlap (`market add --key`, `market key add|remove`, `POST /markets` `keys`, `POST|DELETE /markets/{id}/keys`, or the admin UI's **Signing keys**). They are stored per marketplace in `plugin_markets.trusted_keys` (a JSON array; empty for every marketplace that existed before, so an upgraded manager changes nothing) and shown whole, since they are public.
+
+**What verification covers.** While a marketplace has keys, its catalog must be the same embedded envelope as the official one, with a signature by any one of them over the exact payload bytes; the payload pins every package's sha256 and size, so a verified catalog covers the packages. This is enforced wherever the official catalog's signature is: registering (a catalog that does not verify is not added), refreshes, scheduled and extension-initiated reads, every manager restart (the saved envelope is verified again), the catalog's `problem`, previews (the entry must come unchanged from a catalog one of the current keys verified) and the commit (the key set is part of the preview's trust snapshot: changing keys between preview and install refuses the install). A catalog that was read and does not verify (a bad signature, another signer, a plain index) quarantines the marketplace like the official one: `signature.state` `invalid`, nothing installed or upgraded from it, not even from its last good catalog, and a restart keeps the quarantine. A read that gets nothing (404, timeout) changes nothing, as for the official marketplace. Installs and upgrades record the verifying key in `market_key`, exactly as for the official key; rollback restores the previous version's own key.
+
+**Changing keys.** A key change verifies the saved catalog with the new set at once, without a network read, then re-reads the marketplace in the background: removing the key the current catalog is signed with quarantines it immediately; adding it back verifies the saved catalog again. To rotate: add the new key, publish the catalog signed with both (`sign-index --key old.pem --key new.pem`), then publish it signed with the new key only and remove the old key. Installations verified with a removed key keep running and say so (`market_signature.state` `key_removed`) until their next upgrade records the new key. Removing every key returns the marketplace to unsigned, as before. The official marketplace never takes owner keys, and the official public key cannot be added to another marketplace.
+
+**Trust model.** A private key proves who published a catalog; it does not make the publisher as trusted as the official marketplace:
+
+| | Official marketplace | Private marketplace with owner keys | Marketplace without keys |
+| --- | --- | --- | --- |
+| Key | compiled into the manager | configured by the owner, per marketplace | none |
+| Catalog must verify | yes | yes | no |
+| Installs / upgrades | verified, key recorded | verified, key recorded | unsigned, no key recorded |
+| Catalog that fails verification | quarantined | quarantined | (plain indexes are expected) |
+| Default sandbox | off (final official key id only) | **on**: the owner may turn it off per extension | on |
+| Shown as | official signature | verified (key id) | unsigned |
+
+So the owner's keys protect against a changed catalog or package (someone with write access to the repository or site, a compromised mirror) but grant no extra capability: permissions are still reviewed and approved at install and upgrade, and the sandbox default stays on, because the key is only as trustworthy as wherever its private half is kept. `fromTrustedMarket` (`server/internal/extmgr/extension_sandbox.go`) still recognizes only the final official key id.
+
+**Signing.** `personad extension keygen --out market.pem` writes a new private key (PKCS #8 PEM, mode 0600; `openssl genpkey -algorithm ed25519` keys work too) and prints the public key and key id; `personad extension sign-index persona-extensions.json --key market.pem` replaces the file with the signed envelope (re-signing an envelope keeps its payload bytes). Both run offline and never contact a hub. Keep the private key out of the marketplace repository; a CI secret used only by the signing step is the usual place.
+
+**What installed extensions show.** `ExtensionView.market_signature` (`{state, key_id?}`, the same shape as a marketplace's `signature`; `GET /api/v1/extensions`, the admin list) says how a marketplace installation was verified: `official`, `signed` (with `key_id`, a key the marketplace still trusts), `key_removed` (verified with a key no longer trusted, or its marketplace is gone), `unsigned`, or `market_invalid` (verified at install, but its marketplace is quarantined now). Absent for extensions not from a marketplace and on older managers. Older managers ignore `trusted_keys` (and treat such a marketplace as unsigned); their upserts leave the column as it was.
 
 ### OCI packages and mirrors
 
@@ -2029,7 +2094,7 @@ An extension installed from a package (a marketplace, `file:`, `dir:`, …) can 
   `data_dir` in the details (`personad extension show <id>`) says where that data directory is, so a program run on its own on the same machine can keep using it in place.
 - **What is checked**: the sockets must be the ones the package's runtime uses (`rpc` for one that speaks the protocol, `http` when it serves HTTP), and the program on them must answer `manifest` (`GET /manifest` for an HTTP-only one) with the package's id and version, so attaching grants nothing the package did not have. Each connection asks again before `initialize` ("Refused" above), so a program swapped for another one or version later gets nothing either.
   A package with no program, or a source runtime one, cannot be attached; one installed from `remote:` has no package and is attached already.
-- **Its program**: `initialize` gives it no path on the hub machine (`extension.dir` and `extension.data_dir` are empty). It gets its settings and secrets as usual, and a hub token of its granted scopes, or of every scope except the named-only `agents.archive_idle`, `agents.permission_mode`, `assistant.start_defaults`, `decisions.raise`, `dispatch.guard`, `push.grading`, `tasks.schedule` and `market.refresh_own` when it was granted `hub_api`: never the hub's own token ("Hub API: scopes").
+- **Its program**: `initialize` gives it no path on the hub machine (`extension.dir` and `extension.data_dir` are empty). It gets its settings and secrets as usual, and a hub token of its granted scopes, or of every scope except the named-only `agents.archive_idle`, `agents.permission_mode`, `assistant.start_defaults`, `bots.feishu.handoff`, `decisions.raise`, `dispatch.guard`, `lark.messages.read`, `push.grading`, `tasks.schedule` and `market.refresh_own` when it was granted `hub_api`: never the hub's own token ("Hub API: scopes").
 - **No upgrade or rollback while attached**: both are refused, and it never upgrades itself. Detach it, upgrade the package, and attach the new version's program.
 - **Audit**: `attach` (version and sockets) and `detach` (version) go to the extension's audit log, and the manager switches the extension's connection at once.
 
@@ -3705,6 +3770,7 @@ Extensions contribute `events` to subscribe to things happening on the hub. Thes
 | `leader.changed` | `id`, `title`, `project?`, `ended?`: a direction was made, retitled, filed under another project, ended or made current again (needs `leaders.read`, see "Leader events") |
 | `leader.report` | `id`, `leader`, `kind`, `todo`, `text`, `link?`, `at`: a direction's task reached its goal, needs the owner's decision or is stuck, or the direction reported progress (needs `leaders.read`) |
 | `placement.pending` | `plan_id`, `todo_id`, `batch_size`: one-way wake notification that a planned task is awaiting machine placement (needs `tasks.schedule`, granted by name only; carries no prompts or private fields and is never emitted for hidden privacy-space tasks) |
+| `lark.messages` | `binding`, `page`, `pages`, `total`, `messages`: batched metadata for new Lark messages committed to the sync outbox in a round (`messages[]` carries `chat_id`, `message_id`, `sender_open_id?`, `at`, `type?`, never message bodies; needs `lark.messages.read`, granted by name only; see "Lark message events") |
 
 SDK programs receive them in `Namespaces["event"]` (method name is the event name).
 
@@ -3770,6 +3836,21 @@ no Persona conversation. Either kind has one stable direction id. Schema: `schem
 - **Leaders made before the extension**: `GET /api/v1/assistant/leaders` (`leaders.read`) lists every direction as
   `leader.changed` would tell it now, with `by` (`assistant` or `user`), `at` and `ended_at?`; current leaders first.
 - They share the to-do events' queue and its limits.
+
+### Lark message events
+
+`lark.messages` notifies an extension right after a Lark user sync round (`ModeIM` incremental poll or `ModeFull` daily sync) commits new messages to the outbox, so the extension can react without waiting for knowledge-base ingestion (`kb.changed`) or polling on a timer.
+
+```json
+{"permissions":{"hub":["lark.messages.read"]},"activation_events":["on_startup"],
+ "contributes":{"events":[{"id":"lark","subscribe":["lark.messages"]}]}}
+```
+
+- **Who is told**: an extension that is enabled, has that contribution on, has its program running, subscribed to `lark.messages`, **and** was explicitly granted `lark.messages.read`. `lark.messages.read` is granted by name only: `kb.read`, `inbox.read` and legacy `hub_api` full access are not enough.
+- **Payload**: `{binding, page, pages, total, messages}` (`larksyncwire.MessagesEvent`). `binding` is the sync binding key; `page` (1-based), `pages` and `total` describe the round's pagination; each entry in `messages` (`larksyncwire.MessageEventItem`) carries only `{chat_id, message_id, sender_open_id?, at, type?}`. `sender_open_id` is the sender's Lark `open_id` from `im/v1/messages` (`user_id_type=open_id`; for app/bot senders Lark reports the sender's app ID, omitted when absent); `at` is the message timestamp in UTC RFC 3339; `type` is Lark's `msg_type` (`text`, `post`, `interactive`, `image`, `file`, …).
+- **No message bodies**: message text, attachments, chat names and sender display names are never included. An extension reads message content on its own within whatever permissions it holds.
+- **Batching and pagination**: emitted per sync round rather than once per message, sorted chronologically by `at`. Rounds with more than 100 new messages are split into sequential pages of up to 100 messages each (`page: 1..pages`, all sharing `total`). Rounds with zero new messages, failed runs/commits, and sender-name backfill repairs emit nothing.
+- **Queue**: delivered through a dedicated queue (`larkEvents`, capacity 512) separate from `kb.changed` and to-do events, so a large sync batch cannot crowd out other extension events. Like other hub events, notifications are not persisted for redelivery across restarts.
 
 ## Error reports
 
@@ -4179,7 +4260,16 @@ and the node follows (`node/plugins.go`). Reconciliation runs on computer connec
   with caller identity ("The hub's API", "The caller on forwarded requests");
   full-access devices only, only on extension-enabled machines; missing extension or not enabled there 404, offline machine 409, program not running / not responding 502.
 - **Calls and events**: the hub-side program calls `nodes.call {machine, method, params}`, forwarded to that computer program's extension-protocol method (enabled computers only);
-  computer-program events are passed to the hub program as `node.event {machine_id, event, params}`. Computer programs calling hub methods always get `unknown_method`.
+  computer-program events are passed to the hub program as `node.event {machine_id, event, params}`.
+- **Programs on computers calling the hub** (`plugin.node.hub_call`): a program on a computer has no `hub_api` and no token, but it may call the hub's knowledge-base methods `kb.list`, `kb.recent`,
+  `kb.get`, `kb.day`, `kb.search`, `kb.owner`, `kb.update` and `kb.put_recording` exactly as its extension's program on the hub would ("Knowledge base RPC"). Its node relays the call on its own
+  connection as `plugin.node.hub_call {id, identity_revision, method, params}`; the manager (`extmgr/extension_node_calls.go`) answers it only when the method is on the allowlist
+  (`proto.PluginNodeHubMethod`, checked on both sides), the connection is one of the hub's computers, the extension exists at the identity revision the hub started the program with, and the extension
+  is on, set up and switched on for that computer (`nodeRunsOn`). Then it is the same call as from the hub: the same granted scopes (`kb.read` / `kb.write`, never the manifest's request), the writes
+  attributed to the extension. Any other method answers `unknown_method` on the node without reaching the hub. Security: the machine is the connection the request came in on and the extension is
+  the program the node started, never fields the program sets, so a program cannot speak for another extension or computer; a program left running after it was switched off for that computer, its
+  lease ran out, or it was replaced is refused; the allowlist carries only knowledge-base calls, none of which reaches another computer (`nodes.call`), the extension's storage, models, secrets, the
+  hub's token or an Agent, so a computer's program gets no more than its extension was granted. An older hub answers that it does not know `plugin.node.hub_call`.
 - **In the app**: extension details include `node_machines` (computer-selector field name); enabled rows show the program's state there ("Program running · version", "Program error: reason", "Offline: starts on connection", "personad on this computer is too old…").
   For program errors, Go `exit status N` displays as "Exit code N", `signal: X` as "Terminated by signal (X)" (converted by app/web, including reports from old nodes);
   disabled rows still show just online / offline. Enabling a computer asks first (the hub adds field `confirm`: "Runs the ‘…’ program on this computer…", unless supplied by the manifest).

@@ -700,6 +700,7 @@ final class TodoStore {
             apply(updated)
         }
         return Task {
+            guard generation == targetGeneration else { return false }
             do {
                 try await updatePlan(id: id, APIClient.TodoPlanChange(due: due), api: api)
                 return true
@@ -724,6 +725,7 @@ final class TodoStore {
             apply(updated)
         }
         return Task {
+            guard generation == targetGeneration else { return false }
             do {
                 try await updatePlan(id: id, APIClient.TodoPlanChange(project: project), api: api)
                 return true
@@ -764,6 +766,7 @@ final class TodoStore {
             apply(updated)
         }
         Task {
+            guard generation == targetGeneration else { return }
             do {
                 _ = try await update(id: todo.id, done: newDone, api: api)
             } catch {
@@ -1061,7 +1064,9 @@ final class TodoStore {
         if target.isSpace && changingSpaces {
             throw APIError(status: 409, message: String(localized: "Updating projects. Try again in a moment."))
         }
+        let targetGeneration = generation
         let created = try await create(title: title, owner: owner, api: api)
+        guard generation == targetGeneration else { return nil }
         do {
             try await link(target, to: created.id, api: api)
             return nil

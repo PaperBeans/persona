@@ -41,6 +41,10 @@ func (s *Service) toolTodo(ctx context.Context, machine, self, name string, args
 		return s.toolTodoDone(ctx, machine, self, name, args)
 	case "todo_delete":
 		return s.toolTodoDelete(ctx, machine, self, args)
+	case "todo_split":
+		return s.toolTodoSplit(ctx, args)
+	case "todo_merge":
+		return s.toolTodoMerge(ctx, args)
 	}
 	return "", fmt.Errorf("unknown tool %s", name)
 }
@@ -298,6 +302,9 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		ItemType           string          `json:"item_type"`
 		PartOf             json.RawMessage `json:"part_of"`
 		After              json.RawMessage `json:"after"`
+		BlockedByPR        []string        `json:"blocked_by_pr"`
+		UnlockStage        string          `json:"unlock_stage"`
+		UnlockContracts    []string        `json:"unlock_contracts"`
 		RepositoryBindings json.RawMessage `json:"repository_bindings"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -342,6 +349,23 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	if dir := strings.TrimSpace(a.DirectionID); dir != "" {
 		plan.DirectionID = &dir
 	}
+	var blockedByPR []string
+	var unlockStage string
+	var unlockContracts []string
+	if s.settings(ctx).todosV2On() {
+		if len(a.BlockedByPR) > 0 {
+			var prErr error
+			blockedByPR, prErr = parseBlockedByPRURLs(a.BlockedByPR)
+			if prErr != nil {
+				return "", prErr
+			}
+		}
+		var unlockErr error
+		unlockStage, unlockContracts, unlockErr = parseUnlockStageRule(a.UnlockStage, a.UnlockContracts)
+		if unlockErr != nil {
+			return "", unlockErr
+		}
+	}
 	if s.settings(ctx).todosV2On() && strings.TrimSpace(a.ItemType) != "" {
 		it, err := todoItemType(a.ItemType)
 		if err != nil {
@@ -385,6 +409,12 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		if err != nil {
 			return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
 		}
+		if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+			s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+		}
+		if len(t.After) > 0 {
+			s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
+		}
 		return "Created under your direction (you supervise it; to have an Agent do it, use task_plan with todo_id " + t.ID +
 			"): " + todoLine(t, now, loc), nil
 	}
@@ -394,12 +424,24 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		if err != nil {
 			return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
 		}
+		if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+			s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+		}
+		if len(t.After) > 0 {
+			s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
+		}
 		return "Created as a piece of " + t.PartOf + " (to have an Agent do it when its turn comes, use task_plan with todo_id " + t.ID +
 			"): " + todoLine(t, now, loc), nil
 	}
 	t, err := s.createPlainTodo(ctx, title, strings.TrimSpace(a.Notes), plan, bindings)
 	if err != nil {
 		return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
+	}
+	if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+		s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+	}
+	if len(t.After) > 0 {
+		s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
 	}
 	return "Created: " + todoLine(t, now, loc), nil
 }
@@ -508,6 +550,9 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 	if err != nil {
 		return "", fmt.Errorf("the change could not be saved, nothing changed: %w", err)
 	}
+	if e.After != nil {
+		s.syncAfterBlockers(ctx, out.ID, out.After, "", nil)
+	}
 	return "Updated: " + todoLine(out, now, loc), nil
 }
 
@@ -543,6 +588,14 @@ func (s *Service) toolTodoDone(ctx context.Context, machine, self, name string, 
 	out, err := s.editTodo(ctx, t.ID, db.TodoEdit{Done: &complete})
 	if err != nil {
 		return "", fmt.Errorf("the change could not be saved, nothing changed: %w", err)
+	}
+	if complete && s.settings(ctx).todosV2On() {
+		if recErr := s.ResetSupervisedTaskRecovery(ctx, t.ID); recErr != nil {
+			s.logf("todo %s: reset todos_v2 restart recovery: %v", t.ID, recErr)
+		}
+		if _, blkErr := s.ReconcileTodoBlockers(ctx, t.ID); blkErr != nil {
+			s.logf("todo %s: reconcile todos_v2 blockers: %v", t.ID, blkErr)
+		}
 	}
 	if complete {
 		return "Completed: " + todoLine(out, now, loc), nil

@@ -30,6 +30,7 @@ type preparedApproval struct {
 
 	clarified  bool
 	waiting    bool // its decision window ended unanswered and it was kept for the owner (keepWaiting)
+	ownerSpoke bool // an owner message arrived before startPreparedTimer armed the initial wait
 	release    chan struct{}
 	attempt    *clarifyAttempt
 	terminal   bool
@@ -209,9 +210,9 @@ func (s *Service) awaitPrepared(ctx context.Context, p *pending, auxiliary bool)
 // startPreparedTimer is called after the card is registered and announced.
 func (s *Service) startPreparedTimer(p *pending) {
 	s.fleet.mu.Lock()
-	defer s.fleet.mu.Unlock()
 	a := p.prepared
 	if a == nil || a.terminal || p.claimed || s.fleet.interactions[p.ix.ID] != p || a.paused || a.clarified {
+		s.fleet.mu.Unlock()
 		return
 	}
 	if persistentOwnerProposal(p.ix) {
@@ -220,12 +221,14 @@ func (s *Service) startPreparedTimer(p *pending) {
 			a.decisionTimer = nil
 		}
 		a.decisionGen++
+		s.fleet.mu.Unlock()
 		return
 	}
 	if !p.ix.ExpiresAt.IsZero() {
 		a.decisionDeadline = p.ix.ExpiresAt
 	}
 	if a.decisionDeadline.IsZero() {
+		s.fleet.mu.Unlock()
 		return
 	}
 	if a.decisionTimer != nil {
@@ -237,6 +240,12 @@ func (s *Service) startPreparedTimer(p *pending) {
 	a.decisionTimer = time.AfterFunc(wait, func() {
 		s.expirePreparedGen(p, gen)
 	})
+	detachNow := a.ownerSpoke && p.ix.Detachable && p.orphaned == nil && a.caller.Err() == nil
+	a.ownerSpoke = false
+	s.fleet.mu.Unlock()
+	if detachNow {
+		go s.detachPreparedGen(p, gen, false)
+	}
 }
 
 func (s *Service) expirePrepared(p *pending) {
@@ -289,6 +298,10 @@ func (s *Service) expirePreparedGen(p *pending, gen uint64) {
 // final outcome reaches the conversation through the approval journal, as after a question. It keeps nothing waiting
 // when the caller already went away, once the card has clarified (its own timing applies), superseded, or ended. False: expire.
 func (s *Service) keepWaitingGen(p *pending, gen uint64) bool {
+	return s.detachPreparedGen(p, gen, true)
+}
+
+func (s *Service) detachPreparedGen(p *pending, gen uint64, expireOnError bool) bool {
 	// A scheduled task's own conversation has nobody present to continue the turn
 	// between rounds. Let its detachable card expire at the initial window instead
 	// of retaining a needs-you session that makes every later round skip as busy.
@@ -327,19 +340,33 @@ func (s *Service) keepWaitingGen(p *pending, gen uint64) bool {
 			}
 		}
 		s.fleet.mu.Lock()
-		a.attempt = nil
-		close(attempt.done)
 		ended := a.terminal || p.claimed || s.fleet.interactions[p.ix.ID] != p
 		stale := a.decisionGen != gen
 		if err != nil || ended || stale || a.caller.Err() != nil {
-			s.fleet.mu.Unlock()
 			if err != nil {
-				s.logf("approval %s: could not keep the unanswered card waiting, it expires: %v", ix.ID, err)
+				a.attempt = nil
+				close(attempt.done)
+				s.fleet.mu.Unlock()
+				if expireOnError {
+					s.logf("approval %s: could not keep the unanswered card waiting, it expires: %v", ix.ID, err)
+				} else {
+					s.logf("approval %s: could not detach waiting card on owner message, keeping initial wait: %v", ix.ID, err)
+				}
 				return false
 			}
+			// Keep a.attempt held while rolling back the unused journal entry so a
+			// waiting resolvePreparedAnswer cannot race approvalJournalApplying with
+			// approvalJournalAborted.
+			s.fleet.mu.Unlock()
 			s.approvalJournalAborted(context.Background(), ix.ID)
+			s.fleet.mu.Lock()
+			a.attempt = nil
+			close(attempt.done)
+			s.fleet.mu.Unlock()
 			return ended || stale // ended/superseded meanwhile: nothing more to do; its caller gone: it expires as before
 		}
+		a.attempt = nil
+		close(attempt.done)
 		a.clarified, a.waiting = true, true
 		p.ix.ExpiresAt = deadline
 		a.decisionDeadline = p.ix.ExpiresAt
@@ -352,8 +379,84 @@ func (s *Service) keepWaitingGen(p *pending, gen uint64) bool {
 		a.decisionTimer = time.AfterFunc(approvalWaitingWindow, func() { s.expirePreparedGen(p, nextGen) })
 		s.fleet.mu.Unlock()
 		s.show(ix) // the apps keep the card, with its new deadline
+		s.armPendingReminder(ix)
 		close(a.release)
 		return true
+	}
+}
+
+type clarifyingCardKey struct{}
+
+func withClarifyingCard(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, clarifyingCardKey{}, id)
+}
+
+func clarifyingCardOf(ctx context.Context) string {
+	id, _ := ctx.Value(clarifyingCardKey{}).(string)
+	return id
+}
+
+// detachPendingApprovalsOnOwnerMessage moves any unanswered Detachable approval
+// card for (machine, session) out of its initial synchronous wait into the
+// retained approvalWaitingWindow state so the blocked tool call releases the
+// turn promptly for the owner's new message. The card stays pending in the UI
+// and is never cancelled; non-detachable cards and scheduled conversations are
+// untouched. Runs asynchronously so owner sends never block or fail on storage.
+func (s *Service) detachPendingApprovalsOnOwnerMessage(machine, session string) {
+	if machine == "" || session == "" {
+		return
+	}
+	type candidate struct {
+		p         *pending
+		machineID string
+		gen       uint64
+	}
+	s.fleet.mu.Lock()
+	var candidates []candidate
+	for _, p := range s.fleet.interactions {
+		a := p.prepared
+		if a == nil || !p.ix.Detachable || p.ix.SessionID != session {
+			continue
+		}
+		if a.terminal || p.claimed || a.clarified || a.paused || p.orphaned != nil || a.caller.Err() != nil {
+			continue
+		}
+		candidates = append(candidates, candidate{p: p, machineID: p.ix.MachineID, gen: a.decisionGen})
+	}
+	s.fleet.mu.Unlock()
+	if len(candidates) == 0 {
+		return
+	}
+	var ready []candidate
+	for _, c := range candidates {
+		if c.machineID != machine && !s.sameMachine(c.machineID, machine) {
+			continue
+		}
+		if c.gen == 0 {
+			// Registration (record/announce) has not reached startPreparedTimer yet.
+			// Re-check under fleet.mu so startPreparedTimer detaches once recorded.
+			s.fleet.mu.Lock()
+			a := c.p.prepared
+			if a != nil && s.fleet.interactions[c.p.ix.ID] == c.p &&
+				!a.terminal && !c.p.claimed && !a.clarified && !a.paused &&
+				c.p.orphaned == nil && a.caller.Err() == nil {
+				if a.decisionGen == 0 {
+					a.ownerSpoke = true
+				} else {
+					c.gen = a.decisionGen
+					ready = append(ready, c)
+				}
+			}
+			s.fleet.mu.Unlock()
+			continue
+		}
+		ready = append(ready, c)
+	}
+	if len(ready) == 0 {
+		return
+	}
+	for _, c := range ready {
+		go s.detachPreparedGen(c.p, c.gen, false)
 	}
 }
 
@@ -564,7 +667,7 @@ func (s *Service) clarify(ctx context.Context, id, text, clientMsgID string, ori
 		questionParams[assistantwire.ClarificationProofParam] = token
 		questionParams[assistantwire.ClarificationInteractionParam] = id
 	}
-	params, err := s.SendParams(ctx, SendParams{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID, Params: questionParams, VerbatimText: true})
+	params, err := s.SendParams(withClarifyingCard(ctx, id), SendParams{MachineID: p.ix.MachineID, SessionID: p.ix.SessionID, Params: questionParams, VerbatimText: true})
 	if err != nil {
 		return s.finishClarifyAttempt(p, attempt, nil, err)
 	}
@@ -644,6 +747,9 @@ func (s *Service) finishClarifyAttempt(p *pending, attempt *clarifyAttempt, run 
 	}
 	if release {
 		close(a.release)
+	}
+	if finalErr == nil {
+		s.detachPendingApprovalsOnOwnerMessage(p.ix.MachineID, p.ix.SessionID)
 	}
 	return finalErr
 }

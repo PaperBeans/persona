@@ -68,7 +68,7 @@ test('native phone search sizes the entered text and placeholder together and pr
   assert.match(switcher,/Text\(tr\(create \? 'phone_new_assistant' : 'phone_manage_assistants'\) \+ \(create \? '' : '…'\)\)\.fontSize\(Tokens\.interfaceFontVp\(17,this\.environment\.fontScale\)\)/);
   assert.match(switcher,/PhoneStyle\.sidebarMetric\(44,this\.environment\.fontScale\)/);
 });
-const {AgentLaunchChoices,typedAgentDirectory,providerStartModes,launchModelName,recentLaunchDirectories,LaunchChoice,RecentAgentSetup,rememberAgentSetup,loadAgentSetups}=await import('../entry/src/main/ets/models/AgentLaunchChoices.ets');
+const {AgentLaunchChoices,builtinLauncherTitle,typedAgentDirectory,providerStartModes,launchModelName,recentLaunchDirectories,LaunchChoice,RecentAgentSetup,rememberAgentSetup,loadAgentSetups}=await import('../entry/src/main/ets/models/AgentLaunchChoices.ets');
 const {ProjectWorktree}=await import('../entry/src/main/ets/models/ProjectCatalog.ets');
 const {ResourceRow,Wire}=await import('../entry/src/main/ets/models/Wire.ets');
 
@@ -197,12 +197,19 @@ test('the initial missing folder falls back once on its own machine and can neve
   const late=choices.folder(owner,'mac','child');owner.generation++;pending.at(-1).resolve({path:'/old',entries:[]});await late;
   assert.equal(choices.path,'');assert.equal(choices.directories.length,0);
 });
-test('model aliases keep the host title while raw GPT model IDs match the iPhone display label', () => {
-  assert.equal(launchModelName('gpt-5.5-codex','GPT-5.5-Codex'),'5.5 Codex');
+test('model aliases keep the host title while raw GPT model IDs preserve GPT- prefix', () => {
+  assert.equal(launchModelName('gpt-5.5-codex','GPT-5.5-Codex'),'GPT-5.5 Codex');
   assert.equal(launchModelName('gpt-5.5-mini','Team review'),'Team review');
   assert.equal(launchModelName('gateway/glm-5.3','glm-5.3'),'glm-5.3');
-  assert.equal(launchModelName('foo/gpt-5.6-fast',''),'5.6 Fast');
+  assert.equal(launchModelName('foo/gpt-5.6-fast',''),'GPT-5.6 Fast');
   assert.equal(launchModelName('gpt--mini',''),'gpt--mini');
+  assert.equal(builtinLauncherTitle('claude'),'Claude Code');
+  assert.equal(builtinLauncherTitle('codex'),'Codex');
+  assert.equal(builtinLauncherTitle('claude-desktop'),'Claude Desktop');
+  assert.equal(builtinLauncherTitle('codex-app'),'Codex App');
+  assert.equal(builtinLauncherTitle('traex','TRAEX'),'TRAE CLI');
+  assert.equal(builtinLauncherTitle('agy'),'Antigravity CLI');
+  assert.equal(builtinLauncherTitle('claude','My Claude'),'My Claude');
 });
 
 test('available models, compatible efforts and launcher-supplied model locks follow the node',async()=>{
@@ -270,7 +277,7 @@ for (const name of required) {
     if (formMethods.has(callee) && !externalEffects.has(callee)) required.add(callee);
   }
 }
-const nativeFormDependencies = { Wire, LaunchChoice, RecentAgentSetup, rememberAgentSetup, recentLaunchDirectories, providerStartModes,
+const nativeFormDependencies = { Wire, LaunchChoice, RecentAgentSetup, rememberAgentSetup, recentLaunchDirectories, providerStartModes, builtinLauncherTitle,
   tr: key => ({ flow_start_model_terminal_hint:'{about} /model', phone_start_configured_model:'Model Settings: {model}',
     phone_start_typed_model_id:'Typed model ID: {id}' }[key] ?? key) };
 const NativeAgentForm = new Function(...Object.keys(nativeFormDependencies), 'return ' + stripTypeScriptTypes(

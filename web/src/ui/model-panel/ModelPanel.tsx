@@ -547,7 +547,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (row.kind === "typed") return { text: `${name} · ${t("ui-modelpanel.use_typed_note")}` };
     if (row.kind === "preset") return { text: `${name} · ${row.preset?.description || row.model.name}` };
     if (row.model.custom) return { text: `${name} · ${t("ui-modelpanel.typed_before")}` };
-    if (!searching && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
+    if (!searching && !columns && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
     if (!searching && row.kind === "model") return { text: row.model.description ?? "", describes: true };
     return { text: name };
   };

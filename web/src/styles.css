@@ -22,6 +22,8 @@
   [data-sidebar-column] {
     flex-shrink: 0;
     border-right: 0;
+    /* Let the resize handle stack above the adjoining main border. */
+    translate: none;
   }
 
   [data-app-shell] > main,
@@ -104,44 +106,44 @@
 [data-terminal-scheme="light"], :root {
   --assistant-dock-open-max: calc(var(--kb-h) * 0.82);
   --task-count-meter-height: 0.25rem;
-  --page: #fafafb;
-  --canvas: #f1f2f3;
-  --surface: #fff;
-  --inset: #f7f8f9;
-  --hover: #f4f5f6;
-  --hover-2: #e7e9eb;
-  --ink: #1f2124;
-  --ink-2: #62656b;
-  --ink-3: #66696f;
-  --line: #ecedef;
-  --line-strong: #e0e2e5;
-  --field: #f2f2f3;
+  --page: #f7f7f9;
+  --canvas: #f1f1f4;
+  --surface: #ffffff;
+  --inset: #f5f5f7;
+  --hover: #eaeaee;
+  --hover-2: #e2e2e7;
+  --ink: #111113;
+  --ink-2: #505059;
+  --ink-3: #5a5a63;
+  --line: #e4e4e9;
+  --line-strong: #d0d0d8;
+  --field: #efeff3;
   /* A dropdown's arrow (#2314, the select rule below): ui/icons.tsx `chevron` stroked in --ink-3. A background image
      cannot read var(), so the color is written out here; ui/select-chevron.test.tsx keeps it equal to --ink-3. */
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2366696f' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235a5a63' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   --stripe: #49494913;
   --stripe-bg: #f5f5f5;
   --accent: #0285ff;
-  --accent-ink: #0166cc;
+  --accent-ink: #0160c2;
   /* Semantic status tints stay pale; approvals and Needs you use explicit neutral surfaces.
      Selection and error fills remain neutral, including selected extension themes. */
-  --accent-tint: #e7e9eb;
-  --green: #107638;
+  --accent-tint: #e2e2e7;
+  --green: #0e6e34;
   --green-tint: #e8f5ed;
-  --orange: #a64c00;
+  --orange: #9c4700;
   --orange-tint: #fdf1e5;
-  --red: #bd3038;
-  --red-tint: #f7f8f9;
-  --attention: #8f5c00;
+  --red: #b42b33;
+  --red-tint: #f5f5f7;
+  --attention: #855500;
   --danger-fill: #bd3038;
   /* The AI role (iOS Theme.ai): what the AI runs on its own, such as ultracode's workflow icon (#3428) and a
      workflow run (#3434). */
-  --ai: #5b4fd6;
+  --ai: #5347cc;
   --ai-tint: #efedfb;
   /* where an agent was opened (#2526), the color of its mark at the row's end: a terminal pane or a desktop app's own chat
      (a Lark group's mark is Lark's own) */
-  --source-terminal: #6a46c2;
-  --source-desktop: #0b7285;
+  --source-terminal: #6340b8;
+  --source-desktop: #0a6b7d;
   --tooltip-bg: #25272b;
   --tooltip-fg: #f6f7f8;
   --tooltip-muted: #a5a8ad;
@@ -156,11 +158,11 @@
   --extension-logo-backing: var(--mark-white);
   --extension-meta-size: 11px;
   --mark-black: #000;
-  --shadow-hairline: 0 0 0 1px var(--line);
-  --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px #1018280d;
-  --shadow-card: 0 0 0 1px var(--line), 0 1px 2px #1018280a, 0 2px 6px #10182808;
-  --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #0000000b;
-  --shadow-overlay: 0 0 0 1px var(--line), 0 8px 28px #0001;
+  --shadow-hairline: 0 0 0 1px #0000000d;
+  --shadow-btn: 0 0 0 1px #00000017;
+  --shadow-card: 0 0 0 1px #0000000a;
+  --shadow-raised: 0 0 0 1px #00000012,0 4px 12px -2px #00000012;
+  --shadow-overlay: 0 0 0 1px #00000014,0 12px 32px -4px #0000001f;
   --shadow-nav-preview: 0 12px 40px #00000014;
   --shadow-inset-field: inset 0 1px 2px #0000001f;
   /* The on/off switch (ui/atoms.tsx Switch, #3675): iOS's green and a translucent grey track (a little darker than iOS's in light), so the off track shows on
@@ -171,45 +173,45 @@
 }
 
 [data-terminal-scheme="dark"], .dark {
-  --page: #17181a;
-  --canvas: #101113;
-  --surface: #232427;
-  --inset: #1f2022;
-  --hover: #2a2b2e;
-  --hover-2: #313236;
-  --ink: #f2f3f4;
-  --ink-2: #a5a8ad;
-  --ink-3: #979aa0;
-  --line: #2e3033;
-  --line-strong: #3a3c40;
-  --field: #2b2c2f;
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23979aa0' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  --page: #111113;
+  --canvas: #0b0b0c;
+  --surface: #161618;
+  --inset: #101012;
+  --hover: #1e1e21;
+  --hover-2: #252529;
+  --ink: #f5f5f7;
+  --ink-2: #a3a3ab;
+  --ink-3: #92929b;
+  --line: #202024;
+  --line-strong: #2e2e33;
+  --field: #1b1b1e;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2392929b' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   --stripe: #ffffff0e;
   --stripe-bg: #1b1c1e;
   --accent: #3d9aff;
   --accent-ink: #7ec0ff;
-  --accent-tint: #313236;
-  --green: #6dd697;
+  --accent-tint: #252529;
+  --green: #67d894;
   --green-tint: #3dbb7224;
-  --orange: #eea66d;
+  --orange: #f0a66c;
   --orange-tint: #f68f3c24;
-  --red: #ff9499;
-  --red-tint: #1f2022;
-  --attention: #f1b969;
+  --red: #ff929a;
+  --red-tint: #101012;
+  --attention: #f2bb6b;
   --danger-fill: #bd3038;
-  --ai: #9c94ff;
+  --ai: #a39aff;
   --ai-tint: #9c94ff24;
   --source-terminal: #bea3ff;
-  --source-desktop: #6fd3e3;
+  --source-desktop: #64cad9;
   --tooltip-bg: #111214;
   --tooltip-fg: #f2f3f4;
   --tooltip-muted: #a5a8ad;
   --tooltip-border: #2e3033;
-  --shadow-hairline: 0 0 0 1px var(--line);
-  --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px #0000004d;
-  --shadow-card: 0 0 0 1px var(--line), 0 1px 2px #0003, 0 2px 6px #0003;
-  --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #00000038;
-  --shadow-overlay: 0 0 0 1px var(--line-strong), 0 8px 28px #00000057;
+  --shadow-hairline: 0 0 0 1px rgba(255,255,255,.06);
+  --shadow-btn: 0 0 0 1px rgba(255,255,255,.09);
+  --shadow-card: 0 0 0 1px rgba(255,255,255,.04);
+  --shadow-raised: 0 0 0 1px rgba(255,255,255,.08),0 4px 14px rgba(0,0,0,.45);
+  --shadow-overlay: 0 0 0 1px rgba(255,255,255,.1),0 14px 36px rgba(0,0,0,.65);
   --shadow-nav-preview: 0 12px 40px #00000060;
   --shadow-inset-field: inset 0 1px 2px #0006;
   --switch-on: #30d158;
@@ -299,10 +301,11 @@
 
   --radius-chip: 6px;
   --radius-control: 8px;
-  --radius-card: 10px;
+  --radius-card: 14px;
   --radius-nav-preview: 16px;
 
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-spring: cubic-bezier(0.22, 1.16, 0.36, 1);
   --ease-link: cubic-bezier(0.16, 1, 0.3, 1);
   --sidebar-fold-open: 250ms;
   --sidebar-fold-close: 200ms;
@@ -323,13 +326,13 @@ body {
   font-family: var(--font-sans);
 }
 
-/* ── Keyframes ─────────────────────────────────────────── */
+/* ── Keyframes & Interactive Surfaces ──────────────────── */
 @keyframes shimmer-text{0%{background-position:150%}to{background-position:-50%}}
-@keyframes fade-up{0%{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fade-up{0%{opacity:0;transform:translateY(6px) scale(.992)}to{opacity:1;transform:none}}
 @keyframes fade-in{0%{opacity:0}to{opacity:1}}
 @keyframes eq-bounce{0%,to{transform:scaleY(.35)}50%{transform:scaleY(1)}}
 @keyframes stream-in{0%{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur()}}
-@keyframes pop-in{0%{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+@keyframes pop-in{0%{opacity:0;transform:translateY(-2px) scale(.96)}to{opacity:1;transform:none}}
 /* Spinners turn 100 times per cycle (lib/busy-motion.ts SPIN_TURNS): a looping CSS animation sends React's root listener an
    animationiteration event, and the page a style recalc, every cycle; at 100 turns that is once a minute or so, not every
    turn. --busy-cycles tells the reduced-motion rule below how many turns one cycle is. */
@@ -337,11 +340,16 @@ body {
 @property --busy-cycles { syntax: "<number>"; inherits: false; initial-value: 1; }
 @keyframes indeterminate{0%{transform:translateX(-100%)}to{transform:translateX(300%)}}
 @keyframes pixel-on{0%,to{opacity:.15}18%,42%{opacity:1}62%{opacity:.15}}
-
+.card-interactive { transition: box-shadow .15s, background-color .15s, transform .15s var(--ease-out-strong); }
+@media (hover: hover) {
+  .card-interactive:hover:not(:focus-visible,:has(:focus-visible),:has(a:focus-visible)) { box-shadow: var(--shadow-btn); }
+  .dark .card-interactive:hover { background-color: var(--hover); }
+}
+.card-interactive:active { transform: scale(.994); }
 
 /* ── Persona additions ──────────────────────────────────── */
-[data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #f0f1f3; --term-magenta: #a347ba; --term-cyan: #0f8a9c; --term-bg: #1b1c1f; --term-fg: #e6e7e9; }
-[data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #2c2d31; --term-magenta: #c678dd; --term-cyan: #4fb6c4; --term-bg: #141517; --term-fg: #e6e7e9; }
+[data-terminal-scheme="light"], :root { --status-needs: var(--attention); --status-working: var(--orange); --status-waiting: color-mix(in srgb, var(--status-working) 55%, var(--ink-3)); --status-unread: var(--green); --status-idle: var(--ink-3); --user-bubble: #dceaff; --neutral-bubble: #e8e8ed; --term-magenta: #a347ba; --term-cyan: #0f8a9c; --term-bg: #1b1c1f; --term-fg: #e6e7e9; }
+[data-terminal-scheme="dark"], .dark { --user-bubble: #1d3557; --neutral-bubble: #222226; --term-magenta: #c678dd; --term-cyan: #4fb6c4; --term-bg: #141517; --term-fg: #e6e7e9; }
 ::highlight(persona-comment) { background-color: color-mix(in srgb, var(--accent) 20%, transparent); }
 ::highlight(persona-comment-flash) { background-color: color-mix(in srgb, var(--accent) 36%, transparent); }
 /* The chat's trace (aligned with cindy's defaults, #1963): tool rows and their chevrons, the work group's rail, thought
@@ -378,8 +386,8 @@ body {
    a message relayed from another conversation and a tool's inline detail keep the neutral gray. */
 @theme inline { --color-user-bubble: var(--user-bubble); --color-neutral-bubble: var(--neutral-bubble); --color-status-waiting: var(--status-waiting); }
 @keyframes breathe{0%,to{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
-@keyframes slide-up{0%{opacity:0;transform:translateY(12px) scale(.985)}to{opacity:1;transform:none}}
-@keyframes slide-in-right{0%{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+@keyframes slide-up{0%{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes slide-in-right{0%{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
 /* a Feishu message a Pin jumped to: lit, then gone */
 @keyframes pin-flash{0%,35%{opacity:.9}to{opacity:0}}
 /* a chat row an in-conversation search went to (ChatView, Android ChatSearchHighlight): ringed, then gone */
@@ -426,6 +434,17 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 /* In the base layer: unlayered, it beat every utility, so `scrollbar-none` rows kept a thin, always-on bar (#1381). */
 @layer base { * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; } }
 /* A row that scrolls sideways without a bar (still by wheel, trackpad and touch); WebKit before 18.2 needs the pseudo. */
+/* Keep the native horizontal scrollbar. Fade the trailing chips only while more can scroll into view. */
+@supports (animation-timeline: scroll(self x)) {
+  .integrations-chip-scroll {
+    animation: integrations-chip-edge auto steps(1, end);
+    animation-timeline: scroll(self x);
+  }
+  @keyframes integrations-chip-edge {
+    from { mask-image: linear-gradient(to right, black calc(100% - 1rem), transparent); }
+    to { mask-image: none; }
+  }
+}
 @utility scrollbar-none { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
 /* Conversation chrome: retain the native hit strip and drag behavior, with no opaque track or layout shift.
    Only enhanced browsers fade the thumb; forced colors and unsupported browsers keep the native bar. */
@@ -453,6 +472,7 @@ button:disabled { cursor: default; }
   .busy-motion, .busy-motion::before, .busy-motion::after { animation-duration: calc(2.4s * var(--busy-cycles, 1)) !important; animation-iteration-count: infinite !important; }
   /* the breathing dot pulses without shrinking */
   @keyframes breathe { 0%, to { opacity: 1; } 50% { opacity: .45; } }
+  .card-interactive:active { transform: none; }
 }
 
 /* Assistant prose (react-markdown): reading first, no bubble. */
@@ -555,7 +575,7 @@ button:disabled { cursor: default; }
 .dark { --series-1: #3987e5; --series-2: #199e70; --series-3: #9085e9; --series-4: #d55181; }
 /* Extensions' named colors (UI version 6, schema Color): on badges, icons, tiles, chart series and sparks, never on text.
  * Each reads on the surface in its theme (3:1 at least, as an icon); a tile that is on lays it at 14% under the ink. */
-:root { --hue-red: #e3474c; --hue-orange: #e2680a; --hue-amber: #b57a00; --hue-yellow: #9c8500; --hue-green: #189a4d; --hue-teal: #0f8a9c; --hue-blue: #0285ff; --hue-indigo: #5b5bd6; --hue-purple: #9a4fd0; --hue-pink: #d6407f; --hue-gray: #7c8087; }
+:root { --hue-red: #e3474c; --hue-orange: #d25d04; --hue-amber: #b57a00; --hue-yellow: #9c8500; --hue-green: #189a4d; --hue-teal: #0f8a9c; --hue-blue: #0285ff; --hue-indigo: #5b5bd6; --hue-purple: #9a4fd0; --hue-pink: #d6407f; --hue-gray: #7c8087; }
 .dark { --hue-red: #ee5c61; --hue-orange: #f68f3c; --hue-amber: #f0b429; --hue-yellow: #e8d04a; --hue-green: #3dbb72; --hue-teal: #3fb8c8; --hue-blue: #3d9aff; --hue-indigo: #8b8ef0; --hue-purple: #c08af0; --hue-pink: #ef7aa8; --hue-gray: #9a9ea5; }
 /* Health's two rings (#13176, modules/health/HealthToday.tsx): water in a blue and protein in an amber, each at least 40 degrees of hue away from
  * the Activity rings' red #FA114F, green #A6FF00 and cyan #00FFF6 so that nothing here reads as one of them (Apple's guidelines keep those
@@ -656,7 +676,7 @@ select:not([multiple], [size], .appearance-none) {
   --mark-glow: 6px; --mark-glow-mix: 50%; --mark-ring-gap: 1.5px; --mark-ring-mix: 40%; --mark-hollow: 1.5px;
   --mark-spin-dur: .9s;
   --status-offline: var(--ink-3);
-  --seg-track: color-mix(in srgb, var(--ink) 7%, transparent); --seg-dur: 200ms;
+  --seg-track: color-mix(in srgb, var(--ink) 7%, transparent); --seg-dur: 220ms;
 }
 @theme inline { --color-seg-track: var(--seg-track); }
 @theme inline { --color-switch-on: var(--switch-on); --color-switch-off: var(--switch-off); --shadow-knob: var(--shadow-knob); }
@@ -683,7 +703,7 @@ select:not([multiple], [size], .appearance-none) {
 .state-tally { display: inline-flex; align-items: center; gap: 6px; }
 .state-tally > span { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--ink-3); }
 /* The segmented control's thumb (ui/Segmented.tsx): one element that slides under the chosen segment. */
-.seg-thumb { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; background: var(--surface); box-shadow: var(--shadow-btn); transition: transform var(--seg-dur) var(--ease-out-strong), width var(--seg-dur) var(--ease-out-strong), height var(--seg-dur) var(--ease-out-strong); }
+.seg-thumb { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; background: var(--surface); box-shadow: var(--shadow-btn); transition: transform var(--seg-dur) var(--ease-spring), width var(--seg-dur) var(--ease-spring), height var(--seg-dur) var(--ease-spring); }
 .seg-thumb[data-ready="false"] { transition: none; }
 @media (prefers-reduced-motion: reduce) { .seg-thumb { transition: none !important; } }
 

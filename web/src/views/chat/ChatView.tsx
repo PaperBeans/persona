@@ -1754,9 +1754,13 @@ function ActiveChatView({ mid, sid, assistant, assistantManager, starting: launc
     foldsBackgroundRounds(sid, s.assistant ?? (mainCache ? { main: mainCache.scope } : undefined)));
   const foldRoutineRelayReplies = useStore((s) => assistant && sid === s.assistant?.main && s.assistant.fold_routine_relay_replies);
   const latestReplyNeedsAttention = Boolean(turnFailure || relayNeedsAttention(session));
+  // A reload shows the cached page before the hub's newest page comes (a stalled hub held that read across several
+  // reloads, #16214), or keeps it when the read failed: its unanswered last turn may have a reply the page has not read
+  // yet, and Retry there sent the question again (#16286).
+  const stale = !detached && (!live.firstRead || Boolean(live.error));
   const allLines = useMemo(
-    () => stabilizeLines(lastLines.current, chatLines(earlier.liveItems, { live: lastLive && !outgoing, background: foldBackground, main: isMain, foldRoutineRelayReplies, latestReplyNeedsAttention })),
-    [earlier.liveItems, lastLive, outgoing, foldBackground, isMain, foldRoutineRelayReplies, latestReplyNeedsAttention],
+    () => stabilizeLines(lastLines.current, chatLines(earlier.liveItems, { live: lastLive && !outgoing, background: foldBackground, main: isMain, foldRoutineRelayReplies, latestReplyNeedsAttention, stale })),
+    [earlier.liveItems, lastLive, outgoing, foldBackground, isMain, foldRoutineRelayReplies, latestReplyNeedsAttention, stale],
   );
   lastLines.current = allLines;
   // The timeline split and the assistant display use the same history boundary: one feed walk per items change.

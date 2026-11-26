@@ -78,12 +78,16 @@ export interface PanelOptions {
  *  `switch_unsupported`, #8142). */
 export const switchesLauncher = (s: Session, o: PanelOptions): boolean => Boolean(o.switching) && !s.source_kind && sessionEngine(s) === "claude" && canSwitchModel(s);
 
-/** The engine a conversation moves to from `engine` ("" for an engine that doesn't switch). */
+const SWITCH_ENGINES = new Set(["claude", "codex", "agy"]);
+
+/** The engine a conversation moves to from `engine` ("" for an engine that doesn't switch). Kept for single-target callers. */
 export const otherEngine = (engine: string): string => (engine === "claude" ? "codex" : engine === "codex" ? "claude" : "");
 
-/** Whether `s` may move to a launcher of `engine`, the other engine, with its next message (#5054). */
-export const switchesEngine = (s: Session, engine: string, o: PanelOptions): boolean =>
-  Boolean(o.engineSwitch) && engine !== "" && engine === otherEngine(sessionEngine(s)) && engineSwitchable(s);
+/** Whether `s` may move to a launcher of `engine`, another engine, with its next message (#5054). */
+export const switchesEngine = (s: Session, engine: string, o: PanelOptions): boolean => {
+  const from = sessionEngine(s);
+  return Boolean(o.engineSwitch) && engine !== "" && engine !== from && SWITCH_ENGINES.has(from) && SWITCH_ENGINES.has(engine) && engineSwitchable(s);
+};
 
 /** The panel's providers and state for `s`: `launchers` the computer's (undefined before they are read), `listOf` what
  *  was read for each. The session's own launcher is always there, at its place in the list or first. */

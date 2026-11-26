@@ -61,6 +61,9 @@ export interface GroupedSessionsProps<T> {
   source: GroupedSource<T>;
   renderRow: (row: T, within: GroupDimension, group: SessionGroup) => ReactNode;
   groupName: (group: SessionGroup) => string;
+  /** Drawn before a group's name in its heading (the personal list's account marks); `groupTip` is the name's tooltip. */
+  groupLead?: (group: SessionGroup) => ReactNode;
+  groupTip?: (group: SessionGroup) => string | undefined;
   machineName: (id: string) => string;
   /** Where the open conversation is: its section opens by itself. */
   open?: SessionPlace;
@@ -141,7 +144,7 @@ function scheduleSectionLoad(priority: number, run: () => Promise<void>, signal:
   });
 }
 
-export function GroupedSessions<T>({ groups, dimension, kind, scope, source, renderRow, groupName, machineName, open, foldScope, heldSeen, placeOf, justFinished = false, chipless = false }: GroupedSessionsProps<T>) {
+export function GroupedSessions<T>({ groups, dimension, kind, scope, source, renderRow, groupName, groupLead, groupTip, machineName, open, foldScope, heldSeen, placeOf, justFinished = false, chipless = false }: GroupedSessionsProps<T>) {
   const [all, setAll] = useState(false);
   const adjustedGroups = useMemo(() => {
     if (dimension !== "state" || !heldSeen?.rows.length || (!chipless && scope.state !== "unread")) return groups;
@@ -180,7 +183,7 @@ export function GroupedSessions<T>({ groups, dimension, kind, scope, source, ren
         const hideIds = dimension === "state" && group.key === "idle" ? hideIdleIds : undefined;
         return (
           <GroupSection key={group.key} group={group} first={i === 0} startsOpen={sectionHeld.length > 0 || (dimension === "todo" ? !group.rest && (i < SESSION_LIST_METRICS.groupsOpen || group.needs > 0) : i < SESSION_LIST_METRICS.groupsOpen || (dimension === "state" && group.key === JUST_FINISHED_KEY))} dimension={dimension} kind={kind} scope={scope} source={source}
-            renderRow={renderRow} name={groupName(group)} machineName={machineName} several={several} holds={Boolean((open && holdsPlace(group, dimension, open)) || (dimension === "todo" && !group.rest && group.needs > 0))} foldScope={foldScope}
+            renderRow={renderRow} name={groupName(group)} lead={groupLead?.(group)} tip={groupTip?.(group)} machineName={machineName} several={several} holds={Boolean((open && holdsPlace(group, dimension, open)) || (dimension === "todo" && !group.rest && group.needs > 0))} foldScope={foldScope}
             heldRows={sectionHeld} hideIds={hideIds} stay={Boolean(heldSeen?.stay)} onClearSeen={heldSeen?.onClear} onRows={heldSeen?.onRows} />
         );
       })}
@@ -191,9 +194,9 @@ export function GroupedSessions<T>({ groups, dimension, kind, scope, source, ren
   );
 }
 
-function GroupSection<T>({ group, first, startsOpen, dimension, kind, scope, source, renderRow, name, machineName, several, holds, foldScope, heldRows, hideIds, stay, onClearSeen, onRows }: {
+function GroupSection<T>({ group, first, startsOpen, dimension, kind, scope, source, renderRow, name, lead, tip, machineName, several, holds, foldScope, heldRows, hideIds, stay, onClearSeen, onRows }: {
   group: SessionGroup; first: boolean; startsOpen: boolean; dimension: GroupDimension; kind: string; scope: ListFilters; source: GroupedSource<T>;
-  renderRow: (row: T, within: GroupDimension, group: SessionGroup) => ReactNode; name: string; machineName: (id: string) => string; several: boolean; holds: boolean; foldScope?: string;
+  renderRow: (row: T, within: GroupDimension, group: SessionGroup) => ReactNode; name: string; lead?: ReactNode; tip?: string; machineName: (id: string) => string; several: boolean; holds: boolean; foldScope?: string;
   heldRows: readonly T[]; hideIds?: ReadonlySet<string>; stay: boolean; onClearSeen?: (rows: readonly T[]) => void; onRows?: (rows: readonly T[]) => void;
 }) {
   // The first few start open, the rest folded: an open section keeps a list of its own up to date. "Expand all"
@@ -207,7 +210,9 @@ function GroupSection<T>({ group, first, startsOpen, dimension, kind, scope, sou
   return (
     <div data-session-group={group.key} data-group-open={!folded}>
       <Section first={first} folded={folded} onToggle={toggle}
-        title={<>{name}{computer && <span className="font-normal"> · {computer}</span>}</>}
+        title={lead || tip
+          ? <span className="flex min-w-0 items-center gap-1.5">{lead}<span className="min-w-0 truncate" title={tip}>{name}{computer && <span className="font-normal"> · {computer}</span>}</span></span>
+          : <>{name}{computer && <span className="font-normal"> · {computer}</span>}</>}
         right={<>
           {dimension === "state" && stay && onClearSeen && heldRows.length > 0 && (
             <ClearSeenButton count={heldRows.length} onClear={() => onClearSeen(heldRows)} />

@@ -27,6 +27,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/storage"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 const schemaDir = "../../../../schema/extension"
@@ -106,22 +107,24 @@ var goTypes = map[string]any{
 	"ChannelTypingParams":  channel.TypingParams{},
 	"ChannelEditParams":    channel.EditParams{},
 
-	"KBListParams":     assistantwire.KBListParams{},
-	"KBListResult":     assistantwire.KBListResult{},
-	"KBGetParams":      assistantwire.KBGetParams{},
-	"KBGetResult":      assistantwire.KBGetResult{},
-	"KBDayParams":      assistantwire.KBDayParams{},
-	"KBDayResult":      assistantwire.KBDayResult{},
-	"KBSearchParams":   assistantwire.KBSearchParams{},
-	"KBSearchResult":   assistantwire.KBSearchResult{},
-	"KBUpdateParams":   assistantwire.KBUpdateParams{},
-	"KBUpdateResult":   assistantwire.KBUpdateResult{},
-	"KBRecentParams":   assistantwire.KBRecentParams{},
-	"KBRecentResult":   assistantwire.KBRecentResult{},
-	"KBOwnerParams":    struct{}{},
-	"KBOwner":          assistantwire.KBOwner{},
-	"KBChangedEvent":   assistantwire.KBChanged{},
-	"KBForgottenEvent": assistantwire.KBForgottenEvent{},
+	"KBListParams":         assistantwire.KBListParams{},
+	"KBListResult":         assistantwire.KBListResult{},
+	"KBGetParams":          assistantwire.KBGetParams{},
+	"KBGetResult":          assistantwire.KBGetResult{},
+	"KBDayParams":          assistantwire.KBDayParams{},
+	"KBDayResult":          assistantwire.KBDayResult{},
+	"KBSearchParams":       assistantwire.KBSearchParams{},
+	"KBSearchResult":       assistantwire.KBSearchResult{},
+	"KBUpdateParams":       assistantwire.KBUpdateParams{},
+	"KBUpdateResult":       assistantwire.KBUpdateResult{},
+	"KBRecentParams":       assistantwire.KBRecentParams{},
+	"KBRecentResult":       assistantwire.KBRecentResult{},
+	"KBOwnerParams":        struct{}{},
+	"KBPutRecordingParams": recordingwire.RecordingWrite{},
+	"KBPutRecordingResult": recordingwire.RecordingWriteResult{},
+	"KBOwner":              assistantwire.KBOwner{},
+	"KBChangedEvent":       assistantwire.KBChanged{},
+	"KBForgottenEvent":     assistantwire.KBForgottenEvent{},
 
 	"AssistantEventParams":         assistantwire.AssistantEventParams{},
 	"AssistantEventResult":         assistantwire.AssistantEventResult{},
@@ -241,6 +244,7 @@ var channelCalls = []string{channel.MReceive, channel.MStatus, channel.MSend, ch
 
 var kbCalls = []string{assistantwire.MethodKBList, assistantwire.MethodKBGet, assistantwire.MethodKBDay,
 	assistantwire.MethodKBSearch, assistantwire.MethodKBUpdate, assistantwire.MethodKBOwner, assistantwire.MethodKBRecent,
+	assistantwire.MethodKBPutRecording,
 	"event." + assistantwire.EventKBChanged, "event." + assistantwire.EventKBForgotten}
 
 // The model call the hub forwards for extensions granted models (models.schema.json).

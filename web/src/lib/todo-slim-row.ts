@@ -2,6 +2,7 @@
 // Strictly used inside `todos_v2 === true` branches; legacy mode never calls these.
 
 import { t } from "../i18n";
+import { waitSummary } from "./state-labels";
 import { parkedLine } from "./supervision";
 import { cancellationReason } from "./todo-details";
 import { isAgentTask } from "./todo-list-filter";
@@ -34,7 +35,7 @@ export function isPersonalSlimRow(
     effectiveSection?: TriageSection;
   },
 ): boolean {
-  if (isAgentTask(todo)) return false;
+  if (todo.wait != null || isAgentTask(todo)) return false;
   if (options.hasGoalSummary || options.hasParentGoal) return false;
   if (options.effectiveSection === "parked" || options.effectiveSection === "shelved") return false;
   if (
@@ -91,6 +92,8 @@ export function slimSecondaryCue(
       askOutcome: ask.outcome || "deployed",
     };
   }
+
+  if (todo.wait != null) return { tone: "muted", text: waitSummary(todo.wait), testId: "todo-slim-cue" };
 
   if (options.effectiveSection === "waiting") {
     const urgent = `${view.urgentLead}${view.urgentText}`.trim();

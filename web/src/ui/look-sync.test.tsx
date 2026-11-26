@@ -43,7 +43,7 @@ describe("a theme color or text size picked in another tab", () => {
     act(() => root.render(<Picked />));
     elsewhere("persona.accent", "coral");
     expect(page().accent).toBe("coral");
-    expect(document.getElementById("persona-accent")!.textContent).toContain("--accent: #d2673e;");
+    expect(document.getElementById("persona-accent")!.textContent).toContain("--accent: #c9633c;");
     elsewhere("persona.text-size", "large");
     expect(page()).toEqual({ accent: "coral", size: "large" });
     expect(shown()).toEqual({ accent: "coral", size: "large" });

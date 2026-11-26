@@ -3,6 +3,8 @@
 // POST /todos/{id}/accept, the route the briefing's Accept takes (Brief.tsx) — OK takes a decision's recommendation, Got it
 // acknowledges a conclusion, Accept verifies a deployed to-do. A decision that recommends nothing has no button: it is
 // answered in the conversation the task came from.
+import { VerificationFollowUp } from "./assistant/VerificationFollowUp";
+import { EvidenceLink } from "./assistant/EvidenceLink";
 import { useState } from "react";
 import { t } from "../i18n";
 import { errorText } from "../lib/api";
@@ -189,6 +191,8 @@ function AskPanel({ todo, ask, onOpenConversation = openConversation, ...control
         <span className="text-[12.5px] font-semibold text-ink-2">{stateName("needs_you")}</span>
       </div>
       <p className={cx("mt-2 text-[13.5px] font-medium leading-[1.55] select-text [overflow-wrap:anywhere]", TONE[tone])}>{ask.verdict}</p>
+      {!ask.outcome && ask.summary && <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink-2 select-text [overflow-wrap:anywhere]" title={ask.summary}>{ask.summary}</p>}
+      {!ask.outcome && <EvidenceLink verification link={ask.link} todoId={todo.id} />}
       {ask.recommend && <p className="mt-1 text-[13px] leading-[1.55] text-ink select-text [overflow-wrap:anywhere]">{t("assistant-brief.recommend", { option: ask.recommend })}</p>}
       {!what && <p className="mt-1 text-[12.5px] leading-[1.6] text-ink-3">{t("todos.ask_answer_hint")}</p>}
       {(what || (decide && todo.origin)) && (
@@ -203,6 +207,7 @@ function AskPanel({ todo, ask, onOpenConversation = openConversation, ...control
                 {takeLabel(what, false)}
               </Button>
             ))}
+          {taking === "idle" && <VerificationFollowUp todo={todo} />}
           {decide && todo.origin && (
             // the conversation the task came from: the to-do's manager's, whichever assistant is current
             <Button icon="chat" onClick={() => onOpenConversation(todo, ask)}>

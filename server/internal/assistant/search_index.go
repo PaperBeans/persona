@@ -232,28 +232,39 @@ func (s *Service) searchSweep(ctx context.Context) time.Duration {
 		}
 		todo = append(todo, due{c: c, cur: cur, backup: !read})
 	}
+	cursorKeys := make([]searchKey, 0, len(s.search.cursors))
+	for k := range s.search.cursors {
+		cursorKeys = append(cursorKeys, k)
+	}
+	s.search.mu.Unlock()
+
+	deletedKeys := s.deletedSearchKeys(ctx, cursorKeys)
+
 	// Permanent deletions leave immediately, even with an empty inventory.
 	// Ordinary missing chats keep the grace period: the computer may be offline.
 	var drop []searchKey
-	for k := range s.search.cursors {
-		if _, deleted, err := s.deletedConversation(ctx, k.machine, k.session); err == nil && deleted {
-			drop = append(drop, k)
-			continue
+	if len(cursorKeys) > 0 {
+		s.search.mu.Lock()
+		for _, k := range cursorKeys {
+			if _, ok := s.search.cursors[k]; !ok {
+				continue
+			}
+			if deletedKeys[k] {
+				drop = append(drop, k)
+				continue
+			}
+			if len(list) == 0 || listed[k] {
+				continue
+			}
+			since, ok := s.search.gone[k]
+			if !ok {
+				s.search.gone[k] = now
+			} else if now.Sub(since) >= searchGoneAfter {
+				drop = append(drop, k)
+			}
 		}
-		if len(list) == 0 {
-			continue
-		}
-		if listed[k] {
-			continue
-		}
-		since, ok := s.search.gone[k]
-		if !ok {
-			s.search.gone[k] = now
-		} else if now.Sub(since) >= searchGoneAfter {
-			drop = append(drop, k)
-		}
+		s.search.mu.Unlock()
 	}
-	s.search.mu.Unlock()
 
 	for _, k := range drop {
 		if err := s.dropSearchIndex(ctx, st, k.machine, k.session); err != nil {
@@ -300,6 +311,37 @@ func (s *Service) searchSweep(ctx context.Context) time.Duration {
 		}
 	}
 	return next
+}
+
+// deletedSearchKeys resolves which snapshot cursor keys appear in the cached
+// deletion ledger without holding s.search.mu or issuing per-cursor DB queries.
+func (s *Service) deletedSearchKeys(ctx context.Context, keys []searchKey) map[searchKey]bool {
+	if len(keys) == 0 {
+		return nil
+	}
+	rows, err := s.deletedConversationsSnapshot(ctx)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	aliasesByMachine := map[string][]string{}
+	var deleted map[searchKey]bool
+	for _, k := range keys {
+		aliases, ok := aliasesByMachine[k.machine]
+		if !ok {
+			aliases = s.physicalAliases(k.machine)
+			aliasesByMachine[k.machine] = aliases
+		}
+		for _, alias := range aliases {
+			if _, found := lookupRuntimeListID(rows, alias, k.session); found {
+				if deleted == nil {
+					deleted = map[searchKey]bool{}
+				}
+				deleted[k] = true
+				break
+			}
+		}
+	}
+	return deleted
 }
 
 // searchRead reads a conversation's messages after its cursor into the index, page by page; done: it reached the end.

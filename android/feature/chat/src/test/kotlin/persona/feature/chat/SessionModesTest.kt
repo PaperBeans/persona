@@ -53,13 +53,13 @@ class SessionModesTest {
 
     @Test fun theGptHintKeepsTheModesAndEveryVersionVariant() {
         val session = Session(sessionId = "s", model = "gpt-6.1-sol", permissionMode = "default", effort = "high")
-        assertEquals("6.1 Sol", chatModeHint(session, res))
-        assertEquals("6.1", chatModeHint(session.copy(model = "gpt-6.1"), res))
-        assertEquals("4o Mini", chatModeHint(session.copy(model = "gpt-4o-mini"), res))
-        assertEquals("6.1 Codex Max", chatModeHint(session.copy(model = "gpt-6.1-codex-max"), res))
-        assertEquals("允许编辑，思考很高，6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
+        assertEquals("GPT-6.1 Sol", chatModeHint(session, res))
+        assertEquals("GPT-6.1", chatModeHint(session.copy(model = "gpt-6.1"), res))
+        assertEquals("GPT-4o Mini", chatModeHint(session.copy(model = "gpt-4o-mini"), res))
+        assertEquals("GPT-6.1 Codex Max", chatModeHint(session.copy(model = "gpt-6.1-codex-max"), res))
+        assertEquals("允许编辑，思考很高，GPT-6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res))
         // The current model does not grant a session permission or effort controls.
-        assertEquals("6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res, includeModes = false))
+        assertEquals("GPT-6.1 Sol", chatModeHint(session.copy(permissionMode = "acceptEdits", effort = "xhigh"), res, includeModes = false))
         assertEquals("gpt-6.1-sol", session.model)
     }
 

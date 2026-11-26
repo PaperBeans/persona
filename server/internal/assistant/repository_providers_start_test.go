@@ -130,7 +130,7 @@ func TestRepositoryCatalogWaitsForTheProviders(t *testing.T) {
 
 // A to-do link that can't be placed yet says, in the asker's language, that the extensions are still starting.
 func TestTodoRepositoryLinksSayTheProvidersAreStarting(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func (p *stuckAcme) RepositoryParse(ctx context.Context, provider, remote string
 // The links of one reply each get a provider budget of their own, and only a provider's answer stops a later reply
 // from asking again: a call out of time, or the providers still starting, does not.
 func TestReportedLinksEachGetTheirOwnBudget(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}

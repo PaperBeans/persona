@@ -74,6 +74,32 @@ test('lists the recent sessions in the store as offline DSH rows, titled from DS
   assert.equal(rows.find((r) => r.session_id === 'session-b').title, 'app', 'a cache record of another log is not used')
 })
 
+test('offline turn outlines skip marker-only replies on the first inventory', async (t) => {
+  const marker = 'BOTMUX_NOTHING_TO_SEND'
+  const words = `  The guide mentions ${marker}.\n  ${'detail '.repeat(45)}`
+  const cases = [
+    ['prior', [words, marker, `  ${marker}  `], words],
+    ['mixed', [`${words}\n${marker}`], words],
+    ['empty', [words, '', marker], undefined],
+    ['missing', [words, undefined, marker], undefined],
+  ]
+  const cache = {}
+  for (const [id, responses] of cases) {
+    cache[`${HOME}/storages/session_projcache/sessions/${id}.json`] = { record: {
+      identity: { createdAt: 1000, cwd: '/w/app' },
+      rows: { turnOutline: { val: { turns: responses.map(response => ({ response })) } } },
+    } }
+  }
+  const { n, st, rt } = await setup(t, { json: cache })
+  for (const [id] of cases) st.add(id, {})
+  rt.start()
+  await n.ready
+  const { sessions } = await until('disk inventory', () => n.last('runtime.sessions'))
+  for (const [id, , expected] of cases) {
+    assert.equal(sessions.find(row => row.session_id === id).last_text, expected, id)
+  }
+})
+
 test('pages a session from its log, read once while the file does not change', async (t) => {
   const { n, st, rt } = await setup(t)
   st.add('session-p', {}, [text(0, 'user', 'one'), text(1, 'assistant', 'a1'), text(2, 'user', 'two'), text(3, 'assistant', 'a2')])

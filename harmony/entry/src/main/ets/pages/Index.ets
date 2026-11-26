@@ -7,7 +7,7 @@ import { assistantChatSource, assistantChatState, assistantSidebarChats, sidebar
 import { i18n, intl } from '@kit.LocalizationKit';
 import { nativeMeetingServices, NativeMeetingServices } from '../platform/NativeMeetingServices';
 import { AgentStartPicker } from '../components/AgentStartPicker';
-import { AgentLaunchChoices, providerStartModes, LaunchChoice, RecentAgentSetup, loadAgentSetups, rememberAgentSetup, recentLaunchDirectories } from '../models/AgentLaunchChoices';
+import { AgentLaunchChoices, builtinLauncherTitle, providerStartModes, LaunchChoice, RecentAgentSetup, loadAgentSetups, rememberAgentSetup, recentLaunchDirectories } from '../models/AgentLaunchChoices';
 import { WorktreeSheet } from '../components/WorktreeSheet';
 import { phonePlaceAtRoot, phonePanIntent, finishesPhonePan } from '../models/PhoneNavigation';
 import { relativeActivityDate } from '../core/PhoneDate';
@@ -2836,12 +2836,12 @@ struct Index {
         .concat(Wire.rows(reply,'unavailable'));
       this.blockedLaunchers = blocked.filter((v:Record<string,Object>) => !!Wire.text(v,'name')).map((v:Record<string,Object>) => {
         const reason = Wire.text(Wire.object(v,'block'),'reason') || Wire.text(v,'reason') || tr('offline');
-        return new LaunchChoice(Wire.text(v,'name'),Wire.text(v,'display_name') || Wire.text(v,'name'),reason,true);
+        return new LaunchChoice(Wire.text(v,'name'),builtinLauncherTitle(Wire.text(v,'name'),Wire.text(v,'display_name')),reason,true);
       });
       this.agentLauncherOptions = allowed.map((item: Record<string,Object>) => Wire.text(item,'name'));
       this.agentTierProfile = Wire.text(Wire.object(reply,'tiers_profile'),'name');
       this.agentPresets = Wire.rows(reply,'tiers').filter((v:Record<string,Object>) => !!Wire.text(v,'name') && this.agentLauncherOptions.includes(Wire.text(v,'launcher')));
-      this.agentLauncherLabels = allowed.map((item: Record<string,Object>) => Wire.text(item,'display_name') || Wire.text(item,'name'));
+      this.agentLauncherLabels = allowed.map((item: Record<string,Object>) => builtinLauncherTitle(Wire.text(item,'name'),Wire.text(item,'display_name')));
       if (!this.agentPanel) this.loadAgentModels();
     } catch (_) { /* Older nodes support entering the existing launcher name directly. */ }
   }

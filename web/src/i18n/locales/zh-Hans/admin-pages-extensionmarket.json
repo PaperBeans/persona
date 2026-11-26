@@ -56,5 +56,21 @@
   "official_unreachable": "暂时读不到官方扩展，稍后再试。",
   "catalog_unreadable": "市场暂时读不到，读到后扩展会列在这里",
   "token_create_hint": "没有 token？在 GitHub 上生成一个：名字、用途和一年的有效期已经填好，不用勾任何权限，点 Generate token 后复制回来粘贴到上面。",
-  "token_create": "去 GitHub 生成"
+  "token_create": "去 GitHub 生成",
+  "keys_tag_one": "{count} 把公钥",
+  "keys_tag_other": "{count} 把公钥",
+  "signing_keys": "签名公钥",
+  "keys_optional": "签名公钥（选填）",
+  "keys_hint": "给自己签名的私有市场用：每行一把 ed25519:… 公钥。填了公钥，索引必须由其中一把签过，否则不添加；安装和升级都会验签。不填就是未签名市场。",
+  "keys_title": "签名公钥 · {name}",
+  "keys_signed_intro": "这个市场的索引必须由下面任一把公钥签名。从它安装和升级都会验签，验不过的索引会被拒绝。验签通过的扩展默认仍在沙箱里运行：只有官方市场的公钥才免沙箱。",
+  "keys_unsigned_intro": "这个市场没有签名公钥，按未签名处理：扩展按未签名安装，在沙箱里运行。加上你给索引签名用的公钥，就会开始验签。",
+  "key_signs_index": "签了当前索引",
+  "remove_key_label": "删除公钥 {key}",
+  "new_key": "添加公钥",
+  "new_key_hint": "ed25519:<base64>，由 personad extension keygen 打印。轮换时先加新公钥，用新旧两把一起签索引，再删旧公钥。",
+  "add_key": "添加",
+  "done": "完成",
+  "key_added": "已给「{name}」添加公钥",
+  "key_removed": "已从「{name}」删除公钥"
 }

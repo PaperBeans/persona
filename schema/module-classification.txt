@@ -288,7 +288,7 @@ go server/scripts/fleetsoak core
 go server/scripts/pushrec core
 
 # Module code still in core paths.
-go server/internal/transcribelive voice
+go server/scripts/transcribelive voice
 go server/internal/lark lark
 go server/internal/screen core
 go server/internal/protectedapps computer-use
@@ -398,6 +398,7 @@ web web/src/sharing core
 web web/src/showcase core
 web web/src/showcase/images core
 web web/src/showcase/v6 core
+web web/src/test core
 web web/src/ui core
 web web/src/ui/brands core
 web web/src/ui/model-panel core

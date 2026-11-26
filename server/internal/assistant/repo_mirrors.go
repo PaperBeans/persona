@@ -542,8 +542,14 @@ func (s *Service) prepareEnabledMirrorsForWorkspace(ctx context.Context, r *task
 	repoIDs := make([]string, 0, len(r.Plan.Source.Repositories.Repositories))
 	byID := make(map[string]repository.PreparationRepository, len(r.Plan.Source.Repositories.Repositories))
 	for _, repo := range r.Plan.Source.Repositories.Repositories {
+		if repo.Local != nil {
+			continue
+		}
 		repoIDs = append(repoIDs, repo.RepoID)
 		byID[repo.RepoID] = repo
+	}
+	if len(repoIDs) == 0 {
+		return nil
 	}
 	enabled, err := st.ListEnabledRepoMirrors(ctx, r.Plan.Source.MachineID, repoIDs)
 	if err != nil || len(enabled) == 0 {

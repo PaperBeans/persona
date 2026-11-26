@@ -13,7 +13,7 @@ import (
 )
 
 func TestTodoRepositoryHTTPJourneyAndLegacyCompatibility(t *testing.T) {
-	dsn := newDatabase(t)
+	dsn := newMigratedDatabase(t, db.ManagerSet)
 	database, err := db.Open(t.Context(), dsn, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestTodoRepositoryHTTPJourneyAndLegacyCompatibility(t *testing.T) {
 }
 
 func TestTodoRepositoryToolsAndTransportCompatibility(t *testing.T) {
-	dsn := newDatabase(t)
+	dsn := newMigratedDatabase(t, db.ManagerSet)
 	database, err := db.Open(t.Context(), dsn, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestTodoRepositoryToolsAndTransportCompatibility(t *testing.T) {
 }
 
 func TestTodoRepositoryAgentReportsUseUnifiedStore(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestTodoRepositoryAgentReportsUseUnifiedStore(t *testing.T) {
 }
 
 func TestAgentRepositoryToolsStayOnTheirOwnTodo(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestAgentRepositoryToolsStayOnTheirOwnTodo(t *testing.T) {
 }
 
 func TestTodoRepositoryReportsNotifyWithoutChangingLegacyProgress(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestTodoRepositoryReportsNotifyWithoutChangingLegacyProgress(t *testing.T) 
 }
 
 func TestTodoRepositoryLegacyPRsImportOnceBeforeFirstEdit(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestTodoRepositoryLegacyPRsImportOnceBeforeFirstEdit(t *testing.T) {
 }
 
 func TestTodoRepositoryEmptyTodoNeedsNoCatalog(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}

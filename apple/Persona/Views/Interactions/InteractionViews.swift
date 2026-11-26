@@ -569,7 +569,7 @@ struct InteractionPanel: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("View plan full screen")
                 }
-                if interaction.toolName != "ask_user" {
+                if interaction.toolName != "ask_user" && interaction.noHandBack != true {
                     Menu {
                         Button { Task { await model.resolve(interaction, .dismissed) } } label: {
                             Label("Handle in Terminal on Computer", systemImage: Theme.Icon.machine)

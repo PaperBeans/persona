@@ -235,7 +235,7 @@ export function assistantPillView(c: AssistantChat, setup: AssistantSetup, info:
   const out: PillView = {
     ...pillModel(row, displayActive, displayFallback),
     engine,
-    provider: launcher ? providerTitle(launcher) : providerBare,
+    provider: providerTitle(launcher ?? { name: providerBare }),
     loading: e.list === undefined && Boolean(e.loading),
     failed: e.list === undefined && Boolean(e.error),
   };

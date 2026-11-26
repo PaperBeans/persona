@@ -6,6 +6,7 @@ import { BASE } from "./base";
 import { intercepted, reloadForSignIn } from "./edge-auth";
 import { requestCrumb } from "./error-reports";
 import { currentLanguage, t } from "../i18n";
+import { HubUnreachableError, isNetworkFailure, isProgramError } from "./network-failure";
 import type { Item } from "./types";
 import { clearFeedCache } from "./feed-cache";
 import { credentialEpoch, renewCredentialEpoch } from "./credential-epoch";
@@ -353,7 +354,7 @@ async function runSharedGet(key: string, entry: InFlightGet, path: string, init:
           res = await entry.fetcher.call(globalThis, `${BASE}/api/v1${path}`, { redirect: "manual", ...fetchOptions, headers });
         } catch (e) {
           if (!isAbort(e)) requestCrumb(method, path, 0);
-          throw e;
+          throw unreachable(e);
         }
         const notModified = res.status === 304 && headers.has("If-None-Match");
         if (!notModified && !allowHtmlResponse && intercepted(res)) {
@@ -363,7 +364,7 @@ async function runSharedGet(key: string, entry: InFlightGet, path: string, init:
           }
           throw new ApiError(res.status || 401, t("lib-api.hub_no_response"), {}, false);
         }
-        const text = await res.text();
+        const text = await bodyText(res);
         let data: Record<string, unknown> = {};
         let isJson = false;
         try {
@@ -410,7 +411,7 @@ async function request<T>(path: string, init: ApiOptions, binary = false): Promi
   } catch (e) {
     // a breadcrumb for an error report: the method, the path's pattern (no ids, no query) and that it did not get there
     if (!isAbort(e)) requestCrumb(method, path, 0);
-    throw e;
+    throw unreachable(e);
   }
   // A 304 answers a request that sent a validator (If-None-Match): the caller keeps what it has. It is neither the
   // sign-in layer's redirect nor an error.
@@ -428,9 +429,9 @@ async function request<T>(path: string, init: ApiOptions, binary = false): Promi
   }
   if (binary && res.ok) {
     onResponse?.(res.headers, res.status);
-    return (await (readBlob ? readBlob(res, init.signal) : res.blob())) as T;
+    return (await (readBlob ? readBlob(res, init.signal) : res.blob().catch((e: unknown) => { throw isAbort(e) ? e : unreachable(e); }))) as T;
   }
-  const text = await res.text();
+  const text = await bodyText(res);
   let data: Record<string, unknown> = {};
   let isJson = false;
   try {
@@ -500,7 +501,7 @@ export function isAbort(e: unknown): e is DOMException {
 
 /** Whether the request may not have reached a running hub: fetch failed, or something in front of it answered 502/503/504. */
 export function isTransient(e: unknown): boolean {
-  if (e instanceof TypeError) return true; // fetch: the connection failed (an abort is a DOMException)
+  if (isNetworkFailure(e)) return true; // fetch: the connection failed (an abort is a DOMException); a page bug is no gap
   // the hub's own errors carry a code or say what was delivered (a machine offline, a node timing out): those are
   // answers, not gaps
   return e instanceof ApiError && [502, 503, 504].includes(e.status) && (!e.isJson || (!e.code && e.body.delivered === undefined));
@@ -525,6 +526,23 @@ function businessFailureText(e: ApiError): string | undefined {
   return undefined;
 }
 
+export { HubUnreachableError, isNetworkFailure } from "./network-failure";
+
+/** fetch's own rejection as HubUnreachableError (an abort stays an AbortError): only a request that never got its answer
+ *  may later read "Can't reach the hub" (errorText). */
+function unreachable(e: unknown): unknown {
+  return e instanceof TypeError && !(e instanceof HubUnreachableError) ? new HubUnreachableError(e) : e;
+}
+
+/** The answer's body, a connection that drops partway through it counting as never reached (the hub logged its 200). */
+async function bodyText(res: Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch (e) {
+    throw isAbort(e) ? e : unreachable(e);
+  }
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     const business = businessFailureText(e);
@@ -540,6 +558,8 @@ export function errorText(e: unknown): string {
     if (e.status >= 500 && e.status < 600) return t("lib-api.server_error", { detail });
     return e.message;
   }
-  if (e instanceof TypeError) return t("lib-api.cant_reach_hub");
+  if (isNetworkFailure(e)) return t("lib-api.cant_reach_hub");
+  // a TypeError from this page's own code (a row it did not expect) is not a network gap: say what broke
+  if (isProgramError(e)) return t("lib-api.page_error", { detail: e.message });
   return e instanceof Error ? e.message : String(e);
 }

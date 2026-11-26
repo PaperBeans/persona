@@ -275,8 +275,19 @@ func TestDetachedApprovalCarriesEditedTextAndTerminalOutcomes(t *testing.T) {
 		if err := ft.s.resolve("ix_after_expiry", proto.Resolution{Allow: &deny}); err != nil {
 			t.Fatal(err)
 		}
-		if result := waitApprovalResult(t, ft, "ix_after_expiry"); !strings.Contains(result, "denied") {
+		if result := waitApprovalResult(t, ft, "ix_after_expiry"); !strings.Contains(result, "denied") || strings.Contains(result, "Owner note:") {
 			t.Fatalf("denial result = %q", result)
+		}
+
+		// Detached denial with an owner note preserves that note in the delivered journal outcome.
+		withNote := startDetachedTest(t, ft, detachedTestCard("ix_detached_deny_note"))
+		elapse(30 * time.Millisecond)
+		awaitDetachedTest(t, withNote)
+		if err := ft.s.resolve("ix_detached_deny_note", proto.Resolution{Allow: &deny, Message: "  Change tone to brief  "}); err != nil {
+			t.Fatal(err)
+		}
+		if result := waitApprovalResult(t, ft, "ix_detached_deny_note"); !strings.Contains(result, "denied") || !strings.Contains(result, "Owner note: Change tone to brief") {
+			t.Fatalf("denial-with-note result = %q, want owner note preserved", result)
 		}
 	})
 }

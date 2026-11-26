@@ -370,7 +370,9 @@ func TestTaskLeaderHerdrBothUsesTaskWorkspace(t *testing.T) {
 func TestTaskWorkspaceCloseChecksEveryAgentMachine(t *testing.T) {
 	s, f, leader, worker := leaderWithAcceptedWorker(t)
 	const remote = "remote"
+	f.mu.Lock()
 	f.devices = append(f.devices, Device{ID: remote, Name: remote, Home: "/home/me", Online: true, Reachable: true})
+	f.mu.Unlock()
 	s.todos.mu.Lock()
 	s.todos.todos[worker.ID].Agents[0].MachineID = remote
 	s.todos.mu.Unlock()
@@ -411,11 +413,13 @@ func TestTaskWorkspaceCloseChecksEveryAgentMachine(t *testing.T) {
 	delete(f.nodes, DeviceSessionsList)
 	f.mu.Unlock()
 	f.setSessions(remote, remoteRow)
+	f.mu.Lock()
 	f.devices = []Device{
 		{ID: "server", Name: "server", Home: "/home/me", Online: true, Reachable: true},
 		{ID: "box", Name: "box", Home: "/home/me", Online: true, Reachable: true},
 		{ID: remote, Name: remote, Home: "/home/me", Online: true, Reachable: true},
 	}
+	f.mu.Unlock()
 	boxList, boxErr := s.sessions(context.Background(), "box")
 	remoteList, remoteErr := s.sessions(context.Background(), remote)
 	lists := map[string][]proto.Session{"box": boxList, remote: remoteList}

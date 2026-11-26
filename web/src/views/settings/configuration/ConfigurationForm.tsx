@@ -34,7 +34,7 @@ export function problemText(p: Problem): string {
 /** The form for `source`. A source with another `key` is another resource: the form starts over for it. */
 type FieldBadge = { id: string; content: ReactNode };
 
-export function ConfigurationForm({ source, guidance, fieldBadge }: { source: ConfigurationSource; guidance?: ConfigurationGuidance; fieldBadge?: FieldBadge }) {
+export function ConfigurationForm({ source, guidance, fieldBadge, afterFields }: { source: ConfigurationSource; guidance?: ConfigurationGuidance; fieldBadge?: FieldBadge; afterFields?: ReactNode }) {
   const [ctl, setCtl] = useState<ConfigurationController | null>(null);
   useEffect(() => {
     const c = new ConfigurationController(source, guidance);
@@ -46,7 +46,7 @@ export function ConfigurationForm({ source, guidance, fieldBadge }: { source: Co
   }, [source.key]);
   useLayoutEffect(() => ctl?.setGuidance(guidance), [ctl, guidance]);
   if (!ctl || ctl.source.key !== source.key) return <FormLoading />;
-  return <Form ctl={ctl} fieldBadge={fieldBadge} />;
+  return <Form ctl={ctl} fieldBadge={fieldBadge} afterFields={afterFields} />;
 }
 
 function FormLoading() {
@@ -59,7 +59,7 @@ function FormLoading() {
   );
 }
 
-function Form({ ctl, fieldBadge }: { ctl: ConfigurationController; fieldBadge?: FieldBadge }) {
+function Form({ ctl, fieldBadge, afterFields }: { ctl: ConfigurationController; fieldBadge?: FieldBadge; afterFields?: ReactNode }) {
   const s = useSyncExternalStore(ctl.subscribe, ctl.snapshot);
   const heading = useRef<HTMLHeadingElement>(null);
   const previouslyConfirming = useRef(false);
@@ -99,11 +99,12 @@ function Form({ ctl, fieldBadge }: { ctl: ConfigurationController; fieldBadge?: 
         </Banner>
       )}
       {s.formError && <Banner tone="alert">{problemText(s.formError)}</Banner>}
-      {doc.groups.map((g) => (
+      {doc.groups.map((g, i) => (
         <Group key={g.id} title={g.title || undefined} footer={g.description} anchor={`configuration-${doc.id}-${g.id}`}>
           {g.fields.map((f) => (
             <FieldRow key={f.id} ctl={ctl} s={s} field={f} badge={fieldBadge?.id === f.id ? fieldBadge.content : undefined} />
           ))}
+          {i === doc.groups.length - 1 ? afterFields : null}
         </Group>
       ))}
       {request && (

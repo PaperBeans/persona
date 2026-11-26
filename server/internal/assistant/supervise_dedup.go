@@ -437,8 +437,22 @@ func (s *Service) clearTaskBoundSignalDedup(ctx context.Context, todoID, kind st
 }
 
 func (s *Service) restoreDigest(signals []superviseSignal, at, prev time.Time) {
-	if !s.autoSupervisionOn(context.Background()) {
+	mode := s.supervisionMode(context.Background())
+	if mode == supervisionModeOff {
 		return // withdrawn, not retried: they would otherwise come back once the switch is on again
+	}
+	if mode == supervisionModeOutcomes {
+		// Only what outcomes sends is retried; the routine rest was withdrawn when the mode changed.
+		signals = slices.DeleteFunc(slices.Clone(signals), func(g superviseSignal) bool { return !supervisionSignalAllowed(mode, g) })
+		if len(signals) == 0 {
+			b := &s.supervise
+			b.mu.Lock()
+			if b.last.Equal(at) {
+				b.last = prev // nothing went out, and nothing is left to retry
+			}
+			b.mu.Unlock()
+			return
+		}
 	}
 	b := &s.supervise
 	b.mu.Lock()

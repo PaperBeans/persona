@@ -7,8 +7,8 @@ import { ago } from "../../lib/format";
 import { formatDate, formatNumber, t } from "../../i18n";
 import { hubUpdate, setHubUpdateSettings, startHubUpdate, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus } from "../../lib/hub-update";
 import {
-  applyHubUpdateBackup, channelTitle, checkHubUpdate, dockerSteps, hubUpdateBackups, hubUpdateHistory, latestWarning,
-  recordTitle, recordTone, updateFinished, updateView, updateWorking,
+  applyHubUpdateBackup, cancelHubUpdate, channelTitle, checkHubUpdate, dockerSteps, hubUpdateBackups, hubUpdateHistory, latestWarning,
+  recordTitle, recordTone, startLatestHubUpdate, updateFinished, updateView, updateWorking,
 } from "../../lib/hub-update-settings";
 import { machineDeployment } from "../../lib/machine-deploy";
 import { managerOf, multiManager, useRoster } from "../../lib/managers";
@@ -64,6 +64,7 @@ function HubUpdates() {
   const [confirmBackup, setConfirmBackup] = useState(false);
   const last = useRef<string | undefined>(undefined);
   const revision = useRef(0);
+  const opened = useRef(false);
 
   const apply = useCallback((s: HubUpdateStatus) => {
     revision.current++;
@@ -122,8 +123,21 @@ function HubUpdates() {
     };
   }, [apply, load]);
 
+  useEffect(() => {
+    if (!status || opened.current) return;
+    opened.current = true;
+    if (status.source !== "web-dev" || !status.supports_preview || status.state === "checking" || updateWorking(status)) return;
+    const before = revision.current;
+    setChecking(true);
+    checkHubUpdate(true).then(next => {
+      if (revision.current === before) apply(next);
+    }, e => {
+      if (revision.current === before) toast(t("settings-hubsettings.check_failed", { error: errorText(e) }), "error");
+    }).finally(() => setChecking(false));
+  }, [apply, status]);
+
   const phase = status?.state;
-  const streaming = phase === "building" || phase === "backing_up" || phase === "applying_backup";
+  const streaming = phase === "resolving" || phase === "building" || phase === "backing_up" || phase === "applying_backup";
   useEffect(() => {
     if (!streaming) return;
     let stopped = false;
@@ -161,12 +175,26 @@ function HubUpdates() {
   const update = async (now: boolean) => {
     setStarting(true);
     try {
-      apply(await startHubUpdate(now));
+      const before = revision.current;
+      const next = !now && status?.source === "web-dev" && status.supports_preview
+        ? await startLatestHubUpdate() : await startHubUpdate(now);
+      if (revision.current === before) apply(next);
       setConfirmNow(false);
     } catch (e) {
       toast(t("settings-hubsettings.start_failed", { error: errorText(e) }), "error");
     } finally {
       setStarting(false);
+    }
+  };
+
+  const cancel = async () => {
+    const before = revision.current;
+    try {
+      const next = await cancelHubUpdate();
+      if (before === revision.current) apply(next);
+    } catch (e) {
+      toast(errorText(e), "error");
+      void load();
     }
   };
 
@@ -322,13 +350,14 @@ function HubUpdates() {
         )}
         {!selectedBackup && view.kind === "newer" && !working && (
           <div className="flex justify-end px-4 py-2.5">
-            <Button tone="accent" busy={starting} disabled={starting} onClick={() => void update(false)}>
+            <Button tone="accent" busy={starting} disabled={starting || checking || status.state === "checking"} onClick={() => void update(false)}>
               {t("settings-hubsettings.update_hub")}
             </Button>
           </div>
         )}
+        {status.state === "resolving" && !run && <div role="status"><SettingsHint>{t("settings-hubsettings.resolving_latest")}</SettingsHint></div>}
         {run && view.kind !== "docker" && (
-          <HubUpdatePipeline s={status} run={run} onNow={() => setConfirmNow(true)} />
+          <HubUpdatePipeline s={status} run={run} onCancel={cancel} onNow={() => setConfirmNow(true)} />
         )}
         {sourceWarning && (
           <p role="status" className="flex items-start gap-1.5 px-4 py-3 text-meta leading-snug break-words text-orange">
@@ -411,7 +440,7 @@ function UpdateHistory({ records }: { records: HubUpdateRecord[] }) {
         const time = record.ended || record.started;
         const commit = record.commit?.slice(0, 12);
         const showCommit = commit && !record.to_version.toLowerCase().includes(commit.toLowerCase());
-        const tone = { green: "text-green", orange: "text-orange", red: "text-red" }[recordTone(record.result)];
+        const tone = { neutral: "text-ink-2", green: "text-green", orange: "text-orange", red: "text-red" }[recordTone(record.result)];
         const label = record.result === "held" ? t("settings-hubsettings.history_held")
           : record.result === "failed" ? t("settings-hubsettings.history_failed")
             : recordTitle(record.result);
@@ -427,7 +456,7 @@ function UpdateHistory({ records }: { records: HubUpdateRecord[] }) {
             </div>
             <div className="mt-0.5 flex gap-1 font-mono text-submeta text-ink-3">
               <span className="truncate" title={record.from_version}>{record.from_version}</span>
-              <span className="shrink-0">{" → "}</span>
+              {record.to_version && <span className="shrink-0">{" → "}</span>}
               <span className="truncate" title={record.to_version}>{record.to_version}</span>
             </div>
             {showCommit && <div className="mt-0.5 font-mono text-submeta text-ink-3">{commit}</div>}

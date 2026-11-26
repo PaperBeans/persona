@@ -274,7 +274,7 @@ func linkTitles(row repository.TaskRepository) map[string]string {
 }
 
 func TestTodoRepositoryLinksThroughAProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestTodoRepositoryLinksThroughAProvider(t *testing.T) {
 }
 
 func TestTodoRepositoryLinkAddressesThroughAProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestTodoRepositoryLinkAddressesThroughAProvider(t *testing.T) {
 }
 
 func TestTodoRepositoryLegacyImportNeverAsksAProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestTodoRepositoryLegacyImportNeverAsksAProvider(t *testing.T) {
 }
 
 func TestTodoRepositoryBuiltinLinksNeverAskAProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestTodoRepositoryBuiltinLinksNeverAskAProvider(t *testing.T) {
 
 // A GitHub or GitLab repository saved by choice on a host a provider claims keeps the built-in rules, offline.
 func TestTodoRepositoryBuiltinRowOnAClaimedHost(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestTodoRepositoryBuiltinRowOnAClaimedHost(t *testing.T) {
 
 // With its provider gone, a host the catalog's extension repositories use never gets a GitHub-style guess.
 func TestTodoRepositoryCatalogHostWithoutItsProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestTodoRepositoryCatalogHostWithoutItsProvider(t *testing.T) {
 
 // Right after a restart the providers are not listed yet: nothing on a host no built-in owns is guessed meanwhile.
 func TestTodoRepositoryLinksWaitForTheProviders(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +622,7 @@ func (p slowAcme) RepositoryParse(ctx context.Context, provider, remote string) 
 
 // An agent's reply never waits on a provider, and asks it about an address once, the PR it names included.
 func TestReportedLinksNeverWaitOnAProvider(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +659,7 @@ func TestReportedLinksNeverWaitOnAProvider(t *testing.T) {
 
 // A provider is sent only plain links on its own hosts: anything else is refused before any call.
 func TestProviderLinksSendOnlyPlainLinks(t *testing.T) {
-	database, err := db.Open(t.Context(), newDatabase(t), db.ManagerSet)
+	database, err := db.Open(t.Context(), newMigratedDatabase(t, db.ManagerSet), db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}

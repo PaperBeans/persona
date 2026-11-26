@@ -314,7 +314,8 @@ test('a blank cancelled turn is recorded before its queued successor and does no
   const interrupted = page.items.findIndex((item) => item.kind === 'notice' && item.text === '已中断')
   assert.ok(interrupted > page.items.findIndex((item) => item.text === 'Interrupted request.'))
   assert.ok(interrupted < page.items.findIndex((item) => item.text === 'New request.'))
-  assert.equal(page.items.at(-1).text, 'New answer.')
+  assert.equal(page.items.filter((item) => item.kind !== 'turn_duration').at(-1).text, 'New answer.')
+  assert.equal(page.items.at(-1).kind, 'turn_duration')
 })
 
 test('a blank ACP cancelled result never starts a retry', async (t) => {
@@ -356,8 +357,10 @@ test('a plan-mode 401 retries despite a previous reply flushing and whole-second
   await until('plan retry settles', () => row()?.last_text === 'Finished.' && idle())
   assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 3)
   const page = await items()
-  assert.deepEqual(page.items.map((item) => item.text), [input.content, prior.prompt, prior.reply, '/plan Continue.', 'Finished.'])
-  assert.equal(page.items[3].client_msg_id, 'plan-retry')
+  const visible = page.items.filter((item) => item.kind !== 'turn_duration')
+  assert.deepEqual(visible.map((item) => item.text), [input.content, prior.prompt, prior.reply, '/plan Continue.', 'Finished.'])
+  assert.equal(visible[3].client_msg_id, 'plan-retry')
+  assert.equal(page.items.at(-1).kind, 'turn_duration')
 })
 
 for (const [reason, plan, attempts, retryDelay] of [

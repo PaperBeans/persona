@@ -45,7 +45,13 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
         error("Persona entry is not connected")
     }
     suspend fun askPersona(request: InboxPersonaRequest) = askPersona(request.itemId, request.action)
-    suspend fun personaContext(itemId: String): String? = null
+
+    /**
+     * The item's `context` from `GET /api/v1/inbox/{id}` with the mail clipping claim beside it (#15995); null only
+     * when no text could be read or restored. Callers that feed the text to the persona use [PersonaContext.text];
+     * the stored-mail page also reads [PersonaContext.mailClipping].
+     */
+    suspend fun personaContext(itemId: String): PersonaContext? = null
 
     /**
      * A reply in the user's voice drafted by the hub (`POST /api/v1/inbox/{id}/draft`); [instruction] may be empty.

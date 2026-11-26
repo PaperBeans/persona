@@ -29,6 +29,9 @@ type MarketView struct {
 	// Signature is the index's signature (docs/extensions/extensions.md "Signing"): signed / unsigned / invalid / key_changed,
 	// and the key it is signed by.
 	Signature MarketSignatureView `json:"signature"`
+	// TrustedKeys are a private market's owner-configured public keys (extension_market_keys.go); while there are
+	// any, its catalog must be signed by one of them. Never set for the official market.
+	TrustedKeys map[string]string `json:"trusted_keys,omitempty"` // key id → "ed25519:<base64>"
 }
 
 // MarketSignatureView is a market's signature as the apps show it.
@@ -94,6 +97,9 @@ func (h *Manager) marketView(s *marketState) MarketView {
 	v := MarketView{ID: s.rec.ID, Spec: s.rec.Spec, Name: marketName(l, s.rec), HasToken: s.rec.TokenSealed != "", Warnings: []string{},
 		Error: i18n.MarketText(l, s.rec.Error), FetchedAt: s.rec.FetchedAt, AddedAt: s.rec.AddedAt, Official: extension.IsOfficialMarket(s.rec.Spec),
 		Signature: MarketSignatureView{State: s.rec.Signature.State, KeyID: s.rec.Signature.KeyID}}
+	if len(s.rec.TrustedKeys) > 0 {
+		v.TrustedKeys = marketKeyViews(s.rec.TrustedKeys)
+	}
 	if v.Signature.State == "" { // a market read before #1848
 		v.Signature.State = extension.SigUnsigned
 	}
@@ -195,7 +201,7 @@ func (h *Manager) catalogItem(l i18n.Lang, s *marketState, e *extension.MarketEn
 	it := CatalogItem{Replaces: e.Replaces, Market: s.rec.ID, MarketName: marketName(l, s.rec), ID: m.ID, Name: ts.Name(l, m.Name), Version: m.Version, Description: ts.Description(l, m.Description),
 		Publisher: m.Publisher, Homepage: m.Homepage, IconURL: catalogIconURL(s.rec.ID, e), Downloads: e.Downloads, DownloadsUpdatedAt: s.index.DownloadsUpdatedAt,
 		Tags: append([]string{}, e.Tags...), Contributes: m.Contributions(), Permissions: extension.ExplainIn(l, m)}
-	if s.rec.Signature.Bad() || (extension.IsOfficialMarket(s.rec.Spec) && (s.rec.Signature.State != extension.SigSigned || s.rec.Signature.KeyID != keyIDOf(extension.Official.SigningKey))) {
+	if !marketVerified(s.rec) {
 		it.Problem = i18n.T(l, "hub-extension_market.bad_signature", i18n.Args{"err": i18n.MarketText(l, s.rec.Error)})
 	} else if e.PackageFor(extension.Platform()) == nil {
 		it.Problem = i18n.T(l, "hub-extension_market.no_package", i18n.Args{"platform": extension.Platform()})
@@ -249,7 +255,7 @@ func marketEntryLocked(ms *markets, market, id string) (extension.MarketRecord, 
 	if s == nil {
 		return extension.MarketRecord{}, nil, errNoMarket
 	}
-	if s.rec.Signature.Bad() || (extension.IsOfficialMarket(s.rec.Spec) && (s.rec.Signature.State != extension.SigSigned || s.rec.Signature.KeyID != keyIDOf(extension.Official.SigningKey))) {
+	if !marketVerified(s.rec) {
 		// Nothing is installed or upgraded from a market whose signature fails, not even from its last good index.
 		return extension.MarketRecord{}, nil, i18n.Err("hub-extension_market.bad_signature_install", i18n.Args{"err": s.rec.Error})
 	}

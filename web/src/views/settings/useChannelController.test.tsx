@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Unit tests for the shared channel detail controller: sequencing, exclusive writes, stale-write re-reads,
-// channel-switch / ABA fencing, null clearing, adopt, and test feedback.
+// channel-switch / ABA fencing, null clearing, routing, and test feedback.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -227,20 +227,10 @@ describe("useChannelController", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("adopts a newer snapshot, invalidates older reads, and runs reply-only tests cleanly", async () => {
+  it("pins the manager and runs reply-only tests cleanly", async () => {
     await act(async () => root.render(<Harness channelId="alpha" manager="m-1" />));
     expect(hub.pins[0]).toEqual({ prefix: "/channels/alpha", manager: "m-1" });
-    const slowGet = hub.asked.shift()!;
-
-    act(() => latest.adopt(makeDetail("alpha", { capabilities: { reply_only: true }, name: "Alpha" })));
-    expect(hub.forgotten).toBe(1);
-    expect(latest.detail?.capabilities.reply_only).toBe(true);
-
-    // Late initial read must not overwrite the adopted detail, and must still clear loading when it settles.
-    await act(async () => slowGet.answer(makeDetail("alpha", { capabilities: { push: true }, name: "Stale" })));
-    await settle();
-    expect(latest.detail?.name).toBe("Alpha");
-    expect(latest.loading).toBe(false);
+    await act(async () => hub.asked.shift()!.answer(makeDetail("alpha", { capabilities: { reply_only: true }, name: "Alpha" })));
 
     let run!: Promise<void>;
     await act(async () => {
@@ -337,47 +327,55 @@ describe("useChannelController", () => {
     expect(latest.loading).toBe(false);
   });
 
-  it("fences adopt against channel switches, manager switches, null clearing, mismatched ids, and unmount", async () => {
-    await act(async () => root.render(<Harness channelId="alpha" manager="m-1" />));
-    await act(async () => hub.asked.shift()!.answer(makeDetail("alpha", { name: "Alpha M1" })));
-    await settle();
-    const staleAlphaAdopt = latest.adopt;
-
-    // Wrong id on the active scope is ignored.
-    act(() => staleAlphaAdopt(makeDetail("beta", { name: "Wrong" })));
-    expect(latest.detail?.id).toBe("alpha");
-
-    // Switching to beta with an in-flight GET: stale alpha adopt must neither drop beta's GET nor overwrite detail.
-    await act(async () => root.render(<Harness channelId="beta" manager="m-1" />));
-    const betaGet = hub.asked.shift()!;
-    act(() => staleAlphaAdopt(makeDetail("alpha", { name: "Stale Alpha" })));
-    expect(latest.detail).toBeNull();
-    await act(async () => betaGet.answer(makeDetail("beta", { name: "Beta M1" })));
-    await settle();
-    expect(latest.detail?.name).toBe("Beta M1");
-
-    // Switching back to alpha (ABA) or changing manager still fences the first scope's adopt.
-    await act(async () => root.render(<Harness channelId="alpha" manager="m-1" />));
-    const alphaGet2 = hub.asked.shift()!;
-    act(() => staleAlphaAdopt(makeDetail("alpha", { name: "ABA Stale" })));
-    await act(async () => alphaGet2.answer(makeDetail("alpha", { name: "Alpha Fresh" })));
-    await settle();
-    expect(latest.detail?.name).toBe("Alpha Fresh");
-
-    // Switching to null fences adopt.
-    const currentAdopt = latest.adopt;
-    await act(async () => root.render(<Harness channelId={null} />));
-    act(() => currentAdopt(makeDetail("alpha", { name: "After Null" })));
-    expect(latest.detail).toBeNull();
-
-    // Unmount fences adopt without throwing or updating state.
+  it("shares the write lock with routing and discards a routing reply after reload", async () => {
     await act(async () => root.render(<Harness channelId="alpha" />));
-    await act(async () => hub.asked.shift()!.answer(makeDetail("alpha", { name: "Before Unmount" })));
-    await settle();
-    const beforeUnmountAdopt = latest.adopt;
-    act(() => root.unmount());
-    expect(() => beforeUnmountAdopt(makeDetail("alpha", { name: "After Unmount" }))).not.toThrow();
-    // Recreate root for afterEach cleanup.
-    root = createRoot(host);
+    const plugin = makeDetail("alpha", { source: "plugin", thread_mode: "channel_default" });
+    await act(async () => hub.asked.shift()!.answer(plugin));
+    const save = latest.updateRouting;
+    let routing!: Promise<ChannelDetail | null>;
+    act(() => { routing = save({ thread_mode: "per_topic" }); });
+    const put = hub.asked.shift()!;
+    expect(put).toMatchObject({ kind: "put", id: "alpha", body: { thread_mode: "per_topic" } });
+    expect(latest.busy).toBe("routing");
+    await act(async () => latest.change("enabled", { enabled: false }));
+    expect(await save({ thread_idle_hours: 48 })).toBeNull();
+    expect(hub.asked).toHaveLength(0);
+
+    act(() => { void latest.load(); });
+    const fresh = { ...plugin, thread_idle_hours: 72 };
+    await act(async () => hub.asked.shift()!.answer(fresh));
+    await act(async () => {
+      put.answer({ ...plugin, thread_mode: "per_topic" });
+      expect(await routing).toBeNull();
+    });
+    expect(latest.detail).toEqual(fresh);
+    expect(latest.busy).toBe("");
+    const reconcile = hub.asked.shift()!;
+    expect(reconcile.kind).toBe("get");
+    await act(async () => reconcile.answer(fresh));
+    expect(await save({ thread_mode: "per_topic" })).toBeNull();
+    expect(hub.asked).toHaveLength(0);
+
+    act(() => { void latest.change("enabled", { enabled: false }); });
+    const toggle = hub.asked.shift()!;
+    expect(await latest.updateRouting({ thread_idle_hours: 24 })).toBeNull();
+    expect(hub.asked).toHaveLength(0);
+    await act(async () => toggle.answer({ ...fresh, enabled: false }));
+  });
+
+  it("fences previous routing callbacks across manager, ABA and unmount", async () => {
+    await act(async () => root.render(<Harness channelId="alpha" manager="m-1" />));
+    await act(async () => hub.asked.shift()!.answer(makeDetail("alpha")));
+    const save = latest.updateRouting;
+    for (const manager of ["m-2", "m-1"]) {
+      await act(async () => root.render(<Harness channelId="alpha" manager={manager} />));
+      expect(await save({ thread_idle_hours: 48 })).toBeNull();
+      expect(hub.asked).toHaveLength(1);
+      await act(async () => hub.asked.shift()!.answer(makeDetail("alpha")));
+    }
+    const beforeUnmount = latest.updateRouting;
+    act(() => root.render(null));
+    expect(await beforeUnmount({ thread_idle_hours: 48 })).toBeNull();
+    expect(hub.asked).toHaveLength(0);
   });
 });

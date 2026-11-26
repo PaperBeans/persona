@@ -76,8 +76,9 @@ func (m *memBlockerStore) ListTodoBlockersByTodo(_ context.Context, todoID strin
 }
 
 func (m *memBlockerStore) ListActiveTodoBlockersByTarget(_ context.Context, targetRef string) ([]db.TodoBlockerRow, error) {
+	want := strings.TrimSpace(targetRef)
 	return m.listFiltered(func(r db.TodoBlockerRow) bool {
-		return r.State == db.TodoBlockerStateActive && r.TargetRef == targetRef
+		return r.State == db.TodoBlockerStateActive && strings.EqualFold(r.TargetRef, want)
 	}), nil
 }
 

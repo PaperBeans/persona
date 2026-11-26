@@ -727,3 +727,51 @@ func TestTodoListExposesValidAskLinkAndFiltersSelfAndUnsafeLinks(t *testing.T) {
 		})
 	}
 }
+
+func TestUserCheckSummaryAndEvidenceOnListAndBrief(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "The itinerary is ready.")
+	const summary = "Both train connections leave time for transfers."
+	const link = "https://docs.example.com/itinerary"
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict": "accepted", "user_check": true, "reason": "  " + summary + "  ",
+		"note": "Reviewed the final itinerary.", "link": link, "checks": completeReviewChecks(todoNow(s, todo.ID)),
+	})
+	ask := listedAsk(t, s, todo.ID)
+	if ask["summary"] != summary || ask["link"] != link || ask["outcome"] != nil {
+		t.Fatalf("verification ask = %+v", ask)
+	}
+	needsBriefingModule(t)
+	rows := s.briefBodyOf(s.briefFactsAt(t.Context(), time.Now(), ""), "Review").Accept
+	if len(rows) != 1 || rows[0].Detail != summary || rows[0].EvidenceLink != link || rows[0].Verdict != ask["verdict"] {
+		t.Fatalf("briefing acceptance = %+v", rows)
+	}
+}
+
+func TestVerificationDetailsFromOlderAsks(t *testing.T) {
+	const web = "https://hub.example.com"
+	const verdict = "Done: please verify the result"
+	w := awaitingAccept{todo: "trip", machine: "node", session: "worker",
+		review: &TaskReview{Verdict: reviewAccepted, Note: "  The route is ready. "}}
+	for _, tc := range []struct {
+		reason, link, wantSummary, wantLink string
+	}{
+		{"", web + "/s/node/worker?tab=chat", "The route is ready.", ""},
+		{" Checked both routes. ", web + "/todos/trip", "Checked both routes.", ""},
+		{verdict, "https://example.com/team/trips/pull/7", "", "https://example.com/team/trips/pull/7"},
+	} {
+		w.ask = acceptAsk{Reason: tc.reason, Link: tc.link}
+		if summary, link := w.verificationDetails(web, verdict); summary != tc.wantSummary || link != tc.wantLink {
+			t.Errorf("details = %q, %q; want %q, %q", summary, link, tc.wantSummary, tc.wantLink)
+		}
+	}
+	s, _, todo := acceptedForUserCheck(t)
+	before := listedAsk(t, s, todo.ID)
+	s.accept.mu.Lock()
+	s.accept.asks[todo.ID].Reason = before["verdict"].(string)
+	s.accept.mu.Unlock()
+	ask := listedAsk(t, s, todo.ID)
+	if ask["summary"] != nil || ask["link"] != nil || ask["asked_at"] != before["asked_at"] {
+		t.Errorf("legacy ask with duplicate verdict: %+v", ask)
+	}
+}

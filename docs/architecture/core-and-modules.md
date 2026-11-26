@@ -516,8 +516,8 @@ chosen extension or on the phone. The apps' composer dictation is core; the exte
 (docs/assistant/voice.md 4.18) goes with the module, and apps use it only while the extension advertises its
 `dictation` feature. Still in the core and named by string, to move as the host serves their slots: the channel kind
 (`channel.KindVoice`), `assistantwire.PluginsVoice`, the `voice` and `speech` extension points, the extension host's
-glue (`internal/extmgr/voice_extension.go`) and the `hub-voice_extension.*` strings; `internal/transcribelive`, a
-measuring tool that also reads the knowledge base, stays where it is.
+glue (`internal/extmgr/voice_extension.go`) and the `hub-voice_extension.*` strings. The developer tool
+`server/scripts/transcribelive` measures live transcription and reads the knowledge base.
 
 ### Recording
 
@@ -827,6 +827,11 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
 
 ### How to add a module
 
+These steps move a feature of this repository into an in-tree module, and step 3 changes Core paths (the
+registration in `server/internal/modules/all`, a `module <id>` line in `schema/module-classification.txt`). To add a
+feature to a core-only install without changing Core code, write an extension instead:
+`docs/extensions/core-only-features.md`, with the sample `sdk/examples/quicknotes`.
+
 1. Pick the id from #13430 section 2 and check its manifest needs only slots the kernel serves; if it needs another,
    add the `Host` method and the kernel's support first, in their own PR, and update "Slots" above.
 2. Create `server/internal/modules/<id>/` with `module.json` (validated by `schema/module.schema.json`), a `Module` whose
@@ -841,7 +846,8 @@ workbench, topics and pushes, about 10k lines) is moving into the `lark` module 
 
 ## Clients
 
-Each client documents its side in its own platform doc; these are pointers only.
+Each client documents its side in its own platform doc; these are pointers only. Across both Core and feature
+modules, shared domain logic lives in the Go server while clients stay thin (`docs/architecture/server-first-logic.md`).
 
 - **Apple** (#13432): `PersonaHostApp` with `PersonaModuleAPI` and `PersonaModule<Name>` packages. See `docs/apple/` (written with #13432).
   A module the hub may turn off declares `feature` = `module.<id>`; the app follows the rule agreed on #13844 (off only

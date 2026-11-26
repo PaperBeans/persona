@@ -264,6 +264,16 @@ func TestIntegrationsV2CombinedRollbackSuite(t *testing.T) {
 		setIntegrationsV2ViaHTTP(t, s, true, false)
 		assertIntegrationsV2Flag(t, s, true)
 
+		// Before any preference is saved, a legacy-only plugin continues the conversation opened while off.
+		if err := s.channelForward(ctx, "legacybot", channel.Message{
+			ID: "after-toggle", Text: "follow-up", Thread: "old_chat:root_1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastSendOnceSession(f); got != legacyBotSess {
+			t.Fatalf("inherited topic mode sent follow-up to %q, want existing conversation %q", got, legacyBotSess)
+		}
+
 		// Stale optimistic lock must fail with 409 configuration_conflict without toggling off.
 		wConflict, _ := permissionSettingsRequest(t, s, http.MethodPut, "/api/v1/assistant", s.managerIdentity(), "full",
 			`{"integrations_v2":false,"expected_integrations_v2":false}`)
@@ -295,8 +305,12 @@ func TestIntegrationsV2CombinedRollbackSuite(t *testing.T) {
 			if d.ThreadMode != tc.mode || d.ThreadIdleHours != tc.idle {
 				t.Fatalf("PUT %s: mode=%q idle=%d, want %q/%d", tc.id, d.ThreadMode, d.ThreadIdleHours, tc.mode, tc.idle)
 			}
-			if d.TargetOverride == nil || d.TargetOverride.Mode != channel.TargetOverrideTopics {
-				t.Fatalf("PUT %s under integrations_v2=true: target_override=%+v, want topics", tc.id, d.TargetOverride)
+			wantOverride := channel.TargetOverrideTopics
+			if tc.mode == channel.ThreadModePerGroupAndTopic {
+				wantOverride = channel.TargetOverrideGroupsAndTopics
+			}
+			if d.TargetOverride == nil || d.TargetOverride.Mode != wantOverride {
+				t.Fatalf("PUT %s: target_override=%+v, want %s", tc.id, d.TargetOverride, wantOverride)
 			}
 		}
 
@@ -551,7 +565,7 @@ func TestIntegrationsV2CombinedRollbackSuite(t *testing.T) {
 
 		exDetail := getChannelDetail(t, s, "examplechat")
 		if exDetail.ThreadMode != channel.ThreadModePerGroupAndTopic || exDetail.ThreadIdleHours != 2 ||
-			exDetail.TargetOverride == nil || exDetail.TargetOverride.Mode != channel.TargetOverrideTopics {
+			exDetail.TargetOverride == nil || exDetail.TargetOverride.Mode != channel.TargetOverrideGroupsAndTopics {
 			t.Fatalf("re-enabled examplechat detail = %+v", exDetail)
 		}
 		if syncOn, _ := featureValue(exDetail.Features, channel.FeatureSync); !syncOn {
@@ -722,6 +736,8 @@ func TestIntegrationsV2LegacyPluginThreadOnlyMatrix(t *testing.T) {
 	}{
 		{"v2_off_cap_threads_on", false, true, channel.ThreadModeChannelDefault, true, true},
 		{"v2_off_cap_threads_off", false, false, channel.ThreadModeChannelDefault, false, false},
+		{"v2_on_unset_cap_threads_on", true, true, "", true, true},
+		{"v2_on_unset_cap_threads_off", true, false, "", false, false},
 		{"v2_on_channel_default", true, true, channel.ThreadModeChannelDefault, false, false},
 		{"v2_on_per_group_and_topic_cap_on", true, true, channel.ThreadModePerGroupAndTopic, true, true},
 		{"v2_on_per_group_and_topic_cap_off", true, false, channel.ThreadModePerGroupAndTopic, true, true},
@@ -733,7 +749,7 @@ func TestIntegrationsV2LegacyPluginThreadOnlyMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, f, sent := threadsChannelService(t, tc.capThreads)
 			setIntegrationsV2(t, s, tc.v2On)
-			if tc.mode != channel.ThreadModeChannelDefault {
+			if tc.mode != "" {
 				rec := channelAPIRequest(t, s, http.MethodPut, "/api/v1/channels/examplechat", "full",
 					fmt.Sprintf(`{"thread_mode":%q}`, tc.mode))
 				if rec.Code != http.StatusOK {

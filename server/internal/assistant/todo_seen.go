@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -88,16 +89,26 @@ func (s *Service) autoSeeTodo(ctx context.Context, id string) (bool, error) {
 	return true, nil
 }
 
-// autoSeeAcceptedTodo settles an accepted autonomous to-do when todos_v2 is enabled (#14639):
-// it sets seen_at on the to-do and marks its finished linked worker sessions as read.
-// Never applies when todos_v2 is off, audience != autonomous, user_check is true, outcome != done,
+// autoSeeAcceptedTodo settles an accepted autonomous to-do when todos_v2 is enabled (#14639, #16098):
+// it sets seen_at on the to-do and marks its finished linked worker sessions as read according to
+// todos_v2_auto_seen ("off", "subtasks", or "all_autonomous").
+// Never applies when todos_v2 is off, mode is "off", mode is "subtasks" on a top-level to-do,
+// audience != autonomous, user_check is true, outcome != done,
 // or the owner previously called Undo (DELETE /api/v1/todos/{id}/seen -> AutoSeenUndone == true).
 func (s *Service) autoSeeAcceptedTodo(ctx context.Context, id, outcome string, userCheck bool) {
-	if userCheck || outcome != outcomeDone || !s.settings(ctx).todosV2On() {
+	cfg := s.settings(ctx)
+	if userCheck || outcome != outcomeDone || !cfg.todosV2On() {
+		return
+	}
+	mode := cfg.todosV2AutoSeenMode()
+	if mode == todosV2AutoSeenOff {
 		return
 	}
 	cur, ok := s.todoNow(id)
 	if !ok || cur.Audience != db.AudienceAutonomous || cur.AutoSeenUndone || cur.DoneAt == nil {
+		return
+	}
+	if mode == todosV2AutoSeenSubtasks && strings.TrimSpace(cur.PartOf) == "" {
 		return
 	}
 	applied, err := s.autoSeeTodo(ctx, id)

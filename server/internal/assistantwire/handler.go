@@ -118,7 +118,18 @@ type SessionRef struct {
 type UserSpokeParams struct {
 	SessionRef
 	Text string `json:"text,omitempty"`
+	// Source is set only with Text from authenticated owner input to an Agent: "app" for the app's message route,
+	// "terminal" for the terminal Agent-message route. It is never a runtime transcript role.
+	Source      string    `json:"source,omitempty"`
+	ClientMsgID string    `json:"client_msg_id,omitempty"`
+	At          time.Time `json:"at,omitempty"`
 }
+
+// Verified owner-input provenance carried by UserSpokeParams.
+const (
+	OwnerInputApp      = "app"
+	OwnerInputTerminal = "terminal"
+)
 
 // ContextParams is assistant.context's params. MachineID is the asking node's machine: the hub sets it from the
 // node's connection, never from the node's params. With Ack the call only confirms that a message carrying those

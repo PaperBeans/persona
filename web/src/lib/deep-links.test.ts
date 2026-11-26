@@ -113,6 +113,25 @@ describe("deep links: pages and paths", () => {
     }
   });
 
+  it.each([
+    ["integrations", "extension:tools@work", "integration"],
+    ["connectors", "github@work", "connector"],
+    ["channels", "chat@work", "channel"],
+    ["extensions", "tools@work/ui/status", "extension"],
+  ])("opens %s app links on their settings detail", (tab, item, key) => {
+    const path = appPath(`persona://open/settings/${tab}/${item}?token=discarded`);
+    expect(path).toBe(`/settings?tab=${tab}&${key}=${encodeURIComponent(item)}`);
+    expect(appPage(new URL(`persona://open/settings/${tab}@work`))?.page)
+      .toEqual({ page: "settings", tab, manager: "work" });
+  });
+
+  it("keeps embedded escapes when an integration source app link becomes a Settings query", () => {
+    const state = JSON.stringify({ id: "file%20name/path%2Fchild" });
+    const sub = `-sources@work/${encodeURIComponent(state)}`;
+    const path = appPath(`persona://open/settings/integrations/${sub}`);
+    expect(path).toBe(`/settings?tab=integrations&integration=${encodeURIComponent(sub)}`);
+  });
+
   it("opens Labs settings from web and app links", () => {
     expect(pageOfPath("/settings", "tab=labs")).toEqual({ page: "settings", tab: "labs" });
     expect(appPage(new URL("persona://open/settings?tab=labs"))?.page).toEqual({ page: "settings", tab: "labs" });

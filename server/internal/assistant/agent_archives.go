@@ -295,30 +295,47 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 		return archiveApplied{list: list, of: b.snapshot.Load()}, false, nil
 	}
 	var next map[string]agentArchive
-	for _, s := range list {
-		rec, ok := rowArchive(machine, s, b.records, nil)
-		if !ok || !rec.Archived {
+	var listedBuf strings.Builder
+	for i := range list {
+		var listedOut *strings.Builder
+		if next == nil {
+			listedOut = &listedBuf
+		}
+		rec, ok := rowArchive(machine, &list[i], b.records, listedOut)
+		if !ok {
 			continue
 		}
-		// The restore goes under the row's archive key, newer than the record that archived it (under that key, or
-		// under an id the row went by, which stays as it was).
-		sid := archiveSessionOf(s)
-		key := runtimeListID(machine, sid)
-		if rec.active(s, mark) {
-			b.pending[key] = true
-		}
-		if b.pending[key] {
-			rec.Archived = false
-			rec.ChangedAt = nextAgentArchiveChangedAt(rec.ChangedAt)
-			rec.Session = archiveSnapshot(s)
-			rec.Session.MachineID, rec.Session.SessionID = machine, sid
-			if next == nil {
-				next = maps.Clone(b.records)
+		if rec.Archived {
+			// The restore goes under the row's archive key, newer than the record that archived it (under that key, or
+			// under an id the row went by, which stays as it was).
+			active := rec.active(list[i], mark)
+			if active || len(b.pending) > 0 {
+				sid := archiveSessionOf(list[i])
+				key := runtimeListID(machine, sid)
+				if active {
+					b.pending[key] = true
+				}
+				if b.pending[key] {
+					restored := rec
+					restored.Archived = false
+					restored.ChangedAt = nextAgentArchiveChangedAt(restored.ChangedAt)
+					restored.Session = archiveSnapshot(list[i])
+					restored.Session.MachineID, restored.Session.SessionID = machine, sid
+					if next == nil {
+						next = maps.Clone(b.records)
+					}
+					next[key] = restored
+					continue
+				}
 			}
-			next[key] = rec
+		}
+		if next == nil && !list[i].Assistant {
+			list[i].Archived = rec.Archived
+			list[i].ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
 		}
 	}
 	var saveErr error
+	var listed string
 	if next != nil {
 		saveErr = svc.saveAgentArchivesLocked(ctx, next)
 		if saveErr == nil {
@@ -328,9 +345,11 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 				}
 			}
 		}
+		listed = markAgentArchives(machine, list, b.records, b.pending, mark)
+	} else {
+		listed = listedBuf.String()
 	}
 	of := b.snapshot.Load()
-	listed := markAgentArchives(machine, list, b.records, b.pending, mark)
 	var t archiveTail
 	if rest {
 		t = b.tailFor(machine, of, b.records, listed)
@@ -377,7 +396,7 @@ func (svc *Service) archivedRow(ctx context.Context, machine, sid string) (proto
 
 // archiveRowOf is the row overlayAgentArchives appends for machine's session sid, when records has one.
 func archiveRowOf(machine, sid string, records map[string]agentArchive) (proto.Session, bool) {
-	rec, ok := records[runtimeListID(machine, sid)]
+	rec, ok := lookupRuntimeListID(records, machine, sid)
 	if !ok || rec.Session.MachineID != machine {
 		return proto.Session{}, false
 	}
@@ -401,18 +420,42 @@ func archiveRow(rec agentArchive) proto.Session {
 func markAgentArchives(machine string, list []proto.Session, records map[string]agentArchive, pending map[string]bool, mark uint64) string {
 	var listed strings.Builder
 	for i := range list {
-		rec, ok := rowArchive(machine, list[i], records, &listed)
+		rec, ok := rowArchive(machine, &list[i], records, &listed)
 		if !ok || list[i].Assistant {
 			continue
 		}
 		// A storage timeout must neither reveal unrelated archived rows nor hide
 		// new work. The durable restore remains pending until its write succeeds.
 		active := rec.active(list[i], mark)
-		restoring := len(pending) > 0 && pending[runtimeListID(machine, archiveSessionOf(list[i]))] // under its archive key
+		restoring := false
+		if len(pending) > 0 {
+			restoring, _ = lookupRuntimeListID(pending, machine, archiveSessionOf(list[i])) // under its archive key
+		}
 		list[i].Archived = rec.Archived && !restoring && !active
 		list[i].ArchiveChangedAt = archiveChangedAt(rec.ChangedAt)
 	}
 	return listed.String()
+}
+
+func lookupArchiveKey(machine, session string, records map[string]agentArchive, listed *strings.Builder) (agentArchive, bool) {
+	var buf [128]byte
+	if len(machine)+len(session)+7 <= len(buf) {
+		if key, ok := appendRuntimeListID(buf[:0], machine, session); ok {
+			r, found := records[string(key)]
+			if found && listed != nil {
+				listed.Write(key)
+				listed.WriteByte('\n')
+			}
+			return r, found
+		}
+	}
+	key := runtimeListID(machine, session)
+	r, found := records[key]
+	if found && listed != nil {
+		listed.WriteString(key)
+		listed.WriteByte('\n')
+	}
+	return r, found
 }
 
 // rowArchive is the record that says whether s, listed on machine, is archived: the newest among those under its own
@@ -421,25 +464,15 @@ func markAgentArchives(machine string, list []proto.Session, records map[string]
 // was kept under before #14520. Activity in the row restores it under the row's archive key (applyArchives), and a
 // record under another id stays as it was, as Paseo's do (#8131). listed, when not nil, gets the key of every record
 // found, one per line, the aliases' first.
-func rowArchive(machine string, s proto.Session, records map[string]agentArchive, listed *strings.Builder) (rec agentArchive, ok bool) {
+func rowArchive(machine string, s *proto.Session, records map[string]agentArchive, listed *strings.Builder) (rec agentArchive, ok bool) {
 	for _, alias := range s.Aliases() {
-		k := runtimeListID(machine, alias)
-		if r, found := records[k]; found {
-			if listed != nil {
-				listed.WriteString(k)
-				listed.WriteByte('\n')
-			}
+		if r, found := lookupArchiveKey(machine, alias, records, listed); found {
 			if !ok || r.ChangedAt.After(rec.ChangedAt) {
 				rec, ok = r, true
 			}
 		}
 	}
-	own := runtimeListID(machine, s.SessionID)
-	if r, found := records[own]; found {
-		if listed != nil {
-			listed.WriteString(own)
-			listed.WriteByte('\n')
-		}
+	if r, found := lookupArchiveKey(machine, s.SessionID, records, listed); found {
 		if !ok || !rec.ChangedAt.After(r.ChangedAt) {
 			rec, ok = r, true
 		}
@@ -519,7 +552,44 @@ func (svc *Service) archiveStore() Store {
 	return svc.store()
 }
 
+func runtimeListIDSafe(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
+}
+
+func appendRuntimeListID(dst []byte, machine, session string) ([]byte, bool) {
+	if !runtimeListIDSafe(machine) || !runtimeListIDSafe(session) {
+		return nil, false
+	}
+	dst = append(dst, '[', '"')
+	dst = append(dst, machine...)
+	dst = append(dst, '"', ',', '"')
+	dst = append(dst, session...)
+	dst = append(dst, '"', ']')
+	return dst, true
+}
+
+func lookupRuntimeListID[V any](m map[string]V, machine, session string) (V, bool) {
+	var buf [128]byte
+	if len(machine)+len(session)+7 <= len(buf) {
+		if key, ok := appendRuntimeListID(buf[:0], machine, session); ok {
+			v, found := m[string(key)]
+			return v, found
+		}
+	}
+	v, found := m[runtimeListID(machine, session)]
+	return v, found
+}
+
 func runtimeListID(machine, session string) string {
+	if runtimeListIDSafe(machine) && runtimeListIDSafe(session) {
+		return `["` + machine + `","` + session + `"]`
+	}
 	raw, _ := json.Marshal([2]string{machine, session})
 	return string(raw)
 }

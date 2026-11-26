@@ -3,6 +3,7 @@
 // bind step, #5818); the status and the on / off switch, pairing with a code sent to the bot, what the bot may do and the
 // agents driven there; and, folded under Advanced, the app's credentials and how to make one by hand.
 // Each change goes to the hub at once and the page shows what the hub answered; a failed one leaves it as it was.
+import { sameManager } from "../../lib/manager-choice";
 import { BindSteps, ChannelLink } from "./Channels";
 import { Disclosure } from "./ProviderFields";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -128,9 +129,9 @@ export function useBot() {
   return { status, accept, readStatus, loading, error, setError, load };
 }
 
-export function FeishuBot({ onChannel, larkcli, onOpen }: { onChannel?: (id: string) => void; larkcli?: HubConnector | null; onOpen?: (id: string) => void } = {}) {
+export function FeishuBot({ onChannel, larkcli, onOpen, manager, onRouteClose }: { manager?: string; onRouteClose?: () => void; onChannel?: (id: string, manager?: string) => void; larkcli?: HubConnector | null; onOpen?: (id: string) => void } = {}) {
   const bot = useBot();
-  const [open, setOpen] = useState(() => new URLSearchParams(location.search).get("connector") === "feishu-bot");
+  const [open, setOpen] = useState(false);
   const tone = botTone(bot.status);
   return (
     <>
@@ -156,8 +157,8 @@ export function FeishuBot({ onChannel, larkcli, onOpen }: { onChannel?: (id: str
           </button>
         </Group>
       )}
-      {onChannel && <ChannelLink id="feishu" onOpen={onChannel} />}
-      {open && <FeishuBotDialog bot={bot} larkcli={larkcli} onClose={() => setOpen(false)} onOpen={onOpen} />}
+      {onChannel && <ChannelLink id="feishu" manager={manager} onOpen={onChannel} />}
+      {(open || onRouteClose) && <FeishuBotDialog bot={bot} manager={manager} larkcli={larkcli} onClose={onRouteClose ?? (() => setOpen(false))} onOpen={onOpen} />}
     </>
   );
 }
@@ -180,7 +181,7 @@ function CombinedLarkRow({ bot, connector, onOpen }: { bot: ReturnType<typeof us
   );
 }
 
-function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<typeof useBot>; larkcli?: HubConnector | null; onClose: () => void; onOpen?: (id: string) => void }) {
+function FeishuBotDialog({ bot, manager, larkcli, onClose, onOpen }: { manager?: string; bot: ReturnType<typeof useBot>; larkcli?: HubConnector | null; onClose: () => void; onOpen?: (id: string) => void }) {
   const { status, accept, readStatus, loading, error, setError, load } = bot;
   const [dialogLarkcli, setDialogLarkcli] = useState<HubConnector | null | undefined>(larkcli);
   const [form, setForm] = useState<BotCredentials>(() => (status ? credentialsOf(status) : { appID: "", appSecret: "", domain: "feishu" }));
@@ -211,10 +212,10 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
 
   const fetchLarkcli = useCallback(async () => {
     const all = await listConnectors();
-    const found = all.find((connector) => connector.id === "larkcli");
+    const found = all.find((connector) => connector.id === "larkcli" && sameManager(connector.manager, manager));
     // A re-read that no longer lists it keeps what the page showed; only a first read may conclude "none".
     setDialogLarkcli((prev) => found ?? (prev === undefined ? null : prev));
-  }, []);
+  }, [manager]);
 
   useEffect(() => {
     if (larkcli !== undefined) {

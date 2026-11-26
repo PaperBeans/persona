@@ -324,6 +324,7 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 			if m.peer == peer {
 				m.reloadUntil = time.Now().Add(m.reconnectGrace)
 				peer.SuspendCalls()
+				m.nodeUpdateHandoverLocked(params)
 			}
 			m.mu.Unlock()
 			return

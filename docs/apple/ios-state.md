@@ -20,6 +20,14 @@ The general performance rules (main-thread IO, `@State`, images, launch, memory)
 Background: `docs/archive/apple/live-updates.md` (three instances of "push interrupts an action").
 The root causes, the staged plan and the measurements after each step are in `docs/archive/apple/ios-state-records.md`.
 
+## Switching hubs with reads in flight
+
+The sidebar can show cached conversations for the selected hub as soon as the owner switches. Inbox rows, counters, task sheets and pending actions belong to the visit that requested them. Leaving the hub clears the visible state and releases its in-flight work, so the new hub can start loading immediately.
+
+A saved Inbox list carries its source pairing. On cold launch the list can appear offline when that pairing belongs to the selected group. Older records with an address are usable when the address identifies that group unambiguously. A successful refresh replaces an unattributed record. Pending Agent handoffs also carry the source pairing so delivery to an Agent on another hub can file the original Inbox item.
+
+A group ID alone cannot identify a request after a quick switch from Home to Work and back to Home. Each completion must still belong to the current visit before publishing data, changing a badge, reporting an error, or releasing a pending operation. This also applies to a follow-up write scheduled after a successful request. The hub switch and Inbox store tests delay responses across the switch to exercise these cases.
+
 ## Current data flow
 
 ```

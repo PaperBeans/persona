@@ -40,13 +40,44 @@ describe("integrations-route sources and data-flow codec", () => {
       expect(parseIntegrationsSub(sub)).toEqual(route);
     }
 
-    // Also handles already-decoded JSON state (e.g. from parseSettingsPath).
+    // Plain JSON without escape sequences remains compatible with older links.
     expect(parseIntegrationsSub(`-sources/${sampleState}`)).toEqual({ kind: "sources", state: sampleState });
     expect(parseIntegrationsSub(`-sources@work/${sampleState}`)).toEqual({
       kind: "sources",
       state: sampleState,
       manager: "work",
     });
+  });
+
+  it.each(["connectors", "channels", "extensions", "integrations"])("keeps the manager on %s paths", (tab) => {
+    expect(parseSettingsPath(`/settings/${tab}@work`)).toEqual({ tab, manager: "work", sub: null });
+  });
+
+  it.each(["mail", "lark", "feishu-bot"])("preserves the owner of built-in %s across rollback", (id) => {
+    const legacy = integrationsToLegacy(`builtin:${id}@work`);
+    expect(legacy).toEqual({ tab: "connectors", sub: `${id}@work` });
+    expect(legacyToIntegrations(legacy.tab, legacy.sub)).toEqual({ sub: `builtin:${id}@work` });
+  });
+
+  it("uses the tab owner for detail and UI routes, unless the item names its own", () => {
+    expect(parseSettingsPath("/settings/channels@work/chat")?.sub).toBe("chat@work");
+    expect(parseSettingsPath("/settings/connectors@work/git")?.sub).toBe("git@work");
+    expect(parseSettingsPath("/settings/extensions@work/tools/ui/status")?.sub).toBe("tools@work/ui/status");
+    expect(parseSettingsPath("/settings/integrations@work/ext:tools@home")?.sub).toBe("ext:tools@home");
+  });
+
+  it("accepts the long extension prefix for objects and pages", () => {
+    for (const suffix of ["", "@work", "@work/ui/status"]) {
+      expect(parseIntegrationsSub(`extension:tools${suffix}`)).toEqual(parseIntegrationsSub(`ext:tools${suffix}`));
+    }
+  });
+
+  it("consumes exactly one layer of escaping for path-style Data flow state", () => {
+    const state = JSON.stringify({ id: "a%20b/%2F@x" });
+    for (const route of ["integrations/-sources@work", "integrations@work/-sources"]) {
+      const sub = parseSettingsPath(`/settings/${route}/${encodeURIComponent(state)}`)?.sub;
+      expect(parseIntegrationsSub(sub)).toEqual({ kind: "sources", manager: "work", state });
+    }
   });
 
   it("maps legacy sources routes into -sources with preserved @manager and encoded state", () => {

@@ -661,6 +661,9 @@ type codexListPass struct {
 	apps map[string]*codexAppState
 	// looks is the missLook by Codex home that rolloutPathIn checks each thread with no rollout against.
 	looks map[string]*missLook
+	// agentKinds maps a session id listed in this pass to its row's agent kind. Transcript lookup uses it to skip a TRAE
+	// probe for a row sessionListIn already knows belongs to another agent. Nil/untagged ids keep the probe.
+	agentKinds map[string]string
 }
 
 func (p *codexListPass) markHomeUnavailable(home string) {
@@ -789,6 +792,17 @@ func (p *codexListPass) paginatedThreadOf(src codexSource) (codexAppThread, bool
 	}
 	t, ok := threads[src.thread]
 	return t, ok
+}
+
+// knownNonTraexAgent reports whether this pass's list row for id is an agent other than TRAE, so a fresh cached
+// transcript path needs no TRAE database probe. A nil pass or an id the pass did not tag answers false and preserves
+// the probe, keeping every caller without list agent knowledge on the original lookup order.
+func (p *codexListPass) knownNonTraexAgent(id string) bool {
+	if p == nil || p.agentKinds == nil {
+		return false
+	}
+	kind := p.agentKinds[id]
+	return kind != "" && kind != traexAgent
 }
 
 func (p *codexListPass) assistantProject(n *Node) string {

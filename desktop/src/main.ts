@@ -48,6 +48,14 @@ let screenLocked = false;
 let presenceTimer: ReturnType<typeof setInterval> | undefined;
 const hubWindow = new HubWindowLifecycle<BrowserWindow | undefined>();
 const store = () => JSONStore.inUserData(app.getPath("userData"));
+function windowBackground(surface: "hub" | "setup" = "hub"): string {
+  if (surface === "setup") {
+    // Match --page in setup.css until the local renderer paints.
+    return nativeTheme.shouldUseDarkColors ? "#0b0b0c" : "#f1f1f4";
+  }
+  // Match the Web shell canvas and its prepaint background.
+  return nativeTheme.shouldUseDarkColors ? "#0b0b0c" : "#f1f1f4";
+}
 // Each hub window's routes wait until its page listens (page-routes.ts, #10282): no route is sent around them.
 const pageRoutes = new WeakMap<BrowserWindow, PageRoutes>();
 function openRoute(window: BrowserWindow | undefined, route: string): void {
@@ -187,7 +195,7 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     show: false,
     title: "Persona",
     autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17181a" : "#fafafb",
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -316,7 +324,7 @@ async function showSetup(): Promise<void> {
     show: false,
     title: isSettings ? "Persona Settings" : "Persona",
     autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17181a" : "#fafafb",
+    backgroundColor: windowBackground("setup"),
     ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, "setup-preload.cjs"),

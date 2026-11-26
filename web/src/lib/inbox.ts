@@ -27,7 +27,7 @@ import { supervisorHeld } from "./supervisor-held";
 import { inFolderFilter } from "./inbox-folders";
 import type { ChainEntry, InboxHandling, InboxRelated, InboxStatus, InboxSuggestion, InboxSuggestionAttempt, SuggestionAction } from "./inbox-events";
 import { actedText, actOnSuggestion, statusOf } from "./inbox-suggestion"; // not inbox-events.ts: that one is the Inbox page's
-import type { MailAccount } from "./mail";
+import type { MailAccount } from "./agent-settings";
 import type { ExternalRef } from "../features/external-sources/api";
 
 // Not the Inbox's: re-exported from their own modules until their importers import them from there (#11538).
@@ -148,7 +148,7 @@ export interface InboxItem {
   /** Only in GET /inbox/{id}: the conversation as text. */
   context?: string;
   /** Only in GET /inbox/{id}, for a mail: whether the hub clipped the newest mail's text when it stored `context`.
-   *  Absent: the hub does not know (or is from before it sent this). Read it through storedMailClipping (lib/mail.ts). */
+   *  Absent: the hub does not know (or is from before it sent this). Read it through storedMailClipping (lib/mail-stored.ts). */
   mail_body_truncated?: boolean;
   agent?: InboxAgent;
   /** Deterministic PR/Issue auto-forward status and linked to-do metadata (#12492). */

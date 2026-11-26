@@ -65,14 +65,19 @@ const LINKS_SHOWN = 4;
 /** Search matches shown before "Show all". */
 const MATCHES_SHOWN = 5;
 
+/** The side beside the list with no entry open: an empty bar of the list's height (#16462), so the line under the list's
+ *  bar runs across the page as on Inbox and To-dos, and what to do here under it. Only shown beside the list. */
 export function EmptyDetail() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh] text-center" style={{ animation: `fade-in 300ms ease-out both` }}>
-      <span className="mb-3 flex size-11 items-center justify-center rounded-[12px] bg-field text-ink-3">
-        <Icon name="book" size={20} />
-      </span>
-      <p className="text-[14px] font-medium text-ink">{t("knowledge-kbdetail.empty_title")}</p>
-      <p className="mt-1 max-w-[320px] text-[12.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.empty_body")}</p>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div data-testid="kb-empty-detail-bar" aria-hidden className="h-14 shrink-0 border-b border-line" />
+      <div className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh] text-center" style={{ animation: `fade-in 300ms ease-out both` }}>
+        <span className="mb-3 flex size-11 items-center justify-center rounded-[12px] bg-field text-ink-3">
+          <Icon name="book" size={20} />
+        </span>
+        <p className="text-[14px] font-medium text-ink">{t("knowledge-kbdetail.empty_title")}</p>
+        <p className="mt-1 max-w-[320px] text-[12.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.empty_body")}</p>
+      </div>
     </div>
   );
 }

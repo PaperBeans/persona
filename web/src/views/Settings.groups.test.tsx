@@ -3,6 +3,7 @@
 // assistant's avatar and a Switch that opens the sidebar's list, "This device" and "Hub", in that order, with their lines;
 // the first group's pages ask the current assistant only, read again for another, and an item of theirs open when the
 // pick changes goes back to its list.
+import { installedMailbox, preloadMailbox } from "../test/installed-mailbox";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,10 +181,11 @@ describe("the current assistant's pages", () => {
   });
 
   it("ask the current assistant for its mail accounts on Connectors, and leave other pages' requests alone", async () => {
+    await preloadMailbox("Settings");
     setRoster(ROSTER);
     await switchTo("m-1");
     await mount("/settings?tab=connectors");
-    expect(asked("/api/v1/mail/accounts")).toEqual(["m-1"]);
+    expect(asked("/api/v1/mail/accounts")).toEqual(installedMailbox ? ["m-1"] : []);
     // a page outside the group: nothing pinned
     await act(async () => root.render(null));
     calls = [];

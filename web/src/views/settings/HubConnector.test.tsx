@@ -5,7 +5,7 @@ import { ExtensionConnectorGroup, IMessageGroups, SignInStep } from "./HubConnec
 
 // Settings › Connectors' login card (#1693): a QR code step is drawn and a step the page can't draw says so, never an empty
 // form whose "Next" stays grey forever.
-const draw = (prompt: ConnectorPrompt, isChannel = false) =>
+const draw = (prompt: ConnectorPrompt, isChannel = false, integrationsV2 = false) =>
   renderToStaticMarkup(
     <SignInStep
       name="微信"
@@ -13,6 +13,7 @@ const draw = (prompt: ConnectorPrompt, isChannel = false) =>
       values={{}}
       busy={false}
       isChannel={isChannel}
+      integrationsV2={integrationsV2}
       onChange={() => {}}
       onSubmit={() => {}}
       onRestart={() => {}}
@@ -39,6 +40,12 @@ describe("a sign-in step", () => {
     expect(html).toContain("设置 › 渠道 › 微信");
     expect(html).toContain("重新开始");
     expect(html).not.toContain("下一步");
+  });
+
+  it("points to Integrations & Extensions when the unified list is enabled", () => {
+    const html = draw({ step: "qr", kind: "qr" }, true, true);
+    expect(html).toContain("设置 › 集成与扩展 › 微信");
+    expect(html).not.toContain("设置 › 渠道");
   });
 
   it("offers the link a QR step encodes when only its modules are missing", () => {

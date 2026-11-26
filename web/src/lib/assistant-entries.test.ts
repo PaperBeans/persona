@@ -18,6 +18,84 @@ it("keeps an Agent interaction on a verifying task under its original conversati
   ]);
 });
 
+describe("steps carried by an open request", () => {
+  const at = "2026-11-10T08:00:00Z";
+  const view = { section: "needs_you" as const, phase: "needs_you" as const, rank: 0 };
+  const parent: Todo = {
+    id: "request", title: "Prepare the release", origin: "direction", created_at: at, updated_at: at, agents: [],
+    view: { ...view, reason: "verify", steps: { done: 0, total: 1 } },
+  };
+  const verifyingParent: Todo = {
+    ...parent, supervision: { state: "user_check", supervisor: "direction" },
+    ask: { verdict: "Please verify the request", asked_at: at },
+  };
+  const verification: Todo = {
+    ...parent, id: "verify", title: "Review the result", part_of: parent.id,
+    supervision: { state: "user_check", supervisor: "worker-supervisor" }, ask: { verdict: "Please verify", asked_at: at },
+    view: { ...view, reason: "verify" },
+  };
+  const interaction: Interaction = { id: "confirm", kind: "permission", machine_id: "box", session_id: "worker", created_at: at };
+  const confirmation: Todo = {
+    ...parent, id: "confirm", title: "Allow the change", part_of: parent.id,
+    agents: [{ machine_id: "box", session_id: "worker", linked_at: at }], view: { ...view, reason: "agent_asks" },
+  };
+  const entries = (todos: Todo[], interactions: Interaction[] = [], deferred?: Record<string, unknown>) => assistantEntries({
+    conversation: "direction", main: "main", todos, sessions: [], interactions, plans: {}, feed: [], now: Date.parse(at), deferred,
+  });
+
+  it("keeps a verification and a live confirmation under the same counted parent", () => {
+    const result = entries([{ ...parent, view: { ...view, reason: "verify", steps: { done: 0, total: 2 } } }, verification, confirmation], [interaction]);
+    expect(result.needsYou).toHaveLength(1);
+    expect(result.needsYou[0]).toMatchObject({
+      key: "task:request", countsOpen: true,
+      steps: [{ todo: { id: "confirm" }, asks: [interaction] }, { todo: { id: "verify" } }],
+    });
+    expect(result.running).toEqual([]);
+  });
+
+  it.each(["deferred", "dismissed"])("keeps a step independently actionable when the parent's verification is %s", (hiddenBy) => {
+    const visible = entries([verifyingParent, verification]);
+    expect(visible.needsYou).toMatchObject([{ key: "task:request", steps: [{ key: "task:verify" }] }]);
+    expect(visible.running).toEqual([]);
+
+    const request = hiddenBy === "dismissed" ?
+      { ...verifyingParent, decision_review: { review_at: at, dismissal_id: "dismissed" } } : verifyingParent;
+    const deferred = hiddenBy === "deferred" ? { [decisionLaterKey(request)]: true } : undefined;
+    const result = entries([request, verification], [], deferred);
+    expect(result.needsYou).toMatchObject([{ key: "task:verify", todo: { ask: verification.ask } }]);
+    expect(result.running).toEqual([]);
+  });
+
+  it("keeps a live permission independent of a quiet parent with a visible verification", () => {
+    const request = { ...verifyingParent, quiet: true };
+    const result = entries([request, confirmation], [interaction]);
+    expect(result.needsYou).toMatchObject([{ key: "task:confirm", asks: [interaction] }, { key: "task:request" }]);
+    expect(result.needsYou[1]).not.toHaveProperty("steps");
+    expect(result.running).toEqual([]);
+  });
+
+  it("keeps an owner-decision to-do independent of its open parent", () => {
+    const ownerDecision: Todo = {
+      ...verification, id: "todo_od_release", title: "Choose the release",
+      supervision: { state: "needs_user", supervisor: "direction" },
+      ask: { verdict: "Please choose", asked_at: at, outcome: "decide" },
+      view: { ...view, reason: "owner_decides" },
+    };
+    const result = entries([parent, verification, ownerDecision]);
+    expect(result.needsYou).toHaveLength(2);
+    expect(result.needsYou.find((item) => item.key === "task:request")).toMatchObject({ steps: [{ key: "task:verify" }] });
+    expect(result.needsYou.find((item) => item.key === "task:todo_od_release")).toMatchObject({ todo: { ask: ownerDecision.ask } });
+    expect(result.running).toEqual([]);
+  });
+
+  it("removes an empty parent row when all of its carried steps are hidden", () => {
+    expect(entries([parent, verification]).needsYou).toMatchObject([{ key: "task:request", steps: [{ key: "task:verify" }] }]);
+    const result = entries([parent, verification], [], { [decisionLaterKey(verification)]: true });
+    expect(result.needsYou).toEqual([]);
+    expect(result.running).toEqual([]);
+  });
+});
+
 // Android reads the same fixture (AssistantEntriesFixtureTest): the two entries split the same input the same way.
 describe("the Assistant's Needs you and In progress entries (spec/fixtures/entries)", () => {
   for (const c of fixture.cases) {

@@ -412,6 +412,9 @@ func (s *Service) directionTreeParts(ctx context.Context, now time.Time) (*treeB
 	if err := s.listDecisionReviews(ctx, all); err != nil {
 		s.logf("direction tree decision reviews: %v", err)
 	}
+	if cfg.todosV2On() {
+		s.populateTodoActiveBlockers(ctx, all)
+	}
 	asks := s.todoAsks(ctx) // once the to-dos are let go: it reads them itself
 	var undone []Todo
 	wantCards := map[string]map[string]bool{}
@@ -439,7 +442,7 @@ func (s *Service) directionTreeParts(ctx context.Context, now time.Time) (*treeB
 	lists, reached := s.agentSessionLists(ctx, undone)
 	cards := s.todoRunCards(wantCards)
 	heldOnly := s.heldOnlySessions()
-	tb := newTreeBuild(s, cfg.Main, leads, all, lists, cards, heldOnly, reached, now, s.location(ctx), cfg.todosV2On())
+	tb := newTreeBuild(s, cfg.Main, leads, all, lists, cards, heldOnly, reached, now, s.location(ctx), cfg)
 	return tb, cfg, names
 }
 
@@ -475,6 +478,7 @@ type treeBuild struct {
 	s        *Service
 	main     string
 	leads    []string
+	todosV2  bool
 	todos    map[string]listedTodo
 	placed   map[string]todoTriage
 	views    map[string]assistantwire.TodoSummary
@@ -513,8 +517,8 @@ type treeAttach struct {
 }
 
 func newTreeBuild(s *Service, main string, leads []string, all []listedTodo, lists map[string][]proto.Session,
-	cards map[[2]string][]proto.Interaction, heldOnly map[[2]string]bool, reached map[string]bool, now time.Time, loc *time.Location, todosV2 bool) *treeBuild {
-	tb := &treeBuild{s: s, main: main, leads: leads, todos: map[string]listedTodo{}, views: map[string]assistantwire.TodoSummary{},
+	cards map[[2]string][]proto.Interaction, heldOnly map[[2]string]bool, reached map[string]bool, now time.Time, loc *time.Location, cfg Settings) *treeBuild {
+	tb := &treeBuild{s: s, main: main, leads: leads, todosV2: cfg.todosV2On(), todos: map[string]listedTodo{}, views: map[string]assistantwire.TodoSummary{},
 		carried: map[string]bool{}, heldOnly: heldOnly, reached: reached, now: now,
 		sessions: map[[2]string]proto.Session{}, lists: lists, listed: map[string]bool{}, codexKid: map[[2]string][]proto.Session{},
 		leaderAgent: map[[2]string][]string{}, workerAt: map[string]treeAttach{}, workersUnder: map[treeAttach][]string{}}
@@ -536,11 +540,10 @@ func newTreeBuild(s *Service, main string, leads []string, all []listedTodo, lis
 		c, ok := tb.sessions[[2]string{machine, id}]
 		return c, ok
 	}
-	tb.placed = triagePlace(all, look, now, loc)
 	facts := make([]projection.Facts, len(all))
 	for i := range all {
 		f := projectionFacts(all[i], tb.sessions, loc)
-		f.TodosV2 = todosV2
+		applyTodosV2FactsConfig(&f, cfg)
 		if all[i].DoneAt == nil || all[i].StartError != "" {
 			f.Unreached = !reached[all[i].ID]
 			linked := hasParkInteractionLink(all[i].Supervision)
@@ -554,13 +557,29 @@ func newTreeBuild(s *Service, main string, leads []string, all []listedTodo, lis
 		facts[i] = f
 	}
 	projViews := projection.Views(facts, now)
-	for i := range all {
-		tb.views[all[i].ID] = projViews[i]
-	}
-	for _, t := range all {
-		tb.index(t)
-		if triageCountsAsOpen(t.Todo, tb.placed[t.ID]) {
-			tb.open = append(tb.open, t.ID)
+	if cfg.todosV2On() {
+		applyActiveBlockersToViews(all, projViews, nil)
+		tb.placed = make(map[string]todoTriage, len(all))
+		for i := range all {
+			tb.views[all[i].ID] = projViews[i]
+			tb.placed[all[i].ID] = todoTriageFromProjectionView(all[i], projViews[i], look)
+		}
+		for i, t := range all {
+			tb.index(t)
+			if projectionViewCountsAsOpen(projViews[i]) {
+				tb.open = append(tb.open, t.ID)
+			}
+		}
+	} else {
+		tb.placed = triagePlace(all, look, now, loc)
+		for i := range all {
+			tb.views[all[i].ID] = projViews[i]
+		}
+		for _, t := range all {
+			tb.index(t)
+			if triageCountsAsOpen(t.Todo, tb.placed[t.ID]) {
+				tb.open = append(tb.open, t.ID)
+			}
 		}
 	}
 	for _, id := range tb.open {
@@ -678,17 +697,36 @@ func (tb *treeBuild) taskOwner(t Todo) string {
 	return sup
 }
 
-// directionOf is the group a listed task is in: its raw owner when that is a current leader, else the secretary ("").
+// directionOf is the group a listed task is in: under todos_v2=true, an explicit direction_id takes precedence
+// (matching board.direction_groups as the single source of truth; an explicit direction_id that is not a current
+// leader stays in the secretary group rather than falling back to supervisor/origin). When direction_id is unset
+// (or todos_v2=false), it falls back to the existing supervisor rule (and origin under todos_v2=true), else the
+// secretary ("").
 func (tb *treeBuild) directionOf(t Todo) string {
+	if tb.todosV2 {
+		if dirID := strings.TrimSpace(t.DirectionID); dirID != "" {
+			if slices.Contains(tb.leads, dirID) {
+				return dirID
+			}
+			return ""
+		}
+	}
 	if sup := tb.taskOwner(t); sup != "" && slices.Contains(tb.leads, sup) {
 		return sup
+	}
+	if tb.todosV2 {
+		if origin := strings.TrimSpace(t.Origin); origin != "" && slices.Contains(tb.leads, origin) {
+			return origin
+		}
 	}
 	return ""
 }
 
 // state is listed task t's state in the tree (first match wins). Needs you follows the authoritative to-do projection
-// so supervisor-held cards, supervised failed starts, deferred can_wait decisions, user_check, and dismissed decisions
-// stay out of counts.needs_you and agree with GET /api/v1/todos counts.needs_you.
+// so supervisor-held cards, supervised failed starts, deferred can_wait decisions and dismissed decisions stay out of
+// counts.needs_you and agree with GET /api/v1/todos counts.needs_you. An open personal verification (user_check) is
+// in the projection's Needs you (reason verify), so here too; a quiet or carried one, kept out of Needs you below, is
+// review.
 func (tb *treeBuild) state(t listedTodo) string {
 	tr := tb.placed[t.ID]
 	v, hasView := tb.views[t.ID]

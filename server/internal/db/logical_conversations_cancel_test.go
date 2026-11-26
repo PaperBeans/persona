@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestLogicalConversationIgnoresPreparationFailuresAfterMapping(t *testing.T) {
+	d, _ := historyDB(t)
+	op := prepareLogicalSwitch(t, d)
+	ctx := t.Context()
+	rejectLatePreparation := func() {
+		t.Helper()
+		for _, outcome := range []string{"in_doubt", "rejected"} {
+			err := d.ResolveConversationPreparation(ctx, "root-machine", "root-chat", op.OperationID, outcome, "late node response")
+			if !errors.Is(err, ErrConversationEpoch) {
+				t.Fatalf("late preparation outcome %s: %v", outcome, err)
+			}
+		}
+	}
+	rejectLatePreparation()
+	if err := d.ActivateConversationSegment(ctx, "root-machine", "root-chat", op.OperationID, 1); err != nil {
+		t.Fatal(err)
+	}
+	rejectLatePreparation()
+	c, err := d.LogicalConversation(ctx, "root-machine", "root-chat")
+	if err != nil || c == nil || c.Epoch != 2 || c.Switch == nil || c.Switch.Phase != "active" {
+		t.Fatalf("late preparation changed the active switch: %+v, %v", c, err)
+	}
+}
+
 // A switch that never activated its target can be cancelled: its source stays active at the same epoch, the
 // prepared target is abandoned for closure, the outcome keeps its reason, and the conversation can switch again
 // (#15317).

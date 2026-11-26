@@ -22,7 +22,7 @@ func (s *Service) channelRoutes() {
 		s.handle(pattern, func(w http.ResponseWriter, r *http.Request) { fn(w, withRequestLang(r)) })
 	}
 	handle("GET /api/v1/channels", func(w http.ResponseWriter, r *http.Request) {
-		list, err := s.channelList(r.Context())
+		list, err := s.channelList(r.Context(), s.integrationsV2On(r.Context()))
 		if err != nil {
 			apierr.Write(w, http.StatusBadGateway, err)
 			return
@@ -46,7 +46,7 @@ func (s *Service) channelRoutes() {
 				apierr.Write(w, http.StatusForbidden, errors.New("this device can only read and answer"))
 				return
 			}
-			v, ok, err := s.channelView(r.Context(), r.PathValue("id"))
+			v, ok, err := s.channelView(r.Context(), r.PathValue("id"), s.integrationsV2On(r.Context()))
 			switch {
 			case err != nil:
 				apierr.Write(w, http.StatusBadGateway, err)
@@ -89,6 +89,10 @@ func (s *Service) channelRoutes() {
 			ThreadIdleHours: in.ThreadIdleHours,
 			Features:        in.Features,
 		}); err != nil {
+			if errors.Is(err, errChannelsUnread) {
+				apierr.Write(w, http.StatusServiceUnavailable, err)
+				return
+			}
 			var re *rpc.Error
 			if errors.As(err, &re) && re.Code == assistantwire.CodeNeedsTriageModel {
 				apierr.WriteCode(w, http.StatusConflict, re.Code, errors.New(re.Message))
@@ -186,15 +190,21 @@ func (s *Service) updateChannelFields(ctx context.Context, v channel.View, in ch
 	if v.Source != channel.SourcePlugin {
 		return errors.New(i18n.T(l, "assistant-channels.not_set_here", i18n.Args{"name": v.Name}))
 	}
+	c := &s.chans
+	c.mu.Lock()
+	s.loadChannelsLocked(ctx)
+	if !c.loaded {
+		c.mu.Unlock()
+		return errChannelsUnread
+	}
 	if enabled != nil {
+		c.mu.Unlock()
 		if err := s.appCall(ctx, AppChannels, ChannelsEnable, map[string]any{"channel": v.ID, "on": *enabled}, nil); err != nil {
 			return err
 		}
+		c.mu.Lock()
 	}
-	c := &s.chans
-	c.mu.Lock()
 	defer c.mu.Unlock()
-	s.loadChannelsLocked(ctx)
 	p := s.channelPrefLocked(v.ID)
 	if target != nil {
 		t := *target

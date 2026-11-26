@@ -216,7 +216,9 @@ function SpaceHome({ track, readOnly, onToggleSidebar }: { track: Track; readOnl
 
           {readOnly && <HealthReadOnlyData mid={mid} unavailable={error} />}
 
-          <SpaceMdCard slug={slug} title={track.title || slug} latest={saved} editable={!track.builtin && !readOnly} onEdit={() => setEditing(true)} />
+          {/* A built-in space (the Health archive) has no SPACE.md of its own: spaceTrack excludes it, so asking for one
+              is always a 404 (server/internal/assistant/track_space.go). Draw the card only for a track that can have one. */}
+          {!track.builtin && <SpaceMdCard slug={slug} title={track.title || slug} latest={saved} editable={!track.builtin && !readOnly} onEdit={() => setEditing(true)} />}
 
           <section className="mt-7 mb-4">
             <SectionTitle>{t("spaces.categories")}</SectionTitle>

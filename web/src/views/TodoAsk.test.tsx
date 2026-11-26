@@ -4,6 +4,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { t } from "../i18n";
+import { getQuotes, removeQuote, storeDraft, storedPageDraft, withQuoteBlock } from "../lib/drafts";
+import { registerComposer } from "../lib/links";
 import { ApiError } from "../lib/api";
 import { getState } from "../lib/store";
 import { boardSectionOf } from "../lib/task-board";
@@ -207,6 +210,54 @@ describe("a to-do's row", () => {
 });
 
 describe("a to-do's page", () => {
+  it("follows up in the origin composer with a removable task quote and the draft intact", async () => {
+    const origin = "direction";
+    const key = "assistant-computer/direction";
+    const ask = { verdict: "Please verify", asked_at: ASKED, summary: "The route is step-free." };
+    const task = todo({ origin, ask, supervision: { supervisor: "main", state: "user_check" } });
+    seed({ assistant: { machine_id: "assistant-computer", main: "main", conversations: [] } });
+    storeDraft(key, "My existing question");
+    setRoute(origin, "earlier-decision", ASKED);
+    act(() => root.render(<TodoAskPanel todo={task} />));
+    const action = () => [...host.querySelectorAll("button")].find((b) => b.textContent === t("assistant-taskpanel.follow_up"));
+    await act(async () => action()!.click());
+    expect(navigate).toHaveBeenCalledWith({ name: "persona", sid: origin });
+    const focus = vi.fn();
+    const unregister = registerComposer({ key, focus, send: vi.fn() });
+    expect(focus).toHaveBeenCalledOnce();
+    unregister();
+    const quotes = getQuotes(key).list;
+    expect(quotes).toHaveLength(1);
+    expect(quotes[0]).toMatchObject({ task: { id: task.id, title: task.title }, text: ask.summary });
+    expect(withQuoteBlock(quotes, storedPageDraft(key))).toContain(task.id);
+    removeQuote(key, quotes[0].id!);
+    expect(getQuotes(key).list).toEqual([]);
+    expect(storedPageDraft(key)).toBe("My existing question");
+    expect(getFeedState().routes[origin]).toBeUndefined();
+    expect(accepts()).toEqual([]);
+    expect(host.querySelector("[data-ask-done]")).toBeNull();
+    act(() => root.render(<TodoAskPanel todo={{ ...task, origin: undefined }} />));
+    expect(action()).toBeUndefined();
+    act(() => root.render(<TodoAskPanel todo={{ ...task, supervision: undefined }} />));
+    expect(action()).toBeUndefined();
+    storeDraft(key, "");
+  });
+
+  it("shows the verification summary and direct deliverable, with an empty fallback on older hubs", () => {
+    const summary = "Both routes have step-free access.";
+    const link = "https://docs.example.com/routes";
+    const ask = { verdict: "Please verify the result", asked_at: ASKED };
+    act(() => root.render(<TodoAskPanel todo={todo({ ask: { ...ask, summary, link } })} />));
+    expect(host.textContent).toContain(summary);
+    expect(host.querySelector("a")?.href).toBe(link);
+    for (const legacy of [ask, { ...ask, link: location.origin + "/s/node/worker" }]) {
+      act(() => root.render(<TodoAskPanel todo={todo({ ask: legacy })} />));
+      expect(host.textContent).toContain(ask.verdict);
+      expect(host.textContent).not.toContain(summary);
+      expect(host.querySelector("a")).toBeNull();
+    }
+  });
+
   it("lists parked work outside Done and counts it under the badge's name", async () => {
     await drawList([todo({
       seen_at: new Date(Date.now() + 1000).toISOString(),

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,7 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		TranscriptionMode      json.RawMessage `json:"meeting_transcription_default"`
 		Glossary               json.RawMessage `json:"meeting_glossary"`
 		TranscriptionExtension json.RawMessage `json:"meeting_transcription_extension"`
+		TodosV2QuietHoursPatch json.RawMessage `json:"todos_v2_quiet_hours"`
 	}
 	var raw json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
@@ -68,7 +70,11 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-schedule.bad_permission_mode", i18n.Args{"mode": strconv.Quote(in.DefaultPermissionMode)}))
 		return
 	}
-	if (in.Permission != nil || in.WorkGuide != nil || in.TodosV2 != nil || in.IntegrationsV2 != nil) && !s.explicitSettingsTarget(w, r) {
+	if (in.Permission != nil || in.WorkGuide != nil || in.TodosV2 != nil ||
+		in.TodosV2AutoSeen != "" || in.TodosV2PendingReviewSLAHours != nil ||
+		in.TodosV2CanWaitSLAHours != nil || in.TodosV2FoldChildren != nil ||
+		in.TodosV2QuietHoursPatch != nil || in.TodosV2DigestWindowMinutes != nil ||
+		in.IntegrationsV2 != nil) && !s.explicitSettingsTarget(w, r) {
 		return
 	}
 	if in.Readonly != nil {
@@ -129,9 +135,15 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if d := in.RecordingDays; d != nil && (*d < minRecordingDays || *d > maxRecordingDays) {
-		apierr.Write(w, http.StatusBadRequest, errors.New("recording_days must be 1–365"))
+	if d := in.RecordingDays; d != nil && !recordingDaysValid(d, true) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("recording_days must be 1–3650"))
 		return
+	}
+	for _, d := range []*int{in.RecordingAudioDays, in.RecordingTextDays} {
+		if d != nil && !recordingDaysValid(d, false) {
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_recording_days"))
+			return
+		}
 	}
 	var conversationTagFilters []string
 	tagFiltersWritten := len(in.ConversationTagFilters) > 0
@@ -185,6 +197,41 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if g := in.DeliveryGate; g != nil && !slices.Contains(deliveryGates, *g) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("delivery_gate must be off, merged or live"))
+		return
+	}
+	if in.AutoSupervisionMode != "" && !slices.Contains(supervisionModes, in.AutoSupervisionMode) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("auto_supervision_mode must be all, outcomes or off"))
+		return
+	}
+	if in.TodosV2AutoSeen != "" && !slices.Contains(todosV2AutoSeenModes, in.TodosV2AutoSeen) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_auto_seen must be off, subtasks or all_autonomous"))
+		return
+	}
+	if h := in.TodosV2PendingReviewSLAHours; h != nil && !slices.Contains(todosV2PendingReviewSLAOptions, *h) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_pending_review_sla_hours must be 0, 12, 24 or 48"))
+		return
+	}
+	if h := in.TodosV2CanWaitSLAHours; h != nil && !slices.Contains(todosV2CanWaitSLAOptions, *h) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_can_wait_sla_hours must be 0, 24, 48 or 72"))
+		return
+	}
+	var todosV2QuietHours string
+	if in.TodosV2QuietHoursPatch != nil {
+		var qh *string
+		if err := json.Unmarshal(in.TodosV2QuietHoursPatch, &qh); err != nil || qh == nil {
+			apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_quiet_hours must be empty or HH:MM-HH:MM (24-hour range with distinct start and end)"))
+			return
+		}
+		todosV2QuietHours = strings.TrimSpace(*qh)
+		if todosV2QuietHours != "" {
+			if _, ok := parseTodosV2QuietHours(todosV2QuietHours); !ok {
+				apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_quiet_hours must be empty or HH:MM-HH:MM (24-hour range with distinct start and end)"))
+				return
+			}
+		}
+	}
+	if m := in.TodosV2DigestWindowMinutes; m != nil && !slices.Contains(todosV2DigestWindowOptions, *m) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("todos_v2_digest_window_minutes must be 0, 30, 60 or 120"))
 		return
 	}
 	if code := s.readMeetingTranscriptionSettings(&in.Settings, in.TranscriptionMode, in.Glossary, in.TranscriptionExtension); code != "" {
@@ -337,8 +384,14 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.Readonly != nil {
 			v.ReadonlyMode = in.ReadonlyMode
 		}
-		if in.RecordingDays != nil {
-			v.RecordingDays = in.RecordingDays
+		if in.RecordingDays != nil { // the old name: a client from before #16412 sets the audio's days
+			v.RecordingAudioDays = in.RecordingDays
+		}
+		if in.RecordingAudioDays != nil {
+			v.RecordingAudioDays = in.RecordingAudioDays
+		}
+		if in.RecordingTextDays != nil {
+			v.RecordingTextDays = in.RecordingTextDays
 		}
 		if in.MinutesDays != nil {
 			v.MinutesDays = in.MinutesDays
@@ -364,6 +417,24 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.TodosV2 != nil {
 			v.TodosV2 = in.TodosV2
+		}
+		if in.TodosV2AutoSeen != "" {
+			v.TodosV2AutoSeen = in.TodosV2AutoSeen
+		}
+		if in.TodosV2PendingReviewSLAHours != nil {
+			v.TodosV2PendingReviewSLAHours = in.TodosV2PendingReviewSLAHours
+		}
+		if in.TodosV2CanWaitSLAHours != nil {
+			v.TodosV2CanWaitSLAHours = in.TodosV2CanWaitSLAHours
+		}
+		if in.TodosV2FoldChildren != nil {
+			v.TodosV2FoldChildren = in.TodosV2FoldChildren
+		}
+		if in.TodosV2QuietHoursPatch != nil {
+			v.TodosV2QuietHours = todosV2QuietHours
+		}
+		if in.TodosV2DigestWindowMinutes != nil {
+			v.TodosV2DigestWindowMinutes = in.TodosV2DigestWindowMinutes
 		}
 		if in.IntegrationsV2 != nil {
 			v.IntegrationsV2 = in.IntegrationsV2
@@ -460,8 +531,16 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.SupervisionBatchMinutes != nil {
 			v.SupervisionBatchMinutes = in.SupervisionBatchMinutes
 		}
-		if in.AutoSupervisionMessages != nil {
+		if in.AutoSupervisionMode != "" {
+			// The mode wins over the older switch in the same body, and keeps it in step for older readers.
+			on := in.AutoSupervisionMode != supervisionModeOff
+			v.AutoSupervisionMode, v.AutoSupervisionMessages = in.AutoSupervisionMode, &on
+		} else if in.AutoSupervisionMessages != nil {
 			v.AutoSupervisionMessages = in.AutoSupervisionMessages
+			v.AutoSupervisionMode = supervisionModeOff
+			if *in.AutoSupervisionMessages {
+				v.AutoSupervisionMode = supervisionModeAll
+			}
 		}
 		if in.DefaultPermissionMode != "" {
 			v.DefaultPermissionMode = in.DefaultPermissionMode
@@ -514,7 +593,11 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	if in.SupervisionBatchMinutes != nil && supervisionBatchMinutesOf(s.settings(ctx)) != supervisionBatchMinutesOf(before) {
 		s.rescheduleSupervision()
 	}
-	if in.TodosV2 != nil && s.settings(ctx).todosV2On() != before.todosV2On() {
+	afterTodosV2 := s.settings(ctx)
+	if (in.TodosV2 != nil && afterTodosV2.todosV2On() != before.todosV2On()) ||
+		(afterTodosV2.todosV2On() && (afterTodosV2.todosV2PendingReviewSLAHours() != before.todosV2PendingReviewSLAHours() ||
+			afterTodosV2.todosV2CanWaitSLAHours() != before.todosV2CanWaitSLAHours() ||
+			afterTodosV2.todosV2FoldChildrenOn() != before.todosV2FoldChildrenOn())) {
 		s.todosPushSoon()
 	}
 	if in.MeetingTranscriptionExtension != nil {
@@ -526,9 +609,13 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Main != "" && in.Main != "-" && in.Main != before.Main {
 		if before.Main != "" {
-			s.handOverMainTasks(context.WithoutCancel(ctx), before.Main, in.Main) // its open tasks follow the main conversation (main_handover.go)
+			s.handOverMainTasks(context.WithoutCancel(ctx), before.Main, in.Main)  // its open tasks follow the main conversation (main_handover.go)
+			s.handOverMainAlways(context.WithoutCancel(ctx), before.Main, in.Main) // its Always-allow grants follow once (#16158)
 		} else {
 			s.handOverFormerMainTasks(context.WithoutCancel(ctx)) // after newMain / clearMain, old main sits in Former
+			if len(before.Former) > 0 && before.Former[0].SessionID != "" && before.Former[0].SessionID != in.Main {
+				s.handOverMainAlways(context.WithoutCancel(ctx), before.Former[0].SessionID, in.Main)
+			}
 		}
 	}
 	apierr.WriteJSON(w, s.view(ctx, false))

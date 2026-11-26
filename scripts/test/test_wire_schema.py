@@ -133,8 +133,16 @@ def agent_views():
             yield "AgentView", f"{where}.expected.views[{i}] {v['id']}", v["view"]
 
 
+def todo_waits():
+    """(definition, sample) of every waiting reason todo-wait expects (#16168)."""
+    for where, c in domain_cases("todo-wait"):
+        wait = c["expected"].get("wait")
+        if wait is not None:
+            yield "TodoWait", f"{where}.expected.wait", wait
+
+
 SAMPLES = {"agent-view.schema.json": agent_views, "counts.schema.json": counts_views, "ids.schema.json": wire_ids, "recents.schema.json": recent_setups,
-           "todo-view.schema.json": todo_views}
+           "todo-view.schema.json": todo_views, "todo-wait.schema.json": todo_waits}
 
 
 def walk(doc, schema, value, at, reached):

@@ -30,6 +30,7 @@
   "wrong_offset": "node 确认的更新传输位置不正确",
   "install_update_failed": "安装 node 更新失败：{err}",
   "not_confirmed": "新 node 未在两分钟内重新上线并确认版本；本机恢复机制会在确认超时后回滚，请查看电脑状态后重试",
+  "drain_timeout": "node 等待空闲重启超时，仍未完成交接；请检查电脑上正在进行的任务后重试",
   "hub_changed": "hub 版本已变化，之前的 node 更新任务已停止；请重新更新",
   "rolled_back": "node 更新后仍运行旧版，可能已回滚；请检查电脑状态后手动重试",
   "node_temporary": "当前连接使用临时 node，请先安装常驻 node 服务",

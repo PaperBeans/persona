@@ -3,19 +3,22 @@ import { t } from "../i18n";
 import { api } from "./api";
 import { workingUpdateTitle, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus } from "./hub-update";
 
-export const checkHubUpdate = () => api<HubUpdateStatus>("/hub/update/check", { method: "POST" });
+export const checkHubUpdate = (preview = false) => api<HubUpdateStatus>("/hub/update/check", { method: "POST", json: preview ? { preview: true } : undefined });
+export const startLatestHubUpdate = () => api<HubUpdateStatus>("/hub/update", { method: "POST", json: { target: "latest" } });
+export const cancelHubUpdate = () => api<HubUpdateStatus>("/hub/update/cancel", { method: "POST" });
 export const hubUpdateHistory = () => api<{ history: HubUpdateRecord[] | null }>("/hub/update/history").then(r => r.history ?? []);
 export const hubUpdateBackups = () => api<{ backups: HubUpdateBackup[] }>("/hub/update/backups").then(r => r.backups);
 export const applyHubUpdateBackup = (id: string) => api<HubUpdateStatus>(`/hub/update/backups/${encodeURIComponent(id)}/apply`, { method: "POST" });
 
 /** An update is under way (the progress row, no buttons). */
-export function updateWorking(s: HubUpdateStatus): boolean {
-  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "installing", "restarting", "confirming"].includes(s.state);
+export function updateWorking(s: Pick<HubUpdateStatus, "state">): boolean {
+  return ["resolving", "building", "applying_backup", "backing_up", "downloading", "waiting_idle", "installing", "restarting", "confirming"].includes(s.state);
 }
 
 /** A state that ends an update: the history has a new line. */
 export function updateFinished(prev: string | undefined, next: string): boolean {
-  return prev !== next && ["updated", "rolled_back", "failed"].includes(next);
+  return prev !== next && (["updated", "rolled_back", "failed"].includes(next) ||
+    (next === "idle" && prev !== undefined && updateWorking({ state: prev })));
 }
 
 export function updateStateTitle(s: HubUpdateStatus): string {
@@ -44,10 +47,12 @@ export function channelTitle(channel: string): string {
 }
 
 export function recordTitle(result: string): string {
+  if (result === "cancelled") return t("settings-hubsettings.cancelled");
   return t(result === "updated" ? "lib-hub-update.result_updated" : result === "rolled_back" ? "lib-hub-update.result_rolled_back" : result === "held" ? "lib-hub-update.result_held" : "lib-hub-update.result_failed");
 }
 
-export function recordTone(result: string): "green" | "orange" | "red" {
+export function recordTone(result: string): "green" | "orange" | "red" | "neutral" {
+  if (result === "cancelled") return "neutral";
   return result === "updated" ? "green" : result === "rolled_back" || result === "held" ? "orange" : "red";
 }
 

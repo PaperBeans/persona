@@ -1,6 +1,8 @@
 package node
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -85,7 +87,7 @@ func larkLoneGateCall(cmd string, gates []proto.CommandGate) bool {
 			}
 		}
 		if i > 0 {
-			if !larkFilters[words[0]] || words[0] == "cd" {
+			if !isLarkFilter(words) || words[0] == "cd" {
 				return false
 			}
 			continue
@@ -529,7 +531,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			v.other = true // it edits text and runs none of it, whatever its pattern names
 		case name == "for" || name == "done" || name == "fi":
 			v.other = true // a loop's words are its variable's values: run only where a command uses $var (dynamicCommandName)
-		case larkFilters[name] && len(env) == 0:
+		case isLarkFilter(words) && len(env) == 0:
 			seg.filter = true
 		case name == "tee":
 			v.other, seg.filter, seg.writes = true, true, true
@@ -551,7 +553,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			}
 			// A program whose code the command does not show may run lark-cli; inline code that runs nothing
 			// else is read by its own words above.
-			seg.opaque = indirectLarkCommand(name) && !selfContainedCode(words) && !inert
+			seg.opaque = (indirectLarkCommand(name) || sortExecutesProgram(words)) && !selfContainedCode(words) && !inert
 			sequential = sequential && name != "trap" // its code runs later
 		}
 	}
@@ -596,7 +598,7 @@ func larkSubstitutionFilter(cmd string, inlineCode bool) bool {
 			return false
 		}
 		words, ok := unwrapCommand(s.Words)
-		if !ok || len(words) == 0 || len(words) != len(s.Words) || !larkFilters[words[0]] && (!inlineCode || !selfContainedCode(words)) {
+		if !ok || len(words) == 0 || len(words) != len(s.Words) || !isLarkFilter(words) && (!inlineCode || !selfContainedCode(words)) {
 			return false
 		}
 	}
@@ -859,7 +861,7 @@ func larkVariableScopeStable(cmd string, gates []proto.CommandGate) bool {
 			}
 			if !allowed {
 				allowed = map[string]bool{"cat": true, "tee": true, "ls": true, "git": true, "go": true, "pwd": true, "sleep": true, "false": true, ":": true}[name] ||
-					larkFilters[name] && name != "printf" && name != "cd"
+					isLarkFilter(suffix) && name != "printf" && name != "cd"
 			}
 			if !allowed {
 				stable = false
@@ -1047,7 +1049,7 @@ func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, c
 	if len(rest) > 0 && (strings.HasPrefix(rest[0], "{") || strings.HasPrefix(rest[0], "[")) {
 		c.Body, rest, hasData = rest[0], rest[1:], true
 	} else if len(rest) > 0 && strings.HasPrefix(rest[0], "@") {
-		c.Body, c.relFile, rest = readBodyFile(rest[0][1:], cwd), !filepath.IsAbs(rest[0][1:]), rest[1:]
+		c.Body, c.fileBody, c.relFile, rest = readBodyFile(rest[0][1:], cwd), true, !filepath.IsAbs(rest[0][1:]), rest[1:]
 		hasData = true
 	}
 	for i := 0; i < len(rest); i++ {
@@ -1101,12 +1103,17 @@ func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, c
 				if p == "-" {
 					query = val
 					c.queryUnknown = true
+				} else if p == "" {
+					return larkCall{}, "读不到 --url-query 文件 ：empty path", false
+				} else if p == os.DevNull {
+					// Curl reads os.DevNull as an empty file; skip opening the device node.
 				} else {
 					relative = !filepath.IsAbs(p)
 					if relative {
 						p = filepath.Join(cwd, p)
 					}
-					b, err := os.ReadFile(p)
+					p = filepath.Clean(p)
+					b, err := readSafeRegularBodyFile(p)
 					if err != nil {
 						return larkCall{}, "读不到 --url-query 文件 " + p + "：" + err.Error(), false
 					}
@@ -1141,6 +1148,10 @@ func parseGateCall(g proto.CommandGate, args []string, vars map[string]string, c
 			queryFragment = hasFragment
 		case "-d", "--data", "--data-raw", "--data-urlencode":
 			hasData = true
+			if (name == "-d" || name == "--data") && strings.HasPrefix(val, "@") ||
+				name == "--data-urlencode" && hasCurlDataFile(val) {
+				c.fileBody = true
+			}
 			if c.Body == "" {
 				c.Body = val
 			}
@@ -1199,11 +1210,273 @@ func gateCurlQueryEscape(s string) string {
 	return out.String()
 }
 
+const maxBodyFileBytes = 1 << 20
+
+// hasCurlDataFile reports whether a curl --data-urlencode value uses @file or name@file form.
+func hasCurlDataFile(val string) bool {
+	before, _, ok := strings.Cut(val, "@")
+	return ok && !strings.Contains(before, "=")
+}
+
+// isLarkFilter reports whether words invokes a pure output-only filter from larkFilters, rejecting
+// flags that write files, execute programs, or mutate system state (#8413).
+func isLarkFilter(words []string) bool {
+	if len(words) == 0 || !larkFilters[words[0]] {
+		return false
+	}
+	return isSafeFilterInvocation(words[0], words[1:])
+}
+
+func isSafeFilterInvocation(base string, args []string) bool {
+	switch base {
+	case "sort":
+		writesFile, runsProgram := inspectSortArgs(args)
+		return !writesFile && !runsProgram
+	case "date":
+		return safeDateArgs(args)
+	case "uniq":
+		return safeUniqArgs(args)
+	default:
+		return true
+	}
+}
+
+func sortExecutesProgram(words []string) bool {
+	if len(words) == 0 || filepath.Base(words[0]) != "sort" {
+		return false
+	}
+	_, runsProgram := inspectSortArgs(words[1:])
+	return runsProgram
+}
+
+func isLongFlagPrefix(flag, full string, minPrefix int) bool {
+	name, _, _ := strings.Cut(flag, "=")
+	return len(name) >= minPrefix && strings.HasPrefix(full, name)
+}
+
+func inspectSortArgs(args []string) (writesFile, runsProgram bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if strings.HasPrefix(arg, "--") {
+			if isLongFlagPrefix(arg, "--output", 3) {
+				writesFile = true
+				if !strings.Contains(arg, "=") {
+					i++
+				}
+				continue
+			}
+			if isLongFlagPrefix(arg, "--compress-program", 4) {
+				runsProgram = true
+				if !strings.Contains(arg, "=") {
+					i++
+				}
+				continue
+			}
+			if !strings.Contains(arg, "=") {
+				switch arg {
+				case "--key", "--field-separator", "--temporary-directory", "--buffer-size",
+					"--batch-size", "--parallel", "--random-source", "--sort", "--files0-from":
+					i++
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+			for j := 1; j < len(arg); j++ {
+				switch arg[j] {
+				case 'o':
+					writesFile = true
+					if j+1 == len(arg) {
+						i++
+					}
+					j = len(arg)
+				case 'k', 't', 'T', 'S':
+					if j+1 == len(arg) {
+						i++
+					}
+					j = len(arg)
+				}
+			}
+		}
+	}
+	return writesFile, runsProgram
+}
+
+func safeDateArgs(args []string) bool {
+	afterEnd := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !afterEnd && arg == "--" {
+			afterEnd = true
+			continue
+		}
+		if !afterEnd && strings.HasPrefix(arg, "--") {
+			if isLongFlagPrefix(arg, "--set", 3) {
+				return false
+			}
+			if !strings.Contains(arg, "=") {
+				switch arg {
+				case "--date", "--file", "--reference", "--rfc-3339":
+					i++
+				}
+			}
+			continue
+		}
+		if !afterEnd && strings.HasPrefix(arg, "-") && len(arg) > 1 {
+			for j := 1; j < len(arg); j++ {
+				switch arg[j] {
+				case 's':
+					return false
+				case 'd', 'f', 'r':
+					if j+1 == len(arg) {
+						i++
+					}
+					j = len(arg)
+				case 'I':
+					// GNU date -I accepts an optional attached argument (such as -Iseconds);
+					// it never consumes the next word, and characters in that value are not flags.
+					j = len(arg)
+				}
+			}
+			continue
+		}
+		// GNU and BSD date treat any positional operand not starting with '+' as a clock-setting timestamp.
+		if !strings.HasPrefix(arg, "+") {
+			return false
+		}
+	}
+	return true
+}
+
+// safeUniqArgs rejects uniq invocations with a second positional operand, which uniq writes to as its output file.
+func safeUniqArgs(args []string) bool {
+	operands := 0
+	afterEnd := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !afterEnd && arg == "--" {
+			afterEnd = true
+			continue
+		}
+		if !afterEnd && strings.HasPrefix(arg, "--") {
+			if !strings.Contains(arg, "=") {
+				switch arg {
+				case "--skip-fields", "--skip-chars", "--check-chars":
+					i++
+				}
+			}
+			continue
+		}
+		if !afterEnd && strings.HasPrefix(arg, "-") && len(arg) > 1 {
+			for j := 1; j < len(arg); j++ {
+				switch arg[j] {
+				case 'f', 's', 'w':
+					if j+1 == len(arg) {
+						i++
+					}
+					j = len(arg)
+				}
+			}
+			continue
+		}
+		operands++
+		if operands > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func isVirtualFSPath(p string) bool {
+	clean := filepath.ToSlash(filepath.Clean(p))
+	for _, root := range []string{"/proc", "/dev", "/sys"} {
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func readSafeRegularBodyFile(p string) ([]byte, error) {
+	if isVirtualFSPath(p) {
+		return nil, errors.New("virtual filesystem path")
+	}
+	base := filepath.Base(p)
+	if base == "" || base == "." || base == ".." || base == string(filepath.Separator) {
+		return nil, errors.New("not a regular file")
+	}
+	resolvedDir, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return nil, err
+	}
+	if isVirtualFSPath(resolvedDir) || isVirtualFSPath(filepath.Join(resolvedDir, base)) {
+		return nil, errors.New("virtual filesystem path")
+	}
+	root, err := os.OpenRoot(resolvedDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	// Confirm the pinned root inode still matches a canonical non-virtual directory after open.
+	afterDir, err := filepath.EvalSymlinks(resolvedDir)
+	if err != nil || isVirtualFSPath(afterDir) {
+		return nil, errors.New("virtual filesystem path")
+	}
+	afterInfo, err := os.Lstat(afterDir)
+	if err != nil {
+		return nil, err
+	}
+	rootInfo, err := root.Stat(".")
+	if err != nil || !os.SameFile(afterInfo, rootInfo) {
+		return nil, errors.New("parent directory changed during open")
+	}
+	st, err := root.Lstat(base)
+	if err != nil {
+		return nil, err
+	}
+	if st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() || dataless(st) {
+		return nil, errors.New("not a regular file")
+	}
+	if st.Size() > maxBodyFileBytes {
+		return nil, errors.New("file too large")
+	}
+	f, err := openKnowledgeFile(root, base)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fst, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fst.Mode().IsRegular() || !os.SameFile(st, fst) {
+		return nil, errors.New("not a regular file")
+	}
+	if fst.Size() > maxBodyFileBytes {
+		return nil, errors.New("file too large")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxBodyFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBodyFileBytes {
+		return nil, errors.New("file too large")
+	}
+	return b, nil
+}
+
 func readBodyFile(p, cwd string) string {
+	if p == "" || p == "-" {
+		return "（读不到 " + p + "）"
+	}
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(cwd, p)
 	}
-	b, err := os.ReadFile(p)
+	p = filepath.Clean(p)
+	b, err := readSafeRegularBodyFile(p)
 	if err != nil {
 		return "（读不到 " + p + "）"
 	}

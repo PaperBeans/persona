@@ -176,7 +176,7 @@ describe("what the pill says", () => {
   it("the list's name for the model once read, a short id before; the launcher, engine, effort and speed", () => {
     expect(pillView(session(), { list: claudeList })).toEqual({ engine: "claude", provider: "gateway", model: "Opus 5.5", effort: "high", loading: false, failed: false });
     expect(pillView(session(), {}).model).toBe("opus 5.5");
-    expect(pillView(codex({ service_tier: "priority" }), {})).toMatchObject({ engine: "codex", provider: "cx", model: "5.5", fast: true });
+    expect(pillView(codex({ service_tier: "priority" }), {})).toMatchObject({ engine: "codex", provider: "cx", model: "GPT-5.5", fast: true });
     expect(pillView(session({ launcher: undefined, agent: undefined }), {})).toMatchObject({ engine: "claude", provider: "claude" });
   });
 
@@ -211,7 +211,7 @@ describe("what the pill says", () => {
     expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("sonnet 5.5 1M");
     expect(modelLabel("claude-opus-5-5-20260101")).toBe("opus 5.5");
     expect(modelLabel("claude-haiku-5-5")).toBe("haiku 5.5");
-    expect(modelLabel("gpt-5.5-codex")).toBe("5.5 Codex");
+    expect(modelLabel("gpt-5.5-codex")).toBe("GPT-5.5 Codex");
     expect(modelLabel("vendor/model-x")).toBe("vendor/model-x");
     expect(modelLabel("route-a/gemini-4-carbon")).toBe("route-a/gemini-4-carbon");
     expect(modelLabel("acme/gpt-5-pro")).toBe("acme/gpt-5-pro");

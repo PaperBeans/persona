@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { initI18n } from "../i18n";
 import { onDraftEvent, type DraftEvent } from "../lib/drafts";
-import { PINNED_USAGE_ACCOUNTS_KEY, remainingTone, resetPinnedUsageAccounts, timelinePosition, type UsageAccount } from "../lib/usage-windows";
+import { timelinePosition } from "../lib/usage-popover";
+import { PINNED_USAGE_ACCOUNTS_KEY, remainingTone, resetPinnedUsageAccounts, usageWindowPinId, type UsageAccount } from "../lib/usage-windows";
 import { UsageBars } from "./UsageBars";
 import { compactResetText, computeUsagePopoverLayout, packedColumnHeight, POPOVER_HYSTERESIS_PX, providerHue, UsagePopover, visibleTimelineTickHours } from "./UsagePopover";
 import { unconnectedUsageProviders } from "./UsageUnconnected";
@@ -596,26 +597,233 @@ describe("user-selected pinned usage accounts (#12418)", () => {
     expect(strip).not.toContain("Antigravity");
 
     const popover = renderToStaticMarkup(<UsagePopover accounts={sampleAccounts()} now={NOW} />);
-    expect(popover).toContain("固定账号暂不可用");
+    expect(popover).toContain("固定项暂不可用");
     expect(popover).toContain("恢复默认");
   });
 
+  it("pins individual usage windows such as agy gemini 7d, preserves multi-window order, falls back when a window disappears, and resets", async () => {
+    const agyAccount = (): UsageAccount => ({
+      id: "agy",
+      provider: "agy",
+      name: "Antigravity",
+      sampled_at: iso(-12_000),
+      local: true,
+      machines: ["MacBook"],
+      windows: [
+        { label: "5h", window_minutes: 300, used_percent: 88, resets_at: iso(3 * H), model: "Gemini Models" },
+        { label: "7d", window_minutes: 10080, used_percent: 25, resets_at: iso(2 * 24 * H), model: "Gemini Models" },
+        { label: "7d", window_minutes: 10080, used_percent: 12, resets_at: iso(3 * 24 * H), model: "Claude and GPT models" },
+      ],
+    });
+    const accountsWithAgy = (): UsageAccount[] => [
+      account("codex", 85, 30, { provider: "codex", name: "Codex Pro" }),
+      agyAccount(),
+      balanceAccount("ds", "12.34"),
+    ];
+    const agy = agyAccount();
+    const gemini7dPin = usageWindowPinId("agy", agy.windows[1]);
+    const codex7dPin = usageWindowPinId("codex", account("codex", 85, 30).windows[1]);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsageBars accounts={accountsWithAgy()} now={NOW} />));
+      const stripBtn = () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!;
+
+      // Open popover: every UsageWindow row has a pin button alongside account pin buttons
+      await act(async () => stripBtn().click());
+      await vi.waitFor(() => expect(document.querySelector(`[data-usage-pin-window="${gemini7dPin}"]`)).not.toBeNull());
+      expect(document.querySelectorAll("[data-usage-pin]")).toHaveLength(3);
+      expect(document.querySelectorAll("[data-usage-pin-window]")).toHaveLength(5);
+      expect(document.querySelector(`[data-usage-pin-window="${gemini7dPin}"]`)?.getAttribute("aria-pressed")).toBe("false");
+
+      // Pin Antigravity Gemini Models 7d (25% used -> 75% remaining): collapsed strip renders 75% remaining bar with account+model+7d, NOT 12% tightest
+      await act(async () => document.querySelector<HTMLButtonElement>(`[data-usage-pin-window="${gemini7dPin}"]`)!.click());
+      expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBe(JSON.stringify([gemini7dPin]));
+      expect(document.querySelector(`[data-usage-pin-window="${gemini7dPin}"]`)?.getAttribute("aria-pressed")).toBe("true");
+      expect(document.querySelector("[data-usage-pinned-bar]")?.textContent).toContain("侧栏已固定 1 项");
+      expect(stripBtn().querySelectorAll('[role="progressbar"]')).toHaveLength(1);
+      expect(stripBtn().textContent).toContain("Antigravity · Gemini Models");
+      expect(stripBtn().textContent).toContain("7d");
+      expect(stripBtn().textContent).toContain("剩 75%");
+      expect(stripBtn().textContent).not.toContain("12%");
+      expect(stripBtn().querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("75");
+      expect(stripBtn().querySelector('[role="progressbar"]')?.getAttribute("aria-label")).toContain("Antigravity · Gemini Models 7d");
+      expect(stripBtn().querySelector('[role="progressbar"]')?.getAttribute("aria-label")).toContain("剩余 75%");
+      expect(stripBtn().querySelector(`[data-usage-window="${gemini7dPin}"]`)?.getAttribute("title")).toContain("MacBook");
+
+      // Also pin DeepSeek balance and Codex Pro 7d (30% used -> 70% remaining): exact pinned order is preserved
+      await act(async () => document.querySelector<HTMLButtonElement>('[data-usage-pin="ds"]')!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>(`[data-usage-pin-window="${codex7dPin}"]`)!.click());
+      expect(document.querySelector("[data-usage-pinned-bar]")?.textContent).toContain("侧栏已固定 3 项");
+      const stripText = stripBtn().textContent ?? "";
+      expect(stripText.indexOf("Antigravity · Gemini Models")).toBeLessThan(stripText.indexOf("CNY 12.34"));
+      expect(stripText.indexOf("CNY 12.34")).toBeLessThan(stripText.indexOf("Codex Pro"));
+      expect(stripBtn().querySelectorAll('[role="progressbar"]')).toHaveLength(2);
+      expect(stripBtn().textContent).toContain("剩 70%");
+      expect(stripBtn().textContent).not.toContain("15%");
+
+      // If Gemini Models 7d disappears from live data, surviving pins stay rendered; popover counts 2 live items
+      const withoutGemini7d: UsageAccount[] = [
+        account("codex", 85, 30, { provider: "codex", name: "Codex Pro" }),
+        { ...agyAccount(), windows: [agy.windows[0], agy.windows[2]] },
+        balanceAccount("ds", "12.34"),
+      ];
+      await act(async () => root.render(<UsageBars accounts={withoutGemini7d} now={NOW} />));
+      expect(stripBtn().textContent).not.toContain("Gemini Models");
+      expect(stripBtn().textContent).toContain("CNY 12.34");
+      expect(stripBtn().textContent).toContain("Codex Pro");
+      expect(document.querySelector("[data-usage-pinned-bar]")?.textContent).toContain("侧栏已固定 2 项");
+
+      // When only a missing window pin remains, strip falls back to automatic ranking and popover shows fallback notice.
+      // Automatic ranking reads each account as a whole: Antigravity has only model pools, so it shows the pool with the
+      // most headroom (Claude and GPT models, 88% left), not Gemini's exhausted 5h window (#15669).
+      await act(async () => document.querySelector<HTMLButtonElement>('[data-usage-pin="ds"]')!.click());
+      await act(async () => document.querySelector<HTMLButtonElement>(`[data-usage-pin-window="${codex7dPin}"]`)!.click());
+      expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBe(JSON.stringify([gemini7dPin]));
+      expect(document.querySelector("[data-usage-pinned-bar]")?.textContent).toContain("固定项暂不可用");
+      expect(stripBtn().textContent).toContain("Codex Pro剩 15%");
+      expect(stripBtn().textContent).toContain("Antigravity剩 88%");
+      expect(stripBtn().textContent).not.toContain("Gemini Models");
+
+      // Reset to automatic clears stored pins
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-reset-pins]")!.click());
+      expect(localStorage.getItem(PINNED_USAGE_ACCOUNTS_KEY)).toBeNull();
+      expect(document.querySelector("[data-usage-pinned-bar]")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("survives localStorage write failures using tab-local in-memory pin state", async () => {
+    localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, '["codex"]');
+    const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const removeSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      const live = sampleAccounts();
+      const agy7dPin = usageWindowPinId("agy", live[2].windows[1]);
+      await act(async () => root.render(<UsageBars accounts={live} now={NOW} />));
+      const stripBtn = () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!;
+      expect(stripBtn().textContent).toContain("Codex Pro");
+
+      await act(async () => stripBtn().click());
+      await vi.waitFor(() => expect(document.querySelector(`[data-usage-pin-window="${agy7dPin}"]`)).not.toBeNull());
+
+      // Pin agy 7d (20% used -> 80% remaining) despite setItem throwing: UI updates and stays updated across further toggles
+      await act(async () => document.querySelector<HTMLButtonElement>(`[data-usage-pin-window="${agy7dPin}"]`)!.click());
+      expect(stripBtn().textContent).toContain("Antigravity");
+      expect(stripBtn().textContent).toContain("剩 80%");
+
+      // Unpin codex: only agy 7d remains instead of reverting to stored '["codex"]'
+      await act(async () => document.querySelector<HTMLButtonElement>('[data-usage-pin="codex"]')!.click());
+      expect(stripBtn().textContent).not.toContain("Codex Pro");
+      expect(stripBtn().textContent).toContain("Antigravity");
+
+      // Reset works in memory even when removeItem throws
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-usage-reset-pins]")!.click());
+      expect(document.querySelector("[data-usage-pinned-bar]")).toBeNull();
+      expect(stripBtn().textContent).toContain("Codex Pro");
+      expect(stripBtn().textContent).toContain("Claude Max");
+    } finally {
+      setSpy.mockRestore();
+      removeSpy.mockRestore();
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("does not append extra unconnected rows once four or more bars are pinned", () => {
+    const live = [
+      account("codex", 85, 30, { provider: "codex", name: "Codex Pro" }),
+      account("claude", 60, 40, { provider: "claude", name: "Claude Max" }),
+    ];
+    localStorage.setItem(
+      PINNED_USAGE_ACCOUNTS_KEY,
+      JSON.stringify([
+        usageWindowPinId("codex", live[0].windows[0]),
+        usageWindowPinId("codex", live[0].windows[1]),
+        usageWindowPinId("claude", live[1].windows[0]),
+        usageWindowPinId("claude", live[1].windows[1]),
+      ]),
+    );
+    const strip = renderToStaticMarkup(<UsageBars accounts={live} unconnected={sampleUnconnected} now={NOW} />);
+    expect(strip.match(/role="progressbar"/g)).toHaveLength(4);
+    expect(strip).not.toContain("data-usage-unconnected");
+  });
+
   it.each([
-    ["en", "Pin Antigravity to sidebar", "Unpin Antigravity from sidebar", "Reset to automatic"],
-    ["zh-Hans", "将 Antigravity 固定到侧栏", "取消将 Antigravity 固定到侧栏", "恢复默认"],
-    ["ja", "Antigravity をサイドバーに固定", "Antigravity のサイドバー固定を解除", "自動表示に戻す"],
-  ])("localizes pin controls and reset action in %s", async (lang, pinLabel, unpinLabel, resetLabelText) => {
+    [
+      "en",
+      "Pin Antigravity to sidebar",
+      "Unpin Antigravity from sidebar",
+      "Pin Antigravity 7d to sidebar",
+      "Unpin Antigravity 7d from sidebar",
+      "Pin Antigravity 7d (Gemini Models) to sidebar",
+      "Unpin Antigravity 7d (Gemini Models) from sidebar",
+      "Pinned in sidebar: 2",
+      "Reset to automatic",
+    ],
+    [
+      "zh-Hans",
+      "将 Antigravity 固定到侧栏",
+      "取消将 Antigravity 固定到侧栏",
+      "将 Antigravity 7d 固定到侧栏",
+      "取消将 Antigravity 7d 固定到侧栏",
+      "将 Antigravity 7d（Gemini Models）固定到侧栏",
+      "取消将 Antigravity 7d（Gemini Models）固定到侧栏",
+      "侧栏已固定 2 项",
+      "恢复默认",
+    ],
+    [
+      "ja",
+      "Antigravity をサイドバーに固定",
+      "Antigravity のサイドバー固定を解除",
+      "Antigravity 7d をサイドバーに固定",
+      "Antigravity 7d のサイドバー固定を解除",
+      "Antigravity 7d（Gemini Models）をサイドバーに固定",
+      "Antigravity 7d（Gemini Models）のサイドバー固定を解除",
+      "サイドバーに 2 件を固定中",
+      "自動表示に戻す",
+    ],
+  ])("localizes account and window pin controls and reset action in %s", async (lang, pinLabel, unpinLabel, pinWinLabel, unpinWinLabel, pinModelLabel, unpinModelLabel, summaryText, resetLabelText) => {
     await initI18n(lang);
     try {
-      const live = [account("agy", 20, 30, { provider: "agy", name: "Antigravity" })];
+      const live: UsageAccount[] = [{
+        ...account("agy", 20, 30, { provider: "agy", name: "Antigravity" }),
+        windows: [
+          { label: "7d", window_minutes: 10080, used_percent: 30, resets_at: iso(2 * 24 * H) },
+          { label: "7d", window_minutes: 10080, used_percent: 25, resets_at: iso(2 * 24 * H), model: "Gemini Models" },
+        ],
+      }];
       const unpinned = renderToStaticMarkup(<UsagePopover accounts={live} now={NOW} />);
       expect(unpinned).toContain(`aria-label="${pinLabel}"`);
+      expect(unpinned).toContain(`aria-label="${pinWinLabel}"`);
+      expect(unpinned).toContain(`aria-label="${pinModelLabel}"`);
       expect(unpinned).not.toContain(resetLabelText);
 
-      localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, '["agy"]');
+      const planPin = usageWindowPinId("agy", live[0].windows[0]);
+      const modelPin = usageWindowPinId("agy", live[0].windows[1]);
+      localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, JSON.stringify(["agy", modelPin]));
       const pinned = renderToStaticMarkup(<UsagePopover accounts={live} now={NOW} />);
       expect(pinned).toContain(`aria-label="${unpinLabel}"`);
+      expect(pinned).toContain(`aria-label="${pinWinLabel}"`);
+      expect(pinned).toContain(`aria-label="${unpinModelLabel}"`);
+      expect(pinned).toContain(summaryText);
       expect(pinned).toContain(resetLabelText);
+
+      localStorage.setItem(PINNED_USAGE_ACCOUNTS_KEY, JSON.stringify([planPin]));
+      const planPinned = renderToStaticMarkup(<UsagePopover accounts={live} now={NOW} />);
+      expect(planPinned).toContain(`aria-label="${unpinWinLabel}"`);
     } finally {
       localStorage.removeItem(PINNED_USAGE_ACCOUNTS_KEY);
       await initI18n("zh-Hans");
@@ -951,7 +1159,7 @@ describe("provider cards and single unified reset timeline (V2)", () => {
     try {
       const host = document.createElement("div");
       host.innerHTML = renderToStaticMarkup(<UsagePopover accounts={[noticeOnly]} now={NOW} />);
-      expect(host.textContent).toContain("固定账号暂不可用");
+      expect(host.textContent).toContain("固定项暂不可用");
       const unpinBtn = host.querySelector('[data-usage-pin="cool-1"]');
       expect(unpinBtn).not.toBeNull();
       expect(unpinBtn?.getAttribute("aria-pressed")).toBe("true");

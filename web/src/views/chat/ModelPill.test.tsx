@@ -293,7 +293,7 @@ describe("an Agent's pill", () => {
     await open();
     expect(provider("gateway").name).toBe(pill()!.querySelector("[data-pill-target]")?.textContent);
     await show(agent({ launcher: "claude" }));
-    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("claude");
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("Claude Code");
     expect(pill()!.textContent).toContain("Opus 5.5");
     expect(pill()!.querySelector("[data-pill-effort]")?.textContent).toBe("High");
     expect(modes()).toEqual([]);
@@ -513,7 +513,7 @@ describe("an Agent's pill", () => {
     act(() => root.render(<AgentModelPill session={getSession(s.machine_id, "s1")!} />));
     await flush();
     expect(pill()!.getAttribute("data-model-pill")).toBe("pending");
-    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · Haiku 5.5 · claude · Low" }));
+    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · Haiku 5.5 · Claude Code · Low" }));
     // a refusal puts it back as it was, with the hub's words
     calls.length = 0;
     modesAnswer = () => json({ error: "这个启动器用的是另一个配置目录", code: "switch_config_dir" }, 409);

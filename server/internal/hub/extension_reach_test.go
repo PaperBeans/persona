@@ -514,6 +514,9 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}": "manager",
 		"POST /api/v1/assistant/workspace-naming/preview":              "manager",
 		"POST /api/v1/todos":                                           "manager", "PATCH /api/v1/todos/{id}": "manager",
+		// The paired bot is the owner's; the manager reads its public identity and bounds every handoff (bots_handoff.go).
+		"GET /api/v1/bots/feishu/identity":                  "manager",
+		"POST /api/v1/bots/feishu/handoffs":                 "manager",
 		"POST /api/v1/decisions":                            "manager",
 		"GET /api/v1/decisions/{id}":                        "manager",
 		"POST /api/v1/decisions/{id}/withdraw":              "manager",

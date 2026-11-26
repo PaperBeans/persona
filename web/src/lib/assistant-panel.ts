@@ -93,7 +93,7 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
     const claude = setup.provider === "claude";
     const e = listOf(setup.provider);
     const models = e.list ? e.list.models.map((m) => panelModel(m, engine, Boolean(o.starting))) : setup.model ? [{ id: setup.model, name: modelLabel(setup.model), efforts: [] }] : [];
-    providers.unshift({ id: setup.provider, name: setup.provider, engine, models: claude && !e.list ? null : models, ...(claude ? (e.list ? {} : { loading: true }) : { unavailable: t("chat-modelpill.provider_gone") }) });
+    providers.unshift({ id: setup.provider, name: providerTitle({ name: setup.provider }), engine, models: claude && !e.list ? null : models, ...(claude ? (e.list ? {} : { loading: true }) : { unavailable: t("chat-modelpill.provider_gone") }) });
   }
   // what can't run it, a Paseo provider among them: that provider is its engine, never "paseo" (#8142)
   for (const u of info?.unavailable ?? []) {

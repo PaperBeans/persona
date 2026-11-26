@@ -2,7 +2,8 @@
 // This controller owns manager routing, configuration drafts, authentication and mutation results;
 // extensions supply only their configuration fields and custom content (docs/extensions/extension-settings.md).
 import { OwnerMark } from "./OwnerMark";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { currentListViewKey, listViewCache, useListViewKey } from "../../lib/list-view-cache";
 import { enc, errorText, subscribeCredentialOwner } from "../../lib/api";
 import { OfflineState, useShownOffline } from "../ManagerParts";
 import { defaultManager, otherManager, pinManagerAt, useChosenManager } from "../../lib/manager-choice";
@@ -172,26 +173,47 @@ function StateDot({ extension }: { extension?: HubExtension | null }) {
 
 // ── the list ────────────────────────────────────────────
 
+type ExtensionListProps = { onOpen: (id: string) => void; onMarket: () => void; onMarkets: () => void; openBeside?: string | null };
+type ExtensionListView = { extensions: HubExtension[]; markets: boolean };
+const extensionViews = listViewCache<ExtensionListView>();
+
+function ExtensionList(props: ExtensionListProps) {
+  const viewKey = useListViewKey();
+  return <ScopedExtensionList key={viewKey} viewKey={viewKey} {...props} />;
+}
+
 /** `openBeside`: the extension open beside the list (Settings' two columns): its row is marked current, and every row
  *  puts its state under its name (with a warning, when it has one, in place of the description), so the narrow column
  *  shows the name whole. */
-function ExtensionList({ onOpen, onMarket, onMarkets, openBeside }: { onOpen: (id: string) => void; onMarket: () => void; onMarkets: () => void; openBeside?: string | null }) {
+function ScopedExtensionList({ viewKey, onOpen, onMarket, onMarkets, openBeside }: ExtensionListProps & { viewKey: string }) {
   const picked = useChosenManager();
-  const [extensions, setExtensions] = useState<HubExtension[] | null>(null);
-  const [markets, setMarkets] = useState(false);
+  const [view, setView] = useState(() => extensionViews.read(viewKey));
+  const extensions = view?.extensions;
+  const markets = view?.markets;
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   // Reads are numbered: an answer older than the last one asked for is dropped.
   const reads = useRef(0);
-  const load = () => {
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  const load = useCallback(() => {
     const mine = ++reads.current;
+    const current = () => active.current && mine === reads.current && viewKey === currentListViewKey();
+    if (!current()) return;
     setLoading(true);
-    listExtensionsInfo()
-      .then((r) => mine === reads.current && (setExtensions(r.extensions), setMarkets(r.markets), setError(""), dropGone(r.extensions)))
-      .catch((e) => mine === reads.current && setError(errorText(e)))
-      .finally(() => mine === reads.current && setLoading(false));
-  };
-  useEffect(load, []);
+    listExtensionsInfo(current).then((r) => {
+      if (!current()) return;
+      setView(r);
+      setError("");
+      dropGone(r.extensions);
+    }, (e) => {
+      if (current()) setError(errorText(e));
+    }).finally(() => { if (current()) setLoading(false); });
+  }, [viewKey]);
+  useEffect(load, [load]);
   // An install, upgrade or uninstall that finished (here, on another device, or the hub's auto-upgrade) changes the
   // list: lib/extension-operations.ts sends EXTENSIONS_CHANGED when one succeeds. watchOperations starts its push
   // listener, which otherwise only a market page starts. Several at once read the list once.
@@ -211,15 +233,20 @@ function ExtensionList({ onOpen, onMarket, onMarkets, openBeside }: { onOpen: (i
       window.removeEventListener(EXTENSIONS_CHANGED, again);
       stop();
     };
-  }, []);
+  }, [load]);
   // a sign-in that changed (signed in, out, expired) shows at once
   // only the row of the manager whose extension signed in (or out): another manager's of the same id stays as it is
-  useEffect(() => onAuthChange((id, auth, from) => setExtensions((cur) => cur?.map((x) => ((x.manager || defaultManager()) === from ? withAuth(x, id, auth) : x)) ?? cur)), []);
+  useEffect(() => onAuthChange((id, auth, from) => setView((cur) => cur && ({
+    ...cur, extensions: cur.extensions.map((x) => (x.manager || defaultManager()) === from ? withAuth(x, id, auth) : x),
+  }))), []);
   // a reconnect the hub could not resume: the extension_auth pushes missed meanwhile are not replayed (#4954)
-  useEffect(() => onHubEvent("hello", (m) => !isResumed(m) && load()), []);
+  useEffect(() => onHubEvent("hello", (m) => !isResumed(m) && load()), [load]);
   // the current assistant's extensions only (docs/assistant/managers.md "The current assistant"); one assistant: all
   const scope = useScope();
   const own = useMemo(() => (extensions ? scoped(extensions, scope) : null), [extensions, scope]);
+  useEffect(() => {
+    if (own && markets !== undefined) extensionViews.keep(viewKey, { extensions: own, markets });
+  }, [viewKey, own, markets]);
   const drafts = useUnsaved();
   // an offline current assistant: the hub has none of its extensions to merge in, which must not read as "none installed"
   const offline = useShownOffline();

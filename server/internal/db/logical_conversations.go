@@ -421,7 +421,7 @@ func (d *DB) AcceptIdleConversationSwitch(ctx context.Context, machine, session,
 			return err
 		}
 		// No input carried the handoff: it stays for the conversation's next one (ConversationPendingHandoff, #14488).
-		if err := resolveConversationSwitch(ctx, tx, machine, session, operation, "accepted", "", true); err != nil {
+		if err := resolveConversationSwitch(ctx, tx, machine, session, operation, "accepted", "", switchSettlement{keepHandoff: true}); err != nil {
 			return err
 		}
 		accepted = true
@@ -442,13 +442,28 @@ func (d *DB) ResolveConversationSwitch(ctx context.Context, machine, session, op
 }
 
 func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, session, operation, outcome, reason string) error {
-	return resolveConversationSwitch(ctx, tx, machine, session, operation, outcome, reason, false)
+	return resolveConversationSwitch(ctx, tx, machine, session, operation, outcome, reason, switchSettlement{})
 }
 
-// resolveConversationSwitch settles operation as outcome. A settled switch discards its handoff unless keepHandoff:
-// an idle acceptance keeps it for the conversation's next input, which no queued input carried yet. Accepting a switch
-// also discards the handoff an earlier idle acceptance kept: its target is retired for good.
-func resolveConversationSwitch(ctx context.Context, tx pgx.Tx, machine, session, operation, outcome, reason string, keepHandoff bool) error {
+// ResolveConversationPreparation applies a failed or unconfirmed preparation only while the operation still
+// owns preparation at its expected epoch. Another manager may have mapped or activated the target during the RPC.
+func (d *DB) ResolveConversationPreparation(ctx context.Context, machine, session, operation, outcome, reason string) error {
+	if outcome != "rejected" && outcome != "in_doubt" {
+		return errors.New("invalid preparation outcome")
+	}
+	return conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+		return resolveConversationSwitch(ctx, tx, machine, session, operation, outcome, reason, switchSettlement{preparationOnly: true})
+	})
+}
+
+type switchSettlement struct {
+	keepHandoff     bool
+	preparationOnly bool
+}
+
+// An idle acceptance keeps its handoff for the conversation's next input. Accepting a switch discards
+// the handoff an earlier idle acceptance kept for the newly retired source.
+func resolveConversationSwitch(ctx context.Context, tx pgx.Tx, machine, session, operation, outcome, reason string, settlement switchSettlement) error {
 	var epoch int64
 	if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&epoch); err != nil {
 		return err
@@ -457,6 +472,9 @@ func resolveConversationSwitch(ctx context.Context, tx pgx.Tx, machine, session,
 	var expected int64
 	if err := tx.QueryRow(ctx, `SELECT source_segment,coalesce(target_segment,''),phase,expected_epoch FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).Scan(&source, &target, &phase, &expected); err != nil {
 		return err
+	}
+	if settlement.preparationOnly && (epoch != expected || phase != "preparing" && phase != "in_doubt") {
+		return ErrConversationEpoch
 	}
 	if phase == outcome {
 		return nil
@@ -508,7 +526,7 @@ func resolveConversationSwitch(ctx context.Context, tx pgx.Tx, machine, session,
 			}
 		}
 	}
-	_, err := tx.Exec(ctx, `UPDATE conversation_switches SET phase=$4,error=$5,handoff=CASE WHEN $4 IN ('accepted','rejected') AND NOT $6::boolean THEN NULL ELSE handoff END,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation, outcome, reason, keepHandoff)
+	_, err := tx.Exec(ctx, `UPDATE conversation_switches SET phase=$4,error=$5,handoff=CASE WHEN $4 IN ('accepted','rejected') AND NOT $6::boolean THEN NULL ELSE handoff END,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation, outcome, reason, settlement.keepHandoff)
 	return err
 }
 
@@ -614,6 +632,11 @@ func (d *DB) ObserveConversationRevision(ctx context.Context, machine, session s
 		if err != nil || c == nil {
 			return err
 		}
+		for _, seg := range c.Segments {
+			if seg.MachineID == machine && seg.SessionID == session && seg.SourceRevision == revision {
+				return nil
+			}
+		}
 		var epoch int64
 		if err = tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 FOR UPDATE NOWAIT`, c.MachineID, c.SessionID).Scan(&epoch); err != nil {
 			return err
@@ -695,8 +718,12 @@ func (d *DB) ConversationInputReceipt(ctx context.Context, machine, session, id 
 // Claim exactly one queue head. A sending/in-doubt head fences later input until
 // reconciled: process restarts cannot blindly repeat an ambiguous model turn.
 func (d *DB) ClaimConversationInput(ctx context.Context, machine, session string, epoch int64) (*ConversationInput, error) {
+	pending, err := conversationInputPending(ctx, d.pool, machine, session)
+	if err != nil || !pending {
+		return nil, err
+	}
 	var out *ConversationInput
-	err := conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+	err = conversationTransaction(ctx, d, func(tx pgx.Tx) error {
 		var current int64
 		if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&current); err != nil {
 			return err
@@ -881,6 +908,26 @@ func (d *DB) ClaimConversationPreparation(ctx context.Context, machine, session,
 	tag, err := d.pool.Exec(ctx, `UPDATE conversation_switches SET start_claimed=true,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3 AND phase='preparing' AND handoff IS NOT NULL AND NOT start_claimed`, machine, session, operation)
 	return tag.RowsAffected() == 1, err
 }
+
+// ConversationPreparedSession returns a saved positive receipt for a current preparation,
+// or an empty session if the node must be consulted. PrepareConversationSegment checks
+// the epoch again under the row lock when mapping either receipt.
+func (d *DB) ConversationPreparedSession(ctx context.Context, machine, session, operation, targetMachine string, epoch int64) (string, error) {
+	var target string
+	err := d.pool.QueryRow(ctx, `SELECT coalesce(p.session_id,'')
+	 FROM conversation_switches s
+	 JOIN logical_conversations c ON c.machine_id=s.logical_machine AND c.session_id=s.logical_session
+	 LEFT JOIN conversation_prepared_candidates p ON p.logical_machine=s.logical_machine AND p.logical_session=s.logical_session
+	 AND p.operation_id=s.operation_id AND p.machine_id=$4
+	 WHERE s.logical_machine=$1 AND s.logical_session=$2 AND s.operation_id=$3
+	 AND c.epoch=$5 AND c.deleted_at IS NULL AND s.expected_epoch=c.epoch AND s.phase IN ('preparing','in_doubt')
+	 ORDER BY p.session_id LIMIT 1`, machine, session, operation, targetMachine, epoch).Scan(&target)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrConversationEpoch
+	}
+	return target, err
+}
+
 func (d *DB) ConversationUnresolvedInput(ctx context.Context, machine, session string) (*ConversationInput, error) {
 	var row ConversationInput
 	var raw []byte

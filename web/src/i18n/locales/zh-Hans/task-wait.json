@@ -1,4 +1,7 @@
 {
+  "kind_pr_merge": "PR 合并",
+  "kind_agent": "智能体",
+  "deadline": "截止时间：{time}",
   "kind_todo_handoff": "等待结果",
   "handoff_deadline": "回传截止于 {time}",
   "kind_person_reply": "等回复",

@@ -51,7 +51,7 @@ func open(t testing.TB) *DB {
 // TruncateForTest. TruncateForTest alone does not clear lock_tests, client_ops, pair_tokens or device_sessions.
 var openTables = []string{"health_tells", "health_strength_sets", "health_strength_drafts", "health_strength_workouts", "health_strength_exercises", "health_intake", "push_device_retirements", "lock_tests", "client_ops", "devices", "device_tokens", "pair_tokens",
 	"device_sessions", "live_activities", "phone_tools", "node_sessions", "mail_accounts", "interactions", "settings",
-	"inbox_items", "kb_entities", "connector_secrets", "machine_systems", "machine_metrics", "machine_usage",
+	"inbox_items", "kb_entities", "connector_secrets", "machine_systems", "machine_metrics", "machine_usage", "usage_dirs",
 	"sent_messages", "todos", "todo_agents", "assistant_always", "sent_as_user", "hub_push_sent", "urgent_calls", "model_usage",
 	"conversation_histories", "assistant_conversation_spaces", "logical_conversations", "conversation_segment_closures", "conversation_prepared_candidates", "assistant_entries", "assistant_captures"}
 

@@ -173,7 +173,7 @@ func (s *Service) loadModules(mods []modapi.Module, off []string) {
 // reservedCoreToolNames are names a module may not take, whether a conditional core tool is enabled now or later.
 func reservedCoreToolNames() map[string]bool {
 	out := map[string]bool{}
-	for _, name := range append(slices.Clone(toolNames), ownerActionPrepareTool, "health_intake", "health_strength", "urgent_call", knowledgeSearchTool, knowledgeReadTool, spaceStateTool, externalSourcesReadTool, externalSourcesWriteTool,
+	for _, name := range append(slices.Clone(toolNames), ownerActionPrepareTool, "todo_split", "todo_merge", "health_intake", "health_strength", "urgent_call", knowledgeSearchTool, knowledgeReadTool, spaceStateTool, externalSourcesReadTool, externalSourcesWriteTool,
 		"resource_acquire", "resource_get", "resource_renew", "resource_release", "resource_cancel") {
 		out[name] = true
 	}

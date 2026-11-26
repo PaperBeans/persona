@@ -225,7 +225,7 @@ export function newAgentPill(o: { launchers: Launcher[]; runs: string; list: Mod
   const model = !runs ? o.fallback : named || (list !== undefined ? (d ? modelName(d) : fallback) : undefined);
   const out: PillSetup & { loading: boolean; failed: boolean } = {
     engine: agentId(providerAgent(agent, runs)),
-    provider: l ? providerTitle(l) : runs,
+    provider: runs ? providerTitle(l ?? { name: runs }) : "",
     loading: list === undefined && Boolean(e.loading),
     failed: list === undefined && Boolean(e.error),
   };

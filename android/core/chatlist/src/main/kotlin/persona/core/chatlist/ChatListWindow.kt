@@ -58,6 +58,34 @@ interface ChatAnchorStore {
 
 data class ChatListEntry(val rowId: String, val lastLineAtTop: Boolean = false, val offsetPx: Int = 0, val alignTop: Boolean = false)
 
+internal const val LEAVE_BOTTOM_THRESHOLD_DP = 16f
+internal const val RETURN_BOTTOM_TOLERANCE_DP = 4f
+
+/** Whether the reverse-layout list has moved far enough from the newest edge to stop following. */
+internal fun hasLeftBottom(
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    canScrollBackward: Boolean,
+    leaveThresholdPx: Int,
+): Boolean = canScrollBackward && (firstVisibleItemIndex > 0 || firstVisibleItemScrollOffset > leaveThresholdPx)
+
+/** Whether the reverse-layout list has moved further toward older history than [anchorIndex]/[anchorOffset]. */
+internal fun movedAwayFromBottom(
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    anchorIndex: Int,
+    anchorOffset: Int,
+): Boolean = firstVisibleItemIndex > anchorIndex ||
+    (firstVisibleItemIndex == anchorIndex && firstVisibleItemScrollOffset > anchorOffset)
+
+/** Whether the reverse-layout list is settled at (or within small tolerance of) the newest edge. */
+internal fun isAtBottom(
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    canScrollBackward: Boolean,
+    returnTolerancePx: Int,
+): Boolean = !canScrollBackward || (firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset <= returnTolerancePx)
+
 internal fun shouldPrefetch(dragged: Boolean, hasOlder: Boolean, loading: Boolean, lastVisible: Int, rows: Int, distance: Int): Boolean =
     dragged && hasOlder && !loading && rows > 0 && lastVisible >= (rows - 1 - distance).coerceAtLeast(0)
 

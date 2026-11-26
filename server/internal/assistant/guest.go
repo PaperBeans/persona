@@ -49,10 +49,15 @@ type guestConv struct {
 	// is deleted, not guestKeep.
 	Kind      string `json:"kind,omitempty"`
 	Recording string `json:"recording,omitempty"`
+	// Handoff is the proxy reply this guest answers (guestKindBotHandoff); its one tool posts the reply.
+	Handoff string `json:"handoff,omitempty"`
 }
 
 // guestKindMeeting is a meeting's room conversation (docs/assistant/meeting-minutes.md "The room conversation").
 const guestKindMeeting = "meeting"
+
+// guestKindBotHandoff is a proxy reply's guest (bot_handoff.go): one hub-owned tool, kept for guestKeep like any guest.
+const guestKindBotHandoff = "bot_handoff"
 
 type guestBook struct {
 	mu     sync.Mutex
@@ -98,6 +103,11 @@ func (s *Service) guestSet(ctx context.Context, machine, id string, tools []stri
 // calls come before the start answers).
 func (s *Service) guestSetRoom(ctx context.Context, machine, id, recording string) error {
 	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: s.meetingRoomToolNames(), Kind: guestKindMeeting, Recording: recording})
+}
+
+// guestSetHandoff notes that conversation id on machine answers handoff (before the node starts it).
+func (s *Service) guestSetHandoff(ctx context.Context, machine, id, handoff string, tools []string) error {
+	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: slices.Clone(tools), Kind: guestKindBotHandoff, Handoff: handoff})
 }
 
 // guestDrop forgets guest id (a room deleted).
@@ -262,4 +272,23 @@ func guestTools(all []proto.Tool, allowed []string) []proto.Tool {
 		}
 	}
 	return out
+}
+
+// handoffOf is the proxy reply machine's conversation session answers; false when it is none; an error when that
+// cannot be told.
+func (s *Service) handoffOf(ctx context.Context, machine, session string) (string, bool, error) {
+	if session == "" {
+		return "", false, nil
+	}
+	b := &s.guests
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := s.guestsLocked(ctx); err != nil {
+		return "", false, err
+	}
+	g := b.m[session]
+	if g == nil || g.Kind != guestKindBotHandoff || !s.sameMachine(g.MachineID, machine) {
+		return "", false, nil
+	}
+	return g.Handoff, true, nil
 }

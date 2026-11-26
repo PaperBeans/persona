@@ -1,4 +1,5 @@
 {
+  "assistant_resources": "助手共享资源",
   "title": "共享资源",
   "configure": "配置门禁",
   "invalid": "请输入 JSON 数组。",

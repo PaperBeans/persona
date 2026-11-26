@@ -27,6 +27,39 @@ const EARLIER_RETRY_MAX_MS = 30_000;
 /** Coalesce live push cache writes so WS bursts do not serialize the main-chat cache on every frame. */
 export const FEED_CACHE_SAVE_MS = 1000;
 
+// Independent newest-page reads still share one commit order across views of a session. Otherwise an older response
+// can land after a newer one and roll its own view and the shared page cache back to a stale snapshot.
+interface PageReadHub {
+  committed: number;
+  listeners: Set<(page: ItemsPage) => void>;
+}
+const pageReadHubs = new Map<string, PageReadHub>();
+let nextPageReadTicket = 0;
+
+function listenPageReads(key: string, listener: (page: ItemsPage) => void): () => void {
+  let hub = pageReadHubs.get(key);
+  if (!hub) {
+    hub = { committed: 0, listeners: new Set() };
+    pageReadHubs.set(key, hub);
+  }
+  hub.listeners.add(listener);
+  return () => {
+    hub.listeners.delete(listener);
+    if (!hub.listeners.size && pageReadHubs.get(key) === hub) pageReadHubs.delete(key);
+  };
+}
+
+function publishPageRead(key: string, ticket: number, page: ItemsPage): void {
+  const hub = pageReadHubs.get(key);
+  if (!hub || hub.committed > ticket) return;
+  hub.committed = ticket;
+  for (const listener of [...hub.listeners]) listener(page);
+}
+
+function pageReadSuperseded(key: string, ticket: number): boolean {
+  return (pageReadHubs.get(key)?.committed ?? 0) > ticket;
+}
+
 interface EarlierRead {
   controller: AbortController;
   promise: Promise<symbol | undefined>;
@@ -428,7 +461,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       const sent = revs.sending();
       let fresh = 0;
       for (let n = 0; n < 8 && !dead; n++) {
-        const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?after_seq=${covered.current}&lazy_images=1`, { signal: ctl.signal });
+        const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?after_seq=${covered.current}&lazy_images=1`, { signal: ctl.signal, dedupe: false });
         if (dead || version !== pageRequest) return fresh;
         if (p.history && history.current && p.history !== history.current) {
           rewritten(p.history);
@@ -625,35 +658,44 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       pendingEnd = false;
     }
 
+    const pageReadKey = sessionPath(mid, sid);
+    const offPageReads = listenPageReads(pageReadKey, (p) => {
+      if (dead) return;
+      if (pendingHistory && p.history && pendingHistory !== p.history) {
+        rewritten(); // Take a fresh snapshot after both conflicting observations.
+        return;
+      }
+      commitPage(p);
+    });
+
     async function readPage(openWatch = true) {
       const before = history.current;
       const version = ++pageRequest;
+      const ticket = ++nextPageReadTicket;
       ready = false;
       historyMissing.current = true;
       if (!itemsRef.current.length && !liveRaw.current) setLoading(true);
       clearTimeout(refused);
       refused = undefined;
       try {
-        const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}`, { signal: ctl.signal });
+        const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}`, { signal: ctl.signal, dedupe: false });
         if (dead || version !== pageRequest) return;
-        if (pendingHistory && p.history && pendingHistory !== p.history) {
-          rewritten(); // Take a fresh snapshot after both conflicting observations.
-          return;
-        }
-        commitPage(p);
+        publishPageRead(pageReadKey, ticket, p);
       } catch (e) {
         if (dead || version !== pageRequest) return;
-        if (e instanceof ApiError && e.code === "conversation_deleted") { markConversationDeleted(mid, sid); return; }
-        if (opts.starting) recovered();
-        // A subscribe may already have supplied the page while the HTTP read was pending.
-        if (replacing.current && replacementReplay) {
-          commitPage(replacementReplay);
-          endRefused();
-        } else if (!opts.starting) {
-          const text = sessionLoadError(errorText(e));
-          historyMissing.current = sessionHistoryNotFound(e);
-          if (isNotLoaded(e)) refused = window.setTimeout(() => endRefused(text), READ_TIMEOUT_MS);
-          else setError(text);
+        if (!pageReadSuperseded(pageReadKey, ticket)) {
+          if (e instanceof ApiError && e.code === "conversation_deleted") { markConversationDeleted(mid, sid); return; }
+          if (opts.starting) recovered();
+          // A subscribe may already have supplied the page while the HTTP read was pending.
+          if (replacing.current && replacementReplay) {
+            commitPage(replacementReplay);
+            endRefused();
+          } else if (!opts.starting) {
+            const text = sessionLoadError(errorText(e));
+            historyMissing.current = sessionHistoryNotFound(e);
+            if (isNotLoaded(e)) refused = window.setTimeout(() => endRefused(text), READ_TIMEOUT_MS);
+            else setError(text);
+          }
         }
       } finally {
         if (!dead && version === pageRequest) {
@@ -674,6 +716,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       ctl.abort();
       offDeleted();
       off();
+      offPageReads();
       clearTimeout(refused);
       clearTimeout(handoffTimer);
       itemCoalescer.cancel();

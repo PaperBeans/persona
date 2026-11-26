@@ -26,6 +26,12 @@ if [ "$lane" = all ] || [ "$lane" = build ]; then
   ci_run 'Builds without each module' 900 bash -c 'cd server && for m in internal/modules/*/module.json; do id="$(basename "$(dirname "$m")")" && t="persona_without_${id//-/_}" && go build -tags "$t" ./... && go test -tags "$t" -count=1 -timeout=4m ./internal/modules/all/... ./internal/archguard/... || exit 1; done'
   ci_run 'Extension schema and SDK bundle' 300 bash -c 'python3 scripts/test/test_extension_schema.py && python3 scripts/test/test_module_schema.py && python3 scripts/test/test_sdk_bundle.py'
   ci_run 'Go SDK tests' 300 bash -c 'cd sdk/go && go test -count=1 -timeout=4m ./...'
+  # A feature added to Persona Core without changing Core (docs/extensions/core-only-features.md, #16244): the sample
+  # extension's own tests, then the document's steps on a persona_core_only hub with a disposable Postgres: absent,
+  # installed (flag, navigation entry, route, stored value), switched off (entry points gone, stored file unchanged),
+  # on again and uninstalled (entry points gone, data directory explicitly deleted).
+  ci_run 'Sample extension tests' 300 bash -c 'test -z "$(gofmt -l sdk/examples)" && cd sdk/examples/quicknotes && go vet ./... && go test -count=1 -timeout=4m ./...'
+  ci_run 'Core-only sample extension' 900 python3 scripts/ci/core-sample.py
 fi
 if [ "$lane" = build ]; then exit 0; fi
 

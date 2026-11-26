@@ -271,10 +271,11 @@ test('refused auto automatically approves git status, rg and an MCP read without
   }, {
     mode: 'bypassPermissions',
     cards: [],
+    // An Assistant session answers once and never with allow_always (#16220), so no native grant outlives the command gate.
     answers: [
-      { id: 'read-permission-git-status', result: selected('always') },
-      { id: 'read-permission-mcp', result: selected('always') },
-      { id: 'read-permission-rg', result: selected('always') },
+      { id: 'read-permission-git-status', result: selected('allow') },
+      { id: 'read-permission-mcp', result: selected('allow') },
+      { id: 'read-permission-rg', result: selected('allow') },
     ],
   })
 })
@@ -605,5 +606,147 @@ test('deferred bypassPermissions start reapplies accept-edits after session/resu
   assert.equal(n.asked.length, 0)
   assert.equal(row()?.permission_mode, 'bypassPermissions')
   assert.equal(calls().filter((call) => call.method === 'session/resume').length, 1)
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+async function restartedBypassFixture(t, afterRestartCatalog = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'agy-bypass-shadow-'))
+  const agyDir = join(home, 'settings')
+  const rawId = '11111111-2222-3333-4444-555555555555'
+  mkdirSync(join(agyDir, 'brain', rawId), { recursive: true })
+  const writeCatalog = (value) => {
+    const file = join(home, 'catalog.json')
+    writeFileSync(`${file}.next`, JSON.stringify(value))
+    renameSync(`${file}.next`, file)
+  }
+  writeCatalog({ models: entries, resetModeOnResume: true })
+  const bin = join(home, 'agy')
+  const fake = fileURLToPath(new URL('./fake-acp-models.mjs', import.meta.url))
+  writeFileSync(bin, `#!/bin/sh\nexec '${process.execPath}' '${fake}' '${home}' "$@"\n`)
+  chmodSync(bin, 0o755)
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+
+  const n1 = await startFakeNode(t)
+  const rt1 = createAgyRuntime({ home, agyDir, agyBin: bin, personadBin: '/missing', socketPath: n1.path, log: () => {} })
+  rt1.start()
+  await n1.ready
+  const { session } = await n1.peer.call('session.start', { cwd: home, permission_mode: 'bypassPermissions' })
+  assert.equal(session.permission_mode, 'bypassPermissions')
+  assert.equal(readFileSync(join(agyDir, 'brain', rawId, '.persona-permission-mode'), 'utf8').trim(), 'bypassPermissions')
+  await rt1.stop()
+
+  writeCatalog({ models: entries, resetModeOnResume: true, ...afterRestartCatalog })
+  const n2 = await startFakeNode(t)
+  const rt2 = createAgyRuntime({ home, agyDir, agyBin: bin, personadBin: '/missing', socketPath: n2.path, log: () => {} })
+  t.after(async () => { await rt2.stop() })
+  rt2.start()
+  await n2.ready
+  await n2.peer.call('launchers.models', {})
+  const calls = () => readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+  const answers = () => calls().filter((call) => typeof call.id === 'string' && call.id.startsWith('read-permission-') && call.result)
+  const row = () => n2.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === session.session_id)
+  return { n2, sessionId: session.session_id, calls, answers, row }
+}
+
+test('config_option_update with thought_level and mode before resume response does not shadow persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, {
+    configUpdateOnResume: true, askPermissionOnResume: true,
+  })
+  // session.modes loads the session without pre-hydrating sessionModes via listSessions;
+  // fake agy emits config_option_update and requests a permission before session/resume returns.
+  await n2.peer.call('session.modes', { session_id: sessionId })
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always')])
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('resumed session auto-approves all permissions after config_option_update', () => answers().length === 4)
+  await until('resumed turn finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always'), selected('always'), selected('always'), selected('always')])
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(row()?.effort, 'medium')
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+test('config_option_update with thought_level only (no mode) does not shadow persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, {
+    configUpdateOnResume: 'effortOnly', omitResumeModes: true, omitResumeConfig: true, askPermissionOnResume: true,
+  })
+  await n2.peer.call('session.modes', { session_id: sessionId })
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always')])
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('resumed session auto-approves all permissions after effort-only config update', () => answers().length === 4)
+  await until('resumed turn finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always'), selected('always'), selected('always'), selected('always')])
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(row()?.effort, 'medium')
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+test('config_option_update without thought_level or mode does not shadow persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, {
+    configUpdateOnResume: 'modelOnly', omitResumeModes: true, omitResumeConfig: true, askPermissionOnResume: true,
+  })
+  await n2.peer.call('session.modes', { session_id: sessionId })
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always')])
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('resumed session auto-approves all permissions after model-only config update', () => answers().length === 4)
+  await until('resumed turn finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+test('switching model via session.modes after restart does not shadow persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, {
+    omitResumeModes: true, omitResumeConfig: true, omitSetModelConfigUpdate: true,
+  })
+  await n2.peer.call('session.modes', { session_id: sessionId, model: entries[2].modelId })
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('turn after model switch auto-approves all permissions', () => answers().length === 3)
+  await until('turn after model switch finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always'), selected('always'), selected('always')])
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(row()?.model, entries[2].modelId)
+  assert.equal(row()?.effort, 'low')
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+test('switching effort via session.modes after restart does not shadow persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, {
+    omitResumeModes: true, omitResumeConfig: true,
+  })
+  await n2.peer.call('session.modes', { session_id: sessionId, effort: 'xhigh' })
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('turn after effort switch auto-approves all permissions', () => answers().length === 3)
+  await until('turn after effort switch finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always'), selected('always'), selected('always')])
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(row()?.effort, 'xhigh')
+  assert.equal(row()?.model, 'gemini-future-xhigh')
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
+})
+
+test('loadSession configOptions without modes during session.modes model switch preserves persisted bypassPermissions (#16290)', async (t) => {
+  const { n2, sessionId, calls, answers, row } = await restartedBypassFixture(t, { omitResumeModes: true })
+  await n2.peer.call('session.modes', { session_id: sessionId, model: entries[0].modelId })
+
+  await n2.peer.call('session.send', { session_id: sessionId, text: 'ask-read-permissions' })
+  await until('turn after resume configOptions + model switch auto-approves all permissions', () => answers().length === 3)
+  await until('turn finishes', () => row()?.status === 'done')
+  assert.equal(n2.asked.length, 0)
+  assert.deepEqual(answers().map((a) => a.result), [selected('always'), selected('always'), selected('always')])
+  assert.equal(row()?.permission_mode, 'bypassPermissions')
+  assert.equal(row()?.model, entries[0].modelId)
+  assert.equal(row()?.effort, 'medium')
   assert.equal(calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits').length, 2)
 })

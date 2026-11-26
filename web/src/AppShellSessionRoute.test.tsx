@@ -38,6 +38,7 @@ import { doneTeamAsk, useTeamAsk } from "./lib/team";
 import { doneSideAsk, useSideAsk } from "./lib/side-panel";
 import { setSideFold } from "./lib/side-fold";
 import { setToken } from "./lib/api";
+import { inboxReturnTo } from "./lib/inbox-nav";
 import type { Machine, Session } from "./lib/types";
 import { App } from "./App";
 import { t } from "./i18n";
@@ -71,15 +72,15 @@ const sessions: Session[] = [
   // a conversation that moved from Claude Code to Codex (#5054): its Claude session is not listed, the Codex one runs it
   row("conv", { agent: "codex", engine_history: [{ session_id: "conv-claude", agent: "claude", until: "2026-11-12T09:00:00Z" }] }),
 ];
-const answers: Record<string, unknown> = { "/api/v1/sessions": { sessions }, "/api/v1/machines": { machines } };
+const answers: Record<string, unknown> = { "/api/v1/sessions": { sessions }, "/api/v1/machines": { machines }, "/api/v1/assistant": { machine_id: "mac", conversations: [] } };
 
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
-const open = async (path: string) => {
-  history.replaceState(null, "", path);
+const open = async (path: string, state: Record<string, unknown> | null = null) => {
+  history.replaceState(state, "", path);
   await act(() => refresh());
   act(() => root.render(<App />));
   await flush();
@@ -134,6 +135,16 @@ describe("another session's push on the machine", () => {
 });
 
 describe("the shell's session links", () => {
+  it("replaces a summary-only archived Inbox conversation link with its Persona page", async () => {
+    const summary = row("inbox-chat", { assistant: true, archived: true, origin: "inbox", origin_ref: "larkcli:chat:100" });
+    getState().sessionSummaries = [summary];
+    await open("/s/mac/inbox-chat", { personaInboxFrom: "/inbox/larkcli%3Achat%3A100" });
+    expect(getState().sessions.mac.some((r) => r.session_id === summary.session_id)).toBe(false);
+    expect(location.pathname + location.search).toBe("/persona/inbox-chat");
+    expect(drawn.chatSid).toBe(summary.session_id);
+    expect(inboxReturnTo(history.state)).toEqual({ id: summary.origin_ref });
+  });
+
   it("replaces a pane's /s link with its tab's /t route", async () => {
     await open("/s/mac/p1");
     expect(location.pathname).toBe("/t/mac/sp/sl/p1");

@@ -446,6 +446,10 @@ func (s *Service) answerOutside(ctx context.Context, id, asked string, answer ou
 		return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
 	}
 	cp := copyAcceptAsk(cur)
+	caller, ref := "", ""
+	if rec := b.outside[cp.OutsideID]; rec != nil {
+		caller, ref = rec.Caller, rec.Ref
+	}
 	b.mu.Unlock()
 	s.askChanged(ctx)
 	s.updateAskCards(ctx, id, cp)
@@ -453,6 +457,11 @@ func (s *Service) answerOutside(ctx context.Context, id, asked string, answer ou
 		s.todoPushOver(id)
 		s.recordOutsideDecision(ctx, id, &cp)
 		s.closeOutsideBacking(ctx, id)
+		option := ""
+		if cp.OutsideAnswer != nil {
+			option = cp.OutsideAnswer.Option
+		}
+		s.handoffDecided(ctx, caller, ref, option)
 	}
 	return acceptSucceeded(), nil
 }

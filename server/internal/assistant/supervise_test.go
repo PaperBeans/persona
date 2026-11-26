@@ -23,7 +23,21 @@ var shortSuperviseTimings = superviseTimings{gather: 20 * time.Millisecond, ever
 // in-flight digest timers are stopped and drained when the test ends.
 func shortSupervise(t testing.TB, s *Service) {
 	t.Helper()
-	s.superviseTimes = shortSuperviseTimings
+	superviseTimed(t, s, shortSuperviseTimings)
+}
+
+// heldSuperviseTimings are shortSuperviseTimings with an hour's gather: no digest goes out during the test.
+func heldSuperviseTimings() superviseTimings {
+	times := shortSuperviseTimings
+	times.gather = time.Hour
+	return times
+}
+
+// superviseTimed is shortSupervise with times as s's timings. Call it before anything of s can set a digest timer:
+// the timer reads the timings with no lock of their own.
+func superviseTimed(t testing.TB, s *Service, times superviseTimings) {
+	t.Helper()
+	s.superviseTimes = times
 	t.Cleanup(s.stopSuperviseTimers)
 }
 

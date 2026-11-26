@@ -281,11 +281,7 @@ func (h *Manager) guardExtensionPlan(ctx context.Context, previews []*extension.
 			}
 		}
 		spec, key := pv.MarketTrust()
-		currentKey := rec.SigningKey
-		if extension.IsOfficialMarket(rec.Spec) {
-			currentKey = extension.Official.SigningKey
-		}
-		if spec != rec.Spec || key != currentKey {
+		if spec != rec.Spec || key != extension.TrustPin(rec.Spec, rec.SigningKey, rec.TrustedKeys) {
 			return fail(i18n.Err("hub-extension_model.market_trust_changed"))
 		}
 	}

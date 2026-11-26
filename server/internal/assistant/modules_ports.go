@@ -33,7 +33,7 @@ func toBriefBoardRows(rows []boardRow) []modapi.BriefBoardRow {
 	for i, r := range rows {
 		out[i] = modapi.BriefBoardRow{
 			Blocking: r.blocking, Waited: r.waited, ID: r.id, Summary: r.summary,
-			From: r.from, Link: r.link, Nudged: r.nudged,
+			From: r.from, Link: r.link, Nudged: r.nudged, Detail: r.detail, EvidenceLink: r.evidenceLink,
 			Machine: r.machine, Session: r.session, Asked: r.asked,
 		}
 	}

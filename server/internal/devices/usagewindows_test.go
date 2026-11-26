@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -147,6 +151,162 @@ func TestUsageWindowsKeepsDistinctAntigravityWindows(t *testing.T) {
 	if got := answer(local, remote); len(got) != 2 || mostUsed(got[0]) != 38 || got[0].Stale || got[0].Problem != "" ||
 		got[0].Windows[0].Model != "gemini" || len(got[1].Windows) != 1 || got[1].Windows[0].Model != claude.Model {
 		t.Fatalf("an older fresh reading should replace the stale model-scoped window: %+v", got)
+	}
+}
+
+func TestAntigravityGenericIdleSibling(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	week := now.Add(7 * 24 * time.Hour)
+	for _, tc := range []struct {
+		name, scope, fiveHour  string
+		geminiOffset, localAge time.Duration
+		wantUsed               float64
+	}{
+		{"epoch filtered", "Claude/GPT", `{"label":"5h","used_percent":80,"resets_at":"1970-01-01T00:00:00Z"},`, 0, 0, 0},
+		{"missing with unmatched Gemini", "Claude / GPT", "", time.Second, 0, 0},
+		{"both idle", "Claude/GPT", `{"label":"5h","used_percent":0,"resets_at":null},`, 0, 0, 0},
+		{"nil resets prefer newer local", "Claude/GPT", `{"label":"5h","used_percent":8},`, 0, 0, 0},
+		{"nil resets prefer external on tie", "Claude/GPT", `{"label":"5h","used_percent":8},`, 0, time.Minute, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seatName := "Antigravity · " + tc.scope
+			gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"accounts":[
+					{"id":"seat-c","provider":"antigravity","name":%q,"sampled_at":%q,"windows":[
+						%s{"label":"1d","used_percent":97,"resets_at":"2026-11-05T08:59:59Z"},
+						{"label":"7d","used_percent":42,"resets_at":%q}]},
+					{"id":"seat-g","provider":"antigravity","name":"Antigravity · Gemini","windows":[
+						{"label":"7d","used_percent":76,"resets_at":%q}]}]}`,
+					seatName, now.Add(-time.Minute).Format(time.RFC3339), tc.fiveHour, week.Add(time.Millisecond).Format(time.RFC3339Nano),
+					week.Add(tc.geminiOffset).Format(time.RFC3339))
+			}))
+			defer gate.Close()
+			var gateway usageGateways
+			gateway.init(UsageConfig{Sources: []UsageSourceConfig{{ID: "pool", Name: "Gateway", Type: "generic", URL: gate.URL, Key: "k"}}}, func() {}, t.Logf)
+			gateway.pollDue(t.Context(), now)
+
+			claude7, gemini7 := uw("7d", 10080, 45, week), uw("7d", 10080, 79, week)
+			claude7.Model, gemini7.Model = "Claude and GPT models", "Gemini Models"
+			idle := proto.UsageWindow{Label: "5h", WindowMinutes: 300, Model: claude7.Model}
+			node := local("agy", "Antigravity", now.Add(-tc.localAge), gemini7, idle, claude7)
+			node.Machines = []string{"Computer"}
+			cache := mergeUsageAccounts(append(gateway.accounts(now), node), now)
+			if len(cache) != 3 {
+				t.Fatalf("expected a native sample and two gateway seats: %+v", cache)
+			}
+			before, err := json.Marshal(cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := usageWindowsAnswer(cache, nil, now)["accounts"].([]proto.UsageAccount)
+			after, err := json.Marshal(cache)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("display changed poll cache: %s -> %s (%v)", before, after, err)
+			}
+			rows := map[string]proto.UsageAccount{}
+			for _, a := range got {
+				rows[a.Name] = a
+			}
+			c := rows[seatName]
+			if c.ID == "" || !slices.ContainsFunc(cache, func(a proto.UsageAccount) bool { return a.ID == c.ID && a.Ref == "pool:seat-c" }) ||
+				!c.Local || !slices.Equal(c.Sources, []string{"Gateway"}) || !slices.Equal(c.Machines, node.Machines) {
+				t.Fatalf("Claude/GPT seat lost identity or sources: %+v", c)
+			}
+			if len(c.Windows) != 2 || c.Windows[0].WindowMinutes != 300 || c.Windows[0].ResetsAt != nil || c.Windows[0].UsedPercent != tc.wantUsed ||
+				c.Windows[1].WindowMinutes != 10080 || c.Windows[1].ResetsAt == nil || c.Windows[1].ResetsAt.Unix() != week.Unix() {
+				t.Fatalf("expected one idle 5h and one active 7d window: %+v", c.Windows)
+			}
+			g := rows["Antigravity · Gemini"]
+			if len(g.Windows) != 1 || g.Windows[0].ResetsAt == nil || !g.Windows[0].ResetsAt.Equal(week.Add(tc.geminiOffset)) {
+				t.Fatalf("wrong Gemini window: %+v", g)
+			}
+			if tc.geminiOffset == 0 {
+				if !g.Local || len(got) != 2 {
+					t.Fatalf("expected only the two matched seats: %+v", got)
+				}
+			} else if rest := rows[node.Name]; g.Local || len(got) != 3 || len(rest.Windows) != 1 || !reflect.DeepEqual(rest.Windows[0], gemini7) {
+				t.Fatalf("only unmatched Gemini should remain on the native row: %+v", got)
+			}
+		})
+	}
+}
+
+func TestAntigravitySiblingCollisions(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	week, day := now.Add(7*24*time.Hour), now.Add(24*time.Hour)
+	makeNode := func(origin string, wins ...proto.UsageWindow) proto.UsageAccount {
+		a := local("agy", "Antigravity", now, wins...)
+		a.Origin = origin
+		for i := range a.Windows {
+			a.Windows[i].Model = "Claude and GPT models"
+		}
+		return a
+	}
+	seat := func(id string, wins ...proto.UsageWindow) proto.UsageAccount {
+		return gw("Gateway", id, "antigravity", "Antigravity · Claude/GPT", now, wins...)
+	}
+	idle := proto.UsageWindow{WindowMinutes: 300, Label: "5h"}
+	w7, w1 := uw("7d", 10080, 32, week), uw("1d", 1440, 23, day)
+	node := makeNode("computer/0", idle, w1, w7)
+	for _, tc := range []struct {
+		name           string
+		in             []proto.UsageAccount
+		localRemaining []int // durations on the first local source
+		foldedWeek     bool
+	}{
+		{"two seats share reset", []proto.UsageAccount{node, seat("a", w1, w7), seat("b", w7)}, []int{300, 1440, 10080}, false},
+		{"one scope hits two seats on different durations", []proto.UsageAccount{node, seat("a", w1), seat("b", w7)}, []int{300, 1440, 10080}, false},
+		{"two local sources share one seat", []proto.UsageAccount{node, makeNode("computer/1", idle, w1), seat("a", w7, w1)}, []int{300, 1440, 10080}, false},
+		{"different timed resets block idle sibling", []proto.UsageAccount{node, seat("a", w7, uw("1d", 1440, 28, day.Add(time.Second)))}, []int{300, 1440}, true},
+		{"active external slot and idle local slot", []proto.UsageAccount{node, seat("a", w7, uw("5h", 300, 28, now.Add(time.Hour)))}, []int{300, 1440}, true},
+		{"different reset second", []proto.UsageAccount{node, seat("a", uw("7d", 10080, 33, week.Add(time.Second)))}, []int{300, 1440, 10080}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			answer := func(in []proto.UsageAccount) []proto.UsageAccount {
+				return usageWindowsAnswer(mergeUsageAccounts(in, now), nil, now)["accounts"].([]proto.UsageAccount)
+			}
+			got := answer(tc.in)
+			if len(got) != len(tc.in) {
+				t.Fatalf("lost a conflicting row: %+v", got)
+			}
+			for _, a := range got {
+				if a.Origin == node.Origin {
+					var durations []int
+					for _, w := range a.Windows {
+						durations = append(durations, w.WindowMinutes)
+					}
+					if !slices.Equal(durations, tc.localRemaining) {
+						t.Fatalf("remaining local slots = %v", durations)
+					}
+				} else if len(a.Sources) > 0 {
+					if a.Local != tc.foldedWeek {
+						t.Fatalf("unexpected local association: %+v", a)
+					}
+					for _, src := range tc.in {
+						if src.Ref != a.Ref {
+							continue
+						}
+						if len(src.Windows) != len(a.Windows) {
+							t.Fatalf("extra external sibling: %+v", a)
+						}
+						for _, w := range src.Windows {
+							if !slices.Contains(a.Windows, w) {
+								t.Fatalf("lost external window %+v from %+v", w, a)
+							}
+						}
+					}
+				}
+			}
+			reordered := slices.Clone(tc.in)
+			slices.Reverse(reordered)
+			for i, a := range reordered {
+				reordered[i].Windows = slices.Clone(a.Windows)
+				slices.Reverse(reordered[i].Windows)
+			}
+			if other := answer(reordered); !reflect.DeepEqual(got, other) {
+				t.Fatalf("order changed result: %+v vs %+v", got, other)
+			}
+		})
 	}
 }
 

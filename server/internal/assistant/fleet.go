@@ -71,6 +71,7 @@ type fleetBook struct {
 	upgradeEvery, upgradeFor time.Duration
 	upgrades                 sync.WaitGroup // active screen-upgrade loops; database-backed fixtures wait during teardown
 	completionRuns           sync.WaitGroup // delayed turn completions already running when a fixture tears down
+	resolvedRuns             sync.WaitGroup // answered cards' hooks still running (interactionResolvedSoon)
 	completionTimers         map[*time.Timer]struct{}
 	completionStopped        bool // test teardown only: no new delayed completion after the drain starts
 	// hooked: Persona's hooks run in the session (a hook event came since the manager started).

@@ -152,7 +152,7 @@ describe("a Persona chat's pill on a hub that keeps picks", () => {
     expect(panel.props!.providers.map((p) => [p.id, p.unavailable ?? ""])).toEqual([["claude", ""], ["relay", ""], ["codex", otherEngine], ["gpt-direct", "Responses API"]]);
     expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus", effort: "high" });
     expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_default", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_default", { setup: "Claude Code · Opus 5.5" }));
   });
 
   it("keeps a pick for the conversation (PUT), drawn at once, and follows the default again (DELETE)", async () => {
@@ -350,7 +350,7 @@ describe("an older hub and the new-conversation page", () => {
     // what it says now is the default's, effort included
     expect(pill().textContent).toContain("Opus 5.5");
     await open();
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "Claude Code · Opus 5.5" }));
     expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus", effort: "high" });
   });
 
@@ -455,7 +455,7 @@ describe("an older hub and the new-conversation page", () => {
     await show(undefined);
     expect(pill().textContent).toContain("Opus 5.5");
     await open();
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "Claude Code · Opus 5.5" }));
     // nothing runs yet: every engine can start it
     expect(panel.props!.providers.find((p) => p.id === "codex")!.unavailable).toBeUndefined();
     expect(await act(() => panel.props!.onPick({ provider: "relay", model: "haiku", effort: "low" }))).toBe(true);

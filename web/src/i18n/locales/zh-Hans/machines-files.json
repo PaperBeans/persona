@@ -1,6 +1,5 @@
 {
   "title": "机器文件",
-  "machine_label": "机器",
   "machine_offline": "这台机器当前离线，重新连接后即可浏览文件。",
   "no_machines": "暂无可用机器。",
   "roots_label": "常用根目录",

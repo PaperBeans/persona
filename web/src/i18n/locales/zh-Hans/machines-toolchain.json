@@ -1,7 +1,6 @@
 {
   "title": "开发工具链与本地环境",
   "subtitle": "按需只读探测并短时缓存，绝不返回令牌或私钥。",
-  "machine_select": "选择机器",
   "refresh": "刷新",
   "refreshing": "正在刷新…",
   "loading": "正在探测工具链与本地环境…",

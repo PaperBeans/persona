@@ -79,7 +79,7 @@ test('ACP updates during rewind cannot start autonomous work or restore the old 
   }
   assert.equal(runtime.idle(), true)
   const final = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(final.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(final), ['Repeat', 'First answer'])
 })
 
 test('the native fake answers port discovery and keeps serving the conversation', async (t) => {
@@ -97,7 +97,7 @@ test('the native fake answers port discovery and keeps serving the conversation'
   assert.equal(probe.error, undefined)
   assert.equal(probe.status, 404)
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(page.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(page), ['Repeat', 'First answer'])
 })
 
 test('native rewind preserves the prefix, resets watched history and persists through replacement exports', async (t) => {
@@ -109,7 +109,7 @@ test('native rewind preserves the prefix, resets watched history and persists th
   const native = calls().find((c) => c.method === 'RevertToCascadeStep')
   assert.deepEqual(native.params, { cascadeId: RAW, stepIndex: 1, conversationOnly: true, suppressErrorStep: true })
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(page.items.map((i) => i.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(page), ['Repeat', 'First answer'])
   assert.notEqual(page.history, initial.history)
   await until('history reset pushed', () => node.all('session.items').some((batch) => batch.history === page.history))
   const result = await rewind({ occurrence: 1, prompts_after: 0 })
@@ -124,52 +124,52 @@ test('native rewind preserves the prefix, resets watched history and persists th
   ].map((s) => JSON.stringify(s)).join('\n') + '\n')
   db.exec('UPDATE conversation_summaries SET step_count = 2')
   const replacement = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(replacement.items.map((i) => i.text), ['New branch', 'New answer'])
+  assert.deepEqual(texts(replacement), ['New branch', 'New answer'])
   assert.notEqual(replacement.history, empty.history)
   assert.equal((await node.peer.call('session.items', { session_id: SESSION })).history, replacement.history)
 })
 
 test('rewound identical inputs and replacement replies cannot reuse earlier item identities', async (t) => {
   const { node, transcript, rewind, db } = await fixture(t)
-  const initial = await node.peer.call('session.items', { session_id: SESSION })
+  const initial = visible(await node.peer.call('session.items', { session_id: SESSION }))
   await rewind()
   // Native exports append the repeated input at its old index, potentially with the same timestamp.
   appendFileSync(transcript, [records[2], { ...records[3], content: 'Replacement answer' }]
     .map((step) => JSON.stringify(step)).join('\n') + '\n')
   db.exec('UPDATE conversation_summaries SET step_count = 4')
-  const replacement = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(replacement.items.slice(0, 2), initial.items.slice(0, 2), 'retained prefix stays stable')
-  assert.equal(replacement.items[2].text, initial.items[2].text)
-  assert.equal(replacement.items[2].seq, initial.items[2].seq)
-  assert.notEqual(replacement.items[2].id, initial.items[2].id, 'a pending send must not inherit the old echo binding')
-  assert.notEqual(replacement.items[3].id, initial.items[3].id, 'the old expanded reply must not match the new reply')
-  const full = await node.peer.call('session.item', { session_id: SESSION, item_id: replacement.items[3].id })
+  const replacement = visible(await node.peer.call('session.items', { session_id: SESSION }))
+  assert.deepEqual(replacement.slice(0, 2), initial.slice(0, 2), 'retained prefix stays stable')
+  assert.equal(replacement[2].text, initial[2].text)
+  assert.equal(replacement[2].seq, initial[2].seq)
+  assert.notEqual(replacement[2].id, initial[2].id, 'a pending send must not inherit the old echo binding')
+  assert.notEqual(replacement[3].id, initial[3].id, 'the old expanded reply must not match the new reply')
+  const full = await node.peer.call('session.item', { session_id: SESSION, item_id: replacement[3].id })
   assert.equal(full.text, 'Replacement answer')
-  await assert.rejects(node.peer.call('session.item', { session_id: SESSION, item_id: initial.items[3].id }), /not found/)
+  await assert.rejects(node.peer.call('session.item', { session_id: SESSION, item_id: initial[3].id }), /not found/)
 
   appendFileSync(transcript, JSON.stringify({ ...records[3], content: 'Completed replacement answer' }) + '\n')
-  const completed = await node.peer.call('session.items', { session_id: SESSION })
-  assert.equal(completed.items[3].id, replacement.items[3].id, 'same-step completion keeps its identity')
-  assert.equal(completed.items[3].text, 'Completed replacement answer')
+  const completed = visible(await node.peer.call('session.items', { session_id: SESSION }))
+  assert.equal(completed[3].id, replacement[3].id, 'same-step completion keeps its identity')
+  assert.equal(completed[3].text, 'Completed replacement answer')
 
   appendFileSync(transcript, [records[2], { ...records[3], content: 'Completed replacement answer' }]
     .map((step) => JSON.stringify(step)).join('\n') + '\n')
-  const repeated = await node.peer.call('session.items', { session_id: SESSION })
-  assert.notEqual(repeated.items[2].id, completed.items[2].id, 'another identical replacement is another send')
-  assert.notEqual(repeated.items[3].id, completed.items[3].id)
-  assert.deepEqual(repeated.items.slice(0, 2), initial.items.slice(0, 2))
+  const repeated = visible(await node.peer.call('session.items', { session_id: SESSION }))
+  assert.notEqual(repeated[2].id, completed[2].id, 'another identical replacement is another send')
+  assert.notEqual(repeated[3].id, completed[3].id)
+  assert.deepEqual(repeated.slice(0, 2), initial.slice(0, 2))
 })
 
 test('complete export replacement also distinguishes new steps at reused indices', async (t) => {
   const { node, transcript, db } = await fixture(t)
-  const initial = await node.peer.call('session.items', { session_id: SESSION })
+  const initial = visible(await node.peer.call('session.items', { session_id: SESSION }))
   const next = records.map((step, index) => index < 2 ? step : { ...step, created_at: '2026-01-02T00:00:00Z' })
   writeFileSync(transcript, next.map((step) => JSON.stringify(step)).join('\n') + '\n')
   db.exec('UPDATE conversation_summaries SET step_count = 4')
-  const replaced = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(replaced.items.slice(0, 2), initial.items.slice(0, 2))
-  assert.notEqual(replaced.items[2].id, initial.items[2].id)
-  assert.notEqual(replaced.items[3].id, initial.items[3].id)
+  const replaced = visible(await node.peer.call('session.items', { session_id: SESSION }))
+  assert.deepEqual(replaced.slice(0, 2), initial.slice(0, 2))
+  assert.notEqual(replaced[2].id, initial[2].id)
+  assert.notEqual(replaced[3].id, initial[3].id)
 })
 
 test('moved prompts and native busy state refuse before mutation', async (t) => {
@@ -207,7 +207,7 @@ test('a companion restart verifies a native cut whose timestamp precedes the aba
   db.prepare('UPDATE conversation_summaries SET last_modified_time = ?').run('2025-01-01T00:00:00Z')
   await restart()
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(page.items.map((i) => i.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(page), ['Repeat', 'First answer'])
   assert.ok(page.history.endsWith(':cut:2'))
 })
 
@@ -222,7 +222,8 @@ test('a companion restart preserves an empty native trajectory with no steps fie
 })
 
 const later = '2026-01-01T00:01:00Z'
-const texts = (page) => page.items.map((item) => item.text)
+const visible = (page) => page.items.filter((item) => item.kind !== 'turn_duration')
+const texts = (page) => visible(page).map((item) => item.text)
 
 test('a sent turn appends to the history, its export changes it once and a rewind still replaces it (#12014)', async (t) => {
   const { node, transcript, db, nativeFile, rewind } = await fixture(t, { promptPlan: [{ reply: 'Third answer' }] })
@@ -477,7 +478,8 @@ test('an inventory refresh revalidates an existing cut after native work advance
   await until('recovered last reply in the inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'Recovered answer')
   assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectory').length, checks + 1)
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.equal(page.items.at(-1).text, 'Recovered answer')
+  assert.equal(texts(page).at(-1), 'Recovered answer')
+  assert.equal(page.items.at(-1).kind, 'turn_duration')
 })
 
 test('a changed summary cannot expose the abandoned tail while the native trajectory is still rewound', async (t) => {
@@ -496,7 +498,7 @@ test('a changed summary cannot expose the abandoned tail while the native trajec
   await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed' })
   await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(page.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(page), ['Repeat', 'First answer'])
   assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectory').length, checks + 1)
   assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
 })
@@ -517,7 +519,7 @@ test('native progress cannot clear a cut until the replacement export catches up
   await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed' })
   await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
   const lagging = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(lagging.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.deepEqual(texts(lagging), ['Repeat', 'First answer'])
   assert.ok(lagging.history.endsWith(':cut:2'))
   assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
 
@@ -525,7 +527,7 @@ test('native progress cannot clear a cut until the replacement export catches up
   await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed again' })
   await until('replacement export is visible', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'Replacement answer')
   const caughtUp = await node.peer.call('session.items', { session_id: SESSION })
-  assert.deepEqual(caughtUp.items.map((item) => item.text), replacement.map((step) => step.content))
+  assert.deepEqual(texts(caughtUp), replacement.map((step) => step.content))
 })
 
 test('a stale native check cannot erase a cut installed by a newer rewind', async (t) => {
@@ -554,7 +556,7 @@ test('a stale native check cannot erase a cut installed by a newer rewind', asyn
   const page = await node.peer.call('session.items', { session_id: SESSION })
   assert.equal(node.all('session.items').some((event) => event.items?.some((item) => item.text === 'Abandoned answer')), false)
   assert.equal(node.all('runtime.sessions').some((event) => event.sessions?.[0]?.last_text === 'Abandoned answer'), false)
-  assert.deepEqual(page.items.map((item) => item.text), records.slice(0, 2).map((step) => step.content))
+  assert.deepEqual(texts(page), records.slice(0, 2).map((step) => step.content))
   assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
 })
 
@@ -588,7 +590,7 @@ test('a stale check cannot publish while a newer rewind is installing its cut', 
   const page = await node.peer.call('session.items', { session_id: SESSION })
   assert.equal(node.all('session.items').some((event) => event.items?.some((item) => item.text === 'Abandoned answer')), false)
   assert.equal(node.all('runtime.sessions').some((event) => event.sessions?.[0]?.last_text === 'Abandoned answer'), false)
-  assert.deepEqual(page.items.map((item) => item.text), records.slice(0, 2).map((step) => step.content))
+  assert.deepEqual(texts(page), records.slice(0, 2).map((step) => step.content))
   assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
 })
 
@@ -628,11 +630,91 @@ test('native rewind drops rewound-away token usage and model from runtime.sessio
   assert.equal(row().model, 'gemini-4-carbon-high')
   const page = await node.peer.call('session.items', { session_id: SESSION })
   assert.deepEqual(page.items[1].usage, [{ model: 'gemini-4-carbon-high', in: 10000, out: 150, cache_read: 2000 }])
-  assert.equal(page.items.length, 2)
+  assert.equal(visible(page).length, 2)
+  assert.equal(page.items.at(-1).kind, 'turn_duration')
 
   // Full rewind clears all projected steps; session row omits usage and model rather than reading stale disk.
   await rewind({ occurrence: 1, prompts_after: 0 })
   await until('fully rewound session clears usage', () => row()?.context_tokens === undefined && row()?.output_tokens === undefined)
   assert.equal(row().context_window, undefined)
   assert.equal(row().model, undefined)
+})
+
+test('settled Persona ACP turn recovers from summary_behind after delayed shifted-index export and emits turn_duration (#15619)', async (t) => {
+  const { node, runtime, transcript, db, nativeFile, restart } = await fixture(t, {
+    promptPlan: [{ reply: 'Shifted final answer', toolStart: true, tool: true }],
+  })
+  const before = await node.peer.call('session.items', { session_id: SESSION })
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: before.to_seq })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Run check' })
+  await until('Persona-owned ACP prompt settled', () => runtime.idle())
+
+  // Simulate delayed native export whose real step_index shifts past the synthetic live index (internal steps + tools)
+  // while conversation_summaries.db remains behind at step_count = 4 (native trajectory already holds all 10 steps).
+  const flushed = [
+    { step_index: 4, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: later, content: 'Run check' },
+    { step_index: 5, type: 'CHECKPOINT', status: 'DONE', created_at: later },
+    { step_index: 6, type: 'PLANNER_RESPONSE', source: 'MODEL', status: 'DONE', created_at: later, content: 'Running tool', tool_calls: [{ name: 'run_command', args: { CommandLine: 'echo ok' } }] },
+    { step_index: 7, type: 'GENERIC', source: 'MODEL', status: 'DONE', created_at: later, content: 'ok' },
+    { step_index: 8, type: 'SYSTEM_MESSAGE', status: 'DONE', created_at: later, content: 'internal note' },
+    { step_index: 9, type: 'PLANNER_RESPONSE', source: 'MODEL', status: 'DONE', created_at: later, content: 'Shifted final answer' },
+  ]
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  snapshot.trajectory.steps.push(...flushed.map(nativeRecord))
+  writeFileSync(nativeFile, JSON.stringify(snapshot))
+  appendFileSync(transcript, flushed.map((step) => JSON.stringify(step)).join('\n') + '\n')
+
+  await until('session settles to done despite lagging summary DB', () => {
+    const row = node.last('runtime.sessions')?.sessions.find((s) => s.session_id === SESSION)
+    return row?.status === 'done' && row?.last_text === 'Shifted final answer'
+  })
+  const summary = db.prepare('SELECT status, step_count FROM conversation_summaries WHERE conversation_id = ?').get(RAW)
+  assert.equal(summary.status, 'CASCADE_RUN_STATUS_IDLE')
+  assert.equal(summary.step_count, 4)
+
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  const td = page.items.at(-1)
+  assert.equal(td.kind, 'turn_duration')
+  assert.equal(td.seq, 10)
+  assert.equal(td.turn_duration.source, 'agy_turn_end')
+  assert.equal(td.turn_duration.duration_ms, 0)
+  assert.equal(td.turn_duration.user_item_id, page.items.find((it) => it.seq === 5 && it.role === 'user').id)
+  await until('watched stream pushes turn_duration', () =>
+    node.all('session.items').some((batch) => batch.items?.some((it) => it.id === td.id)),
+  )
+
+  // The in-memory match must have refreshed .persona-turn-completion with real (history, step_index=9) so restarts recover too.
+  await restart()
+  const afterRestart = node.last('runtime.sessions').sessions.find((s) => s.session_id === SESSION)
+  assert.equal(afterRestart.status, 'done')
+  const restartedPage = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(restartedPage.items.at(-1).id, td.id)
+})
+
+test('settled Persona ACP turn recovers when summary row is not yet present while external unverified turns stay unknown (#15619)', async (t) => {
+  const { node, runtime, transcript, db } = await fixture(t, {
+    promptPlan: [{ reply: 'Fresh summary answer', export: true }],
+  })
+  db.exec('DELETE FROM conversation_summaries')
+  await node.peer.call('session.send', { session_id: SESSION, text: 'First without summary row' })
+  await until('Persona-owned ACP prompt settled', () => runtime.idle())
+
+  await until('session reports done even before summary row exists', () =>
+    node.last('runtime.sessions')?.sessions.find((s) => s.session_id === SESSION)?.status === 'done',
+  )
+  const settledPage = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(settledPage.items.at(-1).kind, 'turn_duration')
+
+  // Appending an external unverified turn without ACP settlement must drop back to unknown without trailing turn_duration.
+  const external = [
+    { step_index: 6, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: '2026-01-01T00:02:00Z', content: 'External' },
+    { step_index: 7, type: 'PLANNER_RESPONSE', source: 'MODEL', status: 'DONE', created_at: '2026-01-01T00:02:01Z', content: 'Unverified external reply' },
+  ]
+  appendFileSync(transcript, external.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const before = node.all('runtime.sessions').length
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Refresh' })
+  await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
+  assert.equal(node.last('runtime.sessions').sessions.find((s) => s.session_id === SESSION).status, 'unknown')
+  const externalPage = await node.peer.call('session.items', { session_id: SESSION })
+  assert.notEqual(externalPage.items.at(-1).kind, 'turn_duration')
 })

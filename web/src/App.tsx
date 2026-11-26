@@ -59,7 +59,7 @@ import { SIDEBAR_LABEL, useShortcuts } from "./lib/use-shortcuts";
 import { Sidebar, SidebarRail } from "./views/Sidebar";
 import { SidebarResize } from "./views/SidebarResize";
 import { SidebarRowHoverHost } from "./views/SidebarRowHover";
-import { SidePanel } from "./views/SidePanel";
+import { closePanel, usePanel } from "./lib/panel";
 import { ExtensionNavPage } from "./views/extensions/ExtensionSlots";
 import { useExtensionPlace } from "./lib/extension-slots";
 import { AttentionSignals } from "./lib/attention-signals";
@@ -85,11 +85,10 @@ const AgentArchives = lazyPage(() => import("./views/agents/AgentArchives").then
 const CompareRuns = lazyPage(() => import("./views/CompareRuns").then((m) => m.CompareRuns), { routes: ["compare"] });
 const RequestPage = lazyPage(() => import("./views/RequestPage").then((m) => m.RequestPage), { routes: ["request"] });
 const WorkspaceBoard = lazyPage(() => import("./views/WorkspaceBoard").then((m) => m.WorkspaceBoard), { routes: ["workspace-board"] });
-const Machines = lazyPage(() => import("./views/Machines").then((m) => m.Machines), { routes: ["machines"] });
+const Machines = lazyPage(() => import("./views/Machines").then((m) => m.Machines), { routes: ["machines", "machine"] });
 const TerminalPage = lazyPage(() => import("./views/terminal/TerminalPage").then((m) => m.TerminalPage), { routes: ["terminal"] });
 const LarkOAuthReturn = lazyPage(() => import("./views/settings/LarkOAuthReturn").then((m) => m.LarkOAuthReturn), { routes: ["lark-oauth"] });
 const SubscriptionsPage = lazyPage(() => import("./views/subscriptions/SubscriptionsPage").then((m) => m.SubscriptionsPage), { routes: ["subscriptions"] });
-const MachineDetail = lazyPage(() => import("./views/machines/MachineDetail").then((m) => m.MachineDetail), { routes: ["machine"] });
 const SpacePage = lazyPage(() => import("./views/SpacePage").then((m) => m.SpacePage), { routes: ["space"] });
 const Settings = lazyPage(() => import("./views/Settings").then((m) => m.Settings), { routes: ["settings"] });
 const SpaceExtensionEntry = lazyPage(() => import("./views/spaces/SpaceExtensionEntry").then((m) => m.SpaceExtensionEntry), { routes: ["track", "track-new"] });
@@ -104,6 +103,19 @@ const TodosView = lazyPage(() => import("./views/Todos").then((m) => m.TodosView
 // an address that is no page (lib/router.ts "not-found"): loaded only by one
 const NotFound = lazyPage(() => import("./views/NotFound").then((m) => m.NotFound));
 // Keep the shortcut palette warm. The new-agent dialog loads only when opened.
+// A closed side panel is not part of startup. Keep it mounted after first use so its hooks preserve focus and layout.
+const SidePanel = lazyPage(() => import("./views/SidePanel").then((m) => m.SidePanel));
+function SidePanelHost() {
+  const open = Boolean(usePanel());
+  if (!useOpened(open)) return null;
+  return (
+    <OverlayBoundary open={open} onClose={closePanel}>
+      <Suspense fallback={open && <div className="fixed right-4 top-4 z-40"><Loading /></div>}>
+        <SidePanel />
+      </Suspense>
+    </OverlayBoundary>
+  );
+}
 const Palette = lazyPage(() => import("./views/Palette").then((m) => m.Palette), { idle: true });
 // Where the toasts sit on a narrow screen (ui/toast-lift.tsx): off the first screen and out of the idle tier, which a
 // wide screen loads too; Shell loads it once the screen is narrow. A load that fails leaves the toasts at the bottom of
@@ -321,7 +333,7 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
     if (route.at || route.standalone) return exact();
     const parentRow = pageRows(s, route.mid).find((r) => r.session_id === sub.parent);
     const dest = parentRow?.assistant
-      ? conversationRoute(route.mid, sub.parent, s.sessions, s.assistant, parentRow.manager)
+      ? conversationRoute(route.mid, sub.parent, s.sessions, s.assistant, parentRow)
       : { ...route, sid: sub.parent };
     return { link: undefined, to: routePath(dest), mid: route.mid, sid: undefined, parent: sub.parent, subagent: { mid: route.mid, sid: route.sid } };
   }
@@ -329,7 +341,7 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
   const row = rows.find((r) => r.session_id === route.sid);
   // a Persona conversation's `/s/…` link (a push, a copied address): its own page, which draws its plan cards, questions
   // and tasks; the agent chat here shows none of them
-  if (row?.assistant && !route.at) return { link: undefined, to: routePath(conversationRoute(route.mid, route.sid, s.sessions, s.assistant, row.manager)), mid: route.mid, sid: undefined };
+  if (row?.assistant && !route.at) return { link: undefined, to: routePath(conversationRoute(route.mid, route.sid, s.sessions, s.assistant, row)), mid: route.mid, sid: undefined };
   // a lead's worker's (#5180): the lead's page, the worker in its Team panel
   const worker = workerTarget(rows, route.mid, row, inWorkView(route));
   if (worker && !route.standalone) return worker;
@@ -343,7 +355,7 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
     if (route.at || route.standalone) return exact();
     const parentRow = pageRows(s, parentMid).find((r) => r.session_id === parent);
     const dest = parentRow?.assistant
-      ? conversationRoute(parentMid, parent, s.sessions, s.assistant, parentRow.manager)
+      ? conversationRoute(parentMid, parent, s.sessions, s.assistant, parentRow)
       : withWorkView({ name: "session", mid: parentMid, sid: parent }, inWorkView(route));
     return { link: undefined, to: routePath(dest), mid: parentMid, sid: undefined, parent, subagent: { mid: route.mid, sid: route.sid } };
   }
@@ -614,17 +626,15 @@ function Shell() {
     case "compare":
       main = <CompareRuns id={route.id} onToggleSidebar={toggle} />;
       break;
+    case "machine":
     case "machines":
       main = <Machines onToggleSidebar={toggle} />;
       break;
     case "terminal":
       main = <TerminalPage route={route} onToggleSidebar={toggle} onNewAgent={openNewAgent} />;
       break;
-    case "machine":
-      main = <MachineDetail key={route.mid} mid={route.mid} onToggleSidebar={toggle} />;
-      break;
     case "space":
-      main = <SpacePage key={`${route.mid}/${route.space}`} mid={route.mid} space={route.space} onToggleSidebar={toggle} />;
+      main = <SpacePage key={`${route.mid}/${route.workspace ?? route.space}`} workspaceId={route.workspace} mid={route.mid} space={route.space} onToggleSidebar={toggle} />;
       break;
     case "settings":
       main = <Settings onToggleSidebar={toggle} />;
@@ -693,7 +703,7 @@ function Shell() {
         </div>
       </main>
       <SidebarRowHoverHost />
-      <SidePanel />
+      <SidePanelHost />
       {paletteOpened && (
         <OverlayBoundary open={palette.open} onClose={closePalette}>
           <Suspense fallback={null}>

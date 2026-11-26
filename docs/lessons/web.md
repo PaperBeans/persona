@@ -1,5 +1,15 @@
 # Lessons: web UI and interactions
 
+## A TypeError is not a network failure (#16182)
+
+fetch rejects a failed connection with a TypeError, and JavaScript throws one for a bug in the page's own code.
+`errorText` mapped every TypeError to "Can't reach the hub". The Agents lists run their answer's processing, and the
+store subscribers each publish reaches, inside the read's `try`, so a row the page tripped over showed as a network gap
+that Retry could never close, while the hub logged the read as a 200. `lib/api.ts` now turns fetch's own rejection,
+and a body that breaks off, into `HubUnreachableError`. Only that, or a TypeError carrying the browser's fetch-failure
+message, is a gap (`isNetworkFailure`). Any other TypeError says what broke ("Something went wrong on this page: …") and
+is not retried. When code needs to know whether a request reached the hub, use `isNetworkFailure`, not `instanceof TypeError`.
+
 ## A text shimmer needs an opaque source color (#15367)
 
 Setting `color: transparent` also clears any gradient stop that reads `currentColor`.
@@ -1570,3 +1580,13 @@ project lists each of its folders as its own `project_path`, so the section's fi
 Use a label linked by ID, with the select beside it. When a label wraps the native select, browser label lookup can
 include the option text in the label. Check the label in a real browser and attach any inherited-policy hint with
 `aria-describedby` so it stays available without changing the control's name.
+
+## A cached first screen is not evidence of an outcome (#16286)
+
+The chat draws its cached page at once and reads the hub's newest page behind it (`useTranscript`, `firstRead`). The
+cache can be older than the last turn's reply, so anything that judges an outcome from it is a guess. "No response
+returned" with Retry was drawn from the cache. While a stalled hub held the read (#16214), each reload showed it again,
+and Retry sent the question a second time although the reply was in the transcript. Draw verdicts and offer actions that
+act on them only once the page holds the newest read, `firstRead` without an `error` (`chatLines` `stale`). A failed
+read keeps its "Refresh failed" pill, which reloads and sends nothing. Test with a cache that lacks the reply and a held
+read (`sync/fake-hub.ts` `hold`), not with a mocked transcript.

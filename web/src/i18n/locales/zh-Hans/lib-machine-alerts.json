@@ -8,6 +8,7 @@
   "launcher": "启动器异常",
   "mismatch": "版本不一致",
   "updating": "正在更新",
+  "waiting_restart": "待空闲重启",
   "with_value": "{name} · {value}",
   "per_core": "每核 {value}",
   "load_definition": "负载 = 正在运行和排队等 CPU 的线程数（1 分钟平均；Linux 上也算等磁盘的线程），不是占用率；每核超过 1 表示有线程在等；Mac 上后台优先级的任务可能只用部分核心，所以 CPU 不高时也会排队。",
