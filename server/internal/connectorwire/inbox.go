@@ -199,6 +199,8 @@ const (
 	TagChat   = "chat"
 	TagSender = "sender"
 	TagBranch = "branch"
+	// TagExternalObject is a canonical source object URL when the row opens a related view instead.
+	TagExternalObject = "external_object"
 )
 
 // InboxReply is a reply to one of a connector's inbox items.

@@ -216,11 +216,11 @@ struct CallOneButtonTests {
         let body = String(calls[back.upperBound...].prefix(300))
         #expect(body.contains("voiceCalls.returnTo(chat.key)") && !body.contains("voiceCalls.returned("), "the bar goes at the tap")
         let chat = try Self.code("Persona/Views/Chat/ChatView.swift")
-        #expect(chat.contains(".onChange(of: VoiceCalls.shared.returning == key) { _, back in if back { closeCovers() } }"))
+        #expect(chat.contains(".onChange(of: model.voice?.isReturning(to: key) ?? false) { _, back in if back { closeCovers() } }"))
         let close = try #require(chat.range(of: "private func closeCovers() {"))
         let covers = String(chat[close.upperBound...].prefix(300))
         #expect(covers.contains("viewingImages = nil") && covers.contains("showTerminal = false"))
-        #expect(chat.contains(".onTabVisibility(appear: { [key] in VoiceCalls.shared.returned(key) }"), "the page showing takes the bar away")
+        #expect(chat.contains(".onTabVisibility(appear: { [key, model] in model.voice?.returned(key) }"), "the page showing takes the bar away")
     }
 
     /// No + row offers voice or a call; the in-app voice chat goes on in the background and away from its page on iOS.

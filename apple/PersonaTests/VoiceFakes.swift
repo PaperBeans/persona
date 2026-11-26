@@ -184,6 +184,15 @@ final class FakeVoiceSocket: VoiceSocket, @unchecked Sendable {
     func cue(_ pcm: Data) { cues.append(pcm) }
     func clear() { clears += 1 }
 
+    /// The extension's reply edges, in order (`true`: began).
+    private(set) var replies: [Bool] = []
+    func reply(_ open: Bool) { replies.append(open) }
+    /// What the call reads as it ends or changes voice.
+    var lead = VoiceLead()
+    /// Where the call started the jitter buffer, each time.
+    private(set) var startedLeads: [Int] = []
+    func startLead(at level: Int) { startedLeads.append(level) }
+
     func stop() {
         stops += 1
         uplink = nil
@@ -242,6 +251,8 @@ struct FakeMicPermission: MicPermission {
 
     /// A group of its own per rig: the rates a call learns are remembered per group and extension.
     let key = SessionKey(group: "g-" + UUID().uuidString, machineID: "m1", sessionID: "s1")
+    /// Where the rig's calls remember how far each voice's jitter buffer grew: never the app's own defaults.
+    let leads = VoiceLeadMemory(defaults: UserDefaults(suiteName: "PersonaTests.VoiceRig")!)
 
     var api: APIClient {
         var c = hub.client
@@ -258,7 +269,8 @@ struct FakeMicPermission: MicPermission {
                   },
                   audio: { self.audio },
                   mic: FakeMicPermission(allowed: allowed), microphone: microphone, idleTimer: idleTimer, clock: clock,
-                  session: { _ in self.session }, voice: { _, _ in self.voice }, callEvents: { self.heard.append($0) })
+                  session: { _ in self.session }, voice: { _, _ in self.voice }, callEvents: { self.heard.append($0) },
+                  leads: leads)
     }
 
     func call(_ key: SessionKey? = nil, surface: VoiceSurface = .phone, recent: [VoiceLine] = []) -> VoiceConversation {

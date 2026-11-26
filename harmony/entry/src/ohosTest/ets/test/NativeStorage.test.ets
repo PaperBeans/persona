@@ -78,6 +78,25 @@ export default function nativeStorageTests(): void {
         await second.put(own, 'new pairing'); expect(await first.get(own)).assertEqual('new pairing');
       } finally { await first.close(); await second.close(); await relationalStore.deleteRdbStore(context, name); }
     });
+    it('conditional_snapshot_cleanup_preserves_a_newer_request_and_a_repaired_pairing', 0, async (): Promise<void> => {
+      const context = nativeTestContext(), name = 'snapshot-' + util.generateRandomUUID() + '.db';
+      const first = new LocalStore(name), second = new LocalStore(name), key = 'view:["fixture","personal"]:worktree-request:fixture';
+      try {
+        await first.open(context); await second.open(context);
+        const epoch = first.revision(key);
+        await first.put(key, 'original request');
+        const replacement = second.put(key, 'replacement request');
+        const cleanup = first.remove(key, epoch, 'original request');
+        await Promise.all([replacement, cleanup]);
+        expect(await first.get(key)).assertEqual('replacement request');
+        await first.remove(key, epoch, 'replacement request');
+        expect(await second.get(key)).assertEqual('');
+        await first.purgeHub('fixture'); second.allowHub('fixture');
+        await second.put(key, 'original request');
+        await first.remove(key, epoch, 'original request');
+        expect(await second.get(key)).assertEqual('original request');
+      } finally { await first.close(); await second.close(); await relationalStore.deleteRdbStore(context, name); }
+    });
     it('versioned_drafts_and_sharded_outbox_survive_reopen_and_forget', 0, async (): Promise<void> => {
       const context = nativeTestContext(), name = 'outbox-test-' + util.generateRandomUUID() + '.db';
       const first = new LocalStore(name), reopened = new LocalStore(name), scope = JSON.stringify(['hub-outbox', 'personal']);

@@ -47,6 +47,10 @@ var sealedSettings = []SealedSetting{
 	{Key: "launchers.machine_keys", List: true, Fields: []string{"key_sealed"}},                                // internal/assistant machineKey
 	{Key: "bots.feishu", Fields: []string{"secret_enc", "registration_device_enc", "registration_secret_enc"}}, // internal/extmgr FeishuBotSettings
 	{Key: mailwire.MicrosoftClientSetting, Fields: []string{mailwire.MicrosoftClientSealedField}},              // internal/modules/mail sealedSetting
+	// internal/extmgr larksync.go: the user sync's primary-bot state, its extra bots and its bindings' user tokens.
+	{Key: "bots.feishu.sync", Fields: []string{"registration_device_enc"}},
+	{Key: "bots.feishu.sync.bots", List: true, Fields: []string{"secret_enc", "registration_device_enc"}},
+	{Key: "bots.feishu.sync.bindings", List: true, Fields: []string{"access_token_enc", "refresh_token_enc", "auth_verifier_enc", "auth_device_enc"}},
 }
 
 // SealedSettings are the settings values that hold sealed strings (the packages that write them check theirs is here).

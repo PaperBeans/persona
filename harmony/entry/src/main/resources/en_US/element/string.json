@@ -1,6 +1,38 @@
 {
   "string": [
     {
+      "name": "cloudflare_access_required",
+      "value": "This hub is behind Cloudflare Access and needs a service token"
+    },
+    {
+      "name": "cloudflare_access_rejected",
+      "value": "Cloudflare Access rejected the service token"
+    },
+    {
+      "name": "cloudflare_access_incomplete",
+      "value": "Enter both the client ID and client secret"
+    },
+    {
+      "name": "cloudflare_access_invalid",
+      "value": "Check the Cloudflare Access service token"
+    },
+    {
+      "name": "phone_switcher_expiry",
+      "value": "Installing · code expires in {minutes} min"
+    },
+    {
+      "name": "phone_switcher_expired",
+      "value": "Installing · code expired"
+    },
+    {
+      "name": "phone_switcher_synced",
+      "value": "Offline · last synced {time}"
+    },
+    {
+      "name": "project_temporary_session",
+      "value": "Temporary Session"
+    },
+    {
       "name": "module_desc",
       "value": "Persona phone client"
     },
@@ -95,6 +127,18 @@
     {
       "name": "search",
       "value": "Search"
+    },
+    {
+      "name": "agents_search_prompt",
+      "value": "Search spaces, tabs, sessions, content"
+    },
+    {
+      "name": "agent_source_lark_group",
+      "value": "Lark Group"
+    },
+    {
+      "name": "agent_grouping_current",
+      "value": "Grouping: {group}"
     },
     {
       "name": "search_sessions",
@@ -397,12 +441,36 @@
       "value": "Sent"
     },
     {
+      "name": "chat_feedback_sending",
+      "value": "Sending…"
+    },
+    {
+      "name": "chat_feedback_processing",
+      "value": "Processing…"
+    },
+    {
       "name": "pending",
       "value": "Pending"
     },
     {
       "name": "completed",
       "value": "Completed"
+    },
+    {
+      "name": "phone_working_seconds",
+      "value": "Working {s} s"
+    },
+    {
+      "name": "phone_working_minutes",
+      "value": "Working {m} min"
+    },
+    {
+      "name": "phone_working_minutes_seconds",
+      "value": "Working {m}m {s}s"
+    },
+    {
+      "name": "phone_working_hours_minutes",
+      "value": "Working {h} hr {m} min"
     },
     {
       "name": "work_summary",
@@ -1045,6 +1113,14 @@
       "value": "Workspace"
     },
     {
+      "name": "project_join_space",
+      "value": "Join Space"
+    },
+    {
+      "name": "project_join_help",
+      "value": "Opens a new tab in the selected worktree."
+    },
+    {
       "name": "latest",
       "value": "Latest"
     },
@@ -1067,6 +1143,70 @@
     {
       "name": "takeover",
       "value": "Take over"
+    },
+    {
+      "name": "session_git_staged_count",
+      "value": "{count} staged"
+    },
+    {
+      "name": "session_git_changes_count",
+      "value": "{count} changes"
+    },
+    {
+      "name": "session_git_choose_files",
+      "value": "Tick the files to commit"
+    },
+    {
+      "name": "session_git_detached_commit",
+      "value": "Switch to a branch to commit"
+    },
+    {
+      "name": "session_git_pull_no_directory",
+      "value": "Persona doesn’t know this pane’s folder."
+    },
+    {
+      "name": "session_git_pull_not_a_repository",
+      "value": "This folder isn’t in a Git repository."
+    },
+    {
+      "name": "session_git_pull_detached_head",
+      "value": "HEAD is detached. Switch to a branch first."
+    },
+    {
+      "name": "session_git_pull_no_upstream",
+      "value": "This branch has no upstream branch. Set one on the computer first."
+    },
+    {
+      "name": "session_git_pull_uncommitted_changes",
+      "value": "The working tree has uncommitted changes. Commit or stash them on the computer, then pull."
+    },
+    {
+      "name": "session_git_pull_not_fast_forward",
+      "value": "The branch and its upstream have both moved on, so it can’t fast-forward. Merge or rebase it on the computer."
+    },
+    {
+      "name": "session_git_pulling",
+      "value": "Pulling"
+    },
+    {
+      "name": "session_git_pull_latest",
+      "value": "Pull latest code"
+    },
+    {
+      "name": "session_git_pulled",
+      "value": "Pulled the latest code"
+    },
+    {
+      "name": "session_git_up_to_date",
+      "value": "Already up to date"
+    },
+    {
+      "name": "session_git_commit_action",
+      "value": "Commit…"
+    },
+    {
+      "name": "session_git_binary",
+      "value": "Binary"
     },
     {
       "name": "session_tools_binary_file",
@@ -2230,7 +2370,7 @@
     },
     {
       "name": "health_ask_placeholder",
-      "value": "Ask about your health"
+      "value": "Ask about your health…"
     },
     {
       "name": "health_chats",
@@ -2290,15 +2430,19 @@
     },
     {
       "name": "health_question_sleep",
-      "value": "How can I improve my sleep?"
+      "value": "How did I sleep this week?"
     },
     {
       "name": "health_question_steps",
-      "value": "What can my daily steps tell me?"
+      "value": "How do my steps over the last 7 days compare with last week?"
+    },
+    {
+      "name": "health_question_resting_heart_rate",
+      "value": "Log my weight today: 62.5 kg"
     },
     {
       "name": "health_log_weight",
-      "value": "Log my weight"
+      "value": "Log my weight today: 62.5 kg"
     },
     {
       "name": "health_log_water",
@@ -2362,7 +2506,7 @@
     },
     {
       "name": "health_try_asking",
-      "value": "Try asking"
+      "value": "Try Asking"
     },
     {
       "name": "health_upload_pdf",
@@ -2374,7 +2518,7 @@
     },
     {
       "name": "health_upload_report",
-      "value": "Upload a report"
+      "value": "Upload a Checkup Report"
     },
     {
       "name": "knowledge_agent_prompt",
@@ -2435,6 +2579,14 @@
     {
       "name": "knowledge_kind_recordings",
       "value": "Recordings"
+    },
+    {
+      "name": "phone_lark_meeting_notes",
+      "value": "Lark Meeting Notes"
+    },
+    {
+      "name": "phone_original_meeting_notes",
+      "value": "Original Meeting Notes"
     },
     {
       "name": "knowledge_minutes",
@@ -2923,6 +3075,34 @@
     {
       "name": "branch_chat",
       "value": "Branch chat"
+    },
+    {
+      "name": "chat_lift_select",
+      "value": "Select Text"
+    },
+    {
+      "name": "chat_lift_multiple",
+      "value": "Select Messages"
+    },
+    {
+      "name": "chat_lift_me",
+      "value": "Me"
+    },
+    {
+      "name": "chat_lift_quote_part",
+      "value": "Quoted Selection · {author}"
+    },
+    {
+      "name": "chat_lift_quote_whole",
+      "value": "Quote · {author}"
+    },
+    {
+      "name": "chat_lift_remove_quote",
+      "value": "Remove Quote"
+    },
+    {
+      "name": "chat_lift_quote",
+      "value": "Quote"
     },
     {
       "name": "use_as_context",
@@ -4621,6 +4801,46 @@
       "value": "Cancel question"
     },
     {
+      "name": "agent_group_repo",
+      "value": "By Repository"
+    },
+    {
+      "name": "agent_group_todo",
+      "value": "By To-do"
+    },
+    {
+      "name": "agent_group_app",
+      "value": "By App"
+    },
+    {
+      "name": "agent_group_recent",
+      "value": "Recently Used"
+    },
+    {
+      "name": "agent_group_direction",
+      "value": "By Pinned"
+    },
+    {
+      "name": "agent_app_claude",
+      "value": "Claude desktop app"
+    },
+    {
+      "name": "agent_app_codex",
+      "value": "Codex App"
+    },
+    {
+      "name": "agent_app_desktop",
+      "value": "{agent} desktop app"
+    },
+    {
+      "name": "agent_show_all_count",
+      "value": "Show All {count}"
+    },
+    {
+      "name": "agent_group_machine",
+      "value": "By Machine"
+    },
+    {
       "name": "agent_group_state",
       "value": "By Status"
     },
@@ -4693,6 +4913,174 @@
       "value": "Type"
     },
     {
+      "name": "map_point_title",
+      "value": "Knowledge Point"
+    },
+    {
+      "name": "map_from",
+      "value": "From"
+    },
+    {
+      "name": "map_confirmed",
+      "value": "Confirmed %s"
+    },
+    {
+      "name": "map_active",
+      "value": "Active"
+    },
+    {
+      "name": "map_done",
+      "value": "Done"
+    },
+    {
+      "name": "map_paused",
+      "value": "Paused"
+    },
+    {
+      "name": "map_unrated",
+      "value": "Not rated"
+    },
+    {
+      "name": "map_other",
+      "value": "Other"
+    },
+    {
+      "name": "map_summary",
+      "value": "Summary"
+    },
+    {
+      "name": "map_goal",
+      "value": "Goal"
+    },
+    {
+      "name": "map_role",
+      "value": "My role"
+    },
+    {
+      "name": "map_latest",
+      "value": "Latest"
+    },
+    {
+      "name": "map_notes",
+      "value": "Main chat notes"
+    },
+    {
+      "name": "map_dirs",
+      "value": "Code folders"
+    },
+    {
+      "name": "map_chats",
+      "value": "Related chats"
+    },
+    {
+      "name": "map_people",
+      "value": "Related people"
+    },
+    {
+      "name": "map_topics",
+      "value": "Topics"
+    },
+    {
+      "name": "map_topic_count",
+      "value": "Topics"
+    },
+    {
+      "name": "map_points",
+      "value": "Knowledge Points"
+    },
+    {
+      "name": "map_sources",
+      "value": "Sources"
+    },
+    {
+      "name": "map_with_summary",
+      "value": "With a summary"
+    },
+    {
+      "name": "map_knowledge",
+      "value": "Knowledge"
+    },
+    {
+      "name": "map_by_topic",
+      "value": "by topic"
+    },
+    {
+      "name": "map_by_status",
+      "value": "by status"
+    },
+    {
+      "name": "map_topics_off",
+      "value": "Knowledge Points Are Off"
+    },
+    {
+      "name": "map_topics_none",
+      "value": "No Topics Yet"
+    },
+    {
+      "name": "map_projects_none",
+      "value": "No Projects Yet"
+    },
+    {
+      "name": "map_topics_off_info",
+      "value": "Turn on “Organize knowledge points by topic” in Settings › Knowledge Selection, and Persona starts curating in the background."
+    },
+    {
+      "name": "map_topics_none_info",
+      "value": "In the background, Persona pulls durable knowledge out of your project timelines and chats and files it by topic. The map fills in as it does."
+    },
+    {
+      "name": "map_projects_none_info",
+      "value": "Projects appear as Persona sorts them out of your chats and Agents' work."
+    },
+    {
+      "name": "map_open_selection",
+      "value": "Open Knowledge Selection"
+    },
+    {
+      "name": "map_why",
+      "value": "Why"
+    },
+    {
+      "name": "map_cause",
+      "value": "Cause"
+    },
+    {
+      "name": "map_concept",
+      "value": "Concept"
+    },
+    {
+      "name": "map_decision",
+      "value": "Decision"
+    },
+    {
+      "name": "map_practice",
+      "value": "How to"
+    },
+    {
+      "name": "map_pitfall",
+      "value": "Pitfall"
+    },
+    {
+      "name": "map_fact",
+      "value": "Fact"
+    },
+    {
+      "name": "map_question",
+      "value": "Open question"
+    },
+    {
+      "name": "map_point",
+      "value": "Point"
+    },
+    {
+      "name": "map_partial",
+      "value": "Some entries could not be read (%s)."
+    },
+    {
+      "name": "knowledge_frequent_tags",
+      "value": "Frequent Tags"
+    },
+    {
       "name": "knowledge_filter_tag",
       "value": "Tags"
     },
@@ -4739,6 +5127,3462 @@
     {
       "name": "agent_delivery_waiting",
       "value": "Waiting for {computer}."
+    },
+    {
+      "name": "project_search",
+      "value": "Search projects or worktrees"
+    },
+    {
+      "name": "project_all_machines",
+      "value": "All computers"
+    },
+    {
+      "name": "project_worktrees",
+      "value": "worktrees"
+    },
+    {
+      "name": "project_agent_count",
+      "value": "{count} agents"
+    },
+    {
+      "name": "project_sessions",
+      "value": "sessions"
+    },
+    {
+      "name": "project_empty",
+      "value": "No projects on the connected computers yet."
+    },
+    {
+      "name": "project_no_sessions",
+      "value": "No Agents in this worktree yet."
+    },
+    {
+      "name": "project_catalog_unavailable",
+      "value": "The project list could not be loaded."
+    },
+    {
+      "name": "project_catalog_partial",
+      "value": "Some computers could not be refreshed."
+    },
+    {
+      "name": "project_gone",
+      "value": "This project or worktree is no longer in the catalog."
+    },
+    {
+      "name": "project_worktree",
+      "value": "Worktree"
+    },
+    {
+      "name": "project_start_here",
+      "value": "Start in this worktree"
+    },
+    {
+      "name": "welcome_morning",
+      "value": "Good morning"
+    },
+    {
+      "name": "welcome_afternoon",
+      "value": "Good afternoon"
+    },
+    {
+      "name": "welcome_evening",
+      "value": "Good evening"
+    },
+    {
+      "name": "project_free_directory",
+      "value": "Enter a directory"
+    },
+    {
+      "name": "project_count",
+      "value": "projects"
+    },
+    {
+      "name": "project_view_worktree",
+      "value": "View worktree"
+    },
+    {
+      "name": "project_start_unavailable",
+      "value": "The selected computer is unavailable. Refresh the project to try again."
+    },
+    {
+      "name": "tree_create",
+      "value": "New Worktree"
+    },
+    {
+      "name": "tree_rename_current_name",
+      "value": "Name on the host"
+    },
+    {
+      "name": "tree_rename_requested_name",
+      "value": "Requested name"
+    },
+    {
+      "name": "tree_rename_original_name",
+      "value": "Name shown before renaming"
+    },
+    {
+      "name": "tree_rename_keep_current",
+      "value": "Keep current name and clear this request"
+    },
+    {
+      "name": "tree_rename_previous_directory",
+      "value": "Previous worktree directory"
+    },
+    {
+      "name": "tree_rename_removed_explanation",
+      "value": "The previous worktree has been removed. Its rename request can be marked checked on this device."
+    },
+    {
+      "name": "tree_rename_removed_continue",
+      "value": "Previous worktree removed — continue renaming"
+    },
+    {
+      "name": "tree_rename_keep_explanation",
+      "value": "Keeping the current name clears this request on this device. You can then enter a new name."
+    },
+    {
+      "name": "tree_rename_check_again",
+      "value": "The name or workspace changed. Check the current name again."
+    },
+    {
+      "name": "tree_rename",
+      "value": "Rename Worktree"
+    },
+    {
+      "name": "tree_cleanup",
+      "value": "Remove Worktree"
+    },
+    {
+      "name": "tree_remove",
+      "value": "Remove"
+    },
+    {
+      "name": "tree_source",
+      "value": "Source worktree"
+    },
+    {
+      "name": "tree_actions",
+      "value": "Worktree actions"
+    },
+    {
+      "name": "tree_location",
+      "value": "Location"
+    },
+    {
+      "name": "tree_checkout",
+      "value": "Checkout"
+    },
+    {
+      "name": "tree_branch",
+      "value": "Branch"
+    },
+    {
+      "name": "tree_base_branch",
+      "value": "Current branch"
+    },
+    {
+      "name": "tree_branch_hint",
+      "value": "New branch name"
+    },
+    {
+      "name": "tree_path_hint",
+      "value": "Checkout directory"
+    },
+    {
+      "name": "tree_automatic",
+      "value": "Use an automatic name"
+    },
+    {
+      "name": "tree_display_name",
+      "value": "Worktree name"
+    },
+    {
+      "name": "tree_cleanup_preview",
+      "value": "Review removal"
+    },
+    {
+      "name": "tree_dirty_files",
+      "value": "Changed files"
+    },
+    {
+      "name": "tree_force",
+      "value": "Discard uncommitted changes"
+    },
+    {
+      "name": "tree_delete_branch",
+      "value": "Also delete the Git branch"
+    },
+    {
+      "name": "tree_revoke_unused_preview",
+      "value": "Discard the unused confirmation and preview again"
+    },
+    {
+      "name": "tree_cleanup_present",
+      "value": "The worktree was still present at the last check. Check again for the cleanup result."
+    },
+    {
+      "name": "tree_cleanup_removing",
+      "value": "Cleanup is in progress. Check again for the result."
+    },
+    {
+      "name": "tree_check_result",
+      "value": "Check removal status"
+    },
+    {
+      "name": "tree_created",
+      "value": "Worktree created"
+    },
+    {
+      "name": "tree_renamed",
+      "value": "Worktree renamed"
+    },
+    {
+      "name": "tree_cleaned",
+      "value": "Worktree removed"
+    },
+    {
+      "name": "tree_cleaned_branch",
+      "value": "Worktree removed. Check whether the branch was deleted."
+    },
+    {
+      "name": "tree_preview_changed",
+      "value": "The cleanup preview is out of date. Refresh it before confirming."
+    },
+    {
+      "name": "tree_changed_files",
+      "value": "Review the uncommitted changes before removal."
+    },
+    {
+      "name": "tree_main_protected",
+      "value": "The main checkout must be kept."
+    },
+    {
+      "name": "tree_repo_unavailable",
+      "value": "The host could not identify the repository."
+    },
+    {
+      "name": "phone_settings_search",
+      "value": "Search settings"
+    },
+    {
+      "name": "phone_settings_assistant",
+      "value": "Current assistant"
+    },
+    {
+      "name": "phone_settings_device",
+      "value": "This device"
+    },
+    {
+      "name": "phone_settings_hub",
+      "value": "Hub"
+    },
+    {
+      "name": "phone_settings_common_groups_footer",
+      "value": "These two groups are the same whichever assistant is current."
+    },
+    {
+      "name": "phone_machines",
+      "value": "Machines"
+    },
+    {
+      "name": "phone_machine_manage",
+      "value": "Manage computers"
+    },
+    {
+      "name": "phone_machine_detail",
+      "value": "Machine details"
+    },
+    {
+      "name": "phone_cores",
+      "value": "cores"
+    },
+    {
+      "name": "phone_ram",
+      "value": "Memory"
+    },
+    {
+      "name": "phone_other_agents",
+      "value": "other"
+    },
+    {
+      "name": "phone_today_tokens",
+      "value": "Today’s tokens"
+    },
+    {
+      "name": "phone_record_search",
+      "value": "Search recordings"
+    },
+    {
+      "name": "phone_record_start",
+      "value": "Record audio"
+    },
+    {
+      "name": "phone_configure_path",
+      "value": "Workspace and launcher"
+    },
+    {
+      "name": "phone_launcher_default",
+      "value": "Machine default"
+    },
+    {
+      "name": "phone_connect_hub",
+      "value": "Connect to a Hub"
+    },
+    {
+      "name": "phone_local_demo",
+      "value": "Explore local demo"
+    },
+    {
+      "name": "phone_welcome_intro",
+      "value": "Your conversations, agents and workspaces in one place."
+    },
+    {
+      "name": "phone_scheduled",
+      "value": "Scheduled"
+    },
+    {
+      "name": "phone_history",
+      "value": "Run history"
+    },
+    {
+      "name": "phone_no_schedules",
+      "value": "No scheduled tasks yet"
+    },
+    {
+      "name": "health_default_manager_unavailable",
+      "value": "Connect to your Hub’s default assistant to add a health report."
+    },
+    {
+      "name": "phone_attention",
+      "value": "Needs attention"
+    },
+    {
+      "name": "phone_network",
+      "value": "Network"
+    },
+    {
+      "name": "phone_rate",
+      "value": "Now"
+    },
+    {
+      "name": "phone_hit_rate",
+      "value": "Cache hits"
+    },
+    {
+      "name": "phone_total",
+      "value": "Total"
+    },
+    {
+      "name": "phone_preset",
+      "value": "Agent preset"
+    },
+    {
+      "name": "phone_default_preset",
+      "value": "Custom"
+    },
+    {
+      "name": "phone_read_only_recording",
+      "value": "No recordings yet"
+    },
+    {
+      "name": "phone_directory_read_failed",
+      "value": "The computer could not read this directory. Check the path or try again."
+    },
+    {
+      "name": "flow_all_chats",
+      "value": "All chats"
+    },
+    {
+      "name": "flow_search_chats",
+      "value": "Search conversations"
+    },
+    {
+      "name": "flow_search_local",
+      "value": "Showing matches available on this phone"
+    },
+    {
+      "name": "flow_search_partial",
+      "value": "Some conversations are still being indexed"
+    },
+    {
+      "name": "flow_start_tab_name",
+      "value": "Tab Name (Optional)"
+    },
+    {
+      "name": "flow_start_tab_name_placeholder",
+      "value": "Leave empty to name it from the first message"
+    },
+    {
+      "name": "flow_start_tab_name_help",
+      "value": "Optional name for the new session tab. If empty, it is named from the first message."
+    },
+    {
+      "name": "flow_first_message",
+      "value": "First message"
+    },
+    {
+      "name": "flow_pick_machine",
+      "value": "Choose a computer"
+    },
+    {
+      "name": "flow_pick_tree",
+      "value": "Choose a workspace"
+    },
+    {
+      "name": "flow_choose_folder",
+      "value": "Choose by folder"
+    },
+    {
+      "name": "flow_folder_search",
+      "value": "Enter a path"
+    },
+    {
+      "name": "flow_use_folder",
+      "value": "Use this folder"
+    },
+    {
+      "name": "flow_folder_empty",
+      "value": "No subfolders"
+    },
+    {
+      "name": "flow_use_default",
+      "value": "Use default"
+    },
+    {
+      "name": "flow_model",
+      "value": "Model"
+    },
+    {
+      "name": "flow_effort",
+      "value": "Reasoning effort"
+    },
+    {
+      "name": "flow_start",
+      "value": "Start Agent"
+    },
+    {
+      "name": "flow_recent_setups",
+      "value": "Recent setups"
+    },
+    {
+      "name": "flow_workspace_search",
+      "value": "Search workspaces or branches"
+    },
+    {
+      "name": "flow_start_options",
+      "value": "Launch options"
+    },
+    {
+      "name": "flow_draft_optional",
+      "value": "Optional first message"
+    },
+    {
+      "name": "flow_models_offline",
+      "value": "Model choices are unavailable"
+    },
+    {
+      "name": "project_checkout_primary",
+      "value": "Primary"
+    },
+    {
+      "name": "project_worktree_idle",
+      "value": "Idle"
+    },
+    {
+      "name": "project_primary",
+      "value": "Primary"
+    },
+    {
+      "name": "project_children",
+      "value": "child worktrees"
+    },
+    {
+      "name": "project_detached",
+      "value": "Detached HEAD"
+    },
+    {
+      "name": "project_copy_path",
+      "value": "Copy directory path"
+    },
+    {
+      "name": "project_open",
+      "value": "Open project"
+    },
+    {
+      "name": "project_show_all",
+      "value": "Show all"
+    },
+    {
+      "name": "project_idle_repositories",
+      "value": "Idle repositories"
+    },
+    {
+      "name": "machine_status_online",
+      "value": "Online"
+    },
+    {
+      "name": "machine_online_ratio",
+      "value": "{online}/{total} online"
+    },
+    {
+      "name": "machine_running_high",
+      "value": "{count} running high"
+    },
+    {
+      "name": "machine_waiting_agents",
+      "value": "{count} agents need you"
+    },
+    {
+      "name": "machine_high_cpu",
+      "value": "High CPU"
+    },
+    {
+      "name": "machine_low_memory",
+      "value": "Low memory"
+    },
+    {
+      "name": "machine_full_disk",
+      "value": "Disk almost full"
+    },
+    {
+      "name": "machine_high_load",
+      "value": "High load"
+    },
+    {
+      "name": "machine_load",
+      "value": "Load"
+    },
+    {
+      "name": "machine_monitor",
+      "value": "Monitoring"
+    },
+    {
+      "name": "machine_hour",
+      "value": "1 hour"
+    },
+    {
+      "name": "machine_six_hours",
+      "value": "6 hours"
+    },
+    {
+      "name": "machine_day",
+      "value": "24 hours"
+    },
+    {
+      "name": "machine_no_samples",
+      "value": "No samples in this period"
+    },
+    {
+      "name": "machine_monitor_unavailable",
+      "value": "Monitoring is unavailable"
+    },
+    {
+      "name": "machine_history_hint",
+      "value": "Touch a chart to inspect a reading."
+    },
+    {
+      "name": "machine_now",
+      "value": "Latest"
+    },
+    {
+      "name": "machine_disk",
+      "value": "Disk"
+    },
+    {
+      "name": "machine_per_minute",
+      "value": "{value}/min"
+    },
+    {
+      "name": "machine_all_agents",
+      "value": "Show all {count}"
+    },
+    {
+      "name": "machine_no_agents",
+      "value": "No agents running"
+    },
+    {
+      "name": "machine_offline_agents",
+      "value": "Agents appear when this computer connects."
+    },
+    {
+      "name": "machine_pending",
+      "value": "Waiting for you"
+    },
+    {
+      "name": "machine_never",
+      "value": "Not connected yet"
+    },
+    {
+      "name": "machine_update_needed",
+      "value": "Node update available"
+    },
+    {
+      "name": "machine_problem_service",
+      "value": "Persona Link’s background service is stopped. Reinstall it from Persona Link on this computer."
+    },
+    {
+      "name": "machine_problem_link",
+      "value": "Persona Link is offline, or this computer is asleep."
+    },
+    {
+      "name": "machine_problem_never",
+      "value": "Pair this computer using its pairing link."
+    },
+    {
+      "name": "machine_problem_version",
+      "value": "Reinstall Persona Link on this computer to update the node."
+    },
+    {
+      "name": "machine_problem_manager",
+      "value": "Its assistant “{name}” is offline."
+    },
+    {
+      "name": "machine_agent_idle",
+      "value": "Idle"
+    },
+    {
+      "name": "machine_problem_timeout",
+      "value": "Connection timed out. The network may be unstable or the computer may be asleep. Wait for it to wake up or switch networks, then reconnect."
+    },
+    {
+      "name": "machine_os",
+      "value": "Operating system"
+    },
+    {
+      "name": "machine_arch",
+      "value": "Architecture"
+    },
+    {
+      "name": "machine_hostname",
+      "value": "Hostname"
+    },
+    {
+      "name": "machine_cpu_cores",
+      "value": "{count} cores"
+    },
+    {
+      "name": "machine_time_unavailable",
+      "value": "The computer is no longer in this Hub."
+    },
+    {
+      "name": "settings_agent_options_title",
+      "value": "Agent"
+    },
+    {
+      "name": "settings_language_options_title",
+      "value": "App language"
+    },
+    {
+      "name": "settings_this_assistant",
+      "value": "Current Assistant"
+    },
+    {
+      "name": "settings_alias_models",
+      "value": "provider model api key"
+    },
+    {
+      "name": "settings_alias_appearance",
+      "value": "display dark mode fonts theme"
+    },
+    {
+      "name": "settings_alias_language",
+      "value": "language locale english chinese japanese"
+    },
+    {
+      "name": "settings_alias_machines",
+      "value": "computer mac server host"
+    },
+    {
+      "name": "settings_alias_agents",
+      "value": "agents launcher automation tools engine"
+    },
+    {
+      "name": "machine_today",
+      "value": "Today"
+    },
+    {
+      "name": "flow_navigation",
+      "value": "Phone navigation"
+    },
+    {
+      "name": "flow_separate",
+      "value": "Separate"
+    },
+    {
+      "name": "flow_merged",
+      "value": "Merged sidebar"
+    },
+    {
+      "name": "phone_chat_thoughts",
+      "value": "Thoughts"
+    },
+    {
+      "name": "project_copy_name",
+      "value": "Copy worktree name"
+    },
+    {
+      "name": "project_open_parent",
+      "value": "Open parent worktree"
+    },
+    {
+      "name": "flow_inbox_progress",
+      "value": "In Progress"
+    },
+    {
+      "name": "flow_inbox_fyi",
+      "value": "FYI"
+    },
+    {
+      "name": "flow_inbox_collapsed",
+      "value": "Collapsed"
+    },
+    {
+      "name": "flow_inbox_section_empty",
+      "value": "No items in this section"
+    },
+    {
+      "name": "flow_inbox_older_done",
+      "value": "Load earlier completed items"
+    },
+    {
+      "name": "flow_todo_due",
+      "value": "Due date"
+    },
+    {
+      "name": "flow_todo_no_due",
+      "value": "No due date"
+    },
+    {
+      "name": "flow_todo_today",
+      "value": "Today"
+    },
+    {
+      "name": "flow_todo_week",
+      "value": "This week"
+    },
+    {
+      "name": "flow_todo_month",
+      "value": "This month"
+    },
+    {
+      "name": "flow_todo_order",
+      "value": "Sort by"
+    },
+    {
+      "name": "flow_todo_recent",
+      "value": "Recent activity"
+    },
+    {
+      "name": "flow_todo_priority",
+      "value": "Priority"
+    },
+    {
+      "name": "flow_todo_overdue",
+      "value": "Overdue"
+    },
+    {
+      "name": "knowledge_kind_topics",
+      "value": "Topics"
+    },
+    {
+      "name": "phone_all_meetings",
+      "value": "All Meetings"
+    },
+    {
+      "name": "phone_record_local",
+      "value": "Still on This Device"
+    },
+    {
+      "name": "phone_record_audio_local",
+      "value": "Audio stays on this device. Confirm transcription to sync its text to Knowledge."
+    },
+    {
+      "name": "phone_record_play",
+      "value": "Play recording"
+    },
+    {
+      "name": "phone_record_play_failed",
+      "value": "Couldn’t play this recording"
+    },
+    {
+      "name": "session_find_files",
+      "value": "Find files and folders"
+    },
+    {
+      "name": "session_find_here",
+      "value": "In “{folder}” and its folders · {count} found"
+    },
+    {
+      "name": "session_find_unavailable",
+      "value": "Only this folder is available for search"
+    },
+    {
+      "name": "session_folder_back",
+      "value": "Previous folder"
+    },
+    {
+      "name": "session_folder_forward",
+      "value": "Next folder"
+    },
+    {
+      "name": "file_crumb_home",
+      "value": "Home Folder"
+    },
+    {
+      "name": "file_crumb_session",
+      "value": "Session"
+    },
+    {
+      "name": "session_enter_path",
+      "value": "Go to path"
+    },
+    {
+      "name": "session_project_folder",
+      "value": "Session folder"
+    },
+    {
+      "name": "session_show_hidden",
+      "value": "Show hidden files"
+    },
+    {
+      "name": "session_git_history",
+      "value": "Commits"
+    },
+    {
+      "name": "session_git_earlier",
+      "value": "Load earlier commits"
+    },
+    {
+      "name": "session_git_history_error",
+      "value": "Could not load the commit information"
+    },
+    {
+      "name": "session_git_patch",
+      "value": "Show patch"
+    },
+    {
+      "name": "session_git_remote_gone",
+      "value": "Upstream branch deleted"
+    },
+    {
+      "name": "session_git_detached",
+      "value": "Detached HEAD"
+    },
+    {
+      "name": "session_git_changed_paths",
+      "value": "Changed files"
+    },
+    {
+      "name": "session_git_untracked",
+      "value": "Untracked"
+    },
+    {
+      "name": "session_git_change_conflict",
+      "value": "Conflicts"
+    },
+    {
+      "name": "session_git_untracked_file",
+      "value": "Untracked file"
+    },
+    {
+      "name": "phone_agents_current_hub",
+      "value": "Current Hub only"
+    },
+    {
+      "name": "flow_todo_hub",
+      "value": "By Hub status"
+    },
+    {
+      "name": "flow_todo_can_wait",
+      "value": "Can wait"
+    },
+    {
+      "name": "flow_todo_someday",
+      "value": "Someday"
+    },
+    {
+      "name": "flow_todo_plain",
+      "value": "To do"
+    },
+    {
+      "name": "flow_todo_suggested",
+      "value": "Suggested"
+    },
+    {
+      "name": "phone_chat_intro_main",
+      "value": "Use your main chat to ask about projects, messages and the work your agents are doing."
+    },
+    {
+      "name": "phone_chat_intro_side",
+      "value": "Choose a topic for this chat or ask your own question."
+    },
+    {
+      "name": "phone_chat_help_skills",
+      "value": "With a computer and model connected, Persona can follow work, organize your inbox and tasks, and pick up a conversation where you left off."
+    },
+    {
+      "name": "phone_chat_help_model",
+      "value": "Configure a model provider in Settings or sign in to a supported agent on a connected computer, then return here to chat."
+    },
+    {
+      "name": "phone_chat_phone_read",
+      "value": "This question may need data from your phone. You’ll be asked for permission when needed."
+    },
+    {
+      "name": "phone_chat_ask_agenda",
+      "value": "What’s on my calendar today?"
+    },
+    {
+      "name": "phone_chat_ask_mail",
+      "value": "Which emails need my reply?"
+    },
+    {
+      "name": "phone_chat_ask_agents",
+      "value": "What are my agents working on?"
+    },
+    {
+      "name": "phone_chat_ask_lark",
+      "value": "Which Lark messages matter today?"
+    },
+    {
+      "name": "mail_compose",
+      "value": "New email"
+    },
+    {
+      "name": "session_tools_replace_confirm",
+      "value": "Replace the existing item?"
+    },
+    {
+      "name": "session_tools_file_edit_confirm",
+      "value": "Apply this change?"
+    },
+    {
+      "name": "session_tools_rename",
+      "value": "Rename"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_active",
+      "value": "Terminal control enabled"
+    },
+    {
+      "name": "session_tools_terminal_screen_view_only",
+      "value": "View only"
+    },
+    {
+      "name": "upstream_error",
+      "value": "The connected service could not complete the request."
+    },
+    {
+      "name": "storage_unavailable",
+      "value": "Local storage is unavailable."
+    },
+    {
+      "name": "receipt_storage_failed",
+      "value": "The result could not be saved on this device."
+    },
+    {
+      "name": "scope_retired",
+      "value": "The connection changed. Reopen this page to continue."
+    },
+    {
+      "name": "invalid",
+      "value": "The service could not accept this request."
+    },
+    {
+      "name": "unauthorized",
+      "value": "Sign in again to continue."
+    },
+    {
+      "name": "forbidden",
+      "value": "You do not have permission to perform this operation."
+    },
+    {
+      "name": "not_found",
+      "value": "The requested item could not be found."
+    },
+    {
+      "name": "method_not_allowed",
+      "value": "This operation is unavailable on the connected service."
+    },
+    {
+      "name": "conflict",
+      "value": "The item changed. Refresh to see its current state."
+    },
+    {
+      "name": "node_offline",
+      "value": "The selected computer is offline."
+    },
+    {
+      "name": "internal",
+      "value": "The service could not complete the operation."
+    },
+    {
+      "name": "http_error",
+      "value": "The service returned an error."
+    },
+    {
+      "name": "request_failed",
+      "value": "The request could not be completed."
+    },
+    {
+      "name": "transport_failed",
+      "value": "Could not reach the service."
+    },
+    {
+      "name": "redirect_refused",
+      "value": "The service redirected the request to a different address."
+    },
+    {
+      "name": "response_too_large",
+      "value": "The response is too large to open on this device."
+    },
+    {
+      "name": "tree_retry_same_request",
+      "value": "Retry the same request"
+    },
+    {
+      "name": "tree_check_worktree_result",
+      "value": "Check operation result"
+    },
+    {
+      "name": "tree_confirm_not_created",
+      "value": "Confirm no worktree was created and start again"
+    },
+    {
+      "name": "tree_verify_original_checkout",
+      "value": "Enter the original branch and directory to check this earlier request."
+    },
+    {
+      "name": "phone_switch_assistant",
+      "value": "Switch assistant"
+    },
+    {
+      "name": "phone_manage_assistants",
+      "value": "Manage assistants"
+    },
+    {
+      "name": "settings_search_results",
+      "value": "Search Results"
+    },
+    {
+      "name": "settings_assistant_named",
+      "value": "{name}’s Settings"
+    },
+    {
+      "name": "machine_net_down",
+      "value": "Down"
+    },
+    {
+      "name": "machine_net_up",
+      "value": "Up"
+    },
+    {
+      "name": "machine_empty_title",
+      "value": "No computers yet"
+    },
+    {
+      "name": "machine_empty_detail",
+      "value": "Computers appear here once they connect to your Hub."
+    },
+    {
+      "name": "machine_swap",
+      "value": "Swap"
+    },
+    {
+      "name": "machine_total_bytes",
+      "value": "{size} total"
+    },
+    {
+      "name": "machine_battery",
+      "value": "Battery"
+    },
+    {
+      "name": "machine_charging",
+      "value": "Charging"
+    },
+    {
+      "name": "machine_temperature",
+      "value": "Temperature"
+    },
+    {
+      "name": "chat_away_recap",
+      "value": "While You Were Away"
+    },
+    {
+      "name": "session_space_starter",
+      "value": "Starter"
+    },
+    {
+      "name": "session_space_agents",
+      "value": "{count} agents in this workspace"
+    },
+    {
+      "name": "phone_chat_expand_editor",
+      "value": "Expand editor"
+    },
+    {
+      "name": "phone_chat_close_editor",
+      "value": "Collapse editor"
+    },
+    {
+      "name": "phone_chat_hide_keyboard",
+      "value": "Hide keyboard"
+    },
+    {
+      "name": "phone_chat_dictation",
+      "value": "Dictate"
+    },
+    {
+      "name": "phone_dictation_preparing",
+      "value": "Starting on-device dictation…"
+    },
+    {
+      "name": "phone_dictation_listening",
+      "value": "Listening…"
+    },
+    {
+      "name": "phone_dictation_finishing",
+      "value": "Finishing transcription…"
+    },
+    {
+      "name": "phone_dictation_review",
+      "value": "Review the text before adding it to your draft."
+    },
+    {
+      "name": "phone_dictation_insert",
+      "value": "Add to draft"
+    },
+    {
+      "name": "phone_dictation_empty",
+      "value": "No speech was recognized."
+    },
+    {
+      "name": "phone_dictation_unavailable",
+      "value": "On-device dictation is unavailable. You can use your keyboard microphone."
+    },
+    {
+      "name": "phone_dictation_keyboard_language",
+      "value": "Use your keyboard microphone to dictate in this language."
+    },
+    {
+      "name": "phone_dictation_keyboard",
+      "value": "Open keyboard"
+    },
+    {
+      "name": "phone_dictation_too_long",
+      "value": "Your draft has reached its text limit. Copy the transcription or shorten the draft."
+    },
+    {
+      "name": "phone_agent_folders",
+      "value": "Agent Folders"
+    },
+    {
+      "name": "phone_claude_config",
+      "value": "Claude Code Settings"
+    },
+    {
+      "name": "phone_codex_config",
+      "value": "Codex Settings"
+    },
+    {
+      "name": "phone_agy_config",
+      "value": "Antigravity Settings"
+    },
+    {
+      "name": "phone_agent_followup",
+      "value": "Agent Follow-up"
+    },
+    {
+      "name": "phone_agent_layout",
+      "value": "Agents List Layout"
+    },
+    {
+      "name": "phone_agent_tools_note",
+      "value": "Agent tools and automation for this assistant’s computers."
+    },
+    {
+      "name": "phone_folder_pattern",
+      "value": "Folder path or pattern"
+    },
+    {
+      "name": "phone_folder_hide",
+      "value": "Hide"
+    },
+    {
+      "name": "phone_folder_block",
+      "value": "Block collection"
+    },
+    {
+      "name": "phone_follow_start_requested",
+      "value": "Start requested tasks"
+    },
+    {
+      "name": "phone_follow_agent_tasks",
+      "value": "Follow Agent tasks"
+    },
+    {
+      "name": "phone_follow_naming",
+      "value": "Name Agent sessions automatically"
+    },
+    {
+      "name": "phone_follow_supervise",
+      "value": "Supervise tasks from the main chat"
+    },
+    {
+      "name": "phone_follow_close_ended",
+      "value": "Close ended terminals"
+    },
+    {
+      "name": "phone_dictation",
+      "value": "Dictation"
+    },
+    {
+      "name": "phone_system_input",
+      "value": "System input method"
+    },
+    {
+      "name": "phone_dictation_os_note",
+      "value": "The active system keyboard manages voice input and its languages."
+    },
+    {
+      "name": "phone_language_system_note",
+      "value": "When following the system, Persona uses Simplified Chinese for any Chinese language, including Traditional Chinese, Japanese for Japanese, and English for other languages. Your hub also uses this language for notifications and assistant replies."
+    },
+    {
+      "name": "phone_search_conversation_count",
+      "value": "{count} conversations"
+    },
+    {
+      "name": "phone_todo_waiting_hidden",
+      "value": "{count} more items need you outside “{filter}”."
+    },
+    {
+      "name": "phone_kb_confirmed",
+      "value": "Confirmed facts"
+    },
+    {
+      "name": "phone_kb_add_fact",
+      "value": "Add a confirmed fact"
+    },
+    {
+      "name": "phone_kb_fact_note",
+      "value": "Persona keeps your corrections when this entry is updated."
+    },
+    {
+      "name": "phone_kb_profile",
+      "value": "Profile"
+    },
+    {
+      "name": "flow_recent_folders",
+      "value": "Recent folders"
+    },
+    {
+      "name": "flow_folder_up",
+      "value": "Up One Level"
+    },
+    {
+      "name": "flow_use_named_folder",
+      "value": "Use “{name}”"
+    },
+    {
+      "name": "flow_model_id_empty",
+      "value": "Enter a model ID"
+    },
+    {
+      "name": "flow_model_id_start",
+      "value": "Start with a letter or digit (or ~ and then one)"
+    },
+    {
+      "name": "flow_model_id_space",
+      "value": "A model ID can't contain spaces"
+    },
+    {
+      "name": "flow_model_id_control",
+      "value": "A model ID can't contain line breaks or control characters"
+    },
+    {
+      "name": "flow_model_id_character",
+      "value": "“{character}” can't be in a model ID. Use letters, digits and . _ - / : @ [ ]"
+    },
+    {
+      "name": "flow_model_id_length",
+      "value": "Too long: at most 256 bytes"
+    },
+    {
+      "name": "flow_model_id_rule",
+      "value": "Letters, digits and . _ - / : @ [ ], starting with a letter or digit; a gateway's latest alias can start with ~."
+    },
+    {
+      "name": "flow_model_id_note",
+      "value": "Used for this start only. Once it runs, it's listed under Typed Before."
+    },
+    {
+      "name": "flow_typed_model_title",
+      "value": "Other Model"
+    },
+    {
+      "name": "flow_typed_model_use",
+      "value": "Use"
+    },
+    {
+      "name": "flow_enter_model_id",
+      "value": "Enter Model ID…"
+    },
+    {
+      "name": "flow_use_model_id",
+      "value": "Use “{id}”"
+    },
+    {
+      "name": "flow_unlisted_model_start",
+      "value": "Not in the list; this start uses the ID as typed"
+    },
+    {
+      "name": "flow_other_model",
+      "value": "Other model…"
+    },
+    {
+      "name": "phone_conditional_read_only",
+      "value": "This Hub supports viewing only. Update it to edit here."
+    },
+    {
+      "name": "phone_rules_changed",
+      "value": "Another device changed the folder rules. Review the latest rules and apply your change again."
+    },
+    {
+      "name": "phone_facts_changed",
+      "value": "Another device changed the confirmed facts. Your draft is still here. Review the latest text before saving again."
+    },
+    {
+      "name": "phone_new_assistant",
+      "value": "New assistant"
+    },
+    {
+      "name": "phone_assistant_title",
+      "value": "Assistant"
+    },
+    {
+      "name": "session_back_to_chat",
+      "value": "Back to Chat"
+    },
+    {
+      "name": "knowledge_focus",
+      "value": "Focus"
+    },
+    {
+      "name": "knowledge_other_active",
+      "value": "Other Active"
+    },
+    {
+      "name": "knowledge_not_project",
+      "value": "Not a Project"
+    },
+    {
+      "name": "phone_meeting_start",
+      "value": "Start Meeting"
+    },
+    {
+      "name": "phone_todo_section_needs",
+      "value": "Needs You"
+    },
+    {
+      "name": "phone_todo_section_working",
+      "value": "Working"
+    },
+    {
+      "name": "phone_todo_section_pr",
+      "value": "PR to merge"
+    },
+    {
+      "name": "phone_todo_section_open",
+      "value": "Other open"
+    },
+    {
+      "name": "phone_todo_section_recent",
+      "value": "Just finished"
+    },
+    {
+      "name": "phone_todo_section_shelved",
+      "value": "Shelved"
+    },
+    {
+      "name": "phone_todo_section_done",
+      "value": "Done"
+    },
+    {
+      "name": "phone_todo_list",
+      "value": "List"
+    },
+    {
+      "name": "session_find_in_folder",
+      "value": "Find in “{folder}”"
+    },
+    {
+      "name": "chat_ask_persona",
+      "value": "Ask Persona"
+    },
+    {
+      "name": "session_message_to_agent",
+      "value": "Message {agent}"
+    },
+    {
+      "name": "session_git_pull_request",
+      "value": "Pull Request"
+    },
+    {
+      "name": "session_git_push_before_pr",
+      "value": "Push the branch first, then open a pull request"
+    },
+    {
+      "name": "session_git_create_pr",
+      "value": "Open Pull Request"
+    },
+    {
+      "name": "project_idle_named",
+      "value": "{count} idle"
+    },
+    {
+      "name": "flow_start_chat",
+      "value": "Start Chat"
+    },
+    {
+      "name": "flow_launcher_model_once",
+      "value": "Launcher & Model (This Time Only)"
+    },
+    {
+      "name": "flow_directory_address_hint",
+      "value": "Edit the path above and press Return to go there. ~ is your home folder."
+    },
+    {
+      "name": "flow_start_model_settings_hint",
+      "value": "Uses Model Configuration › New Agent by default. A choice here applies to this session only and doesn't change the global default."
+    },
+    {
+      "name": "flow_start_machine_launchers_hint",
+      "value": "Claude Code / Codex launchers from this machine. It runs in a new tab in the terminal engine."
+    },
+    {
+      "name": "flow_start_model_terminal_hint",
+      "value": "{about} Models are the same as what /model shows in the terminal."
+    },
+    {
+      "name": "flow_model_default_hint",
+      "value": "The launcher uses its default model."
+    },
+    {
+      "name": "flow_model_count",
+      "value": "{count} models"
+    },
+    {
+      "name": "flow_model_id_search",
+      "value": "Search or enter a model ID"
+    },
+    {
+      "name": "project_pending_count",
+      "value": "{count} pending"
+    },
+    {
+      "name": "flow_model_manual_hint",
+      "value": "A model missing from the list can be entered by ID, including a gateway model."
+    },
+    {
+      "name": "session_git_no_pr",
+      "value": "This branch has no pull request yet"
+    },
+    {
+      "name": "session_git_pr_read_failed",
+      "value": "Couldn’t read the pull request"
+    },
+    {
+      "name": "session_git_pr_body",
+      "value": "Description"
+    },
+    {
+      "name": "session_git_pr_draft",
+      "value": "Draft"
+    },
+    {
+      "name": "chat_recap_written",
+      "value": "Written {time}"
+    },
+    {
+      "name": "chat_recap_group_title",
+      "value": "While You Were Away · {count}"
+    },
+    {
+      "name": "chat_recap_latest_written",
+      "value": "Latest · Written {time}"
+    },
+    {
+      "name": "chat_recap_open_one",
+      "value": "Recap while you were away, tap to view"
+    },
+    {
+      "name": "chat_recap_open_group",
+      "value": "{count} recaps while you were away, tap to view"
+    },
+    {
+      "name": "session_git_partly_staged",
+      "value": "Partly staged"
+    },
+    {
+      "name": "session_git_file_count",
+      "value": "{count} files"
+    },
+    {
+      "name": "session_git_base_branch",
+      "value": "Base branch"
+    },
+    {
+      "name": "phone_record_meeting",
+      "value": "Meeting"
+    },
+    {
+      "name": "phone_record_note",
+      "value": "Note"
+    },
+    {
+      "name": "phone_start_note",
+      "value": "Start Note"
+    },
+    {
+      "name": "phone_meeting_calendar",
+      "value": "Name from a Calendar Meeting"
+    },
+    {
+      "name": "phone_meeting_calendar_empty",
+      "value": "No more meetings today"
+    },
+    {
+      "name": "phone_meeting_local_transcription",
+      "value": "Transcription on this device"
+    },
+    {
+      "name": "phone_calendar_all_day",
+      "value": "All Day"
+    },
+    {
+      "name": "phone_calendar_moved",
+      "value": "Moved to {due}"
+    },
+    {
+      "name": "phone_meeting_auto_invite",
+      "value": "Invite Persona Automatically"
+    },
+    {
+      "name": "phone_meeting_auto_off_note",
+      "value": "A meeting starts with only you. Invite Persona on the Meetings page when you need it; the minutes and highlights come either way."
+    },
+    {
+      "name": "phone_meeting_auto_on_note",
+      "value": "Every meeting starts with Persona in it, answering on screen. Remove it from a meeting on the Meetings page."
+    },
+    {
+      "name": "phone_meeting_experimental",
+      "value": "Experimental"
+    },
+    {
+      "name": "phone_meeting_echo",
+      "value": "Echo Cancellation with the Speaker"
+    },
+    {
+      "name": "phone_meeting_echo_note",
+      "value": "Turning on the speaker during a meeting stops the microphone for a moment."
+    },
+    {
+      "name": "phone_meeting_echo_unavailable",
+      "value": "This device does not support echo cancellation for voice capture."
+    },
+    {
+      "name": "phone_meeting_echo_restore",
+      "value": "Echo cancellation was unavailable. Recording continued using the microphone."
+    },
+    {
+      "name": "phone_meeting_speaker",
+      "value": "Answer Aloud"
+    },
+    {
+      "name": "phone_calendar_day",
+      "value": "Day"
+    },
+    {
+      "name": "phone_calendar_week",
+      "value": "Week"
+    },
+    {
+      "name": "phone_calendar_month",
+      "value": "Month"
+    },
+    {
+      "name": "phone_inbox_search",
+      "value": "Search Titles, Senders, and Content"
+    },
+    {
+      "name": "phone_inbox_waiting_agents",
+      "value": "Agents Waiting on You"
+    },
+    {
+      "name": "phone_inbox_mention",
+      "value": "@Me"
+    },
+    {
+      "name": "phone_inbox_dm",
+      "value": "DMs"
+    },
+    {
+      "name": "phone_inbox_group",
+      "value": "Group chat"
+    },
+    {
+      "name": "phone_inbox_done",
+      "value": "Done"
+    },
+    {
+      "name": "phone_new_chat_title",
+      "value": "New Chat"
+    },
+    {
+      "name": "phone_plan_fullscreen",
+      "value": "View plan full screen"
+    },
+    {
+      "name": "phone_interaction_terminal",
+      "value": "Handle in Terminal on Computer"
+    },
+    {
+      "name": "decision_allow_session",
+      "value": "Always Allow in Session"
+    },
+    {
+      "name": "decision_scope_reads",
+      "value": "All reads in this directory in this conversation"
+    },
+    {
+      "name": "decision_scope_edits",
+      "value": "All file edits in this directory in this conversation"
+    },
+    {
+      "name": "decision_scope_commands",
+      "value": "All commands in this conversation"
+    },
+    {
+      "name": "decision_scope_tool",
+      "value": "All uses of this tool in this conversation"
+    },
+    {
+      "name": "decision_scope_custom",
+      "value": "The approved scope remains allowed in this conversation"
+    },
+    {
+      "name": "decision_other_choice",
+      "value": "Other answer…"
+    },
+    {
+      "name": "phone_agent_permission_preview",
+      "value": "{tool}: {target}"
+    },
+    {
+      "name": "phone_agent_plan_approval",
+      "value": "Plan ready for review"
+    },
+    {
+      "name": "phone_agent_asks",
+      "value": "{agent} has a question"
+    },
+    {
+      "name": "phone_agent_needs_approval",
+      "value": "Waiting for approval"
+    },
+    {
+      "name": "session_task_more",
+      "value": "{count} more"
+    },
+    {
+      "name": "session_task_approve_run",
+      "value": "Approve & Auto-Run"
+    },
+    {
+      "name": "session_task_auto_edits",
+      "value": "Auto-Accept Edits"
+    },
+    {
+      "name": "session_task_return",
+      "value": "Send Back"
+    },
+    {
+      "name": "session_brief_stage_plan",
+      "value": "Plan"
+    },
+    {
+      "name": "session_brief_stage_develop",
+      "value": "Develop"
+    },
+    {
+      "name": "session_brief_stage_review",
+      "value": "Review"
+    },
+    {
+      "name": "session_brief_stage_merge",
+      "value": "Merge"
+    },
+    {
+      "name": "session_brief_stage_deploy",
+      "value": "Deploy"
+    },
+    {
+      "name": "session_brief_stage_verify",
+      "value": "Verified"
+    },
+    {
+      "name": "session_brief_stage_summary",
+      "value": "Step {step} of {total} · {name}"
+    },
+    {
+      "name": "session_brief_stage_accessibility",
+      "value": "Stage: {name} (step {step} of {total})"
+    },
+    {
+      "name": "session_brief_waiting_count",
+      "value": "Waiting for you ({count})"
+    },
+    {
+      "name": "session_brief_waiting_unknown",
+      "value": "Waiting for you (?)"
+    },
+    {
+      "name": "session_brief_waiting_note",
+      "value": "Cards waiting for you weren't read yet (Persona had just started). Look in Agents."
+    },
+    {
+      "name": "session_brief_empty",
+      "value": "Nothing."
+    },
+    {
+      "name": "session_brief_accept_count",
+      "value": "To verify ({count})"
+    },
+    {
+      "name": "session_brief_later_count",
+      "value": "Can wait ({count})"
+    },
+    {
+      "name": "session_brief_progress_count",
+      "value": "In progress ({count})"
+    },
+    {
+      "name": "session_brief_setup",
+      "value": "Recommended setup"
+    },
+    {
+      "name": "session_brief_setup_note",
+      "value": "From Persona's own records of the last 7 days, unless a line names its own period. Nothing was changed: each of these stays as it is until you change it yourself."
+    },
+    {
+      "name": "session_brief_open_named",
+      "value": "Open: {title}"
+    },
+    {
+      "name": "session_brief_more",
+      "value": "and {count} more"
+    },
+    {
+      "name": "session_brief_stage_done",
+      "value": "{value}, step {step} of {total}, done"
+    },
+    {
+      "name": "session_brief_stage_current",
+      "value": "{value}, step {step} of {total}, current step"
+    },
+    {
+      "name": "session_brief_stage_ahead",
+      "value": "{value}, step {step} of {total}, still ahead"
+    },
+    {
+      "name": "session_brief_waited",
+      "value": "Waited {value}"
+    },
+    {
+      "name": "session_brief_nudged",
+      "value": "nudged"
+    },
+    {
+      "name": "session_brief_recommended",
+      "value": "Recommended: {value}"
+    },
+    {
+      "name": "session_brief_skipped",
+      "value": "Skipped · {value}"
+    },
+    {
+      "name": "session_brief_run_failed",
+      "value": "Run failed · {value}"
+    },
+    {
+      "name": "session_brief_start_failed",
+      "value": "Did not start · {value}"
+    },
+    {
+      "name": "session_brief_days",
+      "value": "{count}d"
+    },
+    {
+      "name": "session_brief_hours",
+      "value": "{count}h"
+    },
+    {
+      "name": "session_brief_minutes",
+      "value": "{count}m"
+    },
+    {
+      "name": "session_brief_past",
+      "value": "Last {hours} hours: {done} done · {failed} not through"
+    },
+    {
+      "name": "session_git_stage_all",
+      "value": "Stage All"
+    },
+    {
+      "name": "session_git_unstage_all",
+      "value": "Unstage All"
+    },
+    {
+      "name": "phone_keyboard_settings",
+      "value": "Keyboard Settings"
+    },
+    {
+      "name": "phone_dictation_automatic_note",
+      "value": "Automatic uses your draft and recent messages to choose on-device Chinese recognition or keyboard dictation. When the language is unclear, it uses the last recognized language, then the app language."
+    },
+    {
+      "name": "phone_meeting_invite",
+      "value": "Invite Persona"
+    },
+    {
+      "name": "phone_meeting_remove",
+      "value": "Remove from Meeting"
+    },
+    {
+      "name": "phone_meeting_onscreen",
+      "value": "Answers on screen"
+    },
+    {
+      "name": "phone_meeting_aloud",
+      "value": "Answers Aloud"
+    },
+    {
+      "name": "phone_meeting_private",
+      "value": "Private Meeting"
+    },
+    {
+      "name": "phone_meeting_room",
+      "value": "In-meeting conversation"
+    },
+    {
+      "name": "phone_meeting_live_note",
+      "value": "Audio stays on this device. Text syncs to this meeting and Knowledge."
+    },
+    {
+      "name": "meeting_room_privacy_local_days",
+      "value": "Audio stays on this device. Text syncs to the meeting and is kept in Knowledge for {days} days."
+    },
+    {
+      "name": "meeting_room_text_shared",
+      "value": "Text also syncs to this meeting."
+    },
+    {
+      "name": "phone_meeting_live_ready",
+      "value": "Persona is following the meeting"
+    },
+    {
+      "name": "phone_meeting_live_starting",
+      "value": "Connecting the meeting conversation…"
+    },
+    {
+      "name": "phone_meeting_unavailable",
+      "value": "Persona can’t join this meeting right now."
+    },
+    {
+      "name": "phone_meeting_retry",
+      "value": "The connection was interrupted. Meeting lines are saved on this device."
+    },
+    {
+      "name": "phone_meeting_full",
+      "value": "The live transcript has reached its limit."
+    },
+    {
+      "name": "phone_meeting_ask",
+      "value": "Ask in this meeting"
+    },
+    {
+      "name": "phone_meeting_question",
+      "value": "Ask about this meeting"
+    },
+    {
+      "name": "phone_meeting_closed",
+      "value": "Meeting ended"
+    },
+    {
+      "name": "phone_meeting_role",
+      "value": "Persona’s default role"
+    },
+    {
+      "name": "phone_meeting_role_listener",
+      "value": "Listen"
+    },
+    {
+      "name": "phone_meeting_role_participant",
+      "value": "Take Part"
+    },
+    {
+      "name": "phone_meeting_role_note_off",
+      "value": "Persona stays out of the meeting. The minutes come after it ends."
+    },
+    {
+      "name": "phone_meeting_role_note_listener",
+      "value": "Persona follows the meeting. Ask it from this phone; it answers on screen and never speaks."
+    },
+    {
+      "name": "phone_meeting_role_note_participant",
+      "value": "Persona follows the meeting and answers out loud when you tap Ask Persona."
+    },
+    {
+      "name": "phone_meeting_in_front",
+      "value": "In Front of Others"
+    },
+    {
+      "name": "phone_meeting_material",
+      "value": "Answers only from meeting material: earlier minutes, project progress and who owns a to-do."
+    },
+    {
+      "name": "phone_meeting_privacy",
+      "value": "Never brings up private chats, mail, health or other personal data."
+    },
+    {
+      "name": "phone_meeting_explicit_voice",
+      "value": "Speaks only when you tap Ask Persona, and only when it takes part."
+    },
+    {
+      "name": "phone_meeting_limits_note",
+      "value": "The hub holds Persona to these limits in a meeting, whatever it is asked."
+    },
+    {
+      "name": "phone_meeting_default_note",
+      "value": "Each meeting recording starts with this. To change it for one meeting, pick another on the Recordings page before you start."
+    },
+    {
+      "name": "phone_meeting_speech_unavailable",
+      "value": "Live recognition is unavailable. You can still record locally and type a question."
+    },
+    {
+      "name": "phone_meeting_off",
+      "value": "Off"
+    },
+    {
+      "name": "phone_meeting_topics",
+      "value": "Topics"
+    },
+    {
+      "name": "phone_meeting_no_answer",
+      "value": "The meeting could not answer this question."
+    },
+    {
+      "name": "phone_knowledge_selection",
+      "value": "Knowledge Selection"
+    },
+    {
+      "name": "ks_individual",
+      "value": "Individual Chats and Documents"
+    },
+    {
+      "name": "ks_individual_hint",
+      "value": "A setting here comes before every rule below. Removing it puts the chat or document back under the rules."
+    },
+    {
+      "name": "ks_add_chat",
+      "value": "Add Chat…"
+    },
+    {
+      "name": "ks_add_doc",
+      "value": "Add Document…"
+    },
+    {
+      "name": "ks_remove",
+      "value": "Remove Setting"
+    },
+    {
+      "name": "ks_priority",
+      "value": "Priority {level}"
+    },
+    {
+      "name": "ks_messages",
+      "value": "Chat Rules · Priority 1"
+    },
+    {
+      "name": "ks_docs",
+      "value": "Document Rules · Priority 1"
+    },
+    {
+      "name": "ks_up",
+      "value": "Move Up"
+    },
+    {
+      "name": "ks_down",
+      "value": "Move Down"
+    },
+    {
+      "name": "ks_join",
+      "value": "Merge {name} into Priority {level}"
+    },
+    {
+      "name": "ks_split",
+      "value": "Give {name} Its Own Level"
+    },
+    {
+      "name": "ks_store",
+      "value": "Store What Matches"
+    },
+    {
+      "name": "ks_text_days",
+      "value": "Days to Keep Text"
+    },
+    {
+      "name": "ks_attachment_days",
+      "value": "Days to Keep Attachments"
+    },
+    {
+      "name": "ks_include_all",
+      "value": "Count @all as a Mention"
+    },
+    {
+      "name": "ks_context",
+      "value": "Messages Kept Around Yours"
+    },
+    {
+      "name": "ks_context_hint",
+      "value": "0 to 200 messages before and after each one you send, so your own make sense later. Empty is 50."
+    },
+    {
+      "name": "ks_days_hint",
+      "value": "1 to 36500 days. Empty uses the hub's retention settings. Attachments are never kept longer than their text."
+    },
+    {
+      "name": "ks_doc_days_hint",
+      "value": "1 to 36500 days. Empty adds no deletion date."
+    },
+    {
+      "name": "ks_invalid",
+      "value": "Use whole numbers in the ranges above, or leave a field empty."
+    },
+    {
+      "name": "ks_source",
+      "value": "Source"
+    },
+    {
+      "name": "ks_mode",
+      "value": "What to Store"
+    },
+    {
+      "name": "ks_days",
+      "value": "Days to Keep"
+    },
+    {
+      "name": "ks_chat_editor",
+      "value": "Chat Setting"
+    },
+    {
+      "name": "ks_doc_editor",
+      "value": "Document Setting"
+    },
+    {
+      "name": "ks_list_chats",
+      "value": "Chats the knowledge base already has something of. Mail, issues and pull requests are always stored."
+    },
+    {
+      "name": "ks_list_docs",
+      "value": "Documents the knowledge base already has."
+    },
+    {
+      "name": "ks_empty_chat",
+      "value": "No Chats Yet"
+    },
+    {
+      "name": "ks_empty_doc",
+      "value": "No Documents Yet"
+    },
+    {
+      "name": "ks_empty_hint",
+      "value": "Once the knowledge base has stored something from one, you can give it a setting of its own here."
+    },
+    {
+      "name": "ks_off",
+      "value": "Off"
+    },
+    {
+      "name": "ks_on",
+      "value": "On"
+    },
+    {
+      "name": "ks_day_count",
+      "value": "{days} days"
+    },
+    {
+      "name": "ks_skip",
+      "value": "Don't Read"
+    },
+    {
+      "name": "ks_rules_chat",
+      "value": "Only Mentions and My Messages"
+    },
+    {
+      "name": "ks_rules_doc",
+      "value": "Follow the Rules"
+    },
+    {
+      "name": "ks_all",
+      "value": "Store Everything"
+    },
+    {
+      "name": "ks_skip_hint",
+      "value": "Nothing new from it is read or stored, not even mentions of you. What is already stored stays."
+    },
+    {
+      "name": "ks_rules_chat_hint",
+      "value": "Only what the Mentions of You and Your Messages rules keep is stored, whatever the other rules say."
+    },
+    {
+      "name": "ks_rules_doc_hint",
+      "value": "Read and stored as the document rules decide."
+    },
+    {
+      "name": "ks_all_chat_hint",
+      "value": "Every message is stored. Leave the days empty to keep them as long as the deciding rule or the hub's text retention says."
+    },
+    {
+      "name": "ks_all_doc_hint",
+      "value": "The document is stored whatever the rules say. Leave the days empty to add no deletion date."
+    },
+    {
+      "name": "ks_not_read",
+      "value": "Not Read"
+    },
+    {
+      "name": "ks_personal",
+      "value": "Mentions and Mine"
+    },
+    {
+      "name": "ks_by_rules",
+      "value": "By Rules"
+    },
+    {
+      "name": "ks_everything",
+      "value": "Everything"
+    },
+    {
+      "name": "ks_old_hub",
+      "value": "This hub doesn't have the knowledge selection yet. Update the hub, then choose here what it keeps."
+    },
+    {
+      "name": "ks_future",
+      "value": "This hub's selection has settings this version of the app doesn't know. Update the app to change it here; nothing was changed."
+    },
+    {
+      "name": "ks_changed",
+      "value": "The selection changed on another device. Check it and try again."
+    },
+    {
+      "name": "ks_no_id",
+      "value": "The knowledge base doesn't record where this one came from, so it can't get a setting of its own."
+    },
+    {
+      "name": "ks_not_selectable",
+      "value": "Mail, issues and pull requests are always stored. The selection doesn't apply to them."
+    },
+    {
+      "name": "ks_topics",
+      "value": "Organize Knowledge Points by Topic"
+    },
+    {
+      "name": "ks_map",
+      "value": "Open the Knowledge Map"
+    },
+    {
+      "name": "ks_map_title",
+      "value": "Knowledge Map"
+    },
+    {
+      "name": "ks_topic",
+      "value": "Topic"
+    },
+    {
+      "name": "ks_removed",
+      "value": "Setting removed"
+    },
+    {
+      "name": "ks_undo",
+      "value": "Undo"
+    },
+    {
+      "name": "ks_priority_hint",
+      "value": "Levels are checked from the top. The first level with a matching rule decides: the message is stored if any matching rule there is on, and not stored if they are all off. Lower levels are not checked. Turning a rule off only stops new messages; what is stored stays until its days run out."
+    },
+    {
+      "name": "ks_docs_hint",
+      "value": "Documents follow the same order. Only days you set here add a deletion date; with none, documents are kept as before."
+    },
+    {
+      "name": "ks_rule_mentions",
+      "value": "Mentions of You"
+    },
+    {
+      "name": "ks_rule_mine",
+      "value": "Your Messages"
+    },
+    {
+      "name": "ks_rule_dm",
+      "value": "Direct Chats"
+    },
+    {
+      "name": "ks_rule_group",
+      "value": "Group Chats"
+    },
+    {
+      "name": "ks_rule_bot",
+      "value": "Bots and Apps"
+    },
+    {
+      "name": "ks_rule_official",
+      "value": "Official Accounts"
+    },
+    {
+      "name": "ks_rule_muted",
+      "value": "Muted Chats"
+    },
+    {
+      "name": "ks_rule_collapsed",
+      "value": "Collapsed Chats"
+    },
+    {
+      "name": "ks_rule_done",
+      "value": "Done Chats"
+    },
+    {
+      "name": "ks_rule_comment_mentions",
+      "value": "Comment Mentions"
+    },
+    {
+      "name": "ks_rule_authored",
+      "value": "Documents You Wrote"
+    },
+    {
+      "name": "ks_rule_viewed",
+      "value": "Documents You Viewed"
+    },
+    {
+      "name": "ks_detail_mentions",
+      "value": "Messages that @mention you, in any chat"
+    },
+    {
+      "name": "ks_detail_mine",
+      "value": "What you send, with the messages around it"
+    },
+    {
+      "name": "ks_detail_dm",
+      "value": "One-to-one chats with a person"
+    },
+    {
+      "name": "ks_detail_group",
+      "value": "Groups you haven't muted, collapsed or marked done"
+    },
+    {
+      "name": "ks_detail_bot",
+      "value": "Chats with a bot, an app or an AI agent"
+    },
+    {
+      "name": "ks_detail_official",
+      "value": "Official, service and system accounts"
+    },
+    {
+      "name": "ks_detail_muted",
+      "value": "Chats you muted"
+    },
+    {
+      "name": "ks_detail_collapsed",
+      "value": "Chats you folded away"
+    },
+    {
+      "name": "ks_detail_done",
+      "value": "Chats you marked done"
+    },
+    {
+      "name": "ks_detail_comment_mentions",
+      "value": "Documents with a comment that @mentions you"
+    },
+    {
+      "name": "ks_detail_authored",
+      "value": "Documents you created"
+    },
+    {
+      "name": "ks_detail_viewed",
+      "value": "Documents you opened"
+    },
+    {
+      "name": "ks_detail_doc_mentions",
+      "value": "Documents that @mention you"
+    },
+    {
+      "name": "ks_load_error",
+      "value": "Couldn't load the selection"
+    },
+    {
+      "name": "ks_save_error",
+      "value": "Couldn't save the selection"
+    },
+    {
+      "name": "ks_discard",
+      "value": "Discard Changes"
+    },
+    {
+      "name": "phone_meeting_voice_unavailable",
+      "value": "The answer is on screen. This device couldn’t read it aloud."
+    },
+    {
+      "name": "chat_tray_needs",
+      "value": "Needs You"
+    },
+    {
+      "name": "chat_tray_progress",
+      "value": "In Progress"
+    },
+    {
+      "name": "phone_settings_models",
+      "value": "Models"
+    },
+    {
+      "name": "phone_settings_profile",
+      "value": "Assistant Profile"
+    },
+    {
+      "name": "phone_settings_display",
+      "value": "Appearance & Display"
+    },
+    {
+      "name": "phone_settings_language_dictation",
+      "value": "Language & Dictation"
+    },
+    {
+      "name": "phone_settings_switch",
+      "value": "Switch"
+    },
+    {
+      "name": "phone_settings_system_language",
+      "value": "Match System ({language})"
+    },
+    {
+      "name": "phone_settings_owner_note",
+      "value": "Only {name}'s own settings are shown. To change another assistant's, switch to it first."
+    },
+    {
+      "name": "chat_tray_other",
+      "value": "Another conversation"
+    },
+    {
+      "name": "phone_drawer_recent",
+      "value": "Recent"
+    },
+    {
+      "name": "phone_drawer_schedules",
+      "value": "Scheduled Tasks"
+    },
+    {
+      "name": "phone_drawer_health",
+      "value": "Health"
+    },
+    {
+      "name": "meeting_reminders",
+      "value": "Remind me before meetings"
+    },
+    {
+      "name": "meeting_reminder_body",
+      "value": "Starts at {time}. Record it?"
+    },
+    {
+      "name": "meeting_calendar_allow",
+      "value": "Allow calendar access"
+    },
+    {
+      "name": "meeting_notifications_allow",
+      "value": "Allow notifications"
+    },
+    {
+      "name": "meeting_reminder_footer",
+      "value": "A minute before a meeting on your calendar, this phone asks whether to record it."
+    },
+    {
+      "name": "meeting_calendar_needed",
+      "value": "Reminders need access to this phone’s calendar."
+    },
+    {
+      "name": "meeting_reminder_unavailable",
+      "value": "Couldn’t update meeting reminders on this phone."
+    },
+    {
+      "name": "meeting_transcription",
+      "value": "Meeting transcription"
+    },
+    {
+      "name": "meeting_mode_device",
+      "value": "On device"
+    },
+    {
+      "name": "meeting_mode_hub",
+      "value": "On the hub"
+    },
+    {
+      "name": "meeting_service",
+      "value": "Speech service"
+    },
+    {
+      "name": "meeting_service_builtin",
+      "value": "Built-in service"
+    },
+    {
+      "name": "meeting_glossary",
+      "value": "Glossary"
+    },
+    {
+      "name": "meeting_glossary_hint",
+      "value": "Enter one term per line, up to 200 terms and 40 characters per term."
+    },
+    {
+      "name": "meeting_glossary_limit",
+      "value": "Use up to 200 terms of 40 characters each."
+    },
+    {
+      "name": "meeting_privacy_device",
+      "value": "On-device transcription keeps audio on the device. Confirm before syncing the transcript to the hub."
+    },
+    {
+      "name": "meeting_privacy_hub",
+      "value": "Devices that support hub transcription send meeting audio to the hub and {service}."
+    },
+    {
+      "name": "meeting_speech_not_ready",
+      "value": "The hub’s speech service isn’t ready. Use on-device transcription."
+    },
+    {
+      "name": "meeting_privacy_this_phone",
+      "value": "Recordings on this phone keep their audio on the device. Only a transcript you confirm is synced to the hub."
+    },
+    {
+      "name": "meeting_reminder_quota",
+      "value": "The system has limited Persona’s background reminders. Further meeting reminders could not be scheduled."
+    },
+    {
+      "name": "meeting_reminder_none",
+      "value": "No meeting reminders are currently scheduled."
+    },
+    {
+      "name": "meeting_reminder_count",
+      "value": "Meeting reminders scheduled on this phone: {count}."
+    },
+    {
+      "name": "kb_search_profiles",
+      "value": "Search profiles and chat history"
+    },
+    {
+      "name": "kb_minutes_ago",
+      "value": "{n} min ago"
+    },
+    {
+      "name": "kb_yesterday",
+      "value": "Yesterday"
+    },
+    {
+      "name": "kb_relevance_value",
+      "value": "Relevance {n}"
+    },
+    {
+      "name": "kb_people",
+      "value": "People"
+    },
+    {
+      "name": "kb_events",
+      "value": "Events"
+    },
+    {
+      "name": "meeting_this_device",
+      "value": "This device"
+    },
+    {
+      "name": "meeting_transcription_label",
+      "value": "Transcription"
+    },
+    {
+      "name": "meeting_cloud_service",
+      "value": "Cloud · {service}"
+    },
+    {
+      "name": "meeting_hub_unavailable",
+      "value": "This device · the hub can’t transcribe now"
+    },
+    {
+      "name": "meeting_start_privacy_cloud",
+      "value": "Audio from this meeting goes through your hub to {service} for transcription. The hub deletes the audio once the minutes are written."
+    },
+    {
+      "name": "meeting_start_privacy_cloud_days",
+      "value": "Audio from this meeting goes through your hub to {service} for transcription. The hub deletes the audio once the minutes are written and keeps the transcript for {days} days."
+    },
+    {
+      "name": "meeting_start_privacy_local_days",
+      "value": "Audio stays on this device. Its text syncs to Knowledge and is kept for {days} days."
+    },
+    {
+      "name": "meeting_start_confirm_title",
+      "value": "Send this meeting’s audio?"
+    },
+    {
+      "name": "meeting_start_send",
+      "value": "Start and send audio"
+    },
+    {
+      "name": "meeting_start_opt_in",
+      "value": "Choose cloud transcription and confirm when starting each meeting to send its audio from this phone."
+    },
+    {
+      "name": "meeting_wifi_only",
+      "value": "Hub transcription on Wi-Fi only"
+    },
+    {
+      "name": "meeting_wifi_note",
+      "value": "Applies to this phone. On cellular or a metered connection, audio waits on the device until an unmetered Wi-Fi connection is available. An hour of audio is about 115 MB."
+    },
+    {
+      "name": "meeting_cloud_transcription",
+      "value": "Hub transcription"
+    },
+    {
+      "name": "meeting_audio_negotiating",
+      "value": "Checking which service will transcribe this meeting."
+    },
+    {
+      "name": "meeting_audio_connecting",
+      "value": "Connecting to the hub."
+    },
+    {
+      "name": "meeting_audio_live",
+      "value": "The hub is transcribing this meeting."
+    },
+    {
+      "name": "meeting_audio_reconnecting",
+      "value": "Reconnecting to the hub. Audio is retained on this device."
+    },
+    {
+      "name": "meeting_audio_waiting_network",
+      "value": "Waiting for a permitted network to send audio to the hub."
+    },
+    {
+      "name": "meeting_audio_fallback",
+      "value": "Hub transcription is unavailable for this meeting. The recording remains available on this device."
+    },
+    {
+      "name": "meeting_audio_finishing",
+      "value": "The hub is finishing the transcript."
+    },
+    {
+      "name": "meeting_audio_final",
+      "value": "The hub finished the transcript."
+    },
+    {
+      "name": "meeting_audio_failed",
+      "value": "The hub could not finish the transcript. The recording is available on this device."
+    },
+    {
+      "name": "meeting_audio_revoked",
+      "value": "Sending audio to the hub has stopped."
+    },
+    {
+      "name": "meeting_audio_previous",
+      "value": "Hub transcription was requested for this recording."
+    },
+    {
+      "name": "meeting_audio_processing_problem",
+      "value": "The hub reported a transcription problem."
+    },
+    {
+      "name": "meeting_audio_received",
+      "value": "Audio received by the hub: {seconds} s"
+    },
+    {
+      "name": "meeting_audio_withdraw",
+      "value": "Stop sending audio"
+    },
+    {
+      "name": "meeting_audio_withdraw_note",
+      "value": "Stops further audio from this meeting. Audio the hub already received is processed under its retention settings."
+    },
+    {
+      "name": "meeting_configured_service",
+      "value": "its configured speech service"
+    },
+    {
+      "name": "meeting_start_options",
+      "value": "Meeting options"
+    },
+    {
+      "name": "meeting_language_chinese",
+      "value": "Chinese"
+    },
+    {
+      "name": "meeting_language_unavailable",
+      "value": "Couldn’t check transcription languages. Try again."
+    },
+    {
+      "name": "meeting_input_label",
+      "value": "Microphone"
+    },
+    {
+      "name": "meeting_input_automatic",
+      "value": "System default"
+    },
+    {
+      "name": "meeting_bluetooth_input",
+      "value": "Bluetooth microphone"
+    },
+    {
+      "name": "meeting_phone_input",
+      "value": "Phone microphone"
+    },
+    {
+      "name": "meeting_input_changed",
+      "value": "The selected microphone is unavailable. Choose an available input and start again."
+    },
+    {
+      "name": "meeting_note_without_minutes",
+      "value": "No minutes, and Persona stays out."
+    },
+    {
+      "name": "decision_to_decide",
+      "value": "To Decide"
+    },
+    {
+      "name": "decision_previous",
+      "value": "Previous"
+    },
+    {
+      "name": "decision_next",
+      "value": "Next"
+    },
+    {
+      "name": "decision_view_in_chat",
+      "value": "View in Chat"
+    },
+    {
+      "name": "decision_skip",
+      "value": "Skip"
+    },
+    {
+      "name": "decision_skip_plan",
+      "value": "This is a plan approval and can't be skipped. To not go ahead, send it back."
+    },
+    {
+      "name": "decision_skip_permission",
+      "value": "This is a permission request and can't be skipped. To stop it running, tap Deny."
+    },
+    {
+      "name": "decision_skip_terminal",
+      "value": "This question was read off the terminal and can't be skipped yet. To leave it, tap Reply in Chat Instead."
+    },
+    {
+      "name": "phone_sidebar_directions",
+      "value": "Pinned"
+    },
+    {
+      "name": "phone_sidebar_show_scheduled",
+      "value": "Show Scheduled Task Chats"
+    },
+    {
+      "name": "phone_sidebar_label_separator",
+      "value": ", "
+    },
+    {
+      "name": "phone_sidebar_source_spawned",
+      "value": "Spawned from Chats"
+    },
+    {
+      "name": "phone_sidebar_source_extension",
+      "value": "From an extension"
+    },
+    {
+      "name": "phone_sidebar_source_lark",
+      "value": "From Lark /agent"
+    },
+    {
+      "name": "phone_sidebar_source_other",
+      "value": "Other"
+    },
+    {
+      "name": "phone_sidebar_unread",
+      "value": "Unread"
+    },
+    {
+      "name": "chat_queued_followup",
+      "value": "Add a note (queued)"
+    },
+    {
+      "name": "chat_pending_cards_count",
+      "value": "{count} pending"
+    },
+    {
+      "name": "phone_all_chats_display_options",
+      "value": "Display Options"
+    },
+    {
+      "name": "phone_session_info",
+      "value": "Session Info"
+    },
+    {
+      "name": "phone_session_info_action",
+      "value": "{title}, view session info"
+    },
+    {
+      "name": "phone_session_runtime",
+      "value": "Runtime"
+    },
+    {
+      "name": "phone_session_usage",
+      "value": "Usage"
+    },
+    {
+      "name": "phone_session_context",
+      "value": "Context"
+    },
+    {
+      "name": "phone_session_output",
+      "value": "Output"
+    },
+    {
+      "name": "phone_session_started",
+      "value": "Start"
+    },
+    {
+      "name": "phone_session_folder",
+      "value": "Folder"
+    },
+    {
+      "name": "phone_start_default_model",
+      "value": "Default Model"
+    },
+    {
+      "name": "phone_start_configured_model",
+      "value": "Model Settings: {model}"
+    },
+    {
+      "name": "phone_start_typed_model",
+      "value": "Typed model ID"
+    },
+    {
+      "name": "phone_start_typed_model_id",
+      "value": "Typed model ID: {id}"
+    },
+    {
+      "name": "phone_start_named_preset",
+      "value": "Preset {preset}"
+    },
+    {
+      "name": "phone_start_preset",
+      "value": "Preset"
+    },
+    {
+      "name": "phone_session_permissions",
+      "value": "Permissions"
+    },
+    {
+      "name": "phone_session_effort",
+      "value": "Thinking Effort"
+    },
+    {
+      "name": "phone_session_extra_high",
+      "value": "Extra High"
+    },
+    {
+      "name": "phone_session_not_running",
+      "value": "Not running"
+    },
+    {
+      "name": "phone_session_background_work",
+      "value": "Working (Background)"
+    },
+    {
+      "name": "phone_session_turns",
+      "value": "{n} turns"
+    },
+    {
+      "name": "phone_session_turn_one",
+      "value": "{n} turn"
+    },
+    {
+      "name": "phone_session_workspace",
+      "value": "Open workspace {space}"
+    },
+    {
+      "name": "phone_todo_did_not_start",
+      "value": "Didn't Start"
+    },
+    {
+      "name": "phone_todo_start_failure",
+      "value": "Failed to start: {reason}"
+    },
+    {
+      "name": "phone_todo_not_handed",
+      "value": "Not handed to an agent yet"
+    },
+    {
+      "name": "phone_sidebar_recent_heading",
+      "value": "Sidebar's Recent"
+    },
+    {
+      "name": "phone_sidebar_recent_help",
+      "value": "Chats your scheduled tasks and the background supervisor start also appear in the sidebar's Recent, by time. All your devices follow."
+    },
+    {
+      "name": "phone_chat_pin",
+      "value": "Pin"
+    },
+    {
+      "name": "phone_chat_unpin",
+      "value": "Unpin"
+    },
+    {
+      "name": "phone_chat_pin_title",
+      "value": "Pin this chat?"
+    },
+    {
+      "name": "phone_chat_pin_message",
+      "value": "The chat moves to Pinned and no longer appears in Recent."
+    },
+    {
+      "name": "phone_chat_unpin_title",
+      "value": "Unpin this chat?"
+    },
+    {
+      "name": "phone_chat_unpin_message",
+      "value": "“{name}” returns to Recent. Its open tasks go back to the main chat's supervision; nothing is closed or deleted."
+    },
+    {
+      "name": "phone_chat_unpin_filing",
+      "value": "What you added to it stays."
+    },
+    {
+      "name": "phone_chat_pinned",
+      "value": "Pinned"
+    },
+    {
+      "name": "phone_chat_unpinned",
+      "value": "Unpinned"
+    },
+    {
+      "name": "phone_chat_archived",
+      "value": "Archived"
+    },
+    {
+      "name": "phone_chat_move",
+      "value": "Move To…"
+    },
+    {
+      "name": "phone_chat_own",
+      "value": "On Its Own"
+    },
+    {
+      "name": "phone_chat_moved",
+      "value": "Moved to “{name}”"
+    },
+    {
+      "name": "phone_chat_already_moved",
+      "value": "Already in “{name}”"
+    },
+    {
+      "name": "phone_chat_own_set",
+      "value": "Set on its own"
+    },
+    {
+      "name": "phone_chat_own_already",
+      "value": "Already on its own"
+    },
+    {
+      "name": "phone_chat_direction_unavailable",
+      "value": "Not available on this hub"
+    },
+    {
+      "name": "phone_chat_undo",
+      "value": "Undo"
+    },
+    {
+      "name": "phone_chat_move_undone",
+      "value": "Move undone"
+    },
+    {
+      "name": "phone_chat_direction_full",
+      "value": "This direction is full."
+    },
+    {
+      "name": "phone_chat_direction_supervised",
+      "value": "This chat follows a supervised task."
+    },
+    {
+      "name": "phone_all_chats_lark",
+      "value": "Lark /agent"
+    },
+    {
+      "name": "phone_all_chats_mine",
+      "value": "Mine"
+    },
+    {
+      "name": "phone_all_chats_empty",
+      "value": "No Chats Here"
+    },
+    {
+      "name": "phone_all_chats_empty_detail",
+      "value": "Chats started by the Inbox's AI twin, scheduled tasks and Lark /agent are collected here by source."
+    },
+    {
+      "name": "phone_all_chats_filter_count",
+      "value": "{name}, {count}"
+    },
+    {
+      "name": "phone_inbox_by_source",
+      "value": "By Source"
+    },
+    {
+      "name": "phone_inbox_by_time",
+      "value": "By Time"
+    },
+    {
+      "name": "phone_inbox_week_ago",
+      "value": "7+ Days Ago"
+    },
+    {
+      "name": "phone_inbox_month_ago",
+      "value": "1+ Month Ago"
+    },
+    {
+      "name": "phone_inbox_grouping_mode",
+      "value": "Grouping: {name}"
+    },
+    {
+      "name": "header_permission_title",
+      "value": "Permission Mode: {mode}"
+    },
+    {
+      "name": "header_permission_detail_default",
+      "value": "Asks you before editing files or running commands"
+    },
+    {
+      "name": "header_permission_detail_acceptEdits",
+      "value": "Edits files without asking, still asks before commands"
+    },
+    {
+      "name": "header_permission_detail_plan",
+      "value": "Reads code and writes a plan, acts only once you approve"
+    },
+    {
+      "name": "header_permission_detail_auto",
+      "value": "Judges the risk itself and does safe things right away"
+    },
+    {
+      "name": "header_permission_launcher",
+      "value": "Use Launcher's"
+    },
+    {
+      "name": "header_permission_launcher_detail",
+      "value": "Its own approval settings decide what it asks, and may already allow everything"
+    },
+    {
+      "name": "header_permission_full_detail",
+      "value": "Edits files and runs commands without asking"
+    },
+    {
+      "name": "header_permission_start_only",
+      "value": "Never asks. Only available when starting"
+    },
+    {
+      "name": "header_permission_restart",
+      "value": "Restarts the session to apply it once this turn ends; the conversation carries on"
+    },
+    {
+      "name": "header_permission_pending",
+      "value": "The session restarts in Full access once this turn ends"
+    },
+    {
+      "name": "header_permission_enter",
+      "value": "Full access?"
+    },
+    {
+      "name": "header_permission_leave",
+      "value": "Leave Full access?"
+    },
+    {
+      "name": "header_permission_leave_detail",
+      "value": "This agent wasn't started with Full access, so it can't be switched back to it from here."
+    },
+    {
+      "name": "header_space_open",
+      "value": "All agents in space {space}"
+    },
+    {
+      "name": "header_space_needs",
+      "value": "{count} agents in this space, one needs you"
+    },
+    {
+      "name": "header_space_count",
+      "value": "{count} agents in this space"
+    },
+    {
+      "name": "header_space_one",
+      "value": "{count} agent in this space"
+    },
+    {
+      "name": "phone_decision_height",
+      "value": "Card Height"
+    },
+    {
+      "name": "phone_decision_height_hint",
+      "value": "Swipe up or down to change the card height. Double-tap to switch between tallest and default."
+    },
+    {
+      "name": "phone_decision_taller",
+      "value": "Make card taller"
+    },
+    {
+      "name": "phone_decision_shorter",
+      "value": "Make card shorter"
+    },
+    {
+      "name": "phone_decision_full_text",
+      "value": "Show Full Text"
+    },
+    {
+      "name": "phone_settings_advanced",
+      "value": "Advanced"
+    },
+    {
+      "name": "phone_advanced_footer",
+      "value": "Appearance, language, storage, devices and more."
+    },
+    {
+      "name": "phone_inbox_sources",
+      "value": "Inbox Sources"
+    },
+    {
+      "name": "phone_hubs",
+      "value": "Hub Connection"
+    },
+    {
+      "name": "phone_pairing",
+      "value": "Devices & Pairing"
+    },
+    {
+      "name": "phone_settings_build",
+      "value": "Build"
+    },
+    {
+      "name": "phone_settings_data_size",
+      "value": "App Data"
+    },
+    {
+      "name": "phone_default_permissions",
+      "value": "Default Permissions"
+    },
+    {
+      "name": "phone_new_conversation_permissions",
+      "value": "New Conversation Permissions"
+    },
+    {
+      "name": "phone_default_permission_footer",
+      "value": "Applies to new conversations without an explicit choice. Existing conversations keep their current permission mode."
+    },
+    {
+      "name": "phone_permission_unconfirmed",
+      "value": "The hub did not confirm the new-conversation permission."
+    },
+    {
+      "name": "phone_inbox_permissions",
+      "value": "Inbox Permissions"
+    },
+    {
+      "name": "phone_follow_agents",
+      "value": "Follow Agents"
+    },
+    {
+      "name": "phone_inbox_permission_hint",
+      "value": "Only the AI twin's own choice applies. Default permissions asks before edits or commands. New chats and stopped chats use the choice when they resume; a running chat keeps its current mode."
+    },
+    {
+      "name": "phone_search_alias_models",
+      "value": "model providers API key purpose subscription launcher execution"
+    },
+    {
+      "name": "phone_search_alias_assistant",
+      "value": "profile name memory notes triage"
+    },
+    {
+      "name": "phone_search_alias_channels",
+      "value": "channel bot messaging WeChat Feishu"
+    },
+    {
+      "name": "phone_search_alias_connectors",
+      "value": "connector mail email sources accounts sent as you"
+    },
+    {
+      "name": "phone_search_alias_phone_inbox_sources",
+      "value": "inbox sources subscriptions recommended mail muted"
+    },
+    {
+      "name": "phone_search_alias_extensions",
+      "value": "extension plugin market tools install"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_options",
+      "value": "Agent Claude Code Codex Antigravity agy session triage runtime"
+    },
+    {
+      "name": "phone_search_alias_appearance",
+      "value": "appearance display color theme style text size layout dark light glow return enter keyboard send"
+    },
+    {
+      "name": "phone_search_alias_phone_language_options",
+      "value": "language dictation speech voice keyboard"
+    },
+    {
+      "name": "phone_search_alias_notifications",
+      "value": "notifications push alerts lock screen privacy"
+    },
+    {
+      "name": "phone_search_alias_translation",
+      "value": "translation translate language"
+    },
+    {
+      "name": "phone_search_alias_storage",
+      "value": "storage cache disk clear cleanup"
+    },
+    {
+      "name": "phone_search_alias_about",
+      "value": "about version build commit diagnostics new chat check"
+    },
+    {
+      "name": "phone_search_alias_phone_hubs",
+      "value": "Hub server connection address network tunnel"
+    },
+    {
+      "name": "phone_search_alias_hub_update",
+      "value": "Hub server version update upgrade"
+    },
+    {
+      "name": "phone_search_alias_managers",
+      "value": "assistants managers create default switch"
+    },
+    {
+      "name": "phone_search_alias_phone_look_avatar",
+      "value": "avatar face persona shared icon name"
+    },
+    {
+      "name": "phone_search_alias_phone_pairing",
+      "value": "devices pairing Watch sync disconnect unpair QR code"
+    },
+    {
+      "name": "phone_search_alias_triage",
+      "value": "session triage delegation questions permissions"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_followup",
+      "value": "agent follow-up supervise supervisor idle stop archive closed sessions names rename workspace start tasks"
+    },
+    {
+      "name": "phone_search_alias_phone_look_color",
+      "value": "theme color palette accent"
+    },
+    {
+      "name": "phone_search_alias_phone_look_style",
+      "value": "interface style fonts text size"
+    },
+    {
+      "name": "phone_search_alias_phone_look_scheme",
+      "value": "light dark system appearance"
+    },
+    {
+      "name": "phone_search_alias_phone_knowledge_selection",
+      "value": "knowledge base selection sources priorities retention"
+    },
+    {
+      "name": "phone_search_alias_phone_meeting_options",
+      "value": "meetings recording attendance transcription minutes glossary wi-fi hub"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_layout",
+      "value": "Agents list layout rows cards compact"
+    },
+    {
+      "name": "phone_search_alias_phone",
+      "value": "iPhone data permissions photos contacts calendar reminders location health clipboard"
+    },
+    {
+      "name": "phone_search_alias_machines",
+      "value": "computers machines nodes pairing"
+    },
+    {
+      "name": "phone_settings_cache_size",
+      "value": "Cache"
+    },
+    {
+      "name": "phone_search_alias_phone_claude_config",
+      "value": "Claude Code"
+    },
+    {
+      "name": "phone_search_alias_phone_codex_config",
+      "value": "Codex"
+    },
+    {
+      "name": "phone_search_alias_phone_agy_config",
+      "value": "Antigravity agy"
+    },
+    {
+      "name": "phone_model_choose_uses",
+      "value": "Choose models for each use."
+    },
+    {
+      "name": "phone_model_scope",
+      "value": "Applies To"
+    },
+    {
+      "name": "phone_model_scope_hint",
+      "value": "Categories provide defaults. A separately configured use keeps its own settings. Changes take effect from the next run."
+    },
+    {
+      "name": "phone_model_provider_keys",
+      "value": "Providers and Keys"
+    },
+    {
+      "name": "phone_model_unset",
+      "value": "Not set up"
+    },
+    {
+      "name": "phone_model_configured",
+      "value": "Separately configured"
+    },
+    {
+      "name": "phone_model_follow_main",
+      "value": "Follow Main Chat"
+    },
+    {
+      "name": "phone_model_none",
+      "value": "No Model Configuration Yet"
+    },
+    {
+      "name": "phone_hub_connected",
+      "value": "Connected to hub"
+    },
+    {
+      "name": "phone_hub_connected_ssh",
+      "value": "Connected to hub · via SSH tunnel"
+    },
+    {
+      "name": "phone_hub_new_image",
+      "value": "New Image"
+    },
+    {
+      "name": "phone_hub_update_available",
+      "value": "Update Available"
+    },
+    {
+      "name": "phone_live_screen",
+      "value": "Live Screen"
+    },
+    {
+      "name": "phone_search_alias_phone_live_screen",
+      "value": "live screen screen route direct connection quality cellular mobile data hotspot scroll scrolling scroll speed two fingers"
+    },
+    {
+      "name": "phone_screen_scroll_speed",
+      "value": "Scroll Speed"
+    },
+    {
+      "name": "phone_screen_slower",
+      "value": "Slower"
+    },
+    {
+      "name": "phone_screen_default",
+      "value": "Default"
+    },
+    {
+      "name": "phone_screen_faster",
+      "value": "Faster"
+    },
+    {
+      "name": "phone_screen_scroll_hint",
+      "value": "How far a computer's screen scrolls when you drag two fingers on it."
+    },
+    {
+      "name": "phone_native_alarms",
+      "value": "Alarms and Timers"
+    },
+    {
+      "name": "phone_search_alias_phone_native_alarms",
+      "value": "alarm timer clock wake up countdown"
+    },
+    {
+      "name": "phone_alarm_empty",
+      "value": "No Alarms or Timers"
+    },
+    {
+      "name": "phone_alarm_empty_note",
+      "value": "Alarms and timers Persona sets for you show up here. Only Persona's are listed: the ones in the Clock app aren't."
+    },
+    {
+      "name": "phone_native_timers",
+      "value": "Timers"
+    },
+    {
+      "name": "phone_native_alarms_only",
+      "value": "Alarms"
+    },
+    {
+      "name": "phone_native_timer",
+      "value": "Timer"
+    },
+    {
+      "name": "phone_native_alarm",
+      "value": "Alarm"
+    },
+    {
+      "name": "phone_alarm_allow",
+      "value": "Allow Alarms"
+    },
+    {
+      "name": "phone_alarm_open_settings",
+      "value": "Open Settings"
+    },
+    {
+      "name": "phone_delete_timer",
+      "value": "Delete Timer"
+    },
+    {
+      "name": "phone_delete_alarm",
+      "value": "Delete Alarm"
+    },
+    {
+      "name": "phone_delete_timer_note",
+      "value": "The timer stops and won't ring."
+    },
+    {
+      "name": "phone_delete_alarm_note",
+      "value": "This alarm won't ring again."
+    },
+    {
+      "name": "phone_alarm_changed",
+      "value": "This alarm or timer has changed. Refresh to see its current state."
+    },
+    {
+      "name": "phone_alarm_access_note",
+      "value": "Allow notifications to manage alarms and timers set by Persona on this device."
+    },
+    {
+      "name": "phone_timer_seconds",
+      "value": "{seconds} seconds"
+    },
+    {
+      "name": "phone_alarm_day_mon",
+      "value": "Mon"
+    },
+    {
+      "name": "phone_alarm_day_tue",
+      "value": "Tue"
+    },
+    {
+      "name": "phone_alarm_day_wed",
+      "value": "Wed"
+    },
+    {
+      "name": "phone_alarm_day_thu",
+      "value": "Thu"
+    },
+    {
+      "name": "phone_alarm_day_fri",
+      "value": "Fri"
+    },
+    {
+      "name": "phone_alarm_day_sat",
+      "value": "Sat"
+    },
+    {
+      "name": "phone_alarm_day_sun",
+      "value": "Sun"
+    },
+    {
+      "name": "phone_health_reports",
+      "value": "Health"
+    },
+    {
+      "name": "phone_search_alias_phone_health_reports",
+      "value": "health workout report Apple Health"
+    },
+    {
+      "name": "phone_auto_workout_reports",
+      "value": "Automatic workout reports"
+    },
+    {
+      "name": "phone_workout_access",
+      "value": "Workout record access"
+    },
+    {
+      "name": "phone_workout_granted",
+      "value": "Allowed"
+    },
+    {
+      "name": "phone_workout_not_granted",
+      "value": "Not granted"
+    },
+    {
+      "name": "phone_workout_unavailable",
+      "value": "Huawei Health Service is unavailable on this device."
+    },
+    {
+      "name": "phone_workout_unknown",
+      "value": "The health service could not verify this app’s workout access."
+    },
+    {
+      "name": "phone_workout_check",
+      "value": "Check access again"
+    },
+    {
+      "name": "phone_workout_access_note",
+      "value": "This check reads Persona’s permission status. Your workout records stay on the device."
+    },
+    {
+      "name": "interaction_supervisor_handling",
+      "value": "Supervisor is handling this"
+    },
+    {
+      "name": "interaction_supervisor_escalation",
+      "value": "This went to its task's supervisor first. It comes to you only if the supervisor passes it up."
+    },
+    {
+      "name": "agent_reading_expand_header",
+      "value": "{title}, show title and tags"
+    },
+    {
+      "name": "session_effort_none",
+      "value": "None"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "Minimal"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "Ultra"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "This launcher has no models available to switch to."
     }
   ]
 }

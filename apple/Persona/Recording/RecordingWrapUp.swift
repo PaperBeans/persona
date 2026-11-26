@@ -90,6 +90,7 @@ struct RecordingWrapUp: View {
         case .ready: .ready
         case .failed: .failed
         case .unsupported: .unsupported
+        case .paused: .paused
         }
     }
 
@@ -226,10 +227,13 @@ struct RecordingWrapUp: View {
                 .themedButton()
                 .accessibilityIdentifier("recording-wrapup-resume")
             case .tryAgainMinutes:
-                Button { Task { await minutes.regenerate(id) } } label: { Label("Retry", systemImage: Theme.Icon.retry).lineLimit(1) }
-                    .themedButton()
-                    .disabled(minutes.asking)
-                    .accessibilityIdentifier("recording-wrapup-retry")
+                // Not while the hub's recording module is off (#15214): the route that writes them is gone with it.
+                if minutes.offersWrites {
+                    Button { Task { await minutes.regenerate(id) } } label: { Label("Retry", systemImage: Theme.Icon.retry).lineLimit(1) }
+                        .themedButton()
+                        .disabled(minutes.asking)
+                        .accessibilityIdentifier("recording-wrapup-retry")
+                }
             }
         }
     }

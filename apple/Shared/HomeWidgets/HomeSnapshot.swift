@@ -27,6 +27,10 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
     var usage: Usage?
     var machines: [Machine] = []
     var recording: Recording?
+    /// Whether the hub lets a recording start (#15214, `RecordingModule.allowance` when the app wrote the file). Written
+    /// only when it is off: absent (every file with the module on, and one from before the field) means allowed, as
+    /// does a word this build doesn't know. Off, the Record widget and the Control offer no start; Stop stays.
+    var recordingModule: PhoneRecordingAllowance?
     var health: Health?
     var intake: Intake?
     var activity: Activity?
@@ -38,6 +42,9 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
     static let staleAfter: TimeInterval = 60 * 60
 
     func isStale(at date: Date) -> Bool { at > 0 && date.timeIntervalSince1970 - at > Self.staleAfter }
+
+    /// A tap may start a meeting recording: always, unless the hub's recording module is off.
+    var offersRecordingStart: Bool { (recordingModule ?? .allowed).offersWrites }
 
     // MARK: Persona
 
@@ -215,7 +222,9 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
         var online: Bool
         var working = 0
         var needsYou = 0
-        /// Load average ÷ cores, 0…100; nil when not reported.
+        /// The 1-minute load average ÷ cores × 100, rounded to 10 (the Live Activity's `FleetState.Stats.Load.percent`):
+        /// 100 is one thread per core, and it passes 100 when threads wait for a core, so it is shown per core
+        /// (`FleetText.perCore`) and the ring stops full; nil when not reported.
         var load: Int?
         /// The mark the user gave it (`Machine.icon`: server, desktop, else a laptop).
         var icon: String?
@@ -250,6 +259,7 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
 
     /// Hub-owned day buckets. Optional at the top level so version 1 snapshots remain readable.
     nonisolated struct Intake: Codable, Hashable, Sendable {
+        var items: [String]?
         var supported: Bool
         /// An opaque app-side hub scope; never a credential. Older snapshots omit it.
         var scope: String?

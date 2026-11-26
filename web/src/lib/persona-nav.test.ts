@@ -84,7 +84,7 @@ describe("Persona is the front door (#1239)", () => {
 
   it("orders the pages under Persona like the app", () => {
     // the feature modules' pages (the health module's after Inbox) are placed by the sidebar (SidebarParts.tsx)
-    expect(NAV_PAGES).toEqual(["home", "inbox", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"]);
+    expect(NAV_PAGES).toEqual(["home", "inbox", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"]);
   });
 });
 

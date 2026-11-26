@@ -67,10 +67,10 @@ func TestDefaultPermissionSettingsScopeAndReload(t *testing.T) {
 		{"assistant", "full", `{"default_permission_mode":false,"main":"-"}`, 400},
 		{"assistant", "full", `{"default_permission_mode":"unsafe","launcher":"codex-l","main":"-"}`, 400},
 	} {
-		puts := st.puts
+		puts := st.putCount()
 		w, _ := permissionSettingsRequest(t, s, "PUT", "/api/v1/assistant", tc.target, tc.role, tc.body)
 		got, _ := s.savedSettings(ctx)
-		if w.Code != tc.code || !reflect.DeepEqual(got, before) || st.puts != puts || len(f.sends) != 0 {
+		if w.Code != tc.code || !reflect.DeepEqual(got, before) || st.putCount() != puts || len(f.sends) != 0 {
 			t.Fatalf("non-atomic refusal: %+v -> %d %s; %+v", tc, w.Code, w.Body, got)
 		}
 	}

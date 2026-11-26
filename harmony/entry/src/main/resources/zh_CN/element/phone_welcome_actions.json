@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "welcome_action_scan",
+      "value": "扫码连接 hub"
+    },
+    {
+      "name": "welcome_action_other",
+      "value": "其他方式"
+    },
+    {
+      "name": "welcome_action_help",
+      "value": "帮助"
+    },
+    {
+      "name": "welcome_action_demo",
+      "value": "体验"
+    },
+    {
+      "name": "welcome_action_hint",
+      "value": "装好 hub 时屏幕上会出二维码；也可以在已经连上的设备里打开 设置 › 设备 › 连接新设备"
+    },
+    {
+      "name": "welcome_action_done",
+      "value": "好"
+    }
+  ]
+}

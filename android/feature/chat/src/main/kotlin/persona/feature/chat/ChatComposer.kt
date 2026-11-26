@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -31,7 +32,9 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.core.content.FileProvider
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ComposerOperationException
@@ -78,6 +81,8 @@ fun ChatComposer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     leading: (@Composable RowScope.() -> Unit)? = null,
     accessory: (@Composable ColumnScope.() -> Unit)? = null,
+    /** Short chips sharing one wrapping row with [modeHint] above [accessory] (e.g., Brief/Board's launcher chip). */
+    hintChips: (@Composable FlowRowScope.() -> Unit)? = null,
     modeHint: String? = null,
     onOverlay: (Boolean) -> Unit = {},
     visible: Boolean = true,
@@ -118,10 +123,14 @@ fun ChatComposer(
     upload: ComposerAttachmentUpload? = null,
     wrapPlaceholder: Boolean = false,
     dictate: DictationControl? = rememberComposerDictation(session, state, visible && enabled, onNotice),
+    /** The hub's picture limits for this session's agent (docs/protocol/protocol.md "Pictures in a message"). */
+    imageLimits: ImageLimits = LocalHubImageLimits.current.forAgent(null),
 ) {
     val context = LocalContext.current
+    val currentImageLimits by rememberUpdatedState(imageLimits)
     val performUpload: ComposerAttachmentUpload = upload ?: { uploadService, uploadSession, attachment, onStaged ->
-        uploadAttachment(context, uploadService, uploadSession, attachment, destination = uploadDestination, onStaged = onStaged)
+        uploadAttachment(context, uploadService, uploadSession, attachment, destination = uploadDestination,
+            limits = currentImageLimits, onStaged = onStaged)
     }
     val compactShell = useShellSurface && PersonaTheme.style == AppStyle.Glass
     val adaptiveProbePage = "chat:${session.path}"
@@ -166,40 +175,81 @@ fun ChatComposer(
         }
     }
 
-    // [media]: from the photo picker, the camera or the clipboard, photos and videos sharing four places (iOS).
+    // [media]: from the photo picker, the camera or the clipboard; pictures follow the hub's image limits (spilling
+    // past count or body budget into file attachments when a computer is available) while videos keep their own cap of 4.
     fun select(uris: List<Uri>, media: Boolean, capture: Boolean = false) {
         scope.launch {
             pickerLock.withLock {
-                var overflow = false
-                for (uri in uris) {
-                    // An earlier invalid pick leaves its place available; a later valid one must still be considered.
-                    val allowed = if (media) (MAX_COMPOSER_MEDIA - state.attachments.count { it.media }).coerceAtLeast(0)
-                        else composerFileRoom(state.attachments)
-                    if (allowed == 0) {
-                        overflow = true
-                        if (capture) withContext(Dispatchers.IO) { deleteCapture(context, uri.toString()) }
-                        continue
-                    }
-                    try {
-                        val attachment = withContext(Dispatchers.IO) {
-                            val video = media && isVideo(context, uri)
-                            selectAttachment(context, uri, image = media && !video, video = video)
+                val limits = currentImageLimits
+                if (!media) {
+                    var overflow = false
+                    for (uri in uris) {
+                        if (composerFileRoom(state.attachments) == 0) {
+                            overflow = true
+                            continue
                         }
-                        state.beginEdit()
-                        state.attachments += attachment
-                        attachment.error?.let(onNotice)
+                        try {
+                            val attachment = withContext(Dispatchers.IO) { selectAttachment(context, uri, image = false, video = false) }
+                            state.beginEdit()
+                            state.attachments += attachment
+                            attachment.error?.let(onNotice)
+                        } catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { onNotice(resources.getString(R.string.chat_composer_attachment_unreadable)) }
+                    }
+                    if (overflow) onNotice(resources.getString(R.string.chat_composer_file_limit))
+                    return@withLock
+                }
+                var videoOverflow = false
+                val photoCandidates = mutableListOf<PhotoCandidate>()
+                for (uri in uris) {
+                    try {
+                        val video = withContext(Dispatchers.IO) { isVideo(context, uri) }
+                        if (video) {
+                            if (composerVideoRoom(state.attachments) == 0) {
+                                videoOverflow = true
+                                if (capture) withContext(Dispatchers.IO) { deleteCapture(context, uri.toString()) }
+                                continue
+                            }
+                            val attachment = withContext(Dispatchers.IO) { selectAttachment(context, uri, image = false, video = true) }
+                            state.beginEdit()
+                            state.attachments += attachment
+                            attachment.error?.let(onNotice)
+                        } else {
+                            val attachment = withContext(Dispatchers.IO) { selectAttachment(context, uri, image = true, video = false) }
+                            if (attachment.uploadState == DraftUploadState.Invalid) {
+                                state.beginEdit()
+                                state.attachments += attachment
+                                attachment.error?.let(onNotice)
+                            } else {
+                                val scaled = withContext(Dispatchers.IO) { measurePhotoBytes(context, uri, limits) }
+                                photoCandidates += PhotoCandidate(attachment, scaled)
+                            }
+                        }
                     } catch (e: CancellationException) { throw e }
                     catch (_: Exception) {
                         if (capture) withContext(Dispatchers.IO) { deleteCapture(context, uri.toString()) }
                         onNotice(resources.getString(R.string.chat_composer_attachment_unreadable))
                     }
                 }
-                if (overflow) onNotice(resources.getString(
-                    if (media) R.string.chat_composer_photo_limit else R.string.chat_composer_file_limit))
+                if (photoCandidates.isNotEmpty()) {
+                    val existing = refreshHeldPhotoSizes(context, state.attachments, limits) { id, bytes ->
+                        state.updateAttachment(id) { if (it.scaledBytes == null) it.copy(scaledBytes = bytes) else it }
+                    }
+                    val plan = planComposerPhotos(existing, photoCandidates, limits, canSpill = service != null)
+                    if (plan.added.isNotEmpty()) {
+                        state.beginEdit()
+                        state.attachments += plan.added
+                    }
+                    if (capture && plan.refused.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { plan.refused.forEach { deleteCapture(context, it.uri) } }
+                    }
+                    plan.notices(resources, limits).forEach(onNotice)
+                }
+                if (videoOverflow) onNotice(resources.getString(R.string.chat_composer_video_limit, MAX_COMPOSER_VIDEOS))
             }
         }
     }
-    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_COMPOSER_MEDIA)) { select(it, true) }
+    val photos = rememberLauncherForActivityResult(DynamicPickVisualMedia()) { select(it, true) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { select(it, false) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         cameraUri?.let { value ->
@@ -240,7 +290,7 @@ fun ChatComposer(
         clipboardImages.dismiss()
         if (clip == null) return
         scope.launch {
-            val pasted = withContext(Dispatchers.IO) { pastedImages(context, clip, MAX_COMPOSER_MEDIA) }
+            val pasted = withContext(Dispatchers.IO) { pastedImages(context, clip, currentImageLimits.perMessage + MAX_COMPOSER_FILES) }
             if (pasted.isEmpty()) onNotice(resources.getString(R.string.chat_composer_attachment_unreadable))
             else select(pasted, media = true, capture = true)
         }
@@ -253,10 +303,11 @@ fun ChatComposer(
         scope.launch {
             try {
                 // An edited photo opens from its source with its edits, still undoable; its source gone, it starts over on itself.
+                val maxSide = currentImageLimits.maxSide
                 val prior = state.photoEdits[photo.id]
-                val source = prior?.let { runCatching { withContext(Dispatchers.IO) { decodePhoto(context, Uri.parse(it.sourceUri)) } }.getOrNull() }
+                val source = prior?.let { runCatching { withContext(Dispatchers.IO) { decodePhoto(context, Uri.parse(it.sourceUri), maxSide) } }.getOrNull() }
                 editing = if (prior != null && source != null) ComposerPhotoEdit(photo, source, prior.sourceUri, prior)
-                    else ComposerPhotoEdit(photo, withContext(Dispatchers.IO) { decodePhoto(context, Uri.parse(photo.uri)) })
+                    else ComposerPhotoEdit(photo, withContext(Dispatchers.IO) { decodePhoto(context, Uri.parse(photo.uri), maxSide) })
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { onNotice(resources.getString(R.string.chat_attach_edit_unreadable)) }
             finally { editOpening = false }
@@ -270,12 +321,21 @@ fun ChatComposer(
             var edited: ComposerAttachment? = null
             var kept = false
             try {
-                edited = MediaShare.writeEditedPhoto(context, result)
+                val limits = currentImageLimits
+                edited = MediaShare.writeEditedPhoto(context, result, limits)
                 val carried = PhotoEdits(edit.sourceUri, done).takeUnless { done.edits.isEmpty }
+                var stagedBytes = edited.scaledBytes
                 val outcome = state.replaceWithEdited(edit.original, edited, carried) { photo ->
-                    uploadLimiter.withSlot { uploadAttachment(context, checkNotNull(service), session, photo) }
+                    uploadLimiter.withSlot {
+                        uploadAttachment(context, checkNotNull(service), session, photo, limits = limits) { size ->
+                            if (size > 0L) stagedBytes = size
+                        }
+                    }
                 }
                 kept = outcome == PhotoEditOutcome.Replaced
+                if (kept && stagedBytes != null) {
+                    state.updateAttachment(edited.id) { it.copy(size = stagedBytes, scaledBytes = stagedBytes) }
+                }
                 if (outcome is PhotoEditOutcome.Failed) onNotice(resources.getString(R.string.chat_attach_edit_failed))
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { onNotice(resources.getString(R.string.chat_attach_edit_failed)) }
@@ -306,7 +366,12 @@ fun ChatComposer(
                     val path = uploadLimiter.withSlot {
                         state.updateAttachment(attachment.id) { it.copy(uploadState = DraftUploadState.Uploading) }
                         performUpload(service, session, attachment) { size ->
-                            state.updateAttachment(attachment.id) { it.copy(size = size) }
+                            state.updateAttachment(attachment.id) {
+                                if (it.image) {
+                                    val staged = size.takeIf { v -> v > 0L }
+                                    it.copy(size = staged ?: it.size, scaledBytes = staged ?: it.scaledBytes)
+                                } else it.copy(size = size)
+                            }
                         }
                     }
                     if (state.attachments.any { it.id == attachment.id }) {
@@ -521,37 +586,57 @@ fun ChatComposer(
             )
         },
         accessory = {
-            dictate?.let { DictationStatus(it) }
-            if (state.oldVersion) Text(stringResource(R.string.chat_composer_old_version), style = PersonaTheme.type.caption,
-                color = PersonaTheme.palette.cautionText)
-            if (PersonaTheme.style == AppStyle.Glass && enabled && !sending && service != null && state.focused && clipboardImages.offered)
-                PasteImageChip(onPaste = ::pasteImages, onDismiss = clipboardImages::dismiss)
-            ComposerAttachmentPreviews(state, service, sending, enabled, onEdit = ::editPhoto)
-            if (fullToolbar) accessory?.invoke(this)
-            if (fullToolbar) modeHint?.let { JChip(it, icon = PhIcons.SlidersHorizontal) }
-            if (working && hasContent && enabled) Text(stringResource(R.string.chat_composer_will_queue), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-            ComposerSuggestions(slashItems,
-                onPick = { row ->
-                    when {
-                        row.key.startsWith("saved:") -> saved.firstOrNull { "saved:${it.id}" == row.key }?.let { state.fillSavedPrompt(it.text) }
-                        row.key.startsWith("extension:") -> quick.firstOrNull { "extension:${it.extension}/${it.id}" == row.key }?.let { state.fillQuickPrompt(it) }
-                        else -> suggestions.firstOrNull { it.word == row.key }?.let(::pick)
+            CompactAccessoryStack(gap = Tokens.Space.xs) {
+                dictate?.let { DictationStatus(it) }
+                if (state.oldVersion) Text(stringResource(R.string.chat_composer_old_version), style = PersonaTheme.type.caption,
+                    color = PersonaTheme.palette.cautionText)
+                if (PersonaTheme.style == AppStyle.Glass && enabled && !sending && service != null && state.focused && clipboardImages.offered)
+                    PasteImageChip(onPaste = ::pasteImages, onDismiss = clipboardImages::dismiss)
+                ComposerAttachmentPreviews(state, service, sending, enabled, onEdit = ::editPhoto)
+                if (fullToolbar && (hintChips != null || modeHint != null)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        hintChips?.invoke(this)
+                        modeHint?.let {
+                            // Match clickable chip height so side-by-side hint pills align visually without growing row height.
+                            JChip(
+                                it,
+                                Modifier.heightIn(min = JChipTokens.height).testTag("chat-composer-mode-hint"),
+                                icon = PhIcons.SlidersHorizontal,
+                            )
+                        }
                     }
-                },
-                modifier = Modifier.padding(vertical = Tokens.Space.xs))
-            // The @ menu: Persona's open tasks, files this chat used, the session folder's entries, then other sessions; a word
-            // that matches nothing says so. On Glass it grows in and out in iOS's state motion, rising from the field, as the
-            // lines over New chat's composer step aside for it (`NeedsStepAside`).
-            Column(Modifier.fillMaxWidth().then(if (PersonaTheme.style == AppStyle.Glass && !PersonaTheme.reduceMotion)
-                Modifier.animateContentSize(PersonaTheme.motion.enter(), Alignment.BottomStart) else Modifier)) {
-                ComposerSuggestions(mentionItems, onPick = ::pickMention, modifier = Modifier.padding(vertical = Tokens.Space.xs))
-                if (mention != null && mentionItems.isEmpty()) Text(stringResource(when {
-                        browsing.reading -> R.string.chat_mention_reading_folder
-                        browsing.browse != null -> R.string.chat_mention_no_match_folder
-                        else -> R.string.chat_mention_no_match
-                    }), Modifier.padding(vertical = Tokens.Space.xs), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                }
+                if (fullToolbar && accessory != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) { accessory.invoke(this) }
+                }
+                if (working && hasContent && enabled) Text(stringResource(R.string.chat_composer_will_queue), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                ComposerSuggestions(slashItems,
+                    onPick = { row ->
+                        when {
+                            row.key.startsWith("saved:") -> saved.firstOrNull { "saved:${it.id}" == row.key }?.let { state.fillSavedPrompt(it.text) }
+                            row.key.startsWith("extension:") -> quick.firstOrNull { "extension:${it.extension}/${it.id}" == row.key }?.let { state.fillQuickPrompt(it) }
+                            else -> suggestions.firstOrNull { it.word == row.key }?.let(::pick)
+                        }
+                    },
+                    modifier = Modifier.padding(vertical = Tokens.Space.xs))
+                // The @ menu: Persona's open tasks, files this chat used, the session folder's entries, then other sessions; a word
+                // that matches nothing says so. On Glass it grows in and out in iOS's state motion, rising from the field, as the
+                // lines over New chat's composer step aside for it (`NeedsStepAside`).
+                Column(Modifier.fillMaxWidth().then(if (PersonaTheme.style == AppStyle.Glass && !PersonaTheme.reduceMotion)
+                    Modifier.animateContentSize(PersonaTheme.motion.enter(), Alignment.BottomStart) else Modifier)) {
+                    ComposerSuggestions(mentionItems, onPick = ::pickMention, modifier = Modifier.padding(vertical = Tokens.Space.xs))
+                    if (mention != null && mentionItems.isEmpty()) Text(stringResource(when {
+                            browsing.reading -> R.string.chat_mention_reading_folder
+                            browsing.browse != null -> R.string.chat_mention_no_match_folder
+                            else -> R.string.chat_mention_no_match
+                        }), Modifier.padding(vertical = Tokens.Space.xs), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                }
+                hint?.let { Text(it.text, style = PersonaTheme.type.caption, color = if (it.missing) PersonaTheme.palette.cautionText else PersonaTheme.palette.ink2) }
             }
-            hint?.let { Text(it.text, style = PersonaTheme.type.caption, color = if (it.missing) PersonaTheme.palette.cautionText else PersonaTheme.palette.ink2) }
         },
     ) {
         ReadingContent {
@@ -588,12 +673,13 @@ fun ChatComposer(
     val moduleActions = if (menu) persona.core.moduleapi.LocalModuleActions.current.actions(persona.core.moduleapi.MenuSlot.ComposerActions,
         persona.core.moduleapi.ModuleActionTarget(session.machineId, session.sessionId)) else emptyList()
     if (menu) ChatActionsSheet(onDismiss = { menu = false }, title = stringResource(R.string.chat_composer_menu_title), actions = buildList {
-        // Photos picks pictures and videos (iOS mediaPicker), four together at most.
-        val roomForMedia = state.attachments.count { it.media } < MAX_COMPOSER_MEDIA
-        add(JAction(stringResource(R.string.chat_composer_photos), enabled = service != null && roomForMedia) {
-            launchPicker { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+        // Photos picks pictures (hub image limits + overflow file room) and videos (up to 4) sized by what is left.
+        val mediaRoom = composerMediaPickerRoom(state.attachments, currentImageLimits, canSpill = service != null)
+        val photoRoom = composerCanAddPhoto(state.attachments, currentImageLimits, canSpill = service != null)
+        add(JAction(stringResource(R.string.chat_composer_photos), enabled = service != null && mediaRoom > 0) {
+            launchPicker { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo) to mediaRoom) }
         })
-        add(JAction(stringResource(R.string.chat_composer_take_photo), enabled = service != null && roomForMedia) { takePhoto() })
+        add(JAction(stringResource(R.string.chat_composer_take_photo), enabled = service != null && photoRoom) { takePhoto() })
         add(JAction(stringResource(R.string.chat_composer_files), enabled = service != null) { launchPicker { files.launch(arrayOf("*/*")) } })
         // iOS's Mention a File or Session, after the attachments (`AttachMoreSection.common`): where the composer has an @ list.
         if (mentions != null) add(JAction(stringResource(R.string.chat_mention)) { menu = false; startMention() })
@@ -611,6 +697,33 @@ fun ChatComposer(
     if (cameraDenied) JDialog(onDismiss = { cameraDenied = false }, title = stringResource(R.string.chat_composer_camera_title),
         text = stringResource(R.string.chat_composer_camera_text, appLabel(context)),
         confirm = stringResource(R.string.chat_composer_open_settings) to { cameraDenied = false; openAppSettings(context) })
+}
+
+/** Stacks non-zero-height composer accessory items with [gap], skipping zero-height placeholders so empty slots add no gap. */
+@Composable
+private fun CompactAccessoryStack(
+    gap: Dp,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content) { measurables, constraints ->
+        val childConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val visible = measurables.map { it.measure(childConstraints) }.filter { it.height > 0 }
+        if (visible.isEmpty()) {
+            layout(0, 0) {}
+        } else {
+            val gapPx = gap.roundToPx()
+            val width = visible.maxOf { it.width }.coerceIn(constraints.minWidth, constraints.maxWidth)
+            val height = (visible.sumOf { it.height } + gapPx * (visible.size - 1))
+                .coerceIn(constraints.minHeight, constraints.maxHeight)
+            layout(width, height) {
+                var y = 0
+                visible.forEach { placeable ->
+                    placeable.placeRelative(0, y)
+                    y += placeable.height + gapPx
+                }
+            }
+        }
+    }
 }
 
 /** True when [dispatchComposerSend] opens the permission picker instead of sending the draft. */

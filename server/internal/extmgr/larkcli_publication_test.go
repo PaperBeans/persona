@@ -25,7 +25,7 @@ func TestLarkCLIRecoveryPublicationRejectsCallsAndRetiredInstances(t *testing.T)
 			st := &dualLarkReadStore{Store: w.store}
 			st.failed.Store(true)
 			w.h.store = st
-			w.h.startConnectors(w.ctx)
+			w.startRecoveryConnectors(t)
 			old := currentRecoveryCLI(w.h)
 			if old == nil {
 				t.Fatal("placeholder missing")

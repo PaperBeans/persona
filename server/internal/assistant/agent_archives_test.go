@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,7 @@ func TestAgentSessionArchivesPersistAndRestore(t *testing.T) {
 		}
 	}
 	restarted, _ := archiveTestService(t)
-	restarted.s.store = func() Store { return ft.st }
+	restarted.s.setStore(func() Store { return ft.st })
 	restarted.d.setSessions("mac", nil)
 	rows := archiveRows(t, restarted.s)
 	if len(rows) != 2 {
@@ -113,7 +114,7 @@ func TestAgentSessionArchivesPersistAndRestore(t *testing.T) {
 		t.Fatalf("restore stayed archived: %+v", got)
 	}
 	again, _ := archiveTestService(t)
-	again.s.store = func() Store { return ft.st }
+	again.s.setStore(func() Store { return ft.st })
 	again.d.setSessions("mac", nil)
 	restored := again.s.decorated("mac")
 	if len(restored) != 2 {
@@ -151,7 +152,7 @@ func TestAgentSessionArchiveActivityPermanentlyRestores(t *testing.T) {
 				}
 			}
 			restarted, _ := archiveTestService(t)
-			restarted.s.store = func() Store { return ft.st }
+			restarted.s.setStore(func() Store { return ft.st })
 			restarted.d.setSessions("mac", nil)
 			if got := archiveRows(t, restarted.s); len(got) != 0 {
 				t.Fatalf("restore not persisted: %+v", got)
@@ -367,5 +368,41 @@ func TestArchiveUnderAnAliasIsTheListedRow(t *testing.T) {
 	ft.d.setSessions("mac", []proto.Session{rows[0], rows[1]}) // no row names them any more
 	if got := archivedIDs(t, s); !got[transcript] || !got[fork] {
 		t.Fatalf("the records went with the row that named them: %v", got)
+	}
+}
+
+func TestRuntimeListIDMatchesJSONMarshal(t *testing.T) {
+	cases := [][2]string{
+		{"", ""},
+		{"mac", "claude-11111111-2222-4333-8444-555555555555"},
+		{"box-01", "session:with/safe_punct.~@#%^*()+=[]{}|;',?"},
+		{`quote"machine`, `back\slash`},
+		{"<html&tag>", "a<b&c>d"},
+		{"ctrl\x00nul", "line\nbreak\tand\rcarriage"},
+		{"unit\x1fsep", "del\x7fchar"},
+		{"\u4f1a\u8bdd", "\u6d4b\u8bd5-\U0001f680"},
+		{"line\u2028sep", "para\u2029sep"},
+		{"bad\xffutf8", "more\xfe\x80bytes"},
+		{strings.Repeat("m", 96), strings.Repeat("s", 96)},
+		{strings.Repeat("a", 80) + "<", strings.Repeat("b", 80) + `"`},
+	}
+	for b := range 256 {
+		s := string([]byte{'x', byte(b), 'y'})
+		cases = append(cases, [2]string{s, "sess"}, [2]string{"mach", s})
+	}
+	for _, tc := range cases {
+		raw, err := json.Marshal([2]string{tc[0], tc[1]})
+		if err != nil {
+			t.Fatalf("marshal %q %q: %v", tc[0], tc[1], err)
+		}
+		want := string(raw)
+		got := runtimeListID(tc[0], tc[1])
+		if got != want {
+			t.Fatalf("runtimeListID(%q, %q) = %q, want %q", tc[0], tc[1], got, want)
+		}
+		m := map[string]int{want: 42}
+		if v, ok := lookupRuntimeListID(m, tc[0], tc[1]); !ok || v != 42 {
+			t.Fatalf("lookupRuntimeListID(%q, %q) = (%d, %v), want (42, true)", tc[0], tc[1], v, ok)
+		}
 	}
 }

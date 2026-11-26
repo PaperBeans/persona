@@ -1,0 +1,104 @@
+{
+  "string": [
+    {
+      "name": "phone_todo_new",
+      "value": "新しいToDo"
+    },
+    {
+      "name": "phone_todo_list_hidden",
+      "value": "ほかに {count} 件が対応待ち（「{filter}」の対象外）"
+    },
+    {
+      "name": "phone_todo_show_all",
+      "value": "すべて表示"
+    },
+    {
+      "name": "phone_todo_was_due",
+      "value": "期限切れ {date}"
+    },
+    {
+      "name": "phone_todo_due_on",
+      "value": "期限{date}"
+    },
+    {
+      "name": "phone_todo_high_priority",
+      "value": "優先度：高"
+    },
+    {
+      "name": "phone_todo_remind_at",
+      "value": "{date} にリマインド"
+    },
+    {
+      "name": "phone_todo_related_count",
+      "value": "関連 {count} 件"
+    },
+    {
+      "name": "phone_todo_clear_filter",
+      "value": "「{filter}」の絞り込みを解除"
+    },
+    {
+      "name": "phone_todo_filter_sort",
+      "value": "絞り込みと並べ替え"
+    },
+    {
+      "name": "phone_todo_filter_count",
+      "value": "{count} 件"
+    },
+    {
+      "name": "phone_todo_show",
+      "value": "表示"
+    },
+    {
+      "name": "phone_todo_sort_by",
+      "value": "並べ替え"
+    },
+    {
+      "name": "phone_todo_got_it",
+      "value": "了解"
+    },
+    {
+      "name": "phone_todo_seen_done_a11y",
+      "value": "了解：「{title}」を完了に移動"
+    },
+    {
+      "name": "phone_todo_seen_open_a11y",
+      "value": "了解：「{title}」をその他の未完了に移動"
+    },
+    {
+      "name": "phone_todo_seen_done",
+      "value": "「完了」に移動しました"
+    },
+    {
+      "name": "phone_todo_seen_open",
+      "value": "「その他の未完了」に移動しました"
+    },
+    {
+      "name": "phone_todo_row_cancelled",
+      "value": "キャンセルしました"
+    },
+    {
+      "name": "phone_todo_row_accepted",
+      "value": "検収済み"
+    },
+    {
+      "name": "phone_todo_row_auto_done",
+      "value": "自動完了"
+    },
+    {
+      "name": "phone_todo_review_user_check",
+      "value": "あなたの確認待ち"
+    },
+    {
+      "name": "phone_todo_review_rework",
+      "value": "差し戻し {round} 回目"
+    },
+    {
+      "name": "phone_todo_review_needs_user",
+      "value": "判断待ち"
+    },
+    {
+      "name": "phone_todo_review_ongoing",
+      "value": "監督中"
+    }
+  ]
+}

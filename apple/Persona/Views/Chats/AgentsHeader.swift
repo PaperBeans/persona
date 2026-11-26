@@ -294,12 +294,14 @@ private struct AgentsFoldingField: View {
     let header: AgentsHeader
     @Binding var query: String
     var begin: () -> Void
+    /// What the search reads (#7443), named in the field.
+    @StoredValue(AgentSearchScope.key) private var scope: AgentSearchScope = .all
 
     var body: some View {
         let band = AgentsHeader.band
         let shown = AgentsSearchVisibility.rowShown(scrolled: header.scrolled, band: band,
                                                     floating: header.floating, query: query)
-        AgentsSearchField(text: $query, active: false, begin: begin)
+        AgentsSearchField(text: $query, active: false, scope: scope, begin: begin)
             .modifier(AgentsFieldPlace())
             .frame(height: band, alignment: .top)
             .mask(alignment: .bottom) { Rectangle().frame(height: shown) }
@@ -353,6 +355,8 @@ struct AgentsSearchOverlay: View {
     var begin: () -> Void
     var focused: (UUID?) -> Void
     var cancel: () -> Void
+    /// What the search reads (#7443): its token in the field, which deleting sets back to Full Text.
+    @StoredValue(AgentSearchScope.key) private var scope: AgentSearchScope = .all
 
     var body: some View {
         // From the top of the safe area: the navigation bar's row.
@@ -364,7 +368,8 @@ struct AgentsSearchOverlay: View {
                 HStack(alignment: .top, spacing: Theme.Size.searchCloseGap) {
                     // A retained field is the ordinary flat capsule and never autofocuses. Explicit activation changes
                     // its identity, so the active field gets the existing gesture, accessibility and keyboard setup.
-                    AgentsSearchField(text: $query, active: header.floating, begin: begin, focused: { focused(start) })
+                    AgentsSearchField(text: $query, active: header.floating, scope: scope, clearScope: { scope = .all },
+                                      begin: begin, focused: { focused(start) })
                         .id(header.floating)
                     if header.floating {
                         // Its bar puts the item at its trailing margin: the page's edge.
@@ -443,11 +448,13 @@ struct ListShift: ViewModifier, Animatable {
 struct AgentsSearchField: UIViewRepresentable {
     @Binding var text: String
     var active: Bool
+    /// What the search reads (#7443): another scope than Full Text is a token at the field's start (as Mail's search
+    /// scopes), there while something is typed; deleting it (`clearScope`) searches Full Text again.
+    var scope: AgentSearchScope = .all
+    var clearScope: () -> Void = {}
     var begin: () -> Void = {}
     /// Active: it has the keyboard (the first one of a launch takes a moment to load; what moves waits for it).
     var focused: () -> Void = {}
-
-    static var prompt: String { AgentsSearchPrompt.text }
 
     /// The text size the field's words stop growing at: the top bars' (`Theme.Shell.topBarLargestTypeSize`), whose row
     /// it rises into. Its capsule and its band keep their height at every size, so the fold, the pull and the rise do
@@ -463,7 +470,7 @@ struct AgentsSearchField: UIViewRepresentable {
 
     func makeUIView(context: Context) -> Holder {
         let bar = UISearchBar()
-        bar.placeholder = Self.prompt
+        bar.placeholder = AgentsSearchPrompt.text(scope)
         let field = bar.searchTextField
         field.removeFromSuperview()
         let holder = Holder(field: field, bar: bar)
@@ -482,16 +489,19 @@ struct AgentsSearchField: UIViewRepresentable {
             holder.activateSearch = { [weak coordinator = context.coordinator] in coordinator?.parent.begin() }
             holder.isAccessibilityElement = true
             holder.accessibilityTraits = .searchField
-            holder.accessibilityLabel = Self.prompt
-            holder.accessibilityValue = text.isEmpty ? Self.prompt : text
             context.coordinator.updateClearAction(for: holder)
             field.isAccessibilityElement = false
         }
         #endif
         field.addAction(UIAction { [weak field, weak coordinator = context.coordinator] _ in
-            coordinator?.parent.text = field?.text ?? ""
+            guard let field, let coordinator else { return }
+            coordinator.parent.text = field.text ?? ""
+            coordinator.tokensEdited(field)
         }, for: .editingChanged)
+        context.coordinator.applying = true
         field.text = text
+        Self.show(scope, text: text, active: active, in: holder)
+        context.coordinator.applying = false
         if !active {
             field.borderStyle = .none
             field.backgroundColor = .tertiarySystemFill
@@ -503,11 +513,40 @@ struct AgentsSearchField: UIViewRepresentable {
         return holder
     }
 
+    /// The scope in the field: its token and prompt, and at rest what VoiceOver reads. Only what changed is set again.
+    private static func show(_ scope: AgentSearchScope, text: String, active: Bool, in holder: Holder) {
+        let field = holder.field
+        let shown = field.tokens.first.flatMap { ($0.representedObject as? String).flatMap(AgentSearchScope.init(rawValue:)) } ?? .all
+        if shown != scope || field.tokens.count > 1 {
+            field.tokens = scope == .all ? [] : [token(scope)]
+            holder.prompt = AgentsSearchPrompt.text(scope)
+        }
+        #if os(iOS)
+        if !active {
+            let spoken = AgentsSearchPrompt.spoken(scope)
+            if holder.accessibilityLabel != spoken { holder.accessibilityLabel = spoken }
+            holder.accessibilityValue = text.isEmpty ? spoken : text
+        }
+        #endif
+    }
+
+    /// A scope as the field's token: its symbol and its name, as the menu's Search In shows it.
+    static func token(_ scope: AgentSearchScope) -> UISearchToken {
+        let token = UISearchToken(icon: UIImage(systemName: Theme.Icon.styled(scope.symbol)), text: scope.title)
+        token.representedObject = scope.rawValue
+        return token
+    }
+
     /// The field across it; the bar it came from kept with it (the field's look is the bar's).
     final class Holder: UIView {
         let field: UISearchTextField
         private let bar: UISearchBar
         var activateSearch: (() -> Void)?
+        /// The field's placeholder, set through the bar it came from (drawn in the bar's colors).
+        var prompt: String? {
+            get { bar.placeholder }
+            set { bar.placeholder = newValue }
+        }
         init(field: UISearchTextField, bar: UISearchBar) {
             self.field = field
             self.bar = bar
@@ -586,10 +625,13 @@ struct AgentsSearchField: UIViewRepresentable {
     func updateUIView(_ holder: Holder, context: Context) {
         let field = holder.field
         context.coordinator.parent = self
+        // What is set here is not the user's editing: a token taken away by it is not a deleted scope.
+        context.coordinator.applying = true
         if field.text != text { field.text = text }
+        Self.show(scope, text: text, active: active, in: holder)
+        context.coordinator.applying = false
         if !active {
             #if os(iOS)
-            holder.accessibilityValue = text.isEmpty ? Self.prompt : text
             context.coordinator.updateClearAction(for: holder)
             #endif
             if field.isFirstResponder { field.resignFirstResponder() }
@@ -602,6 +644,8 @@ struct AgentsSearchField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextFieldDelegate, UIGestureRecognizerDelegate {
         var parent: AgentsSearchField
+        /// The field is being set from `parent` (`updateUIView`), not edited.
+        var applying = false
         init(_ parent: AgentsSearchField) { self.parent = parent }
 
         @objc func beginSearchFromTap(_ recognizer: UITapGestureRecognizer) {
@@ -675,6 +719,28 @@ struct AgentsSearchField: UIViewRepresentable {
 
         func textFieldShouldReturn(_ field: UITextField) -> Bool {
             field.resignFirstResponder()
+            return false
+        }
+
+        /// The scope's token deleted (Delete before it, a selected token typed over, × with nothing typed): Full Text
+        /// again. Only the user's editing of the active field: not what `updateUIView` sets (`applying`).
+        func tokensEdited(_ field: UITextField) {
+            guard parent.active, !applying, let field = field as? UISearchTextField, field.tokens.isEmpty,
+                  parent.scope != .all else { return }
+            parent.clearScope()
+        }
+
+        func textFieldDidChangeSelection(_ field: UITextField) { tokensEdited(field) }
+
+        /// × takes what was typed and leaves the scope, which is kept for the next search; with nothing typed it
+        /// takes the scope's token too, as a search field's × does.
+        func textFieldShouldClear(_ field: UITextField) -> Bool {
+            guard parent.active, let field = field as? UISearchTextField, !field.tokens.isEmpty,
+                  !(field.text ?? "").isEmpty else { return true }
+            applying = true
+            field.text = ""
+            applying = false
+            parent.text = ""
             return false
         }
     }

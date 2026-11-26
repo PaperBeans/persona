@@ -16,13 +16,33 @@ export function heldReceipt202(body: string, operation: string): string {
   return "pending";
 }
 
+/** Only these authenticated mutations use the Hub's public error text in their row. */
+export function publicMutationError(method: string, path: string, status: number, body: string): string {
+  if (!body || body.length >= 65536) return "";
+  const direction = method === "PUT" && status >= 400 && status < 500 &&
+    /^\/api\/v1\/assistant\/sessions\/[^/]+\/[^/]+\/direction$/.test(path);
+  const brief = method === "POST" && [400, 403, 409, 423, 502, 503].includes(status) &&
+    /^\/api\/v1\/(?:todos\/[^/?]+\/accept|later\/[^/?]+\/handled)(?:\?manager=[^&#]+)?$/.test(path);
+  if (!direction && !brief) return "";
+  try {
+    const response = JSON.parse(body) as Record<string, Object>;
+    const explanation = response["error"];
+    return typeof explanation === "string" ? explanation.trim().slice(0, 512) : "";
+  } catch {
+    return "";
+  }
+}
+
 /** Only explicit refusal evidence permits replacing a dispatched write. */
-export function writeResultUnknown(status: number, body = ""): boolean {
+export function writeResultUnknown(status: number, body = "", gitPull = false): boolean {
   if (body) {
     try {
       const data = JSON.parse(body) as Record<string, unknown>;
       if (data.state === "unknown" || data.state === "pending" || data.delivered === "unknown" || data.delivered === "yes") return true;
       if (data.delivered === "none") return false;
+      // The node sends these codes before it runs git pull. Older proxies may return them with HTTP 502.
+      if (gitPull && typeof data.code === "string" &&
+          ["no_directory", "not_a_repository", "detached_head", "no_upstream", "uncommitted_changes"].includes(data.code)) return false;
     } catch { /* An unreadable response is not proof of no side effect. */ }
   }
   return ![400, 401, 403, 404, 405, 409, 410, 413, 415, 422].includes(status);

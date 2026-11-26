@@ -36,6 +36,7 @@ func withdrawArgs() map[string]any {
 }
 
 func TestSupervisorWithdrawsItsNeedsUserQuietly(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	database := todoTestDB(t)
 	s, f, todo, posts, updates := setupNeedsUserTaskWithLark(t, database)
@@ -211,4 +212,28 @@ func TestSupervisorWithdrawsAnOwnerWait(t *testing.T) {
 	if !toldResolved(f, card) {
 		t.Fatal("the hub was not told the owner wait is over")
 	}
+}
+
+// Directly closing or deleting a to-do, or withdrawing an outside decision, tells the hub its to-do ask is over
+// (EventFleetResolved todo-ask:<id>) so any delivered phone notification is recalled (#13916).
+func TestTodoCloseDeleteAndOutsideWithdrawTellHubResolved(t *testing.T) {
+	t.Run("direct close", func(t *testing.T) {
+		s, f, todo, _, _ := setupNeedsUserTaskWithLark(t, nil)
+		done := true
+		if _, err := s.editTodo(context.Background(), todo.ID, db.TodoEdit{Done: &done}); err != nil {
+			t.Fatal(err)
+		}
+		if !toldResolved(f, assistantwire.TodoAskCardID(todo.ID)) {
+			t.Fatalf("direct close did not emit EventFleetResolved %s", assistantwire.TodoAskCardID(todo.ID))
+		}
+	})
+	t.Run("delete", func(t *testing.T) {
+		s, f, todo, _, _ := setupNeedsUserTaskWithLark(t, nil)
+		if err := s.deleteTodo(context.Background(), todo.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !toldResolved(f, assistantwire.TodoAskCardID(todo.ID)) {
+			t.Fatalf("delete did not emit EventFleetResolved %s", assistantwire.TodoAskCardID(todo.ID))
+		}
+	})
 }

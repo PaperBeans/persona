@@ -28,6 +28,22 @@ function lastReload(): number | null {
   }
 }
 
+/** Reloads the current page (extracted so jsdom tests can observe chunk-recovery reloads without mutating window.location). */
+export const reloadPage = () => location.reload();
+
+/** Reloads once when a hashed chunk fails to load (e.g. after a hub redeploy); returns true when a reload was started. */
+export function reloadForStaleChunk(error: unknown, reload: () => void = reloadPage): boolean {
+  if (!reloadsFor(error, lastReload(), Date.now())) return false;
+  try {
+    sessionStorage.setItem(RELOADED, String(Date.now()));
+  } catch {
+    // no storage: reload anyway; the next failure shows the message (the timestamp is not there to stop a loop,
+    // but a reload that fails the same way lands here again only after the user acts)
+  }
+  reload();
+  return true;
+}
+
 export class PageBoundary extends Component<{ children: ReactNode; page: string }, { error: unknown }> {
   state = { error: null as unknown };
 
@@ -36,19 +52,10 @@ export class PageBoundary extends Component<{ children: ReactNode; page: string 
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
-    if (!reloadsFor(error, lastReload(), Date.now())) {
-      // shown to the user: a render crash (fatal), or a chunk that still would not load after the reload (warning). The
-      // first chunk failure, which only reloads, is the expected cost of a redeploy and not reported.
-      reportBoundary(error, "page_boundary", isChunkError(error), info.componentStack);
-      return;
-    }
-    try {
-      sessionStorage.setItem(RELOADED, String(Date.now()));
-    } catch {
-      // no storage: reload anyway; the next failure shows the message (the timestamp is not there to stop a loop,
-      // but a reload that fails the same way lands here again only after the user acts)
-    }
-    location.reload();
+    if (reloadForStaleChunk(error)) return;
+    // shown to the user: a render crash (fatal), or a chunk that still would not load after the reload (warning). The
+    // first chunk failure, which only reloads, is the expected cost of a redeploy and not reported.
+    reportBoundary(error, "page_boundary", isChunkError(error), info.componentStack);
   }
 
   componentDidUpdate(prev: { page: string }) {

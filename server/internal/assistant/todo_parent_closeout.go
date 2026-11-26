@@ -453,7 +453,7 @@ func (s *Service) parentCloseoutDigestEntry(ctx context.Context, g superviseSign
 		Children: promptChildren,
 		Notes:    clip(strings.TrimSpace(t.Notes), 1000),
 	})
-	return prompts.SuperviseEntry{
+	e := prompts.SuperviseEntry{
 		ID:             t.ID,
 		Title:          t.Title,
 		Kind:           sigParentCloseout,
@@ -461,5 +461,7 @@ func (s *Service) parentCloseoutDigestEntry(ctx context.Context, g superviseSign
 		Link:           todoLink(web, t.ID),
 		Quiet:          t.Quiet,
 		ParentCloseout: wakeText,
-	}, true, false
+	}
+	s.setEntryOrigin(ctx, t, web, &e)
+	return e, true, false
 }

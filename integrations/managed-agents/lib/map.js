@@ -3,6 +3,7 @@
 // to read (status changes, spans, usage, confirmations) yield no item but still take a seq, so the log and the pages
 // keep one numbering.
 
+import { assistantPreview } from '../../runtime-sdk/lib/assistant-preview.js'
 import { appToolName, clipInput, snippet } from '../../runtime-sdk/index.js'
 
 // Words the hub recognizes and rewrites into the reader's language (docs/protocol/i18n.md, transcript.Runtime*):
@@ -82,6 +83,7 @@ export function eventItems(ev, seq, images) {
       break
     case 'agent.tool_result':
     case 'agent.mcp_tool_result':
+    case 'user.tool_result':
       push(0, { role: 'user', kind: 'tool_result', tool_use_id: ev.tool_use_id ?? ev.mcp_tool_use_id, text: textOf(ev.content), is_error: ev.is_error === true })
       break
     case 'user.custom_tool_result':
@@ -129,8 +131,8 @@ export function logStatus(events) {
 export function lastText(events) {
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i]?.type === 'agent.message') {
-      const t = textOf(events[i].content)
-      if (t.trim()) return snippet(t)
+      const preview = assistantPreview(textOf(events[i].content))
+      if (preview) return preview
     }
     if (events[i]?.type === 'user.message') return ''
   }

@@ -3,30 +3,28 @@ import SwiftUI
 /// Settings › Appearance › Avatar › New from Photo (#2405): the picked image in a square, a circle over it showing what the
 /// avatar keeps; drag to move it, pinch (or, on the Mac, the slider) to zoom. A name (required) and a description, then
 /// Upload (`AvatarUploadModel`): the hub makes the avatar and this device chooses it.
+///
+/// With a hub that lists `look_uploads_states` (#15449) two entries follow the fields, one level down: **Theme Color**
+/// (`AvatarColorPage`) and **Pictures for Each State** (`AvatarStatesPage`). Left alone, the sheet does what it did. The
+/// same sheet edits an uploaded avatar (Edit on its card): filled from its package, Save sends only what changed.
 struct AvatarCropView: View {
     @Bindable var model: AvatarUploadModel
     @Environment(\.dismiss) private var dismiss
-    /// The drag so far: each change moves the square by what was added.
-    @State private var dragged: CGSize = .zero
-    /// The zoom when the pinch began.
-    @State private var pinchedFrom: Double?
+    @Environment(\.displayScale) private var scale
+    @State private var path: [AvatarSheetPage] = []
+    /// An edit's new main picture: Photos or a file.
+    @State private var choosingPhoto = false
+    @State private var choosingFile = false
     @FocusState private var field: Field?
 
     private enum Field { case name, subtitle }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
-                Section {
-                    cropArea
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
-                } footer: {
-                    Text("Drag to move the photo. Pinch to zoom.")
-                }
-                // Made already: the crop and the names would not be sent again.
-                .disabled(model.made != nil)
+                pictureSection
+                // Made already: the picture and the names would not be sent again.
+                    .disabled(model.made != nil)
                 Section {
                     TextField(String(localized: "Name"), text: $model.name)
                         .focused($field, equals: .name)
@@ -41,17 +39,28 @@ struct AvatarCropView: View {
                     Text("Persona goes by this name in the top bar and the chat. The description shows only here in Settings.")
                 }
                 .disabled(model.made != nil)
+                if model.offersStates {
+                    AvatarMoreSection(model: model)
+                        .disabled(model.made != nil)
+                }
                 if let error = model.error {
                     Section { LoadProblem(text: error) }
                         .accessibilityIdentifier("avatar-upload-error")
                 }
             }
             .themedPage()
-            .navigationTitle(String(localized: "New Avatar"))
+            .navigationTitle(model.editing == nil ? String(localized: "New Avatar") : String(localized: "Edit Avatar"))
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: AvatarSheetPage.self) { page in
+                switch page {
+                case .color: AvatarColorPage(model: model)
+                case .states: AvatarStatesPage(model: model, path: $path)
+                case .crop(let state): AvatarStateCropPage(model: model, state: state)
+                }
+            }
             // No Cancel while it uploads: the avatar would be made all the same. Once made, closing loses nothing: it is
             // in the list.
-            .sheetCancel(unsaved: !model.trimmedName.isEmpty && model.made == nil, when: !model.uploading) { dismiss() }
+            .sheetCancel(unsaved: unsaved, when: !model.uploading) { dismiss() }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -70,6 +79,8 @@ struct AvatarCropView: View {
                         } else if model.made != nil {
                             // Made but not downloaded here: the download again, not another upload.
                             Text("Try Again").lineLimit(1)
+                        } else if model.editing != nil {
+                            Text("Save").lineLimit(1)
                         } else {
                             // Its own key: Japanese says Create, short enough to leave the title whole.
                             Text(String(localized: "avatar.upload", defaultValue: "Upload")).lineLimit(1)
@@ -80,18 +91,101 @@ struct AvatarCropView: View {
                 }
             }
             .interactiveDismissDisabled(model.uploading)
+            .modifier(AvatarPicturePicking(choosingPhoto: $choosingPhoto, choosingFile: $choosingFile, picked: { data in
+                _ = await model.receiveMain(data)
+            }, failed: model.failedToRead))
+            .task { await model.prepare(facePixels: Int(Theme.Size.avatarCrop * scale)) }
+            #if DEBUG
+            .task { debugOpen() }
+            #endif
         }
     }
 
-    /// The image under a square window, dimmed outside the circle the avatar keeps.
-    private var cropArea: some View {
+    /// What closing would lose: a name typed for a new avatar, or an edit's changes, before the hub has them.
+    private var unsaved: Bool {
+        guard model.made == nil else { return false }
+        return model.editing == nil ? !model.trimmedName.isEmpty : model.changed
+    }
+
+    /// The main picture: a new avatar's crop; an edit's face as it is, or the crop of the new picture picked for it.
+    @ViewBuilder private var pictureSection: some View {
+        let canDrop = model.made == nil && !model.uploading
+        if let main = model.main {
+            Section {
+                AvatarCropArea(framing: main) { Task { await model.estimateColor() } }
+                    .modifier(AvatarPictureDrop(enabled: canDrop, radius: Theme.Radius.card, targetID: "main",
+                                                dropped: { _ = await model.receiveMain($0) },
+                                                failed: model.failedToRead))
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                if model.editing != nil { changePicture }
+            } footer: {
+                Text("Drag to move the photo. Pinch to zoom.")
+            }
+        } else {
+            Section {
+                AvatarCurrentFace(face: model.packageFace)
+                    .modifier(AvatarPictureDrop(enabled: canDrop, radius: Theme.Radius.card, targetID: "main",
+                                                dropped: { _ = await model.receiveMain($0) },
+                                                failed: model.failedToRead))
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                changePicture
+            }
+        }
+    }
+
+    /// An edit's new main picture (Photos, a file), or back to the one it has.
+    private var changePicture: some View {
+        Menu {
+            AvatarPictureSourceButtons(slot: .mainEdit) { source in
+                if source == .files { choosingFile = true } else { choosingPhoto = true }
+            }
+            if model.main != nil {
+                Button {
+                    model.keepMain()
+                    Task { await model.estimateColor() }
+                } label: { Label(String(localized: "Keep Current Picture"), systemImage: Theme.Icon.undo) }
+            }
+        } label: {
+            Text("Change Picture").lineLimit(1)
+        }
+        .accessibilityIdentifier("avatar-change-picture")
+    }
+
+    #if DEBUG
+    /// `-showAvatarCropPage color|states` opens that page of the sheet once it is up (`PersonaPicker.debugOpen`).
+    private func debugOpen() {
+        switch UserDefaults.standard.string(forKey: "showAvatarCropPage") {
+        case "color": path = [.color]
+        case "states": path = [.states]
+        default: break
+        }
+    }
+    #endif
+}
+
+/// The picture under a square window, dimmed outside the circle the avatar keeps: drag to move it, pinch to zoom (VoiceOver
+/// swipes up and down). `settled`: a drag or pinch ended, or VoiceOver zoomed (what follows the square, such as the
+/// automatic color, is worked out then, not on every frame of a drag).
+struct AvatarCropArea: View {
+    @Bindable var framing: AvatarFraming
+    var settled: () -> Void = {}
+    /// The drag so far: each change moves the square by what was added.
+    @State private var dragged: CGSize = .zero
+    /// The zoom when the pinch began.
+    @State private var pinchedFrom: Double?
+
+    var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let crop = model.crop
+            let crop = framing.crop
             let k = side / crop.side // points per pixel of the image
             Theme.Fill.well
                 .overlay {
-                    Image(decorative: model.image, scale: 1)
+                    Image(decorative: framing.image, scale: 1)
                         .resizable()
                         .interpolation(.high)
                         .frame(width: crop.width * k, height: crop.height * k)
@@ -109,13 +203,14 @@ struct AvatarCropView: View {
         .frame(maxWidth: Theme.Size.avatarCrop)
         .accessibilityElement()
         .accessibilityLabel(String(localized: "Crop"))
-        .accessibilityValue(String(localized: "Zoom \(model.crop.zoom.formatted(.percent.precision(.fractionLength(0))))"))
+        .accessibilityValue(String(localized: "Zoom \(framing.crop.zoom.formatted(.percent.precision(.fractionLength(0))))"))
         .accessibilityAdjustableAction { direction in
             switch direction {
-            case .increment: model.crop = model.crop.zoomed(to: model.crop.zoom * Self.zoomStep)
-            case .decrement: model.crop = model.crop.zoomed(to: model.crop.zoom / Self.zoomStep)
+            case .increment: framing.crop = framing.crop.zoomed(to: framing.crop.zoom * Self.zoomStep)
+            case .decrement: framing.crop = framing.crop.zoomed(to: framing.crop.zoom / Self.zoomStep)
             @unknown default: break
             }
+            settled()
         }
         .accessibilityIdentifier("avatar-crop")
     }
@@ -129,19 +224,47 @@ struct AvatarCropView: View {
             .onChanged { v in
                 let step = CGSize(width: v.translation.width - dragged.width, height: v.translation.height - dragged.height)
                 dragged = v.translation
-                model.crop = model.crop.panned(by: step, viewSide: side)
+                framing.crop = framing.crop.panned(by: step, viewSide: side)
             }
-            .onEnded { _ in dragged = .zero }
+            .onEnded { _ in
+                dragged = .zero
+                settled()
+            }
     }
 
     private var pinch: some Gesture {
         MagnifyGesture()
             .onChanged { v in
-                let from = pinchedFrom ?? model.crop.zoom
+                let from = pinchedFrom ?? framing.crop.zoom
                 pinchedFrom = from
-                model.crop = model.crop.zoomed(to: from * v.magnification)
+                framing.crop = framing.crop.zoomed(to: from * v.magnification)
             }
-            .onEnded { _ in pinchedFrom = nil }
+            .onEnded { _ in
+                pinchedFrom = nil
+                settled()
+            }
+    }
+}
+
+/// An edit's face as the package has it, in the crop's place, until a new picture is picked.
+private struct AvatarCurrentFace: View {
+    var face: UIImage?
+
+    var body: some View {
+        Theme.Fill.well
+            .overlay {
+                if let face {
+                    Image(uiImage: face).resizable().interpolation(.high).scaledToFill().clipShape(.circle)
+                } else {
+                    ProgressView()
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
+            .frame(maxWidth: Theme.Size.avatarCrop)
+            .accessibilityElement()
+            .accessibilityLabel(String(localized: "Current picture"))
+            .accessibilityIdentifier("avatar-current-face")
     }
 }
 

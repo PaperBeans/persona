@@ -11,7 +11,7 @@ vi.hoisted(() => {
 });
 
 import { t } from "../../i18n";
-import { closePanel, getPanel, openPanel, type Panel } from "../../lib/panel";
+import { closePanel, getPanel, openPanel, popPanel, type Panel } from "../../lib/panel";
 import { href } from "../../lib/router";
 import { handoffFrom } from "../../lib/handoff";
 import { applyCompleteSessions, getState, refreshTodos, reset } from "../../lib/store";
@@ -103,6 +103,22 @@ async function expectSessionWindow(s = first) {
 }
 
 describe("Agent panel new-window destination", () => {
+  it("opens the verification report first and restores it after inspecting a released worker", async () => {
+    const todo = task();
+    todo.agents![0].released_at = at;
+    todo.supervision = { supervisor: "owner", state: "user_check", done_when: ["Check the route"], criteria: [{ criterion: "Check the route", state: "met", evidence: "Both transfers checked" }] };
+    todo.ask = { verdict: "Ready to verify", summary: "The itinerary is ready.", asked_at: at, link: "https://example.com/itinerary" };
+    await open({ kind: "task", todo: todo.id }, todo);
+    expect(host.textContent).toContain(todo.ask.summary);
+    expect(host.textContent).toContain("Both transfers checked");
+    expect(host.querySelector("a")?.href).toBe(todo.ask.link);
+    const button = [...host.querySelectorAll("button")].find((b) => b.textContent === t("assistant-taskpanel.raw_session"));
+    act(() => button!.click());
+    expect(getPanel()).toEqual({ kind: "agent", mid: first.machine_id, sid: first.session_id });
+    act(() => { popPanel(); });
+    expect(host.textContent).toContain(todo.ask.summary);
+  });
+
   it("opens the displayed Agent session from a task card or task-backed In progress tray entry", async () => {
     await open({ kind: "task", todo: "example-task" });
     expect(host.querySelector("aside header h1")?.textContent).toBe("Example task");

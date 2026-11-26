@@ -57,6 +57,10 @@ func TestMinutesHTTP(t *testing.T) {
 		"calendar": map[string]any{"title": "发布评审", "attendees": []string{"Ada", "Bo"}, "id": "ignored"},
 		"segments": []map[string]any{{"start": 0, "end": 9, "text": "导出会丢掉大条目"}, {"start": 10, "end": 19, "text": "先保留上限"}, {"start": 20, "end": 29, "text": "Bo 补上回归测试"}}}
 	path := "/api/v1/recordings/" + id
+	// The fixture's 2026-11-10 recording must stay inside the retention window when the calendar advances; an upload
+	// outside it returns "expired" and the minutes route would see no recording instead of the intended 409.
+	request("PUT", "/api/v1/assistant", "", map[string]any{"recording_days": 30}, 200)
+	defer request("PUT", "/api/v1/assistant", "", map[string]any{"recording_days": 14}, 200)
 	request("PUT", path, "", upload, 200)
 	request("POST", path+"/minutes", "", nil, 409) // the transcript is not complete
 	upload["revision"], upload["complete"] = 2, true
@@ -64,7 +68,7 @@ func TestMinutesHTTP(t *testing.T) {
 	if !strings.Contains(request("GET", "/api/v1/recordings", "", nil, 200), `"minutes_state":"pending"`) {
 		t.Fatal("reconciliation lacks the pending minutes")
 	}
-	if n := e.WriteMinutes(context.Background(), 2); n != 1 {
+	if n := e.RecordingProvider().WriteMinutes(context.Background(), 2); n != 1 {
 		t.Fatalf("wrote %d", n)
 	}
 	pushes := f.pushed()
@@ -145,7 +149,7 @@ func TestMinutesHTTP(t *testing.T) {
 	if body := request("POST", path+"/minutes", "", nil, 202); !strings.Contains(body, `"state":"pending"`) {
 		t.Fatalf("regenerate: %s", body)
 	}
-	e.WriteMinutes(context.Background(), 2)
+	e.RecordingProvider().WriteMinutes(context.Background(), 2)
 	if pushes := f.pushed(); len(pushes) != 2 || pushes[1].ID != "ntf_minutes_"+id+"_2" {
 		t.Fatalf("pushes %+v", pushes)
 	}

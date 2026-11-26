@@ -12,8 +12,11 @@ package recordinghost
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/extwire"
@@ -32,8 +35,9 @@ type Layer interface {
 	Routes(engine func(http.ResponseWriter, *http.Request) *kb.Engine)
 	// AudioSocket serves GET /api/v1/recordings/{id}/audio, the phone's audio socket.
 	AudioSocket(w http.ResponseWriter, r *http.Request)
-	// Hook gives knowledge base e the module's callbacks (minutes written, live changes, day recaps).
-	Hook(e *kb.Engine)
+	// Hook gives knowledge base e the module's callbacks (minutes written, live changes, day recaps) and its write
+	// side; core is e as the storage port, which the module's writers reach the store through.
+	Hook(e *kb.Engine, core recordingwire.Core)
 	// AttendResume picks the attended meetings up again from their live logs when e opens.
 	AttendResume(e *kb.Engine)
 	// FinalPasses runs hub transcription's final passes until ctx ends.
@@ -158,30 +162,29 @@ type Host interface {
 	TranscriptionReadyAwait() bool
 
 	InSpaceRecording(ctx context.Context, rawID string) bool
-	PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u kb.RecordingUpload)
+	// PutSpaceRecordingRoute answers the upload u of a recording saved into a track; clean is the module's check of an
+	// upload, run where the knowledge base's own upload runs it.
+	PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u recordingwire.RecordingUpload, clean recordingwire.UploadCleaner)
 	DeleteSpaceRecording(w http.ResponseWriter, r *http.Request, id string) bool
-	SpaceRecordingStates(ctx context.Context) (kept []kb.RecordingState, deleted []string)
+	SpaceRecordingStates(ctx context.Context) (kept []recordingwire.RecordingState, deleted []string)
 
 	DecodeLargeBody(w http.ResponseWriter, r *http.Request, v any, limit int64) error
 }
 
-var provided func(Host) Layer
+var port = moduleswitch.NewPort[func(Host) Layer]("recordinghost")
 
-// Provide provides the module: new makes its layer for one manager's host (init only).
-func Provide(new func(Host) Layer) {
-	if provided != nil {
-		panic("recordinghost: the recording module provided twice")
-	}
-	provided = new
-}
+// Provide provides the module under its id: new makes its layer for one manager's host (init only; twice panics).
+func Provide(module string, new func(Host) Layer) { port.Provide(module, new) }
 
-// InBuild says whether the recording module is in this build.
-func InBuild() bool { return provided != nil }
+// InBuild says whether the recording module is in this build and s has it on.
+func InBuild(s moduleswitch.Set) bool { return port.On(s) }
 
-// New is the module's layer for h; false when the module is not in this build.
-func New(h Host) (Layer, bool) {
-	if provided == nil {
+// New is the module's layer for h; false when the module is not in this build or s switched it off (the `modules`
+// setting the manager started with), so it is absent exactly as one built out.
+func New(s moduleswitch.Set, h Host) (Layer, bool) {
+	newLayer, ok := port.Get(s)
+	if !ok {
 		return nil, false
 	}
-	return provided(h), true
+	return newLayer(h), true
 }

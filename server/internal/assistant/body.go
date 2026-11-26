@@ -39,12 +39,10 @@ func decodeLargeBody(w http.ResponseWriter, r *http.Request, v any, limit int64)
 }
 
 // decodeInPlace is encoding/json's Decoder.Decode of b's first value into v, reading b where it is.
+// A buffered decoder borrows the original slice; decoding the first value directly avoids a second copy of the whole object.
 func decodeInPlace(b []byte, v any) error {
-	value, err := jsontext.NewDecoder(bytes.NewBuffer(b), json.DefaultOptionsV1()).ReadValue()
-	if err != nil {
-		return err
-	}
-	return jsonv2.Unmarshal(value, v, json.DefaultOptionsV1())
+	dec := jsontext.NewDecoder(bytes.NewBuffer(b), json.DefaultOptionsV1())
+	return jsonv2.UnmarshalDecode(dec, v, json.DefaultOptionsV1())
 }
 
 // zeroAt: v is a non-nil pointer to a zero value (what a failed try puts back).

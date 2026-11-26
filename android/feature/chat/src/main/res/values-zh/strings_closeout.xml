@@ -38,4 +38,5 @@
     <string name="chat_decision_handled">已经处理过了</string>
     <string name="chat_decision_failed">回答没发出去。%1$s</string>
     <string name="chat_decision_confirm">确认：%1$s</string>
+    <string name="chat_decision_tap_to_confirm">再点一次确认</string>
 </resources>

@@ -154,9 +154,6 @@ func (s *Service) a2aConfig(ctx context.Context) assistantwire.A2AConfig {
 }
 
 func (s *Service) a2aStore() (a2aStore, error) {
-	if s.store == nil {
-		return nil, errA2AUnavailable
-	}
 	st, ok := s.store().(a2aStore)
 	if !ok || st == nil {
 		return nil, errA2AUnavailable

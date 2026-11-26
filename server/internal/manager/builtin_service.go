@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -512,11 +513,20 @@ func (e *env) builtinStatus(ctx context.Context, always bool) {
 // that does not run, or that it cannot start on, is not tried again: it goes on with the code it runs until another
 // file is there.
 var (
-	binaryCheck = time.Minute      // how often it looks at the file
-	idleCheck   = 10 * time.Second // how often it asks whether it is idle, once a new binary passed its check
-	idleMost    = 30 * time.Minute // then it starts again anyway, and says so
-	versionWait = 30 * time.Second // how long the new binary's `version -v` may take
+	binaryCheck       = time.Minute      // how often it looks at the file
+	idleCheck         = 10 * time.Second // how often it asks whether it is idle, once a new binary passed its check
+	idleMost          = 30 * time.Minute // then it starts again anyway, and says so (RunBuiltin only)
+	versionWait       = 30 * time.Second // how long the new binary's `version -v` may take
+	restartLoopWindow = 5 * time.Minute  // cross-process restart-loop guard window for the same target binary
+	binaryWatchNow    = time.Now
 )
+
+const binaryRestartGuardFile = ".binary-restart.json"
+
+type binaryRestartRecord struct {
+	Target fileIdentity `json:"target"`
+	At     time.Time    `json:"at"`
+}
 
 // runningBinary is the file this process runs from and what it was when looked at; ok false when it cannot tell.
 var runningBinary = func() (path string, fi os.FileInfo, ok bool) {
@@ -568,27 +578,107 @@ var checkBinary = func(ctx context.Context, path string) error {
 	return nil
 }
 
-// binaryWatch follows the file the built-in manager's service runs from.
+// binaryWatch follows the file a supervised manager service runs from.
 type binaryWatch struct {
 	path string
 	// seen is the file there last looked at that needs no restart: the one at start, or one that did not run or that
 	// it could not start on (not tried again).
 	seen os.FileInfo
 	out  io.Writer
+	// logPrefix names the component in log lines (defaults to "assistant").
+	logPrefix string
+	// guardPath optionally persists the last restart target identity across process restarts to break restart loops.
+	guardPath string
+	// waitUntilIdle, when true, never interrupts active turns past idleMost and cancels waiting if the file reverts.
+	waitUntilIdle bool
 }
 
 // newBinaryWatch follows the file this process runs from; nil when it cannot tell which.
 func newBinaryWatch(out io.Writer) *binaryWatch {
+	return newBinaryWatchWithGuard(out, "")
+}
+
+// newBinaryWatchWithGuard follows the file this process runs from, cleaning up guardPath if the current process is
+// already running the previously targeted binary.
+func newBinaryWatchWithGuard(out io.Writer, guardPath string) *binaryWatch {
 	path, fi, ok := runningBinary()
 	if !ok {
 		return nil
 	}
-	return &binaryWatch{path: path, seen: fi, out: out}
+	w := &binaryWatch{path: path, seen: fi, out: out, logPrefix: "assistant", guardPath: guardPath}
+	if guardPath != "" {
+		if rec, ok := w.readRestartRecord(); ok && rec.Target == fileIdentityOf(fi) {
+			_ = os.Remove(guardPath)
+		}
+	}
+	return w
 }
 
+func (w *binaryWatch) prefix() string {
+	if w.logPrefix != "" {
+		return w.logPrefix
+	}
+	return "assistant"
+}
+
+func (w *binaryWatch) readRestartRecord() (binaryRestartRecord, bool) {
+	if w.guardPath == "" {
+		return binaryRestartRecord{}, false
+	}
+	b, err := os.ReadFile(w.guardPath)
+	if err != nil {
+		return binaryRestartRecord{}, false
+	}
+	var rec binaryRestartRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return binaryRestartRecord{}, false
+	}
+	return rec, true
+}
+
+func (w *binaryWatch) loopGuarded(fi os.FileInfo) bool {
+	if w.guardPath == "" || fi == nil {
+		return false
+	}
+	rec, ok := w.readRestartRecord()
+	if !ok || rec.At.IsZero() {
+		return false
+	}
+	if rec.Target != fileIdentityOf(fi) {
+		return false
+	}
+	age := binaryWatchNow().Sub(rec.At)
+	return age >= 0 && age < restartLoopWindow
+}
+
+func (w *binaryWatch) recordRestartAttempt(fi os.FileInfo) {
+	if w.guardPath == "" || fi == nil {
+		return
+	}
+	b, err := json.Marshal(binaryRestartRecord{Target: fileIdentityOf(fi), At: binaryWatchNow().UTC()})
+	if err != nil {
+		return
+	}
+	_ = managerconf.WriteFileAtomic(w.guardPath, b, 0o600)
+}
+
+type waitIdleResult int
+
+const (
+	waitIdleCanceled waitIdleResult = iota
+	waitIdleReady
+	waitIdleAborted
+)
+
 // next returns once another file is there that runs and the manager is idle (idle gives its Idle, nil while it has
-// none yet), or idleMost passed: true then. False when ctx ends first.
+// none yet), or idleMost passed (when waitUntilIdle is false): true then. False when ctx ends first.
 func (w *binaryWatch) next(ctx context.Context, idle func() assistant.Idle) bool {
+	return w.nextWith(ctx, idle, nil)
+}
+
+// nextWith is next, additionally notifying onPending(true) while waiting on busy work and onPending(false) if the
+// replaced file is reverted or invalidated before the manager becomes idle.
+func (w *binaryWatch) nextWith(ctx context.Context, idle func() assistant.Idle, onPending func(bool)) bool {
 	t := time.NewTicker(binaryCheck)
 	defer t.Stop()
 	for {
@@ -601,18 +691,35 @@ func (w *binaryWatch) next(ctx context.Context, idle func() assistant.Idle) bool
 		if err != nil || sameFile(fi, w.seen) {
 			continue
 		}
+		if w.loopGuarded(fi) {
+			fmt.Fprintf(w.out, "%s: %s was replaced, but a restart onto this same binary was already attempted recently "+
+				"(restart-loop guard): going on with this one until it is replaced again\n", w.prefix(), w.path)
+			w.seen = fi
+			continue
+		}
 		if err := checkBinary(ctx, w.path); err != nil {
 			if ctx.Err() != nil {
 				return false
 			}
-			fmt.Fprintf(w.out, "assistant: %s was replaced, but the new one does not run (%v): going on with this one until "+
-				"it is replaced again\n", w.path, err)
+			fmt.Fprintf(w.out, "%s: %s was replaced, but the new one does not run (%v): going on with this one until "+
+				"it is replaced again\n", w.prefix(), w.path, err)
 			w.seen = fi
 			continue
 		}
-		fmt.Fprintf(w.out, "assistant: %s was replaced (an update): starting again on the new one once nothing is going on "+
-			"(at most %s from now)\n", w.path, idleMost)
-		return w.waitIdle(ctx, idle)
+		if w.waitUntilIdle {
+			fmt.Fprintf(w.out, "%s: %s was replaced (an update): restarting gracefully once nothing is going on\n", w.prefix(), w.path)
+		} else {
+			fmt.Fprintf(w.out, "%s: %s was replaced (an update): starting again on the new one once nothing is going on "+
+				"(at most %s from now)\n", w.prefix(), w.path, idleMost)
+		}
+		switch w.waitIdle(ctx, fi, idle, onPending) {
+		case waitIdleReady:
+			return true
+		case waitIdleAborted:
+			continue
+		default:
+			return false
+		}
 	}
 }
 
@@ -622,17 +729,54 @@ type idleAnswer struct {
 	why  string
 }
 
-// waitIdle returns true once the manager is idle or idleMost passed (saying so), false when ctx ends first. An Idle
-// that does not answer within idleCheck (its database stuck, say) counts as busy, and is not asked again until it
-// has answered; that late answer is dropped (it is old by then), and it is asked anew. idleMost holds whatever it
-// does.
-func (w *binaryWatch) waitIdle(ctx context.Context, idle func() assistant.Idle) bool {
+// waitIdle returns waitIdleReady once the manager is idle (or idleMost passed when !waitUntilIdle), waitIdleAborted
+// if the replacement file disappeared/reverted/failed re-verification while waiting under waitUntilIdle, or
+// waitIdleCanceled when ctx ends first. An Idle that does not answer within idleCheck counts as busy, and is not
+// asked again until it has answered; that late answer is dropped (it is old by then), and it is asked anew.
+func (w *binaryWatch) waitIdle(ctx context.Context, target os.FileInfo, idle func() assistant.Idle, onPending func(bool)) waitIdleResult {
 	deadline := time.Now().Add(idleMost)
 	said := ""
+	reportedPending := false
+	setPending := func(v bool) {
+		if onPending != nil && reportedPending != v {
+			reportedPending = v
+			onPending(v)
+		}
+	}
 	var asked chan idleAnswer // an Idle asked and not answered yet
 	late := false             // asked has not answered in time
 	const noAnswer = "its check of what is going on does not answer"
+	first := true
 	for {
+		if w.waitUntilIdle && !first {
+			cur, err := os.Stat(w.path)
+			switch {
+			case err != nil || sameFile(cur, w.seen):
+				setPending(false)
+				fmt.Fprintf(w.out, "%s: pending restart for %s cancelled (file reverted or gone): continuing on current binary\n", w.prefix(), w.path)
+				return waitIdleAborted
+			case !sameFile(cur, target):
+				if w.loopGuarded(cur) {
+					setPending(false)
+					fmt.Fprintf(w.out, "%s: %s was replaced, but a restart onto this same binary was already attempted recently "+
+						"(restart-loop guard): going on with this one until it is replaced again\n", w.prefix(), w.path)
+					w.seen = cur
+					return waitIdleAborted
+				}
+				if err := checkBinary(ctx, w.path); err != nil {
+					if ctx.Err() != nil {
+						return waitIdleCanceled
+					}
+					setPending(false)
+					fmt.Fprintf(w.out, "%s: %s was replaced while waiting for idle, but the new one does not run (%v): "+
+						"going on with this one until it is replaced again\n", w.prefix(), w.path, err)
+					w.seen = cur
+					return waitIdleAborted
+				}
+				target = cur
+			}
+		}
+		first = false
 		why := "it is not running yet"
 		if p := idle(); p != nil {
 			if late {
@@ -657,33 +801,65 @@ func (w *binaryWatch) waitIdle(ctx context.Context, idle func() assistant.Idle) 
 				case a := <-asked:
 					asked = nil
 					if a.idle {
-						return true
+						return waitIdleReady
 					}
 					why = a.why
 				case <-time.After(idleCheck):
 					late = true
 				case <-ctx.Done():
-					return false
+					return waitIdleCanceled
 				}
 			}
 		}
 		if ctx.Err() != nil {
-			return false
+			return waitIdleCanceled
 		}
-		if !time.Now().Before(deadline) {
-			fmt.Fprintf(w.out, "assistant: still not idle after %s (%s): starting again on the new binary anyway\n", idleMost, why)
-			return true
+		setPending(true)
+		if !w.waitUntilIdle && !time.Now().Before(deadline) {
+			fmt.Fprintf(w.out, "%s: still not idle after %s (%s): starting again on the new binary anyway\n", w.prefix(), idleMost, why)
+			return waitIdleReady
 		}
 		if why != said {
-			fmt.Fprintf(w.out, "assistant: waiting to start again on the new binary: %s\n", why)
+			fmt.Fprintf(w.out, "%s: waiting to start again on the new binary: %s\n", w.prefix(), why)
 			said = why
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return waitIdleCanceled
 		case <-time.After(idleCheck):
 		}
 	}
+}
+
+// prepareExitForNew re-verifies the replaced file after the manager has stopped cleanly. When valid and not guarded,
+// it records the restart-loop guard and returns true so the process exits cleanly for systemd/launchd to restart onto
+// the new binary. Otherwise it updates w.seen when appropriate and returns false so the manager keeps running.
+func (w *binaryWatch) prepareExitForNew(ctx context.Context) bool {
+	fi, err := os.Stat(w.path)
+	switch {
+	case ctx.Err() != nil:
+		return false
+	case err != nil:
+		fmt.Fprintf(w.out, "%s: the new %s is gone (%v): going on with this one\n", w.prefix(), w.path, err)
+		return false
+	case sameFile(fi, w.seen):
+		fmt.Fprintf(w.out, "%s: %s is a file it does not start on again (put back): going on with this one\n", w.prefix(), w.path)
+		return false
+	case w.loopGuarded(fi):
+		fmt.Fprintf(w.out, "%s: restart onto %s blocked by restart-loop guard: going on with this one\n", w.prefix(), w.path)
+		w.seen = fi
+		return false
+	}
+	if err := checkBinary(ctx, w.path); err != nil {
+		if ctx.Err() == nil {
+			fmt.Fprintf(w.out, "%s: the new %s does not run any more (%v): going on with this one\n", w.prefix(), w.path, err)
+			w.seen = fi
+		}
+		return false
+	}
+	w.recordRestartAttempt(fi)
+	fmt.Fprintf(w.out, "%s: exiting gracefully to restart on the new %s\n", w.prefix(), w.path)
+	return true
 }
 
 // restartOnNew starts this process again in place on the new file (the manager stopped). It checks the file once

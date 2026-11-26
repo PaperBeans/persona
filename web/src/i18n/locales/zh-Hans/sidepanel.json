@@ -14,5 +14,6 @@
   "background": "后台任务",
   "task": "任务",
   "agent": "Agent",
-  "sides": "分支会话"
+  "sides": "分支会话",
+  "subagent": "子智能体"
 }

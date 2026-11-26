@@ -44,8 +44,13 @@ describe.each(["assistant", "agents"] as const)("%s background continuation", (s
     // the turn before the wake was over: its last words stay where they were, its summary is untouched
     expect(slots()[0]).toBe(answered);
     expect(answered.textContent).toContain("Earlier progress.");
-    // the woken work opens with its notice and has one summary and one text slot of its own
+    // the woken work opens with its notice (hairline divider, no capsule or bell icon) and has one summary and one text slot of its own
     expect(host.textContent).toContain(wake.text);
+    const wakeNotice = host.querySelector<HTMLElement>("[data-wake-notice]");
+    expect(wakeNotice).not.toBeNull();
+    expect(wakeNotice?.getAttribute("role")).toBe("separator");
+    expect(wakeNotice?.querySelector("svg")).toBeNull();
+    expect(wakeNotice?.className).not.toContain("rounded-full");
     expect(host.querySelectorAll("[data-segment]")).toHaveLength(2);
     expect(headers()).toHaveLength(2);
     expect(slots()).toHaveLength(2);

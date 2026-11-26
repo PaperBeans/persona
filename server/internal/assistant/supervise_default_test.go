@@ -12,8 +12,8 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A task an ordinary conversation hands out with task_plan keeps that conversation as its origin, but the main
-// conversation supervises and reviews it (#5732).
+// A task a live side conversation hands out with task_plan stays supervised and reviewed by that conversation (#13657),
+// while the main conversation cannot review it.
 func TestSideConversationTaskIsSupervisedByMain(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
@@ -29,37 +29,37 @@ func TestSideConversationTaskIsSupervisedByMain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res, "The main conversation supervises them") {
-		t.Fatalf("the planning conversation is not told who supervises: %s", res)
+	if !strings.Contains(res, "You supervise them") {
+		t.Fatalf("the planning conversation is not told it supervises: %s", res)
 	}
 	waitFor(t, "the link", func() bool { return len(onlyTodo(s).Agents) == 1 })
 	todo := onlyTodo(s)
-	if v := todo.Supervision; v == nil || v.Supervisor != "conv1" || todo.Origin != "side1" || len(v.DoneWhen) != 1 {
+	if v := todo.Supervision; v == nil || v.Supervisor != "side1" || todo.Origin != "side1" || len(v.DoneWhen) != 1 {
 		t.Fatalf("ledger = %+v (origin %q)", todo.Supervision, todo.Origin)
 	}
 
-	// The supervision message goes only to the main conversation.
+	// The supervision message goes only to the side conversation that dispatched the task.
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
-	waitFor(t, "the main conversation's supervision message", func() bool {
-		for _, n := range f.noticesTo("conv1") {
+	waitFor(t, "the side conversation's supervision message", func() bool {
+		for _, n := range f.noticesTo("side1") {
 			if strings.Contains(n, "📋 督办") {
 				return true
 			}
 		}
 		return false
 	})
-	for _, n := range f.noticesTo("side1") {
+	for _, n := range f.noticesTo("conv1") {
 		if strings.Contains(n, "📋 督办") {
-			t.Fatalf("the side conversation got the supervision message:\n%s", n)
+			t.Fatalf("the main conversation got a supervision message for side1's task:\n%s", n)
 		}
 	}
 
-	// The origin cannot accept and close its own task; the main reviewer can, and the origin hears the outcome.
-	if _, err := runJSON(t, s, "side1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted"}); err == nil {
-		t.Fatal("the side conversation accepted a main-supervised task")
+	// Main chat cannot review side1's task; side1 can accept and close it.
+	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted"}); err == nil {
+		t.Fatal("the main conversation accepted a side-supervised task")
 	}
-	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "PR 已合并",
+	if _, err := runJSON(t, s, "side1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "PR 已合并",
 		"checks": []map[string]any{{"criterion": "PR 合并到 main", "met": true, "evidence": "pull/7"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +67,10 @@ func TestSideConversationTaskIsSupervisedByMain(t *testing.T) {
 		t, ok := s.todoNow(todo.ID)
 		return ok && t.DoneAt != nil
 	})
-	waitFor(t, "the origin's end notice", func() bool { return len(endNotices(f, "side1")) == 1 })
 }
 
-// A direction lead owns its plans. Ordinary side conversations use main; task-leader workers keep their Agent.
+// Direction leads and live side conversations own their plans (#13657). Gone conversations fall back to main;
+// task-leader workers keep their Agent.
 func TestPlanSupervisorDefaults(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
@@ -81,7 +81,7 @@ func TestPlanSupervisorDefaults(t *testing.T) {
 		conv, parent, want string
 		ok                 bool
 	}{
-		{"side1", "", "conv1", true},
+		{"side1", "", "side1", true},
 		{"gone", "", "conv1", true},
 		{"conv1", "", "conv1", true},
 		{"side1", "box/s1", "", false},
@@ -96,8 +96,11 @@ func TestPlanSupervisorDefaults(t *testing.T) {
 	if got, ok := s.defaultPlanSupervisor(ctx, "lead1", ""); !ok || got != "lead1" {
 		t.Fatalf("lead without main: %q %v", got, ok)
 	}
-	if got, ok := s.defaultPlanSupervisor(ctx, "side1", ""); ok || got != "" {
-		t.Fatalf("no main conversation: %q %v, want no supervisor", got, ok)
+	if got, ok := s.defaultPlanSupervisor(ctx, "side1", ""); !ok || got != "side1" {
+		t.Fatalf("live side without main: %q %v, want side1 true", got, ok)
+	}
+	if got, ok := s.defaultPlanSupervisor(ctx, "gone", ""); ok || got != "" {
+		t.Fatalf("gone conversation without main: %q %v, want no supervisor", got, ok)
 	}
 }
 

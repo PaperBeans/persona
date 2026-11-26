@@ -40,5 +40,12 @@
     <string name="chat_engine_switch_handoff_title">引き継ぎ内容</string>
     <string name="chat_modelpanel_engine_note">エンジンを切り替えるとコンテキストが再構築され、内容が失われる場合があります</string>
     <string name="chat_modelpanel_switch_scheduled">切り替えを予約しました：次のメッセージでエージェントが %1$s に移ります</string>
+    <string name="chat_modelpanel_switch_title">このチャットの接続を切り替えますか？</string>
+    <string name="chat_modelpanel_switch_explanation">最近のメッセージと要約を使い、%1$s で続けます。チャットとタスクはここに残ります。一部の詳細は要約されます。次のメッセージを送ると新しい接続が引き継ぎます。</string>
+    <string name="chat_modelpanel_switch_confirm">接続を切り替える</string>
+    <string name="chat_modelpanel_switch_requested">切り替えをリクエストしました。このチャットで続けられます。</string>
+    <string name="chat_modelpanel_switch_unavailable">接続を切り替えられません。チャットを更新して再試行してください。</string>
+    <string name="chat_modelpanel_switch_unconfirmed">切り替え結果を確認できません。再試行では同じリクエストを使い、新たな切り替えは開始しません。%1$s</string>
+    <string name="chat_modelpanel_supervision_unavailable">この接続は独立したタスクのフォローアップ指示を受け取れません。</string>
     <string name="chat_model_changed">モデルが %1$s から %2$s に変わりました</string>
 </resources>

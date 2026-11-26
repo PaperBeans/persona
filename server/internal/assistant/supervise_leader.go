@@ -51,8 +51,8 @@ func (s *Service) supervises(ctx context.Context, id string) bool {
 	return s.isMain(ctx, id) || s.isLeader(ctx, id)
 }
 
-// defaultPlanSupervisor assigns a direction lead its own plans, and otherwise uses main. A task leader's
-// workers and active reporting conversations retain their specialized topology.
+// defaultPlanSupervisor assigns a direction lead or live assistant side conversation its own plans, and otherwise uses
+// main. A task leader's workers and active reporting conversations retain their specialized topology.
 func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, parent string) (string, bool) {
 	if parent != "" || conversation == "" {
 		return "", false
@@ -62,6 +62,9 @@ func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, paren
 	}
 	if _, reports := s.reporterOf(ctx, conversation); reports {
 		return "", false
+	}
+	if s.liveSideSupervisor(ctx, conversation) {
+		return conversation, true
 	}
 	main := s.settings(ctx).Main
 	return main, main != ""
@@ -269,7 +272,8 @@ func (s *Service) rehomeQueuedSupervision(ctx context.Context, old string, ids m
 func (s *Service) digestTo(ctx context.Context, cfg Settings, g superviseSignal) string {
 	// Explicit escalations keep their destination; needs_user alone is not an escalation.
 	if t, ok := s.todoNow(g.Todo); ok && t.Supervision != nil && t.Supervision.assigned() &&
-		g.Kind != sigAsk && g.Kind != sigEscalated {
+		g.Kind != sigAsk && g.Kind != sigEscalated &&
+		!(g.Kind == sigDecide && g.Unreachable && g.Recipient != "" && g.To == cfg.Main) {
 		return s.effectiveSupervisor(ctx, cfg, t)
 	}
 	own := s.ownSupervisor(cfg)
@@ -454,14 +458,27 @@ func (s *Service) leadersChange(ctx context.Context, cfg Settings, in []string) 
 					return fmt.Errorf("assistant.leaders changed after the card was shown, so nothing was saved: get it and set it again for a new card (%w)", approvalops.ErrStale)
 				}
 				v.Leaders = list
+				s.directionRolesChanged(ctx, before, list)
 				return nil
 			}); err != nil {
 				return "", err
 			}
+			// A lead taken out ends its direction as Unpin does: its open tasks go to main's supervision.
+			handed := 0
+			for _, id := range before {
+				if !slices.Contains(list, id) {
+					handed += s.handBackDirectionTasks(context.WithoutCancel(ctx), id)
+				}
+			}
 			s.settingsChanged(ctx)
-			return fmt.Sprintf("assistant.leaders is %q: a manually started Agent the owner explicitly puts under one keeps its ordinary "+
+			out := fmt.Sprintf("assistant.leaders is %q: a manually started Agent the owner explicitly puts under one keeps its ordinary "+
 				"supervision there. A direction lead supervises its own task_plan work, including failed starts, retry and review; "+
-				"main supervises its own tasks and receives the lead's owner-decision escalations.", list), nil
+				"main supervises its own tasks and receives the lead's owner-decision escalations.", list)
+			if handed > 0 {
+				out += fmt.Sprintf(" The %d open tasks of the leads taken out are supervised by the main conversation now, as "+
+					"agent_transfer moves a task; making a lead again does not take them back.", handed)
+			}
+			return out, nil
 		}}, nil
 }
 
@@ -616,7 +633,7 @@ func (s *Service) endSessionCards(machine, session string) {
 		}
 	}
 	s.fleet.mu.Unlock()
-	s.feishuDetach(ids)
+	s.larkModule().AskDetached(ids, resumeGrace)
 	for _, id := range ids {
 		if s.endPreparedByID(id, "cancelled", "The conversation that owned this approval ended; nothing changed.") {
 			continue

@@ -102,7 +102,8 @@ extension AllDaySnapshot.Face {
         case .off(.needsConsent?), .stopped(startable: false): String(localized: "Agree on iPhone")
         case .off(.hidden?): String(localized: "Update iPhone app")
         case .paused, .stopped(startable: true): String(localized: "Tap to continue")
-        case .off(.none), .recording, .stale: nil
+        // With the hub's recording module off the face offers nothing: the mode's name alone (#15214).
+        case .off(.none), .off(.moduleOff?), .recording, .stale: nil
         }
     }
 
@@ -150,9 +151,16 @@ struct AllDayComplicationPreview: View {
             AllDayEntry(date: now, snapshot: AllDaySnapshot(state: .recording, since: since,
                                                             updatedAt: now.addingTimeInterval(-AllDaySnapshot.staleAfter - 60))),
         ]
+        // `-recording.phoneModule off`: the faces as the hub's recording module being off draws them (#15214), off and
+        // stopped, in place of the ones above.
+        let moduleOff: [AllDayEntry] = [
+            AllDayEntry(date: now, snapshot: AllDaySnapshot(state: .off, updatedAt: now, access: .moduleOff)),
+            AllDayEntry(date: now, snapshot: AllDaySnapshot(state: .stopped, since: now, updatedAt: now, access: .moduleOff)),
+        ]
+        let faces = PhoneRecordingAllowance.stored() == .off ? moduleOff : entries
         // `-showComplicationState recording|interrupted|stopped|stale|off`: only that state's faces (screenshots).
         let only = UserDefaults.standard.string(forKey: "showComplicationState")
-        let shown = entries.filter { entry in
+        let shown = faces.filter { entry in
             guard let only else { return true }
             let stale = entry.snapshot.map { now.timeIntervalSince($0.updatedAt) > AllDaySnapshot.staleAfter } ?? false
             if only == "stale" { return stale }

@@ -146,7 +146,7 @@ func transcriptionInstallOf(r extension.Record) string {
 // "<extension id>/<contribution id>".
 func (ps *extensions) transcriptionRef(ref string) (id, cid string, ok bool) {
 	if ref == "" {
-		voice, has := builtinext.VoiceExtension()
+		voice, has := builtinext.VoiceExtension(ps.modules())
 		return ps.voiceID, voice.TranscriptionContribution, has && ps.voiceID != ""
 	}
 	id, cid, ok = strings.Cut(ref, "/")

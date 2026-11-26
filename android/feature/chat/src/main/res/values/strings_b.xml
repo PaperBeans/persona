@@ -59,7 +59,6 @@
         <item quantity="one">%1$d peer</item>
         <item quantity="other">%1$d peers</item>
     </plurals>
-    <string name="chat_chrome_switch_session">Switch session</string>
     <string name="chat_chrome_subagent">Subagent: %1$s</string>
     <string name="chat_chrome_interrupt">Interrupt</string>
     <string name="chat_chrome_rename">Rename</string>
@@ -74,7 +73,9 @@
     <string name="chat_chrome_rename_text">The tab name syncs to herdr. The session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="chat_chrome_rename_text_tern">The tab name syncs to Tern. The session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="chat_chrome_rename_text_rex">The tab name syncs to Rex. The session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
+    <string name="chat_chrome_rename_text_unified">Updates the herdr tab and, where supported, the CLI session name.</string>
     <string name="chat_chrome_save">Save</string>
+    <string name="chat_chrome_name">Name</string>
     <string name="chat_chrome_tab_name">Tab name (herdr tab)</string>
     <string name="chat_chrome_tab_name_tern">Tab name (Tern tab)</string>
     <string name="chat_chrome_tab_name_rex">Tab name (Rex tab)</string>
@@ -91,7 +92,7 @@
     <string name="chat_chrome_conn_details">Diagnostics</string>
     <string name="chat_chrome_got_it">Got it</string>
     <string name="chat_composer_placeholder">Message</string>
-    <string name="chat_composer_photo_limit">You can add up to 4 photos</string>
+    <string name="chat_composer_photo_limit">Up to %1$d photos at a time</string>
     <string name="chat_composer_attachment_unreadable">Can\'t read the attachment. Pick it again; your text is kept</string>
     <string name="chat_composer_no_camera_app">No app on this phone can take photos</string>
     <string name="chat_composer_camera_failed">Can\'t open the camera. Try again later</string>
@@ -160,6 +161,7 @@
     <string name="chat_request_secret_run_commands">Commands, run in order</string>
     <string name="chat_request_secret_run_password">Password</string>
     <string name="chat_request_secret_run_note">Used once, never saved. The assistant never sees it.</string>
+    <string name="chat_request_secret_run_env_warning">Warning: every listed command receives your typed password directly in PERSONA_SECRET. Encoded output may evade redaction.</string>
     <string name="chat_request_secret_run_run">Run</string>
     <string name="chat_request_secret_run_decline">Decline</string>
     <string name="chat_secret_handoff_always">Always allow</string>
@@ -385,7 +387,9 @@
     <string name="chat_queue_send_now">Send now</string>
     <string name="chat_queue_send_now_message">Sends the queued messages to the agent now. A command it is running keeps running in the background; a reply it is writing starts again with your message.</string>
     <string name="chat_queue_send_now_message_persona">%1$s gets them right away instead of at its next step. What it is doing now stops, or goes on in the background when it can, and it starts again with your messages.</string>
-    <string name="chat_queue_relayed_note">Arrives when this chat is free</string>
+    <string name="chat_queue_count">%1$d queued</string>
+    <string name="chat_queue_relayed_from">From %1$s: %2$s</string>
+    <string name="chat_queue_relayed_note_no_wake">Arrives with the next message</string>
     <plurals name="chat_queue_relayed_summary">
         <item quantity="one">%1$d message from another conversation is waiting</item>
         <item quantity="other">%1$d messages from other conversations are waiting</item>

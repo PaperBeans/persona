@@ -1,0 +1,541 @@
+import BeautifulUI
+import SwiftUI
+
+/// The voice conversation's bar (docs/assistant/voice.md 6.2): the composer turned into it in place, in the composer's own shape
+/// (`ComposerSurface`, so every style's difference stays in there). Its top row: Mute, the orb (a tap while Persona
+/// speaks stops the voice: Interrupt Voice), what the voice does, Stop. Under it the line about the bound conversation
+/// (`VoiceBarLine`) with its buttons, Stop Claude among them, and ⋯: the line's buttons that do not fit, Type a Line,
+/// All Captions, Voice and Model. Every button is one line. It reads the call itself; the page (ChatView) only asks whether a
+/// call is bound to it, and the orb alone reads the call's levels.
+struct VoiceBar: View {
+    let call: VoiceConversation
+    let key: SessionKey
+    /// Who works in the conversation: 「Claude」, 「Codex」, the persona's name for its own.
+    let label: String
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.buiTheme) private var theme
+    @State private var typing = false
+    @State private var typed = ""
+    @State private var showCaptions = false
+    @State private var showModel = false
+    /// ⋯ › Voice: the voices of the call's model, asked again after a failure and when the menu opens without them.
+    @State private var voices: VoiceVoicesLoader
+
+    init(call: VoiceConversation, key: SessionKey, label: String) {
+        self.call = call
+        self.key = key
+        self.label = label
+        let group = key.group
+        _voices = State(initialValue: VoiceVoicesLoader(extensionID: call.extensionID, api: { AppModel.shared.api(group) }))
+    }
+
+    var body: some View {
+        let session = model.session(key)
+        let cards = pendingCards
+        let line = VoiceBarLine.make(phase: call.phase, link: call.link, runs: call.runs, session: session, cards: cards,
+                                     muted: call.muted, held: call.held, asking: call.askingID, notice: call.notice, label: label,
+                                     dismissed: call.dismissed, resendable: Set(call.runs.map(\.id).filter { call.canResend($0) }))
+        let working = [.working, .paused, .waiting].contains(line.kind)
+        let status = VoiceBarStatus.make(phase: call.phase, link: call.link, muted: call.muted, working: working,
+                                         tool: call.tools.last?.label, held: call.held)
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            controls(status)
+            second(line, cards: cards)
+                .padding(.leading, Theme.Space.s)
+                .padding(.trailing, Theme.Space.xs)
+        }
+        .padding(.horizontal, Theme.Space.xs)
+        .padding(.top, Theme.Space.xs)
+        .padding(.bottom, Theme.Space.s)
+        // As tall as its words need: offered less (cards over it take the page), the line was cut to one and the state
+        // beside the orb shrank. The cards scroll instead.
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(ComposerSurface())
+        .shellScaled()
+        .modifier(VoiceFeedback(call: call, kind: line.kind, text: line.text, cards: cards.map(\.id)))
+        .sheet(isPresented: $showCaptions) { VoiceTranscriptSheet(call: call, persona: model.assistantShownName(in: key)) }
+        // The default assistant's: calls talk to its voice extension.
+        .modelConfigurationSheet(isPresented: $showModel, purposeID: "plugin." + call.extensionID, owner: .defaultAssistant)
+        // The voice's model may have changed in the sheet: the call picks it up on a new connection.
+        .onChange(of: showModel) { _, open in
+            guard !open, let api = model.api(key.group) else { return }
+            Task {
+                if case .ready(let picked) = await VoiceConversation.resolveModel(api, call.extensionID) { call.change(model: picked) }
+            }
+        }
+        .alert("Type a Line", isPresented: $typing) {
+            TextField(String(localized: "What to say"), text: $typed)
+            Button("Send") {
+                call.say(typed)
+                typed = ""
+            }
+            Button("Cancel", role: .cancel) { typed = "" }
+        } message: {
+            Text("Same as saying it; the voice handles it.")
+        }
+        .task(id: call.model ?? "") { voices.show(model: call.model) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+            if abs(VoiceBarRoom.shared.height - h) >= 1 { VoiceBarRoom.shared.height = h }
+        }
+        .onDisappear {
+            VoiceBarRoom.shared.height = 0
+            voices.stop()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("voice-bar")
+    }
+
+    /// The bound conversation's pending cards that the user may answer (leaving out cards a task's supervisor holds;
+    /// with `-showVoiceSample`'s made-up one in DEBUG, as the page shows it).
+    private var pendingCards: [Interaction] {
+        var cards = model.interactions(for: key)
+        #if DEBUG
+        cards += VoiceSample.cards(key)
+        #endif
+        return Self.answerableCards(cards)
+    }
+
+    /// Pending cards the voice bar may announce, count, or offer to answer: excludes cards a task's supervisor holds.
+    nonisolated static func answerableCards(_ cards: [Interaction]) -> [Interaction] {
+        cards.filter(\.answerableHere)
+    }
+
+    /// The plan card `Send Back as Feedback` resolves: nil when absent or held by its task's supervisor.
+    nonisolated static func returnablePlan(id: String, in cards: [Interaction]) -> Interaction? {
+        cards.first { $0.id == id && $0.answerableHere }
+    }
+
+    // MARK: The top row
+
+    /// Mute, the orb, the state and Stop on one row; where the state does not fit between them (the accessibility sizes:
+    /// Voice Paused was cut, or Speaking wrapped mid-word), it goes under the row instead.
+    private func controls(_ status: VoiceBarStatus) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                muteButton
+                orb(status)
+                statusText(status).fixedSize()
+                Spacer(minLength: 0)
+                expandButton
+                endButton
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack(spacing: Theme.Space.s) {
+                    muteButton
+                    orb(status)
+                    Spacer(minLength: 0)
+                    expandButton
+                    endButton
+                }
+                statusText(status)
+                    .padding(.leading, Theme.Space.s)
+            }
+        }
+    }
+
+    private func orb(_ status: VoiceBarStatus) -> some View {
+        VoiceOrb(phase: status.orb, level: { [levels = call.levels, speaking = status.orb == .speaking] in
+            Double(speaking ? levels.output : levels.input)
+        }, interrupt: { [call] in
+            Haptics.tap()
+            call.interruptSpeech()
+        })
+    }
+
+    private func statusText(_ status: VoiceBarStatus) -> some View {
+        Text(status.text)
+            .font(Theme.Font.secondaryStrong)
+            .foregroundStyle(AppStyle.current.usesBeautifulUI ? theme.colors.ink : Color.primary)
+            .lineLimit(1)
+            .accessibilityIdentifier("voice-status")
+    }
+
+    private var muteButton: some View {
+        Button {
+            Haptics.tap()
+            #if os(iOS)
+            // A system call's mute is the system's (its call UI and AirPods say the same): through its manager.
+            if call.surface == .call { return PersonaCalls.shared.setMuted(!call.muted) }
+            #endif
+            call.muted.toggle()
+        } label: {
+            ThemedIcon(call.muted ? Theme.Icon.voiceUnmute : Theme.Icon.voiceMute)
+                .font(Theme.Font.heading)
+                .fontWeight(.medium)
+                .foregroundStyle(call.muted ? Theme.accent : ComposerInk.icon(theme))
+                .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                .background { if call.muted { Circle().fill(Theme.Fill.chip) } }
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(call.muted ? String(localized: "Unmute [Inbox Mutes View 8d0173]") : String(localized: "Mute [Voice Bar 7db2e1]"))
+        .accessibilityIdentifier("voice-mute")
+    }
+
+    /// A system call to Persona (#9290): back to its full screen (the call screen), the call unchanged.
+    @ViewBuilder private var expandButton: some View {
+        #if os(iOS)
+        if call.surface == .call {
+            Button {
+                Haptics.tap()
+                PersonaCalls.shared.present()
+            } label: {
+                ThemedIcon(Theme.Icon.callExpand)
+                    .font(Theme.Font.bodyStrong)
+                    .foregroundStyle(ComposerInk.icon(theme))
+                    .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show Call [Voice Bar]")
+            .accessibilityIdentifier("voice-expand")
+        }
+        #endif
+    }
+
+    /// Stop: the phone's red, round like the composer's send. A system call hangs up through its manager, so the
+    /// system's call ends with it.
+    private var endButton: some View {
+        Button {
+            Haptics.tap()
+            #if os(iOS)
+            if call.surface == .call { return PersonaCalls.shared.hangUp() }
+            #endif
+            VoiceCalls.shared.end(.user, from: call.surface)
+        } label: {
+            ThemedIcon(Theme.Icon.voiceEnd)
+                .font(Theme.Font.bodyHeavy)
+                .foregroundStyle(Theme.onSolid)
+                .scaledFrame(width: Theme.Size.wellL, height: Theme.Size.wellL)
+                .background(Theme.danger, in: .circle)
+                .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Stop [Car Play Voice Screen c7b24e]")
+        .accessibilityHint(call.surface == .call ? Text("Hangs up the call; what was handed over still gets done")
+                               : Text("Ends the voice chat; what was handed over still gets done"))
+        .accessibilityIdentifier("voice-end")
+    }
+
+    // MARK: The second line
+
+    /// On one line when the words and the buttons fit beside each other; else the words over the buttons, and the
+    /// buttons that still do not fit in ⋯.
+    private func second(_ line: VoiceBarLine, cards: [Interaction]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                words(line).lineLimit(1).fixedSize()
+                Spacer(minLength: Theme.Space.s)
+                ForEach(line.actions) { action in button(action, cards: cards) }
+                moreSlot(overflow: [])
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                    words(line).lineLimit(4)
+                    Spacer(minLength: 0)
+                    if line.actions.isEmpty { moreSlot(overflow: []) }
+                }
+                if !line.actions.isEmpty { actionRow(line, cards: cards) }
+            }
+        }
+        .animation(Theme.Motion.state, value: line.kind)
+        // The one ⋯ menu, drawn here whichever layout the line took (see `moreSlot`).
+        .overlayPreferenceValue(MoreSlotKey.self) { slot in
+            GeometryReader { proxy in
+                if let slot {
+                    let rect = proxy[slot.bounds]
+                    more(overflow: slot.overflow, cards: cards)
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                }
+            }
+        }
+    }
+
+    private func actionRow(_ line: VoiceBarLine, cards: [Interaction]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                ForEach(line.actions) { action in button(action, cards: cards) }
+                Spacer(minLength: 0)
+                moreSlot(overflow: [])
+            }
+            if line.actions.count > 1 {
+                HStack(spacing: Theme.Space.s) {
+                    button(line.actions[0], cards: cards)
+                    Spacer(minLength: 0)
+                    moreSlot(overflow: Array(line.actions.dropFirst()))
+                }
+            }
+            HStack(spacing: Theme.Space.s) {
+                Spacer(minLength: 0)
+                moreSlot(overflow: line.actions)
+            }
+        }
+    }
+
+    /// The line's mark, its words, and how long it has been so.
+    private func words(_ line: VoiceBarLine) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+            if let mark = Self.mark(line.kind) {
+                ThemedIcon(mark.symbol).font(Theme.Font.labelStrong).foregroundStyle(mark.color)
+            } else if [.working, .handing, .waiting, .paused].contains(line.kind) {
+                Circle().fill(Theme.busy).scaledFrame(width: Theme.Size.dotS, height: Theme.Size.dotS)
+            }
+            VoiceLineText(text: line.text, since: line.since)
+                .font(Theme.Font.secondary)
+                .foregroundStyle([.needsTap, .asking, .notSent, .offline].contains(line.kind) ? Color.primary : Color.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("voice-line")
+    }
+
+    private static func mark(_ kind: VoiceBarLine.Kind) -> (symbol: String, color: Color)? {
+        switch kind {
+        case .needsTap, .asking: (Theme.Icon.needsYou, Theme.caution)
+        case .notSent: (Theme.Icon.errorFilled, Theme.caution)
+        case .offline: (Theme.Icon.offline, Theme.caution)
+        case .muted: (Theme.Icon.voiceMute, Color.secondary)
+        case .held: (Theme.Icon.pause, Theme.caution)
+        case .ready, .handing, .working, .waiting, .paused: nil
+        }
+    }
+
+    private func button(_ action: VoiceBarLine.Action, cards: [Interaction]) -> some View {
+        Button { perform(action, cards: cards) } label: {
+            Text(title(action)).lineLimit(1)
+        }
+        .font(Theme.Font.secondaryStrong)
+        .controlSize(.small)
+        .themedButton()
+        .tint(action == .stopAgent ? Theme.danger : Theme.accent)
+        .fixedSize()
+        .accessibilityIdentifier("voice-line-" + action.name)
+    }
+
+    /// Where ⋯ goes in the layout `ViewThatFits` picked, and the line's buttons it takes there. Only room is made here:
+    /// the menu itself is drawn once, over the line (`second`). A menu inside the branches was a new view each time the
+    /// line changed its layout (words over buttons, a button more or less), which closed it while it was open (#2619).
+    private func moreSlot(overflow: [VoiceBarLine.Action]) -> some View {
+        Color.clear
+            .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.wellXS)
+            .anchorPreference(key: MoreSlotKey.self, value: .bounds) { MoreSlot(bounds: $0, overflow: overflow) }
+    }
+
+    /// ⋯: the line's buttons that did not fit, then what the call offers besides.
+    private func more(overflow: [VoiceBarLine.Action], cards: [Interaction]) -> some View {
+        Menu {
+            if !overflow.isEmpty {
+                Section {
+                    ForEach(overflow) { action in
+                        Button(role: action == .stopAgent ? .destructive : nil) { perform(action, cards: cards) } label: {
+                            Label(title(action), systemImage: Self.symbol(action))
+                        }
+                    }
+                }
+            }
+            Section {
+                Button { typing = true } label: { Label("Type a Line", systemImage: Theme.Icon.keyboard) }
+                Button { showCaptions = true } label: { Label("All Captions", systemImage: Theme.Icon.voiceCaptions) }
+                voicePicker
+                Button { showModel = true } label: { Label("Model [Assistant View c98e11]", systemImage: Theme.Icon.model) }
+            }
+        } label: {
+            ThemedIcon(Theme.Icon.more)
+                .font(Theme.Font.bodyStrong)
+                .foregroundStyle(ComposerInk.icon(theme))
+                .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.wellXS)
+                .contentShape(.rect)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("voice-more")
+    }
+
+    /// Voice: the extension's voices for the call's model, the current one named (picked on this device, else the
+    /// model's default); picking one keeps it on this device and picks the call up with it. While the list is asked
+    /// for it says so; when it could not be read, a tap asks again (and it asks by itself a little later, and when the
+    /// menu opens again: `VoiceVoicesLoader`).
+    @ViewBuilder private var voicePicker: some View {
+        Group {
+            switch voices.state {
+            case .loaded(let list) where !list.voices.isEmpty:
+                let current = call.voice ?? list.default ?? ""
+                Picker(selection: Binding(get: { current }, set: { picked in
+                    VoiceTimbre.choose(picked, group: key.group, extensionID: call.extensionID)
+                    call.change(voice: picked)
+                })) {
+                    ForEach(list.voices, id: \.id) { v in Text(v.name ?? v.id).tag(v.id) }
+                    // A voice kept from another model still shows as the current one.
+                    if !current.isEmpty, !list.voices.contains(where: { $0.id == current }) { Text(current).tag(current) }
+                } label: {
+                    // In the title: a submenu shows no second line.
+                    if let name = VoiceTimbreName.current(chosen: call.voice, in: list) {
+                        Label { Text("Voice: \(name)") } icon: { ThemedIcon(Theme.Icon.voiceTimbre) }
+                    } else {
+                        Label { Text("Voice") } icon: { ThemedIcon(Theme.Icon.voiceTimbre) }
+                    }
+                }
+                .pickerStyle(.menu)
+            // A menu item's second line comes only from a second Text right in its label (docs/lessons/ios.md, #1307).
+            case .loaded:
+                Button {} label: {
+                    Text("Voice")
+                    Text("None for this model")
+                    Theme.Icon.image(Theme.Icon.voiceTimbre)
+                }
+                .disabled(true)
+            case .idle, .loading:
+                Button {} label: {
+                    Text("Voice")
+                    Text("Loading voices…")
+                    Theme.Icon.image(Theme.Icon.voiceTimbre)
+                }
+                .disabled(true)
+            case .failed:
+                Button {
+                    Haptics.tap()
+                    voices.retry()
+                } label: {
+                    Text("Voice")
+                    Text("Couldn't load · Retry")
+                    Theme.Icon.image(Theme.Icon.voiceTimbre)
+                }
+            }
+        }
+        .accessibilityIdentifier("voice-timbre")
+        // Drawn when the menu opens: no list (or a stale one) asks again right away.
+        .onAppear { voices.opened() }
+    }
+
+    private func title(_ action: VoiceBarLine.Action) -> String {
+        switch action {
+        case .stopAgent: String(localized: "Stop \(label)")
+        case .resend: String(localized: "Resend")
+        case .clearAndSend: String(localized: "Clear and Send")
+        case .sendAnyway: String(localized: "Send Anyway")
+        case .returnPlan: String(localized: "Send Back as Feedback")
+        case .dismiss: String(localized: "Never Mind")
+        }
+    }
+
+    private static func symbol(_ action: VoiceBarLine.Action) -> String {
+        switch action {
+        case .stopAgent: Theme.Icon.interrupt
+        case .resend, .clearAndSend: Theme.Icon.retry
+        case .sendAnyway: Theme.Icon.send
+        case .returnPlan: Theme.Icon.reply
+        case .dismiss: Theme.Icon.close
+        }
+    }
+
+    private func perform(_ action: VoiceBarLine.Action, cards: [Interaction]) {
+        Haptics.tap()
+        switch action {
+        case .stopAgent:
+            Task { await model.interrupt(key) }
+        case .resend(let run):
+            call.resend(run)
+        case .clearAndSend(let run):
+            call.resend(run, clearingDraft: true)
+        case .sendAnyway(let run):
+            // The user's own confirmation: the hub sends it past the user-speech gate (docs/assistant/voice.md 3.2 resend).
+            call.resend(run)
+        case .returnPlan(let card, _, let run):
+            // The app's own answer to the card (decision 5: the user tapped it), with the refused words as the feedback.
+            call.dismiss(run: run)
+            guard let plan = Self.returnablePlan(id: card, in: cards), let answer = action.resolution else { return }
+            Task { await model.resolve(plan, answer) }
+        case .dismiss(let run):
+            call.dismiss(run: run)
+        }
+    }
+}
+
+/// Where the second line's ⋯ sits and what it holds there (`VoiceBar.moreSlot`).
+private struct MoreSlot {
+    let bounds: Anchor<CGRect>
+    let overflow: [VoiceBarLine.Action]
+}
+
+private struct MoreSlotKey: PreferenceKey {
+    static func reduce(value: inout MoreSlot?, nextValue: () -> MoreSlot?) { value = nextValue() ?? value }
+}
+
+/// The line's words, and how long it has been so (「Claude 在跑测试 · 2 分钟」) as one paragraph, so they wrap together at
+/// large text sizes; redrawn once a minute, and nothing about the time under a minute.
+private struct VoiceLineText: View {
+    let text: String
+    let since: Date?
+
+    var body: some View {
+        if let since {
+            TimelineView(.everyMinute) { context in Text(Self.words(text, since: since, now: context.date)) }
+        } else {
+            Text(text)
+        }
+    }
+
+    static func words(_ text: String, since: Date, now: Date) -> String {
+        let seconds = now.timeIntervalSince(since)
+        guard seconds >= 60 else { return text }
+        return text + " · " + Duration.seconds(seconds).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+    }
+}
+
+/// The call's cues, taps and VoiceOver words (docs/assistant/voice.md 1.2 A / I / M, 6.6): connected (a cue up and a light tap),
+/// the voice's connection dropping (a low cue), a new card (a cue and a tap that asks); VoiceOver hears what asks for
+/// the user or stops the voice, never the captions (they would talk over the voice and leak into the microphone).
+private struct VoiceFeedback: ViewModifier {
+    let call: VoiceConversation
+    let kind: VoiceBarLine.Kind
+    let text: String
+    let cards: [String]
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: call.phase) { old, new in
+                if new.isLive, !old.isLive { cue(.ready) }
+                if case .reconnecting = new, !Self.reconnecting(old) { cue(.reconnecting) }
+            }
+            .onChange(of: call.link) { old, new in
+                if new == .reconnecting, old != .reconnecting { cue(.reconnecting) }
+            }
+            .onChange(of: cards) { old, new in
+                if !Set(new).isSubset(of: Set(old)) { cue(.attention) }
+            }
+            .onChange(of: kind) { _, new in
+                if new.announced { AccessibilityNotification.Announcement(text).post() }
+            }
+    }
+
+    private func cue(_ cue: Theme.VoiceCue) {
+        call.play(cue)
+        VoiceHaptics.play(cue.haptic)
+    }
+
+    private static func reconnecting(_ phase: VoicePhase) -> Bool {
+        if case .reconnecting = phase { true } else { false }
+    }
+}
+
+/// The voice bar's height while it is on screen: the pending cards leave room for it in a call (`PendingCards.cap`). Its
+/// own object, so only the cards read it, and only in a call.
+@MainActor @Observable final class VoiceBarRoom {
+    static let shared = VoiceBarRoom()
+    var height: CGFloat = 0
+}
+
+/// `Theme.VoiceHaptic` on the hand (`Haptics`).
+enum VoiceHaptics {
+    static func play(_ haptic: Theme.VoiceHaptic) {
+        switch haptic {
+        case .none: break
+        case .tap: Haptics.tap()
+        case .attention: Haptics.attention()
+        case .failure: Haptics.error()
+        }
+    }
+}

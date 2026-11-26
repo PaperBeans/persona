@@ -28,6 +28,7 @@
   "open_machines": "打开机器页",
   "computers": "电脑",
   "monitor": "监控 ›",
+  "view_rows": "行",
   "machine_agents_other": "{count} 个 Agent",
   "offline": "离线",
   "online": "在线",

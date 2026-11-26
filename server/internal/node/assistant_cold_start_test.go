@@ -82,7 +82,8 @@ if [ ! -e "$CLI_FAKE_DIR/retried" ]; then
 fi
 fi
 `
-	writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+prefix+fakeCLI)
+	// The new profile's sign-in check runs claude auth status as an assistant (#14458): answer it before counting starts.
+	writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+fakeCLIAuthStatus+prefix+fakeCLI)
 	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", text, nil, "acceptEdits", "high", cliExec())
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +125,8 @@ func TestAssistantColdStartTimeoutStages(t *testing.T) {
 			if stage == "control_response_timeout" {
 				script = "echo '{\"type\":\"system\",\"subtype\":\"init\"}'\n" + script
 			}
-			writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+script)
+			// As in testAssistantColdStartControlTimeoutRetries: the sign-in check is no start.
+			writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+fakeCLIAuthStatus+script)
 			_, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "hello", nil, "acceptEdits", "high", cliExec())
 			var re *rpc.Error
 			if !errors.As(err, &re) || re.Code != "assistant_control_failed" {
@@ -148,11 +150,115 @@ func TestAssistantColdStartTimeoutStages(t *testing.T) {
 			if got := len(strings.Fields(f.file(counter))); got != 2 {
 				t.Fatalf("attempts = %d", got)
 			}
+			if stage == "shell_start_timeout" && f.file("starts") != "" {
+				t.Fatalf("claude launched after shell_start_timeout: %q", f.file("starts"))
+			}
 			if strings.Contains(f.file("stdin.jsonl"), `"type":"user"`) {
 				t.Fatal("input delivered despite failed preparation")
 			}
 		})
 	}
+}
+
+// Stopping an assistant during interactive-shell initialization must kill the shell rather than send SIGTERM alone:
+// interactive zsh/bash ignore SIGTERM, so a dying rc-file child would let the shell continue and launch claude after
+// stop(). And connection-end / fixture cleanup must wait for already-retired processes too, not only n.procs.
+func TestAssistantColdStartStopLeavesNoLateWriter(t *testing.T) {
+	t.Run("shell_init_stop_does_not_launch_claude", func(t *testing.T) {
+		f := cliTest(t)
+		control, startup := assistantControlTimeout, assistantStartupTimeout
+		assistantControlTimeout, assistantStartupTimeout = 300*time.Millisecond, 300*time.Millisecond
+		t.Cleanup(func() { assistantControlTimeout, assistantStartupTimeout = control, startup })
+		shortStartRetries(t, time.Millisecond)
+		assistantStartRetries = 1
+
+		writeFile(t, filepath.Join(os.Getenv("HOME"), ".zshrc"),
+			`if [[ "$ZSH_EXECUTION_STRING" = *'__PERSONA_ASSISTANT_SHELL_READY__'* ]]; then echo shell >> "$CLI_FAKE_DIR/shell-starts"; sleep 30; fi`+"\n")
+		script := fakeCLIAuthStatus +
+			"if [ \"$PERSONA_ASSISTANT\" = 1 ]; then echo start >> \"$CLI_FAKE_DIR/starts\"; echo late > late-write; fi\nread line\nsleep 30\n"
+		writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+script)
+
+		cwd := t.TempDir()
+		_, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "hello", nil, "acceptEdits", "high", cliExec())
+		var re *rpc.Error
+		if !errors.As(err, &re) || re.Code != "assistant_control_failed" {
+			t.Fatalf("error = %v", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		f.n.reapAssistants(ctx)
+
+		if got := len(strings.Fields(f.file("shell-starts"))); got != 2 {
+			t.Fatalf("shell attempts = %d, want 2", got)
+		}
+		if got := f.file("starts"); got != "" {
+			t.Fatalf("claude launched after shell_start_timeout stop: %q", got)
+		}
+		if entries, err := os.ReadDir(cwd); err != nil || len(entries) != 0 {
+			t.Fatalf("conversation dir entries = %v (err=%v), want empty", entries, err)
+		}
+		var leftover int
+		liveAssistants.Range(func(k, _ any) bool {
+			p := k.(*assistantProc)
+			if p.cwd == cwd {
+				leftover++
+			}
+			return true
+		})
+		if leftover != 0 {
+			t.Fatalf("liveAssistants still holds %d processes for this conversation after shutdown", leftover)
+		}
+	})
+
+	t.Run("retired_process_exits_before_connection_end", func(t *testing.T) {
+		f := cliTest(t)
+		lateDir := t.TempDir()
+		t.Setenv("LATE_OUT_DIR", lateDir)
+		script := fakeCLIAuthStatus + `trap 'sleep 0.15; echo done > "$LATE_OUT_DIR/late-exit"; exit 0' TERM
+echo '{"type":"system","subtype":"init"}'
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"control_request"'*)
+      id=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+      echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\"}}" ;;
+    *'"type":"user"'*)
+      echo '{"type":"result","subtype":"success","result":"ok"}' ;;
+  esac
+done
+while :; do sleep 0.05; done
+`
+		writeFile(t, filepath.Join(os.Getenv("HOME"), "bin", "claude"), "#!/bin/sh\n"+script)
+
+		cwd := t.TempDir()
+		id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "hello", nil, "acceptEdits", "high", cliExec())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.idle(t, id)
+		p := f.proc(id)
+		if p == nil {
+			t.Fatal("missing running process")
+		}
+
+		// Retire p via stopAssistantProcess (removes it from n.procs before it exits).
+		f.n.stopAssistantProcess(id)
+
+		// Connection-end shutdown must still wait for the retired process to finish exiting.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		f.n.reapAssistants(ctx)
+
+		if p.alive() {
+			t.Fatal("reapAssistants returned while retired process was still running")
+		}
+		if _, err := os.Stat(filepath.Join(lateDir, "late-exit")); err != nil {
+			t.Fatalf("expected retired process's exit handler to complete before shutdown returned: %v", err)
+		}
+		if err := os.RemoveAll(lateDir); err != nil {
+			t.Fatalf("RemoveAll after shutdown failed: %v", err)
+		}
+	})
 }
 
 // Virtual time covers a CLI that has no startup output until it handles a

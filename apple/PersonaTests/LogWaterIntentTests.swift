@@ -70,6 +70,23 @@ struct LogWaterIntentTests {
         #expect(hub.sent("POST", path).isEmpty)
     }
 
+    @Test func aRemovedWaterItemRefusesBeforeWritingButOldHubsStillLog() async throws {
+        let hub = FakeHub()
+        let absent = String(snapshot.dropLast()) + ",\"items\":[\"protein\"]}"
+        hub.on("GET", path, json: absent)
+        do {
+            _ = try await LogWaterFlow.log(hub.client, amount: nil)
+            Issue.record("removed water must not write")
+        } catch {
+            #expect(error.localizedDescription == String(localized: "First add Water in Health"))
+        }
+        #expect(hub.sent("POST", path).isEmpty)
+        hub.on("GET", path, json: snapshot)
+        hub.on("POST", path, json: change)
+        _ = try await LogWaterFlow.log(hub.client, amount: nil)
+        #expect(hub.sent("POST", path).count == 1)
+    }
+
     @Test func credentialsKeepTheSelectedGroupAndNeverFallBackAfterRemoval() throws {
         let first = ExtensionSurfaceCredential(url: URL(string: "https://first.invalid")!, token: "sample-first", name: "First")
         let second = ExtensionSurfaceCredential(url: URL(string: "https://second.invalid")!, token: "sample-second", name: "Second", answerOnly: true)

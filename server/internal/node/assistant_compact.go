@@ -156,7 +156,7 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 	if proto.IsExternalLauncher(p.launcher) && ctx.Err() != nil {
 		return externalAdapterError(ctx, ctx.Err())
 	}
-	if err := n.compactAssistantProc(ctx, p); err != nil {
+	if err := n.compactAssistantProc(ctx, p, time.Now().UTC()); err != nil {
 		return err
 	}
 	return finishExternalStartup(ctx)
@@ -164,14 +164,14 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 
 // compactAssistantProc starts an in-place compaction while assistantLife is held.
 // Both the user's request and idle-aware delivery use the same completion reporting.
-func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc) error {
+func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc, startedAt time.Time) error {
 	id := p.id
 	n.forgetCacheWarm(id)
 	p.mu.Lock()
 	p.compacting, p.compacted, p.manual = true, true, true
-	p.lastActive = time.Now()
+	p.lastActive = startedAt
 	p.mu.Unlock()
-	n.setCompaction(id, &proto.Compaction{State: proto.CompactionRunning, StartedAt: time.Now().UTC()})
+	n.setCompaction(id, &proto.Compaction{State: proto.CompactionRunning, StartedAt: startedAt})
 	var err error
 	if p.agent == "codex" {
 		err = p.cx.compact(ctx)
@@ -192,27 +192,40 @@ func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc) error
 
 // setCompaction records where the user's compaction is at and pushes the session list.
 func (n *Node) setCompaction(id string, c *proto.Compaction) {
-	st, _ := n.state.get(id)
-	st.Compaction = c
-	n.state.put(id, st)
+	if !n.state.update(id, func(st *sessionState) bool {
+		st.Compaction = c
+		return true
+	}) {
+		n.state.put(id, sessionState{Compaction: c})
+	}
 	n.notifySessions()
 }
 
 // compactionEnded ends a running compaction: done with no failure, else failed with it.
 func (n *Node) compactionEnded(id, failure string) {
-	st, ok := n.state.get(id)
-	if !ok || st.Compaction == nil || st.Compaction.State != proto.CompactionRunning {
+	ended := false
+	n.state.update(id, func(st *sessionState) bool {
+		if st.Compaction == nil || st.Compaction.State != proto.CompactionRunning {
+			return false
+		}
+		c := *st.Compaction
+		now := time.Now().UTC()
+		c.FinishedAt = &now
+		c.State, c.Error = proto.CompactionDone, ""
+		if failure != "" {
+			c.State, c.Error = proto.CompactionFailed, failure
+		}
+		st.Compaction = &c
+		ended = true
+		return true
+	})
+	if !ended {
 		return
 	}
-	c := *st.Compaction
-	now := time.Now().UTC()
-	c.FinishedAt = &now
-	c.State, c.Error = proto.CompactionDone, ""
 	if failure != "" {
-		c.State, c.Error = proto.CompactionFailed, failure
 		n.logger.Printf("assistant %s: compaction failed: %s", short(id), failure)
 	}
-	n.setCompaction(id, &c)
+	n.notifySessions()
 }
 
 // sweepCompactions fails the compactions whose process is gone: it exited, or the node restarted under them.
@@ -236,10 +249,13 @@ func (n *Node) sweepCompactions() {
 }
 
 // compactFailure is what a /compact that ended without a boundary is shown as: claude's own words when it gave any.
-func compactFailure(isError bool, result string) string {
+func compactFailure(isError bool, result string, details ...string) string {
 	result = strings.TrimSpace(result)
 	if result == "" {
 		if isError {
+			if detail := strings.TrimSpace(strings.Join(details, " ")); detail != "" {
+				return snippet(detail)
+			}
 			return "压缩出错了"
 		}
 		return "没有压缩：对话太短，或者 Claude Code 没有执行 /compact"

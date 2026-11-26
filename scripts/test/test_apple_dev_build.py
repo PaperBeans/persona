@@ -127,7 +127,7 @@ class LeanDevBuildCallersTests(unittest.TestCase):
                           text, re.MULTILINE | re.DOTALL).group()
         # Execute the real lane branch, replacing only its build runner with argument capture.
         runner = 'ci_run() { shift 2; printf "%s\\n" "$@"; }\n'
-        for lane in ('all', 'ios', 'ios18', 'packages', 'ios-build'):
+        for lane in ('all', 'ios', 'ios18', 'packages', 'ios-build', 'ios-core-only'):
             with self.subTest(lane=lane):
                 result = subprocess.run(['bash', '-eu', '-c', runner + block],
                                         env=dict(os.environ, LANE=lane, SOURCE='/fixture'),

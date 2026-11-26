@@ -206,4 +206,7 @@ type WorktreeDeleteResult struct {
 	Removed       bool   `json:"removed"`
 	State         string `json:"state"`
 	BranchDeleted bool   `json:"branch_deleted,omitempty"`
+	// Present only when this Herdr node can atomically surrender the exact device's unspent token.
+	CanRevokePreview    bool   `json:"can_revoke_preview,omitempty"`
+	RevokedPreviewToken string `json:"revoked_preview_token,omitempty"`
 }

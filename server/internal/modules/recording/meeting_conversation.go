@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,7 +15,6 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -64,8 +64,8 @@ func (s *Recordings) meetingConversationRoutes() {
 			apierr.WriteCode(w, http.StatusForbidden, assistantwire.CodeKBReadOnly, i18n.Err("assistant-kb_routes.read_only"))
 			return
 		}
-		if _, err := e.SetPrivate(id, private); err != nil {
-			if errors.Is(err, kb.ErrNotMeeting) {
+		if _, err := writersOf(e).SetPrivate(id, private); err != nil {
+			if errors.Is(err, recordingwire.ErrNotMeeting) {
 				apierr.WriteCode(w, http.StatusConflict, codeNotMeeting, i18n.Err("assistant-meeting.not_meeting"))
 				return
 			}
@@ -102,7 +102,7 @@ func parseMeetingMessage(raw []byte) (meetingMessage, error) {
 		return m, i18n.Err("assistant-meeting.bad_ask_id")
 	}
 	var ok bool
-	if m.ID, ok = kb.RecordingID(id); !ok {
+	if m.ID, ok = recordingwire.RecordingID(id); !ok {
 		return m, i18n.Err("assistant-meeting.bad_ask_id")
 	}
 	bad := func(field string) error {
@@ -179,7 +179,7 @@ func (l *meetingLocks) lock(id string) func() {
 }
 
 // timeInMeeting is how long recording r had been running at now, as a clock (m:ss, h:mm:ss).
-func timeInMeeting(r kb.Recording, now time.Time) string {
+func timeInMeeting(r recordingwire.Recording, now time.Time) string {
 	return meetingClock(now.Sub(r.StartedAt).Seconds())
 }
 

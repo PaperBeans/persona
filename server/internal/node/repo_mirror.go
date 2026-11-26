@@ -84,14 +84,7 @@ func (m *repoMirrorManager) timeout() time.Duration {
 }
 
 func (n *Node) repoMirrorRoot() (string, error) {
-	if n.dir == "" {
-		return "", errors.New("mirror runtime directory unavailable")
-	}
-	root := filepath.Join(n.dir, "repos")
-	if err := workspaceNoLinks(root); err != nil {
-		return "", errors.New("mirror root path unavailable")
-	}
-	return root, nil
+	return n.workspaceControlDir("repos")
 }
 
 func (n *Node) repoMirrorPaths(repoID string) (root, mirrorDir, metaPath, lockPath, hooksDir string, err error) {
@@ -144,6 +137,7 @@ func (n *Node) repoMirrorSourceAllowed(identity repository.Identity, cloneURL st
 		local = u.Path
 	}
 	if filepath.IsAbs(local) {
+		local = n.resolveHomeAlias(local)
 		return n.offLimits(local) == nil && workspaceNoLinks(local) == nil
 	}
 	_, err := repository.CloneTransport(cloneURL, identity)

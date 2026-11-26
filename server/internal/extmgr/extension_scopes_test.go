@@ -124,6 +124,10 @@ func TestExtensionScopedToken(t *testing.T) {
 		{"POST /api/v1/sessions/{mid}/{sid}/messages", "/api/v1/sessions/m/s/messages", "agents.control"},
 		{"GET /api/v1/assistant/dispatch-guard", "/api/v1/assistant/dispatch-guard", "dispatch.guard"},
 		{"PUT /api/v1/assistant/dispatch-guard", "/api/v1/assistant/dispatch-guard", "dispatch.guard"},
+		{"GET /api/v1/push/grading/layer", "/api/v1/push/grading/layer", "push.grading"},
+		{"PUT /api/v1/push/grading/layer", "/api/v1/push/grading/layer", "push.grading"},
+		{"DELETE /api/v1/push/grading/layer", "/api/v1/push/grading/layer", "push.grading"},
+		{"POST /api/v1/push/grading/preview", "/api/v1/push/grading/preview", "push.grading"},
 		{"GET /api/v1/ws", "/api/v1/ws", ""},
 		{"POST /api/v1/auth/tokens", "/api/v1/auth/tokens", ""},
 	} {
@@ -191,6 +195,7 @@ func TestHubScopesConsent(t *testing.T) {
 	full := extension.Permissions{HubAPI: true}
 	both := extension.Permissions{HubAPI: true, Hub: []string{"kb.read"}}
 	mode := extension.Permissions{Hub: []string{extension.ScopeAgentsPermissionMode}}
+	grading := extension.Permissions{Hub: []string{extension.ScopePushGrading}}
 	refresh := extension.Permissions{Hub: []string{extension.ScopeMarketRefreshOwn}}
 	for _, c := range []struct {
 		name      string
@@ -208,6 +213,9 @@ func TestHubScopesConsent(t *testing.T) {
 		{"the full token does not cover the permission mode", full, mode, false},
 		{"the full token does not cover own-market refresh", full, refresh, false},
 		{"every scope does not cover own-market refresh", extension.Permissions{Hub: extension.EveryScope()}, refresh, false},
+		{"the full token does not cover push grading", full, grading, false},
+		{"every scope does not cover push grading", extension.Permissions{Hub: extension.EveryScope()}, grading, false},
+		{"push grading covers itself", grading, grading, true},
 		{"the full token does not cover the permission mode among others", full,
 			extension.Permissions{Hub: []string{"kb.read", extension.ScopeAgentsPermissionMode}}, false},
 		{"the permission mode covers itself", mode, mode, true},
@@ -245,6 +253,13 @@ func TestScopeOpens(t *testing.T) {
 		{[]string{extension.ScopeMarketRefreshOwn}, "POST /api/v1/extensions/-/self/market/refresh", selfMarketRefreshPath, true, extension.ScopeMarketRefreshOwn},
 		{nil, "POST /api/v1/extensions/-/self/market/refresh", selfMarketRefreshPath, false, extension.ScopeMarketRefreshOwn},
 		{[]string{extension.ScopeMarketRefreshOwn}, "POST /api/v1/extensions/-/markets/{mid}/refresh", "/api/v1/extensions/-/markets/another/refresh", false, ""},
+		{[]string{extension.ScopePushGrading}, "GET /api/v1/push/grading/layer", "/api/v1/push/grading/layer", true, extension.ScopePushGrading},
+		{[]string{extension.ScopePushGrading}, "PUT /api/v1/push/grading/layer", "/api/v1/push/grading/layer", true, extension.ScopePushGrading},
+		{[]string{extension.ScopePushGrading}, "DELETE /api/v1/push/grading/layer", "/api/v1/push/grading/layer", true, extension.ScopePushGrading},
+		{[]string{extension.ScopePushGrading}, "POST /api/v1/push/grading/preview", "/api/v1/push/grading/preview", true, extension.ScopePushGrading},
+		{[]string{extension.ScopeNotify}, "PUT /api/v1/push/grading/layer", "/api/v1/push/grading/layer", false, extension.ScopePushGrading},
+		{[]string{extension.ScopePushGrading}, "PUT /api/v1/push/grading", "/api/v1/push/grading", false, ""},
+		{[]string{extension.ScopePushGrading}, "PUT /api/v1/push/ln-mode", "/api/v1/push/ln-mode", false, ""},
 	} {
 		if ok, scope := scopeOpens(c.scopes, c.pattern, c.path); ok != c.ok || scope != c.scope {
 			t.Errorf("%v on %s %s: %v %q, want %v %q", c.scopes, c.pattern, c.path, ok, scope, c.ok, c.scope)

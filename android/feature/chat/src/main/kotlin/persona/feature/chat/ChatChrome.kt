@@ -7,12 +7,16 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
@@ -20,8 +24,10 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.lines.isLiveStatus
 import persona.core.domain.sort.AgentSession
+import persona.core.domain.sort.ChildRollupKind
 import persona.core.domain.sort.SessionRename
 import persona.core.domain.sort.SideRollup
+import persona.core.domain.sort.childRollup
 import persona.core.domain.sort.canAttach
 import persona.core.domain.sort.canClose
 import persona.core.domain.sort.canInterrupt
@@ -29,6 +35,9 @@ import persona.core.domain.sort.canRename
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.closeConfirmation
 import persona.core.domain.sort.deleteConfirmation
+import persona.core.domain.sort.displayTabName
+import persona.core.domain.sort.displayTitle
+import persona.core.domain.sort.displayTitleDetail
 import persona.core.domain.sort.isRex
 import persona.core.domain.sort.isTern
 import persona.core.domain.sort.resumeCommand
@@ -38,6 +47,7 @@ import persona.core.domain.sort.source
 import persona.core.domain.sort.sourceSubtitle
 import persona.core.domain.sort.TerminalResume
 import persona.core.domain.sort.terminalResume
+import persona.core.domain.sort.usesUnifiedHerdrRename
 import persona.core.domain.sort.worktreeKind
 
 @Composable
@@ -77,17 +87,64 @@ internal fun ChatHeader(
     /** Explicit Codex takeover / continuation coordinator shared with the bottom read-only bar. */
     takeover: CodexTakeoverCoordinator? = null,
     menuOpen: MutableState<Boolean> = remember { mutableStateOf(false) },
+    /** Hub setting `use_herdr_tab_name`: promotes the herdr tab name to title and merges Rename into one Name field (#13899). */
+    preferHerdrTabName: Boolean = false,
+    /** All known computers, for cross-machine origin chips in Session Overview. */
+    machines: List<Machine> = emptyList(),
+    /** Folded child sessions (same-machine + cross-machine) for Session Overview and subagent rollup. */
+    childRows: List<Session> = emptyList(),
+    /** Opens a subagent's full detail view without redirecting back to its parent. */
+    onOpenSubagent: ((SessionKey) -> Unit)? = null,
+    /** Opens BackgroundTasksPanel at a specific destination from Session Overview's Background tasks section. */
+    onOpenBackgroundDestination: ((BackgroundDestination) -> Unit)? = null,
+    /** Stops an active loop from Session Overview's Background tasks section. */
+    onStopLoop: (() -> Unit)? = null,
+    /** Hub actions and connection for Background tasks detail loading inside Session Overview. */
+    overviewActions: ChatActions? = null,
+    overviewConnection: HubConnection? = null,
+    /** One-shot trigger to open Session Overview focused on its Subagents section (from Agents list parent row). */
+    openSubagentsRequested: Boolean = false,
+    onOpenSubagentsHandled: () -> Unit = {},
+    /** Reports when Session Overview is open so child sessions can refresh on demand. */
+    onOverviewVisible: (Boolean) -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     var menu by menuOpen
     var sharing by remember(session?.key, agentShares) { mutableStateOf<AgentShares?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
+    var scrollToSubagents by rememberSaveable { mutableStateOf(false) }
+    var reopenOverviewOnReturn by rememberSaveable { mutableStateOf(false) }
+    var leftWhilePushingSubagent by rememberSaveable { mutableStateOf(false) }
+    var savedOverviewIndex by rememberSaveable { mutableIntStateOf(0) }
+    var savedOverviewOffset by rememberSaveable { mutableIntStateOf(0) }
+    var savedOverviewEndedExpanded by rememberSaveable(session?.key?.path) { mutableStateOf(false) }
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    LaunchedEffect(openSubagentsRequested) {
+        if (openSubagentsRequested) {
+            scrollToSubagents = true
+            dialog = "info"
+            onOpenSubagentsHandled()
+        }
+    }
+    LaunchedEffect(lifecycleState, reopenOverviewOnReturn) {
+        if (!reopenOverviewOnReturn) {
+            leftWhilePushingSubagent = false
+        } else if (lifecycleState != Lifecycle.State.RESUMED) {
+            leftWhilePushingSubagent = true
+        } else if (leftWhilePushingSubagent) {
+            leftWhilePushingSubagent = false
+            reopenOverviewOnReturn = false
+            dialog = "info"
+        }
+    }
+    LaunchedEffect(dialog) { onOverviewVisible(dialog == "info") }
     var title by rememberSaveable { mutableStateOf("") }
     var tabName by rememberSaveable { mutableStateOf("") }
     val copy = rememberCopy()
     val peers = remember(session, sessions) { spaceCompanions(session, sessions) }
     val places = remember(session, peers) { companionPlaces(session, peers) }
-    val children = session?.subagents.orEmpty().filter { it.running && it.sessionId.isNotBlank() }
+    val subagentRollup = remember(session, childRows) { session?.let { childRollup(it, childRows) } }
+    val subagentOpener = onOpenSubagent ?: onOpenSession
     val linkTitle = connectionTitle(connection)
     val online = connection == null || connection == ConnectionState.Online
     val canAct = state.available && online && machine?.online != false && !readOnly && session != null
@@ -114,7 +171,7 @@ internal fun ChatHeader(
     // While the hub is out of reach the status line under the title says so ("Waiting for network" / "Connecting…" / "Updating…") instead of
     // the session's state, which may be stale; it is back the moment the connection is.
     ChatTopBar(
-        title = session?.displayTitle ?: stringResource(R.string.chat_chrome_title_default), onBack = onBack,
+        title = session?.displayTitle(preferHerdrTabName) ?: stringResource(R.string.chat_chrome_title_default), onBack = onBack,
         status = if (linkTitle != null) null else status,
         statusText = linkTitle ?: when (line?.kind) {
             StatusLineKind.Ended -> stringResource(if (statusState.replaced) R.string.chat_chrome_status_replaced else R.string.chat_chrome_status_ended)
@@ -136,8 +193,8 @@ internal fun ChatHeader(
                 else -> status.localizedLabel
             }
         },
-        source = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text()) },
-        sourceShort = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text(), short = true) },
+        source = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text(), preferHerdrTabName = preferHerdrTabName) },
+        sourceShort = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text(), short = true, preferHerdrTabName = preferHerdrTabName) },
         busy = connection in setOf(ConnectionState.Connecting, ConnectionState.Updating),
         // Glass's title opens Session Info, as iOS's (#4339 C4), or why the hub is out of reach while it is; Brief and
         // Board keep the status sheet.
@@ -160,6 +217,21 @@ internal fun ChatHeader(
         val sidesShown = sideRollup.count > 0 && onOpenSide != null
         if (sidesShown) JIconButton(PersonaIcons.sideSessions, sideSessionsLabel(sideRollup), { dialog = "sides" },
             badge = sideRollup.needsYou, count = sideRollup.count)
+        // Active subagents entry: opens Session Overview directly at the Subagents section.
+        if (subagentRollup != null && session?.assistant != true) {
+            val label = stringResource(
+                if (subagentRollup.kind == ChildRollupKind.NeedsYou) R.string.chat_overview_subagents_button_needs_you
+                else R.string.chat_overview_subagents_button_running,
+                subagentRollup.count,
+            )
+            JIconButton(
+                PersonaIcons.agents,
+                label,
+                { scrollToSubagents = true; dialog = "info" },
+                badge = subagentRollup.kind == ChildRollupKind.NeedsYou,
+                count = subagentRollup.count,
+            )
+        }
         actions()
         // The permission mode, always in view and changed here (#3957, iOS #3719).
         // Glass has the mode in the composer, by the model pill (Q11, #5055); Brief and Board keep it here.
@@ -200,7 +272,10 @@ internal fun ChatHeader(
         onGit?.let { add(JAction(gitLabel, onClick = it)) }
         onBackgroundTasks?.let { add(JAction(stringResource(R.string.chat_background_title), PersonaIcons.backgroundTasks, onClick = it)) }
         add(JAction(stringResource(R.string.chat_chrome_details), onClick = onDetails))
-        add(JAction(stringResource(R.string.chat_chrome_info), PhIcons.Info, enabled = session != null) { dialog = "info" })
+        add(JAction(stringResource(R.string.chat_overview_title), PhIcons.Info, enabled = session != null) {
+            scrollToSubagents = false
+            dialog = "info"
+        })
         if (session?.assistant == false) {
             val unavailable = stringResource(R.string.chat_agent_share_authority)
             add(JAction(stringResource(R.string.chat_agent_share_title), PhIcons.ShareNetwork, enabled = agentShares != null && online) {
@@ -211,7 +286,7 @@ internal fun ChatHeader(
         session?.takeIf { it.canAttach }?.let { target ->
             add(JAction(stringResource(R.string.chat_chrome_attach), PhIcons.PlugsConnected, enabled = canAct) { state.run(target, ChatAction.Attach) })
         }
-        add(JAction(pluralStringResource(R.plurals.chat_chrome_peers, peers.size, peers.size), enabled = session != null) { dialog = "peers" })
+        add(JAction(pluralStringResource(R.plurals.chat_chrome_peers, peers.size, peers.size), PersonaIcons.agents, enabled = session != null) { dialog = "peers" })
         if (sideRollup.count > 0 && onOpenSide != null) add(JAction(stringResource(R.string.chat_side_sessions_count, sideRollup.count),
             PersonaIcons.sideSessions, subtitle = if (sideRollup.needsYou) stringResource(R.string.chat_side_sessions_needs_you) else null) {
             dialog = "sides"
@@ -226,9 +301,6 @@ internal fun ChatHeader(
                 onClick = onForkSession,
             ))
         }
-        add(JAction(stringResource(R.string.chat_chrome_switch_session), enabled = session != null) { dialog = "peers" })
-        children.forEach { child -> add(JAction(stringResource(R.string.chat_chrome_subagent, child.description?.takeIf(String::isNotBlank) ?: child.type),
-            enabled = onOpenSession != null) { onOpenSession?.invoke(SessionKey(session!!.machineId, child.sessionId)) }) }
         if (linkTitle != null) add(JAction(linkTitle) { dialog = "connection" })
         add(JAction(stringResource(R.string.chat_chrome_interrupt), enabled = canAct && session?.status in listOf("working", "blocked") && session?.canInterrupt != false) {
             state.run(session!!, ChatAction.Interrupt)
@@ -268,21 +340,33 @@ internal fun ChatHeader(
         })
     }
     when (dialog) {
-        "rename" -> JDialog(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_rename),
-            text = chatRenameNote(session)?.let { stringResource(it) },
-            confirm = stringResource(R.string.chat_chrome_save) to { dialog = null; state.rename(session!!, title, tabName) },
-            confirmEnabled = canRename && session?.let { SessionRename.changes(it, title, tabName).changed } == true,
-            content = {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-                    if (!session?.paneId.isNullOrBlank()) JTextField(tabName, { tabName = it }, singleLine = true,
-                        label = stringResource(when {
-                            session?.isTern == true -> R.string.chat_chrome_tab_name_tern
-                            session?.isRex == true -> R.string.chat_chrome_tab_name_rex
-                            else -> R.string.chat_chrome_tab_name
-                        }))
-                    JTextField(title, { title = it }, label = stringResource(R.string.chat_chrome_session_name), singleLine = true)
-                }
-            })
+        "rename" -> {
+            val unified = session?.usesUnifiedHerdrRename(preferHerdrTabName) == true
+            JDialog(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_rename),
+                text = chatRenameNote(session, unified = unified)?.let { stringResource(it) },
+                confirm = stringResource(R.string.chat_chrome_save) to {
+                    dialog = null
+                    if (unified) state.renameUnified(session!!, tabName) else state.rename(session!!, title, tabName)
+                },
+                confirmEnabled = canRename && session?.let {
+                    if (unified) SessionRename.unifiedChanges(it, tabName).changed else SessionRename.changes(it, title, tabName).changed
+                } == true,
+                content = {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+                        if (unified) {
+                            JTextField(tabName, { tabName = it }, singleLine = true, label = stringResource(R.string.chat_chrome_name))
+                        } else {
+                            if (!session?.paneId.isNullOrBlank()) JTextField(tabName, { tabName = it }, singleLine = true,
+                                label = stringResource(when {
+                                    session?.isTern == true -> R.string.chat_chrome_tab_name_tern
+                                    session?.isRex == true -> R.string.chat_chrome_tab_name_rex
+                                    else -> R.string.chat_chrome_tab_name
+                                }))
+                            JTextField(title, { title = it }, label = stringResource(R.string.chat_chrome_session_name), singleLine = true)
+                        }
+                    }
+                })
+        }
         // The same words as the Agents list's long press and swipe (core:domain closeConfirmation).
         // Keep or remove the worktree Persona made for it, when it worked in one (#4532); removed once it is gone.
         "close", "delete" -> session?.let { target ->
@@ -301,15 +385,56 @@ internal fun ChatHeader(
                 }, destructive = true, confirmEnabled = canAct && WorktreeCleanups.ready(worktree, cleanup),
                 content = worktree?.let { st -> { WorktreeCleanupSection(st, cleanup, { cleanup = it }, machine?.home) } })
         }
-        "info" -> session?.let { target -> ChatSessionInfoSheet(target, machine, state, onOpenTodo = onOpenTodo, onDismiss = { dialog = null }) }
+        "info" -> session?.let { target ->
+            val overviewListState = rememberLazyListState(
+                initialFirstVisibleItemIndex = savedOverviewIndex,
+                initialFirstVisibleItemScrollOffset = savedOverviewOffset,
+            )
+            SessionOverviewSheet(
+                session = target,
+                machine = machine,
+                machines = machines,
+                childRows = childRows,
+                state = state,
+                actions = overviewActions,
+                connection = overviewConnection,
+                scrollToSubagents = scrollToSubagents,
+                onSubagentsScrolled = { scrollToSubagents = false },
+                endedExpanded = savedOverviewEndedExpanded,
+                onEndedExpandedChange = { savedOverviewEndedExpanded = it },
+                listState = overviewListState,
+                onOpenTodo = onOpenTodo,
+                onOpenSubagent = subagentOpener?.let { open ->
+                    { childKey ->
+                        savedOverviewIndex = overviewListState.firstVisibleItemIndex
+                        savedOverviewOffset = overviewListState.firstVisibleItemScrollOffset
+                        reopenOverviewOnReturn = true
+                        dialog = null
+                        open(childKey)
+                    }
+                },
+                onOpenBackground = onOpenBackgroundDestination,
+                onStopLoop = onStopLoop,
+                preferHerdrTabName = preferHerdrTabName,
+                onDismiss = {
+                    savedOverviewIndex = 0
+                    savedOverviewOffset = 0
+                    savedOverviewEndedExpanded = false
+                    scrollToSubagents = false
+                    reopenOverviewOnReturn = false
+                    dialog = null
+                },
+            )
+        }
         "peers" -> JSheet(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_peers_title)) {
             if (peers.isEmpty()) JEmptyState(stringResource(R.string.chat_chrome_peers_empty_title), stringResource(R.string.chat_chrome_peers_empty_text))
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
                 items(peers, key = { it.key.path }) { peer ->
                     val place = places[peer.key]
-                    val where = peer.slotName ?: peer.agentLabel
+                    val primaryPeerTab = peer.displayTabName(preferHerdrTabName)
+                    val where = if (primaryPeerTab != null) peer.displayTitleDetail(preferHerdrTabName) ?: peer.agentLabel else peer.slotName ?: peer.agentLabel
                     // the launcher says so; the panes it split off sit one step in, as on the Agents list (#2515)
-                    JRow(peer.displayTitle,
+                    JRow(peer.displayTitle(preferHerdrTabName),
                         modifier = if (place == CompanionPlace.Branch) Modifier.padding(start = Tokens.Space.l) else Modifier,
                         subtitle = if (place == CompanionPlace.Launcher) stringResource(R.string.chat_tabs_launcher_subtitle, where) else where,
                         leading = { JStatusDot(Status.entries.firstOrNull { it.name == peer.agentState.name } ?: Status.Unknown) },
@@ -334,8 +459,9 @@ internal fun ChatHeader(
  * list's `renameNote`). None for a session without a terminal (a runtime's, #6294), which has neither.
  */
 @StringRes
-internal fun chatRenameNote(session: Session?): Int? = when {
+internal fun chatRenameNote(session: Session?, unified: Boolean = false): Int? = when {
     session?.canTerminal == false -> null
+    unified -> R.string.chat_chrome_rename_text_unified
     session?.isTern == true -> R.string.chat_chrome_rename_text_tern
     session?.isRex == true -> R.string.chat_chrome_rename_text_rex
     else -> R.string.chat_chrome_rename_text
@@ -380,9 +506,9 @@ internal fun headerStatus(state: StatusLineState, session: Session?): Status {
 @Composable
 internal fun ChatSlimHeader(
     session: Session?, statusState: StatusLineState, connection: ConnectionState?, onBack: () -> Unit,
-    onMore: (() -> Unit)? = null, onOpen: () -> Unit,
+    onMore: (() -> Unit)? = null, preferHerdrTabName: Boolean = false, onOpen: () -> Unit,
 ) {
-    val title = session?.displayTitle ?: stringResource(R.string.chat_chrome_title_default)
+    val title = session?.displayTitle(preferHerdrTabName) ?: stringResource(R.string.chat_chrome_title_default)
     val link = connectionTitle(connection)
     val haptics = rememberHaptics()
     ChatSlimBar(title, stringResource(R.string.chat_chrome_slim_open, link ?: title), onOpen = { haptics(Haptic.Tap); onOpen() },
@@ -399,13 +525,23 @@ internal val QuietStatuses = setOf(Status.Idle, Status.Offline, Status.Unknown)
 /**
  * Where a conversation runs, as the line under its title says it (iOS `devSubtitle`, #4339 C4): its [source] first (a
  * Codex app-server, Codex history or an agent runtime, `sourceSubtitle` in words), then the computer and "space › tab".
+ * When [preferHerdrTabName] promotes the herdr tab name to the main title, the CLI title moves to this detail line and
+ * the tab name is not repeated after the space (#13899).
  * Never the working directory, which DESIGN_SYSTEM.md 5.6 keeps off primary screens; null when there is nothing to say.
  */
-internal fun chatPlace(session: Session, machine: String?, source: String? = null, short: Boolean = false): String? {
-    val place = listOfNotNull(session.spaceName?.takeIf(String::isNotBlank), session.slotLabel).joinToString(" › ")
+internal fun chatPlace(
+    session: Session, machine: String?, source: String? = null, short: Boolean = false,
+    preferHerdrTabName: Boolean = false,
+): String? {
+    val primaryTab = session.displayTabName(preferHerdrTabName)
+    val cliTitle = session.displayTitleDetail(preferHerdrTabName)
+    val place = listOfNotNull(
+        session.spaceName?.takeIf(String::isNotBlank),
+        if (primaryTab != null) null else session.slotLabel,
+    ).joinToString(" › ")
     // [short], for a line too narrow for all of it: the place without the computer, or the computer when there is no place.
     val computer = machine?.takeIf { it.isNotBlank() && (!short || place.isEmpty()) }
-    return listOfNotNull(source?.takeIf(String::isNotBlank), computer, place.takeIf(String::isNotEmpty))
+    return listOfNotNull(cliTitle, source?.takeIf(String::isNotBlank), computer, place.takeIf(String::isNotEmpty))
         .joinToString(" · ").takeIf(String::isNotEmpty)
 }
 

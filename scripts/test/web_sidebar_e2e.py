@@ -20,7 +20,7 @@ import urllib.request
 
 from playwright.sync_api import expect, sync_playwright
 
-PERSONA = 'a[title="Persona 的主对话"]'
+PERSONA = 'a[aria-description="Persona 的主对话"]'
 STARTER = "有什么要我做的？"
 
 
@@ -70,14 +70,14 @@ def run(browser, base, token, main_id, other, shots):
 
     # Persona, with the app's mark, is the column's first row, a line under it, above the pages (#2004, #5109).
     first = page.locator("aside [data-sidebar-rows] a").first
-    expect(first).to_have_attribute("title", "Persona 的主对话")
+    expect(first).to_have_attribute("aria-description", "Persona 的主对话")
     # one picture, the page theme's (ui/AppMark.tsx): the other theme's is not fetched
     expect(first.locator('img[src$="/app-icon.png"], img[src$="/app-icon-dark.png"]')).to_have_count(1)
     expect(first.get_by_text("主对话", exact=True)).to_have_count(0)
     expect(page.locator("aside [data-persona-divider]")).to_have_count(1)
     below = page.evaluate("""() => {
       const line = document.querySelector('aside [data-persona-divider]').getBoundingClientRect();
-      const row = document.querySelector('aside a[title="Persona 的主对话"]').getBoundingClientRect();
+      const row = document.querySelector('aside a[aria-description="Persona 的主对话"]').getBoundingClientRect();
       const pages = [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === '页面').getBoundingClientRect();
       return row.bottom <= line.top && line.bottom <= pages.top;
     }""")
@@ -193,7 +193,7 @@ def run(browser, base, token, main_id, other, shots):
         page.locator("main").get_by_role("button", name="侧边栏").first.click()
         persona = page.locator(PERSONA)
         expect(persona).to_be_in_viewport()
-        expect(page.locator("aside [data-sidebar-rows] a").first).to_have_attribute("title", "Persona 的主对话")
+        expect(page.locator("aside [data-sidebar-rows] a").first).to_have_attribute("aria-description", "Persona 的主对话")
         if shots:
             page.wait_for_timeout(500)
             page.screenshot(path=os.path.join(shots, f"narrow-drawer-{theme}.png"))

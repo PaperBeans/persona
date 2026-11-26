@@ -116,6 +116,7 @@
   "secret_run_decline": "拒否",
   "secret_run_run": "実行",
   "secret_run_note": "1回だけ使い、保存しません。アシスタントにも見えません。",
+  "secret_run_env_warning": "警告：入力したパスワードは PERSONA_SECRET を通じて上記の各コマンドに直接渡されます。エンコードされた出力はマスキングを回避する場合があります。",
   "secret_run_card_only": "カードで回答してください：パスワードを入力して実行するか、拒否してください",
   "secret_handoff_title": "シークレットを Agent に渡しますか？",
   "secret_handoff_lead": "{machine} の「{agent}」が今回の実行だけ受け取ります：",

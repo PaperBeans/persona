@@ -1,18 +1,30 @@
+import type { BackgroundRound } from '../core/BackgroundActivity';
+import { activityFeedRound, splitBackgroundRounds } from '../core/BackgroundActivity';
+import type { HubAccess } from '../core/HubAccess';
+import { liftedMessageWords } from '../core/Markdown';
+import type { ConversationRecapItem } from './Wire';
 import { AssistantViewModel } from './AssistantView';
 import { SshTunnel } from './SshTunnel';
 import type { SshProxyLease } from './SshTunnel';
+import type { PairingSshRoute } from './PairingSsh';
 import { KnowledgeRecording } from './KnowledgeRecording';
 import { deviceLook } from './DeviceLook';
+import { storedPhoneInterfaceStyle } from '../core/PhoneInterfaceStyle';
 import { clientLocale, initializeClientLanguage, setClientLanguage } from '../core/ClientLocale';
+import { dictationLocale, dictationTexts } from '../core/DictationLanguage';
+import { ChatSendFeedback } from '../core/ChatSendFeedback';
+import { dictationPreference } from '../platform/DictationPreference';
 import { i18n } from '@kit.LocalizationKit';
 import { DemoRepository } from './DemoRepository';
 import { NavigationContext } from './NavigationContext';
 import { utf8Bytes } from '../core/TranscriptCache';
-import { ChatDraftStore, ChatDraft, ChatOutboxEntry } from './ChatDraftStore';
+import { ChatDraftStore, ChatDraft, ChatOutboxEntry, DraftForwardImage, draftForwardRows } from './ChatDraftStore';
 import { clearImagePreviews } from '../platform/NativePreview';
+import { forwardPrefix, forwardOrigin, forwardGroups } from '../core/ChatForwardWire';
 import { parseMessageContent } from '../core/MessageContent';
-import { decodeInteractionDecision, firstBlockingDecision, isPersonaAskUserQuestion } from './InteractionDecision';
+import { decodeInteractionDecision, firstBlockingDecision, interactionCanSubmit, isPersonaAskUserQuestion } from './InteractionDecision';
 import { ChatAttachments } from './ChatAttachments';
+import { AgentAttentionCard, agentAttentionCards, waitingAgentBadge } from './AgentAttention';
 import type { PreparedAttachmentSend } from './ChatAttachments';
 import { nativeNotifications } from '../platform/NativeNotifications';
 import { resolveManagerScope } from '../core/ScopePolicy';
@@ -39,10 +51,19 @@ interface DevicePreferenceChange { appearance?: number; style?: string; alerts?:
 interface HeldActionReceipt { scope: string; pairing: number; target: string; expected: HeldAgentMessage; deleted: boolean; }
 
 export interface ClientViewLease {
+  readonly storageKey?:string;
   readonly epoch: number;
   valid: () => boolean;
   read: () => Promise<string>;
   write: (value: string) => Promise<void>;
+  clearIfUnchanged: (expected: string) => Promise<void>;
+}
+
+class PhoneListRead {
+  change: number = 0;
+  snapshot: string = '';
+  pendingKey: string = '';
+  pending: Promise<void> | undefined;
 }
 
 @ObservedV2
@@ -64,6 +85,7 @@ export class ClientModel {
     root.publishDirectory();
   }
   @Trace ready: boolean = false;
+  @Trace projectsRequested: boolean = false;
   @Trace pairingLink: string = '';
   @Trace notificationTarget: string = '';
   @Trace forgottenProfile: string = '';
@@ -76,10 +98,19 @@ export class ClientModel {
   @Trace profiles: HubProfile[] = [];
   @Trace profile: HubProfile = new HubProfile();
   @Trace managers: ResourceRow[] = [];
+  @Trace rosterDefaultId: string = '';
   @Trace features: string[] = [];
+  private helloHub: string = '';
+  private helloScope: string = '';
+  private helloGeneration: number = -1;
+  private helloVersion: string = '';
+  private helloFeatures: string[] = [];
   @Trace section: number = 0;
   @Trace sessions: ResourceRow[] = [];
   @Trace sessionsReady: boolean = false;
+  @Trace private attentionCards: AgentAttentionCard[] = [];
+  @Trace private attentionOwner: string = '';
+  private attentionReadRevision: number = 0;
   @Trace conversations: ResourceRow[] = [];
   @Trace machines: ResourceRow[] = [];
   @Trace directorySessions: ResourceRow[] = [];
@@ -94,6 +125,8 @@ export class ClientModel {
   @Trace knowledge: ResourceRow[] = [];
   @Trace knowledgeKind: string = 'projects';
   @Trace inbox: ResourceRow[] = [];
+  private inboxRead: PhoneListRead = new PhoneListRead();
+  private todoRead: PhoneListRead = new PhoneListRead();
   @Trace selected: ResourceRow = new ResourceRow();
   @Trace messages: ChatMessage[] = [];
   @Trace cards: ResourceRow[] = [];
@@ -107,6 +140,10 @@ export class ClientModel {
   @Trace draftRevision: string = '';
   private localMessages: ChatOutboxEntry[] = [];
   private activeMessages: Set<string> = new Set();
+  private sendAttempts: Map<string, ChatSendFeedback> = new Map();
+  @Trace private sendFeedbackRevision: number = 0;
+  private feedbackTimer: number = -1;
+  private feedbackDeadline: number = 0;
   private renderedMessages: ChatMessage[] = [];
   private echoedMessages: Set<string> = new Set();
   @Trace private heldActions: string[] = [];
@@ -121,6 +158,20 @@ export class ClientModel {
   @Trace operationState: string = '';
   @Trace mainId: string = '';
   @Trace mainMachineId: string = '';
+  @Trace sidebarConfig: string = '';
+  acceptSidebarConfig(assistant: Record<string,Object>, confirmedEdit: boolean = false): void {
+    const config = JSON.stringify(Wire.payload(['main','main_machine_id','leaders','background_supervisor','recent_task_chats'],
+      [Wire.text(assistant,'main'),Wire.text(assistant,'main_machine_id',Wire.text(assistant,'machine_id')),
+        Wire.strings(assistant,'leaders'),Wire.text(assistant,'background_supervisor'),Wire.bool(assistant,'recent_task_chats')]));
+    if (this.sidebarConfig !== config) this.sidebarConfig = config;
+    // A scoped settings page can use a detached model. Publish its confirmed Hub preference to the visible drawer only for the same owner.
+    const parent = this.directoryParent;
+    if (confirmedEdit && parent && parent.scope() === this.scope() && parent.profile.hubId === this.profile.hubId) {
+      const current = Wire.parse(parent.sidebarConfig);
+      current['recent_task_chats'] = Wire.bool(assistant,'recent_task_chats');
+      parent.sidebarConfig = JSON.stringify(current);
+    }
+  }
   private preferenceTask: Promise<void> = Promise.resolve();
   private async changePreferences(action: () => Promise<void>): Promise<void> { const task = this.preferenceTask.then(action, action); this.preferenceTask = task.catch(() => {}); await task; }
   @Trace language: string = 'default';
@@ -134,16 +185,46 @@ export class ClientModel {
   @Trace detail: string = '';
   @Trace hasMoreMessages: boolean = false;
   private deviceEvent: ((payload: string) => void) | undefined;
-  private eventListeners: Set<(payload: string) => void> = new Set();
-  observeEvents(listener: (payload: string) => void): () => void { this.eventListeners.add(listener); return (): void => { this.eventListeners.delete(listener); }; }
+  private eventListeners: Set<(payload: string, type: string) => void> = new Set();
+  observeEvents(listener: (payload: string, type: string) => void): () => void { this.eventListeners.add(listener); return (): void => { this.eventListeners.delete(listener); }; }
   setDeviceEvents(handler: ((payload: string) => void) | undefined): void { this.deviceEvent = handler; }
   private workspace: SessionWorkspace | undefined;
   setWorkspace(workspace: SessionWorkspace | undefined): void { if (this.workspace && this.workspace !== workspace) this.workspace.hide(); this.workspace = workspace; }
+  selectWorkspaceTab(index: number): void { this.workspace?.selectTab(index); }
   @Trace transcriptHistoryReady: boolean = false;
   private transcript: TranscriptModel | undefined;
   private transcriptKey: string = '';
   private revisionItems: TranscriptItem[] = [];
   transcriptItems(): readonly TranscriptItem[] { return this.revisionItems.slice(); }
+
+  private activityOwner: string = '';
+  private activityRounds: readonly BackgroundRound[] = [];
+
+  mainActivityRow(): ResourceRow | undefined {
+    if (!this.mainId) return undefined;
+    return this.conversations.find((row: ResourceRow): boolean => this.isMainActivityRow(row));
+  }
+
+  private isMainActivityRow(row: ResourceRow): boolean {
+    return row.kind === 'conversation' && !!this.mainId && row.id === this.mainId &&
+      (!this.mainMachineId || row.machine === this.mainMachineId) && (!row.group || row.group === this.profile.id) &&
+      (!row.manager || row.manager === this.profile.manager);
+  }
+
+  readActivityTranscript(row: ResourceRow, publish: (items: readonly TranscriptItem[], more: boolean, ready: boolean) => void,
+    failure: (error: Error) => void): TranscriptModel | undefined {
+    const main = this.mainActivityRow();
+    if (!main || this.target(main) !== this.target(row)) throw new Error('request_updated');
+    if (this.demo && this.demoRepository) {
+      publish(this.demoRepository.historyItems(row) as Object as TranscriptItem[], false, true);
+      return undefined;
+    }
+    return new TranscriptModel(row, this.repo(), this.local, this.target(row), publish, failure, false);
+  }
+
+  feedInBackground(kind: string, at: number): boolean {
+    return this.activityOwner === this.target() && !!activityFeedRound(this.activityRounds, kind, at);
+  }
   private repository: HubRepository | undefined;
   private demoRepository: DemoRepository | undefined;
   private detached: boolean = false;
@@ -296,6 +377,7 @@ export class ClientModel {
   private reconnectAttempt: number = 0;
   private stopReconnect(): void { if (this.reconnectTimer !== -1) clearTimeout(this.reconnectTimer); this.reconnectTimer = -1; }
   private scheduleReconnect(): void {
+    if (this.error === 'cloudflare_access_required' || this.error === 'cloudflare_access_rejected') return;
     if (!this.foreground || this.demo || !this.profile.id || this.cleanupProfiles.has(this.profile.id) || this.reconnectTimer !== -1 || this.pairingProfiles.size > 0) return;
     const generation = this.generation, scope = this.scope(), delay = Math.min(30000, 1000 * Math.pow(2, Math.min(5, this.reconnectAttempt++)));
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = -1;
@@ -312,6 +394,31 @@ export class ClientModel {
     this.pendingDecisions = [];
     this.personaQuestions = [];
     this.decision = undefined;
+  }
+  private async readInteractionSnapshot(): Promise<Record<string, Object>[]> {
+    const generation = this.generation, scope = this.scope(), revision = ++this.attentionReadRevision;
+    const values = await this.repo().decisions();
+    if (revision === this.attentionReadRevision && this.owns(generation, scope)) {
+      this.attentionCards = agentAttentionCards(values, this.profile.manager);
+      this.attentionOwner = JSON.stringify([generation, scope]);
+    }
+    return values;
+  }
+  // Old briefing rows name a waiting card without its chat. Resolve it only from this owner's current snapshot.
+  briefWaitingSession(cardID: string): ResourceRow | undefined {
+    if (!cardID || !this.connected || this.attentionOwner !== JSON.stringify([this.generation, this.scope()])) return undefined;
+    const matches = this.attentionCards.filter((card: AgentAttentionCard) => card.id === cardID && !!card.session);
+    if (matches.length !== 1) return undefined;
+    const card = matches[0];
+    return this.sessions.find((row: ResourceRow) => row.manager === this.profile.manager &&
+      (!row.group || row.group === this.profile.id) && row.machine === card.machine && (row.session || row.id) === card.session);
+  }
+
+  phoneAgentBadge(muted: (row: ResourceRow, space: string) => boolean): number {
+    if (!this.connected) return 0;
+    const current = this.attentionOwner === JSON.stringify([this.generation, this.scope()]);
+    return waitingAgentBadge(this.sessions, this.todos, current ? this.attentionCards : [],
+      this.profile.id, this.profile.manager, muted, current);
   }
   private replacePendingDecisions(interactions: Record<string, Object>[], row: ResourceRow, target: string,
     generation: number, scope: string, sequence: number): void {
@@ -349,7 +456,7 @@ export class ClientModel {
     const generation = this.generation, scope = this.scope(), target = this.target(), row = this.selected;
     const sequence = ++this.decisionRefreshSequence;
     try {
-      const interactions = await this.repo().decisions();
+      const interactions = await this.readInteractionSnapshot();
       this.replacePendingDecisions(interactions, row, target, generation, scope, sequence);
     } catch (error) {
       if (this.owns(generation, scope) && this.target() === target && sequence === this.decisionRefreshSequence) this.failure(error as Error);
@@ -357,15 +464,31 @@ export class ClientModel {
     }
   }
 
+  // A device preference shared by Persona's conversation docks across Hubs and rotations.
+  @Trace questionCardHeightShare: number = -1;
+  async setQuestionCardHeight(share: number): Promise<void> {
+    if (!Number.isFinite(share)) return;
+    this.questionCardHeightShare = share < 0 ? -1 : Math.max(0,Math.min(1,share));
+    const stored = this.questionCardHeightShare;
+    await this.changePreferences(async (): Promise<void> => {
+      if (stored < 0) await this.local.remove('ui.questionCardHeight');
+      else await this.local.put('ui.questionCardHeight',String(stored));
+    });
+  }
+
   async initialize(context: common.UIAbilityContext): Promise<void> {
     this.context = context;
+    dictationPreference.load(context);
     this.ssh.initialize(context);
     this.vault = new CredentialVault(context);
     await this.local.open(context);
+    const storedCardHeight = await this.local.get('ui.questionCardHeight');
+    const share = Number(storedCardHeight);
+    if (storedCardHeight && Number.isFinite(share)) this.questionCardHeightShare = Math.max(0,Math.min(1,share));
     const preferences = Wire.parse(await this.local.get('preferences'));
     this.appearance = Wire.number(preferences, 'appearance');
     const savedStyle = Wire.text(preferences, 'style', 'system');
-    this.style = ['system', 'glass', 'brief', 'board'].includes(savedStyle) ? savedStyle : 'system';
+    this.style = storedPhoneInterfaceStyle(savedStyle);
     this.alerts = Wire.bool(preferences, 'alerts', true); this.language = Wire.text(preferences, 'language', 'default');
     if (!['default', 'en-US', 'zh-CN', 'ja-JP'].includes(this.language)) this.language = 'default';
     i18n.System.setAppPreferredLanguage(this.language); initializeClientLanguage(this.language);
@@ -390,12 +513,21 @@ export class ClientModel {
     return this.repository;
   }
   connectionGeneration(): number { return this.generation; }
+  verifiedServerVersion(feature: string): string {
+    return this.connected && !!this.helloHub && this.helloHub === this.profile.hubId &&
+      this.owns(this.helloGeneration, this.helloScope) && this.helloFeatures.includes(feature) ? this.helloVersion : '';
+  }
   owns(generation: number, scope: string): boolean { return !this.retired && generation === this.generation && scope === this.scope(); }
   isChat(): boolean { return this.selected.kind === 'conversation' || this.selected.kind === 'session'; }
+  isAppInForeground(): boolean { return !this.retired && this.foreground; }
+  isForegroundChat(): boolean { return !this.retired && this.foreground && this.chatVisible && this.isChat(); }
   reportError(error: Error): void { this.failure(error); }
   operationBlocked(path: string): boolean { return this.unresolvedWrites.some((record: MutationRecord) => record.path === path); }
   private failure(error: Error): void {
     if (error instanceof HttpFailure) {
+      if (error.code === 'cloudflare_access_required' || error.code === 'cloudflare_access_rejected') {
+        this.stopReconnect(); this.error = error.resultUnknown ? 'result_unknown' : error.code; return;
+      }
       if (error.status === 401 || error.status === 403) this.stopReconnect();
       this.error = error.resultPending ? 'pending' : error.resultUnknown ? 'result_unknown' : error.status === 401 ? 'welcome' :
         error.status === 403 ? 'permission_denied' : error.status === 409 || error.status === 410 ? 'request_updated' : 'failed';
@@ -409,7 +541,7 @@ export class ClientModel {
     await this.changePreferences(async (): Promise<void> => {
       const mode = change.appearance === undefined ? this.appearance : change.appearance;
       const requested = change.style === undefined ? this.style : change.style;
-      const style = ['system', 'glass', 'brief', 'board'].includes(requested) ? requested : 'system';
+      const style = storedPhoneInterfaceStyle(requested);
       const alerts = change.alerts === undefined ? this.alerts : change.alerts;
       try { await this.local.put('preferences', JSON.stringify({ appearance: mode, style: style, alerts: alerts, language: this.language })); }
       catch (_) { this.error = 'cache_unavailable'; return; }
@@ -453,7 +585,7 @@ export class ClientModel {
       }
     }
   }
-  async useEndpoint(config: EndpointConfig, name: string, admit?: () => boolean): Promise<void> {
+  async useEndpoint(config: EndpointConfig, name: string, admit?: () => boolean, route?: PairingSshRoute): Promise<void> {
     if (this.forgettingProfiles.has(config.hubId) || this.cleanupProfiles.has(config.hubId)) throw new Error('pending_action');
     if (!this.vault) throw new Error('storage_unavailable');
     if (this.pairingProfiles.size > 0) throw new Error('pending_action');
@@ -466,22 +598,42 @@ export class ClientModel {
     const epoch = this.forgetEpochs.get(config.hubId) || 0, vault = this.vault;
     const current = (): boolean => epoch === (this.forgetEpochs.get(config.hubId) || 0) && !this.forgettingProfiles.has(config.hubId) && (!admit || admit());
     let previous: string | null = null, written = false;
+    let previousAccess: HubAccess | undefined;
+    let settleRoute: ((committed: boolean) => Promise<void>) | undefined;
     const rollback = async (): Promise<void> => {
-      if (await vault.get(config.hubId) !== config.token) return;
-      if (previous && epoch === (this.forgetEpochs.get(config.hubId) || 0) && !this.forgettingProfiles.has(config.hubId)) await vault.put(config.hubId, previous);
+      let installedAccess: HubAccess | undefined;
+      const installed = await vault.get(config.hubId, (value: HubAccess | undefined): void => { installedAccess = value; });
+      if (installed !== config.token || (config.access ? !config.access.equals(installedAccess) : !!installedAccess)) return;
+      if (previous && epoch === (this.forgetEpochs.get(config.hubId) || 0) && !this.forgettingProfiles.has(config.hubId)) await vault.put(config.hubId, previous, previousAccess);
       else await vault.remove(config.hubId);
     };
     await this.credentialChange(config.hubId, async (): Promise<void> => {
       if (!current()) throw new Error('request_updated');
-      previous = await vault.get(config.hubId); if (!current()) throw new Error('request_updated');
-      await vault.put(config.hubId, config.token); written = true;
-      if (!current()) { await rollback(); written = false; throw new Error('request_updated'); }
+      previous = await vault.get(config.hubId, (value: HubAccess | undefined): void => { previousAccess = value; }); if (!current()) throw new Error('request_updated');
+      try {
+        if (route) {
+          this.local.allowHub(config.hubId);
+          const state = this.captureViewPath(this.sshViewKey(config.hubId));
+          settleRoute = await route.install(config.hubId, config.baseUrl, config.pin, state, current);
+        }
+        if (!current()) throw new Error('request_updated');
+        await vault.put(config.hubId, config.token, config.access); written = true;
+        if (!current()) throw new Error('request_updated');
+      } catch (error) {
+        try { if (written) await rollback(); } finally { if (settleRoute) await settleRoute(false); }
+        throw error as Error;
+      }
     });
-    if (!current()) { if (written) await this.credentialChange(config.hubId, rollback); throw new Error('request_updated'); }
+    if (!current()) {
+      try { if (written) await this.credentialChange(config.hubId, rollback); }
+      finally { if (settleRoute) await settleRoute(false); }
+      throw new Error('request_updated');
+    }
     this.retireHubConnections(config.hubId);
     const profile = new HubProfile(config.hubId, name, config.baseUrl);
     profile.addresses = config.alternateUrls?.slice() || []; profile.hubId = config.hubId; profile.pin = config.pin; profile.manager = config.managerId;
     this.profiles = this.profiles.filter((item: HubProfile) => item.id !== profile.id).concat([profile]);
+    if (settleRoute) await settleRoute(true);
     await this.selectProfile(profile);
     } finally {
       this.pairingProfiles.delete(config.hubId);
@@ -498,16 +650,18 @@ export class ClientModel {
     this.ssh.stop(); this.stopReconnect(); this.cancelDraftTimer(); const keep = preserve && profile.id === this.profile.id && profile.manager === this.profile.manager;
     const saved = this.persistDraft(); this.closeTranscript(); this.releaseTerminal(); this.repository?.close(); this.repository = undefined;
     const generation = ++this.generation; this.selectionGeneration++; const selection = this.selected;
+    this.sendAttempts.clear(); this.feedbackChanged();
     this.profile = profile; const scope = this.scope(); this.connected = false;
     this.clearPendingDecisions();
-    this.unresolvedWrites = []; this.operationState = ''; this.mainId = ''; this.mainMachineId = ''; this.features = []; this.managers = [];
+    this.unresolvedWrites = []; this.operationState = ''; this.mainId = ''; this.mainMachineId = ''; this.sidebarConfig = ''; this.features = []; this.managers = []; this.rosterDefaultId = '';
     this.demo = false; this.demoRepository = undefined; this.error = '';
     if (!keep) { this.sessionsReady = false; this.sessions = []; this.machines = []; this.conversations = []; this.todos = []; this.inbox = []; this.knowledge = []; this.messages = []; } this.selected = keep ? selection : new ResourceRow(); this.draftLoading = false;
     if (!keep && !this.detached) { this.directoryReady = false; this.directoryLoading = false; this.directoryUnavailable = 0; this.publishDirectory(); }
     if (!keep) { this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); }
     await saved; if (!this.owns(generation, scope)) return;
     await this.saveProfiles(); if (!this.owns(generation, scope) || !this.foreground) return;
-    const token = await this.vault?.get(profile.id);
+    let access: HubAccess | undefined;
+    const token = await this.vault?.get(profile.id, (value: HubAccess | undefined): void => { access = value; });
     if (!this.owns(generation, scope)) return;
     if (!token) { this.error = 'welcome'; return; }
     if (profile.manager) await this.restoreSnapshot(generation, scope);
@@ -515,18 +669,37 @@ export class ClientModel {
     try {
       await this.ssh.bind(this, (): boolean => this.foreground && !this.retired && !this.forgettingProfiles.has(profile.id));
       if (!this.owns(generation, scope) || !this.foreground) return;
-      proxy = await this.ssh.acquire();
-      const address = proxy ? profile.baseUrl : await Pairing.reachable(profile.baseUrl, profile.addresses, profile.hubId, profile.pin, (): boolean => this.owns(generation, scope) && this.foreground);
+      const current = (): boolean => this.owns(generation, scope) && this.foreground;
+      const direct = (required: boolean): Promise<string> => Pairing.reachable(profile.baseUrl, profile.addresses,
+        profile.hubId, profile.pin, current, access, required);
+      const config = this.ssh.configuration, policy = config?.enabled ? config.routePolicy : 'legacy';
+      let address = profile.baseUrl;
+      if (policy === 'fallback') {
+        try { address = await direct(true); }
+        catch (error) {
+          if (!current()) return;
+          proxy = await this.ssh.acquire(current);
+          if (!proxy) throw error as Error;
+          this.ssh.watchDirect((): Promise<string> => direct(true), (): void => {
+            if (current()) this.selectProfile(profile,true).catch((failure: Error) => this.failure(failure));
+          });
+        }
+      } else {
+        try { proxy = await this.ssh.acquire(); }
+        catch (error) { if (policy !== 'always' || !current()) throw error as Error; }
+        if (!proxy) address = await direct(policy === 'always');
+      }
       if (!this.owns(generation, scope) || !this.foreground) return;
+      if (!proxy && (policy === 'always' || policy === 'fallback')) this.ssh.usingDirectAddress();
       if (address !== profile.baseUrl) { profile.addresses = Array.from(new Set<string>([profile.baseUrl].concat(profile.addresses))).filter((value: string) => value !== address && value.startsWith('https://')); profile.baseUrl = address; await this.saveProfiles(); }
     } catch (error) { if (this.owns(generation, scope)) { this.failure(error as Error); this.scheduleReconnect(); } return; }
     if (!this.owns(generation, scope) || !this.foreground) return;
     let defaultOwner = '';
-    const probe = new HubTransport(new EndpointConfig(profile.baseUrl, profile.hubId, token, profile.pin, '', [], proxy));
+    const probe = new HubTransport(new EndpointConfig(profile.baseUrl, profile.hubId, token, profile.pin, '', [], proxy, access));
     try {
       const roster = Wire.parse(await probe.request('/api/v1/managers'));
       if (!this.owns(generation, scope)) return;
-      defaultOwner = Wire.text(roster, 'default');
+      defaultOwner = Wire.text(roster, 'default'); this.rosterDefaultId = defaultOwner;
       const managerId = resolveManagerScope(profile.manager, defaultOwner, Wire.rows(roster, 'managers').map((item: Record<string, Object>) => Wire.text(item, 'id')));
       if (managerId !== profile.manager) {
         const canonical = new HubProfile(profile.id, profile.name, profile.baseUrl);
@@ -534,6 +707,7 @@ export class ClientModel {
         this.profiles = this.profiles.map((item: HubProfile) => item.id === canonical.id ? canonical : item);
         await this.selectProfile(canonical); return;
       }
+      this.managers = Wire.rows(roster, 'managers').map((item: Record<string,Object>) => ResourceRow.from(item,'manager'));
     } catch (error) {
       if (!this.owns(generation, scope)) return;
       // A hub without manager support has one legacy scope. Never downgrade a named manager.
@@ -541,7 +715,7 @@ export class ClientModel {
     } finally { probe.close(); }
     if (!profile.manager) await this.restoreSnapshot(generation, scope);
     if (!this.owns(generation, scope) || !this.foreground) return;
-    const config = new EndpointConfig(profile.baseUrl, profile.hubId, token, profile.pin, profile.manager, [], proxy);
+    const config = new EndpointConfig(profile.baseUrl, profile.hubId, token, profile.pin, profile.manager, [], proxy, access);
     this.repository = new HubRepository(config, this.local, () => { if (this.owns(generation, scope)) this.unresolvedWrites = this.repository?.mutations?.blocked() || []; }, defaultOwner);
     await this.repository.mutations?.load(); if (!this.owns(generation, scope) || !this.foreground) return; this.unresolvedWrites = this.repository.mutations?.blocked() || [];
     await this.repository.transport.connect((payload: string) => {
@@ -550,7 +724,7 @@ export class ClientModel {
       if (!this.owns(generation, scope)) return;
       this.connected = state === 'ready' || state === 'online';
       if (this.connected) { this.reconnectAttempt = 0; this.stopReconnect(); }
-      if (state === 'offline' || state === 'closed') { this.clearPendingDecisions(); this.releaseTerminal(); this.error = 'offline'; this.scheduleReconnect(); }
+      if (state === 'offline' || state === 'closed') { this.helloGeneration = -1; this.clearPendingDecisions(); this.releaseTerminal(); this.error = 'offline'; this.scheduleReconnect(); }
       else if (this.connected && this.isChat() && (this.chatVisible || this.decisionsVisible)) {
         const row = this.selected;
         if (this.chatVisible) this.loadChat(row).catch((error: Error) => this.failure(error));
@@ -576,8 +750,26 @@ export class ClientModel {
       owner.heldReceipts = restored;
       this.sessionsReady = Wire.has(snapshot, 'sessions');
       this.sessions = Wire.rows(snapshot, 'sessions').map((data: Record<string, Object>) => this.cachedRow(data, 'session'));
+      this.sidebarConfig = Wire.text(snapshot, 'sidebarConfig');
+      if (this.sidebarConfig) {
+        const config=Wire.parse(this.sidebarConfig);
+        this.mainId=Wire.text(config,'main'); this.mainMachineId=Wire.text(config,'main_machine_id');
+      }
       this.conversations = Wire.rows(snapshot, 'conversations').map((data: Record<string, Object>) => this.cachedRow(data, 'conversation')); this.publishDirectory();
     } catch (_) { if (this.owns(generation, scope)) this.error = 'cache_unavailable'; }
+  }
+  listedManagers(): ResourceRow[] {
+    return this.managers.filter((row: ResourceRow) => !!row.id && !Wire.bool(row.data(), 'hidden'));
+  }
+  async selectListedManager(id: string, sourceScope: string): Promise<void> {
+    if (sourceScope !== this.scope() || this.profile.manager === id) return;
+    const row = this.listedManagers().find((item: ResourceRow) => item.id === id);
+    if (!row || row.isInstallingManager()) return;
+    const group = this.profile.id;
+    try { await this.selectManager(id); }
+    catch (error) {
+      if (this.profile.id === group && (this.scope() === sourceScope || this.profile.manager === id)) this.reportError(error as Error);
+    }
   }
   async selectManager(id: string): Promise<void> {
     if (this.demo && id === this.profile.manager) return;
@@ -605,9 +797,10 @@ export class ClientModel {
       this.stopReconnect(); this.cancelDraftTimer(); this.closeTranscript(); this.releaseTerminal();
       this.repository?.close(); this.repository = undefined; this.generation++; this.selectionGeneration++;
       this.profile = new HubProfile(); this.connected = false; this.selected = new ResourceRow();
+      this.sendAttempts.clear(); this.feedbackChanged();
       this.sessionsReady = false; this.sessions = []; this.conversations = []; this.machines = []; this.managers = []; this.todos = []; this.knowledge = []; this.inbox = [];
       this.clearPendingDecisions();
-      this.messages = []; this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); this.detail = ''; this.reply = ''; this.mainId = ''; this.mainMachineId = '';
+      this.messages = []; this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); this.detail = ''; this.reply = ''; this.mainId = ''; this.mainMachineId = ''; this.sidebarConfig = '';
       this.unresolvedWrites = []; this.operationState = ''; this.notificationTarget = ''; this.draftLoading = false; this.features = []; this.error = '';
     }
     this.publishDirectory();
@@ -637,9 +830,18 @@ export class ClientModel {
   private event(payload: string): void {
     try {
       const data = Wire.parse(payload), type = Wire.text(data, 'type');
-      if (type === 'hello') { const hubId = Wire.text(data, 'hub_id'); if (hubId && hubId !== this.profile.hubId) { this.repository?.close(); this.error = 'identity_changed'; return; } }
-      this.workspace?.onEvent(data); this.deviceEvent?.(payload);
-      for (const listener of this.eventListeners) { try { listener(payload); } catch (_) {} }
+      if (type === 'hello') {
+        this.helloGeneration = -1;
+        const hubId = Wire.text(data, 'hub_id');
+        if (hubId && hubId !== this.profile.hubId) { this.repository?.close(); this.error = 'identity_changed'; return; }
+        if (hubId && hubId === this.profile.hubId) {
+          this.helloHub = hubId; this.helloScope = this.scope(); this.helloGeneration = this.generation;
+          this.helloVersion = Wire.text(data, 'server_version'); this.helloFeatures = Wire.strings(data, 'features');
+        }
+      }
+      this.workspace?.onEvent(data);
+      if (type === 'tool_call') this.deviceEvent?.(payload);
+      for (const listener of this.eventListeners) { try { listener(payload, type); } catch (_) {} }
       if (type === 'hello') {
         this.features = Wire.strings(data, 'features'); this.connected = true; this.error = '';
         this.repository?.transport.hello(nativeNotifications.features(!this.detached && this.alerts));
@@ -650,6 +852,8 @@ export class ClientModel {
         if (Wire.text(data, 'machine_id') === this.selected.machine && Wire.text(data, 'session_id') === this.selected.session)
           this.terminalText = (this.terminalText + Wire.text(data, 'data')).slice(-200000);
       } else if (['interaction', 'interactions', 'interaction_resolved', 'session', 'sessions', 'sessions_delta', 'item', 'items', 'session_delta', 'todo', 'inbox', 'task_plan', 'assistant_feed', 'managers', 'machines'].includes(type)) {
+        if (type === 'inbox') this.inboxRead.change++;
+        if (type === 'todo') this.todoRead.change++;
         this.queueRefresh();
       }
     } catch (_) { this.error = 'failed'; }
@@ -679,11 +883,17 @@ export class ClientModel {
     try {
       const sessions = await repo.sessions(), assistant = await repo.call('/api/v1/assistant');
       const machines = await repo.machines();
-      const managers = this.features.includes('managers') ? await repo.list('/api/v1/managers', 'managers', 'manager') : [];
+      let managers: ResourceRow[] = [];
+      let rosterDefault = this.rosterDefaultId;
+      if (this.managers.length || this.features.includes('sessions_manager') || this.features.includes('managers')) {
+        try { managers = await repo.list('/api/v1/managers', 'managers', 'manager', false, (roster: Record<string,Object>) => { rosterDefault = Wire.text(roster,'default'); }); }
+        catch (error) { if (!(error instanceof HttpFailure) || ![404,501].includes(error.status)) throw error as Error; }
+      }
       if (!this.owns(generation, scope)) return;
       if (heldRevision !== owner.heldRevision(scope)) { this.queueRefresh(); return; }
       sessions.forEach((row: ResourceRow) => row.group = this.profile.id); machines.forEach((row: ResourceRow) => row.group = this.profile.id);
-      this.sessions = sessions; this.sessionsReady = true; this.machines = machines; this.managers = managers;
+      this.sessions = sessions; this.sessionsReady = true; this.machines = machines; this.managers = managers; this.rosterDefaultId = rosterDefault;
+      this.updateSendFeedbackSessions(sessions);
       if (owner.heldReceipts.length) owner.heldReceipts = owner.heldReceipts.filter((receipt: HeldActionReceipt) => {
         if (receipt.scope !== scope) return true;
         const row = sessions.find((item: ResourceRow) => this.target(item) === receipt.target);
@@ -701,6 +911,7 @@ export class ClientModel {
         else { this.selected.raw = JSON.stringify(Wire.payload(['read_only'], [true])); this.selected.state = 'unknown'; this.clearPendingDecisions(); }
         this.reconcileMessageCopies();
       }
+      this.acceptSidebarConfig(assistant);
       this.mainId = Wire.text(assistant, 'main'); this.mainMachineId = Wire.text(assistant, 'main_machine_id', Wire.text(assistant, 'machine_id'));
       this.conversations = Wire.rows(assistant, 'conversations').map((data: Record<string, Object>) => {
         const row = ResourceRow.from(data, 'conversation'); row.manager = this.profile.manager;
@@ -710,13 +921,38 @@ export class ClientModel {
       const heldActions = owner.heldReceipts.filter((receipt: HeldActionReceipt) => receipt.scope === scope)
         .map((receipt: HeldActionReceipt) => this.cachedHeldAction(receipt));
       try { await new ChatDraftStore(this.local).saveSessionSnapshot(scope, sessions, this.conversations, heldActions,
-        (): boolean => this.owns(generation, scope) && owner.heldRevision(scope) === heldRevision); }
+        (): boolean => this.owns(generation, scope) && owner.heldRevision(scope) === heldRevision, this.sidebarConfig); }
       catch (_) { if (this.owns(generation, scope)) this.error = 'cache_unavailable'; }
       if (this.isChat() && this.chatVisible) await this.loadChat(this.selected);
       else if (this.isChat() && this.decisionsVisible) await this.refreshDecisions();
-      if (this.section === 2) { const inbox = await repo.inbox(); if (this.owns(generation, scope)) this.inbox = inbox; }
+      else this.readInteractionSnapshot().catch(() => {});
+      this.refreshPhoneList('todo', repo, generation, scope, false).catch(() => {});
+      if (this.section === 2) await this.refreshPhoneList('inbox', repo, generation, scope, true);
+      else if (!this.detached) this.refreshPhoneList('inbox', repo, generation, scope, false).catch(() => {});
     } catch (error) { if (this.owns(generation, scope)) this.failure(error as Error); }
     finally { if (this.owns(generation, scope)) { this.busy = false; this.publishDirectory(); } }
+  }
+  private async refreshPhoneList(kind: string, repo: HubRepository, generation: number, scope: string, force: boolean): Promise<void> {
+    const state = kind === 'todo' ? this.todoRead : this.inboxRead;
+    const change = state.change, key = JSON.stringify([generation, scope, change]);
+    if (key === state.pendingKey && state.pending) return state.pending;
+    if (!force && key === state.snapshot) return;
+    state.pendingKey = key;
+    const read = kind === 'todo' ? repo.todos() : repo.inbox();
+    state.pending = read.then((rows: ResourceRow[]) => {
+      if (!this.owns(generation, scope) || state.change !== change) return;
+      if (kind === 'todo') this.todos = rows;
+      else this.inbox = rows;
+      state.snapshot = key;
+    }).finally(() => {
+      if (state.pendingKey === key) { state.pending = undefined; state.pendingKey = ''; }
+    });
+    return state.pending;
+  }
+  phoneTodoBadge(): number {
+    if (!this.connected) return 0;
+    return this.todos.filter((row: ResourceRow): boolean =>
+      (!row.manager || row.manager === this.profile.manager) && !row.isDone() && !Wire.bool(row.data(), 'quiet')).length;
   }
   async openMain(): Promise<ResourceRow> {
     const generation = this.generation, scope = this.scope(), repository = this.repository;
@@ -769,6 +1005,56 @@ export class ClientModel {
     const row = ResourceRow.from(data, kind); row.group = this.profile.id; row.raw = Wire.text(data, 'raw', '{}'); row.session = Wire.text(data, 'session', row.id); return row;
   }
   private cancelDraftTimer(): void { if (this.draftTimer !== -1) clearTimeout(this.draftTimer); this.draftTimer = -1; }
+  sendFeedbackPhase(): string {
+    if (!this.sendFeedbackRevision) return '';
+    const current = this.sendAttempts.get(this.target());
+    const phase = current?.visible(Date.now()) || '';
+    // After its own echo, actual running work has its own status line.
+    if (phase === 'processing' && current && current.echoSequence >= 0 && this.renderedMessages.some((m: ChatMessage) => m.role === 'work' && m.running)) return '';
+    return phase;
+  }
+  isSendingMessage(id: string): boolean { return this.sendFeedbackPhase() === 'sending' && this.sendAttempts.get(this.target())?.id === id; }
+  sendFeedbackWorkHeader(): boolean {
+    return this.sendFeedbackPhase() === 'processing' && (this.sendAttempts.get(this.target())?.echoSequence ?? -1) >= 0;
+  }
+  private feedbackChanged(): void {
+    this.sendFeedbackRevision++;
+    const current = this.sendAttempts.get(this.target()), now = Date.now();
+    const deadline = this.isForegroundChat() && current?.visible(now) === 'processing' ? current.acceptedAt + ChatSendFeedback.acceptedWindow : 0;
+    if (deadline === this.feedbackDeadline) return;
+    if (this.feedbackTimer !== -1) clearTimeout(this.feedbackTimer);
+    this.feedbackTimer = -1; this.feedbackDeadline = deadline;
+    if (deadline) this.feedbackTimer = setTimeout(() => { this.feedbackTimer = -1; this.feedbackDeadline = 0; this.feedbackChanged(); }, Math.max(1, deadline-now));
+  }
+  private makeSendFeedback(row: ResourceRow, entry: ChatOutboxEntry): ChatSendFeedback {
+    const current = this.sessionRow(row), data = current.data();
+    return new ChatSendFeedback(entry.id, row.machine, row.session || row.id, entry.afterSequence, entry.at,
+      Wire.text(data,'status',current.state), Wire.text(data,'failure_reason'), Wire.text(data,'state_since'));
+  }
+  private updateSendFeedbackSessions(rows: ResourceRow[]): void {
+    if (!this.sendAttempts.size) return;
+    const now = Date.now();
+    for (const target of this.sendAttempts.keys()) {
+      const attempt = this.sendAttempts.get(target); if (!attempt) continue;
+      if (!attempt.visible(now) && now - Math.max(attempt.acceptedAt,attempt.startedAt) >= ChatSendFeedback.acceptedWindow) {
+        this.sendAttempts.delete(target); continue;
+      }
+      const row = rows.find((r: ResourceRow) => r.machine === attempt.machine && (r.session || r.id) === attempt.session);
+      if (row) {
+        const data = row.data();
+        const wasProcessing = attempt.visible(now) === 'processing';
+        attempt.observeSession(Wire.text(data,'status',row.state), Wire.text(data,'failure_reason'), Wire.text(data,'state_since'));
+        if (wasProcessing && !attempt.visible(now)) this.endSendFeedback(this.scope(),target,attempt);
+      }
+    }
+    this.feedbackChanged();
+  }
+  private async endSendFeedback(scope: string, target: string, attempt: ChatSendFeedback): Promise<void> {
+    attempt.finish(); this.feedbackChanged();
+    try { await new ChatDraftStore(this.local).finishFeedback(scope,attempt.id); } catch (_) {
+      if (this.scope() === scope && this.target() === target) this.error = 'cache_unavailable';
+    }
+  }
   async select(row: ResourceRow): Promise<void> {
     if (row.group && row.group !== this.profile.id || row.manager && row.manager !== this.profile.manager) throw new Error('request_updated');
     const generation = this.generation, scope = this.scope(), selection = ++this.selectionGeneration;
@@ -776,6 +1062,7 @@ export class ClientModel {
     this.closeTranscript(); this.releaseTerminal(); this.selected = row; this.messages = []; this.clearPendingDecisions(); this.error = '';
     this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.draftLoading = true;
     this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); this.operationState = '';
+    this.feedbackChanged();
     try {
       const saved = await new ChatDraftStore(this.local).read(this.target());
       if (!this.owns(generation, scope) || selection !== this.selectionGeneration) return;
@@ -784,6 +1071,7 @@ export class ClientModel {
     } finally { if (this.owns(generation, scope) && selection === this.selectionGeneration) this.draftLoading = false; }
     if (!this.owns(generation, scope) || selection !== this.selectionGeneration) return;
     this.chatVisible = this.isChat();
+    this.feedbackChanged();
     if (this.chatVisible) await this.loadChat(row);
     // Dedicated resource workspaces own their reads and endpoint-specific loading/error state.
   }
@@ -807,6 +1095,13 @@ export class ClientModel {
     const epoch = this.local.revision('outbox:' + scope), target = this.target(), repository = this.repository, entries = await new ChatDraftStore(this.local).list(scope);
     if (!this.owns(generation, scope) || target !== this.target() || !this.local.accepts('outbox:' + scope, epoch)) return;
     this.localMessages = entries;
+    if (!this.sendAttempts.has(target)) {
+      const now = Date.now(), last = entries.filter((entry: ChatOutboxEntry) => entry.target === target).pop();
+      if (last && last.state === 'done' && last.acceptedAt > 0 && now < last.acceptedAt + ChatSendFeedback.acceptedWindow) {
+        const attempt = this.makeSendFeedback(this.selected,last); attempt.accept(last.acceptedAt);
+        this.sendAttempts.set(target,attempt); this.feedbackChanged();
+      }
+    }
     for (const entry of entries) if (this.local.accepts('outbox:' + scope, epoch) && entry.state === 'pending' && !entry.confirmedPending && !this.activeMessages.has(entry.id) && !this.unresolvedWrites.some((record: MutationRecord) => record.id === entry.id)) { entry.state = 'unknown'; await new ChatDraftStore(this.local).settle(scope, entry.id, 'unknown'); }
     for (const entry of entries) if (entry.target === target && entry.state === 'done') await this.completeLocalDelivery(entry, scope, repository);
     if (!this.owns(generation, scope) || target !== this.target() || !this.local.accepts('outbox:' + scope, epoch)) return;
@@ -848,8 +1143,20 @@ export class ClientModel {
     });
     this.messages = this.renderedMessages.concat(heldBubbles, messages);
   }
+  dictationLocaleForChat(): string {
+    const language = this.language === 'default' ? i18n.System.getSystemLanguage() : this.language;
+    return dictationLocale(dictationPreference.choice, dictationTexts(this.draft, this.revisionItems), dictationPreference.last, language);
+  }
+  rememberDictationLocale(locale: string): void { dictationPreference.remember(locale); }
   private publishTranscript(items: readonly TranscriptItem[], running: boolean): void {
-    this.revisionItems = items.slice(); this.renderedMessages = this.projectMessages(items, running);
+    this.revisionItems = items.slice();
+    const isMain = this.isMainActivityRow(this.selected);
+    const projection = isMain ? splitBackgroundRounds(items, running) : undefined;
+    this.activityOwner = isMain ? this.target() : '';
+    this.activityRounds = projection?.rounds || [];
+    this.renderedMessages = this.projectMessages(projection?.timeline || items, running);
+    const feedback = this.sendAttempts.get(this.target());
+    if (feedback) { feedback.observeItems(projection?.timeline || items); this.feedbackChanged(); }
     this.echoedMessages = new Set(items.filter((item: TranscriptItem) => item.role === 'user').map((item: TranscriptItem) => Wire.text(Wire.record(item as Object), 'client_msg_id')).filter((id: string) => !!id));
     this.reconcileMessageCopies();
   }
@@ -892,7 +1199,7 @@ export class ClientModel {
     const store = new ChatDraftStore(this.local);
     const journal = repository?.mutations?.blocked().find((record: MutationRecord) => record.id === entry.id);
     if (journal) await repository?.mutations?.finish(journal, 'done');
-    await store.settle(scope, entry.id, 'done'); await store.acknowledge(entry.target, entry.revision);
+    await store.settle(scope, entry.id, 'done', entry.acceptedAt); await store.acknowledge(entry.target, entry.revision);
     if (entry.attachmentSnapshot) {
       if (!this.context) throw new Error('chat_attachment_storage_unavailable');
       await ChatAttachments.commitStoredSnapshot(this.context, entry.attachmentSnapshot, entry.target, valid);
@@ -913,7 +1220,7 @@ export class ClientModel {
     if (!this.connected) { await this.cachedChat(row); return; }
     const sequence = ++this.decisionRefreshSequence;
     let interactions: Record<string, Object>[] = [], decisionsRead = false;
-    try { interactions = await this.repo().decisions(); decisionsRead = true; }
+    try { interactions = await this.readInteractionSnapshot(); decisionsRead = true; }
     catch (error) { if (this.owns(generation, scope) && this.target() === target) this.failure(error as Error); }
     if (!this.owns(generation, scope) || this.target() !== target) return;
     if (decisionsRead) this.replacePendingDecisions(interactions, row, target, generation, scope, sequence);
@@ -921,25 +1228,43 @@ export class ClientModel {
       this.closeTranscript(); this.transcriptKey = target;
       this.transcript = new TranscriptModel(row, this.repo(), this.local, target, (items: readonly TranscriptItem[], hasMore: boolean, historyReady: boolean) => {
         if (!this.owns(generation, scope) || this.target() !== target) return;
-        this.hasMoreMessages = hasMore; this.transcriptHistoryReady = historyReady; this.publishTranscript(items, row.state === 'working' || Wire.bool(row.data(), 'working'));
+        this.hasMoreMessages = hasMore; this.transcriptHistoryReady = historyReady; this.publishTranscript(items, this.turnWorking());
       }, (error: Error) => { if (this.owns(generation, scope) && this.target() === target) this.failure(error); });
       await this.transcript.open();
     } else await this.transcript.latest();
   }
   private projectMessages(items: readonly TranscriptItem[], running: boolean): ChatMessage[] {
     const turns: TranscriptItem[][] = []; let turn: TranscriptItem[] = [];
+    const isRecap = (item: TranscriptItem): boolean => item.kind === 'recap' && item.role === 'system' && !!item.id && !!item.text?.trim();
     items.forEach((item: TranscriptItem) => {
-      if (turn.length > 0 && (item.wake === true || (item.role === 'user' && item.kind === 'text'))) { turns.push(turn); turn = []; }
+      const startsTurn = item.wake === true || (item.role === 'user' && item.kind === 'text');
+      if (turn.length && (startsTurn || isRecap(item) !== isRecap(turn[0]))) {
+        turns.push(turn); turn = [];
+      }
       turn.push(item);
     });
     if (turn.length) turns.push(turn);
     const messages: ChatMessage[] = [];
     turns.forEach((group: TranscriptItem[], index: number) => {
+      if (isRecap(group[0])) {
+        const message = new ChatMessage('recap:' + group[0].id, 'recap', group[group.length - 1].text || '');
+        message.ownerTarget = this.target();
+        message.itemId = group[0].id;
+        message.at = this.itemTime(group[0]);
+        message.terminalRecap = index === turns.length - 1;
+        message.recaps = group.map((item: TranscriptItem): ConversationRecapItem => {
+          return { id: item.id, at: this.itemTime(item), text: item.text || '' };
+        });
+        messages.push(message);
+        return;
+      }
       const projection = projectToolTurn(group[0].id, group, running && index === turns.length - 1);
       projection.userMessages.forEach((item: TranscriptItem) => { const display = messageDisplay(item.text || ''); const message = new ChatMessage(item.id, 'user', display.text); message.ownerTarget = this.target(); message.itemId = item.id; message.source = display.sources; const content = parseMessageContent(display.text); message.text = content.text; message.imagePaths = content.images; message.filePaths = content.files; message.at = this.itemTime(item); messages.push(message); });
       projection.userImages.forEach((item: TranscriptItem) => { const message = new ChatMessage(item.id, 'user'); message.imageId = item.id; message.ownerTarget = this.target(); message.itemId = item.id; message.at = this.itemTime(item); messages.push(message); });
       if (projection.summaryVisible) {
         const summary = new ChatMessage(projection.workKey, 'work');
+        summary.at = this.itemTime(group[0]);
+        summary.toolCount = projection.toolCount; summary.thoughtCount = projection.thoughtCount; summary.running = projection.running;
         summary.work = projection.inspectionSteps.map((step: WorkInspectionStep) => this.workText(step)).filter((value: string) => !!value).join('\n\n');
         summary.raw = JSON.stringify(group); messages.push(summary);
       }
@@ -961,8 +1286,11 @@ export class ClientModel {
       step.results.map((item: TranscriptItem) => item.text || '').join('\n')].filter((value: string) => !!value).join('\n');
   }
   private closeTranscript(): void { this.transcriptHistoryReady = false; this.transcript?.close(); this.transcript = undefined; this.transcriptKey = ''; this.revisionItems = []; }
-  showConversation(row: ResourceRow): void { this.chatVisible = true; this.loadChat(row).catch((error: Error) => this.failure(error)); }
-  hideConversation(releaseTools: boolean = true): void { this.chatVisible = false; this.closeTranscript(); this.clearPendingDecisions(); if (releaseTools) this.releaseTerminal(); this.persistDraft().catch(() => this.error = 'failed'); }
+  showConversation(row: ResourceRow): void { this.chatVisible = true; this.feedbackChanged(); this.loadChat(row).catch((error: Error) => this.failure(error)); }
+  hideConversation(releaseTools: boolean = true): void { this.chatVisible = false; this.feedbackChanged(); this.closeTranscript(); this.clearPendingDecisions(); if (releaseTools) this.releaseTerminal(); this.persistDraft().catch(() => this.error = 'failed'); }
+  decisionSourceMessage(toolUseId: string): string {
+    return this.transcriptKey === this.target() ? this.transcript?.decisionSource(toolUseId) || '' : '';
+  }
   async loadOlder(): Promise<boolean> { try { if (!this.transcript) return false; await this.transcript.older(); return true; } catch (error) { this.failure(error as Error); return false; } }
   async expandWork(message: ChatMessage): Promise<void> {
     try {
@@ -979,12 +1307,103 @@ export class ClientModel {
     if (this.operationBlocked('/api/v1/interactions/' + segment(decision.id) + '/resolve')) decision.status = 'unknown';
     return decision;
   }
-  prepareMessageText(text: string = this.draft): string { return withSourceContext(text, this.sourceContext, this.features); }
+  sentForwards(message:ChatMessage):Record<string,Object>[] {
+    if(message.ownerTarget!==this.target() || message.role!=='user' || !message.source)return [];
+    const original=this.revisionItems.find((item:TranscriptItem)=>item.id===(message.itemId||message.id));
+    return original?.text?forwardPrefix(original.text).entries.filter((r:Record<string,Object>)=>Wire.text(r,'kind')==='forward'):[];
+  }
+  sentOtherSourceTitle(message:ChatMessage):string {
+    if (!this.sentForwards(message).length) return message.source;
+    const item=this.revisionItems.find((v:TranscriptItem) => v.id===(message.itemId || message.id));
+    return item?.text ? forwardPrefix(item.text).entries.filter((r:Record<string,Object>) => Wire.text(r,'kind')!=='forward')
+      .map((r:Record<string,Object>) => Wire.text(r,'title')).filter((v:string)=>!!v).join(' · ') : message.source;
+  }
+  forwardedOrigin(ref:Record<string,Object>):ResourceRow|undefined {
+    const link=forwardOrigin(ref);if(!link)return undefined;
+    const dir=this.forwardDirectory();
+    return dir.conversations.concat(dir.sessions).find(r=>(!r.group||r.group===this.profile.id) &&
+      r.machine===link.machine && (r.session||r.id)===link.session && this.capabilities(r).canRead);
+  }
+  sentForwardGroups(message:ChatMessage):Record<string,Object>[][] {
+    if(message.ownerTarget!==this.target() || message.role!=='user' || !message.source)return [];
+    const original=this.revisionItems.find((item:TranscriptItem)=>item.id===(message.itemId||message.id));
+    return original?.text?forwardGroups(forwardPrefix(original.text).entries):[];
+  }
+  forwardDraftGroups():Record<string,Object>[][] {return forwardGroups(this.draftContexts(this.sourceContext));}
+  hasForwardContext():boolean { return this.sourceContext.includes('"forward"') && draftForwardRows(this.sourceContext).length>0; }
+  forwardContexts():Record<string,Object>[] { return draftForwardRows(this.sourceContext); }
+  hasSendableContext():boolean {
+    if (!this.sourceContext) return false;
+    try {
+      return this.draftContexts(this.sourceContext).some((ref:Record<string,Object>) =>
+        !!Wire.text(ref,'kind') && !!(Wire.text(ref,'text') || Wire.text(ref,'id') || Wire.text(ref,'msg') || Wire.text(ref,'item_id') || Wire.text(ref,'title')));
+    } catch (_) { return false; }
+  }
+  prepareMessageText(text:string=this.draft,attachmentNoteKey:string=''):string {
+    const hasContext=this.hasSendableContext();
+    if (!text.trim() && attachmentNoteKey) text=tr(attachmentNoteKey);
+    else if (!text.trim() && hasContext) {
+      const forwards=this.forwardContexts().length;
+      text=tr(forwards>1 ? 'chat_forward_several_note' : forwards===1 ? 'chat_forward_single_note' : 'chat_context_only_note');
+    }
+    return hasContext ? withSourceContext(text,this.sourceContext,this.features) : text;
+  }
+  /** Target lists use only the directory captured for the originating Hub. */
+  forwardDirectory():ClientModel {
+    const root=this.directoryParent;
+    return root && root.profile.id===this.profile.id && root.profile.hubId===this.profile.hubId ? root : this;
+  }
+  canForwardTo(row:ResourceRow,ended:boolean=true):boolean {
+    if (!this.connected || (row.group && row.group!==this.profile.id) || !['session','conversation'].includes(row.kind) ||
+      !row.id || !row.machine || !this.profile.id) return false;
+    const endpoints=this.forwardDirectory();
+    const current=endpoints.conversations.concat(endpoints.sessions).find(r=>r.kind===row.kind && r.id===row.id &&
+      r.machine===row.machine && (!r.group || r.group===this.profile.id) && (!r.manager || !row.manager || r.manager===row.manager));
+    if(!current)return false;
+    const d=current.data(), effective=this.capabilities(current), caps=Wire.object(d,'capabilities');
+    if(Wire.bool(d,'deleted') || Wire.has(d,'capabilities') && !Wire.bool(caps,'send'))return false;
+    if (!effective.canSend || Wire.bool(d,'archived') || Wire.bool(d,'health') || Wire.bool(d,'is_health') ||
+        Wire.text(d,'space')==='health' || Wire.text(d,'purpose')==='health' || Wire.text(d,'kind')==='health') return false;
+    if (this.selected.machine===row.machine && (this.selected.session||this.selected.id)===(row.session||row.id)) return false;
+    if (row.kind==='conversation' || Wire.bool(d,'assistant')) return true;
+    const machine=endpoints.machines.find((m:ResourceRow)=>m.id===row.machine && (!m.group || m.group===this.profile.id));
+    return !!machine && Wire.bool(machine.data(),'online') && (ended || current.state.toLowerCase()!=='offline');
+  }
+  async receiveForward(target:ResourceRow,refs:Record<string,Object>[],images:DraftForwardImage[],transfer:string,admit:()=>boolean):Promise<void> {
+    const generation=this.connectionGeneration(),scope=this.scope();
+    const key=JSON.stringify([scopeKey({groupId:this.profile.id,managerId:target.manager || this.profile.manager}),target.kind,target.machine,target.id]);
+    const current=():boolean=>admit() && this.owns(generation,scope) && this.canForwardTo(target);
+    if(!current()) throw new Error('request_updated');
+    const root=this.directoryParent || this, viewers:ClientModel[]=[root,...Array.from(root.views.values())];
+    const active=viewers.filter((v:ClientModel)=>v.selected.id && v.target()===key && !v.draftLoading && !v.retired);
+    for(const v of active) if(v.draftTimer!==-1){v.cancelDraftTimer();await v.persistDraft();}
+    const snapshots=new Map<ClientModel,string>();
+    for(const v of active)snapshots.set(v,v.draftRevision);
+    const store=new ChatDraftStore(this.local);
+    let merged=await store.appendForwards(key,refs,images,transfer,current);
+    if(!current())throw new Error('request_updated');
+    for(const v of active) if(v.target()===key && !v.retired) {
+      if(v.draftRevision!==snapshots.get(v)){
+        v.cancelDraftTimer();await v.persistDraft();
+        merged=await store.appendForwards(key,refs,images,transfer,current);
+      }
+      if(!current() || v.target()!==key || v.retired)continue;
+      v.draft=merged.text;v.sourceContext=merged.context;v.draftRevision=merged.revision;
+    }
+  }
+  async removeForward(item:string,url:string):Promise<void> {
+    const before=this.sourceContext,key=this.target(),old=this.draftRevision;
+    const refs=this.draftContexts(before);const index=refs.findIndex((v:Record<string,Object>)=>Wire.text(v,'kind')==='forward' && Wire.text(v,'msg')===item && Wire.text(v,'url')===url);
+    if(index<0)return;refs.splice(index,1);this.sourceContext=refs.length?JSON.stringify(Wire.payload(['contexts'],[refs])):'';this.draftRevision=util.generateRandomUUID();
+    const current=this.draftRevision;
+    try { await this.persistDraft();await new ChatDraftStore(this.local).discardForwardMedia(key,before,this.sourceContext); }
+    catch (_) { if(this.target()===key && this.draftRevision===current){this.sourceContext=before;this.draftRevision=old;this.error='cache_unavailable';} }
+  }
   async send(admit?: () => boolean): Promise<boolean> {
     if (admit && !admit()) return false;
     const text = this.draft;
     if (utf8Bytes(text) > 100000) { this.error = 'chat_attachment_text_too_large'; return false; }
-    if (this.draftLoading || this.decision || !this.canSend() || !text.trim() || ['pending', 'unknown'].includes(this.operationState)) return false;
+    if (this.draftLoading || !this.canSend() || (!text.trim() && !this.hasSendableContext()) || ['pending', 'unknown'].includes(this.operationState)) return false;
     if (this.demo && this.demoRepository) {
       const prepared = this.prepareMessageText(text); if (utf8Bytes(prepared) > 100000) { this.error = 'chat_attachment_request_too_large'; return false; }
       try { this.demoRepository.sendLocal(this.selected, prepared); this.sourceContext = ''; this.updateDraft(''); await this.loadChat(this.selected); return true; }
@@ -994,7 +1413,7 @@ export class ClientModel {
     return this.dispatchMessage(this.repo(), this.selected, preparedText, [], this.generation, this.scope(), this.target(), text, this.sourceContext, '', admit);
   }
   async sendPrepared(prepared: PreparedAttachmentSend, draft: string, context: string, admit?: () => boolean): Promise<boolean> {
-    if (admit && !admit() || !prepared.repository || this.draftLoading || this.decision || !this.canSend() || ['pending', 'unknown'].includes(this.operationState) ||
+    if (admit && !admit() || !prepared.repository || this.draftLoading || !this.canSend() || ['pending', 'unknown'].includes(this.operationState) ||
       !this.owns(prepared.generation, prepared.scope) || this.target() !== prepared.modelTarget || this.repository !== prepared.repository ||
       this.target(prepared.row) !== prepared.modelTarget || (!prepared.text.trim() && !prepared.images.length)) return false;
     if (this.draft !== draft || this.sourceContext !== context) { this.error = 'chat_attachment_selection_changed'; return false; }
@@ -1006,16 +1425,31 @@ export class ClientModel {
     const paired = (): boolean => (ClientModel.pairingEpochs.get(hub) || 0) === pairing && this.local.accepts('outbox:' + scope, entry.localEpoch);
     if (!this.draftRevision) this.draftRevision = util.generateRandomUUID();
     entry.id = util.generateRandomUUID(); entry.target = target; entry.revision = this.draftRevision; entry.text = text; entry.context = context; entry.draft = draft; entry.imageCount = images.length; entry.attachmentSnapshot = attachmentSnapshot; entry.at = Date.now(); entry.localEpoch = this.local.revision('outbox:' + scope);
+    entry.afterSequence = this.revisionItems.length ? this.revisionItems[this.revisionItems.length-1].seq : 0;
+    const feedback = this.makeSendFeedback(row,entry);
+    this.sendAttempts.set(target,feedback); this.feedbackChanged();
     this.activeMessages.add(entry.id); this.cancelDraftTimer(); this.operationState = 'pending'; this.error = ''; let dispatched = false, staged = false;
     try {
       const captured = new ChatDraft(); captured.text = draft; captured.context = context; captured.revision = entry.revision;
       await store.save(target, captured);
-      if (admit && !admit() || !this.owns(generation, scope) || this.target() !== target || this.repository !== repo) { this.activeMessages.delete(entry.id); if (this.owns(generation, scope) && this.target() === target) { this.operationState = 'failed'; this.error = 'request_updated'; } return false; }
+      if (admit && !admit() || !this.owns(generation, scope) || this.target() !== target || this.repository !== repo) { feedback.finish(); this.feedbackChanged(); this.activeMessages.delete(entry.id); if (this.owns(generation, scope) && this.target() === target) { this.operationState = 'failed'; this.error = 'request_updated'; } return false; }
+      if (context.includes('"forward"') && draftForwardRows(context).length) {
+        const current=():boolean=>this.owns(generation,scope) && this.target()===target && this.repository===repo && this.draftRevision===entry.revision && (!admit || admit());
+        const extras=await store.forwardedImages(target,context,4-images.length,current);
+        images=images.concat(extras);entry.imageCount=images.length;
+        if (utf8Bytes(JSON.stringify(Wire.payload(['text','images'],[text,images])))>=4*1024*1024) throw new Error('chat_attachment_request_too_large');
+      }
       await store.stage(scope, entry); staged = true;
-      if (admit && !admit() || !this.owns(generation, scope) || this.target() !== target || this.repository !== repo || this.draftRevision !== entry.revision || this.decision || !this.canSend()) { await store.settle(scope, entry.id, 'failed'); this.activeMessages.delete(entry.id); entry.state = 'failed'; if (this.owns(generation, scope) && this.target() === target) { this.operationState = 'failed'; this.error = 'request_updated'; this.publishMessages(); } return false; }
+      if (admit && !admit() || !this.owns(generation, scope) || this.target() !== target || this.repository !== repo || this.draftRevision !== entry.revision || !this.canSend()) { feedback.finish(); this.feedbackChanged(); await store.settle(scope, entry.id, 'failed'); this.activeMessages.delete(entry.id); entry.state = 'failed'; if (this.owns(generation, scope) && this.target() === target) { this.operationState = 'failed'; this.error = 'request_updated'; this.publishMessages(); } return false; }
       this.localMessages = this.localMessages.concat([entry]); this.publishMessages();
       dispatched = true;
-      const reply = await repo.send(row, text, entry.id, '', images, (): boolean => (!admit || admit()) && this.owns(generation, scope) && this.target() === target && this.repository === repo && this.draftRevision === entry.revision && !this.decision && this.canSend());
+      const reply = await repo.send(row, text, entry.id, '', images, (): boolean => (!admit || admit()) && this.owns(generation, scope) && this.target() === target && this.repository === repo && this.draftRevision === entry.revision && this.canSend());
+      if (reply && Wire.text(reply,'delivered') === 'later') feedback.finish();
+      else if (paired()) {
+        const now = Date.now(); feedback.accept(now);
+        if (feedback.visible(now) === 'processing') entry.acceptedAt = now;
+      }
+      this.feedbackChanged();
       if (reply && row.kind === 'session' && Wire.text(reply, 'delivered') === 'later') {
         const raw = Wire.object(reply, 'undelivered'), held = HeldAgentMessage.from(raw);
         if (held?.id === entry.id) {
@@ -1046,6 +1480,7 @@ export class ClientModel {
         }
       }
     } catch (error) {
+      feedback.finish(); this.feedbackChanged();
       if (entry.state === 'done') {
         this.activeMessages.delete(entry.id);
         try { await this.completeLocalDelivery(entry, scope, repo); } catch (_) { if (this.owns(generation, scope) && this.target() === target) this.error = 'cache_unavailable'; }
@@ -1076,12 +1511,39 @@ export class ClientModel {
     this.draftRevision = util.generateRandomUUID();
     try { await this.persistDraft(); } catch (_) { if (this.owns(generation, scope) && this.target() === target) this.error = 'cache_unavailable'; }
   }
+  async quoteMessageContext(message: ChatMessage, author: string, selection?: string): Promise<boolean> {
+    const target=this.target(),generation=this.generation,scope=this.scope();
+    if (this.draftLoading || !message.text || message.ownerTarget!==target ||
+      !this.messages.some((item:ChatMessage) => item.id===message.id && item.text===message.text)) return false;
+    const text=selection===undefined ? message.text : selection.trim();
+    if (!text || selection!==undefined && !liftedMessageWords(message.text,message.role==='user').includes(text)) return false;
+    const previous=this.sourceContext,previousRevision=this.draftRevision,refs=this.draftContexts(previous);
+    const id=message.itemId || message.id,part=selection===undefined ? '' : 'selection';
+    if (id && refs.some((ref:Record<string,Object>) => Wire.text(ref,'kind')==='quote' && Wire.text(ref,'msg')===id &&
+      Wire.text(ref,'part')===part && (!part || Wire.text(ref,'text')===text))) return true;
+    const ref=Wire.payload(['kind','title','url','msg','text'],['quote',author,'',id,text]);
+    if (part) ref['part']=part;
+    refs.push(ref);
+    const next=this.serializeDraftContexts(refs);
+    if (utf8Bytes(next)>100000) { this.error='chat_attachment_text_too_large'; return false; }
+    const revision=util.generateRandomUUID(); this.sourceContext=next; this.draftRevision=revision;
+    const current=():boolean => this.owns(generation,scope) && this.target()===target && this.draftRevision===revision;
+    try { await this.persistDraft(); return current(); }
+    catch (_) {
+      if (current()) { this.sourceContext=previous; this.draftRevision=previousRevision; this.error='cache_unavailable'; }
+      return false;
+    }
+  }
   @Trace interruptPendingKey: string = '';
   private interruptIdentity(): string { return JSON.stringify([this.generation, this.target()]); }
   private turnWorking(): boolean {
-    const row = this.sessions.find((item: ResourceRow) => item.machine === this.selected.machine && (item.session || item.id) === (this.selected.session || this.selected.id)) || this.selected;
-    return row.state === 'working' || Wire.text(row.data(), 'status') === 'working' || Wire.bool(row.data(), 'working');
+    const row = this.sessionRow();
+    const data = row.data(), status = Wire.text(data, 'status', row.state);
+    return row.state === 'working' || status === 'working' || Wire.bool(data, 'working') ||
+      this.selected.kind === 'session' && status === 'blocked';
   }
+  assistantReplyWorking(): boolean { return this.selected.kind === 'conversation' && this.turnWorking(); }
+  agentQueuesMessages(): boolean { return this.selected.kind === 'session' && this.turnWorking(); }
   stopPending(): boolean { return this.interruptPendingKey === this.interruptIdentity(); }
   canStop(): boolean {
     const path = '/api/v1/sessions/' + encodeURIComponent(this.selected.machine) + '/' + encodeURIComponent(this.selected.session || this.selected.id) + '/interrupt';
@@ -1090,12 +1552,14 @@ export class ClientModel {
   async stop(admission?: () => boolean): Promise<void> {
     if (!this.canStop() || admission && !admission()) return;
     const generation = this.generation, scope = this.scope(), target = this.target(), row = this.selected, repo = this.repo();
+    const feedback = this.sendAttempts.get(target);
     const pending = this.interruptIdentity(), admit = (): boolean => this.owns(generation, scope) && this.target() === target && this.repository === repo && this.canInterrupt() && this.turnWorking() && (!admission || admission());
     this.interruptPendingKey = pending;
     try { await repo.stop(row, admit); } catch (error) {
       if (this.owns(generation, scope) && this.target() === target && this.repository === repo) this.failure(error as Error);
       return;
     } finally { if (this.interruptPendingKey === pending) this.interruptPendingKey = ''; }
+    if (feedback && this.owns(generation,scope) && this.sendAttempts.get(target) === feedback) await this.endSendFeedback(scope,target,feedback);
     if (!this.owns(generation, scope) || this.target() !== target || this.repository !== repo) return;
     if (this.demo && this.demoRepository === repo) this.refreshDemo();
   }
@@ -1111,7 +1575,7 @@ export class ClientModel {
       decision.machine !== row.machine || decision.session !== session || row.manager && row.manager !== this.profile.manager)) {
       this.error = 'request_updated'; return;
     }
-    if (decision.status !== 'open') return;
+    if (!interactionCanSubmit(decision)) return;
     const personaQuestion = isPersonaAskUserQuestion(decision, row.kind);
     const request = new Decision();
     request.id = decision.id; request.raw = decision.raw; request.kind = decision.kind; request.revision = decision.revision;
@@ -1225,12 +1689,15 @@ export class ClientModel {
     const epoch = this.forgetEpochs.get(target.hubId) || 0, generation = this.generation, scope = this.scope();
     const current = (): boolean => this.owns(generation, scope) && this.foreground && epoch === (this.forgetEpochs.get(target.hubId) || 0) && !this.forgettingProfiles.has(target.hubId) && (!admit || admit());
     if (!current()) throw new Error('request_updated');
-    const config = await pairing.redeem(target, tr('phone'), current);
-    if (!current()) throw new Error('request_updated');
-    await this.useEndpoint(config, target.name, current);
+    const route = pairing.sshRoute;
+    try {
+      const config = await pairing.redeem(target, tr('phone'), current);
+      if (!current()) throw new Error('request_updated');
+      await this.useEndpoint(config, target.name, current, route);
+    } finally { route?.close(); }
   }
-  private capabilities(): EffectiveSessionCapabilities {
-    const data = this.sessionRow().data(), caps = Wire.object(data, 'capabilities');
+  private capabilities(row: ResourceRow = this.sessionRow()): EffectiveSessionCapabilities {
+    const data = row.data(), caps = Wire.object(data, 'capabilities');
     const input: SessionCapabilityInput = { sourceKind: Wire.text(data, 'source_kind'),
       readOnly: Wire.bool(data, 'read_only', Wire.bool(data, 'readonly')), readOnlyReason: Wire.text(data, 'read_only_reason'),
       capabilities: { read: Wire.bool(caps, 'read'), send: Wire.bool(caps, 'send'), interrupt: Wire.bool(caps, 'interrupt'),
@@ -1270,7 +1737,14 @@ export class ClientModel {
     }
     return '';
   }
-  canSend(): boolean { return this.connected && this.canCompose() && this.decisionsReady(); }
+  // A follow-up while an Agent waits is a message to that session. It never resolves an interaction.
+  // A legacy caller with only a blocking decision has no verified snapshot for this route.
+  decisionBlocksMessage(): boolean {
+    if (!this.decision) return false;
+    return this.selected.kind !== 'session' || this.pendingDecisionTarget !== this.target() ||
+      this.decisionReadyTarget !== this.pendingDecisionTarget || !this.pendingDecisions.includes(this.decision);
+  }
+  canSend(): boolean { return this.connected && this.canCompose() && this.decisionsReady() && !this.decisionBlocksMessage(); }
   canCompose(): boolean {
     const notice = this.agentInputNotice();
     return this.isChat() && this.capabilities().canSend && (!notice || notice === 'agent_computer_holds');
@@ -1350,7 +1824,39 @@ export class ClientModel {
     }
   }
   canApprove(): boolean { return this.connected && this.capabilities().canApprove && this.decisionsReady(); }
+  canApproveSession(row: ResourceRow): boolean {
+    const session=this.sessions.find((item: ResourceRow) => item.machine===row.machine && (item.session || item.id)===(row.session || row.id));
+    return this.connected && row.manager===this.profile.manager && (!row.group || row.group===this.profile.id) &&
+      !!session && this.capabilities(session).canApprove;
+  }
   canInterrupt(): boolean { return this.connected && this.capabilities().canInterrupt; }
+  private serializeDraftContexts(refs: Record<string,Object>[]): string {
+    if (!refs.length) return '';
+    return JSON.stringify(refs.length===1 ? refs[0] : Wire.payload(['contexts'],[refs]));
+  }
+  draftMessageQuotes(): Record<string,Object>[] {
+    if (!this.sourceContext) return [];
+    return this.draftContexts(this.sourceContext).filter((ref:Record<string,Object>) => ['message','quote'].includes(Wire.text(ref,'kind')));
+  }
+  otherContextTitle(): string {
+    if (!this.sourceContext) return '';
+    return this.draftContexts(this.sourceContext).filter((ref:Record<string,Object>) => !['message','quote','forward'].includes(Wire.text(ref,'kind')))
+      .map((ref:Record<string,Object>) => Wire.text(ref,'title')).filter((title:string) => !!title).join(' · ');
+  }
+  removeMessageQuote(ref: Record<string,Object>): void {
+    const before=this.draftContexts(this.sourceContext),key=JSON.stringify(ref);
+    const index=before.findIndex((candidate:Record<string,Object>) => JSON.stringify(candidate)===key &&
+      ['message','quote'].includes(Wire.text(candidate,'kind')));
+    if (index<0) return;
+    before.splice(index,1); this.sourceContext=this.serializeDraftContexts(before);
+    this.draftRevision=util.generateRandomUUID(); void this.persistDraft().catch(() => this.error='cache_unavailable');
+  }
+  removeOtherContexts(): void {
+    const keep=this.draftContexts(this.sourceContext).filter((ref:Record<string,Object>) => ['message','quote','forward'].includes(Wire.text(ref,'kind')));
+    if (!keep.length) { this.removeContext(); return; }
+    this.sourceContext=this.serializeDraftContexts(keep); this.draftRevision=util.generateRandomUUID();
+    void this.persistDraft().catch(() => this.error='cache_unavailable');
+  }
   contextTitle(): string {
     if (!this.sourceContext) return ''; const data = Wire.parse(this.sourceContext);
     return Wire.rows(data, 'contexts').map((item: Record<string, Object>) => Wire.text(item, 'title')).join(' · ') || Wire.text(data, 'title');
@@ -1401,13 +1907,31 @@ export class ClientModel {
     await new ChatDraftStore(this.local).settle(scope, id, 'checked');
     if (this.owns(generation, scope)) { this.unresolvedWrites = repo.mutations?.blocked() || []; await this.restoreOutbox(generation, scope); }
   }
-  private viewKey(key: string): string { return 'view:' + (key === 'ssh-tunnel' ? scopeKey({ groupId: this.profile.id, managerId: '' }) : this.scope()) + ':' + key; }
+  private sshViewKey(hub: string): string { return 'view:' + scopeKey({ groupId: hub, managerId: '' }) + ':ssh-tunnel'; }
+  private viewKey(key: string): string {
+    if (key === 'pickIncludeQuestions') return 'device:pickIncludeQuestions';
+    if (key === 'forwardTargets') return 'view:'+scopeKey({groupId:this.profile.id,managerId:''})+':forwardTargets';
+    if (key === 'agent-hub-mode') return 'device:agent-hub-mode';
+    if (key === 'usage.hiddenProviders') return 'device:usage.hiddenProviders';
+    return key === 'ssh-tunnel' ? this.sshViewKey(this.profile.id) : 'view:' + this.scope() + ':' + key;
+  }
   viewRevision(key: string): number { return this.local.revision(this.viewKey(key)); }
   /** Outcome bookkeeping stays on the admitted scope, even after navigation; Forget retires the captured epoch. */
   captureView(key: string): ClientViewLease {
-    const path = this.viewKey(key), local = this.local, epoch = local.revision(path);
+    return this.captureViewPath(this.viewKey(key));
+  }
+  async savedRenameTargets(group:string, manager:string, machine:string, source:string, requestId:string):Promise<string[]> {
+    const scope=this.scope(), generation=this.connectionGeneration();
+    const root=this.viewKey('worktree-request:');
+    const prefix=JSON.stringify([scope,group,manager,machine,source]).slice(0,-1)+',';
+    const keys=await this.local.keys(root+prefix,requestId);
+    if (!this.owns(generation,scope)) throw new Error('request_updated');
+    return keys.filter((key:string)=>key.startsWith(root+prefix) && key.endsWith(',"rename"]')).map((key:string)=>key.slice(root.length));
+  }
+  private captureViewPath(path: string): ClientViewLease {
+    const local = this.local, epoch = local.revision(path);
     const valid = (): boolean => local.accepts(path, epoch);
-    return { epoch: epoch, valid: valid,
+    return { storageKey:path, epoch: epoch, valid: valid,
       read: async (): Promise<string> => {
         if (!valid()) throw new Error('request_updated');
         const result = await local.get(path);
@@ -1418,15 +1942,21 @@ export class ClientModel {
         if (!valid()) throw new Error('request_updated');
         await local.put(path, value, epoch);
         if (!valid()) throw new Error('request_updated');
+      },
+      clearIfUnchanged: async (expected: string): Promise<void> => {
+        if (valid()) await local.remove(path, epoch, expected);
       } };
   }
   async saveView(key: string, value: string, expectedEpoch: number = this.viewRevision(key)): Promise<void> { await this.local.put(this.viewKey(key), value, expectedEpoch); }
   async loadView(key: string): Promise<string> { return this.local.get(this.viewKey(key)); }
-  removeContext(): void { this.sourceContext = ''; this.draftRevision = util.generateRandomUUID(); this.persistDraft().catch(() => this.error = 'failed'); }
-  async createAgent(prompt: string, machine: ResourceRow, directory: string, launcher: string, todoId: string = '', admit?: () => boolean): Promise<ResourceRow> {
+  removeContext():void {
+    const previous=this.sourceContext,target=this.target();this.sourceContext='';this.draftRevision=util.generateRandomUUID();
+    this.persistDraft().then(()=>new ChatDraftStore(this.local).discardForwardMedia(target,previous,'')).catch(()=>this.error='failed');
+  }
+  async createAgent(prompt: string, machine: ResourceRow, directory: string, launcher: string, todoId: string = '', admit?: () => boolean, workspaceId: string = '', host: string = '', model: string = '', effort: string = '', tabName: string = ''): Promise<ResourceRow> {
     if (machine.manager !== this.profile.manager) throw new Error('request_updated');
     const generation = this.generation, scope = this.scope(), repo = this.repo();
-    const row = await repo.createAgent(prompt, machine, directory, launcher, util.generateRandomUUID(), todoId, (): boolean => this.owns(generation, scope) && (!admit || admit()));
+    const row = await repo.createAgent(prompt, machine, directory, launcher, util.generateRandomUUID(), todoId, (): boolean => this.owns(generation, scope) && (!admit || admit()), workspaceId, host, model, effort, tabName);
     if (!this.owns(generation, scope)) throw new Error('request_updated');
     try { await this.refresh(); } catch (_) { if (this.owns(generation, scope)) this.error = 'failed'; }
     if (!this.owns(generation, scope)) throw new Error('request_updated'); row.group = this.profile.id; return row;
@@ -1477,6 +2007,7 @@ export class ClientModel {
   useDemo(): void {
     this.ssh.stop(); this.stopReconnect(); this.cancelDraftTimer(); this.closeTranscript(); this.releaseTerminal(); this.retireViews(); this.repository?.close(); this.generation++; this.selectionGeneration++;
     this.demo = true; this.connected = true; this.profile = new HubProfile('demo', tr('local_demo')); this.profile.hubId = 'demo'; this.profile.manager = 'demo';
+    this.sendAttempts.clear(); this.feedbackChanged();
     this.demoRepository = new DemoRepository(this.local); this.repository = this.demoRepository;
     this.selected = new ResourceRow(); this.messages = []; this.revisionItems = []; this.clearPendingDecisions(); this.draft = ''; this.sourceContext = ''; this.draftRevision = ''; this.draftLoading = false;
     this.localMessages = []; this.renderedMessages = []; this.echoedMessages.clear(); this.unresolvedWrites = []; this.operationState = ''; this.resourceRows = []; this.detail = ''; this.reply = '';
@@ -1485,11 +2016,12 @@ export class ClientModel {
   releaseTerminal(): void { this.workspace?.hide(); this.terminalControl = false; }
   async background(): Promise<void> {
     this.foreground = false; this.ssh.stop(); this.stopReconnect(); this.cancelDraftTimer(); this.closeTranscript(); this.clearPendingDecisions(); this.releaseTerminal();
+    this.feedbackChanged();
     const repository = this.repository; repository?.close();
     const children = Array.from(this.views.values()).map((view: ClientModel): Promise<void> => view.background());
     await this.persistDraft(); await Promise.all(children);
   }
-  activateForeground(): void { this.foreground = true; for (const view of this.views.values()) view.activateForeground(); }
+  activateForeground(): void { this.foreground = true; this.feedbackChanged(); for (const view of this.views.values()) view.activateForeground(); }
   async foregrounded(): Promise<void> { if (this.retired) return; this.activateForeground(); await this.retryCleanup(); if (this.retired || !this.foreground) return; if (this.profile.id && !this.demo) await this.selectProfile(this.profile, true); await this.flushNotification(); }
   async shutdown(): Promise<void> { await this.background(); this.retireViews(); if (!this.detached) await this.local.close(); }
 }

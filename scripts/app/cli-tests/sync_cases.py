@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,7 @@ from test_sync_case_mock import Device  # noqa: E402
 
 SPEC = os.path.join(ROOT, "spec", "fixtures", "sync")
 TRACE = os.environ.get("SYNC_CASE_TRACE") == "1"  # every step's view, as read from the screen
+LAUNCH_WAIT = int(os.environ.get("SYNC_CASE_LAUNCH_WAIT", "20"))
 
 # Cases that fail for a bug of their own, until it is fixed: "<case>" or "<case>@<device>" -> the issue, and what the
 # failure must say (another failure is still a failure).
@@ -105,12 +107,12 @@ class App:
 
     def launch(self):
         self.forget()
-        self.c.launch(self.hub, extra=self.args(fresh=True), pair="mock-" + self.device)
+        self.c.launch(self.hub, extra=self.args(fresh=True), wait=LAUNCH_WAIT, pair="mock-" + self.device)
         self.in_front()
 
     def relaunch(self):
         """Killed and started again from what it stored, paired as it was."""
-        self.c.launch(self.hub, extra=self.args(fresh=False), pair="")
+        self.c.launch(self.hub, extra=self.args(fresh=False), wait=LAUNCH_WAIT, pair="")
         self.in_front()
 
     def in_front(self):
@@ -126,7 +128,8 @@ class App:
     def settle(self):
         try:
             self.c.call("settle", timeout=3, stable=2, pixels=600)
-        except CtlError:
+        except (CtlError, socket.timeout):
+            # The following tree read still has to succeed and match the case.
             pass
 
     def marked(self, prefix="chat."):
@@ -134,6 +137,12 @@ class App:
         an alert over a bubble is not in it). Rows scrolled out of sight count: the chat's list keeps them."""
         els = self.c.call("tree", containers=True)["elements"]
         marks = sorted((e for e in els if e.get("container") and e["id"].startswith(prefix)), key=lambda e: e["frame"][1])
+        start, sent = "chat.outbox.sending.start", "chat.outbox.sent."
+        if self.chat.get("new") and any(m["id"] == start for m in marks) and any(m["id"].startswith(sent) for m in marks):
+            # The start page and the chat briefly coexist. An on-screen mark covered by the other page is outside the
+            # visible chat. Scrolled-out rows and any two visible bubbles still count.
+            marks = [m for m in marks if not (m["onScreen"] and not m["visible"]
+                                            and (m["id"] == start or m["id"].startswith(sent)))]
         return [(m, [e for e in els if not e.get("container") and e.get("in") == m["id"]]) for m in marks]
 
     def look(self):
@@ -166,7 +175,14 @@ class App:
 
     def nth(self, e, **filters):
         """`e`'s index among the elements `filters` match (what `activate` takes as `index`)."""
-        for i, x in enumerate(self.c.call("tree", **filters)["elements"]):
+        nodes = self.c.call("tree", containers=True, **filters)["elements"]
+        elements = [x for x in nodes if not x.get("container")]
+        # Match the same bubble or card even if its frame moved since we read it. The index excludes containers,
+        # as the following activation does.
+        siblings = [(i, x) for i, x in enumerate(elements) if x.get("in") == e.get("in")]
+        if len(siblings) == 1:
+            return siblings[0][0]
+        for i, x in siblings:
             if x["frame"] == e["frame"]:
                 return i
         raise CtlError("%s is gone" % json.dumps(filters, ensure_ascii=False))
@@ -270,7 +286,8 @@ def req_is(w, s, before):
     if w.get("post") != s.get("post"):
         return False
     if w.get("new_op"):
-        return s.get("op") is not None and s["op"] not in before
+        op = s.get("op")
+        return bool(op) and op not in before
     return s.get("key") == w.get("id")
 
 

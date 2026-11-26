@@ -63,7 +63,7 @@ func main() throws -> Int32 {
     let prefix = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
 
     var swift: [String] = [], specs: [String] = [], manifests: [String] = []
-    guard let walk = FileManager.default.enumerator(at: scanURL, includingPropertiesForKeys: [.isDirectoryKey]) else {
+    guard let walk = FileManager.default.enumerator(at: scanURL, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else {
         throw Failure(description: "cannot read \(scanURL.path)")
     }
     for case let url as URL in walk {
@@ -72,6 +72,9 @@ func main() throws -> Int32 {
             if skippedFolders.contains(name) { walk.skipDescendants() }
             continue
         }
+        // A linked source (Persona Link's NativeCompatibility.swift → Shared/NativeStateMigration.swift) is the same code
+        // as its target, read where it really is: read twice, a call into it would resolve to either copy.
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { continue }
         let relative = String(url.standardizedFileURL.path.dropFirst(prefix.count))
         let parts = relative.split(separator: "/").map(String.init)
         if name == "project.yml" { specs.append(relative) }

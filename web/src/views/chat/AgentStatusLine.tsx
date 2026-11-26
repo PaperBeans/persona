@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { t } from "../../i18n";
-import { contextUsage } from "../../lib/context-usage";
+import { currentContextTokens } from "../../lib/context-usage";
 import { togglePanel } from "../../lib/panel";
 import { countdown, liveAccounts, resetLabel, useUsageWindows, windowKey, type UsageAccount } from "../../lib/usage-windows";
 import type { Item, Session } from "../../lib/types";
@@ -47,7 +47,7 @@ export function AgentStatusLine({ session, source, assistant, items, onCompact, 
 }) {
   const isAssistant = Boolean(assistant || session.assistant);
   const place = isAssistant ? null : workingLocation(session);
-  const hasContext = contextUsage(session) !== null || hasSessionTokenUsage(items);
+  const hasContext = currentContextTokens(session) > 0 || hasSessionTokenUsage(items);
   const accounts = useUsageWindows();
   const now = useNow(30_000, !isAssistant && accounts.length > 0);
   const quota = isAssistant ? null : sessionQuota(accounts, session, now);

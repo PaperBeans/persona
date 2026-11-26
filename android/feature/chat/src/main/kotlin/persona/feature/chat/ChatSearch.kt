@@ -48,6 +48,7 @@ private fun JsonElement.strings(): Sequence<String> = when (this) {
 }
 
 private val viewErrors = Regex("""<persona-view-errors\b[^>]*>[\s\S]*?</persona-view-errors>\s*""")
+private val inlineReferences = Regex("""(?:^|\r?\n\r?\n)<!-- persona-inline-v1 \[[^\r\n]*""", RegexOption.MULTILINE)
 private val cardTag = Regex("""\n<persona-action view="([^"<>]*)" action="([^"<>]*)">(\{[^<>]*\})</persona-action>$""")
 private val snippetBreaks = Regex("""\s*\n\s*""")
 
@@ -105,8 +106,8 @@ internal fun assistantCardText(markdown: String): String {
 
 /** The user's words without the tags the bubble hides, a quoted context as its own field, and a file's name. */
 private fun userSearchFields(raw: String): List<Pair<String, String>> {
-    val stripped = if (raw.contains("<persona-view-errors")) viewErrors.replace(raw, "") else raw
-    val (contexts, written) = parseContexts(stripped)
+    val stripped = if (raw.contains("<!-- persona-inline-v1 ")) inlineReferences.replace(raw, "") else raw
+    val (contexts, written) = parseContexts(if (stripped.contains("<persona-view-errors")) viewErrors.replace(stripped, "") else stripped)
     val (files, rest) = parseAttachedFiles(written)
     val words = cardReplyText(messageText(rest, files = false).text)
     return buildList {

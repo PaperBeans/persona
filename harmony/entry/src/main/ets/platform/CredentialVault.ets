@@ -1,3 +1,4 @@
+import { HubAccess } from '../core/HubAccess';
 import { common } from '@kit.AbilityKit';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
@@ -25,7 +26,7 @@ export class CredentialVault {
   private readonly context: common.UIAbilityContext;
   constructor(context: common.UIAbilityContext) { this.context = context; }
 
-  async get(hubId: string): Promise<string | null> {
+  async get(hubId: string, receiveAccess?: (access: HubAccess | undefined) => void): Promise<string | null> {
     let values: Array<asset.AssetMap>;
     const query = assetAlias(hubId); query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ALL);
     try { values = await asset.query(query); }
@@ -36,18 +37,18 @@ export class CredentialVault {
     if (values.length === 0) return null;
     const secret = values[0].get(asset.Tag.SECRET);
     if (!(secret instanceof Uint8Array) || secret.length === 0) return null;
-    try { return util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(secret); }
+    try { return HubAccess.restore(util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(secret), receiveAccess); }
     catch (_) { return null; }
   }
 
-  async put(hubId: string, token: string): Promise<void> {
+  async put(hubId: string, token: string, access?: HubAccess): Promise<void> {
     if (!this.context) throw new Error('storage_unavailable');
     if (!token || token.length > 8192 || /[\r\n\u0000]/.test(token)) throw new Error('invalid_credential');
     const alias = keyFor(hubId);
     const query = new Map<asset.Tag, asset.Value>();
     query.set(asset.Tag.ALIAS, alias);
     const values: asset.AssetMap = new Map();
-    values.set(asset.Tag.SECRET, new util.TextEncoder().encodeInto(token));
+    values.set(asset.Tag.SECRET, new util.TextEncoder().encodeInto(access ? access.protect(token) : token));
     try { await asset.update(query, values); }
     catch (error) {
       if (assetErrorCode(error as Error) !== 24000002) throw new Error('storage_unavailable');

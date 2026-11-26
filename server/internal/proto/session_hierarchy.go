@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/agentviewwire"
 )
 
 // IsCodexSubagent identifies delegated tasks from source metadata, even when
@@ -104,6 +106,32 @@ type SessionHierarchy struct {
 	// "context_breakdown" wire key.
 	ContextBreakdown *ContextBreakdown `json:"context_breakdown,omitempty"`
 	Deleted          bool              `json:"deleted,omitempty"` // Permanent manager tombstone; use Session.IsDeleted/SetDeleted.
+	// View is the session as every client draws it: one of five phases, why, whether its row counts in the Agents
+	// list's Needs you, and its rank (docs/protocol/agent-states.md "Five phases", #15397), encoded as the top-level
+	// "view" key. The manager computes it on the lists it publishes (assistant/agentview); state and status stay as
+	// they are for older clients. Here rather than on Session, which has no room left (TestSessionFitsItsSizeClass).
+	// Use Session.View / SetView.
+	View *agentviewwire.AgentView `json:"view,omitempty"`
+}
+
+// View is the session's five-phase view, nil from a hub that does not send one (FeatureAgentView) and on a row the
+// manager did not compute it for. Shared with the row's other copies: not to be modified in place.
+func (s *Session) View() *agentviewwire.AgentView {
+	if s.Hierarchy == nil {
+		return nil
+	}
+	return s.Hierarchy.View
+}
+
+// SetView replaces the session's view without changing other copies of the row; nil takes it away. The view is
+// shared from then on: the caller does not change it after.
+func (s *Session) SetView(v *agentviewwire.AgentView) {
+	if v == nil && s.View() == nil {
+		return
+	}
+	h := s.hierarchy()
+	h.View = v
+	s.setHierarchy(h)
 }
 
 // ContextBreakdown returns the session's structured context window breakdown, or nil when unavailable.
@@ -198,7 +226,7 @@ func (h *SessionHierarchy) empty() bool {
 		h.FoldedUnder == "" && h.FoldedUnderMachineID == "" && h.FoldedAs == "" && h.FoldedSide == "" &&
 		h.ParentMachineID == "" && h.A2ATaskID == "" && h.SubagentOrigin == "" &&
 		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil && len(h.Aliases) == 0 &&
-		len(h.BackgroundEnded) == 0 && h.ContextBreakdown == nil && !h.Deleted
+		len(h.BackgroundEnded) == 0 && h.ContextBreakdown == nil && !h.Deleted && h.View == nil
 }
 
 // HiddenByDirectory reports the manager's directory visibility without growing every session row.

@@ -210,6 +210,11 @@ struct SettingsView: View {
         if d.bool(forKey: "openMachines") {
             p.append(MachineListRoute())
             if let id = d.string(forKey: "openMachineDetail") { p.append(MachineDetailRoute(id: id)) }
+            // `-openUsageMap <machine>` (`reclaim:<machine>`: the disk alert's reclaim mode): its disk usage map (#14576).
+            if let id = d.string(forKey: "openUsageMap") {
+                let reclaim = id.hasPrefix("reclaim:")
+                p.append(MachineUsageMapRoute(ref: MachineRef(path: reclaim ? String(id.dropFirst("reclaim:".count)) : id), reclaim: reclaim))
+            }
         }
         else if d.bool(forKey: "openAdvancedSettings") { p.append(SettingsPage.advanced) } // Settings › Advanced (#13395)
         else if d.bool(forKey: "openStorage") { p.append(SettingsPage.storage) }
@@ -432,6 +437,7 @@ private struct SettingsDestinations: ViewModifier {
             .navigationDestination(for: ModelPurposeRoute.self) { r in ModelPurposeEditorView(purposeID: r.id).splitDetailPage() }
             .navigationDestination(for: ModelLauncherRoute.self) { r in ModelLauncherDetailView(name: r.name).splitDetailPage() }
             .navigationDestination(for: MachineDetailRoute.self) { r in MachineDetailView(ref: r.ref).splitDetailPage() }
+            .navigationDestination(for: MachineUsageMapRoute.self) { r in UsageMapView(route: r).splitDetailPage() }
             .navigationDestination(for: TerminalsRoute.self) { r in TerminalsView(only: r.machine).splitDetailPage() }
             .navigationDestination(for: MessagesChatsRoute.self) { r in MessagesChatListView(manager: r.manager).splitDetailPage() }
             .navigationDestination(for: MessagesThreadRoute.self) { r in MessagesThreadView(id: r.id, name: r.name, manager: r.manager).splitDetailPage() }
@@ -497,7 +503,7 @@ private struct SettingsDestinations: ViewModifier {
         case .feishu(let manager): FeishuConnectorView(manager: manager)
         case .connector(let id, let manager):
             if id == "imessage" { MessagesConnectorView(manager: manager ?? model.assistantManagerID) } else { HubConnectorView(id: id, manager: manager) }
-        case .feishuBot: FeishuBotView()
+        case .feishuBot: LarkBotGate { FeishuBotView() }
         #if os(iOS)
         case .health: WorkoutReportSettingsView()
         case .meetings: MeetingSettingsView()
@@ -536,7 +542,9 @@ private struct SettingsDestinations: ViewModifier {
         case .marketExtension(let market, let id): MarketExtensionDetailView(market: market, id: id)
         case .pluginMarkets: ExtensionMarketsView()
         case .channels: ChannelsView()
-        case .channel(let id, let manager): ChannelDetailView(id: id, manager: manager)
+        case .channel(let id, let manager):
+            // The Lark bot's channel goes with the hub's Lark module (#15995); every other channel is as it was.
+            if id == LarkBotEntry.channelID { LarkBotGate { ChannelDetailView(id: id, manager: manager) } } else { ChannelDetailView(id: id, manager: manager) }
         }
     }
 

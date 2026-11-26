@@ -115,9 +115,15 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
             && a.session.canDelete == b.session.canDelete && a.session.canInterrupt == b.session.canInterrupt
             && (a.session.loop != nil) == (b.session.loop != nil)
             && a.session.todo == b.session.todo
-            && a.session.subagents?.count == b.session.subagents?.count && a.session.spaceID == b.session.spaceID
+            && a.session.subagents?.count == b.session.subagents?.count
+            && a.subagentCount == b.subagentCount
+            && a.session.spaceID == b.session.spaceID
             && a.session.paneID == b.session.paneID && a.paneActions == b.paneActions
             && a.moveChoices == b.moveChoices
+    }
+
+    nonisolated var subagentCount: Int {
+        ChildSessions.totalSubagentCount(session)
     }
 
     /// The complete ordered inventory, including the nested node actions as separate entries.
@@ -131,7 +137,7 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
         for pane in panes where pane == .files || pane == .git { add(pane == .files ? .files : .git) }
         if review { add(.review) }
         if preview { add(.preview) }
-        if !hosted, let n = session.subagents?.count, n > 0 { add(.subagents) }
+        if !hosted, subagentCount > 0 { add(.subagents) }
         if sideCount > 0 { add(.sideSessions) }
         if showsSpace, session.spaceID != nil { add(.space) }
         if session.canAttach { add(.attach) }
@@ -245,7 +251,7 @@ extension AgentActionFacts {
     /// What More's items are and say: a change builds its nested menu again (`AgentActionMenu.more`).
     nonisolated var moreIdentity: [String] {
         layout.more.map(\.id.rawValue) + [muted ? "muted" : "", paneBadges[.git] ?? "", "\(sideCount)",
-                                          "\(session.subagents?.count ?? 0)", session.todo?.title ?? "", "\(terminalResume)"]
+                                          "\(subagentCount)", session.todo?.title ?? "", "\(terminalResume)"]
             + moveChoices.map(\.id)
     }
 }
@@ -371,7 +377,7 @@ struct AgentActionMenu: View, Equatable {
                 .accessibilityIdentifier("chat-preview")
         case .subagents:
             Button { handlers.navigate(s, .subagents) } label: {
-                Label(String(localized: "All Subagents (\(s.subagents?.count ?? 0))"), systemImage: Theme.Icon.list).lineLimit(1)
+                Label(String(localized: "Subagents (\(facts.subagentCount)) [Session Overview]"), systemImage: Theme.Icon.subagent).lineLimit(1)
             }
         case .sideSessions:
             Button { handlers.navigate(s, .sideSessions) } label: {

@@ -29,6 +29,12 @@ class DemoDataTests(unittest.TestCase):
                 raise RuntimeError("demo fixture generation failed; captured output is not printed")
             cls.data = json.loads(out.read_text())
 
+    def test_health_selection_matches_the_bundled_demo_without_strength_pages(self):
+        bundled = json.loads((ROOT / "apple/Persona/Resources/Demo.json").read_text())
+        self.assertEqual(self.data["health_items"], bundled["health_items"])
+        self.assertEqual(self.data["health_intake"]["items"], bundled["health_intake"]["items"])
+        self.assertEqual(self.data["health_intake"]["items"], self.data["health_items"]["items"])
+
     def test_todo_samples_and_scheduled_routines_are_both_present(self):
         self.assertGreater(len(self.data["todos"]), 0)
         self.assertGreater(len(self.data["tasks"]), 0)

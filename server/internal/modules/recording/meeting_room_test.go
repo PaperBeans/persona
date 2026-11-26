@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -66,14 +66,14 @@ func TestMeetingRoomStarts(t *testing.T) {
 	}
 
 	// Asked again (a restart left it pending): the node has it, so nothing is sent again.
-	if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error {
-		m.Room.State, m.Room.Pending, m.Room.StartingAt = kb.RoomStarting, true, time.Now()
+	if _, err := writersOf(r.engine()).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.State, m.Room.Pending, m.Room.StartingAt = recordingwire.RoomStarting, true, time.Now()
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	r.look(meetingRec)
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomReady || m.Room.SessionID != sid || m.Room.Pending {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomReady || m.Room.SessionID != sid || m.Room.Pending {
 		t.Fatalf("settled %+v", m.Room)
 	}
 	if n := len(r.sends()); n != 2 {
@@ -93,7 +93,7 @@ func TestMeetingRoomUnavailable(t *testing.T) {
 	r.f.mu.Unlock()
 	r.upload(meetingRec, 1, map[string]any{"room": map[string]any{"attendance": "listener"}})
 	r.look(meetingRec)
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomUnavailable || m.Room.Problem != kb.RoomNodeTooOld || len(r.sends()) != 0 {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomUnavailable || m.Room.Problem != recordingwire.RoomNodeTooOld || len(r.sends()) != 0 {
 		t.Fatalf("too old: %+v %v", m.Room, r.sends())
 	}
 	if next := r.look(meetingRec); !next.After(time.Now().Add(time.Hour)) {
@@ -107,18 +107,18 @@ func TestMeetingRoomUnavailable(t *testing.T) {
 	r.upload(meetingOther, 1, map[string]any{"room": map[string]any{"attendance": "listener"}})
 	next := r.look(meetingOther)
 	m := r.meeting(meetingOther)
-	if m.Room.State != kb.RoomUnavailable || m.Room.Problem != kb.RoomMachineOffline || next.After(time.Now().Add(2*time.Minute)) {
+	if m.Room.State != recordingwire.RoomUnavailable || m.Room.Problem != recordingwire.RoomMachineOffline || next.After(time.Now().Add(2*time.Minute)) {
 		t.Fatalf("offline: %+v next %v", m.Room, next)
 	}
 	// Retried after a minute: a start that does not get ready in 2 minutes failed.
-	if _, err := r.engine().MeetingUpdate(meetingOther, func(m *kb.Meeting, _ kb.Recording) error {
-		m.Room.State, m.Room.Problem, m.Room.StartingAt, m.Room.Pending = kb.RoomStarting, "", time.Now().Add(-3*time.Minute), true
+	if _, err := writersOf(r.engine()).MeetingUpdate(meetingOther, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.State, m.Room.Problem, m.Room.StartingAt, m.Room.Pending = recordingwire.RoomStarting, "", time.Now().Add(-3*time.Minute), true
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	r.look(meetingOther)
-	if m := r.meeting(meetingOther); m.Room.State != kb.RoomUnavailable || m.Room.Problem != kb.RoomStartFailed {
+	if m := r.meeting(meetingOther); m.Room.State != recordingwire.RoomUnavailable || m.Room.Problem != recordingwire.RoomStartFailed {
 		t.Fatalf("start failed: %+v", m.Room)
 	}
 	view := r.do("GET", livePath(meetingOther), "", nil, http.StatusOK)
@@ -170,8 +170,8 @@ func TestMeetingRoomAsk(t *testing.T) {
 	}
 
 	// The room unavailable: meeting.answer answers at once.
-	if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error {
-		m.Room.State, m.Room.Problem = kb.RoomUnavailable, kb.RoomMachineOffline
+	if _, err := writersOf(r.engine()).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.State, m.Room.Problem = recordingwire.RoomUnavailable, recordingwire.RoomMachineOffline
 		m.Room.RetryAt = time.Now().Add(time.Hour)
 		return nil
 	}); err != nil {
@@ -183,7 +183,7 @@ func TestMeetingRoomAsk(t *testing.T) {
 	}
 
 	// A failed room ask asked again while the room is unavailable: room_unavailable; once ready, attempt 2.
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
 		for i := range l.Asks {
 			if l.Asks[i].ID == askOne {
 				l.Asks[i] = failAsk(l.Asks[i], askNoAnswer)
@@ -197,8 +197,8 @@ func TestMeetingRoomAsk(t *testing.T) {
 	if again["state"] != "failed" || again["error"] != askRoomUnavailble || again["via"] != "room" {
 		t.Fatalf("asked again while unavailable: %v", again)
 	}
-	if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error {
-		m.Room.State, m.Room.Problem = kb.RoomReady, ""
+	if _, err := writersOf(r.engine()).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.State, m.Room.Problem = recordingwire.RoomReady, ""
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -223,7 +223,10 @@ func TestMeetingRoomDeleted(t *testing.T) {
 	r := newRoomFixture(t)
 	sid := r.roomUp(meetingRec, "listener")
 	e := r.engine()
-	if _, err := e.MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room.State = kb.RoomEnded; return nil }); err != nil {
+	if _, err := writersOf(e).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.State = recordingwire.RoomEnded
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var deletes []map[string]any
@@ -251,12 +254,12 @@ func TestMeetingRoomDeleted(t *testing.T) {
 	if len(deletes) != 1 || deletes[0]["session_id"] != sid || deletes[0]["dir"] != meetingRoomDir+"/"+meetingRec {
 		t.Fatalf("deletes %v", deletes)
 	}
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomEnded || m.Room.SessionID != sid {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomEnded || m.Room.SessionID != sid {
 		t.Fatalf("a node too old: %+v", m.Room)
 	}
 	fail = nil
 	r.s.meetingRoomsSweep(context.Background(), e)
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomDeleted || m.Room.SessionID != "" {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomDeleted || m.Room.SessionID != "" {
 		t.Fatalf("deleted: %+v", m.Room)
 	}
 	if r.s.isRoom(sid) {
@@ -282,8 +285,8 @@ func shortRoomAsks(t *testing.T) {
 // the lists in each, never compacted.
 func (r *roomFixture) olderRoom(id string) {
 	r.t.Helper()
-	if _, err := r.engine().MeetingUpdate(id, func(m *kb.Meeting, _ kb.Recording) error {
-		m.Room.Batching, m.Room.Lean = 0, kb.MeetingRoomLean{}
+	if _, err := writersOf(r.engine()).MeetingUpdate(id, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
+		m.Room.Batching, m.Room.Lean = 0, recordingwire.MeetingRoomLean{}
 		return nil
 	}); err != nil {
 		r.t.Fatal(err)
@@ -318,17 +321,17 @@ func TestMeetingRoomFed(t *testing.T) {
 	if running, _ := r.s.meetingTurnRunning(context.Background(), "server", sid); running {
 		t.Fatal("a meeting-turn mark on the room")
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); l.Fed != 1 || l.FedTo == nil || l.FedTo.SessionID != sid {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); l.Fed != 1 || l.FedTo == nil || l.FedTo.SessionID != sid {
 		t.Fatalf("fed %+v", l)
 	}
 
 	// The next batch tells the room of the asks meeting.answer took, never of its own.
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
 		l.FedAt = l.FedAt.Add(-2 * feedBatchEvery)
 		now := time.Now().UTC()
 		l.Asks = append(l.Asks,
-			kb.LiveAsk{ID: askOne, Question: "q1", State: askAnswered, Answer: "ROOM-ANSWER", Via: kb.AskViaRoom, AskedAt: now, Sources: []kb.AskSource{}},
-			kb.LiveAsk{ID: askTwo, Question: "q2", State: askAnswered, Answer: "MATERIAL-ANSWER", Via: kb.AskViaMaterial, AskedAt: now, Sources: []kb.AskSource{}})
+			recordingwire.LiveAsk{ID: askOne, Question: "q1", State: askAnswered, Answer: "ROOM-ANSWER", Via: recordingwire.AskViaRoom, AskedAt: now, Sources: []recordingwire.AskSource{}},
+			recordingwire.LiveAsk{ID: askTwo, Question: "q2", State: askAnswered, Answer: "MATERIAL-ANSWER", Via: recordingwire.AskViaMaterial, AskedAt: now, Sources: []recordingwire.AskSource{}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -343,7 +346,7 @@ func TestMeetingRoomFed(t *testing.T) {
 	r.upload(meetingOther, 1, map[string]any{"attendance": "listener", "attending_session": map[string]any{"machine_id": "server", "session_id": sid}})
 	r.do("POST", livePath(meetingOther), "", `{"from":0,"segments":[{"start":1,"end":3,"text":"Bo: hello"}]}`, http.StatusOK)
 	r.look(meetingOther)
-	if l, _, _ := r.engine().LiveRead(meetingOther); l.Problem != attendeeNotAllowed {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingOther); l.Problem != attendeeNotAllowed {
 		t.Fatalf("another meeting fed the room: %+v", l)
 	}
 }
@@ -362,7 +365,7 @@ func TestMeetingRoomEnds(t *testing.T) {
 	if text, _ := sends[len(sends)-1]["text"].(string); !strings.Contains(text, "The meeting has ended") {
 		t.Fatalf("end batch %v", sends[len(sends)-1])
 	}
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomReady || m.Room.EndingAt.IsZero() {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomReady || m.Room.EndingAt.IsZero() {
 		t.Fatalf("ended before its turn: %+v", m.Room)
 	}
 	if _, err := r.s.SendParams(context.Background(), SendParams{MachineID: "server", SessionID: sid, Params: map[string]any{"text": "x"}}); err != nil {
@@ -377,7 +380,7 @@ func TestMeetingRoomEnds(t *testing.T) {
 	}
 	r.f.mu.Unlock()
 	r.look(meetingRec)
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomEnded || m.Room.SessionID != sid {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomEnded || m.Room.SessionID != sid {
 		t.Fatalf("not ended: %+v", m.Room)
 	}
 	_, err := r.s.SendParams(context.Background(), SendParams{MachineID: "server", SessionID: sid, Params: map[string]any{"text": "x"}})
@@ -391,13 +394,13 @@ func TestMeetingRoomEnds(t *testing.T) {
 	r.roomUp(meetingOther, "listener")
 	r.upload(meetingOther, 2, map[string]any{"room": map[string]any{"attendance": "off"}, "ended_at": end, "complete": true})
 	r.look(meetingOther)
-	if m := r.meeting(meetingOther); m.Room.State != kb.RoomEnded {
+	if m := r.meeting(meetingOther); m.Room.State != recordingwire.RoomEnded {
 		t.Fatalf("off at the end: %+v", m.Room)
 	}
 	third := "66666666-6666-4666-8666-666666666666"
 	r.upload(third, 1, map[string]any{"room": map[string]any{"attendance": "off"}, "ended_at": end, "complete": true})
 	r.look(third)
-	if m := r.meeting(third); m.Room.State != kb.RoomNone {
+	if m := r.meeting(third); m.Room.State != recordingwire.RoomNone {
 		t.Fatalf("never started: %+v", m.Room)
 	}
 }
@@ -425,7 +428,7 @@ func TestMeetingRoomAskTurnError(t *testing.T) {
 	if a["state"] != "failed" || a["error"] != askModelError || a["via"] != "room" || a["answer"] != nil && a["answer"] != "" {
 		t.Fatalf("ask %v", a)
 	}
-	if m := r.meeting(meetingRec); m.Room.State != kb.RoomUnavailable || m.Room.Problem != kb.RoomStartFailed || m.Room.RetryAt.IsZero() {
+	if m := r.meeting(meetingRec); m.Room.State != recordingwire.RoomUnavailable || m.Room.Problem != recordingwire.RoomStartFailed || m.Room.RetryAt.IsZero() {
 		t.Fatalf("room %+v", m.Room)
 	}
 	b := meetingAskOf(t, r.do("POST", askPath(meetingRec), "", map[string]any{"id": askTwo, "question": "Anything else?"}, http.StatusOK))
@@ -445,9 +448,9 @@ func TestMeetingRoomAskResumes(t *testing.T) {
 		{ID: "a1", Seq: 2, Role: "assistant", Kind: proto.KindText, Text: "The answer."},
 	}
 	r.f.mu.Unlock()
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: askOne, QuestionSent: "q", Question: "q", QuestionSource: askTyped, State: askPending, Via: kb.AskViaRoom,
-			Sources: []kb.AskSource{}, AskedAt: time.Now().UTC(), Attempts: []kb.AskAttempt{{K: 1, MsgID: askMsgID(askOne, 1), SentAt: time.Now().UTC()}}})
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: askOne, QuestionSent: "q", Question: "q", QuestionSource: askTyped, State: askPending, Via: recordingwire.AskViaRoom,
+			Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC(), Attempts: []recordingwire.AskAttempt{{K: 1, MsgID: askMsgID(askOne, 1), SentAt: time.Now().UTC()}}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -474,9 +477,9 @@ func TestMeetingRoomAskResumesForTheFeeder(t *testing.T) {
 		{ID: "a1", Seq: 2, Role: "assistant", Kind: proto.KindText, Text: "The answer."},
 	}
 	r.f.mu.Unlock()
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: askOne, QuestionSent: "q", Question: "q", QuestionSource: askTyped, State: askPending, Via: kb.AskViaRoom,
-			Sources: []kb.AskSource{}, AskedAt: time.Now().UTC(), Attempts: []kb.AskAttempt{{K: 1, MsgID: askMsgID(askOne, 1), SentAt: time.Now().UTC()}}})
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: askOne, QuestionSent: "q", Question: "q", QuestionSource: askTyped, State: askPending, Via: recordingwire.AskViaRoom,
+			Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC(), Attempts: []recordingwire.AskAttempt{{K: 1, MsgID: askMsgID(askOne, 1), SentAt: time.Now().UTC()}}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -486,7 +489,7 @@ func TestMeetingRoomAskResumesForTheFeeder(t *testing.T) {
 	sends := len(r.sends())
 	r.look(meetingRec)
 	r.idle()
-	l, _, err := r.engine().LiveRead(meetingRec)
+	l, _, err := writersOf(r.engine()).LiveRead(meetingRec)
 	if err != nil || len(l.Asks) != 1 || l.Asks[0].State != askAnswered || l.Asks[0].Answer != "The answer." {
 		t.Fatalf("the feeder left the ask: %+v %v", l.Asks, err)
 	}
@@ -517,7 +520,7 @@ func TestMeetingLiveParts(t *testing.T) {
 		defer r.f.mu.Unlock()
 		return slices.Contains(r.f.events, "meeting_live")
 	})
-	d, err := r.engine().Get(kb.KindRecording, meetingRec, 0)
+	d, err := r.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

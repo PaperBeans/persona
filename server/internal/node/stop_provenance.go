@@ -60,6 +60,9 @@ const (
 // state.put is one-way. Verify the cause before closing or consuming a stopped
 // capability: a failed save must not revive old recovery permission after a restart.
 func (n *Node) saveStopCause(ctx context.Context, id string, cause proto.StopCause) error {
+	if cause == proto.StopUser {
+		n.noteAgyStopped(id) // an agy pane's conversation is listed as stopped next (agystopped.go)
+	}
 	n.state.stopped(id, cause)
 	want, known := n.state.get(id)
 	if !known || n.peer == nil {

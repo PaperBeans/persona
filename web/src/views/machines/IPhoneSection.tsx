@@ -5,95 +5,37 @@
 // those runs, Forget in a paired iPhone's menu. Developer Mode and the iPhone's own consent are given on the iPhone, so
 // for those the section says where. The hub is asked again when the page opens, every 2 s while a job runs and every
 // 5 s while the next step is at the iPhone, only while the tab is shown.
-import { useEffect, useRef, useState } from "react";
-import { api, enc, errorText } from "../../lib/api";
+import { useState } from "react";
 import { iphonePollEvery, iphoneView, newerIPhone, type IPhoneAction, type IPhoneRow, type IPhoneTone, type MachineIPhone } from "../../lib/iphone";
 import { stateName } from "../../lib/state-labels";
-import { documentPage, latestRequest, visiblePoll } from "../../lib/visible-poll";
-import { Button, cx, EASE, IconButton, Menu, Spinner, toast, useMenu } from "../../ui/atoms";
+import { Button, cx, EASE, IconButton, Menu, Spinner, useMenu } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Switch } from "../settings/SettingsParts";
+import { useMachineExtensionControl } from "./useMachineExtensionControl";
 import { t } from "../../i18n";
 
 export function IPhoneSection({ mid, iphone, online, mac }: { mid: string; iphone: MachineIPhone; online: boolean; mac: boolean }) {
-  // What the hub said since the page opened; the machine list's copy wins once it is newer (it follows the node too).
-  const [fresh, setFresh] = useState<MachineIPhone | null>(null);
-  const [saving, setSaving] = useState(false);
   // The action whose request is on the way: its row shows it at once, before the hub answers (principle 7).
   const [asked, setAsked] = useState<{ action: IPhoneAction; device?: string } | null>(null);
-  const [checking, setChecking] = useState(false);
   const menu = useMenu();
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const shown = newerIPhone(fresh, iphone);
-  const enabled = shown.enabled;
-  const every = iphonePollEvery(shown, online, mac);
-
-  // One request line per computer, as ComputerSection: only the latest read or write is shown (#5455).
-  const reads = useRef<ReturnType<typeof latestRequest<MachineIPhone>> | null>(null);
-  useEffect(() => {
-    setFresh(null);
-    const line = latestRequest<MachineIPhone>(setFresh, () => {});
-    reads.current = line;
-    return () => {
-      line.dispose();
-      if (reads.current === line) reads.current = null;
-    };
-  }, [mid]);
-
-  const refresh = () => reads.current?.run(() => api<MachineIPhone>(`/machines/${enc(mid)}/iphone`)) ?? Promise.resolve();
-
-  const write = async (send: () => Promise<MachineIPhone>) => {
-    const line = reads.current;
-    try {
-      const value = await send();
-      void line?.run(() => Promise.resolve(value));
-    } catch (e) {
-      if (line && line === reads.current) throw e;
-    }
-  };
-
-  useEffect(() => {
-    if (online && enabled) void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, online, enabled]);
-
-  useEffect(() => {
-    if (!every) return;
-    let started = false; // the page just asked (on open or with the action that started this)
-    const stop = visiblePoll(() => { if (started) void refresh(); }, every, documentPage);
-    started = true;
-    return stop;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, every]);
-
-  const set = async (on: boolean) => {
-    setSaving(true);
-    try {
-      await write(() => api<MachineIPhone>(`/machines/${enc(mid)}/iphone`, { method: "PUT", json: { enabled: on } }));
-    } catch (e) {
-      toast(t(on ? "machines-iphonesection.turn_on_failed" : "machines-iphonesection.turn_off_failed", { error: errorText(e) }), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const { shown, enabled, saving, checking, toggle, postAction, recheck } = useMachineExtensionControl({
+    mid,
+    resource: "iphone",
+    initial: iphone,
+    online,
+    merge: newerIPhone,
+    pollEvery: (s) => iphonePollEvery(s, online, mac),
+    toggleError: (on, error) =>
+      on ? t("machines-iphonesection.turn_on_failed", { error }) : t("machines-iphonesection.turn_off_failed", { error }),
+  });
 
   const run = async (action: IPhoneAction, device?: string) => {
     setAsked({ action, device });
     try {
-      await write(() => api<MachineIPhone>(`/machines/${enc(mid)}/iphone/${action}`, { method: "POST", json: device ? { device } : {} }));
-    } catch (e) {
-      toast(errorText(e), "error");
+      await postAction(action, device ? { device } : {});
     } finally {
       setAsked(null);
-    }
-  };
-
-  const recheck = async () => {
-    setChecking(true);
-    try {
-      await refresh();
-    } finally {
-      setChecking(false);
     }
   };
 
@@ -113,7 +55,7 @@ export function IPhoneSection({ mid, iphone, online, mac }: { mid: string; iphon
             <div className="mt-0.5 truncate text-submeta text-ink-3">{t("machines-iphonesection.allow_detail")}</div>
           </div>
           {saving && <Spinner />}
-          <Switch on={enabled} onChange={(on) => void set(on)} disabled={saving || !online} label={t("machines-iphonesection.allow")} />
+          <Switch on={enabled} onChange={(on) => void toggle(on)} disabled={saving || !online} label={t("machines-iphonesection.allow")} />
         </div>
         {v.kind !== "off" && (
           <div className="flex flex-col items-start gap-2.5 border-t border-line px-4 py-3">

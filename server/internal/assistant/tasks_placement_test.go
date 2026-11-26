@@ -17,6 +17,34 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
+func TestUpdatePlanTaskKeepsNotesAddedAfterPlacement(t *testing.T) {
+	ctx := t.Context()
+	store := &profileTaskStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}
+	s, _ := newTaskServiceOn(t, store)
+	task := PlanTask{Machine: "box", Why: "The files are on box"}
+	plan := &TaskPlan{ID: "plan_notes", State: planStarted, Tasks: []PlanTask{task}}
+	if err := s.savePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	task.Placement = &placement{Choice: task.Machine, Reason: task.Why}
+	task.noteWhy("The engine used its default launcher")
+	task.noteWhy("Ultracode was skipped")
+	s.updatePlanTask(ctx, plan.ID, 0, task)
+
+	saved, err := s.loadPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := saved.Tasks[0]
+	if got.Why != task.Why {
+		t.Fatalf("stored why = %q, want %q", got.Why, task.Why)
+	}
+	if p := got.Placement; p == nil || p.Choice != task.Machine || p.Reason != task.Placement.Reason {
+		t.Fatalf("stored placement = %+v, want %+v", p, task.Placement)
+	}
+}
+
 func TestFixedTaskPreviewKeepsTheRequestedMachine(t *testing.T) {
 	s, _ := launcherHealthHubOn(t, newStorelessService)
 	ctx := context.Background()
@@ -79,10 +107,11 @@ func TestFixedTaskHealthChangesBetweenPreviewDispatchAndRetry(t *testing.T) {
 	if starts := taskStartMachines(f); len(starts) != 0 {
 		t.Fatalf("unhealthy fixed target dispatched: %v", starts)
 	}
-	stored, err := s.loadPlan(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var stored *TaskPlan
+	waitFor(t, "fixed target failure on the plan", func() bool {
+		stored, err = s.loadPlan(ctx, id)
+		return err == nil && len(stored.Tasks) == 1 && stored.Tasks[0].Error != ""
+	})
 	if task := stored.Tasks[0]; task.Machine != "l4" || task.MachinePolicy != machineFixed || task.Error == "" || task.Cwd != "/home/me/code/app" {
 		t.Fatalf("fixed refusal was not retained: %+v", task)
 	}

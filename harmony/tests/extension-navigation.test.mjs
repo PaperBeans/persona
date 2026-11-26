@@ -19,6 +19,7 @@ registerHooks({
   }
 });
 const { ExtensionNavigation } = await import('../entry/src/main/ets/models/ExtensionNavigation.ets');
+const { Wire } = await import('../entry/src/main/ets/models/Wire.ets');
 const entry = (id='page') => ({extension:'example',id,title:id,placement:'nav_page',icon:'chart'});
 function fixture() {
   let generation=1, manager='assistant'; const handlers=new Set(), calls=[];
@@ -30,7 +31,7 @@ function fixture() {
   f.model=new ExtensionNavigation();f.calls=calls;
   f.switch=()=>{manager='other';generation++;f.client.profile={id:'hub',manager};};
   f.reconnect=()=>{generation++;f.client.features=[];f.client.connected=false;};
-  f.event=data=>{for(const handler of handlers)handler(JSON.stringify(data));};
+  f.event=data=>{for(const handler of handlers)handler(JSON.stringify(data),data.type);};
   return f;
 }
 test('main navigation lists every valid contribution without a small page cap',async()=>{
@@ -91,4 +92,20 @@ test('a newly installed application is discovered without a lifecycle event',asy
   const f=fixture();f.result={ui:[]};f.model.bind(f.client);await f.model.refresh();assert.equal(f.model.visible,false);
   f.result={ui:[entry('new')]};t.mock.timers.tick(5000);await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.model.entries[0]?.uiId,'new');assert.equal(f.model.visible,true);f.model.dispose();
+});
+
+test('ordinary Hub events reuse the decoded type and leave extension navigation alone', async t => {
+  const f=fixture();
+  f.model.bind(f.client);
+  t.after(()=>f.model.dispose());
+  await f.model.refresh();
+  const current=f.model.entries[0], parse=t.mock.method(Wire,'parse');
+  for(const type of ['sessions','items','machine','items_replace','interaction_resolved','todo','inbox'])
+    f.event({type,manager:'assistant',items:[{id:'sample',title:'A normal update'}]});
+  assert.equal(parse.mock.callCount(),0);
+  assert.strictEqual(f.model.entries[0],current);
+  assert.equal(f.calls.length,1);
+  f.event({type:'extension_ui',extension:'example',id:'page',badge:{text:'3'}});
+  assert.equal(parse.mock.callCount(),1);
+  assert.equal(current.badge,'3');
 });

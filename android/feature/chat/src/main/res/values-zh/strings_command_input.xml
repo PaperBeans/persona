@@ -1,0 +1,8 @@
+<resources>
+    <string name="chat_command_input_kicker">命令输入</string>
+    <string name="chat_command_input_waiting">等待你的输入</string>
+    <string name="chat_command_input_line">输入</string>
+    <string name="chat_command_input_show">显示</string>
+    <string name="chat_command_input_hide">隐藏</string>
+    <string name="chat_command_input_not_now">暂不输入</string>
+</resources>

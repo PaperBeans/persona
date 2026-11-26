@@ -63,6 +63,18 @@ const GraphCanvas = lazyPage<
   }
 >(() => import("./ViewBody10").then((m) => m.GraphCanvas));
 
+// UI version 12's interactive vector map canvas (ViewBody12.tsx) is its own lazy chunk: only loaded when an extension
+// page, card or chat tool view renders a `map` item, keeping the first screen and idle preload clear.
+const MapCanvas = lazyPage<
+  {
+    item: UIItem;
+    compact?: boolean;
+    busy: string;
+    onPress: (a: UIAction, destructive?: boolean) => void;
+    canPress?: (a: UIAction) => boolean;
+  }
+>(() => import("./ViewBody12").then((m) => m.MapCanvas));
+
 function CodeItem({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Loading />}>{children}</Suspense>;
 }
@@ -318,20 +330,21 @@ function MoreLine({ more, busy, onMore, onObserveMore, divided, preserveObserver
 }
 
 function Metrics({ items, style, className }: { items: UIItem[]; style?: React.CSSProperties; className?: string }) {
+  const alone = items.length === 1;
   return (
-    <div className={cx("grid gap-x-4 gap-y-3 px-4 py-3", items.length === 1 ? "grid-cols-1" : items.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3", className)} style={style}>
+    <div className={cx("grid gap-x-4 gap-y-3 px-4 py-3", alone ? "grid-cols-1" : items.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3", className)} style={style}>
       {items.map((it, i) => (
         <div key={i} className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-ink-3">
             {/* UI version 6: the metric's icon, in its color */}
             {glyphOf(it.icon, ROW_ICON) && <Icon name={glyphOf(it.icon, ROW_ICON)!} size={13} className="shrink-0" style={it.icon_color ? { color: hue(it.icon_color) } : undefined} />}
-            <span className="min-w-0 truncate">{it.label}</span>
+            <span className={cx("min-w-0", alone ? "line-clamp-2 break-words" : "truncate")}>{it.label}</span>
           </div>
           <div className="mt-0.5 flex min-w-0 items-end gap-2">
             <span className={cx("min-w-0 truncate text-[20px] leading-tight font-semibold tabular-nums", TEXT[toneOf(it.tone)])}>{it.value && <Rolling value={it.value} />}</span>
             {it.spark && <Sparkline spark={it.spark} width={64} height={22} className="mb-0.5" />}
           </div>
-          {it.detail && <div className="mt-0.5 truncate text-[11.5px] text-ink-3">{it.detail}</div>}
+          {it.detail && <div className="mt-0.5 break-words text-[11.5px] text-ink-3">{it.detail}</div>}
         </div>
       ))}
     </div>
@@ -432,6 +445,18 @@ function NativeItem({ item: it, compact, values, setValue, busy, onPress, onChoo
             <GraphCanvas item={it} compact={compact} busy={busy} onPress={onPress} canPress={canPress} />
           </Suspense>
         </div>
+      );
+    case "map":
+      return (
+        <Suspense
+          fallback={(
+            <div className={compact ? "px-4 py-3" : "w-full"} style={compact ? undefined : { height: "clamp(320px, 70dvh, 900px)" }} aria-hidden>
+              {compact && <div style={{ height: 200 }} />}
+            </div>
+          )}
+        >
+          <MapCanvas item={it} compact={compact} busy={busy} onPress={onPress} canPress={canPress} />
+        </Suspense>
       );
     case "stat_grid":
       return <StatGrid item={it} compact={compact} />;
@@ -727,7 +752,7 @@ function Row({ item: it, busy, onPress, pressable, chosen, h }: { item: UIItem; 
         {it.subtitle && <div className="mt-0.5 line-clamp-2 text-submeta break-words whitespace-normal text-ink-3">{it.subtitle}</div>}
       </div>
       {it.spark && <Sparkline spark={it.spark} />}
-      {it.value && !slider && <span className="shrink-0 truncate text-[12.5px] text-ink-2 tabular-nums"><Rolling value={it.value} /></span>}
+      {it.value && !slider && <span className="min-w-0 max-w-[45%] truncate text-[12.5px] text-ink-2 tabular-nums"><Rolling value={it.value} /></span>}
       {/* a slider's row says the value it is at, as the thumb moves */}
       {slider && <span className="shrink-0 truncate text-[12.5px] text-ink-2 tabular-nums">{sliderText(c, h)}</span>}
       {it.badge?.text && <Badge badge={it.badge} />}

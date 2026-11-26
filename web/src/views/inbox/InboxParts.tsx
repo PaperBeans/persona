@@ -14,6 +14,7 @@ import { AssistantAvatar } from "../../ui/AssistantAvatar";
 import { BrandMark } from "../../ui/BrandMark";
 import { Icon } from "../../ui/icons";
 import { useClamped } from "../../ui/use-clamped";
+import { useItemReadOnly } from "./item-write-gate";
 import larkMark from "./lark.svg";
 
 // ── glyphs not in ui/icons (Beautiful UI grammar: 24 grid, round caps, currentColor) ──
@@ -241,6 +242,7 @@ export function Count({ n, accent }: { n: number; accent?: boolean }) {
  * differs from the AI's. "Edit" opens it in the draft dialog. `onSend` gets the text and changes shown.
  */
 export function DraftCard({ it, onEdit, onSend }: { it: InboxItem; onEdit: () => void; onSend: (text: string, changes: DocChange[]) => void }) {
+  const readOnly = useItemReadOnly(it);
   const draft = agentDraft(it);
   const key = itemKey(it);
   const sending = useInbox((s) => s.sending.includes(key));
@@ -284,7 +286,7 @@ export function DraftCard({ it, onEdit, onSend }: { it: InboxItem; onEdit: () =>
       ))}
       <div className="mt-2.5 flex justify-end gap-2">
         <Button tone="secondary" onClick={onEdit}>{t("inbox-inboxparts.edit")}</Button>
-        <Button tone="accent" icon="send" busy={sending} disabled={!text.trim() && !changes.length} onClick={() => onSend(text.trim(), changes)} title={t("inbox-inboxparts.send_draft")}>{t("inbox-inboxparts.send")}</Button>
+        {!readOnly && <Button tone="accent" icon="send" busy={sending} disabled={!text.trim() && !changes.length} onClick={() => { if (!readOnly) onSend(text.trim(), changes); }} title={t("inbox-inboxparts.send_draft")}>{t("inbox-inboxparts.send")}</Button>}
       </div>
     </div>
   );

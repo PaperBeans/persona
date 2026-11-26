@@ -1,0 +1,80 @@
+{
+  "string": [
+    {
+      "name": "background_activity",
+      "value": "バックグラウンドアクティビティ"
+    },
+    {
+      "name": "activity_empty",
+      "value": "バックグラウンドアクティビティはありません"
+    },
+    {
+      "name": "activity_empty_detail",
+      "value": "完了した静かなラウンドはここに保持され、確認できます。"
+    },
+    {
+      "name": "activity_record",
+      "value": "バックグラウンドで処理済み"
+    },
+    {
+      "name": "activity_answered",
+      "value": "回答済み"
+    },
+    {
+      "name": "activity_task",
+      "value": "タスク"
+    },
+    {
+      "name": "activity_expand",
+      "value": "詳細を表示"
+    },
+    {
+      "name": "activity_handoff_active",
+      "value": "実行中だった"
+    },
+    {
+      "name": "activity_handoff_resumed",
+      "value": "再開"
+    },
+    {
+      "name": "activity_handoff_continuation",
+      "value": "引き継ぎ"
+    },
+    {
+      "name": "activity_handoff_new",
+      "value": "新規"
+    },
+    {
+      "name": "activity_me",
+      "value": "自分"
+    },
+    {
+      "name": "activity_input",
+      "value": "監督入力"
+    },
+    {
+      "name": "activity_no_motion",
+      "value": "まだ動きはありません"
+    },
+    {
+      "name": "activity_starting_agent",
+      "value": "エージェントを起動中"
+    },
+    {
+      "name": "activity_task_gone",
+      "value": "このタスクはもうありません"
+    },
+    {
+      "name": "activity_closed",
+      "value": "Agentが起動する前に閉じられました"
+    },
+    {
+      "name": "activity_starting",
+      "value": "起動中"
+    },
+    {
+      "name": "activity_start_failed",
+      "value": "エージェントを起動できませんでした"
+    }
+  ]
+}

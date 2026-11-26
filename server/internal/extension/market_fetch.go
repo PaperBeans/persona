@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -198,6 +199,8 @@ type Fetched struct {
 	Index        *MarketIndex
 	Warnings     []string
 	Raw, Payload []byte
+	// SignedBy is the trusted key ("ed25519:…") whose signature verified the catalog; "" when it was not verified.
+	SignedBy string
 }
 
 func (m *Market) Fetch(ctx context.Context) (*MarketIndex, []string, error) {
@@ -243,7 +246,16 @@ func (m *Market) FetchSigned(ctx context.Context) (*Fetched, error) {
 	if err != nil {
 		return nil, catalogFailure(ErrCatalogUnavailable, err)
 	}
-	return ParseCatalog(raw, key)
+	return ParseCatalogKeys(raw, m.VerifyKeys())
+}
+
+// VerifyKeys are the keys a catalog of m must be signed by (any one of them): the compiled-in key for the official
+// market, the owner's keys for a private market that has them, none for an unsigned market.
+func (m *Market) VerifyKeys() []string {
+	if IsOfficialMarket(m.Spec.String()) {
+		return []string{Official.SigningKey}
+	}
+	return slices.Clone(m.TrustedKeys)
 }
 
 // fetchRaw never reads an adjacent signature or another catalog filename.

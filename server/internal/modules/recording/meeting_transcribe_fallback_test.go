@@ -16,6 +16,15 @@ func TestFallbackUpstreamFailed(t *testing.T) {
 	h.hubUpload(meetingRec, 1, nil)
 	p, _ := h.open(meetingRec, 0, nil)
 	p.audio(1.2)
+	waitFor(t, "the job ready or the problem", func() bool {
+		if len(p.of("problem")) > 0 {
+			return true
+		}
+		r := h.s.hubRunOf(meetingRec)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.job != nil && r.job.ready
+	})
 	if f := p.wait("problem", 1); f["code"] != problemUpstreamFailed {
 		t.Fatalf("problem %v", f)
 	}

@@ -7,7 +7,7 @@ pub mod registry;
 #[cfg(feature = "ohos")]
 mod binding {
     use napi_derive_ohos::napi;
-    use napi_ohos::bindgen_prelude::{Buffer, FnArgs, Result, Status};
+    use napi_ohos::bindgen_prelude::{FnArgs, Result, Status, Uint8Array, Uint8ArraySlice};
     use napi_ohos::threadsafe_function::ThreadsafeFunction;
     use serde::Serialize;
     use serde::de::DeserializeOwned;
@@ -16,9 +16,9 @@ mod binding {
 
     #[napi(catch_unwind)]
     pub fn core_create(
-        config: Buffer,
+        config: Uint8ArraySlice<'_>,
         changed: ThreadsafeFunction<i64, (), i64, Status, false>,
-        effects: ThreadsafeFunction<Buffer, (), Buffer, Status, false>,
+        effects: ThreadsafeFunction<Uint8Array, (), Uint8Array, Status, false>,
     ) -> Result<i64> {
         registry::create(config.as_ref(), CoreHost::new(changed, effects))
     }
@@ -26,10 +26,10 @@ mod binding {
     #[napi(catch_unwind)]
     #[allow(clippy::type_complexity)] // Type aliases are not expanded by napi-derive's TypeScript generator.
     pub fn core_create_with_chat(
-        config: Buffer,
+        config: Uint8ArraySlice<'_>,
         changed: ThreadsafeFunction<i64, (), i64, Status, false>,
         changed_chat: ThreadsafeFunction<FnArgs<(String, i64)>, (), FnArgs<(String, i64)>, Status, false>,
-        effects: ThreadsafeFunction<Buffer, (), Buffer, Status, false>,
+        effects: ThreadsafeFunction<Uint8Array, (), Uint8Array, Status, false>,
     ) -> Result<i64> {
         registry::create(
             config.as_ref(),
@@ -38,12 +38,12 @@ mod binding {
     }
 
     #[napi(catch_unwind)]
-    pub fn core_dispatch(handle: i64, action: Buffer) -> Result<bool> {
+    pub fn core_dispatch(handle: i64, action: Uint8ArraySlice<'_>) -> Result<bool> {
         registry::dispatch(handle, action.as_ref())
     }
 
     #[napi(catch_unwind)]
-    pub fn core_drain(handle: i64, chat: String) -> Result<Buffer> {
+    pub fn core_drain(handle: i64, chat: String) -> Result<Uint8Array> {
         registry::drain(handle, &chat).map(Into::into)
     }
 
@@ -58,7 +58,7 @@ mod binding {
     }
 
     #[napi(catch_unwind)]
-    pub fn core_config() -> Buffer {
+    pub fn core_config() -> Uint8Array {
         registry::config().into()
     }
 

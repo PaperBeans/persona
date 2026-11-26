@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 func golden(t *testing.T, name, got string) {
@@ -187,6 +186,16 @@ func goldenProject(t *testing.T, language string) {
 			_ = e.Store.PutSummary(KindProject, p.Slug, "# 示例发布\n\n## 目标\n周五灰度")
 			_ = e.Store.AppendLog(p.Slug, at, "lark-f1", "定了周五灰度")
 			_ = e.Store.AppendLog(p.Slug, at.Add(time.Hour), "lark-f2", "提前到周四")
+			if err := e.AppendProjectMemoryBatch(p.Slug, []ProjectMemoryRecord{
+				{ID: "todo-demo/machine-demo/session-demo/3/1/decision/1", Type: ProjectMemoryDecision,
+					Question: "哪天灰度？", Decision: "周四灰度", Reason: "周五有冻结", RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+				{ID: "todo-demo/machine-demo/session-demo/3/1/pitfall/1", Type: ProjectMemoryPitfall,
+					Conclusion: "不要只看旧摘要", RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+				{ID: "todo-demo/machine-demo/session-demo/3/1", Type: ProjectMemoryOutcome,
+					Conclusion: "周四灰度已完成", Links: []string{"https://example.com/pr/42"}, RecordedAt: "2026-10-30T03:00:00Z", Verification: ProjectMemoryAgentReported},
+			}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if n := e.RefreshProjects(ctx, 5); n != 1 {
 			t.Fatalf("refreshed %d", n)
@@ -283,31 +292,6 @@ func goldenMomentsLink(t *testing.T, language string) {
 		m.calls[0][1] = strings.ReplaceAll(m.calls[0][1], at.In(goldenZone).Format("2006-01-02"), "2026-10-30")
 	}
 	m.golden(t, "moments_link")
-}
-
-// The day recap's merge (kb/day_recap_merge), rendered directly: the known meetings of every kind, a long day left
-// partial, a chunk with no summary, entries with and without points' speakers, and actions with and without deadlines.
-func TestGoldenDayRecapMerge(t *testing.T) {
-	at := func(h, m int) time.Time { return time.Date(2026, 11, 11, h, m, 0, 0, goldenZone) }
-	day := prompts.KBDayRecapDay{Pinned: "示例用户 在示例公司做发布", Title: "出差", Day: "2026-11-11", Weekday: "周三",
-		Zone: "Asia/Shanghai", Language: "zh-CN", Part: 2}
-	in := prompts.KBDayRecapMergeInput{Day: day, Partial: true, Meetings: []prompts.KBDayMeeting{
-		{N: 1, Kind: KindRecording, Title: "设计评审", From: at(9, 0), To: at(9, 45)},
-		{N: 2, Kind: KindMeeting, Title: "周会（视频）", From: at(14, 0)},
-		{N: 3, Kind: KindEvent, Title: "午饭约", From: at(12, 0)},
-	}, Chunks: []prompts.KBDayRecapChunk{
-		{From: "09:01", To: "09:44", Summary: "评审导出的上限", Entries: []prompts.KBDayRecapEntry{
-			{FromLine: 12, ToLine: 40, Kind: "meeting", Title: "导出评审", Points: []prompts.KBMinutesNote{
-				{Line: 15, Text: "导出超过 4 MB 的条目会被丢掉", Who: "Ada"}, {Line: 31, Text: "这一版先保留上限"}}},
-		}, Actions: []prompts.KBMinutesNote{{Line: 38, Text: "补上回归测试", Who: "Bo", By: "周五前", DueDate: "2026-11-13"}}},
-		{From: "12:03", To: "12:40", Entries: []prompts.KBDayRecapEntry{
-			{FromLine: 90, ToLine: 120, Kind: "outside", Title: "午饭", Points: []prompts.KBMinutesNote{{Line: 95, Text: "聊到下周出差"}}},
-		}, Actions: []prompts.KBMinutesNote{{Line: 101, Text: "订周一的机票"}}},
-	}}
-	golden(t, "day_recap_merge.system", prompts.RenderKBDayRecapMerge(prompts.KBOwner{Owner: "示例用户"}))
-	golden(t, "day_recap_merge.user", prompts.RenderKBDayRecapMergeInput(in))
-	in.Meetings, in.Partial, in.Day = nil, false, prompts.KBDayRecapDay{Day: "2026-11-11", Weekday: "周三", Zone: "Asia/Shanghai"}
-	golden(t, "day_recap_merge.no_meetings.user", prompts.RenderKBDayRecapMergeInput(in))
 }
 
 func knowledgeGolden(name, language string) string {

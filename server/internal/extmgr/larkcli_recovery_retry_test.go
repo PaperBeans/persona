@@ -37,6 +37,16 @@ func recoveryCLI(t *testing.T, w *botLoadWorld) string {
 	return log
 }
 
+func (w *botLoadWorld) startRecoveryConnectors(t *testing.T) {
+	t.Helper()
+	w.h.startConnectors(w.ctx)
+	t.Cleanup(func() {
+		w.cancel()
+		w.h.connectors.Stop() // the CLI audit and environment belong to this test until its last watcher exits
+		eventually(t, 2*time.Second, "CLI profile recovery to stop", func() bool { return !w.h.larkCLIRecovery.running.Load() })
+	})
+}
+
 func TestLarkCLIManagedRecoveryRetriesTransientSyncFailure(t *testing.T) {
 	needsLarkCLI(t)
 	w := newBotLoadWorld(t, true, false)
@@ -72,7 +82,7 @@ exec "$LARKCLI_RECOVERY_REAL" "$@"
 	if err := w.store.botStore.PutSetting(w.ctx, botSettingsKey, FeishuBotSettings{AppID: "cli_recovered", SecretEnc: sealed}); err != nil {
 		t.Fatal(err)
 	}
-	w.h.startConnectors(w.ctx)
+	w.startRecoveryConnectors(t)
 	w.store.recover()
 	w.advance()
 	w.h.botAPI()
@@ -169,7 +179,7 @@ func TestLarkCLIDualSettingsOutageRestoresDurableSwitches(t *testing.T) {
 			st := &dualLarkReadStore{Store: w.store}
 			st.failed.Store(true)
 			w.h.store = st
-			w.h.startConnectors(w.ctx)
+			w.startRecoveryConnectors(t)
 			initialReads := st.connectorReads.Load()
 			if w.h.connectors.Enabled("larkcli") || w.h.connectors.Feeds("larkcli", connector.FeedInbox) {
 				t.Error("unread connector preferences started as enabled/feed-on")

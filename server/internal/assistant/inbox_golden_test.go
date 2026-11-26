@@ -274,3 +274,25 @@ func TestGoldenInboxFolders(t *testing.T) {
 		goldenCall(t, "inbox_folders."+name, onlyCall(t, calls()))
 	}
 }
+
+func TestGoldenExternalInboxRouting(t *testing.T) {
+	for _, locale := range []string{"en", "zh-Hans", "ja"} {
+		t.Run(locale, func(t *testing.T) {
+			h := goldenInbox(t)
+			model, calls := captureModel(t, `{"results":[{"disposition":"ignore"}]}`)
+			h.in.model = model
+			h.f.hello.Locale = locale
+			target := externalTarget{ID: "todo_sample", Kind: "todo"}
+			input := externalTriageInput{Candidates: []externalCandidateBrief{{
+				externalTarget: target, Title: "Deploy", Scope: "Release the example", Status: "open",
+			}}, Summaries: []string{"New review"}}
+			if _, err := h.askExternalInboxTriage(t.Context(), input); err != nil {
+				t.Fatal(err)
+			}
+			goldenCall(t, "external_inbox_routing."+locale, onlyCall(t, calls()))
+			golden(t, "external_inbox_update."+locale, h.renderExternalUpdate(t.Context(), assistantwire.ExternalInboxEvent{
+				Key: "event_sample", Title: "New review", Summary: "Please check the example.", URL: "https://example.com/review",
+			}))
+		})
+	}
+}

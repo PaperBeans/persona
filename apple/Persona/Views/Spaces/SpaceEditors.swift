@@ -312,7 +312,7 @@ struct ExtensionInfoAccessSection: View {
                     if !trust.isOwner {
                         ForEach(InfoCategory.all, id: \.self) { c in
                             Toggle(InfoCategoryWords.name(c), isOn: Binding(get: { trust.categories.contains(c) },
-                                                                             set: { on in Task { await page.setCategory(c, on: on) } }))
+                                                                             set: { on in Task { await page.allowCategory(c, on: on) } }))
                                 .accessibilityIdentifier("extension-trust-\(c)")
                         }
                     }

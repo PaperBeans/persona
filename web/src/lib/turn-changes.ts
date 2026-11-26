@@ -30,6 +30,16 @@ export interface TurnChangeSet {
   exact: boolean;
 }
 
+/** Files listed before "Show N more files" (cindy's MAX_VISIBLE_FILES). */
+export const VISIBLE_FILES = 3;
+
+/** The card's height as drawn (Chrome, 2026-11-12), for an exchange's estimate before it is first drawn: its 4 px
+ *  margins, border, the 64 px head, and the files' padding, rows and Show more row. */
+export function turnChangesHeight(c: TurnChangeSet): number {
+  const rows = Math.min(c.files.length, VISIBLE_FILES);
+  return 8 + 2 + 64 + 1 + 16 + rows * 36 + (c.files.length > VISIBLE_FILES ? 32 : 0);
+}
+
 interface Counts {
   add: number;
   del: number;

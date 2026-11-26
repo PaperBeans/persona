@@ -1,10 +1,13 @@
 package persona.core.domain.models
 
 import persona.core.contracts.ModelPick
+import persona.core.contracts.ProtocolCompatibility
 import persona.core.contracts.Session
 import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.AgentModel
 import persona.core.contracts.api.AssistantLaunchers
+import persona.core.contracts.api.ConversationSwitchRequest
+import persona.core.contracts.api.ConversationSwitchState
 import persona.core.contracts.api.LauncherModels
 import persona.core.contracts.api.launcherExplicitModel
 
@@ -14,14 +17,16 @@ import persona.core.contracts.api.launcherExplicitModel
  * own pick is kept on the hub (`model_pick`, [MODEL_PICK]) and holds from the next message on every device; without one
  * the main chat follows Model configuration › Main chat and another chat keeps what it started with. The providers are
  * what the assistant's computer lists for the main chat, then what can't run it there, off with the hub's reason. A chat
- * that already runs keeps its engine. Every pickable provider switches the same way, from the next message, so
- * Recommended is the provider the chat runs on now.
+ * that already runs keeps its engine unless the hub supports explicit conversation switching ([SEGMENTS]). Every pickable
+ * provider switches the same way, from the next message, so Recommended is the provider the chat runs on now.
  */
 object PersonaModelPanel {
     /** The hub keeps a Persona chat's pick (`PUT` / `DELETE …/conversations/{id}/model`). */
     const val MODEL_PICK = "assistant_model_pick"
     /** The hub takes a model id typed by hand for a Persona chat. */
     const val TYPED_MODELS = "typed_models"
+    /** The hub supports explicit cross-engine / runtime conversation switching (`…/segments` and `…/switch`). */
+    const val SEGMENTS = "assistant_segments"
 
     /** Where a chat's setup comes from: its own pick; the default (the main chat, the new-chat page); or what it started with. */
     enum class Source { Pick, Default, Own }
@@ -29,8 +34,18 @@ object PersonaModelPanel {
     /** What the chat's next message runs on: [model] null is the launcher's default entry, [effort] null the default's. */
     data class Setup(val provider: String, val model: String? = null, val effort: String? = null, val source: Source)
 
-    /** A Persona chat as its pill sees it: [session] null on the new-chat page; [kept] the hub has [MODEL_PICK]. */
-    data class Chat(val session: Session?, val isMain: Boolean, val kept: Boolean, val config: String? = null, val pagePick: ModelPick? = null)
+    /**
+     * A Persona chat as its pill sees it: [session] null on the new-chat page; [kept] the hub has [MODEL_PICK];
+     * [followsDefault] the chat follows the default without a pick (main chat, leaders, background supervisor, tasks).
+     */
+    data class Chat(
+        val session: Session?,
+        val isMain: Boolean,
+        val kept: Boolean,
+        val config: String? = null,
+        val pagePick: ModelPick? = null,
+        val followsDefault: Boolean = isMain,
+    )
 
     /** The chat's own pick: `model_pick` on a hub that keeps it, else this page's (an older hub, the new-chat page). */
     fun pick(chat: Chat): ModelPick? {
@@ -39,12 +54,98 @@ object PersonaModelPanel {
         return chat.pagePick?.takeIf { it.launcher.isNotEmpty() }
     }
 
+    private val engineAliases = mapOf(
+        "claudecode" to "claude",
+        "codexcli" to "codex",
+        "geminicli" to "gemini",
+        "cursoragent" to "cursor",
+        "piweb" to "pi",
+        "traecli" to "trae",
+    )
+
+    private fun canonicalEngine(raw: String?): String {
+        val id = AgentModelPanel.engineId(raw)
+        val key = id.filter { !it.isWhitespace() && it != '.' && it != '_' && it != '-' }
+        return engineAliases[key] ?: id
+    }
+
+    private fun isNativeSource(source: String?): Boolean =
+        source.isNullOrEmpty() || source == "zshrc" || source == "path" || source == "builtin" ||
+            ProtocolCompatibility.managedProvider(source)
+
+    /**
+     * A runtime connection cannot resume a native transcript of the same engine, nor another runtime's session.
+     * Different engines or connection identities require an explicit conversation switch (web `assistantSwitchNeeded`).
+     */
+    fun switchNeeded(session: Session, target: AgentLauncher, engine: String): Boolean {
+        if (session.launcher == target.name) return false
+        if (canonicalEngine(AgentModelPanel.engine(session)) != canonicalEngine(engine)) return true
+        if (session.launcher?.startsWith("persona_ext_") == true || target.name.startsWith("persona_ext_")) return true
+        val runtimeTarget = !isNativeSource(target.source)
+        if (session.sourceKind == "runtime") return !runtimeTarget || session.sourceInstanceId != target.source
+        return runtimeTarget
+    }
+
+    /** Descriptive picker eligibility for supervising conversations; the hub re-attests before execution. */
+    fun launcherSupervisionPolicy(target: AgentLauncher): Boolean {
+        if (target.name.isEmpty() || target.name.startsWith("persona_ext_")) return false
+        val native = isNativeSource(target.source)
+        val agent = canonicalEngine(target.agentType)
+        if (native && (agent == "claude" || agent == "codex")) return true
+        return target.assistant && target.supervisionPolicy
+    }
+
+    /**
+     * Builds an explicit logical-conversation switch request from [state] (web `prepareConversationSwitch`).
+     * Returns null when segments are disabled, the epoch is invalid (< 1), or [operationId] is blank.
+     */
+    fun buildSwitchRequest(
+        session: Session,
+        pick: ModelPick,
+        state: ConversationSwitchState,
+        operationId: String,
+    ): ConversationSwitchRequest? {
+        if (!state.enabled || state.epoch < 1L || operationId.isBlank() || session.machineId.isBlank() || pick.launcher.isBlank()) {
+            return null
+        }
+        return ConversationSwitchRequest(
+            operationId = operationId,
+            expectedEpoch = state.epoch,
+            sourceMachineId = session.machineId,
+            machineId = session.machineId,
+            launcher = pick.launcher,
+            model = pick.model?.takeIf(String::isNotBlank),
+            effort = pick.effort?.takeIf(String::isNotBlank),
+            permissionMode = session.permissionMode?.takeIf(String::isNotBlank),
+        )
+    }
+
+    // Model configuration prefixes launcher providers; a session names the same launcher without that prefix.
+    private fun canonicalLauncher(name: String): String = name.removePrefix("launcher.")
+
+    private fun mainChatAgentMismatch(chat: Chat, info: AssistantLaunchers?): Boolean {
+        val s = chat.session ?: return false
+        val actualLauncher = s.launcher?.takeIf(String::isNotEmpty) ?: return false
+        if (!chat.isMain || info == null || pick(chat) != null) return false
+        val configuredLauncher = info.default?.provider?.takeIf(String::isNotEmpty) ?: chat.config?.takeIf(String::isNotEmpty) ?: return false
+        if (canonicalLauncher(configuredLauncher) == canonicalLauncher(actualLauncher)) return false
+        val configured = info.launchers.firstOrNull { it.name == configuredLauncher }
+            ?: info.launchers.firstOrNull { canonicalLauncher(it.name) == canonicalLauncher(configuredLauncher) }
+            ?: return false
+        val configuredAgent = engineOf(configured)
+        val actualAgent = AgentModelPanel.engine(s)
+        return canonicalEngine(configuredAgent) != canonicalEngine(actualAgent) || switchNeeded(s, configured, configuredAgent)
+    }
+
     /** The setup the chat's next message runs on, as the hub decides it (assistant/start.go `sendModel`). */
     fun setup(chat: Chat, info: AssistantLaunchers?): Setup {
         val s = chat.session
         pick(chat)?.let { return Setup(it.launcher, it.model?.takeIf(String::isNotEmpty), it.effort?.takeIf(String::isNotEmpty) ?: s?.effort, Source.Pick) }
+        if (s != null && mainChatAgentMismatch(chat, info)) {
+            return Setup(s.launcher.orEmpty(), s.model, s.effort, Source.Own)
+        }
         val def = info?.default
-        if (s == null || chat.isMain) {
+        if (s == null || chat.followsDefault) {
             val provider = def?.provider?.takeIf(String::isNotEmpty) ?: chat.config?.takeIf(String::isNotEmpty) ?: s?.launcher?.takeIf(String::isNotEmpty) ?: "claude"
             return Setup(provider, def?.model?.takeIf(String::isNotEmpty) ?: s?.model?.takeIf { s.launcher == provider },
                 (if (chat.isMain) def?.effort?.takeIf(String::isNotEmpty) ?: s?.effort else s?.effort ?: def?.effort?.takeIf(String::isNotEmpty)), Source.Default)
@@ -54,7 +155,7 @@ object PersonaModelPanel {
         return Setup(own ?: chat.config?.takeIf(String::isNotEmpty) ?: "claude", if (own != null) s.model else null, s.effort, Source.Own)
     }
 
-    private fun engineOf(l: AgentLauncher) = AgentModelPanel.engineId(l.agentType)
+    private fun engineOf(l: AgentLauncher) = canonicalEngine(AgentModelPanel.launcherEngine(l.name, l.agentType))
 
     private fun panelModel(m: AgentModel, engine: String) = PanelModel(
         id = m.id, name = m.label, description = m.description?.takeIf(String::isNotBlank), resolved = m.resolved?.takeIf(String::isNotBlank),
@@ -65,11 +166,21 @@ object PersonaModelPanel {
 
     /**
      * The panel's providers and state for a chat running [setup]: [info] the computer's launchers for the main chat (null
-     * before they are read), [listOf] each launcher's list as read; [typed] the hub takes typed ids; [engine] the engine
-     * the chat runs, [running] it already runs on it (another engine's providers are off; not on the new-chat page).
+     * before they are read), [listFor] each launcher's list as read; [typed] the hub takes typed ids; [engine] the engine
+     * the chat runs, [running] it already runs on it (another engine's providers are off unless [switching] is true;
+     * not on the new-chat page); [supervision] restricts choices to launchers with supervision support.
      */
-    fun panel(setup: Setup, info: AssistantLaunchers?, listFor: (String) -> ModelList, typed: Boolean, engine: String = "claude", running: Boolean = false): PanelData {
-        val runs = AgentModelPanel.engineId(engine)
+    fun panel(
+        setup: Setup,
+        info: AssistantLaunchers?,
+        listFor: (String) -> ModelList,
+        typed: Boolean,
+        engine: String = "claude",
+        running: Boolean = false,
+        switching: Boolean = false,
+        supervision: Boolean = false,
+    ): PanelData {
+        val runs = canonicalEngine(engine)
         val launchers = info?.launchers.orEmpty()
         val providers = launchers.map { l ->
             val kind = engineOf(l)
@@ -86,7 +197,11 @@ object PersonaModelPanel {
                 models = list
             }
             // the provider it runs on stays as it is, whatever its kind: it is what the panel says the chat runs
-            val unavailable = if (running && kind != runs && l.name != setup.provider) PanelReason.OtherEngine(runs, kind) else null
+            val unavailable = when {
+                running && !switching && kind != runs && l.name != setup.provider -> PanelReason.OtherEngine(runs, kind)
+                supervision && !launcherSupervisionPolicy(l) -> PanelReason.SupervisionUnavailable
+                else -> null
+            }
             PanelProvider(l.name, l.title, kind, models, loading = !e.read && (e.loading || e.error == null),
                 error = e.error?.takeIf { !e.read && !e.loading },
                 unavailable = unavailable, typable = unavailable == null && typed && AgentModelPanel.typedModelOffered(kind, e.list))

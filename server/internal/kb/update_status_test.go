@@ -27,7 +27,7 @@ func TestPersonStatusUpdate(t *testing.T) {
 				t.Fatal(err)
 			}
 			p, ok := reopened.Person("person")
-			if !ok || p.Status != status || !p.fieldLocked("status") {
+			if !ok || p.Status != status || !taggingFieldLocked(&p.Tagging, "status") {
 				t.Fatalf("status was not persisted and protected: %+v", p)
 			}
 			editApply(t, e, KindPerson, "person", Update{Note: "Confirmed note"})

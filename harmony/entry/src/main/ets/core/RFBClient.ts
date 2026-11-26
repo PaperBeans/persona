@@ -210,6 +210,17 @@ export class RFBClient {
     return this.send(packet);
   }
 
+  wheel(x:number,y:number,notches:number):boolean {
+    if (!this.inputAllowed() || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(notches) || !notches || Math.abs(notches)>200) return false;
+    const px=Math.min(this.framebuffer.width-1,Math.max(0,x)),py=Math.min(this.framebuffer.height-1,Math.max(0,y));
+    const count=Math.abs(notches),mask=notches>0 ? 8 : 16;
+    const bytes=new Uint8Array(count*12);
+    const pair=new Uint8Array([5,mask,(px>>>8)&255,px&255,(py>>>8)&255,py&255, 5,0,(px>>>8)&255,px&255,(py>>>8)&255,py&255]);
+    for (let i=0;i<count;i++) bytes.set(pair,i*12);
+    this.pointerX=px;this.pointerY=py;this.pointerButtons=0;
+    return this.send(bytes);
+  }
+
   releasePointer(): boolean {
     if (!this.inputAllowed() || this.pointerButtons === 0) return false;
     this.pointerButtons = 0;

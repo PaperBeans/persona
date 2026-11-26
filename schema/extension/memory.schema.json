@@ -30,7 +30,8 @@
         "entries": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/MemoryEntry"}},
         "tagged": {"type": "boolean"},
         "has_more": {"type": "boolean", "description": "Another page follows; ask again with after. When true, after must be set: true with an empty after counts as the end of the entries."},
-        "after": {"type": "string", "maxLength": 512, "description": "Opaque: what to send as after for the next page; required in practice whenever has_more is true."}
+        "after": {"type": "string", "maxLength": 512, "description": "Opaque: what to send as after for the next page; required in practice whenever has_more is true."},
+        "standing_bytes": {"type": "integer", "minimum": 0, "description": "The bytes of standing entries' text the program wants a standing channel to carry (its own setting, say). The hub keeps this budget apart from its own memory ledger's, caps it at 8192 and takes the largest any page states; left out or 0: 4096. Entries past it are left out, the most important kept."}
       },
       "required": ["entries", "tagged", "has_more"]
     },
@@ -40,7 +41,7 @@
       "properties": {
         "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Stable across pages and answers: a to-do's brief names the entries it carried by it (prefixed memory-extension:)."},
         "text": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "What the entry says, as the program would render it, on one or a few lines."},
-        "facet": {"type": "string", "maxLength": 32, "pattern": "^[a-z][a-z0-9_]{0,31}$", "description": "The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by it."},
+        "facet": {"type": "string", "maxLength": 32, "pattern": "^[a-z][a-z0-9_]{0,31}$", "description": "The program's own grouping (preferences, workflow, people…). Used for explicit recall tag matching; it does not change priority or visibility."},
         "status": {"type": "string", "enum": ["active", "candidate", "dormant", "retired"], "description": "active: the program would use it today, whatever it calls that state itself (a program with its own stable or shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no longer true. Only active entries are carried; an entry with any other value is dropped."},
         "origin_space": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "The slug of the space the entry was first said in; left out for the main space."},
         "categories": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 32, "pattern": "^[a-z][a-z0-9_]{0,31}$"}, "description": "Its information categories (health, finance, relationships, emotion, legal_id); left out for a general entry. A category the hub does not know makes the entry not known."},

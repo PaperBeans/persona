@@ -288,6 +288,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		return
 	}
 	text, isText := p["text"].(string)
+	clientMsgID, _ := p["client_msg_id"].(string)
 	if isText {
 		r = h.captureHumanSubmission(r, text)
 	}
@@ -334,14 +335,24 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 	}
 	if spokeKnown && (!terminal && m.isAssistant(spokeSession) || isText && strings.TrimSpace(text) != "") {
 		// The manager also observes owner messages to Agents before delivery, so a task's decision default can pause.
-		spoke := assistantwire.UserSpokeParams{SessionRef: assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid}}
-		// The same id the send's session.assistant_sent names: a choice that must not settle before delivery waits for it.
-		spoke.ClientMsgID, _ = p["client_msg_id"].(string)
+		spoke := assistantwire.UserSpokeParams{
+			SessionRef: assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid},
+			At:         time.Now().UTC(),
+		}
 		// A person's own app supplies the text for every conversation, including a supervisor / direction
 		// conversation: its needs_user decision cards are answered there too, and this event reaches the manager
 		// before the message is persisted, so the text cannot be recovered from transcript history at this point.
+		// The text carries the send's client_msg_id, the same id its session.assistant_sent names: a choice that
+		// must not settle before delivery waits for it (#13041).
 		if isText && personSent(r.Context()) {
 			spoke.Text = text
+			spoke.ClientMsgID = clientMsgID
+			// Owner provenance (#15641) marks owner input to an Agent only, never the assistant's own conversations.
+			if terminal {
+				spoke.Source = assistantwire.OwnerInputTerminal
+			} else if !m.isAssistant(spokeSession) {
+				spoke.Source = assistantwire.OwnerInputApp
+			}
 		}
 		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).userSpoke(r.Context(), spoke)
 	}
@@ -662,7 +673,13 @@ func (b *bufferedResponse) Header() http.Header         { return b.header }
 func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
 func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
 
+// writeRaw writes a send's answer, which the hub built itself (callErrBytes, laterBody) or a node returned (a 200): a
+// server error's is the hub's own error, noted for its request line (apierr.NoteError) as WriteBody would.
 func writeRaw(w http.ResponseWriter, status int, body []byte) {
+	var e map[string]any
+	if status >= 500 && json.Unmarshal(body, &e) == nil {
+		apierr.NoteError(w, status, e)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(body)

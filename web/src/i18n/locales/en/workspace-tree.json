@@ -1,5 +1,6 @@
 {
   "disclosure": "Expand or collapse {name}",
   "actions": "Actions for {name}",
-  "unavailable": "Workspace unavailable"
+  "unavailable": "Workspace unavailable",
+  "worktree_kind": "Worktree"
 }

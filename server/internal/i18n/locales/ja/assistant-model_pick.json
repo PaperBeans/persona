@@ -13,5 +13,14 @@
   "unavailable_api_chat": "Chat Completions API で接続しています。アシスタントの会話には Claude Code か Messages API の接続が必要です",
   "unavailable_api_other": "{api} API で接続しています。アシスタントの会話には Claude Code か Messages API の接続が必要です",
   "err_invalid_id": "会話 ID ではありません",
-  "err_unreadable": "会話ごとのモデルの選択を読み込めませんでした。少し待ってからもう一度お試しください。"
+  "err_unreadable": "会話ごとのモデルの選択を読み込めませんでした。少し待ってからもう一度お試しください。",
+  "unhealthy_auth": "{machine} での前回のチェックで、キーまたはサインインが拒否されました",
+  "unhealthy_model_route": "{machine} での前回のチェックで、ゲートウェイがこのモデルを使えませんでした",
+  "unhealthy_cli_outdated": "{machine} の CLI のバージョンが古すぎます。更新してからもう一度テストしてください",
+  "unhealthy_timeout": "{machine} での前回のチェックで応答がありませんでした",
+  "unhealthy_usage_limit": "{machine} でサブスクリプションの利用上限に達しました",
+  "unhealthy_upstream": "{machine} での前回のチェックで、ゲートウェイに空いているアカウントがありませんでした",
+  "unhealthy_onboarding": "{machine} で初回設定が終わっていません",
+  "unhealthy_other": "{machine} での前回のチェックに失敗しました",
+  "unhealthy_with_error": "{reason}：{error}"
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/modules/voice/voicetest"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // Hub transcription end to end (docs/assistant/meeting-minutes.md "Phase 5: hub transcription"): the phone's audio
@@ -131,7 +132,7 @@ func newE2EFixture(t *testing.T, s voicetest.Script) *e2eFixture {
 	t.Helper()
 	shortHubTimes(t)
 	jobReadyWait, jobDoneWait = 20*time.Second, time.Minute // and the recording module's below (recTimings)
-	voice, ok := builtinext.VoiceExtension()
+	voice, ok := builtinext.VoiceExtension(moduleswitch.Set{})
 	if !ok {
 		t.Skip("the voice module, the built-in transcription these tests run, is not in this build")
 	}
@@ -338,7 +339,7 @@ func TestHubTranscriptionEndToEnd(t *testing.T) {
 
 	eng := e.engine()
 	eng.Model, eng.ModelFor = e.minutes, func(string) kb.Model { return e.minutes }
-	if n := eng.WriteMinutes(context.Background(), 5); n < 1 {
+	if n := eng.RecordingProvider().WriteMinutes(context.Background(), 5); n < 1 {
 		t.Fatal("no minutes")
 	}
 	e.minutes.mu.Lock()

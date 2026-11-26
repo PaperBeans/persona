@@ -32,10 +32,12 @@ private struct ChannelStateDot: View {
 /// Settings' row before Connectors: Channels, how many are connected (red when one went wrong). Only with a hub that has channels.
 struct ChannelsEntryRow: View {
     @Environment(AppModel.self) private var model
-    @State private var channels: [HubChannel]?
+    @State private var loaded: [HubChannel]?
 
     var body: some View {
         if model.hubFeatures.contains("channels") {
+            // Counted without the Lark bot's channel while the hub's Lark module is off (#15995); offered, the very list.
+            let channels = loaded.map(LarkModule.botEntry.listing)
             Section {
                 Group {
                     NavigationLink(value: SettingsPage.channels) {
@@ -58,10 +60,10 @@ struct ChannelsEntryRow: View {
                 Text("Where you can talk to Persona: its own apps, WeChat, the Lark bot…")
             }
             .task(id: "\(model.assistantManagerID ?? "")|\(model.settingsPath.count)|\(model.config?.url.absoluteString ?? "")") {
-                channels = nil
+                loaded = nil
                 guard let api = model.api?.currentAssistantSettings(), let l = try? await api.channels(),
                       !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
-                channels = l
+                loaded = l
             }
         }
     }
@@ -103,7 +105,7 @@ struct ChannelsView: View {
         .overlay { if page.channels == nil && page.loading { ProgressView() } }
         .detailTitle(String(localized: "Channels"))
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: "\(app.assistantManagerID ?? "")|\(app.config?.url.absoluteString ?? "")") { await page.load() }
+        .task(id: "\(app.assistantManagerID ?? "")|\(app.config?.url.absoluteString ?? "")|\(LarkModule.botEntry.isOffered)") { await page.load() }
         .refreshable { await page.load() }
     }
 

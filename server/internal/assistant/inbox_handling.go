@@ -31,6 +31,7 @@ type InboxHandling struct {
 const (
 	SuggestReply      = "reply"      // one message to send
 	SuggestAgent      = "agent"      // an instruction for a new Agent
+	SuggestHandoff    = "handoff"    // hand off to an existing conversation (main, leader, or linked task) (#13562)
 	SuggestConclusion = "conclusion" // done: just read it
 	SuggestTodo       = "todo"       // a to-do to add: Text its title, Due when (#6480)
 )
@@ -44,10 +45,14 @@ type InboxSuggestion struct {
 	Note     string `json:"note,omitempty"`
 	Handback bool   `json:"handback"`
 	// Due is when a to-do suggestion is due: a day (2006-01-02, all day) or a moment (RFC 3339); "" none.
-	Due       string      `json:"due,omitempty"`
-	MachineID string      `json:"machine_id,omitempty"`
-	Changes   []DocChange `json:"changes,omitempty"`
-	At        time.Time   `json:"at"`
+	Due       string `json:"due,omitempty"`
+	MachineID string `json:"machine_id,omitempty"`
+	// SessionID and TargetTitle name the existing conversation a handoff suggestion targets (#13562).
+	// Conversation remains the author conversation that submitted a write-back suggestion.
+	SessionID   string      `json:"session_id,omitempty"`
+	TargetTitle string      `json:"target_title,omitempty"`
+	Changes     []DocChange `json:"changes,omitempty"`
+	At          time.Time   `json:"at"`
 	// Cwd is where an agent suggestion's Agent starts (the tool's cwd; "" home): kept, not listed.
 	Cwd string `json:"cwd,omitempty"`
 	// MailTarget is the message a reply suggestion answered when it was created: kept, not listed. Reading that mail
@@ -59,6 +64,24 @@ type InboxSuggestion struct {
 	// Owner and SourceOf bind an unsent reply to its author and source snapshot; persisted, not listed.
 	Owner    *SessionRef `json:"owner,omitempty"`
 	SourceOf string      `json:"source_of,omitempty"`
+	// Reply policy fields are copied from the item by the server, never supplied by the drafting model.
+	ReplyCategory     string `json:"reply_category,omitempty"`
+	ReplyMode         string `json:"reply_mode,omitempty"`
+	ReplyClassifiedOf string `json:"reply_classified_of,omitempty"`
+	ReplyPolicyRev    string `json:"reply_policy_rev,omitempty"`
+	ReplyReviewed     bool   `json:"reply_reviewed,omitempty"`
+	// ReplyInstruction is the owner rewrite instruction whose generated replacement was already classified. It is
+	// internal authorization provenance, not part of the physical send identity and not listed to clients.
+	ReplyInstruction string `json:"reply_instruction,omitempty"`
+	// ReplyPublicationFailed keeps a draft whose only publication write failed from becoming an owner-authored direct
+	// reply after the store recovers. It is an internal fail-closed marker, never listed to clients.
+	ReplyPublicationFailed bool `json:"reply_publication_failed,omitempty"`
+	// OnDemand identifies model text returned by /draft. ReplyPublicationPending remains true in the first persisted
+	// row and is cleared only by a separate successful commit, so a restart in the publication gap fails closed.
+	OnDemand                bool `json:"on_demand,omitempty"`
+	ReplyPublicationPending bool `json:"reply_publication_pending,omitempty"`
+	// ReplyPolicy binds an accepted reply suggestion to the compiled upstream policy snapshot; persisted, not listed.
+	ReplyPolicy *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
 }
 
 // InboxHandoff is one hand-off of the event to Persona's main conversation (POST /api/v1/inbox/{id}/handoff): that

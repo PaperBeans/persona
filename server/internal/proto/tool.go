@@ -1,6 +1,10 @@
 package proto
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/nwverse/persona/sdk/go/wire"
+)
 
 // Tool is an MCP tool definition.
 type Tool struct {
@@ -40,6 +44,9 @@ type ToolResult struct {
 	// them from that phone's registration and client hello; older hubs and queued receipts leave them absent.
 	SourceDeviceName     string `json:"source_device_name,omitempty"`
 	SourceDevicePlatform string `json:"source_device_platform,omitempty"`
+	// ToolViews are out-of-band declarative views from a connector read tool rendered inline alongside the turn;
+	// stripped before returning tool outputs to model runtimes.
+	ToolViews []wire.View `json:"tool_views,omitempty"`
 }
 
 // The kinds of a tool's failure (ToolResult.ErrorKind), as personad tool's exit codes have them.

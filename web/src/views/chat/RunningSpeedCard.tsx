@@ -14,6 +14,7 @@ import { compactTokens } from "../../lib/tokens";
 import { EASE, EXIT_MS, useExit } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { useEscapeClose } from "../../ui/overlay";
+import { COMPOSER_INPUT } from "../../lib/dock-focus";
 
 type Reveal = "idle" | "hover" | "pinned" | "dismissed";
 /** cindy's tooltip delay before a hovered card shows, and the moment the pointer has to cross to the card. */
@@ -267,7 +268,7 @@ function SpeedButton({ elapsed, card, onPinned, onEngaged, children }: { elapsed
         onClose={() => {
           setMode("dismissed");
           const own = button.current;
-          const composer = own?.closest("[data-chat-dock]")?.querySelector("textarea");
+          const composer = own?.closest("[data-chat-dock]")?.querySelector<HTMLElement>(COMPOSER_INPUT);
           own?.focus({ preventScroll: true });
           // after the turn the button goes with the card: the keyboard goes back to the composer, not on a touch screen
           // alone (that would raise the keyboard)

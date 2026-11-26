@@ -49,7 +49,7 @@ func ixPress(id, v string) *botcard.CardAction {
 // A typed answer or a press whose resolve fails on the way puts the card back only while it still waits: one that
 // ended while the answer was out (its interaction.ended found no card) stays closed, not a ghost card (#5012).
 func TestFailedAnswerRestoresOnlyAPendingCard(t *testing.T) {
-	defer func(w time.Duration) { cardAnswerWait = w }(cardAnswerWait)
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		name     string
 		press    bool // the button path; else a typed answer
@@ -65,9 +65,9 @@ func TestFailedAnswerRestoresOnlyAPendingCard(t *testing.T) {
 		{"late press, ended meanwhile", true, true, true, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			cardAnswerWait = time.Second
+			wait := time.Second // how long a press waits for its answer (the module's card_answer_wait)
 			if c.late {
-				cardAnswerWait = 10 * time.Millisecond
+				wait = 10 * time.Millisecond
 			}
 			hold, let := heldAnswer(t)
 			ix := qCard("ix_q", false, "北京", "上海")
@@ -81,21 +81,20 @@ func TestFailedAnswerRestoresOnlyAPendingCard(t *testing.T) {
 				}
 				return nil, errors.New("hub restarted")
 			}, ix)
+			s.setLarkTiming("card_answer_wait", wait)
 			endingQueue(f, ix, &ended, "resolved")
 			seedCard(s, ix)
 			ctx := context.Background()
 			if c.press {
-				r := s.botCardAction(ctx, ixPress(ix.ID, "上海"), "oa_1")
+				r := s.larkModule().Action(ctx, ixPress(ix.ID, "上海"), "oa_1")
 				if r == nil || r.Toast == nil {
 					t.Fatalf("no toast: %+v", r)
 				}
-			} else if !s.botAnswerQuestion(ctx, "om_r", "2", "oa_1", "", "") || !strings.Contains(noteText(notes), "没交上去") {
+			} else if !botAnswer(t, s, f, "om_r", "2", "oa_1", "", "") || !strings.Contains(noteText(notes), "没交上去") {
 				t.Fatalf("typed answer not taken, notes %q", noteText(notes))
 			}
 			waits := func() bool {
-				s.fbot.mu.Lock()
-				defer s.fbot.mu.Unlock()
-				_, ok := s.fbot.cards[ix.ID]
+				_, ok := chatCard(s, ix.ID)
 				return ok
 			}
 			if c.late {
@@ -119,12 +118,9 @@ func TestFailedAnswerRestoresOnlyAPendingCard(t *testing.T) {
 // of it: one that failed posts a note under the card, which waits again for another press; one that lost to another
 // surface closes the card as handled instead of leaving its buttons live (#4123).
 func TestLatePressOutcomeIsSaidInTheChat(t *testing.T) {
-	defer func(w time.Duration) { cardAnswerWait = w }(cardAnswerWait)
-	cardAnswerWait = 10 * time.Millisecond
+	needsLarkLayer(t) // the chat is the lark module's
 	waits := func(s *Service, id string) bool {
-		s.fbot.mu.Lock()
-		defer s.fbot.mu.Unlock()
-		_, ok := s.fbot.cards[id]
+		_, ok := chatCard(s, id)
 		return ok
 	}
 	// record replaces the fake hub's handler of app/method with one that keeps what it was called with: the answer is
@@ -162,10 +158,11 @@ func TestLatePressOutcomeIsSaidInTheChat(t *testing.T) {
 			hold() // out until the press has said "Working on it…"
 			return nil, errors.New("hub restarted")
 		}, ix)
+		s.setLarkTiming("card_answer_wait", 10*time.Millisecond)
 		endingQueue(f, ix, new(atomic.Bool), "resolved")
 		notes := record(f, AppFeishu, FeishuText)
 		seedCard(s, ix)
-		r := s.botCardAction(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
+		r := s.larkModule().Action(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
 		if r == nil || r.Toast == nil || r.Toast.Content != "正在处理…" {
 			t.Fatalf("toast %+v", r)
 		}
@@ -192,10 +189,11 @@ func TestLatePressOutcomeIsSaidInTheChat(t *testing.T) {
 			ended.Store(true)
 			return map[string]any{"ok": false}, nil
 		}, ix)
+		s.setLarkTiming("card_answer_wait", 10*time.Millisecond)
 		endingQueue(f, ix, &ended, "resolved")
 		closed := record(f, AppFeishu, FeishuUpdateCard)
 		seedCard(s, ix)
-		r := s.botCardAction(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
+		r := s.larkModule().Action(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
 		if r == nil || r.Toast == nil || r.Toast.Content != "正在处理…" {
 			t.Fatalf("toast %+v", r)
 		}
@@ -216,6 +214,7 @@ func TestLatePressOutcomeIsSaidInTheChat(t *testing.T) {
 // A press or typed answer on a card the hub no longer has pending says why: it expired, it was withdrawn, or (answered,
 // dismissed, unknown) it was handled elsewhere (#5012).
 func TestEndedCardSaysWhy(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		status, toast, note, closed string
 	}{
@@ -232,7 +231,7 @@ func TestEndedCardSaysWhy(t *testing.T) {
 			s, f, _, _, rs := textAnswerBot(t, nil, ix)
 			endingQueue(f, ix, ended, c.status)
 			seedCard(s, ix)
-			r := s.botCardAction(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
+			r := s.larkModule().Action(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
 			if r == nil || r.Toast == nil || r.Toast.Content != c.toast || len(*rs) != 0 {
 				t.Fatalf("press toast %+v resolves %v, want %q", r, *rs, c.toast)
 			}
@@ -240,7 +239,7 @@ func TestEndedCardSaysWhy(t *testing.T) {
 			s, f, posts, notes, rs := textAnswerBot(t, nil, ix)
 			endingQueue(f, ix, ended, c.status)
 			seedCard(s, ix)
-			if !s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "", "") || len(*rs) != 0 {
+			if !botAnswer(t, s, f, "om_r", "2", "oa_1", "", "") || len(*rs) != 0 {
 				t.Fatalf("typed answer not swallowed: resolves %v", *rs)
 			}
 			if got := noteText(notes); !strings.Contains(got, c.note) {

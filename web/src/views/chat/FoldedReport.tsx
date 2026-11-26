@@ -46,26 +46,57 @@ function writeOpen(id: string, open: boolean) {
   }
 }
 
-/** The reader's choice for report `id`, kept across reloads. */
-export function useReportOpen(id: string): [boolean, () => void] {
+export interface ReportOpenStorage {
+  read: (id: string) => boolean;
+  write: (id: string, open: boolean) => void;
+}
+
+/** The reader's choice for report `id`, kept across reloads (or in a supplied storage adapter). */
+export function useReportOpen(id: string, storage?: ReportOpenStorage): [boolean, () => void] {
   const [seen, setSeen] = useState(id);
-  const [open, setOpen] = useState(() => readOpen(id));
+  const [open, setOpen] = useState(() => (storage ? storage.read(id) : readOpen(id)));
   if (seen !== id) {
     setSeen(id);
-    setOpen(readOpen(id));
+    setOpen(storage ? storage.read(id) : readOpen(id));
   }
   return [
     open,
     () => {
-      writeOpen(id, !open);
-      setOpen(!open);
+      const next = !open;
+      if (storage) storage.write(id, next);
+      else writeOpen(id, next);
+      setOpen(next);
     },
   ];
 }
 
+export interface FoldedReportProps {
+  id: string;
+  text: string;
+  className?: string;
+  children: React.ReactNode;
+  /** Controlled open state; skips browser localStorage persistence when supplied. */
+  open?: boolean;
+  /** Receives the next open state when the reader clicks Expand or Collapse. */
+  onOpenChange?: (open: boolean) => void;
+  /** Optional persistence adapter for uncontrolled mode; defaults to browser localStorage. */
+  storage?: ReportOpenStorage;
+}
+
 /** A report, one line folded with "Expand" after it; open, the whole text (drawn by `children`) and "Collapse". */
-export function FoldedReport({ id, text, className, children }: { id: string; text: string; className?: string; children: React.ReactNode }) {
-  const [open, toggle] = useReportOpen(id);
+export function FoldedReport(props: FoldedReportProps) {
+  if (props.open !== undefined) {
+    return <FoldedReportView {...props} open={props.open} onToggle={() => props.onOpenChange?.(!props.open)} />;
+  }
+  return <UncontrolledFoldedReport {...props} />;
+}
+
+function UncontrolledFoldedReport(props: FoldedReportProps) {
+  const [open, toggle] = useReportOpen(props.id, props.storage);
+  return <FoldedReportView {...props} open={open} onToggle={() => { toggle(); props.onOpenChange?.(!open); }} />;
+}
+
+function FoldedReportView({ text, className, open, onToggle, children }: { text: string; className?: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   const line = reportLine(text);
   if (!line) return null;
   return (
@@ -73,13 +104,13 @@ export function FoldedReport({ id, text, className, children }: { id: string; te
       {open ? (
         children
       ) : (
-        <button type="button" onClick={toggle} aria-expanded={false} className="flex min-w-0 items-baseline gap-2 text-left" data-report-line>
+        <button type="button" onClick={onToggle} aria-expanded={false} className="flex min-w-0 items-baseline gap-2 text-left" data-report-line>
           <span className="min-w-0 flex-1 truncate text-ink">{line}</span>
           <span className="shrink-0 text-[12px] font-medium whitespace-nowrap text-accent-ink">{t("chat-report.expand")}</span>
         </button>
       )}
       {open && (
-        <button type="button" onClick={toggle} aria-expanded className="flex w-fit items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink" data-report-collapse>
+        <button type="button" onClick={onToggle} aria-expanded className="flex w-fit items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink" data-report-collapse>
           <Icon name="up" size={12} />
           {t("chat-report.collapse")}
         </button>

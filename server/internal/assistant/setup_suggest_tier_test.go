@@ -266,7 +266,7 @@ func TestSetupTierOnceAMonthAndNothingSwitched(t *testing.T) {
 		}
 		return out
 	}
-	before, puts := snapshot(), store.puts
+	before, puts := snapshot(), store.putCount()
 	bound, err := s.resolveModel(ctx, purposeSupervise)
 	if err != nil {
 		t.Fatal(err)
@@ -276,12 +276,12 @@ func TestSetupTierOnceAMonthAndNothingSwitched(t *testing.T) {
 	if got := setupIDs(b); !slices.Equal(got, []string{setupSupervisorTier}) {
 		t.Fatalf("first briefing of the week: %v", got)
 	}
-	if store.puts != puts {
-		t.Fatalf("computing the line wrote %d settings", store.puts-puts)
+	if after := store.putCount(); after != puts {
+		t.Fatalf("computing the line wrote %d settings", after-puts)
 	}
 	s.setupTold(b, monday)
-	if store.puts != puts+1 {
-		t.Fatalf("telling the line wrote %d settings, want the block's own book only", store.puts-puts)
+	if after := store.putCount(); after != puts+1 {
+		t.Fatalf("telling the line wrote %d settings, want the block's own book only", after-puts)
 	}
 	after := snapshot()
 	if len(after) != len(before) {

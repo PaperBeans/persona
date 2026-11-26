@@ -205,10 +205,13 @@ func liveFleet(tb testing.TB, machines, rows int) *Service {
 }
 
 // liveRoundOnce is one of liveLoop's rounds without the telling: the fleet read (over kept, nil: new copies) and the
-// state and the summary built from it.
-func liveRoundOnce(s *Service, kept map[string][]proto.Session) (assistantwire.FleetState, link.Attention) {
+// state, the summary and the counts view built from it, over the needs-you arrays r kept from its last round, as
+// liveLoop's.
+func liveRoundOnce(s *Service, kept map[string][]proto.Session, r *fleetRound) (assistantwire.FleetState, link.Attention) {
 	agents, ixs, told := s.fleetInputsInto(kept)
-	return buildFleetIn("en", agents, ixs), linkAttention("en", agents, ixs, told)
+	st := r.buildFleet("en", agents, ixs)
+	attention, _ := r.linkAndCounts("en", agents, ixs, told, s.fleet.live.counts.todos.kept())
+	return st, attention
 }
 
 // BenchmarkLiveRound: one of liveLoop's rounds over 10 computers of 50 sessions, with new copies of the lists
@@ -222,12 +225,13 @@ func BenchmarkLiveRound(b *testing.B) {
 			if way == "kept" {
 				kept = map[string][]proto.Session{}
 			}
-			if st, _ := liveRoundOnce(s, kept); st.Working != 10 {
+			var r fleetRound
+			if st, _ := liveRoundOnce(s, kept, &r); st.Working != 10 {
 				b.Fatalf("the fleet: %+v", st)
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				liveRoundOnce(s, kept)
+				liveRoundOnce(s, kept, &r)
 			}
 		})
 	}
@@ -235,7 +239,8 @@ func BenchmarkLiveRound(b *testing.B) {
 
 // liveRoundLimit bounds what a round over kept lists allocates for 10 computers of 50 sessions: 79,524 to 80,265
 // bytes measured (the agents, the maps a decoration reads, the state and the summary), plus 5%. Over new copies of
-// the lists a round was 905,941 to 908,537 bytes.
+// the lists a round was 905,941 to 908,537 bytes. The counting core's own copies of the agents and cards come on top
+// (surfaceCopies): each surface's fleetcount.NewAgents and NewCards copy what the round hands them.
 const liveRoundLimit = 84000
 
 // A round over the lists the last one kept copies no list into a new array.
@@ -246,24 +251,29 @@ func TestLiveRoundKeepsItsLists(t *testing.T) {
 	if !isolated(t) {
 		return
 	}
+	var copies uint64
 	measure := func(kept map[string][]proto.Session) uint64 {
 		s := liveFleet(t, 10, 50)
-		liveRoundOnce(s, kept)
+		var r fleetRound
+		liveRoundOnce(s, kept, &r)
+		agents, ixs, _ := s.fleetInputs()
+		copies = 2 * surfaceCopies(t, agents, ixs) // the Live Activity's and Persona Link's
 		const runs = 100
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		for range runs {
-			liveRoundOnce(s, kept)
+			liveRoundOnce(s, kept, &r)
 		}
 		runtime.ReadMemStats(&after)
 		return (after.TotalAlloc - before.TotalAlloc) / runs
 	}
-	if per := measure(map[string][]proto.Session{}); per > liveRoundLimit {
-		t.Errorf("a round over kept lists allocated %d bytes, want at most %d", per, liveRoundLimit)
+	if per := measure(map[string][]proto.Session{}); per > liveRoundLimit+copies {
+		t.Errorf("a round over kept lists allocated %d bytes, want at most %d and the core's %d", per, liveRoundLimit, copies)
 	}
-	if per := measure(nil); per <= liveRoundLimit {
-		t.Errorf("a round over new copies allocated %d bytes, want more than %d: the limit no longer tells the two apart", per, liveRoundLimit)
+	if per := measure(nil); per <= liveRoundLimit+copies {
+		t.Errorf("a round over new copies allocated %d bytes, want more than %d and the core's %d: the limit no longer tells the two apart",
+			per, liveRoundLimit, copies)
 	}
 }
 

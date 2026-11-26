@@ -185,6 +185,8 @@ export interface ExtensionChoice {
   title?: string;
 }
 
+export type ExtensionConfigSection = "connection" | "channel" | "inbox" | "advanced";
+
 /** One field of the form: the hub's reading of the manifest's JSON Schema subset. */
 export interface ExtensionField {
   name: string;
@@ -192,6 +194,8 @@ export interface ExtensionField {
   type: string;
   title?: string;
   description?: string;
+  /** Optional UI grouping hint from the manifest configuration schema. */
+  section?: ExtensionConfigSection;
   default?: Json;
   required?: boolean;
   enum?: ExtensionChoice[];
@@ -310,8 +314,8 @@ type ListAnswer = { extensions?: HubExtension[]; plugins?: HubExtension[]; can_i
 
 export const listExtensions = () => api<ListAnswer>(extRoot()).then((r) => listOf(r));
 /** The list with what this hub allows: installing at all (a database), and markets (docs/extensions/extensions.md "Extension marketplace"). */
-export const listExtensionsInfo = () =>
-  api<ListAnswer>(extRoot()).then((r) => ({
+export const listExtensionsInfo = (isAuthContextCurrent?: () => boolean) =>
+  api<ListAnswer>(extRoot(), { isAuthContextCurrent }).then((r) => ({
     extensions: listOf(r),
     canInstall: !!r.can_install,
     markets: !!r.markets,

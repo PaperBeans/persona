@@ -3,7 +3,7 @@
 <persona-supervision level="triage" />
 
 1. 任务「Redraw the toolbar icons」（todo_1，signal=parked_due）：搁置到期了：你搁置时写的是在等「The design team has to pick the icon set first」（等别人），搁置到 2026-11-14 Sat 09:00；已经连续搁置 1 次，剩余搁置次数 3（中间 Agent 不干活时）
-   验收标准：icons merged
+   验收标准用 todo_get 取原文
 
 2. 任务「Move the reports to the new store」（todo_2，signal=parked_due）：搁置到期了：你搁置时写的是在等「Whether this goes ahead of the billing work」（等用户定优先级），搁置到 2026-11-12 Thu 18:00；已经连续搁置 4 次，剩余搁置次数 0（中间 Agent 没干活，不能再搁置了）
    验收标准：未记录

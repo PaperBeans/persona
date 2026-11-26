@@ -3,102 +3,360 @@
 
 import Foundation
 
+/// Called with a closed enum's name and the raw value each time one with x-unknown "count" decodes a
+/// value this app does not know. nil: nothing is called. Set it once, before decoding starts.
+public nonisolated enum TodoViewWireDefects {
+    public nonisolated(unsafe) static var unknownEnum: (@Sendable (_ enumName: String, _ raw: String) -> Void)?
+}
+
 /// The to-do's state in the domain (proposal 6.3): needs_you, the owner has to act; working, Persona or an Agent
 /// works on it now; waiting, it waits on something named; ready, finished work nobody has ticked; todo, nobody works
 /// on it and nothing waits; someday, the owner put it off; done, closed. done holds exactly when the to-do is closed,
-/// and a start that failed reads as open. Open: a newer hub may send other values.
-public nonisolated enum TodoPhase {
-    public static let needsYou = "needs_you"
-    public static let working = "working"
-    public static let waiting = "waiting"
-    public static let ready = "ready"
-    public static let todo = "todo"
-    public static let someday = "someday"
-    public static let done = "done"
-    public static let all = ["needs_you", "working", "waiting", "ready", "todo", "someday", "done"]
+/// and a start that failed reads as open. Closed: a client decodes a value a newer hub sends as unknown and counts
+/// it.
+/// A value this app does not know decodes to .unknown with the raw value, and encodes back as it came.
+public nonisolated enum TodoPhase: Codable, Hashable, Sendable {
+    case needsYou
+    case working
+    case waiting
+    case ready
+    case todo
+    case someday
+    case done
+    /// A value this app does not know, kept as it came.
+    case unknown(String)
+
+    public static let all: [TodoPhase] = [.needsYou, .working, .waiting, .ready, .todo, .someday, .done]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "needs_you": self = .needsYou
+        case "working": self = .working
+        case "waiting": self = .waiting
+        case "ready": self = .ready
+        case "todo": self = .todo
+        case "someday": self = .someday
+        case "done": self = .done
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .needsYou: "needs_you"
+        case .working: "working"
+        case .waiting: "waiting"
+        case .ready: "ready"
+        case .todo: "todo"
+        case .someday: "someday"
+        case .done: "done"
+        case .unknown(let raw): raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+        if case .unknown = self { TodoViewWireDefects.unknownEnum?("TodoPhase", raw) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// Where the list draws the row, in the list's order (proposal 3.4): needs_you; can_wait, folded at the foot of Needs
 /// you, listed but not counted; working; waiting; todo; just_finished, open work finished and not ticked, and closed
-/// work not seen yet within 24 hours; someday; done. Open: a newer hub may send other values.
-public nonisolated enum TodoListSection {
-    public static let needsYou = "needs_you"
-    public static let canWait = "can_wait"
-    public static let working = "working"
-    public static let waiting = "waiting"
-    public static let todo = "todo"
-    public static let justFinished = "just_finished"
-    public static let someday = "someday"
-    public static let done = "done"
-    public static let all = ["needs_you", "can_wait", "working", "waiting", "todo", "just_finished", "someday", "done"]
+/// work not seen yet within 24 hours; someday; done. Closed: a client decodes a value a newer hub sends as unknown,
+/// counts it and draws the row in no section.
+/// A value this app does not know decodes to .unknown with the raw value, and encodes back as it came.
+public nonisolated enum TodoListSection: Codable, Hashable, Sendable {
+    case needsYou
+    case canWait
+    case working
+    case waiting
+    case todo
+    case justFinished
+    case someday
+    case done
+    /// A value this app does not know, kept as it came.
+    case unknown(String)
+
+    public static let all: [TodoListSection] = [.needsYou, .canWait, .working, .waiting, .todo, .justFinished, .someday, .done]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "needs_you": self = .needsYou
+        case "can_wait": self = .canWait
+        case "working": self = .working
+        case "waiting": self = .waiting
+        case "todo": self = .todo
+        case "just_finished": self = .justFinished
+        case "someday": self = .someday
+        case "done": self = .done
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .needsYou: "needs_you"
+        case .canWait: "can_wait"
+        case .working: "working"
+        case .waiting: "waiting"
+        case .todo: "todo"
+        case .justFinished: "just_finished"
+        case .someday: "someday"
+        case .done: "done"
+        case .unknown(let raw): raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+        if case .unknown = self { TodoViewWireDefects.unknownEnum?("TodoListSection", raw) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// Why the row is where it is: the row of proposal 6.3 that placed it (docs/design/proposals/todos-redesign.md 3.4
-/// and 6.3 say which reasons each section holds). Inactivity is a mark (TodoSummary.inactive), not a reason. Open: a
-/// newer hub may send other values.
-public nonisolated enum TodoReason {
-    public static let failedStart = "failed_start"
-    public static let agentAsks = "agent_asks"
-    public static let interrupted = "interrupted"
-    public static let stoppedUnfinished = "stopped_unfinished"
-    public static let ownerDecides = "owner_decides"
-    public static let verify = "verify"
-    public static let stepsProposed = "steps_proposed"
-    public static let signin = "signin"
-    public static let canWait = "can_wait"
-    public static let awaitsReply = "awaits_reply"
-    public static let personaWorking = "persona_working"
-    public static let agentRunning = "agent_running"
-    public static let starting = "starting"
-    public static let queued = "queued"
-    public static let background = "background"
-    public static let closedUnseen = "closed_unseen"
-    public static let completed = "completed"
-    public static let canceled = "canceled"
-    public static let reported = "reported"
-    public static let superseded = "superseded"
-    public static let parked = "parked"
-    public static let finishedUnseen = "finished_unseen"
-    public static let finishedRecent = "finished_recent"
-    public static let prOpen = "pr_open"
-    public static let usageLimit = "usage_limit"
-    public static let computerOffline = "computer_offline"
-    public static let scheduledReport = "scheduled_report"
-    public static let someoneElse = "someone_else"
-    public static let finishedSeen = "finished_seen"
-    public static let deferred = "deferred"
-    public static let rest = "rest"
-    public static let all = ["failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest"]
+/// and 6.3 say which reasons each section holds). Inactivity is a mark (TodoSummary.inactive), not a reason. Closed:
+/// a client decodes a value a newer hub sends as unknown and counts it.
+/// A value this app does not know decodes to .unknown with the raw value, and encodes back as it came.
+public nonisolated enum TodoReason: Codable, Hashable, Sendable {
+    case failedStart
+    case agentAsks
+    case interrupted
+    case stoppedUnfinished
+    case ownerDecides
+    case verify
+    case stepsProposed
+    case signin
+    case canWait
+    case awaitsReply
+    case personaWorking
+    case agentRunning
+    case starting
+    case queued
+    case background
+    case closedUnseen
+    case completed
+    case canceled
+    case reported
+    case superseded
+    case parked
+    case finishedUnseen
+    case finishedRecent
+    case prOpen
+    case usageLimit
+    case computerOffline
+    case scheduledReport
+    case someoneElse
+    case finishedSeen
+    case deferred
+    case rest
+    /// A value this app does not know, kept as it came.
+    case unknown(String)
+
+    public static let all: [TodoReason] = [.failedStart, .agentAsks, .interrupted, .stoppedUnfinished, .ownerDecides, .verify, .stepsProposed, .signin, .canWait, .awaitsReply, .personaWorking, .agentRunning, .starting, .queued, .background, .closedUnseen, .completed, .canceled, .reported, .superseded, .parked, .finishedUnseen, .finishedRecent, .prOpen, .usageLimit, .computerOffline, .scheduledReport, .someoneElse, .finishedSeen, .deferred, .rest]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "failed_start": self = .failedStart
+        case "agent_asks": self = .agentAsks
+        case "interrupted": self = .interrupted
+        case "stopped_unfinished": self = .stoppedUnfinished
+        case "owner_decides": self = .ownerDecides
+        case "verify": self = .verify
+        case "steps_proposed": self = .stepsProposed
+        case "signin": self = .signin
+        case "can_wait": self = .canWait
+        case "awaits_reply": self = .awaitsReply
+        case "persona_working": self = .personaWorking
+        case "agent_running": self = .agentRunning
+        case "starting": self = .starting
+        case "queued": self = .queued
+        case "background": self = .background
+        case "closed_unseen": self = .closedUnseen
+        case "completed": self = .completed
+        case "canceled": self = .canceled
+        case "reported": self = .reported
+        case "superseded": self = .superseded
+        case "parked": self = .parked
+        case "finished_unseen": self = .finishedUnseen
+        case "finished_recent": self = .finishedRecent
+        case "pr_open": self = .prOpen
+        case "usage_limit": self = .usageLimit
+        case "computer_offline": self = .computerOffline
+        case "scheduled_report": self = .scheduledReport
+        case "someone_else": self = .someoneElse
+        case "finished_seen": self = .finishedSeen
+        case "deferred": self = .deferred
+        case "rest": self = .rest
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .failedStart: "failed_start"
+        case .agentAsks: "agent_asks"
+        case .interrupted: "interrupted"
+        case .stoppedUnfinished: "stopped_unfinished"
+        case .ownerDecides: "owner_decides"
+        case .verify: "verify"
+        case .stepsProposed: "steps_proposed"
+        case .signin: "signin"
+        case .canWait: "can_wait"
+        case .awaitsReply: "awaits_reply"
+        case .personaWorking: "persona_working"
+        case .agentRunning: "agent_running"
+        case .starting: "starting"
+        case .queued: "queued"
+        case .background: "background"
+        case .closedUnseen: "closed_unseen"
+        case .completed: "completed"
+        case .canceled: "canceled"
+        case .reported: "reported"
+        case .superseded: "superseded"
+        case .parked: "parked"
+        case .finishedUnseen: "finished_unseen"
+        case .finishedRecent: "finished_recent"
+        case .prOpen: "pr_open"
+        case .usageLimit: "usage_limit"
+        case .computerOffline: "computer_offline"
+        case .scheduledReport: "scheduled_report"
+        case .someoneElse: "someone_else"
+        case .finishedSeen: "finished_seen"
+        case .deferred: "deferred"
+        case .rest: "rest"
+        case .unknown(let raw): raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+        if case .unknown = self { TodoViewWireDefects.unknownEnum?("TodoReason", raw) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// The line keys produced by this version of the projection; see the Line keys table in
-/// spec/fixtures/todo-view/README.md. Clients can receive a newer key.
-public nonisolated enum TodoLineKey {
-    public static let failedStart = "failed_start"
-    public static let agentAsks = "agent_asks"
-    public static let interrupted = "interrupted"
-    public static let decision = "decision"
-    public static let decisionDefault = "decision_default"
-    public static let cannot = "cannot"
-    public static let awaitsReply = "awaits_reply"
-    public static let working = "working"
-    public static let personaWorking = "persona_working"
-    public static let starting = "starting"
-    public static let background = "background"
-    public static let parked = "parked"
-    public static let finished = "finished"
-    public static let accepted = "accepted"
-    public static let deployed = "deployed"
-    public static let prOpen = "pr_open"
-    public static let usageLimit = "usage_limit"
-    public static let runWaits = "run_waits"
-    public static let finishedSeen = "finished_seen"
-    public static let completed = "completed"
-    public static let canceled = "canceled"
-    public static let reported = "reported"
-    public static let superseded = "superseded"
-    public static let someday = "someday"
-    public static let all = ["failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"]
+/// spec/fixtures/todo-view/README.md. Closed: a client reads a row's TodoLine.key as one of these, a newer key as
+/// unknown, and draws no line for that. TodoLine.key itself stays a string: a timeline entry's line takes the keys of
+/// spec/fixtures/todo-rounds/README.md.
+/// A value this app does not know decodes to .unknown with the raw value, and encodes back as it came.
+public nonisolated enum TodoLineKey: Codable, Hashable, Sendable {
+    case failedStart
+    case agentAsks
+    case interrupted
+    case decision
+    case decisionDefault
+    case cannot
+    case awaitsReply
+    case working
+    case personaWorking
+    case starting
+    case background
+    case parked
+    case finished
+    case accepted
+    case deployed
+    case prOpen
+    case usageLimit
+    case runWaits
+    case finishedSeen
+    case completed
+    case canceled
+    case reported
+    case superseded
+    case someday
+    /// A value this app does not know, kept as it came.
+    case unknown(String)
+
+    public static let all: [TodoLineKey] = [.failedStart, .agentAsks, .interrupted, .decision, .decisionDefault, .cannot, .awaitsReply, .working, .personaWorking, .starting, .background, .parked, .finished, .accepted, .deployed, .prOpen, .usageLimit, .runWaits, .finishedSeen, .completed, .canceled, .reported, .superseded, .someday]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "failed_start": self = .failedStart
+        case "agent_asks": self = .agentAsks
+        case "interrupted": self = .interrupted
+        case "decision": self = .decision
+        case "decision_default": self = .decisionDefault
+        case "cannot": self = .cannot
+        case "awaits_reply": self = .awaitsReply
+        case "working": self = .working
+        case "persona_working": self = .personaWorking
+        case "starting": self = .starting
+        case "background": self = .background
+        case "parked": self = .parked
+        case "finished": self = .finished
+        case "accepted": self = .accepted
+        case "deployed": self = .deployed
+        case "pr_open": self = .prOpen
+        case "usage_limit": self = .usageLimit
+        case "run_waits": self = .runWaits
+        case "finished_seen": self = .finishedSeen
+        case "completed": self = .completed
+        case "canceled": self = .canceled
+        case "reported": self = .reported
+        case "superseded": self = .superseded
+        case "someday": self = .someday
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .failedStart: "failed_start"
+        case .agentAsks: "agent_asks"
+        case .interrupted: "interrupted"
+        case .decision: "decision"
+        case .decisionDefault: "decision_default"
+        case .cannot: "cannot"
+        case .awaitsReply: "awaits_reply"
+        case .working: "working"
+        case .personaWorking: "persona_working"
+        case .starting: "starting"
+        case .background: "background"
+        case .parked: "parked"
+        case .finished: "finished"
+        case .accepted: "accepted"
+        case .deployed: "deployed"
+        case .prOpen: "pr_open"
+        case .usageLimit: "usage_limit"
+        case .runWaits: "run_waits"
+        case .finishedSeen: "finished_seen"
+        case .completed: "completed"
+        case .canceled: "canceled"
+        case .reported: "reported"
+        case .superseded: "superseded"
+        case .someday: "someday"
+        case .unknown(let raw): raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+        if case .unknown = self { TodoViewWireDefects.unknownEnum?("TodoLineKey", raw) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on
@@ -173,14 +431,14 @@ public nonisolated struct TodoStepCount: Codable, Hashable, Sendable {
 /// folder.
 public nonisolated struct TodoRunRef: Codable, Hashable, Sendable {
     /// The machine the session runs on.
-    public var machineId: String
+    public var machineId: MachineID
     /// The session.
-    public var sessionId: String
+    public var sessionId: SessionID
     /// The session's title as the session list has it, else as the to-do's link recorded it; absent when neither has
     /// one.
     public var title: String?
 
-    public init(machineId: String = "", sessionId: String = "", title: String? = nil) {
+    public init(machineId: MachineID = MachineID(""), sessionId: SessionID = SessionID(""), title: String? = nil) {
         self.machineId = machineId
         self.sessionId = sessionId
         self.title = title
@@ -194,8 +452,8 @@ public nonisolated struct TodoRunRef: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.machineId = (try? c.decodeIfPresent(String.self, forKey: .machineId)) ?? ""
-        self.sessionId = (try? c.decodeIfPresent(String.self, forKey: .sessionId)) ?? ""
+        self.machineId = (try? c.decodeIfPresent(MachineID.self, forKey: .machineId)) ?? MachineID("")
+        self.sessionId = (try? c.decodeIfPresent(SessionID.self, forKey: .sessionId)) ?? SessionID("")
         self.title = try? c.decodeIfPresent(String.self, forKey: .title)
     }
 }
@@ -307,9 +565,9 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
     /// The id of the run's pending card this ask is (the session's own before Persona's card about its turn, then the
     /// oldest), answered through POST /api/v1/interactions/{id}/resolve; only on a run's ask, and absent while the
     /// hub holds no card for the run (its kind is then question).
-    public var interaction: String?
+    public var interaction: InteractionID?
 
-    public init(id: String = "", kind: String = "", home: String = "", round: String? = nil, text: String? = nil, run: TodoRunRef? = nil, recommend: String? = nil, options: [OwnerAskOption]? = nil, canWait: Bool? = nil, defaultAt: String? = nil, risk: String? = nil, lockscreen: String? = nil, interaction: String? = nil) {
+    public init(id: String = "", kind: String = "", home: String = "", round: String? = nil, text: String? = nil, run: TodoRunRef? = nil, recommend: String? = nil, options: [OwnerAskOption]? = nil, canWait: Bool? = nil, defaultAt: String? = nil, risk: String? = nil, lockscreen: String? = nil, interaction: InteractionID? = nil) {
         self.id = id
         self.kind = kind
         self.home = home
@@ -355,7 +613,7 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
         self.defaultAt = try? c.decodeIfPresent(String.self, forKey: .defaultAt)
         self.risk = try? c.decodeIfPresent(String.self, forKey: .risk)
         self.lockscreen = try? c.decodeIfPresent(String.self, forKey: .lockscreen)
-        self.interaction = try? c.decodeIfPresent(String.self, forKey: .interaction)
+        self.interaction = try? c.decodeIfPresent(InteractionID.self, forKey: .interaction)
     }
 }
 
@@ -364,9 +622,9 @@ public nonisolated struct OwnerAsk: Codable, Hashable, Sendable {
 /// own (proposal 6.1, 6.3). A row without it comes from an older manager and is drawn as before; so is a row whose
 /// section or reason the client does not know.
 public nonisolated struct TodoSummary: Codable, Hashable, Sendable {
-    public var phase: String
-    public var section: String
-    public var reason: String
+    public var phase: TodoPhase
+    public var section: TodoListSection
+    public var reason: TodoReason
     /// Line 2 of the row; absent when there is nothing to say (a plain To do row).
     public var line: TodoLine?
     /// When the reason began (the ask, the failure, the park, the close…); absent when nothing says.
@@ -389,7 +647,7 @@ public nonisolated struct TodoSummary: Codable, Hashable, Sendable {
     /// Its steps; absent when it has none.
     public var steps: TodoStepCount?
 
-    public init(phase: String = "", section: String = "", reason: String = "", line: TodoLine? = nil, since: String? = nil, nextChangeAt: String? = nil, rank: Int = 0, seen: Bool? = nil, inactive: String? = nil, canWait: Bool? = nil, asks: [OwnerAsk]? = nil, steps: TodoStepCount? = nil) {
+    public init(phase: TodoPhase = .unknown(""), section: TodoListSection = .unknown(""), reason: TodoReason = .unknown(""), line: TodoLine? = nil, since: String? = nil, nextChangeAt: String? = nil, rank: Int = 0, seen: Bool? = nil, inactive: String? = nil, canWait: Bool? = nil, asks: [OwnerAsk]? = nil, steps: TodoStepCount? = nil) {
         self.phase = phase
         self.section = section
         self.reason = reason
@@ -421,9 +679,9 @@ public nonisolated struct TodoSummary: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.phase = (try? c.decodeIfPresent(String.self, forKey: .phase)) ?? ""
-        self.section = (try? c.decodeIfPresent(String.self, forKey: .section)) ?? ""
-        self.reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? ""
+        self.phase = (try? c.decodeIfPresent(TodoPhase.self, forKey: .phase)) ?? .unknown("")
+        self.section = (try? c.decodeIfPresent(TodoListSection.self, forKey: .section)) ?? .unknown("")
+        self.reason = (try? c.decodeIfPresent(TodoReason.self, forKey: .reason)) ?? .unknown("")
         self.line = try? c.decodeIfPresent(TodoLine.self, forKey: .line)
         self.since = try? c.decodeIfPresent(String.self, forKey: .since)
         self.nextChangeAt = try? c.decodeIfPresent(String.self, forKey: .nextChangeAt)
@@ -505,9 +763,9 @@ public nonisolated struct TodoCounts: Codable, Hashable, Sendable {
     public var inProgress: Int
     /// Rows per section, every section named, 0 included, so the bytes stay stable and the hub adds maps up key by
     /// key. Quiet tasks count here as the rows they are.
-    public var sections: [String: Int]
+    public var sections: TodoCountsSections
 
-    public init(open: Int = 0, needsYou: Int = 0, inProgress: Int = 0, sections: [String: Int] = [:]) {
+    public init(open: Int = 0, needsYou: Int = 0, inProgress: Int = 0, sections: TodoCountsSections = TodoCountsSections()) {
         self.open = open
         self.needsYou = needsYou
         self.inProgress = inProgress
@@ -526,7 +784,7 @@ public nonisolated struct TodoCounts: Codable, Hashable, Sendable {
         self.open = (try? c.decodeIfPresent(Int.self, forKey: .open)) ?? 0
         self.needsYou = (try? c.decodeIfPresent(Int.self, forKey: .needsYou)) ?? 0
         self.inProgress = (try? c.decodeIfPresent(Int.self, forKey: .inProgress)) ?? 0
-        self.sections = (try? c.decodeIfPresent([String: Int].self, forKey: .sections)) ?? [:]
+        self.sections = (try? c.decodeIfPresent(TodoCountsSections.self, forKey: .sections)) ?? TodoCountsSections()
     }
 }
 
@@ -575,26 +833,88 @@ public nonisolated enum TodoMessageState {
 /// and run_failed, a run put on the to-do, let go of, or not started; interrupted, a run whose latest turn in the
 /// round was cut off; ask, a question for the owner; decision, a call Persona, a run or the hub made; result, what
 /// the work came to; closed, the to-do was closed; scope, its scope changed; review, parked, report and overdue,
-/// supervision nobody asked for. Open: a newer hub may send other values, which clients skip.
-public nonisolated enum TodoEntryType {
-    public static let instruction = "instruction"
-    public static let answer = "answer"
-    public static let relay = "relay"
-    public static let run = "run"
-    public static let runStarted = "run_started"
-    public static let runEnded = "run_ended"
-    public static let runFailed = "run_failed"
-    public static let interrupted = "interrupted"
-    public static let ask = "ask"
-    public static let decision = "decision"
-    public static let result = "result"
-    public static let closed = "closed"
-    public static let scope = "scope"
-    public static let review = "review"
-    public static let parked = "parked"
-    public static let report = "report"
-    public static let overdue = "overdue"
-    public static let all = ["instruction", "answer", "relay", "run", "run_started", "run_ended", "run_failed", "interrupted", "ask", "decision", "result", "closed", "scope", "review", "parked", "report", "overdue"]
+/// supervision nobody asked for. Closed: a client decodes a value a newer hub sends as unknown, counts it and skips
+/// the entry.
+/// A value this app does not know decodes to .unknown with the raw value, and encodes back as it came.
+public nonisolated enum TodoEntryType: Codable, Hashable, Sendable {
+    case instruction
+    case answer
+    case relay
+    case run
+    case runStarted
+    case runEnded
+    case runFailed
+    case interrupted
+    case ask
+    case decision
+    case result
+    case closed
+    case scope
+    case review
+    case parked
+    case report
+    case overdue
+    /// A value this app does not know, kept as it came.
+    case unknown(String)
+
+    public static let all: [TodoEntryType] = [.instruction, .answer, .relay, .run, .runStarted, .runEnded, .runFailed, .interrupted, .ask, .decision, .result, .closed, .scope, .review, .parked, .report, .overdue]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "instruction": self = .instruction
+        case "answer": self = .answer
+        case "relay": self = .relay
+        case "run": self = .run
+        case "run_started": self = .runStarted
+        case "run_ended": self = .runEnded
+        case "run_failed": self = .runFailed
+        case "interrupted": self = .interrupted
+        case "ask": self = .ask
+        case "decision": self = .decision
+        case "result": self = .result
+        case "closed": self = .closed
+        case "scope": self = .scope
+        case "review": self = .review
+        case "parked": self = .parked
+        case "report": self = .report
+        case "overdue": self = .overdue
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .instruction: "instruction"
+        case .answer: "answer"
+        case .relay: "relay"
+        case .run: "run"
+        case .runStarted: "run_started"
+        case .runEnded: "run_ended"
+        case .runFailed: "run_failed"
+        case .interrupted: "interrupted"
+        case .ask: "ask"
+        case .decision: "decision"
+        case .result: "result"
+        case .closed: "closed"
+        case .scope: "scope"
+        case .review: "review"
+        case .parked: "parked"
+        case .report: "report"
+        case .overdue: "overdue"
+        case .unknown(let raw): raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+        if case .unknown = self { TodoViewWireDefects.unknownEnum?("TodoEntryType", raw) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// Who an entry is by: owner; persona, Persona (the conversation that supervises the to-do included); lead, a Pinned
@@ -654,7 +974,7 @@ public nonisolated struct TodoTimelineEntry: Codable, Hashable, Sendable {
     /// Unique within the to-do's timeline, and the same on every read while the hub keeps what it was read from.
     /// Opaque to clients (spec/fixtures/todo-rounds/README.md says how the hub forms it).
     public var id: String
-    public var type: String
+    public var type: TodoEntryType
     /// When it happened; a run line's latest turn, or since when the run works for a live line that has no turn yet.
     public var at: String
     public var actor: TodoActor
@@ -692,7 +1012,7 @@ public nonisolated struct TodoTimelineEntry: Codable, Hashable, Sendable {
     /// The run works now: only on a run line of the latest round. Written only when true.
     public var live: Bool?
 
-    public init(id: String = "", type: String = "", at: String = "", actor: TodoActor = TodoActor(), text: String? = nil, choice: String? = nil, question: String? = nil, reason: String? = nil, line: TodoLine? = nil, run: TodoRunRef? = nil, ask: String? = nil, via: String? = nil, state: String? = nil, decision: String? = nil, supersededBy: String? = nil, turns: Int? = nil, live: Bool? = nil) {
+    public init(id: String = "", type: TodoEntryType = .unknown(""), at: String = "", actor: TodoActor = TodoActor(), text: String? = nil, choice: String? = nil, question: String? = nil, reason: String? = nil, line: TodoLine? = nil, run: TodoRunRef? = nil, ask: String? = nil, via: String? = nil, state: String? = nil, decision: String? = nil, supersededBy: String? = nil, turns: Int? = nil, live: Bool? = nil) {
         self.id = id
         self.type = type
         self.at = at
@@ -735,7 +1055,7 @@ public nonisolated struct TodoTimelineEntry: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
-        self.type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        self.type = (try? c.decodeIfPresent(TodoEntryType.self, forKey: .type)) ?? .unknown("")
         self.at = (try? c.decodeIfPresent(String.self, forKey: .at)) ?? ""
         self.actor = (try? c.decodeIfPresent(TodoActor.self, forKey: .actor)) ?? TodoActor()
         self.text = try? c.decodeIfPresent(String.self, forKey: .text)
@@ -940,7 +1260,7 @@ public nonisolated struct TodoRecap: Codable, Hashable, Sendable {
 /// spec/fixtures/todo-push.
 public nonisolated struct TodoDecidePush: Codable, Hashable, Sendable {
     /// The to-do.
-    public var id: String
+    public var id: TodoID
     /// The round the decision waits in, as POST /api/v1/todos/{id}/accept takes it: an answer to an earlier round
     /// takes nothing.
     public var askedAt: String
@@ -961,7 +1281,7 @@ public nonisolated struct TodoDecidePush: Codable, Hashable, Sendable {
     /// ask.
     public var options: [String]?
 
-    public init(id: String = "", askedAt: String = "", recommend: String = "", manager: String? = nil, ask: String? = nil, lockscreen: String? = nil, options: [String]? = nil) {
+    public init(id: TodoID = TodoID(""), askedAt: String = "", recommend: String = "", manager: String? = nil, ask: String? = nil, lockscreen: String? = nil, options: [String]? = nil) {
         self.id = id
         self.askedAt = askedAt
         self.recommend = recommend
@@ -983,7 +1303,7 @@ public nonisolated struct TodoDecidePush: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.id = (try? c.decodeIfPresent(TodoID.self, forKey: .id)) ?? TodoID("")
         self.askedAt = (try? c.decodeIfPresent(String.self, forKey: .askedAt)) ?? ""
         self.recommend = (try? c.decodeIfPresent(String.self, forKey: .recommend)) ?? ""
         self.manager = try? c.decodeIfPresent(String.self, forKey: .manager)
@@ -1140,5 +1460,81 @@ public nonisolated struct TodoItemDetail: Codable, Hashable, Sendable {
         self.roundsTotal = try? c.decodeIfPresent(Int.self, forKey: .roundsTotal)
         self.recap = try? c.decodeIfPresent(TodoRecap.self, forKey: .recap)
         self.results = try? c.decodeIfPresent([TodoResult].self, forKey: .results)
+    }
+}
+
+/// One field for each TodoListSection of TodoCounts.sections.
+public nonisolated struct TodoCountsSections: Codable, Hashable, Sendable {
+    public var needsYou: Int
+    public var canWait: Int
+    public var working: Int
+    public var waiting: Int
+    public var todo: Int
+    public var justFinished: Int
+    public var someday: Int
+    public var done: Int
+
+    public init(needsYou: Int = 0, canWait: Int = 0, working: Int = 0, waiting: Int = 0, todo: Int = 0, justFinished: Int = 0, someday: Int = 0, done: Int = 0) {
+        self.needsYou = needsYou
+        self.canWait = canWait
+        self.working = working
+        self.waiting = waiting
+        self.todo = todo
+        self.justFinished = justFinished
+        self.someday = someday
+        self.done = done
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case needsYou = "needs_you"
+        case canWait = "can_wait"
+        case working
+        case waiting
+        case todo
+        case justFinished = "just_finished"
+        case someday
+        case done
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.needsYou = (try? c.decodeIfPresent(Int.self, forKey: .needsYou)) ?? 0
+        self.canWait = (try? c.decodeIfPresent(Int.self, forKey: .canWait)) ?? 0
+        self.working = (try? c.decodeIfPresent(Int.self, forKey: .working)) ?? 0
+        self.waiting = (try? c.decodeIfPresent(Int.self, forKey: .waiting)) ?? 0
+        self.todo = (try? c.decodeIfPresent(Int.self, forKey: .todo)) ?? 0
+        self.justFinished = (try? c.decodeIfPresent(Int.self, forKey: .justFinished)) ?? 0
+        self.someday = (try? c.decodeIfPresent(Int.self, forKey: .someday)) ?? 0
+        self.done = (try? c.decodeIfPresent(Int.self, forKey: .done)) ?? 0
+    }
+
+    /// The field of one TodoListSection: an unknown one reads 0, and setting it changes nothing.
+    public subscript(_ key: TodoListSection) -> Int {
+        get {
+            switch key {
+            case .needsYou: needsYou
+            case .canWait: canWait
+            case .working: working
+            case .waiting: waiting
+            case .todo: todo
+            case .justFinished: justFinished
+            case .someday: someday
+            case .done: done
+            case .unknown: 0
+            }
+        }
+        set {
+            switch key {
+            case .needsYou: needsYou = newValue
+            case .canWait: canWait = newValue
+            case .working: working = newValue
+            case .waiting: waiting = newValue
+            case .todo: todo = newValue
+            case .justFinished: justFinished = newValue
+            case .someday: someday = newValue
+            case .done: done = newValue
+            case .unknown: break
+            }
+        }
     }
 }

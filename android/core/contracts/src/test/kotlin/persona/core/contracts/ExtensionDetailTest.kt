@@ -97,4 +97,53 @@ class ExtensionDetailTest {
         assertFalse(supportsExtensionSecretReferences(setOf("launcher_secret_references")))
         assertFalse(supportsExtensionSecretReferences(emptySet()))
     }
+
+    @Test fun entryListSchemaDynamicSecretsAndUserEntryTitlesDecode() {
+        val detail = ExtensionDetail.decode(JsonCodec.parseToJsonElement("""{
+            "id":"example-entries",
+            "form":{"fields":[
+                {
+                    "name":"accounts",
+                    "type":"array",
+                    "title":"Accounts",
+                    "required":true,
+                    "min_items":0,
+                    "max_items":4,
+                    "secret":{"name":"account_key","title":"Account key","description":"API token","required":true,"hint":"last4"},
+                    "items":{
+                        "type":"object",
+                        "fields":[
+                            {"name":"name","type":"string","title":"Name","required":true},
+                            {"name":"address","type":"string","title":"Address","format":"uri","required":true,"clears_secret":true}
+                        ]
+                    }
+                }
+            ]},
+            "config":{"accounts":[{"_id":"entry_saved","name":"One","address":"https://one.example.com"}]},
+            "secrets":[
+                {"name":"fixed_key","title":"Fixed key","set":true,"hint":"9999"},
+                {"name":"entry_saved","title":"Account key","required":true,"set":true,"hint":"1234","list":"accounts","entry_title":"One"}
+            ],
+            "secret_users":[
+                {"kind":"extension","extension":"example-entries","extension_name":"Example Entries","secret":"entry_saved","secret_title":"Account key","entry_title":"One","reference":"op://Dev/Accounts/one"}
+            ]
+        }"""))
+        val listField = detail.form.single()
+        assertTrue(listField.isEntryList)
+        assertEquals(4, listField.maxItems)
+        assertEquals(0, listField.minItems)
+        assertEquals("account_key", listField.secret!!.name)
+        assertEquals("Account key", listField.secret!!.title)
+        assertEquals("last4", listField.secret!!.hint)
+        assertEquals(listOf("name", "address"), listField.items!!.fields!!.map { it.name })
+        assertEquals(true, listField.items!!.fields!![1].clearsSecret)
+
+        assertFalse(detail.secrets[0].isEntrySecret)
+        assertEquals("9999", detail.secrets[0].hint)
+        assertTrue(detail.secrets[1].isEntrySecret)
+        assertEquals("accounts", detail.secrets[1].list)
+        assertEquals("One", detail.secrets[1].entryTitle)
+        assertEquals("1234", detail.secrets[1].hint)
+        assertEquals("One", detail.secretUsers.single().entryTitle)
+    }
 }

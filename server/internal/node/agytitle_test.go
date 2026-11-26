@@ -1,12 +1,14 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -147,5 +149,71 @@ func TestAgyNativeTitles(t *testing.T) {
 		if got := n.agyNativeTitle(agyTestID); got != "" {
 			t.Errorf("%s: title %q", name, got)
 		}
+	}
+}
+
+// A Persona-started agy pane never displays the sourced agent-start-*.sh shell command as its title; before agy's
+// conversation or metadata title is available, the row shows the start's first prompt instead.
+func TestAgyPaneDropsStartScriptTitleAndUsesFirstPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		title string
+		want  bool
+	}{
+		{". /home/user/.persona/agent-start-3733190294.sh", true},
+		{". '/home/user/.persona/agent-start-123.sh' && true abc123", true},
+		{"source /home/user/.persona/agent-start-9.sh", true},
+		{"Fix agent-start-123.sh bug", false},
+		{"agy", false},
+		{"", false},
+	} {
+		if got := isStartScriptTitle(tc.title); got != tc.want {
+			t.Errorf("isStartScriptTitle(%q) = %v, want %v", tc.title, got, tc.want)
+		}
+	}
+
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const startScriptTitle = ". /home/user/.persona/agent-start-3733190294.sh"
+	const prompt = "Fix the agy placeholder title bug"
+
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+	paneAgent := agentOf(agyAgent, "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, startScriptTitle)
+	f.after(func(c herdrCall) {
+		if c.Method == "pane.send_input" {
+			f.reply("session.snapshot", snapshot(nil, nil, []any{paneAgent}, nil))
+			f.setScreen("w1:p2", agyIdleScreen)
+		}
+	})
+	f.reply("agent.get", map[string]any{"type": "agent_info", "agent": agentOf(agyAgent, "", proto.StatusWorking, "w1:p2", "w1:t2", "w1", home, startScriptTitle)})
+
+	started, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, agyAgent, agyAgent, "", "", "", prompt, "w1", "")
+	if err != nil {
+		t.Fatalf("startWorkAgent: %v", err)
+	}
+	if started.Title != prompt || started.TitleSource != proto.TitleSourcePrompt {
+		t.Fatalf("started session title = %q (source %q), want %q (%q)", started.Title, started.TitleSource, prompt, proto.TitleSourcePrompt)
+	}
+	var listed *proto.Session
+	for _, row := range listSessions(t, n) {
+		if row.SessionID == started.SessionID {
+			cp := row
+			listed = &cp
+			break
+		}
+	}
+	if listed == nil {
+		t.Fatalf("started row %s not in session list", started.SessionID)
+	}
+	if listed.Title != prompt || listed.TitleSource != proto.TitleSourcePrompt {
+		t.Fatalf("listed agy pane title = %q (source %q), want %q (%q)", listed.Title, listed.TitleSource, prompt, proto.TitleSourcePrompt)
+	}
+
+	// Even a pane with no recorded start prompt never displays Persona's agent-start-*.sh command as its title.
+	orphan := agentOf(agyAgent, "", proto.StatusIdle, agyTestPane, "w1:t1", "w1", home, ". /home/user/.persona/agent-start-99999.sh")
+	f.reply("session.snapshot", snapshot(nil, nil, []any{orphan}, nil))
+	row := agyTestPaneRow(t, n)
+	if row.Title == ". /home/user/.persona/agent-start-99999.sh" {
+		t.Fatalf("orphan agy pane kept start script title %q", row.Title)
 	}
 }

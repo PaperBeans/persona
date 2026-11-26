@@ -1155,6 +1155,25 @@ type startTogetherHub struct {
 	n, came  int
 	all      chan struct{} // closed when n came
 	lastPlan *TaskPlan
+	planSeen chan struct{} // closed again by each task_plan notification
+}
+
+func (h *startTogetherHub) lastTold() *TaskPlan {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastPlan
+}
+
+func (h *startTogetherHub) planComplete(p *TaskPlan) bool {
+	if p == nil {
+		return false
+	}
+	for _, task := range p.Tasks {
+		if task.Error == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *startTogetherHub) Broadcast(ctx context.Context, b Broadcast) {
@@ -1165,7 +1184,12 @@ func (h *startTogetherHub) Broadcast(ctx context.Context, b Broadcast) {
 	if json.Unmarshal(b.Message, &ev) == nil && ev.Type == "task_plan" {
 		h.mu.Lock()
 		h.lastPlan = ev.Plan
+		seen := h.planSeen
+		h.planSeen = make(chan struct{})
 		h.mu.Unlock()
+		if seen != nil {
+			close(seen)
+		}
 	}
 	h.fakeHub.Broadcast(ctx, b)
 }
@@ -1229,14 +1253,25 @@ func TestPlanTasksFailingTogetherAllKeepTheirError(t *testing.T) {
 	}
 	waitFor(t, "every start's failure to be written", func() bool {
 		done, _ := st.done()
-		return done && s.tasks.planEdits.len() == 0
+		// A launch can have passed the read barrier and still be about to record its start error.
+		return done && s.tasks.planEdits.len() == 0 && s.taskStarting.Load() == 0
 	})
 	if _, timedOut := st.done(); timedOut {
 		t.Fatal("the plan's writers did not all come")
 	}
-	h.mu.Lock()
-	told := h.lastPlan
-	h.mu.Unlock()
+	// The last writer releases the plan lock only after its broadcast returns: wait for that final notification too.
+	var told *TaskPlan
+	for !h.planComplete(h.lastTold()) {
+		h.mu.Lock()
+		seen := h.planSeen
+		h.mu.Unlock()
+		select {
+		case <-seen:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the apps did not receive the complete failed plan: %+v", h.lastTold())
+		}
+	}
+	told = h.lastTold()
 	for what, p := range map[string]*TaskPlan{"stored": storedPlan(t, st), "told to the apps last": told} {
 		if p == nil || len(p.Tasks) != n {
 			t.Fatalf("%s plan: %+v", what, p)

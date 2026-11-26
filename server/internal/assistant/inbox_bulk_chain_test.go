@@ -127,7 +127,7 @@ func TestInboxBulkFilterIncludesIntermediatePendingOpen(t *testing.T) {
 								}
 							}
 						}}
-						h.store = func() Store { return probe }
+						h.setStore(func() Store { return probe })
 						results[0] <- call(0)
 						for i, ch := range results {
 							select {

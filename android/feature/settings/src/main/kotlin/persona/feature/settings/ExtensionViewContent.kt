@@ -331,13 +331,25 @@ private fun ExtensionRow(item: ExtensionViewItem, state: ExtensionViewState, han
     val icon = item.icon?.takeIf { it.isNotBlank() }?.let(ExtensionIcons::of)
     val leading = rowLeading(item, handle)
     val busy = action != null && state.acting == action.id
+    val slider = control?.takeIf { it.under() }
+    val rowValue = if (slider == null) item.value?.takeIf { it.isNotBlank() } else null
+    val stackedSpark = spark != null && rowValue != null
     val end = control?.takeIf { !it.under() }
     val flip = end?.takeIf { it.kind == "switch" && it.disabled != true }
+    val rowHandlesSwitch = action == null && flip != null
     val trailing: (@Composable () -> Unit)? = if (busy || badge != null || end != null || spark != null || actions.isNotEmpty()) ({
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            spark?.let { JSparkline(it) }
+            if (stackedSpark) {
+                val valueStyle = if (PersonaTheme.style == AppStyle.Board) PersonaTheme.type.micro else PersonaTheme.type.callout
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                    JChangingText(rowValue, style = valueStyle, color = palette.ink3)
+                    JSparkline(spark)
+                }
+            } else {
+                spark?.let { JSparkline(it) }
+            }
             if (busy) JSpinner() else badge?.let { ExtensionBadge(it) }
-            end?.let { RowControlEnd(it, state, handle) }
+            end?.let { RowControlEnd(it, state, handle, rowHandlesSwitch = rowHandlesSwitch) }
             RowActionsMenu(actions, menu, { menu = it }, handle, enabled = true)
         }
     }) else null
@@ -355,9 +367,8 @@ private fun ExtensionRow(item: ExtensionViewItem, state: ExtensionViewState, han
             role = if (action == null && flip != null) androidx.compose.ui.semantics.Role.Switch else androidx.compose.ui.semantics.Role.Button)
     }
     JSwipeActions(start = start, end = swipeEnd) {
-        val slider = control?.takeIf { it.under() }
         if (slider != null) RowSlider(slider, item.title.orEmpty(), state, handle) { value -> row(value) }
-        else row(item.value?.takeIf { it.isNotBlank() })
+        else row(if (stackedSpark) null else rowValue)
     }
 }
 
@@ -383,14 +394,16 @@ internal fun StandaloneItem(item: ExtensionViewItem, state: ExtensionViewState, 
         }
         "metric" -> ItemPanel(top) {
             Column(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                val tone = ExtensionViewText.tone(item.tone)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     item.icon?.takeIf { it.isNotBlank() }?.let {
-                        JIcon(ExtensionIcons.of(it), null, size = Tokens.Space.l, tint = palette.hueOr(ExtensionViewText.hue(item.iconColor)), decorative = true)
+                        val iconTint = ExtensionViewText.hue(item.iconColor)?.let { h -> palette.hue(h).dot }
+                            ?: if (tone == Tone.Neutral) palette.ink2 else palette.tone(tone).dot
+                        JIcon(ExtensionIcons.of(it), null, size = Tokens.Space.l, tint = iconTint, decorative = true)
                         Spacer(Modifier.width(Tokens.Space.xs))
                     }
                     Text(item.label.orEmpty(), style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                val tone = ExtensionViewText.tone(item.tone)
                 JChangingText(item.value.orEmpty(), style = type.number, color = if (tone == Tone.Neutral) palette.ink else palette.tone(tone).text)
                 ExtensionViewText.spark(item.spark)?.let { JSparkline(it, Modifier.fillMaxWidth().height(SparkSize.height)) }
                 item.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink3) }

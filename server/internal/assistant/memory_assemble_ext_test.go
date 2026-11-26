@@ -83,7 +83,7 @@ func TestMemoryExtensionEntryUses(t *testing.T) {
 
 // A standing channel takes the memory extension's entries as it takes the ledger's: in the main conversation the
 // main space's and general ones from elsewhere, never a finance one; in qa-finance its own space's. The ledger's come
-// after the extension's, so a budget goes to them first.
+// after the extension's, each spending its own budget (memory_assemble_budget_test.go).
 func TestMemoryExtensionStanding(t *testing.T) {
 	ctx := context.Background()
 	s, src := memoryExtensionService(t, true)
@@ -91,13 +91,13 @@ func TestMemoryExtensionStanding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := entryIDs(a.Entries), extID(extQAPlain)+","+extID(extQAMain); got != want || len(a.Sensitive) != 0 {
+	if got, want := entryIDList(a.Entries), extID(extQAPlain)+","+extID(extQAMain); !slices.Equal(got, []string{extID(extQAPlain), extID(extQAMain)}) || len(a.Sensitive) != 0 {
 		t.Errorf("main standing = %s (sensitive %v), want %s", got, a.Sensitive, want)
 	}
 	a, _ = s.standingMemory(ctx, "qa-finance-1")
 	// Every one of the extension's entries is personal: the main space's general one goes too, as the ledger's personal
 	// general entries do.
-	if got, want := entryIDs(a.Entries), extID(extQAFinance)+","+extID(extQAFinanceUntagged)+","+extID(extQAPlain)+","+extID(extQAMain); got != want ||
+	if got, want := entryIDList(a.Entries), extID(extQAFinance)+","+extID(extQAFinanceUntagged)+","+extID(extQAPlain)+","+extID(extQAMain); !slices.Equal(got, []string{extID(extQAFinance), extID(extQAFinanceUntagged), extID(extQAPlain), extID(extQAMain)}) ||
 		!slices.Equal(a.Sensitive, []string{extID(extQAFinance), extID(extQAFinanceUntagged)}) {
 		t.Errorf("qa-finance standing = %s (sensitive %v), want %s", got, a.Sensitive, want)
 	}
@@ -107,7 +107,7 @@ func TestMemoryExtensionStanding(t *testing.T) {
 	// With the ledger: its entries come after the extension's.
 	s.memoryEntries = &memEntrySource{entries: []proto.AssistantEntry{entryQAPlain, entryQAMain}}
 	a, _ = s.standingMemory(ctx, "qa-main")
-	if got, want := entryIDs(a.Entries), extID(extQAPlain)+","+extID(extQAMain)+",entry-qa-plain,entry-qa-main"; got != want {
+	if got, want := entryIDList(a.Entries), extID(extQAPlain)+","+extID(extQAMain)+",entry-qa-plain,entry-qa-main"; !slices.Equal(got, []string{extID(extQAPlain), extID(extQAMain), "entry-qa-plain", "entry-qa-main"}) {
 		t.Errorf("main standing with the ledger = %s, want %s", got, want)
 	}
 }
@@ -125,14 +125,14 @@ func TestMemoryExtensionRecall(t *testing.T) {
 		}
 		return a
 	}
-	if got, want := entryIDs(recall().Entries), extID(extQAPlain)+","+extID(extQAMain); got != want {
+	if got, want := entryIDList(recall().Entries), extID(extQAPlain)+","+extID(extQAMain); !slices.Equal(got, []string{extID(extQAPlain), extID(extQAMain)}) {
 		t.Errorf("recall without finance = %s, want %s", got, want)
 	}
 	if err := s.tagConversation(ctx, "qa-main", []string{categoryFinance}, infoTaggedByModel, ""); err != nil {
 		t.Fatal(err)
 	}
 	a := recall()
-	if got := entryIDs(a.Entries); !strings.Contains(got, extID(extQAFinance)) || !strings.Contains(got, extID(extQAFinanceUntagged)) ||
+	if got := strings.Join(entryIDList(a.Entries), ","); !strings.Contains(got, extID(extQAFinance)) || !strings.Contains(got, extID(extQAFinanceUntagged)) ||
 		strings.Contains(got, extID(extQAUnknown)) {
 		t.Errorf("recall with finance = %s", got)
 	}
@@ -149,22 +149,22 @@ func TestMemoryExtensionHandOffAndInbox(t *testing.T) {
 	// ones share too few words with the task.
 	finance := []string{extID(extQAFinance), extID(extQAFinanceUntagged)}
 	if a := s.handOffMemory(ctx, task, "qa-machine"); !slices.Equal(a.IDs(), finance) || !slices.Equal(a.Sensitive, finance) {
-		t.Errorf("confirmed hand-off = %s (sensitive %v)", entryIDs(a.Entries), a.Sensitive)
+		t.Errorf("confirmed hand-off = %s (sensitive %v)", entryIDList(a.Entries), a.Sensitive)
 	}
 	unconfirmed := task
 	unconfirmed.OwnerStarted = false
 	if a := s.handOffMemory(ctx, unconfirmed, "qa-machine"); len(a.Entries) != 0 {
-		t.Errorf("unconfirmed hand-off = %s", entryIDs(a.Entries))
+		t.Errorf("unconfirmed hand-off = %s", entryIDList(a.Entries))
 	}
 	src.asked = nil
 	if a := s.handOffMemory(ctx, task, "qa-other"); len(a.Entries) != 0 || len(src.asked) != 0 {
-		t.Errorf("hand-off to another computer = %s (source asked %v)", entryIDs(a.Entries), src.asked)
+		t.Errorf("hand-off to another computer = %s (source asked %v)", entryIDList(a.Entries), src.asked)
 	}
 	a, err := s.inboxMemory(ctx, "qa: can you send the quarterly budget envelope totals, and the weekly report bullet points")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := entryIDs(a.Entries); got != extID(extQAMain) || len(a.Sensitive) != 0 {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{extID(extQAMain)}) || len(a.Sensitive) != 0 {
 		t.Errorf("Inbox = %s (sensitive %v), want only the general entry the message bears on", got, a.Sensitive)
 	}
 }
@@ -182,16 +182,16 @@ func TestMemoryExtensionOlderCarriesNothing(t *testing.T) {
 	for _, sid := range []string{"qa-main", "qa-plain-1", "qa-finance-1"} {
 		for _, r := range []assembleRole{assembleStanding, assembleRecall} {
 			if a, _ := s.assembleMemory(ctx, s.assembleForConversation(ctx, sid, r), p, true); len(a.Entries) != 0 {
-				t.Errorf("%s role %d carries %s", sid, r, entryIDs(a.Entries))
+				t.Errorf("%s role %d carries %s", sid, r, entryIDList(a.Entries))
 			}
 		}
 	}
 	task := PlanTask{Title: "qa: quarterly report", Prompt: "qa: prepare the quarterly budget envelope totals, weekly report bullet points",
 		OwnerStarted: true, MemoryTopic: []string{categoryFinance}}
 	if a := s.handOffMemory(ctx, task, "qa-machine"); len(a.Entries) != 0 {
-		t.Errorf("hand-off carries %s", entryIDs(a.Entries))
+		t.Errorf("hand-off carries %s", entryIDList(a.Entries))
 	}
 	if a, _ := s.inboxMemory(ctx, task.Prompt); len(a.Entries) != 0 {
-		t.Errorf("Inbox carries %s", entryIDs(a.Entries))
+		t.Errorf("Inbox carries %s", entryIDList(a.Entries))
 	}
 }

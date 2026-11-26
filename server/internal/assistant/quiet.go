@@ -41,8 +41,11 @@ type quietNotice struct {
 }
 
 type quietBook struct {
+	wg      sync.WaitGroup // tracks armed timers and in-flight quiet-notice callbacks so teardown drains them cleanly
 	mu      sync.Mutex
+	stopped bool
 	pending map[string]*quietNotice // by todo id
+	timers  map[string]*time.Timer  // by todo id
 }
 
 // noticeStates are the words for a state in the notice's "meanwhile it also…".
@@ -57,6 +60,10 @@ func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, 
 	}
 	b := &s.quiet
 	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return
+	}
 	if b.pending == nil {
 		b.pending = map[string]*quietNotice{}
 	}
@@ -68,10 +75,24 @@ func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, 
 		n.earlier = appendOnce(n.earlier, noticeStates[n.state])
 	}
 	n.todo, n.machine, n.state, n.ask, n.text, n.files, n.card = t, machine, state, ask, text, files, ""
-	b.mu.Unlock()
 	if !waiting {
-		time.AfterFunc(quietNoticeDelay, func() { s.sendQuietNotice(t.ID) })
+		if b.timers == nil {
+			b.timers = map[string]*time.Timer{}
+		}
+		id := t.ID
+		if prev := b.timers[id]; prev != nil {
+			delete(b.timers, id)
+			if prev.Stop() {
+				b.wg.Done()
+			}
+		}
+		b.wg.Add(1)
+		b.timers[id] = time.AfterFunc(quietNoticeDelay, func() {
+			defer b.wg.Done()
+			s.runQuietNoticeTimer(id)
+		})
 	}
+	b.mu.Unlock()
 }
 
 func appendOnce(list []string, s string) []string {
@@ -86,12 +107,44 @@ func appendOnce(list []string, s string) []string {
 	return append(list, s)
 }
 
+func (s *Service) runQuietNoticeTimer(id string) {
+	b := &s.quiet
+	b.mu.Lock()
+	stopped := b.stopped
+	b.mu.Unlock()
+	if stopped {
+		return
+	}
+	s.sendQuietNotice(id)
+}
+
+// stopQuietTimers stops new quiet-notice timers from arming, disarms pending timers, and drains in-flight callbacks.
+func (s *Service) stopQuietTimers() {
+	b := &s.quiet
+	b.mu.Lock()
+	b.stopped = true
+	for id, timer := range b.timers {
+		delete(b.timers, id)
+		if timer.Stop() {
+			b.wg.Done()
+		}
+	}
+	b.mu.Unlock()
+	b.wg.Wait()
+}
+
 // sendQuietNotice puts task id's notice into the main conversation: now, or queued behind its turn.
 func (s *Service) sendQuietNotice(id string) {
 	b := &s.quiet
 	b.mu.Lock()
 	n := b.pending[id]
 	delete(b.pending, id)
+	if timer := b.timers[id]; timer != nil {
+		delete(b.timers, id)
+		if timer.Stop() {
+			b.wg.Done()
+		}
+	}
 	b.mu.Unlock()
 	if n == nil {
 		return
@@ -161,6 +214,10 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 	}
 	b := &s.quiet
 	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return false
+	}
 	if b.pending == nil {
 		b.pending = map[string]*quietNotice{}
 	}
@@ -177,16 +234,28 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 		if len(n.files) > 0 { // the newer state may be one that carries no files (a question): keep what came
 			cur.files = n.files
 		}
-	} else {
-		b.pending[id] = n
-	}
-	b.mu.Unlock()
-	if newer {
+		b.mu.Unlock()
 		s.logf("task %s: quiet notice: the relay queue can't be read; a newer one waits", id)
 		return false
 	}
-	s.logf("task %s: quiet notice: the relay queue can't be read; trying again in %s", id, quietNoticeDelay)
-	time.AfterFunc(quietNoticeDelay, func() { s.sendQuietNotice(id) })
+	b.pending[id] = n
+	if b.timers == nil {
+		b.timers = map[string]*time.Timer{}
+	}
+	if prev := b.timers[id]; prev != nil {
+		delete(b.timers, id)
+		if prev.Stop() {
+			b.wg.Done()
+		}
+	}
+	delay := quietNoticeDelay
+	b.wg.Add(1)
+	b.timers[id] = time.AfterFunc(delay, func() {
+		defer b.wg.Done()
+		s.runQuietNoticeTimer(id)
+	})
+	b.mu.Unlock()
+	s.logf("task %s: quiet notice: the relay queue can't be read; trying again in %s", id, delay)
 	return false
 }
 
@@ -263,13 +332,14 @@ func (s *Service) dropQueuedNeeds(todoID string) bool {
 	return removed || changed
 }
 
-// prepareAgentTask records an assistant agent_start before the node is called (#5732). The calling conversation stays
-// its origin; the calling lead supervises its own work, otherwise main does. Quiet controls notification behavior,
-// never whether the work is tracked. The supervisor also gets a card when it differs from the origin.
+// prepareAgentTask records an assistant agent_start before the node is called (#5732, #13657). The calling conversation
+// stays its origin; a calling lead or live assistant side conversation supervises its own work, otherwise main does.
+// Quiet controls notification behavior, never whether the work is tracked. The supervisor also gets a card when it differs
+// from the origin.
 func (s *Service) prepareAgentTask(ctx context.Context, conversation string, m Device, cwd, prompt string, tab any) (Todo, string, bool) {
 	supervisor := s.settings(ctx).Main
 	source := ""
-	if s.isLeader(ctx, conversation) {
+	if s.isLeader(ctx, conversation) || s.liveSideSupervisor(ctx, conversation) {
 		supervisor, source = conversation, "plan"
 	}
 	tabName, _ := tab.(string)

@@ -25,6 +25,7 @@ const (
 	ownerActionDenied        = "denied"
 	ownerActionCancelled     = "cancelled"
 	ownerActionConsumed      = "consumed"
+	ownerActionStopped       = "stopped"
 
 	ownerActionMaxItems    = 20
 	ownerActionMaxInput    = 256 << 10
@@ -70,6 +71,8 @@ type ownerActionBatch struct {
 	SessionID  string            `json:"session_id"`
 	CreatedAt  time.Time         `json:"created_at"`
 	Persistent bool              `json:"persistent,omitempty"`
+	FailedItem string            `json:"failed_item,omitempty"`
+	Failure    string            `json:"failure,omitempty"`
 	Items      []ownerActionItem `json:"items"`
 }
 
@@ -79,6 +82,9 @@ type ownerActionItem struct {
 	Canonical     string     `json:"canonical"`
 	Fingerprint   string     `json:"fingerprint"`
 	State         string     `json:"state"`
+	Display       string     `json:"display,omitempty"`
+	Revision      *int64     `json:"revision,omitempty"`
+	Outcome       string     `json:"outcome,omitempty"`
 	DecisionEvent string     `json:"decision_event,omitempty"`
 	DecidedAt     *time.Time `json:"decided_at,omitempty"`
 	ConsumedAt    *time.Time `json:"consumed_at,omitempty"`
@@ -94,8 +100,10 @@ type ownerActionDecision struct {
 }
 
 type ownerActionDraft struct {
-	Tool  string
-	Input json.RawMessage
+	Tool     string
+	Input    json.RawMessage
+	Display  string
+	Revision *int64
 }
 
 // ownerReplyProof contains only facts established independently by an
@@ -283,12 +291,19 @@ func (book *ownerActionBook) createPersistent(ctx context.Context, machine, sess
 			return ownerActionBatch{}, errors.New("owner-action batch is too large")
 		}
 		fingerprint := ownerActionDigest(canonical)
+		var revision *int64
+		if draft.Revision != nil {
+			value := *draft.Revision
+			revision = &value
+		}
 		batch.Items = append(batch.Items, ownerActionItem{
 			ID:          "oai_" + randomHex(12),
 			Tool:        draft.Tool,
 			Canonical:   string(canonical),
 			Fingerprint: fingerprint,
 			State:       ownerActionPending,
+			Display:     draft.Display,
+			Revision:    revision,
 		})
 	}
 	for attempt := 0; attempt < ownerActionCASRetries; attempt++ {
@@ -573,6 +588,174 @@ func (book *ownerActionBook) consume(ctx context.Context, machine, session, tool
 		}
 	}
 	return false, errOwnerActionConflict
+}
+
+// ownerActionExecution identifies one granted built-in call and its position in the approved batch.
+type ownerActionExecution struct {
+	BatchID  string
+	Item     ownerActionItem
+	Position int
+	Total    int
+}
+
+// consumeBuiltin atomically spends one exact built-in grant. Within a batch, an
+// approved built-in item cannot overtake an earlier granted or running built-in.
+// A recorded failure blocks every later grant instead of allowing silent progress.
+func (book *ownerActionBook) consumeBuiltin(ctx context.Context, machine, session, tool string, input json.RawMessage) (*ownerActionExecution, error) {
+	canonical, err := canonicalOwnerAction(input)
+	if err != nil {
+		// The built-in decoders historically accepted duplicate object keys. Do
+		// not let a non-canonical spelling select a pending/denied operation or
+		// execute once here and again through an unconsumed exact grant.
+		return nil, fmt.Errorf("built-in owner-action input is not an unambiguous JSON object: %w", err)
+	}
+	fingerprint := ownerActionDigest(canonical)
+	for attempt := 0; attempt < ownerActionCASRetries; attempt++ {
+		doc, err := book.read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var execution *ownerActionExecution
+		for bi := range doc.Batches {
+			batch := &doc.Batches[bi]
+			if batch.MachineID != machine || batch.SessionID != session {
+				continue
+			}
+			for ii := range batch.Items {
+				item := &batch.Items[ii]
+				if item.State != ownerActionGranted || item.Tool != tool || item.Fingerprint != fingerprint ||
+					!bytes.Equal([]byte(item.Canonical), canonical) {
+					continue
+				}
+				if batch.FailedItem != "" {
+					return nil, fmt.Errorf("owner-action batch %s already stopped at %s: %s", batch.ID, batch.FailedItem, batch.Failure)
+				}
+				for earlier := 0; earlier < ii; earlier++ {
+					if !ownerBuiltinWrite(batch.Items[earlier].Tool) {
+						continue
+					}
+					state := batch.Items[earlier].State
+					if state == ownerActionGranted || state == ownerActionConsumed && batch.Items[earlier].Outcome == "running" {
+						return nil, fmt.Errorf("owner-action batch %s must execute item %d before item %d", batch.ID, earlier+1, ii+1)
+					}
+				}
+				now := time.Now().UTC()
+				item.State = ownerActionConsumed
+				item.Outcome = "running"
+				item.ConsumedAt = &now
+				execution = &ownerActionExecution{BatchID: batch.ID, Item: *item, Position: ii + 1, Total: len(batch.Items)}
+				break
+			}
+			if execution != nil {
+				break
+			}
+		}
+		if execution == nil {
+			// A built-in's ordinary direct path may not itself have a card (switch
+			// and rollback). Never let the exact call bypass a pending, denied,
+			// stopped or already consumed durable decision. A fresh batch is a new
+			// explicit operation and can grant the same canonical bytes again.
+			for _, batch := range doc.Batches {
+				if batch.MachineID != machine || batch.SessionID != session {
+					continue
+				}
+				for _, item := range batch.Items {
+					if ownerBuiltinWrite(item.Tool) && item.Tool == tool && item.Fingerprint == fingerprint &&
+						bytes.Equal([]byte(item.Canonical), canonical) {
+						return nil, fmt.Errorf("exact built-in call is %s in batch %s; wait for its decision or prepare a fresh batch instead of bypassing it", item.State, batch.ID)
+					}
+				}
+			}
+			return nil, nil
+		}
+		doc.Revision++
+		saved, err := book.cas.CompareSetting(ctx, ownerActionBookKey, doc.Revision-1, doc)
+		if err != nil {
+			return nil, err
+		}
+		if saved {
+			return execution, nil
+		}
+	}
+	return nil, errOwnerActionConflict
+}
+
+// finishBuiltin records success, or the exact partial stopping point. Later
+// unused grants become stopped; a consumed grant is never replayed.
+func (book *ownerActionBook) finishBuiltin(ctx context.Context, execution ownerActionExecution, runErr error, completed bool) (string, error) {
+	for attempt := 0; attempt < ownerActionCASRetries; attempt++ {
+		doc, err := book.read(ctx)
+		if err != nil {
+			return "", err
+		}
+		changed := false
+		var report string
+		for bi := range doc.Batches {
+			batch := &doc.Batches[bi]
+			if batch.ID != execution.BatchID {
+				continue
+			}
+			for ii := range batch.Items {
+				item := &batch.Items[ii]
+				if item.ID != execution.Item.ID {
+					continue
+				}
+				if item.State != ownerActionConsumed || item.Outcome != "running" {
+					return "", errOwnerActionConflict
+				}
+				if runErr == nil {
+					item.Outcome = "done"
+				} else {
+					item.Outcome = "failed"
+					if completed {
+						item.Outcome = "done"
+					}
+					batch.FailedItem = item.ID
+					batch.Failure = runErr.Error()
+					if len(batch.Failure) > 2000 {
+						batch.Failure = batch.Failure[:2000]
+					}
+					for later := ii + 1; later < len(batch.Items); later++ {
+						if batch.Items[later].State == ownerActionGranted {
+							batch.Items[later].State = ownerActionStopped
+							batch.Items[later].Outcome = "stopped"
+						}
+					}
+				}
+				changed = true
+				if runErr != nil {
+					doneItems, notExecuted := []int{}, []int{}
+					for i, candidate := range batch.Items {
+						switch candidate.Outcome {
+						case "done":
+							doneItems = append(doneItems, i+1)
+						case "stopped":
+							notExecuted = append(notExecuted, i+1)
+						}
+					}
+					report = fmt.Sprintf("Built-in batch stopped at item %d/%d (%s): %v. Completed items: %v. Items not executed: %v.",
+						ii+1, len(batch.Items), item.ID, runErr, doneItems, notExecuted)
+					if completed {
+						report += " The stopping item completed; its read-back failed."
+					}
+				}
+				break
+			}
+			break
+		}
+		if !changed {
+			return "", errOwnerActionProof
+		}
+		doc.Revision++
+		saved, err := book.cas.CompareSetting(ctx, ownerActionBookKey, doc.Revision-1, doc)
+		if err != nil {
+			return "", err
+		}
+		if saved {
+			return report, nil
+		}
+	}
+	return "", errOwnerActionConflict
 }
 
 func ownerActionBatchActive(batch ownerActionBatch) bool {

@@ -354,6 +354,22 @@ extension HomeWidgetTests {
         #expect(String(localized: "Update the hub [Home Widgets]", locale: Locale(identifier: "zh-Hans")) == "需要更新 hub")
     }
 
+    @Test func removedIntakeItemsPropagateToWidgetsAndOldSnapshotsStayCompatible() throws {
+        let json = #"{"water":{"today":750,"goal":2000,"entries":[]},"protein":{"today":36,"goal":60,"entries":[]},"days":[],"zone":"UTC","items":["protein"]}"#
+        let intake = try JSONDecoder().decode(HealthIntake.self, from: Data(json.utf8))
+        #expect(!intake.contains(.water) && intake.contains(.protein))
+        var snapshot = HomeSnapshot(paired: true)
+        snapshot.intake = HomeIntakeClock.snapshot(intake, now: .now)
+        #expect(snapshot.intake?.items == ["protein"])
+        let water = HomeIntakeValue(kind: .water, c: HomeContext(snapshot: snapshot, date: .now))
+        let protein = HomeIntakeValue(kind: .protein, c: HomeContext(snapshot: snapshot, date: .now))
+        #expect(water.message == "Add Water in Health" && protein.message == nil)
+        snapshot.intake?.items = nil
+        #expect(HomeIntakeValue(kind: .water, c: HomeContext(snapshot: snapshot, date: .now)).message == nil)
+        snapshot.intake?.items = []
+        #expect(HomeIntakeValue(kind: .protein, c: HomeContext(snapshot: snapshot, date: .now)).message == "Add Protein in Health")
+    }
+
     /// Optional screenshot export of the actual gallery views. No app state, credentials or network is involved.
     @Test func exportHealthWidgetGallery() throws {
         guard let path = ProcessInfo.processInfo.environment["PERSONA_WIDGET_SHOTS"] else { return }

@@ -1,0 +1,35 @@
+{
+  "text": "Driving route from Home to Office: 28 min, 14.2 km.",
+  "views": [
+    {
+      "sections": [
+        {
+          "items": [
+            {
+              "type": "map",
+              "alt": "Driving route from Home to Office, 14.2 km, 28 min",
+              "caption": "28 min · 14.2 km",
+              "markers": [
+                {"id": "origin", "lat": 39.984, "lon": 116.318, "kind": "origin", "label": "Home"},
+                {"id": "dest", "lat": 39.946, "lon": 116.412, "kind": "destination", "label": "Office"}
+              ],
+              "routes": [
+                {
+                  "id": "r1",
+                  "mode": "driving",
+                  "distance_meters": 14200,
+                  "duration_seconds": 1680,
+                  "selected": true,
+                  "points": [
+                    {"lat": 39.984, "lon": 116.318},
+                    {"lat": 39.946, "lon": 116.412}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

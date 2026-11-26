@@ -76,6 +76,24 @@ export function matchingKeys(sessions: Session[], f: AgentFilter, mutes: AgentMu
   return new Set(f === "all" ? [] : sessions.filter((s) => matchesFilter(s, f, mutes)).map(agentKey));
 }
 
+/** Takes in newly matching keys while the filter stays chosen (#12585, iOS onChange(of: matching)); same set when unchanged. */
+export function extendKept(kept: ReadonlySet<string>, matching: ReadonlySet<string>): ReadonlySet<string> {
+  let next: Set<string> | undefined;
+  for (const key of matching) {
+    if (!kept.has(key)) (next ??= new Set(kept)).add(key);
+  }
+  return next ?? kept;
+}
+
+/** Drops cleared keys from `kept` (Clear seen under a quick filter); same set when none were kept. */
+export function removeKept(kept: ReadonlySet<string>, keys: Iterable<string>): ReadonlySet<string> {
+  let next: Set<string> | undefined;
+  for (const key of keys) {
+    if (kept.has(key)) (next ??= new Set(kept)).delete(key);
+  }
+  return next ?? kept;
+}
+
 /** The finished ones nobody has seen among these, Unread or Just finished (what "Mark all as seen" marks). */
 export function unreadOf(sessions: Session[]): Session[] {
   return sessions.filter(unseen);

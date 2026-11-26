@@ -1,0 +1,22 @@
+# Every production .go file under server/ that calls the builtin recover(), with its reason
+# (TestRecoverOnlyAtListedSites, rule recover-site; docs/server/architecture.md "Validated and sealed"). A permission
+# list: a file that calls recover() and has no line fails, and so does a line whose file no longer calls it. A
+# programmer error is a defect: raise it with defect.Raise and let a site in catch_sites.txt catch it, or return an
+# error. Add a line only for a boundary that must outlive a panic of code it does not own, and say which in the reason.
+# Paths are relative to server/; the reason follows the path on the same line.
+cmd/password-wasm/main.go the browser's password worker answers a failed OPAQUE step with its JSON error instead of ending the WASM program
+internal/agents/avatar.go the SVG rasterizer panics on some malformed images, and an avatar that cannot be drawn is an error
+internal/assistant/fleet.go guard answers a store that does not keep a fleet table, which panics on it, as errNoTable
+internal/assistant/kb.go kbRun logs a panic with its stack, so one malformed message does not stop the knowledge-base loop
+internal/assistant/launcher_import_tool.go the launcher_import confidentiality boundary catches RPC/store panics so discovered credentials are never formatted into outer recovery or model errors
+internal/assistant/modules.go checkModuleRoutes turns ServeMux's panic on a conflicting module route into the error that leaves the module out
+internal/assistant/profile_trial.go a model-routing trial logs its panic, so a trial can never fail or alter the real dispatch
+internal/domainkit/defect/defect.go defect.Catch, the one recover() a site in catch_sites.txt defers
+internal/extension/sourcevalidate/child.go the disposable validator child refuses a source whose parse panics, answering only its fixed verdict
+internal/extmgr/extension_build.go the build checks' reporter stops a check by panicking with its own type, which run turns into an error; any other panic goes on
+internal/hub/error_reports.go recoverPanics answers a hub handler's panic with 500 and reports it, so one request does not take the hub down
+internal/kb/topic_distill.go a distill worker logs its panic and stops the batch, so one bad source cannot end the process
+internal/modules/lark/feishubot/conn.go a Feishu event handler's panic becomes that event's error, so the bot's connection stays up
+internal/node/codex_catalog.go survive logs a panic in a launcher's catalog lookup goroutine instead of ending the node
+internal/node/lcu_installer_shape.go the installer shape check reads a tokenizer panic as an installer it does not accept
+internal/node/thumb.go the SVG thumbnail drawer panics on some malformed images, and a thumbnail that cannot be drawn is an error

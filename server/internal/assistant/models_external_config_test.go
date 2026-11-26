@@ -146,7 +146,7 @@ func TestExternalCannotEnterProfilesTiersOrManagedProviders(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.tierModel(t.Context(), "standard")
+	_, err := s.pickTierCandidate(t.Context(), "standard", tierFacts{})
 	requireExternalError(t, err, "purpose_unsupported")
 	if _, err := s.applyModelProfile(t.Context(), "old", ProfileActor{Kind: "user"}); err == nil {
 		t.Fatal("an old external profile became active")

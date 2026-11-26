@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // finalState waits for recording id's state to be want.
@@ -42,7 +42,7 @@ func TestFinalPass(t *testing.T) {
 		t.Fatal("the pass started with a gap left")
 	}
 	path := h.srv.URL + "/api/v1/recordings/" + meetingRec + "/audio?at=2"
-	req, _ := http.NewRequest("PUT", path, strings.NewReader(string(make([]byte, 2*2*kb.AudioRate))))
+	req, _ := http.NewRequest("PUT", path, strings.NewReader(string(make([]byte, 2*2*recordingwire.AudioRate))))
 	resp, err := h.srv.Client().Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("gap upload: %v %v", err, resp)
@@ -60,13 +60,13 @@ func TestFinalPass(t *testing.T) {
 			refs = append(refs, *f.Text)
 		}
 	}
-	if !slices.Equal(refs, []string{"Live one.", "Phone in the gap.", "Live two."}) || audio != 6*kb.AudioRate {
+	if !slices.Equal(refs, []string{"Live one.", "Phone in the gap.", "Live two."}) || audio != 6*recordingwire.AudioRate {
 		t.Fatalf("references %q, %d samples", refs, audio)
 	}
 	if got := h.hubTexts(meetingRec); !slices.Equal(got, []string{"Replay one.", "Replay in the gap.", "Live two."}) {
 		t.Fatalf("the final transcript %q", got)
 	}
-	d, err := h.engine().Get(kb.KindRecording, meetingRec, 0)
+	d, err := h.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestFinalPass(t *testing.T) {
 	if !slices.Equal(texts, []string{"Replay one./hub", "Replay in the gap./hub", "Live two./hub"}) {
 		t.Fatalf("detail.segments %q", texts)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
 	if tr := m.Transcription; tr.UsageSeconds < 7 || tr.FinalAt.IsZero() || len(tr.Gaps) != 0 {
 		t.Fatalf("transcription %+v", tr)
 	}
@@ -85,7 +85,7 @@ func TestFinalPass(t *testing.T) {
 	if resp, err := h.srv.Client().Do(put); err != nil || resp.StatusCode != http.StatusConflict {
 		t.Fatalf("audio after the pass: %v %v", err, resp)
 	}
-	audioDir := filepath.Join(h.s.kbDir, kb.KindRecording, meetingRec, "attachments", "audio")
+	audioDir := filepath.Join(h.s.kbDir, recordingwire.KindRecording, meetingRec, "attachments", "audio")
 	if _, err := os.Stat(audioDir); err != nil {
 		t.Fatalf("the audio went before the minutes: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestFinalPassProgress(t *testing.T) {
 		tr := h.transcription(meetingRec)
 		return tr["state"] == "finishing" && tr["final_done"] == 3.0 && tr["end"] == 6.0
 	})
-	if m, _, _ := h.engine().MeetingRead(meetingRec); m.Transcription.FinalDone != 3 {
+	if m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec); m.Transcription.FinalDone != 3 {
 		t.Fatalf("meeting.json %+v", m.Transcription)
 	}
 	close(gate)
@@ -163,7 +163,7 @@ func TestFinalRetryAfter(t *testing.T) {
 		{7, 5, false, 5 * time.Minute, true}, // a failed try after a long outage: its second
 		{0, 0, false, 0, false},
 	} {
-		wait, ok := finalRetryAfter(defaultTimings(), kb.MeetingTranscription{FinalTries: c.tries, FinalUnreachable: c.unreachable}, c.now)
+		wait, ok := finalRetryAfter(defaultTimings(), recordingwire.MeetingTranscription{FinalTries: c.tries, FinalUnreachable: c.unreachable}, c.now)
 		if wait != c.wait || ok != c.ok {
 			t.Errorf("tries %d, unreachable %d, this one unreachable %v: %v %v, want %v %v", c.tries, c.unreachable, c.now, wait, ok, c.wait, c.ok)
 		}
@@ -233,7 +233,7 @@ func TestFinalPassEndsWithTheRecording(t *testing.T) {
 			return false
 		}
 		_, audio, _, _ := jobs[0].snapshot()
-		return audio > kb.AudioRate
+		return audio > recordingwire.AudioRate
 	})
 	h.do("DELETE", "/api/v1/recordings/"+meetingRec, "", nil, http.StatusOK)
 	waitFor(t, "the replay job closed", func() bool { return h.tr.jobsOf(extwire.TranscriptionReplay)[0].over() })
@@ -274,7 +274,7 @@ func TestFinalPassWaitsForTheLastLines(t *testing.T) {
 	st := h.s.hubTr.passes[meetingRec]
 	running := st != nil && st.running
 	h.s.hubTr.mu.Unlock()
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
 	if running || !m.Transcription.FinalFrom.IsZero() {
 		t.Fatal("the pass started before the last lines")
 	}
@@ -288,7 +288,7 @@ func TestFinalPassWaitsForTheLastLines(t *testing.T) {
 	h.finalState(meetingRec, "final")
 }
 
-// The final pass marks Persona's echo among its sentences by the timeline's spans and their answers (kb/echo.go),
+// The final pass marks Persona's echo among its sentences by the timeline's spans and their answers (writers/echo.go),
 // never drops it: the final transcript and detail.segments keep it marked, transcript.md marks it, and chars leaves it
 // out.
 func TestFinalPassMarksEcho(t *testing.T) {
@@ -306,7 +306,7 @@ func TestFinalPassMarksEcho(t *testing.T) {
 	if got, echo := h.hubTexts(meetingRec), h.hubEcho(meetingRec); len(got) != 3 || !slices.Equal(echo, []bool{false, true, false}) {
 		t.Fatalf("the final transcript %q, echo %v", got, echo)
 	}
-	d, err := h.engine().Get(kb.KindRecording, meetingRec, 0)
+	d, err := h.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestFinalPassMarksEcho(t *testing.T) {
 	if !slices.Equal(marked, []string{"Bo owns the regression test."}) {
 		t.Fatalf("detail.segments %+v", d.Segments)
 	}
-	md, err := os.ReadFile(filepath.Join(h.s.kbDir, kb.KindRecording, meetingRec, "transcript.md"))
+	md, err := os.ReadFile(filepath.Join(h.s.kbDir, recordingwire.KindRecording, meetingRec, "transcript.md"))
 	if err != nil || !strings.Contains(string(md), "[Persona 回声] Bo owns the regression test.") {
 		t.Fatalf("transcript.md %s %v", md, err)
 	}

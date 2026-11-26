@@ -76,5 +76,6 @@
   "lark_triage": "收件箱分拣规则",
   "lark_triage_footer": "用一句或几句话说明飞书里什么算「需要你」、什么算「知悉」或「折叠」。留空用收件箱默认的判断；写了就只按这里的规则分拣飞书内容。",
   "lark_triage_placeholder": "例如：机器人发的构建、发布和告警通知算知悉，除非点名要我处理；有人问我问题或请我评审算需要你。",
-  "lark_triage_save": "保存规则"
+  "lark_triage_save": "保存规则",
+  "bind_in_integrations": "也可以到 设置 › 集成与扩展 › {name} 里绑定。"
 }

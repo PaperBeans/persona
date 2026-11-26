@@ -572,7 +572,7 @@ describe("messages kept across a reload", () => {
   });
 
   it.each(retryPrompts)("restores $kind after a reload, and Retry preserves the same identity and payload", async ({ text }) => {
-    keepFailed("m", "s", { id: "a1", text, images: [], at: 1000, launcher: "codex" }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a1", text, images: [], at: 1000, launcher: "codex" }, new TypeError("Failed to fetch"));
     expect(store.size).toBe(1);
     reload();
     restoreOutbox("m", "s");
@@ -705,7 +705,7 @@ describe("messages kept across a reload", () => {
     noteSent("m", "s", { text: "Accepted in this tab" });
     const accepted = outbox()["m/s"][0];
     forgetOutgoing("m/s", accepted.id); // another tab saw the transcript first
-    keepFailed("m", "s", { id: "failed", text: "Another message", images: [], at: Date.now() }, new TypeError("network"));
+    keepFailed("m", "s", { id: "failed", text: "Another message", images: [], at: Date.now() }, new TypeError("Failed to fetch"));
     expect(store.has(`outbox-msg:m/s/${accepted.id}`)).toBe(false);
     expect(store.has("outbox-msg:m/s/failed")).toBe(true);
   });
@@ -836,14 +836,14 @@ describe("messages kept across a reload", () => {
   });
 
   it("forgets a deleted message", () => {
-    keepFailed("m", "s", { id: "a5", text: "别发了", images: [], at: 1000 }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a5", text: "别发了", images: [], at: 1000 }, new TypeError("Failed to fetch"));
     discardOutbox("m", "s", "a5");
     expect(store.size).toBe(0);
   });
 
   it("puts a deleted message back where it was on Undo, kept for reloads again (#4626)", () => {
-    keepFailed("m", "s", { id: "a6", text: "第一条", images: [], at: 1000 }, new TypeError("network"));
-    keepFailed("m", "s", { id: "a7", text: "第二条", images: [], at: 2000 }, new TypeError("network"));
+    keepFailed("m", "s", { id: "a6", text: "第一条", images: [], at: 1000 }, new TypeError("Failed to fetch"));
+    keepFailed("m", "s", { id: "a7", text: "第二条", images: [], at: 2000 }, new TypeError("Failed to fetch"));
     const undo = discardOutbox("m", "s", "a6")!;
     expect(outbox()["m/s"].map((e) => e.id)).toEqual(["a7"]);
     expect(store.size).toBe(1);
@@ -854,6 +854,53 @@ describe("messages kept across a reload", () => {
     undo(); // there already: no second copy
     expect(outbox()["m/s"]).toHaveLength(2);
     expect(discardOutbox("m", "s", "gone")).toBeUndefined();
+  });
+
+  it("keeps attached images in memory across same-tab navigation without persisting image bytes to localStorage", () => {
+    const imgs = [
+      { mime: "image/jpeg", data: "AAAA" },
+      { mime: "image/png", data: "BBBB" },
+    ];
+    const at = Date.now();
+    restoreOutbox("m", "s");
+    keepOutgoing("m/s", { id: "img-msg", text: "Check these two screenshots", images: imgs, at });
+    acceptOutgoing("m/s", "img-msg", at);
+    const saved = JSON.parse(store.get("outbox-msg:m/s/img-msg")!);
+    expect(saved.images).toBe(2);
+    expect(store.get("outbox-msg:m/s/img-msg")).not.toContain("AAAA");
+    expect(store.get("outbox-msg:m/s/img-msg")).not.toContain("BBBB");
+
+    // Client-side switch away and back (same tab: in-memory images survive).
+    restoreOutbox("m", "s");
+    expect(outbox()["m/s"]).toMatchObject([{ id: "img-msg", text: "Check these two screenshots", state: "sent", images: imgs }]);
+
+    // Once settled by the transcript echo, both localStorage and in-memory images are cleaned up.
+    settleOutbox("m", "s", [{ id: "echo-1", client_msg_id: "img-msg", text: "Check these two screenshots", images: [] }]);
+    expect(outbox()["m/s"]).toBeUndefined();
+    expect(store.size).toBe(0);
+
+    // After a full page reload (in-memory cleared), an unconfirmed message with images still reports lost images.
+    keepOutgoing("m/s", { id: "img-reload", text: "Lost after reload", images: imgs, at, state: "sending" });
+    reload();
+    restoreOutbox("m", "s");
+    expect(outbox()["m/s"]).toMatchObject([{ id: "img-reload", images: [], state: "failed", restored: true, error: t("lib-outbox.not_confirmed_images") }]);
+  });
+
+  it("preserves an image-only message across same-tab navigation without writing to localStorage", () => {
+    const imgs = [{ mime: "image/jpeg", data: "CCCC" }];
+    const at = Date.now();
+    restoreOutbox("m", "s");
+    keepOutgoing("m/s", { id: "img-only", text: "", images: imgs, at });
+    acceptOutgoing("m/s", "img-only", at);
+    expect(store.size).toBe(0);
+
+    restoreOutbox("m", "s");
+    expect(outbox()["m/s"]).toMatchObject([{ id: "img-only", text: "", state: "sent", images: imgs }]);
+
+    settleOutbox("m", "s", [{ id: "echo-only", client_msg_id: "img-only", text: "", images: [{}] }]);
+    expect(outbox()["m/s"]).toBeUndefined();
+    restoreOutbox("m", "s");
+    expect(outbox()["m/s"]).toBeUndefined();
   });
 });
 

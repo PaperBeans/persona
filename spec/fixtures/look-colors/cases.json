@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "solid_blue",
+      "description": "Uniform opaque blue image produces its own hex color",
+      "file": "solid-blue.png",
+      "expected_seed": "#3A7BD5"
+    },
+    {
+      "name": "two_hues",
+      "description": "Dominant hue wins over a secondary hue and even-count median picks the lower middle channel value",
+      "file": "two-hues.png",
+      "expected_seed": "#E68C28"
+    },
+    {
+      "name": "transparent_and_dark",
+      "description": "Filters out alpha <= 200, value <= 0.35 and saturation <= 0.3 before binning",
+      "file": "transparent-and-dark.png",
+      "expected_seed": "#32B464"
+    },
+    {
+      "name": "gray_fallback",
+      "description": "Fewer than 50 qualifying pixels falls back to neutral gray #787878",
+      "file": "gray-fallback.png",
+      "expected_seed": "#787878"
+    },
+    {
+      "name": "hue_wrap",
+      "description": "Hue neighborhood wraps across the 0/360 degree boundary (bins 35, 0 and 1)",
+      "file": "hue-wrap.png",
+      "expected_seed": "#DC3228"
+    }
+  ]
+}

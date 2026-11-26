@@ -110,7 +110,7 @@ func TestPreparedHubLostHandleReportsOriginalConversationExactlyOnce(t *testing.
 				t.Fatal(err)
 			}
 			result := waitApprovalResult(t, ft, id)
-			for _, want := range []string{id, "stale and cancelled", "Nothing was applied", "fresh approval"} {
+			for _, want := range []string{id, "Change the example setting", "stale and cancelled", "Nothing was applied", "fresh approval"} {
 				if !strings.Contains(result, want) {
 					t.Errorf("terminal result = %q, want %q", result, want)
 				}

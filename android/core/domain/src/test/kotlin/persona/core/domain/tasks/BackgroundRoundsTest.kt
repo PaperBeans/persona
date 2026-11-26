@@ -285,6 +285,69 @@ class BackgroundRoundsTest {
         assertTrue(foreground.any { it.id == "a4" })
     }
 
+    @Test fun antigravityTimestampWrappedSupervisionFinishReceiptFoldsSilentFallbackReplyAndKeepsPromotionsVisible() {
+        val headers = "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+            "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n"
+        val source = MessageSource("conversation", "c2", "Release plan")
+        val silentRound = listOf(
+            user(1, "Supervision check", source),
+            use(2, "Read"), result(3, 2, "checked"),
+            use(4, "mcp_persona_supervision_finish"),
+            result(5, 4, headers + """{"level":"triage","summary":"All quiet.","visibility":"silent"}"""),
+            reply(6, "OK"),
+        )
+        val folded = project(silentRound).foreground
+        assertEquals(1, folds(folded).size)
+        assertTrue(folded.none { it.id == "a6" })
+
+        // Wrapped visibility=user stays visible.
+        val userRound = listOf(
+            user(1, "Supervision check", source),
+            use(2, "mcp_persona_0c671287_supervision_finish"),
+            result(3, 2, headers + """{"level":"user","summary":"Need approval.","visibility":"user"}"""),
+            reply(4, "Please confirm."),
+        )
+        assertTrue(folds(project(userRound).foreground).isEmpty())
+
+        // Promotion tools (notify_user, ask_user, task_review accepted/needs_user) stay visible even alongside silent finish.
+        val promotedCases = listOf(
+            use(2, "mcp_persona_notify_user"),
+            use(2, "mcp_persona_ask_user"),
+            use(2, "mcp_persona_task_review", buildJsonObject { put("verdict", "accepted") }),
+            use(2, "mcp_persona_task_review", buildJsonObject { put("verdict", "needs_user") }),
+        )
+        for (promoted in promotedCases) {
+            val items = listOf(
+                user(1, "Supervision check", source),
+                promoted, result(3, 2, "done"),
+                use(4, "mcp_persona_supervision_finish"),
+                result(5, 4, headers + """{"level":"triage","summary":"All quiet.","visibility":"silent"}"""),
+                reply(6, "OK"),
+            )
+            assertTrue("${promoted.toolName} stays visible", folds(project(items).foreground).isEmpty())
+        }
+
+        // Ordinary Created At text is not stripped, so a malformed receipt fails open rather than hiding a reply.
+        val malformed = listOf(
+            user(1, "Supervision check", source),
+            use(2, "mcp_persona_supervision_finish"),
+            result(3, 2, "Created At: yesterday\n" + """{"visibility":"silent"}"""),
+            reply(4, "The real reply"),
+        )
+        assertTrue(folds(project(malformed).foreground).isEmpty())
+
+        // Historical Antigravity QuickResult with timestamp headers still parses.
+        val reminderCall = ToolCall(
+            use = LineItem(use(10, "mcp_persona_phone_reminders_create")),
+            result = LineItem(result(11, 10, headers + """{"id":"42","title":"Call back","list":"Inbox"}""")),
+            images = emptyList(),
+        )
+        val quick = QuickResult.of(reminderCall)
+        assertNotNull(quick)
+        assertEquals(42L, quick!!.itemId)
+        assertEquals("Call back", quick.title)
+    }
+
     @Test fun supervisesConversationMatchesOnlyMainAndLeaderIds() {
         val leaders = setOf("lead-1", "lead-2")
         assertTrue(BackgroundFolding.supervisesConversation("main", "main", leaders))

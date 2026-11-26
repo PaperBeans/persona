@@ -1,0 +1,18 @@
+{
+  "waiting": "等 {name} 回来后启动",
+  "starting": "正在启动…",
+  "check": "等 {name} 回来后核对是否已启动",
+  "unclear": "无法确认这个 Agent 是否已启动。点重试会先核对电脑。",
+  "unconfirmed": "无法确认这个 Agent 是否已启动。要重新启动请点重试，或者删除。",
+  "refused": "没有启动：{reason}",
+  "no_reason": "电脑没有说明原因",
+  "expired": "没有启动：{name} 已离线 24 小时",
+  "signed_out": "发起这次启动的设备已退出登录。请删除它，并从已登录的设备重新启动。",
+  "starting_now": "这个 Agent 正在启动，稍后再试。",
+  "not_found": "这条 Agent 启动请求已经不在等待中了。",
+  "read_only": "这台设备不能查看或修改等待启动的 Agent",
+  "store_failed": "现在没法修改这条启动请求，请稍后再试。",
+  "not_prepared": "Persona 没能准备好启动这个 Agent",
+  "full": "这台电脑上等待启动的 Agent 太多了。请先删掉一些，或等电脑回来后再启动。",
+  "unavailable": "现在暂时没法读取等待启动的 Agent，请稍后再试。"
+}

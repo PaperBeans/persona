@@ -3,10 +3,13 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
 	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // When the hub has no sentences, the phone's text fills the live log (docs/assistant/meeting-minutes.md "Audio from
@@ -16,12 +19,12 @@ import (
 // other than no_interim has stood for fallbackAfter. Then each hub-mode upload's segments join the live log (source
 // device): those that end after the hub's last sentence and that the hub's sentences, taken together, cover no more
 // than half of, while the role at their end is not off and they are not Persona's echo (marked by the phone, or by the
-// echo rule against the timeline, kb.EchoOf). It ends once the hub's sentences come again (hubRun.acceptLocked).
+// echo rule against the timeline, writers.EchoOf). It ends once the hub's sentences come again (hubRun.acceptLocked).
 
 // hubUploaded is told of a stored hub-mode upload of recording id with its segments: the run learns the meeting's role,
 // its timeline and the phone's text; a socket that never started counts as down from the first one; in the fallback
 // the segments join the live log. A complete upload has the final passes looked at.
-func (s *Recordings) hubUploaded(e *kb.Engine, id string, segs []kb.RecordingSegment, complete bool) {
+func (s *Recordings) hubUploaded(e *kb.Engine, id string, segs []kbwire.RecordingSegment, complete bool) {
 	defer func() {
 		if complete {
 			s.kickFinal()
@@ -31,7 +34,7 @@ func (s *Recordings) hubUploaded(e *kb.Engine, id string, segs []kb.RecordingSeg
 	if r == nil {
 		return
 	}
-	m, rec, err := e.MeetingRead(id)
+	m, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil {
 		return
 	}
@@ -79,10 +82,10 @@ func (r *hubRun) fallbackCheckLocked(now time.Time) {
 // setFallbackLocked turns the fallback on or off, in meeting.json too (transcription.fallback).
 func (r *hubRun) setFallbackLocked(on bool) {
 	r.fallback = on
-	if _, err := r.e.TranscriptionUpdate(r.id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := writersOf(r.e).TranscriptionUpdate(r.id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 		t.Fallback = on
 		return nil
-	}); err != nil && !errors.Is(err, kb.ErrNotFound) && !errors.Is(err, kb.ErrRecordingDeleted) {
+	}); err != nil && !errors.Is(err, kbwire.ErrNotFound) && !errors.Is(err, recordingwire.ErrRecordingDeleted) {
 		r.s.logf("recording %s: transcription fallback: %v", r.id, err)
 	}
 	r.notifyLocked()
@@ -95,21 +98,21 @@ func (r *hubRun) fillLocked() {
 		hub = append(hub, [2]float64{sg.Start, sg.End})
 	}
 	after := max(r.lastHubEnd, r.filledTo)
-	var add []kb.LiveSegment
+	var add []recordingwire.LiveSegment
 	for _, sg := range r.device {
 		switch {
 		case sg.End <= after || sg.Text == "":
-		case kb.CoveredShare(sg.Start, sg.End, hub) > 0.5:
-		case r.timeline.RoleAt(sg.End, r.role) == kb.AttendanceOff:
-		case sg.Echo || kb.EchoOf(r.timeline, sg.Start, sg.End, sg.Text): // Persona's echo
+		case recordingwire.CoveredShare(sg.Start, sg.End, hub) > 0.5:
+		case r.timeline.RoleAt(sg.End, r.role) == recordingwire.AttendanceOff:
+		case sg.Echo || writers.EchoOf(r.timeline, sg.Start, sg.End, sg.Text): // Persona's echo
 		default:
-			add = append(add, kb.LiveSegment{Start: sg.Start, End: sg.End, Text: sg.Text, Source: kb.SourceDevice})
+			add = append(add, recordingwire.LiveSegment{Start: sg.Start, End: sg.End, Text: sg.Text, Source: recordingwire.SourceDevice})
 		}
 	}
 	if len(add) == 0 {
 		return
 	}
-	slices.SortStableFunc(add, func(a, b kb.LiveSegment) int {
+	slices.SortStableFunc(add, func(a, b recordingwire.LiveSegment) int {
 		switch {
 		case a.Start < b.Start:
 			return -1
@@ -118,8 +121,8 @@ func (r *hubRun) fillLocked() {
 		}
 		return 0
 	})
-	if _, err := r.e.LiveAppendHub(r.id, add); err != nil {
-		if !errors.Is(err, kb.ErrLiveFull) {
+	if _, err := writersOf(r.e).LiveAppendHub(r.id, add); err != nil {
+		if !errors.Is(err, recordingwire.ErrLiveFull) {
 			r.s.logf("recording %s: live lines from the phone: %v", r.id, err)
 		}
 		return

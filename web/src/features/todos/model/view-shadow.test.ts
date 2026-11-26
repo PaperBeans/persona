@@ -11,7 +11,8 @@ import { localRestores, QUIET_MS, RECHECK_MS, SETTLE_MAX_MS, SUMMARY_MS, startVi
 
 const START = Date.parse("2026-11-10T12:00:00Z");
 const ago = (hours: number) => new Date(START - hours * 3_600_000).toISOString();
-const view = (section: string, reason: string, more: Partial<TodoSummary> = {}): TodoSummary => ({ phase: "todo", section, reason, rank: 0, ...more });
+// The view as the wire carries it: raw strings, which may be a newer hub's values the closed types do not know.
+const view = (section: string, reason: string, more: object = {}): TodoSummary => ({ phase: "todo", section, reason, rank: 0, ...more }) as TodoSummary;
 const todo = (id: string, more: Partial<Todo> = {}): Todo => ({ id, title: "Call the dentist about Tuesday", created_at: ago(2), updated_at: ago(1), ...more });
 
 // today's triage files these at rest (Other open, or Shelved for a task idle for 60 hours); their views say:

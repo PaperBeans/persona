@@ -92,7 +92,8 @@ func (h *Hub) managerConnected() {
 
 // agentStartParams has the manager fill in params, an Agent the app starts on m (POST /api/v1/sessions): what it runs
 // on (Models › Agents, the launcher / model / effort picked for this start over it) and, from nameFrom when it is not
-// "", its tab's name. An error is the start's refusal (*startRefused, the app's to see: 400), errManagerOffline (the
+// "", a local placeholder for its tab. Once the start answers, agents.tab_name_started finishes model naming in the
+// background. An error is the start's refusal (*startRefused, the app's to see: 400), errManagerOffline (the
 // manager is not connected after waiting for it while the hub starts, and without it nothing reaches the machine:
 // 503), or the manager's failure to answer (502). note is the manager's word that a default the computer lacks gave
 // way to another launcher (#4661), for the app.

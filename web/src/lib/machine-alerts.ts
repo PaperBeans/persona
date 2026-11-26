@@ -80,6 +80,16 @@ export function offlineReason(m: Machine): OfflineReason {
   return classifyConnection({ ...m, online: false })?.kind ?? "unknown";
 }
 
+/** Load per core as every screen writes it, one decimal (the apps' MetricFormat.perCore): 1.43 is "1.4". */
+export const perCoreText = (perCore: number): string => perCore.toFixed(1);
+
+/** Load per core in words: "1.4 per core" (the chip, the machine page's Load tile, the alert sheet). */
+export const perCoreLabel = (perCore: number): string => t("lib-machine-alerts.per_core", { value: perCoreText(perCore) });
+
+/** What load counts, in one sentence wherever load is shown (#12519; the apps' MachineCard.loadDefinition,
+ *  docs/server/machines.md "What load counts"): the raw number alone read as a wrong one. */
+export const loadDefinition = (): string => t("lib-machine-alerts.load_definition");
+
 /** The latest memory, disk and CPU percents and the load per core; undefined for what was not measured. */
 export function readings(machine: Machine, metrics: MachineMetrics | undefined): { memory?: number; disk?: number; cpu?: number; load?: number; cores?: number } {
   const latest = metrics?.latest;
@@ -118,18 +128,19 @@ export function machineAlerts({ machine: m, metrics, launchers = 0, managerOffli
   return out.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || KIND_RANK[a.kind] - KIND_RANK[b.kind]);
 }
 
-/** The chip's words: "Memory pressure · 95%", "Offline", "Launcher failing · 2". On a card (`card`), whose own notice
- *  already says why it is offline, the offline chip says what it opens: "Offline · What to check". */
+/** The chip's words: "Memory used · 95%", "High load · 1.4 per core", "Offline", "Launcher failing · 2". On a card
+ *  (`card`), whose own notice already says why it is offline, the offline chip says what it opens: "Offline · What to
+ *  check". */
 export function alertLabel(a: MachineAlert, card = false): string {
   if (card && a.kind === "offline") return t("lib-machine-alerts.offline_check");
   const name = alertTitle(a);
-  if (a.kind === "load" && a.value !== undefined) return t("lib-machine-alerts.with_value", { name, value: t("lib-machine-alerts.per_core", { value: a.value.toFixed(1) }) });
+  if (a.kind === "load" && a.value !== undefined) return t("lib-machine-alerts.with_value", { name, value: perCoreLabel(a.value) });
   if (a.value !== undefined) return t("lib-machine-alerts.with_value", { name, value: percent(a.value) });
   if (a.kind === "launcher" && (a.count ?? 0) > 1) return t("lib-machine-alerts.with_value", { name, value: String(a.count) });
   return name;
 }
 
-/** The alert's name alone ("Memory pressure"). */
+/** The alert's name alone ("Memory used"). */
 export function alertTitle(a: Pick<MachineAlert, "kind" | "busy">): string {
   switch (a.kind) {
     case "offline":
@@ -156,7 +167,7 @@ export function severityText(s: Severity): string {
   return s === "critical" ? t("lib-machine-alerts.severity_critical") : s === "warning" ? t("lib-machine-alerts.severity_warning") : t("lib-machine-alerts.severity_info");
 }
 
-/** The chip's words with the severity first, for a screen reader and the tooltip: "Critical: Memory pressure · 95%". */
+/** The chip's words with the severity first, for a screen reader and the tooltip: "Critical: Memory used · 95%". */
 export function alertSpoken(a: MachineAlert, card = false): string {
   return t("lib-machine-alerts.spoken", { severity: severityText(a.severity), label: alertLabel(a, card) });
 }

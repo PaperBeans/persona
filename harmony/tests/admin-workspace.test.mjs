@@ -101,6 +101,74 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('the assistant Recent setting changes only its supported Hub field and retains an unsaved profile draft', async () => {
+  const server={recent_task_chats:false,notes:'Original',leaders:['direction']};
+  const env=fixture({root:{onCall:async call=>{
+    if (call.path!=='/api/v1/assistant') return undefined;
+    if (call.method==='PUT') Object.assign(server,call.body);
+    return server;
+  }}});
+  const applied=[];env.root.acceptSidebarConfig=data=>applied.push(data.recent_task_chats);
+  const workspace=new AdminWorkspace();await workspace.open(env.root,'assistant',true);
+  workspace.setForm('notes','My unsaved note');
+  const ticket=workspace.capture('/api/v1/assistant');
+  assert.equal(await workspace.setRecentTaskChats(ticket,true),true);
+  assert.deepEqual(env.shared.calls.filter(call=>call.method==='PUT').map(call=>call.body),[{recent_task_chats:true}]);
+  assert.equal(workspace.formText('notes'),'My unsaved note');assert.equal(workspace.draftDirty,true);assert.deepEqual(applied,[true]);
+  workspace.hide();assert.equal(await workspace.setRecentTaskChats(ticket,false),false);
+  const legacy=fixture(),old=new AdminWorkspace();await old.open(legacy.root,'assistant',true);
+  assert.equal(await old.setRecentTaskChats(old.capture('/api/v1/assistant'),true),false);
+  assert.deepEqual(legacy.shared.calls.filter(call=>call.method==='PUT'),[]);
+});
+
+test('All Chats and Assistant Profile share the acknowledged Hub preference, even after the options sheet is dismissed',async()=>{
+  const gate=Promise.withResolvers(),store={recent_task_chats:false};
+  const env=fixture({root:{onCall:async call=>{
+    if (call.path!=='/api/v1/assistant') return undefined;
+    if (call.method==='PUT') { await gate.promise; Object.assign(store,call.body); }
+    return {...store};
+  }}});
+  const echoes=[];env.root.acceptSidebarConfig=data=>echoes.push(data.recent_task_chats);
+  const menu=new AdminWorkspace(),path='/api/v1/assistant';
+  await menu.open(env.root,'conversation_options',true);
+  assert.equal(menu.showsConversationOptions(env.root),true);
+  const ticket=menu.capture(path),writing=menu.setRecentTaskChats(ticket,true);
+  assert.equal(menu.assistantData.recent_task_chats,true);
+  assert.equal(await menu.setRecentTaskChats(ticket,false),false);
+  menu.hide(); assert.equal(menu.showsConversationOptions(env.root),false);
+  gate.resolve();assert.equal(await writing,true);assert.deepEqual(echoes,[true]);
+  const profile=new AdminWorkspace();await profile.open(env.root,'assistant',true);
+  assert.equal(profile.assistantData.recent_task_chats,true);
+  assert.equal(await profile.setRecentTaskChats(profile.capture(path),false),true);
+  await menu.open(env.root,'conversation_options',true);assert.equal(menu.assistantData.recent_task_chats,false);
+  assert.deepEqual(env.shared.calls.filter(call=>call.method==='PUT').map(call=>call.body),[{recent_task_chats:true},{recent_task_chats:false}]);
+});
+
+test('All Chats reverts a refused switch and will not write from an old menu, unauthenticated client or older Hub',async()=>{
+  const gate=Promise.withResolvers();const env=fixture({root:{onCall:async call=>{
+    if (call.path!=='/api/v1/assistant') return undefined;
+    if (call.method==='PUT') {await gate.promise;throw Error('forbidden');}
+    return {recent_task_chats:false};
+  }}});
+  const menu=new AdminWorkspace(),path='/api/v1/assistant';
+  await menu.open(env.root,'conversation_options',true);
+  const ticket=menu.capture(path);const write=menu.setRecentTaskChats(ticket,true);
+  assert.equal(menu.assistantData.recent_task_chats,true);gate.resolve();assert.equal(await write,false);
+  assert.equal(menu.assistantData.recent_task_chats,false);assert.equal(menu.writeState,'failed');
+  env.root.demo=true;assert.equal(await menu.setRecentTaskChats(ticket,true),false);
+  env.root.demo=false;env.root.connected=false;assert.equal(await menu.setRecentTaskChats(ticket,true),false);
+  env.root.connected=true;env.root.generation++;assert.equal(await menu.setRecentTaskChats(ticket,true),false);
+  assert.equal(env.shared.calls.filter(call=>call.method==='PUT').length,1);
+  const legacy=fixture();await menu.open(legacy.root,'conversation_options',true);
+  assert.equal(await menu.setRecentTaskChats(menu.capture(path),true),false);
+  assert.deepEqual(legacy.shared.calls.filter(call=>call.method==='PUT'),[]);
+  const original=fixture({root:{onCall:async()=>({recent_task_chats:false})}}),replacement=fixture({root:{onCall:async()=>({recent_task_chats:false})}});
+  await menu.open(original.root,'conversation_options',true);const formerMenu=menu.capture(path);
+  await menu.open(replacement.root,'conversation_options',true);
+  assert.equal(await menu.setRecentTaskChats(formerMenu,true),false);
+  assert.deepEqual(replacement.shared.calls.filter(call=>call.method==='PUT'),[]);
+});
+
 test('assistant profile writes use the documented path and changed fields only', async () => {
   const env = fixture(), workspace = new AdminWorkspace();
   await workspace.open(env.root, 'assistant', true);

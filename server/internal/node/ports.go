@@ -712,7 +712,7 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Port <= 0 || p.Port > 65535 {
 		return nil, errors.New("port.dial: need id and port")
 	}
-	link := p.Link && p.Port == screenPort && p.Pair != "" && n.links != nil
+	link := p.Link && p.Port == screenPort && p.Pair != "" && n.screenLinks() != nil
 	if link && p.Attach {
 		return n.reattachScreen(p.ID, p.Pair, false)
 	}
@@ -744,7 +744,7 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 		}
 	}
 	if link {
-		relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here
+		relay := n.screenLinks().Open(p.Pair, c) // the session owns Screen Sharing's connection from here
 		n.streams.Start(p.ID, relay)
 		return map[string]any{"link": 1}, nil
 	}
@@ -760,7 +760,7 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 // its current video channel. Nothing is dialed or started; the relay must send the session's token first. session_gone
 // when there is no such session (or no live video in it): the phone starts over.
 func (n *Node) reattachScreen(id, pair string, video bool) (any, error) {
-	s := n.links.Get(pair)
+	s := n.screenLinks().Get(pair)
 	if s == nil || (video && !s.HasVideo()) {
 		return nil, &rpc.Error{Code: "session_gone", Message: "no live screen session for this pair"}
 	}

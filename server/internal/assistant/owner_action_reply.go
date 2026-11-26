@@ -61,21 +61,9 @@ func (s *Service) botApproveOwnerAction(ctx context.Context, ev botcard.MessageE
 		return false
 	}
 
-	b := &s.fbot
-	b.mu.Lock()
-	s.loadBotLocked(ctx)
 	id := ""
-	for candidate, ref := range b.st.Cards {
-		if ref == nil || !ref.OwnerProposal || ref.MessageID != msg.ParentID {
-			continue
-		}
-		if id != "" {
-			id = "" // ambiguous persisted mapping: never guess which operation was approved
-			break
-		}
-		id = candidate
-	}
-	b.mu.Unlock()
+	// An ambiguous persisted mapping answers none: never guess which operation was approved.
+	s.larkModule().Book(ctx, func(b assistantwire.ChatBook) { id = b.ProposalFor(msg.ParentID) })
 	if id == "" {
 		return false
 	}
@@ -96,12 +84,13 @@ func (s *Service) botApproveOwnerAction(ctx context.Context, ev botcard.MessageE
 		fail(errOwnerActionProof)
 		return true
 	}
-	b.mu.Lock()
-	ref := b.st.Cards[id]
-	validLocation := ref != nil && ref.ChatID == "" && ref.MessageID == msg.ParentID &&
-		ref.ApprovalBatchID == ix.ApprovalBatchID && ref.ApprovalItemID == ix.ApprovalItemID &&
-		ref.MachineID == ix.MachineID && ref.SessionID == ix.SessionID
-	b.mu.Unlock()
+	validLocation := false
+	s.larkModule().Book(ctx, func(b assistantwire.ChatBook) {
+		ref, ok := b.CardRef(id)
+		validLocation = ok && ref.ChatID == "" && ref.MessageID == msg.ParentID &&
+			ref.ApprovalBatchID == ix.ApprovalBatchID && ref.ApprovalItemID == ix.ApprovalItemID &&
+			ref.MachineID == ix.MachineID && ref.SessionID == ix.SessionID
+	})
 	if !validLocation {
 		fail(errOwnerActionProof)
 		return true

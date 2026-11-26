@@ -9,6 +9,7 @@ export class Symbols {
   static readonly collapse: Resource = $r('sys.symbol.chevron_left');
   static readonly expand: Resource = $r('sys.symbol.chevron_right');
   static readonly filter: Resource = $r('sys.symbol.funnel');
+  static readonly folder: Resource = $r('sys.symbol.folder');
   static readonly document: Resource = $r('sys.symbol.doc_plaintext');
   static readonly calendar: Resource = $r('sys.symbol.calendar');
   static readonly inbox: Resource = $r('sys.symbol.envelope');

@@ -14,6 +14,7 @@ const PAGES = [
   "./LanguageRow.tsx",
   "./TranslationSettings.tsx",
   "./AgentOpenSetting.tsx",
+  "./SeenRowsSetting.tsx",
   "./TerminalModeSetting.tsx",
   "./SidebarPages.tsx",
   "./AssistantSettings.tsx",
@@ -72,6 +73,9 @@ const views = new URL("../", import.meta.url);
 const sources = (readdirSync(views, { recursive: true }) as string[])
   .filter((f) => f.endsWith(".tsx") && !f.includes(".test."))
   .map((f) => readFileSync(new URL(f, views), "utf8"))
+  .concat(read("../../modules/mail/MailSettings.tsx"))
+  // Advanced › Appearance's extension theme row is drawn by ui/ExtensionThemePicker.tsx when a theme is installed
+  .concat(readFileSync(new URL("../../ui/ExtensionThemePicker.tsx", import.meta.url), "utf8"))
   .join("\n");
 
 // The index reads t() at module scope, just as it does after the page loads its catalog. Build an independent
@@ -81,7 +85,8 @@ async function inLanguage(lang: string) {
   const { initI18n, t } = await import("../../i18n");
   await initI18n(lang);
   const { SEARCH_INDEX, searchSettings } = await import("./search");
-  return { lang, t, SEARCH_INDEX, searchSettings };
+  const { registerModule, resetModulesForTest } = await import("../../core/module-host");
+  return { lang, t, SEARCH_INDEX, searchSettings, registerModule, resetModulesForTest };
 }
 const languages: Awaited<ReturnType<typeof inLanguage>>[] = [];
 // resetModules changes the registry: constructing these fixtures concurrently would mix their catalogs.
@@ -129,6 +134,23 @@ describe("the settings search's index", () => {
     if (lang !== "ja") finds("token", "devices", "devices");
   });
 
+  it.each(languages)("finds registered feature switches and their group in General in $lang", ({ t, searchSettings, registerModule, resetModulesForTest }) => {
+    const group = t("settings-features.features_group");
+    const features = t("settings-features.area_features");
+    const title = t("sidebar.nav_health");
+    const matches = (query: string) => searchSettings(query).groups.filter((g) => g.anchor.startsWith("configuration-features-"));
+    expect(matches(group)).toEqual([]);
+    registerModule({ id: "sample", title: () => title, description: () => "A synthetic module", load: async () => ({}) });
+    try {
+      const destination = { tab: "general", anchor: "configuration-features-modules" };
+      expect(matches(group)).toEqual([expect.objectContaining(destination)]);
+      expect(searchSettings(features)).toEqual({ tabs: [], groups: [expect.objectContaining(destination)] });
+      expect(matches(title)).toEqual([expect.objectContaining({ tab: "general", anchor: "configuration-features-sample" })]);
+    } finally {
+      resetModulesForTest();
+    }
+  });
+
   it("finds the words people searched for in Chinese (audit item 18), each under a label that says it", () => {
     const { searchSettings } = chinese;
     const found = (q: string) => searchSettings(q).groups.map((g) => `${g.tab}/${g.anchor}/${g.group}`);
@@ -151,6 +173,58 @@ describe("the settings search's index", () => {
     expect(searchSettings("effort").groups.map((g) => g.anchor)).toEqual(expect.arrayContaining(["settings-claude", "settings-codex", "settings-model-config"]));
   });
 
+  it.each(languages)("remaps Inbox Sources search entries to integrations -sources when integrations_v2 is on in $lang", ({ t, searchSettings }) => {
+    const label = t("settings-nav.tab_sources");
+    const off = searchSettings(label, false);
+    expect(off.tabs).toContain("sources");
+    expect(off.tabs).not.toContain("integrations");
+    expect(off.groups).toContainEqual(expect.objectContaining({ tab: "sources", anchor: "inbox-sources" }));
+
+    const on = searchSettings(label, true, true);
+    expect(on.tabs).toContain("integrations");
+    expect(on.tabs).not.toContain("sources");
+    expect(on.groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "inbox-sources", sub: "-sources" }));
+
+    const flow = searchSettings(t("settings-integrations.view_sources"), true, true);
+    expect(flow.groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "inbox-sources", sub: "-sources" }));
+
+    const fwdLabel = t("settings-assistantsettings.inbox_todo_forward");
+    expect(searchSettings(fwdLabel, false).groups).toContainEqual(expect.objectContaining({ tab: "sources", anchor: "inbox-todo-forward" }));
+    expect(searchSettings(fwdLabel, true, true).groups).toContainEqual(expect.objectContaining({ tab: "integrations", anchor: "inbox-todo-forward", sub: "-sources" }));
+  });
+
+  it.each(languages)("uses the available Data flow destination once in $lang", ({ t, searchSettings }) => {
+    const forward = t("settings-assistantsettings.inbox_todo_forward");
+    const flow = t("settings-integrations.view_sources");
+    expect(searchSettings(forward, true, true).groups).toEqual([
+      expect.objectContaining({ tab: "integrations", group: `${flow} › ${forward}`, sub: "-sources" }),
+    ]);
+    expect(searchSettings(forward, true, false).groups).toEqual([expect.objectContaining({ tab: "persona" })]);
+    for (const key of ["settings-nav.tab_sources", "settings-integrations.view_sources", "external-sources.flows"]) {
+      expect(searchSettings(t(key), true, false).groups.filter((g) => g.sub === "-sources")).toEqual([]);
+    }
+  });
+
+  it.each(languages)("finds each integration setting at its own destination in $lang", ({ t, searchSettings }) => {
+    for (const [key, sub] of [
+      ["settings-connectors.lark", "builtin:lark"], ["settings-larksync.title", "builtin:feishu-bot"],
+      ["settings-extensions.market_title", "-market"], ["settings-extensionmarket.manage_markets", "-markets"],
+      ["settings-feishubot.title", "builtin:feishu-bot"], ["settings-larkdisplay.anti_recall", "builtin:lark"],
+      ["settings-larkdisplay.edit_history", "builtin:lark"], ["external-sources.flows", "-sources"],
+      ["settings-integrations.thread_mode_title", "builtin:feishu-bot"], ["settings-integrations.thread_idle_hours_title", "builtin:feishu-bot"],
+    ]) {
+      expect(searchSettings(t(key), true, true).groups, key).toContainEqual(expect.objectContaining({ tab: "integrations", sub }));
+    }
+    for (const field of ["thread_mode", "thread_idle_hours"]) {
+      expect(searchSettings(field, true, true).groups).toEqual([
+        expect.objectContaining({ sub: "builtin:feishu-bot", anchor: `configuration-channel-routing-feishu-${field}` }),
+      ]);
+    }
+    expect(searchSettings(t("settings-extensions.title"), true, true).groups).toContainEqual(expect.objectContaining({
+      tab: "integrations", anchor: "extensions", group: t("settings-integrations.group_extensions"),
+    }));
+  });
+
   it("lands every entry on something a page draws, and lists each once", () => {
     const { SEARCH_INDEX } = english;
     // anchors a page writes from a value: each one's source, and the values it takes
@@ -158,7 +232,7 @@ describe("the settings search's index", () => {
       [/^shortcut-(.+)$/, "anchor={`shortcut-${s.id}`}", (id) => [...SHORTCUTS, ...LOCAL_SHORTCUTS].some((s) => s.id === id)],
       [/^knowledge-(.+)$/, "anchor={`knowledge-${kind}`}", (kind) => kind === "messages" || kind === "docs"],
       [/^settings-(.+)$/, "id={`settings-${id}`}", (id) => ["claude", "codex", "agy", "omp", "grok"].includes(id)],
-      [/^configuration-(.+)$/, "data-settings-row={`configuration-${doc.id}-${field.id}`}", (id) => id === `${TERMINAL_LABS_ID}-renderer` || id === "assistant-work-work_guide"],
+      [/^configuration-(.+)$/, "data-settings-row={`configuration-${doc.id}-${field.id}`}", (id) => id === `${TERMINAL_LABS_ID}-renderer` || id === "assistant-work-work_guide" || id === "assistant-todos-v2-todos_v2" || id === "assistant-integrations-v2-integrations_v2"],
     ];
     const drawn = (anchor: string) =>
       new RegExp(`\\b(anchor|data-settings-row|data-settings-group|id)="${anchor}"`).test(sources) ||
@@ -166,7 +240,7 @@ describe("the settings search's index", () => {
         const m = re.exec(anchor);
         return !!m && sources.includes(code) && takes(m[1]);
       });
-    expect(SEARCH_INDEX.filter((g) => !drawn(g.anchor)).map((g) => g.anchor)).toEqual([]);
+    expect(SEARCH_INDEX.filter((g) => g.anchor ? !drawn(g.anchor) : !g.sub).map((g) => g.anchor)).toEqual([]);
     const keys = SEARCH_INDEX.map((g) => `${g.tab}/${g.anchor}/${g.group}`);
     expect(keys.length).toBe(new Set(keys).size);
   });

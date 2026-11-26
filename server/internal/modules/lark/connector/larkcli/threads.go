@@ -75,7 +75,7 @@ func (c *Connector) Thread(ctx context.Context, thread, before string, limit int
 		link, linkErr := url.Parse(m.MessageAppLink)
 		if linkErr == nil && link.Scheme == "https" && link.User == nil &&
 			(link.Host == "applink.feishu.cn" || link.Host == "applink.larksuite.com") &&
-			(link.Path == "/client/chat/open" || link.Path == "/client/thread/open") {
+			isSourceAppLinkPath(link.Path) {
 			out.URL = m.MessageAppLink
 		}
 		if m.Deleted {

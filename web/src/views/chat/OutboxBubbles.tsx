@@ -6,7 +6,22 @@ import { useRef, useState } from "react";
 import { checkOutbox, discardOutbox, entryReason, heldOnComputer, outboxMessage, retryOutbox, type OutboxEntry } from "../../lib/outbox";
 import { toast } from "../../ui/atoms";
 import { UserBubble } from "./SegmentView";
+import { matchesQueuedEntry } from "./queue-entries";
 import { t } from "../../i18n";
+
+/** Drops non-failed outbox entries already represented in Session.queued (1-to-1) so a queued follow-up never shows as
+ *  both a QueuePanel row and a duplicate faded bubble in the chat stream (#14871). Failed entries always stay visible. */
+export function dedupeQueuedOutbox(entries: OutboxEntry[], queued?: string[]): OutboxEntry[] {
+  if (!entries.length || !queued?.length) return entries;
+  const remaining = queued.slice();
+  return entries.filter((entry) => {
+    if (entry.state === "failed") return true;
+    const i = remaining.findIndex((raw) => matchesQueuedEntry(raw, { raw: entry.text, images: entry.images }));
+    if (i === -1) return true;
+    remaining.splice(i, 1);
+    return false;
+  });
+}
 
 /** Delete on a failed message (the row under it, its message menu): it was only on this device, so it goes at once and
  *  nothing is sent; Undo in the toast puts it back (#4626, as the apps do). */
@@ -15,7 +30,7 @@ export function deleteFailed(mid: string, sid: string, id: string) {
   if (undo) toast(t("chat-outboxbubbles.deleted"), "ok", { label: t("chat-outboxbubbles.undo"), run: undo });
 }
 
-export function OutboxBubbles({ mid, sid, entries, canRetry = true }: { mid: string; sid: string; entries: OutboxEntry[]; canRetry?: boolean }) {
+export function OutboxBubbles({ mid, sid, entries, queued, canRetry = true }: { mid: string; sid: string; entries: OutboxEntry[]; queued?: string[]; canRetry?: boolean }) {
   const [checking, setChecking] = useState<string>();
   const checkLock = useRef(false);
   const check = async (e: OutboxEntry) => {
@@ -30,10 +45,11 @@ export function OutboxBubbles({ mid, sid, entries, canRetry = true }: { mid: str
       setChecking(undefined);
     }
   };
-  if (!entries.length) return null;
+  const visible = dedupeQueuedOutbox(entries, queued);
+  if (!visible.length) return null;
   return (
     <>
-      {entries.map((e) => (
+      {visible.map((e) => (
         <div key={e.id} data-outbox={e.id} className="flex flex-col gap-1.5">
           <UserBubble msg={outboxMessage(e)} mid={mid} sid={sid} pending={e.state === "sending"} sendState={e.state}
             onDelete={e.state === "failed" ? () => deleteFailed(mid, sid, e.id) : undefined} />

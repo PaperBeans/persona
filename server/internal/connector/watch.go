@@ -19,6 +19,8 @@ var (
 // logged as the connector wrote it — connectors keep secrets out of their errors). Each runs under its own context:
 // switching it off cancels it, switching it on starts it again (SetEnabled).
 func (r *Registry) Start(ctx context.Context, changed func(id string, scope Scope), logf func(string, ...any)) {
+	r.lifecycle.Lock()
+	defer r.lifecycle.Unlock()
 	r.mu.Lock()
 	r.run = &starter{ctx: ctx, changed: changed, logf: logf,
 		backoff: watchBackoff{first: watchBackoffFirst, last: watchBackoffLast, healthy: watchHealthy}}
@@ -26,6 +28,22 @@ func (r *Registry) Start(ctx context.Context, changed func(id string, scope Scop
 	for _, c := range r.All() {
 		r.startOne(c)
 	}
+}
+
+// Stop cancels the registered workers and waits for Run and Watch to return, including those already replaced.
+// Add and SetEnabled can still update the registry; a later Start runs the enabled connectors again.
+func (r *Registry) Stop() {
+	r.lifecycle.Lock()
+	defer r.lifecycle.Unlock()
+	r.mu.Lock()
+	r.run = nil
+	stops := r.stop
+	r.stop = make(map[string]context.CancelFunc)
+	r.mu.Unlock()
+	for _, cancel := range stops {
+		cancel()
+	}
+	r.workers.Wait()
 }
 
 // startOne runs c unless Start has not been called, it is switched off or it runs already.
@@ -39,13 +57,13 @@ func (r *Registry) startOne(c Connector) {
 	ctx, cancel := context.WithCancel(r.run.ctx)
 	r.stop[id] = cancel
 	run := r.run
-	r.mu.Unlock()
 	if rn, ok := c.(Runner); ok {
-		go rn.Run(ctx)
+		r.workers.Go(func() { rn.Run(ctx) })
 	}
 	if e, ok := c.(Events); ok {
-		go watchOne(ctx, id, e, run.changed, run.logf, run.backoff)
+		r.workers.Go(func() { watchOne(ctx, id, e, run.changed, run.logf, run.backoff) })
 	}
+	r.mu.Unlock()
 }
 
 // watchBackoff is the restart backoff of the Watches of one Start.

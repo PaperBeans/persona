@@ -4,16 +4,20 @@ import { lazyPage } from "../../lib/lazy-page";
 import { onDefaultManager, onManagerChoice, shownManager } from "../../lib/manager-choice";
 import { providerName, type ModelProvider, type ModelPurpose } from "../../lib/model-config";
 import {
+  captureProfileInput,
   LAUNCHER_MODEL_FIELDS,
   modelProfiles,
+  parseProfileChange,
   PROFILE_CATEGORY_IDS,
+  profileApplyDrift,
   rollbackModelProfile,
   saveModelProfile,
   switchModelProfile,
+  type ModelProfile,
   type ModelProfileSaveInput,
   type ModelProfiles as Profiles,
 } from "../../lib/model-profiles";
-import { namedLauncher, namesFromProviders, providerIdNote, providerTitle } from "../../lib/provider-names";
+import { namedLauncher, namesFromProviders, providerIdNote, providerTitle, type Named } from "../../lib/provider-names";
 import { effortTitle, modeTitle } from "../../lib/session-actions";
 import { onHubEvent } from "../../lib/store";
 import { t } from "../../i18n";
@@ -51,6 +55,45 @@ function purposeLabel(id: string, purposes?: ModelPurpose[]): string {
     translate: t("settings-modelprofiles.cat_translate"),
   };
   return fallback[id] ?? id;
+}
+
+function describeChange(
+  change: string,
+  profile: ModelProfile | undefined,
+  purposes: ModelPurpose[] | undefined,
+  providers: ModelProvider[] | undefined,
+  names: Named[],
+): { key: string; label: string; target?: string } {
+  const parsed = parseProfileChange(change, purposes?.map((p) => p.id));
+  if (parsed.kind === "purpose") {
+    const label = purposeLabel(parsed.id, purposes);
+    const binding = profile?.purposes && Object.prototype.hasOwnProperty.call(profile.purposes, parsed.id)
+      ? profile.purposes[parsed.id]
+      : undefined;
+    const target = binding
+      ? [
+          binding.provider ? (providerName(binding.provider, providers) ?? binding.provider) : t("settings-modelprofiles.purpose_follow_default"),
+          binding.model,
+          binding.effort && effortTitle(binding.effort),
+          binding.permission_mode && modeTitle(binding.permission_mode),
+        ].filter(Boolean).join(" · ")
+      : undefined;
+    return { key: change, label, target };
+  }
+  if (parsed.kind === "launcher") {
+    const l = namedLauncher(parsed.launcher, names);
+    const label = `${providerTitle(l)} · ${t(`settings-modelprofiles.field_${parsed.field}`)}`;
+    const raw = profile?.launchers?.[parsed.launcher]?.[parsed.field];
+    const target = raw === undefined
+      ? undefined
+      : raw === ""
+        ? t("settings-modelprofiles.clear_on_switch")
+        : parsed.field === "effort"
+          ? effortTitle(raw)
+          : raw;
+    return { key: change, label, target };
+  }
+  return { key: change, label: parsed.raw };
 }
 
 /** `providers` and `purposes`: the model configuration's, to name launchers/categories cleanly and share picker filtering (#5029). */
@@ -102,7 +145,10 @@ function ModelProfilesForOwner({
   const [conflict, setConflict] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [confirmingApply, setConfirmingApply] = useState(false);
   const [editRevision, setEditRevision] = useState(0);
+  const [editSyncKey, setEditSyncKey] = useState(0);
+  const [busyAction, setBusyAction] = useState<"apply" | "rollback" | "save" | "capture" | "capture-apply" | null>(null);
   const busy = useSyncExternalStore(subscribeWrites, () => pendingWrites.has(manager), () => false);
   const token = useRef(getToken()).current;
   const mounted = useRef(false);
@@ -159,6 +205,7 @@ function ModelProfilesForOwner({
   const apply = async (id?: string) => {
     if (!current() || pendingWrites.has(manager)) return;
     pendingWrites.add(manager);
+    setBusyAction(id ? "apply" : "rollback");
     writesChanged();
     invalidateRead();
     const edit = ++interaction.current;
@@ -168,13 +215,14 @@ function ModelProfilesForOwner({
       const result = await (id ? switchModelProfile(id, manager, reqContext) : rollbackModelProfile(manager, reqContext));
       if (current()) {
         setData(result);
-        if (edit === interaction.current) { setEditing(false); setSelected(null); }
+        if (edit === interaction.current) { setConfirmingApply(false); setEditing(false); setSelected(null); }
         changed.current();
       }
     } catch (e) {
       if (current() && edit === interaction.current) setActionError(errorText(e));
     } finally {
       pendingWrites.delete(manager);
+      if (current()) setBusyAction(null);
       writesChanged();
     }
   };
@@ -182,6 +230,7 @@ function ModelProfilesForOwner({
   const save = async (id: string, input: ModelProfileSaveInput) => {
     if (!current() || pendingWrites.has(manager)) return;
     pendingWrites.add(manager);
+    setBusyAction("save");
     writesChanged();
     invalidateRead();
     const edit = ++interaction.current;
@@ -206,6 +255,99 @@ function ModelProfilesForOwner({
       }
     } finally {
       pendingWrites.delete(manager);
+      if (current()) setBusyAction(null);
+      writesChanged();
+    }
+  };
+
+  const capture = async (
+    id: string,
+    target: Pick<ModelProfile, "name" | "description">,
+    options?: { keepEditing?: boolean; exitConfirm?: boolean },
+  ) => {
+    if (!current() || pendingWrites.has(manager)) return;
+    pendingWrites.add(manager);
+    setBusyAction("capture");
+    writesChanged();
+    invalidateRead();
+    const edit = ++interaction.current;
+    setReadError(""); setActionError(""); setConflict(false);
+    const reqContext = { token, tokenOwner: owner, isAuthContextCurrent: current };
+    const revision = options?.keepEditing ? editRevision : (data?.revision ?? 0);
+    try {
+      const result = await saveModelProfile(id, captureProfileInput(target, revision), manager, reqContext);
+      if (current()) {
+        setData(result);
+        if (edit === interaction.current) {
+          setEditRevision(result.revision ?? 0);
+          if (options?.keepEditing) setEditSyncKey((n) => n + 1);
+          if (options?.exitConfirm) setConfirmingApply(false);
+        }
+        toast(t("settings-modelprofiles.captured"), "ok");
+        changed.current();
+      }
+    } catch (e) {
+      if (current() && edit === interaction.current) {
+        const isConflict = e instanceof ApiError && e.status === 409;
+        setConflict(isConflict);
+        setActionError(isConflict ? t("settings-modelprofiles.conflict_capture") : errorText(e));
+      }
+    } finally {
+      pendingWrites.delete(manager);
+      if (current()) setBusyAction(null);
+      writesChanged();
+    }
+  };
+
+  const captureActiveAndApply = async (activeTarget: ModelProfile, nextTarget: ModelProfile) => {
+    if (!current() || pendingWrites.has(manager)) return;
+    pendingWrites.add(manager);
+    setBusyAction("capture-apply");
+    writesChanged();
+    invalidateRead();
+    const edit = ++interaction.current;
+    setReadError(""); setActionError(""); setConflict(false);
+    const reqContext = { token, tokenOwner: owner, isAuthContextCurrent: current };
+    try {
+      let captured: Profiles;
+      try {
+        captured = await saveModelProfile(
+          activeTarget.id,
+          captureProfileInput(activeTarget, data?.revision ?? 0),
+          manager,
+          reqContext,
+        );
+      } catch (e) {
+        if (current() && edit === interaction.current) {
+          const isConflict = e instanceof ApiError && e.status === 409;
+          setConflict(isConflict);
+          setActionError(isConflict ? t("settings-modelprofiles.conflict_capture") : errorText(e));
+        }
+        return;
+      }
+      if (!current()) return;
+      setData(captured);
+      try {
+        const applied = await switchModelProfile(nextTarget.id, manager, reqContext);
+        if (current()) {
+          setData(applied);
+          if (edit === interaction.current) {
+            setConfirmingApply(false);
+            setEditing(false);
+            setSelected(null);
+          }
+          toast(t("settings-modelprofiles.captured_and_applied", { active: activeTarget.name, target: nextTarget.name }), "ok");
+          changed.current();
+        }
+      } catch (e) {
+        if (current() && edit === interaction.current) {
+          setActionError(t("settings-modelprofiles.apply_failed_after_capture", { active: activeTarget.name, error: errorText(e) }));
+          changed.current();
+        }
+      }
+    } finally {
+      pendingWrites.delete(manager);
+      if (current()) setBusyAction(null);
       writesChanged();
     }
   };
@@ -215,24 +357,35 @@ function ModelProfilesForOwner({
     const fresh = await load();
     if (fresh && current()) {
       setEditRevision(fresh.revision ?? 0);
+      setEditSyncKey((n) => n + 1);
     }
+  };
+
+  const reloadForDetail = async () => {
+    clearErrors();
+    await load();
   };
 
   const clearErrors = () => { interaction.current++; setReadError(""); setActionError(""); setConflict(false); };
   const closeDialog = () => {
     if (busy) return;
+    setConfirmingApply(false);
     setEditing(false);
     setSelected(null);
     clearErrors();
   };
   const startEditing = () => {
     clearErrors();
+    setConfirmingApply(false);
     setEditRevision(data?.revision ?? 0);
+    setEditSyncKey((n) => n + 1);
     setEditing(true);
   };
 
   const error = actionError || readError;
   const profile = data?.profiles.find((p) => p.id === selected);
+  const activeProfile = data?.active ? data.profiles.find((p) => p.id === data.active) : undefined;
+  const drift = profile ? profileApplyDrift(profile, activeProfile) : null;
   const tiers = Object.entries(profile?.tiers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const purposeEntries = Object.entries(profile?.purposes ?? {}).sort(([a], [b]) => {
     const ai = (PROFILE_CATEGORY_IDS as readonly string[]).indexOf(a);
@@ -244,19 +397,168 @@ function ModelProfilesForOwner({
   });
   const launcherEntries = Object.entries(profile?.launchers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const names = namesFromProviders(providers);
+  const describedTargetChanges = (drift?.targetChanges ?? []).map((change) => describeChange(change, profile, purposes, providers, names));
+  const describedActiveDrift = (drift?.activeDrift ?? []).map((change) => describeChange(change, undefined, purposes, providers, names));
+
+  const requestApply = () => {
+    if (!profile || busy) return;
+    if (drift?.hasDrift) {
+      clearErrors();
+      setConfirmingApply(true);
+      return;
+    }
+    void apply(profile.id);
+  };
+
   if (!data && !error) return null; // old hubs do not expose profiles
+
+  const errorBanner = error ? (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p role="alert" data-testid="profile-action-error" className="min-w-0 flex-1 text-label text-red">{error}</p>
+      {conflict && (
+        <Button tone="secondary" size="sm" disabled={busy} onClick={() => void reloadForDetail()}>
+          {t("settings-modelprofiles.reload")}
+        </Button>
+      )}
+    </div>
+  ) : null;
+
+  const dialogTitle = !profile
+    ? ""
+    : editing
+      ? t("settings-modelprofiles.edit_title", { name: profile.name })
+      : confirmingApply
+        ? t("settings-modelprofiles.confirm_apply_title", { name: profile.name })
+        : profile.name;
+
+  const dialogFooter = !profile || editing ? undefined : confirmingApply ? (
+    <div data-testid="profile-confirm-footer" className="flex w-full flex-col gap-2">
+      {errorBanner}
+      <div className="flex flex-col gap-1.5">
+        {drift?.canCaptureActiveFirst && activeProfile ? (
+          drift.hasActiveDrift ? (
+            <>
+              <Button
+                tone="primary"
+                className="w-full"
+                testId="profile-capture-and-apply"
+                busy={busyAction === "capture-apply"}
+                disabled={busy}
+                onClick={() => void captureActiveAndApply(activeProfile, profile)}
+              >
+                <span className="truncate">{t("settings-modelprofiles.capture_active_first", { name: activeProfile.name })}</span>
+              </Button>
+              <Button
+                tone="secondary"
+                className="w-full"
+                testId="profile-apply-direct"
+                busy={busyAction === "apply"}
+                disabled={busy}
+                onClick={() => void apply(profile.id)}
+              >
+                {t("settings-modelprofiles.apply_directly")}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                tone="primary"
+                className="w-full"
+                testId="profile-apply-direct"
+                busy={busyAction === "apply"}
+                disabled={busy}
+                onClick={() => void apply(profile.id)}
+              >
+                {t("settings-modelprofiles.apply_directly")}
+              </Button>
+              <Button
+                tone="secondary"
+                className="w-full"
+                testId="profile-capture-and-apply"
+                busy={busyAction === "capture-apply"}
+                disabled={busy}
+                onClick={() => void captureActiveAndApply(activeProfile, profile)}
+              >
+                <span className="truncate">{t("settings-modelprofiles.capture_active_first", { name: activeProfile.name })}</span>
+              </Button>
+            </>
+          )
+        ) : profile.active ? (
+          <>
+            <Button
+              tone="primary"
+              className="w-full"
+              testId="profile-confirm-capture"
+              busy={busyAction === "capture"}
+              disabled={busy}
+              onClick={() => void capture(profile.id, profile, { exitConfirm: true })}
+            >
+              {t("settings-modelprofiles.capture_from_current")}
+            </Button>
+            <Button
+              tone="secondary"
+              className="w-full"
+              testId="profile-apply-direct"
+              busy={busyAction === "apply"}
+              disabled={busy}
+              onClick={() => void apply(profile.id)}
+            >
+              {t("settings-modelprofiles.apply_directly")}
+            </Button>
+          </>
+        ) : (
+          <Button
+            tone="primary"
+            className="w-full"
+            testId="profile-apply-direct"
+            busy={busyAction === "apply"}
+            disabled={busy}
+            onClick={() => void apply(profile.id)}
+          >
+            {t("settings-modelprofiles.apply_directly")}
+          </Button>
+        )}
+        <Button
+          tone="quiet"
+          className="w-full"
+          disabled={busy}
+          onClick={() => { setConfirmingApply(false); clearErrors(); }}
+        >
+          {t("common.cancel")}
+        </Button>
+      </div>
+    </div>
+  ) : (
+    <div className="flex w-full flex-col gap-2">
+      {errorBanner}
+      <div className="flex items-center justify-end gap-2">
+        <Button tone="quiet" disabled={busy} onClick={closeDialog}>{t("common.cancel")}</Button>
+        <Button tone="secondary" disabled={busy} onClick={startEditing}>{t("settings-modelprofiles.edit")}</Button>
+        <Button tone="primary" busy={busyAction === "apply"} disabled={busy} onClick={requestApply}>{t("settings-modelprofiles.apply")}</Button>
+      </div>
+    </div>
+  );
 
   return <>
     <Group anchor="model-profiles" title={t("settings-modelprofiles.title")}
       footer={data && !data.active ? `${t("settings-modelprofiles.footer")} ${t("settings-modelprofiles.none_active")}` : t("settings-modelprofiles.footer")}>
       {data?.profiles.map((p) => (
-        <Row key={p.id} label={p.name} hint={p.description} onClick={() => { setSelected(p.id); setEditing(false); clearErrors(); }}>
+        <Row key={p.id} label={p.name} hint={p.description} onClick={() => { setSelected(p.id); setEditing(false); setConfirmingApply(false); clearErrors(); }}>
           {p.active && <Pill>{t("settings-modelprofiles.active")}</Pill>}
+          {!p.active && p.trial && (
+            <span className="shrink-0 whitespace-nowrap text-submeta text-ink-3">
+              {t("settings-modelprofiles.trial_summary", {
+                days: p.trial.days,
+                dispatches: p.trial.dispatches,
+                would_switch: p.trial.would_switch,
+              })}
+            </span>
+          )}
         </Row>
       ))}
       {data?.rollback && (
         <Row label={t("settings-modelprofiles.rollback")} hint={data.rollback.to || t("settings-modelprofiles.custom")}>
-          <Button tone="quiet" busy={busy} onClick={() => void apply()}>{t("settings-modelprofiles.rollback")}</Button>
+          <Button tone="quiet" busy={busyAction === "rollback"} disabled={busy} onClick={() => void apply()}>{t("settings-modelprofiles.rollback")}</Button>
         </Row>
       )}
     </Group>
@@ -264,15 +566,9 @@ function ModelProfilesForOwner({
     <Dialog
       open={!!profile}
       width={editing ? 560 : 480}
-      title={profile ? (editing ? t("settings-modelprofiles.edit_title", { name: profile.name }) : profile.name) : ""}
+      title={dialogTitle}
       onClose={closeDialog}
-      footer={
-        editing ? undefined : <>
-          <Button tone="quiet" disabled={busy} onClick={closeDialog}>{t("common.cancel")}</Button>
-          <Button tone="secondary" disabled={busy} onClick={startEditing}>{t("settings-modelprofiles.edit")}</Button>
-          <Button tone="primary" busy={busy} onClick={() => profile && void apply(profile.id)}>{t("settings-modelprofiles.apply")}</Button>
-        </>
-      }
+      footer={dialogFooter}
     >
       {profile && editing ? (
         <Suspense fallback={<Loading />}>
@@ -280,42 +576,160 @@ function ModelProfilesForOwner({
             manager={manager}
             profile={profile}
             revision={editRevision}
+            syncKey={editSyncKey}
             purposes={purposes}
             providers={providers}
             busy={busy}
+            saving={busyAction === "save"}
+            capturing={busyAction === "capture"}
             error={error}
             conflict={conflict}
             onSave={(input) => save(profile.id, input)}
+            onCapture={() => capture(profile.id, profile, { keepEditing: true })}
             onReload={reloadForEdit}
             onCancel={() => { setEditing(false); clearErrors(); }}
           />
         </Suspense>
+      ) : profile && confirmingApply ? (
+        <div data-testid="model-profile-apply-confirm" className="flex flex-col gap-3">
+          {describedTargetChanges.length > 0 ? (
+            <>
+              <p className="text-label leading-relaxed text-ink-2">
+                {profile.active
+                  ? t("settings-modelprofiles.confirm_reapply_intro", { name: profile.name })
+                  : t("settings-modelprofiles.confirm_apply_intro", { name: profile.name })}
+              </p>
+              <ul data-testid="profile-apply-drift-list" className="flex flex-col gap-1.5">
+                {describedTargetChanges.map(({ key, label, target }) => (
+                  <li key={key} className="flex items-baseline justify-between gap-2 rounded-control bg-field px-3 py-2 text-label">
+                    <span className="shrink-0 font-medium text-ink">{label}</span>
+                    {target && <span className="min-w-0 truncate text-right text-ink-3">{target}</span>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : activeProfile && describedActiveDrift.length > 0 ? (
+            <p className="text-label leading-relaxed text-ink-2">
+              {t("settings-modelprofiles.confirm_switch_active_drift_only", { active: activeProfile.name, target: profile.name })}
+            </p>
+          ) : null}
+
+          {drift?.canCaptureActiveFirst && activeProfile && (
+            drift.hasActiveDrift ? (
+              <div data-testid="profile-active-drift-notice" className="flex flex-col gap-2 rounded-control bg-inset px-3 py-2.5 text-label text-ink-2">
+                <p className="leading-relaxed">
+                  {t("settings-modelprofiles.confirm_active_drift", { active: activeProfile.name })}
+                </p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {describedActiveDrift.map(({ key, label }) => (
+                    <li key={key} className="rounded-control bg-field px-2 py-0.5 text-submeta text-ink-2">{label}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-submeta text-ink-3">
+                {t("settings-modelprofiles.confirm_capture_active_hint", { active: activeProfile.name })}
+              </p>
+            )
+          )}
+        </div>
       ) : profile ? (
         <>
           {profile.description && <p className="mb-3 text-label text-ink-3">{profile.description}</p>}
-          <p className="mb-3 text-label text-ink-3">{t("settings-modelprofiles.changes", { count: profile.changes.length })}</p>
-          {profile.active && profile.changes.length > 0 && (
-            <p className="mb-4 rounded-control bg-inset px-3 py-2 text-label text-ink-2">{t("settings-modelprofiles.active_drift")}</p>
+          <p className="mb-2 text-label text-ink-3">{t("settings-modelprofiles.changes", { count: profile.changes.length })}</p>
+          {describedTargetChanges.length > 0 && (
+            <ul data-testid="model-profile-changes" className="mb-3 flex flex-wrap gap-1.5">
+              {describedTargetChanges.map(({ key, label }) => (
+                <li key={key} className="rounded-control bg-field px-2 py-0.5 text-submeta text-ink-2">{label}</li>
+              ))}
+            </ul>
           )}
+          {!profile.active && profile.trial && (
+            <div data-testid="model-profile-trial" className="mb-4 rounded-control bg-inset px-3 py-2 text-label">
+              <p className="font-medium text-ink">
+                {t("settings-modelprofiles.trial_summary", {
+                  days: profile.trial.days,
+                  dispatches: profile.trial.dispatches,
+                  would_switch: profile.trial.would_switch,
+                })}
+              </p>
+              <p className="mt-0.5 text-submeta text-ink-3">{t("settings-modelprofiles.trial_definition")}</p>
+            </div>
+          )}
+          <div className="mb-4 flex flex-col gap-2 rounded-control bg-inset px-3 py-2.5 text-label text-ink-2">
+            <p className="leading-relaxed">
+              {profile.active && profile.changes.length > 0
+                ? t("settings-modelprofiles.active_drift")
+                : t("settings-modelprofiles.capture_hint")}
+            </p>
+            <div>
+              <Button
+                tone="secondary"
+                size="sm"
+                testId="profile-capture-button"
+                busy={busyAction === "capture"}
+                disabled={busy}
+                onClick={() => void capture(profile.id, profile)}
+              >
+                {t("settings-modelprofiles.capture_from_current")}
+              </Button>
+            </div>
+          </div>
 
           <p className="mb-1.5 text-label font-semibold text-ink-2">{t("settings-modelprofiles.tiers")}</p>
           {tiers.length ? (
             <ul data-testid="model-profile-tiers" className="mb-4 flex flex-col gap-1.5">
               {tiers.map(([name, x]) => {
                 // the launcher by its display name, its startup ID after it in small mono (#5029); an rc alias by its ID
-                const l = namedLauncher(x.launcher, names);
-                const id = providerIdNote(l);
-                const speed = x.speed === "fast" || x.speed === "ultrafast" ? x.speed : "";
+                const multiCandidates = x.candidates && x.candidates.length > 1 ? x.candidates : null;
+                const renderCandidate = (c: { launcher: string; model?: string; effort?: string; permission_mode?: string; speed?: string }) => {
+                  const l = namedLauncher(c.launcher, names);
+                  const id = providerIdNote(l);
+                  const speed = c.speed === "fast" || c.speed === "ultrafast" ? c.speed : "";
+                  return (
+                    <>
+                      {providerTitle(l)}
+                      {id && <> <span className="font-mono text-submeta">{id}</span></>}
+                      {[c.model, c.effort, c.permission_mode && modeTitle(c.permission_mode), speed].filter(Boolean).map((v) => ` · ${v}`).join("")}
+                    </>
+                  );
+                };
                 return (
                   <li key={name} className="rounded-control bg-field px-3 py-2 text-label">
-                    <div className="flex min-w-0 items-baseline gap-2">
-                      <span className="shrink-0 font-mono text-ink">{name}</span>
-                      <span className="min-w-0 [overflow-wrap:anywhere] text-ink-3">
-                        {providerTitle(l)}
-                        {id && <> <span className="font-mono text-submeta">{id}</span></>}
-                        {[x.model, x.effort, x.permission_mode && modeTitle(x.permission_mode), speed].filter(Boolean).map((v) => ` · ${v}`).join("")}
-                      </span>
-                    </div>
+                    {multiCandidates ? (
+                      <>
+                        <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+                          <span className="shrink-0 font-mono text-ink">{name}</span>
+                          {x.aliases && x.aliases.length > 0 && (
+                            <span data-testid="model-profile-tier-aliases" className="text-submeta text-ink-3">
+                              {t("settings-modelprofiles.tier_aliases_inline", { aliases: x.aliases.join(", ") })}
+                            </span>
+                          )}
+                        </div>
+                        <ol className="mt-1 flex flex-col gap-0.5 text-ink-3">
+                          {multiCandidates.map((cand, ci) => (
+                            <li key={ci} className="min-w-0 [overflow-wrap:anywhere]">
+                              <span className="mr-1.5 font-mono text-submeta text-ink-2">{ci + 1}.</span>
+                              {renderCandidate(cand)}
+                            </li>
+                          ))}
+                        </ol>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <span className="shrink-0 font-mono text-ink">{name}</span>
+                          <span className="min-w-0 [overflow-wrap:anywhere] text-ink-3">
+                            {renderCandidate(x)}
+                          </span>
+                        </div>
+                        {x.aliases && x.aliases.length > 0 && (
+                          <p data-testid="model-profile-tier-aliases" className="mt-0.5 text-submeta text-ink-3">
+                            {t("settings-modelprofiles.tier_aliases_inline", { aliases: x.aliases.join(", ") })}
+                          </p>
+                        )}
+                      </>
+                    )}
                     {x.description && <p className="mt-0.5 text-ink-2">{x.description}</p>}
                   </li>
                 );
@@ -380,8 +794,6 @@ function ModelProfilesForOwner({
           ) : (
             <p className="mb-2 text-label text-ink-3">{t("settings-modelprofiles.no_launchers")}</p>
           )}
-
-          {error && <p role="alert" className="mt-3 text-label text-red">{error}</p>}
         </>
       ) : null}
     </Dialog>

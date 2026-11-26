@@ -10,28 +10,38 @@ instead, the client on the computer connects to the hub and reconnects on its ow
 The user decided again on 2026-11-02 ([plan-hub-center.md](../archive/operations/plan-hub-center.md), sections 0 and 4): hubs and computers always connect through a preinstalled service on the computer, not SSH (too much permission);
 the computer can connect to the hub or accept a connection from it. The recommendation is one hub for the whole household, with a **node service** on every other computer: resident node plus persona-link, installed by one command or one App.
 
-## On computers: the web app and Persona Link
+## On computers: Persona Link and its tray
 
-On a computer, Persona has an Electron desktop app and an independently installable Persona Link ([desktop.md](../desktop/desktop.md)).
-
-- **The desktop app** wraps the hub-hosted web UI and adds native notifications, presence and desktop integration. A computer you only chat from, or use another computer's Agents from, does not need a local node or Link.
-- **Persona Link** runs on a computer whose Agents the hub should reach, and does what a browser cannot: it connects the hub to the resident node service and owns the Persona Screen and Persona Input helpers. Its CLI/service works without the desktop app, including on Linux and headless computers.
-- The local setup window offers fixed status/pairing/reconnect/node-service operations for a separately installed Link. It does not silently install a service. The Mac launchd agent and Windows scheduled task run independently of the desktop app. The former menu bar and Windows tray implementations are archived in [link-menu-tray.md](../archive/operations/link-menu-tray.md).
-
-A desktop need goes into the shared web UI first, and into Persona Link only when the browser cannot meet it (for example local node connectivity, pairing or a recording helper). The desktop app and Link are not a bundled installation.
+Persona Link runs on a computer whose Agents the hub should reach, and does what a browser cannot: it connects the hub to the resident node service and owns the Persona Screen and Persona Input helpers.
+It is complete on its own: its CLI and service, and on Mac and Windows its menu bar App or tray icon, need no other Persona program on the computer, and nothing else installs, starts, stops or manages it.
+A computer you only chat from, or use another computer's Agents from, needs no Link: the web app in a browser is enough.
 
 ### Independent Link service
 
 | | Mac | Linux | Windows |
 | --- | --- | --- | --- |
-| Install | `scripts/app/mac-link.sh install` builds the independent helpers and registers both services | `persona-link install` or the release install command | `persona-link install --personad <personad.exe>` |
+| Install | `scripts/app/mac-link.sh install` builds the App with its helpers and registers both services | `persona-link install` or the release install command | `persona-link install --personad <personad.exe>` |
 | Connector | launchd `com.persona.link`, running `~/.persona/bin/persona-link` | systemd user `persona-link.service` | Scheduled task `Persona Link` and its supervisor |
 | Resident node | launchd `com.persona.node`, a separate service | systemd user `personad-node` | The same scheduled task |
-| Management | Fixed desktop setup actions or the same CLI; neither needs a menu bar app | CLI or the desktop setup window | CLI or the desktop setup window; no tray required |
+| Management | The menu bar App "Persona Link", or the CLI | The CLI | The tray icon, or the CLI |
 
-The connector always reads `PERSONA_HOME` in its service environment, otherwise its default data directory. The Electron setup window invokes only the fixed `~/.persona/bin/persona-link` (`.exe` on Windows) and does not pass arbitrary paths or credentials. Closing or uninstalling the desktop app does not stop an independently installed Link service.
+The connector always reads `PERSONA_HOME` in its service environment, otherwise its default data directory. Quitting the menu bar App or the tray does not stop the connector: the service keeps the computer reachable either way.
 
-The former menu bar and tray are in [the archive](../archive/operations/link-menu-tray.md), including the historical migration procedure. Stop the old parent UI before installing the new service so two connector instances do not fight over the run lock; keep the existing `link.json` and resident-node service. `persona-link install` refuses to take over an unmanaged running connector and explains this.
+### Tray and menu bar App
+
+The Mac menu bar App (`apple/PersonaLink/App`) and the Windows tray (`server/internal/linktray`, [windows.md](windows.md), "Tray") are the same thing on two systems, item for item. They only pair the computer and keep its connection:
+no notifications, no "Needs you" list, no presence, and nothing that opens or drives a session; those belong to the Persona apps and the web app.
+
+- **They read, never host**: the service runs the connector. The App and the tray read `link.json` and `link.status.json` (and whether the pid in it is a live persona-link), and every action runs the same CLI a person would (`persona-link reconnect`, `pair`, `mode`, `address`, `name`, `ssh`, `install`), so the result is the same either way.
+- **Icon**: the Persona helper, the same art as the app icon (`scripts/assets/make_icon.py link`): a template image in the Mac menu bar, in color in the Windows notification area. It is faded while the link is not up (connecting, offline, not paired),
+  and a dot in its corner marks the states that need you (waiting for your OK on the phone, background service not running, offline).
+- **Status**: mode (active or passive), the address in use and for how long, or why it is down; the hub's name and linked group; whether this computer's node is online; the name the hub gives this computer.
+- **Actions**: **Reconnect now** (active mode), **Pair / Change connection…** (the pairing window, active and passive, with the SSH tunnel), **Rename this computer…** (connected and confirmed), installing or restarting the background service when it is missing or stopped,
+  **Launch at login** for the App or tray itself (the service starts at login either way), opening the log folder, and **Quit**.
+- **Pairing links**: `persona://link?…` opens the pairing window with the link filled in; it never pairs on its own. Pairing runs only after **Pair**, once the window has shown which hub and which name.
+
+The archived [link-menu-tray.md](../archive/operations/link-menu-tray.md) records the earlier menu bar App, which hosted the connector itself and also showed "Needs you" and notifications; neither returns.
+
 ## Two modes
 
 The same persona-link supports both, selected during pairing and changeable anytime (`persona-link mode active|passive` or the desktop setup window). Each mode stores its pairing separately, so switching back doesn't require pairing again.
@@ -62,18 +72,18 @@ curl -fsSL <site>/install.sh | sh -s -- --node --listen [:18663] [--addr <addres
 - `--pair` / `--listen` imply `--node`; so do `PERSONA_ROLE=node`, `PERSONA_PAIR`, `PERSONA_LISTEN`. With no options and a terminal, it asks;
   if a hub is already detected on the LAN (mDNS `_persona-hub._tcp`, `persona-link discover`), it first says "One hub is enough for the whole household; install the node service on this computer."
 - Without systemd, it still installs the binaries and prints alternative instructions (see "Linux (headless)").
-- On Mac, `--node` installs the connector and resident-node launchd agents and pairs; the Electron desktop is not required.
+- On Mac, `--node` installs the connector and resident-node launchd agents and pairs; the menu bar App is optional.
 - Publishing: `scripts/release/publish.sh` builds four extra `persona-link-<os>-<arch>.gz` and `persona-node-<os>-<arch>.gz` files alongside personad and adds them to the same `SHA256SUMS`. Persona Link also has Windows amd64 and arm64 downloads named `persona-link-windows-<arch>.exe.gz`; `latest.json` indexes every connector under `links`.
 
 **Mac**: install the independent **Persona Link** helpers (`./scripts/app/mac-link.sh install`; a step-by-step guide is in [persona-link-install.md](persona-link-install.md)). The installer places persona-node in `Contents/Helpers/persona-node` and invokes
 `persona-link install --node-bin <bundled persona-node>`, which installs the connector LaunchAgent `com.persona.link` and the resident-node LaunchAgent `com.persona.node`.
-The connector is copied to `~/.persona/bin/persona-link`, the fixed path the Electron setup window uses. An existing node agent is left unchanged (for example one from `scripts/deploy/node-launchd.sh install`); one that runs personad moves over with `persona-link node switch`. A deleted node service is not silently reinstalled.
+The connector is copied to `~/.persona/bin/persona-link`, the fixed path the menu bar App runs. An existing node agent is left unchanged (for example one from `scripts/deploy/node-launchd.sh install`); one that runs personad moves over with `persona-link node switch`. A deleted node service is not silently reinstalled.
 The agent it writes has `ProcessType=Interactive` (the same as `node-launchd.sh`), so launchd doesn't throttle the node like a background job. Since an existing installation is left unchanged, one written before #5944 lacks it: `personad node doctor` reports it and `personad node doctor --fix` adds it (docs/server/server.md "Scheduling and privacy on the Mac").
 App updates don't replace the installed resident node. Nodes supporting the update protocol can be remotely updated by the hub over the existing connection, with backup, rollback and online confirmation; first-time local upgrades for old nodes, progress and installation boundaries are in [node-update.md](node-update.md) (#1158).
 
 **Windows** (Orca engine, [windows.md](windows.md) ("Install and start at logon")): download `persona-link-windows-amd64.exe.gz` or `persona-link-windows-arm64.exe.gz` from the GitHub release, verify and unpack it using the PowerShell commands there, then run `persona-link install [--personad <personad.exe>] [--pair '<link>']`, without admin privileges.
 Registers the current user's scheduled task **Persona Link**, starting at sign-in and checked every 5 minutes; it runs a windowless supervisor (`persona-link supervise`), which starts
-persona-link and the resident node and restarts them on exit. Both are in one task (no separate `node install`). The retired tray is not installed. There is no one-command installer script or installation package; the release provides the connector executable.
+persona-link and the resident node and restarts them on exit. Both are in one task (no separate `node install`). `install` also adds the tray icon, started at sign-in (`--no-tray` leaves it out). There is no one-command installer script or installation package; the release provides the connector executable.
 
 ### The device's program
 
@@ -358,7 +368,7 @@ When a hub machine exposes only SSH (port 22) — its HTTP and TLS ports listen 
 
 ### Pairing window and CLI
 
-- **Desktop setup**: active/passive pairing, status and reconnect use the fixed Link command bridge. SSH tunnel configuration remains available through the CLI below; the retired tray-specific tunnel editor is not part of the desktop shell:
+- **Pairing window** (the Mac menu bar App's and the Windows tray's): the **SSH tunnel** section below the pairing link, closed by default, sets the tunnel before or after pairing; the CLI below does the same:
   - **SSH server**: `[user@]host[:port]`, or a host alias from `~/.ssh/config`.
   - **Hub address as that server sees it**: defaults to `127.0.0.1:<TLS port in the pairing link>`; with no link and no saved address yet, to `127.0.0.1:18662`, the TLS port `personad hub setup` uses.
   - **Always use SSH**: uses only the tunnel. Enabled automatically when the pairing link names only loopback addresses; otherwise off so direct addresses are tried first.
@@ -616,12 +626,12 @@ for Windows see [windows.md](windows.md). Instructions for people who don't use 
 1. Install Persona Link on the Mac: `./scripts/app/mac-link.sh install` ([persona-link-install.md](persona-link-install.md)). It builds persona-node and Persona Screen, copies the helpers to `/Applications`, and registers both launchd services. Existing node installations are left untouched.
 2. In the signed-in web app, open **Machines › Add Computer**, select Mac and enter a name (Chinese is allowed; the hub generates the id from the name). The hub adds `kind: link`, **pending confirmation**, and provides its pairing link
    (`POST /api/v1/auth/pair-codes` with `add`, [protocol.md](../protocol/protocol.md), "Computer pairing codes"). iOS and Android entry points are in progress.
-3. Send the link to this Mac (**Copy pairing link** or **Share…**) and paste it into the Electron desktop's **Persona Link** setup section, or use `~/.persona/bin/persona-link pair -` with the link on stdin.
+3. Send the link to this Mac (**Copy pairing link** or **Share…**) and open it there: it opens the menu bar App's pairing window with the link filled in. Or paste it into **Pair / Change connection…**, or use `~/.persona/bin/persona-link pair -` with the link on stdin.
 4. Once it connects, the same web screen asks "A computer wants to join: <name>. Is it yours?"; tap **This is my computer** (`POST /api/v1/machines/{id}/confirm`).
    Before confirmation it receives no Persona-managed keys, isn't considered for assistant-machine selection, and doesn't appear in the computer list for creating Agents; unconfirmed computers are removed after 24 hours ([protocol.md](../protocol/protocol.md), "Computer trust").
    If you closed that screen, its card in the machine list also lets you confirm or delete it.
 5. Verify: `persona-link status` shows the connector running and connected, and the computer is online in App **Settings › Machines**.
-6. `com.persona.link` starts at login and restarts the connector independently of Electron. No login-item setting in the desktop app controls it.
+6. `com.persona.link` starts at login and restarts the connector whether or not the menu bar App runs; the App's **Launch at login** only shows the App.
 
 Links expire after 10 minutes and are single-use; if expired, tap **Regenerate** on the web screen (`{"machine": <id>}` issues a new code and also revokes old Persona Link credentials).
 Without hub TLS, the web reports "The hub hasn't enabled a secure connection yet" (409 `tls_required`); see "Advanced" below.
@@ -822,7 +832,7 @@ On servers, NAS boxes and Raspberry Pis without a GUI, `persona-link` alone is e
 
 **Build**
 - Pure Go, no cgo: `cd server && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o persona-link ./cmd/persona-link`.
-  Builds for `amd64`, `arm64` and 32-bit Raspberry Pi (`GOARCH=arm GOARM=7`); Windows also builds (file locks and signals in platform-specific files); the scheduled task works without a tray ([windows.md](windows.md), "Install and start at logon").
+  Builds for `amd64`, `arm64` and 32-bit Raspberry Pi (`GOARCH=arm GOARM=7`); Windows also builds (file locks and signals in platform-specific files); the scheduled task works with or without the tray ([windows.md](windows.md), "Install and start at logon").
 - `personad` also builds for Windows (`GOOS=windows go build ./...`; process groups, signals, file locks and CPU time are platform-specific in `internal/osproc` and each package's `_windows.go`),
   and the Windows resident node works with Orca; `persona-link install` installs a sign-in scheduled task on Windows (the Windows paragraph under "Install the node service"), see [windows.md](windows.md).
 - The resident node runs the device's program, persona-node, built from the same commit (`~/.persona/bin/persona-node`; personad where the computer has no persona-node or runs a hub or a manager, "The device's program"); `scripts/deploy/node-launchd.sh install` installs a personad node on Linux as systemd user service `personad-node`.
@@ -941,7 +951,7 @@ Two things to know about a node without systemd:
   a persona-link starting at that exact moment exits as "already running", then systemd starts it again after 5 seconds.
 - Link state: `~/.persona/link.status.json` (see "Status line"); when not running, shows the last report and time.
 - **Does not connect to the resident node socket** to check liveness: every connection is a new attach and would replace the hub's current connection. Local-node status comes only from the hub.
-- On Mac the launchd agent writes the same status file, and `status` also reports whether `com.persona.link` is installed and loaded. The Electron setup reads only the allowlisted status fields, never the credential file.
+- On Mac the launchd agent writes the same status file, and `status` also reports whether `com.persona.link` is installed and loaded. The menu bar App and the tray read the same file.
 
 `scripts/deploy/link-systemd.sh` remains a thin wrapper: `install` / `uninstall` / `status` delegate to `~/.persona/bin/persona-link`; `restart` runs `systemctl --user restart`.
 

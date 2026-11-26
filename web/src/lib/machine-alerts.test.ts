@@ -1,8 +1,9 @@
 // The Machines page's alert model (#8037): which alerts a computer has, worst first; none for a computer the card
 // explains itself (pending, never connected, its assistant offline); the cards' order (the apps' MachineConcern);
 // and how far apart two builds are.
-import { describe, expect, it } from "vitest";
-import { alertLabel, buildGap, buildTime, concernOf, gapText, machineAlerts, offlineReason, orderMachines, worst, type MachineAlert } from "./machine-alerts";
+import { afterEach, describe, expect, it } from "vitest";
+import { initI18n } from "../i18n";
+import { alertLabel, alertTitle, buildGap, buildTime, concernOf, gapText, loadDefinition, machineAlerts, offlineReason, orderMachines, perCoreLabel, perCoreText, readings, worst, type MachineAlert } from "./machine-alerts";
 import type { Machine, MachineMetrics } from "./types";
 
 const GB = 1024 ** 3;
@@ -67,12 +68,52 @@ describe("machineAlerts", () => {
   });
 
   it("labels each alert with its number, and an offline card's chip with what it opens", () => {
-    expect(alertLabel({ kind: "memory", severity: "critical", value: 95.2 })).toBe("内存紧张 · 95%");
+    expect(alertLabel({ kind: "memory", severity: "critical", value: 95.2 })).toBe("内存占用 · 95%");
     expect(alertLabel({ kind: "launcher", severity: "warning", count: 2 })).toBe("启动器异常 · 2");
     expect(alertLabel({ kind: "load", severity: "warning", value: 1.24 })).toBe("负载偏高 · 每核 1.2");
     expect(alertLabel({ kind: "offline", severity: "critical" })).toBe("离线");
     expect(alertLabel({ kind: "offline", severity: "critical" }, true)).toBe("离线 · 排查");
   });
+});
+
+describe("one meaning for load (#12519)", () => {
+  // switching languages loads their catalogs, which takes a few seconds on a busy machine
+  afterEach(async () => {
+    await initI18n("zh-Hans");
+  }, 30_000);
+
+  it("writes load per core with one decimal everywhere, the figure the alert goes by", () => {
+    expect(perCoreText(25.4 / 18)).toBe("1.4");
+    expect(perCoreText(0.04)).toBe("0.0");
+    expect(perCoreLabel(1.43)).toBe("每核 1.4");
+    const studio = machine({ system: { cores: 18, memory: 16 * GB } });
+    const now = metrics({ t: 1, cpu: 41, load: 25.4 });
+    const r = readings(studio, now);
+    expect(perCoreText(r.load!)).toBe("1.4");
+    const [load] = machineAlerts({ machine: studio, metrics: now });
+    expect(load.kind).toBe("load");
+    expect(alertLabel(load)).toBe(`负载偏高 · ${perCoreLabel(r.load!)}`);
+  });
+
+  it("defines load in one sentence, and calls the used-memory alert what it counts", async () => {
+    expect(loadDefinition()).toMatch(/^负载 = 正在运行和排队等 CPU 的线程数/);
+    await initI18n("en");
+    expect(loadDefinition()).toMatch(/^Load is the number of threads running or waiting for a CPU/);
+    expect(perCoreLabel(1.43)).toBe("1.4 per core");
+    expect(alertLabel({ kind: "memory", severity: "critical", value: 95.2 })).toBe("Memory used · 95%");
+    expect(alertLabel({ kind: "load", severity: "warning", value: 1.24 })).toBe("High load · 1.2 per core");
+  }, 30_000);
+
+  it("lets no alert other than load call itself load, in any language", async () => {
+    // the word for load in each language; ja's CPU alert used to read "CPU 高負荷", CPU high load
+    for (const [lang, word] of [["zh-Hans", "负载"], ["en", "load"], ["ja", "負荷"]] as const) {
+      await initI18n(lang);
+      expect(alertTitle({ kind: "load" }).toLowerCase()).toContain(word);
+      for (const kind of ["memory", "disk", "cpu", "launcher", "offline", "deploy_failed", "mismatch"] as const) {
+        expect(alertTitle({ kind }).toLowerCase()).not.toContain(word);
+      }
+    }
+  }, 30_000);
 });
 
 describe("the cards' order", () => {

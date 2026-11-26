@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import persona.core.contracts.ExternalDirection
+import persona.core.contracts.GroupKeys
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantManagement
@@ -58,6 +59,8 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.navigation.MessageJumps
 import persona.core.domain.sort.AgentQuery
 import persona.core.domain.sort.admits
+import persona.core.domain.sort.displayTitle
+import persona.core.domain.sort.displayTitleDetail
 import java.time.Instant
 
 /**
@@ -140,6 +143,7 @@ internal fun AssistantFullSearch(
     agents: List<Session>? = null,
     agentMachines: Map<String, String> = emptyMap(),
     pinnedAgents: Set<String> = emptySet(),
+    herdrTabNameHubs: Set<String?> = emptySet(),
     agentsFirst: Boolean = false,
     onOpenAgent: ((SessionKey) -> Unit)? = null,
 ) {
@@ -214,7 +218,12 @@ internal fun AssistantFullSearch(
                 if (searchingAgents) {
                     item { JSectionHeader(stringResource(if (query.isBlank()) R.string.assistant_recent else R.string.assistant_sidebar_search_agents)) }
                     items(agentRows, key = { it.key.path }) { session ->
-                        JRow(session.displayTitle, subtitle = agentMachines[session.machineId],
+                        val preferTab = GroupKeys.namespaceOf(session.machineId) in herdrTabNameHubs
+                        val subtitle = listOfNotNull(
+                            session.displayTitleDetail(preferTab),
+                            agentMachines[session.machineId],
+                        ).joinToString(" · ").takeIf(String::isNotEmpty)
+                        JRow(session.displayTitle(preferTab), subtitle = subtitle,
                             leadingIcon = PersonaIcons.agentChat, onClick = onOpenAgent?.let { open -> { open(session.key) } })
                     }
                     if (agentRows.isEmpty() && query.isNotBlank()) item {

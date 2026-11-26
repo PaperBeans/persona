@@ -116,6 +116,58 @@ nonisolated enum ReviewLogic {
         guard let hash = review.base?.hash, !hash.isEmpty else { return current }
         return .commit(hash)
     }
+
+    /// Outcome of resolving a Changed Files card's target file against a review's current load phase (#12016).
+    enum TargetResolution: Equatable, Sendable {
+        case pending
+        /// Review is for a different scope than requested (e.g. user manually switched scope while loading).
+        case ignore
+        /// Matched a file path in the loaded review (repository-relative `GitReview.File.path`).
+        case select(String)
+        /// Review failed to load or did not contain the target file: fall back to the native file viewer for `path`.
+        case fallback(String)
+    }
+
+    /// Stable scroll anchor identifier for one file header in `ReviewPage`.
+    static func fileAnchor(_ path: String) -> String { "review-file-" + path }
+
+    /// Resolves `targetFile` (typically absolute or normalized) against the loaded review's repository root (falling
+    /// back to `cwd` when `root` is absent), selecting the matching review file or falling back to `FileViewer`.
+    static func resolveTargetFile(
+        _ targetFile: String,
+        cwd: String,
+        requestedScope: GitReviewScope,
+        currentScope: GitReviewScope,
+        phase: ReviewModel.Phase
+    ) -> TargetResolution {
+        guard currentScope == requestedScope else { return .ignore }
+        switch phase {
+        case .loading:
+            return .pending
+        case .failed:
+            return .fallback(targetFile)
+        case .loaded(let review):
+            if let wireScope = review.scope, !wireScope.isEmpty, wireScope != requestedScope.wireName {
+                return .ignore
+            }
+            let root = (review.root?.isEmpty == false) ? review.root : (cwd.isEmpty ? nil : cwd)
+            let repoRelative = TurnChanges.relative(to: root, path: targetFile)
+            if let match = review.files.first(where: { $0.path == repoRelative }) {
+                return .select(match.path)
+            }
+            return .fallback(targetFile)
+        }
+    }
+}
+
+nonisolated extension GitReviewScope {
+    var wireName: String {
+        switch self {
+        case .uncommitted: "uncommitted"
+        case .branch: "branch"
+        case .commit: "commit"
+        }
+    }
 }
 
 /// The review of one session's changes: what is compared, the answer, the drafts (kept per session in `StateCache`,

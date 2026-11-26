@@ -72,7 +72,7 @@ func TestBriefFollowingWaitingAgeThreshold(t *testing.T) {
 		{ID: "nil-handling", Title: "nil-handling", Now: NowWaiting},
 		{ID: "nil-since", Title: "nil-since", Now: NowWaiting, Handling: &InboxHandling{}},
 	}
-	waiting, due := briefFollowing(items, now, time.UTC)
+	waiting, due := briefFollowing(t, items, now, time.UTC)
 	want := []prompts.BriefFollow{{Title: "25h"}}
 	if !reflect.DeepEqual(waiting, want) {
 		t.Fatalf("waiting = %+v, want %+v", waiting, want)
@@ -98,7 +98,7 @@ func TestBriefFollowingTodayUsesOwnerZoneAcrossUTCDate(t *testing.T) {
 		briefFollowingTestItem("already-due", NowWaiting, briefFollowingTestTime(now.Add(-time.Hour))),
 		briefFollowingTestItem("local-start", NowWaiting, briefFollowingTestTime(day)),
 	}
-	waiting, due := briefFollowing(items, now, loc)
+	waiting, due := briefFollowing(t, items, now, loc)
 	if len(waiting) != 0 {
 		t.Fatalf("waiting = %+v, want no rows", waiting)
 	}
@@ -118,7 +118,7 @@ func TestBriefFollowingAlwaysListsReturnedFollowUps(t *testing.T) {
 		briefFollowingTestItem("needs-you", NowNeedsYou, briefFollowingTestTime(now)),
 		briefFollowingTestItem("ordinary-waiting", NowWaiting, nil),
 	}
-	waiting, due := briefFollowing(items, now, time.UTC)
+	waiting, due := briefFollowing(t, items, now, time.UTC)
 	if len(waiting) != 0 {
 		t.Fatalf("waiting = %+v, want no rows", waiting)
 	}
@@ -142,7 +142,7 @@ func TestBriefFollowingSortsAndLimits(t *testing.T) {
 		{ID: "w-tie-a", Title: "w-tie-a", Now: NowWaiting, Handling: &InboxHandling{Since: briefFollowingTestTime(now.Add(-40 * time.Hour))}},
 		{ID: "w-mid", Title: "w-mid", Now: NowWaiting, Handling: &InboxHandling{Since: briefFollowingTestTime(now.Add(-30 * time.Hour))}},
 	}
-	waiting, _ := briefFollowing(waitingItems, now, time.UTC)
+	waiting, _ := briefFollowing(t, waitingItems, now, time.UTC)
 	wantWaiting := []string{"w-old", "w-tie-a", "w-tie-b", "w-mid", "w-new"}
 	if got := briefFollowingTestTitles(waiting); !reflect.DeepEqual(got, wantWaiting) {
 		t.Fatalf("waiting titles = %v, want %v", got, wantWaiting)
@@ -158,7 +158,7 @@ func TestBriefFollowingSortsAndLimits(t *testing.T) {
 		briefFollowingTestItem("d-nil-a", NowCheckDue, nil),
 		briefFollowingTestItem("d-tie-a", NowWaiting, briefFollowingTestTime(tie)),
 	}
-	_, due := briefFollowing(dueItems, now, time.UTC)
+	_, due := briefFollowing(t, dueItems, now, time.UTC)
 	wantDue := []string{"d-first", "d-tie-a", "d-tie-b", "d-later", "d-nil-a"}
 	if got := briefFollowingTestTitles(due); !reflect.DeepEqual(got, wantDue) {
 		t.Fatalf("due titles = %v, want %v", got, wantDue)
@@ -182,7 +182,7 @@ func TestBriefFollowingFormatsTextWithoutChangingInput(t *testing.T) {
 		{ID: "nil-follow", Title: "No follow", Now: NowFollowUpAsk},
 	}
 	before := briefFollowingTestCopy(items)
-	waiting, due := briefFollowing(items, now, time.UTC)
+	waiting, due := briefFollowing(t, items, now, time.UTC)
 	plain := prompts.BriefFollow{Title: "Weekly report needs a reply", Who: "Reviewer team", Next: "Ask for an update"}
 	if want := []prompts.BriefFollow{plain}; !reflect.DeepEqual(waiting, want) {
 		t.Fatalf("waiting = %+v, want %+v", waiting, want)
@@ -227,7 +227,7 @@ func TestBriefFactsIncludeInboxFollowUps(t *testing.T) {
 	if !reflect.DeepEqual(facts.InboxDue, want) {
 		t.Fatalf("InboxDue = %+v, want %+v", facts.InboxDue, want)
 	}
-	text := facts.modelText()
+	text := e.s.briefModelText(facts)
 	if !facts.Card || !e.s.inbox.loaded.Load() {
 		t.Fatalf("Card = %v, inbox loaded = %v; want a card and a completed cold-start load", facts.Card, e.s.inbox.loaded.Load())
 	}

@@ -28,6 +28,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -262,6 +263,9 @@ func (d *Devices) heldLoop(ctx context.Context) {
 	h.mu.Lock()
 	h.ctx = ctx
 	h.mu.Unlock()
+	d.heldStarts.mu.Lock()
+	d.heldStarts.ctx = ctx
+	d.heldStarts.mu.Unlock()
 	t := time.NewTicker(heldTick)
 	defer t.Stop()
 	for {
@@ -279,6 +283,7 @@ func (d *Devices) heldLoop(ctx context.Context) {
 				d.heldWake(machine)
 			}
 		}
+		d.heldStartTick(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -561,7 +566,7 @@ func (r *heldRow) wire(lang i18n.Lang, computer string, behind bool) proto.Undel
 		m.State = proto.UndeliveredFailed
 		switch r.Failure {
 		case db.HeldRefused:
-			reason := r.Error
+			reason := localizeHeldReason(lang, r.Error)
 			if reason == "" {
 				reason = i18n.T(lang, "devices-held.no_reason")
 			}
@@ -586,6 +591,38 @@ func (r *heldRow) wire(lang i18n.Lang, computer string, behind bool) proto.Undel
 		m.Error = i18n.T(lang, "devices-held.waiting", i18n.Args{"name": computer})
 	}
 	return m
+}
+
+// localizeHeldReason translates the node's generic terminal delivery and dialog refusal sentences into the viewer's
+// language while preserving any dialog headline and specific diagnostics verbatim.
+func localizeHeldReason(lang i18n.Lang, reason string) string {
+	switch reason {
+	case i18n.T(i18n.Default, "rpc-errors.not_delivered"):
+		return i18n.T(lang, "rpc-errors.not_delivered")
+	case i18n.T(i18n.Default, "rpc-errors.not_delivered_finished"):
+		return i18n.T(lang, "rpc-errors.not_delivered_finished")
+	}
+	if lang == i18n.ZhHans {
+		return reason
+	}
+	const (
+		dialogBare   = "电脑上的终端正开着一个对话框（确认、选择列表等），这条消息没有发出去：先回答或关掉它再发。" // i18n-ignore: matches node dialog_open refusal
+		dialogPrefix = "电脑上的终端正开着一个对话框（「"                              // i18n-ignore: matches node dialog_open refusal
+		dialogMid    = "」），这条消息没有发出去："                                 // i18n-ignore: matches node dialog_open refusal
+		dialogNotice = "它只是一条通知，按回车就关掉，可以让发送先关掉它再发。"                   // i18n-ignore: matches node dialog_open refusal
+	)
+	if reason == dialogBare {
+		return i18n.T(lang, "rpc-errors.dialog_open")
+	}
+	if rest, ok := strings.CutPrefix(reason, dialogPrefix); ok {
+		if head, tail, ok := strings.Cut(rest, dialogMid); ok && head != "" {
+			if tail == dialogNotice {
+				return i18n.T(lang, "rpc-errors.dialog_open_notice") + " (" + head + ")"
+			}
+			return i18n.T(lang, "rpc-errors.dialog_open") + " (" + head + ")"
+		}
+	}
+	return reason
 }
 
 // ---- sending ----

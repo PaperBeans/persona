@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // machineFact makes unknown distinct from a measured zero, with a reason the model can relay.
@@ -82,28 +86,78 @@ func (s *Service) silentNode(d Device, sample *proto.MetricSample, now time.Time
 	return silent > machineSilentAfter, silent
 }
 
-func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
+func (s *Service) isHubMachine(ctx context.Context, d Device, m *proto.Machine) bool {
+	if d.Kind == "local" || (m != nil && m.Kind == "local") {
+		return true
+	}
+	if d.Kind == "" && (m == nil || m.Kind == "") {
+		if hubID := s.settings(ctx).MachineID; hubID != "" && s.canonical(d.ID) == s.canonical(hubID) {
+			return true
+		}
+	}
+	return false
+}
+
+func machinePlatformOS(m *proto.Machine) string {
+	if m == nil {
+		return ""
+	}
+	if m.System != nil && strings.TrimSpace(m.System.OS) != "" {
+		return strings.ToLower(strings.TrimSpace(m.System.OS))
+	}
+	return strings.ToLower(strings.TrimSpace(m.OS))
+}
+
+func machinePlatformArch(m *proto.Machine) string {
+	if m == nil {
+		return ""
+	}
+	if m.System != nil && strings.TrimSpace(m.System.Arch) != "" {
+		return strings.ToLower(strings.TrimSpace(m.System.Arch))
+	}
+	return strings.ToLower(strings.TrimSpace(m.Arch))
+}
+
+type machineResourceSnapshot struct {
+	facts   machineFacts
+	summary assistantwire.MachineResourceSummary
+}
+
+func (s *Service) machineNowTime() time.Time {
+	if s.machineNow != nil {
+		return s.machineNow()
+	}
+	return time.Now()
+}
+
+func (s *Service) collectMachineSnapshots(ctx context.Context, excludeSpaceSessions bool) ([]machineResourceSnapshot, bool, int, error) {
 	var listed struct {
 		Devices  []Device `json:"devices"`
 		Complete bool     `json:"complete"`
 		Others   []string `json:"others"`
 	}
 	if err := s.call(ctx, DeviceAll, DeviceDevicesList, map[string]any{}, &listed); err != nil {
-		return "", fmt.Errorf("machine list unavailable: %w", err)
+		return nil, false, 0, fmt.Errorf("machine list unavailable: %w", err)
 	}
 	if s.devs == nil {
-		return "", fmt.Errorf("machine resource manager unavailable")
+		return nil, false, 0, fmt.Errorf("machine resource manager unavailable")
 	}
-	now := time.Now()
-	rows := make([]machineFacts, 0, len(listed.Devices))
+	snaps := make([]machineResourceSnapshot, 0, len(listed.Devices))
 	for _, d := range listed.Devices {
 		m, sample, outdated := s.devs.MachineResources(d.ID)
+		now := s.machineNowTime()
 		row := machineFacts{ID: d.ID, Name: d.Name, State: "pending", StateReason: unknown("connection_pending"),
 			OS: unknown("system_not_reported"), Cores: unknown("system_not_reported"),
 			CPUBusyPercent: unknown("sample_not_reported"), Load: unknown("sample_not_reported"),
 			MemoryAvailableBytes: unknown("sample_not_reported"), Swap: unknown("sample_not_reported"), DiskFreeBytes: unknown("sample_not_reported"),
 			SampleAgeSeconds: unknown("sample_not_reported"), WorkingAgents: unknown("connection_not_available"),
 			FailingLaunchers: unknown("health_not_available"), NodeOutdated: unknown("connection_not_available")}
+		sum := assistantwire.MachineResourceSummary{
+			ID:    wireids.MachineID(d.ID),
+			Name:  d.Name,
+			State: assistantwire.MachineResourceStatePending,
+			IsHub: s.isHubMachine(ctx, d, m),
+		}
 		if stale, silent := s.silentNode(d, sample, now); stale {
 			row.State = "unresponsive"
 			row.StateReason = known(map[string]any{"category": "no_recent_report", "last_report_age_seconds": int64(silent.Seconds()),
@@ -117,7 +171,15 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 		} else if !d.Online {
 			row.State, row.StateReason = "offline", unknown("no_connection_error_reported")
 		}
+		sum.State = assistantwire.MachineResourceState(row.State)
+		sum.Online = row.State == "online"
 		if m != nil {
+			if osName := machinePlatformOS(m); osName != "" {
+				sum.OS = &osName
+			}
+			if arch := machinePlatformArch(m); arch != "" {
+				sum.Arch = &arch
+			}
 			if m.System != nil {
 				os := m.System.Name
 				if os == "" {
@@ -130,7 +192,9 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 					row.OS = known(os)
 				}
 				if m.System.Cores > 0 {
-					row.Cores = known(m.System.Cores)
+					cores := m.System.Cores
+					row.Cores = known(cores)
+					sum.Cores = &cores
 				}
 			} else if m.OS != "" {
 				row.OS = known(m.OS)
@@ -147,7 +211,9 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 				row.SampleAgeSeconds = unknown("sample_clock_in_future")
 				row.CPUBusyPercent, row.Load, row.MemoryAvailableBytes, row.Swap, row.DiskFreeBytes = unknown("sample_clock_in_future"), unknown("sample_clock_in_future"), unknown("sample_clock_in_future"), unknown("sample_clock_in_future"), unknown("sample_clock_in_future")
 			} else {
-				row.SampleAgeSeconds = known(age)
+				ageVal := age
+				row.SampleAgeSeconds = known(ageVal)
+				sum.SampleAgeSeconds = &ageVal
 				reason := "sample_stale"
 				if age <= 30 && d.Reachable {
 					reason = "metric_not_reported"
@@ -160,13 +226,20 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 				row.CPUBusyPercent, row.Load, row.MemoryAvailableBytes, row.Swap, row.DiskFreeBytes = unknown(reason), unknown(reason), unknown(reason), unknown(reason), unknown(reason)
 				if reason == "metric_not_reported" {
 					if sample.CPU != nil {
-						row.CPUBusyPercent = known(*sample.CPU)
+						v := *sample.CPU
+						row.CPUBusyPercent = known(v)
+						sum.CPUBusyPercent = &v
 					}
 					if sample.Load != nil {
-						row.Load = known(*sample.Load)
+						v := *sample.Load
+						row.Load = known(v)
+						sum.Load1M = &v
 					}
 					if sample.MemTotal > 0 && sample.MemUsed > 0 && sample.MemUsed <= sample.MemTotal {
-						row.MemoryAvailableBytes = known(sample.MemTotal - sample.MemUsed)
+						avail, total := sample.MemTotal-sample.MemUsed, sample.MemTotal
+						row.MemoryAvailableBytes = known(avail)
+						sum.MemoryAvailableBytes = &avail
+						sum.MemoryTotalBytes = &total
 					} else {
 						row.MemoryAvailableBytes = unknown("memory_measurement_missing_or_ambiguous")
 					}
@@ -176,7 +249,10 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 						row.Swap = unknown("swap_measurement_missing_or_ambiguous")
 					}
 					if sample.DiskTotal > 0 && sample.DiskUsed > 0 && sample.DiskUsed <= sample.DiskTotal {
-						row.DiskFreeBytes = known(sample.DiskTotal - sample.DiskUsed)
+						free, total := sample.DiskTotal-sample.DiskUsed, sample.DiskTotal
+						row.DiskFreeBytes = known(free)
+						sum.DiskFreeBytes = &free
+						sum.DiskTotalBytes = &total
 					} else {
 						row.DiskFreeBytes = unknown("disk_measurement_missing_or_ambiguous")
 					}
@@ -196,17 +272,22 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 			}
 		}
 		if d.Reachable {
-			list, err := s.sessions(ctx, d.ID)
-			if err != nil {
+			if shown, ok := s.devs.Shown(d.ID); ok && !shown.Listed {
+				row.WorkingAgents = unknown("sessions_not_listed")
+			} else if list, err := s.sessions(ctx, d.ID); err != nil {
 				row.WorkingAgents = unknown("sessions_unavailable")
 			} else {
 				count := 0
 				for _, c := range list {
 					if !c.HiddenByDirectory() && !c.Assistant && !c.Archived && c.State == proto.StateWorking {
+						if excludeSpaceSessions && (runSpace(c) != "" || identity.InSpace(c.Cwd)) {
+							continue
+						}
 						count++
 					}
 				}
 				row.WorkingAgents = known(count)
+				sum.WorkingAgents = &count
 			}
 		}
 		recs := s.healthRecords(ctx, "", d.ID)
@@ -215,15 +296,33 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 		s.health.mu.Unlock()
 		if loaded {
 			failed := make([]LauncherHealth, 0)
+			names := make([]string, 0)
 			for _, r := range recs {
 				if r.unusable() {
 					failed = append(failed, r)
+					if name := strings.TrimSpace(r.Launcher); name != "" && !slices.Contains(names, name) {
+						names = append(names, name)
+					}
 				}
 			}
+			slices.Sort(names)
 			row.FailingLaunchers = known(failed)
+			sum.FailingLaunchers = names
 		}
-		rows = append(rows, row)
+		snaps = append(snaps, machineResourceSnapshot{facts: row, summary: sum})
 	}
-	out, err := json.Marshal(map[string]any{"machines": rows, "complete": listed.Complete, "excluded_count": len(listed.Others)})
+	return snaps, listed.Complete, len(listed.Others), nil
+}
+
+func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
+	snaps, complete, excluded, err := s.collectMachineSnapshots(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	rows := make([]machineFacts, 0, len(snaps))
+	for _, snap := range snaps {
+		rows = append(rows, snap.facts)
+	}
+	out, err := json.Marshal(map[string]any{"machines": rows, "complete": complete, "excluded_count": excluded})
 	return string(out), err
 }

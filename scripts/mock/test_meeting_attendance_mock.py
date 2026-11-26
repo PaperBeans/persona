@@ -121,7 +121,7 @@ class MeetingAttendanceMockTests(Hub, unittest.TestCase):
         self.assertNotIn("minutes_state", self.call("GET", f"/api/v1/kb/recordings/{rid}")[1]["detail"]["meta"])
 
     def test_upload_attendance_is_settled_as_the_hub_does(self):
-        """The hub's normalizeAttendance (server/internal/kb/live.go) after clean() (kb/recordings.go), case by case."""
+        """The hub's normalizeAttendance (server/internal/modules/recording/writers/live.go) after clean() (modules/recording/writers/recordings.go), case by case."""
         session = {"machine_id": "macbook", "session_id": "a1f3c2d4-0000-4000-8000-000000000006"}
         for fields, role, problem, stored in [
             # Off or absent says nothing, whatever the session, and stores none.

@@ -31,6 +31,7 @@ const assistantShellReady = "__PERSONA_ASSISTANT_SHELL_READY__"
 const (
 	assistantEarlyExit  = 30 * time.Second
 	assistantStderrTail = 5
+	assistantGroupSweep = time.Second
 )
 
 // assistantStartWait: how long a send that started a fresh process waits for its first output before answering. A
@@ -324,6 +325,10 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 	if err := execution.check("claude"); err != nil {
 		return nil, err
 	}
+	resolvedModel, err := n.resolveClaudeModelArg(startCtx, launcher, execution.Model)
+	if err != nil {
+		return nil, err
+	}
 	if err := n.checkExternalAssistant(startCtx, id, launcher, execution, spare); err != nil {
 		return nil, err
 	}
@@ -331,7 +336,6 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 		return nil, err
 	}
 	guest := n.guestOf(id) != nil // a guest, a meeting's room too (assistant_guest.go)
-	var err error
 	execution.ConfigDir, err = n.assistantProfileSelection(context.Background(), id, launcher, execution.ConfigDir, resume)
 	if err != nil {
 		return nil, err
@@ -410,14 +414,11 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 	// an old hub that still addresses the legacy namespace keeps the alias.
 	legacyMCP := !n.hubSupportsPersonaContracts()
 	args = append(args, n.claudeAssistantMCPAndToolsFor(id, cwd, legacyMCP, round.toolSet)...)
-	model := execution.Model
-	if model == "" && resume && execution.Fingerprint != "" && !guest {
+	model := resolvedModel
+	if execution.Model == "" && resume && execution.Fingerprint != "" && !guest {
 		// The model configuration names none: the launcher's default, not the model the session ran on last
 		// (assistant_resume_model.go). A guest keeps what it started on.
-		model = n.resumeModel(launcher, cwd, settings, configPath)
-	}
-	if model != "" {
-		model = n.claudeModelArg(launcher, model) // no tier alias for a gateway (#10365); "" its default
+		model = n.claudeModelArg(launcher, n.resumeModel(launcher, cwd, settings, configPath))
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -449,7 +450,7 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 	if toolSearch.env != "" {
 		startEnv = append(startEnv, toolSearchEnv+"="+toolSearch.env)
 	}
-	env := identity.Environment(withoutEnv(os.Environ(), []string{toolSearchEnv}), append(startEnv, compaction.env()...)...)
+	env := identity.Environment(withoutEnv(os.Environ(), []string{toolSearchEnv, categoriesEnv}), append(startEnv, compaction.env()...)...)
 	env = n.claudeProcessEnv(env, configDir)
 	if cacheProxy != nil {
 		env = identity.Environment(env, "ANTHROPIC_BASE_URL="+cacheProxy.BaseURL())
@@ -459,6 +460,7 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 		releaseGates()
 		gateEnv, releaseGates = nil, func() {} // no commands to gate: it has no Bash
 	}
+	categories := categoriesFromEnv(gateEnv)
 	cleanupMCP := func() {}
 	cleanupAdapter := func() {}
 	started := false
@@ -547,7 +549,7 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 	// receive its ACK before the user's first input, just as for live changes.
 	p := &assistantProc{cacheProxy: cacheProxy, id: id, agent: "claude", launcher: launcher, cwd: cwd, cmd: cmd, stdin: stdin, exited: make(chan struct{}), ready: make(chan struct{}),
 		stderrDone: make(chan struct{}), born: time.Now(), lastActive: time.Now(), mode: startMode, canBypass: startMode == proto.ModeBypass, model: processExecution, fingerprint: n.executionFingerprint(launcher, processExecution),
-		instructions: instructions, personaMCPOnly: !legacyMCP, origin: execution.Origin, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared(),
+		instructions: instructions, personaMCPOnly: !legacyMCP, categories: categories, guest: guest, origin: execution.Origin, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared(),
 		round: round.anchor != "", toolSet: round.toolSet, toolSearch: toolSearch, endpoint: compaction.endpoint, tui: tui, tuiNote: tuiNote}
 	startedCacheProxy = true
 	if cacheProxy != nil {
@@ -556,21 +558,26 @@ func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, rou
 	if tui {
 		p.mode, p.effort = tuiMode, tuiEffort // its start flags: nothing to set by control request (syncAssistantModes)
 	}
+	p.owner.Store(n)
+	liveAssistants.Store(p, struct{}{})
 	if !spare {
 		n.mu.Lock()
 		n.procs[id] = p
 		n.mu.Unlock()
 	}
 	go watchAssistantStderr(n.logger, p, stderr)
-	liveAssistants.Store(p, struct{}{})
 	go n.readAssistant(p, stdout)
 	go func() {
 		_ = cmd.Wait()
 		if cacheProxy != nil {
 			cacheProxy.CloseListener()
 		}
-		if proto.IsExternalLauncher(launcher) && !osproc.SweepGroup(cmd.Process.Pid, externalAdapterGroupSweep) {
-			n.logger.Printf("assistant %s: external process group cleanup budget exhausted", short(id))
+		if proto.IsExternalLauncher(launcher) {
+			if !osproc.SweepGroup(cmd.Process.Pid, externalAdapterGroupSweep) {
+				n.logger.Printf("assistant %s: external process group cleanup budget exhausted", short(id))
+			}
+		} else if p.stopped.Load() {
+			osproc.SweepGroup(cmd.Process.Pid, assistantGroupSweep)
 		}
 		cleanupMCP()
 		cleanupAdapter()

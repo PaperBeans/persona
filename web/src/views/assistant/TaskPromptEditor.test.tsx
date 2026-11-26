@@ -13,6 +13,8 @@ import { reloadSavedPrompts, resetSavedPrompts } from "../../lib/saved-prompts";
 import { chooseManager, MANAGER_HEADER, resetManagerChoice } from "../../lib/manager-choice";
 import { useMentionRows, type MentionSource } from "../chat/ComposerPanel";
 import { toast } from "../../ui/atoms";
+import { changeComposerField, composerField, composerFieldText } from "../chat/composer-test-field";
+import { readInlineBody } from "../../lib/inline-message";
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/api", async (original) => ({ ...(await original<typeof import("../../lib/api")>()), api }));
@@ -31,14 +33,8 @@ async function settle() {
   await act(async () => { await vi.advanceTimersByTimeAsync(200); });
 }
 const render = (task: Task) => act(() => root.render(<TaskPromptEditor draft={task} saved={null} disabled={false} onChange={() => {}} />));
-function type(text: string) {
-  act(() => {
-    const el = field();
-    el.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, text);
-    el.setSelectionRange(text.length, text.length);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+function type(text: string, append = false) {
+  act(() => changeComposerField(composerField(host), text, { append }));
 }
 
 beforeAll(async () => { await loadPages(); await loadPages(); });
@@ -248,10 +244,11 @@ it.each([undefined, ""])("offers files and skills for an authorized legacy Claud
   expect(notes).toBeDefined();
   act(() => notes?.click());
   expect(splitSkillDraft(serialized, true).skills[0]).toMatchObject({ kind: "file", attrs: { path: "docs/notes.txt", machine: "current" } });
-  type("/Index");
+  expect(composerFieldText(host)).toBe("notes.txt ");
+  type("@Index", true);
   await settle();
   expect(option("Index receipts")).toBeDefined();
-  act(() => field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  act(() => composerField(host).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
   expect(splitSkillDraft(serialized, true).skills.map((ref) => ref.kind)).toEqual(["file", "skill"]);
 });
 
@@ -283,11 +280,12 @@ it("selects a task-scoped slash skill with the keyboard and preserves prose and 
   await settle();
   expect(option("Index receipts")).toBeDefined();
   act(() => { field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
-  expect(field().value).toBe("");
+  expect(composerFieldText(host)).toBe("Index receipts ");
   expect(splitSkillDraft(raw, true).skills[0].attrs?.ref).toBe("opaque");
-  type("  Review tomorrow\n");
-  expect(field().value).toBe("  Review tomorrow\n");
-  expect(splitSkillDraft(raw, true).text).toBe(field().value);
+  type("  Review tomorrow\n", true);
+  expect(composerFieldText(host)).toBe("Index receipts   Review tomorrow\n");
+  const serialized = splitSkillDraft(raw, true);
+  expect(readInlineBody(serialized.text, serialized.skills).text).toBe(composerFieldText(host));
   const preview = api.mock.calls.filter(([path]) => path === contextPath);
   expect(preview.map(([, options]) => options.json.catalog ?? false)).toEqual([false, true]);
   expect(preview[1][1].json).toMatchObject({ cwd: "/current", repeat: "daily", fresh_each_run: true });

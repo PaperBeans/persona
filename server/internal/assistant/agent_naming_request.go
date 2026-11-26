@@ -86,19 +86,20 @@ func (s *Service) requestAgentName(ctx context.Context, machine, sid string) (ag
 	} else if s.fleetOn() {
 		return agentNameResult{}, errAgentNameNoMachine
 	}
-	if hook := s.agentNames.beforeRequest; hook != nil {
-		hook()
-	}
-	v, err, _ := s.agentNames.requests.Do(agentNameKey(machine, sid), func() (any, error) {
+	result := s.agentNames.requests.DoChan(agentNameKey(machine, sid), func() (any, error) {
 		// The request that started the call may go away; the ones that joined it still get its answer.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentNamingTimeout+15*time.Second)
 		defer cancel()
 		return s.nameAgentNow(ctx, machine, sid)
 	})
-	if err != nil {
-		return agentNameResult{}, err
+	if hook := s.agentNames.requestJoined; hook != nil {
+		hook()
 	}
-	return v.(agentNameResult), nil
+	reply := <-result
+	if reply.Err != nil {
+		return agentNameResult{}, reply.Err
+	}
+	return reply.Val.(agentNameResult), nil
 }
 
 func (s *Service) nameAgentNow(ctx context.Context, machine, sid string) (agentNameResult, error) {

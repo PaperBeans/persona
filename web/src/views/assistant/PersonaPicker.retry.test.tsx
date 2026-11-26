@@ -11,7 +11,7 @@ vi.mock("../../lib/api", async (original) => ({
   api: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
 }));
 
-import { PersonaPicker } from "./Persona";
+import { PersonaPicker } from "./PersonaPicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;

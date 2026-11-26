@@ -291,7 +291,7 @@ func orcaRow(w orcart.Worktree, a orcart.AgentRow, h *orcaHead) map[string]any {
 		row["parent_space_id"] = parent // folds under its parent worktree like the terminals' sessions (#2073)
 	}
 	if a.LastAssistantMessage != "" {
-		row["last_text"] = snippet(a.LastAssistantMessage)
+		row["last_text"] = bridgePreview(a.LastAssistantMessage)
 	}
 	if o := h.opts; o != nil {
 		for mode, theirs := range orcaModes {

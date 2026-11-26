@@ -53,3 +53,34 @@ it("names a task's launcher by the provider's display name, its ID in the chip's
   const chips = [...host.querySelectorAll<HTMLElement>("span.rounded-full")].filter((c) => c.textContent?.match(/中转|cc_glm/));
   expect(chips.map((c) => [c.textContent, c.getAttribute("title")])).toEqual([["我的中转 站 · 预设 review", "relay-example-com"], ["cc_glm", null]]);
 });
+
+it("renders the dispatch reason under why, and hides it for reason=only or absent dispatch", async () => {
+  await render(plan([
+    task({ title: "无 dispatch", why: "原因 A" }),
+    task({ title: "单候选", why: "原因 B", dispatch: { tier: "dev", candidate: 0, of: 1, reason: "only" } }),
+    task({
+      title: "按打分选",
+      why: "原因 C",
+      dispatch: {
+        tier: "dev",
+        candidate: 1,
+        of: 3,
+        launcher: "example-b",
+        model: "model-b",
+        reason: "score",
+        args: { minutes: 18, first_pass: 60, headroom: 34 },
+      },
+    }),
+    task({ title: "沿用上次", dispatch: { tier: "dev", candidate: 0, of: 2, reason: "kept" } }),
+    task({ title: "全部超配速", dispatch: { tier: "dev", candidate: 0, of: 2, reason: "over_pace" } }),
+  ]));
+  const lines = [...host.querySelectorAll<HTMLElement>('[data-testid="plan-task-dispatch"]')].map((el) => el.textContent);
+  expect(lines).toHaveLength(3);
+  expect(lines[0]).toContain("dev");
+  expect(lines[0]).toContain("第 2 个"); // candidate index 1 (0-based) is the second candidate
+  expect(lines[0]).toContain("18");
+  expect(lines[0]).toContain("60%");
+  expect(lines[0]).toContain("34%");
+  expect(lines[1]).toContain("沿用");
+  expect(lines[2]).toContain("超配速");
+});

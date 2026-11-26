@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HistorySearch } from "./HistorySearch";
 import { recordSent } from "../../lib/send-history";
+import { writeInlineDraft } from "../../lib/inline-mentions";
 import { skillDraft } from "../../lib/skill-mentions";
 import { markConversationDeleted, reset } from "../../lib/store";
 import { setToken } from "../../lib/api";
@@ -20,6 +21,64 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); reset(); });
+
+it("shows readable inline references and recalls the original rich draft", () => {
+  const rich = writeInlineDraft(["Use ", { id: "fixture", kind: "skill", title: "Review", text: "Review the change.", url: "" }, "."]);
+  recordSent("history-hub/chat", rich);
+  mount();
+  const row = option("Use Review.");
+  expect(row.title).toBe("Use Review.");
+  expect(host.textContent).not.toContain("persona-inline-v1");
+  act(() => row.click());
+  expect(pick).toHaveBeenCalledExactlyOnceWith(rich);
+});
+
+it("filters by displayed @file text and hides raw JSON/XML metadata tokens (#15797)", () => {
+  const richFile = writeInlineDraft([
+    "Check ",
+    { id: "file:src/App.tsx", kind: "file", title: "App.tsx", url: "", text: "src/App.tsx", attrs: { path: "src/App.tsx", cwd: "/example/repo" } },
+  ]);
+  recordSent("history-hub/chat", richFile, undefined, 2);
+  recordSent("history-hub/chat", secret, undefined, 1);
+  mount();
+
+  const input = host.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+  const setQuery = (q: string) => {
+    const setVal = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setVal.call(input, q);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  setQuery("@src/App");
+  expect(host.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(option("Check @src/App.tsx")).toBeDefined();
+
+  setQuery("persona-inline-v1");
+  expect(host.querySelectorAll('[role="option"]')).toHaveLength(0);
+
+  setQuery("opaque-private-skill");
+  expect(host.querySelectorAll('[role="option"]')).toHaveLength(0);
+
+  setQuery("@src/App.tsx");
+  act(() => option("Check @src/App.tsx").click());
+  expect(pick).toHaveBeenCalledExactlyOnceWith(richFile);
+});
+
+it("rejects a stale click on a deduplicated inline-ref prompt after its newer chat is deleted", () => {
+  const newer = writeInlineDraft(["Open ", { id: "uuid-newer", kind: "workspace", title: "Main box", url: "/m1/w1", text: "box" }]);
+  const older = writeInlineDraft(["Open ", { id: "uuid-older", kind: "workspace", title: "Main box", url: "/m1/w1", text: "box" }]);
+  recordSent("history-hub/private", newer, undefined, 2);
+  recordSent("history-hub/kept", older, undefined, 1);
+  mount();
+  expect(host.querySelectorAll('[role="option"]')).toHaveLength(1);
+  const stale = option("Open Main box");
+  act(() => { markConversationDeleted("history-hub", "private"); stale.click(); });
+  expect(pick).not.toHaveBeenCalled();
+  act(() => option("Open Main box").click());
+  expect(pick).toHaveBeenCalledExactlyOnceWith(older);
+});
 
 it("removes another chat's text and selected skill from an already open search", () => {
   recordSent("history-hub/private", secret, undefined, 2);

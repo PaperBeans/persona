@@ -1,10 +1,12 @@
-import { legacyClientHeader, legacyOperationHeader } from '../core/WireCompatibility';
+import type { HubAccess } from '../core/HubAccess';
+import { SocketReceiveBuffer } from '../core/SocketReceiveBuffer';
+import { defaultHealthIntakeRoute, legacyClientHeader, legacyOperationHeader } from '../core/WireCompatibility';
 import { clientLocale } from '../core/ClientLocale';
 import { bundleManager } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { AGENT_MESSAGE_HOLD, isAgentMessagePost, heldReceipt202, writeResultUnknown } from '../core/TransportPolicy';
+import { AGENT_MESSAGE_HOLD, isAgentMessagePost, heldReceipt202, publicMutationError, writeResultUnknown } from '../core/TransportPolicy';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { cert } from '@kit.DeviceCertificateKit';
 import { connection, socket } from '@kit.NetworkKit';
@@ -13,11 +15,19 @@ import { url, util } from '@kit.ArkTS';
 
 const MAX_HTTP_BYTES: number = 4 * 1024 * 1024;
 const MAX_BINARY_BYTES: number = 32 * 1024 * 1024;
+// Port relays and outgoing messages stay bounded separately from the Hub's fleet snapshots.
 const MAX_FRAME_BYTES: number = 1024 * 1024;
+const MAX_HUB_EVENT_BYTES: number = 64 * 1024 * 1024;
 const MAX_HEADER_BYTES: number = 16 * 1024;
 const REQUEST_TIMEOUT_MS: number = 15000;
 const NEXT_ADDRESS_TIMEOUT_MS: number = 2500;
 const WS_GUID: string = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+export interface StreamNetworkRule {
+  readonly directOnly:boolean;
+  current():boolean;
+  bind(tcp:socket.TCPSocket):Promise<void>;
+}
 
 export interface TransportProxy {
   readonly host: string;
@@ -35,13 +45,14 @@ export class EndpointConfig {
   readonly managerId: string;
   readonly alternateUrls: string[];
   readonly proxy: TransportProxy | undefined;
-  constructor(baseUrl: string, hubId: string, token: string, pin: string, managerId: string = '', alternateUrls: string[] = [], proxy?: TransportProxy) {
+  readonly access: HubAccess | undefined;
+  constructor(baseUrl: string, hubId: string, token: string, pin: string, managerId: string = '', alternateUrls: string[] = [], proxy?: TransportProxy, access?: HubAccess) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
     this.hubId = hubId;
     this.token = token;
     this.pin = normalizePin(pin);
     this.managerId = managerId;
-    this.proxy = proxy;
+    this.proxy = proxy; this.access = access;
     if (alternateUrls.length > 8) throw new Error('invalid_endpoint');
     this.alternateUrls = Array.from(new Set<string>(alternateUrls.map((value: string) => { const normalized = normalizeBaseUrl(value); if (!normalized.startsWith('https://')) throw new Error('invalid_endpoint'); return normalized; }))).filter((value: string) => value !== this.baseUrl);
   }
@@ -52,13 +63,15 @@ export class HttpFailure extends Error {
   readonly code: string;
   readonly resultUnknown: boolean;
   readonly resultPending: boolean;
-  constructor(status: number, code: string, resultUnknown: boolean = false, resultPending: boolean = false) {
+  readonly userMessage: string;
+  constructor(status: number, code: string, resultUnknown: boolean = false, resultPending: boolean = false, userMessage: string = '') {
     super(code || 'request_failed');
     this.name = 'HttpFailure';
     this.status = status;
     this.code = code || 'request_failed';
     this.resultUnknown = resultUnknown;
     this.resultPending = resultPending;
+    this.userMessage = userMessage;
   }
 }
 
@@ -128,6 +141,12 @@ function endpointParts(baseUrl: string): ParsedEndpoint {
   };
 }
 
+export function hubCredentialOrigin(baseUrl: string): string {
+  const endpoint = endpointParts(normalizeBaseUrl(baseUrl));
+  const host = endpoint.hostname.toLowerCase();
+  return endpoint.scheme + '://' + (host.includes(':') ? '[' + host + ']' : host) + ':' + endpoint.port;
+}
+
 function routePath(base: ParsedEndpoint, path: string): string {
   if (!path || path.length > 8192 || !path.startsWith('/') || path.startsWith('//') || /[\\\r\n#\u0000-\u001f]/.test(path))
     throw new Error('invalid_path');
@@ -160,13 +179,6 @@ function utf8(value: string): Uint8Array {
 function utf8String(value: Uint8Array, fatal: boolean = true): string {
   if (value.length === 0) return '';
   return util.TextDecoder.create('utf-8', { fatal: fatal }).decodeToString(value);
-}
-
-function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const merged = new Uint8Array(left.length + right.length);
-  merged.set(left, 0);
-  merged.set(right, left.length);
-  return merged;
 }
 
 function arrayBufferBytes(value: ArrayBuffer): Uint8Array { return new Uint8Array(value); }
@@ -213,11 +225,15 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-function errorCode(body: string): string {
+function errorCode(body: string, path: string, method: string, status: number): string {
   if (!body || body.length > 64 * 1024) return 'http_error';
   try {
     const parsed = JSON.parse(body) as Record<string, Object>;
     const code = parsed['code'];
+    // The Hub exposes both a general HTTP code and a precise receipt error. A missing
+    // operation can be checked safely only on its authenticated operation-status route.
+    if (method === 'GET' && status === 404 && code === 'not_found' && parsed['error'] === 'no such operation' &&
+      /^\/api\/v1\/ops\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(path)) return 'no_such_operation';
     if (typeof code === 'string' && code.length <= 128) return code;
     const error = parsed['error'];
     if (typeof error === 'string' && error.length <= 128) return error;
@@ -246,11 +262,12 @@ export class HubTransport {
   private tcpSocket: socket.TCPSocket | undefined;
   private messageCallback: ((payload: string) => void) | undefined;
   private binaryCallback: ((payload: ArrayBuffer) => void) | undefined;
-  private stateCallback: ((state: string) => void) | undefined;
+  private stateCallback: ((state: string, cause?: Error) => void) | undefined;
   private socketMessageListener: ((info: socket.SocketMessageInfo) => void) | undefined;
   private socketErrorListener: ((error: Error) => void) | undefined;
   private socketCloseListener: (() => void) | undefined;
-  private rx: Uint8Array = new Uint8Array(0);
+  private rx = new SocketReceiveBuffer();
+  private readonly inboundLimit: number;
   private upgraded: boolean = false;
   private socketTrusted: boolean = false;
   private upgradeRequested: boolean = false;
@@ -261,11 +278,16 @@ export class HubTransport {
   private fragmentSize: number = 0;
   private sendQueue: Promise<void> = Promise.resolve();
 
+  private readonly access: HubAccess | undefined;
+  private readonly credentialOrigin: string;
+
   constructor(config: EndpointConfig, streamPath: string = '/api/v1/ws') {
     this.endpoint = endpointParts(config.baseUrl);
+    this.access = config.access; this.credentialOrigin = hubCredentialOrigin(config.baseUrl);
     this.hubId = config.hubId;
     this.token = config.token;
     this.pin = config.pin;
+    this.inboundLimit = streamPath === '/api/v1/ws' ? MAX_HUB_EVENT_BYTES : MAX_FRAME_BYTES;
     this.managerId = config.managerId; this.streamPath = streamPath; routePath(this.endpoint, streamPath);
     this.proxy = config.proxy;
     if (this.proxy && (this.endpoint.scheme !== 'https' || this.proxy.host !== '127.0.0.1' || !this.pin)) throw new Error('ssh_invalid_config');
@@ -273,11 +295,25 @@ export class HubTransport {
     if (this.pin && this.endpoint.scheme !== 'https') throw new Error('pin_requires_https');
   }
 
-  stream(path: string): HubTransport {
+  private streamNetwork:StreamNetworkRule|undefined;
+  private outgoingLimit(opcode:number):number {
+    if(opcode===1 && this.streamNetwork && /^\/api\/v1\/recordings\/[a-f0-9-]{36}\/audio$/.test(this.streamPath))return 8704*1024;
+    return MAX_FRAME_BYTES;
+  }
+  /** Local equality witness for a recording consent across app restarts. No device credential enters its manifest. */
+  meetingCredentialKey():string {
+    this.assertLive(this.generation);
+    if(!this.token)throw new Error('missing_credential');
+    const md=cryptoFramework.createMd('SHA256');
+    md.updateSync({data:utf8('persona.meeting.consent.v1\u0000'+this.token)});
+    return new util.Base64Helper().encodeToStringSync(md.digestSync().data,util.Type.BASIC_URL_SAFE).replace(/=+$/,'');
+  }
+  stream(path: string, network?:StreamNetworkRule): HubTransport {
     this.assertLive(this.generation); this.children = this.children.filter((child: HubTransport) => !child.closed);
     if (this.children.length >= 4) throw new Error('stream_limit');
-    const config = new EndpointConfig(this.endpoint.origin + this.endpoint.basePath, this.hubId, this.token, this.pin, this.managerId, [], this.proxy);
-    const child = new HubTransport(config, path); this.children.push(child); return child;
+    const config = new EndpointConfig(this.endpoint.origin + this.endpoint.basePath, this.hubId, this.token, this.pin, this.managerId, [], this.proxy, this.access);
+    if (network && (!network.current() || this.proxy && network.directOnly)) throw new Error('audio_network_unverified');
+    const child = new HubTransport(config, path); child.streamNetwork=network; this.children.push(child); return child;
   }
   private assertLive(generation: number): void {
     if (this.closed || this.closing || generation !== this.generation || this.proxy && !this.proxy.isCurrent()) throw new HttpFailure(0, 'connection_closed');
@@ -305,11 +341,33 @@ export class HubTransport {
     identity['type'] = 'client_hello'; identity['features'] = features.concat([AGENT_MESSAGE_HOLD]); identity['locale'] = clientLocale(i18n.getSystemLanguage());
     return this.send(JSON.stringify(identity));
   }
-  private authHeaders(): Record<string, string> {
+  private authHeaders(includeManager:boolean = true): Record<string, string> {
     const headers = this.clientHeaders();
+    this.access?.apply(this.credentialOrigin, headers);
     if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
-    if (this.managerId) headers['X-Persona-Manager'] = this.managerId;
+    if (includeManager && this.managerId) headers['X-Persona-Manager'] = this.managerId;
     return headers;
+  }
+
+  private accessDenial(status: number, header: (name: string) => string, body?: Uint8Array): HttpFailure | undefined {
+    let blocked = false;
+    const location = header('location');
+    if (status >= 300 && status < 400 && location) {
+      try {
+        const host = url.URL.parseURL(location, this.endpoint.origin).hostname.toLowerCase();
+        blocked = host === 'cloudflareaccess.com' || host.endsWith('.cloudflareaccess.com');
+      } catch (_) {}
+    }
+    if (!blocked && header('content-type').toLowerCase().includes('html')) {
+      if (body && body.length) {
+        const text = utf8String(body.subarray(0, 64 * 1024), false).toLowerCase();
+        blocked = text.includes('cloudflareaccess.com') || text.includes('/cdn-cgi/access/');
+      } else {
+        blocked = (status === 401 || status === 403) && (!!header('cf-ray') || header('server').toLowerCase().includes('cloudflare'));
+      }
+    }
+    if (!blocked) return undefined;
+    return new HttpFailure(status, this.access?.origin === this.credentialOrigin ? 'cloudflare_access_rejected' : 'cloudflare_access_required');
   }
 
   private async validateContextPin(context: rcp.ValidationContext): Promise<boolean> {
@@ -332,7 +390,7 @@ export class HubTransport {
     const generation = this.generation; this.assertLive(generation);
     const verb = method.toUpperCase();
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(verb)) throw new Error('invalid_method');
-    const target = this.endpoint.origin + routePath(this.endpoint, path), headers = this.authHeaders();
+    const target = this.endpoint.origin + routePath(this.endpoint, path), headers = this.authHeaders(!defaultHealthIntakeRoute(path,verb));
     const messagePost = isAgentMessagePost(verb, path);
     if (messagePost) headers['X-Persona-Features'] = AGENT_MESSAGE_HOLD;
     if (body !== undefined) headers['Content-Type'] = contentType;
@@ -342,7 +400,11 @@ export class HubTransport {
     }
     const session = rcp.createSession(); this.requests.add(session);
     const request = new rcp.Request(target, verb as rcp.HttpMethod, headers, body);
-    request.configuration = { transfer: { autoRedirect: false, timeout: { connectMs: REQUEST_TIMEOUT_MS, transferMs: REQUEST_TIMEOUT_MS, inactivityMs: REQUEST_TIMEOUT_MS } },
+    // Git pull allows the Hub 90 seconds, and checkout creation/removal may wait longer on its host.
+    const worktreeRequest = verb === 'POST' && /^\/api\/v1\/machines\/[^/]+\/worktree\/(create|delete|add|remove)$/.test(path);
+    const pullRequest = verb === 'POST' && /^\/api\/v1\/machines\/[^/]+\/git\/pull$/.test(path);
+    const responseTimeout = worktreeRequest ? 165000 : pullRequest ? 100000 : REQUEST_TIMEOUT_MS;
+    request.configuration = { transfer: { autoRedirect: false, timeout: { connectMs: REQUEST_TIMEOUT_MS, transferMs: responseTimeout, inactivityMs: responseTimeout } },
       security: { remoteValidation: this.pin ? (context: rcp.ValidationContext) => this.validateContextPin(context) : 'system' } };
     if (this.proxy) request.configuration.proxy = { url: 'http://' + this.proxy.host + ':' + this.proxy.port,
       createTunnel: 'always', security: { serverAuthentication: { authenticationType: 'basic', credential: {
@@ -354,20 +416,32 @@ export class HubTransport {
       received += chunk.byteLength; chunks.push(new Uint8Array(chunk).slice());
     };
     try {
+      if(this.streamNetwork && (!this.streamNetwork.current() || this.streamNetwork.directOnly))throw new HttpFailure(0,'audio_network_unverified');
       this.assertLive(generation); dispatched = true; const response = await session.fetch(request); this.assertLive(generation);
       if (overLimit) throw new HttpFailure(0, 'response_too_large');
+      const bytes = concatArrays(chunks);
+      const header = (name: string): string => {
+        const key = Object.keys(response.headers).find((k: string) => k.toLowerCase() === name);
+        const value = key ? response.headers[key] : undefined;
+        return typeof value === 'string' ? value : Array.isArray(value) ? value.join(', ') : '';
+      };
+      const denied = this.accessDenial(response.statusCode, header, bytes);
+      if (denied) throw new HttpFailure(denied.status, denied.code, !['GET','HEAD'].includes(verb) && denied.status >= 200 && denied.status < 300);
       if (response.statusCode >= 300 && response.statusCode < 400) throw new HttpFailure(response.statusCode, 'redirect_refused');
-      const bytes = concatArrays(chunks), text = response.statusCode < 200 || response.statusCode >= 300 ? utf8String(bytes, false) : '';
+      const text = response.statusCode < 200 || response.statusCode >= 300 ? utf8String(bytes, false) : '';
       if (response.statusCode === 202 && !['GET', 'HEAD'].includes(verb) && !acceptTransfer) {
         const state = messagePost ? heldReceipt202(utf8String(bytes, false), opId) : 'pending';
         if (state !== 'held') throw new HttpFailure(202, state === 'unknown' ? 'result_unknown' : 'pending', true, state === 'pending');
       }
-      if (response.statusCode < 200 || response.statusCode >= 300)
-        throw new HttpFailure(response.statusCode, errorCode(text), !['GET', 'HEAD'].includes(verb) && writeResultUnknown(response.statusCode, text));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        const userMessage=publicMutationError(verb,path,response.statusCode,text);
+        throw new HttpFailure(response.statusCode,errorCode(text,path,verb,response.statusCode),
+          !['GET','HEAD'].includes(verb) && writeResultUnknown(response.statusCode,text,pullRequest),false,userMessage);
+      }
       const responseType = response.headers['content-type'] || response.headers['Content-Type'];
       return { data: toArrayBuffer(bytes), contentType: typeof responseType === 'string' ? responseType : '' };
     } catch (error) {
-      if (error instanceof HttpFailure) throw new HttpFailure(error.status, error.code, error.resultUnknown || (dispatched && !['GET', 'HEAD'].includes(verb) && (error.status === 0 || error.status >= 300 && error.status < 400)), error.resultPending);
+      if (error instanceof HttpFailure) throw new HttpFailure(error.status, error.code, error.resultUnknown || (dispatched && !['GET', 'HEAD'].includes(verb) && (error.status === 0 || error.status >= 300 && error.status < 400)), error.resultPending, error.userMessage);
       const fields = error as Object as Record<string, Object>, code = fields ? fields['code'] : undefined;
       const diagnostic = overLimit ? 'response_too_large' : (code === 2300060 || code === 1007900060) && this.pin ? 'tls_' + this.pinValidation : typeof code === 'number' ? 'transport_failed_' + code : 'transport_failed';
       throw new HttpFailure(0, diagnostic, dispatched && !['GET', 'HEAD'].includes(verb));
@@ -376,7 +450,8 @@ export class HubTransport {
 
   async request(path: string, method: string = 'GET', body: string = '', opId: string = ''): Promise<string> {
     if (utf8(body).length > MAX_HTTP_BYTES) throw new HttpFailure(0, 'request_too_large');
-    const response = await this.requestData(path, method, body || undefined, 'application/json', MAX_HTTP_BYTES, opId);
+    const limit = method.toUpperCase() === 'GET' && path.split('?')[0] === '/api/v1/sessions' ? MAX_HUB_EVENT_BYTES : MAX_HTTP_BYTES;
+    const response = await this.requestData(path, method, body || undefined, 'application/json', limit, opId);
     try { return utf8String(new Uint8Array(response.data), true); }
     catch (_) { throw new HttpFailure(0, 'response_invalid', !['GET', 'HEAD'].includes(method.toUpperCase())); }
   }
@@ -392,6 +467,12 @@ export class HubTransport {
     if (body && body.byteLength > MAX_BINARY_BYTES) throw new HttpFailure(0, 'request_too_large');
     return this.requestData(path, method, body, contentType, MAX_BINARY_BYTES, opId);
   }
+  async putMeetingGap(path:string,data:ArrayBuffer):Promise<string>{
+    if(!this.streamNetwork || !/^\/api\/v1\/recordings\/[0-9a-f-]{36}\/audio\?at=\d+(?:\.\d+)?$/.test(path) || !data.byteLength || data.byteLength%2 || data.byteLength>64000)
+      throw new Error('invalid_audio_gap');
+    const result=await this.requestData(path,'PUT',data,'application/octet-stream',MAX_HTTP_BYTES,'');
+    return utf8String(new Uint8Array(result.data),true);
+  }
 
   private async withTimeout<T>(promise: Promise<T>, timeout: number, code: string): Promise<T> {
     let timer: number = -1;
@@ -402,7 +483,7 @@ export class HubTransport {
     } finally { if (timer !== -1) clearTimeout(timer); }
   }
 
-  async connect(onMessage: (payload: string) => void, onState?: (state: string) => void,
+  async connect(onMessage: (payload: string) => void, onState?: (state: string, cause?: Error) => void,
     onBinary?: (payload: ArrayBuffer) => void): Promise<void> {
     this.assertLive(this.generation);
     if (this.connectionStage !== 'idle') throw new Error('already_connecting');
@@ -478,6 +559,8 @@ export class HubTransport {
       const peer = peers[index], tcp = socket.constructTCPSocketInstance();
       this.tcpSocket = tcp;
       try {
+        if(this.streamNetwork?.directOnly)await tcp.bind({address:peer.family===2 ? '::':'0.0.0.0',port:0,family:peer.family});
+        if (this.streamNetwork) await this.streamNetwork.bind(tcp);
         await this.withTimeout(tcp.connect({ address: peer, timeout: timeout }), timeout, 'connect_timeout');
         this.assertLive(generation);
         return { tcp: tcp, family: peer.family || 1 };
@@ -598,27 +681,29 @@ export class HubTransport {
     if (this.closed || this.closing) return;
     if (!this.socketTrusted || !this.upgradeRequested || this.expectedAccept.length !== 28) { this.failSocket(new Error('unsolicited_data')); return; }
     const bytes = arrayBufferBytes(buffer);
-    if (this.rx.length + bytes.length > MAX_FRAME_BYTES + MAX_HEADER_BYTES + 14) {
-      this.failSocket(new Error('frame_too_large')); return;
+    let pos = 0;
+    while (pos < bytes.length && !this.closed && !this.closing) {
+      const limit = this.upgraded ? this.inboundLimit + 10 : MAX_HEADER_BYTES + 4;
+      const take = Math.min(bytes.length - pos, limit - this.rx.length);
+      if (take <= 0) { this.failSocket(new Error(this.upgraded ? 'frame_too_large' : 'invalid_upgrade')); return; }
+      this.rx.append(bytes.subarray(pos, pos + take), limit);
+      pos += take;
+      if (!this.upgraded) this.processUpgradeResponse();
+      if (this.upgraded) this.processFrames();
     }
-    this.rx = appendBytes(this.rx, bytes);
-    if (!this.upgraded) this.processUpgradeResponse();
-    if (this.upgraded) this.processFrames();
   }
 
   private processUpgradeResponse(): void {
-    const end = this.headerEnd(this.rx);
+    const received = this.rx.view();
+    const end = this.headerEnd(received);
     if (end < 0) {
-      if (this.rx.length > MAX_HEADER_BYTES) this.failSocket(new Error('invalid_upgrade'));
+      if (received.length === MAX_HEADER_BYTES + 4) this.failSocket(new Error('invalid_upgrade'));
       return;
     }
     if (end > MAX_HEADER_BYTES) { this.failSocket(new Error('invalid_upgrade')); return; }
     let header: string;
-    try { header = utf8String(this.rx.slice(0, end), true); } catch (_) { this.failSocket(new Error('invalid_upgrade')); return; }
+    try { header = utf8String(received.subarray(0, end), true); } catch (_) { this.failSocket(new Error('invalid_upgrade')); return; }
     const lines = header.split('\r\n');
-    if (!/^HTTP\/1\.[01] 101(?: |$)/.test(lines[0])) {
-      const status = Number((lines[0].split(' ')[1] || '0')); this.failSocket(new HttpFailure(status, 'upgrade_rejected') as Error); return;
-    }
     const parsed: Map<string, string> = new Map();
     for (const line of lines.slice(1)) {
       const colon = line.indexOf(':');
@@ -627,13 +712,18 @@ export class HubTransport {
       const value = line.slice(colon + 1).trim();
       parsed.set(name, (parsed.get(name) || '') + (parsed.has(name) ? ', ' : '') + value);
     }
+    if (!/^HTTP\/1\.[01] 101(?: |$)/.test(lines[0])) {
+      const status = Number(lines[0].split(' ')[1] || '0');
+      const denied = this.accessDenial(status, (name: string): string => parsed.get(name) || '');
+      this.failSocket((denied || new HttpFailure(status, 'upgrade_rejected')) as Error); return;
+    }
     const upgrade = (parsed.get('upgrade') || '').toLowerCase().split(',').map((v: string) => v.trim());
     const connection = (parsed.get('connection') || '').toLowerCase().split(',').map((v: string) => v.trim());
     const accept = parsed.get('sec-websocket-accept') || '';
     if (!accept || !this.socketTrusted || !this.upgradeRequested || !upgrade.includes('websocket') || !connection.includes('upgrade') || !constantTimeEqual(accept, this.expectedAccept)) {
       this.failSocket(new Error('invalid_upgrade')); return;
     }
-    this.rx = this.rx.slice(end + 4);
+    this.rx.consume(end + 4);
     this.upgraded = true;
     this.openResolve?.();
   }
@@ -646,31 +736,33 @@ export class HubTransport {
 
   private processFrames(): void {
     while (!this.closed && !this.closing && this.rx.length >= 2) {
-      const first = this.rx[0], second = this.rx[1];
+      const received = this.rx.view();
+      const first = received[0], second = received[1];
       const fin = (first & 0x80) !== 0, rsv = first & 0x70, opcode = first & 0x0f;
       const masked = (second & 0x80) !== 0;
       let length = second & 0x7f, offset = 2;
       if (rsv !== 0 || masked) { this.failSocket(new Error('invalid_frame')); return; }
       if (length === 126) {
-        if (this.rx.length < 4) return;
-        length = readU16(this.rx, 2); offset = 4;
+        if (received.length < 4) return;
+        length = readU16(received, 2); offset = 4;
       } else if (length === 127) {
-        if (this.rx.length < 10) return;
-        if ((this.rx[2] & 0x80) !== 0) { this.failSocket(new Error('invalid_frame')); return; }
-        const high = readU16(this.rx, 2) * 65536 + readU16(this.rx, 4);
-        const low = readU16(this.rx, 6) * 65536 + readU16(this.rx, 8);
-        if (high !== 0 || low > MAX_FRAME_BYTES) { this.failSocket(new Error('frame_too_large')); return; }
+        if (received.length < 10) return;
+        if ((received[2] & 0x80) !== 0) { this.failSocket(new Error('invalid_frame')); return; }
+        const high = readU16(received, 2) * 65536 + readU16(received, 4);
+        const low = readU16(received, 6) * 65536 + readU16(received, 8);
+        if (high !== 0 || low > this.inboundLimit) { this.failSocket(new Error('frame_too_large')); return; }
         length = low; offset = 10;
       }
-      if (length > MAX_FRAME_BYTES) { this.failSocket(new Error('frame_too_large')); return; }
+      if (length > this.inboundLimit) { this.failSocket(new Error('frame_too_large')); return; }
       const control = opcode >= 8;
       if (control && (!fin || length > 125 || (opcode !== 8 && opcode !== 9 && opcode !== 10))) {
         this.failSocket(new Error('invalid_control_frame')); return;
       }
       if (opcode !== 0 && opcode !== 1 && opcode !== 2 && !control) { this.failSocket(new Error('invalid_frame')); return; }
-      if (this.rx.length < offset + length) return;
-      const payload = this.rx.slice(offset, offset + length);
-      this.rx = this.rx.slice(offset + length);
+      if (opcode === 0 && this.fragmentSize + length > this.inboundLimit) { this.failSocket(new Error('message_too_large')); return; }
+      if (received.length < offset + length) return;
+      const payload = received.slice(offset, offset + length);
+      this.rx.consume(offset + length);
       if (control) { this.processControl(opcode, payload); continue; }
       if (opcode === 0) {
         if (!this.fragmentOpcode) { this.failSocket(new Error('unexpected_continuation')); return; }
@@ -680,9 +772,9 @@ export class HubTransport {
         this.fragmentOpcode = opcode;
         this.fragmentParts = [payload]; this.fragmentSize = payload.length;
       }
-      if (this.fragmentSize > MAX_FRAME_BYTES || this.fragmentParts.length > 1024) { this.failSocket(new Error('message_too_large')); return; }
+      if (this.fragmentSize > this.inboundLimit || this.fragmentParts.length > 1024) { this.failSocket(new Error('message_too_large')); return; }
       if (fin) {
-        const message = concatArrays(this.fragmentParts);
+        const message = this.fragmentParts.length === 1 ? this.fragmentParts[0] : concatArrays(this.fragmentParts);
         const messageOpcode = this.fragmentOpcode;
         this.fragmentOpcode = 0; this.fragmentParts = []; this.fragmentSize = 0;
         if (messageOpcode === 1) {
@@ -728,14 +820,15 @@ export class HubTransport {
   }
 
   private enqueueFrame(opcode: number, payload: Uint8Array): Promise<void> {
-    if (payload.length > MAX_FRAME_BYTES || this.closed || this.closing && opcode !== 8) return Promise.reject(new Error('connection_closed'));
-    if (this.queuedFrames >= 64 || this.queuedBytes + payload.length > MAX_FRAME_BYTES * 2) { this.failSocket(new Error('send_queue_full')); return Promise.reject(new Error('send_queue_full')); }
+    const limit=this.outgoingLimit(opcode);
+    if (payload.length > limit || this.closed || this.closing && opcode !== 8) return Promise.reject(new Error('connection_closed'));
+    if (this.queuedFrames >= 64 || this.queuedBytes + payload.length > Math.max(MAX_FRAME_BYTES*2,limit)) { this.failSocket(new Error('send_queue_full')); return Promise.reject(new Error('send_queue_full')); }
     const tls = this.tlsSocket, tcp = this.tcpSocket, copied = payload.slice(), generation = this.generation;
     this.queuedFrames++; this.queuedBytes += copied.length;
     const send = async (): Promise<void> => {
       if (this.closed || this.closing && opcode !== 8 || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
       const random = await cryptoFramework.createRandom().generateRandom(4);
-      if (this.closed || this.closing && opcode !== 8 || generation !== this.generation || tls !== this.tlsSocket || tcp !== this.tcpSocket || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
+      if (this.closed || this.streamNetwork && !this.streamNetwork.current() && opcode!==8 || this.closing && opcode !== 8 || generation !== this.generation || tls !== this.tlsSocket || tcp !== this.tcpSocket || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
       const mask = random.data;
       const maskBit = 0x80;
       let header: Uint8Array;
@@ -750,7 +843,7 @@ export class HubTransport {
       const masked = new Uint8Array(payload.length);
       for (let i = 0; i < payload.length; i++) masked[i] = copied[i] ^ mask[i & 3];
       const data = toArrayBuffer(concatArrays([header, mask, masked]));
-      if (this.closed || this.closing && opcode !== 8 || generation !== this.generation || tls !== this.tlsSocket || tcp !== this.tcpSocket || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
+      if (this.closed || this.streamNetwork && !this.streamNetwork.current() && opcode!==8 || this.closing && opcode !== 8 || generation !== this.generation || tls !== this.tlsSocket || tcp !== this.tcpSocket || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
       if (tls) await this.withTimeout(tls.send(data), 5000, 'socket_write_timeout');
       else if (tcp) await this.withTimeout(tcp.send({ data: data }), 5000, 'socket_write_timeout');
       else throw new Error('connection_closed');
@@ -761,9 +854,15 @@ export class HubTransport {
   }
 
   send(payload: string): boolean {
-    const bytes = utf8(payload); if (!this.upgraded || this.closed || this.closing || bytes.length > MAX_FRAME_BYTES || this.proxy && !this.proxy.isCurrent()) return false;
+    const bytes = utf8(payload); if (!this.upgraded || this.closed || this.closing || bytes.length > this.outgoingLimit(1) || this.proxy && !this.proxy.isCurrent()) return false;
     this.enqueueFrame(1, bytes).catch(() => { if (!this.closing) this.failSocket(new Error('socket_write_failed')); });
     return !this.closed;
+  }
+
+  async sendBinaryAsync(payload:ArrayBuffer):Promise<void> {
+    if (!this.upgraded || this.closed || this.closing || payload.byteLength>MAX_FRAME_BYTES ||
+      this.streamNetwork && !this.streamNetwork.current() || this.proxy && !this.proxy.isCurrent()) throw new Error('connection_closed');
+    await this.enqueueFrame(2,new Uint8Array(payload));
   }
 
   sendBinary(payload: ArrayBuffer): boolean {
@@ -800,8 +899,8 @@ export class HubTransport {
     try { this.tlsSocket?.close().catch(() => undefined); } catch (_) { }
     try { this.tcpSocket?.close().catch(() => undefined); } catch (_) { }
     this.tlsSocket = undefined; this.tcpSocket = undefined;
-    this.rx = new Uint8Array(0); this.fragmentParts = []; this.fragmentSize = 0;
-    this.stateCallback?.(state);
+    this.rx = new SocketReceiveBuffer(); this.fragmentParts = []; this.fragmentSize = 0;
+    this.stateCallback?.(state, _error);
   }
 
   close(): void {

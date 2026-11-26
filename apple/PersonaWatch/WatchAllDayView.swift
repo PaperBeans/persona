@@ -11,12 +11,16 @@ struct WatchAllDayView: View {
     @AppStorage(WatchSync.phoneDayKey) private var phoneDay: Int?
     /// Absent until the phone says; only a phone that says its hub can't write the recap shows the line.
     @AppStorage(WatchSync.phoneDayHubKey) private var phoneDayHub = true
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
     /// Erasing waits for its confirmation: it can't be undone, and it reaches the iPhone and Knowledge too.
     @State private var erasing = false
 
     var body: some View {
         // Opened from the face or a link while the phone offers nothing yet, the page points to the phone too.
-        let access = allDay.access(phoneDay: phoneDay)
+        let recording = PhoneRecordingAllowance(wire: phoneRecording)
+        let offers = WatchRecordingOffers(recording)
+        let access = allDay.access(phoneDay: phoneDay, recording: recording)
         let startable = access == .ready
         ScrollView {
             VStack(spacing: Theme.Space.m) {
@@ -26,9 +30,12 @@ struct WatchAllDayView: View {
                         .font(Theme.Font.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("watch-allday-deleted")
                 }
-                if startable { controls } else { waiting(access) }
+                // A day that still runs while the hub's recording module is off: why nothing new is offered, above
+                // the controls that stay.
+                if startable, offers.saysOff { WatchRecordingOffLine() }
+                if startable { controls(offers) } else { waiting(access) }
                 WatchAllDayFeedbackLine(feedback: allDay.feedback)
-                if allDay.notificationsOff, access != .hidden {
+                if allDay.notificationsOff, access != .hidden, access != .moduleOff {
                     Label("Notifications are off for Persona, so you won't be told when recording pauses or stops.",
                           systemImage: Theme.Icon.muted)
                         .font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
@@ -65,12 +72,12 @@ struct WatchAllDayView: View {
     /// updated); what needs no start stays: erasing what an open day still holds, and ending a wish to record left from
     /// before (it stopped by itself).
     @ViewBuilder private func waiting(_ access: AllDayAlertPolicy.Access) -> some View {
-        WatchAllDayConsentLine(access: access)
+        if access == .moduleOff { WatchRecordingOffLine() } else { WatchAllDayConsentLine(access: access) }
         if allDay.dayOpen { erase }
         if allDay.state == .stopped { stop }
     }
 
-    @ViewBuilder private var controls: some View {
+    @ViewBuilder private func controls(_ offers: WatchRecordingOffers) -> some View {
         if capture.state == .starting {
             ProgressView(String(localized: "Waiting for microphone access")).font(Theme.Font.secondary)
             Button("Cancel") { capture.cancelStarting() }.lineLimit(1)
@@ -83,11 +90,11 @@ struct WatchAllDayView: View {
                     .accessibilityIdentifier("watch-allday-start")
                 if allDay.dayOpen { erase }
             case .recording:
-                actions(recording: true)
+                actions(recording: true, offers: offers)
                 stop
             case .paused, .interrupted:
                 resume
-                actions(recording: false)
+                actions(recording: false, offers: offers)
                 stop
             case .stopped:
                 // No capture runs to mark a meeting in; what it recorded can still be erased.
@@ -100,21 +107,26 @@ struct WatchAllDayView: View {
 
     /// Icon-only, each named for VoiceOver. Pause and Bookmark only while recording: a paused day has no audio to
     /// mark; a meeting mark and erasing the last 10 minutes still make sense.
-    private func actions(recording: Bool) -> some View {
+    /// With the hub's recording module off (`offers.marks` false) the two marks go; Pause and erasing stay.
+    private func actions(recording: Bool, offers: WatchRecordingOffers) -> some View {
         VStack(spacing: Theme.Space.s) {
             if recording {
                 HStack(spacing: Theme.Space.s) {
                     Button { allDay.pause() } label: { Label("Pause", systemImage: Theme.Icon.pause).labelStyle(.iconOnly) }
                         .accessibilityIdentifier("watch-allday-pause")
-                    Button { allDay.addBookmark() } label: { Label("Bookmark", systemImage: Theme.Icon.pin).labelStyle(.iconOnly) }
-                        .recordingPrimaryGesture()
+                    if offers.marks {
+                        Button { allDay.addBookmark() } label: { Label("Bookmark", systemImage: Theme.Icon.pin).labelStyle(.iconOnly) }
+                            .recordingPrimaryGesture()
+                    }
                 }
             }
             HStack(spacing: Theme.Space.s) {
-                Button { allDay.markMeeting() } label: {
-                    Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).labelStyle(.iconOnly)
+                if offers.marks {
+                    Button { allDay.markMeeting() } label: {
+                        Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("watch-allday-meeting")
                 }
-                .accessibilityIdentifier("watch-allday-meeting")
                 Button { erasing = true } label: {
                     Label("Erase last 10 minutes", systemImage: Theme.Icon.delete).labelStyle(.iconOnly)
                 }
@@ -182,13 +194,15 @@ struct WatchAllDayCard: View {
     @State private var allDay = WatchAllDay.shared
     /// The phone's `recordingDay`: absent from a phone that doesn't take day recordings, 0 until its user agrees.
     @AppStorage(WatchSync.phoneDayKey) private var phoneDay: Int?
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
 
     var body: some View {
-        let access = allDay.access(phoneDay: phoneDay)
-        if access != .hidden {
+        let access = allDay.access(phoneDay: phoneDay, recording: PhoneRecordingAllowance(wire: phoneRecording))
+        if AllDayAlertPolicy.listed(access, state: allDay.state) {
             Group {
                 if access != .ready || allDay.state == .recording {
-                    NavigationLink { WatchAllDayView() } label: { label(startable: access == .ready) }
+                    NavigationLink { WatchAllDayView() } label: { label(startable: access == .ready, off: access == .moduleOff) }
                 } else {
                     Button(action: start) { label(startable: true) }
                 }
@@ -205,7 +219,8 @@ struct WatchAllDayCard: View {
         if !allDay.requestStart() { allDay.pageRequested = true }
     }
 
-    private func label(startable: Bool) -> some View {
+    /// `off`: a wish to record left from before, while the hub's recording module is off: it says that, not the consent.
+    private func label(startable: Bool, off: Bool = false) -> some View {
         let state = allDay.state
         return VStack(alignment: .leading, spacing: Theme.Watch.lineSpacing) {
             Label(state.word(startable: startable) ?? String(localized: "All-Day Recording"), systemImage: state.symbol)
@@ -213,6 +228,8 @@ struct WatchAllDayCard: View {
             if state == .recording, let since = allDay.since {
                 Text(timerInterval: since...Date.distantFuture, countsDown: false)
                     .font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
+            } else if off {
+                Text("Meeting recording is off on this hub.").font(Theme.Font.caption).foregroundStyle(.secondary)
             } else if !startable {
                 Text("Agree on your iPhone to start").font(Theme.Font.caption).foregroundStyle(.secondary)
             } else if allDay.deletedOnPhone, state == .off {
@@ -225,16 +242,20 @@ struct WatchAllDayCard: View {
 /// The recording page while all-day recording runs: its state, a meeting mark (the page's Record can't start a second
 /// recording), and the way to its page.
 struct WatchAllDaySummary: View {
+    /// What the page offers: no meeting mark while the hub's recording module is off (#15214).
+    var offers = WatchRecordingOffers(.allowed)
     @State private var allDay = WatchAllDay.shared
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
             WatchAllDayStatus(state: allDay.state, since: allDay.since)
-            Button { allDay.markMeeting() } label: {
-                Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).lineLimit(1)
+            if offers.marks {
+                Button { allDay.markMeeting() } label: {
+                    Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).lineLimit(1)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("watch-recording-mark-meeting")
             }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("watch-recording-mark-meeting")
             WatchAllDayFeedbackLine(feedback: allDay.feedback)
             NavigationLink { WatchAllDayView() } label: {
                 Label("All-Day Recording", systemImage: Theme.Icon.allDay).lineLimit(1)

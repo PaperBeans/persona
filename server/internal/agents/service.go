@@ -379,6 +379,11 @@ type SendResult struct {
 	Upstream  json.RawMessage `json:"upstream,omitempty"`
 }
 
+// sendPreparer reserves a source's durable idempotency record before a new outbox row can mask a conflict.
+type sendPreparer interface {
+	prepareSend(ctx context.Context, clientID, text string) error
+}
+
 var uuidRe = lazyre.New(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func NewClientID() string {
@@ -438,6 +443,11 @@ func (s *Service) Send(ctx context.Context, id, clientID, text, origin string) (
 	}
 	if !sess.CanSend {
 		return nil, fail(http.StatusConflict, "agents: session %s cannot send now (canSend=false)", id)
+	}
+	if p, ok := src.(sendPreparer); ok {
+		if err := p.prepareSend(ctx, clientID, text); err != nil {
+			return nil, err
+		}
 	}
 	now := time.Now().UTC()
 	e := prev

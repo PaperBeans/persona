@@ -119,18 +119,25 @@ struct VoicePlayoutTests {
         #expect(playout.level == 0)
     }
 
+    /// Without the extension's word the lead stops at 2 s, as before #14933; inside replies it marks, at the last step.
     @Test func theLeadStopsGrowingAtTheLastStep() {
-        var playout = VoicePlayout<Int>(rate: 16000)
-        var now: TimeInterval = 0
-        var left: TimeInterval?
-        for _ in 0..<(VoicePlayout<Int>.raisedLeads.count + 2) {
-            _ = playout.add(0, frames: 16000 * 3, left: left, at: now)
-            now += 3.1
-            left = -0.1 // three seconds played, then 100 ms of nothing before the next piece
+        for marked in [false, true] {
+            var playout = VoicePlayout<Int>(rate: 16000)
+            if marked { playout.replyBegan() }
+            var now: TimeInterval = 0
+            var left: TimeInterval?
+            for _ in 0..<(VoicePlayout<Int>.raisedLeads.count + 2) {
+                // Four seconds, more than any lead: each plays as it comes.
+                #expect(playout.add(0, frames: 16000 * 4, left: left, at: now) == [0])
+                now += 4.1
+                left = -0.1 // four seconds played, then 100 ms of nothing before the next piece
+            }
+            let top = marked ? VoicePlayout<Int>.raisedLeads.count : VoicePlayout<Int>.guessedTop
+            #expect(playout.level == top)
+            #expect(playout.leadNow == VoicePlayout<Int>.raisedLeads[top - 1])
+            #expect(playout.stalls == VoicePlayout<Int>.raisedLeads.count + 1)
         }
-        #expect(playout.level == VoicePlayout<Int>.raisedLeads.count)
-        #expect(playout.leadNow == VoicePlayout<Int>.raisedLeads.last)
-        #expect(playout.stalls == VoicePlayout<Int>.raisedLeads.count + 1)
+        #expect(VoicePlayout<Int>.raisedLeads[VoicePlayout<Int>.guessedTop - 1] == 2.0)
         #expect(VoicePlayout<Int>(rate: 16000, level: 99).level == VoicePlayout<Int>.raisedLeads.count)
         #expect(VoicePlayout<Int>(rate: 16000, level: -1).level == 0)
     }
@@ -143,13 +150,15 @@ struct VoicePlayoutTests {
         #expect(playout.due == VoicePlayout<Int>.quiet, "a short reply waits for the stream to go quiet, not the whole lead")
         #expect(playout.add(2, frames: piece, left: nil, at: 0.5).isEmpty)
         #expect(playout.due == 0.5 + VoicePlayout<Int>.quiet)
-        // Pieces that keep coming are gathered for the lead, but no longer than the wait from the first.
+        // Pieces that keep coming are gathered for the lead, but no longer than the wait from the first: here, coming
+        // far slower than they play, the longest (#14933).
         var now = 0.5
         while now + 0.9 < wait {
             now += 0.9
             #expect(playout.add(3, frames: piece, left: nil, at: now).isEmpty)
         }
-        #expect(playout.due == min(wait, now + VoicePlayout<Int>.quiet))
+        #expect(playout.waitNow == VoicePlayout<Int>.longestWait)
+        #expect(playout.due == min(playout.waitNow, now + VoicePlayout<Int>.quiet))
     }
 
     @Test func aNewPlayerForTheSameCallKeepsTheRaisedLead() {
@@ -262,7 +271,7 @@ struct VoicePlayoutTests {
         #expect(fixed.gaps.count >= 25)
         let growing = replay(arrivals, frames: servicePiece, rate: 16000)
         #expect(growing.gaps.count <= 4)
-        #expect(growing.level == VoicePlayout<Int>.raisedLeads.count)
+        #expect(growing.level == VoicePlayout<Int>.guessedTop)
     }
 
     /// The measured service sends about four times faster than it plays: no gap, and the lead never grows.
@@ -304,7 +313,7 @@ struct VoicePlayoutTests {
             #expect(blind.gaps.count == arrivals90.count - 1)
             let at90 = replay(arrivals90, frames: servicePiece, rate: 16000, latency: latency)
             #expect(at90.gaps.count <= 3)
-            #expect(at90.level == VoicePlayout<Int>.raisedLeads.count)
+            #expect(at90.level == VoicePlayout<Int>.guessedTop)
         }
     }
 
@@ -339,6 +348,252 @@ struct VoicePlayoutTests {
         #expect(replayed.level == 0)
         #expect(replayed.replies.count == 4)
         #expect(replayed.replies.allSatisfy { !$0.isSlow && !$0.raisedLead })
+    }
+
+    // MARK: Slow and bursty voices, with the extension's reply edges (#14933)
+
+    /// Inside a reply the extension marked, a pause longer than `stallWindow` is a stall of that reply; without its word
+    /// the late piece was taken for the next reply, and the lead never grew.
+    @Test func aLongPauseInsideAMarkedReplyIsAStall() {
+        for marked in [false, true] {
+            var playout = VoicePlayout<Int>(rate: 16000)
+            if marked { playout.replyBegan() }
+            #expect(playout.add(1, frames: servicePiece, left: nil, at: 0) == [1])
+            let now = 0.384 + 2.0 // two seconds after the player ran dry
+            #expect(playout.add(2, frames: servicePiece, left: 0.384 - now, at: now).isEmpty == marked)
+            #expect(playout.stalls == (marked ? 1 : 0))
+            #expect(playout.level == (marked ? 1 : 0), "one step: the reply could not be measured before the pause")
+            #expect(playout.takeEnded() == nil || !marked, "marked: still the same reply")
+        }
+        // A fast voice measured before one long hiccup: its pace, the pause counted, is still about its own, so one
+        // step, not the last.
+        var fast = VoicePlayout<Int>(rate: 16000)
+        fast.replyBegan()
+        var end = 0.0
+        for n in 0..<20 {
+            let at = Double(n) * 0.384 / 4
+            let ready = fast.add(n, frames: servicePiece, left: n == 0 ? nil : end - at, at: at)
+            if !ready.isEmpty { end = max(end, at) + Double(ready.count) * 0.384 }
+        }
+        let late = end + 0.5
+        #expect(fast.add(20, frames: servicePiece, left: end - late, at: late).isEmpty)
+        #expect(fast.stalls == 1)
+        #expect(fast.level == 1)
+    }
+
+    /// Inside a marked reply a pause between sentences does not play a raised lead half-gathered (`quiet`); only
+    /// `replyQuiet` does. The reply's end plays what is held at once.
+    @Test func aMarkedReplyHoldsThroughItsPausesAndPlaysAsItEnds() {
+        let top = VoicePlayout<Int>.raisedLeads.count
+        var playout = VoicePlayout<Int>(rate: 16000, level: top)
+        playout.replyBegan()
+        #expect(playout.add(1, frames: piece, left: nil, at: 10).isEmpty)
+        #expect(playout.waitNow > VoicePlayout<Int>.replyQuiet)
+        #expect(playout.due == 10 + VoicePlayout<Int>.replyQuiet, "not 10 + quiet")
+        #expect(playout.add(2, frames: piece, left: nil, at: 11.5).isEmpty, "1.5 s later: still held")
+        #expect(playout.due == min(10 + playout.waitNow, 11.5 + VoicePlayout<Int>.replyQuiet))
+        #expect(playout.replyEnded() == [1, 2])
+        #expect(!playout.isHolding && !playout.inReply)
+        let ended = playout.takeEnded()
+        #expect(ended?.marked == true && ended?.cut == false)
+        #expect(ended?.logLine(lead: playout.leadNow).contains("marked by the extension") == true)
+        // Without the extension's word the same pause played what was held after `quiet`.
+        var guessing = VoicePlayout<Int>(rate: 16000, level: top)
+        #expect(guessing.add(1, frames: piece, left: nil, at: 10).isEmpty)
+        #expect(guessing.due == 10 + VoicePlayout<Int>.quiet)
+    }
+
+    /// A short reply once the lead was raised: with the extension's word it plays as it ends instead of waiting out `quiet`.
+    @Test func aShortMarkedReplyPlaysAsItEnds() {
+        let arrivals: [TimeInterval] = (0..<25).map { Double($0) * 0.04 / 0.83 } // 1 s at 0.83x
+        let guessed = replay(replies: [arrivals], frames: 640, rate: 16000, marked: false, level: 3)
+        let marked = replay(replies: [arrivals], frames: 640, rate: 16000, marked: true, level: 3)
+        #expect(guessed.gaps.isEmpty && marked.gaps.isEmpty)
+        #expect(abs(guessed.starts[0] - (arrivals.last! + VoicePlayout<Int>.quiet)) < 0.01, "waited out quiet")
+        #expect(marked.starts[0] < arrivals.last! + 0.01, "played as it ended")
+        // A reply shorter than the first lead plays as it ends too, not after `wait`.
+        let tiny: [TimeInterval] = [0, 0.02, 0.04]
+        #expect(replay(replies: [tiny], frames: 640, rate: 16000, marked: true).starts[0] < 0.05)
+        #expect(abs(replay(replies: [tiny], frames: 640, rate: 16000, marked: false).starts[0] - VoicePlayout<Int>.wait) < 0.01)
+    }
+
+    @Test func aStallJumpsToTheLeadItsPaceNeeds() {
+        #expect(VoicePlayout<Int>.fitting(nil) == 0)
+        #expect(VoicePlayout<Int>.fitting(1.0) == 0)
+        #expect(VoicePlayout<Int>.fitting(4) == 0)
+        #expect(VoicePlayout<Int>.fitting(0.94) == 1)
+        #expect(VoicePlayout<Int>.fitting(0.9) == 2)
+        #expect(VoicePlayout<Int>.fitting(0.8) == 3)
+        #expect(VoicePlayout<Int>.fitting(0.6) == 4)
+        #expect(VoicePlayout<Int>.fitting(0.1) == VoicePlayout<Int>.raisedLeads.count)
+    }
+
+    /// A raised lead waits as long as the voice's pace needs to gather it, up to `longestWait`: under 0.67x the fixed
+    /// `1.5 x lead` played it half-gathered every time.
+    @Test func aRaisedLeadWaitsAsLongAsASlowVoiceNeedsToGatherIt() {
+        let top = VoicePlayout<Int>.raisedLeads.count
+        func measured(_ speed: Double) -> VoicePlayout<Int> {
+            var playout = VoicePlayout<Int>(rate: 16000, level: top)
+            playout.replyBegan()
+            // 3.4 s in 20 ms pieces, less than the lead: all of it held, over more than `measureSpan` at every speed here.
+            for n in 0..<170 { #expect(playout.add(n, frames: 320, left: nil, at: Double(n) * 0.02 / speed).isEmpty) }
+            #expect(playout.replyEnded().count == 170)
+            return playout
+        }
+        let lead = VoicePlayout<Int>.raisedLeads[top - 1]
+        let slow = measured(0.6)
+        #expect(abs(slow.lastSpeed! - 0.6) < 1e-9)
+        #expect(slow.waitNow >= lead / 0.6, "long enough to gather the lead at 0.6x")
+        #expect(slow.waitNow > VoicePlayout<Int>.wait * lead / VoicePlayout<Int>.lead)
+        #expect(measured(0.2).waitNow == VoicePlayout<Int>.longestWait)
+        let fast = measured(2)
+        #expect(abs(fast.lastSpeed! - 2) < 1e-9)
+        #expect(fast.waitNow == VoicePlayout<Int>.wait * lead / VoicePlayout<Int>.lead, "a voice that keeps up: as before")
+        #expect(VoicePlayout<Int>(rate: 16000).waitNow == VoicePlayout<Int>.wait, "the first lead never waits longer")
+    }
+
+    /// A voice that comes at 60 % of its pace, a 23-second reply in the measured service's pieces: before #14933 it ran
+    /// dry 7 times; without the extension's word it now does 6, with it at most 4, as its lead goes to the last step.
+    @Test func aVoiceAtSixtyPercentPausesAFewTimes() {
+        let arrivals: [TimeInterval] = (0..<60).map { Double($0) * 0.384 / 0.6 }
+        let guessed = replay(replies: [arrivals], frames: servicePiece, rate: 16000, marked: false)
+        #expect(guessed.gaps.count <= 6)
+        #expect(guessed.level == VoicePlayout<Int>.guessedTop)
+        let marked = replay(replies: [arrivals], frames: servicePiece, rate: 16000, marked: true)
+        #expect(marked.gaps.count <= 4)
+        #expect(marked.level == VoicePlayout<Int>.raisedLeads.count)
+        // Three such replies, 15 s each and 4 s apart: 11 gaps before; with the extension's word the later ones gather the
+        // whole lead and run dry once each.
+        let first: [TimeInterval] = (0..<40).map { Double($0) * 0.384 / 0.6 }
+        let second = first.map { $0 + first.last! + 4 }
+        let third = second.map { $0 + first.last! + 4 }
+        let three = replay(replies: [first, second, third], frames: servicePiece, rate: 16000, marked: true)
+        #expect(three.gaps.count <= 5)
+        #expect(three.gapsByReply[1].count <= 1 && three.gapsByReply[2].count <= 1)
+        #expect(replay(replies: [first, second, third], frames: servicePiece, rate: 16000, marked: false).gaps.count <= 11)
+    }
+
+    /// A voice made a sentence at a time: 1.2 s of audio in a burst, then 1.2 s or 2 s of nothing. Without the extension's
+    /// word `quiet` played each lead half-gathered and the 2 s pauses split the reply (3 and 5 gaps, as before #14933);
+    /// inside a marked reply the lead gathers through the pauses (2 and 3).
+    @Test func aBurstyVoicePausesLessInsideAMarkedReply() {
+        for (pause, before, now) in [(1.2, 3, 2), (2.0, 5, 3)] {
+            var arrivals: [TimeInterval] = []
+            var at: TimeInterval = 0
+            for _ in 0..<8 {
+                arrivals += (0..<30).map { at + Double($0) * 0.01 }
+                at = arrivals.last! + pause
+            }
+            let guessed = replay(replies: [arrivals], frames: 640, rate: 16000, marked: false)
+            #expect(guessed.gaps.count <= before)
+            let marked = replay(replies: [arrivals], frames: 640, rate: 16000, marked: true)
+            #expect(marked.gaps.count <= now)
+        }
+    }
+
+    /// The default voice sends four times faster than it plays: with or without the extension's word, every reply plays
+    /// at once, never runs dry, and the lead stays at 200 ms.
+    @Test func aFastVoiceNeverWaitsForMore() {
+        let step = 0.384 / 4
+        let replies: [[TimeInterval]] = [(0..<30).map { Double($0) * step }, (0..<10).map { 10 + Double($0) * step },
+                                         (0..<20).map { 20 + Double($0) * step }]
+        for marked in [false, true] {
+            let replayed = replay(replies: replies, frames: servicePiece, rate: 16000, marked: marked)
+            #expect(replayed.gaps.isEmpty)
+            #expect(replayed.level == 0)
+            #expect(replayed.starts.allSatisfy { $0 == 0 }, "the first piece is more than the lead: it plays as it comes")
+            #expect(replayed.lead.slow == false)
+        }
+    }
+
+    /// Without the extension's word nothing plays worse than before #14933 (counts from the playout before it): the same
+    /// replays, never more gaps.
+    @Test func withoutTheExtensionsWordNothingRunsDryMoreThanBefore() {
+        func steady(_ count: Int, _ speed: Double) -> [TimeInterval] { (0..<count).map { Double($0) * 0.384 / speed } }
+        let before: [(speed: Double, count: Int, gaps: Int)] = [(0.94, 40, 2), (0.9, 78, 3), (0.8, 60, 4), (0.7, 60, 5),
+                                                                (0.6, 60, 7), (0.5, 60, 9), (4, 40, 0)]
+        for (speed, count, gaps) in before {
+            let replayed = replay(replies: [steady(count, speed)], frames: servicePiece, rate: 16000, marked: false)
+            #expect(replayed.gaps.count <= gaps, "at \(speed)x")
+            #expect(replayed.level <= VoicePlayout<Int>.guessedTop)
+        }
+    }
+
+    /// What the replies said of the voice's pace, for its next call (`VoiceLeadMemory`): nothing until one is measured,
+    /// slow once one came slow or ran dry, and it stays slow. A new player for the same call keeps it, and its lead.
+    @Test func theLeadSaysWhatTheRepliesShowed() {
+        var playout = VoicePlayout<Int>(rate: 16000)
+        #expect(playout.lead == VoiceLead(level: 0, slow: nil))
+        _ = playout.add(1, frames: servicePiece, left: nil, at: 0)
+        playout.endReply()
+        #expect(playout.lead.slow == nil, "too quick to measure")
+        for n in 0..<20 { _ = playout.add(n, frames: servicePiece, left: 1, at: 10 + Double(n) * 0.384 / 4) }
+        playout.endReply()
+        #expect(playout.lead == VoiceLead(level: 0, slow: false), "it kept up")
+        for n in 0..<6 { _ = playout.add(n, frames: servicePiece, left: 1, at: 20 + Double(n) * 0.384 / 0.8) }
+        #expect(playout.lead == VoiceLead(level: 0, slow: true), "the reply still arriving counts as the call ends")
+        playout.endReply()
+        #expect(playout.lead == VoiceLead(level: 1, slow: true), "it came at 0.8x")
+        playout.replyBegan()
+        let moved = playout.moved(to: 24000)
+        #expect(moved.rate == 24000 && moved.lead == playout.lead && moved.lastSpeed == playout.lastSpeed)
+        #expect(!moved.inReply && !moved.isHolding)
+        playout.clear()
+        #expect(!playout.inReply, "the extension clears before it ends the reply it cuts off")
+    }
+
+    private struct Replies {
+        /// The gaps inside each reply, where the player ran dry.
+        var gapsByReply: [[TimeInterval]]
+        /// From each reply's first piece to the first of it the player played.
+        var starts: [TimeInterval]
+        var level: Int
+        var lead: VoiceLead
+        var gaps: [TimeInterval] { gapsByReply.flatMap { $0 } }
+    }
+
+    /// Plays `replies` of pieces of `frames` through a playout and a player that plays what it is given back to back, as
+    /// `replay` does with the render position; `marked`: the extension says where each begins and ends (just before its
+    /// first piece, and just after its last).
+    private func replay(replies: [[TimeInterval]], frames: Int, rate: Int, marked: Bool, level: Int = 0,
+                        io: TimeInterval = 0.02) -> Replies {
+        var playout = VoicePlayout<Int>(rate: rate, level: level)
+        var clock = VoicePlayerClock()
+        let length = Double(frames) / Double(rate)
+        var playEnd: TimeInterval?
+        var playing: Int?
+        var gaps = [[TimeInterval]](repeating: [], count: replies.count)
+        var starts = [TimeInterval?](repeating: nil, count: replies.count)
+        func rendered(_ now: TimeInterval) -> TimeInterval { (now / io + 1e-9).rounded(.down) * io }
+        func schedule(_ pieces: [Int], at now: TimeInterval) {
+            for reply in pieces {
+                if let end = playEnd, end < now - 1e-9, playing == reply { gaps[reply].append(now - end) }
+                if starts[reply] == nil { starts[reply] = now - replies[reply][0] }
+                clock.scheduled(length, rendered: rendered(now))
+                playEnd = max(now, playEnd ?? now) + length
+                playing = reply
+            }
+        }
+        func due(by now: TimeInterval) {
+            while let due = playout.due, due <= now { schedule(playout.release(), at: due) }
+        }
+        for (reply, arrivals) in replies.enumerated() {
+            due(by: arrivals[0])
+            if marked { playout.replyBegan() }
+            for now in arrivals {
+                due(by: now)
+                schedule(playout.add(reply, frames: frames, left: clock.left(rendered: rendered(now)), at: now), at: now)
+            }
+            if marked {
+                let end = arrivals.last! + 0.001
+                due(by: end)
+                schedule(playout.replyEnded(), at: end)
+            }
+        }
+        if let due = playout.due { schedule(playout.release(), at: due) }
+        let atEnd = playout.level
+        playout.endReply()
+        return Replies(gapsByReply: gaps, starts: starts.map { $0 ?? .infinity }, level: atEnd, lead: playout.lead)
     }
 
     /// What tells the playout how much the player has left.

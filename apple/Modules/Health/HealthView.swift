@@ -80,6 +80,12 @@ import SwiftUI
         }
     }
 
+    /// Only the default manager's currently paired scope may seed the items projection.
+    var currentIntakeItems: [String]? {
+        guard let scope = intakeScope, isCurrent(scope) else { return nil }
+        return intake?.items
+    }
+
     private func isCurrent(_ api: APIClient) -> Bool {
         api.sameSettingsScope(as: deps.api()?.manager(nil)) && api.sameSettingsScope(as: intakeScope)
     }
@@ -247,6 +253,8 @@ struct HealthView: View {
         var revision: Int
         var retry: Int
         var supported: Bool
+        var itemsSupported: Bool
+        var itemsRetry: Int
     }
     @Environment(AppModel.self) private var model
     /// A conversation is being started (the Persona page shows it coming).
@@ -261,7 +269,13 @@ struct HealthView: View {
     /// Starts a health conversation with the message (`AssistantView.start(…, space:)`).
     var send: (String, [ImagePayload]) -> Void
     @State private var page = HealthModel()
+    @State private var items = HealthItemsModel()
+    #if DEBUG
+    @State private var openedItemsExample = false
+    @State private var tellPreview = false
+    #endif
     @State private var intakeDetail: HealthIntakeSheet.Route?
+    @State private var strengthDetail: HealthStrengthSheet.Route?
     #if os(iOS)
     #if DEBUG
     @State private var trends = HealthHomeSamples.trendsModel()
@@ -317,9 +331,29 @@ struct HealthView: View {
         .background(Theme.groupedPage)
         .keepsHeightUnderUndockedKeyboard() // the composer stays at the bottom under a floating keyboard (#2565)
         .pageTitle(String(localized: "Health"))
+        .toolbar {
+            if items.supported {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { items.beginEditing() } label: { Text("Edit").lineLimit(1) }
+                        .disabled(items.state == nil || items.busy)
+                        .accessibilityIdentifier("health-items-edit")
+                }
+            }
+        }
         .fileUploadPicker(isPresented: $showReports) { uploadReports($0) }
+        .sheet(isPresented: Binding(get: { items.editing }, set: { if !$0 { items.closeEditor() } })) {
+            HealthItemsEditor(page: items)
+        }
         .sheet(item: $intakeDetail) { HealthIntakeSheet(kind: $0.kind) }
+        .sheet(item: $strengthDetail) { HealthStrengthSheet(push: $0.push, group: $0.group) }
         #if DEBUG
+        .sheet(isPresented: $tellPreview) {
+            NavigationStack {
+                TellHealthPreview(api: model.api?.manager(nil))
+                    .toolbar { SheetClose { tellPreview = false } }
+            }
+        }
+        .task { tellPreview = UserDefaults.standard.bool(forKey: "showTellHealthResult") }
         // `-showReportUpload <name>[,<name>…]`: made-up reports uploaded as if picked, to check the whole way without the
         // picker; `-showReportUploadMB <n>`: each that big, on its way a while (the mock hub reads it slowly). Once a launch:
         // the page built again (a fold, #2836) does not upload them twice.
@@ -338,15 +372,50 @@ struct HealthView: View {
         #endif
         .tabActiveTask(id: IntakeRefresh(group: model.hubGroup, hellos: model.hubHellos,
                                         revision: model.healthIntakeRevision, retry: page.intakeRefresh,
-                                        supported: model.hubFeatures.contains(HealthIntake.feature))) {
+                                        supported: model.hubFeatures.contains(HealthIntake.feature),
+                                        itemsSupported: model.hubFeatures.contains(HealthItems.feature), itemsRetry: items.refresh)) {
+            async let selection: Void = items.load(features: model.hubFeatures, available: Self.availableItems, intakeItems: page.currentIntakeItems)
             await page.load(machine: machine.id, features: model.hubFeatures, isDemo: model.isDemo)
+            items.useIntakeItems(page.currentIntakeItems)
+            await selection
+            #if DEBUG
+            if !openedItemsExample, UserDefaults.standard.bool(forKey: "showHealthItemsEditor"), items.state != nil {
+                openedItemsExample = true
+                items.beginEditing()
+            }
+            #endif
         }
-        .refreshable { await page.load(machine: machine.id, features: model.hubFeatures, isDemo: model.isDemo) }
+        .onChange(of: page.intake?.items) { _, _ in items.useIntakeItems(page.currentIntakeItems) }
+        .refreshable {
+            await items.load(features: model.hubFeatures, available: Self.availableItems, intakeItems: page.currentIntakeItems)
+            await page.load(machine: machine.id, features: model.hubFeatures, isDemo: model.isDemo)
+            items.useIntakeItems(page.currentIntakeItems)
+        }
         #if os(iOS)
         // Load outside the conditional List row: a hidden empty section has no row to run its task.
         .tabActiveTask(id: trends.range) { await trends.load() }
         #endif
     }
+
+    private static var availableItems: [String] {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? ["water", "protein", "activity", "trends", "strength"] : ["water", "protein", "trends", "strength"]
+        #else
+        ["water", "protein"]
+        #endif
+    }
+
+    #if os(iOS)
+    @ViewBuilder private var activitySection: some View {
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            #if DEBUG
+            HealthActivitySection(model: HealthHomeSamples.activityModel())
+            #else
+            HealthActivitySection()
+            #endif
+        }
+    }
+    #endif
 
     private func sections(_ list: [Session]) -> some View {
         ScrollViewReader { proxy in
@@ -356,24 +425,54 @@ struct HealthView: View {
                     Section { HealthWaterMigrationCard(page: page) }
                 }
                 #endif
-                Section {
-                    HealthTodaySection(page: page) { intakeDetail = .init(kind: $0) }
+                if items.supported {
+                    if items.question { Section { HealthItemsQuestion(page: items) } }
+                    if !items.question, let error = items.error { Section { LoadProblem(text: error) } }
+                    ForEach(items.sections) { section in
+                        switch section {
+                        case .today:
+                            Section {
+                                HealthTodaySection(page: page, kinds: items.todayKinds) { intakeDetail = .init(kind: $0) }
+                                #if os(iOS)
+                                HealthIntakeSyncLink()
+                                #endif
+                            } header: { Text("Today") }
+                        case .strength:
+                            #if os(iOS)
+                            HealthStrengthSection(hellos: model.hubHellos, group: model.hubGroup) { push, group in
+                                strengthDetail = .init(push: push, group: group)
+                            }.id(model.hubGroup)
+                            #endif
+                        case .activity:
+                            #if os(iOS)
+                            activitySection
+                            #endif
+                        case .trends:
+                            #if os(iOS)
+                            if trends.hasData { HealthTrendsSection(model: trends, automaticallyLoads: false) }
+                            #endif
+                        }
+                    }
+                } else {
+                    Section {
+                        HealthTodaySection(page: page) { intakeDetail = .init(kind: $0) }
+                        #if os(iOS)
+                        HealthIntakeSyncLink()
+                        #endif
+                    } header: { Text("Today") }
                     #if os(iOS)
-                    HealthIntakeSyncLink()
-                    #endif
-                } header: { Text("Today") }
-                #if os(iOS)
-                if UIDevice.current.userInterfaceIdiom == .phone {
-                    #if DEBUG
-                    HealthActivitySection(model: HealthHomeSamples.activityModel())
-                    #else
-                    HealthActivitySection()
+                    if UIDevice.current.userInterfaceIdiom == .phone {
+                        #if DEBUG
+                        HealthActivitySection(model: HealthHomeSamples.activityModel())
+                        #else
+                        HealthActivitySection()
+                        #endif
+                    }
+                    if trends.hasData {
+                        HealthTrendsSection(model: trends, automaticallyLoads: false)
+                    }
                     #endif
                 }
-                if trends.hasData {
-                    HealthTrendsSection(model: trends, automaticallyLoads: false)
-                }
-                #endif
                 // Where the data comes from, named first (App Review 2.5.1, #13118): HealthKit is Apple Health, with its
                 // icon; on an iPhone or iPad it opens This iPhone, where the access is turned on.
                 Section {
@@ -454,6 +553,7 @@ struct HealthView: View {
                 Section {
                     source(Theme.Brand.iosHealth, String(localized: "Apple Health"), String(localized: "Reads summaries of steps, sleep, heart rate, weight and more through your iPhone. Persona needs to be open on the phone with access granted."))
                     source(Theme.Icon.edit, String(localized: "Log Data"), String(localized: "Say “I drank 300 ml of water”, or take a photo of a meal in the field below, to log it in Health. When sync is on, it is also written to Apple Health."))
+                    source(Theme.Icon.edit, String(localized: "Strength Training"), String(localized: "In Shortcuts, create an automation for Apple Watch Workout · Strength Training Starts, then add Tell Health with “Strength training has started”. Health plans today from your last workout. You can also say it in a Health chat. The system decides whether confirmation is needed."))
                     source(Theme.Icon.document, String(localized: "Checkup Reports and Lab Results"), String(localized: "Choose Upload a checkup report and pick a PDF or a photo: each item is read out and the ones outside the reference range are marked. The original and its record stay in Health, so years can be compared."))
                 } header: {
                     Text("Data Sources")

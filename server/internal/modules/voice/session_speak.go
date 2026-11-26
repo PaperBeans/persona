@@ -17,6 +17,7 @@ type sentWords struct {
 	queued     time.Time // it went into the queue: the user's voice holds it back at most answerHoldMost / sayHoldMost
 	prio       int       // which goes first of what waits for the insertion gate: higher first, then the oldest
 	card       string    // the card it asks (asks.go): once it is sent, the model asks that card
+	reask      bool      // a reminder for a new upstream session that has not heard this card
 	cards      []string  // the cards it says wait on the screen (asks.go): not said once they are all gone
 	// run is the run it is about (a heartbeat: it goes when the run has more to say); expires, when it is not said by
 	// then it is not said (a heartbeat gone stale).
@@ -135,6 +136,14 @@ func (c *conversation) sendNow(s *sentWords) {
 		c.requeue(s)
 		c.mu.Unlock()
 		return
+	}
+	if s.reask {
+		// The original question could already be out of the queue when the tracker checked.
+		if s.card != c.askingCardLocked() || c.askGen == c.gen {
+			c.mu.Unlock()
+			return
+		}
+		s.reask = false // it is this session's question now; an explicit provider refusal can still retry it
 	}
 	w, now, cur := c.w, time.Now(), c.gen
 	if s.delegation != "" && s.gen != c.gen {

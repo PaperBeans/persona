@@ -13,5 +13,14 @@
   "unavailable_api_chat": "Connects through the Chat Completions API. Assistant chats need Claude Code or a Messages API connection",
   "unavailable_api_other": "Connects through the {api} API. Assistant chats need Claude Code or a Messages API connection",
   "err_invalid_id": "That isn’t a conversation ID",
-  "err_unreadable": "The conversations’ model picks couldn’t be read. Try again in a moment."
+  "err_unreadable": "The conversations’ model picks couldn’t be read. Try again in a moment.",
+  "unhealthy_auth": "Its key or sign-in was rejected in its last check on {machine}",
+  "unhealthy_model_route": "Its gateway couldn’t use the model in its last check on {machine}",
+  "unhealthy_cli_outdated": "Its CLI on {machine} is too old. Update it, then test it again",
+  "unhealthy_timeout": "Didn’t answer in its last check on {machine}",
+  "unhealthy_usage_limit": "Reached its subscription usage limit on {machine}",
+  "unhealthy_upstream": "Its gateway had no account free in its last check on {machine}",
+  "unhealthy_onboarding": "First-run setup isn’t finished on {machine}",
+  "unhealthy_other": "Failed its last check on {machine}",
+  "unhealthy_with_error": "{reason}: {error}"
 }

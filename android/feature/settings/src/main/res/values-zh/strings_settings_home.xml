@@ -16,7 +16,7 @@
     <string name="settings_search_empty">没有找到相关设置</string>
     <string name="settings_search_empty_detail">换个名称搜索，或清空搜索内容。</string>
     <string name="settings_search_models_aliases">供应商 模型配置 模型设置 模型档位 档位 用途 密钥 API Key 运行方式</string>
-    <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy 会话分诊 编码 运行时</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy 会话分诊 编码 运行时 herdr 标签名 会话名</string>
     <string name="settings_search_notifications_aliases">通知设置 通知 通知渠道 电池 保活 自启动 胶囊 悬浮 静音 电脑 锁屏 后台</string>
     <string name="settings_search_connectors_aliases">邮箱 邮件 手机 飞书 Lark 以你的名义发出</string>
     <string name="settings_search_extensions_aliases">扩展 插件 市场</string>
@@ -32,4 +32,8 @@
     <string name="settings_inbox_sources">收件箱来源</string>
     <string name="settings_inbox_sources_detail">哪些来源会往收件箱里放新东西</string>
     <string name="settings_search_inbox_sources_aliases">收件箱 来源 订阅 推荐订阅 邮件 静音</string>
+    <string name="settings_use_herdr_tab_name">使用 herdr 标签名作为会话名</string>
+    <string name="settings_use_herdr_tab_name_hint">优先显示标签名。此设置会在连接同一 Hub 的设备间同步。</string>
+    <string name="settings_herdr_tab_name_saving">正在保存会话命名设置…</string>
+    <string name="settings_herdr_tab_name_retry">重试</string>
 </resources>

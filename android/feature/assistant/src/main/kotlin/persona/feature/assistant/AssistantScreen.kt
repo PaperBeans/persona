@@ -324,7 +324,8 @@ fun AssistantScreen(
     val healthPage = active == null && newChat?.space == persona.core.contracts.api.AssistantSpace.HEALTH
     // The domain spaces (#13500, docs/android/android.md "Domain spaces"): the tracks as last read (shared with the
     // sidebar), each space's chats as last read, and every chat known to be one's, so New on it opens its home.
-    val spaces = rememberSpaces(managerChoice.hubId, management, enabled = conversationsOf != null && !demo)
+    val spacesEnabled = LocalSpaceConversationsEnabled.current?.collectAsStateWithLifecycle()?.value == true
+    val spaces = rememberSpaces(managerChoice.hubId, management, enabled = spacesEnabled && conversationsOf != null && !demo)
     val spacesApi = remember(management, managerChoice.hubId) { management?.forManager(null) }
     val spaceChatsState = remember(managerChoice.hubId) { mutableStateOf<Map<String, List<Session>>>(emptyMap()) }
     var spaceChats by spaceChatsState
@@ -922,13 +923,19 @@ fun AssistantScreen(
                         // A forward waiting for the new conversation (#3901): its card and source photos over the composer.
                         val homeForwards = if (active == null) persona.feature.chat.ForwardPlacements.home else emptyList()
                         val homePhotoHandoffs = if (active == null) persona.feature.chat.ForwardPlacements.homePhotoHandoffs() else emptyMap()
-                        LaunchedEffect(homeForwards, composer, homePhotoHandoffs, composer.attachments.map { it.id }) {
+                        val assistantImageLimits = persona.core.designsystem.LocalHubImageLimits.current.forAgent(null)
+                        val assistantComposerService = composerService?.takeIf { uploadTarget.machineId.isNotBlank() && !healthPage && !spacePage }
+                        LaunchedEffect(homeForwards, composer, homePhotoHandoffs, composer.attachments.map { it.id }, assistantImageLimits) {
                             if (homeForwards.isEmpty()) return@LaunchedEffect
                             val present = composer.attachments.mapTo(mutableSetOf()) { it.id }
                             val pending = homePhotoHandoffs.mapValues { (_, handoff) ->
                                 handoff.copy(attachments = handoff.attachments.filterNot { it.id in present })
                             }
-                            val rejected = persona.feature.chat.attachForwardedPhotos(context, composer, pending.values.toList())
+                            val rejected = persona.feature.chat.attachForwardedPhotos(context, composer, pending.values.toList(),
+                                limits = assistantImageLimits, canSpill = assistantComposerService != null,
+                                onNotice = { message ->
+                                    if (feedback?.notice(message) != true) toast.show(persona.core.designsystem.FeedbackNotice(message))
+                                })
                             val lost = pending.values.sumOf { it.lost } + rejected.size
                             if (lost > 0) {
                                 val message = persona.feature.chat.forwardedPhotoNotice(resources, lost)
@@ -940,7 +947,8 @@ fun AssistantScreen(
                         }
                         ChatComposer(uploadTarget, composer, working = false, sending = sending || !draftReady,
                             // The health page sends no files: an upload goes to the main chat's machine, outside the health space.
-                            canClear = false, service = composerService?.takeIf { uploadTarget.machineId.isNotBlank() && !healthPage && !spacePage },
+                            canClear = false, service = assistantComposerService,
+                            imageLimits = assistantImageLimits,
                             uploadDestination = if (onHealthChat) "health" else null,
                             upload = composerUpload,
                             onSend = { submit() }, onCommand = { composer.insert(it, composer.focused) },

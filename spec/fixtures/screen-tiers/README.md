@@ -1,7 +1,7 @@
 # screen-tiers
 
 The live screen's quality tiers (#6396, `docs/extensions/computer-use.md` "Live screen video (#3954)"): what the
-iPhone's `PersonaScreenKit` (`TierLadder`, `ReceiverSignals`, `TierPolicy`) and the browser's port (`web/src/screen/tiers/`, #6558)
+iPhone's `PersonaScreenKit` (`TierLadder`, `ReceiverSignals`, `TierPolicy`) and the browser's port (`web/src/modules/screen-share/tiers/`, #6558)
 must both give. One scenario per file: its input and the expected output, never internal state. The format was agreed
 between the two lanes that keep the two sides.
 

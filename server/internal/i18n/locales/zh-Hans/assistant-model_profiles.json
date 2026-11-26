@@ -30,7 +30,10 @@
   "err_tier_not_found": "正在使用的模型档位（{profile}）没有层级 {tier}；可用层级：{tiers}。",
   "err_tier_model": "预设 {tier}：{model} 不是模型 ID。须以字母或数字开头，之后只能用字母、数字和 . _ - / : @ [ ]。",
   "err_tier_description": "预设 {tier} 的说明最多 {max} 个字，且只能一行。",
-  "tier_strong": "建这个档位时主对话用的模型：设计、审查和难题。",
-  "tier_standard": "建这个档位时新建 Agent 用的模型：日常编码。",
-  "err_permission_mode": "{where} 的权限模式 {mode} 无效。可用值：{modes}。"
+  "tier_core": "建这个档位时主对话用的模型：核心设计与实现、审查和难题。",
+  "tier_dev": "建这个档位时新建 Agent 用的模型：开发、排查和调研整理。",
+  "err_permission_mode": "{where} 的权限模式 {mode} 无效。可用值：{modes}。",
+  "err_tier_candidates": "层级 {tier} 的候选超过 {max} 个。",
+  "err_tier_alias": "层级 {tier}：{alias} 不能作为别名；别名要符合层级名的格式，也不能和其他层级的名字或别名重复。",
+  "err_forbidden_field": "模型档位不能包含凭据或端点字段 {field}。"
 }

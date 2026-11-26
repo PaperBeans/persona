@@ -35,6 +35,7 @@ type voiceRun struct {
 	appIDs     []string // the app's  "Persona main chat working" lines that end with it
 
 	checked  time.Time // its answer was last read
+	readRev  int64     // known transcript revision at that read, zero if unknown or the read failed
 	notFound bool      // that read did not find its message
 	ended    bool      // the hub said a turn ended there since
 	waiting  bool      // it was seen waiting on the user (until it works again)
@@ -379,12 +380,13 @@ func (t *tracker) check(ctx context.Context, r *voiceRun) {
 		}
 		r.failure = r.failureOf(sess)
 	}
-	// The end was not seen (it came between looks, or never), or the message was not there last time: read now and
-	// then, not every look.
-	if (!r.Seen || r.notFound) && !r.ended && now.Sub(r.checked) < readEvery {
+	// An unanswered read still applies to the same transcript. If the Hub link was down, the next look may see
+	// a completed short turn only in the revision. Read it without waiting for the fallback interval again.
+	changed := r.notFound && r.readRev != 0 && sess != nil && sess.Rev != 0 && sess.Rev != r.readRev
+	if (!r.Seen || r.notFound) && !r.ended && !changed && now.Sub(r.checked) < readEvery {
 		return
 	}
-	r.checked, r.ended = now, false
+	r.checked, r.ended, r.readRev = now, false, 0
 	src := httpItems{hub: hub, machine: r.MachineID, session: r.SessionID}
 	rd, err := channel.ReadTurn(ctx, src, &r.Run)
 	if err == nil && !rd.Found && r.Base > 0 {
@@ -407,6 +409,7 @@ func (t *tracker) check(ctx context.Context, r *voiceRun) {
 			r.ended, t.last = true, time.Time{}
 			return
 		}
+		r.readRev = sess.Rev
 	}
 	r.notFound = !rd.Found
 	if rd.Found {

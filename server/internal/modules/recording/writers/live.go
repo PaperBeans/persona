@@ -1,0 +1,696 @@
+package writers
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"sort"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/recordingwire"
+)
+
+// Attending a meeting (docs/assistant/meeting-minutes.md "Attending a meeting"): a meeting recording uploaded with a
+// role (listener or participant) gets a live log, the finished sentences the phone appends by position while it
+// records (POST /api/v1/recordings/{id}/live), which the assistant feeds to the attending session and answers the
+// room's questions from. It is live.json in the recording's directory: the sentences by position, what was fed to
+// which session, and the questions asked with their answers. The upload still owns the transcript; the live log is
+// the hub's, so it is not in an upload's undo journal (recordingFiles). Never searched (find.go searchable) and never
+// shown by Get; a delete or the retention takes it with the directory.
+
+// Re-exported from recordingwire.
+const (
+	AttendanceOff         = recordingwire.AttendanceOff
+	AttendanceNotes       = recordingwire.AttendanceNotes
+	AttendanceListener    = recordingwire.AttendanceListener
+	AttendanceParticipant = recordingwire.AttendanceParticipant
+)
+
+// Re-exported from recordingwire.
+const (
+	AttendanceUnknownRole = recordingwire.AttendanceUnknownRole
+	AttendanceNotMeeting  = recordingwire.AttendanceNotMeeting
+	AttendanceBadSession  = recordingwire.AttendanceBadSession
+)
+
+// Limits of attending.
+const (
+	maxSessionIDRunes = 200
+	// MaxLiveRequest is how many sentences one POST …/live carries at most (the HTTP layer answers 400 above it;
+	// LiveAppend refuses them too).
+	MaxLiveRequest   = 200
+	maxLiveText      = recordingwire.MaxLiveText
+	maxLivePositions = 20000
+	maxLiveBytes     = 4 << 20 // of live text in all
+	// What MeetingMaterial gives of the live sentences, of the photos' words, and of earlier meetings.
+	materialLiveRunes  = 12000
+	materialPhotoRunes = 8000
+	materialMaxEarlier = 6
+)
+
+// SessionRef is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type SessionRef = recordingwire.SessionRef
+
+// LiveSegment is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type LiveSegment = recordingwire.LiveSegment
+
+// AskSource is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type AskSource = recordingwire.AskSource
+
+// LiveAsk is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type LiveAsk = recordingwire.LiveAsk
+
+// Re-exported from recordingwire.
+const (
+	AskViaRoom     = recordingwire.AskViaRoom
+	AskViaMaterial = recordingwire.AskViaMaterial
+)
+
+// AskAttempt is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type AskAttempt = recordingwire.AskAttempt
+
+// Live is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type Live = recordingwire.Live
+
+// Re-exported from recordingwire.
+const (
+	TopicDone     = recordingwire.TopicDone
+	TopicCurrent  = recordingwire.TopicCurrent
+	TopicOpen     = recordingwire.TopicOpen
+	MaxTopics     = recordingwire.MaxTopics
+	MaxTopicTitle = recordingwire.MaxTopicTitle
+	MaxTopicNote  = recordingwire.MaxTopicNote
+)
+
+// LiveTopic is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type LiveTopic = recordingwire.LiveTopic
+
+// Re-exported from recordingwire.
+const (
+	MaxHighlights    = recordingwire.MaxHighlights
+	MaxHighlightText = recordingwire.MaxHighlightText
+)
+
+// LiveHighlight is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type LiveHighlight = recordingwire.LiveHighlight
+
+// HighlightSaid is declared in recordingwire (docs/plans/plan-kb-recording-port.md).
+type HighlightSaid = recordingwire.HighlightSaid
+
+// Re-exported from recordingwire.
+var (
+	ErrNotAttending  = recordingwire.ErrNotAttending
+	ErrLiveGap       = recordingwire.ErrLiveGap
+	ErrLiveFull      = recordingwire.ErrLiveFull
+	ErrBadLive       = recordingwire.ErrBadLive
+	ErrBadTopics     = recordingwire.ErrBadTopics
+	ErrBadHighlights = recordingwire.ErrBadHighlights
+)
+
+// LiveGapError is declared in recordingwire.
+type LiveGapError = recordingwire.LiveGapError
+
+// normalizeAttendance settles the attendance fields of an upload clean accepted (its Kind is set), never failing it:
+// an unknown role, a role on a recording that is not a meeting, or a session with exactly one id or one over
+// maxSessionIDRunes leaves attending off, and the problem says which. Off is "" with no session; a session with no
+// ids is nil (the main chat). Watch recordings are not refused here: the phone never gives them a role.
+func normalizeAttendance(u *RecordingUpload) (problem string) {
+	role := strings.ToLower(strings.TrimSpace(u.Attendance))
+	session := u.AttendingSession
+	u.Attendance, u.AttendingSession = "", nil
+	switch {
+	case u.BadRole:
+		return AttendanceUnknownRole
+	case role == "" || role == AttendanceOff:
+		return ""
+	case role != AttendanceListener && role != AttendanceParticipant:
+		return AttendanceUnknownRole
+	case u.Kind != RecordingMeeting:
+		return AttendanceNotMeeting
+	case u.BadSession:
+		return AttendanceBadSession
+	}
+	if session != nil {
+		ref := SessionRef{MachineID: strings.TrimSpace(session.MachineID), SessionID: strings.TrimSpace(session.SessionID)}
+		switch {
+		case (ref.MachineID == "") != (ref.SessionID == ""),
+			utf8.RuneCountInString(ref.MachineID) > maxSessionIDRunes, utf8.RuneCountInString(ref.SessionID) > maxSessionIDRunes:
+			return AttendanceBadSession
+		case ref.MachineID != "":
+			u.AttendingSession = &ref
+		}
+	}
+	u.Attendance = role
+	return ""
+}
+
+// readLive is recording id's live.json; an empty Live when there is none yet.
+func (s *store) readLive(id string) (Live, error) {
+	var l Live
+	raw, err := os.ReadFile(s.path(KindRecording, id, liveFile))
+	if os.IsNotExist(err) {
+		return l, nil
+	}
+	if err != nil {
+		return l, err
+	}
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return Live{}, fmt.Errorf("live log of %s: %w", id, err)
+	}
+	return l, nil
+}
+
+// putLive writes recording id's live.json as putMinutes writes the minutes: not when the recording was deleted or
+// trimmed meanwhile (false then), so a delete stays a delete and a trim keeps no live log. The trim (recording_trim.go)
+// holds recFilesMu from its meta.json to its last removal, so a read-modify-write that read the live log before it
+// cannot write it back after. The caller holds liveMu.
+func (s *store) putLive(id string, l *Live) (bool, error) {
+	if s.readOnly {
+		return false, ErrReadOnly
+	}
+	raw, err := json.Marshal(l)
+	if err != nil {
+		return false, err
+	}
+	s.recFilesMu.Lock()
+	defer s.recFilesMu.Unlock()
+	if err := s.recoverRecordingLocked(id); err != nil {
+		return false, err
+	}
+	meta, err := os.ReadFile(s.path(KindRecording, id, "meta.json"))
+	if err != nil {
+		return false, nil
+	}
+	var trim struct {
+		TrimmedAt *time.Time `json:"trimmed_at"`
+	}
+	if json.Unmarshal(meta, &trim) == nil && trim.TrimmedAt != nil {
+		return false, nil
+	}
+	// Synced before it replaces the old one: the phone was told next, and does not send those positions again.
+	return true, s.writeRecordingFile(s.path(KindRecording, id, liveFile), append(raw, '\n'))
+}
+
+// liveState is recording id (a stored id) with its live log: ErrRecordingDeleted after a delete, ErrNotFound with
+// no upload of it.
+func (s *store) liveState(id string) (Live, Recording, error) {
+	if gone := s.tombstoned(id); gone {
+		return Live{}, Recording{}, ErrRecordingDeleted
+	}
+	r, ok := s.Recording(id)
+	if !ok {
+		return Live{}, Recording{}, ErrNotFound
+	}
+	l, err := s.readLive(id)
+	return l, *r, err
+}
+
+// liveEnded notes in recording id's live log when the hub first saw it ended, for a recording that attends
+// (attending) or has a live log already. The caller holds recMu.
+func (s *store) liveEnded(id string, attending bool, now time.Time) error {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	if !attending {
+		if _, err := os.Stat(s.path(KindRecording, id, liveFile)); err != nil {
+			return nil
+		}
+	}
+	l, err := s.readLive(id)
+	if err != nil || !l.EndedAt.IsZero() {
+		return err
+	}
+	l.EndedAt = now.UTC()
+	_, err = s.putLive(id, &l)
+	return err
+}
+
+// cleanLive is a sentence as the live log keeps it: a bad one is mended, never refused, since positions stay
+// contiguous. A negative start is 0, an end before the start the start; the text is one line, cut to maxLiveText bytes
+// at a character boundary.
+func cleanLive(sg LiveSegment) LiveSegment { return recordingwire.CleanLive(sg) }
+
+// cutBytes is s within n bytes, cut at a character boundary.
+func cutBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// LiveAppend stores sentences of recording id's live log, segs[0] at position from: the positions held already are
+// skipped (a replay or a retry stores nothing twice) and the rest appended. Errors in the contract's order:
+// ErrRecordingDeleted, ErrNotFound (no upload yet), ErrReadOnly, ErrBadLive (a negative from, over MaxLiveRequest
+// sentences), ErrNotAttending (the stored upload has attendance off), ErrHubTranscribes (the hub transcribes it: its
+// live log is the hub's, LiveAppendHub), a LiveGapError (from above the positions held),
+// ErrLiveFull (the request would pass maxLivePositions or maxLiveBytes; nothing of it is stored). The Live returned is
+// the log after it, also with ErrLiveGap and ErrLiveFull. Engine.LiveChanged hears of every append.
+func (e *engine) LiveAppend(rawID string, from int, segs []LiveSegment) (Live, Recording, error) {
+	id, ok := RecordingID(rawID)
+	if !ok {
+		return Live{}, Recording{}, ErrNotFound
+	}
+	l, r, stored, err := e.liveAppend(id, from, segs)
+	if stored {
+		if e.LiveChanged != nil {
+			e.LiveChanged(id)
+		}
+		e.meetingChanged(id, []string{PartLines}) // its revision is the live log's length
+	}
+	return l, r, err
+}
+
+func (e *engine) liveAppend(id string, from int, segs []LiveSegment) (Live, Recording, bool, error) {
+	st := e.Store
+	st.liveMu.Lock()
+	defer st.liveMu.Unlock()
+	l, r, err := st.liveState(id)
+	switch {
+	case err != nil:
+		return l, r, false, err
+	case st.ReadOnly():
+		return l, r, false, ErrReadOnly
+	case from < 0:
+		return l, r, false, fmt.Errorf("%w: from must be 0 or more", ErrBadLive)
+	case len(segs) > MaxLiveRequest:
+		return l, r, false, fmt.Errorf("%w: at most %d sentences a request", ErrBadLive, MaxLiveRequest)
+	case !r.Attending():
+		return l, r, false, ErrNotAttending
+	case r.HubTranscribed():
+		return l, r, false, ErrHubTranscribes
+	case from > len(l.Segments):
+		return l, r, false, LiveGapError{Next: len(l.Segments)}
+	}
+	fresh := segs[min(len(l.Segments)-from, len(segs)):]
+	if len(fresh) == 0 {
+		return l, r, false, nil
+	}
+	add, size := make([]LiveSegment, len(fresh)), 0
+	for i, sg := range fresh {
+		add[i] = cleanLive(sg)
+		size += len(add[i].Text)
+	}
+	if len(l.Segments)+len(add) > maxLivePositions || l.Bytes+size > maxLiveBytes {
+		if !l.Full {
+			l.Full = true
+			if _, err := st.putLive(id, &l); err != nil {
+				e.logf("recording %s: live full: %v", id, err)
+			}
+		}
+		return l, r, false, ErrLiveFull
+	}
+	next := l
+	next.Segments = append(append(make([]LiveSegment, 0, len(l.Segments)+len(add)), l.Segments...), add...)
+	next.Bytes += size
+	if ok, err := st.putLive(id, &next); err != nil {
+		return l, r, false, err
+	} else if !ok {
+		return l, r, false, st.goneError(id)
+	}
+	return next, r, true, nil
+}
+
+// LiveAppendHub appends the hub's sentences at the end of recording rawID's live log: no from and no role check (the
+// caller applied the timeline), each Source SourceHub unless it is SourceDevice (the phone's text filling in), mended
+// as LiveAppend mends them. first is the position of segs[0] (the live log's length when segs is empty). Errors:
+// ErrRecordingDeleted, ErrNotFound, ErrReadOnly, ErrTranscriptExpired (trimmed), ErrNotHub (not transcribed on the
+// hub), ErrLiveFull (past maxLivePositions or maxLiveBytes; nothing of it is stored). LiveChanged and MeetingChanged
+// (PartLines) hear of an append.
+func (e *engine) LiveAppendHub(rawID string, segs []LiveSegment) (first int, err error) {
+	id, ok := RecordingID(rawID)
+	if !ok {
+		return 0, ErrNotFound
+	}
+	first, stored, err := e.liveAppendHub(id, segs)
+	if stored {
+		if e.LiveChanged != nil {
+			e.LiveChanged(id)
+		}
+		e.meetingChanged(id, []string{PartLines})
+	}
+	return first, err
+}
+
+func (e *engine) liveAppendHub(id string, segs []LiveSegment) (int, bool, error) {
+	st := e.Store
+	st.liveMu.Lock()
+	defer st.liveMu.Unlock()
+	l, r, err := st.liveState(id)
+	switch {
+	case err != nil:
+		return 0, false, err
+	case st.ReadOnly():
+		return len(l.Segments), false, ErrReadOnly
+	case r.Trimmed():
+		return len(l.Segments), false, ErrTranscriptExpired
+	case !r.HubTranscribed():
+		return len(l.Segments), false, ErrNotHub
+	}
+	first := len(l.Segments)
+	if len(segs) == 0 {
+		return first, false, nil
+	}
+	add, size := make([]LiveSegment, len(segs)), 0
+	for i, sg := range segs {
+		if sg.Source != SourceDevice {
+			sg.Source = SourceHub
+		}
+		add[i] = cleanLive(sg)
+		size += len(add[i].Text)
+	}
+	if len(l.Segments)+len(add) > maxLivePositions || l.Bytes+size > maxLiveBytes {
+		if !l.Full {
+			l.Full = true
+			if _, err := st.putLive(id, &l); err != nil {
+				e.logf("recording %s: live full: %v", id, err)
+			}
+		}
+		return first, false, ErrLiveFull
+	}
+	next := l
+	next.Segments = append(append(make([]LiveSegment, 0, len(l.Segments)+len(add)), l.Segments...), add...)
+	next.Bytes += size
+	if ok, err := st.putLive(id, &next); err != nil {
+		return first, false, err
+	} else if !ok {
+		if err := st.goneError(id); !errors.Is(err, ErrNotAttending) {
+			return first, false, err
+		}
+		return first, false, ErrTranscriptExpired // trimmed meanwhile
+	}
+	return first, true, nil
+}
+
+// goneError is why recording id takes no live log any more: deleted, trimmed (attending it is over) or never uploaded.
+func (s *store) goneError(id string) error {
+	if gone := s.tombstoned(id); gone {
+		return ErrRecordingDeleted
+	}
+	if r, ok := s.Recording(id); ok && r.Trimmed() {
+		return ErrNotAttending
+	}
+	return ErrNotFound
+}
+
+// LiveRead is recording id's live log (empty before any) and its stored upload, also on a read-only knowledge base:
+// ErrRecordingDeleted after a delete, ErrNotFound with no upload of it.
+func (e *engine) LiveRead(rawID string) (Live, Recording, error) {
+	id, ok := RecordingID(rawID)
+	if !ok {
+		return Live{}, Recording{}, ErrNotFound
+	}
+	return e.Store.liveState(id)
+}
+
+// LiveUpdate changes recording id's live log with fn (given it and the stored upload) and writes the result unless fn
+// fails or changed nothing; the live log after it. The asks', the topics' and the highlights' revisions go up when fn
+// changed them, and MeetingChanged hears of them. ErrNotFound when the recording's meta.json is gone (also deleted
+// meanwhile) or the recording was trimmed meanwhile, ErrReadOnly on a read-only knowledge base. fn runs with the live
+// log locked: it must be quick and call no Engine method of the live log or the recordings.
+func (e *engine) LiveUpdate(rawID string, fn func(l *Live, r Recording) error) (Live, error) {
+	id, ok := RecordingID(rawID)
+	if !ok {
+		return Live{}, ErrNotFound
+	}
+	l, parts, err := e.liveUpdate(id, fn)
+	e.meetingChanged(id, parts)
+	return l, err
+}
+
+func (e *engine) liveUpdate(id string, fn func(l *Live, r Recording) error) (Live, []string, error) {
+	st := e.Store
+	st.liveMu.Lock()
+	defer st.liveMu.Unlock()
+	r, ok := st.Recording(id)
+	if !ok {
+		return Live{}, nil, ErrNotFound
+	}
+	if st.ReadOnly() {
+		return Live{}, nil, ErrReadOnly
+	}
+	l, err := st.readLive(id)
+	if err != nil {
+		return Live{}, nil, err
+	}
+	before, err := json.Marshal(l)
+	if err != nil {
+		return Live{}, nil, err
+	}
+	asksBefore, _ := json.Marshal(l.Asks)
+	topicsBefore, _ := json.Marshal(l.Topics)
+	highlightsBefore, _ := json.Marshal(l.Highlights)
+	if err := fn(&l, *r); err != nil {
+		return Live{}, nil, err
+	}
+	after, err := json.Marshal(l)
+	if err != nil || bytes.Equal(before, after) {
+		return l, nil, err
+	}
+	var parts []string
+	if asksAfter, _ := json.Marshal(l.Asks); !bytes.Equal(asksBefore, asksAfter) {
+		l.AsksRev++
+		parts = append(parts, PartAsks)
+	}
+	if topicsAfter, _ := json.Marshal(l.Topics); !bytes.Equal(topicsBefore, topicsAfter) {
+		l.TopicsRev++
+		parts = append(parts, PartTopics)
+	}
+	if highlightsAfter, _ := json.Marshal(l.Highlights); !bytes.Equal(highlightsBefore, highlightsAfter) {
+		l.HighlightsRev++
+		parts = append(parts, PartHighlights)
+	}
+	if ok, err := st.putLive(id, &l); err != nil {
+		return Live{}, nil, err
+	} else if !ok {
+		return Live{}, nil, ErrNotFound
+	}
+	return l, parts, nil
+}
+
+// CleanTopics is topics as the live log keeps them, or ErrBadTopics saying which limit they break: at most MaxTopics,
+// each with a title of at most MaxTopicTitle characters and a state done, current or open (at most one current), at
+// (when given) 0 or more seconds, a note of at most MaxTopicNote characters. Titles and notes are put on one line
+// first; none at all is nil.
+func CleanTopics(topics []LiveTopic) ([]LiveTopic, error) {
+	if len(topics) > MaxTopics {
+		return nil, fmt.Errorf("%w: %d topics, over the %d the meeting may have", ErrBadTopics, len(topics), MaxTopics)
+	}
+	var out []LiveTopic
+	current := 0
+	for i, t := range topics {
+		n := i + 1
+		t.Title, t.Note = topicLine(t.Title), topicLine(t.Note)
+		t.State = strings.ToLower(strings.TrimSpace(t.State))
+		switch c := utf8.RuneCountInString(t.Title); {
+		case c == 0:
+			return nil, fmt.Errorf("%w: topic %d has no title", ErrBadTopics, n)
+		case c > MaxTopicTitle:
+			return nil, fmt.Errorf("%w: topic %d's title is %d characters, over the %d a title may have", ErrBadTopics, n, c, MaxTopicTitle)
+		}
+		switch t.State {
+		case TopicDone, TopicOpen:
+		case TopicCurrent:
+			current++
+		default:
+			return nil, fmt.Errorf("%w: topic %d's state is %q, not done, current or open", ErrBadTopics, n, t.State)
+		}
+		if t.At != nil && (math.IsNaN(*t.At) || math.IsInf(*t.At, 0) || *t.At < 0) {
+			return nil, fmt.Errorf("%w: topic %d's at is not 0 or more seconds from the meeting's start", ErrBadTopics, n)
+		}
+		if c := utf8.RuneCountInString(t.Note); c > MaxTopicNote {
+			return nil, fmt.Errorf("%w: topic %d's note is %d characters, over the %d a note may have", ErrBadTopics, n, c, MaxTopicNote)
+		}
+		if t.At != nil {
+			at := *t.At
+			t.At = &at
+		}
+		out = append(out, t)
+	}
+	if current > 1 {
+		return nil, fmt.Errorf("%w: %d topics are current, and at most one may be", ErrBadTopics, current)
+	}
+	return out, nil
+}
+
+// topicLine is a topic's title or note on one line, valid UTF-8.
+func topicLine(s string) string {
+	return strings.Join(strings.Fields(strings.ToValidUTF8(s, "\uFFFD")), " ")
+}
+
+// TopicsSet replaces recording rawID's topics with topics (CleanTopics: ErrBadTopics names the limit broken), at now;
+// false when they were those already, which changes nothing. LiveUpdate's errors otherwise; MeetingChanged hears of
+// PartTopics.
+func (e *engine) TopicsSet(rawID string, topics []LiveTopic, now time.Time) (bool, error) {
+	clean, err := CleanTopics(topics)
+	if err != nil {
+		return false, err
+	}
+	want, _ := json.Marshal(clean)
+	changed := false
+	_, err = e.LiveUpdate(rawID, func(l *Live, _ Recording) error {
+		if have, _ := json.Marshal(l.Topics); bytes.Equal(have, want) {
+			return nil
+		}
+		l.Topics, l.TopicsAt, changed = clean, now.UTC(), true
+		return nil
+	})
+	return changed && err == nil, err
+}
+
+// LiveClock is the clock time a batch gives the moment sec seconds from recording r's start, in loc ("15:04"): the
+// [HH:MM] of a batch's lines (the assistant's feedText) and the minute a highlight's said_at names (HighlightsSet), one
+// function so the two never differ.
+func LiveClock(r Recording, sec float64, loc *time.Location) string {
+	return r.StartedAt.Add(time.Duration(sec * float64(time.Second))).In(loc).Format("15:04")
+}
+
+// highlightSaidAt is H:MM or HH:MM, hours 0 to 23.
+var highlightSaidAt = lazyre.New(`^([01]?[0-9]|2[0-3]):[0-5][0-9]$`)
+
+// highlightMinute is the minute said (a said_at) names, as LiveClock writes it ("9:05" is "09:05"), brackets and
+// spaces around it dropped; false when it is not H:MM or HH:MM.
+func highlightMinute(said string) (string, bool) {
+	said = strings.TrimFunc(said, func(r rune) bool { return unicode.IsSpace(r) || r == '[' || r == ']' })
+	if !highlightSaidAt.MatchString(said) {
+		return "", false
+	}
+	if len(said) == len("9:05") {
+		said = "0" + said
+	}
+	return said, true
+}
+
+// CleanHighlights is said as HighlightsSet resolves it, or ErrBadHighlights saying which limit it breaks: at most
+// MaxHighlights, each an object with a string text and a string said_at, a text of 1 to MaxHighlightText characters
+// once on one line, a said_at H:MM or HH:MM (put as HH:MM). None at all is nil.
+func CleanHighlights(said []HighlightSaid) ([]HighlightSaid, error) {
+	if len(said) > MaxHighlights {
+		return nil, fmt.Errorf("%w: %d highlights, over the %d the meeting may have", ErrBadHighlights, len(said), MaxHighlights)
+	}
+	var out []HighlightSaid
+	for i, h := range said {
+		n := i + 1
+		if h.Malformed {
+			return nil, fmt.Errorf("%w: highlight %d is not an object with a string text and a string said_at", ErrBadHighlights, n)
+		}
+		h.Text = topicLine(h.Text)
+		switch c := utf8.RuneCountInString(h.Text); {
+		case c == 0:
+			return nil, fmt.Errorf("%w: highlight %d has no text", ErrBadHighlights, n)
+		case c > MaxHighlightText:
+			return nil, fmt.Errorf("%w: highlight %d's text is %d characters, over the %d a highlight may have", ErrBadHighlights, n, c, MaxHighlightText)
+		}
+		minute, ok := highlightMinute(h.SaidAt)
+		if !ok {
+			return nil, fmt.Errorf("%w: highlight %d's said_at is %q, not the H:MM or HH:MM of a batch line", ErrBadHighlights, n, h.SaidAt)
+		}
+		out = append(out, HighlightSaid{Text: h.Text, SaidAt: minute})
+	}
+	return out, nil
+}
+
+// HighlightsSet replaces recording rawID's highlights with said (CleanHighlights), each resolved against the live log
+// so far in loc, the time zone the batches are written in (highlightsResolved), at now; false when the resolved list
+// is the one there already (each text, at and end), which changes nothing. A list that breaks a limit (among them a
+// said_at whose minute has no line) is refused with ErrBadHighlights naming it, and nothing changes; [] clears them.
+// LiveUpdate's errors otherwise; MeetingChanged hears of PartHighlights.
+func (e *engine) HighlightsSet(rawID string, said []HighlightSaid, loc *time.Location, now time.Time) (bool, error) {
+	clean, err := CleanHighlights(said)
+	if err != nil {
+		return false, err
+	}
+	if loc == nil { // the caller's zone is the batches' (s.location); without one, the archive's (never the machine's)
+		loc = e.Store.Zone()
+	}
+	changed := false
+	_, err = e.LiveUpdate(rawID, func(l *Live, r Recording) error {
+		hs, err := highlightsResolved(clean, l.Segments, r, loc)
+		if err != nil {
+			return err
+		}
+		have, _ := json.Marshal(l.Highlights)
+		if want, _ := json.Marshal(hs); bytes.Equal(have, want) {
+			return nil
+		}
+		l.Highlights, l.HighlightsAt, changed = hs, now.UTC(), true
+		return nil
+	})
+	return changed && err == nil, err
+}
+
+// highlightsResolved are clean's highlights with the moments of their minutes in recording r's live log segs
+// (highlightLines), sorted by at (those of one minute in the order given); ErrBadHighlights for one whose minute has
+// no line.
+func highlightsResolved(clean []HighlightSaid, segs []LiveSegment, r Recording, loc *time.Location) ([]LiveHighlight, error) {
+	if len(clean) == 0 {
+		return nil, nil
+	}
+	clocks := make([]string, len(segs)) // each line's minute as a batch writes it; "" for a placeholder, which never counts
+	for i, sg := range segs {
+		if sg.Text != "" {
+			clocks[i] = LiveClock(r, sg.Start, loc)
+		}
+	}
+	var out []LiveHighlight
+	for i, h := range clean {
+		at, end, ok := highlightLines(segs, clocks, h.SaidAt)
+		if !ok {
+			return nil, fmt.Errorf("%w: highlight %d's said_at %s is not the minute of any line of the meeting so far", ErrBadHighlights, i+1, h.SaidAt)
+		}
+		out = append(out, LiveHighlight{Text: h.Text, At: at, End: end})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At < out[j].At })
+	return out, nil
+}
+
+// highlightLines is minute (HH:MM) in the live log segs, whose lines a batch writes at clocks: the earliest start and
+// the latest end of the positions whose clock is minute. A minute the clock shows twice (it went back an hour) is its
+// first occurrence: the lines that start within a minute of the earliest. False when no line is in it.
+func highlightLines(segs []LiveSegment, clocks []string, minute string) (at, end float64, ok bool) {
+	for i, sg := range segs {
+		if clocks[i] == minute && (!ok || sg.Start < at) {
+			at, ok = sg.Start, true
+		}
+	}
+	if !ok {
+		return 0, 0, false
+	}
+	end = at
+	for i, sg := range segs {
+		if clocks[i] == minute && sg.Start-at < 60 {
+			end = max(end, sg.End)
+		}
+	}
+	return at, end, true
+}
+
+// AttendingRecordings is every recording whose stored attendance is not off and whose end batch has not gone out,
+// oldest first: what the feeder picks up again after a restart.
+func (e *engine) AttendingRecordings() []Recording {
+	var out []Recording
+	for _, r := range e.Store.Recordings() {
+		if !r.Attending() {
+			continue
+		}
+		if l, err := e.Store.readLive(r.ID); err == nil && l.EndFed {
+			continue
+		}
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartedAt.Equal(out[j].StartedAt) {
+			return out[i].StartedAt.Before(out[j].StartedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}

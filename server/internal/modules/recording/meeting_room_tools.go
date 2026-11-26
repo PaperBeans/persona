@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"slices"
 	"strings"
 	"sync"
@@ -63,7 +66,7 @@ func (s *Recordings) roomToolCall(ctx context.Context, recording, name string, a
 		if len(args) > 0 && json.Unmarshal(args, &a) != nil {
 			return proto.TextResult("from and to are seconds from the meeting's start", true)
 		}
-		l, rec, err := e.LiveRead(recording)
+		l, rec, err := writersOf(e).LiveRead(recording)
 		if err != nil {
 			return proto.TextResult("this meeting's lines are not available", true)
 		}
@@ -75,19 +78,19 @@ func (s *Recordings) roomToolCall(ctx context.Context, recording, name string, a
 		if json.Unmarshal(args, &a) != nil {
 			return proto.TextResult("query is required", true)
 		}
-		earlier, err := e.EarlierMaterial(recording, a.Query)
+		earlier, err := writersOf(e).EarlierMaterial(recording, a.Query)
 		if err != nil {
 			return proto.TextResult("earlier meetings are not available", true)
 		}
-		var srcs []kb.AskSource
+		var srcs []recordingwire.AskSource
 		for _, em := range earlier {
-			srcs = append(srcs, kb.AskSource{Kind: kb.KindRecording, ID: em.ID, Name: em.Name, When: em.When})
+			srcs = append(srcs, recordingwire.AskSource{Kind: recordingwire.KindRecording, ID: em.ID, Name: em.Name, When: em.When})
 			for _, p := range em.Projects {
-				srcs = append(srcs, kb.AskSource{Kind: kb.KindProject, ID: p.Slug, Name: p.Name})
+				srcs = append(srcs, recordingwire.AskSource{Kind: kb.KindProject, ID: p.Slug, Name: p.Name})
 			}
 		}
 		s.room.noteSources(recording, srcs)
-		in := s.answerInput(ctx, kb.MeetingMaterial{EarlierAvailable: true, Earlier: earlier}, kb.LiveAsk{QuestionSource: askTyped}, nil)
+		in := s.answerInput(ctx, recordingwire.MeetingMaterial{EarlierAvailable: true, Earlier: earlier}, recordingwire.LiveAsk{QuestionSource: askTyped}, nil)
 		out, err := json.Marshal(map[string]any{"earlier_meetings": in.Earlier})
 		if err != nil {
 			return proto.TextResult(err.Error(), true)
@@ -104,9 +107,9 @@ func (s *Recordings) roomToolCall(ctx context.Context, recording, name string, a
 }
 
 // meetingLinesText is recording r's live lines said between from and to (seconds; nil: open) as "[m:ss · HH:MM]
-// text", the offset from the start and then the clock time a batch gives the line in loc (kb.LiveClock, what a
+// text", the offset from the start and then the clock time a batch gives the line in loc (writers.LiveClock, what a
 // highlight's said_at copies), at most meetingLinesRunes, the newest kept.
-func meetingLinesText(r kb.Recording, segs []kb.LiveSegment, from, to *float64, loc *time.Location) string {
+func meetingLinesText(r recordingwire.Recording, segs []recordingwire.LiveSegment, from, to *float64, loc *time.Location) string {
 	var lines []string
 	runes := 0
 	for i := len(segs) - 1; i >= 0; i-- {
@@ -114,7 +117,7 @@ func meetingLinesText(r kb.Recording, segs []kb.LiveSegment, from, to *float64, 
 		if sg.Text == "" || from != nil && sg.End < *from || to != nil && sg.Start > *to {
 			continue
 		}
-		line := fmt.Sprintf("[%s · %s] %s", meetingClock(sg.Start), kb.LiveClock(r, sg.Start, loc), oneLine(sg.Text))
+		line := fmt.Sprintf("[%s · %s] %s", meetingClock(sg.Start), writers.LiveClock(r, sg.Start, loc), oneLine(sg.Text))
 		n := utf8.RuneCountInString(line) + 1
 		if runes+n > meetingLinesRunes {
 			break
@@ -134,10 +137,10 @@ func meetingLinesText(r kb.Recording, segs []kb.LiveSegment, from, to *float64, 
 // meeting_earlier gave during the ask being answered (its sources), and the failed sends of photo messages.
 type roomState struct {
 	mu         sync.Mutex
-	waiters    map[string][]chan struct{} // by recording: asks waiting for its room
-	turn       map[string]chan struct{}   // by recording: held while an ask runs in its room
-	sources    map[string][]kb.AskSource  // by recording: what meeting_earlier gave since the running ask was sent
-	photoTries map[string]int             // by client_msg_id: failed sends of a photo's message (meeting_photos.go)
+	waiters    map[string][]chan struct{}           // by recording: asks waiting for its room
+	turn       map[string]chan struct{}             // by recording: held while an ask runs in its room
+	sources    map[string][]recordingwire.AskSource // by recording: what meeting_earlier gave since the running ask was sent
+	photoTries map[string]int                       // by client_msg_id: failed sends of a photo's message (meeting_photos.go)
 }
 
 // wait is a channel closed when recording's room changes (wake).
@@ -175,7 +178,7 @@ func (r *roomState) take(recording string) (release func(), done <-chan struct{}
 	ch := make(chan struct{})
 	r.turn[recording] = ch
 	if r.sources == nil {
-		r.sources = map[string][]kb.AskSource{}
+		r.sources = map[string][]recordingwire.AskSource{}
 	}
 	delete(r.sources, recording)
 	return func() {
@@ -189,28 +192,28 @@ func (r *roomState) take(recording string) (release func(), done <-chan struct{}
 }
 
 // noteSources keeps what meeting_earlier gave in recording's room while an ask runs there.
-func (r *roomState) noteSources(recording string, srcs []kb.AskSource) {
+func (r *roomState) noteSources(recording string, srcs []recordingwire.AskSource) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.turn[recording] == nil {
 		return
 	}
 	if r.sources == nil {
-		r.sources = map[string][]kb.AskSource{}
+		r.sources = map[string][]recordingwire.AskSource{}
 	}
 	r.sources[recording] = append(r.sources[recording], srcs...)
 }
 
 // takeSources are the sources of the ask that ran in recording's room: each once, at most 6.
-func (r *roomState) takeSources(recording string) []kb.AskSource {
+func (r *roomState) takeSources(recording string) []recordingwire.AskSource {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := []kb.AskSource{}
+	out := []recordingwire.AskSource{}
 	for _, src := range r.sources[recording] {
 		if len(out) >= 6 {
 			break
 		}
-		if !slices.ContainsFunc(out, func(x kb.AskSource) bool { return x.Kind == src.Kind && x.ID == src.ID }) {
+		if !slices.ContainsFunc(out, func(x recordingwire.AskSource) bool { return x.Kind == src.Kind && x.ID == src.ID }) {
 			out = append(out, src)
 		}
 	}
@@ -219,24 +222,24 @@ func (r *roomState) takeSources(recording string) []kb.AskSource {
 }
 
 // topicsSetTool is the room's meeting_topics_set {topics} for recording, its own meeting: the whole list replaces the
-// topics at now. A list that breaks a limit is refused saying which (kb.CleanTopics), and nothing changes.
+// topics at now. A list that breaks a limit is refused saying which (writers.CleanTopics), and nothing changes.
 func topicsSetTool(e *kb.Engine, recording string, args json.RawMessage, now time.Time) proto.ToolResult {
 	var a struct {
-		Topics *[]kb.LiveTopic `json:"topics"`
+		Topics *[]recordingwire.LiveTopic `json:"topics"`
 	}
 	if json.Unmarshal(args, &a) != nil || a.Topics == nil {
 		return proto.TextResult("topics is required, and is the whole list of the meeting's topics: each {title, state, at?, note?}, "+
 			"title and note text, state done, current or open, at a number of seconds from the meeting's start", true)
 	}
-	changed, err := e.TopicsSet(recording, *a.Topics, now)
+	changed, err := writersOf(e).TopicsSet(recording, *a.Topics, now)
 	switch {
 	case err == nil && changed:
 		return proto.TextResult("Topics saved.", false)
 	case err == nil:
 		return proto.TextResult("The topics are as they were: nothing changed.", false)
-	case errors.Is(err, kb.ErrBadTopics):
+	case errors.Is(err, recordingwire.ErrBadTopics):
 		return proto.TextResult(err.Error()+". Nothing was saved: send the whole list again within the limits.", true)
-	case errors.Is(err, kb.ErrReadOnly):
+	case errors.Is(err, kbwire.ErrReadOnly):
 		return proto.TextResult("the meeting's topics can't be changed now", true)
 	}
 	return proto.TextResult("this meeting's topics are not available now", true)
@@ -244,7 +247,7 @@ func topicsSetTool(e *kb.Engine, recording string, args json.RawMessage, now tim
 
 // highlightsSetTool is the room's meeting_highlights_set {highlights} for recording, its own meeting: the whole list of
 // {text, said_at} replaces the highlights at now, each said_at resolved in loc, the zone the batches are written in
-// (kb.HighlightsSet). A list that is not one, or breaks a limit, is refused saying which, and nothing changes.
+// (writers.HighlightsSet). A list that is not one, or breaks a limit, is refused saying which, and nothing changes.
 func highlightsSetTool(e *kb.Engine, recording string, args json.RawMessage, loc *time.Location, now time.Time) proto.ToolResult {
 	var a struct {
 		Highlights *[]json.RawMessage `json:"highlights"` // nil when absent or null
@@ -253,27 +256,27 @@ func highlightsSetTool(e *kb.Engine, recording string, args json.RawMessage, loc
 		return proto.TextResult("highlights is required, and is the whole list of the meeting's highlights: each {text, said_at}, "+
 			"text one short sentence, said_at the HH:MM of the batch line it was made in", true)
 	}
-	said := make([]kb.HighlightSaid, len(*a.Highlights))
+	said := make([]recordingwire.HighlightSaid, len(*a.Highlights))
 	for i, raw := range *a.Highlights {
 		var h struct {
 			Text   *string `json:"text"`
 			SaidAt *string `json:"said_at"`
 		}
 		if json.Unmarshal(raw, &h) != nil || h.Text == nil || h.SaidAt == nil { // null, not an object, not strings
-			said[i].Malformed = true // refused in its place, after the count (kb.CleanHighlights)
+			said[i].Malformed = true // refused in its place, after the count (writers.CleanHighlights)
 			continue
 		}
-		said[i] = kb.HighlightSaid{Text: *h.Text, SaidAt: *h.SaidAt}
+		said[i] = recordingwire.HighlightSaid{Text: *h.Text, SaidAt: *h.SaidAt}
 	}
-	changed, err := e.HighlightsSet(recording, said, loc, now)
+	changed, err := writersOf(e).HighlightsSet(recording, said, loc, now)
 	switch {
 	case err == nil && changed:
 		return proto.TextResult("Highlights saved.", false)
 	case err == nil:
 		return proto.TextResult("The highlights are as they were: nothing changed.", false)
-	case errors.Is(err, kb.ErrBadHighlights):
+	case errors.Is(err, recordingwire.ErrBadHighlights):
 		return proto.TextResult(err.Error()+". Nothing was saved: send the whole list again within the limits.", true)
-	case errors.Is(err, kb.ErrReadOnly):
+	case errors.Is(err, kbwire.ErrReadOnly):
 		return proto.TextResult("the meeting's highlights can't be changed now", true)
 	}
 	return proto.TextResult("this meeting's highlights are not available now", true)

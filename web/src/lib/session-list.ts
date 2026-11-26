@@ -25,7 +25,7 @@ const validCounts = (counts: ListCounts | undefined): counts is ListCounts => !!
 // todo: `sessions_todo` (#6662), a to-do's id or "none"; waiting, pane_source and exclude_pane_source: the sidebar's
 // quick filters (`sessions_quick_filters`, #6662); just_finished: the Just finished rows or the other seen ones
 // (`sessions_just_finished`, #9751)
-const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "todo", "waiting", "pane_source", "exclude_pane_source", "just_finished"] as const;
+const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "parent_machine_id", "todo", "waiting", "pane_source", "exclude_pane_source", "just_finished"] as const;
 /** The filters that take several values, each a machine and value pair spelled as a JSON array (`sessions_catalog`,
  * docs/protocol/protocol.md "Projects and spaces"): the rows at any of the places, in any of the spaces. */
 const PAIR_KEYS = ["place", "space"] as const;
@@ -115,9 +115,14 @@ export interface SessionListOptions<T> {
   /** Read the list without the child sessions folded under a listed one (`roots=1`, `sessions_hierarchy`, #5120): rows,
    * totals and counts then hold each parent once, counted by its folded state. Only for a hub that advertises it. */
   roots?: boolean;
+  /** Opt into cross-machine folding and orphan `is_subagent` filtering (`cross_machine_hierarchy=1`,
+   * `sessions_cross_machine_hierarchy`). Only for a hub that advertises it. */
+  crossMachineHierarchy?: boolean;
   /** false: the list's counts are never read (its snapshot's `counts` stays null). For a list that only shows rows,
    * as one group's section does: its group's numbers come from the read that named the groups. */
   counts?: boolean;
+  /** Optional concurrency gate for refresh reads (e.g., throttling multiple open grouped sections). */
+  schedule?: (run: () => Promise<void>, signal: AbortSignal) => Promise<void>;
 }
 
 /** What a `sessions_list` hint says of the change it follows (`sessions_list_changes`, #6685): the revision before it,
@@ -137,6 +142,7 @@ export class SessionList<T> {
   private listeners = new Set<() => void>();
   private filters: ListFilters = {};
   private generation = 0;
+  private abort?: AbortController;
   protected work: Work = { generation: 0, load: false, more: false, kind: null };
   // The frozen cursor never follows the delta checkpoint. Counts are not a row checkpoint either.
   protected cursor?: string;
@@ -155,9 +161,11 @@ export class SessionList<T> {
   private lastFailure: "load" | "more" = "load";
   private summary: boolean;
   private roots: boolean;
+  private crossMachineHierarchy: boolean;
   private onDelta?: (upsert: T[], remove: string[]) => void;
   private pageCounts: () => boolean;
   private counted: boolean;
+  private schedule?: SessionListOptions<T>["schedule"];
   private onRefresh?: () => void;
   private presentation?: SessionListPresentation<T>;
   private presented: readonly T[] = [];
@@ -178,14 +186,18 @@ export class SessionList<T> {
     this.presentation = options.presentation;
     this.summary = options.summary ?? true;
     this.roots = options.roots ?? false;
+    this.crossMachineHierarchy = options.crossMachineHierarchy ?? false;
     this.onDelta = options.onDelta;
     this.pageCounts = options.pageCounts ?? (() => false);
     this.counted = options.counts ?? true;
+    this.schedule = options.schedule;
   }
 
   isSummary(): boolean { return this.summary; }
   /** Whether every read sends `roots=1`: a list or counts read over the same collection sends it too. */
   isRoots(): boolean { return this.roots; }
+  /** Whether every read sends `cross_machine_hierarchy=1`. */
+  isCrossMachineHierarchy(): boolean { return this.crossMachineHierarchy; }
   /** For a list over the same collection, e.g. a filtered copy of this one. */
   usesPageCounts(): boolean { return this.pageCounts(); }
 
@@ -211,6 +223,13 @@ export class SessionList<T> {
   setRoots(value: boolean): void {
     if (this.roots === value) return;
     this.roots = value;
+    this.reset();
+  }
+
+  /** Enabling or disabling cross-machine hierarchy changes bound cursors and row visibility: like setRoots. */
+  setCrossMachineHierarchy(value: boolean): void {
+    if (this.crossMachineHierarchy === value) return;
+    this.crossMachineHierarchy = value;
     this.reset();
   }
 
@@ -281,6 +300,8 @@ export class SessionList<T> {
   }
 
   reset(): void {
+    this.abort?.abort();
+    this.abort = undefined;
     this.lastFailure = "load";
     this.generation++;
     this.work = { generation: this.generation, load: false, more: false, kind: null };
@@ -289,6 +310,10 @@ export class SessionList<T> {
     this.invalidationTimer = undefined;
     this.invalidatedAt = 0;
     this.clearBaseline();
+  }
+
+  private signal(): AbortSignal {
+    return (this.abort ??= new AbortController()).signal;
   }
 
   private empty(): ListSnapshot<T> {
@@ -361,10 +386,11 @@ export class SessionList<T> {
   private query(extra: Record<string, string>): string {
     const [path, existing = ""] = this.path.split("?");
     const params = new URLSearchParams(existing);
-    for (const key of [...FILTER_KEYS, ...PAIR_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since", "roots"]) params.delete(key);
+    for (const key of [...FILTER_KEYS, ...PAIR_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since", "roots", "cross_machine_hierarchy"]) params.delete(key);
     for (const key of FILTER_KEYS) if (this.filters[key]) params.set(key, this.filters[key]!);
     for (const key of PAIR_KEYS) for (const pair of this.filters[key] ?? []) params.append(key, pair);
     if (this.roots) params.set("roots", "1");
+    if (this.crossMachineHierarchy) params.set("cross_machine_hierarchy", "1");
     for (const [key, value] of Object.entries(extra)) params.set(key, value);
     return `${path}?${params}`;
   }
@@ -384,7 +410,7 @@ export class SessionList<T> {
   private async page(generation: number, extra: Record<string, string> = {}): Promise<ListPage<T> | null> {
     let response: Partial<ListPage<T>>;
     try {
-      response = await api<Partial<ListPage<T>>>(this.query({ summary: this.summary ? "1" : "0", limit: String(PAGE_SIZE), ...extra }));
+      response = await api<Partial<ListPage<T>>>(this.query({ summary: this.summary ? "1" : "0", limit: String(PAGE_SIZE), ...extra }), { signal: this.signal() });
     } catch (error) {
       if (!this.current(generation)) return null;
       if (!this.unsupported(error)) throw error;
@@ -406,7 +432,7 @@ export class SessionList<T> {
   private async readCounts(generation: number): Promise<void> {
     if (!this.counted) return;
     try {
-      const counts = await api<ListCounts>(this.query({ counts: "1" }));
+      const counts = await api<ListCounts>(this.query({ counts: "1" }), { signal: this.signal() });
       if (!this.current(generation)) return;
       // Legacy hubs may ignore counts and answer with sessions. Never use that as a row baseline.
       if (validCounts(counts)) this.publish({ counts });
@@ -426,7 +452,14 @@ export class SessionList<T> {
     return undefined;
   }
 
-  private async refresh(generation: number, retry = true): Promise<void> {
+  private refresh(generation: number, retry = true): Promise<void> {
+    return retry && this.schedule
+      ? this.schedule(() => this.runRefresh(generation, retry), this.signal())
+      : this.runRefresh(generation, retry);
+  }
+
+  private async runRefresh(generation: number, retry: boolean): Promise<void> {
+    if (!this.current(generation)) return;
     this.onRefresh?.();
     const withCounts = this.counted && this.pageCounts();
     const results = await Promise.allSettled([
@@ -442,7 +475,7 @@ export class SessionList<T> {
       this.clearBaseline();
       if (!this.current(generation)) return;
       this.publish({ loading: true });
-      await this.refresh(generation, false);
+      await this.runRefresh(generation, false);
       return;
     }
     if (errors.length) throw errors[0];

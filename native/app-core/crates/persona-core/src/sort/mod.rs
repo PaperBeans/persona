@@ -201,6 +201,9 @@ pub struct Settings {
     /// Include filtered/unpinned inventory even when no renderable group can contain a row.
     #[serde(default)]
     pub inventory: bool,
+    /// Include matches for each quick-filter button, independently of the active button and kept selection.
+    #[serde(default)]
+    pub include_filter_counts: bool,
     /// Paged spaces whose hub totals may not have arrived yet. Missing totals are zero, not local-window counts.
     #[serde(default)]
     pub bounded_spaces: BTreeSet<String>,
@@ -254,6 +257,8 @@ pub enum Quick {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Projection {
     pub counts: Counts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_counts: Option<Counts>,
     pub groups: Vec<Group>,
     /// Real tab and agent rows of the compact By Project list; omitted for the legacy flat contract.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -866,6 +871,7 @@ fn project_impl(input: &Input, oldest_first: bool) -> Projection {
         .then(|| tab_rows(&unpinned, &groups, &input.settings));
     Projection {
         counts,
+        filter_counts: input.settings.include_filter_counts.then(|| filter_counts(&base)),
         groups,
         rows,
         unread_shown,
@@ -907,6 +913,17 @@ fn quick_matches(row: &Row, quick: Quick) -> bool {
         Quick::Working => row.counted_state() == AgentState::Working && !row.muted,
         Quick::BackgroundWaiting => row.background_waiting && !row.muted,
     }
+}
+
+fn filter_counts(base: &[Row]) -> Counts {
+    let mut totals = Counts::default();
+    for row in base {
+        totals.needs_you += usize::from(quick_matches(row, Quick::NeedsYou));
+        totals.unread += usize::from(quick_matches(row, Quick::Unread));
+        totals.working += usize::from(quick_matches(row, Quick::Working));
+        totals.background_waiting += usize::from(quick_matches(row, Quick::BackgroundWaiting));
+    }
+    totals
 }
 
 fn ordered<'a>(rows: impl IntoIterator<Item = &'a Row>, by_rank: bool) -> Vec<&'a Row> {

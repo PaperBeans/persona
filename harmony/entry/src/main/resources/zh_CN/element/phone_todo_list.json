@@ -1,0 +1,104 @@
+{
+  "string": [
+    {
+      "name": "phone_todo_new",
+      "value": "新建待办"
+    },
+    {
+      "name": "phone_todo_list_hidden",
+      "value": "另有 {count} 项需要你，不在「{filter}」里"
+    },
+    {
+      "name": "phone_todo_show_all",
+      "value": "看全部"
+    },
+    {
+      "name": "phone_todo_was_due",
+      "value": "已过截止 {date}"
+    },
+    {
+      "name": "phone_todo_due_on",
+      "value": "截止 {date}"
+    },
+    {
+      "name": "phone_todo_high_priority",
+      "value": "高优先级"
+    },
+    {
+      "name": "phone_todo_remind_at",
+      "value": "{date} 提醒"
+    },
+    {
+      "name": "phone_todo_related_count",
+      "value": "相关 {count} 项"
+    },
+    {
+      "name": "phone_todo_clear_filter",
+      "value": "清除「{filter}」筛选"
+    },
+    {
+      "name": "phone_todo_filter_sort",
+      "value": "筛选与排序"
+    },
+    {
+      "name": "phone_todo_filter_count",
+      "value": "{count} 条"
+    },
+    {
+      "name": "phone_todo_show",
+      "value": "显示"
+    },
+    {
+      "name": "phone_todo_sort_by",
+      "value": "排序方式"
+    },
+    {
+      "name": "phone_todo_got_it",
+      "value": "知道了"
+    },
+    {
+      "name": "phone_todo_seen_done_a11y",
+      "value": "知道了：把「{title}」移到已完成"
+    },
+    {
+      "name": "phone_todo_seen_open_a11y",
+      "value": "知道了：把「{title}」移到其余没完成"
+    },
+    {
+      "name": "phone_todo_seen_done",
+      "value": "已移到「已完成」"
+    },
+    {
+      "name": "phone_todo_seen_open",
+      "value": "已移到「其余没完成」"
+    },
+    {
+      "name": "phone_todo_row_cancelled",
+      "value": "已取消"
+    },
+    {
+      "name": "phone_todo_row_accepted",
+      "value": "已验收"
+    },
+    {
+      "name": "phone_todo_row_auto_done",
+      "value": "自动完成"
+    },
+    {
+      "name": "phone_todo_review_user_check",
+      "value": "待你验收"
+    },
+    {
+      "name": "phone_todo_review_rework",
+      "value": "返工第 {round} 轮"
+    },
+    {
+      "name": "phone_todo_review_needs_user",
+      "value": "等你决定"
+    },
+    {
+      "name": "phone_todo_review_ongoing",
+      "value": "督办中"
+    }
+  ]
+}

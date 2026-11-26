@@ -1,0 +1,260 @@
+{
+  "string": [
+    {
+      "name": "phone_look_color",
+      "value": "主题色"
+    },
+    {
+      "name": "phone_look_style",
+      "value": "界面风格"
+    },
+    {
+      "name": "phone_look_navigation",
+      "value": "侧边栏"
+    },
+    {
+      "name": "phone_look_layout",
+      "value": "Agents 列表布局"
+    },
+    {
+      "name": "phone_look_scheme",
+      "value": "深浅色"
+    },
+    {
+      "name": "phone_look_avatar",
+      "value": "形象"
+    },
+    {
+      "name": "phone_look_avatar_alias",
+      "value": "形象 头像 Persona 图标 名字 共享"
+    },
+    {
+      "name": "phone_look_color_alias",
+      "value": "主题 颜色 配色"
+    },
+    {
+      "name": "phone_look_style_alias",
+      "value": "界面 风格 字体 字号"
+    },
+    {
+      "name": "phone_look_scheme_alias",
+      "value": "浅色 深色 系统 外观"
+    },
+    {
+      "name": "phone_look_layout_header",
+      "value": "Agents 列表"
+    },
+    {
+      "name": "phone_look_sample_ask",
+      "value": "明天出门要带伞吗？"
+    },
+    {
+      "name": "phone_look_sample_reply",
+      "value": "上午有小雨，带一把折叠伞。"
+    },
+    {
+      "name": "phone_look_sample_link",
+      "value": "查看逐小时天气"
+    },
+    {
+      "name": "phone_look_sample_add",
+      "value": "加到提醒"
+    },
+    {
+      "name": "phone_look_sample_skip",
+      "value": "不用了"
+    },
+    {
+      "name": "phone_look_navigation_merged",
+      "value": "合并"
+    },
+    {
+      "name": "phone_look_navigation_separate",
+      "value": "分开"
+    },
+    {
+      "name": "phone_look_layout_avatar",
+      "value": "头像"
+    },
+    {
+      "name": "phone_look_layout_compact",
+      "value": "紧凑两行"
+    },
+    {
+      "name": "phone_look_layout_cards",
+      "value": "色条卡片"
+    },
+    {
+      "name": "phone_look_layout_list",
+      "value": "细列表"
+    },
+    {
+      "name": "phone_look_example_review",
+      "value": "补齐网络层的单元测试"
+    },
+    {
+      "name": "phone_look_example_review_note",
+      "value": "用哪个测试框架？我建议用 Swift Testing。"
+    },
+    {
+      "name": "phone_look_example_build",
+      "value": "给天气 App 加主屏幕小组件"
+    },
+    {
+      "name": "phone_look_example_build_note",
+      "value": "跑测试：目前 160 个里过了 128 个。"
+    },
+    {
+      "name": "phone_look_style_glass",
+      "value": "液态玻璃"
+    },
+    {
+      "name": "phone_look_style_clay",
+      "value": "黏土"
+    },
+    {
+      "name": "phone_look_style_island",
+      "value": "Island"
+    },
+    {
+      "name": "phone_look_style_lark",
+      "value": "飞书"
+    },
+    {
+      "name": "phone_look_style_beautiful",
+      "value": "BeautifulUI"
+    },
+    {
+      "name": "phone_look_style_glass_note",
+      "value": "原生系统界面"
+    },
+    {
+      "name": "phone_look_style_clay_note",
+      "value": "柔和、圆润"
+    },
+    {
+      "name": "phone_look_style_island_note",
+      "value": "悬浮卡片"
+    },
+    {
+      "name": "phone_look_style_lark_note",
+      "value": "和飞书一致"
+    },
+    {
+      "name": "phone_look_style_footer",
+      "value": "浮层和卡片的画法、按钮、字体和对话里的组件，整个 App 一起换，包括收件箱里的飞书页面。"
+    },
+    {
+      "name": "phone_look_style_beautiful_note",
+      "value": "BeautifulUI 的卡片、工具卡片和输入框"
+    },
+    {
+      "name": "phone_look_layout_avatar_note",
+      "value": "头像、标题和时间，两行最新的话，再一行写它在哪儿跑。"
+    },
+    {
+      "name": "phone_look_layout_compact_note",
+      "value": "每个 Agent 两行：标题和时间，再一行最新的话。"
+    },
+    {
+      "name": "phone_look_layout_cards_note",
+      "value": "每个 Agent 一张卡片，左边一条状态色；等你处理的那张整张淡蓝底。"
+    },
+    {
+      "name": "phone_look_layout_list_note",
+      "value": "每个 Agent 一行：状态、标题和时间。"
+    },
+    {
+      "name": "phone_look_scheme_system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "phone_look_scheme_light",
+      "value": "浅色"
+    },
+    {
+      "name": "phone_look_scheme_dark",
+      "value": "深色"
+    },
+    {
+      "name": "phone_look_navigation_separate_note",
+      "value": "助手和 Agents 各占一页，可在屏幕顶部切换。"
+    },
+    {
+      "name": "phone_look_navigation_merged_note",
+      "value": "主对话、页面、Persona 对话和 Agents 都放在同一个侧边栏。从左侧滑动即可打开。"
+    },
+    {
+      "name": "phone_look_text_size",
+      "value": "字号"
+    },
+    {
+      "name": "phone_look_text_small",
+      "value": "小"
+    },
+    {
+      "name": "phone_look_text_standard",
+      "value": "标准"
+    },
+    {
+      "name": "phone_look_text_large",
+      "value": "大"
+    },
+    {
+      "name": "phone_look_text_footer",
+      "value": "在系统的「文字大小」之上再调小或调大一档。"
+    },
+    {
+      "name": "phone_look_section",
+      "value": "外观"
+    },
+    {
+      "name": "phone_look_color_blue",
+      "value": "系统蓝"
+    },
+    {
+      "name": "phone_look_color_coral",
+      "value": "珊瑚橙"
+    },
+    {
+      "name": "phone_look_color_lavender",
+      "value": "薰衣草紫"
+    },
+    {
+      "name": "phone_look_color_teal",
+      "value": "青"
+    },
+    {
+      "name": "phone_look_color_lark",
+      "value": "飞书蓝"
+    },
+    {
+      "name": "phone_look_scheme_footer",
+      "value": "跟随系统会使用设备当前的外观。选择浅色或深色后，Persona 会固定使用该外观。"
+    },
+    {
+      "name": "phone_look_color_footer",
+      "value": "按钮、链接、选中态和你自己的气泡用主题色，黏土和 Island 的底色是它的淡色调。「跟随界面风格」用每种风格原来的颜色。"
+    },
+    {
+      "name": "phone_look_navigation_footer",
+      "value": "只影响这台设备，选择后立即生效。"
+    },
+    {
+      "name": "phone_look_glow",
+      "value": "回复时发光"
+    },
+    {
+      "name": "phone_look_glow_note",
+      "value": "Persona 写回复时，输入框外圈亮起流动光效"
+    },
+    {
+      "name": "phone_look_return",
+      "value": "按回车发送"
+    },
+    {
+      "name": "phone_look_return_note",
+      "value": "回车直接发送，Shift + 回车换行"
+    }
+  ]
+}

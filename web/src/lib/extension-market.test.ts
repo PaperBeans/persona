@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  addMarket, agreeLabel, canUninstall, catalogOf, catalogQuery, getCatalog, installPreview, isGitMarket, itemLine, itemState, listMarkets, MARKET_SPEC_HINT, marketView, marketKind, marketLine, marketOf,
+  addMarket, agreeLabel, extensionSignatureLabel, parseKeyList, canUninstall, catalogOf, catalogQuery, getCatalog, installPreview, isGitMarket, itemLine, itemState, listMarkets, MARKET_SPEC_HINT, marketView, marketKind, marketLine, marketOf,
   extensionsRoute, previewFromMarket, previewVersion, renameConsent, refreshMarket, removeMarket, routeSub, setMarketToken, specLabel, uninstallExtension, upgradePreview, upgradingFrom, wantsGitHubToken,
   type CatalogItem, type Market, type MarketPreview, type ExtensionsRoute,
 } from "./extension-market";
@@ -19,6 +19,22 @@ afterEach(() => {
 });
 
 const item = (extra: Partial<CatalogItem> = {}): CatalogItem => ({ market: "m1", market_name: "Example 扩展", id: "example-cal", name: "Example 日历", version: "1.1.0", ...extra });
+
+describe("private market keys", () => {
+  it("reads keys typed one per line, with commas or spaces", () => {
+    expect(parseKeyList(" ed25519:a\n\ned25519:b, ed25519:c ")).toEqual(["ed25519:a", "ed25519:b", "ed25519:c"]);
+    expect(parseKeyList("  ")).toEqual([]);
+  });
+  it("labels an installed extension's verification", () => {
+    expect(extensionSignatureLabel(undefined)).toBeNull();
+    expect(extensionSignatureLabel({ state: "signed", key_id: "1111111111111111" })?.tone).toBe("green");
+    expect(extensionSignatureLabel({ state: "official" })?.tone).toBe("accent");
+    expect(extensionSignatureLabel({ state: "unsigned" })?.tone).toBe("gray");
+    expect(extensionSignatureLabel({ state: "key_removed" })?.tone).toBe("orange");
+    expect(extensionSignatureLabel({ state: "market_invalid" })?.tone).toBe("red");
+    expect(extensionSignatureLabel({ state: "something_new" })?.text).toContain("something_new");
+  });
+});
 
 describe("市场的规矩", () => {
   it("says where a catalog extension stands", () => {

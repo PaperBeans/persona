@@ -1,0 +1,10 @@
+{
+  "waiting_idle": "Update queued",
+  "transferring": "Preparing the update",
+  "restarting": "Restarting after the update",
+  "confirming": "Checking the connection",
+  "updating": "Update in progress",
+  "reconnect": "Your assistant will reconnect automatically.",
+  "pending_restart": "New version ready",
+  "restart_when_idle": "Your assistant will restart when it’s idle."
+}

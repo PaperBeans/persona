@@ -19,7 +19,7 @@ ALIASES = {
     "sim.sh": "app/sim.sh", "android.sh": "app/android.sh", "ui-test.sh": "app/ui-test.sh",
     "deploy.sh": "deploy/deploy.sh", "publish.sh": "release/publish.sh",
     "release.sh": "release/release.sh", "test-server.sh": "test/test-server.sh",
-    "check-fast.sh": "test/check-fast.sh",
+    "check-fast.sh": "test/check-fast.sh", "new_domain_slice.py": "gen/new_domain_slice.py",
 }
 
 

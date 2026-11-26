@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,6 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // Helpers of the hub transcription tests: a transcription contribution in the test process whose jobs a test scripts
@@ -265,7 +265,7 @@ func (f *fakeTranscriber) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	pos := int64(0)
 	if j.start.At != nil {
-		pos = int64(*j.start.At * kb.AudioRate)
+		pos = int64(*j.start.At * recordingwire.AudioRate)
 	}
 	sentLines, sentWindows, ackedTo := 0, 0, pos
 	emit := func(upTo float64, all bool) bool {
@@ -303,7 +303,7 @@ func (f *fakeTranscriber) serve(w http.ResponseWriter, r *http.Request) {
 			j.mu.Lock()
 			j.audio += int64(len(raw) / 2)
 			j.mu.Unlock()
-			at := float64(pos) / kb.AudioRate
+			at := float64(pos) / recordingwire.AudioRate
 			if script.dropAt > 0 && at >= script.dropAt {
 				return
 			}
@@ -314,7 +314,7 @@ func (f *fakeTranscriber) serve(w http.ResponseWriter, r *http.Request) {
 				send(extwire.TranscriptionFrame{Type: extwire.TFError, Code: cmp.Or(script.failCode, extwire.TEUpstreamFailed), Fatal: true})
 				return
 			}
-			if !script.noAck && pos-ackedTo >= kb.AudioRate/2 {
+			if !script.noAck && pos-ackedTo >= recordingwire.AudioRate/2 {
 				ackedTo = pos
 				if !send(extwire.TranscriptionFrame{Type: extwire.TFAck, At: extwire.F(at)}) {
 					return
@@ -332,11 +332,11 @@ func (f *fakeTranscriber) serve(w http.ResponseWriter, r *http.Request) {
 		j.mu.Lock()
 		j.frames = append(j.frames, fr)
 		j.mu.Unlock()
-		at := float64(pos) / kb.AudioRate
+		at := float64(pos) / recordingwire.AudioRate
 		switch fr.Type {
 		case extwire.TFSeek:
 			if fr.At != nil {
-				pos = int64(*fr.At * kb.AudioRate)
+				pos = int64(*fr.At * recordingwire.AudioRate)
 				j.mu.Lock()
 				j.seeks = append(j.seeks, *fr.At)
 				j.mu.Unlock()
@@ -422,7 +422,7 @@ func (p *testPhone) send(v any) {
 // audio sends seconds of audio (silence) in 100 ms frames.
 func (p *testPhone) audio(seconds float64) {
 	p.t.Helper()
-	frame := make([]byte, kb.AudioRate/10*2)
+	frame := make([]byte, recordingwire.AudioRate/10*2)
 	for n := int(seconds * 10); n > 0; n-- {
 		if err := p.c.Write(context.Background(), websocket.MessageBinary, frame); err != nil {
 			p.t.Fatalf("audio: %v", err)
@@ -547,16 +547,16 @@ func (h *hubFixture) transcription(id string) map[string]any {
 }
 
 // lines are recording id's live log as texts and sources.
-func (h *hubFixture) lines(id string) []kb.LiveSegment {
+func (h *hubFixture) lines(id string) []recordingwire.LiveSegment {
 	h.t.Helper()
-	l, _, err := h.engine().LiveRead(id)
+	l, _, err := writersOf(h.engine()).LiveRead(id)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return l.Segments
 }
 
-func lineTexts(segs []kb.LiveSegment) []string {
+func lineTexts(segs []recordingwire.LiveSegment) []string {
 	out := make([]string, 0, len(segs))
 	for _, sg := range segs {
 		out = append(out, sg.Text)

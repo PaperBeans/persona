@@ -9,7 +9,7 @@ use persona_core_runtime::wire::{self, Config};
 use persona_core_runtime::{Host, Runtime};
 
 #[cfg(feature = "ohos")]
-use napi_ohos::bindgen_prelude::{Buffer, Error, FnArgs, Result, Status};
+use napi_ohos::bindgen_prelude::{Error, FnArgs, Result, Status, Uint8Array};
 #[cfg(feature = "ohos")]
 use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 
@@ -98,7 +98,7 @@ type ChangedCallback = ThreadsafeFunction<i64, (), i64, Status, false>;
 #[cfg(feature = "ohos")]
 type ChangedChatCallback = ThreadsafeFunction<FnArgs<(String, i64)>, (), FnArgs<(String, i64)>, Status, false>;
 #[cfg(feature = "ohos")]
-type EffectsCallback = ThreadsafeFunction<Buffer, (), Buffer, Status, false>;
+type EffectsCallback = ThreadsafeFunction<Uint8Array, (), Uint8Array, Status, false>;
 
 #[cfg(feature = "ohos")]
 pub struct CoreHost {
@@ -151,9 +151,10 @@ impl Host for CoreHost {
     }
 
     fn run(&self, effect: &[u8]) {
-        let _ = self
-            .effects
-            .call(Buffer::from(effect.to_vec()), ThreadsafeFunctionCallMode::NonBlocking);
+        let _ = self.effects.call(
+            Uint8Array::from(effect.to_vec()),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
     }
 }
 

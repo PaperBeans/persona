@@ -1,5 +1,5 @@
 // Real app browser check of background rounds in the main conversation (#4314), with synthetic HTTP/WS only.
-// node web/e2e/background-rounds.mjs <web URL> --shots <directory> [--folded on|off] [--expect before|after] [--chromium <executable>]
+// node web/e2e/background-rounds.mjs <web URL> --shots <directory> [--folded on|off] [--relay unset|on|off] [--runtime claude|codex|dsh] [--expect before|after] [--chromium <executable>]
 // --folded: the hub's main_background_folded (on by default). --expect before: only take screenshots (a build without
 // the feature); after: also assert the folded and opened states.
 import assert from "node:assert/strict";
@@ -12,9 +12,11 @@ const flag = (name) => { const i = args.indexOf(name); return i < 0 ? undefined 
 const base = args[0]?.replace(/\/$/, "");
 const shots = flag("--shots");
 const folded = (flag("--folded") ?? "on") === "on";
+const relaySetting = flag("--relay") ?? "unset";
+const runtime = flag("--runtime") ?? "claude";
 const expect = flag("--expect") ?? "after";
 if (!base || !shots) {
-  console.error("usage: node web/e2e/background-rounds.mjs <web URL> --shots <directory> [--folded on|off] [--expect before|after] [--chromium <executable>]");
+  console.error("usage: node web/e2e/background-rounds.mjs <web URL> --shots <directory> [--folded on|off] [--relay unset|on|off] [--runtime claude|codex|dsh] [--expect before|after] [--chromium <executable>]");
   process.exit(2);
 }
 mkdirSync(shots, { recursive: true });
@@ -42,7 +44,9 @@ const items = [
 ];
 
 async function run(browser, size, theme) {
-  const session = { machine_id: "demo", session_id: sid, title: "Persona", cwd: "/tmp/fictional-project", assistant: true, started_by_persona: true, state: "idle", status: "idle", updated_at: AT, state_since: AT, capabilities: { send: true, read: true } };
+  let relay = relaySetting === "unset" ? undefined : relaySetting === "on";
+  const writes = [];
+  const session = { machine_id: "demo", session_id: sid, agent: runtime, title: "Persona", cwd: "/tmp/fictional-project", assistant: true, started_by_persona: true, state: "idle", status: "idle", updated_at: AT, state_since: AT, capabilities: { send: true, read: true } };
   const side = { ...session, session_id: "demo-side", title: "Release desk" };
   const context = await browser.newContext({ viewport: size === "wide" ? { width: 1280, height: 1100 } : { width: 390, height: 1100 }, colorScheme: theme, reducedMotion: "reduce" });
   await context.addInitScript(({ theme, now }) => {
@@ -62,7 +66,14 @@ async function run(browser, size, theme) {
     if (path === "/machines") body = { machines: [{ id: "demo", name: "Example computer", online: true, os: "linux" }] };
     else if (path === "/sessions") body = { sessions: [session, side] };
     else if (path === "/interactions") body = { interactions: [] };
-    else if (path === "/assistant") body = { machine_id: "demo", main: sid, conversations: [session, side], tasks: [], memory: [], main_background_folded: folded };
+    else if (path === "/assistant") {
+      if (route.request().method() === "PUT") {
+        const update = route.request().postDataJSON();
+        writes.push(update);
+        relay = update.fold_routine_relay_replies;
+      }
+      body = { machine_id: "demo", manager: route.request().headers()["x-persona-manager"] || undefined, main: sid, conversations: [session, side], tasks: [], memory: [], main_background_folded: folded, fold_routine_relay_replies: relay };
+    }
     else if (path === "/todos") body = { todos: [] };
     else if (path === `/sessions/demo/${sid}`) body = { session };
     else if (path.endsWith("/feed")) body = { items: [] };
@@ -101,15 +112,17 @@ async function run(browser, size, theme) {
     assert(text.includes("Only the example screenshots are left."), "the user's own rounds stay shown");
     assert(text.includes("Two example invoices") || text.includes("two example invoices"), "a round that told the user stays shown");
     if (folded) {
-      assert.equal(await rounds.count(), 2, "the routine relay and scheduled rounds both fold");
+      const quietRelay = relay === true;
+      assert.equal(await rounds.count(), quietRelay ? 2 : 1, "a nonempty relay folds only with explicit opt-in; the scheduled round still folds");
       assert(!text.includes(prompt), "no scheduled prompt in the main chat");
       const answer = chat.getByText("The fictional release notes mention the export button.", { exact: true });
-      assert.equal(await answer.count(), 0, "a routine relay reply stays folded after a failed notification");
-      assert.equal(await chat.locator("[data-work-group] > button[aria-expanded=false]").count(), 1, "the tool trace stays closed");
-      await rounds.first().locator(":scope > button").click();
-      const relayOpened = await chat.textContent();
-      assert(relayOpened.includes("The fictional release notes mention the export button."), "the routine reply remains available when opened");
-      await rounds.nth(1).locator(":scope > button").click();
+      assert.equal(await answer.count(), quietRelay ? 0 : 1, "visible routine response follows the independent opt-in");
+      if (quietRelay) {
+        assert.equal(await chat.locator("[data-work-group] > button[aria-expanded=false]").count(), 1, "the tool trace stays closed");
+        await rounds.first().locator(":scope > button").click();
+        assert((await chat.textContent()).includes("The fictional release notes mention the export button."), "the routine reply remains available when opened");
+      }
+      await rounds.last().locator(":scope > button").click();
       const opened = await chat.textContent();
       assert(opened.includes("Checking the example inboxes."), "the scheduled round's work shows when opened");
       assert(!opened.includes(prompt), "the scheduled prompt stays hidden when opened");
@@ -127,9 +140,25 @@ async function run(browser, size, theme) {
     await toggle.waitFor();
     assert.equal(await toggle.getAttribute("aria-checked"), String(folded));
     await toggle.scrollIntoViewIfNeeded();
-    await shot("settings");
+    const relayToggle = page.getByRole("switch", { name: "折叠其他对话的常规回复" }); // i18n-ignore: the zh-Hans label under test
+    if (relay === undefined) {
+      assert.equal(await relayToggle.count(), 0, "an older hub cannot opt into a policy it does not support");
+      await shot("settings");
+    } else {
+      await relayToggle.scrollIntoViewIfNeeded();
+      assert.equal(await relayToggle.getAttribute("aria-checked"), String(relay));
+      await shot("settings");
+      const previous = relay;
+      await Promise.all([page.waitForResponse((r) => r.url().endsWith("/assistant") && r.request().method() === "GET"), relayToggle.click()]);
+      assert.deepEqual(writes, [{ fold_routine_relay_replies: !previous }]);
+      assert.equal(await relayToggle.getAttribute("aria-checked"), String(!previous));
+      assert.equal(await toggle.getAttribute("aria-checked"), String(folded));
+      await Promise.all([page.waitForResponse((r) => r.url().endsWith("/assistant") && r.request().method() === "GET"), page.goto(`${base}/`)]);
+      await page.getByText("Only the example screenshots are left.", { exact: true }).waitFor();
+      await chat.getByText("The fictional release notes mention the export button.", { exact: true }).waitFor({ state: folded && !previous ? "hidden" : "visible" });
+    }
   }
-  console.log(`PASS ${tag} (${expect}, folded ${folded ? "on" : "off"})`);
+  console.log(`PASS ${tag} (${expect}, folded ${folded ? "on" : "off"}, relay ${relaySetting}, runtime ${runtime})`);
   await context.close();
 }
 

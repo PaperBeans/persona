@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "phone_agent_display_title",
+      "value": "显示"
+    },
+    {
+      "name": "phone_agent_display_avatar",
+      "value": "头像"
+    },
+    {
+      "name": "phone_agent_display_compact",
+      "value": "紧凑两行"
+    },
+    {
+      "name": "phone_agent_display_cards",
+      "value": "色条卡片"
+    },
+    {
+      "name": "phone_agent_display_list",
+      "value": "细列表"
+    },
+    {
+      "name": "phone_agent_recommended",
+      "value": "推荐"
+    },
+    {
+      "name": "phone_agent_recommended_accessible",
+      "value": "{value}，推荐"
+    },
+    {
+      "name": "phone_agent_deny_choice",
+      "value": "拒绝"
+    }
+  ]
+}

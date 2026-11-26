@@ -37,9 +37,7 @@ func putOwnerReplyPending(s *Service, ix proto.Interaction) {
 
 func keepOwnerReplyCard(s *Service, ix proto.Interaction, messageID string) {
 	putOwnerReplyPending(s, ix)
-	s.fbot.mu.Lock()
-	s.keepBotCardLocked(ix.ID, &botCard{MessageID: messageID, Ix: ix, At: time.Unix(1000, 0)})
-	s.fbot.mu.Unlock()
+	keepChatCard(s, ix.ID, &botCard{MessageID: messageID, Ix: ix, At: time.Unix(1000, 0)})
 }
 
 func ownerReplyBatchIX(batch ownerActionBatch) proto.Interaction {
@@ -90,6 +88,7 @@ func answerOwnerProof(f *fakeHub, action, interaction string, calls *int, mutate
 }
 
 func TestOwnerActionFeishuBatchReplyAfterRestartConsumesOnce(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, st, book := ownerReplyTestService(t)
 	batch := createOwnerTestBatch(t, book, `{"body":"one","to":"a@example.test"}`, `{"body":"two","to":"b@example.test"}`, `{"body":"three","to":"c@example.test"}`)
 	batchIX := ownerReplyBatchIX(batch)
@@ -137,6 +136,7 @@ func TestOwnerActionFeishuBatchReplyAfterRestartConsumesOnce(t *testing.T) {
 }
 
 func TestOwnerActionFeishuItemReplyApprovesOnlyThatItem(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, _, book := ownerReplyTestService(t)
 	batch := createOwnerTestBatch(t, book, `{"body":"one"}`, `{"body":"two"}`)
 	ix := ownerReplyItemIX(batch, batch.Items[0])
@@ -282,6 +282,7 @@ func TestOwnerActionAppReplyRetryAfterDecisionHasNoNewEffect(t *testing.T) {
 }
 
 func TestOwnerActionFeishuReplyFailuresGrantNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name          string
 		text          string
@@ -303,9 +304,7 @@ func TestOwnerActionFeishuReplyFailuresGrantNothing(t *testing.T) {
 			batch := createOwnerTestBatch(t, book, `{"body":"unchanged"}`)
 			ix := ownerReplyBatchIX(batch)
 			putOwnerReplyPending(s, ix)
-			s.fbot.mu.Lock()
-			s.keepBotCardLocked(ix.ID, &botCard{MessageID: "om_batch", ChatID: tc.cardChat, Ix: ix, At: time.Unix(1000, 0)})
-			s.fbot.mu.Unlock()
+			keepChatCard(s, ix.ID, &botCard{MessageID: "om_batch", ChatID: tc.cardChat, Ix: ix, At: time.Unix(1000, 0)})
 			calls := 0
 			answerOwnerProof(f, "oa_reply", ix.ID, &calls, tc.mutateProof)
 			ev := ownerReplyEvent(tc.parent)

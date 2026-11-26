@@ -2,6 +2,13 @@ import { common } from '@kit.AbilityKit';
 import { relationalStore } from '@kit.ArkData';
 import { isHubStateKey } from '../core/StorageOwnership';
 
+export interface UniqueLocalKey {
+  prefix:string;
+  suffix:string;
+  valueContains:string;
+  key:string;
+}
+
 // Application-sandbox data only. Credentials are kept separately in Asset Store.
 export class LocalStore {
   private static retired: Map<string, Set<string>> = new Map();
@@ -47,15 +54,51 @@ export class LocalStore {
       await store.insert('client_state', { key: key, value: value }, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
     });
   }
-  async remove(key: string, expectedEpoch: number = this.keyEpoch(key)): Promise<void> {
+  /** Commit related records together, optionally requiring the original values to remain unchanged. */
+  async updateRecords(mainKey:string,epoch:number,values:Map<string,string>,deletions:string[],current:()=>boolean,
+    expected?:Map<string,string>,unique?:UniqueLocalKey):Promise<void> {
+    const store=this.store;if(!store)throw new Error('cache_unavailable');
+    await this.queue(async():Promise<void>=>{
+      if (!current() || !this.accepts(mainKey,epoch)) throw new Error('scope_retired');
+      await store.beginTransaction();
+      try {
+        if(expected) {
+          for(const pair of expected) {
+            const previous=await store.querySql('SELECT value FROM client_state WHERE key = ?', [pair[0]]);
+            try { if ((previous.goToFirstRow()?previous.getString(0):'')!==pair[1]) throw new Error('request_updated'); }
+            finally { previous.close(); }
+          }
+        }
+        if(unique) {
+          const matches=await store.querySql(
+            'SELECT key FROM client_state WHERE substr(key,1,length(?)) = ? AND substr(key,-length(?)) = ? AND instr(value,?) > 0 LIMIT 2',
+            [unique.prefix,unique.prefix,unique.suffix,unique.suffix,unique.valueContains]);
+          try {
+            if(!matches.goToFirstRow() || matches.getString(0)!==unique.key || matches.goToNextRow()) throw new Error('request_updated');
+          } finally { matches.close(); }
+        }
+        for(const pair of values) await store.executeSql('INSERT OR REPLACE INTO client_state(key, value) VALUES (?, ?)',[pair[0],pair[1]]);
+        for(const key of deletions) await store.executeSql('DELETE FROM client_state WHERE key = ?',[key]);
+        if(!current() || !this.accepts(mainKey,epoch))throw new Error('scope_retired');
+        await store.commit();
+      } catch(error) { await store.rollBack();throw error as Error; }
+    });
+  }
+  async remove(key: string, expectedEpoch: number = this.keyEpoch(key), expectedValue?: string): Promise<void> {
     if (!this.store) return;
     const store = this.store, epoch = expectedEpoch;
-    await this.queue(async () => { if (epoch !== this.keyEpoch(key)) return; await store.executeSql('DELETE FROM client_state WHERE key = ?', [key]); });
+    await this.queue(async () => {
+      if (epoch !== this.keyEpoch(key)) return;
+      if (expectedValue === undefined) await store.executeSql('DELETE FROM client_state WHERE key = ?', [key]);
+      else if (!this.retiredKey(key)) await store.executeSql('DELETE FROM client_state WHERE key = ? AND value = ?', [key, expectedValue]);
+    });
   }
-  async keys(): Promise<string[]> {
+  async keys(prefix?:string, valueContains:string = ''): Promise<string[]> {
     if (!this.store) return [];
     await this.pendingWrites();
-    const result = await this.store.querySql('SELECT key FROM client_state');
+    const result = prefix === undefined ? await this.store.querySql('SELECT key FROM client_state') :
+      await this.store.querySql('SELECT key FROM client_state WHERE substr(key,1,length(?)) = ? AND instr(value,?) > 0',
+        [prefix,prefix,valueContains]);
     const keys: string[] = [];
     try { while (result.goToNextRow()) keys.push(result.getString(0)); } finally { result.close(); }
     return keys;

@@ -30,5 +30,10 @@
   "agents": "在做这个项目的 Agent",
   "code_dirs": "代码目录",
   "copy_path": "复制路径",
-  "message_line": "{sender}：{text}"
+  "message_line": "{sender}：{text}",
+  "recording_minutes": "会议纪要",
+  "recording_day_recap": "日回顾",
+  "recording_transcript": "转写",
+  "recording_photos": "照片",
+  "recording_photo_label": "照片 {n}"
 }

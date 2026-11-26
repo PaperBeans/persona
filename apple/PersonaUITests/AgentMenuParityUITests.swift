@@ -61,7 +61,7 @@ final class AgentMenuParityUITests: XCTestCase {
     /// The entries of the menu list that shows `marker`: the top level's or, opened, More's.
     @MainActor private func menuLabels(marker: String) -> [String] {
         let wanted: [String: String] = [
-            "更多": "more", "Git": "git", "文件": "files", "全部子 Agent（1）": "subagents", "空间里的所有 Agent": "space",
+            "更多": "more", "Git": "git", "文件": "files", "子智能体（1）": "subagents", "全部子 Agent（1）": "subagents", "空间里的所有 Agent": "space",
             "连接实时会话": "attach", "中断": "interrupt", "标为已看": "markSeen", "接管": "takeover",
             "在新会话中继续": "continueInNewSession", "重命名 Agent…": "rename", "置顶": "pin", "取消置顶": "pin",
             "屏蔽通知": "mute", "取消屏蔽通知": "mute", "关联到待办…": "linkTodo", "移动到其他待办…": "moveTodo",

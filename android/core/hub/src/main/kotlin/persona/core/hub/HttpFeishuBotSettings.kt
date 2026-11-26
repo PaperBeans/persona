@@ -12,15 +12,18 @@ import persona.core.contracts.JsonCodec
 import persona.core.contracts.api.FeishuBotSettings
 import persona.core.contracts.api.FeishuBotStatus
 import persona.core.contracts.api.FeishuBotUpdate
+import persona.core.contracts.api.LarkSyncSettings
 
 /**
  * Settings › Lark bot over the pairing's connection (docs/extensions/bots.md"Configuration and endpoints"). Saving credentials waits on the hub
  * checking them with Feishu's open platform: longer than the client's usual read timeout.
  */
 class HttpFeishuBotSettings internal constructor(
+    /** The bot's daily sync, over the same connection. */
+    override val sync: LarkSyncSettings? = null,
     private val request: suspend (path: String, method: String, body: RequestBody?, readTimeoutSeconds: Long?) -> Response,
 ) : FeishuBotSettings {
-    constructor(connection: OkHttpHubConnection) : this({ path, method, body, timeout ->
+    constructor(connection: OkHttpHubConnection) : this(HttpLarkSync(connection), { path, method, body, timeout ->
         connection.request(path, method, body, readTimeoutSeconds = timeout)
     })
 

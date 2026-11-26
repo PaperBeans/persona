@@ -131,9 +131,10 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertIn("WIDGET_EXTENSION", settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"])
         self.assertNotIn("TARGETED_DEVICE_FAMILY", settings)
         # The watch widgets' shared sources, less the watch face's own (the Milk Frog, All-Day Recording), which visionOS does not draw.
-        watch_face = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
         shared = {item["path"] for item in targets["PersonaWatchWidgets"]["sources"] if item["path"].startswith("Shared/")}
-        watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
+        watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift",
+                     # The phone's Record complication allowance belongs to the watch face too, not visionOS widgets.
+                     "Shared/Recording/PhoneRecordingAllowance.swift"}
         self.assertTrue(watch_pet.issubset(shared))
         # The water and protein complications (#13275) are the watch face's too: visionOS has no complications.
         watch_intake = {"Shared/WatchIntake.swift", "Shared/WatchIntakeConfiguration.swift", "Shared/WatchIntakeComplicationView.swift",
@@ -306,7 +307,8 @@ class PersonaOnlyTests(unittest.TestCase):
 
     def test_plists_have_unique_keys_and_exact_compatible_url_schemes(self):
         registered = set()
-        expected = {"Persona/Resources/Info.plist", "Vision/Resources/Info.plist", "PersonaWatch/Info.plist"}
+        expected = {"Persona/Resources/Info.plist", "Vision/Resources/Info.plist", "PersonaWatch/Info.plist",
+                    "PersonaLink/App/Info.plist"}  # Persona Link opens pairing links (persona://link?…)
         for path in apple_files():
             if path.suffix not in {".plist", ".entitlements"}:
                 continue
@@ -483,14 +485,29 @@ class PersonaOnlyTests(unittest.TestCase):
             self.assertIn("HubNaming.filePattern", source(path))
 
     def test_link_package_and_clients_share_compatible_names_without_duplicates(self):
-        # The retired menu bar's data-directory and pairing code is archived with its UI (#6770). The independent
-        # launchd service and fixed Electron command bridge keep the connector in the shared PERSONA_HOME.
+        # The menu bar App (apple/PersonaLink/App) reads the connector's state from the same data directory the launchd
+        # service gives it (PERSONA_HOME), else the canonical one, else the previous name's when that is the one there.
         package = source("PersonaLink/Package.swift")
         self.assertIn('name: "PersonaScreen"', package)
         self.assertIn('path: "Sources/PersonaScreen"', package)
         self.assertNotIn('path: "Sources/PersonaLink"', package)
         service = APPLE.parent / "server/cmd/persona-link/service_mac.go"
         self.assertIn('<key>PERSONA_HOME</key>', service.read_text())
+        paths = source("PersonaLink/App/Sources/PersonaLink/LinkStatePaths.swift")
+        self.assertIn('environment["PERSONA_HOME"] ?? environment[previousHomeKey] ?? ""', paths)
+        self.assertIn('LegacyNames.product.uppercased() + "_HOME"', paths)
+        self.assertIn('home.appendingPathComponent(".persona", isDirectory: true)', paths)
+        self.assertIn('home.appendingPathComponent("." + LegacyNames.product, isDirectory: true)', paths)
+        self.assertIn("lstat(previous.path, &old)", paths)
+        self.assertIn("a.st_dev == b.st_dev, a.st_ino == b.st_ino", paths)
+        self.assertNotIn("moveItem(", paths)
+        self.assertNotIn("removeItem(", paths)
+        model = source("PersonaLink/App/Sources/PersonaLink/LinkModel.swift")
+        self.assertEqual(model.count('environment["PERSONA_HOME"] = stateURL.path'), 1)
+        self.assertIn('LegacyNames.product.uppercased() + "_HOME"', model)
+        self.assertNotIn('"--parent"', model, "launchd runs the connector; the App never hosts it")
+        self.assertIn('static let schemes: Set<String> = ["persona", LegacyNames.product]',
+                      source("PersonaLink/App/Sources/PersonaLink/PairLink.swift"))
         route = source("Shared/HubPageLink.swift")
         self.assertIn('case "persona", LegacyNames.conversationPath:', route)
         for path in ["Shared/APIClient.swift", "Shared/ExtensionSystemLink.swift"]:
@@ -500,6 +517,9 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertIn('case "persona", LegacyNames.urlScheme:', source("Persona/Views/Chat/AssistantHTMLCard.swift"))
         self.assertFalse((APPLE / "PersonaLink/Sources/PersonaLink").exists())
         self.assertFalse((APPLE / "PersonaLink/Tests/PersonaLinkTests").exists())
+        compatibility = APPLE / "PersonaLink/App/Sources/PersonaLink/NativeCompatibility.swift"
+        self.assertTrue(compatibility.is_symlink())
+        self.assertEqual(compatibility.resolve(), (APPLE / "Shared/NativeStateMigration.swift").resolve())
         for path in (path for path in apple_files() if path.suffix == ".swift"):
             with self.subTest(path=path.relative_to(APPLE)):
                 text = path.read_text(encoding="utf-8")

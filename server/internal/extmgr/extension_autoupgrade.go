@@ -18,8 +18,9 @@ import (
 
 // Plugins upgrade themselves from their markets (docs/extensions/extensions.md "Auto-upgrade"): the hub reads the registered
 // markets every few hours and installs a newer version of a plugin it installed from one, when the version asks for
-// nothing more than the user granted and nothing is using the plugin. One that asks for more waits for the user; one
-// that does not come up is rolled back (watchUpgrade) and not tried again. One switched off waits until it is on again:
+// nothing more than the user granted and nothing is using the plugin, after a snapshot of its data
+// (extension_upgrade_backup.go). One that asks for more waits for the user; one that does not come up is rolled back
+// with its data (watchUpgrade) and not tried again. One switched off waits until it is on again:
 // with no program running, watchUpgrade could not tell whether the new version comes up. Built-in, hub.json's and
 // plugins installed from elsewhere (a directory, a file, a URL, a remote socket) are never upgraded by the hub.
 
@@ -537,6 +538,14 @@ func (u *extensionUpgrades) install(ctx context.Context, p *extension.Extension,
 		reg.Discard(pv.ID) // the index said the same as the package, so this does not happen
 		err = i18n.Err("hub-extension_autoupgrade.package_more_permissions")
 	}
+	backedUp := false
+	if err == nil { // its data is kept first (extension_upgrade_backup.go)
+		if err = h.extensions.backupBeforeUpgrade(ctx, p, pv.Manifest, up.To); err != nil {
+			reg.Discard(pv.ID)
+		} else {
+			backedUp = true
+		}
+	}
 	if err == nil {
 		u.mu.Lock()
 		if u.inflight == nil {
@@ -555,6 +564,9 @@ func (u *extensionUpgrades) install(ctx context.Context, p *extension.Extension,
 			u.mu.Lock()
 			delete(u.inflight, key)
 			u.mu.Unlock()
+			if backedUp {
+				h.extensions.restartAfterUpgradeFailed(id) // the old version, stopped for its backup
+			}
 		} else {
 			go h.settle(context.WithoutCancel(ctx), op, np, true)
 		}
@@ -585,11 +597,14 @@ func (u *extensionUpgrades) watched(ctx context.Context, id, from, to string, ro
 	key := u.storageKey(id)
 	u.mu.Lock()
 	auto := u.inflight[key] == to
-	delete(u.inflight, key)
+	if auto {
+		delete(u.inflight, key)
+	}
 	u.mu.Unlock()
+	cur := u.h.extensions.reg.Get(id)
 	name := id
-	if p := u.h.extensions.reg.Get(id); p != nil {
-		name = p.Manifest.Name
+	if cur != nil {
+		name = cur.Manifest.Name
 	}
 	if rolledBack {
 		n := ExtensionUpgradeNote{Kind: "rolled_back", From: from, To: to, Detail: why, At: time.Now()}
@@ -603,6 +618,9 @@ func (u *extensionUpgrades) watched(ctx context.Context, id, from, to string, ro
 		})
 		u.tell(id, n, "rolled_back", func(i18n.Lang) i18n.Args { return i18n.Args{"name": name, "version": to, "from": from} })
 		return
+	}
+	if cur == nil || cur.Record.Version != to {
+		return // superseded by a newer upgrade, manual rollback, or uninstall
 	}
 	if !auto {
 		_ = u.change(ctx, func(s *extensionUpgradeSettings) { delete(s.Last, key) })

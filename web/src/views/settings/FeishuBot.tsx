@@ -3,6 +3,7 @@
 // bind step, #5818); the status and the on / off switch, pairing with a code sent to the bot, what the bot may do and the
 // agents driven there; and, folded under Advanced, the app's credentials and how to make one by hand.
 // Each change goes to the hub at once and the page shows what the hub answered; a failed one leaves it as it was.
+import { sameManager } from "../../lib/manager-choice";
 import { BindSteps, ChannelLink } from "./Channels";
 import { Disclosure } from "./ProviderFields";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -20,8 +21,9 @@ import { BrandMark } from "../../ui/BrandMark";
 import { Icon, type IconName } from "../../ui/icons";
 import { Group, Pill, Row, Switch, settingsInputClass } from "./SettingsParts";
 import { SignInSteps } from "./HubConnector";
+import { LarkSyncSection } from "./LarkSyncSection";
 
-const SOURCE_REPORT_DELAYS = [0, 1, 2, 5, 10, 15, 30, 60];
+export const SOURCE_REPORT_DELAYS = [0, 1, 2, 5, 10, 15, 30, 60];
 
 const controlClass = "h-8 rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]";
 const dotClass = { green: "bg-green", red: "bg-red", orange: "bg-orange" } as const;
@@ -57,7 +59,7 @@ function combinedLarkState(bot: FeishuBotStatus | null, loading: boolean, c: Hub
   return { label: botSummary(bot), tone: botTone(bot) };
 }
 
-const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail: string }[] = [
+export const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail: string }[] = [
   { key: "main", icon: "spark", title: t("settings-feishubot.feature_main_title"), detail: t("settings-feishubot.feature_main_detail") },
   { key: "cards", icon: "hand", title: t("settings-feishubot.feature_cards_title"), detail: t("settings-feishubot.feature_cards_detail") },
   { key: "all_cards", icon: "bell", title: t("settings-feishubot.feature_all_cards_title"), detail: t("settings-feishubot.feature_all_cards_detail") },
@@ -74,15 +76,16 @@ const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail:
   { key: "agents", icon: "agent", title: t("settings-feishubot.feature_agents_title"), detail: t("settings-feishubot.feature_agents_detail") },
 ];
 
-const STEPS = [
+export const STEPS = [
   t("settings-feishubot.step_create_app"),
   t("settings-feishubot.step_permissions"),
+  t("settings-feishubot.step_sync_permissions"),
   t("settings-feishubot.step_events"),
   t("settings-feishubot.step_publish"),
 ];
 
 /** The bot's state, kept by whoever shows it (the row and its page share one). */
-function useBot() {
+export function useBot() {
   const [status, setStatus] = useState<FeishuBotStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -126,9 +129,9 @@ function useBot() {
   return { status, accept, readStatus, loading, error, setError, load };
 }
 
-export function FeishuBot({ onChannel, larkcli, onOpen }: { onChannel?: (id: string) => void; larkcli?: HubConnector | null; onOpen?: (id: string) => void } = {}) {
+export function FeishuBot({ onChannel, larkcli, onOpen, manager, onRouteClose }: { manager?: string; onRouteClose?: () => void; onChannel?: (id: string, manager?: string) => void; larkcli?: HubConnector | null; onOpen?: (id: string) => void } = {}) {
   const bot = useBot();
-  const [open, setOpen] = useState(() => new URLSearchParams(location.search).get("connector") === "feishu-bot");
+  const [open, setOpen] = useState(false);
   const tone = botTone(bot.status);
   return (
     <>
@@ -154,8 +157,8 @@ export function FeishuBot({ onChannel, larkcli, onOpen }: { onChannel?: (id: str
           </button>
         </Group>
       )}
-      {onChannel && <ChannelLink id="feishu" onOpen={onChannel} />}
-      {open && <FeishuBotDialog bot={bot} larkcli={larkcli} onClose={() => setOpen(false)} onOpen={onOpen} />}
+      {onChannel && <ChannelLink id="feishu" manager={manager} onOpen={onChannel} />}
+      {(open || onRouteClose) && <FeishuBotDialog bot={bot} manager={manager} larkcli={larkcli} onClose={onRouteClose ?? (() => setOpen(false))} onOpen={onOpen} />}
     </>
   );
 }
@@ -178,7 +181,7 @@ function CombinedLarkRow({ bot, connector, onOpen }: { bot: ReturnType<typeof us
   );
 }
 
-function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<typeof useBot>; larkcli?: HubConnector | null; onClose: () => void; onOpen?: (id: string) => void }) {
+function FeishuBotDialog({ bot, manager, larkcli, onClose, onOpen }: { manager?: string; bot: ReturnType<typeof useBot>; larkcli?: HubConnector | null; onClose: () => void; onOpen?: (id: string) => void }) {
   const { status, accept, readStatus, loading, error, setError, load } = bot;
   const [dialogLarkcli, setDialogLarkcli] = useState<HubConnector | null | undefined>(larkcli);
   const [form, setForm] = useState<BotCredentials>(() => (status ? credentialsOf(status) : { appID: "", appSecret: "", domain: "feishu" }));
@@ -209,10 +212,10 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
 
   const fetchLarkcli = useCallback(async () => {
     const all = await listConnectors();
-    const found = all.find((connector) => connector.id === "larkcli");
+    const found = all.find((connector) => connector.id === "larkcli" && sameManager(connector.manager, manager));
     // A re-read that no longer lists it keeps what the page showed; only a first read may conclude "none".
     setDialogLarkcli((prev) => found ?? (prev === undefined ? null : prev));
-  }, []);
+  }, [manager]);
 
   useEffect(() => {
     if (larkcli !== undefined) {
@@ -326,6 +329,9 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
           }}
         />
       )}
+
+      {/* reading Feishu as you every day, into the knowledge base: absent on a hub without it */}
+      <LarkSyncSection appID={status?.app_id} />
 
       <Group title={dialogLarkcli ? t("settings-feishubot.bot_section") : undefined} footer={t("settings-feishubot.footer")}>
         <div className="flex items-center gap-3 px-4 py-3">
@@ -540,7 +546,7 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
   );
 }
 
-function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, onOpen }: {
+export function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, onOpen }: {
   connector: HubConnector;
   status: FeishuBotStatus | null;
   waitsForApp?: boolean;
@@ -691,7 +697,7 @@ function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, on
 
 
 /** Group policies use the same acknowledged save as the other bot settings. */
-function TopicGroups({ status, saving, save }: { status: FeishuBotStatus; saving: boolean; save: (groups: BotTopicChat[]) => Promise<boolean> }) {
+export function TopicGroups({ status, saving, save }: { status: FeishuBotStatus; saving: boolean; save: (groups: BotTopicChat[]) => Promise<boolean> }) {
   const groups = status.topic_chats ?? [];
   const [adding, setAdding] = useState(false);
   const [chatID, setChatID] = useState("");

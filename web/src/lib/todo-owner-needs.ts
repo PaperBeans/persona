@@ -4,7 +4,7 @@
 // brought back in this browser, and one minute clock that moves to-dos across the 24 h and 48 h lines for both at once.
 
 import { useMemo, useSyncExternalStore } from "react";
-import { answeredLookup } from "../views/assistant/answered-lookup";
+import { answeredLookup } from "./answered-lookup";
 import { useScopedTodos } from "./current-assistant";
 import { useAgentSessions } from "./sessions";
 import { useStore, withTaskRows } from "./store";
@@ -43,7 +43,7 @@ export function useTodoMinute(): number {
 
 /** The to-dos' Agents as the To-dos page reads them: the Agents list's rows, an open task's Agent outside the list's
  *  window (`taskRows`), and an Agent whose card was just answered here counted as back at work until the hub catches
- *  up (views/assistant/answered-lookup.ts). */
+ *  up (lib/answered-lookup.ts). */
 export function useTodoLookup(): SessionLookup {
   const sessions = useAgentSessions();
   const taskRows = useStore((s) => s.taskRows);

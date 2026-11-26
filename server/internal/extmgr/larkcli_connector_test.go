@@ -8,12 +8,13 @@ import (
 	"github.com/nwverse/persona/server/internal/cliwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // needsLarkCLI skips a test of the lark-cli connector in a build without the lark module (internal/cliport).
 func needsLarkCLI(t testing.TB) {
 	t.Helper()
-	if !cliport.Available() {
+	if !cliport.Available(moduleswitch.Set{}) {
 		t.Skip("the lark module is not in this build")
 	}
 }

@@ -21,9 +21,6 @@ type modelUsageStore interface {
 }
 
 func (s *Service) modelUsageStore() modelUsageStore {
-	if s.store == nil {
-		return nil
-	}
 	st, _ := s.store().(modelUsageStore)
 	return st
 }

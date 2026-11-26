@@ -1,7 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseDeviceLookAvatarFile, contrastRatio, deviceLookAccentText, deviceLookPackageJSON, deviceLookPalette, parseDeviceLookPackage,
+import { chooseDeviceLookAvatarFile, contrastRatio, deviceLookAccentText, deviceLookPackageJSON, deviceLookPalette, deviceLookSurface, parseDeviceLookPackage,
   validDeviceLookFile, validDeviceLookOwner, validDeviceLookPackageId } from '../entry/src/main/ets/core/DeviceLook.ts';
+import { phoneInterfaceStyleChoices, phoneInterfaceStyleID, storedPhoneInterfaceStyle } from '../entry/src/main/ets/core/PhoneInterfaceStyle.ts';
+
+test('the five device styles keep their own surfaces and keep a previously chosen Brief or Board', () => {
+  const choices = ['glass','clay','island','lark','beautiful'];
+  assert.deepEqual(phoneInterfaceStyleChoices('system'),choices);
+  for(const legacy of ['brief','board']){
+    assert.deepEqual(phoneInterfaceStyleChoices(legacy),[...choices,legacy]);
+    assert.equal(storedPhoneInterfaceStyle(legacy),legacy);
+  }
+  assert.equal(phoneInterfaceStyleID('system'),'glass');
+  assert.equal(storedPhoneInterfaceStyle('unknown'),'system');
+  for(const [style,light,dark,fill,night] of [
+    ['clay','#EFEAF7','#0A0510','#F8F5FD','#2A2533'],
+    ['island','#E6F1EF','#0A1110','#FFFFFF','#16201E'],
+    ['lark','#F5F6F7','#141414','#FFFFFF','#1F1F1F']
+  ]){
+    const palette=deviceLookPalette('style',style);
+    assert.equal(storedPhoneInterfaceStyle(style),style);
+    assert.equal(deviceLookSurface(style,'style',false,palette).page,light);
+    assert.equal(deviceLookSurface(style,'style',true,palette).page,dark);
+    assert.equal(deviceLookSurface(style,'style',false,palette).card,fill);
+    assert.equal(deviceLookSurface(style,'style',true,palette).card,night);
+  }
+  assert.deepEqual(deviceLookPalette('style','beautiful'),deviceLookPalette('style','glass'));
+  const coral=deviceLookPalette('coral','clay');
+  assert.deepEqual(coral,deviceLookPalette('coral','island'));
+  assert.notEqual(deviceLookSurface('clay','coral',false,coral).page,'#EFEAF7');
+  assert.equal(deviceLookSurface('lark','coral',false,coral).page,'#F5F6F7');
+});
 
 function info(overrides = {}) {
   return {
@@ -102,4 +131,14 @@ test('mid-gray supplied bubble text reaches contrast through the better endpoint
  const input=info();input.manifest.colors.light.bubble_text='#888888';input.manifest.colors.dark.bubble_text='#888888';
  const pack=parseDeviceLookPackage(input),palette=deviceLookPalette('avatar','glass',pack.colors);
  assert.ok(contrastRatio(palette.light.userBubble,palette.light.userBubbleText)>=4.5);assert.ok(contrastRatio(palette.dark.userBubble,palette.dark.userBubbleText)>=4.5);
+});
+
+test('system chat uses the native Glass user bubble while explicit accents retain their own pair',()=>{
+ const system=deviceLookPalette('style','system',undefined);
+ assert.equal(system.light.userBubble,'#DCEAFF');
+ assert.equal(system.dark.userBubble,'#1D3557');
+ assert.equal(system.dark.userBubbleText,'#FFFFFF');
+ assert.ok(contrastRatio(system.dark.userBubble,system.dark.userBubbleText)>=4.5);
+ assert.notEqual(deviceLookPalette('style','board',undefined).dark.userBubble,system.dark.userBubble);
+ assert.equal(deviceLookPalette('coral','system',undefined).dark.userBubble,'#AF4C28');
 });

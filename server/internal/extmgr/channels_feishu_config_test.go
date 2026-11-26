@@ -176,6 +176,8 @@ func TestFeishuConfigureDiagnosticSurvivesPairPoll(t *testing.T) {
 		issue       botcard.ConfigureIssue
 	}{
 		{"missing_scope", 230002, 0, botcard.IssuePatchScope},
+		{"missing_scope_gateway", 99991672, 0, botcard.IssuePatchScope},
+		{"missing_scope_token", 99991676, 0, botcard.IssuePatchScope},
 		{"bot_capability", 210041, 0, botcard.IssueBotCapability},
 		{"not_self_built", 210001, 0, botcard.IssueNotSelfBuilt},
 		{"incompatible", 210031, 0, botcard.IssueIncompatible},

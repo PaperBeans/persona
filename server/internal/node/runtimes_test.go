@@ -194,6 +194,12 @@ func dialRuntimeAt(t *testing.T, path string, hello map[string]any) *fakeRuntime
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runtimeOn(t, c, hello)
+}
+
+// runtimeOn is a fake runtime on connection c to the node's runtime host, once it has said hello.
+func runtimeOn(t *testing.T, c net.Conn, hello map[string]any) *fakeRuntime {
+	t.Helper()
 	f := &fakeRuntime{conn: c, params: map[string][]json.RawMessage{}}
 	f.peer = rpc.New("d", c)
 	f.peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -336,6 +342,74 @@ func TestRuntimeRenameCapability(t *testing.T) {
 			}
 			if caps := got["rename-child"].Capabilities; caps == nil || caps.Rename == nil || *caps.Rename {
 				t.Fatalf("a sub-Agent's row lists rename: %+v", caps)
+			}
+		})
+	}
+}
+
+// A runtime's sentinel-only update keeps the preceding preview of that same row or subagent.
+// The new revision still applies, and a real empty preview can clear the old one.
+func TestRuntimeBotmuxSentinelPreviews(t *testing.T) {
+	const marker = "BOTMUX_NOTHING_TO_SEND"
+	rh, h, _ := runtimePush(t, 0)
+	push := func(rev int64, text, child string) proto.Session {
+		t.Helper()
+		children := []proto.Subagent{{ID: "other", LastText: "unrelated"}, {ID: "child", LastText: child}}
+		if rev == 2 {
+			slices.Reverse(children)
+		}
+		rows := []proto.Session{{SessionID: "sample", LastText: text, Rev: rev, Subagents: children}}
+		rh.event(h, "runtime.sessions", mustJSON(map[string]any{"sessions": rows}))
+		s := onlyRow(t, rh.reg.appendSessions(nil), "sample")
+		if s.Rev != rev || len(s.Subagents) != 2 {
+			t.Fatalf("got revision %d with %d children, want %d with two children", s.Rev, len(s.Subagents), rev)
+		}
+		return s
+	}
+	s := push(1, marker+"\nfirst words", strings.Repeat(" ", maxRuntimeTaskText)+marker+"\nchild words")
+	if s.LastText != "first words" || s.Subagents[1].LastText != "child words" {
+		t.Errorf("mixed preview after clipping: got %q / %q", s.LastText, s.Subagents[1].LastText)
+	}
+	s = push(2, marker, marker)
+	if s.LastText != "first words" || s.Subagents[0].LastText != "child words" {
+		t.Errorf("sentinel-only update: got %q / %q", s.LastText, s.Subagents[0].LastText)
+	}
+	s = push(3, "", "")
+	if s.LastText != "" || s.Subagents[1].LastText != "" {
+		t.Errorf("empty update: got %q / %q", s.LastText, s.Subagents[1].LastText)
+	}
+}
+
+func TestRuntimeBotmuxSentinelNewOwner(t *testing.T) {
+	rh, h, _ := runtimePush(t, 0)
+	rh.event(h, "runtime.sessions", json.RawMessage(`{"sessions":[{"session_id":"sample","last_text":"first owner's words","subagents":[{"id":"child","last_text":"earlier child"}]}]}`))
+	other := rh.reg.add(nil)
+	other.hello, other.ready = runtimeHello{Runtime: "other"}, true
+	rh.event(other, "runtime.sessions", json.RawMessage(`{"sessions":[{"session_id":"sample","last_text":"BOTMUX_NOTHING_TO_SEND","subagents":[{"id":"child","last_text":"BOTMUX_NOTHING_TO_SEND"}]}]}`))
+	s := onlyRow(t, rh.reg.appendSessions(nil), "sample")
+	if s.SourceInstanceID != "other" || s.LastText != "" || len(s.Subagents) != 1 || s.Subagents[0].LastText != "" {
+		t.Errorf("new owner's preview: got owner %q, text %q, children %+v", s.SourceInstanceID, s.LastText, s.Subagents)
+	}
+}
+
+func TestRuntimeBotmuxSentinelPaneMerges(t *testing.T) {
+	for name, merge := range map[string]func(*Node, *proto.Session){"opencode": (*Node).mergeOpencodeRow, "pi": (*Node).mergePiRow} {
+		t.Run(name, func(t *testing.T) {
+			rh, h, _ := runtimePush(t, 0)
+			n := &Node{runtimes: rh.reg}
+			for _, tc := range []struct{ reported, want string }{
+				{"BOTMUX_NOTHING_TO_SEND", "host words"},
+				{"", "host words"},
+				{"plugin words\nBOTMUX_NOTHING_TO_SEND", "plugin words"},
+			} {
+				rh.event(h, "runtime.sessions", mustJSON(map[string]any{"sessions": []map[string]any{{
+					"session_id": "sample", "last_text": tc.reported, "model": "sample-model", "rev": 2,
+				}}}))
+				s := proto.Session{SessionID: "sample", LastText: "host words"}
+				merge(n, &s)
+				if s.LastText != tc.want || s.Model != "sample-model" || s.Rev != 2 {
+					t.Errorf("report %q: got preview %q, model %q, rev %d; want %q, sample-model, 2", tc.reported, s.LastText, s.Model, s.Rev, tc.want)
+				}
 			}
 		})
 	}

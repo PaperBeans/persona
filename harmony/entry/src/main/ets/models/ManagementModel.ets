@@ -1,7 +1,9 @@
+import { sessionModeAvailable, sessionModelLauncher, sessionModeSettingsPage } from './SessionModes';
 import { ClientModel } from './ClientModel';
 import { ResourceRow, Wire } from './Wire';
 import { HttpFailure } from '../platform/HubTransport';
 import { findScheduleTemplate } from '../core/ScheduleTemplates';
+import { bindingPermission, purposePermissionChoices } from '../core/PhoneSettingsPermissions';
 
 function segment(value: string): string { return encodeURIComponent(value); }
 
@@ -9,8 +11,9 @@ export class PurposeDraft {
   provider: string = '';
   model: string = '';
   effort: string = '';
-  constructor(provider: string = '', model: string = '', effort: string = '') {
-    this.provider = provider; this.model = model; this.effort = effort;
+  permissionMode: string = '';
+  constructor(provider: string = '', model: string = '', effort: string = '', permissionMode: string = '') {
+    this.provider = provider; this.model = model; this.effort = effort; this.permissionMode = permissionMode;
   }
 }
 
@@ -91,6 +94,7 @@ export class ManagementModel {
   @Trace providers: Record<string, Object>[] = [];
   @Trace catalogPurposes: Record<string, Object>[] = [];
   @Trace purposeDraft: PurposeDraft = new PurposeDraft();
+  @Trace purposeConflict:boolean=false;
   @Trace providerModels: Record<string, Object>[] = [];
   @Trace pairing: Record<string, Object> = {};
   @Trace catalogRows: ManagementRow[] = [];
@@ -219,7 +223,23 @@ export class ManagementModel {
     } else this.error = 'failed';
   }
 
-  async load(page: string, model: ClientModel): Promise<void> {
+  modelCategories():Record<string,Object>[] {
+    return this.catalogPurposes.filter((row:Record<string,Object>)=>Array.isArray(row['uses']));
+  }
+
+  modelCatalogRows():Record<string,Object>[] {
+    const categories=this.modelCategories();
+    const independent=this.catalogPurposes.filter((row:Record<string,Object>):boolean=>{
+      const category=Wire.text(row,'category_id');
+      return !Array.isArray(row['uses']) && !!category && category!==Wire.text(row,'id') &&
+        Wire.strings(row,'fields').some((field:string)=>['provider','model','effort','runtime','permission_mode'].includes(field));
+    });
+    if (categories.length) return categories.concat(independent);
+    // Hubs without category metadata advertised a flat catalog. Keep those concrete uses reachable.
+    return this.catalogPurposes.filter((row:Record<string,Object>)=>!Wire.text(row,'category_id') && Wire.text(row,'id')!=='inbox.agent');
+  }
+
+  async load(page: string, model: ClientModel, purposeID: string = ''): Promise<void> {
     const group = model.profile.id, owner = model.profile.manager, forgetEpoch = this.scheduleForgetEpoch(model, model.profile.id),
       scope = model.scope(), draftLease = this.scheduleDraftLease;
     const keepScheduleReceipt = page === 'schedules' && this.page === 'schedules' && this.group === group &&
@@ -233,7 +253,9 @@ export class ManagementModel {
     const generation = ++this.generation;
     this.clientGeneration = model.connectionGeneration();
     this.page = page; this.scope = scope; this.group = group; this.owner = owner; this.ownerForgetEpoch = forgetEpoch;
-    this.selectedTarget = page === 'session_permissions' || page === 'session_effort' ? model.target() : '';
+    const modePage = ['session_permissions', 'session_effort', 'session_model'].includes(page);
+    const target = modePage ? model.target() : '';
+    this.selectedTarget = target;
     this.error = ''; this.loading = true; this.saving = false; this.rows = []; this.data = {}; this.purpose = {}; this.providers = [];
     this.catalogPurposes = []; this.providerModels = []; this.selectedId = page === 'translation' ? 'kb' : '';
     this.catalogRows = []; this.catalogMarkets = []; this.preview = {}; this.operation = {}; this.extensionDetail = {}; this.extensionDetailMissing = false;
@@ -243,17 +265,32 @@ export class ManagementModel {
     this.scheduleRuns = [];
     try {
       if (page === 'appearance' || page === 'notifications' || page === 'privacy' || page === 'diagnostics' || page === 'phone') return;
-      if (page === 'models' || page === 'translation') {
+      if (['models','models_catalog','model_purpose','translation'].includes(page)) {
         const catalog = await this.read('/api/v1/model-config', model);
         if (!this.active(model, generation, scope)) return;
         this.data = catalog;
         this.catalogPurposes = Wire.rows(catalog, 'purposes');
+        if (page==='models_catalog') return;
+        if (page==='model_purpose') {
+          const target=this.modelCatalogRows().find((row:Record<string,Object>)=>!!purposeID && Wire.text(row,'id')===purposeID);
+          if (target) await this.loadPurpose(model,target,generation,scope);
+          else this.error='no_capability';
+          return;
+        }
         const preferred = page === 'translation' ? 'kb' : 'assistant';
         const selected = this.catalogPurposes.find((row: Record<string, Object>) => Wire.text(row, 'id') === (this.selectedId || preferred)) || this.catalogPurposes[0];
         if (selected) await this.loadPurpose(model, selected, generation, scope);
-      } else if (page === 'session_permissions' || page === 'session_effort') {
-        this.data = model.selected.data();
-        this.selectedId = model.selected.id;
+      } else if (modePage) {
+        const row = model.selected;
+        this.data = row.data();
+        this.selectedId = row.session;
+        if (page === 'session_model' && this.canEditSessionMode(model, 'model')) {
+          const launcher = sessionModelLauncher(this.data);
+          const catalog = await this.read('/api/v1/machines/' + segment(row.machine) + '/launchers/' + segment(launcher) + '/models', model);
+          if (!this.active(model, generation, scope, target) || !this.canEditSessionMode(model, 'model') ||
+            sessionModelLauncher(model.selected.data()) !== launcher) return;
+          if (!Wire.text(catalog, 'locked')) this.providerModels = Wire.rows(catalog, 'models').filter((item: Record<string, Object>) => !!Wire.text(item, 'id'));
+        }
       } else if (page === 'machines') {
         const result = await this.read('/api/v1/machines', model);
         if (!this.active(model, generation, scope)) return;
@@ -322,7 +359,7 @@ export class ManagementModel {
             Wire.text(target, 'to', Wire.text(target, 'subject', Wire.text(item, 'summary'))), item);
         });
       }
-    } catch (error) { if (this.active(model, generation, scope)) this.fail(error as Error); }
+    } catch (error) { if (this.active(model, generation, scope, target)) this.fail(error as Error); }
     finally { if (this.active(model, generation, scope)) this.loading = false; }
   }
 
@@ -331,9 +368,13 @@ export class ManagementModel {
     const detail = await this.call(model, '/api/v1/model-config/purposes/' + segment(id));
     if (!this.active(model, generation, scope)) return;
     const purpose = Wire.object(detail, 'purpose');
+    const receivedId=Wire.text(purpose,'id');
+    if (receivedId && receivedId!==id) { this.purpose={};this.error='request_updated';return; }
     this.selectedId = id; this.purpose = purpose; this.providers = Wire.rows(detail, 'providers');
-    this.purposeDraft = new PurposeDraft(Wire.text(Wire.object(purpose, 'override'), 'provider'),
-      Wire.text(Wire.object(purpose, 'override'), 'model'), Wire.text(Wire.object(purpose, 'override'), 'effort'));
+    this.purposeConflict=false;
+    const binding=Wire.object(purpose,'override');
+    this.purposeDraft = new PurposeDraft(Wire.text(binding,'provider'),Wire.text(binding,'model'),Wire.text(binding,'effort'),
+      bindingPermission(id,Wire.text(binding,'permission_mode')));
     await this.loadPurposeModels(model, generation, scope);
   }
 
@@ -357,12 +398,31 @@ export class ManagementModel {
     if (field === 'provider') return this.purposeDraft.provider;
     if (field === 'model') return this.purposeDraft.model;
     if (field === 'effort') return this.purposeDraft.effort;
+    if (field === 'permission_mode') return this.purposeDraft.permissionMode;
     return '';
   }
 
   purposeChanged(): boolean {
     const override = Wire.object(this.purpose, 'override');
-    return ['provider', 'model', 'effort'].some((field: string) => Wire.text(override, field) !== this.draftValue(field));
+    return ['provider', 'model', 'effort'].some((field: string) => Wire.text(override, field) !== this.draftValue(field)) ||
+      this.supports('permission_mode') && bindingPermission(this.selectedId,Wire.text(override,'permission_mode'))!==this.purposeDraft.permissionMode;
+  }
+
+  purposePermissionInEffect():string {
+    if (Wire.text(this.purpose,'kind')!=='launcher') return '';
+    if (this.selectedId==='inbox.agent') return bindingPermission(this.selectedId,Wire.text(Wire.object(this.purpose,'override'),'permission_mode')) || 'default';
+    return Wire.text(Wire.object(this.purpose,'effective'),'permission_mode');
+  }
+
+  permissionChoices():string[] {
+    const id=this.purposeDraft.provider || Wire.text(Wire.object(this.purpose,'effective'),'provider');
+    const provider=this.providers.find((row:Record<string,Object>)=>Wire.text(row,'id')===id) || {};
+    return purposePermissionChoices(this.selectedId,this.supports('permission_mode'),id,Wire.text(provider,'agent'),Wire.strings(provider,'permission_modes'));
+  }
+
+  restoreInboxInheritance():void {
+    if (this.selectedId!=='inbox.agent' || this.saving || !this.supports('permission_mode')) return;
+    this.purposeDraft=new PurposeDraft();this.modelsRequest++;this.providerModels=[];
   }
 
   async loadPurposeModels(model: ClientModel, generation: number = this.generation, scope: string = this.scope): Promise<void> {
@@ -388,23 +448,25 @@ export class ManagementModel {
   }
 
   changePurposeDraft(key: string, value: string): void {
-    if (!['provider', 'model', 'effort'].includes(key) || !this.supports(key)) return;
-    const next = new PurposeDraft(this.purposeDraft.provider, this.purposeDraft.model, this.purposeDraft.effort);
-    if (key === 'provider' && value !== next.provider) { next.model = ''; next.effort = ''; }
+    if (this.saving || !['provider', 'model', 'effort','permission_mode'].includes(key) || !this.supports(key)) return;
+    if (key==='permission_mode' && value && !this.permissionChoices().includes(value)) return;
+    const next = new PurposeDraft(this.purposeDraft.provider, this.purposeDraft.model, this.purposeDraft.effort,this.purposeDraft.permissionMode);
+    if (key === 'provider' && value !== next.provider) { next.model = ''; next.effort = ''; next.permissionMode=''; }
     if (key === 'provider') next.provider = value;
     if (key === 'model') next.model = value;
     if (key === 'effort') next.effort = value;
+    if (key === 'permission_mode') next.permissionMode=value;
     this.purposeDraft = next;
     if (key === 'provider') { this.modelsRequest++; this.providerModels = []; }
   }
 
   async savePurpose(model: ClientModel): Promise<boolean> {
     if (!this.active(model, this.generation, this.scope)) return false;
-    if (!this.selectedId || !Object.keys(this.purpose).length || this.saving) return false;
+    if (!this.selectedId || !Object.keys(this.purpose).length || this.saving || this.purposeConflict) return false;
     const generation = this.generation, scope = this.scope, id = this.selectedId, purpose = this.purpose;
     const patchKeys: string[] = ['revision'];
     const patchValues: Object[] = [purpose['revision']];
-    for (const key of ['provider', 'model', 'effort']) {
+    for (const key of ['provider', 'model', 'effort','permission_mode']) {
       if (!this.supports(key)) continue;
       patchKeys.push(key);
       const value = this.draftValue(key); patchValues.push(value ? value : jsonNull());
@@ -417,27 +479,44 @@ export class ManagementModel {
       this.saving = false;
       await this.selectPurpose(model, id);
       return this.active(model, this.generation, scope) && !this.error;
-    } catch (error) { if (this.active(model, generation, scope)) this.fail(error as Error); return false; }
+    } catch (error) {
+      if (this.active(model,generation,scope)) { this.purposeConflict=error instanceof HttpFailure && error.status===409;this.fail(error as Error); }
+      return false;
+    }
     finally { if (this.active(model, generation, scope)) this.saving = false; }
   }
 
+  canEditSessionMode(model: ClientModel, field: string): boolean {
+    const row = model.selected;
+    return model.connected && !model.demo && this.page === sessionModeSettingsPage(field) &&
+      this.selectedTarget === model.target(row) && this.selectedId === row.session && this.active(model, this.generation, this.scope, this.selectedTarget) &&
+      (!row.group || row.group === model.profile.id) && (!row.manager || row.manager === model.profile.manager) &&
+      sessionModeAvailable(row, field);
+  }
+
+  private sessionModeChoice(model: ClientModel, field: string, value: string): boolean {
+    if (!value || !this.canEditSessionMode(model, field)) return false;
+    const data = model.selected.data();
+    if (field === 'model') return sessionModelLauncher(data) === sessionModelLauncher(this.data) &&
+      this.providerModels.some((item: Record<string, Object>) => Wire.text(item, 'id') === value);
+    if (field === 'effort') return Wire.strings(data, 'efforts').includes(value);
+    return ['default', 'acceptEdits', 'plan', 'auto'].includes(value) || value === 'bypassPermissions' && Wire.bool(data, 'bypass_available');
+  }
+
   async saveMode(model: ClientModel, field: string, value: string): Promise<boolean> {
-    if (!this.active(model, this.generation, this.scope)) return false;
+    if (this.saving || this.loading || !this.sessionModeChoice(model, field, value)) return false;
     const row = model.selected, generation = this.generation, scope = model.scope(), target = model.target(row);
-    const capabilities = Wire.object(row.data(), 'capabilities');
-    if (row.kind !== 'session' || !Wire.bool(capabilities, 'modes') || !['permission_mode', 'effort'].includes(field)) return false;
-    if (field === 'effort' && !Wire.strings(row.data(), 'efforts').includes(value)) return false;
-    const allowedModes = ['default', 'acceptEdits', 'plan', 'auto'];
-    if (field === 'permission_mode' && !(allowedModes.includes(value) || value === 'bypassPermissions' && Wire.bool(row.data(), 'bypass_available'))) return false;
+    if (Wire.text(row.data(), field) === value) return false;
     this.saving = true; this.error = '';
     try {
       const body = Wire.payload([field], [value]);
-      await this.call(model, '/api/v1/sessions/' + segment(row.machine) + '/' + segment(row.session) + '/modes', 'POST', body);
+      await this.call(model, '/api/v1/sessions/' + segment(row.machine) + '/' + segment(row.session) + '/modes', 'POST', body, '',
+        (): boolean => this.active(model, generation, scope, target) && this.sessionModeChoice(model, field, value));
       if (!this.active(model, generation, scope, target)) return false;
       await model.refresh();
-      return true;
+      return this.active(model, generation, scope, target);
     } catch (error) { if (this.active(model, generation, scope, target)) this.fail(error as Error); return false; }
-    finally { if (this.active(model, generation, scope, target)) this.saving = false; }
+    finally { if (this.active(model, generation, scope)) this.saving = false; }
   }
 
   async setTriage(model: ClientModel, switches: Record<string, Object>): Promise<boolean> {

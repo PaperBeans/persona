@@ -27,11 +27,13 @@ The shared Rust core uses one ohos-rs NAPI library, not a C++ shim. With the API
 OHOS_SDK_NATIVE=/path/to/api26/native ../native/app-core/scripts/build-ohos.sh
 devecocli build --modules entry@ohosTest
 hdc -t '<device serial>' install entry/build/default/outputs/ohosTest/entry-ohosTest-unsigned.hap
-hdc -t '<device serial>' shell aa test -b '<development bundle>' -m entry_test -s unittest OpenHarmonyTestRunner -s coreReplay 1 -w 60
+hdc -t '<device serial>' shell aa test -b '<development bundle>' -m entry_test -s unittest OpenHarmonyTestRunner -s coreReplay 1 -w 60 > core-replay.log
+python3 tests/check-hypium-result.py core-replay.log --suite NativePersonaCore --count 2
 ```
 
-The builder packages the original `spec/fixtures/continuity` corpus and its exact Cargo license closure into ignored
-`build/` resources. `coreReplay` replays all 38 cases / 94 steps through the real NAPI handle, callbacks and generated
+The test HAP packages the original `spec/fixtures/continuity` corpus as rawfiles of the `entry_test` module.
+The log check requires a passing Hypium summary and a successful completion for every expected test. `coreReplay`
+replays all 39 cases / 95 steps through the real NAPI handle, callbacks and generated
 ArkTS codec, and separately asserts one `Update` for a repeated full item. Host tests use a fake NAPI only for adapter
 behavior; they do not prove a HAP or device run. Native core notices are packaged with the core test resources.
 

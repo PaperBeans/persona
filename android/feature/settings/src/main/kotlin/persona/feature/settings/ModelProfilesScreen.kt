@@ -4,6 +4,9 @@ import android.content.res.Resources
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
@@ -89,7 +92,7 @@ internal fun LazyListScope.modelProfilesSection(
                             onClick = onRollback,
                             kind = JButtonKind.Secondary,
                             size = JButtonSize.Small,
-                            loading = state.busy,
+                            loading = state.busyAction == ModelProfileBusyAction.Rollback,
                             enabled = !state.busy,
                         )
                     },
@@ -114,18 +117,46 @@ internal fun LazyListScope.modelProfilesSection(
     }
 }
 
-/** Detail page for one model profile: inspect Agent presets, purpose bindings, launcher overrides, edit or apply. */
+@Composable
+private fun ProfileActionErrorBanner(
+    error: ResText,
+    conflict: Boolean,
+    reloadLabel: String,
+    busy: Boolean,
+    onReload: () -> Unit,
+    errorTag: String = "model-profile-action-error",
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        JInlineStatus(error.text(), Modifier.testTag(errorTag), tone = InlineTone.Failed)
+        if (conflict) {
+            JButton(
+                text = reloadLabel,
+                onClick = onReload,
+                modifier = Modifier.fillMaxWidth().testTag("model-profile-reload-button"),
+                kind = JButtonKind.Secondary,
+                size = JButtonSize.Medium,
+                enabled = !busy,
+            )
+        }
+    }
+}
+
+/** Detail page for one model profile: inspect drift, Agent presets, purpose bindings, launcher overrides, capture, edit or apply. */
 @Composable
 internal fun ModelProfileDetailPage(
     profile: ModelProfile,
     catalog: ModelCatalog?,
-    busy: Boolean,
+    busyAction: ModelProfileBusyAction?,
     error: ResText?,
+    conflict: Boolean,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onApply: () -> Unit,
+    onCapture: () -> Unit,
+    onReload: () -> Unit,
 ) {
     val res = LocalResources.current
+    val busy = busyAction != null
     val providers = catalog?.providers.orEmpty()
     val catalogPurposes = catalog?.purposes.orEmpty()
     val tiers = remember(profile.tiers) { profile.tiers.entries.sortedBy { it.key } }
@@ -138,30 +169,48 @@ internal fun ModelProfileDetailPage(
         )
     }
     val launcherEntries = remember(profile.launchers) { profile.launchers.entries.sortedBy { it.key } }
+    val describedChanges = remember(profile, catalogPurposes, providers, res) {
+        profile.changes.map { describeProfileChange(res, it, profile, catalogPurposes, providers) }
+    }
 
     JListPage(
         title = profile.displayName,
         onBack = onBack,
         largeTitle = false,
         bottomBar = {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s)
+                    .testTag("model-profile-detail-footer"),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
             ) {
-                JButton(
-                    text = stringResource(R.string.settings_model_profiles_edit),
-                    onClick = onEdit,
-                    modifier = Modifier.weight(1f).testTag("model-profile-edit-button"),
-                    kind = JButtonKind.Secondary,
-                    enabled = !busy,
-                )
-                JButton(
-                    text = stringResource(R.string.settings_model_profiles_apply),
-                    onClick = onApply,
-                    modifier = Modifier.weight(1f).testTag("model-profile-apply-button"),
-                    loading = busy,
-                    enabled = !busy,
-                )
+                error?.let { err ->
+                    ProfileActionErrorBanner(
+                        error = err,
+                        conflict = conflict,
+                        reloadLabel = stringResource(R.string.settings_model_profiles_reload),
+                        busy = busy,
+                        onReload = onReload,
+                    )
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    JButton(
+                        text = stringResource(R.string.settings_model_profiles_edit),
+                        onClick = onEdit,
+                        modifier = Modifier.weight(1f).testTag("model-profile-edit-button"),
+                        kind = JButtonKind.Secondary,
+                        enabled = !busy,
+                    )
+                    JButton(
+                        text = stringResource(R.string.settings_model_profiles_apply),
+                        onClick = onApply,
+                        modifier = Modifier.weight(1f).testTag("model-profile-apply-button"),
+                        loading = busyAction == ModelProfileBusyAction.Apply,
+                        enabled = !busy,
+                    )
+                }
             }
         },
     ) {
@@ -184,12 +233,44 @@ internal fun ModelProfileDetailPage(
                 )
             }
         }
-        if (profile.active && profile.changes.isNotEmpty()) {
-            item("profile-drift") {
-                JNotice(
-                    stringResource(R.string.settings_model_profiles_active_drift),
-                    Modifier.padding(top = Tokens.Space.s),
-                    status = Status.NeedsYou,
+        if (describedChanges.isNotEmpty()) {
+            item("profile-changes") {
+                Column(Modifier.padding(top = Tokens.Space.s).testTag("model-profile-changes")) {
+                    describedChanges.forEachIndexed { index, change ->
+                        JGroupItem(GroupPosition.of(index, describedChanges.size)) {
+                            JRow(
+                                title = change.label,
+                                subtitle = change.target,
+                                subtitleLines = 2,
+                                chevron = false,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item("profile-capture") {
+            JCard(
+                modifier = Modifier.padding(top = Tokens.Space.s),
+                status = if (profile.active && profile.changes.isNotEmpty()) Status.NeedsYou else null,
+            ) {
+                Text(
+                    text = stringResource(
+                        if (profile.active && profile.changes.isNotEmpty()) R.string.settings_model_profiles_active_drift
+                        else R.string.settings_model_profiles_capture_hint,
+                    ),
+                    style = PersonaTheme.type.callout,
+                    color = PersonaTheme.palette.ink2,
+                )
+                Spacer(Modifier.height(Tokens.Space.s))
+                JButton(
+                    text = stringResource(R.string.settings_model_profiles_capture_from_current),
+                    onClick = onCapture,
+                    modifier = Modifier.fillMaxWidth().testTag("model-profile-capture-button"),
+                    kind = JButtonKind.Secondary,
+                    size = JButtonSize.Medium,
+                    loading = busyAction == ModelProfileBusyAction.Capture,
+                    enabled = !busy,
                 )
             }
         }
@@ -282,10 +363,208 @@ internal fun ModelProfileDetailPage(
                 }
             }
         }
+    }
+}
 
-        error?.let { err ->
-            item("profile-detail-error") {
-                JInlineStatus(err.text(), Modifier.padding(top = Tokens.Space.m), tone = InlineTone.Failed)
+/** Pre-apply confirmation page listing drifted fields and offering capture-active-first before switching. */
+@Composable
+internal fun ModelProfileApplyConfirmPage(
+    profile: ModelProfile,
+    activeProfile: ModelProfile?,
+    catalog: ModelCatalog?,
+    busyAction: ModelProfileBusyAction?,
+    error: ResText?,
+    conflict: Boolean,
+    onCaptureActiveAndApply: () -> Unit,
+    onApplyDirect: () -> Unit,
+    onCaptureCurrent: () -> Unit,
+    onReload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val res = LocalResources.current
+    val busy = busyAction != null
+    val providers = catalog?.providers.orEmpty()
+    val catalogPurposes = catalog?.purposes.orEmpty()
+    val drift = remember(profile, activeProfile) { profileApplyDrift(profile, activeProfile) }
+    val describedTargetChanges = remember(drift.targetChanges, profile, catalogPurposes, providers, res) {
+        drift.targetChanges.map { describeProfileChange(res, it, profile, catalogPurposes, providers) }
+    }
+    val describedActiveDrift = remember(drift.activeDrift, activeProfile, catalogPurposes, providers, res) {
+        drift.activeDrift.map { describeProfileChange(res, it, activeProfile, catalogPurposes, providers) }
+    }
+
+    JListPage(
+        title = stringResource(R.string.settings_model_profiles_confirm_apply_title, profile.displayName),
+        modifier = Modifier.testTag("model-profile-apply-confirm"),
+        onBack = onCancel,
+        largeTitle = false,
+        bottomBar = {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s)
+                    .testTag("model-profile-confirm-footer"),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                error?.let { err ->
+                    ProfileActionErrorBanner(
+                        error = err,
+                        conflict = conflict,
+                        reloadLabel = stringResource(R.string.settings_model_profiles_reload),
+                        busy = busy,
+                        onReload = onReload,
+                    )
+                }
+                when {
+                    drift.canCaptureActiveFirst && activeProfile != null -> {
+                        if (drift.hasActiveDrift) {
+                            JButton(
+                                text = stringResource(R.string.settings_model_profiles_capture_active_first, activeProfile.displayName),
+                                onClick = onCaptureActiveAndApply,
+                                modifier = Modifier.fillMaxWidth().testTag("model-profile-capture-and-apply"),
+                                kind = JButtonKind.Primary,
+                                loading = busyAction == ModelProfileBusyAction.CaptureAndApply,
+                                enabled = !busy,
+                            )
+                            JButton(
+                                text = stringResource(R.string.settings_model_profiles_apply_directly),
+                                onClick = onApplyDirect,
+                                modifier = Modifier.fillMaxWidth().testTag("model-profile-apply-direct"),
+                                kind = JButtonKind.Secondary,
+                                loading = busyAction == ModelProfileBusyAction.Apply,
+                                enabled = !busy,
+                            )
+                        } else {
+                            JButton(
+                                text = stringResource(R.string.settings_model_profiles_apply_directly),
+                                onClick = onApplyDirect,
+                                modifier = Modifier.fillMaxWidth().testTag("model-profile-apply-direct"),
+                                kind = JButtonKind.Primary,
+                                loading = busyAction == ModelProfileBusyAction.Apply,
+                                enabled = !busy,
+                            )
+                            JButton(
+                                text = stringResource(R.string.settings_model_profiles_capture_active_first, activeProfile.displayName),
+                                onClick = onCaptureActiveAndApply,
+                                modifier = Modifier.fillMaxWidth().testTag("model-profile-capture-and-apply"),
+                                kind = JButtonKind.Secondary,
+                                loading = busyAction == ModelProfileBusyAction.CaptureAndApply,
+                                enabled = !busy,
+                            )
+                        }
+                    }
+                    profile.active -> {
+                        JButton(
+                            text = stringResource(R.string.settings_model_profiles_capture_from_current),
+                            onClick = onCaptureCurrent,
+                            modifier = Modifier.fillMaxWidth().testTag("model-profile-confirm-capture"),
+                            kind = JButtonKind.Primary,
+                            loading = busyAction == ModelProfileBusyAction.Capture,
+                            enabled = !busy,
+                        )
+                        JButton(
+                            text = stringResource(R.string.settings_model_profiles_apply_directly),
+                            onClick = onApplyDirect,
+                            modifier = Modifier.fillMaxWidth().testTag("model-profile-apply-direct"),
+                            kind = JButtonKind.Secondary,
+                            loading = busyAction == ModelProfileBusyAction.Apply,
+                            enabled = !busy,
+                        )
+                    }
+                    else -> {
+                        JButton(
+                            text = stringResource(R.string.settings_model_profiles_apply_directly),
+                            onClick = onApplyDirect,
+                            modifier = Modifier.fillMaxWidth().testTag("model-profile-apply-direct"),
+                            kind = JButtonKind.Primary,
+                            loading = busyAction == ModelProfileBusyAction.Apply,
+                            enabled = !busy,
+                        )
+                    }
+                }
+                JButton(
+                    text = stringResource(R.string.settings_src_cancel),
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth().testTag("model-profile-confirm-cancel"),
+                    kind = JButtonKind.Quiet,
+                    enabled = !busy,
+                )
+            }
+        },
+    ) {
+        if (describedTargetChanges.isNotEmpty()) {
+            item("confirm-intro") {
+                SettingsCaption(
+                    text = stringResource(
+                        if (profile.active) R.string.settings_model_profiles_confirm_reapply_intro
+                        else R.string.settings_model_profiles_confirm_apply_intro,
+                        profile.displayName,
+                    ),
+                    modifier = Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s),
+                )
+            }
+            item("confirm-drift-list") {
+                Column(Modifier.testTag("model-profile-apply-drift-list")) {
+                    describedTargetChanges.forEachIndexed { index, change ->
+                        JGroupItem(GroupPosition.of(index, describedTargetChanges.size)) {
+                            JRow(
+                                title = change.label,
+                                subtitle = change.target,
+                                subtitleLines = 2,
+                                chevron = false,
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (activeProfile != null && describedActiveDrift.isNotEmpty()) {
+            item("confirm-active-drift-only") {
+                SettingsCaption(
+                    text = stringResource(
+                        R.string.settings_model_profiles_confirm_switch_active_drift_only,
+                        activeProfile.displayName,
+                        profile.displayName,
+                    ),
+                    modifier = Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s),
+                )
+            }
+        }
+
+        if (drift.canCaptureActiveFirst && activeProfile != null) {
+            if (drift.hasActiveDrift) {
+                item("confirm-active-drift-notice") {
+                    JCard(
+                        modifier = Modifier.padding(top = Tokens.Space.m).testTag("model-profile-active-drift-notice"),
+                        status = Status.NeedsYou,
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.settings_model_profiles_confirm_active_drift,
+                                activeProfile.displayName,
+                            ),
+                            style = PersonaTheme.type.callout,
+                            color = PersonaTheme.palette.ink2,
+                        )
+                        Spacer(Modifier.height(Tokens.Space.s))
+                        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                            describedActiveDrift.forEach { change ->
+                                Text(
+                                    text = change.target?.let { "${change.label}: $it" } ?: change.label,
+                                    style = PersonaTheme.type.bodyStrong,
+                                    color = PersonaTheme.palette.ink,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                item("confirm-capture-active-hint") {
+                    SettingsCaption(
+                        text = stringResource(
+                            R.string.settings_model_profiles_confirm_capture_active_hint,
+                            activeProfile.displayName,
+                        ),
+                        modifier = Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.m),
+                    )
+                }
             }
         }
     }
@@ -306,21 +585,24 @@ private sealed interface ProfilePicker {
 internal fun ModelProfileEditorPage(
     profile: ModelProfile,
     revision: Long,
+    syncKey: Int = 0,
     catalog: ModelCatalog?,
-    busy: Boolean,
+    busyAction: ModelProfileBusyAction?,
     error: ResText?,
     conflict: Boolean,
     onSave: (ModelProfileSaveInput) -> Unit,
+    onCapture: () -> Unit,
     onReload: () -> Unit,
     onBack: () -> Unit,
 ) {
     val res = LocalResources.current
+    val busy = busyAction != null
     val providers = catalog?.providers.orEmpty()
     val catalogPurposes = catalog?.purposes.orEmpty()
     val catalogIds = remember(catalogPurposes) { catalogPurposes.map { it.id } }
-    val initialDraft = remember(profile.id, revision, catalogIds) { profileToDraft(profile, catalogIds) }
-    var draft by remember(profile.id, revision) { mutableStateOf(initialDraft) }
-    var tierCounter by remember(profile.id, revision) { mutableIntStateOf(0) }
+    val initialDraft = remember(profile.id, revision, syncKey, catalogIds) { profileToDraft(profile, catalogIds) }
+    var draft by remember(profile.id, revision, syncKey) { mutableStateOf(initialDraft) }
+    var tierCounter by remember(profile.id, revision, syncKey) { mutableIntStateOf(0) }
     var picker by remember { mutableStateOf<ProfilePicker?>(null) }
 
     val problems = remember(draft) { profileDraftProblems(draft) }
@@ -328,6 +610,11 @@ internal fun ModelProfileEditorPage(
     val canSave = !busy && !conflict && problems.isEmpty() && dirty
     val launcherProviders = remember(providers) {
         providers.filter { it.kind == "launcher" && it.id.startsWith("launcher.") && !it.hidden }
+    }
+    // Hide empty permission_mode pickers when the hub's launcher purposes omit permission_mode (cross-version hubs).
+    val hubSupportsPermissionMode = remember(catalogPurposes) {
+        val launcherPurposesWithFields = catalogPurposes.filter { it.kind == "launcher" && it.fields != null }
+        launcherPurposesWithFields.isEmpty() || launcherPurposesWithFields.any { it.supports("permission_mode") }
     }
 
     fun updatePurpose(id: String, transform: (ModelProfilePurposeDraft) -> ModelProfilePurposeDraft) {
@@ -344,27 +631,64 @@ internal fun ModelProfileEditorPage(
         onBack = onBack,
         largeTitle = false,
         bottomBar = {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s)
+                    .testTag("model-profile-editor-save-bar"),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
             ) {
+                if (problems.isNotEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = Tokens.Size.box120)
+                            .verticalScroll(rememberScrollState())
+                            .testTag("model-profile-editor-problems"),
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+                    ) {
+                        problems.forEach { problem ->
+                            JInlineStatus(problem.text(), tone = InlineTone.Failed)
+                        }
+                    }
+                }
+                error?.let { err ->
+                    ProfileActionErrorBanner(
+                        error = err,
+                        conflict = conflict,
+                        reloadLabel = stringResource(R.string.settings_model_profiles_reload_discard),
+                        busy = busy,
+                        onReload = onReload,
+                        errorTag = "model-profile-save-error",
+                    )
+                }
                 JButton(
                     text = stringResource(R.string.settings_src_save),
                     onClick = { if (canSave) onSave(draftToProfileInput(draft, revision)) },
                     modifier = Modifier.fillMaxWidth().testTag("model-profile-save-button"),
-                    loading = busy,
+                    loading = busyAction == ModelProfileBusyAction.Save,
                     enabled = canSave,
                 )
             }
         },
     ) {
         item("editor-note") {
-            JNotice(
-                stringResource(
-                    if (profile.active) R.string.settings_model_profiles_save_note_active
-                    else R.string.settings_model_profiles_save_note_inactive
-                ),
-            )
+            JCard {
+                Text(
+                    text = stringResource(
+                        if (profile.active) R.string.settings_model_profiles_save_note_active
+                        else R.string.settings_model_profiles_save_note_inactive,
+                    ),
+                    style = PersonaTheme.type.callout,
+                    color = PersonaTheme.palette.ink2,
+                )
+                Spacer(Modifier.height(Tokens.Space.s))
+                JButton(
+                    text = stringResource(R.string.settings_model_profiles_capture_from_current),
+                    onClick = onCapture,
+                    modifier = Modifier.fillMaxWidth().testTag("model-profile-editor-capture-button"),
+                    kind = JButtonKind.Secondary,
+                    size = JButtonSize.Medium,
+                    loading = busyAction == ModelProfileBusyAction.Capture,
+                    enabled = !busy,
+                )
+            }
         }
         item("editor-identity") {
             Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
@@ -403,8 +727,14 @@ internal fun ModelProfileEditorPage(
         itemsIndexed(purposeIds, key = { _, id -> "editor-purpose-$id" }) { _, id ->
             val entry = draft.purposes.getValue(id)
             val title = profilePurposeLabel(res, id, catalogPurposes)
-            val isLauncherPurpose = catalogPurposes.firstOrNull { it.id == id }?.kind == "launcher" ||
+            val catalogPurpose = catalogPurposes.firstOrNull { it.id == id }
+            val isLauncherPurpose = catalogPurpose?.kind == "launcher" ||
                 id == "assistant" || id == "agent.new"
+            val showPermissionMode = isLauncherPurpose && (
+                entry.permissionMode.isNotBlank() ||
+                    if (catalogPurpose?.fields != null) catalogPurpose.supports("permission_mode")
+                    else hubSupportsPermissionMode
+            )
             Column(Modifier.padding(top = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 JGroupItem(GroupPosition.Single) {
                     JSwitchRow(
@@ -424,7 +754,7 @@ internal fun ModelProfileEditorPage(
                         ?: stringResource(R.string.settings_model_profiles_purpose_follow_default)
                     val modeLabel = entry.permissionMode.takeIf(String::isNotBlank)?.let { permissionModeDisplayLabel(res, it) }
                         ?: stringResource(R.string.settings_model_profiles_purpose_follow_default)
-                    val rowCount = if (isLauncherPurpose) 3 else 2
+                    val rowCount = if (showPermissionMode) 3 else 2
                     JGroupItem(GroupPosition.of(0, rowCount)) {
                         JRow(
                             title = stringResource(R.string.settings_src_model_provider),
@@ -441,11 +771,12 @@ internal fun ModelProfileEditorPage(
                             onClick = { picker = ProfilePicker.PurposeEffort(id) },
                         )
                     }
-                    if (isLauncherPurpose) {
+                    if (showPermissionMode) {
                         JGroupItem(GroupPosition.of(2, rowCount)) {
                             JRow(
                                 title = stringResource(R.string.settings_model_profiles_permission_mode),
                                 value = modeLabel,
+                                modifier = Modifier.testTag("purpose-permission-mode-$id"),
                                 enabled = !busy,
                                 onClick = { picker = ProfilePicker.PurposePermissionMode(id) },
                             )
@@ -493,6 +824,8 @@ internal fun ModelProfileEditorPage(
                 val speedLabel = tierSpeedDisplayLabel(res, tier.speed)
                 val modeLabel = tier.permissionMode.takeIf(String::isNotBlank)?.let { permissionModeDisplayLabel(res, it) }
                     ?: stringResource(R.string.settings_model_profiles_purpose_follow_default)
+                val showTierPermissionMode = hubSupportsPermissionMode || tier.permissionMode.isNotBlank()
+                val tierRowCount = if (showTierPermissionMode) 4 else 3
                 Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                     JTextField(
                         value = tier.name,
@@ -503,7 +836,7 @@ internal fun ModelProfileEditorPage(
                         singleLine = true,
                         enabled = !busy,
                     )
-                    JGroupItem(GroupPosition.of(0, 4)) {
+                    JGroupItem(GroupPosition.of(0, tierRowCount)) {
                         JRow(
                             title = stringResource(R.string.settings_model_profiles_tier_launcher),
                             value = launcherLabel,
@@ -511,7 +844,7 @@ internal fun ModelProfileEditorPage(
                             onClick = { picker = ProfilePicker.TierLauncher(tier.key) },
                         )
                     }
-                    JGroupItem(GroupPosition.of(1, 4)) {
+                    JGroupItem(GroupPosition.of(1, tierRowCount)) {
                         JRow(
                             title = stringResource(R.string.settings_src_model_effort),
                             value = effortLabel,
@@ -519,7 +852,7 @@ internal fun ModelProfileEditorPage(
                             onClick = { picker = ProfilePicker.TierEffort(tier.key) },
                         )
                     }
-                    JGroupItem(GroupPosition.of(2, 4)) {
+                    JGroupItem(GroupPosition.of(2, tierRowCount)) {
                         JRow(
                             title = stringResource(R.string.settings_model_profiles_tier_speed),
                             value = speedLabel,
@@ -527,13 +860,16 @@ internal fun ModelProfileEditorPage(
                             onClick = { picker = ProfilePicker.TierSpeed(tier.key) },
                         )
                     }
-                    JGroupItem(GroupPosition.of(3, 4)) {
-                        JRow(
-                            title = stringResource(R.string.settings_model_profiles_permission_mode),
-                            value = modeLabel,
-                            enabled = !busy,
-                            onClick = { picker = ProfilePicker.TierPermissionMode(tier.key) },
-                        )
+                    if (showTierPermissionMode) {
+                        JGroupItem(GroupPosition.of(3, tierRowCount)) {
+                            JRow(
+                                title = stringResource(R.string.settings_model_profiles_permission_mode),
+                                value = modeLabel,
+                                modifier = Modifier.testTag("tier-permission-mode-${tier.key}"),
+                                enabled = !busy,
+                                onClick = { picker = ProfilePicker.TierPermissionMode(tier.key) },
+                            )
+                        }
                     }
                     JTextField(
                         value = tier.model,
@@ -579,35 +915,6 @@ internal fun ModelProfileEditorPage(
                 kind = JButtonKind.Secondary,
                 enabled = !busy && draft.tiers.size < ModelProfileRules.MAX_MODEL_TIERS,
             )
-        }
-
-        // Validation problems
-        if (problems.isNotEmpty()) {
-            item("editor-problems") {
-                Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                    problems.forEach { problem ->
-                        JInlineStatus(problem.text(), tone = InlineTone.Failed)
-                    }
-                }
-            }
-        }
-
-        // Server error & 409 conflict reload
-        error?.let { err ->
-            item("editor-server-error") {
-                Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    JInlineStatus(err.text(), tone = InlineTone.Failed)
-                    if (conflict) {
-                        JButton(
-                            text = stringResource(R.string.settings_model_profiles_reload_discard),
-                            onClick = onReload,
-                            modifier = Modifier.fillMaxWidth().testTag("model-profile-reload-button"),
-                            kind = JButtonKind.Secondary,
-                            enabled = !busy,
-                        )
-                    }
-                }
-            }
         }
     }
 

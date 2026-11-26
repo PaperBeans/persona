@@ -154,6 +154,9 @@
   "review_missing": "Missing",
   "review_note": "Supervisor: {note}",
   "review_expect": "About {minutes} min",
+  "evidence_author_supervisor": "Supervisor",
+  "evidence_author_agent": "Agent",
+  "evidence_author_reviewer": "Reviewer",
   "dock_task_asks": "{title}: {ask}",
   "dock_agent": "Agent {title}: {state}",
   "today_waiting_n_one": "{count} needs you",
@@ -195,5 +198,16 @@
   "start_cause_not_allowed": "This computer didn't allow it",
   "start_cause_needs_update": "Persona on this computer needs an update",
   "start_failed_short": "Didn't start.",
-  "start_failed_details": "Didn't start. Open it for details."
+  "start_failed_details": "Didn't start. Open it for details.",
+  "dispatch_reason_first": "Preset {tier}: candidate {candidate}",
+  "dispatch_reason_score": "Preset {tier}, candidate {candidate}: {minutes} min p50, {first_pass}% first-pass, {headroom}% headroom",
+  "dispatch_reason_score_short": "Preset {tier}: chose candidate {candidate} by efficiency and headroom",
+  "dispatch_reason_quota": "Earlier candidate low on headroom; using candidate {candidate}",
+  "dispatch_reason_quota_detail": "Earlier candidate low on headroom ({detail}); using candidate {candidate}",
+  "dispatch_reason_unavailable": "Earlier candidate unavailable on this machine; using candidate {candidate}",
+  "dispatch_reason_kept": "Kept the previous Agent's candidate",
+  "dispatch_reason_switched": "Switched from the previous candidate to candidate {candidate}",
+  "dispatch_reason_switched_detail": "Switched from the previous candidate ({detail}) to candidate {candidate}",
+  "dispatch_reason_over_pace": "All candidates are over pace; using candidate {candidate} in order",
+  "dispatch_reason_fallback": "Preset {tier}: candidate {candidate} ({reason})"
 }

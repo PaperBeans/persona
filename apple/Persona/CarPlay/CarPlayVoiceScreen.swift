@@ -89,7 +89,7 @@ extension CarPlayVoicePresence {
 
     /// The phone's sound goes to a car through CarPlay (its audio route), whichever app the car shows.
     nonisolated static func soundGoesToACar() -> Bool {
-        isCar(AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType))
+        isCar(AudioSessionBroker.shared.currentRoute.outputs.map(\.portType))
     }
 
     nonisolated static func isCar(_ outputs: [AVAudioSession.Port]) -> Bool { outputs.contains(.carAudio) }

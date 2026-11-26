@@ -106,7 +106,43 @@ def item_detail(expected):
     return detail
 
 
-SAMPLES = {"recents.schema.json": recent_setups, "todo-view.schema.json": todo_views}
+def counts_views():
+    """(definition, sample) of every view counts/view_samples.json expects (#15512), and of every view a device keeps
+    or gets in counts/views.json (#15893)."""
+    for c in cases("counts/view_samples.json"):
+        yield "CountsView", f"counts/view_samples.json {c['name']}.expected.view", c["expected"]["view"]
+    for c in cases("counts/views.json"):
+        where = f"counts/views.json {c['name']}"
+        for part in ("given", "then"):
+            for i, k in enumerate(c[part]["kept"]):
+                yield "CountsView", f"{where}.{part}.kept[{i}].view", k["view"]
+        if "view" in c["when"]:
+            yield "CountsView", f"{where}.when.view", c["when"]["view"]
+
+
+def wire_ids():
+    """(definition, sample) of every ID and AgentRef in ids/ids.json."""
+    for where, c in domain_cases("ids"):
+        yield c["expected"]["definition"], f"{where}.expected.value", c["expected"]["value"]
+
+
+def agent_views():
+    """(definition, sample) of every session's view agent-view expects (#15397)."""
+    for where, c in domain_cases("agent-view"):
+        for i, v in enumerate(c["expected"]["views"]):
+            yield "AgentView", f"{where}.expected.views[{i}] {v['id']}", v["view"]
+
+
+def todo_waits():
+    """(definition, sample) of every waiting reason todo-wait expects (#16168)."""
+    for where, c in domain_cases("todo-wait"):
+        wait = c["expected"].get("wait")
+        if wait is not None:
+            yield "TodoWait", f"{where}.expected.wait", wait
+
+
+SAMPLES = {"agent-view.schema.json": agent_views, "counts.schema.json": counts_views, "ids.schema.json": wire_ids, "recents.schema.json": recent_setups,
+           "todo-view.schema.json": todo_views, "todo-wait.schema.json": todo_waits}
 
 
 def walk(doc, schema, value, at, reached):
@@ -116,6 +152,13 @@ def walk(doc, schema, value, at, reached):
         reached.add(name)
         return walk(doc, doc["$defs"][name], value, at, reached)
     unknown = []
+    if isinstance(value, dict) and "oneOf" in schema and schema.get("x-discriminator"):
+        disc = schema["x-discriminator"]  # a tagged union: the variant its tag names
+        for option in schema["oneOf"]:
+            variant = doc["$defs"][option["$ref"].rsplit("/", 1)[1]]
+            if variant.get("properties", {}).get(disc, {}).get("const") == value.get(disc):
+                return walk(doc, option, value, at, reached)
+        return [f"{at}.{disc}"]
     if isinstance(value, dict) and "properties" in schema:
         for k, v in value.items():
             if k in schema["properties"]:
@@ -177,6 +220,12 @@ def declared(language, text, names):
     return found
 
 
+# core's opaque agentref (server/internal/agentref) declares MachineID, SessionID and InteractionID on purpose: they are
+# not copies of the contract IDs but their opaque counterparts, which an adapter converts once (typed core plan 2.3).
+# Exempt only that package's files and only those names; any other Go file declaring them still fails.
+OPAQUE_COUNTERPARTS = (("go", "/internal/agentref/", {"MachineID", "SessionID", "InteractionID"}),)
+
+
 def hand_copies(schemas, read, tracked):
     """(file, name) of every declaration of a wire name outside the generated files. schemas: the wire schemas by file
     name; tracked: the repository's files; read(rel) their text."""
@@ -187,9 +236,12 @@ def hand_copies(schemas, read, tracked):
         for language in sorted(set(doc["x-out"]) | set(doc.get("x-guard", []))):
             suffixes = LANGUAGES[language][0]
             for rel in tracked:
-                if rel in generated or not rel.endswith(suffixes):
+                # Fixtures under a testdata directory are inputs to other checks, not code a client builds: the domain
+                # rules plant named ID types there on purpose (archguard's contract-bare-id cases).
+                if rel in generated or not rel.endswith(suffixes) or "/testdata/" in "/" + rel:
                     continue
-                out += [(rel, name) for name in declared(language, read(rel), names)]
+                exempt = set().union(*[n for lang, part, n in OPAQUE_COUNTERPARTS if lang == language and part in "/" + rel])
+                out += [(rel, name) for name in declared(language, read(rel), names) if name not in exempt]
     return sorted(set(out))
 
 
@@ -346,6 +398,25 @@ class WireSchema(unittest.TestCase):
             ("harmony/Widget.ets", "Widget"), ("server/group.go", "Later"), ("server/local.go", "Widget"),
             ("web/generic.ts", "Thing"), ("web/thing.ts", "Thing"),
         ])
+
+    def test_testdata_fixtures_are_not_copies(self):
+        schemas = {"ids.schema.json": {"x-out": {"go": "server/internal/wireids/ids_gen.go"}, "$defs": {"InteractionID": {}}}}
+        files = {
+            "server/internal/archguard/testdata/domainrules/planted/internal/assistantwire/wire.go": "type InteractionID string\n",
+            "server/internal/assistantwire/wire.go": "type InteractionID string\n",
+        }
+        self.assertEqual(hand_copies(schemas, files.__getitem__, sorted(files)),
+                         [("server/internal/assistantwire/wire.go", "InteractionID")])
+
+    def test_agentref_exemption_is_narrow(self):
+        schemas = {"ids.schema.json": {"x-out": {"go": "server/internal/wireids/ids_gen.go"}, "$defs": {"SessionID": {}, "TodoID": {}}}}
+        files = {
+            "server/internal/agentref/ref.go": "type SessionID struct{}\n",  # core's opaque counterpart
+            "server/internal/other/ref.go": "type SessionID string\n",
+            "server/internal/agentref/other.go": "type TodoID string\n",  # not a name the exemption covers
+        }
+        self.assertEqual(hand_copies(schemas, files.__getitem__, sorted(files)), [
+            ("server/internal/agentref/other.go", "TodoID"), ("server/internal/other/ref.go", "SessionID")])
 
     def test_empty_strings_are_samples(self):
         # "" is a value, not an absent field: a generated type must write it back (Go omitempty would not).

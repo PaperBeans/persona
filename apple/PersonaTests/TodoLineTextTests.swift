@@ -41,12 +41,13 @@ struct TodoLineTextTests {
     @Test func everyReadmeKeyIsSaid() throws {
         let keys = try Self.readmeKeys()
         #expect(keys.count > 20, "read the README's table")
-        #expect(keys == TodoLineText.keys, "the README and the app say the same keys")
+        #expect(keys == Set(TodoLineText.keys.map(\.rawValue)), "the README and the app say the same keys")
     }
 
     @Test(arguments: ["en", "zh-Hans", "ja"]) func inEveryLanguage(_ language: String) throws {
         let words = TodoWords(locale: Locale(identifier: language))
-        for key in TodoLineText.keys.sorted() {
+        for line in TodoLineText.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let key = line.rawValue
             let said = try #require(TodoLineText.said(TodoLine(key: key, args: args(key)), since: now.addingTimeInterval(-86_400 * 2),
                                                       now: now, words: words, calendar: calendar), "\(key)")
             let text = said.spoken(separator: words.listSeparator)
@@ -144,18 +145,18 @@ struct TodoRowContentTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let words = TodoWords(locale: Locale(identifier: "en_US"))
 
-    private func filed(_ id: String, _ section: String) -> TodoFiled {
+    private func filed(_ id: String, _ section: TodoListSection) -> TodoFiled {
         TodoFiled(id: id, manager: nil, section: section, closed: false, rank: 0, inactive: false, byView: true, quiet: false,
                   partOf: nil, project: nil, asks: [])
     }
 
-    private func view(_ section: String, key: String, asks: [OwnerAsk] = []) -> TodoSummary {
-        TodoSummary(phase: section, section: section, reason: TodoReason.agentRunning, line: TodoLine(key: key), rank: 0,
-                    asks: asks)
+    private func view(_ section: TodoListSection, key: String, asks: [OwnerAsk] = []) -> TodoSummary {
+        TodoSummary(phase: TodoPhase(rawValue: section.rawValue), section: section, reason: TodoReason.agentRunning,
+                    line: TodoLine(key: key), rank: 0, asks: asks)
     }
 
     @Test(arguments: [TodoListSection.needsYou, TodoListSection.working, TodoListSection.waiting, TodoListSection.justFinished])
-    func aLineThisBuildCannotSayKeepsTheMark(_ section: String) {
+    func aLineThisBuildCannotSayKeepsTheMark(_ section: TodoListSection) {
         let c = TodoRowContentLogic.content(filed("a", section), item: TodoItem(id: "a", title: "A"),
                                             view: view(section, key: "computer_offline"), now: now, words: words)
         #expect(c.mark != nil, "\(section): the mark is drawn on line 2")

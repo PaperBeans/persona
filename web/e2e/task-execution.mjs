@@ -22,7 +22,7 @@ try {
   let task={id:"job",title:"Review project files",prompt:"Summarize the project files.",repeat:"interval",every_minutes:30,enabled:true,model_revision:0};
   let defaultsMoved=false,holdSave=false,releaseSave,sawSave,failRun=false,runRequests=0;
   const viewTask=()=>({...task,execution:{machine_id:task.execution_machine_id||(defaultsMoved?"remote":"box"),launcher:task.launcher||(defaultsMoved?"codex":"assistant"),agent:task.launcher==="codex"?"codex":"claude",model:task.model||"main-model",effort:task.effort||"high"}});
-  const writes=[], reads=[];
+  const writes=[], reads=[], taskLauncherReads=[];
   let launcherCatalog="available", modelCatalogStatus=200;
   let holdRemoteModels=false, releaseModels, sawHeldModels;
   const heldModelRead=new Promise(resolve=>{sawHeldModels=resolve;});
@@ -32,7 +32,11 @@ try {
    if(path==="/model-config/purposes/assistant"||/^\/machines\/[^/]+\/launchers$/.test(path)||path.startsWith("/model-config/providers/")||path.startsWith("/assistant/tasks")) {
     assert.equal(req.headers()["x-persona-manager"]||"assistant",manager,`wrong assistant for ${req.method()} ${path}`);
    }
-   if(/^\/machines\/[^/]+\/launchers$/.test(path))assert.equal(url.searchParams.get("purpose"),"task");
+   if(/^\/machines\/[^/]+\/launchers$/.test(path)) {
+    const purpose=url.searchParams.get("purpose");
+    if(purpose==="task")taskLauncherReads.push(path);
+    else assert.equal(purpose,"assistant",`unexpected launcher purpose for ${path}`);
+   }
    let body={};
    if(path==="/machines")body={machines:[{id:"box",name:"Example computer",online:true},{id:"remote",name:"Other computer",online:true}]};
    else if(path==="/sessions")body={sessions:[]};
@@ -87,11 +91,12 @@ try {
    throw error;
   });
   await page.getByRole("button",{name:/Review project files/}).first().click();
-  const disclosure=page.locator("summary").filter({hasText:"Execution options"});
+  const disclosure=page.locator("summary").filter({hasText:"Advanced"});
   await page.getByRole("radio",{name:"Cron",exact:true}).waitFor();
+  assert(taskLauncherReads.length>0,"task execution reads explicitly request task inheritance");
   await disclosure.getByText("Assistant · claude · main-model · high",{exact:true}).waitFor();
   assert(await disclosure.evaluate((el)=>!!(el.compareDocumentPosition(document.querySelector('textarea'))&Node.DOCUMENT_POSITION_FOLLOWING)));
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   await page.getByRole("combobox",{name:"Agent",exact:true}).selectOption("codex");
   const dialog=page.getByRole("dialog");
   const closed=async()=>{
@@ -109,13 +114,13 @@ try {
   await page.getByText("Saved",{exact:true}).waitFor({state:"hidden"});
   await page.screenshot({path:join(shots,`task-list-${width}-${theme}.png`)});
   await page.getByRole("button",{name:/Review project files/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   assert.equal(await page.getByRole("combobox",{name:"Agent",exact:true}).inputValue(),"codex");
   assert.equal(await page.getByLabel("Working directory",{exact:false}).inputValue(),"/work/project");
   await page.getByLabel("Working directory",{exact:false}).scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth),false);
   await page.getByText("Saved",{exact:true}).waitFor({state:"hidden"});
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   await disclosure.getByText("agents · codex · test-model · high",{exact:true}).waitFor();
   const oneLine=await disclosure.evaluate(el=>{
    const [label,detail]=el.querySelectorAll('span');
@@ -125,7 +130,7 @@ try {
   assert(oneLine,"execution title and summary share one line");
   await disclosure.scrollIntoViewIfNeeded();
   await page.screenshot({path:join(shots,`task-execution-${width}-${theme}.png`)});
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   // Stress the form at twice the standard text size; controls remain reachable in its own scroller.
   await page.evaluate(()=>document.documentElement.style.setProperty("--text-scale","2"));
   await page.getByLabel("Working directory",{exact:false}).scrollIntoViewIfNeeded();
@@ -141,7 +146,7 @@ try {
   task={...task,title:"Review project files",session_id:"origin",execution_machine_id:"box",launcher:"",model:"",effort:"",cwd:""};
   await page.goto(`${base}/routines`);
   await page.getByRole("button",{name:/Review project files/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   await page.getByRole("textbox",{name:"Title",exact:true}).fill("Updated source task");
   const saveSource=page.getByRole("dialog").getByRole("button",{name:"Save",exact:true});
   assert(await saveSource.isDisabled(),"source chat and a computer pin cannot be saved together");
@@ -173,7 +178,7 @@ try {
    const count=writes.length;
    await page.goto(`${base}/routines`);
    await page.getByRole("button",{name:/Updated source task/}).first().click();
-   await page.getByText("Execution options",{exact:true}).click();
+   await page.getByText("Advanced",{exact:true}).click();
    const agent=page.getByRole("combobox",{name:"Agent",exact:true});
    assert(await agent.isEnabled(),"inheritance remains selectable when discovery is unavailable");
    assert.equal(await agent.inputValue(),"gone-agent");
@@ -195,7 +200,7 @@ try {
    assert.equal(writes.length,count+1);
    assert.deepEqual({launcher:writes[count].patch.launcher,model:writes[count].patch.model,effort:writes[count].patch.effort},{launcher:"",model:"",effort:""});
    await page.getByRole("button",{name:/Updated source task/}).first().click();
-   await page.getByText("Execution options",{exact:true}).click();
+   await page.getByText("Advanced",{exact:true}).click();
    assert.equal(await agent.inputValue(),"");
    await page.getByRole("dialog").getByRole("button",{name:"Cancel",exact:true}).click();
    await closed();
@@ -204,7 +209,7 @@ try {
   task={...task,session_id:""};
   await page.goto(`${base}/routines`);
   await page.getByRole("button",{name:/Updated source task/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   const modelField=page.getByRole("dialog").locator("fieldset").filter({has:page.locator("button[aria-expanded]")});
   await modelField.locator("button[aria-expanded]:enabled").waitFor();
   holdRemoteModels=true;
@@ -213,7 +218,7 @@ try {
   await heldModelRead;
   assert(await modelField.locator("button[aria-expanded]").isDisabled(),"model picking waits for the current computer's catalog");
   assert.equal(await modelField.getByRole("option",{name:/Example model/}).count(),0);
-  assert.equal(await page.locator("summary").filter({hasText:"Execution options"}).getByText(/main-model/).count(),0,"another computer's inherited model is not previewed");
+  assert.equal(await page.locator("summary").filter({hasText:"Advanced"}).getByText(/main-model/).count(),0,"another computer's inherited model is not previewed");
   await modelField.scrollIntoViewIfNeeded();
   await page.screenshot({path:join(shots,`task-model-loading-${width}-${theme}.png`)});
   await page.evaluate(()=>document.documentElement.style.setProperty("--text-scale","2"));
@@ -239,7 +244,7 @@ try {
   task={...task,title:"Manual model task",session_id:"",launcher:"codex",model:"saved-unknown",effort:"low",execution_machine_id:"box"};
   await page.goto(`${base}/routines`);
   await page.getByRole("button",{name:/Manual model task/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   const manualPicker=modelField.locator("button[aria-expanded]:enabled");
   await manualPicker.waitFor();
   assert((await manualPicker.innerText()).includes("saved-unknown"),"404 preserves the saved unknown model");
@@ -255,7 +260,7 @@ try {
   task={id:"job",title:"Failed run draft",prompt:"Check the files.",repeat:"interval",every_minutes:30,enabled:true,model_revision:0};
   await page.goto(`${base}/routines`);
   await page.getByRole("button",{name:/Failed run draft/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   await page.getByRole("combobox",{name:"Reasoning effort",exact:true}).selectOption("low");
   const title=page.getByRole("textbox",{name:"Title",exact:true});
   const count=writes.length;
@@ -289,7 +294,7 @@ try {
   task={id:"job",title:"Legacy source task",prompt:"Check the files.",repeat:"interval",every_minutes:30,enabled:true,model_revision:1,session_id:"origin",machine_id:"box",launcher:"assistant",effort:"high"};
   await page.goto(`${base}/routines`);
   await page.getByRole("button",{name:/Legacy source task/}).first().click();
-  await page.getByText("Execution options",{exact:true}).click();
+  await page.getByText("Advanced",{exact:true}).click();
   await title.fill("Updated legacy source task");
   const legacyCount=writes.length;
   assert(await saveSource.isEnabled(),"unchanged legacy fields permit a title edit");

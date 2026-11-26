@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"encoding/json"
 	"slices"
 	"sort"
 	"strings"
@@ -33,9 +34,48 @@ func FoldWorkLatest(items []proto.Item) []proto.Item {
 	return foldWork(items, true)
 }
 
+// FoldPage keeps Claude's public paragraphs in order on both initial and older pages.
+// A call spanning one of these paragraphs and its later receipt stay available for pairing.
+func (f *File) FoldPage(items []proto.Item, latest bool) []proto.Item {
+	f.mu.Lock()
+	codex := f.meta.Codex
+	f.mu.Unlock()
+	if codex {
+		// Keep a public opening available when the user steers later in this turn,
+		// including when the steer arrives on a later page.
+		opening := make(map[int]bool)
+		first := true
+		for i, it := range items {
+			if it.Kind == proto.KindText && it.Role == "user" || it.Kind == "turn_duration" {
+				first = true
+			} else if it.Kind == proto.KindText && it.Role == "assistant" && first {
+				opening[i] = it.Narration
+				first = false
+			}
+		}
+		return foldWorkKeeping(items, latest, opening)
+	}
+	var out []proto.Item
+	start := 0
+	for i, item := range items {
+		if item.Kind == proto.KindText && item.Role == "assistant" {
+			if i > start {
+				out = append(out, FoldWork(items[start:i])...)
+			}
+			out = append(out, item)
+			start = i + 1
+		}
+	}
+	return append(out, FoldWork(items[start:])...)
+}
+
 // A call whose result is not in the page (still running) and a result whose call is not (on an older page) are not
 // folded: the app pairs them with what comes later or earlier, and a fold hides them from that.
 func foldWork(items []proto.Item, latestPage bool) []proto.Item {
+	return foldWorkKeeping(items, latestPage, nil)
+}
+
+func foldWorkKeeping(items []proto.Item, latestPage bool, opening map[int]bool) []proto.Item {
 	results, agents := map[string]*proto.Item{}, map[string]bool{}
 	taskUses := map[string]proto.Item{}
 	for i := range items {
@@ -69,14 +109,15 @@ func foldWork(items []proto.Item, latestPage bool) []proto.Item {
 		case proto.KindThinking:
 			return true
 		case proto.KindText:
-			return it.Narration && index != latestNarration
+			return it.Narration && index != latestNarration && !opening[index]
 		case proto.KindToolUse, proto.KindToolResult, proto.KindImage: // a tool's image goes with its call
 			// a subagent's call stays on the page: the chat draws it as a card, which never folds (#5602)
 			use, hasUse := taskUses[it.ToolUseID]
 			result, hasResult := results[it.ToolUseID]
 			// Keep the silent receipt and its call so even a partial history replay can respect the disposition.
 			return it.ToolUseID != "" && hasUse && hasResult && !agents[it.ToolUseID] &&
-				!silentSupervisionFinish(use.ToolName, *result)
+				!silentSupervisionFinish(use.ToolName, *result) && use.ToolName != claudeDesktopWrapUp &&
+				(use.ToolName != claudeDesktopPlan || taskObject(use.ToolInput)["items"] != nil)
 		}
 		return false
 	}
@@ -98,6 +139,7 @@ func foldWork(items []proto.Item, latestPage bool) []proto.Item {
 			it := fold(items[i:j])
 			it.Fold.Tasks = foldTaskSnapshots(items[i:j], taskUses)
 			it.Fold.Images = ViewedImages(items[i:j], taskUses)
+			it.Fold.ToolViews = FoldToolViews(items[i:j], taskUses)
 			it.Fold.SupervisionUser = supervisionUserAction(items[i:j], taskUses)
 			out = append(out, it)
 		}
@@ -109,7 +151,7 @@ func foldWork(items []proto.Item, latestPage bool) []proto.Item {
 func fold(run []proto.Item) proto.Item {
 	first, last := run[0], run[len(run)-1]
 	fo := &proto.Fold{Items: len(run), Until: last.TS, ThroughSeq: last.Seq, ThroughID: last.ID, ToolNames: []string{}}
-	latestThought := -1
+	latestThought, latestTool := -1, -1
 	var firstTTFT *int64
 	for i, it := range run {
 		if firstTTFT == nil && it.TTFTMS != nil {
@@ -117,6 +159,7 @@ func fold(run []proto.Item) proto.Item {
 		}
 		switch {
 		case it.Kind == proto.KindToolUse:
+			latestTool = i
 			fo.Tools++
 			if it.ToolName != "" && len(fo.ToolNames) < proto.FoldToolNamesMax && !slices.Contains(fo.ToolNames, it.ToolName) {
 				fo.ToolNames = append(fo.ToolNames, it.ToolName)
@@ -137,7 +180,17 @@ func fold(run []proto.Item) proto.Item {
 	fo.Changes = foldChanges(run)
 	fo.Usage = foldUsage(run)
 	fo.Sources = foldSources(run)
-	return proto.Item{ID: "fold:" + first.ID, Seq: first.Seq, TS: first.TS, Role: "assistant", Kind: proto.KindFold, Fold: fo, TTFTMS: proto.CloneTTFTMS(firstTTFT)}
+	item := proto.Item{ID: "fold:" + first.ID, Seq: first.Seq, TS: first.TS, Role: "assistant", Kind: proto.KindFold, Fold: fo, TTFTMS: proto.CloneTTFTMS(firstTTFT)}
+	if latestTool >= 0 && run[latestTool].ToolName == "Bash" {
+		// Keep the same public caption when the client replaces the calls with this range.
+		var input struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal(run[latestTool].ToolInput, &input) == nil {
+			item.Text = oneLine(input.Description, 160)
+		}
+	}
+	return item
 }
 
 func thinkingPreview(it proto.Item) *proto.Item {

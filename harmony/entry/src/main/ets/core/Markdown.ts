@@ -2,6 +2,54 @@
 export type MarkdownInlineKind = 'text' | 'bold' | 'italic' | 'code' | 'link';
 export type MarkdownBlockKind = 'paragraph' | 'heading' | 'code' | 'rule' | 'quote' | 'list' | 'list-item' | 'table' | 'raw';
 
+// System body, the rounded MarkdownUI 17-point ScaledMetric, and the CJK fallback's measured advance.
+// CoreText switches from PingFang UI Text to its optically narrower Display face at 20 points.
+const replyTypeSizes: number[][] = [
+  [14,15,14.883], [15,15,14.883], [16,16,15.875], [17,17,16.851], [19,19,18.834], [21,20,19.154],
+  [23,22,20.945], [28,26,24.754], [33,31,29.427], [40,37,35.018], [47,43,40.656], [53,48,45.293]
+];
+
+export function agentReplyBodySize(fontScale: number, han: boolean = false): number {
+  const body = Math.min(53, Math.max(14, 17 * fontScale));
+  let upper = 1;
+  while (upper < replyTypeSizes.length - 1 && body > replyTypeSizes[upper][0]) upper++;
+  const a = replyTypeSizes[upper - 1], b = replyTypeSizes[upper], column = han ? 2 : 1;
+  return a[column] + (b[column] - a[column]) * (body - a[0]) / (b[0] - a[0]);
+}
+
+/** Font advances of the native recap's mixed CJK and Latin body at standard and largest Dynamic Type. */
+export function recapGlyphSize(bodyPoints: number, han: boolean): number {
+  const regular = han ? 16.4 : 17;
+  const largest = han ? 43.6 : 42;
+  if (bodyPoints <= 17) return bodyPoints * regular / 17;
+  return regular + (bodyPoints - 17) * (largest - regular) / (48 - 17);
+}
+
+export class MarkdownProseRun {
+  text: string;
+  han: boolean;
+  constructor(text: string, han: boolean) { this.text = text; this.han = han; }
+}
+
+export function markdownProseRuns(text: string): MarkdownProseRun[] {
+  const result: MarkdownProseRun[] = [];
+  for (const scalar of text) {
+    const point = scalar.codePointAt(0) ?? 0;
+    const han = point >= 0x3400 && point <= 0x9fff || point >= 0xf900 && point <= 0xfaff ||
+      point >= 0x20000 && point <= 0x323af || point >= 0x3000 && point <= 0x303f || point >= 0xff01 && point <= 0xff60;
+    const previous = result[result.length - 1];
+    const variation = point >= 0xfe00 && point <= 0xfe0f || point >= 0xe0100 && point <= 0xe01ef;
+    if (previous && (previous.han === han || variation)) previous.text += scalar;
+    else result.push(new MarkdownProseRun(scalar,han));
+  }
+  return result;
+}
+
+export function hasHanProse(nodes: MarkdownInline[]): boolean {
+  return nodes.some((node: MarkdownInline) => node.kind === 'text' && /[\u3400-\u9fff]/.test(node.text) ||
+    (node.kind === 'bold' || node.kind === 'italic') && hasHanProse(node.children));
+}
+
 export class MarkdownInline {
   kind: MarkdownInlineKind = 'text';
   text: string = '';
@@ -596,4 +644,17 @@ export function markdownVisibleText(blocks: MarkdownBlock[]): string {
     }
   }
   return pieces.join('\n');
+}
+
+/** The selectable words of a lifted chat message. A table copies as its original Markdown. */
+export function liftedMessageWords(source: string, plain: boolean): string {
+  if (plain) return source;
+  function words(block: MarkdownBlock): string {
+    if (block.kind === 'table') return block.source;
+    if (block.kind === 'list') return block.items.map((item: MarkdownBlock) =>
+      (block.ordered ? item.marker : '•') + ' ' + item.children.map(words).join('\n')).join('\n');
+    if (block.kind === 'quote') return block.children.map(words).join('\n');
+    return markdownVisibleText([block]);
+  }
+  return parseMarkdown(source).map(words).filter((text: string) => text.length > 0).join('\n\n');
 }

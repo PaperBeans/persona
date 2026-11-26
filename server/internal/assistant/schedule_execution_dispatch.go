@@ -90,6 +90,10 @@ func (s *Service) failTaskRun(ctx context.Context, t Task, run ScheduleRun, err 
 	taskRunCompatibilityEvidence(ctx, &run)
 	run.Status, run.Error, run.DeliveryUnknown = runFailed, err.Error(), unknown
 	s.recordRun(run)
+	if t.PageID != "" {
+		s.pageChanged(t.PageID, pageStatus)
+		return proto.Session{}, err
+	}
 	if !unknown && run.Execution != nil {
 		ex := run.Execution
 		s.logf("task %s refused before dispatch: retried=%t launcher=%q model=%q effort=%q: %v", t.ID, run.Retried, ex.Launcher, ex.Model, ex.Effort, err)

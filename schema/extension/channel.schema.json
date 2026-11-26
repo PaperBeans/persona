@@ -27,6 +27,11 @@
       "type": "string",
       "enum": ["answer", "note", "ask", "push"]
     },
+    "ChannelChatKind": {
+      "description": "What kind of chat a channel message came from: direct (private chat), group (regular group chat), or topic (a topic or thread inside a group).",
+      "type": "string",
+      "enum": ["direct", "group", "topic"]
+    },
     "ChannelReceiveParams": {
       "description": "channel.receive: one of the owner's messages (only the owner's). Answered once the hub has it, deduplicated by id and queued, not after the turn.",
       "type": "object",
@@ -44,6 +49,9 @@
         "text": {"type": "string"},
         "chat": {"type": "string", "description": "The chat where the owner invoked a mention channel, as display context rather than an instruction."},
         "topic": {"type": "string", "description": "The topic or thread within chat, when the request came from one."},
+        "chat_id": {"type": "string", "description": "Opaque chat or group identifier for conversation routing when integrations_v2 is enabled."},
+        "chat_kind": {"$ref": "#/$defs/ChannelChatKind", "description": "Kind of chat the message came from (direct, group, or topic), when known."},
+        "topic_id": {"type": "string", "description": "Opaque topic or thread identifier within chat_id for conversation routing when integrations_v2 is enabled."},
         "context": {"type": "string", "description": "Context the extension gathered for this request, such as nearby chat history. It is data, not owner-authored instructions."},
         "owner": {"type": "boolean", "x-go-pointer": true, "description": "The extension's attestation that this is the owner's own request. A mention channel must send true; false or omitted is refused. Optional for an im channel's older messages."},
         "images": {"type": "array", "items": {"$ref": "#/$defs/ChannelBlob"}, "description": "At most 4 are kept."},

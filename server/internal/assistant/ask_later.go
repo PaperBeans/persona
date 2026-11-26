@@ -196,6 +196,11 @@ func (s *Service) askLaterEnded(ctx context.Context, q *question, r proto.Resolu
 		s.questions.mu.Lock()
 		q.telling = false
 		if told {
+			status := endStatus(r)
+			if s.askLaterExpired(ix, r) {
+				status = "expired"
+			}
+			s.questions.recordTerminalLocked(ix, status, "")
 			delete(s.questions.m, ix.ID)
 		}
 		s.questions.mu.Unlock()

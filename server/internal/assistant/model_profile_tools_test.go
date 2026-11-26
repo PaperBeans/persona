@@ -283,7 +283,8 @@ func TestModelProfileMCPDispatch(t *testing.T) {
 	}
 	var p ModelProfileView
 	requireProfileMCP(t, s, "model_profile_get", map[string]any{"id": "economy"}, &p)
-	if p.ID != "economy" || p.Active || p.Tiers["standard"].Model != "test-economy" {
+	// The seeded strength name reads back under its kind-of-work name, the old one kept as an alias (#14700).
+	if p.ID != "economy" || p.Active || p.Tiers["dev"].Model != "test-economy" || !slices.Equal(p.Tiers["dev"].Aliases, []string{"standard"}) {
 		t.Fatalf("get: %+v", p)
 	}
 	requireProfileStoreUnchanged(t, st.memStore, before, puts)
@@ -336,7 +337,7 @@ func TestModelProfileMCPSharedRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, puts := profileStoreSnapshot(st.memStore)
-	tools := []string{"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback"}
+	tools := []string{"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback", "model_profile_capture"}
 	for _, tt := range []struct {
 		name, session    string
 		assistant, guest bool

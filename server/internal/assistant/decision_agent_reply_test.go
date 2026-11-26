@@ -217,8 +217,9 @@ func TestDecisionAgentReplyPauseSurvivesReload(t *testing.T) {
 	reviewTask(t, s, todo.ID, rolloutDecision())
 	setSettings(t, s, func(v *Settings) { v.Main = "" })
 	a := askOf(s, todo.ID)
+	// Model the old process stopping after the reply is persisted, before its supervisor can deliver it.
+	s.supervise.digestMu.Lock()
 	s.UserSpoke(context.Background(), SessionRef{MachineID: a.MachineID, SessionID: a.SessionID})
-	s.supervise.dedupMu.Lock()
 	s.supervise.mu.Lock()
 	if s.supervise.timer != nil {
 		s.supervise.timer.Stop()
@@ -226,7 +227,7 @@ func TestDecisionAgentReplyPauseSurvivesReload(t *testing.T) {
 	}
 	s.supervise.pending = map[string]superviseSignal{}
 	s.supervise.mu.Unlock()
-	s.supervise.dedupMu.Unlock()
+	s.supervise.digestMu.Unlock()
 	var stored map[string]*acceptAsk
 	if _, err := database.Setting(context.Background(), acceptanceKey, &stored); err != nil {
 		t.Fatal(err)

@@ -101,8 +101,8 @@ internal class AgentOperationsState(private val api: AgentOperations, private va
         } finally { mutable.value = mutable.value.copy(busy = false) }
     }
 
-    suspend fun session(session: Session, requested: AgentSessionEdit) = mutex.withLock {
-        val rename = SessionRename.changes(session, requested.title, requested.tab)
+    suspend fun session(session: Session, requested: AgentSessionEdit, unified: Boolean = false) = mutex.withLock {
+        val rename = SessionRename.changes(session, requested.title, requested.tab, unified = unified)
         if (!requested.removes && !rename.changed) return@withLock
         val edit = if (requested.removes) requested else AgentSessionEdit(rename.title, rename.tabName)
         val key = session.key

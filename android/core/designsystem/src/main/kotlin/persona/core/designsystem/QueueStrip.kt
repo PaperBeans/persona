@@ -91,7 +91,7 @@ fun QueueStrip(
     notes: List<String?> = emptyList(),
     initiallyExpanded: Boolean = false,
     photos: List<Int> = emptyList(),
-    relayedItems: List<String> = emptyList(),
+    relayedItems: List<RelayedQueueItem> = emptyList(),
     relayedSummary: String? = null,
     onRelayedItem: (Int) -> Unit = {},
 ) {
@@ -105,7 +105,7 @@ fun QueueStrip(
 private fun GlassQueueStrip(
     title: String, items: List<String>, onItem: (Int) -> Unit, modifier: Modifier, busy: Boolean, enabled: Boolean,
     sendNow: String?, sendNowDescription: String?, onSendNow: () -> Unit, notes: List<String?>, initiallyExpanded: Boolean, photos: List<Int>,
-    relayedItems: List<String>, relayedSummary: String?, onRelayedItem: (Int) -> Unit,
+    relayedItems: List<RelayedQueueItem>, relayedSummary: String?, onRelayedItem: (Int) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
     var relayedExpanded by remember { mutableStateOf(false) }
@@ -116,7 +116,7 @@ private fun GlassQueueStrip(
     val active = enabled && !busy
     val line = type.micro.copy(fontWeight = FontWeight.SemiBold)
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 10.dp.dense, vertical = Tokens.Space.xxs)
+        modifier.fillMaxWidth().padding(horizontal = 10.dp.dense).padding(top = Tokens.Space.xs, bottom = Tokens.Space.xxs)
             .floatingSurface(RoundedCornerShape(Tokens.Radius.panel)).animateContentSize(PersonaTheme.motion.size()),
     ) {
         Row(
@@ -189,15 +189,16 @@ private fun GlassQueueStrip(
 @Composable
 private fun PlainQueueStrip(
     title: String, items: List<String>, onItem: (Int) -> Unit, modifier: Modifier, busy: Boolean, enabled: Boolean, notes: List<String?>,
-    relayedItems: List<String>, relayedSummary: String?, onRelayedItem: (Int) -> Unit,
+    relayedItems: List<RelayedQueueItem>, relayedSummary: String?, onRelayedItem: (Int) -> Unit,
 ) {
     var relayedExpanded by remember { mutableStateOf(false) }
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val shape = RoundedCornerShape(if (style == AppStyle.Brief) 20.dp.corner else 8.dp.corner)
     val outer = when (style) {
-        AppStyle.Brief -> Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xxs).clip(shape).background(palette.surface)
-        else -> Modifier.padding(horizontal = 10.dp.dense).padding(top = Tokens.Space.xxs, bottom = Tokens.Space.xs)
+        AppStyle.Brief -> Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, top = Tokens.Space.xs, bottom = Tokens.Space.xxs)
+            .clip(shape).background(palette.surface)
+        else -> Modifier.padding(horizontal = 10.dp.dense).padding(top = Tokens.Space.xs, bottom = Tokens.Space.xxs)
             .clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
     }
     val active = enabled && !busy
@@ -242,6 +243,8 @@ private fun PlainQueueStrip(
     }
 }
 
+data class RelayedQueueItem(val text: String, val note: String? = null)
+
 /**
  * The messages other conversations sent in, collapsed to one summary line in every style (#6394). Tapping the line
  * expands the read-only rows; their numbers continue after the owner's own ([ownCount]), and a tap hands the row's
@@ -249,7 +252,7 @@ private fun PlainQueueStrip(
  */
 @Composable
 private fun RelayedBlock(
-    relayedItems: List<String>,
+    relayedItems: List<RelayedQueueItem>,
     relayedSummary: String?,
     ownCount: Int,
     expanded: Boolean,
@@ -271,9 +274,10 @@ private fun RelayedBlock(
             JIcon(if (expanded) PersonaIcons.expand else PhIcons.CaretRight, null, size = Tokens.Space.m, tint = palette.ink3)
         }
         if (expanded) {
-            relayedItems.forEachIndexed { pos, text ->
+            relayedItems.forEachIndexed { pos, (text, note) ->
                 val index = ownCount + pos
-                val spoken = stringResource(R.string.designsystem_queue_item, index + 1, text)
+                val spoken = if (note == null) stringResource(R.string.designsystem_queue_item, index + 1, text)
+                    else stringResource(R.string.designsystem_queue_item_note, index + 1, text, note)
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = JChipTokens.height).clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
                         .clickable(role = Role.Button) { onRelayedItem(index) }
@@ -282,8 +286,10 @@ private fun RelayedBlock(
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                 ) {
                     QueueNumber(index + 1)
-                    Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        note?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink2) }
+                    }
                 }
             }
         }

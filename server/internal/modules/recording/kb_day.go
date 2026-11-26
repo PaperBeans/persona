@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,7 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/kb"
 )
 
-// All-day recordings and their daily recap (#4741; kb/recording_day.go, kb/day_recap.go): the phone's appends
+// All-day recordings and their daily recap (#4741; writers/recording_day.go, modules/recording/writers/day_recap.go): the phone's appends
 // (POST …/segments), the refusals of a PUT that only a day recording has, the recap through the minutes' routes
 // (kb_minutes.go), the day's one push, and the names and the recap time the knowledge base asks the manager for. The
 // evening routine's facts about the day are briefing_day.go's.
@@ -36,7 +38,7 @@ const (
 const maxSegmentsBody = 1 << 20
 
 func (s *Recordings) dayRoutes() {
-	// Appends to a day recording by position (kb.AppendRecording). Full credentials only, like …/live, and the
+	// Appends to a day recording by position (writers.AppendRecording). Full credentials only, like …/live, and the
 	// refusals in the contract's order: 503, 413 too_large, 410, 404, 403 kb_read_only, 400, then the append's own.
 	s.handle("POST /api/v1/recordings/{id}/segments", func(w http.ResponseWriter, r *http.Request) {
 		if !meetingCaller(w, r) {
@@ -63,15 +65,15 @@ func (s *Recordings) dayRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		out, err := e.AppendRecording(id, a)
-		var changed kb.BaseChangedError
-		var gap kb.SegmentsGapError
-		var full kb.DayFullError
+		out, err := writersOf(e).AppendRecording(id, a)
+		var changed recordingwire.BaseChangedError
+		var gap recordingwire.SegmentsGapError
+		var full recordingwire.DayFullError
 		switch {
-		case errors.Is(err, kb.ErrBadRecording):
+		case errors.Is(err, recordingwire.ErrBadRecording):
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
-		case errors.Is(err, kb.ErrNotDay):
+		case errors.Is(err, recordingwire.ErrNotDay):
 			apierr.WriteCode(w, http.StatusConflict, codeNotDay, i18n.Err("assistant-day-recap.not_day"))
 			return
 		case errors.As(err, &changed):
@@ -107,13 +109,13 @@ func writeDayFull(w http.ResponseWriter, next int) {
 
 // parseAppend reads a POST …/segments body; what is wrong with its values (no base, a revision not above it, too many
 // segments) is the knowledge base's to refuse. from may be written 12.0, as …/live takes it.
-func parseAppend(raw []byte) (kb.RecordingAppend, error) {
+func parseAppend(raw []byte) (writers.RecordingAppend, error) {
 	var in struct {
-		kb.RecordingAppend
+		writers.RecordingAppend
 		From json.RawMessage `json:"from"` // over the embedded one's
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
-		return kb.RecordingAppend{}, i18n.Err("assistant-meeting.bad_json", i18n.Args{"error": err.Error()})
+		return writers.RecordingAppend{}, i18n.Err("assistant-meeting.bad_json", i18n.Args{"error": err.Error()})
 	}
 	a := in.RecordingAppend
 	if in.From != nil {
@@ -129,23 +131,23 @@ func parseAppend(raw []byte) (kb.RecordingAppend, error) {
 
 // putDayFields are what the 200 of a day recording's PUT adds: its base and the hub's count, and the stored revision
 // in place of the upload's (a stale one is no success for a day recording: the phone sends again above it).
-func putDayFields(out map[string]any, put kb.RecordingPut) {
+func putDayFields(out map[string]any, put recordingwire.RecordingPut) {
 	out["revision"], out["base"], out["next"] = put.Revision, put.Base, put.Next
 }
 
 // dayUpload: upload u says it is a day recording (as kb's clean reads its kind).
-func dayUpload(u kb.RecordingUpload) bool {
-	return strings.EqualFold(strings.TrimSpace(u.Kind), kb.RecordingDay)
+func dayUpload(u recordingwire.RecordingUpload) bool {
+	return strings.EqualFold(strings.TrimSpace(u.Kind), recordingwire.RecordingDay)
 }
 
 // dayRecording is recording rawID when it is a day recording.
-func dayRecording(e *kb.Engine, rawID string) (*kb.Recording, bool) {
-	id, ok := kb.RecordingID(rawID)
+func dayRecording(e *kb.Engine, rawID string) (*recordingwire.Recording, bool) {
+	id, ok := recordingwire.RecordingID(rawID)
 	if !ok {
 		return nil, false
 	}
 	r, ok := e.Store.Recording(id)
-	if !ok || r.Kind != kb.RecordingDay {
+	if !ok || r.Kind != recordingwire.RecordingDay {
 		return nil, false
 	}
 	return r, true
@@ -161,7 +163,7 @@ func dayRecording(e *kb.Engine, rawID string) (*kb.Recording, bool) {
 // (dayPushWait each), with nil only when every one took it or refused it for good (the hub refusing the notification,
 // a channel with nowhere to send it or that answered with a refusal of its own: sending it again would get the same).
 // The counts are the day's, all of its parts' recaps.
-func (s *Recordings) dayRecapWritten(ctx context.Context, e *kb.Engine, r kb.Recording, d kb.DayRecap) ([]string, error) {
+func (s *Recordings) dayRecapWritten(ctx context.Context, e *kb.Engine, r recordingwire.Recording, d recordingwire.DayRecap) ([]string, error) {
 	l := s.lang(ctx)
 	day := cmp.Or(r.Day, d.Day)
 	meetings, actions := dayRecapCounts(e, day, r.ID, d)
@@ -235,7 +237,7 @@ func (s *Recordings) dayRecapWritten(ctx context.Context, e *kb.Engine, r kb.Rec
 // theirs, channelSendTimeout).
 const dayPushWait = 30 * time.Second
 
-// dayPushPhone is the phone among a day push's destinations (kb.Recording.RecapPushTook): a built-in channel's id,
+// dayPushPhone is the phone among a day push's destinations (recordingwire.Recording.RecapPushTook): a built-in channel's id,
 // which no plugin channel can have; the others are channel ids.
 const dayPushPhone = channel.App
 
@@ -243,8 +245,8 @@ const dayPushPhone = channel.App
 // of the day with a recap (one of e's day recordings of day), a meeting the hub knows of counted once whatever the
 // parts it is in. Only meetings the hub knows of count: an entry the model judged a meeting with nothing matching is
 // as often a one-to-one or a chat over lunch, and the push leads with this number (#5051).
-func dayRecapCounts(e *kb.Engine, day, id string, d kb.DayRecap) (meetings, actions int) {
-	recaps := []kb.DayRecap{d}
+func dayRecapCounts(e *kb.Engine, day, id string, d recordingwire.DayRecap) (meetings, actions int) {
+	recaps := []recordingwire.DayRecap{d}
 	if e != nil {
 		for _, p := range e.DayRecordings(day) {
 			if p.ID == id {
@@ -259,7 +261,7 @@ func dayRecapCounts(e *kb.Engine, day, id string, d kb.DayRecap) (meetings, acti
 	for _, rc := range recaps {
 		for _, en := range rc.Timeline {
 			m := en.Meeting
-			if en.Kind != kb.RecapMeeting || m == nil || m.ID == "" {
+			if en.Kind != recordingwire.RecapMeeting || m == nil || m.ID == "" {
 				continue
 			}
 			if k := [2]string{m.Kind, m.ID}; !known[k] {
@@ -286,8 +288,8 @@ func (s *Recordings) kbOwnerLanguage() i18n.Lang { return s.lang(s.runCtx()) }
 // minutes: an id from the recording, the version and the action (todo_day_…), so a retried request makes none twice,
 // and notes that name the day and the clock time it was said in the recording's own zone. The knowledge base records
 // each with its action as that version has it (who, what and when it was said), so a recap written again meanwhile
-// gets it only on the same task said at the same time (kb.Engine.SetDayRecapTodos).
-func (s *Recordings) dayRecapTodos(ctx context.Context, e *kb.Engine, rec *kb.Recording, version int, actions []string) ([]any, *kb.DayRecap, error) {
+// gets it only on the same task said at the same time (writers.Writers.SetDayRecapTodos).
+func (s *Recordings) dayRecapTodos(ctx context.Context, e *kb.Engine, rec *recordingwire.Recording, version int, actions []string) ([]any, *recordingwire.DayRecap, error) {
 	s.minutesMu.Lock()
 	defer s.minutesMu.Unlock()
 	rc, err := e.ReadDayRecap(rec.ID)
@@ -295,11 +297,11 @@ func (s *Recordings) dayRecapTodos(ctx context.Context, e *kb.Engine, rec *kb.Re
 		return nil, nil, err
 	}
 	if rc.Version != version {
-		return nil, nil, kb.ErrMinutesStale
+		return nil, nil, writers.ErrMinutesStale
 	}
 	note := s.dayRecapTodoNotes(ctx, e, rec, rc)
 	out, made, _, err := s.actionTodos(ctx, rc.Actions, actions, todosOfRecap, rec.ID, version, note)
-	var confirmed []kb.MinutesAction // the actions made to-dos, as this version has them
+	var confirmed []recordingwire.MinutesAction // the actions made to-dos, as this version has them
 	for _, a := range rc.Actions {
 		if t := made[a.ID]; t != "" {
 			a.TodoID = t
@@ -308,22 +310,22 @@ func (s *Recordings) dayRecapTodos(ctx context.Context, e *kb.Engine, rec *kb.Re
 	}
 	if err != nil {
 		if made != nil { // those made so far are recorded all the same, as minutesTodos records them
-			if _, serr := e.SetDayRecapTodos(rec.ID, version, confirmed); serr != nil {
+			if _, serr := writersOf(e).SetDayRecapTodos(rec.ID, version, confirmed); serr != nil {
 				s.logf("assistant: recap to-dos of %s: %v", rec.ID, serr)
 			}
 		}
 		return out, nil, err
 	}
-	rc, err = e.SetDayRecapTodos(rec.ID, version, confirmed)
+	rc, err = writersOf(e).SetDayRecapTodos(rec.ID, version, confirmed)
 	return out, rc, err
 }
 
 // dayRecapTodoNotes is what a to-do made of an action of recap rc of day recording rec says: the day, the clock time
 // it was said in the recording's zone, the deadline as said, the recording's page.
-func (s *Recordings) dayRecapTodoNotes(ctx context.Context, e *kb.Engine, rec *kb.Recording, rc *kb.DayRecap) func(kb.MinutesAction) string {
+func (s *Recordings) dayRecapTodoNotes(ctx context.Context, e *kb.Engine, rec *recordingwire.Recording, rc *recordingwire.DayRecap) func(recordingwire.MinutesAction) string {
 	loc, l, link := e.Store.RecordingZone(rec), s.lang(ctx), recordingLink(s.webBase(ctx), rec.ID)
 	day := cmp.Or(rc.Day, rec.Day)
-	return func(a kb.MinutesAction) string {
+	return func(a recordingwire.MinutesAction) string {
 		clock := rec.StartedAt.Add(time.Duration(a.At * float64(time.Second))).In(loc).Format("15:04")
 		notes := i18n.T(l, "assistant-day-recap.todo_notes", i18n.Args{"day": day, "clock": clock})
 		if a.By != "" {

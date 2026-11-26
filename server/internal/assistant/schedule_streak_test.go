@@ -14,6 +14,7 @@ import (
 )
 
 // Not-ready skips are neutral even between genuine failures, and the distinction survives storage in any locale.
+// With no main conversation configured, the streak still reaches the owner as a push.
 func TestNotReadySkipsNeitherCountNorEndAStreak(t *testing.T) {
 	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
 		t.Run(string(lang), func(t *testing.T) {
@@ -51,9 +52,109 @@ func TestNotReadySkipsNeitherCountNorEndAStreak(t *testing.T) {
 	}
 }
 
+// scheduleStore hands each test a database without the settings an earlier test in the process saved: a main
+// conversation left behind sent TestNotReadySkipsNeitherCountNorEndAStreak's streak to the relay instead of the push
+// it checks, whenever schedule_ready_test.go ran first (#15278).
+func TestScheduleStoreForgetsEarlierSettings(t *testing.T) {
+	first := scheduleStore(t)
+	f := newFakeHub()
+	f.settings = &Settings{Timezone: "UTC", Main: "main-left-behind"}
+	newServiceOn(t, f, first)
+	s := newServiceOn(t, newFakeHub(), scheduleStore(t))
+	if got := s.settings(context.Background()).Main; got != "" {
+		t.Fatalf("a fresh schedule store kept an earlier test's main conversation %q", got)
+	}
+}
+
 // outcome records one run of task ref as it ends (recordRun is where the history and the streak are kept).
 func outcome(h *Service, ref, status, why string) {
 	h.recordRun(ScheduleRun{Kind: "routine", RefID: ref, Title: ref, Status: status, Error: why})
+}
+
+// Ordinary streak notices follow the scheduled failure route: the originating supervisor, leader, or main
+// conversation hears them without an owner push or card-ledger entry. The run history still tells one streak once,
+// ends it on success, and lets a later streak report again.
+func TestScheduleStreakRoutesToSupervisorLeaderOrMain(t *testing.T) {
+	e := newRouteEnv(t, nil, true)
+	tasks := []struct {
+		task Task
+		to   string
+	}{
+		{Task{ID: "rt_supervised", Title: "Supervised patrol", Repeat: repeatDaily, Enabled: true, MachineID: "mac", SessionID: "worker-1"}, "lead1"},
+		{Task{ID: "rt_leader", Title: "Leader patrol", Repeat: repeatDaily, Enabled: true, MachineID: "server", SessionID: "lead1"}, "lead1"},
+		{Task{ID: "rt_main", Title: "Main patrol", Repeat: repeatDaily, Enabled: true}, "conv1"},
+	}
+	all := make([]Task, 0, len(tasks))
+	for _, tc := range tasks {
+		all = append(all, tc.task)
+	}
+	setTasks(e.s, all...)
+	for _, tc := range tasks {
+		for range streakLimit {
+			outcome(e.s, tc.task.ID, runFailed, "dispatch timeout")
+		}
+		if !hasRelayFrom(e.s, tc.to, cardScheduleStreak, "task="+tc.task.ID+" ") {
+			t.Fatalf("%s did not reach %s: %+v", tc.task.ID, tc.to, laterFor(e.s, tc.to))
+		}
+		if r := lastRunOf(t, e.s, tc.task.ID); !r.StreakTold {
+			t.Fatalf("%s did not retain StreakTold in its run history: %+v", tc.task.ID, r)
+		}
+	}
+
+	// A fourth failure in the same streak adds no notice. After a success, a new streak reports once more.
+	outcome(e.s, "rt_supervised", runFailed, "still failing")
+	count := func() int {
+		n := 0
+		for _, m := range laterFor(e.s, "lead1") {
+			if m.From == cardScheduleStreak && strings.Contains(m.Text, "task=rt_supervised ") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("one consecutive-failure streak produced %d notices, want 1", n)
+	}
+	outcome(e.s, "rt_supervised", runOK, "")
+	for range streakLimit {
+		outcome(e.s, "rt_supervised", runFailed, "renewed failure")
+	}
+	if n := count(); n != 2 {
+		t.Fatalf("a new streak after recovery produced %d total notices, want 2", n)
+	}
+	if r := lastRunOf(t, e.s, "rt_supervised"); !r.StreakTold {
+		t.Fatalf("the new streak did not retain StreakTold: %+v", r)
+	}
+	if p := e.f.pushed(); len(p) != 0 {
+		t.Fatalf("ordinary schedule streaks still pushed to the owner: %+v", p)
+	}
+	if c := cardsToday(t, e.s)[cardScheduleStreak]; c.N != 0 {
+		t.Fatalf("schedule_streak ledger = %+v, want 0", c)
+	}
+}
+
+// An owner-subscribed briefing retains its existing owner-push fallback even when a main conversation exists.
+func TestScheduleStreakOwnerBriefingFallbackStillPushes(t *testing.T) {
+	for _, briefing := range []struct {
+		name   string
+		facts  bool
+		report bool
+	}{{"facts", true, false}, {"report", false, true}} {
+		t.Run(briefing.name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			setTasks(s, Task{ID: "rt_brief", Title: "Morning briefing", Repeat: repeatDaily, Enabled: true,
+				Facts: briefing.facts, Report: briefing.report})
+			for range streakLimit {
+				outcome(s, "rt_brief", runFailed, "machine offline")
+			}
+			if p := f.pushed(); len(p) != 1 || !strings.Contains(p[0].Body, "machine offline") {
+				t.Fatalf("owner-subscribed briefing streak did not retain its fallback push: %+v", p)
+			}
+			if hasRelayFrom(s, "conv1", cardScheduleStreak, "task=rt_brief ") {
+				t.Fatal("owner-subscribed briefing streak was rerouted to main")
+			}
+		})
+	}
 }
 
 // The user's ask (#4658): a repeating task that keeps failing or being skipped was only a line in the run history.

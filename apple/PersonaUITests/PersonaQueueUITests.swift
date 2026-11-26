@@ -69,15 +69,15 @@ final class PersonaQueueUITests: XCTestCase {
         try shot(app, "strip")
     }
 
-    /// The strip names the assistant, and Send Now sends at one tap (#7169): its Persona wording, which a confirmation
-    /// used to show, is the button's VoiceOver hint (`QueueStripHintTests`), never drawn over the chat.
+    /// The composer-top queue strip shows the concise queued count without naming Claude, and Send Now sends at one tap
+    /// (#7169, #16165): its Persona wording, which a confirmation used to show, stays in the button's VoiceOver hint
+    /// (`QueueStripHintTests`), never drawn over the chat.
     @MainActor func testPersonaSendNowSendsAtOneTap() throws {
         let app = launch()
         let strip = app.descendants(matching: .any)["queue-strip"].firstMatch
         XCTAssertTrue(strip.waitForExistence(timeout: 20), app.debugDescription)
-        // The assistant by the name shown everywhere else (#6489: the roster's, 「助手」 in the mock), never Claude.
         let named = { (name: String) in strip.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", name)).firstMatch }
-        XCTAssertTrue(named("助手").exists, "the queue does not name the assistant:\n\(strip.debugDescription)")
+        XCTAssertTrue(named("排队中").exists, "the queue strip does not show the queued count:\n\(strip.debugDescription)")
         XCTAssertFalse(named("Claude").exists, "the queue names Claude, not the assistant:\n\(strip.debugDescription)")
         let sendNow = app.buttons["queue-send-now"]
         XCTAssertTrue(sendNow.waitForExistence(timeout: 5), "no Send Now for the user's own queued messages:\n\(app.debugDescription)")
@@ -105,7 +105,10 @@ final class PersonaQueueUITests: XCTestCase {
         fold.tap()
         let relayed = app.buttons.matching(identifier: "queue-item").element(boundBy: 2)
         XCTAssertTrue(relayed.waitForExistence(timeout: 5), "the fold row did not open:\n\(app.debugDescription)")
-        XCTAssertTrue(relayed.label.contains("对话空闲后送达"), "the relayed row says when it arrives:\n\(relayed.debugDescription)")
+        XCTAssertTrue(relayed.label.contains("随下一轮消息送达"), relayed.debugDescription)
+        XCTAssertTrue(relayed.label.contains("来自 早报 · 周三"), relayed.debugDescription)
+        XCTAssertTrue(relayed.label.contains("会议纪要整理好了"), relayed.debugDescription)
+        XCTAssertFalse(relayed.label.contains("不唤醒"), relayed.debugDescription)
         try shotLightAndDark(app, "relayed-open")
         relayed.tap()
         XCTAssertTrue(app.buttons["拷贝"].waitForExistence(timeout: 5), app.debugDescription)

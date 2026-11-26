@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mainConversationData} from '../entry/src/main/ets/core/DefaultConversation.ts';
+import {phoneSettingsLink,pushPhoneSetting} from '../entry/src/main/ets/core/PhoneSettingsNavigation.ts';
 import {readFileSync} from 'node:fs';
 import {registerHooks,stripTypeScriptTypes} from 'node:module';
 registerHooks({resolve(s,c,n){if(c.parentURL?.endsWith('NavigationContext.ets')&&s==='./Wire')return {url:new URL('./Wire.ets',c.parentURL).href,shortCircuit:true};return n(s,c);},load(u,c,n){if(u.endsWith('.ets'))return{format:'module',shortCircuit:true,source:stripTypeScriptTypes(readFileSync(new URL(u),'utf8').replace(/@ObservedV2\s*/g,'').replace(/@Trace\s+/g,''))};return n(u,c);}});
@@ -15,16 +16,88 @@ function method(name){
  for(;i<source.length&&depth;i++){const c=source[i];if(quote){if(escape)escape=false;else if(c==='\\')escape=true;else if(c===quote)quote='';}else if(c==='"'||c==="'"||c==='`')quote=c;else if(c==='{')depth++;else if(c==='}')depth--;}
  assert.equal(depth,0,name);return source.slice(start,i);
 }
-const names=['consumeNotification','destinationBackHidden','chatSelectionShown','activeModule','readingAgentDetail','routeTarget','openRow','mainDestination','openMain','hideChatTitle','newConversation','resolveMainDestination','ensureMainDestination','pushChat','redeem','childKey','routeRow','openSettings','settingsKind','settingsModel','targetReady','openLinkedResource','openFrom','openComputer','handoffResource','restoreTarget','routeShown','dismissChatActions','markDetailReady'];
+const names=['syncPhonePath','consumeNotification','destinationBackHidden','chatSelectionShown','activeModule','drawerPlaceSelected','readingAgentDetail','routeTarget','openRow','mainDestination','openMain','hideChatTitle','newConversation','resolveMainDestination','ensureMainDestination','pushChat','redeem','childKey','routeRow','openSettings','settingsKind','settingsModel','targetReady','openLinkedResource','openFrom','openComputer','handoffResource','restoreTarget','routeShown','dismissChatActions','markDetailReady'];
 const NativeNavigation=new Function('NavigationContext','ResourceRow','mainConversationData','Wire','Tokens','return '+stripTypeScriptTypes('class NativeNavigation {'+names.map(method).join('\n')+'}'))(NavigationContext,ResourceRow,mainConversationData,Wire,Tokens);
 function row(id='source',manager='owner-b',kind='conversation'){const r=new ResourceRow(id,id,kind);r.manager=manager;r.machine='machine';r.session=id;return r;}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
+
+test('the compact Health drawer entry returns to the exact route that opened it', () => {
+  const Shell = new Function('tr','return '+stripTypeScriptTypes('class Shell {'+
+    ['openSpace','openResources','phoneBack','destinationTitleText'].map(method).join('\n')+'}'))(key=>key);
+  for (const [section, name, param] of [[0,'conversation','original-chat'],[1,'session','original-agent'],[6,'resources','knowledge']]) {
+    const routes=[{name,param}];
+    const shell=Object.assign(new Shell(),{
+      model:{section,listResources:kind=>assert.equal(kind,'health')},
+      stack:{size:()=>routes.length,pushPath:route=>routes.push(route),pop:()=>routes.pop()},
+      detailModel:{releaseTerminal(){}},wide:()=>false,savePath(){},returnToPhoneSettings:()=>false,spacesShown:true
+    });
+    Object.defineProperties(shell,{
+      phoneTop:{get:()=>routes.at(-1)?.name},phoneParam:{get:()=>routes.at(-1)?.param}
+    });
+    shell.openSpace('health');
+    assert.deepEqual(routes,[{name,param},{name:'resources',param:'health'}]);
+    assert.equal(shell.spacesShown,false);
+    assert.equal(shell.model.section,section);
+    assert.equal(shell.destinationTitleText('resources','health'),'phone_drawer_health');
+    shell.openSpace('health');
+    assert.equal(routes.length,2);
+    shell.phoneBack();
+    assert.deepEqual(routes,[{name,param}]);
+  }
+});
 function fixture(){const shell=new NativeNavigation(),pushed=[];let gen=1;
  const primary={profile:{id:'hub'},selected:row('primary','owner-a'),connected:true,error:'',connectionGeneration:()=>gen,scope:()=> 'hub/owner-a',owns:(g,s)=>g===gen&&s==='hub/owner-a',reportError(e){this.error=e.message;},hideConversation(){},async listResources(){}};
  const detail={selected:row('previous'),connected:true,scope:()=> 'hub/owner-b',connectionGeneration:()=>gen,async select(r){this.selected=r;},hideConversation(){},showConversation(){},watchDecisions(){}};
  primary.viewFor=async()=>detail;shell.mainReadWaiters=[];shell.model=primary;shell.detailModel=primary;shell.activeChild='';shell.routeRevision=0;shell.creatingConversations=new Map();shell.chatReady=false;shell.detailRoute='';shell.stack={size:()=>pushed.length,clear:()=>pushed.splice(0),pushPath:r=>pushed.push(r),getAllPathName:()=>pushed.map(r=>r.name),getParamByIndex:i=>pushed[i]?.param};shell.savePath=()=>{};
  return {shell,primary,detail,pushed,bump:()=>gen++};
 }
+function machineSettingsFixture() {
+  const methods=['openFromPhoneSettings','suspendPhoneSettings','enterPhoneSettingsMachine','leavePhoneSettingsMachine',
+    'backPhoneSetting','returnToPhoneSettings','openLinkedResource','routeTarget','openSpace'];
+  const Shell=new Function('phoneSettingsLink','pushPhoneSetting','NavigationContext','Wire',
+    'return '+stripTypeScriptTypes('class Shell {'+methods.map(method).join('\n')+'}'))(phoneSettingsLink,pushPhoneSetting,NavigationContext,Wire);
+  const {primary,pushed}=fixture();
+  primary.profile={id:'hub',manager:'owner-a'};
+  const shell=Object.assign(new Shell(),{model:primary,phoneSettingsShown:true,spacesShown:true,phoneSettingsTrail:[],
+    phoneSettingsQuery:'机器',phoneSettingsDepth:-1,wide:()=>false,savePath(){},activeChild:'main',
+    stack:{size:()=>pushed.length,getAllPathName:()=>pushed.map(r=>r.name),pop:()=>pushed.pop(),pushPath:r=>pushed.push(r)}});
+  Object.defineProperty(shell,'phoneSettingsPage',{get:()=>shell.phoneSettingsTrail.at(-1)||''});
+  const machine=new ResourceRow('macbook','MacBook','machine');machine.group='hub';machine.manager='owner-a';machine.machine='macbook';
+  return {shell,primary,pushed,machine};
+}
+
+test('the Settings Machines directory, machine and two Back steps stay in the same sheet and restore a search',()=>{
+  const {shell,pushed,machine}=machineSettingsFixture();
+  shell.openFromPhoneSettings('machines');
+  assert.equal(shell.phoneSettingsShown,true);assert.deepEqual(shell.phoneSettingsTrail,['machines']);
+  for (const [group,manager] of [['other','owner-a'],['hub','other']]) {
+    const foreign=Object.assign(new ResourceRow('macbook','MacBook','machine'),{group,manager});
+    shell.enterPhoneSettingsMachine(foreign);assert.equal(shell.phoneSettingsMachine,undefined);
+  }
+  shell.enterPhoneSettingsMachine(machine);assert.equal(shell.phoneSettingsMachine.key(),machine.key());
+  shell.backPhoneSetting();assert.equal(shell.phoneSettingsMachine,undefined);assert.equal(shell.phoneSettingsPage,'machines');
+  shell.backPhoneSetting();assert.equal(shell.phoneSettingsPage,'');assert.equal(shell.phoneSettingsQuery,'机器');
+  assert.equal(shell.phoneSettingsShown,true);assert.deepEqual(pushed,[]);
+  shell.model.section=0;shell.changeSection=index=>{shell.model.section=index;};shell.showPlaceRoot=index=>pushed.push({name:'root',param:index});
+  shell.phoneSettingsShown=false;shell.openSpace('devices');assert.equal(shell.phoneSettingsShown,false);assert.equal(pushed[0].param,8);
+});
+
+test('machine settings restore the exact machine after an owned chat and drop a late open after leaving and reentering',async()=>{
+  const {shell,primary,pushed,machine}=machineSettingsFixture(),session=row('task','owner-a','session');session.group='hub';session.machine='macbook';
+  shell.openFromPhoneSettings('machines');shell.enterPhoneSettingsMachine(machine);
+  const first=shell.phoneSettingsMachine,wait=deferred();primary.viewFor=()=>wait.promise;
+  const late=shell.openLinkedResource(session,destination=>shell.leavePhoneSettingsMachine(destination,first));
+  shell.backPhoneSetting();shell.enterPhoneSettingsMachine(machine);const current=shell.phoneSettingsMachine;assert.notEqual(first,current);
+  wait.resolve(primary);await late;assert.equal(pushed.length,0);assert.equal(shell.phoneSettingsShown,true);
+  await shell.openLinkedResource(session,destination=>shell.leavePhoneSettingsMachine(destination,current));
+  assert.equal(shell.phoneSettingsShown,false);assert.equal(pushed.length,1);assert.equal(pushed[0].name,'session');
+  assert.equal(NavigationContext.from('session',pushed[0].param).row.key(),session.key());
+  pushed.push({name:'tools',param:'child'});assert.equal(shell.returnToPhoneSettings(),false);pushed.pop();
+  assert.equal(shell.returnToPhoneSettings(),true);assert.equal(shell.phoneSettingsMachine,current);
+  assert.equal(shell.leavePhoneSettingsMachine('machine_settings',current),true);pushed.push({name:'machine_settings',param:JSON.stringify(current)});
+  primary.scope=()=> 'different-hub';assert.equal(shell.returnToPhoneSettings(),false);
+});
+
 test('global settings remain workspace-owned and chat settings retain the captured target',()=>{
  const {shell,detail,primary,pushed}=fixture();shell.detailModel=detail;shell.openSettings('models');shell.openSettings('models',true);
  assert.equal(pushed[0].param,'models');assert.equal(shell.settingsModel(pushed[0].param),primary);assert.equal(shell.settingsModel(pushed[1].param),detail);
@@ -166,14 +239,16 @@ test('opening assistant detail restores decision authorization for its captured 
 
 test('a new owner receives a fresh stack before async hydration and merges only its own new intent',async()=>{
  class Stack { routes=[];size(){return this.routes.length;}pushPath(route){this.routes.push(route);}getAllPathName(){return this.routes.map(r=>r.name);}getParamByIndex(i){return this.routes[i]?.param;} }
- const NativeScope=new Function('Wire','NavPathStack','NavigationContext','return '+stripTypeScriptTypes('class NativeScope {'+['routeRow','restoreScope','savePath','changeSection'].map(method).join('\n')+'}'))(Wire,Stack,NavigationContext);
- const s=new NativeScope(),gate=deferred(),saved=[];s.model={section:0,scope:()=> 'B',loadView:()=>gate.promise,saveView:async(k,v)=>saved.push(JSON.parse(v)),releaseTerminal(){},sessions:[]};
+ const NativeScope=new Function('Wire','NavPathStack','NavigationContext','return '+stripTypeScriptTypes('class NativeScope {'+['routeRow','syncPhonePath','restoreScope','savePath','changeSection'].map(method).join('\n')+'}'))(Wire,Stack,NavigationContext);
+ const s=new NativeScope(),gate=deferred(),saved=[];
+ s.projectCatalog={createdSelection:{key:'old-owner-worktree'}};s.meetingServices={pendingOpen:false};s.model={section:0,scope:()=> 'B',loadView:()=>gate.promise,saveView:async(k,v)=>saved.push(JSON.parse(v)),releaseTerminal(){},sessions:[]};
  s.stack=new Stack();s.stack.pushPath({name:'conversation',param:'private-A'});s.paths=new Map();s.activeScope='A';s.restoring=0;s.navigationIntent=0;s.rowVisibility=new Map();s.routeRevision=0;s.detailModel={hideConversation(){}};s.wide=()=>false;s.ensureMainDestination=()=>{};
  const restoring=s.restoreScope();assert.equal(s.stack.size(),0);
  s.changeSection(1);s.stack.pushPath({name:'session',param:'B-notification'});s.savePath();assert.equal(saved.length,0);
  gate.resolve(JSON.stringify({section:0,tabs:[{index:0,routes:[{name:'conversation',param:JSON.stringify(row('saved-B','owner-b'))}]}]}));await restoring;
  assert.equal(s.model.section,1);assert.deepEqual(s.stack.routes,[{name:'session',param:'B-notification'}]);
  assert.equal(JSON.stringify(saved).includes('private-A'),false);assert.equal(JSON.stringify(saved).includes('saved-B'),true);
+ assert.equal(s.projectCatalog.createdSelection,undefined);
 });
 
 
@@ -299,4 +374,98 @@ test('split root title spacing follows the visible path and keeps child Back con
  assert.equal(shell.destinationBackHidden('resources','inbox'),false,'same-name child must keep its native Back control');
  pushed.pop();shell.wide=()=>false;
  assert.equal(shell.destinationBackHidden('resources','inbox'),false,'a single-pane first destination returns to its primary list');
+});
+
+test('a covered destination cannot replace the phone bar or bind the wrong conversation after a fast pop',()=>{
+ const {shell,pushed}=fixture();
+ const current={name:'resources',param:'inbox'};
+ pushed.push(current);shell.activeChild='current';
+ shell.syncPhonePath();assert.deepEqual(shell.phonePath,['resources']);assert.equal(shell.phoneParam,'inbox');
+ shell.routeShown('session','stale');
+ assert.equal(shell.activeChild,'current');
+ assert.deepEqual(shell.phonePath,['resources']);
+});
+
+test('the phone drawer selects only the current owner’s root Persona conversation', () => {
+ const {shell,primary}=fixture(),main=row('main','owner-a');
+ primary.profile.manager='owner-a';primary.mainId=main.id;primary.mainMachineId=main.machine;
+ main.group=primary.profile.id;main.raw=JSON.stringify({navigation_root:true});
+ shell.wide=()=>false;shell.peer=()=>0;shell.phoneTop='conversation';shell.phoneParam=JSON.stringify(main);
+ assert.equal(shell.drawerPlaceSelected('persona'),true);
+ for(const change of [{group:'other-hub'},{manager:'other-owner'},{machine:'other-machine'},{id:'other-chat'},{raw:'{}'}]){
+   shell.phoneParam=JSON.stringify({...main,...change});assert.equal(shell.drawerPlaceSelected('persona'),false);
+ }
+ shell.phoneParam=JSON.stringify(main);
+ for(const page of ['session','tools','settings_root','']){
+   shell.phoneTop=page;assert.equal(shell.drawerPlaceSelected('persona'),false);
+ }
+ shell.phoneTop='conversation';shell.peer=()=>1;assert.equal(shell.drawerPlaceSelected('persona'),false);
+ shell.peer=()=>0;primary.mainId='';assert.equal(shell.drawerPlaceSelected('persona'),false);
+ primary.mainId=main.id;shell.activeModule=()=>'inbox';
+ assert.equal(shell.drawerPlaceSelected('inbox'),true);assert.equal(shell.drawerPlaceSelected('knowledge'),false);
+ shell.wide=()=>true;assert.equal(shell.drawerPlaceSelected('persona'),false);
+});
+
+test('the system phone drawer paints its surface and selection without overriding a custom theme',()=>{
+ const colors=readFileSync(new URL('../entry/src/main/ets/design/Colors.ets',import.meta.url),'utf8');
+ const methodFor=(name)=>{
+  const m=colors.match(new RegExp('@Computed get ('+name+'\\(\\): ResourceColor \\{[^}]+\\})'));
+  assert.ok(m,name);return stripTypeScriptTypes('class Tokens { get '+m[1]+' }');
+ };
+ const surface=new (new Function('$r','return '+methodFor('phoneDrawerSurface'))(x=>x))();
+ const selection=new (new Function('$r','return '+methodFor('phoneDrawerSelection'))(x=>x))();
+ for(const style of ['glass','clay','beautiful']){
+  for(const system of [true,false]){
+   Object.assign(surface,{styleID:style,systemControls:system,surface:'custom surface'});
+   Object.assign(selection,{styleID:style,systemControls:system,control:'custom well'});
+   assert.equal(surface.phoneDrawerSurface,style==='glass'&&system?'app.color.persona_phone_drawer_surface':'custom surface');
+   assert.equal(selection.phoneDrawerSelection,style==='glass'&&system?'app.color.persona_phone_drawer_selection':'custom well');
+  }
+ }
+ for(const [mode,ground,fill] of [['base','#F9F9F9','#EEEEEF'],['dark','#171717','#28282A']]){
+  const palette=JSON.parse(readFileSync(new URL('../entry/src/main/resources/'+mode+'/element/color.json',import.meta.url))).color;
+  assert.equal(palette.find(v=>v.name==='persona_phone_drawer_surface').value,ground);
+  assert.equal(palette.find(v=>v.name==='persona_phone_drawer_selection').value,fill);
+ }
+ assert.match(source,/\.selectable\(this\.wide\(\)\)\.selected\(this\.wide\(\) && this\.drawerPlaceSelected\(kind\)\)/);
+ assert.match(source,/\.accessibilitySelected\(this\.drawerPlaceSelected\(kind\)\)/);
+ assert.match(source,/this\.wide\(\) \? Colors\.surface : Colors\.phoneDrawerSurface/);
+});
+
+test('the compact system-area backgrounds follow the visible page and drawer', () => {
+  const Shell = new Function('Colors','Color','LayoutSafeAreaEdge','return '+stripTypeScriptTypes(
+    'class Shell {'+method('knowledgeSurface')+method('compactInsetEdges')+method('compactInsetSurface')+'}'))(
+    {grouped:'grouped',phoneDrawerSurface:'drawer'},{Transparent:'clear'},{TOP:'top',BOTTOM:'bottom'});
+  const shell = Object.assign(new Shell(), {model:{profile:{id:'phone'},section:1},fullHeightPhone:()=>true,
+    environment:{keyboardHeightPx:0},
+    phoneTop:'resources',phoneParam:'knowledge',drawerFraction:0,chatSearchShown:false,startSearchInAgents:false,
+    projectPlace:()=>false,projectSearching:false,settingsKind:value=>value});
+  for (const [page,param,expected] of [
+    ['resources','knowledge','grouped'],['resources','todo','grouped'],['resources','inbox','clear'],
+    ['recordings','','grouped'],['knowledge_meetings','','grouped'],['knowledge','','grouped'],['resources','health','grouped'],
+    ['project_tree','branch','grouped'],['settings','machines','grouped'],['settings','about','clear'],
+    ['session','conversation','clear'],['','','grouped']]) {
+    shell.phoneTop=page; shell.phoneParam=param;
+    assert.equal(shell.compactInsetSurface(),expected);
+    const groupedToBottom = ['recordings','knowledge_meetings','knowledge'].includes(page) || page==='resources' && param==='knowledge';
+    assert.deepEqual(shell.compactInsetEdges(),groupedToBottom ? ['top','bottom'] : ['top']);
+  }
+  shell.phoneTop='knowledge';shell.environment.keyboardHeightPx=810;
+  assert.deepEqual(shell.compactInsetEdges(),['top']);
+  shell.environment.keyboardHeightPx=0;shell.phoneTop='';
+  shell.projectPlace=()=>true;
+  assert.equal(shell.compactInsetSurface(),'clear');
+  shell.projectSearching=true;
+  assert.equal(shell.compactInsetSurface(),'grouped');
+  shell.phoneTop='session';shell.chatSearchShown=true;shell.startSearchInAgents=true;
+  assert.equal(shell.compactInsetSurface(),'grouped');
+  shell.drawerFraction=1;
+  assert.equal(shell.compactInsetSurface(),'drawer');
+  shell.model.profile.id='';
+  assert.equal(shell.compactInsetSurface(),'clear');
+  shell.model.profile.id='phone';shell.fullHeightPhone=()=>false;
+  assert.equal(shell.compactInsetSurface(),'clear');
+  assert.match(source,/padding\(\{top:this\.compactNavigationInset\(\)\}\)\.clip\(true\)\s*\.backgroundColor\(this\.compactInsetSurface\(\)\)/);
+  assert.match(source,/\.background\(this\.compactInsetSurface\(\),\s*\{ ignoresLayoutSafeAreaEdges: this\.compactInsetEdges\(\) \}\)/);
+  assert.doesNotMatch(source,/\.overlay\(this\.knowledge|@Builder knowledgeNavigationInset/);
 });

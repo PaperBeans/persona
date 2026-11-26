@@ -99,7 +99,7 @@ class HttpExtensionManagement internal constructor(
         return ExtensionListing(extensions, canInstall = flag("can_install"), markets = flag("markets"))
     }
 
-    override suspend fun extension(id: String) = detail(call(path(id, "-", ""), "GET"))
+    override suspend fun extension(id: String) = detail(call(withEntryLists(path(id, "-", "")), "GET"))
 
     override fun adminNetworkUrl(id: String): String? = iconBase()?.toHttpUrlOrNull()?.newBuilder()
         ?.addPathSegments("admin/extensions")
@@ -109,10 +109,10 @@ class HttpExtensionManagement internal constructor(
         ?.build()?.toString()
 
     override suspend fun setEnabled(id: String, enabled: Boolean, cascade: Boolean) =
-        detail(call(path(id, "-", "enabled"), "PUT", buildJsonObject { put("enabled", enabled); if (cascade) put("cascade", true) }))
+        detail(call(withEntryLists(path(id, "-", "enabled")), "PUT", buildJsonObject { put("enabled", enabled); if (cascade) put("cascade", true) }))
 
     override suspend fun setContribution(id: String, point: String, contribution: String, enabled: Boolean) =
-        detail(call(path(id, "-", "contributions", point.also { require(it.matches(ContributionPoint)) }, id(contribution)),
+        detail(call(withEntryLists(path(id, "-", "contributions", point.also { require(it.matches(ContributionPoint)) }, id(contribution))),
             "PUT", buildJsonObject { put("enabled", enabled) }))
 
     override suspend fun quickPrompts() = declared("prompts", "prompts", ExtensionQuickPrompt.serializer())
@@ -128,19 +128,22 @@ class HttpExtensionManagement internal constructor(
     }
 
     override suspend fun setConfig(id: String, config: JsonObject) =
-        detail(call(path(id, "-", "config"), "PUT", buildJsonObject { put("config", config) }))
+        detail(call(withEntryLists(path(id, "-", "config")), "PUT", buildJsonObject { put("config", config) }))
+
+    override suspend fun setConfigPreservingEntries(id: String, config: JsonObject) =
+        detail(call("${withEntryLists(path(id, "-", "config"))}&preserve_entries=1", "PUT", buildJsonObject { put("config", config) }))
 
     override suspend fun setSecret(id: String, name: String, value: String) =
-        detail(call(path(id, "-", "secrets", secret(name)), "PUT", buildJsonObject { put("value", value) }))
+        detail(call(withEntryLists(path(id, "-", "secrets", secret(name))), "PUT", buildJsonObject { put("value", value) }))
 
     override suspend fun setSecretReference(id: String, name: String, reference: String) =
-        detail(call(path(id, "-", "secrets", secret(name)), "PUT", buildJsonObject { put("reference", reference) }))
+        detail(call(withEntryLists(path(id, "-", "secrets", secret(name))), "PUT", buildJsonObject { put("reference", reference) }))
 
     override suspend fun clearSecret(id: String, name: String) =
-        detail(call(path(id, "-", "secrets", secret(name)), "DELETE"))
+        detail(call(withEntryLists(path(id, "-", "secrets", secret(name))), "DELETE"))
 
     override suspend fun removeHandoffRule(id: String, rule: String) =
-        detail(call(path(id, "-", "handoff-rules", this@HttpExtensionManagement.id(rule)), "DELETE"))
+        detail(call(withEntryLists(path(id, "-", "handoff-rules", this@HttpExtensionManagement.id(rule))), "DELETE"))
 
     // ---- declarative UI (docs/extensions/extensions.md "Declarative UI")
 
@@ -372,7 +375,7 @@ class HttpExtensionManagement internal constructor(
     // ---- auto-upgrades (docs/extensions/extensions.md "Auto-upgrade")
 
     override suspend fun setAutoUpgrade(id: String, auto: Boolean) =
-        detail(call(path(id, "-", "auto-upgrade"), "PUT", buildJsonObject { put("auto", auto) }))
+        detail(call(withEntryLists(path(id, "-", "auto-upgrade")), "PUT", buildJsonObject { put("auto", auto) }))
 
     /** A hub without auto-upgrades has no route (404): null, and the switch is not shown. */
     override suspend fun autoUpgrades(): Boolean? = try {
@@ -447,6 +450,9 @@ class HttpExtensionManagement internal constructor(
         }
         else -> null
     }
+
+    /** Every detail-returning settings request opts into entry lists so responses never hide the entry editor. */
+    private fun withEntryLists(path: String): String = "$path${if ('?' in path) '&' else '?'}entry_lists=1"
 
     /** `/api/v1/extensions[/id/…]` (or `/api/v1/plugins`); an empty last segment keeps the trailing slash the detail route has. */
     private fun path(id: String? = null, vararg rest: String): String {

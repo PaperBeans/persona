@@ -163,5 +163,15 @@
   "source_report_full_notice_chat": "将在 {minutes} 分钟后把这份答复发到原消息下。回复并发 /noreply 可以取消。\n\n{text}",
   "source_report_file_notice": "将在 {minutes} 分钟后把附件里的答复发到原消息下。在本话题发 /noreply 可以取消。",
   "source_report_file_notice_chat": "将在 {minutes} 分钟后把附件里的答复发到原消息下。回复这条消息并发 /noreply 可以取消。",
-  "source_report_no_final": "任务已完成，未找到可回传的最终答复。"
+  "source_report_no_final": "任务已完成，未找到可回传的最终答复。",
+  "handoff_decision_source": "飞书机器人",
+  "handoff_decision_title": "{chat} 里的 {sender}",
+  "handoff_decision_background": "问：{question} — 草稿：{draft}",
+  "handoff_decision_post": "发出这条回复",
+  "handoff_decision_post_leads": "机器人把这条回复发到群里，群里所有人都能看到。",
+  "handoff_decision_drop": "不发",
+  "handoff_decision_drop_leads": "什么都不发，这个问题就此放下。",
+  "handoff_decision_cost": "{sender} 还在等答复。",
+  "handoff_reply_header": "{sender} 问：{question}",
+  "handoff_reply_footer": "由 {owner} 的 AI 助手代答，仅供参考。"
 }

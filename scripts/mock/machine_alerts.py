@@ -21,6 +21,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
+from machine_load_mock import LOAD_QUEUE
+
 GB = 1 << 30
 MB = 1 << 20
 ON = os.environ.get("MOCK_MACHINE_ALERTS") == "1"
@@ -58,6 +60,13 @@ _EXTRA = [
      {"os": "darwin", "distro": "macos", "name": "macOS 26.1", "version": "26.1", "build": "25B78", "kernel": "Darwin 25.1.0",
       "arch": "arm64", "model": "Mac mini", "cpu": "Apple M4", "cores": 10, "memory": 32 * GB}),
 ]
+
+
+def queued(mid, cpu, load, cores, jitter):
+    """The selected machines' load and CPU: work queues on some cores, it is not a CPU percentage (#12519)."""
+    if mid in LOAD_QUEUE:
+        return 38 + 6 * jitter, cores * (1.36 + 0.08 * jitter)
+    return cpu, load
 
 
 def install_machines(machines, systems):

@@ -34,6 +34,8 @@ describe("inboxSources", () => {
 
   it("offers Feishu only on a hub that has it, and at most three connectors", () => {
     expect(inboxSources({ mail: 0, connectors: [] }).offers.map((o) => o.id)).toEqual(["mail"]);
+    // a hub without the mail module (no module.mail flag) offers no mail
+    expect(inboxSources({ connectors: [] }).offers.map((o) => o.id)).toEqual([]);
     const many = ["a", "b", "c", "d"].map((id) => c({ id, name: id }));
     expect(inboxSources({ mail: 0, connectors: many }).offers.map((o) => o.id)).toEqual(["mail", "a", "b", "c"]);
   });

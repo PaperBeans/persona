@@ -26,7 +26,7 @@ export function readAssistantSnapshot(page: string): AssistantSnapshot | null {
     if (page && value.manager !== page) return null;
     const assistant = value.assistant;
     if (typeof assistant.machine_id !== "string" || (assistant.main !== undefined && typeof assistant.main !== "string")
-      || !Array.isArray(assistant.conversations) || !strings(assistant.leaders) || !strings(assistant.conversation_order)) return null;
+      || !Array.isArray(assistant.conversations) || !strings(assistant.leaders) || !strings(assistant.conversation_order) || !strings(assistant.labs_seen)) return null;
     if (!assistant.conversations.every((row) => object(row) && typeof row.machine_id === "string" && typeof row.session_id === "string")) return null;
     return {
       manager: value.manager,

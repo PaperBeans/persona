@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -543,11 +544,86 @@ func TestFlushAfterTheWokenSessionDropped(t *testing.T) {
 	}
 }
 
+type pendingTextLink struct {
+	*recLink
+	writing chan struct{}
+	result  chan error
+}
+
+func (l *pendingTextLink) Write(ctx context.Context, typ websocket.MessageType, b []byte) error {
+	close(l.writing)
+	if err := <-l.result; err != nil {
+		return err
+	}
+	return l.recLink.Write(ctx, typ, b)
+}
+
+func TestReconnectWaitsForBufferedTextWrite(t *testing.T) {
+	const line = "数字是几"
+	for _, fails := range []bool{false, true} {
+		t.Run(map[bool]string{true: "failed write", false: "successful write"}[fails], func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				old := &pendingTextLink{&recLink{left: -1}, make(chan struct{}), make(chan error)}
+				c := &conversation{ctx: t.Context(), w: liveWire{}, started: true, ready: true, up: old, wake: make(chan struct{}, 1)}
+				c.sus.state, c.sus.texts = linkWaking, []string{line}
+				go c.flushRing()
+				<-old.writing
+
+				// The reader saw the session drop before the writer returned. Reconnect is taking its snapshot.
+				c.mu.Lock()
+				c.gen++
+				c.up, c.ready = nil, false
+				c.mu.Unlock()
+				snapshot := make(chan []prompts.VoiceLine, 1)
+				go func() {
+					history, err := c.historyForConnect()
+					if err != nil {
+						t.Errorf("taking the reconnect snapshot: %v", err)
+					}
+					snapshot <- history
+				}()
+				synctest.Wait()
+				select {
+				case <-snapshot:
+					t.Fatal("the new session took history before the write outcome")
+				default:
+				}
+				var result error
+				if fails {
+					result = net.ErrClosed
+				}
+				old.result <- result
+				history := <-snapshot
+				synctest.Wait()
+
+				fresh := &recLink{left: -1}
+				c.up, c.ready = fresh, true
+				c.flushRing()
+				if fails {
+					if len(history) != 0 || !slices.Equal(fresh.sent(), []string{line}) {
+						t.Fatalf("failed write: history %v, replay %v", history, fresh.sent())
+					}
+				} else if !slices.Equal(history, []prompts.VoiceLine{{Role: "user", Text: line}}) || len(fresh.sent()) != 0 {
+					t.Fatalf("successful write: history %v, replay %v", history, fresh.sent())
+				}
+				if got := voiceLines(c.history); !slices.Equal(got, []prompts.VoiceLine{{Role: "user", Text: line}}) {
+					t.Fatalf("final history: %v", got)
+				}
+			})
+		})
+	}
+}
+
 // A woken session that drops as soon as it is up is a drop like any other: reconnecting, and the session after it is
 // told the connection dropped (not that the voice was paused). The line typed to wake it is not lost: written to the
 // woken session before the drop was seen, it is the last line of what was said, which the next one is told to answer;
 // else that one gets it.
 func TestWokenSessionDrops(t *testing.T) {
+	t.Run("first line", func(t *testing.T) { wokenSessionDrops(t, "") })
+	t.Run("after a prior line", func(t *testing.T) { wokenSessionDrops(t, "先看看进度") })
+}
+
+func wokenSessionDrops(t *testing.T, prior string) {
 	quick(t)
 	hub := workingAgent(t)
 	up := newSessionsUp(t, false, nil)
@@ -555,21 +631,47 @@ func TestWokenSessionDrops(t *testing.T) {
 	pl := testPlugin(t, liveProvider(up.fakeUpstream), hub.server(t))
 	a := dialApp(t, pl, boundStart("a1", nil))
 	a.until(ofType("ready"))
+	first := instructionsOf(up.find(t, 0, "the first start", isStart))
+	if strings.Contains(first, "语音连接刚断过") || strings.Contains(first, "语音暂停了一下") {
+		t.Fatal("a fresh session was told it was reconnecting")
+	}
+	if prior != "" {
+		a.send(map[string]any{"type": "text", "text": prior})
+		up.find(t, 0, "the preceding line", func(f map[string]any) bool {
+			return f["type"] == "session.commentary.append" && content(f) == prior
+		})
+	}
 	a.until(linkIn(linkPaused))
-	a.send(map[string]any{"type": "text", "text": "数字是几"})
+	const line = "数字是几"
+	a.send(map[string]any{"type": "text", "text": line})
 	a.until(linkIn(linkWaking))
 	a.until(linkIn(linkReconnecting))
 	a.until(linkIn(linkLive))
 	in := instructionsOf(up.find(t, 2, "its start", isStart))
-	if !strings.Contains(in, "语音连接刚断过") || strings.Contains(in, "语音暂停了一下") {
-		t.Fatalf("instructions: %s", in)
+	inHistory := strings.Contains(in, "用户："+line)
+	hasHistory := prior != "" || inHistory
+	if strings.Contains(in, "语音暂停了一下") || strings.Contains(in, "语音连接刚断过") != hasHistory ||
+		prior != "" && !strings.Contains(in, "用户："+prior) {
+		t.Fatalf("reconnected instructions (prior=%q, wake line in history=%t): %s", prior, inHistory, in)
 	}
-	if strings.Contains(in, "用户：数字是几") {
-		return
-	}
-	up.find(t, 2, "the typed line", func(f map[string]any) bool {
-		return f["type"] == "session.commentary.append" && content(f) == "数字是几"
+	// Whatever the wake got to write is in history. Everything still buffered goes to this session, in order.
+	const next = "再看下一项"
+	a.send(map[string]any{"type": "text", "text": next})
+	up.find(t, 2, "the following line", func(f map[string]any) bool {
+		return f["type"] == "session.commentary.append" && content(f) == next
 	})
+	deliveries := 0
+	if inHistory {
+		deliveries++
+	}
+	for _, f := range up.frames(2) {
+		if f["type"] == "session.commentary.append" && content(f) == line {
+			deliveries++
+		}
+	}
+	if deliveries != 1 {
+		t.Fatalf("wake line delivered %d times (in previous conversation=%t)", deliveries, inHistory)
+	}
 }
 
 // A card asked by voice is asked again to the session after a drop, once; a card that wakes a paused upstream is asked
@@ -604,6 +706,59 @@ func TestCardAfterANewSession(t *testing.T) {
 				t.Fatalf("asked %d times in the new session", n)
 			}
 		})
+	}
+}
+
+// The tracker can see an empty queue while the speaker holds a question that missed the previous session.
+func TestReaskWhenSpeakerAlreadyHasTheQuestion(t *testing.T) {
+	up := &recLink{left: -1}
+	c := &conversation{ctx: t.Context(), p: &Provider{}, w: liveWire{}, up: up, ready: true, lang: "zh-Hans",
+		wake: make(chan struct{}, 1), unacked: make(map[string]*sentWords)}
+	k := newAsker(&tracker{c: c}, true)
+	k.queue = []proto.Interaction{{ID: "q", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "选哪天？"}}}}
+	k.next()
+	take := func() *sentWords {
+		t.Helper()
+		s := c.nextToSay(time.Now())
+		if s == nil {
+			t.Fatal("no question waiting for the speaker")
+		}
+		return s
+	}
+	original := take()
+	c.told("q") // marked for the old session just before the hold closed it
+	c.gen++
+	k.reask()
+	reminder := take()
+	c.sendNow(original)
+	c.sendNow(reminder)
+	if got := up.sent(); len(got) != 1 {
+		t.Fatalf("asked %d times in the new session", len(got))
+	}
+
+	c.gen++
+	k.reask()
+	c.sendNow(take()) // only the reminder reaches this one
+	correction := k.question(true)
+	k.say(correction, "q", true)
+	c.sendNow(take()) // a correction on the same card must still go
+	if got := up.sent(); !slices.Equal(got, []string{original.text, original.text, correction.text}) {
+		t.Fatalf("the new session did not get both its question and the correction: %v", got)
+	}
+
+	c.gen++
+	k.reask()
+	obsolete := take()
+	c.endAsk("q", askReleased, "")
+	c.sendNow(obsolete)
+	if got := len(up.sent()); got != 3 {
+		t.Fatalf("a reminder of the retired card was sent: %d questions", got)
+	}
+	c.startAsk("next")
+	k.say(plainWords("下一道题"), "next", true)
+	c.sendNow(take())
+	if got := up.sent(); len(got) != 4 || got[3] != "下一道题" {
+		t.Fatalf("the next card was not asked: %v", got)
 	}
 }
 

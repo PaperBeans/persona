@@ -208,7 +208,7 @@ func TestSessionStartUsesManagerResolvedBudget(t *testing.T) {
 	}
 }
 
-func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
+func TestSessionStartResolvedSyncKeepsLocalNameAndCompletion(t *testing.T) {
 	for _, fallback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "manager disables async", true: "fallback changes inferred type"}[fallback], func(t *testing.T) {
 			h := newTestHub(t)
@@ -218,7 +218,7 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			t.Cleanup(srv.Close)
 			startReceiptNode(t, h, func(context.Context, json.RawMessage) (any, error) {
-				return map[string]any{"session": proto.Session{SessionID: "created"}}, nil
+				return map[string]any{"session": proto.Session{SessionID: "created", SpaceKind: "herdr", SlotID: "w1:t1", SlotName: "hello"}}, nil
 			})
 			m := h.byID["machine"]
 			m.owner = "m-budget"
@@ -230,7 +230,6 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 				{Launcher: proto.Launcher{Name: "resolved"}, AgentType: "codex"},
 			}
 			resolvedAt := make(chan time.Time, 1)
-			names := make(chan string, 1)
 			manager := connectGuardManager(t, h, srv.URL, m.owner, func(method string, raw json.RawMessage) (any, error) {
 				switch method {
 				case assistantwire.MethodAgentStartParams:
@@ -238,9 +237,10 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 					if err := json.Unmarshal(raw, &in); err != nil {
 						return nil, err
 					}
-					if in.NameFrom != "" {
-						t.Errorf("initial async resolution asked for name %q", in.NameFrom)
+					if in.NameFrom != "hello" {
+						t.Errorf("start naming input = %q, want hello", in.NameFrom)
 					}
+					in.Params["tab_name"] = "hello" // the manager's local tabSlug placeholder
 					if fallback {
 						in.Params["launcher"] = "resolved"
 					} else {
@@ -249,22 +249,24 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 					resolvedAt <- time.Now()
 					return map[string]any{"params": in.Params}, nil
 				case assistantwire.MethodAgentTabName:
-					var in struct {
-						Prompt string `json:"prompt"`
-					}
-					if err := json.Unmarshal(raw, &in); err != nil {
-						return nil, err
-					}
-					names <- in.Prompt
-					return map[string]any{"name": "resolved-name"}, nil
+					t.Error("the resolved synchronous start asked for a model name")
+					return nil, errors.New("synchronous naming")
 				}
 				return map[string]any{}, nil
 			})
 			events := make(chan string, 4)
+			nameStarted := make(chan assistantwire.AgentTabNameStart, 1)
 			manager.mu.Lock()
-			manager.onEvent = func(method string, _ json.RawMessage) {
-				if method == assistantwire.EventStartEnded || method == assistantwire.EventModelUsed {
+			manager.onEvent = func(method string, raw json.RawMessage) {
+				if method == assistantwire.EventStartEnded || method == assistantwire.EventModelUsed || method == assistantwire.EventAgentTabNameStarted {
 					events <- method
+				}
+				if method == assistantwire.EventAgentTabNameStarted {
+					var p assistantwire.AgentTabNameStart
+					if err := json.Unmarshal(raw, &p); err != nil {
+						t.Errorf("decode tab naming event: %v", err)
+					}
+					nameStarted <- p
 				}
 			}
 			manager.mu.Unlock()
@@ -272,7 +274,7 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 			observeSessionStartBudget(t, m, func(ctx context.Context, raw any) error {
 				observed = true
 				params := raw.(map[string]any)
-				if params["async"] != false || params["tab_name"] != "resolved-name" {
+				if params["async"] != false || params["tab_name"] != "hello" {
 					t.Errorf("synchronous start not normalized: %+v", params)
 				}
 				if fallback && params["agent_type"] != "codex" {
@@ -290,22 +292,22 @@ func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
 			if w.Code != http.StatusOK || !observed {
 				t.Fatalf("start = %d %s; observed=%v", w.Code, w.Body, observed)
 			}
-			select {
-			case name := <-names:
-				if name != "hello" {
-					t.Errorf("name prompt = %q, want hello", name)
-				}
-			default:
-				t.Error("owning manager was not asked to name the synchronous start")
-			}
 			seen := map[string]bool{}
-			for len(seen) < 2 {
+			for len(seen) < 3 {
 				select {
 				case event := <-events:
 					seen[event] = true
 				case <-time.After(time.Second):
 					t.Fatalf("synchronous completion events missing: %v", seen)
 				}
+			}
+			select {
+			case p := <-nameStarted:
+				if p.SessionID != "created" || p.TabID != "w1:t1" || p.ExpectedTabName != "hello" || p.NameFrom != "hello" {
+					t.Fatalf("tab naming event = %+v", p)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("the started session was not sent for background naming")
 			}
 		})
 	}

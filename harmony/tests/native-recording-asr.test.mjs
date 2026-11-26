@@ -5,27 +5,30 @@ import {readFileSync} from 'node:fs';
 let sdk;
 globalThis.__nativeAsr=()=>sdk;
 registerHooks({
- resolve(specifier,context,next){if(specifier.startsWith('@kit.'))return{url:'native-asr:'+specifier,shortCircuit:true};return next(specifier,context);},
+ resolve(specifier,context,next){
+  if (specifier==='./MeetingAudioNetwork') return {url:'data:text/javascript,export const meetingAudioNetwork = {}',shortCircuit:true};if(specifier.startsWith('@kit.'))return{url:'native-asr:'+specifier,shortCircuit:true};return next(specifier,context);},
  load(url,context,next){if(url.startsWith('native-asr:')){
   const source={
    '@kit.AbilityKit':'export const abilityAccessCtrl={};export const common={};export const Permissions={};',
    '@kit.AudioKit':'export const audio={};',
-   '@kit.CoreSpeechKit':'export const speechRecognizer={createEngine: (...args)=>globalThis.__nativeAsr().createEngine(...args)};',
+   '@kit.CoreSpeechKit':'export const speechRecognizer={createEngine: (...args)=>globalThis.__nativeAsr().createEngine(...args)}; export const textToSpeech={createEngine(){throw new Error("unexpected meeting speech output");}};',
    '@kit.CoreFileKit':'export const fileIo={OpenMode:{READ_ONLY:0},statSync:(...args)=>globalThis.__nativeAsr().stat(...args),mkdirSync(){},openSync:()=>({fd:1}),readSync:(_fd,_bytes,options)=>options.length,closeSync:()=>globalThis.__nativeAsr().closed++};',
    '@kit.ArkTS':'export const util={generateRandomUUID:()=>"00000000-0000-4000-8000-000000000001"};'
   }[url.slice('native-asr:'.length)];return{format:'module',source,shortCircuit:true};}
   if(url.endsWith('NativeRecording.ets'))return{format:'module',source:stripTypeScriptTypes(readFileSync(new URL(url),'utf8')),shortCircuit:true};return next(url,context);
  }
 });
-const {NativeRecording}=await import('../entry/src/main/ets/platform/NativeRecording.ets');
+const {NativeMeetingSpeech,NativeRecording}=await import('../entry/src/main/ets/platform/NativeRecording.ets');
 const id='00000000-0000-4000-8000-000000000001';
 async function fixture(mode,size=19200){
- const state={writes:0,closed:0,started:0,cancelled:0,shutdown:0,session:'',listener:undefined,
+ const state={frames:[],frameTimes:[],finishTimes:[],writes:0,closed:0,started:0,cancelled:0,shutdown:0,session:'',listener:undefined,
   stat(path){return{size:path.endsWith('.pcm')?size:0};},
   async createEngine(){if(this.creation)await this.creation;return{
    setListener(listener){state.listener=listener;},startListening(options){state.started++;state.session=options.sessionId;state.options=options;if(mode!=='wait_start')queueMicrotask(()=>state.listener.onStart(state.session,''));},
-   writeAudio(_session,audio){state.writes++;state.fedMs=(state.fedMs||0)+audio.byteLength/32;if(mode==='limit'&&state.fedMs>=state.options.extraParams.maxAudioDuration)state.listener.onError(state.session,1,'audio duration limit reached');if(mode==='error'&&state.writes===1)state.listener.onError(state.session,1,'sdk detail');if(mode==='early_complete'&&state.writes===1)state.listener.onComplete(state.session,'');},
-   finish(){state.listener.onResult('different-session',{isFinal:true,result:'foreign'});state.listener.onError('different-session',1,'');state.listener.onResult(state.session,{isFinal:true,result:'你好。'});state.listener.onResult(state.session,{isFinal:true,result:'你好。'});state.listener.onComplete(state.session,'');},
+   writeAudio(_session,audio){state.frames.push(audio.length);state.frameTimes.push(Date.now());state.writes++;state.fedMs=(state.fedMs||0)+audio.byteLength/32;if(mode==='limit'&&state.fedMs>=state.options.extraParams.maxAudioDuration)state.listener.onError(state.session,1,'audio duration limit reached');if(mode==='error'&&state.writes===1)state.listener.onError(state.session,1,'sdk detail');if(mode==='early_complete'&&state.writes===1)state.listener.onComplete(state.session,'');},
+   finish(){state.finishTimes.push(Date.now());
+    if(mode==='end_race' && state.started===1){state.listener.onResult(state.session,{isFinal:false,result:'partial from failed engine'});state.listener.onError(state.session,1002200010,'final PCM still queued');return;}
+    state.listener.onResult('different-session',{isFinal:true,result:'foreign'});state.listener.onError('different-session',1,'');state.listener.onResult(state.session,{isFinal:true,result:'你好。'});state.listener.onResult(state.session,{isFinal:true,result:'你好。'});state.listener.onComplete(state.session,'');},
    cancel(){state.cancelled++;state.listener.onError(state.session,1,'cancel');},shutdown(){state.shutdown++;}
   };}};
  sdk=state;const platform=new NativeRecording();await platform.initialize({filesDir:'/private'});return{platform,state};
@@ -70,4 +73,28 @@ test('retained listeners from a retired engine cannot settle or fail the next tr
  const old=state.listener,oldSession=state.session,pending=platform.transcribe(id,'zh-CN');await waitFor(()=>state.writes===2);
  old.onComplete(oldSession,'late completion');old.onError(oldSession,1,'late error');old.onResult(oldSession,{isFinal:true,result:'late text'});
  assert.equal(await pending,'你好。你好。');assert.equal(state.writes,16);assert.equal(state.shutdown,2);
+});
+
+test('finishing waits for the last PCM frame; a late SDK 1002200010 starts one new session and discards the failed transcript',async()=>{
+ const {platform,state}=await fixture('end_race');
+ assert.equal(await platform.transcribe(id,'zh-CN'),'你好。你好。');
+ assert.equal(state.started,2);
+ assert.deepEqual(state.frames.slice(0,15),Array(15).fill(1280));
+ assert.deepEqual(state.frames.slice(15),Array(30).fill(640));
+ assert.ok(state.finishTimes[0]-state.frameTimes[14]>=37);
+ assert.ok(state.finishTimes[1]-state.frameTimes.at(-1)>=17);
+ assert.equal(state.closed,2);
+});
+
+test('room speech spaces frames from a single microphone callback and drains the last frame before finish',async()=>{
+ const {state}=await fixture('repeat');
+ const stream=new NativeMeetingSpeech(),lines=[];
+ await stream.open((from,to,text)=>lines.push({from,to,text}),()=>assert.fail('unexpected native error'));
+ stream.feed(new ArrayBuffer(1920));
+ await stream.finish();
+ assert.deepEqual(state.frames,[640,640,640]);
+ assert.ok(state.frameTimes[1]-state.frameTimes[0]>=17);
+ assert.ok(state.frameTimes[2]-state.frameTimes[1]>=17);
+ assert.ok(state.finishTimes[0]-state.frameTimes[2]>=17);
+ assert.deepEqual(lines.map(line=>line.text),['你好。','你好。']);
 });

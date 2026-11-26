@@ -1,0 +1,84 @@
+{
+  "string": [
+    {
+      "name": "todo_detail_title",
+      "value": "ToDoのタイトル"
+    },
+    {
+      "name": "todo_detail_due",
+      "value": "期限"
+    },
+    {
+      "name": "todo_detail_all_day",
+      "value": "終日"
+    },
+    {
+      "name": "todo_detail_due_value",
+      "value": "期限"
+    },
+    {
+      "name": "todo_detail_remind",
+      "value": "リマインド"
+    },
+    {
+      "name": "todo_detail_remind_at",
+      "value": "リマインド日時"
+    },
+    {
+      "name": "todo_detail_priority",
+      "value": "優先度"
+    },
+    {
+      "name": "todo_detail_high",
+      "value": "高"
+    },
+    {
+      "name": "todo_detail_normal",
+      "value": "普通"
+    },
+    {
+      "name": "todo_detail_low",
+      "value": "低"
+    },
+    {
+      "name": "todo_detail_project",
+      "value": "プロジェクト"
+    },
+    {
+      "name": "todo_detail_none",
+      "value": "なし"
+    },
+    {
+      "name": "todo_detail_agents",
+      "value": "エージェント{n}件"
+    },
+    {
+      "name": "todo_detail_created",
+      "value": "{text}に作成"
+    },
+    {
+      "name": "todo_detail_reminded",
+      "value": "{text} にリマインド済み"
+    },
+    {
+      "name": "todo_detail_notes",
+      "value": "メモ"
+    },
+    {
+      "name": "todo_detail_unsupported",
+      "value": "このHubではこの項目を保存できませんでした。"
+    },
+    {
+      "name": "todo_detail_hand_to_agent",
+      "value": "エージェントへ"
+    },
+    {
+      "name": "todo_detail_done",
+      "value": "完了"
+    },
+    {
+      "name": "todo_detail_empty_notes",
+      "value": "メモはまだありません"
+    }
+  ]
+}

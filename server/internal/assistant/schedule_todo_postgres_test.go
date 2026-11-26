@@ -118,7 +118,7 @@ func TestScheduledTodoSnapshotNULGuard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, todo := scheduledTodoFixture(t)
 			store := &memStore{}
-			s.store = func() Store { return store }
+			s.setStore(func() Store { return store })
 			todo.Supervision.DoneWhen = []string{tc.criterion}
 			todo.Supervision.Criteria = []db.TodoCriterion{{Criterion: tc.criterion, State: tc.state}}
 			putTodo(s, todo)

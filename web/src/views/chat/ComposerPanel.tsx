@@ -9,7 +9,7 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } f
 import { api, enc } from "../../lib/api";
 import { stampedHeaders } from "../../lib/manager-choice";
 import { PickerMenu, type PickerButton } from "./PickerMenu";
-import { useSkillCatalog, type CatalogMemory } from "./useSkillCatalog";
+import { useSkillCatalog, type CatalogMemory, type SkillCatalogState } from "./useSkillCatalog";
 import { SkillDetail, SkillRow } from "./SkillRow";
 import { SkillCatalogStatus } from "./SkillCatalogStatus";
 import type { FsListing } from "../../lib/files";
@@ -25,6 +25,66 @@ import { useComposition } from "../../lib/ime";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
 import { matchingSkills, type MentionSkill, type SkillSource } from "../../lib/skill-mentions";
+
+export type { SkillCatalogState };
+
+export interface MentionDirectoryRequest {
+  machineId: string;
+  dir: string;
+  cwd?: string;
+  taskFiles: boolean;
+  fileManager?: string;
+}
+
+export type MentionDirectoryLoader = (
+  request: MentionDirectoryRequest,
+  signal: AbortSignal,
+) => Promise<FsListing | null>;
+
+export interface MentionRowsOptions {
+  /** Explicit session candidates; skips reading `useStore` when supplied via `ComposerPanel`. */
+  sessions?: readonly Session[];
+  /** Static directory listings keyed by folder path; skips fetching for provided paths (and skips default `api` when `loadDirectory` is absent). */
+  directoryListings?: Readonly<Record<string, FsListing | null>>;
+  /** Custom directory listing loader replacing `GET /machines/:mid/fs`. */
+  loadDirectory?: MentionDirectoryLoader;
+}
+
+export interface ComposerPanelProps {
+  /** "plus": opened from the + with its own search box; "at": a typed @, filtered by `query`. */
+  from: "plus" | "at";
+  query?: string;
+  source?: MentionSource;
+  machineId?: string;
+  /** The Add files row: files and images where the session has a computer, images only elsewhere; none when the box is off. */
+  attach?: "files" | "images";
+  /** The Plan mode check row, where the session has modes. */
+  plan?: { on: boolean };
+  onPick: (pick: PanelPick) => void;
+  /** Esc, Backspace in an empty search, a click outside: `refocus` puts the caret back in the message box. */
+  onClose: (refocus: boolean) => void;
+  handle?: Ref<ComposerPanelHandle>;
+  memory?: CatalogMemory;
+  assistant?: AssistantMentions;
+  /** Explicit mention rows; skips `useStore`, `/fs` reads, and default skill-catalog reads when supplied. */
+  rows?: MentionRow[];
+  /** Explicit loading state (used with controlled `rows`, or combined with internal loading). */
+  loading?: boolean;
+  /** Explicit session candidates; skips reading `useStore` when supplied. */
+  sessions?: readonly Session[];
+  /** Static directory listings keyed by folder path; skips `/fs` reads when supplied. */
+  directoryListings?: Readonly<Record<string, FsListing | null>>;
+  /** Custom directory listing loader replacing `GET /machines/:mid/fs` when `rows` is omitted. */
+  loadDirectory?: MentionDirectoryLoader;
+  /** Explicit skill catalog and status; skips `useSkillCatalog` when supplied. */
+  skillCatalog?: SkillCatalogState;
+  /** Controlled search value for `from="plus"`. */
+  search?: string;
+  /** Called when the `from="plus"` search value changes. */
+  onSearchChange?: (search: string) => void;
+  /** Whether a narrow-screen Back gesture closes the `from="plus"` panel; defaults to true. */
+  closeOnBack?: boolean;
+}
 
 export interface MentionSource {
   /** The session's folder: relative paths and the first listing start here. */
@@ -58,7 +118,7 @@ export type MentionRow =
 
 /** The panel's own rows: the box's file picker and the session's Plan mode. */
 export type PanelAction = "attach" | "plan";
-export type PanelPick = { kind: "action"; action: PanelAction } | { kind: "row"; row: MentionRow };
+export type PanelPick = { kind: "action"; action: PanelAction } | { kind: "row"; row: MentionRow } | { kind: "browse"; insert: string };
 
 export interface ComposerPanelHandle {
   /** A key pressed in the message box while the panel is open from a typed @ (↑ ↓ move, Enter / Tab pick): true when the
@@ -70,6 +130,7 @@ type Entry = { kind: "action"; action: PanelAction; label: string; icon: IconNam
 
 const NO_SESSIONS: Record<string, Session[]> = {};
 const NO_ROWS: Session[] = [];
+const EMPTY_CATALOG: SkillCatalogState = {};
 const MAX_ROWS = 40;
 /** An empty query shows this many of each resource (cindy's EMPTY_QUERY_CONTEXT_SECTION_LIMIT); typing finds the rest. */
 const EMPTY_PER_GROUP = 3;
@@ -80,50 +141,90 @@ export interface AssistantMentions {
   loading: boolean;
 }
 
-/** The rows for what is typed; the folder listings come from the session's computer (`/fs`), read once per folder while
- *  the panel is open. */
-export function useMentionRows(query: string, source: MentionSource | undefined, machineId: string | undefined, skills?: MentionSkill[], assistant?: AssistantMentions): { rows: MentionRow[]; loading: boolean } {
-  const sessions = useStore((s) => (source ? s.sessions : NO_SESSIONS));
-  // A paging hub keeps unopened Agents in the list's rows.
-  const listed = useStore((s) => (source && source.sessions !== false ? s.sessionSummaries : NO_ROWS));
+function useMentionRowsCore(
+  query: string,
+  source: MentionSource | undefined,
+  machineId: string | undefined,
+  candidateSessions: readonly Session[],
+  skills?: MentionSkill[],
+  assistant?: AssistantMentions,
+  options?: Pick<MentionRowsOptions, "directoryListings" | "loadDirectory">,
+): { rows: MentionRow[]; loading: boolean } {
   // Composer remounts this panel when the execution environment changes.
   const cache = useRef(new Map<string, FsListing | null>());
   const [, setTick] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const requestSeq = useRef(0);
+  const [loadingReq, setLoadingReq] = useState<{ key: string; seq: number } | null>(null);
   const files = useMemo(() => source?.files() ?? [], [source]);
+
+  const directoryListings = options?.directoryListings;
+  const loadDirectory = options?.loadDirectory;
+  const loadDirRef = useRef(loadDirectory);
+  useEffect(() => {
+    loadDirRef.current = loadDirectory;
+  }, [loadDirectory]);
 
   const cwd = source?.cwd;
   const target = source ? browseTarget(query, cwd) : null;
   const taskFiles = Boolean(source?.referenceFiles);
   const fileManager = taskFiles ? source?.fileManager : undefined;
   const dir = !source || !machineId || source.allowsFileQuery?.(query) === false ? null : target ? target.dir : cwd ?? null;
-  const cacheKey = dir && (taskFiles ? JSON.stringify([fileManager, machineId, cwd, dir]) : dir);
+  const hasStaticListings = directoryListings !== undefined;
+  const hasStaticDir = Boolean(dir && directoryListings && Object.prototype.hasOwnProperty.call(directoryListings, dir));
+  const staticListing = hasStaticDir && dir ? directoryListings![dir] : undefined;
+  const hasLoadDirectory = Boolean(loadDirectory);
+  const cacheKey = dir
+    ? JSON.stringify([hasLoadDirectory ? "custom" : "default", taskFiles ? fileManager ?? "" : "", machineId ?? "", taskFiles ? cwd ?? "" : "", dir])
+    : null;
+  const skipFetch = !dir || !machineId || !cacheKey || hasStaticDir || (hasStaticListings && !hasLoadDirectory) || cache.current.has(cacheKey);
 
   useEffect(() => {
-    if (!dir || !machineId || !cacheKey || cache.current.has(cacheKey)) return;
+    if (skipFetch || !dir || !machineId || !cacheKey) {
+      requestSeq.current += 1;
+      setLoadingReq(null);
+      return;
+    }
+    let live = true;
+    const seq = ++requestSeq.current;
     const ac = new AbortController();
     const timer = setTimeout(() => {
-      setLoading(true);
-      api<FsListing>(`/machines/${enc(machineId)}/fs?path=${enc(dir)}&cwd=${enc(cwd ?? "")}${taskFiles ? "&task_input=1" : ""}`,
-        { signal: ac.signal, headers: stampedHeaders(fileManager) })
-        .then((l) => { if (!ac.signal.aborted) cache.current.set(cacheKey, l); })
+      if (!live || ac.signal.aborted || requestSeq.current !== seq) return;
+      setLoadingReq({ key: cacheKey, seq });
+      let request: Promise<FsListing | null>;
+      try {
+        request = loadDirRef.current
+          ? Promise.resolve(loadDirRef.current({ machineId, dir, cwd, taskFiles, fileManager }, ac.signal))
+          : api<FsListing>(
+              `/machines/${enc(machineId)}/fs?path=${enc(dir)}&cwd=${enc(cwd ?? "")}${taskFiles ? "&task_input=1" : ""}`,
+              { signal: ac.signal, headers: stampedHeaders(fileManager) },
+            );
+      } catch {
+        request = Promise.resolve(null);
+      }
+      request
+        .then((l) => {
+          if (!live || ac.signal.aborted || requestSeq.current !== seq) return;
+          cache.current.set(cacheKey, l ?? null);
+        })
         .catch(() => {
-          if (!ac.signal.aborted) cache.current.set(cacheKey, null); // not a folder / unreadable: no rows from it
+          if (!live || ac.signal.aborted || requestSeq.current !== seq) return;
+          cache.current.set(cacheKey, null); // not a folder / unreadable: no rows from it
         })
         .finally(() => {
-          if (ac.signal.aborted) return;
-          setLoading(false);
+          if (!live || ac.signal.aborted || requestSeq.current !== seq) return;
+          setLoadingReq((cur) => (cur?.seq === seq ? null : cur));
           setTick((n) => n + 1);
         });
     }, 120);
     return () => {
+      live = false;
       clearTimeout(timer);
       ac.abort();
-      setLoading(false);
+      setLoadingReq((cur) => (cur?.seq === seq ? null : cur));
     };
-  }, [cacheKey, dir, machineId, cwd, taskFiles, fileManager]);
+  }, [skipFetch, cacheKey, dir, machineId, cwd, taskFiles, fileManager, hasLoadDirectory]);
 
-  const listing = cacheKey ? cache.current.get(cacheKey) : undefined;
+  const listing = hasStaticDir ? staticListing : cacheKey ? cache.current.get(cacheKey) : undefined;
   const rows = useMemo<MentionRow[]>(() => {
     if (!source) return [];
     if (target) {
@@ -157,16 +258,38 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
     if (assistant) {
       out.push(...assistant.rows(query));
     }
-    for (const s of source.sessions === false ? [] : otherSessions(pageSessions(sessions, listed), source.self, q)) {
+    for (const s of source.sessions === false ? [] : otherSessions([...candidateSessions], source.self, q)) {
       out.push({ kind: "session", id: `session:${s.machine_id}/${s.session_id}`, name: displayTitle(s), detail: sessionDetail(s), session: s });
     }
     // A large skill inventory must not crowd the existing resource groups out of the empty panel.
     const matches: MentionRow[] = matchingSkills(skills ?? [], q).map(skill => ({ kind: "skill", id: `skill:${skill.id}`, skill }));
     return [...matches, ...(q.trim() ? out : firstOfEach(out)).slice(0, MAX_ROWS)];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, source, listing, sessions, listed, cwd, files, assistant, skills]);
+  }, [query, source, listing, candidateSessions, cwd, files, assistant, skills]);
 
-  return { rows, loading: Boolean((loading && !listing) || assistant?.loading) };
+  const loading = Boolean(cacheKey && loadingReq?.key === cacheKey && !listing);
+  return { rows, loading: Boolean(loading || assistant?.loading) };
+}
+
+/** The rows for what is typed; the folder listings come from the session's computer (`/fs`), read once per folder while
+ *  the panel is open. */
+export function useMentionRows(
+  query: string,
+  source: MentionSource | undefined,
+  machineId: string | undefined,
+  skills?: MentionSkill[],
+  assistant?: AssistantMentions,
+  options?: MentionRowsOptions,
+): { rows: MentionRow[]; loading: boolean } {
+  const wantStore = options?.sessions === undefined && Boolean(source && source.sessions !== false);
+  const sessions = useStore((s) => (wantStore ? s.sessions : NO_SESSIONS));
+  // A paging hub keeps unopened Agents in the list's rows.
+  const listed = useStore((s) => (wantStore ? s.sessionSummaries : NO_ROWS));
+  const candidateSessions = useMemo(
+    () => (options?.sessions !== undefined ? options.sessions : wantStore ? pageSessions(sessions, listed) : NO_ROWS),
+    [options?.sessions, wantStore, sessions, listed],
+  );
+  return useMentionRowsCore(query, source, machineId, candidateSessions, skills, assistant, options);
 }
 
 /** With an empty query, a few of each resource: the files used here, the folder's first entries, workspaces, sessions. */
@@ -180,43 +303,136 @@ function firstOfEach(rows: MentionRow[]): MentionRow[] {
   });
 }
 
-export function ComposerPanel({
+export function ComposerPanel(props: ComposerPanelProps) {
+  if (props.rows === undefined && props.skillCatalog === undefined && Boolean(props.source?.skills)) {
+    return <DefaultSkillCatalogBridge {...props} />;
+  }
+  return (
+    <ComposerPanelWithCatalog
+      {...props}
+      resolvedCatalog={props.skillCatalog ?? EMPTY_CATALOG}
+      hasSkillStatus={props.skillCatalog !== undefined}
+    />
+  );
+}
+
+function DefaultSkillCatalogBridge(props: ComposerPanelProps) {
+  const catalog = useSkillCatalog(props.source?.skills, props.machineId, props.source?.cwd, props.memory);
+  return <ComposerPanelWithCatalog {...props} resolvedCatalog={catalog} hasSkillStatus />;
+}
+
+interface ComposerPanelWithCatalogProps extends ComposerPanelProps {
+  resolvedCatalog: SkillCatalogState;
+  hasSkillStatus: boolean;
+}
+
+function ComposerPanelWithCatalog(props: ComposerPanelWithCatalogProps) {
+  const [innerSearch, setInnerSearch] = useState("");
+  const currentSearch = props.search ?? innerSearch;
+  const updateSearch = (next: string) => {
+    if (props.search === undefined) setInnerSearch(next);
+    props.onSearchChange?.(next);
+  };
+  const q = props.from === "plus" ? currentSearch : (props.query ?? "");
+  const skillStatus = props.hasSkillStatus ? props.resolvedCatalog.status : undefined;
+
+  if (props.rows !== undefined) {
+    return (
+      <ComposerPanelView
+        {...props}
+        q={q}
+        currentSearch={currentSearch}
+        updateSearch={updateSearch}
+        resolvedRows={props.rows}
+        resolvedLoading={Boolean(props.loading)}
+        skillStatus={skillStatus}
+      />
+    );
+  }
+  if (props.sessions !== undefined || !props.source || props.source.sessions === false) {
+    return (
+      <ControlledMentionRowsBridge
+        {...props}
+        q={q}
+        currentSearch={currentSearch}
+        updateSearch={updateSearch}
+        candidateSessions={props.sessions ?? NO_ROWS}
+        skillStatus={skillStatus}
+      />
+    );
+  }
+  return (
+    <StoreMentionRowsBridge
+      {...props}
+      q={q}
+      currentSearch={currentSearch}
+      updateSearch={updateSearch}
+      skillStatus={skillStatus}
+    />
+  );
+}
+
+interface MentionRowsBridgeProps extends ComposerPanelWithCatalogProps {
+  q: string;
+  currentSearch: string;
+  updateSearch: (next: string) => void;
+  skillStatus: SkillCatalogState["status"];
+}
+
+function StoreMentionRowsBridge(props: MentionRowsBridgeProps) {
+  const sessions = useStore((s) => s.sessions);
+  const listed = useStore((s) => s.sessionSummaries);
+  const candidateSessions = useMemo(() => pageSessions(sessions, listed), [sessions, listed]);
+  return <ControlledMentionRowsBridge {...props} candidateSessions={candidateSessions} />;
+}
+
+function ControlledMentionRowsBridge({
+  candidateSessions,
+  ...props
+}: MentionRowsBridgeProps & { candidateSessions: readonly Session[] }) {
+  const { rows, loading } = useMentionRowsCore(
+    props.q,
+    props.source,
+    props.machineId,
+    candidateSessions,
+    props.resolvedCatalog.catalog?.skills,
+    props.assistant,
+    { directoryListings: props.directoryListings, loadDirectory: props.loadDirectory },
+  );
+  return (
+    <ComposerPanelView
+      {...props}
+      resolvedRows={rows}
+      resolvedLoading={Boolean(loading || props.loading)}
+    />
+  );
+}
+
+interface ComposerPanelViewProps extends MentionRowsBridgeProps {
+  resolvedRows: MentionRow[];
+  resolvedLoading: boolean;
+}
+
+function ComposerPanelView({
   from,
-  query = "",
   source,
-  machineId,
   attach,
   plan,
   onPick,
   onClose,
   handle,
-  memory,
-  assistant,
-}: {
-  /** "plus": opened from the + with its own search box; "at": a typed @, filtered by `query`. */
-  from: "plus" | "at";
-  query?: string;
-  source?: MentionSource;
-  machineId?: string;
-  /** The Add files row: files and images where the session has a computer, images only elsewhere; none when the box is off. */
-  attach?: "files" | "images";
-  /** The Plan mode check row, where the session has modes. */
-  plan?: { on: boolean };
-  onPick: (pick: PanelPick) => void;
-  /** Esc, Backspace in an empty search, a click outside: `refocus` puts the caret back in the message box. */
-  onClose: (refocus: boolean) => void;
-  handle?: Ref<ComposerPanelHandle>;
-  memory?: CatalogMemory;
-  assistant?: AssistantMentions;
-}) {
-  const [search, setSearch] = useState("");
-  const q = from === "plus" ? search : query;
-  const searchLabel = t(source?.skills ? "chat-composerpanel.search_skills" : "chat-composerpanel.search");
+  closeOnBack = true,
+  hasSkillStatus,
+  q,
+  currentSearch,
+  updateSearch,
+  resolvedRows: rows,
+  resolvedLoading: loading,
+  skillStatus,
+}: ComposerPanelViewProps) {
+  const searchLabel = t(source?.skills || hasSkillStatus ? "chat-composerpanel.search_skills" : "chat-composerpanel.search");
   const browsing = Boolean(source && browseTarget(q, source.cwd));
   const empty = !q.trim();
-  const catalog = useSkillCatalog(source?.skills, machineId, source?.cwd, memory);
-  const skillStatus = source?.skills ? catalog.status : undefined;
-  const { rows, loading } = useMentionRows(q, source, machineId, catalog.catalog?.skills, assistant);
 
   const entries = useMemo<Entry[]>(() => {
     const actions: Extract<Entry, { kind: "action" }>[] = [];
@@ -244,10 +460,14 @@ export function ComposerPanel({
   const selected = entries[current];
   const skill = selected?.kind === "row" && selected.row.kind === "skill" ? selected.row.skill : undefined;
 
+  const browse = (insert: string) => {
+    if (from === "plus") updateSearch(insert.slice(1));
+    else onPick({ kind: "browse", insert });
+  };
   const choose = (e: Entry) => {
     if (e.kind === "action") return onPick({ kind: "action", action: e.action });
-    // from the +, a folder opens in the search box; from a typed @ the box's token keeps browsing
-    if (from === "plus" && e.row.kind === "file" && e.row.dir) return setSearch(e.row.insert.slice(1));
+    // Scheduled file inputs accept regular files within the execution folder.
+    if (source?.referenceFiles && e.row.kind === "file" && e.row.dir) return browse(e.row.insert);
     onPick({ kind: "row", row: e.row });
   };
   const key = (k: string): boolean => {
@@ -258,6 +478,11 @@ export function ComposerPanel({
     }
     if (k === "Enter" || k === "Tab") {
       choose(entries[current]);
+      return true;
+    }
+    const folder = selected?.kind === "row" && selected.row.kind === "file" && selected.row.dir ? selected.row : null;
+    if (k === "ArrowRight" && folder) {
+      browse(folder.insert);
       return true;
     }
     return false;
@@ -278,7 +503,8 @@ export function ComposerPanel({
     return () => document.removeEventListener("pointerdown", down);
   }, [from, onClose]);
   // on a narrow screen Back closes it too, staying in the chat
-  useCloseOnBack(from === "plus", () => onClose(false), useMedia(NARROW));
+  const narrow = useMedia(NARROW);
+  useCloseOnBack(from === "plus" && closeOnBack, () => onClose(false), narrow);
 
   // the search box takes the keys at once; not on a touch screen alone, where the focus would raise the keyboard over the rows
   const searchBox = useRef<HTMLInputElement>(null);
@@ -305,11 +531,18 @@ export function ComposerPanel({
     }
     const r = e.row;
     if (r.kind === "skill") return <SkillRow skill={r.skill} common={common} />;
+    const folder = r.kind === "file" && r.dir;
     return (
-      <button key={r.id} {...common} title={r.detail ? `${r.name} · ${r.detail}` : r.name} className="relative flex h-9 w-full items-center gap-2 rounded-control px-2.5 text-left text-sm text-ink [@media(pointer:coarse)]:h-11">
+      <button key={r.id} {...common} title={r.detail ? `${r.name} · ${r.detail}` : r.name} className="relative flex h-9 w-full items-center gap-2 rounded-control px-2.5 text-left text-sm text-ink [@media(pointer:coarse)]:h-11"
+        aria-keyshortcuts={folder ? "ArrowRight" : undefined}
+        onClick={(event) => {
+          if (folder && (event.target as Element).closest("[data-browse-folder]")) browse(r.insert);
+          else common.onClick?.(event);
+        }}>
         <Icon name={r.kind === "session" ? "chat" : r.kind === "repository" ? "git" : r.kind === "workspace" || r.dir ? "folder" : "file"} size={16} className="shrink-0 text-ink-3" />
-        <span className="min-w-0 truncate">{r.name}</span>
+        <span className="min-w-0 flex-1 truncate">{r.name}</span>
         {r.detail && <span className="ml-auto max-w-[min(240px,50%)] shrink-0 truncate pl-2 text-[12px] text-ink-3">{r.detail}</span>}
+        {folder && <span data-browse-folder title={t("chat-composerpanel.browse_folder")} aria-hidden className="-mr-2 flex h-full w-11 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-hover-2"><Icon name="chevronRight" size={14} /></span>}
       </button>
     );
   };
@@ -327,11 +560,11 @@ export function ComposerPanel({
           <input
             ref={searchBox}
             type="text"
-            value={search}
+            value={currentSearch}
             data-composer-panel-search
             aria-label={searchLabel}
             placeholder={searchLabel}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => updateSearch(e.target.value)}
             {...ime.handlers}
             onBlur={ime.onBlur}
             onKeyDown={(e) => {
@@ -340,7 +573,7 @@ export function ComposerPanel({
                 if (e.key === "Escape") e.stopPropagation();
                 return;
               }
-              if (e.key === "Escape" || (e.key === "Backspace" && !search)) {
+              if (e.key === "Escape" || (e.key === "Backspace" && !currentSearch)) {
                 // closing the panel only: kept from ChatView's interrupt on the window
                 e.preventDefault();
                 e.stopPropagation();

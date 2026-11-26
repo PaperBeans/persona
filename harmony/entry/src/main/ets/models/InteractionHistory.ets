@@ -1,3 +1,4 @@
+import type { TranscriptItem } from '../core/Domain';
 import { decodeInteractionDecision, interactionHistoryResolution, interactionScreenOptions } from './InteractionDecision';
 import type { InteractionChoice } from './InteractionDecision';
 import type { ClientModel } from './ClientModel';
@@ -178,4 +179,25 @@ export class InteractionHistoryModel {
       if (this.current(model, repository, run)) this.loading = false;
     }
   }
+}
+
+/** Resolve the original words in a turn before centering a task's Agent chat on them. */
+export function decisionSourceItem(items: readonly TranscriptItem[], toolUseId: string): string {
+  let call = -1;
+  for (let i = items.length - 1; i >= Math.max(0, items.length - 400); i--) {
+    const item = items[i];
+    if (item.kind !== 'tool_use') continue;
+    const id = item.tool_use_id || item.toolUseId || '';
+    const name = typeof item['tool_name'] === 'string' ? item['tool_name'] as string : '';
+    if (toolUseId ? id === toolUseId : ['AskUserQuestion','ask_user','request_user_input'].includes(name) || name.endsWith('__ask_user')) {
+      call = i;
+      break;
+    }
+  }
+  for (let i = call - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind !== 'text') continue;
+    if (item.role === 'user' && !item.tool_use_id && !item.toolUseId || item.role === 'assistant' && item.text?.trim()) return item.id;
+  }
+  return '';
 }

@@ -41,7 +41,7 @@ const imessageConfig = `{
 // imessageManifest is the built-in Messages extension's manifest; nil in a build without the iMessage module, which
 // has no such extension.
 func imessageManifest(h *Manager) *extension.Manifest {
-	newRemote := imessageport.Factory()
+	newRemote := imessageport.Factory(h.opts.Modules)
 	if newRemote == nil {
 		return nil
 	}

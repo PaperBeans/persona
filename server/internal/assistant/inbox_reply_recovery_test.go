@@ -411,7 +411,7 @@ func TestInboxHistoricalAliasSettlesWhenReservationCannotSend(t *testing.T) {
 			st := &recoveryReservationGateStore{inboxMemStore: h.st, entered: make(chan struct{}), release: make(chan struct{}), fail: fail}
 			release := func() { st.releaseOnce.Do(func() { close(st.release) }) }
 			t.Cleanup(release)
-			h.store = func() Store { return st }
+			h.setStore(func() Store { return st })
 			confirmed := make(chan int, 1)
 			go func() {
 				code, _ := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm","text":"Edited reply","client_id":"`+recoveryFirstID+`"}`)
@@ -802,7 +802,7 @@ func TestInboxReplyReservationMustBeSavedBeforeSending(t *testing.T) {
 			c := &recoveryReplier{}
 			h, it := recoverySuggestion(t, false, c)
 			if absent {
-				h.store = func() Store { return nil }
+				h.setStore(func() Store { return nil })
 			} else {
 				h.st.imu.Lock()
 				h.st.down = errors.New("store unavailable")
@@ -841,7 +841,7 @@ func TestInboxReplyReservationRejectsReplacedItem(t *testing.T) {
 		replacement.SuggestSeq = 2
 		h.inbox.items[it.ID] = &replacement
 	}}
-	h.store = func() Store { return st }
+	h.setStore(func() Store { return st })
 	code, out := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm","client_id":"`+recoveryFirstID+`"}`)
 	if code != 409 || out["code"] != "suggestion_stale" || len(c.calls()) != 0 || out["item"].(map[string]any)["suggestion"].(map[string]any)["text"] != "Replacement" {
 		t.Fatalf("replaced row was sent: %d %v calls=%+v", code, out, c.calls())
@@ -918,7 +918,7 @@ func TestInboxReplyAttemptReconstruction(t *testing.T) {
 	database := replyRecoveryDatabase(t)
 	c := &recoveryReplier{err: &rpc.Error{Code: assistantwire.CodeInboxSendFailed}}
 	h, it := recoverySuggestion(t, false, c)
-	h.store = func() Store { return database }
+	h.setStore(func() Store { return database })
 	if code, _ := suggestionCall(t, h, it.ID, `{"version":1,"action":"confirm","text":"Edited reply","client_id":"`+recoveryFirstID+`"}`); code != 502 {
 		t.Fatalf("failure=%d", code)
 	}
@@ -954,7 +954,7 @@ func TestInboxSendingReplyAttemptReconstruction(t *testing.T) {
 	c := &recoveryReplier{entered: make(chan struct{}), release: make(chan struct{})}
 	t.Cleanup(c.proceed)
 	h, it := recoverySuggestion(t, false, c)
-	h.store = func() Store { return database }
+	h.setStore(func() Store { return database })
 	finished := make(chan error, 1)
 	go func() {
 		text := "Edited reply"

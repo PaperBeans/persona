@@ -31,6 +31,9 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	// run while a connector downloads, so reread their metadata before commit.
 	e.Store.ingestMu.Lock()
 	defer e.Store.ingestMu.Unlock()
+	// After every other deferred unlock (chatMu below), still under ingestMu: gateway lines a fuller sync message
+	// supersedes go once that message is written (align_loose.go).
+	defer e.settleSuperseded(ChatID(src.Name(), sc.ID))
 	cut := e.textCutoff()
 	e.Store.chatMu.Lock()
 	c, exists, r, err := e.Store.ingestState(src.Name(), sc, cut)
@@ -71,11 +74,29 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 		late bool // stored with a later message of the owner's: older than lines written before it
 	}
 	var picks []pick
+	// dups: messages another source already archived (Engine.Align), by ID: received, never written.
+	var dups map[string]time.Time
+	// repairs: already-received larksync messages arriving with a resolved SenderName to backfill pre-#15486 "?:" lines.
+	var repairs []SourceMessage
 	for _, m := range msgs {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
 		if _, seen := r.IDs[m.ID]; m.ID != "" && seen {
+			if exists && syncSource(src) && !m.Mine && strings.TrimSpace(m.SenderName) != "" {
+				if lr, hasLine := r.Lines[m.ID]; hasLine && !lr.Mine && lr.Hash != "" {
+					repairs = append(repairs, m)
+				}
+			}
+			continue
+		}
+		if e.Align != nil && e.Align(src, sc, m) {
+			if m.ID != "" {
+				if dups == nil {
+					dups = map[string]time.Time{}
+				}
+				dups[m.ID] = m.At
+			}
 			continue
 		}
 		if !selecting {
@@ -139,10 +160,26 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 		}
 		kept = append(kept, m)
 	}
+	needChatNameFill := exists && syncSource(src) && sc.Name != "" && c.Name == ""
+	if len(repairs) > 0 || needChatNameFill {
+		if err := e.repairLarkSyncSenders(src, sc, cut, repairs); err != nil {
+			return 0, err
+		}
+		if needChatNameFill {
+			c.Name = sc.Name
+		}
+	}
 	if len(lines) == 0 {
 		if err := saveWindow(); err != nil {
 			return 0, err
 		}
+		if len(dups) > 0 && exists {
+			if err := e.receiveOnly(src, sc, cut, dups); err != nil {
+				return 0, err
+			}
+		}
+		// A chat not stored yet keeps no receipts for its duplicates: an empty chat would list beside the one that
+		// has the messages. They are asked about again when they come again.
 		return unchanged()
 	}
 	if err := ctx.Err(); err != nil {
@@ -156,6 +193,9 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	}
 	if err := attributeChat(c, src); err != nil {
 		return 0, err
+	}
+	for id, at := range dups {
+		r.IDs[id] = at
 	}
 	for i, m := range kept {
 		if m.ID != "" {
@@ -198,6 +238,24 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	return len(lines), nil
 }
 
+// receiveOnly records the IDs of dups (messages another source already archived) in a stored chat's receipts without
+// writing a line, so they are not aligned again. The caller holds ingestMu.
+func (e *Engine) receiveOnly(src Source, sc SourceChat, cut time.Time, dups map[string]time.Time) error {
+	e.Store.chatMu.Lock()
+	defer e.Store.chatMu.Unlock()
+	c, exists, r, err := e.Store.ingestState(src.Name(), sc, cut)
+	if err != nil || !exists {
+		return err
+	}
+	if err := attributeChat(c, src); err != nil {
+		return err
+	}
+	for id, at := range dups {
+		r.IDs[id] = at
+	}
+	return e.Store.commitIngest(c, nil, r, false, "")
+}
+
 // Defined in the contract package kbwire (docs/server/architecture.md "Contract packages"); the old names stay.
 type (
 	Detail    = kbwire.Detail
@@ -208,7 +266,7 @@ type (
 	Evidence   = kbwire.Evidence
 )
 
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = kbwire.ErrNotFound
 
 // Get reads one entity. recentChars bounds a chat's latest messages in bytes, a recording's transcript in characters
 // (0: none).
@@ -290,6 +348,11 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 			raw := recording["transcript.md"]
 			d.Recent = clip(string(raw), recentChars)
 		}
+		if e.recordings == nil { // without the recording module: what waits for it is said, never rewritten
+			if r, ok := e.Store.Recording(id); ok {
+				d.Paused = e.recordingPaused(r)
+			}
+		}
 	}
 	if kind == KindChat && recentChars > 0 {
 		d.Recent = e.Store.Since(id, time.Now().AddDate(0, 0, -7), recentChars)
@@ -331,7 +394,7 @@ func (e *Engine) itemEntries(refs []string) []Entry {
 		}
 		if kind == KindRecording {
 			if r, ok := e.Store.Recording(id); ok {
-				by[kind] = append(by[kind], recordingEntry(r))
+				by[kind] = append(by[kind], e.recordingEntryOf(r))
 			}
 			continue
 		}
@@ -557,7 +620,7 @@ func (e *Engine) apply(kind, id string, uu UserUpdate, le linkEdit, writer strin
 			if ok {
 				p.Chats = addUnique(p.Chats, c.ID)
 				le.linked(&p.Tagging, "chats", c.ID)
-				p.People = addUnique(p.People, p.kept("people", c.People)...) // not the people the user took off it
+				p.People = addUnique(p.People, taggingKept(&p.Tagging, "people", c.People)...) // not the people the user took off it
 			}
 		}
 		if u.Log != "" {
@@ -773,6 +836,9 @@ func (e *Engine) apply(kind, id string, uu UserUpdate, le linkEdit, writer strin
 		r, ok := e.Store.Recording(id)
 		if !ok {
 			return "", ErrNotFound
+		}
+		if uu.ExpectedPinned != nil && r.Pinned != *uu.ExpectedPinned {
+			return "", ErrConflict
 		}
 		tagUpdate(u, &r.Tagging)
 		protectUpdate(u, &r.Tagging, le)

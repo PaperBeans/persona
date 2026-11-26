@@ -422,12 +422,20 @@ export interface Session {
   /** Newest running workflow, compact metadata only (no agents, phases or tools). */
   workflow_progress?: Workflow;
   parent_session_id?: string;
+  /** Parent session's machine ID when a subagent runs on another computer (empty = same machine). */
+  parent_machine_id?: string;
   root_session_id?: string;
   is_subagent?: boolean;
   /** The listed session this child folds under (an Agent another Agent started: a Codex subagent, an Agent a Paseo Agent
-   *  created), set by the hub's manager (docs/protocol/protocol.md "Session hierarchy", #5120): the web never lists or
-   *  counts it on its own, and draws it as a card in that session's chat. */
+   *  created, or an A2A subagent), set by the hub's manager (docs/protocol/protocol.md "Session hierarchy", #5120): the
+   *  web never lists or counts it on its own, and draws it under that session. */
   folded_under?: string;
+  /** Machine ID of `folded_under` when folded across computers (empty = same machine). */
+  folded_under_machine_id?: string;
+  /** A2A task ID that launched this subagent, if any. */
+  a2a_task_id?: string;
+  /** How this subagent session was created (`"a2a" | "dispatch" | "spawned" | "runtime"`). */
+  subagent_origin?: string;
   /** The session on the same machine this one is drawn under while staying a session of its own (#5935): a Claude
    *  desktop app's side chat, /btw question or spawned session names the one it was started from. Unlike `folded_under`
    *  it folds nothing away: the row keeps its state and counts and only moves under its parent, a level in
@@ -692,6 +700,14 @@ export interface FoldSource {
   title?: string;
 }
 
+/** An out-of-band declarative view attached by a tool call in a folded run (#14730); never sent to model runtimes. */
+export interface FoldToolView {
+  item_id?: string;
+  tool_use_id?: string;
+  tool?: string;
+  view: Record<string, unknown>;
+}
+
 /** What model requests used (proto.TokenUsage): tokens by kind, `in` without the cache; `cache_write_1h` is the part of
  *  `cache_write` written for an hour; `fast`: Claude Code's fast speed. Entries with the same `id` (and model) are one
  *  report, counted once. */
@@ -727,7 +743,9 @@ export interface Item {
   narration?: boolean;
   codex_heartbeat_quiet?: boolean;
   task?: TaskNote;
-  fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[]; sources?: FoldSource[] };
+  fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[]; sources?: FoldSource[]; tool_views?: FoldToolView[] };
+  /** Out-of-band declarative UI views returned by a tool call (#14730); never sent to model runtimes. */
+  tool_views?: unknown[];
   image?: { mime: string; data?: string; lazy?: boolean; size?: number; width?: number; height?: number };
   /** A Codex visualize marker (kind "visualization"): a self-contained HTML fragment on the node, fetched through the
    *  session visualization route. `mode` is "wide" or absent; the bytes are never carried here. */
@@ -911,6 +929,9 @@ export interface Interaction {
   cwd?: string;
   kind: "question" | "plan" | "permission" | "screen" | "elicitation";
   created_at?: string;
+  expires_at?: string;
+  seen_at?: string;
+  seen_ttl_seconds?: number;
   tool_name?: string;
   questions?: Question[];
   plan?: string;
@@ -962,6 +983,8 @@ export interface Interaction {
   agent_type?: string;
   /** The session the card's session folds under (Session.folded_under, #5120): the card's home is that session's page. */
   folded_under?: string;
+  /** Machine ID of `folded_under` when the card's session folds under a parent on another computer (empty = same machine). */
+  folded_under_machine_id?: string;
   /** Session.folded_as of the card's session (#5180): `"worker"` when a lead's worker asks, `"side"` when a side
    *  session does (#7944). */
   folded_as?: "worker" | "side";
@@ -970,6 +993,9 @@ export interface Interaction {
   elicitation?: Elicitation;
   /** Whether this assistant-owned operation can take a non-final owner question. */
   can_clarify?: boolean;
+  /** True when the card has no interactive computer terminal or UI to hand back to (headless assistant, command gates,
+   *  manager-owned cards, headless ACP companions like AGY, Grok, and builtin OpenCode); absent/false keeps "Leave to computer". */
+  no_hand_back?: boolean;
   /** What a permission card needs filled in before it is approved (a password): such a card is never approved in one tap. */
   fields?: { key: string; label: string; secret?: boolean }[];
   /** The assistant is deciding whether it may answer this question for the user (docs/assistant/assistant.md "Assistant
@@ -1041,6 +1067,18 @@ export interface LauncherHealth {
   checked_at?: string;
 }
 
+export type TodosV2AutoSeen = "off" | "subtasks" | "all_autonomous";
+export type TodosV2PendingReviewSLAHours = 0 | 12 | 24 | 48;
+export type TodosV2CanWaitSLAHours = 0 | 24 | 48 | 72;
+
+/** Additive user-configurable attention preferences under todos_v2 (#16098, #16111). */
+export interface TodosV2AttentionPrefs {
+  todos_v2_auto_seen?: TodosV2AutoSeen;
+  todos_v2_pending_review_sla_hours?: TodosV2PendingReviewSLAHours;
+  todos_v2_can_wait_sla_hours?: TodosV2CanWaitSLAHours;
+  todos_v2_fold_children?: boolean;
+}
+
 export interface AssistantInfo {
   /** The manager that answered, including the default whose request carried no manager header. */
   manager?: string;
@@ -1057,6 +1095,8 @@ export interface AssistantInfo {
   leaders?: string[];
   /** "Fold background rounds" in effect (#4314, docs/assistant/assistant.md "Background rounds"); absent from an older hub, which means on. */
   main_background_folded?: boolean;
+  /** Opt-in to fold routine relay replies and skip their finished notification in the main conversation. */
+  fold_routine_relay_replies?: boolean;
   /** "Show scheduled task chats" in the sidebar's Recent (#8324, lib/recent-task-chats.ts): one value on the hub for all
    *  of the user's devices, off by default; absent from an older hub (no switch, and Recent leaves them out). */
   recent_task_chats?: boolean;
@@ -1071,6 +1111,21 @@ export interface AssistantInfo {
   /** The background supervisor's conversation (#4927, lib/background-supervisor.ts): its session id once the hub made
    *  it; absent before that and from an older hub. Read-only. */
   background_supervisor?: string;
+  /** Unified experimental To-dos & Tasks Labs toggle (#14538, #14584); off by default and absent from older hubs. */
+  todos_v2?: boolean;
+  /** Auto-clear unseen badges for autonomously completed to-dos under todos_v2 (#16098, #16111); defaults to "all_autonomous". */
+  todos_v2_auto_seen?: TodosV2AutoSeen;
+  /** Quiet window in hours before pending_review escalates to needs_you under todos_v2 (#16098, #16111); defaults to 24. */
+  todos_v2_pending_review_sla_hours?: TodosV2PendingReviewSLAHours;
+  /** Deferral window in hours before non-urgent can_wait decisions escalate under todos_v2 (#16098, #16111); defaults to 48. */
+  todos_v2_can_wait_sla_hours?: TodosV2CanWaitSLAHours;
+  /** Fold non-urgent child tasks under top-level goals in board projection under todos_v2 (#16098, #16111); defaults to true. */
+  todos_v2_fold_children?: boolean;
+  /** Unified experimental Integrations & Extensions Labs toggle (#14802, #14805); off by default and absent from older hubs. */
+  integrations_v2?: boolean;
+  work_guide?: boolean;
+  /** Additive receipts for Labs experiments. Older managers omit the field. */
+  labs_seen?: string[];
   conversations: Session[];
 }
 

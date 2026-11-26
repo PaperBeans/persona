@@ -9,7 +9,16 @@ import type { Interaction } from "../../lib/types";
 import { t } from "../../i18n";
 import { Button, cx, toast } from "../../ui/atoms";
 
-export function ApprovalQuestion({ ix, busy, onClose }: { ix: Interaction; busy: boolean; onClose: () => void }) {
+export interface ApprovalQuestionProps {
+  ix: Interaction;
+  busy: boolean;
+  onClose: () => void;
+  onSubmitQuestion?: (text: string) => Promise<void>;
+  onSuccess?: (message: string) => void;
+  onError?: (message: string) => void;
+}
+
+export function ApprovalQuestion({ ix, busy, onClose, onSubmitQuestion, onSuccess, onError }: ApprovalQuestionProps) {
   const [question, setQuestion] = useState("");
   const [sending, setSending] = useState(false);
   const delivery = useRef({ text: "", id: "" });
@@ -22,12 +31,19 @@ export function ApprovalQuestion({ ix, busy, onClose }: { ix: Interaction; busy:
     }
     setSending(true);
     try {
-      await askApprovalQuestion(ix, question, delivery.current.id);
-      toast(t("approval-question.sent_pending"), "ok");
+      if (onSubmitQuestion) await onSubmitQuestion(question);
+      else await askApprovalQuestion(ix, question, delivery.current.id);
+      setQuestion("");
+      delivery.current = { text: "", id: "" };
+      const message = t("approval-question.sent_pending");
+      if (onSuccess) onSuccess(message);
+      else toast(message, "ok");
       onClose();
     } catch (e) {
       // Keep the editor and every character on failure; Allow and Deny stay live.
-      toast(t("chat-interactions.send_failed", { error: errorText(e) }), "error");
+      const message = t("chat-interactions.send_failed", { error: errorText(e) });
+      if (onError) onError(message);
+      else toast(message, "error");
     } finally {
       setSending(false);
     }

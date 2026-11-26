@@ -23,6 +23,9 @@ func (t *previewTab) readWeb() {
 		}
 		var in previewIn
 		if json.Unmarshal(p, &in) == nil && in.T != "" {
+			if in.T == "mouse" {
+				in.mouseSequence = t.mouseSequence.Add(1)
+			}
 			t.post(tabItem{in: &in})
 		}
 	}
@@ -76,6 +79,9 @@ func (t *previewTab) navigate(u string) {
 func (t *previewTab) fromWeb(in *previewIn) {
 	switch in.T {
 	case "mouse":
+		if in.mouseSequence != 0 && in.mouseSequence <= t.dropMouseThrough {
+			return
+		}
 		typ := map[string]string{"down": "mousePressed", "up": "mouseReleased", "move": "mouseMoved"}[in.Type]
 		if typ == "" {
 			return

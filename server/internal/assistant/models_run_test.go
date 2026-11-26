@@ -3,11 +3,13 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/ai"
@@ -37,6 +39,54 @@ func (d *runDevs) CallNode(ctx context.Context, id, method string, params json.R
 		return nil, d.err
 	}
 	return json.Marshal(proto.ModelRunAnswer{Text: "answer to " + p.Prompt, Model: "m-run", Usage: d.usage})
+}
+
+type modelRunErrHub struct {
+	Hub
+	expiredDeviceCalls atomic.Int32
+}
+
+func (h *modelRunErrHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
+	if p.Device == DeviceAll && p.Method == DeviceDevicesList && ctx.Err() != nil {
+		h.expiredDeviceCalls.Add(1)
+		return nil, ctx.Err()
+	}
+	return h.Hub.DeviceCall(ctx, p)
+}
+
+// Formatting a model run failure must not make another RPC with the context whose expiry caused that failure.
+func TestModelRunErrorDoesNotReuseExpiredContextForDeviceName(t *testing.T) {
+	s, f, _ := modelService(t)
+	f.devices = []Device{{ID: "server", Name: "Build machine"}}
+	hub := &modelRunErrHub{Hub: f}
+	s.hub = hub
+	var logs logBuffer
+	s.logf = logs.logf
+	config := ai.Config{ViaMachine: "server", RunLauncher: "claude"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done()
+	err := s.modelRunErr(ctx, config, context.DeadlineExceeded)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout identity was lost: %v", err)
+	}
+	want := i18n.T(s.lang(context.Background()), "assistant-models.err_run_timeout", i18n.Args{"name": "server", "launcher": "claude"})
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("timeout %q does not contain %q", err, want)
+	}
+	if got := hub.expiredDeviceCalls.Load(); got != 0 {
+		t.Errorf("expired context made %d devices.list calls", got)
+	}
+	if strings.Contains(logs.String(), "assistant: devices") {
+		t.Errorf("secondary devices log: %s", logs.String())
+	}
+
+	err = s.modelRunErr(context.Background(), config, context.DeadlineExceeded)
+	want = i18n.T(s.lang(context.Background()), "assistant-models.err_run_timeout", i18n.Args{"name": "Build machine", "launcher": "claude"})
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("live context did not use the display name: %q does not contain %q", err, want)
+	}
 }
 
 // An API purpose may pick plain claude, codex, or agy (no gateway, no key): Model configuration offers them with the

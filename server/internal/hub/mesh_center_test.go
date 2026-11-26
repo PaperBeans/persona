@@ -59,6 +59,69 @@ func (mh *testHub) waitReachable(t *testing.T, target string) {
 	})
 }
 
+func TestConcurrentMeshRecordBuildKeepsCurrentNeighbors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		published bool
+		force     bool
+	}{
+		{"new neighbor", false, false},
+		{"unchanged current record", true, false},
+		{"forced publication", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Hub{cfg: defaultConfig()}
+			h.public.id = hubA
+			h.mesh.running = true
+			h.mesh.records = make(map[string]*hubRecord)
+			h.mesh.seenAt = make(map[string]time.Time)
+			h.mesh.changed = make(chan struct{})
+
+			var connected atomic.Bool
+			build := func() *hubRecord {
+				rec := &hubRecord{HubID: hubA}
+				if connected.Load() {
+					rec.Neighbors = []recNeighbor{{HubID: hubB}}
+				}
+				return rec
+			}
+			if tc.published {
+				connected.Store(true)
+				h.meshPublishRecord(false, build)
+				connected.Store(false)
+			}
+
+			captured, resume, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			go func() {
+				var first sync.Once
+				h.meshPublishRecord(tc.force, func() *hubRecord {
+					rec := build()
+					first.Do(func() {
+						close(captured)
+						<-resume
+					})
+					return rec
+				})
+				close(done)
+			}()
+			<-captured
+			connected.Store(true)
+			h.meshPublishRecord(false, build)
+			current := h.recordOf(hubA)
+			close(resume)
+			<-done
+
+			final := h.recordOf(hubA)
+			if _, ok := final.lists(hubB); !ok {
+				t.Fatal("older snapshot removed the current neighbor")
+			}
+			if advanced := final.Rev > current.Rev; advanced != tc.force {
+				t.Fatalf("published another revision = %t, force = %t", advanced, tc.force)
+			}
+		})
+	}
+}
+
 // Joining makes one center; an app on either hub sees and works every computer, those of the member through it.
 func TestCenterMemberForwardsEverything(t *testing.T) {
 	box := newMeshNode("uid-box", "box", "s1")
@@ -816,4 +879,26 @@ func TestCenterLearnsWhyAMemberCannotOpenIt(t *testing.T) {
 	lap.refuse[member.h] = false
 	lap.mu.Unlock()
 	eventually(t, 30*time.Second, "through the member once it can", func() bool { return center.machines(t, tok)["lap"].Online })
+}
+
+// A request that reached the center before a member handed its credentials over was answered "no such token" and
+// cached; once the credential is handed over the device is taken at once, not after the cache entry expires.
+func TestCredsImportForgetsEarlierUnknownTokenAnswer(t *testing.T) {
+	center := startTestHub(t, hubB, "Office", nil, nil)
+	member := startTestHub(t, hubA, "家里", nil, nil)
+	joinHubs(t, member, center)
+	member.waitCenter(t, hubB)
+	center.waitCenter(t, hubB)
+	const tok = "jt_handed_over_after_a_first_request"
+	if st, _ := center.do(t, http.MethodGet, "/api/v1/machines", tok, ""); st != http.StatusUnauthorized {
+		t.Fatalf("an unknown credential: %d, want 401", st)
+	}
+	dt := db.DeviceToken{ID: "dev_late", Name: "phone", Kind: "phone", Role: roleFull}
+	raw, _ := json.Marshal(map[string]any{"tokens": []db.ExportedToken{{DeviceToken: dt, Hash: hashToken(tok)}}})
+	if _, err := center.h.meshLocalCall(context.Background(), hubA, "creds.import", raw); err != nil {
+		t.Fatal(err)
+	}
+	if st, b := center.do(t, http.MethodGet, "/api/v1/machines", tok, ""); st != http.StatusOK {
+		t.Fatalf("the credential right after the handover: %d %s, want 200", st, b)
+	}
 }

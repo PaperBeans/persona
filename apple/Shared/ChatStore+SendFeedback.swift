@@ -14,6 +14,13 @@ extension ChatStore {
         sendFeedback = ChatSendFeedback(id: message.id, startedAt: now, afterSequence: items.last?.seq ?? 0)
     }
 
+    /// Apply a trusted hub `message_send_state` receipt before the HTTP send response returns.
+    func receiveSendReceipt(_ id: UUID, state: SendReceipt.State, now: Date = .now) {
+        guard var feedback = sendFeedback, feedback.id == id else { return }
+        feedback.receive(id, state: state, at: now)
+        if feedback != sendFeedback { sendFeedback = feedback }
+    }
+
     /// Update even after the pending bubble was replaced by its transcript echo.
     func settleSendFeedback(_ id: UUID, state: PendingMessage.State, now: Date = .now) {
         guard var feedback = sendFeedback, feedback.id == id else { return }
@@ -39,8 +46,15 @@ extension ChatStore {
     #if DEBUG
     func traceSendFeedback(_ phase: ChatSendFeedback.Phase) {
         guard let feedback = sendFeedback else { return }
-        print(String(format: "SEND_FEEDBACK_DRAW phase=%@ seconds=%.3f", String(describing: phase),
-                     Date.now.timeIntervalSince(feedback.startedAt)))
+        let source = feedback.acceptance.map { String(describing: $0) } ?? "local"
+        let drawSeconds = Date.now.timeIntervalSince(feedback.startedAt)
+        if phase == .processing, let receiptSeconds = feedback.processingLatency {
+            print(String(format: "SEND_FEEDBACK_DRAW phase=%@ seconds=%.3f source=%@ accepted=%.3f",
+                         String(describing: phase), drawSeconds, source, receiptSeconds))
+        } else {
+            print(String(format: "SEND_FEEDBACK_DRAW phase=%@ seconds=%.3f source=%@",
+                         String(describing: phase), drawSeconds, source))
+        }
     }
     #endif
 }

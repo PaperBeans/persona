@@ -1,0 +1,10 @@
+.nav-rail-track {
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-width: none;
+}
+
+[data-chat-scroll][data-nav-compact] > [data-chat-content] {
+  padding-inline-start: var(--nav-compact-inset);
+}

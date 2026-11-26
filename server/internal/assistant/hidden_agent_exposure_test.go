@@ -178,7 +178,7 @@ func TestHiddenDirectoryColdSupervision(t *testing.T) {
 		t.Fatal(err)
 	}
 	ft := newFleetTest(t)
-	ft.s.store = func() Store { return database }
+	ft.s.setStore(func() Store { return database })
 	hideExposureDirectory(ft.s, "mac", "/code/hidden")
 	ft.d.setSessions("mac", []proto.Session{{SessionID: "cold-agent", Cwd: "/code/hidden", Agent: "codex", Status: proto.StatusWorking}})
 	if ft.s.todosLoaded() {
@@ -206,7 +206,7 @@ func (*visibilityTodoReadFailure) ListTodos(context.Context) ([]db.TodoRow, erro
 
 func TestHiddenDirectoryKeepsUnknownSupervisionVisible(t *testing.T) {
 	ft := newFleetTest(t)
-	ft.s.store = func() Store { return &visibilityTodoReadFailure{} }
+	ft.s.setStore(func() Store { return &visibilityTodoReadFailure{} })
 	if !ft.s.directorySessionSupervised("mac", "agent") {
 		t.Fatal("unreadable inventory must not hide potentially supervised work")
 	}

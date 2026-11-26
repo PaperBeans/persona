@@ -44,7 +44,7 @@ The Inbox is the busiest single domain on every side, and most of its changes al
 - **Ten files outside the Inbox core** (`inbox*.go` less the task bridge's files) **reach its in-memory state**
   (`inboxBook`, `s.inbox`). Five write no item: `assistant/context.go` (`followingInboxItems`, 529-532),
   `assistant/tasks_draft_decisions.go` (88-89, 111-118), `assistant/service.go` (350), and through `b := &s.inbox`
-  `assistant/origins.go` (`gatherOriginEvidence`, 219) and `assistant/feishu_workbench.go` (`workbenchItem`, 575). Five
+  `assistant/origins.go` (`gatherOriginEvidence`, 219) and `assistant/inbox_workbench.go` (`workbenchItem`; it was in `feishu_workbench.go` until that moved into the lark module). Five
   are the task bridge's (section 2), and they also write items under the book's lock: `assistant/supervise_inbox.go`
   (51, 154; writes at 179-186), `assistant/tasks_inbox.go` (27, 65, 85; writes at 86-96; `checkTaskInbox`, a method on
   `*inboxBook`, at 43), `assistant/inbox_task_links.go` (211, 281; writes at 232-235, 247-252 and 305-313),
@@ -108,7 +108,7 @@ a communication center. "Inbox" is the user-facing Inbox, not #7563's durable in
 
 ### 3.1 Server
 
-New packages, all under the manager's tree (D1; feature modules live outside it, in server/internal/modules/<id>, as D1's 2026-11-23 amendment says): server/internal/assistant/kernel (the registration seam, D2; it already hosts the feature modules, `docs/architecture/core-and-modules.md`),
+New packages, all under the manager's tree (D1; feature modules live outside it, in server/internal/modules/<id>, as D1's 2026-11-23 amendment says): server/internal/assistant/kernel/seam (the registration seam, D2; its parent package kernel hosts the feature modules, `docs/architecture/core-and-modules.md`),
 server/internal/assistant/inbox/item (the item's lifecycle core) with its adapter inbox/item/itemadapt (the stored
 item, S8) and, only if D3's gates pass, server/internal/assistant/inbox (the stateful module behind inbox.Host).
 Archguard's `managerPart` and the hub's forbidden prefixes cover them with no new entries. Package assistant keeps the
@@ -119,9 +119,9 @@ their own. Each new package states its layer in its package comment (`//persona:
 
 The kernel is a typed registration seam (D2). `Kernel` is an opaque struct with unexported fields, and only
 `(*Registry).Register` makes one. Its members are either the few services every module uses (its routes, the access
-check, body errors and, from S4, publishing events) or slots that each replace a central-list line; never a domain
-method and never a store. A module takes its own dependencies through its own constructor, from the composition root
-in assistant.New. saved is its first user, so it starts with the services and no slots:
+check, body errors and publishing events, which moved from S4 to #15222) or slots that each replace a central-list
+line; never a domain method and never a store. A module takes its own dependencies through its own constructor, from
+the composition root in assistant.New. saved is its first user, so it starts with the services and no slots:
 
 ```go
 type Module interface {
@@ -138,7 +138,7 @@ reg.Seal()                                          // registering after Seal is
 func (k Kernel) Route(r Route) // r from NewRoute(pattern, fn): a relayed route, in assistantwire.Routes or InboxRoutes
 func (k Kernel) Full(r *http.Request) bool
 func (k Kernel) BodyError(w http.ResponseWriter, err, bad error)
-func (k Kernel) Publish(ctx context.Context, ev assistantwire.Event) // S4: one contract struct per event kind
+func (k Kernel) Publish(ctx context.Context, ev assistantwire.Event) // #15222, moved from S4: a struct per event kind
 
 // Slots, added in steps S4 and S5.
 func (k Kernel) Bus(m BusMethod) // m from NewBusMethod[P, R](name, fn): params decoded into P once
@@ -155,13 +155,14 @@ func (k Kernel) Snapshot(fn func(ctx context.Context, snap *assistantwire.Snapsh
   line at start-up by the value that holds the mistake: an empty, malformed or duplicate name (ModuleName, BusMethod,
   ToolName, a route's pattern), a pattern outside the relayed tables, a nil function, a second hook from the same module
   (hooks have no name, so they are keyed by module), anything after Seal, and any method of a zero Kernel. Route
-  handlers registered through the kernel run under the one listed catch site, kernel/dispatch.go: a defect there is
+  handlers registered through the kernel run under the one listed catch site, kernel/seam/dispatch.go: a defect there is
   reported and answered with 500, and any other panic goes on to net/http. Tables run in registration order, which is
   today's line order, and dispatch goes through the registry, which never hands out its slices.
 - **Hosts stay with their modules.** `saved.Host` and `saved.Register` stay as saved's adapter: a new saved/module.go
   holds the dependencies `saved.NewModule` was given and builds `saved.Host` from them and the Kernel's methods, so
   `server/internal/assistant/saved/saved.go` is untouched. saved's own untyped Host stays inside package saved until
-  its open drafts merge or idle 14 days; its typed ports then replace it.
+  its open drafts merge or idle 14 days; its typed ports then replace it (#15222). The Inbox module takes typed ports
+  through its NewModule from the start, never saved's `func() any` store or map events.
 - **One registry.** The same registry backs #7891's registry stage: in-package domains register routes, loops and tools
   from their own files through package-level front doors taking the same typed names, which New feeds in before the
   modules, so there is one duplicate rule and one tool placement function. `Kernel.Bus` is the seam for any domain's
@@ -276,7 +277,7 @@ for it.
   - Web, a first byte-neutral PR separate from W1: `web/src/views/inbox/lark.svg`, the only brand mark outside
     `web/src/ui/brands`, moves there (`web/src/ui/BrandMark.tsx` and `web/src/views/inbox/InboxParts.tsx` import it),
     and a boundary test lists every outside importer of `web/src/views/inbox`: the lazy route in `web/src/App.tsx`,
-    `web/src/views/messages/Messages.tsx`'s LarkThread (the designed exception), the 7 importers of InboxParts,
+    `web/src/modules/lark/Messages.tsx`'s LarkThread (the designed exception), the 7 importers of InboxParts,
     `web/src/modules/recording/RecordingHandoff.tsx` (HandOffTargets), `web/src/lib/inbox-actions.test.ts` and
     `web/src/views/extensions/ExtensionSlots.managers.test.tsx`. The Inbox's Chip moves to `web/src/ui` only with a
     `docs/design/DESIGN_SYSTEM.md` row; its Count stays, since converging on `web/src/ui/CountBadge.tsx` changes pixels
@@ -352,6 +353,9 @@ repository and the facade; and the client steps wait for the client domain guard
   the kernel passes its domain-rules hook; `go vet ./internal/assistant/...` is clean; X6's measures are in the PR.
 - *Revised 2026-11-22 in #10613:* typed ports and names, defects and the catch site in place of an untyped Infra and
   panics, and a layer declaration in place of a line in a domain-package list.
+- *Built in #15182:* the seam is package `seam` under server/internal/assistant/kernel, because package kernel already
+  hosts the feature modules and declares no layer yet, and NewRegistry also takes a Defects port, which the catch site
+  reports to (`docs/server/architecture.md` "Validated and sealed").
 
 ### S2. Guards and contract tests
 - **Change:** an archguard parse-only test: the book (`s.inbox.*` selectors, `b := &s.inbox`, methods on `*inboxBook`)
@@ -391,7 +395,7 @@ repository and the facade; and the client steps wait for the client domain guard
   `assistant/todo_outcome.go:542`. `assistant/tasks_draft_decisions.go` reads the book through the first two Reader
   methods (the card-send lock, an item copy) and leaves the allowlist. Deferred until their PRs land: `replyInDoubt`
   (`assistant/inbox_triage.go:470`, 7 open PRs), `modelPaused` and the purpose constants (`assistant/inbox_hub.go`, 4),
-  `assistant/context.go` (7), `assistant/feishu_workbench.go` (4), `assistant/origins.go` (#2049, idle since
+  `assistant/context.go` (7), `assistant/inbox_workbench.go` (formerly `feishu_workbench.go`, 4), `assistant/origins.go` (#2049, idle since
   2026-11-09).
 - **Done when:** `go build ./...` succeeds; the full `./internal/assistant` package passes once, with its duration, and
   `./internal/archguard` passes; the allowlist is shorter; `scripts/test/test_doc_go_paths.py` passes.
@@ -404,8 +408,8 @@ repository and the facade; and the client steps wait for the client domain guard
   still name `extension_context.go`, whose header now points to the Inbox file.
 
 ### S4. Routes, bus methods, hooks and snapshot through the kernel
-- **Change:** the kernel gains Bus, TurnSettled, Connected, Snapshot and Publish; it lands after agentref, the shared
-  session identity after #12899. An Inbox module in package assistant registers through the sealed kernel the unchanged
+- **Change:** the kernel gains Bus, TurnSettled, Connected, Snapshot and Publish (Publish moved to #15222, as built
+  below); it lands after agentref, the shared session identity after #12899. An Inbox module in package assistant registers through the sealed kernel the unchanged
   `inboxRoutes` body, the 8 bus methods (`inboxRequest` split per method, each a `NewBusMethod` over the existing
   assistantwire request and reply types), `inboxAgentTurnSettled` (its hook takes `agentref.Ref`: turnEnded parses the
   ref once, and a turn whose ids do not parse calls no hook and is logged, since that is bad input, not a defect), the
@@ -423,6 +427,26 @@ repository and the facade; and the client steps wait for the client domain guard
   passes with every golden unchanged; `./internal/archguard` passes; X6's measures are in the PR.
 - *Revised 2026-11-22 in #10613:* the turn hook takes `agentref.Ref`, bus methods and events are typed, and the repair
   PRs' closing is recorded; agentref comes after #12899, not with it.
+- *Built in #15418:* the slots are `Kernel.Bus` (values from `seam.NewBusMethod`), `Kernel.TurnSettled`,
+  `Kernel.Connected` and `Kernel.Snapshot` (`docs/server/architecture.md` "Validated and sealed"), and the Inbox is the
+  module "inbox" (`server/internal/assistant/inbox_module.go`), registered where `s.inboxRoutes()` was; its route
+  functions stay as they were and register through its Kernel (`routesThrough`). The bus methods' params and answers
+  that had no type became `server/internal/assistantwire/inbox_bus.go`, whose JSON a test compares with the maps the
+  switch built. Two parts of the text above did not hold on main, so they did not land: the Inbox in package
+  `assistant` builds no `map[string]any` app event (`inbox.changed` and `inbox.needs_you` already carry assistantwire
+  structs, and the extension manager builds the apps' `{"type":"inbox"}`), so `Kernel.Publish`, `assistantwire.Event`
+  and the golden per event kind moved to their first user, saved's events (#15222); and `TestDomainLayers` with a
+  base refuses a count line the merge base lacks, so no `app-bridge-call` count starts: the Inbox's hook matches an open item's Agent link with `agentref.Ref.IsSame`
+  and goes on with that link's ids. None of the 57 lines in 26 test files that build `&Service{}` without `New`
+  reaches a path that reads the kernel (`Service.snapshot`, `BusHub.request`, `BusHub.onHello`, `turnEnded`), so
+  nothing stays package-level. A bus method's name must be one a domain lists as a module's (`addModuleMethods`,
+  `server/internal/assistantwire/module_methods.go`), so a name the central dispatch answers is a defect at
+  `NewBusMethod`; the seam cannot see the central switch's cases at run time without a second list kept by hand, so
+  that no listed name is one of them is archguard's `TestModuleBusMethodsAreNoCentralCase`, which reads the cases of
+  `BusHub.request`, of the functions it hands the name to and of the extension manager's and the devices' `Request`.
+  The Inbox's own guard is archguard's `TestCentralFilesNameNoInboxCode`: `service.go` keeps, besides the two fields,
+  the register line and `s.inbox.lang`, the Inbox names of `Service.call` and the conversation views, in its
+  shrink-only list.
 
 ### S5. The Inbox's tools through the kernel
 - **Change:** the five tools register as one block after ask_escalate, through the tool placement the registry stage

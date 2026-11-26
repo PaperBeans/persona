@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { Item } from "../../lib/types";
 import type { Step } from "../../lib/turns";
 import type { ToolStep, WorkGroupNode } from "../../lib/work-groups";
-import { ActionRow, argumentLines, DIFF_FOLD_LINES, diffStats, editDiffs, foldDiffs, inlineInput, lineDiff, presentAction, truncateParam } from "./ActionRow";
+import { ActionRow, argumentLines, computeIntralineDiff, DIFF_FOLD_LINES, DiffBlocks, diffStats, editDiffs, foldDiffs, formatUnifiedDiff, inlineInput, lineDiff, presentAction, truncateParam } from "./ActionRow";
+import { inOpenedFold, MAX_EXPANDED_ENTRIES, openFoldRange } from "./expanded";
 import { PlanCard } from "./PlanCard";
 import { Answer, bubbleLines, SegmentView, UserBubble } from "./SegmentView";
 import { SubagentCard } from "./SubagentCard";
 import { LiveThinking } from "./ThinkingCard";
 import { ThinkingRow } from "./ThinkingRow";
-import { WorkGroup, type WorkProps } from "./WorkGroup";
+import { ClusterRow, clusterWorkChildren, summarizeWorkSteps, WorkGroup, type WorkProps } from "./WorkGroup";
 
 const T0 = Date.parse("2026-11-04T10:00:00Z");
 const at = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -40,11 +41,15 @@ describe("WorkGroup", () => {
     expect(html).not.toContain("data-work-detail"); // a lazy Collapse: nothing until it opens
   });
 
-  it("done: layers and 已工作 Xs, folded", () => {
+  it("done: no leading layers icon, 已工作 Xs followed directly by chevron, folded", () => {
     const html = renderToStaticMarkup(<WorkGroup g={group([tool("t1", "Bash", { command: "ls" })], false, 65_000)} p={props} />);
     expect(html).toContain(">已工作 1m 5s<");
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain("data-live-preview");
+    // Only one svg in the completed top-level header: the disclosure chevron right after the heading (no leading layers icon, no flex-1 spacer)
+    expect(html.match(/<svg /g)).toHaveLength(1);
+    expect(html).not.toContain("flex-1");
+    expect(html.indexOf("已工作 1m 5s")).toBeLessThan(html.indexOf("<svg "));
   });
 
   it("every nonempty live group can be manually opened and never previews tools", () => {
@@ -55,6 +60,18 @@ describe("WorkGroup", () => {
     expect(html).not.toMatch(/^<div[^>]*><button[^>]*disabled/);
     expect(html).not.toContain("echo 1");
     expect(html).not.toContain("echo 6");
+  });
+
+  it("thinking-only nested group omits the fallback layers icon and keeps spinner when live (#14866)", () => {
+    const thought: Step = { kind: "thinking", id: "th#0", item: { id: "th#0", seq: 1, role: "assistant", kind: "thinking", text: "Checking details" } };
+    const doneHtml = renderToStaticMarkup(<WorkGroup g={group([thought], false, 1000)} p={{ ...props, nested: true }} />);
+    expect(doneHtml).toContain(">已工作 1s<");
+    expect(doneHtml.match(/<svg\b/g)).toHaveLength(1); // chevron only, no leading layers icon
+    expect(doneHtml).not.toContain("border-l-2");
+    expect(doneHtml).toContain("pl-3");
+
+    const liveHtml = renderToStaticMarkup(<WorkGroup g={group([thought], true)} p={{ ...props, nested: true }} />);
+    expect(liveHtml).toContain("animation:spin");
   });
 });
 
@@ -291,5 +308,219 @@ describe("the user's bubble and the answer", () => {
     // no live words yet: the row as before
     const waiting = renderToStaticMarkup(<SegmentView seg={seg} live mid="m" sid="s" batchedWords expandFold={async () => {}} />);
     expect(waiting).toContain('data-work-group="live"');
+  });
+});
+
+describe("summarizeWorkSteps", () => {
+  it("aggregates reads, edits, commands, searches, subagents, and other tools into Chinese summary", () => {
+    const steps: Step[] = [
+      tool("r1", "Read", { file_path: "/a.ts" }),
+      tool("r2", "NotebookRead", { notebook_path: "/n.ipynb" }),
+      tool("e1", "Edit", { file_path: "/a.ts", old_string: "a", new_string: "b" }),
+      tool("e2", "Write", { file_path: "/b.ts", content: "hi" }),
+      tool("e3", "MultiEdit", { file_path: "/c.ts", edits: [] }),
+      tool("c1", "Bash", { command: "npm test" }),
+      tool("c2", "Shell", { command: "ls" }),
+      tool("s1", "Grep", { pattern: "foo" }),
+      tool("s2", "WebSearch", { query: "bar" }),
+      tool("a1", "Agent", { description: "sub" }),
+      tool("o1", "CustomTool", {}),
+    ];
+    expect(summarizeWorkSteps(steps)).toBe("读 2 个文件、编辑 3 处、运行 2 条命令、搜索 2 次、1 个子代理、1 项操作");
+    expect(summarizeWorkSteps([])).toBe("");
+  });
+
+  it("recursively collects tools from nested WorkGroupNodes and renders in WorkGroup header", () => {
+    const inner = group([tool("r1", "Read", { file_path: "/a.ts" }), tool("e1", "Edit", { file_path: "/a.ts", old_string: "x", new_string: "y" })], false, 2000);
+    const outer: WorkGroupNode = { kind: "group", id: "work-outer", children: [inner, { kind: "step", step: tool("c1", "Bash", { command: "echo ok" }) }], live: false, durationMs: 5000 };
+    expect(summarizeWorkSteps(outer.children)).toBe("读 1 个文件、编辑 1 处、运行 1 条命令");
+    const html = renderToStaticMarkup(<WorkGroup g={outer} p={props} />);
+    expect(html).toContain(">已工作 5s<");
+    expect(html).toContain("读 1 个文件、编辑 1 处、运行 1 条命令");
+
+    const liveHtml = renderToStaticMarkup(<WorkGroup g={group([tool("t1", "Bash", { command: "ls" }, false), tool("t2", "Read", { file_path: "/a" })], true)} p={props} />);
+    expect(liveHtml).toContain(">正在工作…<");
+    expect(liveHtml).toContain("已执行 2 步");
+  });
+});
+
+describe("DiffBlocks & formatUnifiedDiff", () => {
+  it("renders dual line-number gutters and ⋯ hunk gap separators", () => {
+    const same = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+    const oldText = ["old-top", ...same, "old-bot"].join("\n");
+    const newText = ["new-top", ...same, "new-bot"].join("\n");
+    const diff = lineDiff(oldText, newText);
+    const html = renderToStaticMarkup(<DiffBlocks diffs={[diff]} />);
+    expect(html).toContain("tabular-nums");
+    expect(html).toContain("bg-diff-add-bg");
+    expect(html).toContain("bg-diff-del-bg");
+    expect(html).toContain("data-diff-gap");
+    expect(html).toContain("⋯");
+  });
+
+  it("separates multi-edit blocks with a ⋯ gap and formats unified diff text", () => {
+    const d1 = lineDiff("a", "b");
+    const d2 = lineDiff("c", "d");
+    const html = renderToStaticMarkup(<DiffBlocks diffs={[d1, d2]} />);
+    expect(html).toContain("data-diff-gap");
+    expect(formatUnifiedDiff([d1, d2])).toBe("-a\n+b\n@@\n-c\n+d");
+  });
+});
+
+describe("expanded.ts memory cap", () => {
+  it("caps foldRanges at 500 entries by evicting oldest scopes", () => {
+    expect(MAX_EXPANDED_ENTRIES).toBe(500);
+    const prefix = `cap-test-${Date.now()}:`;
+    for (let i = 0; i < MAX_EXPANDED_ENTRIES + 10; i++) {
+      openFoldRange(`${prefix}${i}`, 1, 5);
+    }
+    expect(inOpenedFold(`${prefix}0`, 3)).toBe(false);
+    expect(inOpenedFold(`${prefix}9`, 3)).toBe(false);
+    expect(inOpenedFold(`${prefix}10`, 3)).toBe(true);
+    expect(inOpenedFold(`${prefix}${MAX_EXPANDED_ENTRIES + 9}`, 3)).toBe(true);
+  });
+});
+
+describe("computeIntralineDiff & DiffBlocks intraline highlight", () => {
+  it("highlights a single word change while preserving unchanged prefix and suffix", () => {
+    const { oldParts, newParts } = computeIntralineDiff("const foo = 1;", "const bar = 1;");
+    expect(oldParts).toEqual([
+      { text: "const ", changed: false },
+      { text: "foo", changed: true },
+      { text: " = 1;", changed: false },
+    ]);
+    expect(newParts).toEqual([
+      { text: "const ", changed: false },
+      { text: "bar", changed: true },
+      { text: " = 1;", changed: false },
+    ]);
+  });
+
+  it("handles identical lines without marking anything changed", () => {
+    expect(computeIntralineDiff("exact same", "exact same")).toEqual({
+      oldParts: [{ text: "exact same", changed: false }],
+      newParts: [{ text: "exact same", changed: false }],
+    });
+    expect(computeIntralineDiff("", "")).toEqual({ oldParts: [], newParts: [] });
+  });
+
+  it("marks completely different lines as changed", () => {
+    expect(computeIntralineDiff("alpha beta", "12345")).toEqual({
+      oldParts: [{ text: "alpha beta", changed: true }],
+      newParts: [{ text: "12345", changed: true }],
+    });
+  });
+
+  it("falls back cleanly on lines longer than 500 chars without O(N^2) blowup", () => {
+    const longOld = "a".repeat(600);
+    const longNew = `${"a".repeat(300)}b${"a".repeat(299)}`;
+    const res = computeIntralineDiff(longOld, longNew);
+    expect(res.oldParts).toEqual([{ text: longOld, changed: false }]);
+    expect(res.newParts).toEqual([{ text: longNew, changed: false }]);
+  });
+
+  it("renders intraline emphasis spans inside DiffBlocks for paired del/add lines", () => {
+    const diff = lineDiff("const foo = 1;\nconst a = 2;", "const bar = 1;\nconst b = 2;");
+    const html = renderToStaticMarkup(<DiffBlocks diffs={[diff]} />);
+    expect(html).toContain("bg-diff-del-fg/20");
+    expect(html).toContain("bg-diff-add-fg/20");
+    expect(html).toContain("data-diff-intraline");
+    expect(html).toContain(">foo<");
+    expect(html).toContain(">bar<");
+  });
+});
+
+describe("clusterWorkChildren & ClusterRow", () => {
+  const stepNode = (s: Step) => ({ kind: "step" as const, step: s });
+  const errTool = (id: string, name: string, input: Record<string, unknown>): ToolStep => ({
+    kind: "tool",
+    id: `${id}#0`,
+    use: use(id, name, input),
+    result: { ...res(id, "boom"), is_error: true },
+    images: [],
+  });
+
+  it("clusters 3+ consecutive reads and leaves runs under 3 unclustered", () => {
+    const threeReads = [
+      stepNode(tool("r1", "Read", { file_path: "/a.ts" })),
+      stepNode(tool("r2", "Read", { file_path: "/b.ts" })),
+      stepNode(tool("r3", "NotebookRead", { notebook_path: "/n.ipynb" })),
+    ];
+    const clustered = clusterWorkChildren(threeReads);
+    expect(clustered).toHaveLength(1);
+    expect(clustered[0]).toMatchObject({
+      kind: "cluster",
+      category: "read",
+      label: "连续读取 3 个文件",
+      hasError: false,
+      hasRunning: false,
+    });
+    if (clustered[0].kind === "cluster") expect(clustered[0].children).toHaveLength(3);
+
+    const twoReads = threeReads.slice(0, 2);
+    expect(clusterWorkChildren(twoReads)).toEqual(twoReads);
+  });
+
+  it("splits mixed categories cleanly and formats search and command labels", () => {
+    const nodes = [
+      stepNode(tool("s1", "Grep", { pattern: "a" })),
+      stepNode(tool("s2", "Glob", { pattern: "*.ts" })),
+      stepNode(tool("s3", "WebSearch", { query: "q" })),
+      stepNode(tool("e1", "Edit", { file_path: "/a.ts", old_string: "a", new_string: "b" })),
+      stepNode(tool("c1", "Bash", { command: "ls" })),
+      stepNode(tool("c2", "Shell", { command: "pwd" })),
+      stepNode(tool("c3", "Bash", { command: "git status" })),
+      stepNode(tool("c4", "Bash", { command: "npm test" })),
+    ];
+    const clustered = clusterWorkChildren(nodes);
+    expect(clustered).toHaveLength(3);
+    expect(clustered[0]).toMatchObject({ kind: "cluster", category: "search", label: "连续搜索 3 次" });
+    expect(clustered[1]).toMatchObject({ kind: "step" });
+    expect(clustered[2]).toMatchObject({ kind: "cluster", category: "command", label: "连续运行 4 条命令" });
+  });
+
+  it("tracks error/running state, collapses settled clusters by default, and auto-expands error or running clusters", () => {
+    const settledNodes = [
+      stepNode(tool("r1", "Read", { file_path: "/a.ts" })),
+      stepNode(tool("r2", "Read", { file_path: "/b.ts" })),
+      stepNode(tool("r3", "Read", { file_path: "/c.ts" })),
+    ];
+    const [settledCluster] = clusterWorkChildren(settledNodes);
+    expect(settledCluster).toMatchObject({ kind: "cluster", category: "read", hasError: false, hasRunning: false });
+    if (settledCluster.kind === "cluster") {
+      const settledHtml = renderToStaticMarkup(<ClusterRow cluster={settledCluster} p={props} live={false} />);
+      expect(settledHtml).toContain('data-work-cluster="read"');
+      expect(settledHtml).toContain(">连续读取 3 个文件<");
+      expect(settledHtml).toContain('aria-expanded="false"');
+      expect(settledHtml).not.toContain("data-cluster-children");
+    }
+
+    const errorNodes = [
+      stepNode(tool("c1", "Bash", { command: "echo 1" })),
+      stepNode(errTool("c2", "Bash", { command: "false" })),
+      stepNode(tool("c3", "Bash", { command: "echo 3" })),
+    ];
+    const [errCluster] = clusterWorkChildren(errorNodes);
+    expect(errCluster).toMatchObject({ kind: "cluster", hasError: true, hasRunning: false });
+    if (errCluster.kind === "cluster") {
+      const errHtml = renderToStaticMarkup(<ClusterRow cluster={errCluster} p={props} live={false} />);
+      expect(errHtml).toContain('aria-expanded="true"');
+      expect(errHtml).toContain('data-cluster-badge="error"');
+      expect(errHtml).toContain("data-cluster-children");
+    }
+
+    const runningNodes = [
+      stepNode(tool("s1", "Grep", { pattern: "a" })),
+      stepNode(tool("s2", "Grep", { pattern: "b" })),
+      stepNode(tool("s3", "Grep", { pattern: "c" }, false)),
+    ];
+    const [runCluster] = clusterWorkChildren(runningNodes);
+    expect(runCluster).toMatchObject({ kind: "cluster", hasError: false, hasRunning: true });
+    if (runCluster.kind === "cluster") {
+      const runHtml = renderToStaticMarkup(<ClusterRow cluster={runCluster} p={props} live={true} />);
+      expect(runHtml).toContain('aria-expanded="true"');
+      expect(runHtml).toContain('data-cluster-badge="running"');
+      expect(runHtml).toContain("data-cluster-children");
+    }
   });
 });

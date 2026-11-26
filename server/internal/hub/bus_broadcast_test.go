@@ -111,13 +111,39 @@ func hubSentTypes(t *testing.T) []string {
 	return out
 }
 
-// managerSentTypes are the types of the messages the managers' code sends the apps: the assistant's Service.event
-// (s.event(ctx, msg)), its extensions' manager's broadcast (….broadcast(msg)) and broadcastExtension(kind, …)
-// (extension_<kind> and plugin_<kind>). A message is a map literal with a "type", there or assigned to the variable
+// managerSentTypes are the types of the messages the managers' code sends the apps: the assistant's Service.event and
+// broadcastEvent, its extensions' manager's broadcast (….broadcast(msg)) and broadcastExtension(kind, …)
+// (extension_<kind> and plugin_<kind>). A message is a literal with a "type" key or Type field, assigned to the variable
 // passed in the same function; one the test cannot read is an error, but for the extensions' own types
 // (apiBroadcast: declared in their manifests) and broadcastExtension's.
 func managerSentTypes(t *testing.T) []string {
 	t.Helper()
+	wireConstants := map[string]string{}
+	for _, file := range goFiles(t, "../assistantwire") {
+		for _, decl := range file.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok || group.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range group.Specs {
+				value := spec.(*ast.ValueSpec)
+				for i, expr := range value.Values {
+					if literal, ok := stringLit(expr); ok {
+						wireConstants[value.Names[i].Name] = literal
+					}
+				}
+			}
+		}
+	}
+	eventType := func(expr ast.Expr) (string, bool) {
+		if sel, ok := expr.(*ast.SelectorExpr); ok {
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "assistantwire" {
+				s, ok := wireConstants[sel.Sel.Name]
+				return s, ok
+			}
+		}
+		return stringLit(expr)
+	}
 	var out []string
 	add := func(s string) {
 		if !slices.Contains(out, s) {
@@ -150,11 +176,14 @@ func managerSentTypes(t *testing.T) []string {
 				if k, _ := stringLit(kv.Key); k == "type" {
 					return stringLit(kv.Value)
 				}
+				if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "Type" {
+					return eventType(kv.Value)
+				}
 			}
 		}
 		return "", false
 	}
-	for _, pkg := range []string{"assistant", "assistant/saved", "modules/recording", "extmgr", "devices"} {
+	for _, pkg := range []string{"assistant", "assistant/saved", "modules/recording", "modules/health", "extmgr", "devices"} {
 		for name, f := range goFiles(t, filepath.Join("..", pkg)) {
 			for _, d := range f.Decls {
 				fn, ok := d.(*ast.FuncDecl)
@@ -179,16 +208,17 @@ func managerSentTypes(t *testing.T) []string {
 						} else {
 							t.Errorf("%s %s: broadcastExtension of a kind the test cannot read", name, fn.Name.Name)
 						}
-					case pkg == "assistant" && sel.Sel.Name == "event" && recv != nil && recv.Name == "s" && len(call.Args) == 2,
+					case pkg == "assistant" && recv != nil && recv.Name == "s" && len(call.Args) == 2 &&
+						(sel.Sel.Name == "event" || (sel.Sel.Name == "broadcastEvent" && fn.Name.Name != "event")),
 						// a package moved out of assistant sends through the Host's Event, with the same two arguments
 						pkg == "assistant/saved" && sel.Sel.Name == "Event" && len(call.Args) == 2,
-						// the recording module sends through its Host the same way (its event, as the assistant's)
-						pkg == "modules/recording" && sel.Sel.Name == "event" && len(call.Args) == 2,
+						// These modules send through their Host the same way (their event, as the assistant's).
+						(pkg == "modules/recording" || pkg == "modules/health") && sel.Sel.Name == "event" && len(call.Args) == 2,
 						(pkg == "extmgr" || pkg == "devices") && sel.Sel.Name == "broadcast" && len(call.Args) == 1:
 						if typ, ok := typeOf(call.Args[len(call.Args)-1], fn.Body); ok {
 							add(typ)
 						} else if fn.Name.Name != "apiBroadcast" && fn.Name.Name != "broadcastExtension" {
-							t.Errorf("%s %s: a message whose type the test cannot read: write it as a map literal with its \"type\"", name, fn.Name.Name)
+							t.Errorf("%s %s: a message whose type the test cannot read: use a literal with its event type", name, fn.Name.Name)
 						}
 					}
 					return true

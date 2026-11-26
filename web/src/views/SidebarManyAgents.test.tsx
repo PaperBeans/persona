@@ -86,7 +86,7 @@ describe("a long list of Agents", () => {
   it("mounts no rows under a folded group", async () => {
     localStorage.setItem("fold:todo:none", "1");
     const tree = buildTodoTree(many, machines, [], { spaces: [], sessions: [] }, Date.now());
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="" {...stable} />));
     await settle();
     expect(host.querySelector('[data-tree-branch="todo:none"] button[aria-expanded]')!.getAttribute("aria-expanded")).toBe("false");
     // before, all 400 were there under the fold, inert
@@ -100,7 +100,7 @@ describe("a long list of Agents", () => {
   it("draws a bounded number of an open group's rows, and keeps the rest's place", async () => {
     localStorage.setItem("fold:todo:none", "0");
     const tree = buildTodoTree(many, machines, [], { spaces: [], sessions: [] }, Date.now());
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="" {...stable} />));
     await settle();
     // the first rows and the last, a box for each part between: before, all 400 rows were drawn at once
     expect(agentLinks()).toHaveLength(HEAD + 1);
@@ -115,14 +115,14 @@ describe("a long list of Agents", () => {
   it("draws the open Agent's row and the parts beside it wherever it is", async () => {
     localStorage.setItem("fold:todo:none", "0");
     const tree = buildTodoTree(many, machines, [], { spaces: [], sessions: [] }, Date.now());
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="s:m1/s300" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="s:m1/s300" {...stable} />));
     await settle();
     const shown = agentLinks().map((a) => a.getAttribute("href"));
     expect(shown).toContain("/s/m1/s300");
     expect(shown.length).toBeLessThanOrEqual(HEAD + 3 * PART + 1);
     // a herdr Agent's page moves on to its tab's address, which no row here holds: its row stays for the second
     // scroll to it
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="t:m1/w1/t1" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="t:m1/w1/t1" {...stable} />));
     await settle();
     expect(agentLinks().map((a) => a.getAttribute("href"))).toContain("/s/m1/s300");
   });
@@ -130,7 +130,7 @@ describe("a long list of Agents", () => {
   it("keeps the part holding the keyboard's focus and the next one drawn", async () => {
     localStorage.setItem("fold:todo:none", "0");
     const tree = buildTodoTree(many, machines, [], { spaces: [], sessions: [] }, Date.now());
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="" {...stable} />));
     await settle();
     // Tab reaches the last of the first rows: the next part is there for the next Tab
     const last = agentLinks()[HEAD - 1]!;

@@ -73,9 +73,10 @@ func TestRolloutsMetaAfterTheFileIsWritten(t *testing.T) {
 }
 
 func rolloutMetaCount(home string) int {
-	rolloutCaches.Lock()
-	defer rolloutCaches.Unlock()
-	return len(cacheFor(home).metas)
+	c := rolloutCacheFor(home)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.metas)
 }
 
 // The session_meta cache keeps only rollouts still on disk: once the older days are listed again, deleted threads

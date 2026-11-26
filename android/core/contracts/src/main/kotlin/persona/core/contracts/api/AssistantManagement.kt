@@ -51,6 +51,19 @@ interface AssistantManagement {
         throw UnsupportedOperationException("Model pick unavailable")
     /** The conversation follows the default again (`DELETE …/conversations/{id}/model`): Follow default, Undo pick. */
     suspend fun clearModelPick(session: SessionKey): Unit = throw UnsupportedOperationException("Model pick unavailable")
+    /**
+     * Logical-conversation segment state for explicit cross-engine / runtime switching
+     * (`GET /api/v1/assistant/conversations/{id}/segments?machine_id=...`, feature `assistant_segments`).
+     */
+    suspend fun conversationSwitchState(session: SessionKey): ConversationSwitchState =
+        throw UnsupportedOperationException("Conversation switch unavailable")
+    /**
+     * Requests an explicit logical-conversation switch (`POST /api/v1/assistant/conversations/{id}/switch`,
+     * feature `assistant_segments`). Retrying after an uncertain failure reuses the same [request] (`operation_id` and
+     * `expected_epoch`) so the hub treats it idempotently.
+     */
+    suspend fun submitConversationSwitch(session: SessionKey, request: ConversationSwitchRequest): Unit =
+        throw UnsupportedOperationException("Conversation switch unavailable")
     suspend fun endConversation(session: SessionKey)
     /**
      * Compacts an assistant conversation's context now (POST /api/v1/assistant/conversations/{id}/compact, hub feature
@@ -92,8 +105,8 @@ interface AssistantManagement {
      */
     suspend fun makeDirection(session: SessionKey): Unit = throw UnsupportedOperationException("Directions unavailable")
     /**
-     * Ends a conversation's leadership (POST /api/v1/assistant/directions/{id}/end, #4331): it leaves 常驻; the tasks it
-     * handed out keep their supervisor. The conversation itself stays, an ordinary chat now.
+     * Ends a conversation's leadership (POST /api/v1/assistant/directions/{id}/end, #4331): it leaves 常驻; its open
+     * tasks go to the main chat's supervision. The conversation itself stays, an ordinary chat now.
      */
     suspend fun endDirection(session: SessionKey): Unit = throw UnsupportedOperationException("Directions unavailable")
     /**
@@ -355,6 +368,34 @@ data class MemoryFile(val name: String = "", val content: String = "", @SerialNa
 
 /** What "New main chat" did: the conversation put away ([archived], empty when there was none) and whether any of it carries over. */
 data class NewMainResult(val archived: String = "", val carried: Boolean = false)
+
+/**
+ * Current logical-conversation segment state (`GET /api/v1/assistant/conversations/{id}/segments?machine_id=...`,
+ * feature `assistant_segments`).
+ */
+@Serializable
+data class ConversationSwitchState(
+    val enabled: Boolean = false,
+    val epoch: Long = 0,
+    @SerialName("supervision_required") val supervisionRequired: Boolean = false,
+)
+
+/**
+ * Explicit logical-conversation switch request (`POST /api/v1/assistant/conversations/{id}/switch`,
+ * feature `assistant_segments`). Preserved across retries after an uncertain failure so the hub handles replays
+ * idempotently.
+ */
+@Serializable
+data class ConversationSwitchRequest(
+    @SerialName("operation_id") val operationId: String,
+    @SerialName("expected_epoch") val expectedEpoch: Long,
+    @SerialName("source_machine_id") val sourceMachineId: String,
+    @SerialName("machine_id") val machineId: String,
+    val launcher: String,
+    val model: String? = null,
+    val effort: String? = null,
+    @SerialName("permission_mode") val permissionMode: String? = null,
+)
 
 /** The hub refused an assistant action (409 with a `code`); [message] is the hub's own words, fit to show as they are. */
 class AssistantRefused(val code: String, message: String) : Exception(message)

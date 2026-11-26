@@ -343,6 +343,7 @@ func (s *Service) prMergedDigestEntry(ctx context.Context, g superviseSignal, we
 		Quiet:    t.Quiet,
 	}
 	e.LastReview = s.lastReviewEntry(ctx, v)
+	s.setEntryOrigin(ctx, t, web, &e)
 	s.briefEntry(ctx, t.ID, &e)
 	return e, true, false
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"mime"
@@ -73,16 +74,25 @@ type gateProxy struct {
 	// the hub now.
 	cur atomic.Pointer[Node]
 
-	mu     sync.Mutex
-	ln     net.Listener
-	keys   map[string]gateKey // key → the gate's command and the conversation its process was started for
-	grants []gateGrant
+	mu            sync.Mutex
+	ln            net.Listener
+	keys          map[string]gateKey        // key → the gate's command and the conversation its process was started for
+	sessionLeases map[gateSessionKey]string // (session, command) → active key in keys for runtime assistant sessions
+	grants        []gateGrant
 	// spaces: the conversations known to be in a space (markSpace). A conversation does not change space, so one
 	// stays in it, and only the ones in a space are kept.
 	spaces map[string]struct{}
+	// remotes latches conversations known to carry remote-runtime confirm-writes posture (markRemote).
+	remotes map[string]struct{}
 
 	// reporting holds a slot for each report to the manager in flight (gateReportsMax).
 	reporting chan struct{}
+}
+
+// gateSessionKey identifies one idempotent session-scoped proxy lease.
+type gateSessionKey struct {
+	session string
+	command string
 }
 
 // gateKey is what an address at the proxy stands for.
@@ -94,14 +104,17 @@ type gateKey struct {
 	// space: the process was started in a space. Decided once, from the directory the node started it in,
 	// when its address is opened: the address stays with that one process, so it never serves another space.
 	space bool
+	// remote: the conversation carries the remote-runtime confirm-writes posture.
+	remote bool
 }
 
 // gateGrant is a call larkCheck let through, to go once.
 type gateGrant struct {
 	command, method, path, query string
-	body                         any  // the JSON body confirmed, when bodyBound (nil there is JSON null)
-	bodyBound                    bool // false: any body (not JSON, cut short, an upload, $… in it)
-	bodyUseNumber                bool // an edited grant compares JSON numbers without float64 rounding
+	body                         any    // the JSON body confirmed, when bodyBound (nil there is JSON null)
+	bodyBound                    bool   // false: any body (not JSON, cut short, an upload, $… in it)
+	bodyUseNumber                bool   // an edited grant compares JSON numbers without float64 rounding
+	rewriteBody                  []byte // when set, proxy forwards these JSON bytes instead of the matched original body
 	until                        time.Time
 	// session is the conversation larkCheck decided for, and through how it let the call through: what the ledger says
 	// of the write once it has gone out.
@@ -110,7 +123,28 @@ type gateGrant struct {
 }
 
 func newGateProxy() *gateProxy {
-	return &gateProxy{keys: map[string]gateKey{}, reporting: make(chan struct{}, gateReportsMax)}
+	return &gateProxy{
+		keys:          map[string]gateKey{},
+		sessionLeases: map[gateSessionKey]string{},
+		reporting:     make(chan struct{}, gateReportsMax),
+	}
+}
+
+// existingGates returns the node's gate proxy if one has already been created, without creating one or changing cur.
+func (n *Node) existingGates() *gateProxy {
+	if n == nil {
+		return nil
+	}
+	if k := n.keeper; k != nil {
+		k.mu.Lock()
+		p := k.gp
+		k.mu.Unlock()
+		return p
+	}
+	n.mu.Lock()
+	p := n.gp
+	n.mu.Unlock()
+	return p
 }
 
 // gates is the gate proxy, made at its first use (it listens once a process needs it, open). A resident node has one
@@ -137,47 +171,201 @@ func (n *Node) gates() *gateProxy {
 	return p
 }
 
-// openIn gives one process of the assistant, the one started for session ("" when that is not known yet: nameAddr gives
-// it later), its own address for command's gate: the base to put in its BaseEnv, and release, which takes the address
-// back when the process ends. space says whether the process is in a space.
-func (p *gateProxy) openIn(command, session string, space bool) (base string, release func(), err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ln == nil {
-		ln, err := osproc.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			if ln, err = osproc.Listen("tcp", "[::1]:0"); err != nil {
-				return "", nil, err
-			}
+func (p *gateProxy) ensureListenerLocked() error {
+	if p.ln != nil {
+		return nil
+	}
+	ln, err := osproc.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		if ln, err = osproc.Listen("tcp", "[::1]:0"); err != nil {
+			return err
 		}
-		p.ln = ln
-		srv := &http.Server{Handler: p, ReadHeaderTimeout: 30 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
-		go func() { _ = srv.Serve(ln) }()
+	}
+	p.ln = ln
+	srv := &http.Server{Handler: p, ReadHeaderTimeout: 30 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
+	go func() { _ = srv.Serve(ln) }()
+	return nil
+}
+
+func (p *gateProxy) allocKeyLocked(gk gateKey) (key, base string, err error) {
+	if err := p.ensureListenerLocked(); err != nil {
+		return "", "", err
 	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	key = hex.EncodeToString(b)
+	p.keys[key] = gk
+	return key, "http://" + p.ln.Addr().String() + "/" + key, nil
+}
+
+// openIn gives one process of the assistant, the one started for session ("" when that is not known yet: nameAddr gives
+// it later), its own address for command's gate: the base to put in its BaseEnv, and release, which takes the address
+// back when the process ends. space says whether the process is in a space; remote says whether the session has
+// remote-runtime confirm-writes posture.
+func (p *gateProxy) openIn(command, session string, space, remote bool) (base string, release func(), err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key, base, err := p.allocKeyLocked(gateKey{command: command, session: session, space: space, remote: remote})
+	if err != nil {
 		return "", nil, err
 	}
-	key := hex.EncodeToString(b)
-	p.keys[key] = gateKey{command: command, session: session, space: space}
-	return "http://" + p.ln.Addr().String() + "/" + key, func() {
+	return base, func() {
 		p.mu.Lock()
-		delete(p.keys, key)
+		if gk, ok := p.keys[key]; ok {
+			delete(p.keys, key)
+			if gk.session != "" {
+				lk := gateSessionKey{session: gk.session, command: gk.command}
+				if p.sessionLeases[lk] == key {
+					delete(p.sessionLeases, lk)
+				}
+			}
+		}
 		p.mu.Unlock()
 	}, nil
 }
 
-// nameAddr says which conversation the address base stands for, when it was opened for a process that did not know its
-// conversation yet (a new Codex conversation has an id only once its thread starts). An address that has one keeps it.
-func (p *gateProxy) nameAddr(base, session string) {
+// openSession returns an idempotent session-scoped proxy address for (session, command), creating one on first use
+// and reusing it across subsequent runtime RPCs until releaseSession/releaseSessions revokes it. space and remote
+// latch monotonically (never downgraded).
+func (p *gateProxy) openSession(command, session string, space, remote bool) (base string, err error) {
 	if session == "" {
+		return "", errors.New("gate proxy session lease requires a session id")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.ensureListenerLocked(); err != nil {
+		return "", err
+	}
+	if _, ok := p.spaces[session]; ok {
+		space = true
+	}
+	if _, ok := p.remotes[session]; ok {
+		remote = true
+	}
+	lk := gateSessionKey{session: session, command: command}
+	if key, ok := p.sessionLeases[lk]; ok {
+		if gk, live := p.keys[key]; live {
+			if space {
+				gk.space = true
+			}
+			if remote {
+				gk.remote = true
+			}
+			p.keys[key] = gk
+			return "http://" + p.ln.Addr().String() + "/" + key, nil
+		}
+		delete(p.sessionLeases, lk)
+	}
+	key, base, err := p.allocKeyLocked(gateKey{command: command, session: session, space: space, remote: remote})
+	if err != nil {
+		return "", err
+	}
+	if p.sessionLeases == nil {
+		p.sessionLeases = map[gateSessionKey]string{}
+	}
+	p.sessionLeases[lk] = key
+	return base, nil
+}
+
+// bindSessionAddr promotes an unnamed address opened before session.start returned its session id into the
+// session-scoped lease for (session, command). space and remote latch monotonically.
+func (p *gateProxy) bindSessionAddr(base, session string, space, remote bool) {
+	if base == "" || session == "" {
 		return
 	}
 	key := base[strings.LastIndex(base, "/")+1:]
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if gk, ok := p.keys[key]; ok && gk.session == "" {
+	gk, ok := p.keys[key]
+	if !ok {
+		return
+	}
+	if gk.session == "" {
 		gk.session = session
+	}
+	if _, ok := p.spaces[gk.session]; ok {
+		space = true
+	}
+	if _, ok := p.remotes[gk.session]; ok {
+		remote = true
+	}
+	if space {
+		gk.space = true
+	}
+	if remote {
+		gk.remote = true
+	}
+	p.keys[key] = gk
+	if p.sessionLeases == nil {
+		p.sessionLeases = map[gateSessionKey]string{}
+	}
+	lk := gateSessionKey{session: gk.session, command: gk.command}
+	if prev, exists := p.sessionLeases[lk]; exists && prev != key {
+		delete(p.keys, prev)
+	}
+	p.sessionLeases[lk] = key
+}
+
+// releaseSession revokes all session-scoped proxy addresses leased to session.
+func (p *gateProxy) releaseSession(session string) {
+	if session != "" {
+		p.releaseSessions([]string{session})
+	}
+}
+
+// releaseSessions revokes all session-scoped proxy addresses leased to any id in sessions.
+// Space and remote latches are kept so confirm-writes boundaries cannot be downgraded.
+func (p *gateProxy) releaseSessions(sessions []string) {
+	if p == nil || len(sessions) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.sessionLeases) == 0 {
+		return
+	}
+	var drop map[string]struct{}
+	if len(sessions) > 1 {
+		drop = make(map[string]struct{}, len(sessions))
+		for _, s := range sessions {
+			if s != "" {
+				drop[s] = struct{}{}
+			}
+		}
+	}
+	for lk, key := range p.sessionLeases {
+		match := false
+		if drop != nil {
+			_, match = drop[lk.session]
+		} else {
+			match = sessions[0] != "" && lk.session == sessions[0]
+		}
+		if match {
+			delete(p.keys, key)
+			delete(p.sessionLeases, lk)
+		}
+	}
+}
+
+// nameAddr says which conversation the address base stands for, when it was opened for a process that did not know its
+// conversation yet (a new Codex conversation has an id only once its thread starts). An address that has one keeps it;
+// remote only latches true.
+func (p *gateProxy) nameAddr(base, session string, remote bool) {
+	if session == "" && !remote {
+		return
+	}
+	key := base[strings.LastIndex(base, "/")+1:]
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if gk, ok := p.keys[key]; ok {
+		if gk.session == "" && session != "" {
+			gk.session = session
+		}
+		if remote {
+			gk.remote = true
+		}
 		p.keys[key] = gk
 	}
 }
@@ -203,6 +391,27 @@ func (p *gateProxy) spaceSession(session string) bool {
 	return ok && session != ""
 }
 
+// markRemote latches that session carries remote-runtime confirm-writes posture.
+func (p *gateProxy) markRemote(session string) {
+	if session == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.remotes == nil {
+		p.remotes = map[string]struct{}{}
+	}
+	p.remotes[session] = struct{}{}
+}
+
+// remoteSession reports whether session was latched with remote-runtime confirm-writes posture.
+func (p *gateProxy) remoteSession(session string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.remotes[session]
+	return ok && session != ""
+}
+
 // close stops listening (tests; the node's proxy lives as long as the node).
 func (p *gateProxy) close() {
 	p.mu.Lock()
@@ -211,6 +420,8 @@ func (p *gateProxy) close() {
 		_ = p.ln.Close()
 		p.ln = nil
 	}
+	clear(p.keys)
+	clear(p.sessionLeases)
 }
 
 // grant lets c, which larkCheck let through for session and the way through says, go once through command's gate.
@@ -261,7 +472,7 @@ func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJ
 		if g.command != k.command || g.method != method || g.path != path || g.query != query {
 			continue
 		}
-		if k.space && (k.session == "" || g.session != k.session) {
+		if (k.space || k.remote) && (k.session == "" || g.session != k.session) {
 			continue
 		}
 		if g.session != "" && k.session != "" && g.session != k.session {
@@ -366,14 +577,15 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// How the call was let through, for the ledger once the API has taken it.
 	session, through := gk.session, proto.LarkLetThrough{}
+	var rewriteBody []byte
 	switch larkDecision(cfg, c) {
 	case "allow":
-		// A call larkCheck confirmed and a rule allows too (a space conversation confirms what a rule allows) was
-		// let through by the card: it uses up its grant, as a confirmed call does. In a space conversation a write
-		// goes only so: a rule's allow is not the phone's yes.
+		// A call larkCheck confirmed and a rule allows too (a space or remote runtime conversation confirms what a rule allows)
+		// was let through by the card: it uses up its grant, as a confirmed call does. In a space or remote runtime conversation
+		// a write goes only so: a rule's allow is not the phone's yes.
 		if gr, ok := p.take(gk, c.Method, c.Path, c.Query, body, isJSON); ok {
-			session, through = firstNonEmpty(gr.session, session), gr.through
-		} else if gk.space && !larkRead(c) {
+			session, through, rewriteBody = firstNonEmpty(gr.session, session), gr.through, gr.rewriteBody
+		} else if (gk.space || gk.remote || n.isRemoteRuntimeSession(session)) && !larkRead(c) {
 			gateNeedsPhone(w, command, c)
 			return
 		} else if rule, ok := firstLark(g.Rules, c); ok {
@@ -388,7 +600,20 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			gateNeedsPhone(w, command, c)
 			return
 		}
-		session, through = firstNonEmpty(gr.session, session), gr.through
+		session, through, rewriteBody = firstNonEmpty(gr.session, session), gr.through, gr.rewriteBody
+	}
+	if len(rewriteBody) > 0 {
+		body = rewriteBody
+		isJSON = true
+		c.Body = string(body)
+		if larkDecision(cfg, c) == "deny" {
+			gateRefuse(w, http.StatusForbidden, "这个操作按配置不允许（"+c.Method+" "+c.Path+"）。")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		r.Header.Del("Content-Length")
+		r.TransferEncoding = nil
 	}
 	sw := &statusWriter{ResponseWriter: w}
 	if !larkRead(c) {

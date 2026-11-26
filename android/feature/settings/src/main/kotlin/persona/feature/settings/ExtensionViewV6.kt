@@ -209,14 +209,14 @@ internal fun rowSwipes(actions: List<ExtensionRowAction>, handle: ExtensionViewH
  * slider is drawn under the row ([RowSlider]). A change on its way for more than a second shows a small spinner.
  */
 @Composable
-internal fun RowControlEnd(control: ExtensionRowControl, state: ExtensionViewState, handle: ExtensionViewHandle) {
+internal fun RowControlEnd(control: ExtensionRowControl, state: ExtensionViewState, handle: ExtensionViewHandle, rowHandlesSwitch: Boolean = false) {
     val enabled = control.disabled != true
     Row(verticalAlignment = Alignment.CenterVertically) {
         ControlSpinner(control, state)
         when (control.kind) {
             "switch" -> {
                 val on = ExtensionViewText.controlValue(control, state.controls) == "true"
-                JSwitch(on, { handle.change(control, (!on).toString()) }, enabled = enabled)
+                JSwitch(on, if (rowHandlesSwitch) null else ({ handle.change(control, (!on).toString()) }), enabled = enabled)
             }
             "stepper" -> RowStepper(control, state, handle, enabled)
         }

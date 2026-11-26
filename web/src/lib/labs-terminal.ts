@@ -5,9 +5,10 @@
 import { t } from "../i18n";
 import { checkUpdate, CONFIGURATION_VERSION, ConfigurationError, type ConfigurationDocument, type ConfigurationSource, type ConfigurationUpdate } from "./configuration/contract";
 import { readTerminalRenderer, subscribeTerminalRenderer, writeTerminalRenderer, type TerminalRenderer } from "./labs";
+import { TERMINAL_LABS_ID } from "./labs-catalog";
 
-export const TERMINAL_LABS_ID = "terminal";
-const FIELD = "renderer";
+export { TERMINAL_LABS_ID } from "./labs-catalog";
+export const TERMINAL_LABS_FIELD = "renderer";
 
 /** The revision: what is stored (another tab writing changes it too). */
 function revision(state: ReturnType<typeof readTerminalRenderer>): string {
@@ -28,7 +29,7 @@ function document(): ConfigurationDocument {
         title: t("settings-labs.terminal_group"),
         fields: [
           {
-            id: FIELD,
+            id: TERMINAL_LABS_FIELD,
             kind: "select",
             title: t("settings-labs.terminal_renderer"),
             description: t("settings-labs.terminal_renderer_hint"),
@@ -49,8 +50,8 @@ function document(): ConfigurationDocument {
         ],
       },
     ],
-    values: { [FIELD]: state.value },
-    ...(notice ? { notices: { [FIELD]: { kind: "warning", message: notice } } } : {}),
+    values: { [TERMINAL_LABS_FIELD]: state.value },
+    ...(notice ? { notices: { [TERMINAL_LABS_FIELD]: { kind: "warning", message: notice } } } : {}),
   };
 }
 
@@ -58,7 +59,7 @@ function update(u: ConfigurationUpdate): ConfigurationDocument {
   // the writer's rules (schema/configuration/README.md "Change and reset"), against what is stored now
   const refused = checkUpdate(document(), u);
   if (refused) throw refused;
-  const next = u.reset?.includes(FIELD) ? "standard" : (u.changes?.[FIELD] as TerminalRenderer);
+  const next = u.reset?.includes(TERMINAL_LABS_FIELD) ? "standard" : (u.changes?.[TERMINAL_LABS_FIELD] as TerminalRenderer);
   if (!writeTerminalRenderer(next).ok) throw new ConfigurationError("storage_failed", t("settings-labs.save_failed"));
   return document();
 }

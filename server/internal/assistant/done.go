@@ -923,7 +923,8 @@ func (s *Service) taskReplies(ctx context.Context, t Todo) (out []prompts.TaskDo
 		if !ok {
 			continue
 		}
-		earlier, items, read := s.lastTwoTurns(ctx, m.ID, a.SessionID)
+		resolved, sid, listed := s.resolveTaskSession(ctx, m.ID, a.SessionID)
+		earlier, items, read := s.lastTwoTurns(ctx, m.ID, sid)
 		if read && taskTurnAwaitingAnswer(items) {
 			return nil, false // one unfinished agent invalidates the whole task's completion evidence
 		}
@@ -940,10 +941,8 @@ func (s *Service) taskReplies(ctx context.Context, t Todo) (out []prompts.TaskDo
 				sideTurnBlocked = true
 			}
 		}
-		if text == "" {
-			if c, ok := s.session(ctx, m.ID, a.SessionID); ok {
-				text = strings.TrimSpace(c.LastText)
-			}
+		if text == "" && listed {
+			text = strings.TrimSpace(resolved.LastText)
 		}
 		if text == "" {
 			continue
@@ -1519,13 +1518,12 @@ func (s *Service) advanceFromLastReplies(ctx context.Context, t Todo) {
 			continue
 		}
 		text := ""
-		if items, read := s.lastTurnItems(ctx, m.ID, a.SessionID); read {
+		resolved, sid, listed := s.resolveTaskSession(ctx, m.ID, a.SessionID)
+		if items, read := s.lastTurnItems(ctx, m.ID, sid); read {
 			_, text = turnExchange(items)
 		}
-		if text == "" {
-			if c, ok := s.session(ctx, m.ID, a.SessionID); ok && !strings.HasSuffix(c.LastText, "…") {
-				text = strings.TrimSpace(c.LastText)
-			}
+		if text == "" && listed && !strings.HasSuffix(resolved.LastText, "…") {
+			text = strings.TrimSpace(resolved.LastText)
 		}
 		if text == "" {
 			continue

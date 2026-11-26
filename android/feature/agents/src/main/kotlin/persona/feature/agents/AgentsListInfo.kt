@@ -9,6 +9,7 @@ import android.content.res.Resources
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.resolve
+import persona.feature.chat.isCommandInputPermission
 import kotlinx.coroutines.flow.*
 import java.time.Instant
 import java.time.ZoneId
@@ -92,6 +93,7 @@ internal fun visibleAgentRequests(
  * name its agent (a Paseo card naming only the engine, [Interaction.agentDisplayName]) says only what it wants.
  */
 internal fun Interaction.cardTitle(res: Resources): String {
+    if (isCommandInputPermission) return res.getString(persona.feature.chat.R.string.chat_command_input_waiting)
     val who = agentDisplayName
     return when (kind) {
         "question" -> when {

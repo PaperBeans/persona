@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"io"
 	"net/http"
 	"slices"
@@ -58,7 +59,7 @@ func TestAudioSocketRefusalsAreTheFirstFrame(t *testing.T) {
 
 	final := "99999999-9999-4999-8999-999999999999"
 	h.hubUpload(final, 1, nil)
-	if _, err := h.engine().TranscriptionUpdate(final, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := recWrites(h.engine()).TranscriptionUpdate(final, func(t *kb.MeetingTranscription, _ kb.Recording) error {
 		t.FinalFrom = time.Now()
 		return nil
 	}); err != nil {
@@ -76,10 +77,11 @@ func TestAudioSocketRefusalsAreTheFirstFrame(t *testing.T) {
 // A trimmed recording's socket is refused transcript_expired.
 func TestAudioSocketTrimmed(t *testing.T) {
 	h := newHubFixture(t)
+	setSettings(t, h.s, func(v *Settings) { days := 14; v.RecordingTextDays = &days }) // the text is kept forever by default
 	h.hubUpload(meetingRec, 1, map[string]any{"complete": true, "duration": 60.0, "ended_at": time.Now().UTC().Format(time.RFC3339),
 		"segments": []map[string]any{{"start": 0, "end": 9, "text": "We keep the cap."}}})
 	e := h.engine()
-	if _, err := e.TranscriptionUpdate(meetingRec, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := recWrites(e).TranscriptionUpdate(meetingRec, func(t *kb.MeetingTranscription, _ kb.Recording) error {
 		t.State = kb.TranscriptionFailed
 		return nil
 	}); err != nil {
@@ -191,11 +193,11 @@ func wholeTimeline(t *testing.T, said string) {
 	}
 	var m kb.Meeting
 	waitFor(t, "the timeline in meeting.json", func() bool { // joined after ready
-		m, _, _ = h.engine().MeetingRead(meetingRec)
+		m, _, _ = recW(h.engine()).MeetingRead(meetingRec)
 		return m.Transcription != nil && m.Transcription.Timeline != nil
 	})
 	if got := m.Transcription.Timeline; len(got.Roles) != kb.MaxTimelineRoles || len(got.Speaking) != kb.MaxTimelineSpans ||
-		got.Speaking[999] != (kb.SpokenSpan{Start: 9990, End: 9995, Text: said}) {
+		got.Speaking[999] != (recordingwire.SpokenSpan{Start: 9990, End: 9995, Text: said}) {
 		t.Fatalf("the timeline has %d roles and %d spans", len(got.Roles), len(got.Speaking))
 	}
 }
@@ -228,7 +230,7 @@ func TestAudioSocketReplacedAndEnd(t *testing.T) {
 	if len(acks) == 0 || acks[len(acks)-1]["at"] != 2.0 {
 		t.Fatalf("acks: %v", acks)
 	}
-	m, _, err := h.engine().MeetingRead(meetingRec)
+	m, _, err := recW(h.engine()).MeetingRead(meetingRec)
 	if err != nil || m.Transcription.End != 2 {
 		t.Fatalf("the end: %+v %v", m.Transcription, err)
 	}
@@ -284,7 +286,7 @@ func TestAudioPut(t *testing.T) {
 	}
 	h.upload(meetingOther, 1, nil)
 	wantCode(t, put(meetingOther, "0", second, "", http.StatusConflict), codeNotHub)
-	if _, err := h.engine().TranscriptionUpdate(meetingRec, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := recWrites(h.engine()).TranscriptionUpdate(meetingRec, func(t *kb.MeetingTranscription, _ kb.Recording) error {
 		t.FinalFrom = time.Now()
 		return nil
 	}); err != nil {

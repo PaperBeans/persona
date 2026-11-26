@@ -320,9 +320,15 @@ func TestProxyOnlyTurnedOnBeforeAReplacedLinkComesBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = first.conn.Close(CloseReplaced, "replaced")
-	back := waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.Conn > st.Conn })
+	back := waitForSSHReady(t, ch, func(s Status) bool { return s.State == "connected" && s.Conn > st.Conn })
 	if back.Kind != KindProxy {
 		t.Fatalf("after the replaced link: %+v", back)
+	}
+	// The client announces the new socket before the test hub finishes its initial messages.
+	select {
+	case <-hub.links:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hub did not finish starting the replacement link")
 	}
 }
 

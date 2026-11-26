@@ -1,0 +1,168 @@
+package lark
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
+	"github.com/nwverse/persona/server/internal/proto"
+)
+
+// The pinned workbench (#1961, docs/extensions/bots.md "The workbench"). With the `workbench` switch on, the standing
+// board (board.go) is drawn as the home card (homeCard), and it is kept where the owner finds it: summoning it
+// (/home, or the workbench button every bot card then carries) posts a fresh one at the bottom of the chat, pins it,
+// takes the bot's other pins off and withdraws the card before, so there is only ever one. Between changes the board
+// already follows (a card opening or ending), it is looked at every workbenchEvery for what else it shows (the agents,
+// the Inbox, the next meeting) and redrawn only when that changed.
+
+const (
+	// workbenchEvery is how often the pinned workbench is looked at for changes the board's own triggers miss.
+	workbenchEvery = time.Minute
+	// workbenchStampMost keeps a card the workbench button is added to inside the size cards are budgeted to
+	// (the core's reportCardMaxBytes, about 24 KB): a card near it goes as it is.
+	workbenchStampMost = 22000
+)
+
+// workbenchState is what the workbench keeps in memory: whether the switch was on when last read (the posts read it
+// without a call), and the loop that looks at the pinned card.
+type workbenchState struct {
+	on   atomic.Bool
+	loop sync.Once
+}
+
+// workbenchOn notes the switch as just read: the stamp follows it, and the first time it is on the loop starts.
+func (s core) workbenchOn(f assistantwire.FeishuFeatures, ready bool) bool {
+	on := ready && f.Workbench
+	s.t.wb.on.Store(on)
+	if on {
+		s.t.wb.loop.Do(func() { go s.workbenchLoop() })
+	}
+	return on
+}
+
+func (s core) workbenchLoop() {
+	t := time.NewTicker(workbenchEvery)
+	defer t.Stop()
+	for range t.C {
+		if !s.t.wb.on.Load() || s.boardRef(context.Background()) == nil {
+			continue
+		}
+		s.boardRefresh()
+	}
+}
+
+// standingCard is what the standing board shows: the home card with the workbench on, the waiting list (the core's
+// board_rows.go) without.
+func (s core) standingCard(ctx context.Context) (card *botcard.Card, fallback, said string) {
+	if f, ready := s.feishuFeatures(ctx); s.workbenchOn(f, ready) {
+		return s.homeCard(ctx, f)
+	}
+	return s.h.BoardCard(ctx, s.t.board.clock())
+}
+
+// workbenchStamp adds a way back to the workbench to a card the bot posts or redraws, with the switch on: any card can
+// bring up the latest workbench. It is a small text button, in the card's row of links or as a line of its own at its
+// end, never beside its actions (#5317); not on a card that has a way back already (the workbench's own cards) or is
+// near its size.
+func (s core) workbenchStamp(ctx context.Context, c *botcard.Card) *botcard.Card {
+	if c == nil || !s.t.wb.on.Load() {
+		return c
+	}
+	js := c.JSON()
+	if strings.Contains(js, `"a":"nav"`) || len(js) > workbenchStampMost {
+		return c
+	}
+	return c.AppendToLinks(botcard.TextBtn(wbT(s.botLang(ctx), "stamp_home"), map[string]any{"a": "nav", "to": "home"}))
+}
+
+// summonWorkbench posts a fresh workbench at the bottom of the chat, pins it as the only pin of the bot's, and
+// withdraws the one before (too old to withdraw, it says where the workbench went). It is the board from then on.
+func (s core) summonWorkbench(ctx context.Context) {
+	p := &s.t.board
+	p.run.Lock()
+	defer p.run.Unlock()
+	card, fallback, said := s.standingCard(ctx)
+	if !s.t.wb.on.Load() {
+		return // switched off meanwhile
+	}
+	old := s.boardRef(ctx)
+	mid, err := s.botPostTo(ctx, feishuTarget{}, "", card, fallback, "")
+	if err != nil {
+		s.logf("bots: workbench: %v", err)
+		return
+	}
+	s.workbenchPin(ctx, mid)
+	s.setBoardRef(ctx, &botBoardRef{MessageID: mid, At: p.clock()})
+	p.written.id, p.written.rows = mid, said
+	if old != nil && old.MessageID != mid {
+		s.workbenchRetire(ctx, old.MessageID)
+	}
+}
+
+// workbenchPin pins the workbench and takes the bot's other pins off, so an older workbench this state lost track of
+// does not stay pinned. A pin that fails leaves the card where it is: still the workbench.
+func (s core) workbenchPin(ctx context.Context, mid string) {
+	if err := s.appCall(ctx, assistantwire.FeishuPin, map[string]any{"message_id": mid, "exclusive": true}, nil); err != nil {
+		s.logf("bots: workbench pin: %v", err)
+	}
+}
+
+// workbenchRetire withdraws a workbench that is no longer the one; one Feishu no longer lets the bot withdraw is
+// redrawn as a line that says where the workbench went.
+func (s core) workbenchRetire(ctx context.Context, mid string) {
+	if err := s.appCall(ctx, assistantwire.FeishuRecall, map[string]any{"message_id": mid}, nil); err == nil {
+		return
+	}
+	l := s.botLang(ctx)
+	stub := botcard.NewCard(wbT(l, "desk_moved_title"), botcard.Grey, wbT(l, "desk_moved_title")).Markdown(wbT(l, "desk_moved"))
+	if err := s.botUpdateCard(ctx, mid, stub); err != nil {
+		s.logf("bots: workbench retire: %v", err)
+	}
+}
+
+// workbenchRefresh redraws the workbench now (its Refresh button), whatever it said before.
+func (s core) workbenchRefresh(ctx context.Context) {
+	p := &s.t.board
+	p.run.Lock()
+	defer p.run.Unlock()
+	ref := s.boardRef(ctx)
+	if ref == nil {
+		return
+	}
+	if _, err := s.boardPut(ctx, ref, false); err != nil {
+		s.logf("bots: workbench refresh: %v", err)
+	}
+}
+
+// workbenchBringCard posts a waiting question or approval again at the bottom of the chat, its old card withdrawn:
+// the home card's "Answer" button, for a card far up the chat.
+func (s core) workbenchBringCard(ctx context.Context, id string) {
+	var ix proto.Interaction
+	found := false
+	for _, p := range s.h.VisiblePending() {
+		if p.ID == id {
+			ix, found = p, true
+			break
+		}
+	}
+	if ended, _ := s.h.AskState(id); !found || ended {
+		return
+	}
+	old := ""
+	s.book(ctx, func(b chatBook) {
+		if c, ok := b.Card(id); ok {
+			old = c.MessageID
+		}
+		b.KeepCard(id, nil)
+	})
+	if old != "" {
+		if err := s.appCall(ctx, assistantwire.FeishuRecall, map[string]any{"message_id": old}, nil); err != nil {
+			s.logf("bots: workbench: withdraw a card: %v", err)
+		}
+	}
+	s.postInteractionCard(ctx, ix)
+}

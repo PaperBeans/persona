@@ -1,9 +1,13 @@
 package node
 
 import (
+	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func herdrDeletionFixture(t *testing.T, linked bool) (worktreeFixture, string, string) {
@@ -58,6 +62,209 @@ func herdrDeletionPreview(t *testing.T, w worktreeFixture, id string, closeOnly 
 		t.Fatal(res)
 	}
 	return str(res["preview_token"])
+}
+
+func TestHerdrUnusedCleanupPreviewCanBeSurrenderedByItsDevice(t *testing.T) {
+	w, id, path := herdrDeletionFixture(t, true)
+	preview := map[string]any{"kind": "herdr", "workspace_id": id, "preview": true, "preview_device": "phone"}
+	result, err := request(t, w.n, "worktree.delete", preview)
+	if err != nil || str(result["preview_token"]) == "" {
+		t.Fatalf("preview: %v %v", result, err)
+	}
+	token := str(result["preview_token"])
+	check := map[string]any{"kind": "herdr", "workspace_id": id, "preview_token": token, "preview_device": "phone", "reconcile": true}
+	got, err := request(t, w.n, "worktree.delete", check)
+	if err != nil || got["state"] != "present" || got["can_revoke_preview"] != true || got["removed"] != false {
+		t.Fatalf("capability: %v %v", got, err)
+	}
+	revoke := maps.Clone(check)
+	revoke["revoke_preview"] = true
+	for key, value := range map[string]any{"workspace_id": "another", "preview_token": "other", "preview_device": "other", "reconcile": false, "force": true,
+		"delete_branch": true, "close_only": true, "preview": true, "kind": "orca"} {
+		wrong := maps.Clone(revoke)
+		wrong[key] = value
+		if result, err := request(t, w.n, "worktree.delete", wrong); err == nil {
+			t.Errorf("%s override accepted: %v", key, result)
+		}
+	}
+	if result, err := (&Node{}).herdrWorktreeDelete(t.Context(), id, workspaceDeletionInput{Token: token, Requester: "phone", Reconcile: true, RevokePreview: true}); err == nil {
+		t.Fatalf("another node accepted token: %v", result)
+	}
+	ownerless := maps.Clone(revoke)
+	delete(ownerless, "preview_device")
+	if result, err := request(t, w.n, "worktree.delete", ownerless); err == nil {
+		t.Fatalf("missing device accepted: %v", result)
+	}
+	for _, body := range []map[string]any{revoke, revoke, check} {
+		result, err := request(t, w.n, "worktree.delete", body)
+		if err != nil || result["workspace_id"] != id || result["removed"] != false || result["state"] != "preview_revoked" || result["revoked_preview_token"] != token {
+			t.Fatalf("revocation receipt: %v %v", result, err)
+		}
+	}
+	for _, device := range []string{"another-device", ""} {
+		read := maps.Clone(check)
+		read["preview_device"] = device
+		result, err := request(t, w.n, "worktree.delete", read)
+		if err != nil || result["state"] != "present" || result["revoked_preview_token"] != nil || result["can_revoke_preview"] != nil {
+			t.Fatalf("another bearer learned private revocation state: %v %v", result, err)
+		}
+		delete(read, "reconcile")
+		if result, err := request(t, w.n, "worktree.delete", read); err == nil {
+			t.Fatalf("another bearer used a surrendered token: %v", result)
+		}
+	}
+	confirm := maps.Clone(check)
+	delete(confirm, "reconcile")
+	confirm["force"] = true
+	if result, err := request(t, w.n, "worktree.delete", confirm); err == nil {
+		t.Fatalf("retired token accepted: %v", result)
+	}
+	if err := os.WriteFile(filepath.Join(path, "app.txt"), []byte("new uncommitted change\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = request(t, w.n, "worktree.delete", preview)
+	if err != nil || str(result["preview_token"]) == "" || result["preview_token"] == token || result["dirty"] != float64(1) {
+		t.Fatalf("independent dirty preview: %v %v", result, err)
+	}
+	delete(confirm, "force")
+	confirm["preview_token"] = result["preview_token"]
+	if result, err := request(t, w.n, "worktree.delete", confirm); err == nil {
+		t.Fatalf("fresh dirty preview removed without a fresh force decision: %v", result)
+	}
+	if got := w.f.trace("worktree.remove", "workspace.close"); len(got) != 0 {
+		t.Fatalf("preview or revocation changed checkout: %v", got)
+	}
+	token = herdrDeletionPreview(t, w, id, false) // A preview issued through an older hub has no device identity.
+	revoke["preview_token"] = token
+	result, err = request(t, w.n, "worktree.delete", revoke)
+	if err != nil || result["state"] != "present" || result["can_revoke_preview"] != nil || result["revoked_preview_token"] != nil {
+		t.Fatalf("old hub token gained revocation capability: %v %v", result, err)
+	}
+	result, err = request(t, w.n, "worktree.delete", preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := str(result["preview_token"])
+	composerDeletions.Lock()
+	composerDeletions.previews[expired].created = time.Now().Add(-25 * time.Hour)
+	composerDeletions.Unlock()
+	revoke["preview_token"] = expired
+	if result, err := request(t, w.n, "worktree.delete", revoke); err == nil {
+		t.Fatalf("expired token accepted: %v", result)
+	}
+}
+
+func TestHerdrCleanupSurrenderRacesAtNativeDispatch(t *testing.T) {
+	for _, method := range []string{"session.snapshot", "worktree.remove"} {
+		t.Run(method, func(t *testing.T) {
+			w, id, path := herdrDeletionFixture(t, true)
+			result, err := request(t, w.n, "worktree.delete", map[string]any{"kind": "herdr", "workspace_id": id, "preview": true, "preview_device": "phone"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			token := str(result["preview_token"])
+			confirm := map[string]any{"kind": "herdr", "workspace_id": id, "preview_token": token, "preview_device": "other-full-client"}
+			revoke := maps.Clone(confirm)
+			revoke["reconcile"], revoke["revoke_preview"], revoke["preview_device"] = true, true, "phone"
+			// Keep a live checkout when the native side received the request but its result is unknown.
+			w.f.handle("worktree.remove", func(map[string]any) any { return herdrFail{Code: "test_ambiguous", Message: "synthetic lost reply"} })
+			entered, proceed := make(chan struct{}), make(chan struct{})
+			var gated atomic.Bool
+			w.f.after(func(c herdrCall) {
+				if c.Method == method && gated.CompareAndSwap(false, true) {
+					close(entered)
+					<-proceed
+				}
+			})
+			finished := make(chan error, 1)
+			go func() { _, err := request(t, w.n, "worktree.delete", confirm); finished <- err }()
+			select {
+			case <-entered:
+			case <-time.After(20 * time.Second):
+				close(proceed)
+				<-finished
+				t.Fatal("confirmation did not reach the native dispatch boundary")
+			}
+			// While the serial native host is serving the delete, it may not answer its inventory.
+			checkCtx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+			result, err = requestCtx(t, checkCtx, w.n, "worktree.delete", revoke)
+			cancel()
+			close(proceed)
+			confirmErr := <-finished
+			if confirmErr == nil || err != nil {
+				t.Fatalf("confirmation %v, revoke %v %v", confirmErr, result, err)
+			}
+			if method == "session.snapshot" {
+				if result["state"] != "preview_revoked" || result["revoked_preview_token"] != token {
+					t.Fatalf("an unspent token was not fenced: %v", result)
+				}
+			} else if (result["state"] != "present" && result["state"] != "unknown") || result["can_revoke_preview"] != nil || result["revoked_preview_token"] != nil {
+				t.Fatalf("an already-dispatched token was surrendered: %v", result)
+			}
+			if _, err := request(t, w.n, "worktree.delete", confirm); err == nil {
+				t.Fatal("late confirm accepted")
+			}
+			recheck, err := request(t, w.n, "worktree.delete", revoke)
+			expected := "preview_revoked"
+			if method == "worktree.remove" {
+				expected = "present"
+			}
+			if err != nil || recheck["state"] != expected || recheck["can_revoke_preview"] != nil {
+				t.Fatalf("repeated check %v %v", recheck, err)
+			}
+			want := 0
+			if method == "worktree.remove" {
+				want = 1
+			}
+			if got := w.f.trace("worktree.remove", "workspace.close"); len(got) != want {
+				t.Fatalf("native mutations %v, want %d", got, want)
+			}
+			if _, err := os.Stat(filepath.Join(path, "app.txt")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestHerdrCleanupPreservesCrossDeviceAndMasterConfirmation(t *testing.T) {
+	for _, device := range []string{"other-full-client", ""} {
+		t.Run(map[bool]string{true: "master", false: "another-device"}[device == ""], func(t *testing.T) {
+			w, id, _ := herdrDeletionFixture(t, true)
+			p, err := request(t, w.n, "worktree.delete", map[string]any{"kind": "herdr", "workspace_id": id, "preview": true, "preview_device": "phone"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := map[string]any{"kind": "herdr", "workspace_id": id, "preview_token": p["preview_token"], "reconcile": true}
+			if device != "" {
+				body["preview_device"] = device
+			}
+			read, err := request(t, w.n, "worktree.delete", body)
+			if err != nil || read["state"] != "present" || read["can_revoke_preview"] != nil || read["revoked_preview_token"] != nil {
+				t.Fatalf("ordinary reconciliation: %v %v", read, err)
+			}
+			body["revoke_preview"] = true
+			if result, err := request(t, w.n, "worktree.delete", body); err == nil {
+				t.Fatalf("non-owner surrendered preview: %v", result)
+			}
+			delete(body, "revoke_preview")
+			delete(body, "reconcile")
+			result, err := request(t, w.n, "worktree.delete", body)
+			if err != nil || result["removed"] != true {
+				t.Fatalf("ordinary confirmation: %v %v", result, err)
+			}
+			body["reconcile"] = true
+			for _, requester := range []string{"phone", device} {
+				body["preview_device"] = requester
+				result, err = request(t, w.n, "worktree.delete", body)
+				if err != nil || result["state"] != "removed" || result["can_revoke_preview"] != nil {
+					t.Fatalf("completed readback: %v %v", result, err)
+				}
+			}
+			if got := w.f.trace("worktree.remove", "workspace.close"); len(got) != 1 {
+				t.Fatalf("native mutations: %v", got)
+			}
+		})
+	}
 }
 
 func TestHerdrWorkspaceCloseKeepsMainCheckoutAndConsumesConfirmation(t *testing.T) {

@@ -222,6 +222,20 @@ func TestCollectItemsConnectorOwnership(t *testing.T) {
 	if !slices.Equal(src.titles, []string{"https://example.com/doc", "https://example.com/linked"}) {
 		t.Errorf("title lookups crossed owners: %v", src.titles)
 	}
+
+	// With a canonical key, another source's item is merged instead of skipped: its owner and ID stay, the newer
+	// revision's title replaces the old one, and both sources are kept. Without one (above) it is still skipped.
+	canonical := &connectorItemSource{items: []kbwire.Item{
+		{Kind: KindEvent, ID: "other", Title: "Merged title", CanonicalKey: "example:other", Revision: 2,
+			Sources: []kbwire.SourceRef{{Channel: "example", Entry: "source"}}},
+	}}
+	if err := e.CollectItems(context.Background(), canonical, "example"); err != nil {
+		t.Fatal(err)
+	}
+	if it, _ := e.Store.Item(KindEvent, "other"); it.Source != "other" || it.Title != "Merged title" || len(it.Sources) != 2 ||
+		it.Sources[0].Channel != "other" || it.Sources[1].Channel != "example" {
+		t.Errorf("canonical merge across owners: %+v", it)
+	}
 }
 
 type ownedArchiveSource struct {

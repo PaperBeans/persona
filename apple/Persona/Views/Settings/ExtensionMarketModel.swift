@@ -260,12 +260,12 @@ extension APIClient {
 
     func installExtension(preview: ExtensionPreview) async throws -> HubExtensionDetail {
         try JSON.decoder.decode(HubExtensionDetail.self, from: try await request(
-            "POST", extensionPath("/-/install"), body: ExtensionInstallRequest(preview: preview), timeout: 120))
+            "POST", extensionPath("/-/install"), query: Self.entryListsQuery, body: ExtensionInstallRequest(preview: preview), timeout: 120))
     }
 
     func upgradeExtension(_ id: String, preview: ExtensionPreview) async throws -> HubExtensionDetail {
         try JSON.decoder.decode(HubExtensionDetail.self, from: try await request(
-            "POST", extensionPath("/\(id)/-/upgrade"), body: ExtensionInstallRequest(preview: preview), timeout: 120))
+            "POST", extensionPath("/\(id)/-/upgrade"), query: Self.entryListsQuery, body: ExtensionInstallRequest(preview: preview), timeout: 120))
     }
 
     @discardableResult func uninstallExtension(_ id: String, cascade: Bool = false, members: Bool = false) async throws -> ExtensionRemovalResult {

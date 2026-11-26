@@ -153,9 +153,18 @@ private struct ExtensionStateDot: View {
 /// secrets (set here, never shown again), what it contributes and what it may do. A plugin written in hub.json is only
 /// looked at here.
 struct ExtensionDetailView: View {
+    private struct EditingSecret: Identifiable {
+        var secret: ExtensionSecret
+        var title: String
+        var id: String { secret.id }
+    }
+
     @State private var page: ExtensionModel
     @FocusState private var focusedNumber: String?
-    @State private var editingSecret: ExtensionSecret?
+    @State private var editingSecret: EditingSecret?
+    /// An entry the user asked to remove: confirmed first, kept during dismissal so the title cannot blank.
+    @State private var removingEntry: PendingEntryRemoval?
+    @State private var removeEntryPresented = false
     /// An Always rule the user asked to remove: confirmed first.
     @State private var declarations = ExtensionTextContributions()
     @State private var connectorInbox: ExtensionConnectorsModel
@@ -275,12 +284,32 @@ struct ExtensionDetailView: View {
                 EmptyView()
             }
         }
-        .sheet(item: $editingSecret) { secret in
+        .accessibleConfirmationDialog(
+            removingEntry.map { String(localized: "Remove “\($0.title)”?") } ?? "",
+            isPresented: $removeEntryPresented,
+            titleVisibility: .visible,
+            hasCancel: true
+        ) {
+            Button(role: .destructive) {
+                if let target = removingEntry {
+                    page.removeEntry(from: target.listName, key: target.key)
+                }
+                removeEntryPresented = false
+            } label: {
+                Text("Remove entry").lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .accessibilityIdentifier("plugin-entry-remove-confirm")
+            Button("Cancel", role: .cancel) { removeEntryPresented = false }
+                .accessibilityIdentifier("plugin-entry-remove-cancel")
+        } message: {
+            Text("The entry and its saved secret are deleted when you save.")
+        }
+        .sheet(item: $editingSecret) { editing in
             // Closed by clearing the item it is shown for, so the page and the sheet cannot disagree about whether it is
             // open (tapping the same secret again must open it).
-            ExtensionSecretSheet(secret: secret, save: { await page.setSecret(secret.name, value: $0) },
-                              saveReference: { await page.setSecretReference(secret.name, reference: $0) },
-                              clear: { await page.clearSecret(secret.name) }, close: { editingSecret = nil })
+            ExtensionSecretSheet(secret: editing.secret, title: editing.title, save: { await page.setSecret(editing.secret.name, value: $0) },
+                                 saveReference: { await page.setSecretReference(editing.secret.name, reference: $0) },
+                                 clear: { await page.clearSecret(editing.secret.name) }, close: { editingSecret = nil })
         }
         .task { await page.load() }
         // A launcher field's choices (format launcher): the hub asks every machine for them, so apart from the page.
@@ -345,7 +374,7 @@ struct ExtensionDetailView: View {
                 let line = Text(String(localized: "Still needs: \(ExtensionText.list(needs))")).font(Theme.Font.label).foregroundStyle(Theme.caution)
                 if let d = page.detail, !d.readOnly, let target = ExtensionText.setupSecret(needs: needs, secrets: d.secrets) {
                     // What is missing is a secret to set here: the line opens it (#8853).
-                    Button { editingSecret = target } label: {
+                    Button { editingSecret = EditingSecret(secret: target, title: ExtensionText.secretSheetTitle(target)) } label: {
                         HStack(spacing: Theme.Space.xs) {
                             line
                             ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong).foregroundStyle(Theme.caution)
@@ -370,9 +399,13 @@ struct ExtensionDetailView: View {
         return [ExtensionText.state(p), page.managerName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    private func fixedSecrets(_ d: HubExtensionDetail) -> [ExtensionSecret] {
+        d.secrets.filter { !$0.isEntrySecret }
+    }
+
     private func hasConfiguration(_ d: HubExtensionDetail) -> Bool {
-        auth != nil || !d.ui.isEmpty || !connectorInbox.connectors.isEmpty || d.readOnly || !d.form.isEmpty || !d.secrets.isEmpty
-            || VoiceTimbreSection.shows(d.plugin, manager: page.manager)
+        auth != nil || !d.ui.isEmpty || !connectorInbox.connectors.isEmpty || d.readOnly || !d.form.isEmpty || !fixedSecrets(d).isEmpty
+            || (AppModel.shared.voice?.showsExtensionSettings(d.plugin, manager: page.manager) ?? false)
     }
 
     @ViewBuilder private func configuration(_ d: HubExtensionDetail) -> some View {
@@ -380,8 +413,8 @@ struct ExtensionDetailView: View {
             ExtensionAuthSection(auth: auth, enabled: d.plugin.enabled ?? true, model: signIn)
         }
         // The voice extension: the voice this device's calls speak with (#2411), whoever's settings the rest are.
-        if VoiceTimbreSection.shows(d.plugin, manager: page.manager) {
-            VoiceTimbreSection(extensionID: d.plugin.id, group: AppModel.shared.api?.group ?? "")
+        if let voice = AppModel.shared.voice, voice.showsExtensionSettings(d.plugin, manager: page.manager) {
+            voice.extensionSettings(extensionID: d.plugin.id, group: AppModel.shared.api?.group ?? "")
         }
         if d.readOnly {
             Section {
@@ -395,9 +428,11 @@ struct ExtensionDetailView: View {
         }
         connectorSections(d)
         if !d.readOnly && !d.form.isEmpty { form(d) }
-        if !d.readOnly && !d.secrets.isEmpty { secrets(d) }
+        let fixed = fixedSecrets(d)
+        if !d.readOnly && !fixed.isEmpty { secrets(fixed) }
         SecretProviderSections(users: d.secretUsers, rules: d.handoffRules, editable: !d.readOnly) { await page.removeHandoffRule($0.id) }
         if !d.readOnly && !d.form.isEmpty {
+            let plainEmpty = d.form.allSatisfy { $0.type == "object" || $0.isEntryList }
             Section {
                 FormAction {
                     Button { Task { await page.save() } } label: {
@@ -410,6 +445,8 @@ struct ExtensionDetailView: View {
                     .disabled(!page.canSave)
                     .accessibilityIdentifier("plugin-save")
                 }
+            } footer: {
+                if plainEmpty { formFooter(d) }
             }
         }
     }
@@ -420,7 +457,7 @@ struct ExtensionDetailView: View {
         let ui = auth?.page.map { page in d.ui.filter { $0.id != page } } ?? d.ui
         if !ui.isEmpty {
             Section {
-                ForEach(ui) { place in
+                ForEach(ui, id: \.scopedID) { place in
                     NavigationLink(value: SettingsPage.pluginPage(plugin: d.plugin.id, ui: place.id, title: place.title, manager: page.manager)) {
                         Label { Text(place.title).lineLimit(1) } icon: { ThemedIcon(Theme.Icon.pluginPage) }
                     }
@@ -473,26 +510,50 @@ struct ExtensionDetailView: View {
         }
     }
 
-    private func form(_ d: HubExtensionDetail) -> some View {
-        Group {
-            Section {
-                ForEach(d.form.filter { $0.type != "object" }) { f in
-                    ExtensionFieldRow(field: f, path: [f.name], page: page, templates: declarations.templates, numberFocus: $focusedNumber)
+    @ViewBuilder private func formFooter(_ d: HubExtensionDetail) -> some View {
+        if page.formError != nil || ExtensionText.saveFooter(d.form) != nil {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                // The extension's own word on settings it refused (#5906), where Save is.
+                if let e = page.formError {
+                    Text(e).foregroundStyle(Theme.danger).accessibilityIdentifier("plugin-form-refused")
                 }
-            } header: {
-                SettingsHeading(String(localized: "Settings"))
-            } footer: {
-                if page.formError != nil || ExtensionText.saveFooter(d.form) != nil {
-                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        // The extension's own word on settings it refused (#5906), where Save is.
-                        if let e = page.formError {
-                            Text(e).foregroundStyle(Theme.danger).accessibilityIdentifier("plugin-form-refused")
-                        }
-                        if let footer = ExtensionText.saveFooter(d.form) { Text(footer) }
+                if let footer = ExtensionText.saveFooter(d.form) { Text(footer) }
+            }
+        }
+    }
+
+    private func form(_ d: HubExtensionDetail) -> some View {
+        let plain = d.form.filter { $0.type != "object" && !$0.isEntryList }
+        let entryLists = d.form.filter(\.isEntryList)
+        let groups = d.form.filter { $0.type == "object" }
+        return Group {
+            if !plain.isEmpty {
+                Section {
+                    ForEach(plain) { f in
+                        ExtensionFieldRow(field: f, path: [f.name], page: page, templates: declarations.templates, numberFocus: $focusedNumber)
                     }
+                } header: {
+                    SettingsHeading(String(localized: "Settings"))
+                } footer: {
+                    formFooter(d)
                 }
             }
-            ForEach(d.form.filter { $0.type == "object" }) { group in
+            ForEach(entryLists) { listField in
+                ExtensionEntryListSection(
+                    field: listField,
+                    page: page,
+                    templates: declarations.templates,
+                    numberFocus: $focusedNumber,
+                    onSecret: { secret, entryTitle in
+                        editingSecret = EditingSecret(secret: secret, title: ExtensionText.secretSheetTitle(secret, fallbackEntryTitle: entryTitle))
+                    },
+                    onRequestRemove: { pending in
+                        removingEntry = pending
+                        removeEntryPresented = true
+                    }
+                )
+            }
+            ForEach(groups) { group in
                 Section {
                     ForEach(group.fields ?? []) { f in
                         ExtensionFieldRow(field: f, path: [group.name, f.name], page: page, templates: declarations.templates, numberFocus: $focusedNumber)
@@ -506,10 +567,10 @@ struct ExtensionDetailView: View {
         }
     }
 
-    private func secrets(_ d: HubExtensionDetail) -> some View {
+    private func secrets(_ secrets: [ExtensionSecret]) -> some View {
         Section {
-            ForEach(d.secrets) { s in
-                Button { editingSecret = s } label: {
+            ForEach(secrets) { s in
+                Button { editingSecret = EditingSecret(secret: s, title: ExtensionText.secretSheetTitle(s)) } label: {
                     LabeledContent {
                         Text(ExtensionText.secretState(s))
                             .foregroundStyle(s.set || s.required != true ? Color.secondary : Theme.caution)
@@ -618,7 +679,7 @@ struct ExtensionDetailView: View {
 
 /// One field of a plugin's form, by its type: a text field, a number, a switch, a choice, a list of texts or of
 /// choices. Its title above, its description and the hub's word on it below.
-private struct ExtensionFieldRow: View {
+struct ExtensionFieldRow: View {
     @Environment(AppModel.self) private var model
     var field: ExtensionField
     var path: [String]
@@ -649,7 +710,9 @@ private struct ExtensionFieldRow: View {
         .modifier(ExtensionFieldIdentifier(id: field.items?.format == "machine" ? nil : identifier))
     }
 
-    private var identifier: String { "plugin-field-\(path.joined(separator: "."))" }
+    private var fieldKey: String { ExtensionModel.fieldPath(path) }
+
+    private var identifier: String { "plugin-field-\(fieldKey)" }
 
     private var title: String { field.required == true && field.default == nil ? String(localized: "\(field.label) (required)") : field.label }
 
@@ -697,7 +760,7 @@ private struct ExtensionFieldRow: View {
                         TextField(placeholder, text: numberBinding)
                             .keyboardType(field.type == "integer" ? .numberPad : .decimalPad)
                             #if os(iOS)
-                            .focused(numberFocus, equals: path.joined(separator: "."))
+                            .focused(numberFocus, equals: fieldKey)
                             #endif
                         if field.type == "integer" {
                             // The hub's step only affects these buttons; typing keeps its own value.
@@ -744,14 +807,14 @@ private struct ExtensionFieldRow: View {
         guard ExtensionIntegerStepper.canStep(field, current: page.value(path)?.double, up: up) else { return nil }
         return {
             let next = ExtensionIntegerStepper.next(field, current: page.value(path)?.double, up: up)
-            page.numberText[path.joined(separator: ".")] = nil
+            page.numberText[fieldKey] = nil
             page.set(.number(next), at: path)
         }
     }
 
     /// A number as typed: kept as text until it reads as one (ExtensionModel.numberProblems), then the value.
     private var numberBinding: Binding<String> {
-        let key = path.joined(separator: ".")
+        let key = fieldKey
         return Binding(get: { page.numberText[key] ?? page.value(path)?.string ?? "" }, set: { text in
             page.numberText[key] = text
             let t = text.trimmingCharacters(in: .whitespaces)
@@ -993,6 +1056,7 @@ private struct ExtensionListField: View {
 /// Sets one of a plugin's secrets: typed in hidden, saved to the hub, never shown again; one set can be cleared.
 private struct ExtensionSecretSheet: View {
     var secret: ExtensionSecret
+    var title: String
     var save: (String) async -> ExtensionSecretSave
     /// Saves a provider's reference in its place, where the hub takes one (`extension_secret_references`).
     var saveReference: (String) async -> ExtensionSecretSave
@@ -1004,9 +1068,10 @@ private struct ExtensionSecretSheet: View {
     @State private var byReference: Bool
     @State private var busy = false
 
-    init(secret: ExtensionSecret, save: @escaping (String) async -> ExtensionSecretSave,
+    init(secret: ExtensionSecret, title: String? = nil, save: @escaping (String) async -> ExtensionSecretSave,
          saveReference: @escaping (String) async -> ExtensionSecretSave, clear: @escaping () async -> Void, close: @escaping () -> Void) {
         self.secret = secret
+        self.title = title ?? secret.title
         self.save = save
         self.saveReference = saveReference
         self.clear = clear
@@ -1062,7 +1127,7 @@ private struct ExtensionSecretSheet: View {
                 }
             }
             .themedPage()
-            .navigationTitle(secret.title)
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: value) { if refusal != nil { refusal = nil } }
             .sheetCancel(unsaved: !value.isEmpty) { close() }
@@ -1104,9 +1169,15 @@ private struct SecretProviderSections: View {
         if !users.isEmpty {
             Section {
                 ForEach(users) { u in
+                    let hasEntryTitle = u.entryTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     VStack(alignment: .leading, spacing: Theme.Space.lines) {
-                        Text(verbatim: label(u)).lineLimit(1)
-                        Text(verbatim: u.reference).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Text(verbatim: ExtensionText.secretUserLabel(u, machineName: machineName))
+                            .lineLimit(2)
+                        Text(verbatim: ExtensionText.secretUserDetail(u))
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(hasEntryTitle ? nil : 1)
+                            .truncationMode(.middle)
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -1160,12 +1231,4 @@ private struct SecretProviderSections: View {
     }
 
     private func machineName(_ id: String) -> String { model.machines.first { $0.id == id }?.name ?? id }
-
-    private func label(_ u: ExtensionSecretUser) -> String {
-        if u.kind == "launcher" {
-            let name = u.launcherName ?? u.launcher ?? ""
-            return u.machine.map { String(localized: "\(name) key on \(machineName($0))") } ?? String(localized: "\(name) key")
-        }
-        return "\(u.extensionName ?? u.extension ?? "") › \(u.secretTitle ?? u.secret ?? "")"
-    }
 }

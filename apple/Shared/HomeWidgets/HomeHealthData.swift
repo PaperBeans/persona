@@ -35,7 +35,7 @@ nonisolated enum HomeIntakeClock {
         let calendar = calendar(value.zone)
         let day = value.days.last?.date ?? key(now, zone: value.zone)
         let start = HomeDays.date(day, calendar: calendar) ?? calendar.startOfDay(for: now)
-        return .init(supported: true, day: day, zone: value.zone,
+        return .init(items: value.items, supported: true, day: day, zone: value.zone,
                      nextDay: HomeDays.nextMidnight(after: start, calendar: calendar).timeIntervalSince1970,
                      water: .init(today: value.water.today, goal: Double(value.water.goal)),
                      protein: .init(today: value.protein.today, goal: Double(value.protein.goal)),

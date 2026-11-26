@@ -8,9 +8,7 @@
   "details": "详情",
   "memory": "内存",
   "load": "负载",
-  "disk": "磁盘",
   "cores_other": "{count} 核",
-  "per_core": "每核 {value}",
   "processes_memory": "占用内存最多的程序",
   "processes_cpu": "占用 CPU 最多的程序",
   "processes_loading": "正在查看是什么在占用这台电脑…",
@@ -40,7 +38,6 @@
   "stop_failed_item": "「{title}」没有停掉：{error}",
   "handoff": "交接到其他电脑",
   "volume_used": "{used} / {total} · {percent}",
-  "disk_free": "剩余 {size}",
   "disk_loading": "正在查看是什么占用了磁盘…",
   "folders_title": "个人文件夹里最大的",
   "folders_none": "没有找到较大的文件夹。",
@@ -156,5 +153,8 @@
   "handoff_confirm_body_other": "把 {source} 上的 {count} 项工作交给 {target}：",
   "handoff_confirm_note": "Persona 会在主对话里处理并告诉你结果；新的 Agent 开始后才停掉 {source} 上原来的。",
   "handoff_confirm": "发给 Persona",
-  "mismatch_resolved": "这台电脑上的 Persona 现在和 hub 是同一次部署了。"
+  "mismatch_resolved": "这台电脑上的 Persona 现在和 hub 是同一次部署了。",
+  "mismatch_hosted_managers": "重新部署会更新共用的 personad 程序，同机助手（{names}）会在空闲后平滑重启。",
+  "deploy_done_pending_restart": "同机助手（{names}）当前正忙，空闲后会自动重启切换到新版本。",
+  "redeploy_confirm_managers": "同机助手（{names}）共用这台电脑上的 personad，更新后会在空闲时平滑重启。"
 }

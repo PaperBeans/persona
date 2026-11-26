@@ -1,13 +1,13 @@
 package recording
 
 import (
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // While Persona speaks a sentence that may be its echo waits (and those after it, in order); when the span closes
@@ -43,9 +43,9 @@ func TestHubEchoHoldBack(t *testing.T) {
 	if got := h.hubEcho(meetingRec); !slices.Equal(got, []bool{false, true, false}) {
 		t.Fatalf("the hub's transcript's echo marks %v (%q)", got, h.hubTexts(meetingRec))
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
 	if tl := m.Transcription.Timeline; tl == nil || len(tl.Speaking) != 1 ||
-		tl.Speaking[0] != (kb.SpokenSpan{Start: 1.8, End: 3.2, Text: "Sure. " + mixedLines[1].text}) {
+		tl.Speaking[0] != (recordingwire.SpokenSpan{Start: 1.8, End: 3.2, Text: "Sure. " + mixedLines[1].text}) {
 		t.Fatalf("the timeline: %+v", m.Transcription.Timeline)
 	}
 }
@@ -83,7 +83,7 @@ func TestHubEchoSpanTimesOut(t *testing.T) {
 		t.Fatalf("echo marks %v", got)
 	}
 	// The span assumed for the hold is not the phone's: meeting.json's timeline (the final pass's) never has it.
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
 	if tl := m.Transcription.Timeline; tl != nil && len(tl.Speaking) > 0 {
 		t.Fatalf("an assumed span in the timeline: %+v", tl.Speaking)
 	}
@@ -129,8 +129,8 @@ func TestHubEchoSpanLongerThanTheHold(t *testing.T) {
 	if got := h.hubEcho(meetingRec); !slices.Equal(got, []bool{false, true, true, false}) {
 		t.Fatalf("echo marks %v", got)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
-	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []kb.SpokenSpan{{Start: 1.9, End: 4.8, Text: answer}}) {
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
+	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []recordingwire.SpokenSpan{{Start: 1.9, End: 4.8, Text: answer}}) {
 		t.Fatalf("the timeline: %+v", m.Transcription.Timeline)
 	}
 	if h.runHas(meetingRec, func(r *hubRun) bool { return r.openFrom != nil }) {
@@ -169,8 +169,8 @@ func TestHubEchoNextAnswerEndsAnAssumedSpan(t *testing.T) {
 	if got := h.hubEcho(meetingRec); !slices.Equal(got, []bool{false, true, true, false}) {
 		t.Fatalf("echo marks %v", got)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
-	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []kb.SpokenSpan{{Start: 3.8, End: 5.1, Text: lines[2].text}}) {
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
+	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []recordingwire.SpokenSpan{{Start: 3.8, End: 5.1, Text: lines[2].text}}) {
 		t.Fatalf("the timeline: %+v", m.Transcription.Timeline)
 	}
 }
@@ -203,8 +203,8 @@ func TestHubEchoSpanRepairedByTheTimeline(t *testing.T) {
 	if got := back.texts(); !slices.Equal(got, []string{mixedLines[1].text, mixedLines[2].text}) {
 		t.Fatalf("lines %q", got)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
-	if tl := m.Transcription.Timeline; tl == nil || len(tl.Speaking) != 1 || tl.Speaking[0] != (kb.SpokenSpan{Start: 1.65, End: 1.7, Text: "Noted."}) {
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
+	if tl := m.Transcription.Timeline; tl == nil || len(tl.Speaking) != 1 || tl.Speaking[0] != (recordingwire.SpokenSpan{Start: 1.65, End: 1.7, Text: "Noted."}) {
 		t.Fatalf("the timeline: %+v", m.Transcription.Timeline)
 	}
 
@@ -264,8 +264,8 @@ func TestHubEchoSpanNotClosedByAnUploadWhileItsSocketIsUp(t *testing.T) {
 	if got := h.hubEcho(meetingRec); !slices.Equal(got, []bool{false, true, true, false}) {
 		t.Fatalf("echo marks %v", got)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
-	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []kb.SpokenSpan{{Start: 1.8, End: 4.8, Text: answer}}) {
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
+	if tl := m.Transcription.Timeline; tl == nil || !slices.Equal(tl.Speaking, []recordingwire.SpokenSpan{{Start: 1.8, End: 4.8, Text: answer}}) {
 		t.Fatalf("the timeline: %+v", m.Transcription.Timeline)
 	}
 }
@@ -299,7 +299,7 @@ func TestHubEchoSpanOpenAtTheEnd(t *testing.T) {
 		t.Fatalf("echo marks %v (%q)", got, h.hubTexts(meetingRec))
 	}
 	// The end assumed for the span is not the phone's: the timeline never has it.
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(h.engine()).MeetingRead(meetingRec)
 	if tl := m.Transcription.Timeline; tl != nil && len(tl.Speaking) > 0 {
 		t.Fatalf("an assumed span in the timeline: %+v", tl.Speaking)
 	}

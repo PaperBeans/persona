@@ -45,6 +45,7 @@ function todos() {
     task("demo-rollout", "Example rollout", {
       verdict: "Needs your decision: roll out to everyone now, or to 10% first",
       recommend: "10% first",
+      link: "https://github.com/nwverse/persona/pull/14659",
       question: "Roll the example change out to everyone now, or to 10% first?",
       why_owner: "priority",
       options: [
@@ -60,6 +61,7 @@ function todos() {
     task("demo-cleanup", "Example data cleanup", {
       verdict: "Needs your decision: delete the example records older than a year",
       recommend: "Delete after an export",
+      link: "https://gitlab.example.com/team/app/-/merge_requests/1468",
       question: "Delete the example records older than a year?",
       why_owner: "irreversible",
       options: [
@@ -73,6 +75,7 @@ function todos() {
     task("demo-custom", "Example custom decision", {
       verdict: "Needs your decision: resume the report now, or change its reminder",
       recommend: "Resume now",
+      link: "https://hub.example.com/todos/demo-custom",
       question: "Resume the report now, or change its reminder?",
       why_owner: "priority",
       options: [
@@ -177,6 +180,15 @@ async function run(browser, size, theme, language) {
     assert.equal(await rollout.locator('[data-decision-default="taken"]').count(), 1, "the reversible decision says when its default is taken");
     assert.match(await rollout.locator('[data-decision-default="taken"]').innerText(), /23:30/);
     assert.equal(await cleanup.locator('[data-decision-default="never"]').count(), 1, "the irreversible one says it is never taken by default");
+    const rolloutLink = rollout.locator('[data-decision-link="external"]');
+    assert.equal(await rolloutLink.innerText(), "PR #14659");
+    assert.equal(await rolloutLink.getAttribute("href"), "https://github.com/nwverse/persona/pull/14659");
+    assert.equal(await rolloutLink.getAttribute("target"), "_blank");
+    assert.equal(await rolloutLink.getAttribute("rel"), "noopener noreferrer");
+    const cleanupLink = cleanup.locator('[data-decision-link="external"]');
+    assert.equal(await cleanupLink.innerText(), "MR !1468");
+    assert.equal(await cleanupLink.getAttribute("href"), "https://gitlab.example.com/team/app/-/merge_requests/1468");
+    assert.equal(await custom.locator("[data-decision-link]").count(), 0, "redundant self-link is not rendered");
     for (const row of [rollout, cleanup]) {
       assert.equal(await row.locator("[data-decision-actions] button").count(), 2, "Later and Don't handle stay on the row");
       const buttons = row.locator("div.overflow-hidden > button, div.overflow-hidden > span > button");

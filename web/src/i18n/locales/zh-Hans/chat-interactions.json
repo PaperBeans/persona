@@ -116,6 +116,7 @@
   "secret_run_decline": "拒绝",
   "secret_run_run": "运行",
   "secret_run_note": "只用这一次，不会保存，助手也看不到。",
+  "secret_run_env_warning": "警告：你输入的密码会通过 PERSONA_SECRET 直接传给上面列出的每一条命令。编码后的输出可能绕过脱敏。",
   "secret_run_card_only": "请在卡片上答复：填密码后点运行，或拒绝",
   "secret_handoff_title": "把密钥交给 Agent？",
   "secret_handoff_lead": "{machine} 上的「{agent}」只在这一次运行中拿到：",

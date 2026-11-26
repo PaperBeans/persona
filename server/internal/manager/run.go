@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/nwverse/persona/server/internal/assistant"
@@ -86,11 +87,28 @@ func Run(ctx context.Context, build update.Build, dir string, out io.Writer) err
 	return newEnv(out).runManager(ctx, build, dir)
 }
 
+// runManagerWith is the independent manager itself (tests: a stand-in).
+var runManagerWith = assistant.RunManagerWith
+
+// shouldWatchBinary says whether `personad manager run` is running under an external service supervisor
+// (systemd/launchd via PERSONA_ASSISTANT_DEPLOY=service) rather than as a one-shot CLI run, container, hub child,
+// or development trial worker.
+func shouldWatchBinary(getenv func(string) string) bool {
+	if getenv == nil {
+		return false
+	}
+	if strings.TrimSpace(getenv("PERSONA_DEVELOPMENT_MANAGER_WORKER")) != "" {
+		return false
+	}
+	return strings.TrimSpace(getenv("PERSONA_ASSISTANT_DEPLOY")) == assistant.DeployService
+}
+
 func (e *env) runManager(ctx context.Context, build update.Build, dir string) error {
 	osproc.SealInherited() // what a parent left inheritable reaches none of what the manager starts (osproc)
 	osproc.ReapInherited() // after reexec, what the previous image started is this one's child (osproc)
 	out := e.stdout
-	env := os.Environ() // as it started: RunManager points PERSONA_HOME at dir
+	env := os.Environ()      // as it started: RunManager points PERSONA_HOME at dir
+	hostDataDir := dataDir() // host's ~/.persona captured before RunManager redirects PERSONA_HOME to dir
 	c, err := assistant.ReadManagerConfig(dir)
 	if err != nil {
 		return ConfigError{err} // restarting cannot fix it (the service's unit does not, exit 2)
@@ -104,14 +122,67 @@ func (e *env) runManager(ctx context.Context, build update.Build, dir string) er
 		return err
 	}
 	return managerupdate.RunDevelopment(ctx, dir, build, out, func(ctx context.Context) error {
-		return e.runBoundManager(ctx, build, dir, env, out)
+		return e.runBoundManager(ctx, build, dir, hostDataDir, env, out)
 	})
 }
 
-func (e *env) runBoundManager(ctx context.Context, build update.Build, dir string, env []string, out io.Writer) error {
+func (e *env) runBoundManager(ctx context.Context, build update.Build, dir, hostDataDir string, env []string, out io.Writer) error {
+	var watch *binaryWatch
+	if shouldWatchBinary(e.getenv) {
+		watch = newBinaryWatchWithGuard(out, filepath.Join(dir, binaryRestartGuardFile))
+		if watch != nil {
+			watch.logPrefix = "manager"
+			watch.waitUntilIdle = true
+		}
+	}
 	for {
 		before, _ := assistant.ReadManagerConfig(dir)
-		err := assistant.RunManager(ctx, build, dir)
+		run, stop := context.WithCancel(ctx)
+		var idle atomic.Pointer[assistant.Idle]
+		var pendingFn atomic.Pointer[func(bool)]
+		var pendingState atomic.Bool
+		setPending := func(v bool) {
+			pendingState.Store(v)
+			if fn := pendingFn.Load(); fn != nil {
+				(*fn)(v)
+			}
+		}
+		var renew atomic.Bool
+		watched := make(chan struct{})
+		if watch != nil {
+			go func() {
+				defer close(watched)
+				if watch.nextWith(run, func() assistant.Idle {
+					if p := idle.Load(); p != nil {
+						return *p
+					}
+					return nil
+				}, setPending) {
+					renew.Store(true)
+					stop()
+				}
+			}()
+		} else {
+			close(watched)
+		}
+		err := runManagerWith(run, build, dir, assistant.MainHooks{
+			HostDataDir: hostDataDir,
+			Ready:       func(p assistant.Idle) { idle.Store(&p) },
+			PendingRestart: func(fn func(bool)) {
+				pendingFn.Store(&fn)
+				if pendingState.Load() {
+					fn(true)
+				}
+			},
+		})
+		stop()
+		<-watched
+		if renew.Load() && ctx.Err() == nil {
+			if watch.prepareExitForNew(ctx) {
+				return nil // exit cleanly so systemd/launchd starts the new binary
+			}
+			continue
+		}
 		if !errors.Is(err, bus.ErrRevoked) {
 			return err
 		}
@@ -164,17 +235,25 @@ func RunBuiltin(ctx context.Context, build update.Build, out io.Writer) error {
 		// the hub's child would with the hub (binaryWatch).
 		run, stop := context.WithCancel(ctx)
 		var idle atomic.Pointer[assistant.Idle]
+		var pendingFn atomic.Pointer[func(bool)]
+		var pendingState atomic.Bool
+		setPending := func(v bool) {
+			pendingState.Store(v)
+			if fn := pendingFn.Load(); fn != nil {
+				(*fn)(v)
+			}
+		}
 		var renew atomic.Bool
 		watched := make(chan struct{})
 		if watch != nil {
 			go func() {
 				defer close(watched)
-				if watch.next(run, func() assistant.Idle {
+				if watch.nextWith(run, func() assistant.Idle {
 					if p := idle.Load(); p != nil {
 						return *p
 					}
 					return nil
-				}) {
+				}, setPending) {
 					renew.Store(true)
 					stop()
 				}
@@ -182,7 +261,15 @@ func RunBuiltin(ctx context.Context, build update.Build, out io.Writer) error {
 		} else {
 			close(watched)
 		}
-		err = runAssistant(run, build, nil, assistant.MainHooks{Ready: func(p assistant.Idle) { idle.Store(&p) }})
+		err = runAssistant(run, build, nil, assistant.MainHooks{
+			Ready: func(p assistant.Idle) { idle.Store(&p) },
+			PendingRestart: func(fn func(bool)) {
+				pendingFn.Store(&fn)
+				if pendingState.Load() {
+					fn(true)
+				}
+			},
+		})
 		stop()
 		<-watched
 		if renew.Load() && ctx.Err() == nil {

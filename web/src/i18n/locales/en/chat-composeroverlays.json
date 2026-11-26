@@ -1,0 +1,13 @@
+{
+  "pasted_preview_hint": "Click to preview or expand into input",
+  "pasted_chip_one": "Pasted text · {count} char",
+  "pasted_chip_other": "Pasted text · {count} chars",
+  "pasted_remove": "Remove pasted text",
+  "pasted_stats": "{lines} lines · {chars} chars",
+  "pasted_expand": "Expand into input",
+  "collapse": "Collapse the message box",
+  "suggestion_label": "Claude suggests: {suggestion}",
+  "suggestion_use": "Use",
+  "suggestion_use_hint": "Put it in the box (Tab)",
+  "suggestion_send": "Send now"
+}

@@ -14,6 +14,30 @@ nonisolated struct WatchGroupData: Equatable, Sendable {
 /// Pure decisions behind the watch's refresh: keeping a failed group's last cards, never buzzing twice for the same
 /// card, and what a phone summary carries and whether it is still news. The watch and its tests use these; Foundation only, no UI.
 nonisolated enum WatchGroupRefresh {
+    /// Pure output of applying a watch refresh or phone summary (`WatchModel.apply`).
+    struct Applied: Equatable, Sendable {
+        var sessions: [Session]
+        var interactions: [Interaction]
+        var petInteractions: [Interaction]
+    }
+
+    /// Pure pipeline behind `WatchModel.apply`: drops quiet tasks (#1731), folds side sessions (#7944), hides muted,
+    /// delegating, and supervisor-held cards from the wrist list (`WatchInteractions.leavingMuted`), and keeps
+    /// non-muted plus supervisor-held cards for `WatchPet.status` (`WatchInteractions.forPet`).
+    @MainActor static func apply(sessions: [Session], interactions: [Interaction], sideFoldGroups: Set<String> = []) -> Applied {
+        // Agents of quiet tasks and their questions are the main conversation's to tell (#1731), by the hub's word.
+        let (sessions, interactions) = QuietTasks.leavingOut(sessions: sessions, interactions: interactions, quiet: \.quiet)
+        // A side session lives in its parent's chat (#7944): no row of its own on the wrist, the parent in its folded state.
+        // The phone's summary is folded already; folding it again changes nothing.
+        let folded = SideFold.fold(sessions, groups: sideFoldGroups).listed
+        // A muted agent's or space's card never reaches the wrist (#4360): it is neither shown nor buzzed for.
+        let shown = WatchInteractions.leavingMuted(interactions)
+        func rank(_ s: Session) -> Int { s.state.priority }
+        let visibleSessions = folded.filter { $0.state.isLive && !$0.assistant || $0.state == .needsYou || $0.state == .working }
+            .sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.sortDate > $1.sortDate }
+        return Applied(sessions: visibleSessions, interactions: shown, petInteractions: WatchInteractions.forPet(interactions))
+    }
+
     /// Keep each failed group's last successful data and replace every group that answered. Groups not attempted this
     /// round (no credential yet) keep their old data as well. `staleFailed` lists the failed groups whose earlier data
     /// stays on screen, sorted for a stable banner order; a group that failed before its first success is absent —

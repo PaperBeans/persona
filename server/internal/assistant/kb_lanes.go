@@ -114,14 +114,16 @@ func (s *Service) kbLaneSet(r *kbRounds) *kbLanes {
 			e.DistillTopics(ctx, 2)
 			e.RefreshTopics(ctx, 2)
 		}},
-		// Meetings' minutes (kb/minutes.go): a recording's can take many calls, so they have their own lane.
-		&kbLane{name: "minutes", run: func(ctx context.Context, e *kb.Engine) { e.WriteMinutes(ctx, 2) }},
+		// The three recording lanes below are the recording module's (kb.Engine.RecordingProvider): without it they
+		// run and do nothing, and what is stored stays as it is.
+		// Meetings' minutes (modules/recording/writers/minutes.go): a recording's can take many calls, so they have their own lane.
+		&kbLane{name: "minutes", run: func(ctx context.Context, e *kb.Engine) { e.RecordingProvider().WriteMinutes(ctx, 2) }},
 		// Live titles of recordings still recording (kb/recording_title.go, #8873): a short call each, never behind a
 		// long meeting's minutes.
-		&kbLane{name: "titles", run: func(ctx context.Context, e *kb.Engine) { e.TitleRecordings(ctx, 2) }},
-		// All-day recordings' recaps (kb/day_recap_write.go): one recording's notes or recap a run, and the day's push
+		&kbLane{name: "titles", run: func(ctx context.Context, e *kb.Engine) { e.RecordingProvider().TitleRecordings(ctx, 2) }},
+		// All-day recordings' recaps (modules/recording/writers/day_recap_write.go): one recording's notes or recap a run, and the day's push
 		// at its recap time; appends that finished an hour wake it.
-		&kbLane{name: "recap", run: func(ctx context.Context, e *kb.Engine) { e.WriteDayRecaps(ctx, 1) }},
+		&kbLane{name: "recap", run: func(ctx context.Context, e *kb.Engine) { e.RecordingProvider().WriteDayRecaps(ctx, 1) }},
 		&kbLane{name: "index", run: func(ctx context.Context, e *kb.Engine) { s.kbIndexLane(ctx, e, indexed) }},
 	)
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type File struct {
 	base        int
 	win         *window
 	partialMeta bool
+	coldInputs  *coldInputStructure
 }
 
 type lineRef struct {
@@ -83,9 +85,9 @@ func (f *File) history() string {
 	if f.lines == 0 {
 		return "" // nothing read yet: no identity to compare
 	}
-	version := ".items1"
+	version := ".items2" // Re-read Codex pages whose user replies omitted the quoted question.
 	if !f.meta.Codex {
-		version = ".items3" // Model-only interjection items are removed; reload older client history.
+		version = ".items6" // Reload Claude folds whose latest command description was omitted.
 	}
 	return fmt.Sprintf("%x.%08x.%d", f.ino, f.firstHash, f.gen) + version + f.branchToken()
 }
@@ -126,6 +128,7 @@ func (f *File) refreshSpan(strict bool) ([]proto.Item, Span, error) {
 	}
 	f.offset, f.lines, f.partial, f.items, f.refs, f.meta = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}
 	f.base, f.win, f.partialMeta, f.firstHash = 0, nil, false, 0
+	f.coldInputs = nil
 	f.tree = &branchTree{manual: manual, marked: f.tree.marked}
 	f.gen++
 	return f.refresh(strict)
@@ -194,6 +197,7 @@ func (f *File) refresh(strict bool) ([]proto.Item, Span, error) {
 	if edited || st.Size() < f.offset || (f.ino != 0 && ino != 0 && ino != f.ino) { // rewritten or replaced: start over
 		f.offset, f.lines, f.partial, f.items, f.refs, f.meta, f.tree = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}, nil
 		f.base, f.win, f.partialMeta = 0, nil, false
+		f.coldInputs = nil
 		f.firstHash = 0
 		f.readMtime = time.Time{}
 		f.gen++
@@ -206,7 +210,7 @@ func (f *File) refresh(strict bool) ([]proto.Item, Span, error) {
 	}
 	if f.offset == 0 && st.Size() > 2*windowBytes {
 		// A big file read cold: its end only (the batch continues from the lines not parsed).
-		fresh, ok, err := f.openWindow(fh, st.Size())
+		fresh, ok, err := f.openWindow(fh, st, strict)
 		if err != nil {
 			return nil, Span{}, err
 		}
@@ -281,11 +285,7 @@ func (f *File) before(beforeSeq int) int {
 	if beforeSeq <= 0 {
 		return len(f.items)
 	}
-	end := 0
-	for end < len(f.items) && f.items[end].Seq < beforeSeq {
-		end++
-	}
-	return end
+	return sort.Search(len(f.items), func(i int) bool { return f.items[i].Seq >= beforeSeq })
 }
 
 // pageSpan is the span of items[start:end] counted back from beforeSeq. Callers hold f.mu.
@@ -388,6 +388,7 @@ func (f *File) Full(id string) (proto.Item, error) {
 		return it, fmt.Errorf("item %s: line %d of the transcript changed, reload the chat", id, it.Seq)
 	}
 	it.Text, it.FullSize, it.Image = full.Text, 0, full.Image
+	it.QuestionReplies, it.QuestionRepliesCut = full.QuestionReplies, false
 	return it, nil
 }
 

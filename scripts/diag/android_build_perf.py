@@ -13,7 +13,10 @@ COLD=<n> also times n cold starts of each package with `am start -W`; a start th
 dropped. Every package must be paired already.
 RUNS (10), SWIPE_MS (180) and SETTLE_S (0.9) override the round count, swipe duration and idle delay; ONLY=agents,chat
 limits the scenarios."""
-import json, os, re, statistics, subprocess, sys, time
+from functools import partial
+import json, os, re, statistics, sys, time
+
+from android_perf_capture import adb_command, frame_counts
 
 RUNS = int(os.environ.get("RUNS", "10"))
 SWIPE_MS = int(os.environ.get("SWIPE_MS", "180"))
@@ -72,8 +75,10 @@ def ordered(packages, i):
 
 
 def cold_start_ms(text):
-    """TotalTime of an `am start -W`, or None when the phone says the start was not cold (the process was still alive, or
-    something else, such as a permission prompt, came to the front instead)."""
+    """TotalTime for a successful cold start. Older shells may omit status or launch state."""
+    status = re.search(r"^Status:[ \t]*(.*)$", text, re.MULTILINE)
+    if status and status.group(1).strip() != "ok":
+        return None
     state = re.search(r"LaunchState: (\w+)", text)
     total = re.search(r"TotalTime: (\d+)", text)
     if not total or (state and state.group(1) != "COLD"):
@@ -95,13 +100,7 @@ def main():
     only = os.environ["ONLY"].split(",") if os.environ.get("ONLY") else None
     links = scenarios(os.environ.get("CHAT"), only)
 
-    def adb(*args, capture=False):
-        cmd = ["adb", "-s", serial, *args]
-        try:
-            return subprocess.run(cmd, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL, text=True, timeout=90, check=True).stdout
-        except subprocess.CalledProcessError as error:
-            raise SystemExit(f"adb {' '.join(args[:2])} failed (exit {error.returncode})") from None
+    adb = partial(adb_command, serial, timeout=90)
 
     w, h = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size", capture=True))[-1])
 
@@ -111,14 +110,7 @@ def main():
 
     def summary(package):
         text = adb("shell", "dumpsys", "gfxinfo", package, capture=True)
-
-        def num(pattern):
-            found = re.search(pattern, text)
-            return int(found.group(1)) if found else None
-
-        total, janky = num(r"Total frames rendered: (\d+)"), num(r"Janky frames: (\d+)")
-        if not total or janky is None or janky > total:
-            raise SystemExit("gfxinfo did not report a usable frame sample")
+        total, janky = frame_counts(text)
         return dict(total=total, janky=janky, histogram=histogram(text))
 
     raw = dict(("%s/%s" % (label, name), []) for label, _ in packages for name in links)

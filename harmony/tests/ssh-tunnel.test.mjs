@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { registerHooks, stripTypeScriptTypes } from 'node:module';
-import { randomUUID } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto';
 
-const tag = { ALIAS: 1, SECRET: 2, DATA_LABEL_CRITICAL_1: 3, DATA_LABEL_CRITICAL_2: 4, RETURN_TYPE: 5, ACCESSIBILITY: 6, AUTH_TYPE: 7, SYNC_TYPE: 8, DATA_LABEL_CRITICAL_3: 9, RETURN_LIMIT: 10 };
+const tag = { ALIAS: 1, SECRET: 2, DATA_LABEL_CRITICAL_1: 3, DATA_LABEL_CRITICAL_2: 4, RETURN_TYPE: 5, ACCESSIBILITY: 6, AUTH_TYPE: 7, SYNC_TYPE: 8, DATA_LABEL_CRITICAL_3: 9, RETURN_LIMIT: 10, CONFLICT_RESOLUTION: 11 };
 const rows = new Map();
 const calls = { add: [], query: [], open: [], close: [] };
 let addGate, queryGate, openGate, failAdd = false;
@@ -17,12 +17,20 @@ const copy = (map) => new Map([...map].map(([key, value]) => [key, value instanc
 const matches = (row, query) => [...query].every(([key, value]) => key === tag.RETURN_TYPE || key === tag.RETURN_LIMIT ||
   value instanceof Uint8Array && row.get(key) instanceof Uint8Array && Buffer.from(value).equals(Buffer.from(row.get(key))));
 globalThis.__sshFixture = {
-  util: { generateRandomUUID: randomUUID, TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } },
+  util: { Base64Helper: class { encodeToStringSync(bytes){return Buffer.from(bytes).toString('base64');} }, generateRandomUUID: randomUUID, TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } },
+  crypto: {
+    createMd(){const hash=createHash('sha256');return{updateSync({data}){hash.update(data);},digestSync(){return{data:hash.digest()};}};},
+    createAsyKeyGenerator(name){assert.equal(name,'Ed25519');return{async generateKeyPair(){
+      const pair=generateKeyPairSync('ed25519');
+      return {priKey:{getEncoded:()=>({data:new Uint8Array(pair.privateKey.export({type:'pkcs8',format:'der'}))}),clearMem(){}},
+        pubKey:{getEncoded:()=>({data:new Uint8Array(pair.publicKey.export({type:'spki',format:'der'}))})}};
+    }};}
+  },
   url: { URL: { parseURL: (value) => new URL(value) } },
   netConnection: { async getAddressesByName(host) { dnsCalls.push(host); if (dnsGate) await dnsGate.promise; if (failDns) throw Error('device DNS failed'); return dnsAnswers; } },
   asset: {
-    Tag: tag, Accessibility: { DEVICE_UNLOCKED: 2 }, AuthType: { NONE: 0 }, SyncType: { NEVER: 0 }, ReturnType: { ALL: 0, ATTRIBUTES: 1 },
-    async add(map) { assert.ok(map.get(tag.SECRET).length <= 1024); calls.add.push(copy(map)); if (addGate) await addGate.promise; if (failAdd) throw Error('platform secret diagnostic'); rows.set(alias(map), copy(map)); },
+    Tag: tag, ConflictResolution:{THROW_ERROR:1}, Accessibility: { DEVICE_UNLOCKED: 2 }, AuthType: { NONE: 0 }, SyncType: { NEVER: 0 }, ReturnType: { ALL: 0, ATTRIBUTES: 1 },
+    async add(map) { assert.ok(map.get(tag.SECRET).length <= 1024); calls.add.push(copy(map)); if (addGate) await addGate.promise; if (failAdd) throw Error('platform secret diagnostic'); if(map.get(tag.CONFLICT_RESOLUTION)===1 && rows.has(alias(map)))throw Object.assign(Error('duplicate'),{code:24000003}); rows.set(alias(map), copy(map)); },
     async query(query) { calls.query.push(copy(query)); if (queryGate) await queryGate.promise; return [...rows.values()].filter((row) => matches(row, query)).slice(0,query.get(tag.RETURN_LIMIT)||Infinity).map(row=>{const result=copy(row);if(query.get(tag.RETURN_TYPE)===1)result.delete(tag.SECRET);return result;}); },
     async remove(query) { assert.deepEqual([...query.keys()],[tag.ALIAS],'native remove admits alias only');for (const [key, row] of rows) if (matches(row, query)) rows.delete(key); }
   },
@@ -39,7 +47,7 @@ globalThis.__sshFixture = {
 };
 registerHooks({
   resolve(specifier, context, next) {
-    const stubs = { '@kit.ArkTS': 'arkts', '@kit.AbilityKit': 'ability', '@kit.NetworkKit': 'network', '@kit.AssetStoreKit': 'asset', '@kit.PerformanceAnalysisKit': 'log', 'libpersona_ssh.so': 'bridge' };
+    const stubs = { '@kit.CryptoArchitectureKit':'crypto', '@kit.ArkTS': 'arkts', '@kit.AbilityKit': 'ability', '@kit.NetworkKit': 'network', '@kit.AssetStoreKit': 'asset', '@kit.PerformanceAnalysisKit': 'log', 'libpersona_ssh.so': 'bridge' };
     if (stubs[specifier]) return { url: 'persona-ssh:' + stubs[specifier], shortCircuit: true };
     if (specifier === './ClientModel' && context.parentURL?.endsWith('/SshTunnel.ets')) return { url: 'persona-ssh:client', shortCircuit: true };
     if (context.parentURL?.endsWith('.ets') && specifier.startsWith('.')) {
@@ -52,6 +60,7 @@ registerHooks({
   },
   load(url, context, next) {
     const source = {
+      'persona-ssh:crypto':'export const cryptoFramework=globalThis.__sshFixture.crypto;',
       'persona-ssh:arkts': 'export const util = globalThis.__sshFixture.util; export const url = globalThis.__sshFixture.url;',
       'persona-ssh:ability': 'export const common = {};',
       'persona-ssh:network': 'export const connection = globalThis.__sshFixture.netConnection;',
@@ -87,6 +96,20 @@ function owner() {
 function configuration() { const config = new SshConfiguration(); config.enabled = true; config.sshHost = 'ssh.test'; config.username = 'user'; config.hostKey = PIN; return config; }
 async function fixture() { const client = owner(), tunnel = new SshTunnel(); tunnel.initialize({}); await tunnel.bind(client); return { client, tunnel }; }
 async function configured() { const value = await fixture(); await value.tunnel.save(configuration(), KEY, 'phrase', true); return value; }
+
+test('legacy bindings keep their logical Hub target while new routes preserve a separate SSH destination', async () => {
+  reset();
+  const legacy = SshConfiguration.from(JSON.stringify({enabled:true,sshHost:'ssh.test',sshPort:22,username:'fixture',hostKey:PIN}));
+  assert.equal(legacy.routePolicy,'legacy');assert.deepEqual(legacy.destination('https://hub.test:8443/'),{host:'hub.test',port:8443});
+  const {client,tunnel}=await fixture(), next=configuration();
+  next.routePolicy='fallback';next.forwardHost='127.0.0.1';next.forwardPort=18660;
+  await tunnel.save(next,KEY,'phrase',true);
+  const stored=SshConfiguration.from(client.saved);
+  assert.deepEqual(stored.destination('https://hub.test:8443/'),{host:'127.0.0.1',port:18660});
+  await tunnel.acquire();
+  assert.deepEqual([calls.open[0].targetHost,calls.open[0].targetPort,calls.open[0].forwardHost,calls.open[0].forwardPort],['hub.test',8443,'127.0.0.1',18660]);
+  tunnel.stop();
+});
 
 test('multiline SSH secrets use separate device-only aliases; DB retains metadata references only', async () => {
   reset(); const { client, tunnel } = await configured();
@@ -217,4 +240,54 @@ test('Hub-wide settings commit retires connections and excludes concurrent write
  const second=new SshTunnel();second.initialize({});await second.bind(client);addGate=gate();const replacing=tunnel.save(configuration(),KEY+'new','',true);await until(()=>calls.add.length>3);
  await assert.rejects(second.disable(),/ssh_busy/);await assert.rejects(second.acquire(),/ssh_busy/);await assert.rejects(second.save(configuration(),KEY,'',true),/ssh_busy/);
  addGate.resolve();addGate=undefined;await replacing;assert.equal(client.retirements.length,2);await second.disable();assert.equal(client.retirements.length,3);tunnel.stop();second.stop();
+});
+
+test('a pre-pair key stays in memory until binding, with rollback preserving the previous Hub settings and key',async()=>{
+  reset();
+  const {SshSecrets}=await import('../entry/src/main/ets/platform/SshCredentialVault.ets');
+  const {client,tunnel}=await configured(),old=client.saved,previous=JSON.parse(old).keyRef;
+  const material=SshSecrets.fromText(KEY,'new passphrase');
+  const fresh=new SshTunnel();const proxy=await fresh.openPairing(client.profile.baseUrl,client.profile.pin,configuration(),material,()=>true);
+  assert.equal(proxy.isCurrent(),true);assert.equal(client.saved,old);
+  const view={valid:()=>true,read:async()=>client.saved,write:async raw=>{client.saved=raw;},clearIfUnchanged:async raw=>{if(raw===client.saved)client.saved='';}};
+  const undo=await SshTunnel.stagePairing(client.profile.id,configuration(),material,view,()=>true);
+  const latest=JSON.parse(client.saved).keyRef;assert.notEqual(latest,previous);
+  await undo(false);assert.equal(client.saved,old);assert.ok([...rows.values()].every(r=>Buffer.from(r.get(tag.DATA_LABEL_CRITICAL_3)).toString()!==latest));
+  const keep=await SshTunnel.stagePairing(client.profile.id,configuration(),material,view,()=>true);await keep(true);
+  assert.notEqual(JSON.parse(client.saved).keyRef,previous);assert.ok([...rows.values()].every(r=>Buffer.from(r.get(tag.DATA_LABEL_CRITICAL_3)).toString()!==previous));
+  fresh.stop();tunnel.stop();material.clear();assert.equal(proxy.isCurrent(),false);
+});
+
+test('the first caller can retire its start permission after a paired Hub owns the established lease',async()=>{
+  reset();const {tunnel}=await configured();let startAllowed=true;
+  const proxy=await tunnel.acquire(()=>startAllowed);startAllowed=false;
+  assert.equal(proxy.isCurrent(),true);
+  tunnel.stop();assert.equal(proxy.isCurrent(),false);
+});
+
+test('a first visit creates one device-only Ed25519 key, whose two copyable forms match the actual signing key',async()=>{
+  reset();const {SshDeviceIdentity}=await import('../entry/src/main/ets/platform/SshDeviceIdentity.ets');
+  const [a,b]=await Promise.all([SshDeviceIdentity.publicIdentity('persona-test'),SshDeviceIdentity.publicIdentity('persona-test')]);
+  assert.equal(a.line,b.line);const [algorithm,encoded,comment]=a.line.split(' ');assert.equal(algorithm,'ssh-ed25519');assert.equal(comment,'persona-test');
+  const wire=Buffer.from(encoded,'base64');assert.equal(wire.length,51);assert.equal(wire.readUInt32BE(0),11);assert.equal(wire.readUInt32BE(15),32);
+  assert.equal(a.fingerprint,'SHA256:'+createHash('sha256').update(wire).digest('base64').replace(/=+$/,''));
+  assert.equal(a.restrictedLine('::1',18660),'restrict,port-forwarding,permitopen="[::1]:18660" '+a.line);
+  assert.throws(()=>a.restrictedLine('bad" host',443),/ssh_invalid/);
+  const material=await SshDeviceIdentity.secrets(()=>true);
+  const priv=createPrivateKey(Buffer.from(material.privateKey));const pub=createPublicKey(priv);const data=Buffer.from('only the generated fixture may sign');
+  assert.equal(Buffer.compare(pub.export({format:'der',type:'spki'}).subarray(-32),wire.subarray(-32)),0);assert.equal(verify(null,data,pub,sign(null,data,priv)),true);material.clear();
+  const persisted=[...rows.values()];assert.equal(persisted.length,1);assert.equal(persisted[0].get(tag.ACCESSIBILITY),2);assert.equal(persisted[0].get(tag.SYNC_TYPE),0);
+  const vault=new SshCredentialVault();await vault.forget('one-forgotten-hub');const later=await SshDeviceIdentity.publicIdentity('persona-test');assert.equal(later.line,a.line);
+  const prior=calls.add.length;rows.values().next().value.set(tag.SECRET,new Uint8Array([0]));
+  await assert.rejects(SshDeviceIdentity.publicIdentity('persona-test'),/ssh_storage_failed/);assert.equal(calls.add.length,prior);
+});
+test('a paired Hub can bind its route to the device identity without duplicating its private key into Hub metadata',async()=>{
+ reset();const {SshDeviceIdentity}=await import('../entry/src/main/ets/platform/SshDeviceIdentity.ets');
+ const info=await SshDeviceIdentity.publicIdentity('test');const {client,tunnel}=await fixture(),config=configuration();config.deviceIdentity=true;
+ const view={valid:()=>true,read:async()=>client.saved,write:async raw=>{client.saved=raw;},clearIfUnchanged:async raw=>{if(raw===client.saved)client.saved='';}};
+ const done=await SshTunnel.stagePairing(client.profile.id,config,undefined,view,()=>true);await done(true);
+ const metadata=JSON.parse(client.saved);assert.equal(metadata.deviceIdentity,true);assert.equal(metadata.keyRef,'');assert.equal(rows.size,1);
+ await tunnel.bind(client);const lease=await tunnel.acquire();assert.equal(lease.isCurrent(),true);
+ const key=createPrivateKey(Buffer.from(calls.open.at(-1).privateKey));assert.equal(createPublicKey(key).export({type:'spki',format:'der'}).subarray(-32).toString('hex'),Buffer.from(info.line.split(' ')[1],'base64').subarray(-32).toString('hex'));
+ tunnel.stop();
 });

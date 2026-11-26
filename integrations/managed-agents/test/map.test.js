@@ -36,6 +36,16 @@ test('events become the items the apps draw', () => {
   assert.equal(items[8].text, `${NOTE_ERROR_LEAD}model failed`)
 })
 
+test('botmux sentinel replies preserve the current turn preview and original content', () => {
+  const marker = 'BOTMUX_NOTHING_TO_SEND'
+  const reply = (content) => ({ type: 'agent.message', content })
+  const mixed = reply('Notes\n' + marker + '\nready')
+  assert.equal(lastText([mixed]), 'Notes ready')
+  assert.equal(lastText([mixed, reply(marker)]), 'Notes ready')
+  assert.equal(lastText([mixed, { type: 'user.message' }, reply(marker)]), '')
+  assert.equal(eventItems(mixed, 1, new Map())[0].text, mixed.content)
+})
+
 test('status and last line come from the log', () => {
   assert.equal(logStatus([]), 'unknown')
   assert.equal(logStatus([{ type: 'user.message' }]), 'working')
@@ -85,4 +95,31 @@ test('answers become the events Managed Agents expects', () => {
   assert.deepEqual(JSON.parse(ok.content[0].text), { decision: 'approved', executionMode: 'acceptEdits', feedback: null })
   const back = answerOf({ kind: 'plan', event: { id: 'p1' } }, { approve: false, feedback: 'smaller' })
   assert.deepEqual(JSON.parse(back.content[0].text), { decision: 'changes_requested', feedback: 'smaller' })
+})
+
+test('self-hosted user.tool_result maps to a tool_result item and clears pending asks', () => {
+  const images = new Map()
+  const at = '2026-11-23T08:00:00Z'
+  const okItems = eventItems(
+    { id: 'e2', type: 'user.tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'stdout line' }], is_error: false, created_at: at },
+    2,
+    images,
+  )
+  assert.deepEqual(okItems, [
+    { id: '2#0', seq: 2, ts: at, role: 'user', kind: 'tool_result', tool_use_id: 't1', text: 'stdout line', is_error: false },
+  ])
+  const errItems = eventItems(
+    { id: 'e3', type: 'user.tool_result', tool_use_id: 't2', content: 'boom', is_error: true, processed_at: at },
+    3,
+    images,
+  )
+  assert.deepEqual(errItems, [
+    { id: '3#0', seq: 3, ts: at, role: 'user', kind: 'tool_result', tool_use_id: 't2', text: 'boom', is_error: true },
+  ])
+  const log = [
+    { id: 't1', type: 'agent.tool_use', name: 'bash', input: { command: 'ls' }, evaluated_permission: 'ask' },
+    { id: 's1', type: 'session.status_idle', stop_reason: { type: 'requires_action', event_ids: ['t1'] } },
+    { id: 'e2', type: 'user.tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'stdout line' }], is_error: false },
+  ]
+  assert.deepEqual(pendingAsks(log, TOOLS), [])
 })

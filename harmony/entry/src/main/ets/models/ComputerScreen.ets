@@ -249,20 +249,49 @@ export class ComputerScreen {
     else this.retry();
   }
 
-  pointerFromView(x: number, y: number, viewWidth: number, viewHeight: number, buttons: number): boolean {
-    if (!this.controlAllowed() || this.remoteWidth <= 0 || this.remoteHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return false;
+  private pointInView(x:number,y:number,viewWidth:number,viewHeight:number):number[] {
+    if (!this.controlAllowed() || this.remoteWidth <= 0 || this.remoteHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return [];
     const scale: number = Math.min(viewWidth / this.remoteWidth, viewHeight / this.remoteHeight);
-    if (!Number.isFinite(scale) || scale <= 0) return false;
+    if (!Number.isFinite(scale) || scale <= 0) return [];
     const contentWidth: number = this.remoteWidth * scale;
     const contentHeight: number = this.remoteHeight * scale;
     const offsetX: number = (viewWidth - contentWidth) / 2;
     const offsetY: number = (viewHeight - contentHeight) / 2;
     const localX: number = x - offsetX;
     const localY: number = y - offsetY;
-    if (localX < 0 || localY < 0 || localX >= contentWidth || localY >= contentHeight) return false;
+    if (localX < 0 || localY < 0 || localX >= contentWidth || localY >= contentHeight) return [];
     const pixelX: number = Math.min(this.remoteWidth - 1, Math.floor(localX / scale));
     const pixelY: number = Math.min(this.remoteHeight - 1, Math.floor(localY / scale));
-    return this.client?.pointer(pixelX, pixelY, buttons) || false;
+    return [pixelX,pixelY];
+  }
+
+  pointerFromView(x:number,y:number,width:number,height:number,buttons:number):boolean {
+    const pt=this.pointInView(x,y,width,height);
+    return pt.length===2 && (this.client?.pointer(pt[0],pt[1],buttons) || false);
+  }
+
+  scrollFromView(x:number,y:number,width:number,height:number,notches:number):boolean {
+    const pt=this.pointInView(x,y,width,height);
+    return pt.length===2 && (this.client?.wheel(pt[0],pt[1],notches) || false);
+  }
+
+  scrollPointsInView(width:number,height:number):number {
+    if (!this.controlAllowed() || width<=0 || height<=0 || this.remoteWidth<=0 || this.remoteHeight<=0) return 0;
+    const machine=this.row?.data();
+    const computer=machine ? Wire.object(machine,'computer') : Wire.payload([],[]);
+    const browser=machine ? Wire.object(machine,'browser') : Wire.payload([],[]);
+    const primary=Wire.bool(computer,'enabled') && Wire.bool(computer,'screen_sharing') ? Wire.rows(computer,'displays') : [];
+    const displays=primary.length ? primary : Wire.bool(browser,'enabled') && Wire.bool(browser,'screen_sharing') ? Wire.rows(browser,'displays') : [];
+    let x=Infinity,y=Infinity,r=-Infinity,b=-Infinity;
+    for (const display of displays) {
+      const w=Wire.number(display,'width'),h=Wire.number(display,'height');
+      if (w<=0 || h<=0) continue;
+      const left=Wire.number(display,'x'),top=Wire.number(display,'y');
+      x=Math.min(x,left);y=Math.min(y,top);r=Math.max(r,left+w);b=Math.max(b,top+h);
+    }
+    const sx=this.remoteWidth/(r-x),sy=this.remoteHeight/(b-y);
+    const macScale=sx>0 && sy>0 && Math.abs(sx/sy-1)<=.02 ? Math.max(1,Math.min(4,sx)) : 1;
+    return Math.max(this.remoteWidth/width,this.remoteHeight/height)/macScale;
   }
 
   releasePointer(): void { if (this.controlAllowed()) this.client?.releasePointer(); }

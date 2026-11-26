@@ -29,14 +29,57 @@ func normName(s string) string { return strings.ReplaceAll(Slug(s), "-", "") }
 // A name in the form known_projects.md shows a project in (「名字（别名、…）：一句话」, which models copy whole) that
 // matches nothing is looked up again without its one line and trailing bracket groups (#5824).
 func (e *Engine) FindProject(name string) *Project {
-	if p := e.findProject(name); p != nil {
+	return e.ProjectLookup().Find(name)
+}
+
+// ProjectLookup is the projects read once, for many lookups in a row: Store.Projects reads and parses every project's
+// meta.json, and a caller resolving one name per to-do read them all once per to-do (#15539). It does not see writes
+// made after it was taken.
+type ProjectLookup struct {
+	projects []lookupProject
+	byID     map[string]*Project
+}
+
+type lookupProject struct {
+	p       *Project
+	name    string
+	aliases []string
+}
+
+// ProjectLookup reads the projects now.
+func (e *Engine) ProjectLookup() *ProjectLookup {
+	l := &ProjectLookup{byID: map[string]*Project{}}
+	for _, id := range e.Store.IDs(KindProject) {
+		p, ok := e.Store.Project(id)
+		if !ok {
+			continue
+		}
+		l.byID[SafeID(id)] = p
+		lp := lookupProject{p: p, name: normName(p.Name)}
+		for _, a := range p.Aliases {
+			lp.aliases = append(lp.aliases, normName(a))
+		}
+		l.projects = append(l.projects, lp)
+	}
+	return l
+}
+
+// Project is Store.Project as of when the lookup was taken.
+func (l *ProjectLookup) Project(slug string) (*Project, bool) {
+	p, ok := l.byID[SafeID(slug)]
+	return p, ok
+}
+
+// Find is FindProject as of when the lookup was taken.
+func (l *ProjectLookup) Find(name string) *Project {
+	if p := l.find(name); p != nil {
 		return p
 	}
 	for _, base := range displayBases(name) {
 		if tooGenericAlias(normName(base)) { // 「无（某某群）」 is not the project named 无
 			break
 		}
-		if p := e.findProject(base); p != nil {
+		if p := l.find(base); p != nil {
 			return p
 		}
 	}
@@ -98,15 +141,17 @@ func isShownFormOf(name, base string) bool {
 	return false
 }
 
-func (e *Engine) findProject(name string) *Project {
+func (l *ProjectLookup) find(name string) *Project {
 	n := normName(name)
 	if n == "" {
 		return nil
 	}
+	slug := Slug(name)
 	var byName, byAlias, merged *Project
-	for _, p := range e.Store.Projects() {
-		exact := normName(p.Name) == n || p.Slug == Slug(name)
-		if !exact && !hasAlias(p, n) {
+	for _, lp := range l.projects {
+		p := lp.p
+		exact := lp.name == n || p.Slug == slug
+		if !exact && !slices.Contains(lp.aliases, n) {
 			continue
 		}
 		switch {
@@ -125,7 +170,7 @@ func (e *Engine) findProject(name string) *Project {
 		return byAlias
 	}
 	if merged != nil && merged.MergedInto != "" {
-		if p, ok := e.Store.Project(merged.MergedInto); ok && p.Live() {
+		if p, ok := l.Project(merged.MergedInto); ok && p.Live() {
 			return p
 		}
 	}
@@ -234,7 +279,7 @@ func (e *Engine) PruneProjectAliases() int {
 	}
 	removed := 0
 	for _, p := range projects {
-		if !p.Live() || p.referenceOnly() || len(p.Aliases) == 0 || p.fieldLocked("aliases") {
+		if !p.Live() || p.referenceOnly() || len(p.Aliases) == 0 || taggingFieldLocked(&p.Tagging, "aliases") {
 			continue
 		}
 		own, seen, counted := normName(p.Name), map[string]bool{}, 0

@@ -1,5 +1,7 @@
 // Package compat contains only the pre-cutover runtime identities required for
 // rolling upgrades. Do not use these names for product copy or rewrite user data.
+//
+//persona:layer library
 package compat
 
 import (

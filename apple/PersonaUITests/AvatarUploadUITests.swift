@@ -1,4 +1,6 @@
+import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 
 /// New from Photo end to end (#2405) against mock_hub.py with MOCK_LOOK_UPLOADS=demo: the crop sheet opened with a
@@ -6,6 +8,8 @@ import XCTest
 /// its card's corner, and only that one (the mock's demo upload, 「豆豆」, stays).
 /// Real touches: the crop sits in a Form, which scrolls, and a drag on the picture must move the picture, not the sheet.
 /// `PERSONA_MOCK_HUB_NO_FILES` (a second mock with MOCK_LOOK_UPLOAD_FILES=fail): made but not downloaded, Try Again.
+/// With `look_uploads_states` (#15449; the demo mock lists it): an upload with a picture of a state's own (moving) and a
+/// chosen color reaches the hub as such, and the Edit sheet of the mock's `u-demo0002` saves a mark turned on.
 /// `PERSONA_LOOK_APPEARANCE` light / dark, `PERSONA_LOOK_LANGUAGE` (en, zh-Hans, ja), `PERSONA_LOOK_SHOTS` a folder for
 /// the screenshots.
 final class AvatarUploadUITests: XCTestCase {
@@ -36,12 +40,12 @@ final class AvatarUploadUITests: XCTestCase {
         return url.path(percentEncoded: false)
     }
 
-    @MainActor private func launch(_ hub: String, _ image: String) -> XCUIApplication {
+    @MainActor private func launch(_ hub: String, _ image: String, name: String = "Sunny", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-openAppearance", "persona", "-openPersona", "persona",
-                               "-showAvatarCrop", image, "-showAvatarCropName", "Sunny",
-                               "-ui.scheme", env["PERSONA_LOOK_APPEARANCE"] ?? "light"]
+                               "-showAvatarCrop", image, "-showAvatarCropName", name,
+                               "-ui.scheme", env["PERSONA_LOOK_APPEARANCE"] ?? "light"] + extra
         if let language = env["PERSONA_LOOK_LANGUAGE"] { app.launchArguments += ["-AppleLanguages", "(\(language))"] }
         app.launchPinned()
         allowNotifications()
@@ -104,7 +108,13 @@ final class AvatarUploadUITests: XCTestCase {
             XCTAssertFalse(app.buttons["persona-delete-\(id)"].exists, "a delete button on \(id), which was not uploaded")
         }
         let deletes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'persona-delete-'"))
-        XCTAssertEqual(deletes.count, 2, "delete buttons: \(deletes.allElementsBoundByIndex.map(\.identifier))")
+        XCTAssertEqual(deletes.count, 1 + Self.demoUploads, "delete buttons: \(deletes.allElementsBoundByIndex.map(\.identifier))")
+        // On a hub that edits them (#15449), Edit is on the same cards, and only on them.
+        let edits = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'persona-edit-'"))
+        if edits.count > 0 {
+            XCTAssertEqual(edits.count, deletes.count, "edit buttons: \(edits.allElementsBoundByIndex.map(\.identifier))")
+            XCTAssertTrue(app.buttons["persona-edit-\(madeID)"].exists && !app.buttons["persona-edit-nwverse"].exists)
+        }
 
         // The demo's button asks about the demo, and chooses nothing; asked about again and cancelled, it stays.
         app.buttons["persona-delete-\(Self.demoID)"].tap()
@@ -131,8 +141,10 @@ final class AvatarUploadUITests: XCTestCase {
         shot(app, "after-delete")
     }
 
-    /// The mock's uploaded avatar at start (MOCK_LOOK_UPLOADS=demo).
+    /// The mock's uploaded avatar at start (MOCK_LOOK_UPLOADS=demo), one made before the hub wrote colors.
     private static let demoID = "u-demo0001"
+    /// The uploaded avatars the mock starts with: `demoID`, and `u-demo0002` with colors and pictures of its own (#15449).
+    private static let demoUploads = 2
 
     /// The delete confirmation's title for `name`, in any of the three languages.
     @MainActor private func title(_ app: XCUIApplication, _ name: String) -> XCUIElement {
@@ -242,12 +254,106 @@ final class AvatarUploadUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: again, evaluatedWith: upload)], timeout: 30), .completed)
         XCTAssertTrue(crop.exists)
 
-        // Cancel: nothing to lose.
-        app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "取消", "キャンセル"])).firstMatch.tap()
-        XCTAssertTrue(crop.waitForNonExistence(timeout: 10), "Cancel did not close the sheet (or asked first)")
+        // Close (the sheet's ✕, #9653): nothing to lose.
+        app.buttons["sheet-close"].tap()
+        XCTAssertTrue(crop.waitForNonExistence(timeout: 10), "Close did not close the sheet (or asked first)")
         let made = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'persona-u-' AND label CONTAINS 'Sunny'")).firstMatch
         XCTAssertTrue(made.waitForExistence(timeout: 10), "the avatar made is not listed")
         XCTAssertFalse(made.isSelected)
         XCTAssertTrue(app.buttons["persona-persona"].isSelected)
+    }
+
+
+    // MARK: Pictures for each state and the theme color (#15449)
+
+    /// A small animated GIF (four frames), for a state's own picture.
+    private func animated() throws -> String {
+        let url = FileManager.default.temporaryDirectory.appending(path: "avatar-upload-wave.gif")
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, 4, nil))
+        for i in 0..<4 {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let frame = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200), format: format).image { ctx in
+                UIColor(hue: Double(i) / 4, saturation: 0.6, brightness: 0.9, alpha: 1).setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+            }
+            CGImageDestinationAddImage(dest, try XCTUnwrap(frame.cgImage),
+                                       [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]] as CFDictionary)
+        }
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return url.path(percentEncoded: false)
+    }
+
+    /// The hub's list as the mock keeps it.
+    private func looks(_ hub: String) async throws -> [[String: Any]] {
+        var req = URLRequest(url: try XCTUnwrap(URL(string: hub + "/api/v1/looks")))
+        req.setValue("Bearer mock", forHTTPHeaderField: "Authorization")
+        let (body, _) = try await URLSession.shared.data(for: req)
+        let list = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        return try XCTUnwrap(list["looks"] as? [[String: Any]])
+    }
+
+    private func source(_ look: [String: Any]?) -> [String: Any]? {
+        (look?["manifest"] as? [String: Any])?["source"] as? [String: Any]
+    }
+
+    @MainActor func testAStatesOwnPictureAndAChosenColorReachTheHub() async throws {
+        let hub = try hub("PERSONA_MOCK_HUB")
+        let app = launch(hub, try portrait(), name: "Mikado",
+                         extra: ["-showAvatarStatePicture", try animated(), "-showAvatarCropColor", "#3A7BD5"])
+        defer { app.terminate() }
+        XCTAssertTrue(app.descendants(matching: .any)["avatar-crop"].waitForExistence(timeout: 20), "the crop sheet did not open")
+        let states = app.buttons["avatar-state-pictures"]
+        XCTAssertTrue(states.waitForExistence(timeout: 10), "no Pictures for Each State on a hub that takes them")
+        states.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["avatar-state-working"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["avatar-state-mark-working"].exists && app.switches["avatar-state-mark-thinking"].exists)
+        XCTAssertFalse(app.switches["avatar-state-mark-idle"].exists) // idle has no mark
+        shot(app, "states-own-pictures")
+        app.navigationBars.buttons.firstMatch.tap()
+        let upload = app.buttons["avatar-upload"]
+        XCTAssertTrue(upload.waitForExistence(timeout: 10))
+        upload.tap()
+        XCTAssertTrue(upload.waitForNonExistence(timeout: 30), "the sheet did not close after the upload")
+        let made = try await looks(hub).first { ($0["manifest"] as? [String: Any])?["name"] as? String == "Mikado" }
+        let color = source(made)?["color"] as? [String: Any]
+        XCTAssertEqual(color?["seed"] as? String, "#3A7BD5")
+        XCTAssertEqual(color?["auto"] as? Bool, false)
+        let own = source(made)?["states"] as? [String: [String: Bool]]
+        XCTAssertEqual(own?["thinking"]?["mark"], true)
+        XCTAssertEqual(own?["working"]?["mark"], false)
+        XCTAssertNil(own?["idle"])
+        // Gone again, so the other tests find the mock's own uploads only.
+        if let id = made?["id"] as? String {
+            var req = URLRequest(url: try XCTUnwrap(URL(string: hub + "/api/v1/looks/uploads/" + id)))
+            req.httpMethod = "DELETE"
+            req.setValue("Bearer mock", forHTTPHeaderField: "Authorization")
+            _ = try await URLSession.shared.data(for: req)
+        }
+    }
+
+    @MainActor func testEditSavesTheChangeAndKeepsTheAvatar() async throws {
+        let hub = try hub("PERSONA_MOCK_HUB")
+        let before = try await looks(hub).first { $0["id"] as? String == "u-demo0002" }
+        let rev = try XCTUnwrap(before?["rev"] as? String, "needs MOCK_LOOK_UPLOADS=demo")
+        let app = launchPicker(hub, ["-showAvatarEdit", "u-demo0002"])
+        defer { app.terminate() }
+        let save = app.buttons["avatar-upload"]
+        XCTAssertTrue(save.waitForExistence(timeout: 20), "the Edit sheet did not open")
+        XCTAssertFalse(save.isEnabled, "Save before anything changed")
+        app.buttons["avatar-state-pictures"].tap()
+        let mark = app.switches["avatar-state-mark-offline"]
+        XCTAssertTrue(mark.waitForExistence(timeout: 10), "offline's own picture has no mark switch")
+        let wasOn = (mark.value as? String) == "1"
+        mark.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() // the switch, at the row's end
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(save.waitForExistence(timeout: 10) && save.isEnabled, "Save not enabled after a change")
+        save.tap()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 30), "the sheet did not close after Save")
+        let after = try await looks(hub).first { $0["id"] as? String == "u-demo0002" }
+        XCTAssertNotEqual(after?["rev"] as? String, rev, "the package was not changed")
+        let offline = (source(after)?["states"] as? [String: [String: Bool]])?["offline"]
+        XCTAssertEqual(offline?["mark"], !wasOn)
+        XCTAssertTrue(app.buttons["persona-u-demo0002"].exists, "the edited avatar is gone from the grid")
     }
 }

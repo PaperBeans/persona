@@ -213,6 +213,9 @@ func (s *Service) applyScope(ctx context.Context, t Todo, c scopeChange) (TaskBr
 		}
 		if _, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
 			v.DoneWhen, v.ExpectMinutes = slices.Clone(brief.Criteria), brief.ExpectNow
+			if len(added)+len(dropped) > 0 {
+				v.recordAssignments(o.Agents, ev.At)
+			}
 			if len(added)+len(dropped) > 0 && (v.State == reviewAccepted || v.State == reviewCancelled) {
 				// The terminal review covered the old criteria, not this new scope (#6880).
 				v.State = ""

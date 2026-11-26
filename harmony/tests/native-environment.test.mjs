@@ -8,14 +8,16 @@ globalThis.__personaNativeEnvironment = screen;
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === '@kit.AbilityKit') return { url: 'native-environment:ability', shortCircuit: true };
+    if (specifier === '@kit.AccessibilityKit') return {url:'native-environment:accessibility',shortCircuit:true};
     if (specifier === '@kit.ArkUI') return { url: 'native-environment:display', shortCircuit: true };
     return next(specifier, context);
   },
   load(url, context, next) {
     if (url === 'native-environment:ability') return {format:'module',shortCircuit:true,source:'export const ConfigurationConstant={ColorMode:{COLOR_MODE_DARK:0,COLOR_MODE_LIGHT:1}};'};
+    if (url === 'native-environment:accessibility') return {format:'module',shortCircuit:true,source:'export const accessibility={isAnimationReduceEnabledSync:()=>globalThis.__personaNativeEnvironment.readMotion()};'};
     if (url === 'native-environment:display') return { format: 'module', shortCircuit: true, source: `
       const s = globalThis.__personaNativeEnvironment;
-      export const window = {AvoidAreaType:{TYPE_NAVIGATION_INDICATOR:3,TYPE_SYSTEM:0,TYPE_KEYBOARD:5}};
+      export const window = {WindowStatusType:{FULL_SCREEN:1},AvoidAreaType:{TYPE_NAVIGATION_INDICATOR:3,TYPE_SYSTEM:0,TYPE_KEYBOARD:5}};
       export const display = { isFoldable: () => s.foldable, getCurrentFoldCreaseRegion() {
         if (s.failure) throw new Error('display unavailable'); return s.region;
       } };
@@ -68,4 +70,42 @@ test('keyboard visibility follows its window and a retired listener cannot resiz
  const second=fakeWindow(700);env.bindWindow(second);assert.equal(first.events.size,0);assert.equal(env.keyboardHeightPx,700);
  stale(1200);assert.equal(env.keyboardHeightPx,700);const retired=second.events.get('keyboardHeightChange');env.bindWindow(second);retired(1200);assert.equal(env.keyboardHeightPx,700);second.events.get('keyboardHeightChange')(-10);assert.equal(env.keyboardHeightPx,0);
  const removed=second.events.get('keyboardHeightChange');env.unbindWindow();assert.equal(env.keyboardHeightPx,0);assert.equal(env.keyboardChanged,undefined);removed(900);assert.equal(env.keyboardHeightPx,0);assert.equal(second.events.size,0);
+});
+
+test('each transition reads the current system Reduce Motion preference', () => {
+  const environment = new NativeEnvironment();
+  for (const enabled of [false, true, false]) {
+    screen.readMotion = () => enabled;
+    assert.equal(environment.reduceMotion, enabled);
+  }
+  screen.readMotion = () => { throw new Error('Accessibility service unavailable'); };
+  assert.equal(environment.reduceMotion, false);
+});
+
+
+test('phone form sheets follow the attached portrait window and retain native sizing in other windows', () => {
+  const env = new NativeEnvironment();
+  const handlers = new Map();
+  let width = 1206, height = 2622, inset = 117, status = 1;
+  const owner = {
+    getWindowProperties: () => ({ windowRect: { width, height, top: 0 } }),
+    getWindowStatus: () => status,
+    getWindowAvoidArea: type => type === 0 ? { topRect: { height: inset } } : { bottomRect: { height: 0 } },
+    on: (key, fn) => handlers.set(key, fn), off: key => handlers.delete(key)
+  };
+  const source = readFileSync(new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url), 'utf8');
+  const first = source.indexOf('  private compactFormHeight()');
+  const last = source.indexOf('  private compactNavigationInset()', first);
+  const end = source.indexOf('\n  }', last);
+  assert.ok(first >= 0 && last > first && end > last);
+  const declaration = source.slice(first, end + 4);
+  const Form = new Function('SheetSize', 'Tokens', 'return '+stripTypeScriptTypes('class Form {'+declaration+'}'))({ LARGE:'native' }, { compactStatusInset:62 });
+  const form = Object.assign(new Form(), { environment:env, model:{profile:{id:'paired'}}, getUIContext:() => ({ px2vp:px => px/3 }) });
+  env.bindWindow(owner); assert.equal(form.compactFormHeight(), 812); assert.equal(form.compactNavigationInset(), 23);
+  inset = 270; handlers.get('avoidAreaChange')({}); assert.equal(form.compactFormHeight(), 776); assert.equal(form.compactNavigationInset(), 0);
+  status = 2; handlers.get('windowRectChange')({}); assert.equal(form.compactFormHeight(), 'native');
+  status = 1; [width,height] = [height,width]; handlers.get('windowSizeChange')({}); assert.equal(form.compactFormHeight(), 'native');
+  [width,height] = [1206,2622]; handlers.get('windowSizeChange')({}); env.nativeHoverAvailable = true; assert.equal(form.compactFormHeight(), 'native');
+  env.nativeHoverAvailable=false; inset=0; handlers.get('avoidAreaChange')({}); assert.equal(form.compactNavigationInset(), 0);
+  env.unbindWindow(); assert.equal(env.windowHeightPx, 0); assert.equal(env.isFullScreen, false);
 });

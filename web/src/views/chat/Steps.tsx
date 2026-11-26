@@ -4,7 +4,7 @@ import { useState } from "react";
 import { imageURL } from "../../lib/api";
 import { compactionLabel } from "../../lib/compaction";
 import { clock } from "../../lib/format";
-import { openPanel } from "../../lib/panel";
+import { openPanel, useReadOnlyFile } from "../../lib/panel";
 import { getSession } from "../../lib/store";
 import { taskLabel, taskPill, taskSubject, wakeSummary, type Tone } from "../../lib/tasks";
 import type { Item } from "../../lib/types";
@@ -88,7 +88,7 @@ function Disclosure({
               },
             })}
             className={cx(
-              "inline-flex h-5.5 min-w-0 items-center truncate rounded-chip bg-hover-2 px-1.5 text-[11.5px] text-[#43464c] shadow-hairline dark:bg-field dark:text-ink-2",
+              "inline-flex h-5.5 min-w-0 items-center truncate rounded-chip bg-hover-2 px-1.5 text-[11.5px] text-ink-2 shadow-hairline dark:bg-field",
               mono && "font-mono",
               onChip && "cursor-pointer underline-offset-2 hover:text-accent-ink hover:underline dark:hover:text-accent-ink",
             )}
@@ -159,6 +159,7 @@ export function CompactDivider({ item }: { item: Item }) {
 
 export function NoticeRow({ item, mid, sid }: { item: Item; mid: string; sid: string }) {
   const { tasks, jumpToCall } = useChatContext();
+  const readOnly = useReadOnlyFile();
   if (item.compact) return <CompactDivider item={item} />;
   const task = item.task;
   if (task) {
@@ -182,7 +183,7 @@ export function NoticeRow({ item, mid, sid }: { item: Item; mid: string; sid: st
         {out && (
           <button
             type="button"
-            onClick={() => openPanel({ kind: "file", mid, path: out, cwd: getSession(mid, sid)?.cwd })}
+            onClick={() => openPanel({ kind: "file", mid, path: out, cwd: getSession(mid, sid)?.cwd, ...(readOnly ? { readOnly: true } : {}) })}
             className="flex w-fit items-center gap-1.5 rounded-[6px] px-0.5 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:underline"
           >
             <Icon name="read" size={12} />

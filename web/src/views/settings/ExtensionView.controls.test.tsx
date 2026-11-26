@@ -152,6 +152,26 @@ describe("UI 6：行内控件", () => {
     expect(sw().getAttribute("aria-checked")).toBe("true");
   });
 
+  it("reconciles instead of snapping back when a concurrent redraw finishes before a view-returning control action (#13020)", async () => {
+    await open(page(false));
+    await flip();
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    // an invalidation redraw runs while the switch action is in flight and resolves with the older view
+    await act(async () => hub.listeners.get("extension_ui")?.forEach((l) => l({ type: "extension_ui", extension: "demo", invalidate: true })));
+    await settle();
+    const redraw = hub.asked.filter((a) => a.kind === "draw")[1];
+    await answer(redraw, page(false));
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    // the switch action returns a full view (as persona.alert / persona.overview do): must not revert to false
+    await answer(acts()[0], { view: page(true), toast: "Alerts on" });
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    // triggers a reconciling draw to bring the authoritative view in sync
+    const reconcile = hub.asked.filter((a) => a.kind === "draw")[2];
+    expect(reconcile).toBeTruthy();
+    await answer(reconcile, page(true));
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+  });
+
   it("an empty answer draws the page again, and the user's value shows until it does", async () => {
     await open(page(false));
     await flip();

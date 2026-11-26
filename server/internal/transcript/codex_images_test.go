@@ -160,7 +160,7 @@ func TestCodexGeneratedImageRollout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(span.History, ".items1") {
+	if !strings.HasSuffix(span.History, ".items2") {
 		t.Fatalf("Codex history revision = %q", span.History)
 	}
 	if len(items) != 7 || items[2].Kind != proto.KindToolUse || items[2].ToolName != "Read" ||

@@ -1,6 +1,10 @@
 package hub
 
-import "github.com/nwverse/persona/server/internal/assistantwire"
+import (
+	"context"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+)
 
 // Attention modes, as the hub delivers pushes in them (#13503, docs/server/server.md "Attention modes"). The mode is the
 // assistant's to keep: the user sets it through the manager's routes, and the manager reports it in its profile
@@ -22,12 +26,17 @@ func (p *Pusher) attentionNow() assistantwire.Attention {
 	return p.attention().Effective(p.now())
 }
 
-// filtering: the grading filter runs for this push: an attention mode is in force, or hub.ln_mode is on.
-func (p *Pusher) filtering() bool {
+// filteringFor reports whether push grading filtering runs for a push owned by manager: an active owner attention
+// mode, the owner's hub.ln_mode / hub.push_grading config, or an active singleton extension layer belonging to manager.
+func (p *Pusher) filteringFor(manager string) bool {
 	if p == nil {
 		return false
 	}
-	return p.attentionNow().Active() || p.pushGradingOn()
+	if p.attentionNow().Active() {
+		return true
+	}
+	cfg, _ := p.effectiveGradingFor(context.Background(), manager)
+	return cfg.Enabled
 }
 
 // attentionHushes: quiet mode is in force, so every push it lets go goes without a sound (hushed): the stricter of it
@@ -54,25 +63,4 @@ func attentionPush(policy pushPolicy, level string) assistantwire.AttentionPush 
 	}
 	return assistantwire.AttentionPush{Level: level, Depth: policy.depth, Track: track, MachineID: policy.machineID,
 		SessionID: policy.sessionID, Done: policy.done, System: policy.system}
-}
-
-// applyAttentionLocked is applyPushGrading in attention mode attn (in force): the push is held, with the mode's reason,
-// or goes; a P0 that goes keeps its key quiet for the window as with hub.ln_mode on. gradingMu is held.
-func (p *Pusher) applyAttentionLocked(attn assistantwire.Attention, policy pushPolicy, level string, in heldPushRecord) (allow bool, reason string) {
-	v := assistantwire.DecideAttention(attn, attentionPush(policy, level))
-	if v.Hold {
-		switch in.Level {
-		case assistantwire.LevelP0, assistantwire.LevelP2:
-		default:
-			in.Level = assistantwire.LevelP1
-		}
-		in.Reason = v.Reason
-		p.addInterceptLocked(in, false)
-		return false, v.Reason
-	}
-	if in.RelatedKey != "" {
-		p.noteKeyPushedLocked(in.RelatedKey, in.At)
-	}
-	p.addSentLocked(pushSent{At: in.At, Level: level, RelatedKey: in.RelatedKey, Manager: policy.manager})
-	return true, ""
 }

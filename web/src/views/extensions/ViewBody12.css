@@ -1,0 +1,3 @@
+/* UI version 12 (#14998): interactive map canvas height on pages and 200 px compact preview height (lazy chunk only). */
+.map-canvas { height: clamp(320px, 70dvh, 900px); }
+.map-preview { height: 200px; }

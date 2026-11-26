@@ -24,6 +24,12 @@ const (
 	EngineT3Code = "t3code"
 )
 
+// HostAgy is the host a start names to run on the computer's Antigravity companion (the agy runtime's terminal-less
+// sessions, node runtimeOfIn) instead of in an engine host. It is a start host beside EngineHostIDs, never an engine a
+// machine enables: a new Agent with the default host runs agy in a herdr pane (#10237), a task the assistant starts
+// runs it here when the companion is connected (#13447).
+const HostAgy = "agy"
+
 // RuntimeEngine: engine is one that is a runtime, not a terminal (Paseo, Cindy, T3 Code): its own providers start every
 // session that opens in it. Whether it runs only those (a launcher it lacks gets one of the same kind, or a refusal) its
 // node says per start host (launchers.list's host_runtime, #8140).

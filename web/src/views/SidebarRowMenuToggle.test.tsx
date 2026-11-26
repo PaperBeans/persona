@@ -94,7 +94,7 @@ async function renderSidebar() {
   await flush();
 }
 
-const personaRow = () => host.querySelector(`a[title="${t("sidebar.persona_main")}"]`) ?? undefined;
+const personaRow = () => host.querySelector(`a[aria-description="${t("sidebar.persona_main")}"]`) ?? undefined;
 const rows: [string, () => Element | undefined][] = [
   ["the Persona main row", personaRow],
   ["a pinned conversation", () => link("Release notes")],

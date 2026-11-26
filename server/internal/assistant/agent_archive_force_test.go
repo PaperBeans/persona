@@ -220,7 +220,7 @@ func TestForceArchiveCloseWriteWindowDatabase(t *testing.T) {
 		t.Log("close succeeded and all three cards cancelled; reading stale blocked snapshot before final ClosedAt write")
 		checkRestart("restart after close before final ClosedAt write")
 	}
-	ft.s.store = func() Store { return window }
+	ft.s.setStore(func() Store { return window })
 	ft.d.machines["mac"].call = func(method string, raw json.RawMessage) (any, error) {
 		if method == "session.close" {
 			var records map[string]agentArchive
@@ -345,7 +345,7 @@ func TestForceArchiveCloseFailureClearsFenceDatabase(t *testing.T) {
 func TestForceArchiveFenceWriteFailureKeepsAgent(t *testing.T) {
 	ft, row := closeTestService(t, func(s *proto.Session) { s.Status = proto.StatusBlocked; s.State = proto.StateNeedsYou })
 	store := &archiveFailStore{fleetMem: ft.st, failWrite: true}
-	ft.s.store = func() Store { return store }
+	ft.s.setStore(func() Store { return store })
 	ix := proto.Interaction{ID: "keep-card", MachineID: "mac", SessionID: row.SessionID, Kind: proto.IxScreen}
 	ft.s.ixMapLocked()[ix.ID] = &pending{ix: ix}
 	if err := ft.s.forceArchiveConfirmation(context.Background(), "mac", row.SessionID); err == nil {

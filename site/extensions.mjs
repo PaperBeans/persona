@@ -92,10 +92,9 @@ function edgeCache() {
 
 async function cached(cache) {
   if (!cache) return null;
-  const r = await cache.match(CACHE_KEY);
-  if (!r) return null;
   try {
-    return await r.json();
+    const r = await cache.match(CACHE_KEY);
+    return r ? await r.json() : null;
   } catch {
     return null;
   }

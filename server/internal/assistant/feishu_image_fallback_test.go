@@ -28,17 +28,15 @@ func deliverImageFallback(t *testing.T, s *Service, msgType, content string) {
 	if err = s.FeishuMessage(context.Background(), FeishuMessage{Event: raw}); err != nil {
 		t.Fatal(err)
 	}
-	s.fbot.mu.Lock()
-	done := s.fbot.line
-	s.fbot.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.larkModule().Wait(ctx); err != nil {
 		t.Fatal("message turn did not finish")
 	}
 }
 
 func TestFeishuImageFileFallbackEntry(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, s, _ := bigFileHub(t)
 	resourceCalls, saves := 0, 0
 	f.answerApp(AppFeishu, FeishuResource, func(p json.RawMessage) (any, error) {
@@ -85,7 +83,7 @@ func TestFeishuImageFileFallbackEntry(t *testing.T) {
 	if resourceCalls != 6 || saves != 1 {
 		t.Fatalf("resource calls=%d saves=%d", resourceCalls, saves)
 	}
-	if images := sentImages(f); len(images) != botImagesMax {
+	if images := sentImages(f); len(images) != 4 { // the most a message passes on as pictures (the module's botImagesMax)
 		t.Fatalf("images %v", images)
 	}
 	for _, image := range sentImages(f) {
@@ -104,6 +102,7 @@ func TestFeishuImageFileFallbackEntry(t *testing.T) {
 }
 
 func TestFeishuOversizeImageEntry(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, only := range []bool{false, true} {
 		name := "with text"
 		if only {
@@ -147,6 +146,7 @@ func TestFeishuOversizeImageEntry(t *testing.T) {
 }
 
 func TestFeishuImageFailureMessages(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, saveFailure := range []bool{false, true} {
 		name, key := "download", "download_image"
 		if saveFailure {
@@ -163,7 +163,7 @@ func TestFeishuImageFailureMessages(t *testing.T) {
 			ev := &botcard.MessageEvent{}
 			ev.Message.MessageID, ev.Message.ChatType = "om_image", "p2p"
 			content := botcard.ParseContent("image", `{"image_key":"img_failure"}`, nil)
-			err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain})
+			err := s.larkModule().Send(context.Background(), ev, content, botTarget{Kind: targetMain})
 			rt, resolveErr := s.resolveBotTarget(context.Background(), botTarget{Kind: targetMain})
 			if resolveErr != nil {
 				t.Fatal(resolveErr)
@@ -180,6 +180,7 @@ func TestFeishuImageFailureMessages(t *testing.T) {
 }
 
 func TestFeishuImageFallbackEmptySavedPath(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, s, notes := bigFileHub(t)
 	f.answerApp(AppFeishu, FeishuResource, func(json.RawMessage) (any, error) {
 		return map[string]any{"path": "", "name": "img_empty.jpg", "mime": "image/jpeg"}, nil
@@ -191,6 +192,7 @@ func TestFeishuImageFallbackEmptySavedPath(t *testing.T) {
 }
 
 func TestFeishuQuotedImageFileFallback(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, s := quoteHub(t, func(p json.RawMessage) (any, error) {
 		var a map[string]any
 		_ = json.Unmarshal(p, &a)
@@ -201,7 +203,7 @@ func TestFeishuQuotedImageFileFallback(t *testing.T) {
 	})
 	ev := quoteReply()
 	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
-	if err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
+	if err := s.larkModule().Send(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sendOnceText(f), "/tmp/img_q.webp") || len(sentImages(f)) != 0 || len(f.appParams(AppFeishu, FeishuSave)) != 0 {

@@ -11,13 +11,14 @@ import (
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extmgr/imessageport"
 	"github.com/nwverse/persona/server/internal/imessagewire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 )
 
 // needsIMessageModule is the iMessage module's factory, as the manager gets it (imessageport, filled by
 // internal/modules/all, which modules_link_test.go links); the test is skipped in a build without the module.
 func needsIMessageModule(t *testing.T) imessagewire.Factory {
 	t.Helper()
-	f := imessageport.Factory()
+	f := imessageport.Factory(moduleswitch.Set{})
 	if f == nil {
 		t.Skip("this build has no iMessage module (persona_without_imessage or persona_core_only)")
 	}
@@ -49,14 +50,15 @@ func imessagePersonKey(handle string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// Without the iMessage module (persona_without_imessage, persona_core_only) the manager has no Messages connector, even
-// with manager.json's imessage.machine set: none is registered, there is no built-in Messages extension, and
-// /api/v1/imessage answers that it is not configured.
+// Without the iMessage module (persona_without_imessage, persona_core_only), or with it switched off in the `modules`
+// setting the manager started with, the manager has no Messages connector, even with manager.json's imessage.machine
+// set: none is registered, there is no built-in Messages extension, and /api/v1/imessage answers that it is not
+// configured.
 func TestManagerWithoutIMessage(t *testing.T) {
-	if imessageport.Factory() != nil {
-		t.Skip("this build has the iMessage module")
-	}
 	h := newTestManager(t)
+	if imessageport.Factory(moduleswitch.Set{}) != nil { // built in: switched off at run time, absent the same way
+		h.opts.Modules = moduleswitch.Off("imessage")
+	}
 	h.connectors = connector.NewRegistry(nil)
 	h.cfg.IMessage = &imessagewire.Config{Machine: "mac"}
 	if err := h.addIMessage(*h.cfg.IMessage); err == nil {

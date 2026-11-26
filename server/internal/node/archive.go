@@ -60,6 +60,11 @@ var codexArchiveTimeout = 30 * time.Second
 // come here: runtimeHandle answers for it.
 func (n *Node) nativeArchive(ctx context.Context, id string, archive bool) (nativeArchiveResult, error) {
 	if !validID(id) {
+		if strings.HasPrefix(id, agyAgent+"-") {
+			// An agy row no runtime took (runtimes_calls.go): a pane's (otherSession), or a conversation's own while no
+			// Antigravity companion lists it. Antigravity keeps no archive of its own either way (#14520).
+			return archiveUnsupported(agyAgent + " has no archive of its own"), nil
+		}
 		return nativeArchiveResult{}, fmt.Errorf("invalid session id %q", id)
 	}
 	if n.isAssistantSession(id) || n.runtimeAssistant(id) {

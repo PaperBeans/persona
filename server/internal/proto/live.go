@@ -28,3 +28,23 @@ type SessionLive struct {
 
 // FeatureSessionLive is the client feature (the WebSocket's features=…) that asks for live pushes.
 const FeatureSessionLive = "session_live"
+
+// LiveTool is a provider-recorded invocation awaiting a result. Its ID belongs to
+// the provider call, which may wrap several commands with independent item IDs.
+type LiveTool struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+const FeatureSessionLiveTools = "session_live_tools"
+
+// LiveToolState carries public activity for one watched turn. An empty state clears the previous one.
+type LiveToolState struct {
+	Tools        []LiveTool `json:"tools"`
+	Summary      string     `json:"summary,omitempty"`
+	Thinking     bool       `json:"thinking,omitempty"`
+	Active       bool       `json:"active,omitempty"`
+	RetryAttempt int        `json:"retry_attempt,omitempty"`
+	RetryMax     int        `json:"retry_max,omitempty"`
+	Compacting   bool       `json:"compacting,omitempty"`
+}

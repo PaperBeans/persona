@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "typed.schema.json",
+  "title": "Typed wire fixture",
+  "description": "Every opt-in keyword of the wire generator (#15397), for scripts/test/test_wiregen_typed.py; no hub or client reads it.",
+  "$defs": {
+    "SessionID": {"type": "string", "x-id": "SessionID", "description": "A session, as its machine names it."},
+    "MachineID": {"type": "string", "x-id": "MachineID"},
+    "Phase": {
+      "type": "string",
+      "enum": ["needs_you", "working", "done", "error", "idle", "unknown"],
+      "x-enum": "closed",
+      "x-unknown": "count",
+      "description": "Where an Agent is."
+    },
+    "Section": {"type": "string", "enum": ["now", "later"], "x-enum": "closed"},
+    "Legacy": {"type": "string", "enum": ["a", "b"], "description": "An open enum, unchanged."},
+    "ToolInput": {"x-opaque": "a tool's own arguments, whatever its program defines", "description": "What a tool was called with."},
+    "Label": {"type": "string", "x-text": "Label", "description": "Where a watched thing is, in its watcher's words."},
+    "Replace": {"type": "boolean", "x-tristate": "Replace", "description": "Whether it replaces; absent is true."},
+    "Signal": {
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": {"$ref": "#/$defs/Label"},
+        "note": {"type": "string", "maxLength": 64, "x-text": "Label"},
+        "replace": {"$ref": "#/$defs/Replace"},
+        "keep": {"type": "boolean", "x-tristate": "Replace"}
+      }
+    },
+    "Ref": {
+      "type": "object",
+      "required": ["machine", "session"],
+      "properties": {
+        "machine": {"$ref": "#/$defs/MachineID"},
+        "session": {"type": "string", "x-id": "SessionID"}
+      }
+    },
+    "View": {
+      "type": "object",
+      "description": "An Agent as a client draws it.",
+      "x-decode": "strict",
+      "required": ["ref", "phase", "counts", "rank"],
+      "properties": {
+        "ref": {"$ref": "#/$defs/Ref"},
+        "phase": {"$ref": "#/$defs/Phase"},
+        "previous": {"$ref": "#/$defs/Phase"},
+        "legacy": {"$ref": "#/$defs/Legacy"},
+        "counts": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/Section"},
+          "additionalProperties": {"type": "integer", "minimum": 0},
+          "required": ["now", "later"],
+          "description": "Rows per section, every section named."
+        },
+        "loose": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/Section"},
+          "additionalProperties": {"type": "integer"},
+          "description": "Not every key required: stays a map."
+        },
+        "rank": {"type": "integer"},
+        "input": {"$ref": "#/$defs/ToolInput"},
+        "related": {"type": "array", "items": {"$ref": "#/$defs/SessionID"}},
+        "seen_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "Lenient": {
+      "type": "object",
+      "required": ["phase", "id"],
+      "properties": {
+        "phase": {"$ref": "#/$defs/Phase"},
+        "id": {"$ref": "#/$defs/SessionID"},
+        "note": {"type": "string"}
+      }
+    },
+    "Event": {
+      "oneOf": [{"$ref": "#/$defs/Changed"}, {"$ref": "#/$defs/Gone"}],
+      "x-discriminator": "type"
+    },
+    "Cause": {
+      "oneOf": [{"$ref": "#/$defs/Late"}, {"$ref": "#/$defs/Lost"}],
+      "x-discriminator": "kind",
+      "x-enum": "closed",
+      "description": "Why a view went stale: a closed union, whose Go tag is a named type."
+    },
+    "Late": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "late"}, "by": {"type": "integer"}}},
+    "Lost": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "lost"}}},
+    "Changed": {
+      "type": "object",
+      "required": ["type", "view"],
+      "properties": {"type": {"const": "changed"}, "view": {"$ref": "#/$defs/View"}}
+    },
+    "Gone": {
+      "type": "object",
+      "required": ["type", "session"],
+      "properties": {"type": {"const": "gone"}, "session": {"$ref": "#/$defs/SessionID"}, "phase": {"$ref": "#/$defs/Phase"}}
+    }
+  }
+}

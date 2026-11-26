@@ -23,10 +23,10 @@ nonisolated enum TodoCountsFallback {
     }
 
     static func counts(_ rows: [TodoFiled]) -> TodoCounts {
-        var c = TodoCounts(sections: Dictionary(uniqueKeysWithValues: TodoListSection.all.map { ($0, 0) }))
+        var c = TodoCounts()
         let skip = carried(rows)
         for row in rows where !skip.contains(row.id) {
-            c.sections[row.section, default: 0] += 1
+            c.sections[row.section] += 1
             if !row.closed && row.section != TodoListSection.someday { c.open += 1 }
             if row.section == TodoListSection.needsYou && !row.quiet { c.needsYou += 1 }
             if row.section == TodoListSection.working || row.section == TodoListSection.waiting { c.inProgress += 1 }

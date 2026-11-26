@@ -1,12 +1,14 @@
 package node
 
 import (
+	"context"
 	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"math"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/preview"
 )
@@ -66,30 +68,46 @@ func (t *previewTab) screenshot(id uint32, full bool) {
 
 // pick turns element picking on or off: while on, the element under the pointer is outlined and a click picks it
 // (Overlay.inspectNodeRequested) instead of clicking it.
-func (t *previewTab) pick(on bool) {
+func (t *previewTab) pick(on bool) bool {
 	if on == t.picking {
-		return
+		return true
 	}
-	t.picking = on
+	mode := map[string]any{"mode": "none", "highlightConfig": map[string]any{}}
 	if on {
 		t.cdp("DOM.enable", nil)
 		t.cdp("Overlay.enable", nil)
-		t.cdp("Overlay.setInspectMode", map[string]any{"mode": "searchForNode", "highlightConfig": map[string]any{
+		mode = map[string]any{"mode": "searchForNode", "highlightConfig": map[string]any{
 			"showInfo": true, "showAccessibilityInfo": false,
 			"contentColor": map[string]any{"r": 57, "g": 135, "b": 229, "a": 0.25},
 			"borderColor":  map[string]any{"r": 57, "g": 135, "b": 229, "a": 0.9},
 			"paddingColor": map[string]any{"r": 27, "g": 175, "b": 122, "a": 0.18},
 			"marginColor":  map[string]any{"r": 235, "g": 104, "b": 52, "a": 0.15},
-		}})
-		return
+		}}
 	}
-	t.cdp("Overlay.setInspectMode", map[string]any{"mode": "none", "highlightConfig": map[string]any{}})
-	t.cdp("Overlay.hideHighlight", nil)
+	// Chrome can deliver pointer input to the compositor while this renderer command is still pending.
+	// Its reply needs no tab callback. Hold subsequent panel input until Chrome confirms the mode.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := t.b.cdp.call(ctx, t.session, "Overlay.setInspectMode", mode, nil); err != nil {
+		t.dropMouseThrough = t.mouseSequence.Load()
+		t.picking = false
+		t.cdp("Overlay.setInspectMode", map[string]any{"mode": "none", "highlightConfig": map[string]any{}})
+		t.cdp("Overlay.hideHighlight", nil)
+		t.send(map[string]any{"t": "pick_failed"})
+		return false
+	}
+	t.picking = on
+	if !on {
+		t.cdp("Overlay.hideHighlight", nil)
+	}
+	return true
 }
 
 // picked describes the element the user picked and sends it to the web.
 func (t *previewTab) picked(backendNode int) {
-	t.pick(false)
+	if !t.picking || !t.pick(false) {
+		return
+	}
 	t.send(map[string]any{"t": "pick", "on": false})
 	t.async("DOM.resolveNode", map[string]any{"backendNodeId": backendNode}, func(raw json.RawMessage, err error) {
 		var r struct {

@@ -146,3 +146,125 @@ test('a second connect or a retired DNS lookup cannot open a socket', async () =
   pending.resolve(records); await Promise.resolve();
   assert.equal(tlsCalls.length, 0); assert.equal(dials.length, 0); assert.equal(writes, 0);
 });
+
+test('only the authenticated operation lookup recognizes the Hub missing-receipt envelope', async () => {
+  const rcp = globalThis.socketTestKit.rcp;
+  let body = {code: 'not_found', error: 'no such operation'}, status = 404;
+  rcp.Request = class { constructor(target, method, headers) { Object.assign(this, {target, method, headers}); } };
+  rcp.createSession = () => ({close() {}, async fetch(request) {
+    request.destination(new TextEncoder().encode(JSON.stringify(body)).buffer);
+    return {statusCode: status, headers: {}};
+  }});
+  const transport = new HubTransport(new EndpointConfig('https://desk.test/', 'fixture', '', '', 'owner'));
+  transport.clientMetadata = () => ({platform: 'harmony', version: '1', build: '1', os: {}});
+  const path = '/api/v1/ops/0d9ce811-24fe-4f6e-ae77-000000000001';
+  const code = async (route, error, method = 'GET') => assert.rejects(
+    transport.request(route, method), failure => failure.status === status && failure.code === error);
+  await code(path, 'no_such_operation');
+  await code('/api/v1/workspaces', 'not_found');
+  await code('/api/v1/ops/bad-id', 'not_found');
+  await code(path, 'not_found', 'POST');
+  status = 403; await code(path, 'not_found');
+  status = 404; body = {code: 'not_found', error: 'no such route'}; await code(path, 'not_found');
+});
+
+function sessionFrame(sequence) {
+  const bytes = new TextEncoder().encode(JSON.stringify({type:'session',sequence}));
+  return Uint8Array.of(0x81, bytes.length, ...bytes);
+}
+
+test('buffered Hub events preserve order across a partial read, including a reentrant reader', () => {
+  const client = new HubTransport(new EndpointConfig('https://fixture.invalid', 'fixture', '', '', 'assistant'));
+  const append = bytes => { client.rx.append(bytes, 1024 * 1024); };
+  const seen = [];
+  client.messageCallback = raw => {
+    const {sequence} = JSON.parse(raw);
+    seen.push(sequence);
+    if (sequence === 2) {
+      append(sessionFrame(4));
+      client.processFrames();
+    }
+  };
+  const next = sessionFrame(2);
+  append(Uint8Array.from([...sessionFrame(1), ...next.slice(0, 7)]));
+  client.processFrames();
+  assert.deepEqual(seen, [1]);
+  assert.equal(client.rx.length, 7);
+  assert.equal(client.rx.view().byteLength, 7);
+  append(Uint8Array.from([...next.slice(7), ...sessionFrame(3)]));
+  client.processFrames();
+  assert.deepEqual(seen, [1, 2, 3, 4]);
+  assert.equal(client.rx.length, 0);
+  assert.equal(client.rx.view().byteLength, 0);
+});
+
+test('when an event closes its transport the remaining buffer stays with that old connection', () => {
+  const config = new EndpointConfig('https://fixture.invalid', 'fixture', '', '', 'assistant');
+  const old = new HubTransport(config), next = new HubTransport(config), seen = [];
+  next.messageCallback = raw => seen.push(JSON.parse(raw).sequence);
+  old.messageCallback = raw => {
+    seen.push(JSON.parse(raw).sequence);
+    old.close();
+    next.rx.append(sessionFrame(3), 1024 * 1024);
+    next.processFrames();
+  };
+  old.rx.append(Uint8Array.from([...sessionFrame(1), ...sessionFrame(2)]), 1024 * 1024);
+  old.processFrames();
+  assert.deepEqual(seen, [1, 3]);
+  assert.equal(old.closed, true);
+  assert.equal(old.rx.length, 0);
+});
+
+test('fragmented text is checked as one Hub hello before any following event is delivered', () => {
+  const stream = new HubTransport(new EndpointConfig('https://fixture.invalid', 'fixture', '', '', 'assistant'));
+  const seen = [], states = [];
+  stream.messageCallback = raw => seen.push(JSON.parse(raw));
+  stream.stateCallback = state => states.push(state);
+  const hello = {type:'hello',hub_id:'fixture',label:'已就绪'};
+  const body = new TextEncoder().encode(JSON.stringify(hello));
+  const cut = body.indexOf(0xe5) + 1;
+  assert.ok(cut > 1 && cut < body.length);
+  stream.rx.append(Uint8Array.of(0x01, cut, ...body.subarray(0,cut)), 1024 * 1024);
+  stream.processFrames();
+  assert.deepEqual(seen, []);
+  stream.rx.append(Uint8Array.of(0x8a,0, 0x80,body.length-cut,...body.subarray(cut), ...sessionFrame(1)), 1024 * 1024);
+  stream.processFrames();
+  assert.deepEqual(seen, [hello,{type:'session',sequence:1}]);
+
+  const changed = new TextEncoder().encode(JSON.stringify({type:'hello',hub_id:'other'}));
+  stream.rx.append(Uint8Array.of(0x81,changed.length,...changed,...sessionFrame(2)), 1024 * 1024);
+  stream.processFrames();
+  assert.deepEqual(seen, [hello,{type:'session',sequence:1}]);
+  assert.deepEqual(states, ['offline']);
+  assert.equal(stream.rx.length, 0);
+});
+
+test('reading a normal batch does not recopy the unconsumed suffix after each message', t => {
+  const stream = new HubTransport(new EndpointConfig('https://fixture.invalid', 'fixture', '', '', 'assistant'));
+  const order = Array.from({length:12}, (_, i) => i);
+  stream.rx.append(Uint8Array.from(order.flatMap(i=>Array.from(sessionFrame(i)))), 1024 * 1024);
+  const total = stream.rx.length, originalSlice = Uint8Array.prototype.slice, seen = [];
+  let copiedSuffix = 0;
+  t.mock.method(Uint8Array.prototype, 'slice', function(...args) {
+    const copy = originalSlice.apply(this,args);
+    if (args.length === 1 && args[0] > 0) copiedSuffix += copy.length;
+    return copy;
+  });
+  stream.messageCallback = raw => seen.push(JSON.parse(raw).sequence);
+  stream.processFrames();
+  assert.deepEqual(seen, order);
+  assert.ok(copiedSuffix <= total, 'unconsumed data was copied repeatedly');
+  assert.equal(stream.rx.length, 0);
+});
+
+test('reserved Health routes keep the paired credentials and use only the Hub’s default manager',async()=>{
+  const requests=[],rcp=globalThis.socketTestKit.rcp, uuid='ed0fe4c5-f936-4419-b24f-b95cee97dc9d',base='/api/v1/assistant/health/intake';
+  rcp.Request=class {constructor(target,method,headers){Object.assign(this,{target,method,headers});}};
+  rcp.createSession=()=>({close(){},async fetch(request){requests.push(request);request.destination(new TextEncoder().encode('{}').buffer);return {statusCode:200,headers:{}};}});
+  const client=new HubTransport(new EndpointConfig('https://test.invalid/','fixture','synthetic-health','','manager-a'));
+  client.clientMetadata=()=>({platform:'harmony',version:'1',build:'1',os:{}});
+  for(const [path,verb,defaultOnly] of [[base+'?space=health','POST',true],[base+'?space=health','GET',true],[base+'/ui?space=health','POST',true],[base+'/'+uuid+'?space=health','DELETE',true],[base+'/ui?space=work','POST',false],[base+'/unrelated?space=health','DELETE',false],['/api/v1/assistant?space=health','GET',false]]){
+    await client.request(path,verb,verb==='POST'?'{}':'');
+    const h=requests.at(-1).headers;assert.equal(h.Authorization,'Bearer synthetic-health');assert.equal(h['X-Persona-Manager'],defaultOnly?undefined:'manager-a');
+  }
+});

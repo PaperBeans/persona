@@ -352,11 +352,11 @@ nonisolated enum SessionModes {
         }
     }
 
-    /// The launcher whose /model list and typed IDs a session's switch offers: the session's own, plain claude when it
-    /// started without one (the web's `sessionLauncher`).
+    /// Use a named launcher's own catalog. A manually started Codex may report only its engine and surface.
     static func launcher(_ s: Session?) -> String {
-        guard let l = s?.launcher, !l.isEmpty else { return "claude" }
-        return l
+        if let launcher = s?.launcher, !launcher.isEmpty { return launcher }
+        guard let s, s.isCodex else { return "claude" }
+        return s.spaceKind == Launcher.codexAppSource || s.agentSurface == "desktop" ? "codex-app" : "codex"
     }
 
     /// What applying a model pick sends: the alias, unless the session already runs it (Default too, while it runs a
@@ -425,20 +425,20 @@ nonisolated enum SessionModes {
         }
     }
 
-    /// GPT display names only: keep the version and every variant, without changing the id used by the agent.
+    /// GPT display names only: preserve the GPT- prefix, version, and every variant without changing the agent wire id.
     static func gptModelName(_ model: String?) -> String? {
         guard let raw = Fmt.model(model)?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.lowercased().hasPrefix("gpt-") else { return nil }
         let parts = raw.dropFirst(4).split(separator: "-", omittingEmptySubsequences: false)
         guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
-        return parts.map { part in
+        return "GPT-" + parts.map { part in
             guard let first = part.first, first.isLetter else { return String(part) }
             return String(first).uppercased() + part.dropFirst().lowercased()
         }.joined(separator: " ")
     }
 
     /// A model's short name for that button: "claude-opus-5-5-20260101" → "Opus 5.5", "opus" / "opus[1m]" → "Opus",
-    /// "gpt-6.1-sol" → "6.1 Sol"; other names retain the existing `Fmt.model` behavior.
+    /// "gpt-6.1-sol" → "GPT-6.1 Sol"; other names retain the existing `Fmt.model` behavior.
     static func modelName(_ model: String?) -> String? {
         guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let raw = Fmt.model(model) else { return nil }

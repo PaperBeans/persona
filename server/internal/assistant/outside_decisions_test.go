@@ -340,6 +340,9 @@ func TestOutsideDecisionWithdrawFencesAnswers(t *testing.T) {
 	if listedAsk(t, e.s, d.AskTodoID) != nil {
 		t.Fatal("a withdrawn decision remains in Needs you")
 	}
+	if !toldResolved(e.f, assistantwire.TodoAskCardID(d.AskTodoID)) {
+		t.Fatalf("withdrawing outside decision did not emit EventFleetResolved %s", assistantwire.TodoAskCardID(d.AskTodoID))
+	}
 	if rec := answerAsk(e.s, d.AskTodoID, map[string]string{"option": "Hold"}); rec.Code != http.StatusConflict {
 		t.Fatalf("answer after withdrawal: %d %s", rec.Code, rec.Body)
 	}

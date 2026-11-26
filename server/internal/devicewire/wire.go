@@ -472,6 +472,9 @@ var Routes = []string{
 	"GET /api/v1/machines/{mid}/herdr",
 	"PUT /api/v1/machines/{mid}/herdr",
 	"POST /api/v1/machines/{mid}/herdr/start",
+	// Named herdr sessions kept out of Persona (#14898, internal/devices herdrsessions.go).
+	"GET /api/v1/machines/{mid}/herdr/sessions",
+	"PUT /api/v1/machines/{mid}/herdr/sessions/blocked",
 	"GET /api/v1/machines/{mid}/botmux",
 	"PUT /api/v1/machines/{mid}/botmux",
 	"GET /api/v1/machines/{mid}/health/reports",
@@ -483,6 +486,11 @@ var Routes = []string{
 	// A computer's diagnosis and cache cleanup (#8037, internal/devices diagnosis.go).
 	"GET /api/v1/machines/{mid}/diagnosis",
 	"POST /api/v1/machines/{mid}/cleanup",
+	// A computer's disk usage map and its guarded trash (#14576, internal/devices usagemap.go).
+	"GET /api/v1/machines/{mid}/storage/usage",
+	"POST /api/v1/machines/{mid}/storage/trash",
+	"POST /api/v1/machines/{mid}/storage/trash/undo",
+	"POST /api/v1/machines/{mid}/storage/trash/purge",
 	"GET /api/v1/machines/{mid}/claude-dirs",
 	"PUT /api/v1/machines/{mid}/claude-dirs/blocked",
 	// Hidden Agent folders, beside the blocked Claude config folders (internal/devices agentdirs.go).
@@ -509,6 +517,8 @@ var TransferRoutes = []string{
 	"POST /api/v1/files/transfer",
 	"GET /api/v1/files/transfer/{id}",
 	"DELETE /api/v1/files/transfer/{id}",
+	// The audit of the Agents' file_transfer calls (internal/devices agent_transfer.go), full devices only.
+	"GET /api/v1/files/transfer-audit",
 }
 
 // MetricsRoutes are the machines' monitoring's routes (internal/devices metrics.go), relayed the same way: every

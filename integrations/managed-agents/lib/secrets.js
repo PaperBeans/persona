@@ -45,6 +45,7 @@ export function parseRef(ref, what = 'key') {
 }
 
 const expand = (p) => (p === '~' ? homedir() : p.startsWith('~/') ? join(homedir(), p.slice(2)) : p)
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Resolves references to values. `env` is the environment to read (the process's by default), `run` runs a command
@@ -120,7 +121,10 @@ export function createSecrets({ env = process.env, run = runCommand, platform = 
     /** Text with every resolved value and anything shaped like a bearer token replaced. */
     redact(text) {
       let out = String(text ?? '')
-      for (const v of known) if (v.length >= 4) out = out.split(v).join('<redacted>')
+      if (known.size > 0) {
+        const pattern = [...known].filter(Boolean).sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')
+        if (pattern) out = out.replace(new RegExp(pattern, 'g'), () => '<redacted>')
+      }
       return out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1<redacted>')
     },
   }

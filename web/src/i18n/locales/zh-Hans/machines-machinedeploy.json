@@ -1,5 +1,6 @@
 {
   "failed": "部署失败：{error}",
   "requesting": "请求中",
-  "details": "详情"
+  "details": "详情",
+  "co_located_note": "将更新共用的 personad 程序，同机助手（{names}）会在空闲时平滑重启。"
 }

@@ -2,7 +2,6 @@
   "tab_label": "网络诊断",
   "title": "网络与代理诊断",
   "subtitle": "按需检测固定开发端点的连通性与代理配置，不会在后台轮询。",
-  "machine_select_label": "选择电脑",
   "recheck": "重新检测",
   "checking": "正在检测网络与代理连通性…",
   "offline": "这台电脑当前离线，上线后可进行网络诊断。",

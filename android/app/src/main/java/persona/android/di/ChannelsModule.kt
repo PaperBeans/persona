@@ -11,6 +11,7 @@ import persona.android.PersonaApp
 import persona.core.contracts.api.*
 import persona.core.hub.HttpChannelManagement
 import persona.core.hub.HttpFeishuBotSettings
+import persona.core.hub.HttpLarkSync
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
 import kotlinx.coroutines.CancellationException
@@ -61,6 +62,8 @@ object ChannelsModule {
         }
         override suspend fun status() = api().status()
         override suspend fun update(update: FeishuBotUpdate) = api().update(update)
+        override val sync: LarkSyncSettings = LarkSyncThrough { HttpLarkSync(runtime.connectionFor(
+            runtime.scopedData.value ?: throw HubFailure(HubError.NoNetwork, AppText.get(R.string.app_error_pair_first), retryable = false))) }
     }
 }
 

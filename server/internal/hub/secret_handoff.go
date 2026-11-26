@@ -40,6 +40,10 @@ import (
 // a header every request carries, nor from a notification, a widget, the Live Activity, the watch or Siri.
 const featureSecretHandoff = "secret_handoff"
 
+// featureSecretRunEnv: an approval of explicit environment delivery comes only from a client that renders its
+// warning. Older specialized secret_run clients suppress Summary when commands exist, so they must not approve it.
+const featureSecretRunEnv = "secret_run_env"
+
 // handoffRecordEvery: a refusal of the same card, credential and reason is recorded once in this long; handoffRecordMost
 // bounds what is remembered.
 const (
@@ -132,7 +136,7 @@ func humanStartOf(ctx context.Context) bool {
 }
 
 // handoffApprover is the device r comes from when it may approve a hand-off card, else why not.
-func (h *Hub) handoffApprover(r *http.Request) (assistantwire.HandoffApprover, string) {
+func (h *Hub) handoffApprover(r *http.Request, features ...string) (assistantwire.HandoffApprover, string) {
 	p := principalOf(r.Context())
 	switch {
 	case p.Role == roleAnswer:
@@ -143,20 +147,42 @@ func (h *Hub) handoffApprover(r *http.Request) (assistantwire.HandoffApprover, s
 		return assistantwire.HandoffApprover{}, handoffRole
 	case p.ID == "":
 		return assistantwire.HandoffApprover{}, handoffHubToken
-	case !requestDeclares(r, featureSecretHandoff):
-		return assistantwire.HandoffApprover{}, handoffClient
 	}
-	return assistantwire.HandoffApprover{DeviceID: p.ID, DeviceName: p.Name}, ""
+	for _, feature := range features {
+		if requestDeclares(r, feature) {
+			return assistantwire.HandoffApprover{DeviceID: p.ID, DeviceName: p.Name}, ""
+		}
+	}
+	return assistantwire.HandoffApprover{}, handoffClient
 }
 
 // handoffGate checks answer res to card id before it is relayed: r to relay (carrying the approver when the manager
 // needs it), or false when it was refused and answered here. An answer to another card passes untouched.
 func (h *Hub) handoffGate(w http.ResponseWriter, r *http.Request, id string, res proto.Resolution) (*http.Request, bool) {
 	ix, known := h.pendingInteraction(id)
+	if known && proto.SecretRunEnvInteraction(ix) {
+		if proto.SecretHandoffDeclines(res) {
+			return r, true
+		}
+		a, why := h.handoffApprover(r, featureSecretRunEnv)
+		if why == "" {
+			return r.WithContext(context.WithValue(r.Context(), handoffApproverKey{}, a)), true
+		}
+		h.logf("env password card %s: an unfeatured approval refused (%s)", clip(ix.ID, 64), why)
+		writeErrCode(w, http.StatusForbidden, proto.CodeSecretRunEnvElsewhere,
+			errors.New(i18n.T(h.requestLang(r), "assistant-secret_run.env_elsewhere")))
+		return r, false
+	}
 	if known && ix.ToolName != proto.SecretHandoffTool {
 		return r, true
 	}
-	a, why := h.handoffApprover(r)
+	features := []string{featureSecretHandoff}
+	if !known {
+		// The hub cannot tell which special card the manager still owns after a restart. Carry either proof;
+		// the manager checks it against the actual card instead of dropping every env approver.
+		features = append(features, featureSecretRunEnv)
+	}
+	a, why := h.handoffApprover(r, features...)
 	if why == "" {
 		return r.WithContext(context.WithValue(r.Context(), handoffApproverKey{}, a)), true
 	}

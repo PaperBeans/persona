@@ -25,6 +25,13 @@ class AppleOfflineProjectTests(unittest.TestCase):
         self.base = yaml.safe_load((ROOT / 'apple/project.yml').read_text())
         self.project = deepcopy(self.base)
         self.project.pop('include')
+        modules = yaml.safe_load((ROOT / 'apple/modules.yml').read_text())['targets']['Persona']
+        self.module_sources = modules['sources']
+        self.project['targets']['Persona']['sources'] = [
+            *self.module_sources, *self.project['targets']['Persona']['sources'],
+        ]
+        self.project['targets']['Persona']['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = \
+            modules['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']
         self.project['schemes'] = {name: self.base['schemes'][name] for name in (
             'Persona', 'PersonaOfflineUnitTests', 'AboutVersionVisualTests',
             'AboutVersionAccessibilityHost', 'PersonaWatch', 'PersonaVision')}
@@ -36,6 +43,12 @@ class AppleOfflineProjectTests(unittest.TestCase):
 
     def test_real_host_dependencies_survive_but_watch_and_share_do_not(self):
         dependencies = self.result['targets']['Persona']['dependencies']
+        self.assertEqual(self.result['targets']['Persona']['sources'],
+                         self.project['targets']['Persona']['sources'])
+        self.assertEqual(self.result['targets']['Persona']['sources'][:len(self.module_sources)],
+                         self.module_sources)
+        self.assertEqual(self.result['targets']['Persona']['settings'],
+                         self.project['targets']['Persona']['settings'])
         expected = self.project['targets']['Persona']['dependencies'][2:]
         self.assertEqual(dependencies, expected)
         self.assertIn({'target': 'PersonaWidgets'}, dependencies)
@@ -94,6 +107,8 @@ class AppleOfflineProjectTests(unittest.TestCase):
                 {'package': 'PersonaCore', 'product': 'PersonaCoreTestSupport'}),
             'package declaration': lambda project: project['packages']['MarkdownUI'].__setitem__('from', '1.0.0'),
             'host sources': lambda project: project['targets']['Persona'].__setitem__('sources', []),
+            'module compilation conditions': lambda project: project['targets']['Persona']['settings']['base'].pop(
+                'SWIFT_ACTIVE_COMPILATION_CONDITIONS'),
             'test assertions': lambda project: project['schemes']['PersonaOfflineUnitTests']['test'].__setitem__(
                 'gatherCoverageData', False),
         }
@@ -123,6 +138,80 @@ class AppleOfflineProjectTests(unittest.TestCase):
             subprocess.run([sys.executable, '-I', str(SCRIPT), str(dump), str(output)],
                            check=True, capture_output=True, text=True, timeout=30)
             self.assertEqual(json.loads(output.read_text()), self.result)
+
+    def test_focused_profile_retains_every_executed_suite_and_shared_helper(self):
+        focused = apple_offline_project.filtered(self.project, profile='focused')
+        sources = focused['targets']['PersonaTests']['sources']
+        self.assertEqual(sources[1], self.base['targets']['PersonaTests']['sources'][1])
+        self.assertEqual(sources[0], {
+            'path': 'PersonaTests',
+            'includes': list(apple_offline_project.FOCUSED_FILES),
+        })
+        self.assertEqual(set(sources[0]['includes']), {
+            'AboutVersionRefractSupport.swift', 'AboutVersionRefractTests.swift', 'FakeHub.swift',
+            'LauncherModelChoiceTests.swift', 'OmpNewAgentTests.swift', 'PageSearchableTests.swift',
+            'PaseoPermissionModesTests.swift', 'PaseoProvidersTests.swift', 'StarredMessagesTests.swift',
+            'TypeScaleTests.swift',
+        })
+        self.assertNotIn('AssistantHTMLCardTests.swift', sources[0]['includes'])
+        self.assertNotIn('AssistantHTMLSecurityTests.swift', sources[0]['includes'])
+        unchanged = deepcopy(focused)
+        unchanged['targets']['PersonaTests']['sources'] = self.base['targets']['PersonaTests']['sources']
+        self.assertEqual(unchanged, self.result)
+        # A new selected-suite declaration must be paired with a reviewed source
+        # entry, not silently omitted from the compiled fixture.
+        root = ROOT / 'apple/PersonaTests'
+        for name, suites in apple_offline_project.FOCUSED_SUITES.items():
+            self.assertTrue((root / name).is_file())
+            source = (root / name).read_text()
+            for suite in suites:
+                self.assertRegex(source, rf'\b(class|struct|enum|actor)\s+{suite}\b')
+
+    def test_ipad_diagnostic_profile_also_compiles_its_later_html_batches(self):
+        diagnostic = apple_offline_project.filtered(self.project, profile='ipad-diagnostic')
+        focused = apple_offline_project.filtered(self.project, profile='focused')
+        includes = diagnostic['targets']['PersonaTests']['sources'][0]['includes']
+        self.assertEqual(includes, [
+            *focused['targets']['PersonaTests']['sources'][0]['includes'],
+            'AssistantHTMLCardTests.swift', 'AssistantHTMLSecurityTests.swift',
+        ])
+        for suite in ('AssistantHTMLCardTests', 'AssistantHTMLSecurityTests'):
+            self.assertIn(f'struct {suite}', (ROOT / f'apple/PersonaTests/{suite}.swift').read_text())
+        with self.assertRaisesRegex(ValueError, 'unknown offline test source profile'):
+            apple_offline_project.filtered(self.project, profile='ios')
+
+    def test_focused_sources_fail_closed_when_a_suite_or_helper_drifts(self):
+        root = ROOT / 'apple/PersonaTests'
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                apple_offline_project.focused_sources(self.project, source_root=directory)
+            staged = Path(directory) / 'staged'
+            shutil.copytree(root, staged)
+            suite = staged / 'TypeScaleTests.swift'
+            original = suite.read_text()
+            suite.write_text(original.replace('struct TypeScaleTests', 'struct MovedTypeScaleTests'))
+            with self.assertRaisesRegex(ValueError, 'TypeScaleTests'):
+                apple_offline_project.focused_sources(self.project, source_root=staged)
+            suite.unlink()
+            with self.assertRaisesRegex(ValueError, 'TypeScaleTests.swift is missing'):
+                apple_offline_project.focused_sources(self.project, source_root=staged)
+            self.assertTrue(apple_offline_project.focused_sources(self.project, source_root=root))
+        # Keep the real fixture immutable; malformed profiles and moved suites
+        # are diagnosed before any reduced Xcode project can be materialized.
+        self.assertIn('final class FakeHub', (root / 'FakeHub.swift').read_text())
+        self.assertIn('let hub = FakeHub()', (root / 'StarredMessagesTests.swift').read_text())
+
+    def test_cli_materializes_the_selected_source_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dump = Path(directory) / 'dump.json'
+            dump.write_text(json.dumps(self.project))
+            for profile in ('focused', 'ipad-diagnostic'):
+                with self.subTest(profile=profile):
+                    output = Path(directory) / f'{profile}.json'
+                    subprocess.run([sys.executable, '-I', str(SCRIPT), str(dump), str(output), '--profile', profile],
+                                   check=True, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(json.loads(output.read_text()),
+                                     apple_offline_project.filtered(self.project, profile=profile))
 
     @unittest.skipUnless(shutil.which('xcodegen'), 'needs xcodegen')
     def test_xcodegen_materializes_only_the_real_host_and_its_two_extensions(self):

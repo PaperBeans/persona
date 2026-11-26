@@ -62,32 +62,32 @@ func TestHelloCompatibility(t *testing.T) {
 	h.public.port, h.public.fp = 19443, "test-pin"
 	h.public.endpoints = []Endpoint{{URL: "https://example.com:19443", Kind: "name", Port: 19443, Scheme: "https", SeenAt: time.Now().UTC()}}
 	hello := h.hello()
-	if hello["type"] != "hello" || hello["server_version"] != h.version || len(hello["client_id"].(string)) != 12 {
+	if hello.Type != "hello" || hello.ServerVersion != h.version || len(hello.ClientID) != 12 {
 		t.Fatal("legacy hello fields changed")
 	}
-	features := hello["features"].([]string)
+	features := hello.Features
 	if !slices.Contains(features, "tls") || !slices.Contains(features, "endpoints") || !slices.Contains(features, proto.FeatureMessageSendState) {
 		t.Fatal("new capabilities were not declared")
 	}
-	if version, ok := hello[proto.FeatureMessageSendState].(int); !ok || version != proto.MessageSendStateVersion {
+	if hello.MessageSendState != proto.MessageSendStateVersion {
 		t.Fatal("hello did not carry the hub-authored receipt version")
 	}
-	if hello["hub_id"] != h.hubID() || hello["tls_port"] != 19443 || hello["fp"] != "test-pin" || len(hello["endpoints"].([]Endpoint)) != 1 {
+	if hello.HubID != h.hubID() || hello.TLSPort != 19443 || hello.FP != "test-pin" || len(hello.Endpoints) != 1 {
 		t.Fatal("missing public connection metadata")
 	}
-	if hello["public_url"] != "http://example.com:18660" {
-		t.Fatalf("public_url = %v", hello["public_url"])
+	if hello.PublicURL != "http://example.com:18660" {
+		t.Fatalf("public_url = %v", hello.PublicURL)
 	}
 	h.cfg.PublicURL = " https://hub.example.com:18660/ "
-	if got := h.hello()["public_url"]; got != "https://hub.example.com:18660" {
+	if got := h.hello().PublicURL; got != "https://hub.example.com:18660" {
 		t.Fatalf("public_url = %v", got)
 	}
 	h.cfg.PublicURL = ""
-	if _, ok := h.hello()["public_url"]; ok {
-		t.Fatal("public_url without one configured")
+	if got := h.hello().PublicURL; got != "" {
+		t.Fatalf("public_url without one configured: %q", got)
 	}
 	// The existing iOS Envelope must not see a new value under an already typed key.
-	for _, key := range []string{"hub_id", "endpoints", "tls_port", "fp", "public_url", "push_grading", proto.FeatureMessageSendState} {
+	for _, key := range []string{"hub_id", "endpoints", "tls_port", "fp", "public_url", "push_grading", "read_only", "expires_at", proto.FeatureMessageSendState} {
 		if slices.Contains(iosEnvelopeKeys, key) {
 			t.Fatalf("new hello field collides with iOS Envelope: %s", key)
 		}

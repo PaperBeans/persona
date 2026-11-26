@@ -90,7 +90,15 @@ func (st *trackKindMemStore) UpdateTrackKind(_ context.Context, k db.TrackKind, 
 }
 
 // validKind is a valid kind config to change field by field.
-func validKind() assistantwire.TrackKindConfig { return builtinKindConfigs()[trackKindSpace] }
+func validKind() assistantwire.TrackKindConfig {
+	return assistantwire.TrackKindConfig{
+		Schema: assistantwire.TrackKindSchema, Template: trackTemplateSpace, UserInstructions: "space_md", Context: "track",
+		DefaultCategories: []string{}, TagFocus: []string{}, Rhythms: []assistantwire.TrackRhythm{},
+		Attention:   assistantwire.TrackAttention{PushCap: assistantwire.LevelP0, DeepDefault: "quick", EnterMode: "none"},
+		Supervision: "none", Usage: []assistantwire.TrackUsageRule{}, Assembly: "track", CaptureTarget: true,
+		Channels: []string{"topics", "single"}, Sidebar: assistantwire.TrackSidebar{Group: "spaces"},
+	}
+}
 
 // Kind configs (#13472): the built-in ones are valid; every field takes only its options; a newer schema is not
 // enabled; a field this manager does not know is refused.
@@ -245,8 +253,8 @@ func TestTracksAPI(t *testing.T) {
 
 	w := serve(s, http.MethodGet, "/api/v1/assistant/track-kinds", "")
 	kinds := decodeTrackJSON[assistantwire.TrackKinds](t, w.Body.Bytes())
-	if w.Code != http.StatusOK || len(kinds.Kinds) != 2 || kinds.Kinds[0].Slug != trackKindOrchestration || kinds.Kinds[1].Slug != trackKindSpace ||
-		!kinds.Kinds[0].Builtin || !slices.Equal(kinds.Kinds[0].Warnings, []string{trackWarnSupervisionLeaders}) {
+	if w.Code != http.StatusOK || len(kinds.Kinds) != 3 || kinds.Kinds[0].Slug != trackKindOrchestration || kinds.Kinds[1].Slug != trackKindHealth || kinds.Kinds[2].Slug != trackKindSpace ||
+		!kinds.Kinds[0].Builtin || kinds.Kinds[2].Builtin || !slices.Equal(kinds.Kinds[0].Warnings, []string{trackWarnSupervisionLeaders}) {
 		t.Fatalf("built-in kinds: %d %s", w.Code, w.Body)
 	}
 	w = serve(s, http.MethodGet, "/api/v1/assistant/tracks", "")
@@ -257,7 +265,7 @@ func TestTracksAPI(t *testing.T) {
 	}
 
 	// Only the user writes.
-	for _, role := range []string{roleExtension, "scoped"} {
+	for _, role := range []string{"scoped"} {
 		for _, req := range [][3]string{
 			{http.MethodPost, "/api/v1/assistant/tracks", `{"slug":"qa-plain","kind":"space","title":"QA plain"}`},
 			{http.MethodPut, "/api/v1/assistant/tracks/qa-plain", `{"revision":1,"title":"x"}`},

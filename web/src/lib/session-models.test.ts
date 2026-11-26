@@ -163,9 +163,12 @@ describe("what a pick sends", () => {
       { id: "future-medium", name: "Future Medium", efforts: ["low", "medium", "high"], default_effort: "medium" },
       { id: "future-high", name: "Future High", efforts: ["low", "medium", "high"], default_effort: "high" },
     ] };
-    expect(pickPlan(agy, { provider: "agy", model: "future-high" }, () => list)).toEqual([{ model: "future-high" }, { effort: "high" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high" }, () => list)).toEqual([{ model: "future-high" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high", effort: "low" }, () => list)).toEqual([{ model: "future-high" }, { effort: "low" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high", effort: "high" }, () => list)).toEqual([{ model: "future-high" }]);
     // its rows have no slider: the variants are the levels
     expect(sessionPanel(agy, [], lists({ agy: { list } })).providers[0].models!.every((m) => m.efforts.length === 0)).toBe(true);
+    expect(sessionPanel({ ...agy, effort: undefined }, [], lists({ agy: { list } })).providers[0].models?.[0].defaultEffort).toBe("medium");
   });
 });
 
@@ -173,7 +176,7 @@ describe("what the pill says", () => {
   it("the list's name for the model once read, a short id before; the launcher, engine, effort and speed", () => {
     expect(pillView(session(), { list: claudeList })).toEqual({ engine: "claude", provider: "gateway", model: "Opus 5.5", effort: "high", loading: false, failed: false });
     expect(pillView(session(), {}).model).toBe("opus 5.5");
-    expect(pillView(codex({ service_tier: "priority" }), {})).toMatchObject({ engine: "codex", provider: "cx", model: "5.5", fast: true });
+    expect(pillView(codex({ service_tier: "priority" }), {})).toMatchObject({ engine: "codex", provider: "cx", model: "GPT-5.5", fast: true });
     expect(pillView(session({ launcher: undefined, agent: undefined }), {})).toMatchObject({ engine: "claude", provider: "claude" });
   });
 
@@ -182,6 +185,14 @@ describe("what the pill says", () => {
     expect(pillView(grok, {})).toMatchObject({ engine: "grok", engineLabel: "Grok", provider: "grok" });
     expect(pillView(session({ agent: "paseo", agent_label: "Cursor", launcher: "cursor", source_kind: "runtime" }), {}).engine).toBe("cursor");
     expect(pillView(session(), {}).engineLabel).toBeUndefined();
+  });
+
+  it("uses the effort encoded by a catalog variant when the session reports only the model", () => {
+    const model = "gemini-4-neon-xhigh";
+    const agy = session({ agent: "agy", launcher: "agy", model, effort: undefined });
+    const list: LauncherModels = { agent: "agy", models: [{ id: model, name: "Gemini 4 Neon (XHigh)", default_effort: "xhigh" }] };
+    expect(pillView(agy, { list })).toMatchObject({ model: "Gemini 4 Neon", effort: "xhigh" });
+    expect(pillView({ ...agy, effort: "medium" }, { list })).toMatchObject({ model: "Gemini 4 Neon", effort: "medium" });
   });
 
   it("loading or failed only while there is no list; no model before one is known, the default entry's name once read", () => {
@@ -200,7 +211,7 @@ describe("what the pill says", () => {
     expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("sonnet 5.5 1M");
     expect(modelLabel("claude-opus-5-5-20260101")).toBe("opus 5.5");
     expect(modelLabel("claude-haiku-5-5")).toBe("haiku 5.5");
-    expect(modelLabel("gpt-5.5-codex")).toBe("5.5 Codex");
+    expect(modelLabel("gpt-5.5-codex")).toBe("GPT-5.5 Codex");
     expect(modelLabel("vendor/model-x")).toBe("vendor/model-x");
     expect(modelLabel("route-a/gemini-4-carbon")).toBe("route-a/gemini-4-carbon");
     expect(modelLabel("acme/gpt-5-pro")).toBe("acme/gpt-5-pro");

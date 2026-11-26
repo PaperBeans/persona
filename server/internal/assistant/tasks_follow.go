@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,40 @@ type machineList struct {
 	err  error
 }
 
+// findListedSession finds the row in list with SessionID == id, else the unique row whose Aliases name id.
+// Returns false when no row matches or when more than one row claims the same alias.
+func findListedSession(list []proto.Session, id string) (proto.Session, bool) {
+	var aliasMatch proto.Session
+	aliases := 0
+	for _, c := range list {
+		if c.SessionID == id {
+			return c, true
+		}
+		if slices.Contains(c.Aliases(), id) {
+			aliasMatch = c
+			aliases++
+		}
+	}
+	if aliases == 1 {
+		return aliasMatch, true
+	}
+	return proto.Session{}, false
+}
+
+// resolveTaskSession resolves a todo agent's stored session id to the session currently listed on machine, following
+// proto.Session.Aliases when a pane placeholder row moved to its companion row (or vice versa).
+func (s *Service) resolveTaskSession(ctx context.Context, machine, id string) (proto.Session, string, bool) {
+	if c, ok := s.session(ctx, machine, id); ok {
+		return c, c.SessionID, true
+	}
+	if list, err := s.sessions(ctx, machine); err == nil {
+		if c, ok := findListedSession(list, id); ok {
+			return c, c.SessionID, true
+		}
+	}
+	return proto.Session{}, id, false
+}
+
 // taskAgentsIn is taskAgents with the lists already read in this pass; the machines it lists are added to lists.
 func (s *Service) taskAgentsIn(ctx context.Context, t Todo, lists machineSessions) []proto.Session {
 	var out []proto.Session
@@ -45,11 +80,8 @@ func (s *Service) taskAgentsIn(ctx context.Context, t Todo, lists machineSession
 		if l.err != nil {
 			continue
 		}
-		for _, c := range l.list {
-			if c.SessionID == a.SessionID {
-				out = append(out, c)
-				break
-			}
+		if c, ok := findListedSession(l.list, a.SessionID); ok {
+			out = append(out, c)
 		}
 	}
 	return out
@@ -110,11 +142,8 @@ func (s *Service) taskAgentsReached(ctx context.Context, t Todo) (agents []proto
 		if a.ReleasedAt != nil || a.DismissedAt != nil {
 			continue
 		}
-		for _, c := range lists[a.MachineID] {
-			if c.SessionID == a.SessionID {
-				agents = append(agents, c)
-				break
-			}
+		if c, ok := findListedSession(lists[a.MachineID], a.SessionID); ok {
+			agents = append(agents, c)
 		}
 	}
 	return agents, reached
@@ -141,6 +170,40 @@ func (s *Service) taskNeedsRecheck(ctx context.Context, t Todo) (waits, known bo
 func (s *Service) taskWaits(ctx context.Context, t Todo) bool {
 	waits, known := s.taskNeedsRecheck(ctx, t)
 	return waits || !known
+}
+
+const (
+	ignoredClosedStart = "task %s: accepted; its agent works again, but nothing was sent for the task: left closed"
+	droppedClosedEnd   = "task %s: closed; its agent %s/%s ended a turn: dropped"
+)
+
+const maxClosedTurnLogs = 256
+
+type closedTurnLog struct {
+	todo, machine, session string
+	doneAt                 time.Time
+	format                 string
+}
+
+// Remember the most recent diagnostics for closed tasks in this manager. Eviction or a
+// restart can log an old closure again; the log history never participates in a turn decision.
+func (ts *tasksState) firstClosedTurnLog(t *Todo, machine, session string, format string) bool {
+	entry := closedTurnLog{todo: t.ID, machine: machine, session: session, doneAt: t.DoneAt.UTC(), format: format}
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	logs := ts.closedTurnLogs
+	for i := len(logs) - 1; i >= 0; i-- {
+		if logs[i] == entry {
+			copy(logs[i:], logs[i+1:])
+			logs[len(logs)-1] = entry
+			return false
+		}
+	}
+	if len(logs) == maxClosedTurnLogs {
+		logs = slices.Delete(logs, 0, 1)
+	}
+	ts.closedTurnLogs = append(logs, entry)
+	return true
 }
 
 // taskWorking: one of the task's agents started a turn. The agent of a task the hub closed meanwhile (judged done,
@@ -172,7 +235,9 @@ func (s *Service) taskWorking(ctx context.Context, mid, sid string, row startRow
 			s.saveSendsOut(ctx) // the hold too: after a restart, the turn is the task's (recoverSendsOut)
 			return
 		case closedTurnStays:
-			s.logf("task %s: accepted; its agent works again, but nothing was sent for the task: left closed", closed.ID)
+			if s.tasks.firstClosedTurnLog(&closed, mid, sid, ignoredClosedStart) {
+				s.logf(ignoredClosedStart, closed.ID)
+			}
 			return
 		}
 		if err := s.reopenTodo(ctx, closed.ID); err != nil {
@@ -316,6 +381,9 @@ func (s *Service) rerouteOfTask(ctx context.Context, todoID, planID string) *Pla
 	}
 	for i := range p.Tasks {
 		if p.Tasks[i].TodoID == todoID {
+			if decision := p.Tasks[i].Placement; decision != nil && decision.Reroute != nil {
+				return decision.Reroute
+			}
 			return p.Tasks[i].Reroute
 		}
 	}
@@ -427,7 +495,9 @@ func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard
 		if closed, found := s.closedTaskOf(ctx, machine, sid); found {
 			// Its closed task's agent still: a turn nobody sent for the task, or one running when it was accepted
 			// (#7539). Nothing is made of its end; this line says it was seen.
-			s.logf("task %s: closed; its agent %s/%s ended a turn: dropped", closed.ID, machine, short(sid))
+			if s.tasks.firstClosedTurnLog(&closed, machine, sid, droppedClosedEnd) {
+				s.logf(droppedClosedEnd, closed.ID, machine, short(sid))
+			}
 		}
 		return settleRefused
 	}
@@ -514,7 +584,7 @@ func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard
 		if items, read = s.lastTurnItems(ctx, last.MachineID, last.SessionID); !read {
 			return settleLater
 		}
-		if _, closed := turnEndOf(items); !closed {
+		if _, closed := turnEndForSession(last, items); !closed {
 			return settleLater // it went on since the sweep read it
 		}
 		_, stopped := s.stopFor(last.MachineID, last.SessionID, s.taskStretch(t))
@@ -584,7 +654,7 @@ func (s *Service) settleTurnReporting(ctx context.Context, machine, sid, unheard
 			return settleLater
 		}
 	}
-	end, named := turnEndOf(items)
+	end, named := turnEndForSession(last, items)
 	quiet := "" // the turn had no output: proto.TurnErrorNoOutput, or proto.TurnErrorStopped (silent_turns.go)
 	// The Stop that interrupted this turn, if one did: read once, it classifies the turn and is the one its receipt
 	// spends, never a newer one (stopFor, forgetStop).
@@ -816,7 +886,7 @@ func (s *Service) releaseReceipt(ctx context.Context, id, machine, sid string, r
 func (s *Service) taskTurnEndedAfter(ctx context.Context, machine, sid string, at time.Time) {
 	w := s.newReceiptRecheck(ctx, machine, sid, at)
 	persisted := false
-	if w.Receipt.TodoID != "" && s.store != nil && s.store() != nil {
+	if w.Receipt.TodoID != "" && s.store() != nil {
 		pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		selected, arm, err := s.persistReceiptRecheck(pctx, w)
 		cancel()

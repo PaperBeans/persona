@@ -15,8 +15,10 @@ struct TodoFilingTests {
         return try JSON.decoder.decode(Session.self, from: Data(json.utf8))
     }
 
-    private func view(_ section: String, phase: String? = nil, rank: Int = 0, inactive: String? = nil, asks: [String] = []) -> TodoSummary {
-        TodoSummary(phase: phase ?? section, section: section, reason: TodoReason.rest, rank: rank, inactive: inactive,
+    private func view(_ section: TodoListSection, phase: TodoPhase? = nil, rank: Int = 0, inactive: String? = nil,
+                      asks: [String] = []) -> TodoSummary {
+        TodoSummary(phase: phase ?? TodoPhase(rawValue: section.rawValue), section: section, reason: TodoReason.rest, rank: rank,
+                    inactive: inactive,
                     asks: asks.map { OwnerAsk(id: $0, kind: OwnerAskKind.decision, home: OwnerAskHome.todo) })
     }
 
@@ -51,7 +53,7 @@ struct TodoFilingTests {
             TodoItem(id: "old", title: "Closed days ago", doneAt: ago(72)),
             TodoItem(id: "unknown", title: "A newer section", createdAt: ago(1)),
         ]
-        let views = ["unknown": view("later_maybe")]
+        let views = ["unknown": view(.unknown("later_maybe"))]
         var looked = 0
         let filed = TodoFiling.file(rows, views: views, now: now, lookup: {
             looked += 1

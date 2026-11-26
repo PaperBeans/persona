@@ -7,7 +7,7 @@ import { t } from "../../i18n";
 import { sessionTitle, stateOf } from "../../lib/format";
 import { stateName } from "../../lib/state-labels";
 import { bytesBin, load as loadText, percent, uptime, usedOfTotal } from "../../lib/machine-detail";
-import { readings, type AlertKind } from "../../lib/machine-alerts";
+import { loadDefinition, perCoreLabel, readings, type AlertKind } from "../../lib/machine-alerts";
 import { stopAgents, stoppableAgents, type StopOutcome } from "../../lib/machine-handoff";
 import type { Diagnosis, ProcessGroup } from "../../lib/machine-diagnosis";
 import { refresh } from "../../lib/store";
@@ -40,8 +40,10 @@ export function PressureSection({ kind, machine, metrics, agents, agentsKnown, r
         <div className="grid grid-cols-3 gap-3" data-testid="pressure-figures">
           <Figure label={t("machines-alerts.memory")} value={percent(r.memory)} detail={usedOfTotal(latest?.mem_used, total)} tone={tone(r.memory, 80, 90)} />
           <Figure label="CPU" value={percent(r.cpu)} detail={r.cores ? t("machines-alerts.cores", { count: r.cores }) : undefined} tone={tone(r.cpu, 75, 90)} />
-          <Figure label={t("machines-alerts.load")} value={loadText(latest?.load)} detail={r.load !== undefined ? t("machines-alerts.per_core", { value: r.load.toFixed(2) }) : undefined} tone={tone(r.load, 1, 2)} />
+          <Figure label={t("machines-alerts.load")} value={loadText(latest?.load)} detail={r.load !== undefined ? perCoreLabel(r.load) : undefined} tone={tone(r.load, 1, 2)} />
         </div>
+        {/* the load alert says what it counts before anything else (#12519): high load with CPU to spare is queuing */}
+        {kind === "load" && <p className="mt-2 text-meta leading-relaxed text-ink-2" data-testid="load-definition">{loadDefinition()}</p>}
       </SheetPart>
       <SheetPart part="why">
         <h4 className="mb-1 text-meta font-medium text-ink">{byCpu ? t("machines-alerts.processes_cpu") : t("machines-alerts.processes_memory")}</h4>

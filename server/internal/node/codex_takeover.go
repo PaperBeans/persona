@@ -87,10 +87,10 @@ func (n *Node) codexDesktopConflict(src codexSource, fresh bool, pass *codexList
 		return true
 	}
 	if !fresh && pass != nil {
-		if pass.desktopAvailable(src.home) {
+		if pass.desktopBusAvailable(src.home) {
 			return true
 		}
-	} else if codexDesktopAvailable(src.home) {
+	} else if codexDesktopBusAvailable(src.home) {
 		return true
 	}
 	if n == nil || n.codices == nil {

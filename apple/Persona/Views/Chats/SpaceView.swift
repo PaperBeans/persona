@@ -295,6 +295,7 @@ private struct SiblingList: View {
                     let on = s.key == current
                     let role = roles[s.key]
                     let label = TabPanes.tabLabel(s, role: role)
+                    let titleDetail = s.displayTitleDetail(preferTab: model.prefersHerdrTabName(for: s))
                     Button { pick(s.key) } label: {
                         HStack(spacing: Theme.Space.m) {
                             Circle().fill(s.stateTone(muted: model.isMuted(s)).dot).scaledFrame(width: Theme.Size.dotL, height: Theme.Size.dotL).scaledFrame(width: Theme.Size.iconS) // a still dot
@@ -302,6 +303,7 @@ private struct SiblingList: View {
                                 Text(label).font(on ? Theme.Font.secondaryStrong : Theme.Font.secondary).lineLimit(1)
                                 // The state in its color, then the model the tab runs on (2026-10-31: which tab is which model).
                                 (Text(s.stateLabel(muted: model.isMuted(s))).foregroundStyle(s.stateTone(muted: model.isMuted(s)).text)
+                                    + Text(titleDetail.map { " · " + $0 } ?? "").foregroundStyle(.secondary)
                                     + Text(role?.launcher == true ? String(localized: " · Started It") : "").foregroundStyle(.secondary)
                                     + Text(Fmt.model(s.model).map { " · " + $0 } ?? "").foregroundStyle(.secondary))
                                     .font(Theme.Font.label).lineLimit(1).truncationMode(.tail)
@@ -408,7 +410,7 @@ struct SpaceView: View {
                 }
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(sessions) { s in
-                        NavigationLink(value: s.key) { SlotCard(session: s, pending: model.interactions(for: s.key).count, muted: model.isMuted(s), pane: roles[s.key]) }
+                        NavigationLink(value: s.key) { SlotCard(session: s, pending: model.interactions(for: s.key).count, muted: model.isMuted(s), pane: roles[s.key], preferHerdrTabName: model.prefersHerdrTabName(for: s)) }
                             .buttonStyle(.plain)
                     }
                     Button { showNew = true } label: {
@@ -464,6 +466,10 @@ struct SlotCard: View {
     var muted = false
     /// Its place in a tab of several agents (#2320): the tab's chip names the agent too, the starter marked.
     var pane: TabPanes.Role? = nil
+    var preferHerdrTabName = false
+
+    private var primaryTab: String? { session.displayTabName(preferTab: preferHerdrTabName) }
+    private var titleDetail: String? { session.displayTitleDetail(preferTab: preferHerdrTabName) }
 
     var body: some View {
         let tone = session.stateTone(muted: muted)
@@ -485,7 +491,10 @@ struct SlotCard: View {
                     StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted))
                 }
             }
-            Text(session.displayTitle).font(Theme.Font.secondaryStrong).lineLimit(2)
+            Text(session.displayTitle(preferTab: preferHerdrTabName)).font(Theme.Font.secondaryStrong).lineLimit(2)
+            if let titleDetail {
+                Text(titleDetail).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
             // The starter says so beside its state: the header's chips are cut first in a narrow card.
             Text(session.stateLabel(muted: muted) + (pane?.launcher == true ? String(localized: " · Started It") : "") + (pending > 0 ? String(localized: " · \(pending) pending") : ""))
                 .font(Theme.Font.labelStrong)
@@ -501,13 +510,17 @@ struct SlotCard: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(session.state == .needsYou ? Theme.needsYou.opacity(0.5) : .clear, lineWidth: 1.5))
     }
 
-    private var tabChip: String { pane.map { TabPanes.tabLabel(session, role: $0) } ?? session.slotLabel ?? "—" }
+    private var tabChip: String {
+        if let pane { return TabPanes.tabLabel(session, role: pane) }
+        if primaryTab != nil { return session.slotIndex.map { "#\($0)" } ?? session.agentLabel }
+        return session.slotLabel ?? "—"
+    }
 
     private func header(agent: Bool) -> some View {
         HStack {
             Chip(text: tabChip, look: .tone(session.stateTone(muted: muted)))
             // Beside its tab mates the tab's chip names the agent already.
-            if agent, pane == nil { Chip(text: session.agentLabel, look: .outline) }
+            if agent, pane == nil, tabChip != session.agentLabel { Chip(text: session.agentLabel, look: .outline) }
             Spacer(minLength: 4)
             StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted))
         }

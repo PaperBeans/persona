@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "health",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Health",
+  "feature": "module.health"
+}

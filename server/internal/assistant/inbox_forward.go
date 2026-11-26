@@ -516,6 +516,9 @@ func isSelfAuthoredInboxItem(it *InboxItem, owner string, ownEmails []string) bo
 	if matchesOwn(it.Sender) {
 		return true
 	}
+	if it.Lark != nil && matchesOwn(it.Lark.SenderID) {
+		return true
+	}
 	if it.Mail != nil {
 		if matchesOwn(it.Mail.From.Email) || matchesOwn(it.Mail.From.Name) {
 			return true
@@ -806,7 +809,7 @@ func (s *Service) forwardInboxToTodos(ctx context.Context) {
 		}
 	}
 	for _, it := range b.items {
-		if !it.open() || !inboxTaskLinkEligible(it) {
+		if it.VisibilityExcluded || !it.open() || it.externallyRouted() || !inboxTaskLinkEligible(it) {
 			continue
 		}
 		if isSelfAuthoredInboxItem(it, owner, ownEmails) {
@@ -860,6 +863,17 @@ type todoForwardDelivery struct {
 }
 
 func (s *Service) forwardOneInboxItemToTodo(ctx context.Context, it *InboxItem, snap InboxItem, m todoForwardMatch) {
+	b := &s.inbox
+	b.mu.Lock()
+	stillLegacy := b.items[snap.ID] == it && it.Last == snap.Last && !it.externallyRouted()
+	b.mu.Unlock()
+	if !stillLegacy {
+		return
+	}
+	allowed, visErr := s.inboxVisibilityModelAllowed(ctx, &snap)
+	if visErr != nil || !allowed {
+		return
+	}
 	claimed, pending, err := s.claimTodoForward(ctx, snap.ID, m.todo.ID, snap.Last)
 	if err != nil {
 		s.logf("inbox: todo forward ledger check for %s -> %s: %v", snap.ID, m.todo.ID, err)
@@ -872,6 +886,14 @@ func (s *Service) forwardOneInboxItemToTodo(ctx context.Context, it *InboxItem, 
 	// Re-check that the to-do is still open right before delivery.
 	curTodo, ok := s.todoNow(m.todo.ID)
 	if !ok || !taskOpen(curTodo) {
+		_ = s.finishTodoForward(ctx, inboxTodoForwardRecord{InboxItemID: snap.ID, TodoID: m.todo.ID}, false)
+		return
+	}
+	won, err := s.claimLegacyExternalInbox(ctx, snap, curTodo.ID)
+	if !won || err != nil {
+		if err != nil {
+			s.logf("inbox: check external receipt before legacy forwarding: %v", err)
+		}
 		_ = s.finishTodoForward(ctx, inboxTodoForwardRecord{InboxItemID: snap.ID, TodoID: m.todo.ID}, false)
 		return
 	}
@@ -911,7 +933,6 @@ func (s *Service) forwardOneInboxItemToTodo(ctx context.Context, it *InboxItem, 
 	}
 
 	// Persist forwarding metadata on the Inbox item without dropping it.
-	b := &s.inbox
 	var w *inboxWrite
 	recordAudit := res.commitLedger
 	b.mu.Lock()

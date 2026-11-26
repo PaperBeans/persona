@@ -61,6 +61,7 @@ const hub = (todos: () => Promise<Response>) =>
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
 const grouping = () => host.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Agent 分组"]')!;

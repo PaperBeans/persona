@@ -90,6 +90,7 @@ func (s *Service) markSeen(ctx context.Context, machine, session string) {
 	}
 	s.publishSessions(machine)
 	s.seenToRuntime(machine, session)
+	s.markSessionOwnerCardsSeen(ctx, machine, session)
 }
 
 // seenToRuntime tells the node of a runtime's session the user saw, while its node lists it as unread (done), #6299: a

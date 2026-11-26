@@ -90,7 +90,9 @@ struct MachineSpacesView: View {
     @ViewBuilder private func row(_ g: SpaceGroup, busy: Bool) -> some View {
         if g.spaceID == "-" {
             ForEach(g.sessions) { s in
-                NavigationLink(value: s.key) { SlotRow(session: s, muted: model.isMuted(s.key)).equatable() }
+                let sideUnread = s.state == .unread && !s.assistant && (s.children?.sidesUnread ?? 0) > 0
+                    ? model.sides(of: s.key).unreadSummary : nil
+                NavigationLink(value: s.key) { SlotRow(session: s, muted: model.isMuted(s.key), sideUnread: sideUnread, preferHerdrTabName: model.prefersHerdrTabName(for: s)).equatable() }
             }
         } else {
             NavigationLink(value: SpaceRoute(id: g.id)) {

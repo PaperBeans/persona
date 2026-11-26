@@ -87,19 +87,20 @@ func TestAcceptanceIsKeptWithoutABot(t *testing.T) {
 
 // The briefing's "To accept" section lists the card-less ask with the round the Accept button is made for.
 func TestAcceptanceWithoutABotIsInTheBriefing(t *testing.T) {
+	needsBriefingModule(t)
 	ctx := context.Background()
 	s, f, _, id := cardlessService(t, botNotSetUp)
 	a := deployedCardless(t, s, f, id)
 	facts := s.briefFactsAt(ctx, time.Now(), "")
-	if len(facts.Accept) != 1 || facts.Accept[0].id != id || facts.Changed[id] != a.Changed {
+	if len(facts.Accept) != 1 || facts.Accept[0].ID != id || facts.Changed[id] != a.Changed {
 		t.Fatalf("facts: %+v changed=%v", facts.Accept, facts.Changed)
 	}
-	body := facts.body(s, "Morning")
+	body := s.briefBodyOf(facts, "Morning")
 	if len(body.Accept) != 1 || body.Accept[0].ID != id || !body.Accept[0].AskedAt.Equal(a.AskedAt) || body.Accept[0].Title != "修登录崩溃" {
 		t.Fatalf("brief item: %+v", body.Accept)
 	}
-	if !strings.Contains(facts.modelText(), a.Changed) {
-		t.Fatalf("the model is not told what changed:\n%s", facts.modelText())
+	if !strings.Contains(s.briefModelText(facts), a.Changed) {
+		t.Fatalf("the model is not told what changed:\n%s", s.briefModelText(facts))
 	}
 }
 
@@ -185,11 +186,11 @@ func TestAcceptanceStatusErrorIsNotNoCard(t *testing.T) {
 	t.Run("status unreadable", func(t *testing.T) {
 		s, f, posts, id := cardlessService(t, botNotSetUp)
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return nil, errors.New("manager away") })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 		s.askAcceptance(onlyTodo(s), "box", "s1", deployedReply)
 		waiting(t, s, id, posts)
 		f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { return botReady, nil })
-		s.feishuForgetStatus()
+		s.larkModule().ForgetStatus()
 		s.retryAcceptance(time.Now())
 		if a := askOf(s, id); a == nil || a.MessageID == "" || countAcceptCards(posts()) != 1 {
 			t.Fatalf("the card for later did not go out: %+v, %d cards", a, countAcceptCards(posts()))
@@ -205,7 +206,7 @@ func TestCardlessAskIsNotReminded(t *testing.T) {
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) { // the bot is set up later
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", PublicURL: cardlessWeb, Features: FeishuFeatures{Main: true, Cards: true, Reports: true}}, nil
 	})
-	s.feishuForgetStatus()
+	s.larkModule().ForgetStatus()
 	s.accept.mu.Lock()
 	s.accept.asks[id].AskedAt = time.Now().Add(-30 * time.Hour)
 	s.accept.mu.Unlock()
@@ -276,6 +277,7 @@ func TestCardlessAskEndsLikeACardedOne(t *testing.T) {
 
 // Verifying a card-less ask says so in the to-do's Lark topic, as verifying on a card does.
 func TestCardlessAcceptSaysSoInTheTopic(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newPostEnv(t)
 	id := e.bound("验收", testThread)

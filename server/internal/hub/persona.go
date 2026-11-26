@@ -137,6 +137,12 @@ func builtinPersonaFS() fs.FS {
 // personaPackages are the packages that check out: the built-in ones first (a directory of the same id in their
 // place), then the directories, by id.
 func (h *Hub) personaPackages() []*personaPackage {
+	lookSwapMu.RLock()
+	defer lookSwapMu.RUnlock()
+	return h.personaPackagesLocked()
+}
+
+func (h *Hub) personaPackagesLocked() []*personaPackage {
 	dirs := map[string]*personaPackage{}
 	var dirIDs []string
 	if entries, err := os.ReadDir(h.personasDir()); err == nil {
@@ -215,6 +221,12 @@ func (emptyFS) Open(name string) (fs.File, error) {
 
 // personaPackage is the package of that id: its directory when that checks out, else the built-in one.
 func (h *Hub) personaPackage(id string) (*personaPackage, error) {
+	lookSwapMu.RLock()
+	defer lookSwapMu.RUnlock()
+	return h.personaPackageLocked(id)
+}
+
+func (h *Hub) personaPackageLocked(id string) (*personaPackage, error) {
 	if !personaIDPattern.MatchString(id) {
 		return nil, fmt.Errorf("no persona %q", id)
 	}
@@ -237,8 +249,10 @@ func (h *Hub) personaPackage(id string) (*personaPackage, error) {
 
 // personas lists the packages that check out, each as a phone sees it (a tiered one at its current tier).
 func (h *Hub) personas() []personaInfo {
+	lookSwapMu.RLock()
+	defer lookSwapMu.RUnlock()
 	out := []personaInfo{}
-	for _, p := range h.personaPackages() {
+	for _, p := range h.personaPackagesLocked() {
 		info, err := h.personaInfo(p)
 		if err != nil {
 			h.logf("persona %s left out: %v", p.id, err)
@@ -485,33 +499,38 @@ func (h *Hub) personaRoutes(api *http.ServeMux) {
 	// A file of a package that checks out (any of its files: a manifest's, or a preview next to them).
 	api.HandleFunc("GET /api/v1/personas/{id}/{file...}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		p, err := h.personaPackage(id)
+		lookSwapMu.RLock()
+		p, err := h.personaPackageLocked(id)
 		if err != nil {
+			lookSwapMu.RUnlock()
 			writeErr(w, http.StatusNotFound, fmt.Errorf("no persona %q", id))
 			return
 		}
 		name, err := p.file(r.PathValue("file"))
 		if err != nil {
+			lookSwapMu.RUnlock()
 			writeErr(w, http.StatusNotFound, err)
 			return
 		}
 		f, err := p.fsys.Open(name)
 		if err != nil {
+			lookSwapMu.RUnlock()
 			writeErr(w, http.StatusNotFound, err)
 			return
 		}
-		defer f.Close()
-		ct := mime.TypeByExtension(path.Ext(name))
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", ct)
 		// At the rev the apps were told (?rev=), a file never changes: the browser may keep it.
 		immutable := false
 		if rev := r.URL.Query().Get("rev"); rev != "" {
 			info, err := h.personaInfo(p)
 			immutable = err == nil && info.Rev == rev
 		}
+		lookSwapMu.RUnlock()
+		defer f.Close()
+		ct := mime.TypeByExtension(path.Ext(name))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ct)
 		personaFileHeaders(w, name, immutable)
 		_, _ = io.Copy(w, f)
 	})

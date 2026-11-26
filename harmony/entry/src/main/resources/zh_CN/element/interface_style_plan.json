@@ -1,0 +1,40 @@
+{
+  "string": [
+    {
+      "name": "style_plan_question",
+      "value": "按这个计划做吗？"
+    },
+    {
+      "name": "style_plan_run_detail",
+      "value": "之后不再逐个确认"
+    },
+    {
+      "name": "style_plan_edits",
+      "value": "批准，自动接受编辑"
+    },
+    {
+      "name": "style_plan_edits_detail",
+      "value": "改文件不问，其他操作照常确认"
+    },
+    {
+      "name": "style_plan_return_hint",
+      "value": "打回并说明要怎么改…"
+    },
+    {
+      "name": "style_plan_mode_edits",
+      "value": "允许编辑"
+    },
+    {
+      "name": "style_plan_mode_all",
+      "value": "完全访问"
+    },
+    {
+      "name": "style_plan_mode_auto",
+      "value": "自动审批"
+    },
+    {
+      "name": "style_plan_mode_default",
+      "value": "默认权限"
+    }
+  ]
+}

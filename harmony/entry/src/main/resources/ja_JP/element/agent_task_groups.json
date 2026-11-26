@@ -1,0 +1,100 @@
+{
+  "string": [
+    {
+      "name": "agent_task_manual",
+      "value": "手動で開始"
+    },
+    {
+      "name": "agent_task_unassigned",
+      "value": "未割り当て"
+    },
+    {
+      "name": "agent_task_manual_hint",
+      "value": "ターミナルで自分で開いた、どのToDoにも関連付けられていないエージェントです。行を長押し ›「ToDoに関連付け…」で関連付けられます。"
+    },
+    {
+      "name": "agent_task_unassigned_hint",
+      "value": "どのToDoにも関連付けられていないエージェントです。多くはLarkやスマートフォンなど、ほかの場所から開始されたものです。行を長押し ›「ToDoに関連付け…」で関連付けられます。"
+    },
+    {
+      "name": "agent_task_secretary",
+      "value": "書記官"
+    },
+    {
+      "name": "agent_task_new_chat",
+      "value": "新しいチャット"
+    },
+    {
+      "name": "agent_task_untitled",
+      "value": "無題のToDo"
+    },
+    {
+      "name": "agent_task_detail",
+      "value": "ToDoの詳細を表示"
+    },
+    {
+      "name": "agent_task_needs_count",
+      "value": "対応待ち {n}"
+    },
+    {
+      "name": "agent_task_working",
+      "value": "作業中"
+    },
+    {
+      "name": "agent_task_needs_you",
+      "value": "対応待ち"
+    },
+    {
+      "name": "agent_task_stuck",
+      "value": "停滞中"
+    },
+    {
+      "name": "agent_task_planned",
+      "value": "未着手"
+    },
+    {
+      "name": "agent_task_review",
+      "value": "検収待ち"
+    },
+    {
+      "name": "agent_task_state_idle",
+      "value": "確認済み"
+    },
+    {
+      "name": "agent_task_state_unknown",
+      "value": "不明"
+    },
+    {
+      "name": "agent_task_state_unread",
+      "value": "未確認"
+    },
+    {
+      "name": "agent_task_state_needs_you",
+      "value": "要対応"
+    },
+    {
+      "name": "agent_task_state_working",
+      "value": "作業中"
+    },
+    {
+      "name": "agent_task_state_offline",
+      "value": "停止中"
+    },
+    {
+      "name": "agent_task_count",
+      "value": "{n}件"
+    },
+    {
+      "name": "agent_task_expanded",
+      "value": "展開済み"
+    },
+    {
+      "name": "agent_task_collapsed",
+      "value": "折りたたみ済み"
+    },
+    {
+      "name": "agent_task_about",
+      "value": "「{title}」について"
+    }
+  ]
+}

@@ -44,6 +44,19 @@ func (h *Manager) PRChecks(ctx context.Context, repo string, number int) (github
 	return snapshot, c.PRChecksRateReset(), true, err
 }
 
+// GitHubConnected reports whether the built-in GitHub connector is enabled, signed in, and targeting github.com.
+func (h *Manager) GitHubConnected(ctx context.Context) bool {
+	if !h.ready(ctx) || h.connectors == nil || !h.connectors.Enabled("github") {
+		return false
+	}
+	registered := h.connectors.Get("github")
+	if registered == nil || !githubChecksPublicHost(registered) {
+		return false
+	}
+	c, builtin := registered.(githubwire.Connector)
+	return builtin && c.Status(ctx).State == connector.StateOK
+}
+
 // GitHubGet reads path (a GitHub REST path) into out with the built-in GitHub connector, when it is enabled, signed in
 // and on github.com; ok false when there is none to read with (the caller reads some other way). The assistant's deploy
 // check uses it (assistant deploy_check.go, #3205).

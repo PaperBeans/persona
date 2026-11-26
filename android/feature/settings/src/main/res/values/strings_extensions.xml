@@ -454,4 +454,15 @@
     <string name="settings_ext_rule_remove_title">Remove this rule?</string>
     <string name="settings_ext_rule_remove_body">The next time %1$s on %2$s asks for it, you approve it again.</string>
     <string name="settings_ext_rule_removed">Rule removed</string>
+    <string name="settings_ext_secret_set_hint">Set · ends in %1$s</string>
+    <string name="settings_ext_entry_untitled">Entry %1$d</string>
+    <string name="settings_ext_entry_save_before_secret">Save this entry before setting its secret.</string>
+    <string name="settings_ext_entry_secret">Secret</string>
+    <string name="settings_ext_entry_remove">Remove %1$s</string>
+    <string name="settings_ext_entry_add">Add entry</string>
+    <string name="settings_ext_entry_editor_hint">Each entry has its own secret, stored separately and never shown again.</string>
+    <string name="settings_ext_entry_rebind_hint">Saving a changed address clears that entry\'s secret.</string>
+    <string name="settings_ext_entry_remove_title">Remove “%1$s”?</string>
+    <string name="settings_ext_entry_remove_body">The entry and its saved secret are deleted when you save.</string>
+    <string name="settings_ext_entry_remove_confirm">Remove entry</string>
 </resources>

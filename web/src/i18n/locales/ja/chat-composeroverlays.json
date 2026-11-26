@@ -1,0 +1,12 @@
+{
+  "pasted_preview_hint": "クリックしてプレビューまたは入力欄に展開",
+  "pasted_chip_other": "貼り付けテキスト · {count} 文字",
+  "pasted_remove": "貼り付けテキストを削除",
+  "pasted_stats": "{lines} 行 · {chars} 文字",
+  "pasted_expand": "入力欄に展開",
+  "collapse": "入力欄を縮める",
+  "suggestion_label": "Claude の提案：{suggestion}",
+  "suggestion_use": "使う",
+  "suggestion_use_hint": "入力欄に入れる（Tab）",
+  "suggestion_send": "そのまま送信"
+}

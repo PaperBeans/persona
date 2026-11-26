@@ -55,6 +55,7 @@ import persona.core.domain.sort.AgentListDisplay
 import persona.core.domain.sort.AgentRowLeading
 import persona.core.domain.sort.AgentRowStyle
 import persona.core.domain.sort.rowParts
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 
@@ -70,6 +71,10 @@ data class RowFlag(val label: String, val icon: PhIcon, val caution: Boolean = f
 @Immutable
 data class RowFact(val text: String, val caution: Boolean = false)
 
+/** Single-line subagent rollup under a parent session row (Needs you priority > Running; null when all ended). */
+@Immutable
+data class RowSubagent(val text: String, val needsYou: Boolean, val onClick: (() -> Unit)? = null)
+
 /**
  * An Agents row's third line on Glass (iOS `SlotRow.placeLine` in the Avatar style, #4338 A9), after the row's source tag:
  * where it runs ([words]: the tab, space › tab, the computer, joined with " · "), the [model] it runs on, its [todo]'s
@@ -84,6 +89,21 @@ data class RowPlace(val words: String = "", val model: String? = null, val todo:
  */
 @Immutable
 data class RowNote(val fields: List<CoreText>, val icon: PhIcon)
+
+/**
+ * A side session folded under a parent row that keeps it Unread (#13524): the [PersonaIcons.sideSessions] mark,
+ * [label] (the most recent unread side's title, or a count line before side rows are read), optional [more] ("+N"
+ * for other unread sides), accessibility description [spoken], and [onClick] to open that side directly in one tap
+ * (null when only a count is known).
+ */
+@Immutable
+data class RowSideUnread(
+    val label: String,
+    val more: String? = null,
+    val spoken: String = label,
+    val clickLabel: String? = null,
+    val onClick: (() -> Unit)? = null,
+)
 
 // ------------------------------------------------------------------ measures
 
@@ -487,6 +507,10 @@ fun AgentRow(
     style: AgentRowStyle = AgentRowStyle.Avatar,
     /** A folded child's request must stay visible even when Board's metadata normally takes the preview's line. */
     showPreviewWithMetadata: Boolean = false,
+    /** Single-line subagent rollup under the parent row; tapping opens Session Overview's Subagents section. */
+    subagent: RowSubagent? = null,
+    /** An unread side session keeping this parent row Unread (#13524); null leaves the row unchanged. */
+    sideUnread: RowSideUnread? = null,
     end: (@Composable () -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
@@ -505,7 +529,8 @@ fun AgentRow(
     val start = if (board) Step * depth else (Step * depth + (Caret - mark) / 2).coerceAtLeast(None)
     val gap = if (avatar) AvatarGap else Tokens.Space.s - Tokens.Space.xxs
     val hasMetadata = note != null || facts.isNotEmpty()
-    val boardMetadata = board && hasMetadata && !compact
+    val hasSubagent = subagent != null && !compact
+    val boardMetadata = board && (hasMetadata || hasSubagent) && !compact
     val statusLabel = stringResource(shown.labelRes)
     val press = Modifier.onSecondaryClick(onLongClick).combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
         // Compact rows and Board's two-line metadata rows have no visible state line: TalkBack still says it (#3902).
@@ -518,12 +543,12 @@ fun AgentRow(
     val click = Modifier.selectedRow(selected).then(press)
     if (glass && parts.leading == AgentRowLeading.Dot) {
         TwoLineRow(title, shown, strong, muted, waiting, depth, position, preview, time, statusText, label, launcher, flags, note, facts,
-            source, agentMark, place, branch, modifier.then(click), end)
+            source, agentMark, place, branch, sideUnread, subagent, onLongClick, modifier.then(click), end)
         return
     }
     if (glass && parts.card) {
         StateCardRow(title, shown, strong, muted, waiting, depth, preview, time, statusText, label, launcher, flags, note, facts, source,
-            agentMark, place, selected, modifier, press, end)
+            agentMark, place, selected, sideUnread, subagent, onLongClick, modifier, press, end)
         return
     }
     val text: @Composable ColumnScope.() -> Unit = {
@@ -564,6 +589,7 @@ fun AgentRow(
                 } else if (line.isNotEmpty()) lineText()
             }
         }
+        if (sideUnread != null) SideUnreadLine(sideUnread, tone)
     }
     // a branch hangs off its initiator one step up: a hairline down from under that row's mark
     val guide = if (!branch) Modifier else Modifier.drawBehind {
@@ -590,7 +616,8 @@ fun AgentRow(
             }
             if (boardMetadata) {
                 val indent = (if (agentMark != null) Tokens.Space.s + Caret else None) + Holder + Tokens.Space.m
-                RowMetadata(note, facts, indent, Modifier.padding(bottom = Tokens.Space.s - Tokens.Space.xxs))
+                if (hasMetadata) RowMetadata(note, facts, indent, Modifier.padding(bottom = if (hasSubagent) None else Tokens.Space.s - Tokens.Space.xxs))
+                if (hasSubagent && subagent != null) RowSubagentLine(subagent, indent, onLongClick, Modifier.padding(bottom = Tokens.Space.s - Tokens.Space.xxs))
             }
         }
         return
@@ -603,7 +630,7 @@ fun AgentRow(
             .stableAlpha(if (muted) 0.72f else 1f),
     ) {
         Row(
-            Modifier.padding(start = start, top = Tokens.Space.s, bottom = if ((hasMetadata || placeLine) && !compact) None else Tokens.Space.s),
+            Modifier.padding(start = start, top = Tokens.Space.s, bottom = if ((hasMetadata || hasSubagent || placeLine) && !compact) None else Tokens.Space.s),
             verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
         ) {
             if (avatar) AgentAvatar(requireNotNull(agentMark), shown, waiting) else {
@@ -615,9 +642,12 @@ fun AgentRow(
             Column(Modifier.weight(1f).padding(top = if (compact) None else Tokens.Space.xxs), content = text)
             end?.let { Box(Modifier.align(Alignment.CenterVertically)) { it() } }
         }
+        val metaIndent = (if (agentMark != null && !avatar) Caret + Tokens.Space.xs else None) + mark + gap
         if (hasMetadata && !compact) {
-            val indent = (if (agentMark != null && !avatar) Caret + Tokens.Space.xs else None) + mark + gap
-            RowMetadata(note, facts, indent, Modifier.padding(start = start, bottom = if (placeLine) None else Tokens.Space.s))
+            RowMetadata(note, facts, metaIndent, Modifier.padding(start = start, bottom = if (hasSubagent || placeLine) None else Tokens.Space.s))
+        }
+        if (hasSubagent && subagent != null) {
+            RowSubagentLine(subagent, metaIndent, onLongClick, Modifier.padding(start = start, bottom = if (placeLine) None else Tokens.Space.s))
         }
         if (placeLine) PlaceLine(requireNotNull(place), source, Modifier.padding(start = start + mark + gap, top = Tokens.Space.xs, bottom = Tokens.Space.s))
     }
@@ -689,7 +719,7 @@ private fun TwoLineRow(
     title: String, shown: Status, strong: Boolean, muted: Boolean, waiting: Boolean, depth: Int, position: GroupPosition,
     preview: String?, time: String?, statusText: String?, label: String?, launcher: Boolean, flags: List<RowFlag>,
     note: RowNote?, facts: List<RowFact>, source: RowSource?, agentMark: AgentMarkSpec?, place: RowPlace?, branch: Boolean,
-    modifier: Modifier, end: (@Composable () -> Unit)?,
+    sideUnread: RowSideUnread?, subagent: RowSubagent?, onLongClick: (() -> Unit)?, modifier: Modifier, end: (@Composable () -> Unit)?,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
@@ -697,6 +727,7 @@ private fun TwoLineRow(
     val start = Step * depth
     val words = start + Caret + TwoLineGap
     val hasMetadata = note != null || facts.isNotEmpty()
+    val hasSubagent = subagent != null
     // a branch hangs off its initiator one step up: a hairline down from under that row's dot
     val guide = if (!branch) Modifier else Modifier.drawBehind {
         val x = (Step * (depth - 1) + Caret / 2).toPx()
@@ -707,7 +738,7 @@ private fun TwoLineRow(
             .drawBehind { if (!position.first) drawLine(palette.line, Offset(words.toPx(), 0f), Offset(size.width, 0f), Hairline.toPx()) }
             .stableAlpha(if (muted) 0.72f else 1f),
     ) {
-        Row(Modifier.padding(start = start, top = Tokens.Space.s, bottom = if (hasMetadata) None else Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = start, top = Tokens.Space.s, bottom = if (hasMetadata || hasSubagent) None else Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
                 StyledTitleLine(title, strong, muted, label, launcher, flags, agentMark, time, leading = {
                     Box(Modifier.width(Caret), contentAlignment = Alignment.Center) { RowStateDot(shown, waiting) }
@@ -727,10 +758,12 @@ private fun TwoLineRow(
                     }
                     source?.let { Spacer(Modifier.width(Tokens.Space.s)); SourceTag(it) }
                 }
+                if (sideUnread != null) SideUnreadLine(sideUnread, tone, Modifier.padding(start = Caret + TwoLineGap))
             }
             end?.let { Box { it() } }
         }
-        if (hasMetadata) RowMetadata(note, facts, Caret + TwoLineGap, Modifier.padding(start = start, bottom = Tokens.Space.s))
+        if (hasMetadata) RowMetadata(note, facts, Caret + TwoLineGap, Modifier.padding(start = start, bottom = if (hasSubagent) None else Tokens.Space.s))
+        if (subagent != null) RowSubagentLine(subagent, Caret + TwoLineGap, onLongClick, Modifier.padding(start = start, bottom = Tokens.Space.s))
     }
 }
 
@@ -745,7 +778,8 @@ private fun TwoLineRow(
 private fun StateCardRow(
     title: String, shown: Status, strong: Boolean, muted: Boolean, waiting: Boolean, depth: Int, preview: String?, time: String?,
     statusText: String?, label: String?, launcher: Boolean, flags: List<RowFlag>, note: RowNote?, facts: List<RowFact>, source: RowSource?,
-    agentMark: AgentMarkSpec?, place: RowPlace?, selected: Boolean, modifier: Modifier, press: Modifier, end: (@Composable () -> Unit)?,
+    agentMark: AgentMarkSpec?, place: RowPlace?, selected: Boolean, sideUnread: RowSideUnread?, subagent: RowSubagent?, onLongClick: (() -> Unit)?,
+    modifier: Modifier, press: Modifier, end: (@Composable () -> Unit)?,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
@@ -773,13 +807,90 @@ private fun StateCardRow(
         preview?.takeIf { it.isNotBlank() }?.let {
             Text(it.replace('\n', ' '), style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        if (sideUnread != null) SideUnreadLine(sideUnread, tone)
         if (note != null || facts.isNotEmpty()) RowMetadata(note, facts, None, Modifier.padding(top = None))
+        if (subagent != null) RowSubagentLine(subagent, None, onLongClick)
         if (statusText != null || place != null || source != null) Row(verticalAlignment = Alignment.CenterVertically) {
             statusText?.let {
                 Text(it, style = type.caption.copy(fontWeight = FontWeight.Medium), color = tone.text, maxLines = 1)
                 Spacer(Modifier.width(Tokens.Space.s))
             }
             PlaceLine(place ?: RowPlace(), source, Modifier.weight(1f))
+        }
+    }
+}
+
+/**
+ * Unread side-session indicator under a parent row's title (#13524): the [PersonaIcons.sideSessions] mark, the most
+ * recent unread side's label, and an optional "+N" count in the unread tint. When [RowSideUnread.onClick] is set,
+ * tapping it opens that side session directly without triggering the parent row.
+ */
+@Composable
+private fun SideUnreadLine(sideUnread: RowSideUnread, tone: StatusColors, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(PersonaTheme.shapes.chip)
+    val interactive = sideUnread.onClick != null
+    val tap = sideUnread.onClick?.let {
+        Modifier.clickable(role = Role.Button, onClickLabel = sideUnread.clickLabel, onClick = it)
+    } ?: Modifier
+    Row(
+        modifier
+            .then(if (interactive) Modifier.minimumInteractiveComponentSize() else Modifier.padding(top = Tokens.Space.xxs))
+            .clip(shape)
+            .then(if (interactive) Modifier.background(tone.tint) else Modifier)
+            .then(tap)
+            .semantics(mergeDescendants = true) { contentDescription = sideUnread.spoken }
+            .then(if (interactive) Modifier.padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        JIcon(PersonaIcons.sideSessions, null, size = Caret, tint = tone.text, decorative = true)
+        Spacer(Modifier.width(Tokens.Space.xs))
+        Text(
+            sideUnread.label,
+            Modifier.weight(1f, fill = false),
+            style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Medium),
+            color = tone.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        sideUnread.more?.let { extra ->
+            Spacer(Modifier.width(Tokens.Space.xs))
+            Text(
+                extra,
+                style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold),
+                color = tone.text,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        if (interactive) {
+            Spacer(Modifier.width(Tokens.Space.xxs))
+            JIcon(PhIcons.CaretRight, null, size = Caret, tint = tone.text, decorative = true)
+        }
+    }
+}
+
+/** Single-line subagent rollup subtitle under a parent row: attention icon/color for Needs you, working mark for Running. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RowSubagentLine(subagent: RowSubagent, indent: Dp, onLongClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    val palette = PersonaTheme.palette
+    val tap = subagent.onClick?.let { click ->
+        Modifier.onSecondaryClick(onLongClick).combinedClickable(role = Role.Button, onClick = click, onLongClick = onLongClick)
+    } ?: Modifier
+    Row(
+        modifier.padding(start = indent, top = Tokens.Space.xxs).then(tap),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+    ) {
+        if (subagent.needsYou) {
+            JIcon(persona.core.designsystem.icons.PersonaIcons.agents, null, size = Tokens.Size.markS,
+                tint = palette.needsYou.text, decorative = true)
+            Text(subagent.text, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Medium),
+                color = palette.needsYou.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            JStatusDot(Status.Working, breathes = false)
+            Text(subagent.text, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Normal),
+                color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

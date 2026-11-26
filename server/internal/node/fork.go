@@ -175,11 +175,14 @@ func (n *Node) forkOnRuntime(ctx context.Context, h *runtimeConn, source proto.S
 	params := map[string]any{"session_id": source.SessionID, "at_item_id": at, "assistant": assistant}
 	if assistant {
 		st, _ := n.state.get(source.SessionID)
-		if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(source.SessionID, source.Cwd, st)); env != nil {
+		if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(source.SessionID, source.Cwd, st), source.SessionID); env != nil {
 			params["env"] = env
 		}
 	}
-	if err := h.peer.Call(ctx, "session.fork", params, &out); err != nil {
+	finishAgy := n.runtimes.agyWorkBegin(h, "session.fork", source.SessionID)
+	err := h.peer.Call(ctx, "session.fork", params, &out)
+	finishAgy(err, false)
+	if err != nil {
 		return "", err
 	}
 	if !runtimeIDRe.MatchString(out.ID) || out.ID == source.SessionID || out.Session != nil && out.Session.SessionID != out.ID {

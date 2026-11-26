@@ -215,12 +215,17 @@ function mix(left: string, right: string, amount: number): string {
 
 function meet(color: string, background: string, floor: number): string {
   if (contrastRatio(color, background) >= floor) return color;
-  const target = background === '#FFFFFF' ? '#000000' : '#FFFFFF';
+  const target = deviceLookAccentText(background);
   for (let step = 1; step <= 100; step++) {
     const candidate = mix(color, target, step / 100);
     if (contrastRatio(candidate, background) >= floor) return candidate;
   }
   return target;
+}
+
+export function deviceLookSelectedFilterInk(palette: DeviceLookPalette, dark: boolean): string {
+  const color = dark ? palette.dark.emphasize : palette.light.emphasize;
+  return meet(color, dark ? '#1F3551' : '#E5EEFC', 4.55);
 }
 
 function readableBubble(fill: string, suppliedText: string | undefined): [string, string] {
@@ -231,18 +236,24 @@ function readableBubble(fill: string, suppliedText: string | undefined): [string
   return [result, textColor];
 }
 
+export function usesSystemStyleColors(style: string): boolean {
+  return style === 'system' || style === 'glass' || style === 'beautiful';
+}
+
 function styleColors(style: string, dark: boolean): DeviceLookColorSet {
-  const brand = style === 'system' ? '#0071E3' : dark ? '#9BB4FF' : '#0055FF';
+  const source = style === 'clay' ? 'lavender' : style === 'island' ? 'teal' : style === 'lark' ? 'lark' : '';
+  if (source) return safeColorSet(dark ? PRESETS[source].dark : PRESETS[source].light,dark);
+  const system = usesSystemStyleColors(style);
+  const brand = system ? '#0071E3' : dark ? '#9BB4FF' : '#0055FF';
   const bubbles: Record<string, [string, string]> = {
-    system: ['#DCEAFF', '#233B57'],
-    glass: ['#E0EDFF', '#263E61'],
+    system: ['#DCEAFF', '#1D3557'],
     brief: ['#F1EADB', '#403B2E'],
     board: ['#DCE8F4', '#283A4D']
   };
-  const selected = bubbles[style] || bubbles.glass;
+  const selected = bubbles[style] || bubbles.system;
   const bubble = dark ? selected[1] : selected[0];
   const text = dark ? '#FFFFFF' : '#000000';
-  return { brand: brand, emphasize: style === 'system' ? dark ? '#86B6FF' : '#0064C8' : brand, userBubble: bubble, userBubbleText: text };
+  return { brand: brand, emphasize: system ? dark ? '#86B6FF' : '#0064C8' : brand, userBubble: bubble, userBubbleText: text };
 }
 
 interface PresetColors {
@@ -301,12 +312,54 @@ export function deviceLookPalette(accent: string, style: string, avatar: DeviceL
     light: packageColors(style, false, avatar),
     dark: packageColors(style, true, avatar)
   };
-  if (accent === 'style') return { light: styleColors(style, false), dark: styleColors(style, true) };
+  if (accent === 'style') {
+    const light = styleColors(style, false), dark = styleColors(style, true);
+    if (usesSystemStyleColors(style)) {
+      // Filled controls keep white words at the previous 4.7:1 contrast while following the two system-blue appearances.
+      light.brand = '#006EED'; dark.brand = '#0070E5';
+    }
+    return { light: light, dark: dark };
+  }
   const preset = PRESETS[accent] || PRESETS.blue;
   return {
     light: safeColorSet(preset.light, false),
     dark: safeColorSet(preset.dark, true)
   };
+}
+
+/** Outlined system symbols keep the platform accent. Labels use the contrast-adjusted text color. */
+export function deviceLookIconAccent(accent: string, style: string, dark: boolean, palette: DeviceLookColorSet): string {
+  return accent === 'style' && usesSystemStyleColors(style) ? (dark ? PRESETS.blue.dark : PRESETS.blue.light).brand : palette.emphasize;
+}
+export function deviceLookInterfaceTint(accent: string, style: string, dark: boolean, palette: DeviceLookColorSet): string {
+  return accent === 'style' && usesSystemStyleColors(style) ? (dark ? PRESETS.blue.dark : PRESETS.blue.light).brand : palette.brand;
+}
+
+export interface PhoneStyleSurface {
+  page: string;
+  card: string;
+  edge: string;
+  shadow: string;
+}
+
+/** A style selects the surface; the separately picked theme color supplies Clay and Island's wash. */
+export function deviceLookSurface(style: string, accent: string, dark: boolean, palette: DeviceLookPalette): PhoneStyleSurface {
+  if (style === 'lark') return { page: dark ? '#141414' : '#F5F6F7', card: dark ? '#1F1F1F' : '#FFFFFF',
+    edge: dark ? '#373A40' : '#DEE0E3', shadow: '' };
+  if (style !== 'clay' && style !== 'island') return { page: '', card: '', edge: '', shadow: '' };
+  const color = accent === 'style' ? style === 'clay' ? 'lavender' : 'teal' : accent;
+  const base = PRESETS[color] || palette;
+  let page = dark ? mix(base.dark.brand, '#000000', .93) : mix(base.light.brand, '#FFFFFF', .90);
+  let card = dark ? mix(base.dark.brand, '#1E1E22', .85) : mix(base.light.brand, '#FFFFFF', .95);
+  let shadow = mix(base.light.brand, '#000000', .12);
+  if (color === 'lavender') {
+    page = dark ? '#0A0510' : '#EFEAF7'; card = dark ? '#2A2533' : '#F8F5FD'; shadow = '#6B54D6';
+  } else if (color === 'teal') {
+    page = dark ? '#0A1110' : '#E6F1EF';
+    if (dark) card = '#16201E';
+  }
+  if (style === 'island') return { page: page, card: dark ? card : '#FFFFFF', edge: '', shadow: '#21000000' };
+  return { page: page, card: card, edge: '#73FFFFFF', shadow: dark ? '#38000000' : '#38' + shadow.slice(1) };
 }
 
 export function validAccentId(value: string): boolean {

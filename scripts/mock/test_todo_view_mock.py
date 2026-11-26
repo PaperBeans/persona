@@ -27,6 +27,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import ProxyHandler, Request, build_opener
 
 HERE = Path(__file__).resolve().parent
@@ -258,6 +259,57 @@ class ViewTests(Case):
         features = self.hub.get("/api/v1/health")["features"]
         self.assertIn("todo_view", features)
         self.assertIn("todo_places", features)
+        self.assertIn("todo_asks", features)
+
+    def ask_path(self, tid):
+        """The asks route for the first ask the row's view lists, its id one path segment."""
+        ask = self.row(tid)["view"]["asks"][0]["id"]
+        return "/api/v1/todos/%s/asks/%s/answer" % (tid, quote(ask, safe="")), ask
+
+    def test_the_asks_say_their_risk(self):
+        asks = {t["id"]: t["view"]["asks"][0] for t in self.rows() if t["view"].get("asks")}
+        self.assertEqual((asks["t01"]["risk"], asks["t01"]["lockscreen"]), ("safe", "answer"))
+        self.assertEqual((asks["t03"]["risk"], asks["t03"]["lockscreen"]), ("safe", "answer"))
+        self.assertEqual((asks["t02"]["risk"], asks["t02"]["lockscreen"], asks["t02"]["interaction"]),
+                         ("open", "open_only", "ix_todo_widget_plan"))
+
+    def test_the_asks_route_answers_t01(self):
+        path, ask = self.ask_path("t01")
+        before = self.hub.get("/api/v1/todos")["counts"]
+        self.assertEqual(self.post(path, {"option": "Kaede", "outcome": "later"})[0], 400, "one answer")
+        self.assertEqual(self.post(path, {"option": "Elsewhere"})[0], 400)
+        self.assertEqual(self.post(path, {})[0], 400, "a decision takes an option, a fixed answer or words (errAnswerNeeded)")
+        status, _, body = self.post(path, {"outcome": "later"})
+        self.assertEqual((status, body["outcome"]), (200, "later"))
+        self.assertEqual(self.row("t01")["view"]["section"], "needs_you", "later writes nothing")
+        status, _, body = self.post(path, {"option": "Kaede"})
+        self.assertEqual((status, body["ask"], body["outcome"]), (200, ask, "answered"))
+        self.holds("TodoSummary", body["todo"]["view"], "t01")
+        self.assertEqual(body["todo"]["view"]["line"], {"key": "persona_working", "args": {"text": "booking Kaede"}})
+        self.assertEqual(self.hub.get("/api/v1/todos")["counts"]["needs_you"], before["needs_you"] - 1)
+        status, _, stale = self.post(path, {})
+        self.assertEqual((status, stale["code"], stale["delivered"], stale["todo"]["id"]), (409, "ask_stale", "none", "t01"))
+        self.assertEqual(self.post("/api/v1/todos/t01/asks/nothing/answer", {})[2]["code"], "ask_not_found")
+        self.assertEqual(self.post("/api/v1/todos/nope/asks/x/answer", {})[2]["code"], "todo_not_found")
+
+    def test_the_asks_route_declines_and_undoes(self):
+        path, _ = self.ask_path("t01")
+        before = self.hub.get("/api/v1/todos")["counts"]
+        status, _, body = self.post(path, {"outcome": "decline"})
+        self.assertEqual((status, body["outcome"]), (200, "declined"))
+        self.assertEqual(self.row("t01")["view"]["section"], "todo")
+        self.assertEqual(self.post(path, {"outcome": "undo", "receipt": "other"})[0], 409)
+        status, _, undone = self.post(path, {"outcome": "undo", "receipt": body["receipt"]})
+        self.assertEqual((status, undone["outcome"]), (200, "undone"))
+        self.assertEqual(self.hub.get("/api/v1/todos")["counts"], before)
+
+    def test_the_asks_route_starts_t03_again_and_leaves_runs_to_their_cards(self):
+        path, _ = self.ask_path("t03")
+        self.assertEqual(self.post(path, {"option": "x"})[0], 400, "a retry takes no answer")
+        status, _, body = self.post(path, {})
+        self.assertEqual((status, body["outcome"], body["todo"]["view"]["section"]), (200, "answered", "working"))
+        path, _ = self.ask_path("t02")
+        self.assertEqual(self.post(path, {})[2]["code"], "answer_in_session")
 
     def test_every_answer_holds_to_the_schema(self):
         listed = self.hub.get("/api/v1/todos")
@@ -413,6 +465,17 @@ class ViewTests(Case):
         self.hub.get("/mock/reset")
         self.hub.call("/api/v1/todos/t07/seen", "PUT")
         self.assertEqual(self.row("t07")["view"]["reason"], "finished_recent")
+
+    def test_a_closed_todo_moved_back(self):
+        before = self.row("t08")["done_at"]
+        self.hub.call("/api/v1/todos/t08/seen", "PUT")
+        self.hub.get("/mock/todo-view?done_hours=t08:50")
+        t08 = self.row("t08")
+        hours = (datetime.now(timezone.utc) - datetime.fromisoformat(t08["done_at"].replace("Z", "+00:00"))).total_seconds() / 3600
+        self.assertTrue(49.9 < hours < 50.1, hours)
+        self.assertEqual(t08["view"]["section"], "done")
+        self.hub.get("/mock/reset")
+        self.assertEqual(self.row("t08")["done_at"], before)
 
     def test_a_parent_follows_its_steps(self):
         t02 = self.row("t02")["view"]
@@ -570,6 +633,16 @@ class ViewTests(Case):
         self.assertNotEqual(self.hub.call("/api/v1/todos")[1]["ETag"], tag)
 
 
+class NoAsksTests(Case):
+    """MOCK_TODO_VIEW_ASKS=0: a hub whose managers answer only through today's routes."""
+    ENV = {"MOCK_TODO_VIEW": "1", "MOCK_TODO_VIEW_ASKS": "0"}
+
+    def test_no_asks_route(self):
+        self.assertNotIn("todo_asks", self.hub.get("/api/v1/health")["features"])
+        ask = self.row("t01")["view"]["asks"][0]["id"]
+        self.assertEqual(self.post("/api/v1/todos/t01/asks/%s/answer" % quote(ask, safe=""), {})[0], 404)
+
+
 class OldHubTests(Case):
     ENV = {"MOCK_TODO_VIEW": "old"}
 
@@ -680,6 +753,18 @@ class ReceiptTests(Case):
     def test_the_hello_vouches_for_both(self):
         _, hello = self.socket()
         self.assertEqual((hello.get("message_send_state"), hello.get("todo_send_state")), (1, 1))
+
+    def test_an_answer_under_an_op_id(self):
+        ws, _ = self.socket("todo_send_state")
+        ask = self.row("t01")["view"]["asks"][0]["id"]
+        path = "/api/v1/todos/t01/asks/%s/answer" % quote(ask, safe="")
+        op = "0A1B2C3D-0000-4000-8000-0000000000AC"
+        status, _, first = self.post(path, {"option": "Ryokan Hanami"}, **{"X-Persona-Op-Id": op})
+        self.assertEqual((status, first["outcome"]), (200, "answered"))
+        self.assertEqual(ws.message(receipt("todo_send_state", client_op_id=op.lower()))["state"], "processing")
+        self.assertEqual(ws.message(receipt("todo_send_state", client_op_id=op.lower()))["state"], "delivered")
+        status, _, again = self.post(path, {"option": "Ryokan Hanami"}, **{"X-Persona-Op-Id": op})
+        self.assertEqual((status, again), (200, first), "the same op id gets the first answer, not ask_stale")
 
     def test_a_todos_message_under_an_op_id(self):
         ws, _ = self.socket("todo_send_state")

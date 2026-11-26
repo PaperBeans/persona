@@ -17,16 +17,24 @@ func TestSocketDirectorySupportsTheUnixPathLimit(t *testing.T) {
 	} else if runtime.GOOS != "darwin" {
 		t.Skip("Unix socket path limit is platform-specific")
 	}
-	base, err := os.MkdirTemp(os.TempDir(), "pc-")
-	if err != nil {
-		t.Fatal(err)
+	// Prefer the host's temporary directory. Deep TMPDIR values need a shorter fallback.
+	var home string
+	for _, root := range []string{os.TempDir(), "/tmp"} {
+		base, err := os.MkdirTemp(root, "pc-")
+		if err != nil {
+			t.Logf("cannot create the socket fixture in %s: %v", root, err)
+			continue
+		}
+		t.Cleanup(func() { os.RemoveAll(base) })
+		count := limit - len(filepath.Join(base, ".persona", "node-attach.sock")) - 1
+		if count > 0 {
+			home = filepath.Join(base, strings.Repeat("h", count))
+			break
+		}
 	}
-	t.Cleanup(func() { os.RemoveAll(base) })
-	count := limit - len(filepath.Join(base, ".persona", "node-attach.sock")) - 1
-	if count < 1 {
-		t.Skip("temporary directory is already longer than the Unix socket limit")
+	if home == "" {
+		t.Skip("no writable temporary directory fits the Unix socket path limit")
 	}
-	home := filepath.Join(base, strings.Repeat("h", count))
 	if _, err := PrepareHome(home); err != nil {
 		t.Fatal(err)
 	}

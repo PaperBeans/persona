@@ -30,6 +30,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.moduleapi.AudioFocus
 import persona.core.navigation.Navigator
 
 /**
@@ -43,6 +44,7 @@ internal fun VoiceScreen(
     navigator: Navigator,
     extensions: VoiceExtensions,
     identity: String,
+    audioFocus: AudioFocus,
     onModelConfiguration: ((String) -> Unit)?,
 ) {
     val context = LocalContext.current
@@ -63,7 +65,7 @@ internal fun VoiceScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
     if (granted) {
-        VoiceConversation(route.extensionId, title, navigator, extensions, identity, onModelConfiguration)
+        VoiceConversation(route.extensionId, title, navigator, extensions, identity, audioFocus, onModelConfiguration)
         return
     }
     JPage(title, onBack = navigator::back) { padding ->
@@ -95,6 +97,7 @@ private fun VoiceConversation(
     navigator: Navigator,
     extensions: VoiceExtensions,
     identity: String,
+    audioFocus: AudioFocus,
     onModelConfiguration: ((String) -> Unit)?,
 ) {
     val app = LocalContext.current.applicationContext
@@ -102,7 +105,7 @@ private fun VoiceConversation(
     val scope = rememberCoroutineScope()
     val page = remember(extensions, extensionId, identity) {
         VoicePage(extensions, extensionId, VoicePrefs.of(app.filesDir, identity), scope, text) {
-            VoiceAudioOverride.factory?.invoke() ?: AndroidVoiceAudio(app)
+            VoiceAudioOverride.factory?.invoke() ?: AndroidVoiceAudio(app, audioFocus)
         }
     }
     DisposableEffect(page) {

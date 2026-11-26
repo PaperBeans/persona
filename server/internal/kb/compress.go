@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/aiwire"
 	"slices"
 	"sort"
 	"strings"
@@ -18,6 +19,10 @@ import (
 type Model interface {
 	JSONMax(ctx context.Context, system, user string, maxTokens int, out any) error
 }
+
+// NewModel is a Model that calls the provider cfg names: the client the engine's models are, for a caller that has
+// only a config (a live check of the recordings' writers, which are outside this package and the core's client).
+func NewModel(cfg aiwire.Config) Model { return ai.New(cfg) }
 
 // When a chat is due for compression: enough new messages, or some new ones and a quiet while.
 const (

@@ -82,6 +82,8 @@ nonisolated enum ExtensionSceneSnapshotCache {
     private(set) var prepared: ExtensionScenePreparedGeometry?
     private(set) var camera: ExtensionSceneCameraState
     private(set) var touched = false
+    /// Shown full screen on a viewport taller than it is wide: the untouched camera opens steeper (#14335).
+    private(set) var tallView = false
     private(set) var geometryVersion = 0
     private(set) var lightVersion = 0
 
@@ -175,7 +177,7 @@ nonisolated enum ExtensionSceneSnapshotCache {
             lightVersion += 1
         }
         if !touched {
-            let resolved = ExtensionSceneCameraState.resolved(next.camera)
+            let resolved = defaultCamera
             if camera != resolved { camera = resolved }
         }
         refreshCutaway()
@@ -226,6 +228,21 @@ nonisolated enum ExtensionSceneSnapshotCache {
         }
     }
 
+    /// The camera the scene opens at here: the scene's own, steeper in a tall full-screen view.
+    var defaultCamera: ExtensionSceneCameraState {
+        var camera = ExtensionSceneCameraState.resolved(scene.camera)
+        if tallView { camera.pitch = max(camera.pitch, Theme.Scene.tallViewPitch) }
+        return camera.clamped()
+    }
+
+    /// The full-screen view says whether it is taller than it is wide (and false when it closes); an untouched camera
+    /// follows the default for the view. Never persisted: the card keeps the scene's own pitch.
+    func setTallView(_ tall: Bool) {
+        guard tall != tallView else { return }
+        tallView = tall
+        if !touched { camera = defaultCamera }
+    }
+
     func updateCamera(_ next: ExtensionSceneCameraState, persist: Bool = false) {
         let clamped = next.clamped()
         guard clamped != camera || !touched else { return }
@@ -249,11 +266,10 @@ nonisolated enum ExtensionSceneSnapshotCache {
         )
     }
 
-    /// Restores the scene's default camera and marks it untouched (persisting `touched: false` so reopening uses the default).
+    /// Restores the default camera (`defaultCamera`) and marks it untouched (persisting `touched: false` so reopening uses the default).
     func reset() {
         wheelSaveTask?.cancel()
-        let defaults = ExtensionSceneCameraState.resolved(scene.camera)
-        camera = defaults
+        camera = defaultCamera
         touched = false
         refreshCutaway()
         writeCurrent()
@@ -277,7 +293,7 @@ nonisolated enum ExtensionSceneSnapshotCache {
             camera = saved.camera.clamped()
             touched = true
         } else {
-            camera = ExtensionSceneCameraState.resolved(scene.camera)
+            camera = defaultCamera
             touched = false
         }
     }

@@ -65,7 +65,7 @@ type updateRecord struct {
 	ToBuild     int64                     `json:"to_build"`
 	Started     time.Time                 `json:"started"`
 	Ended       time.Time                 `json:"ended"`
-	Result      string                    `json:"result"` // updated | rolled_back | failed | held (newer, not installed by itself: Reason)
+	Result      string                    `json:"result"` // updated | rolled_back | failed | cancelled | held (newer, not installed by itself: Reason)
 	Reason      string                    `json:"reason,omitempty"`
 	Auto        bool                      `json:"auto"`
 	Source      string                    `json:"source,omitempty"`
@@ -140,6 +140,7 @@ type updater struct {
 	newestImage string // a Docker hub: the newest release tag of its image
 	lastCheck   time.Time
 	busy        []busyItem
+	attempt     *developmentAttempt // guarded by mu; nil once adoption wins
 	running     bool
 	checking    bool
 	opGen       uint64 // bumped whenever an update or check starts, preventing busy-check ABA races
@@ -158,7 +159,7 @@ type updater struct {
 
 	// androidNote is what syncAndroid last logged: the same failure is not logged again every hour.
 	androidNote string
-	devRun      func(context.Context, *update.DevelopmentConfig, string, string, map[string]any, any, func(update.DevelopmentProgress)) error
+	devRun      func(context.Context, *update.DevelopmentConfig, string, string, map[string]any, any, func(), func(update.DevelopmentProgress)) error
 	// behindNote is the update source and release noteBehind last logged as behind: once per pair, not every hour.
 	behindNote string
 	// testAfterBackupRecoveryCheck runs in tests right after UnrecoveredSnapshot
@@ -423,6 +424,10 @@ func (u *updater) saveLocked(ctx context.Context) error {
 func (u *updater) record(ctx context.Context, r updateRecord) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	return u.recordLocked(ctx, r)
+}
+
+func (u *updater) recordLocked(ctx context.Context, r updateRecord) error {
 	if err := u.loadLocked(ctx); err != nil {
 		return err
 	}
@@ -730,6 +735,10 @@ func (u *updater) set(state, progress, errText string) {
 	u.mu.Lock()
 	u.setLocked(state, progress, errText)
 	u.mu.Unlock()
+	u.broadcastStatus()
+}
+
+func (u *updater) broadcastStatus() {
 	u.h.broadcast(map[string]any{"type": "hub_update", "update": u.view()})
 }
 
@@ -743,6 +752,9 @@ func (u *updater) setLocked(state, progress, errText string) {
 
 // updateView is GET /api/v1/hub/update.
 type updateView struct {
+	CanCancel       bool                      `json:"can_cancel"`
+	Cancelling      bool                      `json:"cancelling"`
+	SupportsPreview bool                      `json:"supports_preview"`
 	Source          string                    `json:"source"`
 	Development     *developmentView          `json:"development,omitempty"`
 	Backup          *update.DevelopmentBackup `json:"backup,omitempty"`
@@ -800,7 +812,8 @@ func (u *updater) viewIn(l i18n.Lang) updateView {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	selfUpdates, source := u.h.selfUpdates(), u.h.updateSource()
-	v := updateView{Version: u.h.version, Build: u.h.build.Number, Channel: u.h.build.Channel, CanUpdate: selfUpdates,
+	v := updateView{SupportsPreview: true, Version: u.h.version, Build: u.h.build.Number, Channel: u.h.build.Channel, CanUpdate: selfUpdates,
+		CanCancel: u.attempt != nil, Cancelling: u.attempt != nil && u.attempt.cancelling,
 		State: u.state, Progress: u.progress, Busy: u.busy, Error: u.errText, Auto: u.settings.auto() && selfUpdates,
 		AutoNotice: selfUpdates && !u.settings.AutoNoticeSeen, Confirmed: u.confirmed,
 		AutoUpdateNodes: u.nodesEnabledLocked(), UpdateURL: source.url, UpdateFrom: source.from, UpdateProxy: proxyShown(source.proxy)}
@@ -853,11 +866,9 @@ func (u *updater) viewIn(l i18n.Lang) updateView {
 		v.LastCheck = &t
 	}
 	if r := u.release; r != nil {
-		released := r.Manifest.Released
-		v.Latest = &latestView{Version: r.Manifest.Version, Build: r.Manifest.Build, Released: &released, Notes: r.Manifest.Notes,
+		v.Latest = &latestView{Version: r.Manifest.Version, Build: r.Manifest.Build, Notes: r.Manifest.Notes,
 			Newer: u.h.build.Newer(r.Manifest.Build), Bad: slices.Contains(u.settings.Bad, r.Manifest.Build)}
 		if r.Development != nil {
-			v.Latest.Released = nil // checked Git candidates have no publication date
 			v.Latest.Commit, v.Latest.Branch = r.Development.Commit, r.Development.Branch
 			v.Latest.UpdatedAt = r.Development.UpdatedAt
 			v.Latest.BackupID = r.Development.BackupID
@@ -866,6 +877,8 @@ func (u *updater) viewIn(l i18n.Lang) updateView {
 			if r.Manifest.Ancestors != "" {
 				v.Latest.Held = u.developmentHold(r.Manifest)
 			}
+		} else if released := r.Manifest.Released; !released.IsZero() {
+			v.Latest.Released = &released
 		}
 		// A deliberately selected saved program version is not evidence that
 		// the development Git source stopped publishing releases.

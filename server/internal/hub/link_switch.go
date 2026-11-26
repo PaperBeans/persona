@@ -65,7 +65,15 @@ type linkSwitches struct {
 	mu       sync.Mutex
 	run      map[string]*linkSwitchRun
 	ended    map[string]linkSwitchEnded
-	reserved map[string]int // moves and removals under way
+	reserved map[string]int   // moves and removals under way
+	now      func() time.Time // nil uses the real clock
+}
+
+func (s *linkSwitches) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 // linkSwitchRun is one switch under way: the manager's id for it, who asked (device | admin), the manager that began
@@ -251,12 +259,12 @@ func (h *Hub) linkSwitchAudited(ctx context.Context, mid string) (bool, error) {
 	if len(history) > 0 {
 		began = history[0].At
 	}
-	return time.Since(began) < linkSwitchFor, nil
+	return h.linkSwitch.clock().Sub(began) < linkSwitchFor, nil
 }
 
 // linkSwitchUnderWay: a switch holds computer mid now (this hub's, or one from before its restart).
 func (h *Hub) linkSwitchUnderWay(ctx context.Context, mid string) (bool, error) {
-	if h.linkSwitch.live(mid, time.Now()) {
+	if h.linkSwitch.live(mid, h.linkSwitch.clock()) {
 		return true, nil
 	}
 	return h.linkSwitchAudited(ctx, mid)
@@ -275,7 +283,7 @@ func (h *Hub) holdLinkSwitch(ctx context.Context, mids ...string) (func(), error
 		}
 	}
 	// A begin since is in memory: hold sees it, or it sees the hold.
-	return h.linkSwitch.hold(mids, time.Now())
+	return h.linkSwitch.hold(mids, h.linkSwitch.clock())
 }
 
 // holdManagerLinkSwitch is holdLinkSwitch for every computer manager id carries (its removal hands them to the
@@ -364,7 +372,7 @@ func (h *Hub) beginLinkSwitch(ctx context.Context, c *busConn, p devicewire.Link
 	if err := h.linkSwitchReady(ctx, c, p, run.operation); err != nil {
 		return nil, err
 	}
-	now := time.Now()
+	now := h.linkSwitch.clock()
 	run.until = now.Add(linkSwitchFor)
 	if err := h.linkSwitch.claim(mid, run, now); err != nil {
 		return nil, linkSwitchRefusal(devicewire.LinkSwitchCodeChanged, "the computer is being moved, removed or switched")

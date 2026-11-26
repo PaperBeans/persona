@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The composer's toolbar as cindy's (#5324): the + opens the + / @ panel with a search box that has the keys; a typed @
 // opens the same panel above the box. "Add" first (files or images, Plan mode where the session has modes), then a few of
-// each resource; picking a file types `@path `, a session becomes a context chip. One round button on the right: Stop
+// each resource; picking a file or session inserts an inline reference. One round button on the right: Stop
 // while the agent works and nothing is typed, Send otherwise (Queue message while it works, with a second Stop).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -14,6 +14,7 @@ import type { Session } from "../../lib/types";
 import { Composer } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
 import type { PlanMode } from "./PermissionPicker";
+import { composerField, composerFieldText } from "./composer-test-field";
 import { t } from "../../i18n";
 
 // the session folder's first level: a test may put other entries in it
@@ -144,22 +145,27 @@ describe("the + (#5324)", () => {
     expect(document.activeElement).toBe(box());
   });
 
-  it("types a picked file's `@path ` at the caret", async () => {
+  it("adds a picked file at the last caret while the search has focus", async () => {
     render();
-    setValue(box(), "look at");
+    setValue(box(), "look at please");
+    act(() => {
+      box().focus();
+      box().setSelectionRange(7, 7);
+    });
     click(plus());
     await settle();
     setValue(search()!, "Composer");
     press(search()!, "Enter");
     expect(panel()).toBeNull();
-    expect(box().value).toBe("look at @web/Composer.tsx ");
+    expect(composerFieldText(host)).toBe("look at Composer.tsx please");
+    expect(composerField(host).querySelector("[data-inline-mention]")?.getAttribute("title")).toBe("/code/app/web/Composer.tsx");
   });
 
-  it("browses a folder in its search box, and adds a session as a context chip", async () => {
+  it("browses a folder with its disclosure and inserts a session in the prompt", async () => {
     render();
     click(plus());
     await settle();
-    click(option("src/"));
+    click(option("src/").querySelector("[data-browse-folder]")!);
     expect(search()!.value).toBe("src/");
     click(plus()); // the + toggles it shut
     expect(panel()).toBeNull();
@@ -167,8 +173,8 @@ describe("the + (#5324)", () => {
     await settle();
     click(option("Fix the login page"));
     expect(panel()).toBeNull();
-    expect(box().value).toBe("");
-    expect(getContexts(KEY).map((c) => c.title)).toEqual(["Fix the login page"]);
+    expect(composerFieldText(host)).toBe("Fix the login page ");
+    expect(getContexts(KEY)).toEqual([]);
   });
 
   it("checks Plan mode while the session plans, and its row switches it", async () => {
@@ -311,7 +317,7 @@ describe("a typed @ (#5324)", () => {
     await settle();
     expect(options().map((o) => o.textContent?.replace(/lib$/, ""))).toEqual(["links.ts"]);
     press(box(), "Enter");
-    expect(box().value).toBe("see @lib/links.ts ");
+    expect(composerFieldText(host)).toBe("see links.ts ");
     expect(panel()).toBeNull();
   });
 });
@@ -331,18 +337,22 @@ describe("a typed query picks a resource before an Add row (#5324)", () => {
     expect(options()[0].textContent).toContain("api.ts");
     press(box(), "Enter");
     expect(picker).not.toHaveBeenCalled();
-    expect(box().value).toBe("@api.ts ");
+    expect(composerFieldText(host)).toBe("api.ts ");
     picker.mockRestore();
   });
 
-  it("`@pl` + Enter opens the plans/ folder, not Plan mode", async () => {
+  it("`@pl` + Enter inserts a folder, and Right Arrow can browse it", async () => {
     entries = [{ name: "plans", dir: true }];
     const plan: PlanMode = { on: false, toggle: vi.fn() };
     await at("@pl", plan);
     expect(options()[0].textContent).toContain("plans/");
-    press(box(), "Enter");
+    press(box(), "ArrowRight");
     expect(plan.toggle).not.toHaveBeenCalled();
     expect(box().value).toBe("@plans/");
+    await at("@pl", plan);
+    press(box(), "Enter");
+    expect(composerFieldText(host)).toBe("plans/ ");
+    expect(composerField(host).querySelector("[data-inline-mention]")?.getAttribute("title")).toBe("/code/app/plans/");
   });
 
   it("`@plan` with nothing else matching still offers Plan mode", async () => {

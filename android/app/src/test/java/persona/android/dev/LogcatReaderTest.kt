@@ -3,7 +3,6 @@ package persona.android.dev
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -44,7 +43,6 @@ class LogcatReaderTest {
         var stdoutClosed = false
         var stderrClosed = false
         var forcibleCalls = 0
-        private val release = CountDownLatch(1)
         private val bytes = "first\nsecond\n".toByteArray()
         private val stdout = object : InputStream() {
             private var offset = 0
@@ -54,14 +52,16 @@ class LogcatReaderTest {
             }
             override fun read(b: ByteArray, off: Int, len: Int): Int {
                 readCalls++
-                if (blocking) release.await()
+                // A timeout returns before the reader is scheduled on a busy runner; the fixture must not park
+                // that late thread forever after the bounded-read assertion.
+                if (blocking) return -1
                 if (offset == bytes.size) return -1
                 val count = minOf(len, bytes.size - offset)
                 bytes.copyInto(b, off, offset, offset + count)
                 offset += count
                 return count
             }
-            override fun close() { stdoutClosed = true; release.countDown() }
+            override fun close() { stdoutClosed = true }
         }
         private val stderr = object : InputStream() {
             override fun read(): Int = -1

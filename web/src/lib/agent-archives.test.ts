@@ -56,6 +56,33 @@ describe("what the menus offer", () => {
   });
 });
 
+describe("Close… on an Antigravity CLI agent (#14520)", () => {
+  const pane: Session = { ...open, session_id: "agy-w1-p1", agent: "agy", pane_id: "w1:p1",
+    capabilities: { read: true, send: true, interrupt: true, approve: true, terminal: true } };
+  const conversation: Session = { ...open, session_id: "agy-11111111-2222-4333-8444-555555555555", agent: "agy", pane_id: undefined,
+    source_kind: "runtime", status: "done", state: "idle", capabilities: { read: true, send: true, interrupt: true, terminal: false, close: true } };
+
+  it("archives and closes its pane's row and its own row, so the conversation leaves the list", () => {
+    expect(closeOffer(pane, both)).toBe("archive");
+    expect(closeOffer({ ...pane, started_by_persona: true }, both)).toBe("archive");
+    expect(closeOffer(conversation, both)).toBe("archive");
+    expect(archiveOffers(conversation, both)).toEqual({ archive: "ok", close: "ok" });
+  });
+
+  it("closes a busy one without archiving it, and only closes where the hub can't archive and close", () => {
+    expect(closeOffer({ ...pane, status: "working", state: "working" }, both)).toBe("close");
+    expect(closeOffer({ ...conversation, status: "working", state: "working" }, both)).toBe("close");
+    expect(closeOffer(pane, [AGENT_ARCHIVES_FEATURE])).toBe("close"); // an older manager
+  });
+
+  it("leaves a companion row with no close, and one already closed, as they were", () => {
+    const noClose = { ...conversation, capabilities: { ...conversation.capabilities, close: false } } as Session;
+    expect(archiveOffers(noClose, both).close).toBe("no");
+    expect(closeOffer({ ...conversation, status: "offline", state: "offline" }, both)).toBe("no");
+    expect(archiveOffers({ ...conversation, agent: "pi" }, both).close).toBe("no"); // another runtime's session
+  });
+});
+
 describe("what Close… does (#7125)", () => {
   it("archives and closes where the hub can, and only closes where it can't", () => {
     expect(closeOffer(open, both)).toBe("archive");

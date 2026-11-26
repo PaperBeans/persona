@@ -187,6 +187,9 @@ func (s *Service) retryOn(ctx context.Context, t *PlanTask, m Device, with retry
 		return cmp.Or(strings.Join(s.launcherAlternatives(ctx, m, *t, name), ", "), "—")
 	}
 	params := map[string]any{"launcher": name}
+	if t.Host != "" {
+		params["host"] = t.Host
+	}
 	if model != "" {
 		params["model"] = model
 	}
@@ -199,6 +202,7 @@ func (s *Service) retryOn(ctx context.Context, t *PlanTask, m Device, with retry
 			"launcher": name, "machine": machine, "reason": r.Error, "launchers": alternatives()})}
 	}
 	if t.Readonly {
+		s.companionStartHost(ctx, m, agent, params)
 		if err := s.readonlyLauncherRefusal(ctx, m, params, agent); err != nil {
 			return retryRefused{err}
 		}

@@ -1,0 +1,176 @@
+{
+  "string": [
+    {
+      "name": "tray_waiting_answer",
+      "value": "有事等你回答"
+    },
+    {
+      "name": "tray_draft_reply",
+      "value": "起草回复"
+    },
+    {
+      "name": "tray_did_not_start",
+      "value": "没开起来"
+    },
+    {
+      "name": "tray_empty_tasks",
+      "value": "还没有任务"
+    },
+    {
+      "name": "tray_empty_tasks_detail",
+      "value": "在对话里说要做的事，Persona 会把它变成任务。"
+    },
+    {
+      "name": "tray_orphaned",
+      "value": "没人在做"
+    },
+    {
+      "name": "tray_orphaned_error",
+      "value": "出错后关闭"
+    },
+    {
+      "name": "tray_orphaned_offline",
+      "value": "电脑离线"
+    },
+    {
+      "name": "tray_orphaned_closed",
+      "value": "已关闭"
+    },
+    {
+      "name": "task_recovery_heading",
+      "value": "Agent 没开起来"
+    },
+    {
+      "name": "task_recovery_workspace_taken",
+      "value": "上次没开起来时留下的工作区还占着位置"
+    },
+    {
+      "name": "task_recovery_launcher_missing",
+      "value": "{launcher} 在这台电脑的终端里开不起来"
+    },
+    {
+      "name": "task_recovery_gone",
+      "value": "没有这个任务了"
+    },
+    {
+      "name": "task_recovery_starting",
+      "value": "正在开 Agent"
+    },
+    {
+      "name": "task_recovery_starting_detail",
+      "value": "开好以后这里就是它的对话。"
+    },
+    {
+      "name": "task_recovery_instead",
+      "value": "改用 {launcher}"
+    },
+    {
+      "name": "task_recovery_remove_title",
+      "value": "移除任务？"
+    },
+    {
+      "name": "task_start_title",
+      "value": "电脑的终端在问：“{value}”"
+    },
+    {
+      "name": "task_start_generic",
+      "value": "选一个回答，Agent 就会在那个标签里启动。"
+    },
+    {
+      "name": "task_start_secret",
+      "value": "它在要密码，Persona 不会从这里输入密码。可以在这里取消，或者去电脑上输入。"
+    },
+    {
+      "name": "task_start_host",
+      "value": "要不要信任新的主机密钥，需要在电脑上决定；在这里只能拒绝。"
+    },
+    {
+      "name": "task_start_until",
+      "value": "标签会留到 {value}。"
+    },
+    {
+      "name": "task_start_enter_yes",
+      "value": "回车（是）"
+    },
+    {
+      "name": "task_start_enter_no",
+      "value": "回车（否）"
+    },
+    {
+      "name": "task_start_enter",
+      "value": "回车"
+    },
+    {
+      "name": "task_start_cancel",
+      "value": "取消（Ctrl-C）"
+    },
+    {
+      "name": "task_start_yes",
+      "value": "是"
+    },
+    {
+      "name": "task_start_no",
+      "value": "否"
+    },
+    {
+      "name": "task_start_yes_key",
+      "value": "是（{value}）"
+    },
+    {
+      "name": "task_start_no_key",
+      "value": "否（{value}）"
+    },
+    {
+      "name": "task_start_update",
+      "value": "更新（{value}）"
+    },
+    {
+      "name": "task_start_not_now",
+      "value": "暂不（{value}）"
+    },
+    {
+      "name": "task_start_continue",
+      "value": "仍然继续（{value}）"
+    },
+    {
+      "name": "task_start_stop_compinit",
+      "value": "停止 compinit（{value}）"
+    },
+    {
+      "name": "task_start_empty_zshrc",
+      "value": "创建空的 .zshrc（{value}）"
+    },
+    {
+      "name": "task_start_quit_wizard",
+      "value": "退出向导（{value}）"
+    },
+    {
+      "name": "task_start_no_trust",
+      "value": "不信任（{value}）"
+    },
+    {
+      "name": "task_start_cancel_key",
+      "value": "取消（{value}）"
+    },
+    {
+      "name": "task_start_press",
+      "value": "按 {value}"
+    },
+    {
+      "name": "tray_plan_start",
+      "value": "开始"
+    },
+    {
+      "name": "tray_plan_start_many",
+      "value": "开始 {count} 个任务"
+    },
+    {
+      "name": "tray_plan_edit",
+      "value": "改一下"
+    },
+    {
+      "name": "tray_plan_dismiss",
+      "value": "不开"
+    }
+  ]
+}

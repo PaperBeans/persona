@@ -230,7 +230,7 @@ func (h *hub) answerOf(f func(json.RawMessage) (any, error), method string, para
 }
 
 // refuses is the real hub's refusal of a program's call, or nil: a connector or channel the extension does not
-// contribute (no_contribution), a knowledge-base call or a gh token without the permission granted
+// contribute (no_contribution), a knowledge-base call, an assistant.event or a gh token without the permission granted
 // (permission_denied, data {scope}), a sent.record for a connector that does not declare sends_as_user
 // (permission_denied) or with a target that is not an object or no text (invalid_params), the knowledge base's connector calls of a connector without archive
 // (no_capability).
@@ -261,6 +261,11 @@ func refuses(m *wire.Manifest, method string, params json.RawMessage) error {
 		// hub_api is the legacy full grant only without scopes (the hub's FullHub).
 		if !(perms.HubAPI && len(perms.Hub) == 0) && !slices.Contains(perms.Hub, scope) {
 			return denied(scope)
+		}
+	case "assistant":
+		// assistant.event needs assistant.events (the hub's grant check; hub_api is the legacy full grant only without scopes).
+		if rest == "event" && !(perms.HubAPI && len(perms.Hub) == 0) && !slices.Contains(perms.Hub, "assistant.events") {
+			return denied("assistant.events")
 		}
 	case ext.SentNamespace:
 		// Only a connector of its own that declares sends_as_user (the hub's registry check), with a target that is an

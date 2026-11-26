@@ -60,6 +60,7 @@ internal class ChatInteractionController(
     private val submittedContexts: MutableState<List<ChatLinkContext>>,
 ) {
     val notice = mutableStateOf<String?>(null)
+    val commandInputErrors = androidx.compose.runtime.mutableStateMapOf<String, String>()
     val sending = mutableStateOf(false)
     val sendingId = mutableStateOf<String?>(null)
     val submittedDraft = mutableStateOf<Pair<String, ChatComposerDraft>?>(null)
@@ -99,18 +100,25 @@ internal class ChatInteractionController(
 
     fun answer(interaction: Interaction, resolution: Resolution) {
         if (!taps.value.canTap(interaction, interactions.pending.value, java.time.Instant.now())) return
+        commandInputErrors.remove(interaction.id)
         taps.value = taps.value.tapped(interaction.id)
         scope.launch {
             try {
-                val result = submitInteraction { resolve(interaction, resolution,
-                    handoffCard = interaction.isSecretHandoff && resolution.allow == true) }
+                val result = submitInteraction(keepUnconfirmedReason = interaction.isCommandInputPermission) { resolve(interaction, resolution,
+                    handoffCard = (interaction.isSecretHandoff || interaction.secretRun?.delivery == "env") && resolution.allow == true) }
                 result.submission.haptic?.let(haptics)
                 taps.value = taps.value.answered(interaction.id, result.card)
                 if (result.withdraw) {
                     interactionFeedback.value = result.notice(resources, interaction, resolution)
                     if (result.offersNext(resolution)) answeredHere.value++
                 }
-                notice.value = if (result.withdraw) null else result.notice(resources, interaction, resolution)
+                val failure = if (result.withdraw) null else result.notice(resources, interaction, resolution)
+                if (failure != null && interaction.isCommandInputPermission) {
+                    commandInputErrors[interaction.id] = failure
+                    notice.value = null
+                } else {
+                    notice.value = failure
+                }
                 if (result.submission == InteractionSubmission.PromptChanged || !result.withdraw) {
                     try {
                         interactions.refresh()

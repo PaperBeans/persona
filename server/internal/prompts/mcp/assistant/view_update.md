@@ -1,4 +1,4 @@
-Replace a live card created by this assistant conversation with a complete validated View. Other conversations and ordinary agents cannot modify it. Supply the version read from view_get to reject stale updates; without it the hub uses the version it reads at the start of this call. Validation or a version conflict leaves the previous card intact. Contents are stored before update notifications are coalesced (at most one per second). Returns {version}. Keep stable component keys to preserve editing and scroll state across devices.{{template "shared/mcp_language" .}}
+Replace a live card of this conversation with a whole new View (rules as view_show); no other conversation or agent can. A version from view_get refuses a stale update; without one, the version read now is used. A refused update leaves the card as it was. Updates are stored at once and told at most once a second. Returns {version}. Keep component keys stable.{{template "shared/mcp_language" .}}
 
 ```json
 {

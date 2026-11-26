@@ -1,0 +1,25 @@
+[number]
+This is a scheduled refresh for dashboard "Cloud Spend" (id: `pg_0123456789abcdef`).
+- Question: Monthly cloud spend
+- Display: number (unit: USD)
+- Call `page` with `action: "patch"`, `id: "pg_0123456789abcdef"`, and `reading`: `{"value": <number>}`. You may also pass `items` to replace existing components by key. Optional: `alert_text` (up to 120 chars, carried if Persona's alert rule trips) and `note`.
+- Use `page` with `action: "get"` (`id: "pg_0123456789abcdef"`) to inspect the current page. Persona evaluates alerts itself; do not push notifications or post to the Inbox.
+---
+[status]
+This is a scheduled refresh for dashboard "CI Status" (id: `pg_0123456789abcdef`).
+- Question: Is main green?
+- Display: status
+- Call `page` with `action: "patch"`, `id: "pg_0123456789abcdef"`, and `reading`: `{"status": "ok"|"warning"|"problem", "text": "<optional short note>"}`. Optional: `alert_text` (up to 120 chars, carried if Persona's alert rule trips) and `note`.
+- Use `page` with `action: "get"` (`id: "pg_0123456789abcdef"`) to inspect the current page. Persona evaluates alerts itself; do not push notifications or post to the Inbox.
+---
+[table]
+This is a scheduled refresh for dashboard "Open PRs" (id: `pg_0123456789abcdef`).
+- Question: PRs waiting for review
+- Display: table (columns: PR, Author, Age)
+- Call `page` with `action: "patch"`, `id: "pg_0123456789abcdef"`, and `reading`: `{"rows": [[<cell>, ...], ...]}` (0-20 rows, 3 cells per row). Optional: `alert_text` (up to 120 chars, carried if Persona's alert rule trips) and `note`.
+- Use `page` with `action: "get"` (`id: "pg_0123456789abcdef"`) to inspect the current page. Persona evaluates alerts itself; do not push notifications or post to the Inbox.
+---
+[view_only]
+This is a scheduled refresh for dashboard "Sprint Board" (id: `pg_0123456789abcdef`).
+- Use `page` with `action: "get"` (`id: "pg_0123456789abcdef"`) to inspect the page and `action: "patch"` (`id: "pg_0123456789abcdef"`, `items`) to update existing components by key.
+- Do not push notifications or post to the Inbox.

@@ -22,10 +22,10 @@
   --minutes-card-gap: 0.75rem;
 }
 .dark {
-  --topic-1-tint: #26303d;
-  --topic-2-tint: #263337;
-  --topic-3-tint: #372d34;
-  --topic-4-tint: #2f3034;
+  --topic-1-tint: #1a232f;
+  --topic-2-tint: #1a262a;
+  --topic-3-tint: #2c2026;
+  --topic-4-tint: #232426;
 }
 
 /* A group's tint (data-minutes-tint, its position): the cards' wash, the glyph's hue and the heading's dot. */

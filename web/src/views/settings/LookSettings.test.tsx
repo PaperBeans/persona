@@ -111,4 +111,31 @@ describe("主题色's options", () => {
     expect(radios[1]!.getAttribute("aria-checked")).toBe("true");
     expect(radios[1]!.getAttribute("aria-label")).toBe("跟随形象，这个形象没带");
   });
+
+  it("offers and applies 跟随形象 for an uploaded avatar with colors", async () => {
+    const uploaded: PersonaInfo = {
+      id: "u-demo0002",
+      rev: "r1",
+      manifest: {
+        format: 1,
+        id: "u-demo0002",
+        name: "Mikan",
+        avatar: { sizes: { "128": "avatar/128.png" } },
+        dot: { states: { idle: { file: "dot/idle.png" } } },
+        source: { kind: "upload", color: { seed: "#3A7BD5", auto: false } },
+        colors: { light: { primary: "#3A7BD5", accent: "#2255A0" }, dark: { primary: "#3A7BD5", accent: "#6BA0E8" } },
+      },
+    };
+    hub.result = list(uploaded);
+    choosePersona("u-demo0002");
+    await refreshPersonas();
+    expect(savedPersonaAccent()).toEqual({ light: "#2255a0", dark: "#6ba0e8" });
+    const radios = await draw();
+    expect(radios).toHaveLength(7);
+    const matchAvatar = radios[1] as HTMLButtonElement;
+    expect(matchAvatar.getAttribute("aria-label")).toBe("跟随形象，Mikan");
+    await act(async () => matchAvatar.click());
+    expect(document.documentElement.dataset.accent).toBe("persona");
+    expect(document.getElementById("persona-accent")?.textContent).toContain("--accent: #2255a0;");
+  });
 });

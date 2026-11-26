@@ -73,7 +73,7 @@ func (s *Service) releaseHeldAsks(session string) {
 // holdsTurn: q is an ask_user a call waits on, not taken back, not answered and not letting go already. Under
 // questions.mu.
 func (q *question) holdsTurn() bool {
-	return q.release != nil && !q.later && !q.userSpoke && !q.releasing && len(q.answer) == 0
+	return q.release != nil && !q.later && !q.userSpoke && !q.withdrawn && !q.releasing && len(q.answer) == 0
 }
 
 // releaseAsk has q, an ask_user a call waits on, let go of its turn: its record is kept first and its card made
@@ -129,7 +129,7 @@ func (s *Service) releaseAsk(ctx context.Context, q *question) bool {
 	s.fleet.mu.Unlock()
 	s.questions.mu.Lock()
 	// Answered or taken back while its record was written: the call has that, and the record goes (the defer).
-	if s.questions.m[ix.ID] != q || q.userSpoke || len(q.answer) > 0 {
+	if s.questions.m[ix.ID] != q || q.userSpoke || q.withdrawn || len(q.answer) > 0 {
 		s.questions.mu.Unlock()
 		return false
 	}

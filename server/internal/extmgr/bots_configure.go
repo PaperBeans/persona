@@ -47,7 +47,7 @@ func (h *Manager) configureBotForPairing(ctx context.Context, receipt botConfigu
 	if err != nil {
 		return errBotSettingsSave
 	}
-	if !botport.Available() {
+	if !botport.Available(h.modules()) {
 		return botport.ErrUnavailable
 	}
 	rep := botport.New(receipt.appID, secret, receipt.domain).AutoConfigure(ctx)

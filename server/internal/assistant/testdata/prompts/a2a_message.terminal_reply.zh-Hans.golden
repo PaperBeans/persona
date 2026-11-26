@@ -1,0 +1,12 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"target-0001","title":"box/target-0001","relay_id":"persona-a2a-a2a-task-0001-2"}
+</persona-context>
+Persona A2A 任务 a2a-task-0001 来自 box/target-0001，状态为 input_required。
+这是会话间的消息。原有任务范围和用户审批要求继续有效。
+根据这条更新继续你派出的任务。需要补充输入时，用同一个任务 ID 和新的 message_id 调用 a2a_send。
+如果当前工具没有集成 Persona MCP，将此 JSON 字符串解码为路径并按终端 shell 规则转义引用，再用它加 tool、相同的工具名称和 JSON 参数执行："/Applications/Persona.app/Contents/MacOS/persona-node"
+
+如果无法调用工具，以「A2A a2a-task-0001 answer」作为最终回复的首行，下一行写给对方的回答。
+
+
+Which build target?

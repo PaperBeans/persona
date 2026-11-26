@@ -3,6 +3,8 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"slices"
 	"sync"
 	"time"
@@ -98,13 +100,13 @@ func (r *hubRun) runJob(j *liveJob) {
 	r.mu.Lock()
 	e := r.e
 	r.mu.Unlock()
-	_, rec, err := e.LiveRead(r.id)
+	_, rec, err := writersOf(e).LiveRead(r.id)
 	if err != nil {
 		r.jobFailed(j, extwire.TEUpstreamUnavailable, err)
 		return
 	}
 	start := extwire.TranscriptionFrame{Type: extwire.TFStart, Mode: extwire.TranscriptionLive, Language: recordingLanguage(rec),
-		Glossary: s.transcriptionGlossary(ctx, rec), At: extwire.F(float64(j.startS) / kb.AudioRate)}
+		Glossary: s.transcriptionGlossary(ctx, rec), At: extwire.F(float64(j.startS) / recordingwire.AudioRate)}
 	rctx, cancel := context.WithTimeout(j.ctx, r.s.tm().jobReadyWait)
 	defer cancel()
 	ref, choice, err := s.transcriptionTarget(ctx)
@@ -167,7 +169,7 @@ func (r *hubRun) runJob(j *liveJob) {
 		case extwire.TFAck:
 			if f.At != nil {
 				r.mu.Lock()
-				j.ackedS, j.ackAt = max(j.ackedS, int64(*f.At*kb.AudioRate)), time.Now()
+				j.ackedS, j.ackAt = max(j.ackedS, int64(*f.At*recordingwire.AudioRate)), time.Now()
 				r.mu.Unlock()
 			}
 		case extwire.TFFlushed:
@@ -237,7 +239,7 @@ func (j *liveJob) feedLocked(from int64, pcm []byte) {
 	if j.ending {
 		return
 	}
-	if j.ready && j.sentS-j.ackedS > int64(j.run.s.tm().liveAhead.Seconds()*kb.AudioRate) {
+	if j.ready && j.sentS-j.ackedS > int64(j.run.s.tm().liveAhead.Seconds()*recordingwire.AudioRate) {
 		if !j.behind {
 			j.run.s.logf("recording %s: transcription job behind, audio skipped", j.run.id)
 		}
@@ -245,7 +247,7 @@ func (j *liveJob) feedLocked(from int64, pcm []byte) {
 		return
 	}
 	if j.behind || from != j.sentS {
-		if !j.queueLocked(jobOut{f: &extwire.TranscriptionFrame{Type: extwire.TFSeek, At: extwire.F(float64(from) / kb.AudioRate)}}) {
+		if !j.queueLocked(jobOut{f: &extwire.TranscriptionFrame{Type: extwire.TFSeek, At: extwire.F(float64(from) / recordingwire.AudioRate)}}) {
 			j.setBehindLocked(true)
 			return
 		}
@@ -447,10 +449,10 @@ func (r *hubRun) usage(j *liveJob, seconds float64, sessions int) {
 
 // addUsage adds seconds to recording id's billed transcription seconds.
 func (s *Recordings) addUsage(e *kb.Engine, id string, seconds float64) {
-	if _, err := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 		t.UsageSeconds += seconds
 		return nil
-	}); err != nil && !errors.Is(err, kb.ErrNotFound) && !errors.Is(err, kb.ErrRecordingDeleted) {
+	}); err != nil && !errors.Is(err, kbwire.ErrNotFound) && !errors.Is(err, recordingwire.ErrRecordingDeleted) {
 		s.logf("recording %s: transcription usage: %v", id, err)
 	}
 }

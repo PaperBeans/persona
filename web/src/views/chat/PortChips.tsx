@@ -7,7 +7,7 @@ import { isHubPortLink } from "../../lib/links";
 import { openPanel } from "../../lib/panel";
 import { portLabel, portLinks, portURL, type PortLink } from "../../lib/port-links";
 import { usePortStates, type PortState } from "../../lib/port-presence";
-import { PREVIEW_FEATURE } from "../../lib/preview";
+import { PREVIEW_FEATURE } from "../../lib/preview-link";
 import { hubHas, useStore } from "../../lib/store";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";

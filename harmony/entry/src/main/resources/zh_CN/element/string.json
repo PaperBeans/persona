@@ -1,6 +1,38 @@
 {
   "string": [
     {
+      "name": "cloudflare_access_required",
+      "value": "此 Hub 受 Cloudflare Access 保护，需要服务令牌"
+    },
+    {
+      "name": "cloudflare_access_rejected",
+      "value": "Cloudflare Access 拒绝了此服务令牌"
+    },
+    {
+      "name": "cloudflare_access_incomplete",
+      "value": "请同时填写客户端 ID 和客户端密钥"
+    },
+    {
+      "name": "cloudflare_access_invalid",
+      "value": "请检查 Cloudflare Access 服务令牌"
+    },
+    {
+      "name": "phone_switcher_expiry",
+      "value": "安装中 · 码 {minutes} 分钟后过期"
+    },
+    {
+      "name": "phone_switcher_expired",
+      "value": "安装中 · 码已过期"
+    },
+    {
+      "name": "phone_switcher_synced",
+      "value": "离线 · 最后同步于 {time}"
+    },
+    {
+      "name": "project_temporary_session",
+      "value": "临时会话"
+    },
+    {
       "name": "module_desc",
       "value": "Persona 手机客户端"
     },
@@ -95,6 +127,18 @@
     {
       "name": "search",
       "value": "搜索"
+    },
+    {
+      "name": "agents_search_prompt",
+      "value": "搜索空间、标签、会话、内容"
+    },
+    {
+      "name": "agent_source_lark_group",
+      "value": "飞书群"
+    },
+    {
+      "name": "agent_grouping_current",
+      "value": "分组：{group}"
     },
     {
       "name": "search_sessions",
@@ -397,12 +441,36 @@
       "value": "已发送"
     },
     {
+      "name": "chat_feedback_sending",
+      "value": "正在发送…"
+    },
+    {
+      "name": "chat_feedback_processing",
+      "value": "处理中…"
+    },
+    {
       "name": "pending",
       "value": "等待中"
     },
     {
       "name": "completed",
       "value": "已完成"
+    },
+    {
+      "name": "phone_working_seconds",
+      "value": "正在工作 {s} 秒"
+    },
+    {
+      "name": "phone_working_minutes",
+      "value": "正在工作 {m} 分"
+    },
+    {
+      "name": "phone_working_minutes_seconds",
+      "value": "正在工作 {m} 分 {s} 秒"
+    },
+    {
+      "name": "phone_working_hours_minutes",
+      "value": "正在工作 {h} 小时 {m} 分"
     },
     {
       "name": "work_summary",
@@ -1045,6 +1113,14 @@
       "value": "工作区"
     },
     {
+      "name": "project_join_space",
+      "value": "加入空间"
+    },
+    {
+      "name": "project_join_help",
+      "value": "在所选工作树中打开新的会话标签。"
+    },
+    {
       "name": "latest",
       "value": "最新消息"
     },
@@ -1069,12 +1145,76 @@
       "value": "接管"
     },
     {
+      "name": "session_git_staged_count",
+      "value": "已暂存 {count} 个"
+    },
+    {
+      "name": "session_git_changes_count",
+      "value": "共 {count} 个改动"
+    },
+    {
+      "name": "session_git_choose_files",
+      "value": "勾选要提交的文件"
+    },
+    {
+      "name": "session_git_detached_commit",
+      "value": "先切换到分支再提交"
+    },
+    {
+      "name": "session_git_pull_no_directory",
+      "value": "不知道这个窗格在哪个文件夹。"
+    },
+    {
+      "name": "session_git_pull_not_a_repository",
+      "value": "这个文件夹不在 Git 仓库里。"
+    },
+    {
+      "name": "session_git_pull_detached_head",
+      "value": "当前是分离的 HEAD，请先切换到分支。"
+    },
+    {
+      "name": "session_git_pull_no_upstream",
+      "value": "这个分支没有上游分支，请先在电脑上设置。"
+    },
+    {
+      "name": "session_git_pull_uncommitted_changes",
+      "value": "工作区有未提交的改动，请先在电脑上提交或 stash，再拉取。"
+    },
+    {
+      "name": "session_git_pull_not_fast_forward",
+      "value": "本地分支和上游都有新提交，无法快进。请在电脑上合并或变基。"
+    },
+    {
+      "name": "session_git_pulling",
+      "value": "正在拉取"
+    },
+    {
+      "name": "session_git_pull_latest",
+      "value": "拉取最新代码"
+    },
+    {
+      "name": "session_git_pulled",
+      "value": "已拉取最新代码"
+    },
+    {
+      "name": "session_git_up_to_date",
+      "value": "已经是最新代码"
+    },
+    {
+      "name": "session_git_commit_action",
+      "value": "提交…"
+    },
+    {
+      "name": "session_git_binary",
+      "value": "二进制"
+    },
+    {
       "name": "session_tools_binary_file",
       "value": "此文件类型暂不支持预览"
     },
     {
       "name": "session_tools_changes",
-      "value": "更改"
+      "value": "改动"
     },
     {
       "name": "session_tools_clean",
@@ -2230,7 +2370,7 @@
     },
     {
       "name": "health_ask_placeholder",
-      "value": "询问健康相关问题"
+      "value": "问健康相关的问题…"
     },
     {
       "name": "health_chats",
@@ -2290,15 +2430,19 @@
     },
     {
       "name": "health_question_sleep",
-      "value": "怎样改善睡眠？"
+      "value": "这周我睡得怎么样？"
     },
     {
       "name": "health_question_steps",
-      "value": "日常步数能说明什么？"
+      "value": "最近 7 天步数和上周比怎么样"
+    },
+    {
+      "name": "health_question_resting_heart_rate",
+      "value": "我的静息心率最近有变化吗"
     },
     {
       "name": "health_log_weight",
-      "value": "记录体重"
+      "value": "帮我记一下今天体重 62.5 kg"
     },
     {
       "name": "health_log_water",
@@ -2362,7 +2506,7 @@
     },
     {
       "name": "health_try_asking",
-      "value": "试着问问"
+      "value": "问问看"
     },
     {
       "name": "health_upload_pdf",
@@ -2374,7 +2518,7 @@
     },
     {
       "name": "health_upload_report",
-      "value": "上传报告"
+      "value": "上传体检报告"
     },
     {
       "name": "knowledge_agent_prompt",
@@ -2435,6 +2579,14 @@
     {
       "name": "knowledge_kind_recordings",
       "value": "录音"
+    },
+    {
+      "name": "phone_lark_meeting_notes",
+      "value": "飞书会议纪要"
+    },
+    {
+      "name": "phone_original_meeting_notes",
+      "value": "原会议纪要"
     },
     {
       "name": "knowledge_minutes",
@@ -2746,7 +2898,7 @@
     },
     {
       "name": "session_tools_stashes",
-      "value": "暂存列表"
+      "value": "贮藏"
     },
     {
       "name": "session_tools_switch_branch",
@@ -2923,6 +3075,34 @@
     {
       "name": "branch_chat",
       "value": "创建分支对话"
+    },
+    {
+      "name": "chat_lift_select",
+      "value": "选择文本"
+    },
+    {
+      "name": "chat_lift_multiple",
+      "value": "多选"
+    },
+    {
+      "name": "chat_lift_me",
+      "value": "我"
+    },
+    {
+      "name": "chat_lift_quote_part",
+      "value": "引用选中的文字 · {author}"
+    },
+    {
+      "name": "chat_lift_quote_whole",
+      "value": "引用 · {author}"
+    },
+    {
+      "name": "chat_lift_remove_quote",
+      "value": "取消引用"
+    },
+    {
+      "name": "chat_lift_quote",
+      "value": "引用"
     },
     {
       "name": "use_as_context",
@@ -4621,6 +4801,46 @@
       "value": "取消问题"
     },
     {
+      "name": "agent_group_repo",
+      "value": "按仓库"
+    },
+    {
+      "name": "agent_group_todo",
+      "value": "按待办"
+    },
+    {
+      "name": "agent_group_app",
+      "value": "按 App"
+    },
+    {
+      "name": "agent_group_recent",
+      "value": "最近使用"
+    },
+    {
+      "name": "agent_group_direction",
+      "value": "按常驻"
+    },
+    {
+      "name": "agent_app_claude",
+      "value": "Claude 桌面版"
+    },
+    {
+      "name": "agent_app_codex",
+      "value": "Codex App"
+    },
+    {
+      "name": "agent_app_desktop",
+      "value": "{agent} 桌面版"
+    },
+    {
+      "name": "agent_show_all_count",
+      "value": "显示全部 {count} 个"
+    },
+    {
+      "name": "agent_group_machine",
+      "value": "按机器"
+    },
+    {
       "name": "agent_group_state",
       "value": "按状态"
     },
@@ -4693,6 +4913,174 @@
       "value": "类型"
     },
     {
+      "name": "map_point_title",
+      "value": "知识点"
+    },
+    {
+      "name": "map_from",
+      "value": "来自"
+    },
+    {
+      "name": "map_confirmed",
+      "value": "%s 确认"
+    },
+    {
+      "name": "map_active",
+      "value": "进行中"
+    },
+    {
+      "name": "map_done",
+      "value": "已完成"
+    },
+    {
+      "name": "map_paused",
+      "value": "已暂停"
+    },
+    {
+      "name": "map_unrated",
+      "value": "未定级"
+    },
+    {
+      "name": "map_other",
+      "value": "其他"
+    },
+    {
+      "name": "map_summary",
+      "value": "摘要"
+    },
+    {
+      "name": "map_goal",
+      "value": "目标"
+    },
+    {
+      "name": "map_role",
+      "value": "我的角色"
+    },
+    {
+      "name": "map_latest",
+      "value": "最新进展"
+    },
+    {
+      "name": "map_notes",
+      "value": "主对话记录"
+    },
+    {
+      "name": "map_dirs",
+      "value": "代码目录"
+    },
+    {
+      "name": "map_chats",
+      "value": "关联会话"
+    },
+    {
+      "name": "map_people",
+      "value": "关联的人"
+    },
+    {
+      "name": "map_topics",
+      "value": "知识主题"
+    },
+    {
+      "name": "map_topic_count",
+      "value": "主题"
+    },
+    {
+      "name": "map_points",
+      "value": "知识点"
+    },
+    {
+      "name": "map_sources",
+      "value": "来源"
+    },
+    {
+      "name": "map_with_summary",
+      "value": "有摘要"
+    },
+    {
+      "name": "map_knowledge",
+      "value": "知识"
+    },
+    {
+      "name": "map_by_topic",
+      "value": "按主题"
+    },
+    {
+      "name": "map_by_status",
+      "value": "按状态"
+    },
+    {
+      "name": "map_topics_off",
+      "value": "知识点整理已关闭"
+    },
+    {
+      "name": "map_topics_none",
+      "value": "还没有主题"
+    },
+    {
+      "name": "map_projects_none",
+      "value": "还没有项目"
+    },
+    {
+      "name": "map_topics_off_info",
+      "value": "在「设置 › 知识选择」里打开「按主题整理知识点」，Persona 就会在后台开始整理。"
+    },
+    {
+      "name": "map_topics_none_info",
+      "value": "Persona 会在后台从项目时间线和会话里整理出以后用得上的知识，按主题归类，整理出来导图就会慢慢填满。"
+    },
+    {
+      "name": "map_projects_none_info",
+      "value": "Persona 从会话和 Agent 的工作里整理出项目后，就会显示在这里。"
+    },
+    {
+      "name": "map_open_selection",
+      "value": "打开知识选择"
+    },
+    {
+      "name": "map_why",
+      "value": "理由"
+    },
+    {
+      "name": "map_cause",
+      "value": "原因"
+    },
+    {
+      "name": "map_concept",
+      "value": "概念"
+    },
+    {
+      "name": "map_decision",
+      "value": "决定"
+    },
+    {
+      "name": "map_practice",
+      "value": "做法"
+    },
+    {
+      "name": "map_pitfall",
+      "value": "坑"
+    },
+    {
+      "name": "map_fact",
+      "value": "事实"
+    },
+    {
+      "name": "map_question",
+      "value": "待定"
+    },
+    {
+      "name": "map_point",
+      "value": "知识点"
+    },
+    {
+      "name": "map_partial",
+      "value": "部分条目读取失败（%s）。"
+    },
+    {
+      "name": "knowledge_frequent_tags",
+      "value": "常用标签"
+    },
+    {
       "name": "knowledge_filter_tag",
       "value": "标签"
     },
@@ -4739,6 +5127,3466 @@
     {
       "name": "agent_delivery_waiting",
       "value": "正在等待 {computer}。"
+    },
+    {
+      "name": "project_search",
+      "value": "搜索项目或工作树"
+    },
+    {
+      "name": "project_all_machines",
+      "value": "全部电脑"
+    },
+    {
+      "name": "project_worktrees",
+      "value": "个工作树"
+    },
+    {
+      "name": "project_agent_count",
+      "value": "{count} 个 Agent"
+    },
+    {
+      "name": "project_sessions",
+      "value": "个会话"
+    },
+    {
+      "name": "project_empty",
+      "value": "已连接的电脑上还没有项目。"
+    },
+    {
+      "name": "project_no_sessions",
+      "value": "这个工作树中还没有 Agent。"
+    },
+    {
+      "name": "project_catalog_unavailable",
+      "value": "暂时无法读取项目列表。"
+    },
+    {
+      "name": "project_catalog_partial",
+      "value": "部分电脑的项目暂时无法更新。"
+    },
+    {
+      "name": "project_gone",
+      "value": "项目或工作树已移出目录。"
+    },
+    {
+      "name": "project_worktree",
+      "value": "工作树"
+    },
+    {
+      "name": "project_start_here",
+      "value": "在此工作树新建"
+    },
+    {
+      "name": "welcome_morning",
+      "value": "早上好"
+    },
+    {
+      "name": "welcome_afternoon",
+      "value": "下午好"
+    },
+    {
+      "name": "welcome_evening",
+      "value": "晚上好"
+    },
+    {
+      "name": "project_free_directory",
+      "value": "自选目录"
+    },
+    {
+      "name": "project_count",
+      "value": "个项目"
+    },
+    {
+      "name": "project_view_worktree",
+      "value": "查看工作树"
+    },
+    {
+      "name": "project_start_unavailable",
+      "value": "所选电脑当前不可用，请刷新项目后重试。"
+    },
+    {
+      "name": "tree_create",
+      "value": "新建工作树"
+    },
+    {
+      "name": "tree_rename_current_name",
+      "value": "主机当前名称"
+    },
+    {
+      "name": "tree_rename_requested_name",
+      "value": "此前请求名称"
+    },
+    {
+      "name": "tree_rename_original_name",
+      "value": "提交前显示的名称"
+    },
+    {
+      "name": "tree_rename_keep_current",
+      "value": "保留当前名称并解除这次改名"
+    },
+    {
+      "name": "tree_rename_previous_directory",
+      "value": "旧工作树目录"
+    },
+    {
+      "name": "tree_rename_removed_explanation",
+      "value": "旧工作树已移除。可以在此设备上把它的改名请求标记为已检查。"
+    },
+    {
+      "name": "tree_rename_removed_continue",
+      "value": "旧工作树已移除，继续改名"
+    },
+    {
+      "name": "tree_rename_keep_explanation",
+      "value": "保留主机当前名称会解除本机这条改名记录。之后可以重新输入名称。"
+    },
+    {
+      "name": "tree_rename_check_again",
+      "value": "名称或工作区已更新，请重新核对当前名称。"
+    },
+    {
+      "name": "tree_rename",
+      "value": "重命名工作树"
+    },
+    {
+      "name": "tree_cleanup",
+      "value": "清理工作树"
+    },
+    {
+      "name": "tree_remove",
+      "value": "移除"
+    },
+    {
+      "name": "tree_source",
+      "value": "源工作树"
+    },
+    {
+      "name": "tree_actions",
+      "value": "工作树操作"
+    },
+    {
+      "name": "tree_location",
+      "value": "位置"
+    },
+    {
+      "name": "tree_checkout",
+      "value": "检出设置"
+    },
+    {
+      "name": "tree_branch",
+      "value": "分支"
+    },
+    {
+      "name": "tree_base_branch",
+      "value": "当前分支"
+    },
+    {
+      "name": "tree_branch_hint",
+      "value": "新分支名称"
+    },
+    {
+      "name": "tree_path_hint",
+      "value": "检出目录"
+    },
+    {
+      "name": "tree_automatic",
+      "value": "自动命名"
+    },
+    {
+      "name": "tree_display_name",
+      "value": "工作树名称"
+    },
+    {
+      "name": "tree_cleanup_preview",
+      "value": "清理预览"
+    },
+    {
+      "name": "tree_dirty_files",
+      "value": "已更改的文件"
+    },
+    {
+      "name": "tree_force",
+      "value": "丢弃未提交的更改"
+    },
+    {
+      "name": "tree_delete_branch",
+      "value": "同时删除 Git 分支"
+    },
+    {
+      "name": "tree_revoke_unused_preview",
+      "value": "撤销未执行的确认并重新预览"
+    },
+    {
+      "name": "tree_cleanup_present",
+      "value": "上次检查时，工作树仍在。可以稍后再检查清理结果。"
+    },
+    {
+      "name": "tree_cleanup_removing",
+      "value": "正在清理工作树，可以稍后检查结果。"
+    },
+    {
+      "name": "tree_check_result",
+      "value": "核对清理结果"
+    },
+    {
+      "name": "tree_created",
+      "value": "工作树已创建"
+    },
+    {
+      "name": "tree_renamed",
+      "value": "工作树名称已更新"
+    },
+    {
+      "name": "tree_cleaned",
+      "value": "工作树已移除"
+    },
+    {
+      "name": "tree_cleaned_branch",
+      "value": "工作树已移除。请核对分支是否已删除。"
+    },
+    {
+      "name": "tree_preview_changed",
+      "value": "清理预览已失效。请重新预览后再确认。"
+    },
+    {
+      "name": "tree_changed_files",
+      "value": "请在清理前核对未提交的更改。"
+    },
+    {
+      "name": "tree_main_protected",
+      "value": "需要保留主检出目录。"
+    },
+    {
+      "name": "tree_repo_unavailable",
+      "value": "宿主未能识别此仓库。"
+    },
+    {
+      "name": "phone_settings_search",
+      "value": "搜索设置"
+    },
+    {
+      "name": "phone_settings_assistant",
+      "value": "当前助手的设置"
+    },
+    {
+      "name": "phone_settings_device",
+      "value": "这台设备"
+    },
+    {
+      "name": "phone_settings_hub",
+      "value": "Hub"
+    },
+    {
+      "name": "phone_settings_common_groups_footer",
+      "value": "这两组和当前是哪个助手无关。"
+    },
+    {
+      "name": "phone_machines",
+      "value": "机器"
+    },
+    {
+      "name": "phone_machine_manage",
+      "value": "管理电脑"
+    },
+    {
+      "name": "phone_machine_detail",
+      "value": "机器详情"
+    },
+    {
+      "name": "phone_cores",
+      "value": "核"
+    },
+    {
+      "name": "phone_ram",
+      "value": "内存"
+    },
+    {
+      "name": "phone_other_agents",
+      "value": "其他"
+    },
+    {
+      "name": "phone_today_tokens",
+      "value": "今日文本用量"
+    },
+    {
+      "name": "phone_record_search",
+      "value": "搜索录音"
+    },
+    {
+      "name": "phone_record_start",
+      "value": "开始录音"
+    },
+    {
+      "name": "phone_configure_path",
+      "value": "工作区与启动器"
+    },
+    {
+      "name": "phone_launcher_default",
+      "value": "使用机器默认设置"
+    },
+    {
+      "name": "phone_connect_hub",
+      "value": "连接到 Hub"
+    },
+    {
+      "name": "phone_local_demo",
+      "value": "体验本地示例"
+    },
+    {
+      "name": "phone_welcome_intro",
+      "value": "在手机上继续对话，查看 Agent 和工作区。"
+    },
+    {
+      "name": "phone_scheduled",
+      "value": "已配置的任务"
+    },
+    {
+      "name": "phone_history",
+      "value": "运行记录"
+    },
+    {
+      "name": "phone_no_schedules",
+      "value": "还没有定时任务"
+    },
+    {
+      "name": "health_default_manager_unavailable",
+      "value": "连接 Hub 的默认助手后即可添加健康报告。"
+    },
+    {
+      "name": "phone_attention",
+      "value": "负载偏高"
+    },
+    {
+      "name": "phone_network",
+      "value": "网络"
+    },
+    {
+      "name": "phone_rate",
+      "value": "现在"
+    },
+    {
+      "name": "phone_hit_rate",
+      "value": "缓存命中率"
+    },
+    {
+      "name": "phone_total",
+      "value": "合计"
+    },
+    {
+      "name": "phone_preset",
+      "value": "Agent 预设"
+    },
+    {
+      "name": "phone_default_preset",
+      "value": "自定"
+    },
+    {
+      "name": "phone_read_only_recording",
+      "value": "还没有录音"
+    },
+    {
+      "name": "phone_directory_read_failed",
+      "value": "电脑暂时无法读取此目录。请检查路径后重试。"
+    },
+    {
+      "name": "flow_all_chats",
+      "value": "全部对话"
+    },
+    {
+      "name": "flow_search_chats",
+      "value": "搜索对话内容"
+    },
+    {
+      "name": "flow_search_local",
+      "value": "正在显示本机可查的结果"
+    },
+    {
+      "name": "flow_search_partial",
+      "value": "部分对话仍在建立索引"
+    },
+    {
+      "name": "flow_start_tab_name",
+      "value": "标签名（可选）"
+    },
+    {
+      "name": "flow_start_tab_name_placeholder",
+      "value": "留空就按第一条消息起名"
+    },
+    {
+      "name": "flow_start_tab_name_help",
+      "value": "新会话标签的可选名称。留空则根据首条消息命名。"
+    },
+    {
+      "name": "flow_first_message",
+      "value": "第一条消息"
+    },
+    {
+      "name": "flow_pick_machine",
+      "value": "选择电脑"
+    },
+    {
+      "name": "flow_pick_tree",
+      "value": "选择工作区"
+    },
+    {
+      "name": "flow_choose_folder",
+      "value": "按文件夹选择"
+    },
+    {
+      "name": "flow_folder_search",
+      "value": "输入目录路径"
+    },
+    {
+      "name": "flow_use_folder",
+      "value": "使用此文件夹"
+    },
+    {
+      "name": "flow_folder_empty",
+      "value": "没有子文件夹"
+    },
+    {
+      "name": "flow_use_default",
+      "value": "使用默认值"
+    },
+    {
+      "name": "flow_model",
+      "value": "模型"
+    },
+    {
+      "name": "flow_effort",
+      "value": "推理强度"
+    },
+    {
+      "name": "flow_start",
+      "value": "启动 Agent"
+    },
+    {
+      "name": "flow_recent_setups",
+      "value": "最近使用的配置"
+    },
+    {
+      "name": "flow_workspace_search",
+      "value": "搜索工作区或分支"
+    },
+    {
+      "name": "flow_start_options",
+      "value": "启动选项"
+    },
+    {
+      "name": "flow_draft_optional",
+      "value": "第一条消息（可选）"
+    },
+    {
+      "name": "flow_models_offline",
+      "value": "暂时无法获取模型列表"
+    },
+    {
+      "name": "project_checkout_primary",
+      "value": "主要"
+    },
+    {
+      "name": "project_worktree_idle",
+      "value": "空闲"
+    },
+    {
+      "name": "project_primary",
+      "value": "主检出"
+    },
+    {
+      "name": "project_children",
+      "value": "个子工作树"
+    },
+    {
+      "name": "project_detached",
+      "value": "分离的 HEAD"
+    },
+    {
+      "name": "project_copy_path",
+      "value": "复制目录路径"
+    },
+    {
+      "name": "project_open",
+      "value": "打开项目"
+    },
+    {
+      "name": "project_show_all",
+      "value": "显示全部"
+    },
+    {
+      "name": "project_idle_repositories",
+      "value": "空闲仓库"
+    },
+    {
+      "name": "machine_status_online",
+      "value": "在线"
+    },
+    {
+      "name": "machine_online_ratio",
+      "value": "{online}/{total} 台在线"
+    },
+    {
+      "name": "machine_running_high",
+      "value": "{count} 台负载偏高"
+    },
+    {
+      "name": "machine_waiting_agents",
+      "value": "{count} 个 Agent 需要你"
+    },
+    {
+      "name": "machine_high_cpu",
+      "value": "CPU 高"
+    },
+    {
+      "name": "machine_low_memory",
+      "value": "内存紧张"
+    },
+    {
+      "name": "machine_full_disk",
+      "value": "磁盘将满"
+    },
+    {
+      "name": "machine_high_load",
+      "value": "负载高"
+    },
+    {
+      "name": "machine_load",
+      "value": "负载"
+    },
+    {
+      "name": "machine_monitor",
+      "value": "监控"
+    },
+    {
+      "name": "machine_hour",
+      "value": "1 小时"
+    },
+    {
+      "name": "machine_six_hours",
+      "value": "6 小时"
+    },
+    {
+      "name": "machine_day",
+      "value": "24 小时"
+    },
+    {
+      "name": "machine_no_samples",
+      "value": "此时段暂无采样"
+    },
+    {
+      "name": "machine_monitor_unavailable",
+      "value": "暂时无法读取监控数据"
+    },
+    {
+      "name": "machine_history_hint",
+      "value": "轻触图表查看当时的采样。"
+    },
+    {
+      "name": "machine_now",
+      "value": "最新"
+    },
+    {
+      "name": "machine_disk",
+      "value": "磁盘"
+    },
+    {
+      "name": "machine_per_minute",
+      "value": "{value}/分"
+    },
+    {
+      "name": "machine_all_agents",
+      "value": "显示全部 {count} 个"
+    },
+    {
+      "name": "machine_no_agents",
+      "value": "没有运行的 Agent"
+    },
+    {
+      "name": "machine_offline_agents",
+      "value": "电脑上线后会在这里显示 Agent。"
+    },
+    {
+      "name": "machine_pending",
+      "value": "等待确认"
+    },
+    {
+      "name": "machine_never",
+      "value": "尚未连接"
+    },
+    {
+      "name": "machine_update_needed",
+      "value": "节点有更新"
+    },
+    {
+      "name": "machine_problem_service",
+      "value": "后台服务尚未运行。可在这台电脑上打开 Persona Link 重新安装。"
+    },
+    {
+      "name": "machine_problem_link",
+      "value": "Persona Link 尚未连接，或电脑正处于休眠。"
+    },
+    {
+      "name": "machine_problem_never",
+      "value": "请在这台电脑上打开配对链接完成首次连接。"
+    },
+    {
+      "name": "machine_problem_version",
+      "value": "请在这台电脑上重新安装 Persona Link，更新节点。"
+    },
+    {
+      "name": "machine_problem_manager",
+      "value": "所属助手“{name}”已离线。"
+    },
+    {
+      "name": "machine_agent_idle",
+      "value": "空闲"
+    },
+    {
+      "name": "machine_problem_timeout",
+      "value": "连接超时：网络不稳或电脑在休眠。等它醒来或换个网络，然后重新连接。"
+    },
+    {
+      "name": "machine_os",
+      "value": "操作系统"
+    },
+    {
+      "name": "machine_arch",
+      "value": "架构"
+    },
+    {
+      "name": "machine_hostname",
+      "value": "主机名"
+    },
+    {
+      "name": "machine_cpu_cores",
+      "value": "{count} 核"
+    },
+    {
+      "name": "machine_time_unavailable",
+      "value": "这台电脑已不在当前 Hub 中。"
+    },
+    {
+      "name": "settings_agent_options_title",
+      "value": "Agent"
+    },
+    {
+      "name": "settings_language_options_title",
+      "value": "应用语言"
+    },
+    {
+      "name": "settings_this_assistant",
+      "value": "当前助手"
+    },
+    {
+      "name": "settings_alias_models",
+      "value": "模型 供应商 模型设置"
+    },
+    {
+      "name": "settings_alias_appearance",
+      "value": "显示 配色 深色 浅色 字体 主题"
+    },
+    {
+      "name": "settings_alias_language",
+      "value": "语言 中文 简体中文 英语 日语"
+    },
+    {
+      "name": "settings_alias_machines",
+      "value": "电脑 计算机 主机 服务器 Mac"
+    },
+    {
+      "name": "settings_alias_agents",
+      "value": "代理 智能体 启动器 自动化 工具 引擎"
+    },
+    {
+      "name": "machine_today",
+      "value": "今天"
+    },
+    {
+      "name": "flow_navigation",
+      "value": "手机导航"
+    },
+    {
+      "name": "flow_separate",
+      "value": "分开显示"
+    },
+    {
+      "name": "flow_merged",
+      "value": "合并侧栏"
+    },
+    {
+      "name": "phone_chat_thoughts",
+      "value": "思考"
+    },
+    {
+      "name": "project_copy_name",
+      "value": "复制工作树名称"
+    },
+    {
+      "name": "project_open_parent",
+      "value": "打开父工作树"
+    },
+    {
+      "name": "flow_inbox_progress",
+      "value": "处理中"
+    },
+    {
+      "name": "flow_inbox_fyi",
+      "value": "知悉即可"
+    },
+    {
+      "name": "flow_inbox_collapsed",
+      "value": "已折叠"
+    },
+    {
+      "name": "flow_inbox_section_empty",
+      "value": "此分类暂无事项"
+    },
+    {
+      "name": "flow_inbox_older_done",
+      "value": "加载更早的已完成事项"
+    },
+    {
+      "name": "flow_todo_due",
+      "value": "截止日期"
+    },
+    {
+      "name": "flow_todo_no_due",
+      "value": "无截止日期"
+    },
+    {
+      "name": "flow_todo_today",
+      "value": "今天"
+    },
+    {
+      "name": "flow_todo_week",
+      "value": "本周"
+    },
+    {
+      "name": "flow_todo_month",
+      "value": "本月"
+    },
+    {
+      "name": "flow_todo_order",
+      "value": "排序"
+    },
+    {
+      "name": "flow_todo_recent",
+      "value": "最近活动"
+    },
+    {
+      "name": "flow_todo_priority",
+      "value": "优先级"
+    },
+    {
+      "name": "flow_todo_overdue",
+      "value": "已逾期"
+    },
+    {
+      "name": "knowledge_kind_topics",
+      "value": "主题"
+    },
+    {
+      "name": "phone_all_meetings",
+      "value": "全部会议"
+    },
+    {
+      "name": "phone_record_local",
+      "value": "仍在此设备上"
+    },
+    {
+      "name": "phone_record_audio_local",
+      "value": "录音保存在此设备上。确认转写后，文本会同步到知识库。"
+    },
+    {
+      "name": "phone_record_play",
+      "value": "播放录音"
+    },
+    {
+      "name": "phone_record_play_failed",
+      "value": "无法播放这段录音"
+    },
+    {
+      "name": "session_find_files",
+      "value": "查找文件和文件夹"
+    },
+    {
+      "name": "session_find_here",
+      "value": "在「{folder}」及子文件夹里 · {count} 个结果"
+    },
+    {
+      "name": "session_find_unavailable",
+      "value": "暂时只可搜索当前目录"
+    },
+    {
+      "name": "session_folder_back",
+      "value": "上一个文件夹"
+    },
+    {
+      "name": "session_folder_forward",
+      "value": "下一个文件夹"
+    },
+    {
+      "name": "file_crumb_home",
+      "value": "个人文件夹"
+    },
+    {
+      "name": "file_crumb_session",
+      "value": "会话"
+    },
+    {
+      "name": "session_enter_path",
+      "value": "前往路径"
+    },
+    {
+      "name": "session_project_folder",
+      "value": "会话目录"
+    },
+    {
+      "name": "session_show_hidden",
+      "value": "显示隐藏文件"
+    },
+    {
+      "name": "session_git_history",
+      "value": "提交记录"
+    },
+    {
+      "name": "session_git_earlier",
+      "value": "载入更早的提交"
+    },
+    {
+      "name": "session_git_history_error",
+      "value": "暂时无法读取提交信息"
+    },
+    {
+      "name": "session_git_patch",
+      "value": "查看完整差异"
+    },
+    {
+      "name": "session_git_remote_gone",
+      "value": "上游分支已删除"
+    },
+    {
+      "name": "session_git_detached",
+      "value": "分离的 HEAD"
+    },
+    {
+      "name": "session_git_changed_paths",
+      "value": "变更文件"
+    },
+    {
+      "name": "session_git_untracked",
+      "value": "未跟踪"
+    },
+    {
+      "name": "session_git_change_conflict",
+      "value": "冲突"
+    },
+    {
+      "name": "session_git_untracked_file",
+      "value": "未跟踪文件"
+    },
+    {
+      "name": "phone_agents_current_hub",
+      "value": "仅当前 Hub"
+    },
+    {
+      "name": "flow_todo_hub",
+      "value": "按 Hub 状态"
+    },
+    {
+      "name": "flow_todo_can_wait",
+      "value": "可稍后处理"
+    },
+    {
+      "name": "flow_todo_someday",
+      "value": "以后再做"
+    },
+    {
+      "name": "flow_todo_plain",
+      "value": "待办"
+    },
+    {
+      "name": "flow_todo_suggested",
+      "value": "建议顺序"
+    },
+    {
+      "name": "phone_chat_intro_main",
+      "value": "在这里继续你的主对话。可以问我项目进度、待处理的消息，或电脑上 Agent 的工作。"
+    },
+    {
+      "name": "phone_chat_intro_side",
+      "value": "为这次对话选一个话题，也可以直接提问。"
+    },
+    {
+      "name": "phone_chat_help_skills",
+      "value": "连接电脑和模型后，Persona 可以跟进工作、整理收件箱和待办，并在你回来时继续对话。"
+    },
+    {
+      "name": "phone_chat_help_model",
+      "value": "在设置中配置模型提供方，或在已连接的电脑上登录支持的 Agent，再回到这里开始对话。"
+    },
+    {
+      "name": "phone_chat_phone_read",
+      "value": "这个问题可能需要读取手机数据。系统会在需要时请求授权。"
+    },
+    {
+      "name": "phone_chat_ask_agenda",
+      "value": "今天有哪些日程？"
+    },
+    {
+      "name": "phone_chat_ask_mail",
+      "value": "哪些邮件需要我回复？"
+    },
+    {
+      "name": "phone_chat_ask_agents",
+      "value": "电脑上的 Agent 在做什么？"
+    },
+    {
+      "name": "phone_chat_ask_lark",
+      "value": "今天有哪些重要飞书消息？"
+    },
+    {
+      "name": "mail_compose",
+      "value": "写邮件"
+    },
+    {
+      "name": "session_tools_replace_confirm",
+      "value": "替换已有项目？"
+    },
+    {
+      "name": "session_tools_file_edit_confirm",
+      "value": "确认此更改？"
+    },
+    {
+      "name": "session_tools_rename",
+      "value": "重命名"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_active",
+      "value": "已开启终端控制"
+    },
+    {
+      "name": "session_tools_terminal_screen_view_only",
+      "value": "仅查看"
+    },
+    {
+      "name": "upstream_error",
+      "value": "连接的服务未能完成请求。"
+    },
+    {
+      "name": "storage_unavailable",
+      "value": "本机存储暂时不可用。"
+    },
+    {
+      "name": "receipt_storage_failed",
+      "value": "操作结果未能保存到本机。"
+    },
+    {
+      "name": "scope_retired",
+      "value": "连接已切换。请重新打开本页后继续。"
+    },
+    {
+      "name": "invalid",
+      "value": "服务无法接受此请求。"
+    },
+    {
+      "name": "unauthorized",
+      "value": "请重新登录后继续。"
+    },
+    {
+      "name": "forbidden",
+      "value": "你没有执行此操作的权限。"
+    },
+    {
+      "name": "not_found",
+      "value": "找不到请求的项目。"
+    },
+    {
+      "name": "method_not_allowed",
+      "value": "连接的服务不支持此操作。"
+    },
+    {
+      "name": "conflict",
+      "value": "项目已发生变化。请刷新查看当前状态。"
+    },
+    {
+      "name": "node_offline",
+      "value": "所选电脑已离线。"
+    },
+    {
+      "name": "internal",
+      "value": "服务未能完成操作。"
+    },
+    {
+      "name": "http_error",
+      "value": "服务返回错误。"
+    },
+    {
+      "name": "request_failed",
+      "value": "请求未能完成。"
+    },
+    {
+      "name": "transport_failed",
+      "value": "无法连接到服务。"
+    },
+    {
+      "name": "redirect_refused",
+      "value": "服务将请求重定向到了其他地址。"
+    },
+    {
+      "name": "response_too_large",
+      "value": "返回的数据太大，无法在本机打开。"
+    },
+    {
+      "name": "tree_retry_same_request",
+      "value": "重试同一请求"
+    },
+    {
+      "name": "tree_check_worktree_result",
+      "value": "检查操作结果"
+    },
+    {
+      "name": "tree_confirm_not_created",
+      "value": "确认未创建，重新开始"
+    },
+    {
+      "name": "tree_verify_original_checkout",
+      "value": "请输入最初使用的分支和目录，核对之前的请求。"
+    },
+    {
+      "name": "phone_switch_assistant",
+      "value": "切换助手"
+    },
+    {
+      "name": "phone_manage_assistants",
+      "value": "管理助手"
+    },
+    {
+      "name": "settings_search_results",
+      "value": "搜索结果"
+    },
+    {
+      "name": "settings_assistant_named",
+      "value": "{name}的设置"
+    },
+    {
+      "name": "machine_net_down",
+      "value": "下行"
+    },
+    {
+      "name": "machine_net_up",
+      "value": "上行"
+    },
+    {
+      "name": "machine_empty_title",
+      "value": "还没有电脑"
+    },
+    {
+      "name": "machine_empty_detail",
+      "value": "电脑连接到你的 Hub 后，会显示在这里。"
+    },
+    {
+      "name": "machine_swap",
+      "value": "交换空间"
+    },
+    {
+      "name": "machine_total_bytes",
+      "value": "共 {size}"
+    },
+    {
+      "name": "machine_battery",
+      "value": "电池"
+    },
+    {
+      "name": "machine_charging",
+      "value": "充电中"
+    },
+    {
+      "name": "machine_temperature",
+      "value": "温度"
+    },
+    {
+      "name": "chat_away_recap",
+      "value": "离开期间回顾"
+    },
+    {
+      "name": "session_space_starter",
+      "value": "发起者"
+    },
+    {
+      "name": "session_space_agents",
+      "value": "此工作区有 {count} 个 Agent"
+    },
+    {
+      "name": "phone_chat_expand_editor",
+      "value": "展开编辑框"
+    },
+    {
+      "name": "phone_chat_close_editor",
+      "value": "收起编辑框"
+    },
+    {
+      "name": "phone_chat_hide_keyboard",
+      "value": "收起键盘"
+    },
+    {
+      "name": "phone_chat_dictation",
+      "value": "听写"
+    },
+    {
+      "name": "phone_dictation_preparing",
+      "value": "正在启动设备端听写…"
+    },
+    {
+      "name": "phone_dictation_listening",
+      "value": "正在听写…"
+    },
+    {
+      "name": "phone_dictation_finishing",
+      "value": "正在整理听写文字…"
+    },
+    {
+      "name": "phone_dictation_review",
+      "value": "请核对文字，再加入草稿。"
+    },
+    {
+      "name": "phone_dictation_insert",
+      "value": "加入草稿"
+    },
+    {
+      "name": "phone_dictation_empty",
+      "value": "没有识别到语音。"
+    },
+    {
+      "name": "phone_dictation_unavailable",
+      "value": "设备端听写暂不可用，可以使用键盘上的麦克风。"
+    },
+    {
+      "name": "phone_dictation_keyboard_language",
+      "value": "请使用键盘上的麦克风听写当前语言。"
+    },
+    {
+      "name": "phone_dictation_keyboard",
+      "value": "打开键盘"
+    },
+    {
+      "name": "phone_dictation_too_long",
+      "value": "草稿已达字数上限。可以复制听写文字或缩短草稿。"
+    },
+    {
+      "name": "phone_agent_folders",
+      "value": "Agent 文件夹"
+    },
+    {
+      "name": "phone_claude_config",
+      "value": "Claude Code 设置"
+    },
+    {
+      "name": "phone_codex_config",
+      "value": "Codex 设置"
+    },
+    {
+      "name": "phone_agy_config",
+      "value": "Antigravity 设置"
+    },
+    {
+      "name": "phone_agent_followup",
+      "value": "Agent 跟进"
+    },
+    {
+      "name": "phone_agent_layout",
+      "value": "Agents 列表布局"
+    },
+    {
+      "name": "phone_agent_tools_note",
+      "value": "此助手电脑上的 Agent 工具与自动化。"
+    },
+    {
+      "name": "phone_folder_pattern",
+      "value": "文件夹路径或匹配规则"
+    },
+    {
+      "name": "phone_folder_hide",
+      "value": "隐藏"
+    },
+    {
+      "name": "phone_folder_block",
+      "value": "停止采集"
+    },
+    {
+      "name": "phone_follow_start_requested",
+      "value": "启动请求的任务"
+    },
+    {
+      "name": "phone_follow_agent_tasks",
+      "value": "跟进 Agent 任务"
+    },
+    {
+      "name": "phone_follow_naming",
+      "value": "自动命名 Agent 会话"
+    },
+    {
+      "name": "phone_follow_supervise",
+      "value": "主对话跟进自己的任务"
+    },
+    {
+      "name": "phone_follow_close_ended",
+      "value": "关闭已结束的终端"
+    },
+    {
+      "name": "phone_dictation",
+      "value": "听写"
+    },
+    {
+      "name": "phone_system_input",
+      "value": "系统输入法"
+    },
+    {
+      "name": "phone_dictation_os_note",
+      "value": "语音听写及其语言由当前系统输入法管理。"
+    },
+    {
+      "name": "phone_language_system_note",
+      "value": "跟随系统时，系统的第一语言是中文（含繁体）就用简体中文，日文用日本語，其他语言用 English。Hub 发来的通知和助手的回复也会使用这个语言。"
+    },
+    {
+      "name": "phone_search_conversation_count",
+      "value": "{count} 个对话"
+    },
+    {
+      "name": "phone_todo_waiting_hidden",
+      "value": "另有 {count} 项需要你，不在「{filter}」里。"
+    },
+    {
+      "name": "phone_kb_confirmed",
+      "value": "确认的事实"
+    },
+    {
+      "name": "phone_kb_add_fact",
+      "value": "添加确认的事实"
+    },
+    {
+      "name": "phone_kb_fact_note",
+      "value": "Persona 更新这个条目时，会保留你的更正。"
+    },
+    {
+      "name": "phone_kb_profile",
+      "value": "档案"
+    },
+    {
+      "name": "flow_recent_folders",
+      "value": "最近使用的目录"
+    },
+    {
+      "name": "flow_folder_up",
+      "value": "上一级"
+    },
+    {
+      "name": "flow_use_named_folder",
+      "value": "使用「{name}」"
+    },
+    {
+      "name": "flow_model_id_empty",
+      "value": "请输入模型 ID"
+    },
+    {
+      "name": "flow_model_id_start",
+      "value": "要以字母或数字开头（或 ~ 后接字母或数字）"
+    },
+    {
+      "name": "flow_model_id_space",
+      "value": "模型 ID 里不能有空格"
+    },
+    {
+      "name": "flow_model_id_control",
+      "value": "模型 ID 里不能有换行或控制字符"
+    },
+    {
+      "name": "flow_model_id_character",
+      "value": "模型 ID 里不能有「{character}」，只能用字母、数字和 . _ - / : @ [ ]"
+    },
+    {
+      "name": "flow_model_id_length",
+      "value": "太长了：最多 256 字节"
+    },
+    {
+      "name": "flow_model_id_rule",
+      "value": "字母、数字和 . _ - / : @ [ ]，以字母或数字开头；网关的 latest 别名可以用 ~ 开头。"
+    },
+    {
+      "name": "flow_model_id_note",
+      "value": "只用于这次新建。跑起来后会列在「输入过的」里。"
+    },
+    {
+      "name": "flow_typed_model_title",
+      "value": "其他模型"
+    },
+    {
+      "name": "flow_typed_model_use",
+      "value": "使用"
+    },
+    {
+      "name": "flow_enter_model_id",
+      "value": "输入模型 ID…"
+    },
+    {
+      "name": "flow_use_model_id",
+      "value": "使用「{id}」"
+    },
+    {
+      "name": "flow_unlisted_model_start",
+      "value": "列表里没有，这次新建按输入的 ID 用"
+    },
+    {
+      "name": "flow_other_model",
+      "value": "其他模型…"
+    },
+    {
+      "name": "phone_conditional_read_only",
+      "value": "当前 Hub 仅支持查看。更新 Hub 后即可编辑。"
+    },
+    {
+      "name": "phone_rules_changed",
+      "value": "其他设备已更新目录规则。请查看最新规则，再应用你的修改。"
+    },
+    {
+      "name": "phone_facts_changed",
+      "value": "其他设备已更新确认事实。你的草稿已保留，请对照最新内容后再保存。"
+    },
+    {
+      "name": "phone_new_assistant",
+      "value": "新建助手"
+    },
+    {
+      "name": "phone_assistant_title",
+      "value": "助手"
+    },
+    {
+      "name": "session_back_to_chat",
+      "value": "返回对话"
+    },
+    {
+      "name": "knowledge_focus",
+      "value": "重点"
+    },
+    {
+      "name": "knowledge_other_active",
+      "value": "其他进行中"
+    },
+    {
+      "name": "knowledge_not_project",
+      "value": "非项目"
+    },
+    {
+      "name": "phone_meeting_start",
+      "value": "开始会议"
+    },
+    {
+      "name": "phone_todo_section_needs",
+      "value": "需要你"
+    },
+    {
+      "name": "phone_todo_section_working",
+      "value": "工作中"
+    },
+    {
+      "name": "phone_todo_section_pr",
+      "value": "PR 待合并"
+    },
+    {
+      "name": "phone_todo_section_open",
+      "value": "其余没完成"
+    },
+    {
+      "name": "phone_todo_section_recent",
+      "value": "刚做完待看"
+    },
+    {
+      "name": "phone_todo_section_delivered",
+      "value": "已交付·待看"
+    },
+    {
+      "name": "phone_todo_section_shelved",
+      "value": "搁置"
+    },
+    {
+      "name": "phone_todo_section_done",
+      "value": "已完成"
+    },
+    {
+      "name": "phone_todo_list",
+      "value": "列表"
+    },
+    {
+      "name": "session_find_in_folder",
+      "value": "在「{folder}」里查找"
+    },
+    {
+      "name": "chat_ask_persona",
+      "value": "问 Persona"
+    },
+    {
+      "name": "session_message_to_agent",
+      "value": "给 {agent} 发消息"
+    },
+    {
+      "name": "session_git_pull_request",
+      "value": "拉取请求"
+    },
+    {
+      "name": "session_git_push_before_pr",
+      "value": "先推送分支，再创建拉取请求"
+    },
+    {
+      "name": "session_git_create_pr",
+      "value": "创建拉取请求"
+    },
+    {
+      "name": "project_idle_named",
+      "value": "{count} 个空闲"
+    },
+    {
+      "name": "flow_start_chat",
+      "value": "开始对话"
+    },
+    {
+      "name": "flow_launcher_model_once",
+      "value": "启动器与模型（只换这一次）"
+    },
+    {
+      "name": "flow_directory_address_hint",
+      "value": "可以直接改上面的路径，回车前往。~ 是主目录。"
+    },
+    {
+      "name": "flow_start_model_settings_hint",
+      "value": "默认使用「模型配置 › 新建 Agent」的设置。手动选择只影响这次会话，不改变全局默认。"
+    },
+    {
+      "name": "flow_start_machine_launchers_hint",
+      "value": "来自这台机器的 Claude Code / Codex 启动器，会在终端引擎里新开一个标签页运行。"
+    },
+    {
+      "name": "flow_start_model_terminal_hint",
+      "value": "{about}模型和在终端里输入 /model 看到的一样。"
+    },
+    {
+      "name": "flow_model_default_hint",
+      "value": "不指定模型时，按启动器自己的设置运行。"
+    },
+    {
+      "name": "flow_model_count",
+      "value": "{count} 个模型"
+    },
+    {
+      "name": "flow_model_id_search",
+      "value": "搜索，或输入模型 ID"
+    },
+    {
+      "name": "project_pending_count",
+      "value": "{count} 件待处理"
+    },
+    {
+      "name": "flow_model_manual_hint",
+      "value": "列表里没有的模型可以直接输入 ID，比如网关提供的模型。"
+    },
+    {
+      "name": "session_git_no_pr",
+      "value": "这个分支还没有拉取请求"
+    },
+    {
+      "name": "session_git_pr_read_failed",
+      "value": "读不到拉取请求"
+    },
+    {
+      "name": "session_git_pr_body",
+      "value": "描述"
+    },
+    {
+      "name": "session_git_pr_draft",
+      "value": "草稿"
+    },
+    {
+      "name": "chat_recap_written",
+      "value": "写于 {time}"
+    },
+    {
+      "name": "chat_recap_group_title",
+      "value": "离开期间回顾 · {count} 次"
+    },
+    {
+      "name": "chat_recap_latest_written",
+      "value": "最新 · 写于 {time}"
+    },
+    {
+      "name": "chat_recap_open_one",
+      "value": "离开期间回顾，点击查看"
+    },
+    {
+      "name": "chat_recap_open_group",
+      "value": "{count} 次离开期间回顾，点击查看"
+    },
+    {
+      "name": "session_git_partly_staged",
+      "value": "部分已暂存"
+    },
+    {
+      "name": "session_git_file_count",
+      "value": "{count} 个文件"
+    },
+    {
+      "name": "session_git_base_branch",
+      "value": "目标分支"
+    },
+    {
+      "name": "phone_record_meeting",
+      "value": "会议"
+    },
+    {
+      "name": "phone_record_note",
+      "value": "笔记"
+    },
+    {
+      "name": "phone_start_note",
+      "value": "开始笔记"
+    },
+    {
+      "name": "phone_meeting_calendar",
+      "value": "用日历里的会议命名"
+    },
+    {
+      "name": "phone_meeting_calendar_empty",
+      "value": "今天没有其他会议"
+    },
+    {
+      "name": "phone_meeting_local_transcription",
+      "value": "在本机转写"
+    },
+    {
+      "name": "phone_calendar_all_day",
+      "value": "全天"
+    },
+    {
+      "name": "phone_calendar_moved",
+      "value": "已移到 {due}"
+    },
+    {
+      "name": "phone_meeting_auto_invite",
+      "value": "开会时自动邀请 Persona"
+    },
+    {
+      "name": "phone_meeting_auto_off_note",
+      "value": "会议开始时只有你。需要时在会议页邀请 Persona；纪要和要点照常会有。"
+    },
+    {
+      "name": "phone_meeting_auto_on_note",
+      "value": "每场会议开始时 Persona 都在会里，在屏幕上回答。要在某场会里移出它，去会议页。"
+    },
+    {
+      "name": "phone_meeting_experimental",
+      "value": "实验"
+    },
+    {
+      "name": "phone_meeting_echo",
+      "value": "开喇叭时消除回声"
+    },
+    {
+      "name": "phone_meeting_echo_note",
+      "value": "会中打开喇叭时，麦克风会短暂中断一下。"
+    },
+    {
+      "name": "phone_meeting_echo_unavailable",
+      "value": "此设备的语音采集不支持回声消除。"
+    },
+    {
+      "name": "phone_meeting_echo_restore",
+      "value": "回声消除不可用，录音已使用普通麦克风继续。"
+    },
+    {
+      "name": "phone_meeting_speaker",
+      "value": "朗读回答"
+    },
+    {
+      "name": "phone_calendar_day",
+      "value": "日"
+    },
+    {
+      "name": "phone_calendar_week",
+      "value": "周"
+    },
+    {
+      "name": "phone_calendar_month",
+      "value": "月"
+    },
+    {
+      "name": "phone_inbox_search",
+      "value": "搜索标题、发件人、内容"
+    },
+    {
+      "name": "phone_inbox_waiting_agents",
+      "value": "Agent 在等你"
+    },
+    {
+      "name": "phone_inbox_mention",
+      "value": "@我"
+    },
+    {
+      "name": "phone_inbox_dm",
+      "value": "私聊"
+    },
+    {
+      "name": "phone_inbox_group",
+      "value": "群聊"
+    },
+    {
+      "name": "phone_inbox_done",
+      "value": "已处理"
+    },
+    {
+      "name": "phone_new_chat_title",
+      "value": "新对话"
+    },
+    {
+      "name": "phone_plan_fullscreen",
+      "value": "全屏查看计划"
+    },
+    {
+      "name": "phone_interaction_terminal",
+      "value": "交给电脑上的终端处理"
+    },
+    {
+      "name": "decision_allow_session",
+      "value": "本会话总是允许"
+    },
+    {
+      "name": "decision_scope_reads",
+      "value": "这段对话中，这个目录里的所有读取操作"
+    },
+    {
+      "name": "decision_scope_edits",
+      "value": "这段对话中，这个目录里的所有文件编辑"
+    },
+    {
+      "name": "decision_scope_commands",
+      "value": "这段对话里的所有命令"
+    },
+    {
+      "name": "decision_scope_tool",
+      "value": "这段对话里对这个工具的所有调用"
+    },
+    {
+      "name": "decision_scope_custom",
+      "value": "批准的范围在这段对话中持续有效"
+    },
+    {
+      "name": "decision_other_choice",
+      "value": "其他回答…"
+    },
+    {
+      "name": "phone_agent_permission_preview",
+      "value": "{tool}：{target}"
+    },
+    {
+      "name": "phone_agent_plan_approval",
+      "value": "计划等你审批"
+    },
+    {
+      "name": "phone_agent_asks",
+      "value": "{agent} 在问你"
+    },
+    {
+      "name": "phone_agent_needs_approval",
+      "value": "在等你批准"
+    },
+    {
+      "name": "session_task_more",
+      "value": "还有 {count} 件"
+    },
+    {
+      "name": "session_task_approve_run",
+      "value": "批准并自动执行"
+    },
+    {
+      "name": "session_task_auto_edits",
+      "value": "自动接受编辑"
+    },
+    {
+      "name": "session_task_return",
+      "value": "打回"
+    },
+    {
+      "name": "session_brief_stage_plan",
+      "value": "方案"
+    },
+    {
+      "name": "session_brief_stage_develop",
+      "value": "开发"
+    },
+    {
+      "name": "session_brief_stage_review",
+      "value": "审查"
+    },
+    {
+      "name": "session_brief_stage_merge",
+      "value": "合入"
+    },
+    {
+      "name": "session_brief_stage_deploy",
+      "value": "部署"
+    },
+    {
+      "name": "session_brief_stage_verify",
+      "value": "已验证"
+    },
+    {
+      "name": "session_brief_stage_summary",
+      "value": "第 {step} 步，共 {total} 步 · {name}"
+    },
+    {
+      "name": "session_brief_stage_accessibility",
+      "value": "阶段：{name}（第 {step} 步，共 {total} 步）"
+    },
+    {
+      "name": "session_brief_waiting_count",
+      "value": "等你处理（{count}）"
+    },
+    {
+      "name": "session_brief_waiting_unknown",
+      "value": "等你处理（?）"
+    },
+    {
+      "name": "session_brief_waiting_note",
+      "value": "刚重启，还没读到等你处理的卡片；到 Agent 页看。"
+    },
+    {
+      "name": "session_brief_empty",
+      "value": "没有。"
+    },
+    {
+      "name": "session_brief_accept_count",
+      "value": "待验收（{count}）"
+    },
+    {
+      "name": "session_brief_later_count",
+      "value": "可以晚点答（{count}）"
+    },
+    {
+      "name": "session_brief_progress_count",
+      "value": "进行中（{count}）"
+    },
+    {
+      "name": "session_brief_setup",
+      "value": "建议的设置"
+    },
+    {
+      "name": "session_brief_setup_note",
+      "value": "根据 Persona 自己过去 7 天的记录算出，写明了自己时间范围的那一项除外。什么都没有改动：下面每一项在你自己改动之前都保持原样。"
+    },
+    {
+      "name": "session_brief_open_named",
+      "value": "打开：{title}"
+    },
+    {
+      "name": "session_brief_more",
+      "value": "还有 {count} 项"
+    },
+    {
+      "name": "session_brief_stage_done",
+      "value": "{value}，第 {step} 步，共 {total} 步，已完成"
+    },
+    {
+      "name": "session_brief_stage_current",
+      "value": "{value}，第 {step} 步，共 {total} 步，当前步骤"
+    },
+    {
+      "name": "session_brief_stage_ahead",
+      "value": "{value}，第 {step} 步，共 {total} 步，还没到"
+    },
+    {
+      "name": "session_brief_waited",
+      "value": "已等 {value}"
+    },
+    {
+      "name": "session_brief_nudged",
+      "value": "已催过"
+    },
+    {
+      "name": "session_brief_recommended",
+      "value": "推荐：{value}"
+    },
+    {
+      "name": "session_brief_skipped",
+      "value": "被跳过 · {value}"
+    },
+    {
+      "name": "session_brief_run_failed",
+      "value": "运行失败 · {value}"
+    },
+    {
+      "name": "session_brief_start_failed",
+      "value": "没开起来 · {value}"
+    },
+    {
+      "name": "session_brief_days",
+      "value": "{count}天"
+    },
+    {
+      "name": "session_brief_hours",
+      "value": "{count}小时"
+    },
+    {
+      "name": "session_brief_minutes",
+      "value": "{count}分钟"
+    },
+    {
+      "name": "session_brief_past",
+      "value": "过去 {hours} 小时：做完 {done} · 没成 {failed}"
+    },
+    {
+      "name": "session_git_stage_all",
+      "value": "全部暂存"
+    },
+    {
+      "name": "session_git_unstage_all",
+      "value": "全部取消暂存"
+    },
+    {
+      "name": "phone_keyboard_settings",
+      "value": "键盘设置"
+    },
+    {
+      "name": "phone_dictation_automatic_note",
+      "value": "自动会参考你的草稿和最近发言，选择本机中文识别或键盘听写。判断不了时使用上次识别的语言，再使用应用语言。"
+    },
+    {
+      "name": "phone_meeting_invite",
+      "value": "邀请 Persona"
+    },
+    {
+      "name": "phone_meeting_remove",
+      "value": "移出会议"
+    },
+    {
+      "name": "phone_meeting_onscreen",
+      "value": "屏幕回答"
+    },
+    {
+      "name": "phone_meeting_aloud",
+      "value": "朗读回答"
+    },
+    {
+      "name": "phone_meeting_private",
+      "value": "私密会议"
+    },
+    {
+      "name": "phone_meeting_room",
+      "value": "会中对话"
+    },
+    {
+      "name": "phone_meeting_live_note",
+      "value": "音频留在本机，转写文字同步到会议对话和知识库。"
+    },
+    {
+      "name": "meeting_room_privacy_local_days",
+      "value": "音频留在本机。文字同步到会议对话，知识库保留 {days} 天。"
+    },
+    {
+      "name": "meeting_room_text_shared",
+      "value": "转写文字也会同步到会议对话。"
+    },
+    {
+      "name": "phone_meeting_live_ready",
+      "value": "Persona 正在跟进会议"
+    },
+    {
+      "name": "phone_meeting_live_starting",
+      "value": "正在连接会议对话…"
+    },
+    {
+      "name": "phone_meeting_unavailable",
+      "value": "Persona 暂时无法加入本次会议。"
+    },
+    {
+      "name": "phone_meeting_retry",
+      "value": "连接中断。会议语句已保存在本机。"
+    },
+    {
+      "name": "phone_meeting_full",
+      "value": "实时转写已达到上限。"
+    },
+    {
+      "name": "phone_meeting_ask",
+      "value": "在本次会议中提问"
+    },
+    {
+      "name": "phone_meeting_question",
+      "value": "对本次会议提问"
+    },
+    {
+      "name": "phone_meeting_closed",
+      "value": "会议已结束"
+    },
+    {
+      "name": "phone_meeting_role",
+      "value": "Persona 的默认角色"
+    },
+    {
+      "name": "phone_meeting_role_listener",
+      "value": "旁听"
+    },
+    {
+      "name": "phone_meeting_role_participant",
+      "value": "参会"
+    },
+    {
+      "name": "phone_meeting_role_note_off",
+      "value": "Persona 不参与这场会议，会后照常出纪要。"
+    },
+    {
+      "name": "phone_meeting_role_note_listener",
+      "value": "Persona 跟着会议听。在这台手机上提问，它只在屏幕上回答，不出声。"
+    },
+    {
+      "name": "phone_meeting_role_note_participant",
+      "value": "Persona 跟着会议听，点「问 Persona」时出声回答。"
+    },
+    {
+      "name": "phone_meeting_in_front",
+      "value": "当着别人的面"
+    },
+    {
+      "name": "phone_meeting_material",
+      "value": "只用会议相关的内容回答：以前的会议纪要、项目进展、待办归谁。"
+    },
+    {
+      "name": "phone_meeting_privacy",
+      "value": "不会提私人聊天、邮件、健康或其他个人数据。"
+    },
+    {
+      "name": "phone_meeting_explicit_voice",
+      "value": "只在你点「问 Persona」时出声，而且只在参会时。"
+    },
+    {
+      "name": "phone_meeting_limits_note",
+      "value": "会议中不管被问什么，hub 都让 Persona 守住这些限制。"
+    },
+    {
+      "name": "phone_meeting_default_note",
+      "value": "每次会议录音都按这里开始。只想改一场，开始前在「录音」页上另选。"
+    },
+    {
+      "name": "phone_meeting_speech_unavailable",
+      "value": "实时识别暂不可用。仍可本机录音，也可输入问题。"
+    },
+    {
+      "name": "phone_meeting_off",
+      "value": "关"
+    },
+    {
+      "name": "phone_meeting_topics",
+      "value": "议题"
+    },
+    {
+      "name": "phone_meeting_no_answer",
+      "value": "本次会议暂时无法回答这个问题。"
+    },
+    {
+      "name": "phone_knowledge_selection",
+      "value": "知识库选择"
+    },
+    {
+      "name": "ks_individual",
+      "value": "单独设置的聊天和文档"
+    },
+    {
+      "name": "ks_individual_hint",
+      "value": "这里的设置优先于下面所有规则。移除后，该聊天或文档重新按规则处理。"
+    },
+    {
+      "name": "ks_add_chat",
+      "value": "添加聊天…"
+    },
+    {
+      "name": "ks_add_doc",
+      "value": "添加文档…"
+    },
+    {
+      "name": "ks_remove",
+      "value": "移除设置"
+    },
+    {
+      "name": "ks_priority",
+      "value": "优先级 {level}"
+    },
+    {
+      "name": "ks_messages",
+      "value": "聊天规则 · 优先级 1"
+    },
+    {
+      "name": "ks_docs",
+      "value": "文档规则 · 优先级 1"
+    },
+    {
+      "name": "ks_up",
+      "value": "上移"
+    },
+    {
+      "name": "ks_down",
+      "value": "下移"
+    },
+    {
+      "name": "ks_join",
+      "value": "把“{name}”并入优先级 {level}"
+    },
+    {
+      "name": "ks_split",
+      "value": "让“{name}”单独成一级"
+    },
+    {
+      "name": "ks_store",
+      "value": "保存匹配的内容"
+    },
+    {
+      "name": "ks_text_days",
+      "value": "文本保留天数"
+    },
+    {
+      "name": "ks_attachment_days",
+      "value": "附件保留天数"
+    },
+    {
+      "name": "ks_include_all",
+      "value": "@所有人也算提及"
+    },
+    {
+      "name": "ks_context",
+      "value": "前后保留的消息数"
+    },
+    {
+      "name": "ks_context_hint",
+      "value": "你每条消息前后各保留 0 到 200 条，方便以后看懂上下文。留空为 50。"
+    },
+    {
+      "name": "ks_days_hint",
+      "value": "1 到 36500 天。留空则用 hub 的保留设置。附件的保留期不会超过所属文本。"
+    },
+    {
+      "name": "ks_doc_days_hint",
+      "value": "1 到 36500 天。留空则不设删除期限。"
+    },
+    {
+      "name": "ks_invalid",
+      "value": "请填上面范围内的整数，或者留空。"
+    },
+    {
+      "name": "ks_source",
+      "value": "来源"
+    },
+    {
+      "name": "ks_mode",
+      "value": "保存什么"
+    },
+    {
+      "name": "ks_days",
+      "value": "保留天数"
+    },
+    {
+      "name": "ks_chat_editor",
+      "value": "聊天设置"
+    },
+    {
+      "name": "ks_doc_editor",
+      "value": "文档设置"
+    },
+    {
+      "name": "ks_list_chats",
+      "value": "这里列出知识库里已有内容的聊天。邮件、issue 和 pull request 始终保存。"
+    },
+    {
+      "name": "ks_list_docs",
+      "value": "这里列出知识库里已有的文档。"
+    },
+    {
+      "name": "ks_empty_chat",
+      "value": "还没有聊天"
+    },
+    {
+      "name": "ks_empty_doc",
+      "value": "还没有文档"
+    },
+    {
+      "name": "ks_empty_hint",
+      "value": "知识库保存过它的内容后，就能在这里给它单独设置。"
+    },
+    {
+      "name": "ks_off",
+      "value": "关"
+    },
+    {
+      "name": "ks_on",
+      "value": "开"
+    },
+    {
+      "name": "ks_day_count",
+      "value": "{days} 天"
+    },
+    {
+      "name": "ks_skip",
+      "value": "不读取"
+    },
+    {
+      "name": "ks_rules_chat",
+      "value": "只存提及我和我发的"
+    },
+    {
+      "name": "ks_rules_doc",
+      "value": "按规则"
+    },
+    {
+      "name": "ks_all",
+      "value": "全部保存"
+    },
+    {
+      "name": "ks_skip_hint",
+      "value": "不再读取或保存它的新内容，提及你的也不例外。已保存的内容保留。"
+    },
+    {
+      "name": "ks_rules_chat_hint",
+      "value": "只保存“提及你”和“你发出的消息”两条规则留下的内容，不管其他规则怎么设。"
+    },
+    {
+      "name": "ks_rules_doc_hint",
+      "value": "按文档规则读取和保存。"
+    },
+    {
+      "name": "ks_all_chat_hint",
+      "value": "保存每条消息。天数留空时，按决定它的规则或 hub 的文本保留期保存。"
+    },
+    {
+      "name": "ks_all_doc_hint",
+      "value": "不管规则怎么设都保存这篇文档。天数留空则不设删除期限。"
+    },
+    {
+      "name": "ks_not_read",
+      "value": "不读取"
+    },
+    {
+      "name": "ks_personal",
+      "value": "提及和我发的"
+    },
+    {
+      "name": "ks_by_rules",
+      "value": "按规则"
+    },
+    {
+      "name": "ks_everything",
+      "value": "全部"
+    },
+    {
+      "name": "ks_old_hub",
+      "value": "这个 hub 还不支持知识库选择。更新 hub 后，就能在这里选择保存哪些内容。"
+    },
+    {
+      "name": "ks_future",
+      "value": "这个 hub 的选择设置里有当前版本 App 不认识的内容。更新 App 后才能在这里修改，现在没有改动任何设置。"
+    },
+    {
+      "name": "ks_changed",
+      "value": "选择设置已在另一台设备上改过。核对后再试一次。"
+    },
+    {
+      "name": "ks_no_id",
+      "value": "知识库没有记录它的来源，没法给它单独设置。"
+    },
+    {
+      "name": "ks_not_selectable",
+      "value": "邮件、issue 和 pull request 始终保存，不受选择设置影响。"
+    },
+    {
+      "name": "ks_topics",
+      "value": "按主题整理知识点"
+    },
+    {
+      "name": "ks_map",
+      "value": "打开知识导图"
+    },
+    {
+      "name": "ks_map_title",
+      "value": "知识导图"
+    },
+    {
+      "name": "ks_topic",
+      "value": "主题"
+    },
+    {
+      "name": "ks_removed",
+      "value": "已移除设置"
+    },
+    {
+      "name": "ks_undo",
+      "value": "撤销"
+    },
+    {
+      "name": "ks_priority_hint",
+      "value": "从上往下依次检查各级。第一个有规则匹配的级别说了算：其中匹配的规则只要有一条开着就保存，全关着就不保存，不再往下看。关掉规则只是不再保存新消息，已保存的会留到保留天数用完。"
+    },
+    {
+      "name": "ks_docs_hint",
+      "value": "文档按同样的顺序判断。只有在这里填了天数才会设删除期限；不填则和以前一样一直保留。"
+    },
+    {
+      "name": "ks_rule_mentions",
+      "value": "提及你"
+    },
+    {
+      "name": "ks_rule_mine",
+      "value": "你发出的消息"
+    },
+    {
+      "name": "ks_rule_dm",
+      "value": "私聊"
+    },
+    {
+      "name": "ks_rule_group",
+      "value": "群聊"
+    },
+    {
+      "name": "ks_rule_bot",
+      "value": "机器人和应用"
+    },
+    {
+      "name": "ks_rule_official",
+      "value": "官方账号"
+    },
+    {
+      "name": "ks_rule_muted",
+      "value": "已静音的聊天"
+    },
+    {
+      "name": "ks_rule_collapsed",
+      "value": "已折叠的聊天"
+    },
+    {
+      "name": "ks_rule_done",
+      "value": "已完成的聊天"
+    },
+    {
+      "name": "ks_rule_comment_mentions",
+      "value": "评论中提及你"
+    },
+    {
+      "name": "ks_rule_authored",
+      "value": "你创建的文档"
+    },
+    {
+      "name": "ks_rule_viewed",
+      "value": "你看过的文档"
+    },
+    {
+      "name": "ks_detail_mentions",
+      "value": "任何聊天里 @ 你的消息"
+    },
+    {
+      "name": "ks_detail_mine",
+      "value": "你发出的消息，连同前后的消息"
+    },
+    {
+      "name": "ks_detail_dm",
+      "value": "和某个人的一对一聊天"
+    },
+    {
+      "name": "ks_detail_group",
+      "value": "没有静音、折叠或标为完成的群"
+    },
+    {
+      "name": "ks_detail_bot",
+      "value": "和机器人、应用或 AI Agent 的聊天"
+    },
+    {
+      "name": "ks_detail_official",
+      "value": "官方号、服务号和系统账号"
+    },
+    {
+      "name": "ks_detail_muted",
+      "value": "你静音的聊天"
+    },
+    {
+      "name": "ks_detail_collapsed",
+      "value": "你折叠起来的聊天"
+    },
+    {
+      "name": "ks_detail_done",
+      "value": "你标为完成的聊天"
+    },
+    {
+      "name": "ks_detail_comment_mentions",
+      "value": "评论里 @ 你的文档"
+    },
+    {
+      "name": "ks_detail_authored",
+      "value": "你创建的文档"
+    },
+    {
+      "name": "ks_detail_viewed",
+      "value": "你打开过的文档"
+    },
+    {
+      "name": "ks_detail_doc_mentions",
+      "value": "@ 你的文档"
+    },
+    {
+      "name": "ks_load_error",
+      "value": "无法读取知识库选择"
+    },
+    {
+      "name": "ks_save_error",
+      "value": "无法保存知识库选择"
+    },
+    {
+      "name": "ks_discard",
+      "value": "放弃更改"
+    },
+    {
+      "name": "phone_meeting_voice_unavailable",
+      "value": "回答已显示，本机暂时无法朗读。"
+    },
+    {
+      "name": "chat_tray_needs",
+      "value": "要你处理"
+    },
+    {
+      "name": "chat_tray_progress",
+      "value": "进行中"
+    },
+    {
+      "name": "phone_settings_models",
+      "value": "模型"
+    },
+    {
+      "name": "phone_settings_profile",
+      "value": "助手资料"
+    },
+    {
+      "name": "phone_settings_display",
+      "value": "外观与显示"
+    },
+    {
+      "name": "phone_settings_language_dictation",
+      "value": "语言与听写"
+    },
+    {
+      "name": "phone_settings_switch",
+      "value": "切换"
+    },
+    {
+      "name": "phone_settings_system_language",
+      "value": "跟随系统（{language}）"
+    },
+    {
+      "name": "phone_settings_owner_note",
+      "value": "只显示「{name}」自己的内容。要改别的助手，先切换过去。"
+    },
+    {
+      "name": "chat_tray_other",
+      "value": "其他对话"
+    },
+    {
+      "name": "phone_drawer_recent",
+      "value": "最近"
+    },
+    {
+      "name": "phone_drawer_schedules",
+      "value": "定时任务"
+    },
+    {
+      "name": "phone_drawer_health",
+      "value": "健康"
+    },
+    {
+      "name": "meeting_reminders",
+      "value": "会前提醒我"
+    },
+    {
+      "name": "meeting_reminder_body",
+      "value": "{time} 开始。要录制吗？"
+    },
+    {
+      "name": "meeting_calendar_allow",
+      "value": "允许访问日历"
+    },
+    {
+      "name": "meeting_notifications_allow",
+      "value": "允许通知"
+    },
+    {
+      "name": "meeting_reminder_footer",
+      "value": "日历里的会议开始前一分钟，本机会发通知，询问是否录音。"
+    },
+    {
+      "name": "meeting_calendar_needed",
+      "value": "提醒需要访问本机日历。"
+    },
+    {
+      "name": "meeting_reminder_unavailable",
+      "value": "未能更新本机会前提醒。"
+    },
+    {
+      "name": "meeting_transcription",
+      "value": "会议转写"
+    },
+    {
+      "name": "meeting_mode_device",
+      "value": "在设备上转写"
+    },
+    {
+      "name": "meeting_mode_hub",
+      "value": "通过 Hub 转写"
+    },
+    {
+      "name": "meeting_service",
+      "value": "语音服务"
+    },
+    {
+      "name": "meeting_service_builtin",
+      "value": "内置服务"
+    },
+    {
+      "name": "meeting_glossary",
+      "value": "术语表"
+    },
+    {
+      "name": "meeting_glossary_hint",
+      "value": "每行一个词条，最多 200 项，每项最多 40 个字符。"
+    },
+    {
+      "name": "meeting_glossary_limit",
+      "value": "最多 200 个词条，每项不超过 40 个字符。"
+    },
+    {
+      "name": "meeting_privacy_device",
+      "value": "设备在本机转写，音频留在本机。你确认后才会把文字同步到 Hub。"
+    },
+    {
+      "name": "meeting_privacy_hub",
+      "value": "支持 Hub 转写的设备可把会议音频发送给 Hub 和「{service}」。"
+    },
+    {
+      "name": "meeting_speech_not_ready",
+      "value": "Hub 的语音服务尚未就绪，使用设备端转写。"
+    },
+    {
+      "name": "meeting_privacy_this_phone",
+      "value": "这台手机的录音保留在本机，只有经你确认的文字才会同步到 Hub。"
+    },
+    {
+      "name": "meeting_reminder_quota",
+      "value": "系统限制了 Persona 的后台提醒额度，暂时无法安排更多会前提醒。"
+    },
+    {
+      "name": "meeting_reminder_none",
+      "value": "目前没有已安排的会前提醒。"
+    },
+    {
+      "name": "meeting_reminder_count",
+      "value": "本机系统已安排 {count} 个会前提醒。"
+    },
+    {
+      "name": "kb_search_profiles",
+      "value": "搜索档案和聊天记录"
+    },
+    {
+      "name": "kb_minutes_ago",
+      "value": "{n} 分钟前"
+    },
+    {
+      "name": "kb_yesterday",
+      "value": "昨天"
+    },
+    {
+      "name": "kb_relevance_value",
+      "value": "相关 {n}"
+    },
+    {
+      "name": "kb_people",
+      "value": "人"
+    },
+    {
+      "name": "kb_events",
+      "value": "日程"
+    },
+    {
+      "name": "meeting_this_device",
+      "value": "本机"
+    },
+    {
+      "name": "meeting_transcription_label",
+      "value": "转写"
+    },
+    {
+      "name": "meeting_cloud_service",
+      "value": "云端 · {service}"
+    },
+    {
+      "name": "meeting_hub_unavailable",
+      "value": "本机 · Hub 暂时无法转写"
+    },
+    {
+      "name": "meeting_start_privacy_cloud",
+      "value": "本次会议的音频将经由你的 Hub 发往「{service}」转写。生成会议纪要后，Hub 会删除音频。"
+    },
+    {
+      "name": "meeting_start_privacy_cloud_days",
+      "value": "本次会议的音频将经由你的 Hub 发往「{service}」转写。生成会议纪要后，Hub 会删除音频，转写文本保留 {days} 天。"
+    },
+    {
+      "name": "meeting_start_privacy_local_days",
+      "value": "音频保留在本机，文字会同步到知识库，并保留 {days} 天。"
+    },
+    {
+      "name": "meeting_start_confirm_title",
+      "value": "发送本次会议的音频？"
+    },
+    {
+      "name": "meeting_start_send",
+      "value": "开始并发送音频"
+    },
+    {
+      "name": "meeting_start_opt_in",
+      "value": "需要发送音频时，请在每次开始会议时选择云端转写并确认。"
+    },
+    {
+      "name": "meeting_wifi_only",
+      "value": "仅通过 Wi-Fi 向 Hub 发送音频"
+    },
+    {
+      "name": "meeting_wifi_note",
+      "value": "此设置仅适用于本机。使用移动网络或按流量计费的连接时，音频会保留在设备上，等连上不限流量的 Wi-Fi 再发送。一小时音频约为 115 MB。"
+    },
+    {
+      "name": "meeting_cloud_transcription",
+      "value": "Hub 转写"
+    },
+    {
+      "name": "meeting_audio_negotiating",
+      "value": "正在向 Hub 确认本次会议的转写服务。"
+    },
+    {
+      "name": "meeting_audio_connecting",
+      "value": "正在连接 Hub。"
+    },
+    {
+      "name": "meeting_audio_live",
+      "value": "Hub 正在转写本次会议。"
+    },
+    {
+      "name": "meeting_audio_reconnecting",
+      "value": "正在重新连接 Hub。音频暂存于本机。"
+    },
+    {
+      "name": "meeting_audio_waiting_network",
+      "value": "等待符合网络设置的连接，再向 Hub 发送音频。"
+    },
+    {
+      "name": "meeting_audio_fallback",
+      "value": "Hub 暂时无法转写本次会议，可在本机使用录音。"
+    },
+    {
+      "name": "meeting_audio_finishing",
+      "value": "Hub 正在完成转写。"
+    },
+    {
+      "name": "meeting_audio_final",
+      "value": "Hub 已完成转写。"
+    },
+    {
+      "name": "meeting_audio_failed",
+      "value": "Hub 未能完成转写，可在本机使用录音。"
+    },
+    {
+      "name": "meeting_audio_revoked",
+      "value": "已停止向 Hub 发送音频。"
+    },
+    {
+      "name": "meeting_audio_previous",
+      "value": "此次录音选择了 Hub 转写。"
+    },
+    {
+      "name": "meeting_audio_processing_problem",
+      "value": "Hub 报告了转写问题。"
+    },
+    {
+      "name": "meeting_audio_received",
+      "value": "Hub 已收到 {seconds} 秒音频"
+    },
+    {
+      "name": "meeting_audio_withdraw",
+      "value": "停止发送音频"
+    },
+    {
+      "name": "meeting_audio_withdraw_note",
+      "value": "停止发送本次会议后续的音频。Hub 已收到的音频仍按其保留设置处理。"
+    },
+    {
+      "name": "meeting_configured_service",
+      "value": "Hub 配置的语音服务"
+    },
+    {
+      "name": "meeting_start_options",
+      "value": "会议选项"
+    },
+    {
+      "name": "meeting_language_chinese",
+      "value": "中文"
+    },
+    {
+      "name": "meeting_language_unavailable",
+      "value": "未能查询转写语言，点此重试。"
+    },
+    {
+      "name": "meeting_input_label",
+      "value": "麦克风"
+    },
+    {
+      "name": "meeting_input_automatic",
+      "value": "跟随系统"
+    },
+    {
+      "name": "meeting_bluetooth_input",
+      "value": "蓝牙麦克风"
+    },
+    {
+      "name": "meeting_phone_input",
+      "value": "手机麦克风"
+    },
+    {
+      "name": "meeting_input_changed",
+      "value": "选中的麦克风已不可用。请选择可用的输入，再重新开始。"
+    },
+    {
+      "name": "meeting_note_without_minutes",
+      "value": "不出纪要，Persona 也不参与。"
+    },
+    {
+      "name": "decision_to_decide",
+      "value": "待选择"
+    },
+    {
+      "name": "decision_previous",
+      "value": "上一张"
+    },
+    {
+      "name": "decision_next",
+      "value": "下一张"
+    },
+    {
+      "name": "decision_view_in_chat",
+      "value": "看原文"
+    },
+    {
+      "name": "decision_skip",
+      "value": "跳过"
+    },
+    {
+      "name": "decision_skip_plan",
+      "value": "这是计划审批，不能跳过：不想按这个计划做就打回。"
+    },
+    {
+      "name": "decision_skip_permission",
+      "value": "这是权限请求，不能跳过：不想让它运行就点「拒绝」。"
+    },
+    {
+      "name": "decision_skip_terminal",
+      "value": "这是从终端读出来的提问，暂时不能跳过：不想选就点下面的「改在对话里说」。"
+    },
+    {
+      "name": "phone_sidebar_directions",
+      "value": "常驻"
+    },
+    {
+      "name": "phone_sidebar_show_scheduled",
+      "value": "显示定时任务的对话"
+    },
+    {
+      "name": "phone_sidebar_label_separator",
+      "value": "，"
+    },
+    {
+      "name": "phone_sidebar_source_spawned",
+      "value": "对话派生"
+    },
+    {
+      "name": "phone_sidebar_source_extension",
+      "value": "来自扩展"
+    },
+    {
+      "name": "phone_sidebar_source_lark",
+      "value": "来自 飞书 /agent"
+    },
+    {
+      "name": "phone_sidebar_source_other",
+      "value": "其他"
+    },
+    {
+      "name": "phone_sidebar_unread",
+      "value": "完成未看"
+    },
+    {
+      "name": "chat_queued_followup",
+      "value": "补充说明（会排队发送）"
+    },
+    {
+      "name": "chat_pending_cards_count",
+      "value": "{count} 个待处理"
+    },
+    {
+      "name": "phone_all_chats_display_options",
+      "value": "显示选项"
+    },
+    {
+      "name": "phone_session_info",
+      "value": "会话信息"
+    },
+    {
+      "name": "phone_session_info_action",
+      "value": "{title}，查看会话信息"
+    },
+    {
+      "name": "phone_session_runtime",
+      "value": "运行"
+    },
+    {
+      "name": "phone_session_usage",
+      "value": "用量"
+    },
+    {
+      "name": "phone_session_context",
+      "value": "上下文"
+    },
+    {
+      "name": "phone_session_output",
+      "value": "共生成"
+    },
+    {
+      "name": "phone_session_started",
+      "value": "开始"
+    },
+    {
+      "name": "phone_session_folder",
+      "value": "文件夹"
+    },
+    {
+      "name": "phone_start_default_model",
+      "value": "默认模型"
+    },
+    {
+      "name": "phone_start_configured_model",
+      "value": "模型配置：{model}"
+    },
+    {
+      "name": "phone_start_typed_model",
+      "value": "手动输入的模型 ID"
+    },
+    {
+      "name": "phone_start_typed_model_id",
+      "value": "手动输入的模型 ID：{id}"
+    },
+    {
+      "name": "phone_start_named_preset",
+      "value": "预设 {preset}"
+    },
+    {
+      "name": "phone_start_preset",
+      "value": "预设"
+    },
+    {
+      "name": "phone_session_permissions",
+      "value": "权限"
+    },
+    {
+      "name": "phone_session_effort",
+      "value": "思考强度"
+    },
+    {
+      "name": "phone_session_extra_high",
+      "value": "很高"
+    },
+    {
+      "name": "phone_session_not_running",
+      "value": "未运行"
+    },
+    {
+      "name": "phone_session_background_work",
+      "value": "工作中（后台）"
+    },
+    {
+      "name": "phone_session_turns",
+      "value": "{n} 轮"
+    },
+    {
+      "name": "phone_session_turn_one",
+      "value": "{n} 轮"
+    },
+    {
+      "name": "phone_session_workspace",
+      "value": "打开工作区 {space}"
+    },
+    {
+      "name": "phone_todo_did_not_start",
+      "value": "没开起来"
+    },
+    {
+      "name": "phone_todo_start_failure",
+      "value": "启动失败：{reason}"
+    },
+    {
+      "name": "phone_todo_not_handed",
+      "value": "还没交给 Agent"
+    },
+    {
+      "name": "phone_sidebar_recent_heading",
+      "value": "侧边栏「最近」"
+    },
+    {
+      "name": "phone_sidebar_recent_help",
+      "value": "定时任务和后台督办开的对话，也按时间排进侧边栏的「最近」。你的所有设备都会跟着变。"
+    },
+    {
+      "name": "phone_chat_pin",
+      "value": "设为常驻"
+    },
+    {
+      "name": "phone_chat_unpin",
+      "value": "取消常驻"
+    },
+    {
+      "name": "phone_chat_pin_title",
+      "value": "设为常驻？"
+    },
+    {
+      "name": "phone_chat_pin_message",
+      "value": "这个对话会移到常驻区，不再出现在「最近」。"
+    },
+    {
+      "name": "phone_chat_unpin_title",
+      "value": "取消常驻？"
+    },
+    {
+      "name": "phone_chat_unpin_message",
+      "value": "「{name}」会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。"
+    },
+    {
+      "name": "phone_chat_unpin_filing",
+      "value": "放进来的会话会留着。"
+    },
+    {
+      "name": "phone_chat_pinned",
+      "value": "已设为常驻"
+    },
+    {
+      "name": "phone_chat_unpinned",
+      "value": "已取消常驻"
+    },
+    {
+      "name": "phone_chat_archived",
+      "value": "已归档"
+    },
+    {
+      "name": "phone_chat_move",
+      "value": "移到…"
+    },
+    {
+      "name": "phone_chat_own",
+      "value": "单独放着"
+    },
+    {
+      "name": "phone_chat_moved",
+      "value": "已移到「{name}」下"
+    },
+    {
+      "name": "phone_chat_already_moved",
+      "value": "已经在「{name}」下"
+    },
+    {
+      "name": "phone_chat_own_set",
+      "value": "已单独放着"
+    },
+    {
+      "name": "phone_chat_own_already",
+      "value": "本来就单独放着"
+    },
+    {
+      "name": "phone_chat_direction_unavailable",
+      "value": "这台 hub 用不了"
+    },
+    {
+      "name": "phone_chat_undo",
+      "value": "撤销"
+    },
+    {
+      "name": "phone_chat_move_undone",
+      "value": "已撤销移动"
+    },
+    {
+      "name": "phone_chat_direction_full",
+      "value": "这个方向已满。"
+    },
+    {
+      "name": "phone_chat_direction_supervised",
+      "value": "这个对话跟随已有督办任务。"
+    },
+    {
+      "name": "phone_all_chats_lark",
+      "value": "飞书 /agent"
+    },
+    {
+      "name": "phone_all_chats_mine",
+      "value": "我的"
+    },
+    {
+      "name": "phone_all_chats_empty",
+      "value": "这里没有对话"
+    },
+    {
+      "name": "phone_all_chats_empty_detail",
+      "value": "收件箱的 AI 分身、定时任务、飞书 /agent 开的对话会按来源收在这里。"
+    },
+    {
+      "name": "phone_all_chats_filter_count",
+      "value": "{name}，{count} 个"
+    },
+    {
+      "name": "phone_inbox_by_source",
+      "value": "按来源"
+    },
+    {
+      "name": "phone_inbox_by_time",
+      "value": "按时间"
+    },
+    {
+      "name": "phone_inbox_week_ago",
+      "value": "7 天前"
+    },
+    {
+      "name": "phone_inbox_month_ago",
+      "value": "1 个月前"
+    },
+    {
+      "name": "phone_inbox_grouping_mode",
+      "value": "分组：{name}"
+    },
+    {
+      "name": "header_permission_title",
+      "value": "权限模式：{mode}"
+    },
+    {
+      "name": "header_permission_detail_default",
+      "value": "改文件、跑命令前都先问你"
+    },
+    {
+      "name": "header_permission_detail_acceptEdits",
+      "value": "改文件不问，跑命令还会问"
+    },
+    {
+      "name": "header_permission_detail_plan",
+      "value": "只读代码、写计划，批准后才动手"
+    },
+    {
+      "name": "header_permission_detail_auto",
+      "value": "自己判断风险，安全的直接做"
+    },
+    {
+      "name": "header_permission_launcher",
+      "value": "跟随启动器"
+    },
+    {
+      "name": "header_permission_launcher_detail",
+      "value": "问不问你由它自己的审批设置决定，可能本来就全部放行"
+    },
+    {
+      "name": "header_permission_full_detail",
+      "value": "改文件、跑命令都不问你"
+    },
+    {
+      "name": "header_permission_start_only",
+      "value": "什么都不问；只能在新开时选"
+    },
+    {
+      "name": "header_permission_restart",
+      "value": "这一轮结束后将重启会话以生效，对话接着进行"
+    },
+    {
+      "name": "header_permission_pending",
+      "value": "这一轮结束后会重启会话，切到完全访问"
+    },
+    {
+      "name": "header_permission_enter",
+      "value": "完全访问？"
+    },
+    {
+      "name": "header_permission_leave",
+      "value": "退出完全访问？"
+    },
+    {
+      "name": "header_permission_leave_detail",
+      "value": "这个 Agent 不是以完全访问启动的，切走后在这里切不回来。"
+    },
+    {
+      "name": "header_space_open",
+      "value": "空间 {space} 的所有 Agent"
+    },
+    {
+      "name": "header_space_needs",
+      "value": "同一空间的 {count} 个 Agent，有 Agent 需要你"
+    },
+    {
+      "name": "header_space_count",
+      "value": "同一空间的 {count} 个 Agent"
+    },
+    {
+      "name": "header_space_one",
+      "value": "同一空间的 {count} 个 Agent"
+    },
+    {
+      "name": "phone_decision_height",
+      "value": "卡片高度"
+    },
+    {
+      "name": "phone_decision_height_hint",
+      "value": "上下滑动可调整卡片高度。轻点两下切换最高或默认高度。"
+    },
+    {
+      "name": "phone_decision_taller",
+      "value": "增高卡片"
+    },
+    {
+      "name": "phone_decision_shorter",
+      "value": "缩短卡片"
+    },
+    {
+      "name": "phone_decision_full_text",
+      "value": "查看全文"
+    },
+    {
+      "name": "phone_settings_advanced",
+      "value": "高级"
+    },
+    {
+      "name": "phone_advanced_footer",
+      "value": "外观、语言、存储空间、设备等更多设置。"
+    },
+    {
+      "name": "phone_inbox_sources",
+      "value": "收件箱来源"
+    },
+    {
+      "name": "phone_hubs",
+      "value": "Hub 连接"
+    },
+    {
+      "name": "phone_pairing",
+      "value": "设备与配对"
+    },
+    {
+      "name": "phone_settings_build",
+      "value": "构建"
+    },
+    {
+      "name": "phone_settings_data_size",
+      "value": "App 数据"
+    },
+    {
+      "name": "phone_default_permissions",
+      "value": "默认权限"
+    },
+    {
+      "name": "phone_new_conversation_permissions",
+      "value": "新对话权限"
+    },
+    {
+      "name": "phone_default_permission_footer",
+      "value": "适用于未单独选择权限的新对话。现有对话保持当前权限模式。"
+    },
+    {
+      "name": "phone_permission_unconfirmed",
+      "value": "服务器未确认新对话权限设置。"
+    },
+    {
+      "name": "phone_inbox_permissions",
+      "value": "收件箱权限"
+    },
+    {
+      "name": "phone_follow_agents",
+      "value": "跟随 Agents"
+    },
+    {
+      "name": "phone_inbox_permission_hint",
+      "value": "仅 AI 分身自己保存的选择生效。默认权限会在编辑文件或运行命令前询问。新对话以及已停止后恢复的对话使用此选择；正在运行的对话保持当前模式。"
+    },
+    {
+      "name": "phone_search_alias_models",
+      "value": "模型 供应商 API Key 密钥 用途 订阅 运行方式"
+    },
+    {
+      "name": "phone_search_alias_assistant",
+      "value": "助手 资料 名字 记忆 备注 分诊"
+    },
+    {
+      "name": "phone_search_alias_channels",
+      "value": "渠道 机器人 消息 微信 飞书"
+    },
+    {
+      "name": "phone_search_alias_connectors",
+      "value": "连接器 邮件 邮箱 来源 账号 以你的名义发出"
+    },
+    {
+      "name": "phone_search_alias_phone_inbox_sources",
+      "value": "收件箱 来源 订阅 推荐订阅 邮件 静音"
+    },
+    {
+      "name": "phone_search_alias_extensions",
+      "value": "扩展 插件 市场 工具 安装"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_options",
+      "value": "Agent Claude Code Codex Antigravity agy 会话 分诊 运行时"
+    },
+    {
+      "name": "phone_search_alias_appearance",
+      "value": "外观 显示 颜色 主题 风格 字号 布局 深色 浅色 发光 回车 键盘 发送"
+    },
+    {
+      "name": "phone_search_alias_phone_language_options",
+      "value": "语言 听写 语音 键盘"
+    },
+    {
+      "name": "phone_search_alias_notifications",
+      "value": "通知 推送 提醒 锁屏 隐私"
+    },
+    {
+      "name": "phone_search_alias_translation",
+      "value": "翻译 译文 语言"
+    },
+    {
+      "name": "phone_search_alias_storage",
+      "value": "存储 空间 缓存 磁盘 清理"
+    },
+    {
+      "name": "phone_search_alias_about",
+      "value": "关于 版本 构建 commit 诊断 新对话 检查"
+    },
+    {
+      "name": "phone_search_alias_phone_hubs",
+      "value": "Hub 服务器 连接 地址 网络 隧道"
+    },
+    {
+      "name": "phone_search_alias_hub_update",
+      "value": "Hub 服务器 版本 更新 升级"
+    },
+    {
+      "name": "phone_search_alias_managers",
+      "value": "助手 管理 新建 默认 切换"
+    },
+    {
+      "name": "phone_search_alias_phone_look_avatar",
+      "value": "形象 头像 Persona 图标 名字 共享"
+    },
+    {
+      "name": "phone_search_alias_phone_pairing",
+      "value": "设备 配对 Watch 手表 同步 断开 扫码"
+    },
+    {
+      "name": "phone_search_alias_triage",
+      "value": "会话 分诊 委托 问题 权限"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_followup",
+      "value": "Agent 跟进 督办 闲置 停止 归档 会话 名字 改名 工作区 派任务 开始"
+    },
+    {
+      "name": "phone_search_alias_phone_look_color",
+      "value": "主题 颜色 配色"
+    },
+    {
+      "name": "phone_search_alias_phone_look_style",
+      "value": "界面 风格 字体 字号"
+    },
+    {
+      "name": "phone_search_alias_phone_look_scheme",
+      "value": "浅色 深色 系统 外观"
+    },
+    {
+      "name": "phone_search_alias_phone_knowledge_selection",
+      "value": "知识库 选择 来源 优先级 保留"
+    },
+    {
+      "name": "phone_search_alias_phone_meeting_options",
+      "value": "会议 录音 参会 转写 纪要 词表 Wi-Fi hub"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_layout",
+      "value": "Agents 列表 布局 行 卡片 紧凑"
+    },
+    {
+      "name": "phone_search_alias_phone",
+      "value": "iPhone 数据 权限 授权 照片 联系人 日历 提醒事项 位置 健康 剪贴板"
+    },
+    {
+      "name": "phone_search_alias_machines",
+      "value": "电脑 计算机 机器 节点 配对"
+    },
+    {
+      "name": "phone_settings_cache_size",
+      "value": "缓存"
+    },
+    {
+      "name": "phone_search_alias_phone_claude_config",
+      "value": "Claude Code"
+    },
+    {
+      "name": "phone_search_alias_phone_codex_config",
+      "value": "Codex"
+    },
+    {
+      "name": "phone_search_alias_phone_agy_config",
+      "value": "Antigravity agy"
+    },
+    {
+      "name": "phone_model_choose_uses",
+      "value": "为各项用途选择模型。"
+    },
+    {
+      "name": "phone_model_scope",
+      "value": "适用范围"
+    },
+    {
+      "name": "phone_model_scope_hint",
+      "value": "分类提供默认设置。单独配置的用途使用自己的设置。修改从下次运行起生效。"
+    },
+    {
+      "name": "phone_model_provider_keys",
+      "value": "供应商与密钥"
+    },
+    {
+      "name": "phone_model_unset",
+      "value": "未配置"
+    },
+    {
+      "name": "phone_model_configured",
+      "value": "单独配置"
+    },
+    {
+      "name": "phone_model_follow_main",
+      "value": "跟随主对话"
+    },
+    {
+      "name": "phone_model_none",
+      "value": "暂无模型配置"
+    },
+    {
+      "name": "phone_hub_connected",
+      "value": "已连接 Hub"
+    },
+    {
+      "name": "phone_hub_connected_ssh",
+      "value": "已连接 hub · 经 SSH 隧道"
+    },
+    {
+      "name": "phone_hub_new_image",
+      "value": "有新镜像"
+    },
+    {
+      "name": "phone_hub_update_available",
+      "value": "有新版本"
+    },
+    {
+      "name": "phone_live_screen",
+      "value": "实时屏幕"
+    },
+    {
+      "name": "phone_search_alias_phone_live_screen",
+      "value": "实时屏幕 屏幕 线路 直连 画质 蜂窝 移动数据 热点 滚动 滚动速度 双指"
+    },
+    {
+      "name": "phone_screen_scroll_speed",
+      "value": "滚动速度"
+    },
+    {
+      "name": "phone_screen_slower",
+      "value": "较慢"
+    },
+    {
+      "name": "phone_screen_default",
+      "value": "默认"
+    },
+    {
+      "name": "phone_screen_faster",
+      "value": "较快"
+    },
+    {
+      "name": "phone_screen_scroll_hint",
+      "value": "用两指在电脑画面上拖动时，画面滚动的快慢。"
+    },
+    {
+      "name": "phone_native_alarms",
+      "value": "闹钟与计时器"
+    },
+    {
+      "name": "phone_search_alias_phone_native_alarms",
+      "value": "闹钟 计时器 定时器 时钟 叫醒 倒计时"
+    },
+    {
+      "name": "phone_alarm_empty",
+      "value": "没有闹钟或计时器"
+    },
+    {
+      "name": "phone_alarm_empty_note",
+      "value": "Persona 为你设定的闹钟和计时器会显示在这里。这里只显示 Persona 设定的，时钟 App 里的看不到。"
+    },
+    {
+      "name": "phone_native_timers",
+      "value": "计时器"
+    },
+    {
+      "name": "phone_native_alarms_only",
+      "value": "闹钟"
+    },
+    {
+      "name": "phone_native_timer",
+      "value": "计时器"
+    },
+    {
+      "name": "phone_native_alarm",
+      "value": "闹钟"
+    },
+    {
+      "name": "phone_alarm_allow",
+      "value": "允许使用闹钟"
+    },
+    {
+      "name": "phone_alarm_open_settings",
+      "value": "打开系统设置"
+    },
+    {
+      "name": "phone_delete_timer",
+      "value": "删除计时器"
+    },
+    {
+      "name": "phone_delete_alarm",
+      "value": "删除闹钟"
+    },
+    {
+      "name": "phone_delete_timer_note",
+      "value": "计时器会停止，不会响铃。"
+    },
+    {
+      "name": "phone_delete_alarm_note",
+      "value": "这个闹钟不会再响。"
+    },
+    {
+      "name": "phone_alarm_changed",
+      "value": "这个闹钟或计时器已更改，请刷新查看。"
+    },
+    {
+      "name": "phone_alarm_access_note",
+      "value": "允许通知后，可以管理 Persona 在这台设备上设置的闹钟和计时器。"
+    },
+    {
+      "name": "phone_timer_seconds",
+      "value": "{seconds} 秒"
+    },
+    {
+      "name": "phone_alarm_day_mon",
+      "value": "周一"
+    },
+    {
+      "name": "phone_alarm_day_tue",
+      "value": "周二"
+    },
+    {
+      "name": "phone_alarm_day_wed",
+      "value": "周三"
+    },
+    {
+      "name": "phone_alarm_day_thu",
+      "value": "周四"
+    },
+    {
+      "name": "phone_alarm_day_fri",
+      "value": "周五"
+    },
+    {
+      "name": "phone_alarm_day_sat",
+      "value": "周六"
+    },
+    {
+      "name": "phone_alarm_day_sun",
+      "value": "周日"
+    },
+    {
+      "name": "phone_health_reports",
+      "value": "健康"
+    },
+    {
+      "name": "phone_search_alias_phone_health_reports",
+      "value": "健康 运动 报告 Apple 健康"
+    },
+    {
+      "name": "phone_auto_workout_reports",
+      "value": "运动后自动生成报告"
+    },
+    {
+      "name": "phone_workout_access",
+      "value": "运动记录读取权限"
+    },
+    {
+      "name": "phone_workout_granted",
+      "value": "已授权"
+    },
+    {
+      "name": "phone_workout_not_granted",
+      "value": "尚未授权"
+    },
+    {
+      "name": "phone_workout_unavailable",
+      "value": "本设备未提供华为健康服务。"
+    },
+    {
+      "name": "phone_workout_unknown",
+      "value": "健康服务暂时无法核验此应用的运动读取权限。"
+    },
+    {
+      "name": "phone_workout_check",
+      "value": "重新检查权限"
+    },
+    {
+      "name": "phone_workout_access_note",
+      "value": "这里核验 Persona 的读取权限，运动记录保留在设备上。"
+    },
+    {
+      "name": "interaction_supervisor_handling",
+      "value": "督办者处理中"
+    },
+    {
+      "name": "interaction_supervisor_escalation",
+      "value": "这张卡先交给了任务的督办者。督办者上交后，才会到你这里。"
+    },
+    {
+      "name": "agent_reading_expand_header",
+      "value": "{title}，显示标题和标签"
+    },
+    {
+      "name": "session_effort_none",
+      "value": "无"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "最低"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "超高"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "此启动器没有可切换的模型。"
     }
   ]
 }

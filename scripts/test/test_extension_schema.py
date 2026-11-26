@@ -197,6 +197,13 @@ class ExtensionSchemaTests(unittest.TestCase):
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_typed_keywords_codegen(self):
+        # x-enum closed, x-id, enum-keyed structs, x-decode strict, x-opaque and Rust (#15397); it compiles what it
+        # generates where the toolchain is here, so it gets longer.
+        r = subprocess.run([sys.executable, str(ROOT / "scripts/test/test_wiregen_typed.py")],
+                           capture_output=True, text=True, timeout=600)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_examples_hold_to_the_schema(self):
         # examples/plugin/ are the plugin-side schemas' (connector, kb): apart, as the apps' own tests read every
         # example at the top level with their types, which do not have these.

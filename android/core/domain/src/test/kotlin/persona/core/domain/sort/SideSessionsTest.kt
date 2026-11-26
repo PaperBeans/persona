@@ -121,4 +121,78 @@ class SideSessionsTest {
         assertNull(settings.copy(query = "zzz").sideHit(parent, named))
         assertTrue(buildAgentList(named.map(::AgentSession), settings = settings.copy(query = "nothing here")).groups.all { it.rows.isEmpty() })
     }
+
+    @Test fun unreadSideSummaryOrdersNewestFirstTracksExtraCountAndReplacesPreviewOnlyWhenParentIsSeen() {
+        val older = side("btw", "unread", updated = "2026-11-15T10:03:00Z").copy(title = "btw question")
+        val newer = side("chat", "unread", updated = "2026-11-15T10:05:00Z").copy(title = "Side chat")
+        val seen = side("done", "idle", updated = "2026-11-15T10:06:00Z").copy(title = "Seen side")
+        val child = Session("m", "child", state = "unread", foldedUnder = "p", updatedAt = "2026-11-15T10:09:00Z")
+        val rawSeenParent = parent.copy(state = "idle", children = SessionChildren(total = 4, sides = 3, sidesUnread = 2))
+        val foldedParent = rawSeenParent.copy(state = "unread")
+
+        assertEquals(listOf("chat", "btw"), unreadSideSessions(listOf(rawSeenParent, older, newer, seen, child), parent.key).map { it.sessionId })
+
+        val multi = unreadSideSummary(foldedParent, rawSeenParent, listOf(rawSeenParent, older, newer, seen, child))
+        assertNotNull(multi)
+        assertEquals(newer.key, multi!!.latest?.key)
+        assertEquals(2, multi.count)
+        assertEquals(1, multi.extraCount)
+        assertEquals(listOf("btw question"), multi.otherTitles)
+        assertTrue(multi.replacesPreview)
+
+        // Single unread side: extraCount is 0.
+        val single = unreadSideSummary(foldedParent, rawSeenParent, listOf(rawSeenParent, newer, seen))
+        assertNotNull(single)
+        assertEquals(newer.key, single!!.latest?.key)
+        assertEquals(1, single.count)
+        assertEquals(0, single.extraCount)
+        assertTrue(single.otherTitles.isEmpty())
+        assertTrue(single.replacesPreview)
+
+        // Both parent and side unread: keep parent's preview alongside the side line.
+        val rawUnreadParent = rawSeenParent.copy(state = "unread")
+        val both = unreadSideSummary(foldedParent, rawUnreadParent, listOf(rawUnreadParent, newer))
+        assertNotNull(both)
+        assertFalse(both!!.replacesPreview)
+
+        // No unread sides: null.
+        assertNull(unreadSideSummary(rawSeenParent.copy(children = SessionChildren(total = 1, sides = 1)), rawSeenParent, listOf(rawSeenParent, seen)))
+        // Plain unread parent with only seen sides: null.
+        assertNull(unreadSideSummary(rawUnreadParent.copy(children = SessionChildren(total = 1, sides = 1)), rawUnreadParent, listOf(rawUnreadParent, seen)))
+        // Working / NeedsYou parent hides the unread side line (not in Unread state).
+        assertNull(unreadSideSummary(foldedParent.copy(state = "working"), rawSeenParent.copy(state = "working"), listOf(rawSeenParent, newer)))
+        assertNull(unreadSideSummary(foldedParent.copy(state = "needs_you"), rawSeenParent.copy(state = "needs_you"), listOf(rawSeenParent, newer)))
+        // Assistant row never shows a side line.
+        assertNull(unreadSideSummary(foldedParent.copy(assistant = true), rawSeenParent.copy(assistant = true), listOf(rawSeenParent, newer)))
+
+        // Paged parent without held side rows falls back to count-only summary.
+        val paged = unreadSideSummary(foldedParent, rawSeenParent, listOf(rawSeenParent))
+        assertNotNull(paged)
+        assertNull(paged!!.latest)
+        assertEquals(2, paged.count)
+        assertEquals(0, paged.extraCount)
+        assertTrue(paged.replacesPreview)
+    }
+
+    @Test fun unreadClearedBySeenKeepsParentUnreadWhileAnySideIsUnreadAndDropsOnceSidesAreSeen() {
+        val rawParent = parent.copy(state = "unread", children = SessionChildren(total = 2, sides = 2, sidesUnread = 2))
+        val sideA = side("a", "unread", updated = "2026-11-15T10:03:00Z")
+        val sideB = side("b", "unread", updated = "2026-11-15T10:05:00Z")
+        val hub = listOf(rawParent, sideA, sideB)
+
+        // Parent marked seen locally while sides are still unread -> still Unread (0 cleared).
+        assertEquals(0, unreadClearedBySeen(hub, listOf(rawParent.copy(state = "idle"), sideA, sideB)))
+        // Parent and one side marked seen locally while another side is unread -> still Unread (0 cleared).
+        assertEquals(0, unreadClearedBySeen(hub, listOf(rawParent.copy(state = "idle"), sideA.copy(state = "idle"), sideB)))
+        // Parent and all held sides marked seen locally -> leaves Unread counts (1 cleared).
+        assertEquals(1, unreadClearedBySeen(hub, listOf(rawParent.copy(state = "idle"), sideA.copy(state = "idle"), sideB.copy(state = "idle"))))
+        // Parent was already idle on hub, only one side was unread -> marking that side seen clears 1.
+        val hubOnlySide = listOf(rawParent.copy(state = "idle", children = SessionChildren(total = 1, sides = 1, sidesUnread = 1)), sideA)
+        assertEquals(1, unreadClearedBySeen(hubOnlySide, listOf(rawParent.copy(state = "idle", children = SessionChildren(total = 1, sides = 1, sidesUnread = 1)), sideA.copy(state = "idle"))))
+        // Paged parent (no held sides) marked seen while hub rollup says sidesUnread = 2 -> stays Unread (0 cleared).
+        assertEquals(0, unreadClearedBySeen(listOf(rawParent), listOf(rawParent.copy(state = "idle"))))
+        // Plain unread session (no sides) marked seen -> clears 1.
+        val plain = Session("m", "plain", state = "unread")
+        assertEquals(1, unreadClearedBySeen(listOf(plain), listOf(plain.copy(state = "idle"))))
+    }
 }

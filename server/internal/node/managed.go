@@ -60,6 +60,7 @@ func (n *Node) setManaged(list []proto.ManagedLauncher) {
 	n.managed.mu.Lock()
 	n.managed.byID, n.managed.full, n.managed.infer = m, nil, infer
 	n.managed.mu.Unlock()
+	forgetOfflineScan() // cached transcript rows include the launcher's context window
 }
 
 // setCatalog is launchers.catalog: the providers in this computer's scope. What was pulled stays while the provider is
@@ -88,6 +89,7 @@ func (n *Node) setCatalog(list []proto.ManagedLauncher) {
 	infer := buildManagedInferLaunchers(m)
 	n.managed.byID, n.managed.full, n.managed.infer = m, full, infer
 	n.managed.mu.Unlock()
+	forgetOfflineScan()
 	n.syncAgyProvider()
 	if len(prefetch) > 0 {
 		go func() {

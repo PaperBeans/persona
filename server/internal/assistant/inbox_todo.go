@@ -270,7 +270,7 @@ func planOfDue(due string) db.TodoEdit {
 
 // confirmTodo adds the confirmed to-do suggestion (title text, due as the user left it) and files the row as turned into
 // it, as the manual way does: one tap, nothing more to ask.
-func (s *Service) confirmTodo(ctx context.Context, it *InboxItem, text, due string) (InboxItem, error) {
+func (s *Service) confirmTodo(ctx context.Context, it *InboxItem, text, due string, sourceNote ...string) (InboxItem, error) {
 	title := clipRunesTo(strings.TrimSpace(text), inboxTodoTitleMax)
 	if err := checkSuggestedDue(due); err != nil || title == "" {
 		return InboxItem{}, errTodoSuggestion
@@ -279,9 +279,14 @@ func (s *Service) confirmTodo(ctx context.Context, it *InboxItem, text, due stri
 		return InboxItem{}, errTodosUnavailable
 	}
 	b := &s.inbox
-	b.mu.Lock()
-	_, notes := todoFromItem(it, "")
-	b.mu.Unlock()
+	var notes string
+	if len(sourceNote) > 0 {
+		notes = sourceNote[0]
+	} else {
+		b.mu.Lock()
+		_, notes = todoFromItem(it, "")
+		b.mu.Unlock()
+	}
 	td, err := s.createTodoFrom(ctx, title, notes, it.ID, planOfDue(due))
 	if err != nil {
 		return InboxItem{}, err

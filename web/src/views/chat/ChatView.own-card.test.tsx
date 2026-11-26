@@ -177,6 +177,34 @@ describe("an assistant-owned approval question", () => {
 });
 
 describe("a Persona conversation's own approval card (#4883)", () => {
+  it("keeps a promoted relay input collapsed while the answer and question card stay visible", async () => {
+    const original = "Synthetic relay transport details\n".repeat(8).trim();
+    const relay: Item = { id: "relay#0", seq: 1, role: "user", kind: "text", text: original, source: { kind: "conversation", conversation_id: "source-1", title: "Synthetic source" } };
+    const ask: Item = { id: "ask#0", seq: 2, role: "assistant", kind: "tool_use", tool_use_id: "ask-call", tool_name: "mcp__persona__ask_user", tool_input: { question: "Which mock change should ship?" } };
+    const receipt: Item = { id: "receipt#0", seq: 3, role: "user", kind: "tool_result", tool_use_id: "ask-call", text: "ok" };
+    const reply: Item = { id: "reply#0", seq: 4, role: "assistant", kind: "text", text: "The mock result needs your confirmation." };
+    transcript.items = [relay, ask, receipt, reply];
+    Object.assign(getState(), {
+      assistant: { machine_id: "hub", main: "c1", conversations: [] },
+      interactions: [question],
+      answered: {},
+    });
+    upsertSession({ machine_id: "hub", session_id: "c1", title: "Persona", status: "done", state: "needs_you", assistant: true, agent: "claude" } as Session);
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+
+    const source = host.querySelector('[data-message-source="conversation"]');
+    const disclosure = source?.querySelector<HTMLButtonElement>("button[aria-expanded]");
+    expect(disclosure?.getAttribute("aria-expanded")).toBe("false");
+    expect(host.textContent).not.toContain(original);
+    expect(host.querySelector("[data-answer]")?.textContent).toContain(reply.text);
+    expect(card(question.id)?.textContent).toContain("Which mock change should ship?");
+
+    act(() => disclosure!.click());
+    expect(disclosure?.getAttribute("aria-expanded")).toBe("true");
+    expect(host.textContent).toContain(original);
+  });
+
   it("is in the chat, not only in the closed Needs you tray", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
     await flush();

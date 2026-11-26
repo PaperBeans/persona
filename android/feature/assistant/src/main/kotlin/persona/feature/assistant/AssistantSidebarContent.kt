@@ -55,6 +55,7 @@ class MergedSidebarContent(
     val onSearchAgent: (SessionKey) -> Unit,
     val agentsInFront: Boolean,
     val showKnowledge: Boolean,
+    val herdrTabNameHubs: Set<String?> = emptySet(),
 )
 
 /** The real shared history remains available even while a secondary page hides the Assistant root. */
@@ -107,8 +108,9 @@ fun AssistantSidebarContent(
     val management = remember(base, choice.hubId, choice.shown) { base?.forManager(choice.shown) }
     // The domain spaces (#13500): the page opens them, so they show only where the page is the real assistant's.
     val sidebarHost = LocalAssistantSidebarHost.current
+    val spacesEnabled = LocalSpaceConversationsEnabled.current?.collectAsStateWithLifecycle()?.value == true
     val spaces = rememberSpaces(choice.hubId, base,
-        enabled = !demo && sidebarHost != null && repository is persona.core.contracts.api.AssistantConversations)
+        enabled = spacesEnabled && !demo && sidebarHost != null && repository is persona.core.contracts.api.AssistantConversations)
     val conversationArranger = remember(management, repository, demo) {
         management?.takeUnless { demo }?.let { api ->
             ConversationArranger(
@@ -327,6 +329,7 @@ fun AssistantSidebarContent(
             agents = merged?.agents,
             agentMachines = merged?.agentMachines.orEmpty(),
             pinnedAgents = merged?.pinnedAgents.orEmpty(),
+            herdrTabNameHubs = merged?.herdrTabNameHubs.orEmpty(),
             agentsFirst = searchAgentsFirst,
             onOpenAgent = if (merged == null && onOpenAgent == null) null else ({ key ->
                 fullSearchOpen = false

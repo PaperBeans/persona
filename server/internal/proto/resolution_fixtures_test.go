@@ -757,6 +757,7 @@ var toast: Toast?
 func api(_ group: String) -> ProbeAPI? { client }
 func session(_ key: SessionKey) -> Session? { Session() }
 func summariesChanged() {}
+func withdrawTodoAsk(_ id: String, group: String) -> Bool { false }
 func notDone() {}
 func show(_ error: Error) {}
 `

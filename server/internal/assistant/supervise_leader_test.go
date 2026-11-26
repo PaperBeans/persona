@@ -110,21 +110,29 @@ func TestLeaderConversationTaskIsSupervisedByItsLead(t *testing.T) {
 	}
 }
 
-// Main retains its administrative review override without taking ownership back from a lead.
+// Main cannot review a task supervised by a direction lead (#13657): only the lead can review it, and ownership stays
+// with the lead.
 func TestMainReviewKeepsSupervisorWithLead(t *testing.T) {
 	s, f, todo := newLeaderService(t)
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
 	waitFor(t, "the review", func() bool { return todoNow(s, todo.ID).Supervision.State == reviewPending })
-	if out, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "rework", "note": "补截图"}); err != nil || !strings.Contains(out, "Rework round 1") {
-		t.Fatalf("main's override: %s %v", out, err)
+	if _, err := runJSON(t, s, "conv1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "rework", "note": "补截图"}); err == nil {
+		t.Fatal("main chat was allowed to review a lead-supervised task")
 	}
 	if got := todoNow(s, todo.ID).Supervision.Supervisor; got != "lead1" {
-		t.Fatalf("main's review reclaimed the task: %s", got)
+		t.Fatalf("main's refused review changed supervisor: %s", got)
+	}
+	if out, err := runJSON(t, s, "lead1", "task_review", map[string]any{"todo_id": todo.ID, "verdict": "rework", "note": "补截图"}); err != nil || !strings.Contains(out, "Rework round 1") {
+		t.Fatalf("lead review: %s %v", out, err)
+	}
+	if got := todoNow(s, todo.ID).Supervision.Supervisor; got != "lead1" {
+		t.Fatalf("lead review changed supervisor: %s", got)
 	}
 }
 
-// Without an explicit leader assignment, a legacy side-supervised task and every new side task_plan go to main (#5732).
+// A legacy unmarked side-supervised task still goes to main, while a new task_plan from a live side conversation is
+// supervised by that conversation (#13657).
 func TestDigestGoesToMainWithoutAnExplicitLeader(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
@@ -153,13 +161,13 @@ func TestDigestGoesToMainWithoutAnExplicitLeader(t *testing.T) {
 		t.Fatal("a side conversation's context says it is a leader")
 	}
 
-	// task_plan from a side conversation that is not an explicit leader: main supervises it.
+	// task_plan from a live side conversation: the side conversation supervises it (#13657).
 	res, err := s.toolTaskPlan(ctx, "lead1", planArgs(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res, "The main conversation supervises them") {
-		t.Fatalf("a side conversation is told who supervises: %s", res)
+	if !strings.Contains(res, "You supervise them") {
+		t.Fatalf("a live side conversation is not told it supervises: %s", res)
 	}
 	var planned Todo
 	waitFor(t, "the task", func() bool {
@@ -171,8 +179,8 @@ func TestDigestGoesToMainWithoutAnExplicitLeader(t *testing.T) {
 		}
 		return false
 	})
-	if planned.Supervision == nil || planned.Supervision.Supervisor != "conv1" {
-		t.Fatalf("a side conversation's task is not main-supervised: %+v", planned.Supervision)
+	if planned.Supervision == nil || planned.Supervision.Supervisor != "lead1" {
+		t.Fatalf("a live side conversation's task is not side-supervised: %+v", planned.Supervision)
 	}
 }
 

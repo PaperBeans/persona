@@ -257,8 +257,11 @@ func TestSecretRunRunsWithAPasswordNothingElseSees(t *testing.T) {
 	if len(ix.Fields) != 1 || ix.Fields[0].Key != "password" || !ix.Fields[0].Secret || ix.Fields[0].Label == "" || ix.Fields[0].Placeholder == "" {
 		t.Fatalf("fields = %+v", ix.Fields)
 	}
-	if got := ix.ExpiresAt.Sub(ix.CreatedAt); got != 10*time.Minute {
-		t.Fatalf("the card lives %v, want 10m", got)
+	if got := ix.ExpiresAt.Sub(ix.CreatedAt); got != ownerCardMaxWait {
+		t.Fatalf("the unseen card lives %v, want %v", got, ownerCardMaxWait)
+	}
+	if ix.SeenTTLSeconds != int(secretRunCardWait.Seconds()) {
+		t.Fatalf("seen_ttl_seconds = %d, want %d", ix.SeenTTLSeconds, int(secretRunCardWait.Seconds()))
 	}
 	var input struct {
 		Machine     string   `json:"machine"`
@@ -364,14 +367,24 @@ func TestSecretRunKeepsNoPasswordInPostgres(t *testing.T) {
 	}
 }
 
-// Not filled in in time: expired, and the node never runs anything.
+// Not filled in in time after being viewed: expired, and the node never runs anything.
 func TestSecretRunExpiresWithoutRunning(t *testing.T) {
 	old := secretRunCardWait
-	secretRunCardWait = 300 * time.Millisecond
+	secretRunCardWait = 250 * time.Millisecond
 	t.Cleanup(func() { secretRunCardWait = old })
 	r := newSecretRig(t, nil)
 	done := r.call(secretArgs)
 	ix := r.card()
+	// Before the user sees the card, it must not expire after secretRunCardWait.
+	select {
+	case res := <-done:
+		t.Fatalf("unseen card expired early: %s", resultText(res))
+	case <-time.After(350 * time.Millisecond):
+	}
+	// Once viewed in the app, the countdown starts and expires it.
+	if !r.s.markInteractionSeen(context.Background(), ix.ID) {
+		t.Fatal("markInteractionSeen returned false")
+	}
 	out, text := r.outcome(done)
 	if out.Status != secretExpired || len(out.Results) != 0 {
 		t.Fatalf("outcome = %s", text)
@@ -415,8 +428,13 @@ func TestSecretRunDismissedIsDeclined(t *testing.T) {
 // manager does not keep the cards) is the card expiring, not the user closing it.
 func TestSecretRunDismissAfterTheDeadlineIsExpired(t *testing.T) {
 	old := secretRunCardWait
+	oldMax := ownerCardMaxWait
 	secretRunCardWait = 100 * time.Millisecond
-	t.Cleanup(func() { secretRunCardWait = old })
+	ownerCardMaxWait = 100 * time.Millisecond
+	t.Cleanup(func() {
+		secretRunCardWait = old
+		ownerCardMaxWait = oldMax
+	})
 	f := newFakeHub()
 	f.sessions["server"], f.sessions["mac"] = nil, nil
 	f.devices = []Device{{ID: "server", Name: "Server", Online: true}, {ID: "mac", Name: "Mac mini", Online: true}}

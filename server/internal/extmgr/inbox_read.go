@@ -21,6 +21,7 @@ func (h *Manager) readInbox(ctx context.Context, round inboxRound) assistantwire
 	if h.connectors == nil {
 		return r
 	}
+	h.enforceIMessageVisibility()
 	for _, c := range h.connectors.All() {
 		r.Names[c.ID()] = connector.DisplayName(ctx, c)
 	}
@@ -37,6 +38,9 @@ func (h *Manager) readInbox(ctx context.Context, round inboxRound) assistantwire
 // readMail reads the latest page of every eligible mailbox, up to inboxMailParallel accounts at once, in account
 // order. An unreadable folder is left out and its account named in Failed. nil when mail is off or listing fails.
 func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
+	if h.inboxVisibilityBlocksSource("mail") {
+		return nil
+	}
 	// Add to Inbox off (#5307): no mail round, so the manager keeps the mail items it has; search, replies and the
 	// knowledge base go on.
 	if h.mail == nil || h.connectors.Get("mail") == nil || !h.connectors.Feeds("mail", connector.FeedInbox) {
@@ -193,6 +197,11 @@ func (h *Manager) readConnectors(ctx context.Context) []assistantwire.InboxSourc
 		}
 		src := assistantwire.InboxSource{ID: c.ID(), Name: connector.DisplayName(ctx, c), Extension: fromExtension(c.ID()), Migrated: isMigrated(c.ID()),
 			Things: []connector.InboxThing{}}
+		if h.inboxVisibilityBlocksSource(c.ID()) {
+			src.Off = true
+			out = append(out, src)
+			continue
+		}
 		state := connector.StatusOf(ctx, c).State
 		if !h.connectors.Feeds(c.ID(), connector.FeedInbox) || state != connector.StateOK && state != connector.StateRateLimited ||
 			h.waitsForTriageModel(ctx, c) { // a hub.json plugin's that needs the triage model (extension_inbox.go)

@@ -115,11 +115,17 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		c.mu.Unlock()
 		n.notifyCodex()
 	case "turn/started":
-		n.ttft.armIfUnarmed(p.id, time.Now(), ev.Turn.ID)
 		c.mu.Lock()
-		c.turnID = ev.Turn.ID
-		c.loop = codexCompactionLoop{}
+		ended := ev.Turn.ID != "" && c.endedTurnID == ev.Turn.ID
+		if !ended {
+			c.turnID = ev.Turn.ID
+			c.loop = codexCompactionLoop{}
+		}
 		c.mu.Unlock()
+		if ended {
+			return // a duplicate notification after turn/completed cannot make the same turn active again
+		}
+		n.ttft.armIfUnarmed(p.id, time.Now(), ev.Turn.ID)
 		p.mu.Lock()
 		had := p.partial.Len() > 0
 		p.partial.Reset()
@@ -193,6 +199,9 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 	case "turn/completed":
 		n.ttft.clearPending(p.id)
 		c.mu.Lock()
+		if ev.Turn.ID != "" {
+			c.endedTurnID = ev.Turn.ID
+		}
 		if c.turnID == ev.Turn.ID {
 			c.turnID = ""
 		}
@@ -227,6 +236,9 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		recovering := n.recoverAssistantResult(p, failure != "", failure, failureKinds...)
 		if !recovering {
 			n.clearAssistantRecovery(p, failure == "")
+			if failure != "" {
+				n.handleModelRouteFailure(p, failure)
+			}
 		}
 		p.mu.Lock()
 		if !recovering {

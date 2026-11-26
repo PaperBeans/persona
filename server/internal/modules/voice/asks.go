@@ -452,7 +452,7 @@ func (k *asker) reask() {
 	if k.cur == nil || !k.t.c.toldBefore(k.cur.ix.ID) || k.t.c.asksQueued(k.cur.ix.ID) {
 		return // not told yet (what asks it is still queued), told to this session, or about to be
 	}
-	k.say(k.question(false), k.cur.ix.ID, true)
+	k.t.c.deliver(&sentWords{words: k.question(false), card: k.cur.ix.ID, agent: true, prio: prioCard, reask: true})
 }
 
 // arm starts the call's cards once the call is set up (its first upstream session, on the goroutine that read the

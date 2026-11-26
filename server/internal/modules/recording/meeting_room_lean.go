@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,7 +14,7 @@ import (
 )
 
 // Long meetings (docs/assistant/meeting-minutes.md "Long meetings: lean batches and compaction (#8253)"): a room this
-// manager starts (kb.MeetingRoom.Batching, set when it first starts) gets a batch at most every two minutes, without the
+// manager starts (recordingwire.MeetingRoom.Batching, set when it first starts) gets a batch at most every two minutes, without the
 // topics and highlights rules (they are in its CLAUDE.md) and with the lists so far only at the boundaries: a batch
 // with the meeting so far (its first, or after its role was off), the first after its conversation was compacted (by the
 // manager, the owner, or Claude Code on its own), and once the last batch that showed them is half an hour old. Once
@@ -21,7 +22,7 @@ import (
 // lines, the manager compacts it in place (the node's assistant.compact, Claude Code's /compact in the same session) at
 // an idle moment, inside the room's look and holding the room's one-ask slot while it starts it; until the session's
 // compaction says it ended, nothing goes into the room. What it keeps for that is the room's record in meeting.json
-// (kb.MeetingRoomLean), so a restart neither compacts twice nor loses a running one: the session's compaction says how
+// (recordingwire.MeetingRoomLean), so a restart neither compacts twice nor loses a running one: the session's compaction says how
 // it is going. An older room (Batching 0) keeps a batch a minute with the rules and the lists in each, and is never
 // compacted.
 
@@ -40,7 +41,7 @@ const (
 // end among the live log's lines from there to its feed position (l.Fed), and their characters. Read off the live log,
 // it is what the batches gave but for two things, both bounded: lines a batch left out (over feedBatchRunes) count, and
 // lines a batch with the meeting so far gives again count once, and only after at.
-func roomSpan(l kb.Live, at int) (from, to float64, runes int) {
+func roomSpan(l recordingwire.Live, at int) (from, to float64, runes int) {
 	end := min(l.Fed, len(l.Segments))
 	seen := false
 	for _, sg := range l.Segments[min(max(at, 0), end):end] {
@@ -57,24 +58,24 @@ func roomSpan(l kb.Live, at int) (from, to float64, runes int) {
 
 // roomCompactDue: the batches given since the room started or was last compacted cover roomCompactSpan of the meeting
 // (the earliest line's start to the latest line's end among them) and roomCompactRunes characters of lines.
-func roomCompactDue(l kb.Live, ln kb.MeetingRoomLean) bool {
+func roomCompactDue(l recordingwire.Live, ln recordingwire.MeetingRoomLean) bool {
 	from, to, runes := roomSpan(l, ln.SpanAt)
 	return runes >= roomCompactRunes && to-from >= roomCompactSpan.Seconds()
 }
 
 // roomListsDue: a lean room's next batch shows the topics and highlights so far: none showed them yet, its
 // conversation was compacted since, or the last that did is roomListsEvery old.
-func roomListsDue(ln kb.MeetingRoomLean, now time.Time) bool {
+func roomListsDue(ln recordingwire.MeetingRoomLean, now time.Time) bool {
 	return ln.ListsDue || ln.ListsAt.IsZero() || now.Sub(ln.ListsAt) >= roomListsEvery
 }
 
 // roomBatchNote notes in recording id's room record that batch b, showing the lists, went to the lean room at sent;
 // ln is the record before it. The bookkeeping after it. (What the batch's lines add to the span is the live log's.)
-func (s *Recordings) roomBatchNote(e *kb.Engine, id string, b feedBatch, sent time.Time, ln kb.MeetingRoomLean) kb.MeetingRoomLean {
+func (s *Recordings) roomBatchNote(e *kb.Engine, id string, b feedBatch, sent time.Time, ln recordingwire.MeetingRoomLean) recordingwire.MeetingRoomLean {
 	if !b.lean || !b.lists {
 		return ln
 	}
-	if rm, ok := s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.Lean.ListsAt, rm.Lean.ListsDue = sent, false }); ok {
+	if rm, ok := s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { rm.Lean.ListsAt, rm.Lean.ListsDue = sent, false }); ok {
 		return rm.Lean
 	}
 	return ln
@@ -88,7 +89,7 @@ type roomRead struct {
 }
 
 // roomRowRead reads room's row, on its machine as attendeeCheckFor names it.
-func (s *Recordings) roomRowRead(ctx context.Context, room *kb.MeetingRoom) roomRead {
+func (s *Recordings) roomRowRead(ctx context.Context, room *recordingwire.MeetingRoom) roomRead {
 	machine := room.MachineID
 	machine = s.canonical(machine)
 	row, found, err := s.attendeeRow(ctx, machine, room.SessionID)
@@ -99,7 +100,7 @@ func (s *Recordings) roomRowRead(ctx context.Context, room *kb.MeetingRoom) room
 // says it at now: the row shows no compaction of the session's that began since and ended, and it was asked less than
 // roomCompactLost ago. Asks, batches and photos wait for it, as they do for a compaction the row shows running
 // (roomWorking).
-func roomCompactPending(ln kb.MeetingRoomLean, row proto.Session, found bool, now time.Time) bool {
+func roomCompactPending(ln recordingwire.MeetingRoomLean, row proto.Session, found bool, now time.Time) bool {
 	if ln.CompactStartedAt.IsZero() || now.Sub(ln.CompactStartedAt) >= roomCompactLost {
 		return false
 	}
@@ -109,7 +110,7 @@ func roomCompactPending(ln kb.MeetingRoomLean, row proto.Session, found bool, no
 
 // roomCompactedAt notes in ln that the room's conversation was compacted with the batches up to feed position fed in
 // it: the next batch shows the lists, and the span (and its attempts) starts again from there.
-func roomCompactedAt(ln *kb.MeetingRoomLean, fed int) {
+func roomCompactedAt(ln *recordingwire.MeetingRoomLean, fed int) {
 	ln.ListsDue, ln.SpanAt, ln.Attempts, ln.RetryAt = true, fed, 0, time.Time{}
 }
 
@@ -118,11 +119,11 @@ func roomCompactedAt(ln *kb.MeetingRoomLean, fed int) {
 // compacting the room on its own, and with start (the role on, the meeting's end not due) starts one that is due at an
 // idle moment (photos: a photo or withdrawal is still to go in). held: nothing goes into the room now, one runs or may;
 // at: when to look again for it (zero: nothing to do before the next batch); the room's bookkeeping after it.
-func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string, l kb.Live, r kb.Recording, now time.Time, start, photos bool, rd roomRead) (at time.Time, held bool, ln kb.MeetingRoomLean) {
+func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string, l recordingwire.Live, r recordingwire.Recording, now time.Time, start, photos bool, rd roomRead) (at time.Time, held bool, ln recordingwire.MeetingRoomLean) {
 	room := r.Conv.Room
 	ln = room.Lean
-	set := func(fn func(ln *kb.MeetingRoomLean)) bool {
-		rm, ok := s.roomSet(e, id, func(rm *kb.MeetingRoom) { fn(&rm.Lean) })
+	set := func(fn func(ln *recordingwire.MeetingRoomLean)) bool {
+		rm, ok := s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { fn(&rm.Lean) })
 		if ok {
 			ln = rm.Lean
 		}
@@ -147,7 +148,7 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 		case ended && c.State == proto.CompactionDone:
 			// The span starts again where it was asked for: what was given since (nothing, unless its row showed it
 			// late) was not in what it compacted.
-			set(func(ln *kb.MeetingRoomLean) {
+			set(func(ln *recordingwire.MeetingRoomLean) {
 				roomCompactedAt(ln, ln.CompactFed)
 				ln.CompactStartedAt, ln.CompactFed, ln.CompactSeen = time.Time{}, 0, c.StartedAt
 				ln.CompactedAt, ln.Compactions = now, ln.Compactions+1
@@ -156,7 +157,10 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 			ended = false
 		case ended:
 			s.logf("meeting %s: its room's compaction failed: %s", short(id), c.Error)
-			set(func(ln *kb.MeetingRoomLean) { roomCompactFailed(ln, now, l.Fed); ln.CompactSeen = c.StartedAt })
+			set(func(ln *recordingwire.MeetingRoomLean) {
+				roomCompactFailed(ln, now, l.Fed)
+				ln.CompactSeen = c.StartedAt
+			})
 			ended = false
 		case now.Sub(ln.CompactStartedAt) < roomCompactLost:
 			// Asked of the node, and not on its row (yet): it may run, so nothing goes into the room meanwhile, and no
@@ -165,28 +169,28 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 		default:
 			// Never reported, or no longer (its node restarted): it has ended. It may have compacted the room, so the
 			// lists go again.
-			set(func(ln *kb.MeetingRoomLean) { roomCompactFailed(ln, now, l.Fed); ln.ListsDue = true })
+			set(func(ln *recordingwire.MeetingRoomLean) { roomCompactFailed(ln, now, l.Fed); ln.ListsDue = true })
 		}
 	}
 	switch {
 	case ended && c.State == proto.CompactionDone:
 		// One the owner asked for (or one of the manager's it counted as ended before its row showed it): the room's
 		// conversation was compacted with what was given to it.
-		set(func(ln *kb.MeetingRoomLean) {
+		set(func(ln *recordingwire.MeetingRoomLean) {
 			roomCompactedAt(ln, l.Fed)
 			ln.CompactSeen, ln.Tokens, ln.TokensStale = c.StartedAt, 0, row.ContextTokens
 		})
 	case ended:
-		set(func(ln *kb.MeetingRoomLean) { ln.CompactSeen = c.StartedAt })
+		set(func(ln *recordingwire.MeetingRoomLean) { ln.CompactSeen = c.StartedAt })
 	}
 	// Claude Code compacting the room on its own: the context its row reports while no turn runs there dropped below
 	// half of the most it reported since the room was last compacted. The span counts from here.
 	if t := row.ContextTokens; found && t > 0 && t != ln.TokensStale && !roomWorking(row) {
 		switch {
 		case ln.Tokens > 0 && t < ln.Tokens/2:
-			set(func(ln *kb.MeetingRoomLean) { roomCompactedAt(ln, l.Fed); ln.Tokens, ln.TokensStale = t, 0 })
+			set(func(ln *recordingwire.MeetingRoomLean) { roomCompactedAt(ln, l.Fed); ln.Tokens, ln.TokensStale = t, 0 })
 		case t > ln.Tokens:
-			set(func(ln *kb.MeetingRoomLean) { ln.Tokens, ln.TokensStale = t, 0 })
+			set(func(ln *recordingwire.MeetingRoomLean) { ln.Tokens, ln.TokensStale = t, 0 })
 		}
 	}
 	if !start || ln.Never || !roomCompactDue(l, ln) {
@@ -209,7 +213,7 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 	if roomWorking(row) {
 		return now.Add(feedBusyPoll), false, ln // the turn ends
 	}
-	ref := kb.SessionRef{MachineID: room.MachineID, SessionID: room.SessionID}
+	ref := recordingwire.SessionRef{MachineID: room.MachineID, SessionID: room.SessionID}
 	switch _, verdict := s.attendeeCheckRead(ctx, ref, now, id, &rd); verdict {
 	case "":
 	case attendeeBusy:
@@ -224,7 +228,7 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 	defer release()
 	// Noted before the node is asked: after a restart the session's compaction says whether it runs. One that could not
 	// be noted is not asked for.
-	if !set(func(ln *kb.MeetingRoomLean) { ln.CompactStartedAt, ln.CompactFed = now, l.Fed }) {
+	if !set(func(ln *recordingwire.MeetingRoomLean) { ln.CompactStartedAt, ln.CompactFed = now, l.Fed }) {
 		return now.Add(feedRetry), false, ln
 	}
 	cctx, cancel := context.WithTimeout(ctx, roomCompactWait)
@@ -242,24 +246,24 @@ func (s *Recordings) roomCompaction(ctx context.Context, e *kb.Engine, id string
 		return now.Add(feedBusyPoll), true, ln
 	case roomCompactNotRunning(err):
 		// Its process exited since its row was read: as when the row says so, the look after the next batch tries again.
-		set(func(ln *kb.MeetingRoomLean) { ln.CompactStartedAt, ln.CompactFed = time.Time{}, 0 })
+		set(func(ln *recordingwire.MeetingRoomLean) { ln.CompactStartedAt, ln.CompactFed = time.Time{}, 0 })
 		return time.Time{}, false, ln
 	case unknownMethod(err), roomCompactRefusedForGood(err):
 		// A node too old for the method, or one that would run the room's process without its restrictions: none.
 		s.logf("meeting %s: its room is not compacted: %v", short(id), err)
-		set(func(ln *kb.MeetingRoomLean) {
+		set(func(ln *recordingwire.MeetingRoomLean) {
 			ln.CompactStartedAt, ln.CompactFed, ln.Never = time.Time{}, 0, true
 		})
 		return time.Time{}, false, ln
 	}
 	s.logf("meeting %s: compact its room: %v", short(id), err) // busy, compacting, its computer away: tried again later
-	set(func(ln *kb.MeetingRoomLean) { roomCompactFailed(ln, now, l.Fed) })
+	set(func(ln *recordingwire.MeetingRoomLean) { roomCompactFailed(ln, now, l.Fed) })
 	return ln.RetryAt, false, ln
 }
 
 // roomCompactFailed notes a compaction that was refused, failed or has not been heard of: tried again roomCompactRetry
 // later, at most roomCompactAttempts times for the same span; then the span starts again from feed position fed.
-func roomCompactFailed(ln *kb.MeetingRoomLean, now time.Time, fed int) {
+func roomCompactFailed(ln *recordingwire.MeetingRoomLean, now time.Time, fed int) {
 	ln.CompactStartedAt, ln.CompactFed = time.Time{}, 0
 	ln.Attempts++
 	ln.RetryAt = now.Add(roomCompactRetry)

@@ -163,6 +163,7 @@ struct SidebarAgentsRootPage: View {
         case is MachineListRoute: MachinesView()
         case let r as TerminalsRoute: TerminalsView(only: r.machine)
         case let r as MachineDetailRoute: MachineDetailView(ref: r.ref)
+        case let r as MachineUsageMapRoute: UsageMapView(route: r)
         case is PersonalAgentsRoute: PersonalAgentListView()
         case let s as PersonalAgentSession: PersonalAgentSessionView(session: s).id(s.id)
         case let r as TodoDetailRoute: TodoDetailView(todoID: r.id)

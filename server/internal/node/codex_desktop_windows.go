@@ -33,6 +33,8 @@ func codexDesktopAvailable(home string) bool {
 	return err == nil
 }
 
+func codexDesktopBusAvailable(home string) bool { return codexDesktopAvailable(home) }
+
 // codexPipeUp says whether the named pipe exists, from the pipe namespace's listing: opening it (os.Stat does, through
 // CreateFile) would take one of the App's free instances for a moment, or connect to it. Kept a few seconds, as the
 // session list asks once per App thread every second.

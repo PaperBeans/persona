@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { t } from "../../i18n";
 import { useKnownDefault } from "../../lib/manager-choice";
 import { href, onLinkClick, type Route } from "../../lib/router";
@@ -22,12 +23,56 @@ export function todoForwardLabel(status: InboxTodoForward["status"]): string {
   }
 }
 
+export type InboxRouteClick = (event: ReactMouseEvent, route: Route) => void;
+
+export interface InboxTaskLinksProps {
+  item: InboxItem;
+  /** Explicit to-dos let a controlled panel own the data without reading the default store. */
+  todos?: Todo[];
+  /** Explicit manager identity for a controlled panel without the default manager-choice store. */
+  defaultManager?: string;
+  /** Builds a link address without using the default router. */
+  resolveHref?: (route: Route) => string;
+  /** Receives link activation while preserving the original event for modifier-key handling. */
+  onRouteClick?: InboxRouteClick;
+}
+
+interface InboxTaskLinksViewProps extends InboxTaskLinksProps {
+  todos: Todo[];
+  defaultManager: string;
+  resolveHref: (route: Route) => string;
+  onRouteClick: InboxRouteClick;
+}
+
+function isControlled(props: InboxTaskLinksProps): props is Required<Pick<InboxTaskLinksProps, "todos" | "defaultManager" | "resolveHref" | "onRouteClick">> & InboxTaskLinksProps {
+  return props.todos !== undefined && props.defaultManager !== undefined && Boolean(props.resolveHref) && Boolean(props.onRouteClick);
+}
+
 /** The business task and its current workers, separate from the Inbox's draft-processing chat. */
-export function InboxTaskLinks({ item }: { item: InboxItem }) {
-  const defaultManager = useKnownDefault();
+export function InboxTaskLinks(props: InboxTaskLinksProps) {
+  if (isControlled(props)) {
+    return <InboxTaskLinksView item={props.item} todos={props.todos} defaultManager={props.defaultManager} resolveHref={props.resolveHref} onRouteClick={props.onRouteClick} />;
+  }
+  return <DefaultInboxTaskLinks {...props} />;
+}
+
+function DefaultInboxTaskLinks(props: InboxTaskLinksProps) {
+  const knownDefault = useKnownDefault();
+  const storedTodos = useStore((s) => s.todos);
+  return (
+    <InboxTaskLinksView
+      {...props}
+      defaultManager={props.defaultManager ?? knownDefault}
+      todos={props.todos ?? storedTodos}
+      resolveHref={props.resolveHref ?? href}
+      onRouteClick={props.onRouteClick ?? onLinkClick}
+    />
+  );
+}
+
+function InboxTaskLinksView({ item, todos, defaultManager, resolveHref, onRouteClick }: InboxTaskLinksViewProps) {
   const id = item.agent?.todo_id;
   const fwd = item.todo_forward;
-  const todos = useStore((s) => s.todos);
   const linked = todos.filter((x) => (x.manager ?? defaultManager) === (item.manager ?? defaultManager) && (x.inbox_item === item.id || x.id === id || (fwd && x.id === fwd.todo_id)));
   const tasks: { id: string; todo?: Todo }[] = linked.map((todo) => ({ id: todo.id, todo }));
   if (id && !tasks.some((x) => x.id === id)) tasks.push({ id });
@@ -55,13 +100,13 @@ export function InboxTaskLinks({ item }: { item: InboxItem }) {
         const taskRoute: Route = { name: "todos", id: taskID };
         const title = todo?.title || (fwd?.todo_id === taskID ? fwd.todo_title : undefined) || taskID;
         return <div key={taskID} className="contents">
-          <a href={href(taskRoute)} onClick={(e) => onLinkClick(e, taskRoute)} className={link}>
+          <a href={resolveHref(taskRoute)} onClick={(e) => onRouteClick(e, taskRoute)} className={link}>
             <Icon name="todo" size={13} /><span className="shrink-0">{t("inbox-inboxdetail.linked_task")}</span>
             <span className="truncate">{title}</span>
           </a>
           {agents.map((agent) => {
             const route: Route = { name: "session", mid: agent.machine, sid: agent.session };
-            return <a key={`${agent.machine}/${agent.session}`} href={href(route)} onClick={(e) => onLinkClick(e, route)} className={link}>
+            return <a key={`${agent.machine}/${agent.session}`} href={resolveHref(route)} onClick={(e) => onRouteClick(e, route)} className={link}>
               <Icon name="agent" size={13} /><span className="shrink-0">{t("inbox-inboxdetail.linked_agent")}</span>
               <span className="truncate">{agent.title}</span>
             </a>;

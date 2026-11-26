@@ -69,7 +69,8 @@ async function load() {
   vi.resetModules();
   const { initI18n } = await import("../../i18n");
   await initI18n("en");
-  return import("./Persona");
+  const [persona, picker] = await Promise.all([import("./Persona"), import("./PersonaPicker")]);
+  return { ...persona, ...picker };
 }
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -100,7 +101,7 @@ function expectDefault(node: HTMLElement) {
 describe("the look the hub keeps", () => {
   // The first import transforms Persona's whole module graph, which takes seconds when the full suite loads the
   // machine; doing it once here keeps that cost out of the first test's 5 s budget. load() still resets modules.
-  beforeAll(() => import("./Persona"), 60_000);
+  beforeAll(() => Promise.all([import("./Persona"), import("./PersonaPicker")]), 60_000);
   beforeEach(() => {
     localStorage.clear();
     hub.looks = [...builtins, aurora, meadow];

@@ -52,6 +52,12 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 		return "", err
 	}
 	label := agentLabel(c)
+	if refused, why := sessionSafetyRefusal(c); refused {
+		return "", fmt.Errorf("%s is blocked by a provider safety refusal (%s): a safety refusal remains a recorded blocker and cannot trigger a provider switch or replay. Nothing was done", label, why)
+	}
+	if s.sessionUnresolvedApproval(c) {
+		return "", fmt.Errorf("%s has an unresolved approval or question waiting for the owner: resolve it directly first; switching never grants or dismisses approvals. Nothing was done", label)
+	}
 	if err := switchUnsupported(c, t.Launcher); err != nil {
 		if errors.Is(err, errOnLauncherAlready) {
 			return "", fmt.Errorf("%s runs on launcher %s already: to go on, use agent_send. Nothing was done", label, t.Launcher)

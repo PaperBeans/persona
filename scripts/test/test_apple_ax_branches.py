@@ -14,6 +14,7 @@ ALLOWED = {
     "Persona/Recording/RecordingMinutesSummary.swift": "the same for minutes' points and transcript lines",
     "Persona/Recording/RecordingMinutesOverview.swift": "puts a topic's icon tile above its title at the reading size (#6563)",
     "Persona/Recording/RecordingMinutesView.swift": "the same for the minutes' points",
+    "Persona/Views/Chat/TurnChangesCard.swift": "stacks the Changed Files reading rows and review action at the reading size",
     "Persona/Views/Chat/BubbleFold.swift": "the user bubble folds by the reading size it is given",
     "Shared/Design/RecordingTokens.swift": "the recording timer's own cap",
     "PersonaWatch/PersonaWatchApp.swift": "the watch's showLargeText launch switch",

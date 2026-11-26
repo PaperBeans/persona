@@ -26,6 +26,9 @@ nonisolated struct WatchIntakeReading: Codable, Equatable, Sendable {
     var protein: Portion
     var nextDay: Date
     var zone: String
+    var items: [String]?
+
+    func contains(_ kind: WatchIntakeKind) -> Bool { items?.contains(kind.rawValue) ?? true }
 
     func portion(_ kind: WatchIntakeKind, at date: Date) -> Portion {
         var value = kind == .water ? water : protein
@@ -39,6 +42,7 @@ nonisolated struct WatchIntakeReading: Codable, Equatable, Sendable {
         var protein: Portion
         var days: [Day]
         var zone: String
+        var items: [String]?
     }
 
     init(_ value: Answer, at now: Date) throws {
@@ -47,7 +51,7 @@ nonisolated struct WatchIntakeReading: Codable, Equatable, Sendable {
         // Go's unresolved "Local" label is not the watch's zone. Keep the hub's authoritative bucket until
         // the next GET rather than clearing its current amounts at a guessed UTC/phone midnight.
         guard value.zone != "Local", let zone = TimeZone(identifier: value.zone) else {
-            self.init(water: value.water, protein: value.protein, nextDay: .distantFuture, zone: value.zone)
+            self.init(water: value.water, protein: value.protein, nextDay: .distantFuture, zone: value.zone, items: value.items)
             return
         }
         var calendar = Calendar(identifier: .gregorian)
@@ -58,11 +62,11 @@ nonisolated struct WatchIntakeReading: Codable, Equatable, Sendable {
             start = day
         } else { start = calendar.startOfDay(for: now) }
         let boundary = calendar.date(byAdding: .day, value: 1, to: start) ?? now
-        self.init(water: value.water, protein: value.protein, nextDay: boundary, zone: value.zone)
+        self.init(water: value.water, protein: value.protein, nextDay: boundary, zone: value.zone, items: value.items)
     }
 
-    init(water: Portion, protein: Portion, nextDay: Date, zone: String) {
-        self.water = water; self.protein = protein; self.nextDay = nextDay; self.zone = zone
+    init(water: Portion, protein: Portion, nextDay: Date, zone: String, items: [String]? = nil) {
+        self.water = water; self.protein = protein; self.nextDay = nextDay; self.zone = zone; self.items = items
     }
 }
 

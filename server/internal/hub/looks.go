@@ -202,12 +202,14 @@ func lookManifest(lp extwire.LookPackage, l extension.LookItem) map[string]any {
 
 // looks is every look, in the picker's order: the built-in ones, the hub's packages, the extensions'.
 func (h *Hub) looks() []lookView {
+	lookSwapMu.RLock()
+	defer lookSwapMu.RUnlock()
 	out := []lookView{}
 	for _, id := range extension.BuiltinLooks {
 		b := builtinLookNames[id]
 		out = append(out, lookView{ID: id, Source: "builtin", Name: b.name, Names: b.names, AppIcon: id})
 	}
-	for _, p := range h.personaPackages() {
+	for _, p := range h.personaPackagesLocked() {
 		info, err := h.personaInfo(p)
 		if err != nil {
 			h.logf("persona %s left out: %v", p.id, err)

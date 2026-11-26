@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchKit
+import WidgetKit
 import PersonaWire
 
 @main
@@ -82,6 +83,9 @@ final class WatchModel {
     var groups: [String] { configs.keys.sorted { ($0.isEmpty ? 0 : 1, $0) < ($1.isEmpty ? 0 : 1, $1) } }
     var sessions: [Session] = []
     var interactions: [Interaction] = []
+    /// Non-muted pending cards (including delegating questions) plus supervisor-held cards so `WatchPet.status` knows
+    /// which `needs_you` sessions are held only by their supervisor.
+    private var petInteractions: [Interaction] = []
     /// The inbox's Needs You (Feishu messages, mail and connectors' items the AI says need the user), newest first.
     var inbox: [InboxItem] = []
     var machines: [Machine] = []
@@ -118,7 +122,7 @@ final class WatchModel {
             return WatchPetStatus(state: state, count: 3)
         }
         #endif
-        return WatchPet.status(sessions: sessions, interactions: interactions, unreachable: error != nil,
+        return WatchPet.status(sessions: sessions, interactions: petInteractions, unreachable: error != nil,
                                partlyUnreachable: !groupFailures.isEmpty)
     }
 
@@ -189,6 +193,10 @@ final class WatchModel {
             Task { await self?.fetchPet() }
         }
         WatchSync.shared.onMinutes = { [weak self] m in self?.minutes = m }
+        // The phone's word on its hub's recording module changed (#15214): the Record complication draws it.
+        WatchSync.shared.onRecordingAllowance = {
+            WidgetCenter.shared.reloadTimelines(ofKind: PhoneRecordingAllowance.recordWidgetKind)
+        }
         WatchSync.shared.onSummary = { [weak self] s in
             guard let self, WatchGroupRefresh.acceptsSummary(at: s.at, lastUpdate: self.lastUpdate) else { return }
             // Which hubs fold side sessions (#7944): the watch reads no hello, so its own reads of them fold as the phone said.
@@ -220,20 +228,14 @@ final class WatchModel {
     }
 
     private func apply(sessions: [Session], interactions: [Interaction], machines: [Machine], at: Date = .now) {
-        // Agents of quiet tasks and their questions are the main conversation's to tell (#1731), by the hub's word.
-        let (sessions, interactions) = QuietTasks.leavingOut(sessions: sessions, interactions: interactions, quiet: \.quiet)
-        // A side session lives in its parent's chat (#7944): no row of its own on the wrist, the parent in its folded state.
-        // The phone's summary is folded already; folding it again changes nothing.
-        let folded = SideFold.fold(sessions, groups: SideFold.rememberedGroups(groups)).listed
-        // A muted agent's or space's card never reaches the wrist (#4360): it is neither shown nor buzzed for.
-        let shown = WatchInteractions.leavingMuted(interactions)
+        let applied = WatchGroupRefresh.apply(sessions: sessions, interactions: interactions,
+                                              sideFoldGroups: SideFold.rememberedGroups(groups))
         // Only a card seen for the first time buzzes: one that vanished with a failed group and came back with it is
         // already in the persisted record (#4369).
-        let freshUids = WatchGroupRefresh.newHapticUids(seen: Set(seenInteractionUids), current: shown)
-        func rank(_ s: Session) -> Int { s.state.priority }
-        self.sessions = folded.filter { $0.state.isLive && !$0.assistant || $0.state == .needsYou || $0.state == .working }
-            .sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.sortDate > $1.sortDate }
-        self.interactions = shown
+        let freshUids = WatchGroupRefresh.newHapticUids(seen: Set(seenInteractionUids), current: applied.interactions)
+        self.sessions = applied.sessions
+        self.interactions = applied.interactions
+        self.petInteractions = applied.petInteractions
         if !machines.isEmpty { self.machines = machines }
         lastUpdate = at
         guard !freshUids.isEmpty else { return }
@@ -342,11 +344,13 @@ final class WatchModel {
         do {
             _ = try await api.resolve(ix.id, r)
             interactions.removeAll { $0.uid == ix.uid }
+            petInteractions.removeAll { $0.uid == ix.uid }
             forgetSeen(ix.uid)
             WKInterfaceDevice.current().play(.success)
         } catch let e as APIError where e.status == 410 {
             // Already ended on server: remove interaction cleanly without error
             interactions.removeAll { $0.uid == ix.uid }
+            petInteractions.removeAll { $0.uid == ix.uid }
             forgetSeen(ix.uid)
             WKInterfaceDevice.current().play(.directionDown)
         } catch {
@@ -568,6 +572,8 @@ struct WatchRootView: View {
                     case "complication": PetComplicationPreview()
                     case "allday-complication": AllDayComplicationPreview()
                     case "record-complication": MeetingRecordingComplicationPreview()
+                    case "intake-complication": WatchIntakePreview()
+                    case "tell-health": TellHealthPreview(api: model.api)
                     default: WatchPetView()
                     }
                 }
@@ -577,6 +583,8 @@ struct WatchRootView: View {
                     case "allday": allDay.pageRequested = true
                     case "allday-complication": openedPetPage = "allday-complication"
                     case "record-complication": openedPetPage = "record-complication"
+                    case "intake-complication": openedPetPage = "intake-complication"
+                    case "tell-health": openedPetPage = "tell-health"
                     default: break
                     }
                 }
@@ -825,8 +833,10 @@ struct WatchInteractionView: View {
                 case .elicitation: // an MCP form or link is answered on the phone, which keeps it off the watch: its message only
                     Text(interaction.watchSummary).font(.footnote)
                 }
-                Button("Handle on Computer") { act(.dismissed) }
-                    .lineLimit(1).minimumScaleFactor(0.8).font(.caption2).foregroundStyle(.secondary)
+                if interaction.noHandBack != true {
+                    Button("Handle on Computer") { act(.dismissed) }
+                        .lineLimit(1).minimumScaleFactor(0.8).font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .buttonStyle(.bordered)
@@ -1013,6 +1023,8 @@ struct WatchPairView: View {
     @State private var allDay = WatchAllDay.shared
     /// The phone's `recordingDay`: absent from a phone that doesn't take day recordings, 0 until its user agrees.
     @AppStorage(WatchSync.phoneDayKey) private var phoneDay: Int?
+    /// The phone's word on its hub's recording module (`PhoneRecordingAllowance`, #15214); absent means allowed.
+    @AppStorage(WatchSync.phoneRecordingKey) private var phoneRecording: String?
 
     var body: some View {
         ScrollView {
@@ -1034,7 +1046,8 @@ struct WatchPairView: View {
                 .padding(.top, Theme.Space.s)
                 // Recording needs the phone, not the hub: all-day recording too, once the phone takes it (its page
                 // points to the phone's consent until the user agreed there).
-                if allDay.access(phoneDay: phoneDay) != .hidden {
+                if AllDayAlertPolicy.listed(allDay.access(phoneDay: phoneDay, recording: PhoneRecordingAllowance(wire: phoneRecording)),
+                                            state: allDay.state) {
                     NavigationLink { WatchAllDayView() } label: {
                         Label("All-Day Recording", systemImage: Theme.Icon.allDay).lineLimit(1)
                     }

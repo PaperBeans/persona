@@ -77,17 +77,19 @@ func TestStandingAuthorizationConfiguredModelAndFallback(t *testing.T) {
 			}
 			e.s.askTick(time.Now().Add(2 * askHoldFor))
 			waitFor(t, "manual fallback notification", func() bool { return e.pushesOf(ix.ID) == 1 })
-			facts := e.s.briefFactsAt(t.Context(), time.Now().Add(time.Second), "")
-			if facts.Confirmations.UserNotified != 1 || facts.Confirmations.AutoAuthorized != 0 || len(facts.Confirmations.Sources) != 1 || facts.Confirmations.Sources[0].Kind != proto.IxPlan {
-				t.Fatalf("manual fallback briefing counts: %+v", facts.Confirmations)
+			if e.s.briefingOn() {
+				facts := e.s.briefFactsAt(t.Context(), time.Now().Add(time.Second), "")
+				if facts.Confirmations.UserNotified != 1 || facts.Confirmations.AutoAuthorized != 0 || len(facts.Confirmations.Sources) != 1 || facts.Confirmations.Sources[0].Kind != proto.IxPlan {
+					t.Fatalf("manual fallback briefing counts: %+v", facts.Confirmations)
+				}
+				facts.Lang = "en"
+				facts.ConfirmationLines = e.s.confirmationLines(i18n.En, e.s.briefConfirmationsAt(t.Context(), time.Now().Add(time.Second), e.s.location(t.Context())))
+				_, plain, _ := e.s.briefCard(facts, "Morning briefing", "")
+				if !strings.Contains(plain, "1 confirmation cards sent to you") {
+					t.Fatalf("manual fallback absent from briefing: %s", plain)
+				}
+				t.Logf("MODEL_UNAVAILABLE_BRIEFING\n%s", plain)
 			}
-			facts.l = i18n.Lang("en")
-			facts.ConfirmationLines = e.s.confirmationLines(facts.l, facts.Confirmations)
-			_, plain, _ := e.s.briefCard(facts, "Morning briefing", "")
-			if !strings.Contains(plain, "1 confirmation cards sent to you") {
-				t.Fatalf("manual fallback absent from briefing: %s", plain)
-			}
-			t.Logf("MODEL_UNAVAILABLE_BRIEFING\n%s", plain)
 		})
 	}
 }

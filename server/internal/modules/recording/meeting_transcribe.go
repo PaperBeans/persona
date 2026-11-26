@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
 	"math"
 	"slices"
 	"strings"
@@ -11,15 +13,16 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // Hub transcription (#3862 phase 5, docs/assistant/meeting-minutes.md "Phase 5: hub transcription"): a meeting uploaded
-// with transcription hub streams its audio to the hub (meeting_audio.go), which stores it (kb.AudioWriter) and hands
+// with transcription hub streams its audio to the hub (meeting_audio.go), which stores it (writers.AudioWriter) and hands
 // it to a transcription contribution's live job (meeting_transcribe_job.go). Each recording being transcribed has a
 // hubRun: it holds a sentence back while Persona speaks and then marks it Persona's echo or not by the echo rule
-// (kb.EchoHeld, kb.EchoOf: kb/echo.go, against the speaking spans and the answers said in them), puts every sentence in
-// the hub's transcript (hub_segments.json, kb.HubTranscriptPut; Persona's echo with its mark) and the meeting's own,
-// while the role at their end is not off, in the live log (kb.LiveAppendHub), sending the phone its line frames.
+// (writers.EchoHeld, writers.EchoOf: writers/echo.go, against the speaking spans and the answers said in them), puts every sentence in
+// the hub's transcript (hub_segments.json, writers.HubTranscriptPut; Persona's echo with its mark) and the meeting's own,
+// while the role at their end is not off, in the live log (writers.LiveAppendHub), sending the phone its line frames.
 // Persona's echo never reaches the live log, a line frame or the room. When the hub has no
 // sentences the phone's text fills the live log (meeting_transcribe_fallback.go). After the meeting the final pass
 // transcribes the stored audio again (meeting_transcribe_final.go). Nothing here logs what was said.
@@ -80,7 +83,7 @@ type hubRun struct {
 	// it (its speaking on's text) and openOn the socket that sent its speaking on; held the sentences waiting for it to
 	// close, in order. openAssumed: it was held echoHoldMost without closing, and is assumed open since: sentences are
 	// no longer held for it but judged with it (assumedSpanLocked) until a speaking off or the timeline closes it.
-	timeline    kb.Timeline
+	timeline    recordingwire.Timeline
 	role        string
 	openFrom    *float64
 	openText    string
@@ -91,7 +94,7 @@ type hubRun struct {
 
 	// The hub's live sentences (hub_segments.json's and those since), whether hub_segments.json lags behind them,
 	// when it was last written, the end of the latest one.
-	hub        []kb.RecordingSegment
+	hub        []kbwire.RecordingSegment
 	hubDirty   bool
 	hubPutAt   time.Time
 	lastHubEnd float64
@@ -112,7 +115,7 @@ type hubRun struct {
 	fallback bool
 	filled   [][2]float64
 	filledTo float64
-	device   []kb.RecordingSegment
+	device   []kbwire.RecordingSegment
 	deviceTo float64
 
 	// flushedTo: the job's sentences up to here are in (flushed); flushWant: the earliest at a heard ask waits for the
@@ -141,7 +144,7 @@ const (
 
 // hubRunOf is recording id's run, nil without one.
 func (s *Recordings) hubRunOf(id string) *hubRun {
-	id, ok := kb.RecordingID(id)
+	id, ok := recordingwire.RecordingID(id)
 	if !ok {
 		return nil
 	}
@@ -153,7 +156,7 @@ func (s *Recordings) hubRunOf(id string) *hubRun {
 // hubRunFor is recording id's run, made when there is none; nil when the recording is not transcribed on the hub or
 // its live pass is over (the final pass started).
 func (s *Recordings) hubRunFor(e *kb.Engine, id string) *hubRun {
-	id, ok := kb.RecordingID(id)
+	id, ok := recordingwire.RecordingID(id)
 	if !ok {
 		return nil
 	}
@@ -192,16 +195,16 @@ func (s *Recordings) hubRunFor(e *kb.Engine, id string) *hubRun {
 // newHubRun is recording id's run as the knowledge base has it: its timeline, the hub's live sentences, the lines
 // the phone's text filled, the standing problem. Nil when it has no live pass.
 func newHubRun(s *Recordings, e *kb.Engine, id string) *hubRun {
-	l, rec, err := e.LiveRead(id)
+	l, rec, err := writersOf(e).LiveRead(id)
 	if err != nil || !rec.HubTranscribed() || rec.Trimmed() {
 		return nil
 	}
 	t := rec.Conv.Transcription
-	if !t.FinalFrom.IsZero() || !t.AudioGoneAt.IsZero() || t.State == kb.TranscriptionFinal || t.State == kb.TranscriptionFailed {
+	if !t.FinalFrom.IsZero() || !t.AudioGoneAt.IsZero() || t.State == recordingwire.TranscriptionFinal || t.State == recordingwire.TranscriptionFailed {
 		return nil
 	}
 	h, err := e.HubTranscript(id)
-	if err != nil || h.Pass == kb.HubPassFinal {
+	if err != nil || h.Pass == recordingwire.HubPassFinal {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(s.runCtx())
@@ -220,14 +223,14 @@ func newHubRun(s *Recordings, e *kb.Engine, id string) *hubRun {
 		r.upstream, r.upstreamAt = t.Problem, time.Now()
 	}
 	for _, sg := range l.Segments {
-		if sg.Source == kb.SourceDevice {
+		if sg.Source == recordingwire.SourceDevice {
 			r.filled = append(r.filled, [2]float64{sg.Start, sg.End})
 			r.filledTo = max(r.filledTo, sg.End)
 		}
 	}
-	if segs, err := e.RecordOf(id); err == nil {
+	if segs, err := writersOf(e).RecordOf(id); err == nil {
 		for _, sg := range segs {
-			if sg.Source == kb.SourceDevice {
+			if sg.Source == recordingwire.SourceDevice {
 				r.device = append(r.device, sg)
 				r.deviceTo = max(r.deviceTo, sg.End)
 			}
@@ -301,7 +304,7 @@ func (r *hubRun) phoneSendLocked(v any) {
 
 // roleNowLocked is the role at the live edge, for what only goes out while the meeting is attended.
 func (r *hubRun) roleNowLocked() string {
-	return r.timeline.RoleAt(float64(r.edge)/kb.AudioRate, r.role)
+	return r.timeline.RoleAt(float64(r.edge)/recordingwire.AudioRate, r.role)
 }
 
 // ---- the phone's socket ----
@@ -327,13 +330,13 @@ func (r *hubRun) attach(p *phoneSocket) (refused string) {
 // spans missing before it; next, the live log's length, read under the run's lock so that every line appended later
 // goes out after ready), its timeline joins the union, the socket is up from now (the fallback's "down" ends) and the
 // standing problem goes out.
-func (r *hubRun) begin(p *phoneSocket, t *kb.Timeline, from float64, gaps [][2]float64) {
+func (r *hubRun) begin(p *phoneSocket, t *recordingwire.Timeline, from float64, gaps [][2]float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.phone != p || r.stopped {
 		return
 	}
-	l, _, _ := r.e.LiveRead(r.id)
+	l, _, _ := writersOf(r.e).LiveRead(r.id)
 	p.send(map[string]any{"type": "ready", "from": from, "gaps": gaps, "next": len(l.Segments)})
 	r.phoneReady = true
 	r.started, r.downSince, r.ended = true, time.Time{}, false
@@ -381,7 +384,7 @@ func (r *hubRun) audio(at float64, pcm []byte) {
 	if r.stopped {
 		return
 	}
-	from := int64(math.Round(at * kb.AudioRate))
+	from := int64(math.Round(at * recordingwire.AudioRate))
 	to := from + int64(len(pcm)/2)
 	if to <= r.edge {
 		return
@@ -392,7 +395,7 @@ func (r *hubRun) audio(at float64, pcm []byte) {
 	r.edge, r.audioAt = to, time.Now()
 	if j := r.ensureJobLocked(from); j != nil {
 		j.feedLocked(from, pcm)
-		if r.flushWant > 0 && float64(j.sentS)/kb.AudioRate >= r.flushWant {
+		if r.flushWant > 0 && float64(j.sentS)/recordingwire.AudioRate >= r.flushWant {
 			r.flushWant = 0
 			r.notifyLocked() // a heard ask's audio reached the job: it flushes now (hubFlush)
 		}
@@ -403,7 +406,7 @@ func (r *hubRun) audio(at float64, pcm []byte) {
 func (r *hubRun) roleFrame(at float64, attendance string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.mergeTimelineLocked(kb.Timeline{Roles: []kb.TimelineRole{{At: at, Attendance: attendance}}})
+	r.mergeTimelineLocked(recordingwire.Timeline{Roles: []recordingwire.TimelineRole{{At: at, Attendance: attendance}}})
 }
 
 // speaking is socket p's speaking frame: a span opens at at, Persona saying text (sentences that end after it began
@@ -418,12 +421,12 @@ func (r *hubRun) speaking(p *phoneSocket, on bool, at float64, text string) {
 		return
 	}
 	if on {
-		const slack = 1.0 / kb.AudioRate // times are rounded to a sample
+		const slack = 1.0 / recordingwire.AudioRate // times are rounded to a sample
 		if r.openFrom != nil && at > *r.openFrom+slack {
 			r.expireSpanLocked(*r.openFrom, at)
 		}
 		if r.openFrom == nil {
-			r.openFrom, r.openText, r.openAt = &at, kb.SpokenText(text), time.Now()
+			r.openFrom, r.openText, r.openAt = &at, recordingwire.SpokenText(text), time.Now()
 			r.clearInterimLocked() // no caption goes out while Persona speaks
 		}
 		r.openOn = p
@@ -443,9 +446,9 @@ func (r *hubRun) clearOpenLocked() {
 
 // closeSpanLocked: the open span is [from, to], with the answer said in it; the sentences held for it are judged now.
 func (r *hubRun) closeSpanLocked(from, to float64) {
-	span := kb.SpokenSpan{Start: from, End: to, Text: r.openText}
+	span := recordingwire.SpokenSpan{Start: from, End: to, Text: r.openText}
 	r.clearOpenLocked()
-	r.mergeTimelineLocked(kb.Timeline{Speaking: []kb.SpokenSpan{span}})
+	r.mergeTimelineLocked(recordingwire.Timeline{Speaking: []recordingwire.SpokenSpan{span}})
 	held := r.held
 	r.held = nil
 	for _, s := range held {
@@ -460,7 +463,7 @@ func (r *hubRun) closeSpanLocked(from, to float64) {
 // speaking off a dropped socket lost (and that the next start or upload repairs) never becomes an assumed span that
 // marks real speech in the final pass.
 func (r *hubRun) expireSpanLocked(from, to float64) {
-	span := kb.SpokenSpan{Start: from, End: max(from, to), Text: r.openText}
+	span := recordingwire.SpokenSpan{Start: from, End: max(from, to), Text: r.openText}
 	r.clearOpenLocked()
 	held := r.held
 	r.held = nil
@@ -487,24 +490,24 @@ func (r *hubRun) releaseHoldLocked() {
 
 // assumedSpanLocked is the open span assumed open (releaseHoldLocked) as sentence s is judged: from its start to the
 // sentence's end, with the answer it carried; false when no span is assumed open.
-func (r *hubRun) assumedSpanLocked(s hubSentence) (kb.SpokenSpan, bool) {
+func (r *hubRun) assumedSpanLocked(s hubSentence) (recordingwire.SpokenSpan, bool) {
 	if r.openFrom == nil || !r.openAssumed {
-		return kb.SpokenSpan{}, false
+		return recordingwire.SpokenSpan{}, false
 	}
 	from := *r.openFrom
-	return kb.SpokenSpan{Start: from, End: max(from, s.End), Text: r.openText}, true
+	return recordingwire.SpokenSpan{Start: from, End: max(from, s.End), Text: r.openText}, true
 }
 
 // reconcileOpenLocked closes the open speaking span once the timeline has it closed: the speaking off a dropped
 // socket lost comes back in the next socket's start.timeline or an upload's timeline (a timeline has only spans that
 // ended; a span still open when a socket starts is not in its start, the phone sends speaking on after it):
-// kb.EchoSpanClosed.
+// writers.EchoSpanClosed.
 func (r *hubRun) reconcileOpenLocked() {
 	if r.openFrom == nil {
 		return
 	}
 	from := *r.openFrom
-	if to, ok := kb.EchoSpanClosed(r.timeline, from); ok {
+	if to, ok := writers.EchoSpanClosed(r.timeline, from); ok {
 		r.closeSpanLocked(from, to)
 	}
 }
@@ -516,12 +519,12 @@ func (r *hubRun) openSeenLocked() bool {
 }
 
 // mergeTimelineLocked adds t to the run's timeline and meeting.json's.
-func (r *hubRun) mergeTimelineLocked(t kb.Timeline) {
+func (r *hubRun) mergeTimelineLocked(t recordingwire.Timeline) {
 	if !r.timeline.Merge(t) {
 		return
 	}
-	if _, err := r.e.TranscriptionUpdate(r.id, func(m *kb.MeetingTranscription, _ kb.Recording) error {
-		var tl kb.Timeline
+	if _, err := writersOf(r.e).TranscriptionUpdate(r.id, func(m *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
+		var tl recordingwire.Timeline
 		if m.Timeline != nil {
 			tl = *m.Timeline
 		}
@@ -538,7 +541,7 @@ func (r *hubRun) mergeTimelineLocked(t kb.Timeline) {
 // sentenceLocked is a sentence of the live job: held while a speaking span that it may be Persona's echo of is open
 // and not yet assumed open (and behind one held, so the live log stays in order), else judged at once.
 func (r *hubRun) sentenceLocked(s hubSentence) {
-	if len(r.held) > 0 || r.openFrom != nil && !r.openAssumed && kb.EchoHeld(s.End, *r.openFrom) {
+	if len(r.held) > 0 || r.openFrom != nil && !r.openAssumed && writers.EchoHeld(s.End, *r.openFrom) {
 		r.held = append(r.held, s)
 		return
 	}
@@ -547,11 +550,11 @@ func (r *hubRun) sentenceLocked(s hubSentence) {
 
 // judgeLocked takes sentence s, marked Persona's echo when the echo rule says so against the timeline's speaking spans,
 // extra (a span assumed closed, expireSpanLocked) and the span assumed open, if any (assumedSpanLocked).
-func (r *hubRun) judgeLocked(s hubSentence, extra ...kb.SpokenSpan) {
+func (r *hubRun) judgeLocked(s hubSentence, extra ...recordingwire.SpokenSpan) {
 	if sp, ok := r.assumedSpanLocked(s); ok {
 		extra = append(slices.Clone(extra), sp)
 	}
-	r.acceptLocked(s, kb.EchoOf(r.timeline, s.Start, max(s.End, s.Start), s.Text, extra...))
+	r.acceptLocked(s, writers.EchoOf(r.timeline, s.Start, max(s.End, s.Start), s.Text, extra...))
 }
 
 // acceptLocked takes sentence s into the hub's transcript (echo: marked Persona's echo) and, unless it is Persona's
@@ -565,7 +568,7 @@ func (r *hubRun) acceptLocked(s hubSentence, echo bool) {
 	if s.End < s.Start {
 		s.End = s.Start
 	}
-	r.hub = append(r.hub, kb.RecordingSegment{Start: s.Start, End: s.End, Text: text, Source: kb.SourceHub, Echo: echo})
+	r.hub = append(r.hub, kbwire.RecordingSegment{Start: s.Start, End: s.End, Text: text, Source: recordingwire.SourceHub, Echo: echo})
 	r.hubDirty = true
 	r.lastHubEnd = max(r.lastHubEnd, s.End)
 	if r.upstream != "" || r.fatal {
@@ -576,15 +579,15 @@ func (r *hubRun) acceptLocked(s hubSentence, echo bool) {
 		r.setFallbackLocked(false)
 	}
 	defer r.notifyLocked()
-	if echo || r.timeline.RoleAt(s.End, r.role) == kb.AttendanceOff {
+	if echo || r.timeline.RoleAt(s.End, r.role) == recordingwire.AttendanceOff {
 		return // in the hub's transcript only (Persona's echo marked there)
 	}
-	if kb.CoveredShare(s.Start, s.End, r.filled) > 0.5 {
+	if recordingwire.CoveredShare(s.Start, s.End, r.filled) > 0.5 {
 		return // the phone's text said it already
 	}
-	n, err := r.e.LiveAppendHub(r.id, []kb.LiveSegment{{Start: s.Start, End: s.End, Text: text}})
+	n, err := writersOf(r.e).LiveAppendHub(r.id, []recordingwire.LiveSegment{{Start: s.Start, End: s.End, Text: text}})
 	if err != nil {
-		if !errors.Is(err, kb.ErrLiveFull) {
+		if !errors.Is(err, recordingwire.ErrLiveFull) {
 			r.s.logf("recording %s: live line: %v", r.id, err)
 		}
 		return
@@ -605,8 +608,8 @@ func (r *hubRun) interimLocked(start float64, text string) {
 	r.interim = &liveInterim{Start: start, Text: text, At: now}
 	r.interimRev = max(now.UnixMilli(), r.interimRev+1)
 	r.phoneSendLocked(map[string]any{"type": "interim", "start": start, "text": text})
-	if r.roleNowLocked() != kb.AttendanceOff {
-		r.s.meetingLiveChanged(r.id, []string{kb.PartInterim})
+	if r.roleNowLocked() != recordingwire.AttendanceOff {
+		r.s.meetingLiveChanged(r.id, []string{recordingwire.PartInterim})
 	}
 }
 
@@ -617,7 +620,7 @@ func (r *hubRun) clearInterimLocked() {
 	}
 	r.interim = nil
 	r.interimRev++
-	r.s.meetingLiveChanged(r.id, []string{kb.PartInterim})
+	r.s.meetingLiveChanged(r.id, []string{recordingwire.PartInterim})
 }
 
 // putHubLocked writes the hub's live sentences to hub_segments.json (with transcript.md).
@@ -626,11 +629,11 @@ func (r *hubRun) putHubLocked() {
 		return
 	}
 	r.hubPutAt = time.Now()
-	if _, err := r.e.HubTranscriptPut(r.id, kb.HubPassLive, r.hub); err != nil {
+	if _, err := writersOf(r.e).HubTranscriptPut(r.id, recordingwire.HubPassLive, r.hub); err != nil {
 		switch {
-		case errors.Is(err, kb.ErrReadOnly):
+		case errors.Is(err, kbwire.ErrReadOnly):
 			return // kept until it can be written
-		case errors.Is(err, kb.ErrTranscriptionFinal), errors.Is(err, kb.ErrNotFound), errors.Is(err, kb.ErrNotHub):
+		case errors.Is(err, recordingwire.ErrTranscriptionFinal), errors.Is(err, kbwire.ErrNotFound), errors.Is(err, recordingwire.ErrNotHub):
 		default:
 			r.s.logf("recording %s: hub transcript: %v", r.id, err)
 			return
@@ -672,10 +675,10 @@ func (r *hubRun) tellProblemLocked() {
 		code = p
 	}
 	r.phoneSendLocked(map[string]any{"type": "problem", "code": code})
-	if _, err := r.e.TranscriptionUpdate(r.id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := writersOf(r.e).TranscriptionUpdate(r.id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 		t.Problem = p
 		return nil
-	}); err != nil && !errors.Is(err, kb.ErrNotFound) && !errors.Is(err, kb.ErrRecordingDeleted) {
+	}); err != nil && !errors.Is(err, kbwire.ErrNotFound) && !errors.Is(err, recordingwire.ErrRecordingDeleted) {
 		r.s.logf("recording %s: transcription problem: %v", r.id, err)
 	}
 }
@@ -693,7 +696,7 @@ func (r *hubRun) stop(code string) {
 	gone := code == codeRecordingDeleted || code == codeTranscriptExpired
 	if r.openFrom != nil && !gone {
 		from := *r.openFrom
-		r.expireSpanLocked(from, float64(r.edge)/kb.AudioRate)
+		r.expireSpanLocked(from, float64(r.edge)/recordingwire.AudioRate)
 	}
 	if !gone {
 		r.putHubLocked()
@@ -749,14 +752,14 @@ func (s *Recordings) hubSweep(e *kb.Engine) {
 	}
 	s.hubTr.mu.Unlock()
 	for _, id := range passes {
-		if _, rec, err := e.MeetingRead(id); errors.Is(err, kb.ErrRecordingDeleted) || errors.Is(err, kb.ErrNotFound) || err == nil && rec.Trimmed() {
+		if _, rec, err := writersOf(e).MeetingRead(id); errors.Is(err, recordingwire.ErrRecordingDeleted) || errors.Is(err, kbwire.ErrNotFound) || err == nil && rec.Trimmed() {
 			s.finalCancel(id)
 		}
 	}
 	for _, r := range runs {
-		_, rec, err := e.MeetingRead(r.id)
+		_, rec, err := writersOf(e).MeetingRead(r.id)
 		switch {
-		case errors.Is(err, kb.ErrRecordingDeleted), errors.Is(err, kb.ErrNotFound):
+		case errors.Is(err, recordingwire.ErrRecordingDeleted), errors.Is(err, kbwire.ErrNotFound):
 			r.stop(codeRecordingDeleted)
 		case err != nil:
 		case rec.Trimmed():
@@ -782,7 +785,7 @@ func (s *Recordings) hubInterim(id string) *liveInterim {
 	defer r.mu.Unlock()
 	in := r.interim
 	if in == nil || !r.phoneReady || r.ended || time.Since(in.At) > s.tm().interimShown ||
-		r.timeline.RoleAt(in.Start, r.role) == kb.AttendanceOff {
+		r.timeline.RoleAt(in.Start, r.role) == recordingwire.AttendanceOff {
 		return nil
 	}
 	c := *in
@@ -821,7 +824,7 @@ func (s *Recordings) hubFlush(ctx context.Context, id string, at float64) bool {
 		}
 		switch {
 		case !j.ready:
-		case float64(j.sentS)/kb.AudioRate < at: // the ask came before its audio: woken once the audio reaches it
+		case float64(j.sentS)/recordingwire.AudioRate < at: // the ask came before its audio: woken once the audio reaches it
 			if r.flushWant == 0 || at < r.flushWant {
 				r.flushWant = at
 			}
@@ -841,8 +844,8 @@ func (s *Recordings) hubFlush(ctx context.Context, id string, at float64) bool {
 // awaitHeard is recording id's live log for heard ask a: in device mode once it holds a.LiveNext positions
 // (awaitLive); in hub mode, whatever live_next says, once the hub's sentences up to a.At are in (hubFlush), or in the
 // fallback once an upload's segments reach it, waiting at most askLiveWait either way.
-func (s *Recordings) awaitHeard(ctx context.Context, e *kb.Engine, id string, a kb.LiveAsk) (kb.Live, error) {
-	l, rec, err := e.LiveRead(id)
+func (s *Recordings) awaitHeard(ctx context.Context, e *kb.Engine, id string, a recordingwire.LiveAsk) (recordingwire.Live, error) {
+	l, rec, err := writersOf(e).LiveRead(id)
 	if err != nil {
 		return l, err
 	}
@@ -861,7 +864,7 @@ func (s *Recordings) awaitHeard(ctx context.Context, e *kb.Engine, id string, a 
 	if err := ctx.Err(); err != nil {
 		return l, err
 	}
-	l, _, err = e.LiveRead(id)
+	l, _, err = writersOf(e).LiveRead(id)
 	return l, err
 }
 
@@ -882,7 +885,7 @@ func (s *Recordings) kickFinal() {
 // transcriptionGlossary is what a job's start carries as its glossary: the meeting's title, its calendar title and
 // attendees, then meeting_glossary; one line each, repeats (case-insensitive) and blanks dropped, terms over
 // glossaryTermMost characters left out, at most glossaryMost. Data: a contribution uses it for spelling only.
-func (s *Recordings) transcriptionGlossary(ctx context.Context, rec kb.Recording) []string {
+func (s *Recordings) transcriptionGlossary(ctx context.Context, rec recordingwire.Recording) []string {
 	terms := []string{rec.Title}
 	if c := rec.Calendar; c != nil {
 		terms = append(terms, c.Title)
@@ -933,4 +936,4 @@ func (s *Recordings) transcriptionJobsCheck(ctx context.Context) {
 
 // recordingLanguage is the recording's language tag: the job's hint, never a lock (every word is written in the
 // language it was said in).
-func recordingLanguage(rec kb.Recording) string { return strings.TrimSpace(rec.Language) }
+func recordingLanguage(rec recordingwire.Recording) string { return strings.TrimSpace(rec.Language) }

@@ -1,0 +1,161 @@
+# Every finding test_client_domain_modules.py RuleTests expects on the planted trees: <tree> <rule> <path>:<line> <what>.
+# A change to a rule or to the planted code changes this list; read each difference before taking it.
+missed kotlin-discovery android/core/hidden/domain/src/main/kotlin/persona/core/hidden/domain/Hidden.kt:1 is in package persona.core.hidden.domain, which the guard reads only in android/core/hidden/domain/ of an included module
+missed kotlin-discovery android/core/hidden/domain:0 is named like a domain module, but settings.gradle.kts does not include :core:hidden:domain
+missed kotlin-discovery android/feature/hidden/src/main/kotlin/persona/feature/hidden/HiddenUse.kt:3 imports persona.core.hidden.domain, which no included module holds
+missed swift-discovery apple/Packages/PersonaHidden/Sources/PersonaHiddenDomain:0 is named like a domain target, but no package declares PersonaHiddenDomain with these sources
+missed swift-discovery apple/Packages/PersonaInbox/Package.swift:24 InboxDomain is named like a domain target, but not Persona<Ctx>Domain
+missed swift-discovery apple/Packages/PersonaInbox/Package.swift:25 InboxDomainTests is named like a domain target, but not Persona<Ctx>DomainTests
+missed swift-discovery apple/Packages/PersonaInbox/Sources/InboxAdapt:0 is named like a domain target, but no package declares InboxAdapt with these sources
+missed swift-discovery apple/Persona/HiddenRow.swift:1 imports PersonaHiddenDomain, which no package declares
+missed swift-discovery apple/Persona/HiddenRow.swift:2 imports NotesDomain, which no package declares
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:101 wakesAt() hands state out, returning entry.wakes
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:123 Label.wire() hands state out, returning label.wakes
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:125 Label.id() hands state out, returning label.wakes
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:20 Broken.count is state visible outside the module; a public val is a computed Boolean
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:22 Broken.doneAt() hands out Instant
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:35 Broken.leak() hands out Long
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:37 Broken.id() hands out String
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:39 Broken.wakes() hands out Instant
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:41 Broken.get() hands out Instant
+planted kotlin-accessor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:91 Entry.wakesOf() hands state out, returning entry.wakes
+planted kotlin-alias android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:119 Raw is a type alias of String
+planted kotlin-app-discard android/feature/planted/src/main/kotlin/persona/feature/planted/BrokenUse.kt:20 drops the result of snoozed
+planted kotlin-app-discard android/feature/planted/src/main/kotlin/persona/feature/planted/BrokenUse.kt:21 drops the result of snoozed
+planted kotlin-banned-call android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:27 calls UUID.randomUUID (makes an id)
+planted kotlin-banned-call android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:27 calls println() (prints)
+planted kotlin-banned-call android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:28 uses System (reads the platform)
+planted kotlin-banned-call android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:50 calls .shuffled() (draws a random order)
+planted kotlin-boundary android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:123 Label.wire() is a companion or top-level wire(), not a member's
+planted kotlin-boundary android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:55 Broken.raw() is marked @DomainBoundary
+planted kotlin-build-flags android/core/broken/domain/build.gradle.kts:0 does not add -Xreturn-value-checker=full
+planted kotlin-build-flags android/core/broken/domain/build.gradle.kts:0 does not call explicitApi()
+planted kotlin-build-flags android/core/broken/domain/build.gradle.kts:0 does not set allWarningsAsErrors to true
+planted kotlin-callback android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:46 Broken.whenDue() takes or returns a function
+planted kotlin-context android/core/broken/domain/build.gradle.kts:10 depends on :core:planted:domain, another context's domain module
+planted kotlin-context android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:8 imports persona.core.planted.domain.ItemId, from another context's domain module
+planted kotlin-context android/core/broken/src/main/kotlin/persona/core/broken/adapt/BrokenWire.kt:3 imports persona.core.planted.adapt, another context's adapter
+planted kotlin-ctor-property android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:11 Record's constructor property doneAt is visible outside the module
+planted kotlin-ctor-property android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:17 Open's constructor property name is visible outside the module
+planted kotlin-data-class android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:11 Record is a data class
+planted kotlin-extensible android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:66 BrokenStore is a public interface
+planted kotlin-extensible android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:70 Shape is a public abstract class
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:114 Phase.draft() builds a Phase under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:58 Broken.fromWire() builds a Broken under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:60 Broken.blank() builds a Broken under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:62 Broken.new() takes 5 parameters
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:93 Entry.from() builds a Entry under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:93 Entry.from() returns Entry ?, which may be null
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:95 Entry.parse() returns Instant, not a Entry or an Outcome of it
+planted kotlin-factory android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:97 Entry.restore() returns Entry, not an Outcome of Entry
+planted kotlin-generic android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:52 Broken.carry() declares a type parameter
+planted kotlin-ignorable android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:43 marks a result @IgnorableReturnValue
+planted kotlin-import android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:3 imports java.util.UUID
+planted kotlin-import android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:4 imports kotlinx.serialization.Serializable
+planted kotlin-import android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:48 names persona.core.domainkit.adapt.SystemClock by its full name
+planted kotlin-module android/core/broken/domain/build.gradle.kts:0 applies the plugin org.jetbrains.kotlin.plugin.serialization
+planted kotlin-module android/core/broken/domain/build.gradle.kts:9 depends on project(":core:contracts")
+planted kotlin-optin android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:34 opts in to DomainBoundary in a domain module
+planted kotlin-optin android/feature/planted/src/main/kotlin/persona/feature/planted/BrokenUse.kt:12 names DomainBoundary
+planted kotlin-optin android/feature/planted/src/main/kotlin/persona/feature/planted/BrokenUse.kt:3 names DomainBoundary
+planted kotlin-primitive-api android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:20 Broken.count is public and has the type Int
+planted kotlin-primitive-api android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:24 Broken.rename() takes name as a primitive
+planted kotlin-primitive-api android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:35 Broken.leak() returns Long
+planted kotlin-primitive-api android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:37 Broken.id() returns String
+planted kotlin-primitive-field android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:20 Broken.count is Int, one of 2 fields
+planted kotlin-primitive-field android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:84 Entry.title is String, one of 4 fields
+planted kotlin-primitive-field android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:85 Entry.count is Int, one of 4 fields
+planted kotlin-primitive-field android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:88 Entry.total is Int, one of 4 fields
+planted kotlin-public-constructor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:11 Record has a public constructor
+planted kotlin-public-constructor android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:17 Open has a public constructor
+planted kotlin-public-evolve android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:32 Broken.evolve() is public
+planted kotlin-public-sealed android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:13 State is public and a sealed type
+planted kotlin-public-sealed android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:15 Kind is public and an enum class
+planted kotlin-serializable android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:10 uses Serializable
+planted kotlin-state android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:76 Registry is a package-level object
+planted kotlin-state android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:77 uses HashSet, which changes in place
+planted kotlin-state android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:77 uses MutableSet, which changes in place
+planted kotlin-state android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:80 cache is package-level state
+planted kotlin-state android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:80 uses mutableMapOf, which changes in place
+planted kotlin-throw android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:28 throws something other than a Defect
+planted kotlin-value-class android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:105 Code is a value class
+planted kotlin-var android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:20 declares a var
+planted kotlin-visitor-impl android/feature/planted/src/main/kotlin/persona/feature/planted/BrokenUse.kt:15 RowReader implements ItemVisitor
+planted kotlin-visitor-name android/core/broken/domain/src/main/kotlin/persona/core/broken/domain/Broken.kt:73 BrokenVisitor.read() is not named visit…
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:10 Broken.count hands out Int
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:11 Broken.doneAt hands out Date
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:12 Broken.description hands out String
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:125 Label.wire hands state out, returning label.wakes
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:127 Label.~ hands state out, returning label.wakes
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:46 Probe.id hands out Instant
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:48 Probe.wakes(at:) hands out Instant
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:50 Probe.subscript(_:) hands out Instant
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:9 Broken.title hands out String
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:90 Entry.wakes hands state out, returning entry.wakes
+planted swift-accessor apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:99 wakesAt hands state out, returning entry.wakes
+planted swift-alias apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:117 Label.Raw is a type alias of String
+planted swift-app-discard apple/Persona/BrokenRow.swift:7 drops the result of snoozed
+planted swift-app-discard apple/Persona/BrokenRow.swift:7 drops the result of snoozed (build warning)
+planted swift-banned-call apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:25 uses print (prints)
+planted swift-banned-call apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:56 uses shuffled (draws a random number or order)
+planted swift-boundary apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:125 Label.wire is a static or free wire, not an instance's `var wire`
+planted swift-boundary apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:58 Probe.raw is marked @_spi(Boundary)
+planted swift-callback apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:54 Probe.whenDue(_:) takes a function
+planted swift-conformance apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:8 names Codable
+planted swift-conformance apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:8 names CustomStringConvertible
+planted swift-context apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain depends on PersonaPlantedDomain, another context's core
+planted swift-context apple/Packages/PersonaBroken/Package.swift:20 PersonaBrokenAdapt depends on PersonaPlantedAdapt, another context's adapter
+planted swift-context apple/Packages/PersonaBroken/Sources/PersonaBrokenAdapt/BrokenWire.swift:2 imports PersonaPlantedAdapt, another context's adapter
+planted swift-context apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:4 PersonaBrokenDomain imports PersonaPlantedDomain, another context's core
+planted swift-discardable apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:52 marks a result @discardableResult
+planted swift-extensible apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:71 ProbeStore is a public protocol
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:112 Phase.draft(_:) builds a Phase under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:14 Broken.init(title:count:) is a public initializer
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:19 Broken.make(a:b:c:d:e:) builds a Broken under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:19 Broken.make(a:b:c:d:e:) takes 5 parameters
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:44 Probe.blank() builds a Probe under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:92 Entry.from(_:) builds a Entry under a name other than parse, new, restore, newBuilder or restoreBuilder
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:92 Entry.from(_:) returns Entry?, which may be nil
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:94 Entry.parse(_:) returns Instant, not a Entry or an Outcome of it
+planted swift-factory apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:96 Entry.restore(_:) returns Entry, not an Outcome of Entry
+planted swift-generic apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:30 Box is generic
+planted swift-import apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:1 PersonaBrokenDomain imports Foundation
+planted swift-import apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:3 PersonaBrokenDomain imports PersonaBrokenSupport
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain depends on PersonaBrokenSupport
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's swiftSettings lack .defaultIsolation(nil)
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's swiftSettings lack the upcoming feature ExistentialAny
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's swiftSettings lack the upcoming feature InternalImportsByDefault
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's swiftSettings lack the upcoming feature MemberImportVisibility
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's unsafeFlags lack -Xfrontend -disable-implicit-concurrency-module-import
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's unsafeFlags lack -Xfrontend -disable-implicit-string-processing-module-import
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's unsafeFlags lack -Xfrontend -reflection-metadata-for-debugger-only
+planted swift-manifest apple/Packages/PersonaBroken/Package.swift:11 PersonaBrokenDomain's unsafeFlags lack -warnings-as-errors
+planted swift-mutating apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:23 declares mutating func bump
+planted swift-primitive-api apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:10 Broken.count has the type Int
+planted swift-primitive-api apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:11 Broken.doneAt has the type Date
+planted swift-primitive-api apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:12 Broken.description has the type String
+planted swift-primitive-api apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:14 Broken.init(title:count:) takes title, count as a primitive
+planted swift-primitive-api apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:9 Broken.title has the type String
+planted swift-primitive-field apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:10 Broken.count is Int, one of 2 fields
+planted swift-primitive-field apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:103 Phase.Case.done's value by is String, one of 2 values
+planted swift-primitive-field apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:81 Entry.count is Int, one of 3 fields
+planted swift-primitive-field apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:81 Entry.title is String, one of 3 fields
+planted swift-primitive-field apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:9 Broken.title is String, one of 2 fields
+planted swift-public-enum apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:35 Broken.Hidden is a public enum
+planted swift-public-enum apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:6 State is a public enum
+planted swift-public-evolve apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:27 Broken.evolve(_:_:) is public
+planted swift-spi-import apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:2 PersonaBrokenDomain imports PersonaDomainKit with @_spi(Clock)
+planted swift-spi-import apple/Persona/BrokenRow.swift:1 imports PersonaPlantedDomain with @_spi(Boundary)
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:10 Broken.count is a stored var
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:62 declares class Tally
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:62 uses @unchecked
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:63 Tally.seen is a stored var
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:63 uses nonisolated(unsafe)
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:67 declares actor Ledger
+planted swift-state apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:69 defaultProbe is a global
+planted swift-stored-public apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:10 Broken.count has a setter
+planted swift-stored-public apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:9 Broken.title is a stored public property
+planted swift-testable apple/Packages/PersonaBroken/Package.swift:0 declares no Persona<Ctx>DomainTests target, so `swift test` has no test to run
+planted swift-throws apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:25 uses throws
+planted swift-visitor-impl apple/Persona/BrokenRow.swift:11 conforms to ItemVisitor
+planted swift-visitor-name apple/Packages/PersonaBroken/Sources/PersonaBrokenDomain/Broken.swift:76 ProbeVisitor.read is not named visit…

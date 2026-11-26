@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
 import { hubHas, onHubEvent, useStore } from "../../lib/store";
+import { ITEMS_EVENT } from "./items";
 import { deleteEntry, INTAKE_EVENT, INTAKE_FEATURE, postEntry, ratioOf, readToday, type IntakeDraft, type IntakeEntry, type IntakeKind, type IntakeToday, type IntakeTotals } from "./intake";
 
 /** What a cup of water is until the hub has answered one: its default (cup_ml). */
@@ -99,8 +100,9 @@ export function useHealthIntake(): HealthIntake {
   useEffect(() => {
     if (!enabled) return;
     void load();
-    // the hub says a record was added or undone (here or elsewhere); a hello is a hub back from away or with another feature set
-    const stops = [onHubEvent(INTAKE_EVENT, () => void load()), onHubEvent("hello", () => void load())];
+    // the hub says a record was added or undone (here or elsewhere), or what Health tracks changed (the protocol's
+    // "Health items" reads intake again with it); a hello is a hub back from away or with another feature set
+    const stops = [onHubEvent(INTAKE_EVENT, () => void load()), onHubEvent(ITEMS_EVENT, () => void load()), onHubEvent("hello", () => void load())];
     // a page left open across midnight, or in a tab the socket missed: back in view, read the day again
     const visible = () => { if (document.visibilityState === "visible") void load(); };
     document.addEventListener("visibilitychange", visible);

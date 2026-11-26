@@ -235,7 +235,7 @@ func TestInboxFilingDoesNotDeliverBeforeCommit(t *testing.T) {
 					}
 				}
 			}}
-			h.store = func() Store { return probe }
+			h.setStore(func() Store { return probe })
 			if !filingRequest(h, bulk, it.ID) {
 				t.Fatal("the failed candidate did not surface as a failure")
 			}
@@ -275,7 +275,7 @@ func TestInboxBulkFilingPartialSuccessDeliversOnlyCommittedRows(t *testing.T) {
 			t.Errorf("%s exposed its closure before persistence: %s", id, itemState(it))
 		}
 	}}
-	h.store = func() Store { return probe }
+	h.setStore(func() Store { return probe })
 	closedText := renderNote(inboxNote{Name: prompts.NoteClosed, Text: "user"}, h.owner(context.Background()))
 	h.f.onSend = func(_ *fakeHub, p map[string]any) {
 		sid := p["session_id"].(string)
@@ -394,7 +394,7 @@ func TestInboxFilingSuccessKeepsNewerHandling(t *testing.T) {
 					h.inbox.mu.Unlock()
 				})
 			}}
-			h.store = func() Store { return probe }
+			h.setStore(func() Store { return probe })
 			if filingRequest(h, bulk, it.ID) {
 				t.Fatal("the filing row failed")
 			}
@@ -446,7 +446,7 @@ func TestInboxFilingConcurrentOutcomes(t *testing.T) {
 								waitForItem(t, h, it.ID, nil)
 							})
 						}}
-						h.store = func() Store { return probe }
+						h.setStore(func() Store { return probe })
 						if failed := filingRequest(h, bulk, it.ID); failed != firstFail {
 							t.Fatalf("first failure = %v, want %v", failed, firstFail)
 						}
@@ -535,7 +535,7 @@ func TestInboxFilingCommitsDuringEarlierDelivery(t *testing.T) {
 					waitForItem(t, h, it.ID, func(it *InboxItem) bool { return len(it.Agent.Pending) == 0 && !it.Agent.Wake })
 				})
 			}}
-			h.store = func() Store { return probe }
+			h.setStore(func() Store { return probe })
 			if filingRequest(h, bulk, it.ID) {
 				t.Fatal("filing failed")
 			}

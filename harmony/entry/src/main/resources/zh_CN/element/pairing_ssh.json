@@ -1,0 +1,140 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_ssh_title",
+      "value": "SSH 隧道"
+    },
+    {
+      "name": "phone_pair_ssh_server",
+      "value": "SSH 服务器"
+    },
+    {
+      "name": "phone_pair_ssh_key_help",
+      "value": "输入 SSH 服务器已授权的私钥。连接时会先核对该服务器的 SHA-256 主机指纹。"
+    },
+    {
+      "name": "phone_pair_ssh_tls_pin",
+      "value": "Hub TLS 指纹"
+    },
+    {
+      "name": "phone_pair_ssh_tls_help",
+      "value": "在配对页输入 Hub 的 HTTPS 地址。配对链接中包含 Hub 的 TLS 公钥指纹（SPKI）。手动填写地址时，请输入同一 Hub 提供的 43 位指纹。"
+    },
+    {
+      "name": "phone_pair_ssh_this_key",
+      "value": "本机公钥"
+    },
+    {
+      "name": "phone_pair_ssh_copy_key",
+      "value": "复制公钥"
+    },
+    {
+      "name": "phone_pair_ssh_copy_restricted",
+      "value": "复制 authorized_keys 行"
+    },
+    {
+      "name": "phone_pair_ssh_public_help",
+      "value": "将限定权限的授权行加入 SSH 服务器的 authorized_keys 文件，仅允许转发到此 Hub 目标。私钥保存在本机。"
+    },
+    {
+      "name": "phone_pair_ssh_import",
+      "value": "使用已有私钥"
+    },
+    {
+      "name": "phone_pair_ssh_use_device",
+      "value": "使用本机密钥"
+    },
+    {
+      "name": "phone_pair_ssh_copied",
+      "value": "已复制"
+    },
+    {
+      "name": "phone_pair_ssh_saved_key",
+      "value": "已确认的服务器指纹"
+    },
+    {
+      "name": "phone_pair_ssh_presented_key",
+      "value": "本次服务器指纹"
+    },
+    {
+      "name": "phone_pair_ssh_key_changed",
+      "value": "SSH 服务器指纹已更改"
+    },
+    {
+      "name": "phone_pair_ssh_confirm_peer",
+      "value": "请先对照服务器的主机公钥核实指纹，再决定是否信任。"
+    },
+    {
+      "name": "phone_pair_ssh_trust_replacement",
+      "value": "信任新指纹"
+    },
+    {
+      "name": "phone_pair_ssh_trust",
+      "value": "信任并保存"
+    },
+    {
+      "name": "phone_pair_ssh_testing",
+      "value": "测试中…"
+    },
+    {
+      "name": "phone_pair_ssh_remove_title",
+      "value": "删除 SSH 隧道？"
+    },
+    {
+      "name": "phone_pair_ssh_remove_help",
+      "value": "删除后将清除此隧道的设置。如需撤销服务器上的权限，请另外移除对应的 authorized_keys 行。"
+    },
+    {
+      "name": "phone_pair_ssh_target",
+      "value": "隧道目标"
+    },
+    {
+      "name": "phone_pair_ssh_target_address",
+      "value": "地址"
+    },
+    {
+      "name": "phone_pair_ssh_target_help",
+      "value": "填写 SSH 服务器访问 Hub 所用的地址。两者在同一台机器上时一般为 127.0.0.1:18660。"
+    },
+    {
+      "name": "phone_pair_ssh_always",
+      "value": "总是走 SSH"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_help",
+      "value": "关闭时先直连 Hub，连不上再通过 SSH 隧道连接。"
+    },
+    {
+      "name": "phone_pair_ssh_direct_active",
+      "value": "已直连 Hub"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_parent",
+      "value": "先直连这个地址，连不上再经 SSH 隧道。"
+    },
+    {
+      "name": "phone_pair_ssh_always_parent",
+      "value": "总是经 SSH 隧道连接这台 hub。"
+    },
+    {
+      "name": "phone_pair_ssh_host",
+      "value": "主机"
+    },
+    {
+      "name": "phone_pair_ssh_port",
+      "value": "端口"
+    },
+    {
+      "name": "phone_pair_ssh_user",
+      "value": "用户名"
+    },
+    {
+      "name": "phone_pair_ssh_server_port",
+      "value": "SSH 服务器端口"
+    },
+    {
+      "name": "phone_pair_ssh_forward_port",
+      "value": "隧道目标端口"
+    }
+  ]
+}

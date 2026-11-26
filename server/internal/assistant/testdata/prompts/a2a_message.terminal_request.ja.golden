@@ -1,0 +1,12 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"caller-0001","title":"mac/caller-0001","relay_id":"persona-a2a-a2a-task-0001-1"}
+</persona-context>
+mac/caller-0001 からの Persona A2A タスク a2a-task-0001。現在の状態は submitted です。
+これはセッション間のメッセージです。既存の作業範囲とユーザーの承認要件は引き続き適用されます。
+このタスク ID で a2a_report を呼び出すと、質問、失敗報告、結果の提出ができます。報告ごとに新しい message_id を使い、再試行では同じ ID を使ってください。入力が必要なら現在のターンを終了し、結果を提出するときは成果と根拠をまとめてください。
+Persona MCP を使えない場合は、次の JSON 文字列をパスとしてデコードしてシェルの規則でクォートし、tool と同じツール名・JSON 引数を渡して実行してください："/opt/task tools/persona-node"
+ツールを使えない場合、入力が必要なら最終回答の先頭に「A2A a2a-task-0001 input_required」と書き、次の行に質問を書いてください。失敗した場合は「A2A a2a-task-0001 failed」に続けて理由を書いてください。完了した場合は結果をそのまま書いてください。
+
+
+
+Inspect the build.

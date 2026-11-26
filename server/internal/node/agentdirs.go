@@ -67,6 +67,9 @@ func (n *Node) dirMatches(dir string, patterns []string) bool {
 // sessionBlocked: the session is kept out by a blocked Agent folder, with the exemptions the list makes (the assistant's
 // conversations, the sessions the hub keeps). cwd is the session's working folder as the caller knows it.
 func (n *Node) sessionBlocked(sid, cwd string) bool {
+	if n.herdrSessionIDBlocked(sid) {
+		return true
+	}
 	if !n.agentDirBlocked(cwd) {
 		return false
 	}
@@ -74,9 +77,13 @@ func (n *Node) sessionBlocked(sid, cwd string) bool {
 }
 
 // restBlocked: a session at rest (a transcript or rollout on disk, listed or in history) working in cwd is left out.
-// A blocked Agent folder spares the assistant's conversations and the sessions the hub keeps (keep); a blocked Claude
-// config folder does not.
+// A blocked Agent folder or named herdr session spares the assistant's conversations and the sessions the hub keeps
+// (keep); a blocked Claude config folder does not. The herdr check goes first: it returns at once while no named
+// session is blocked, so a scan does not ask isAssistantSession of every transcript for nothing (#14985).
 func (n *Node) restBlocked(id, cwd string, keep map[string]bool) bool {
+	if n.herdrSessionIDBlocked(id) && !keep[id] && !n.isAssistantSession(id) {
+		return true
+	}
 	return cwd != "" && n.cwdBlocked(cwd) && (n.claudeDirBlocks(cwd) || !keep[id] && !n.isAssistantSession(id))
 }
 

@@ -47,7 +47,7 @@ class ComposerDropImportTest {
 
     @Test fun readableFileBecomesAnOwnedAttachmentAfterTheSourceDisappears() {
         val (file, uri) = source("notes.txt", "dropped words".toByteArray())
-        val result = importDroppedAttachment(context, uri, mediaCount = 0)
+        val result = importDroppedAttachment(context, uri)
         val attachment = assertNotNullAttachment(result)
         assertEquals("notes.txt", attachment.name)
         assertFalse(attachment.image)
@@ -67,27 +67,32 @@ class ComposerDropImportTest {
         bitmap.recycle()
         created += imageFile
         val imageUri = FileProvider.getUriForFile(context, "${context.packageName}.chat.files", imageFile)
-        assertTrue(assertNotNullAttachment(importDroppedAttachment(context, imageUri, 0)).image)
-        val limited = importDroppedAttachment(context, imageUri, MAX_COMPOSER_MEDIA)
+        assertTrue(assertNotNullAttachment(importDroppedAttachment(context, imageUri)).image)
+        val existing = List(20) { ComposerAttachment("p$it", "p$it.jpg", "", image = true) }
+        val limited = importDroppedAttachment(context, imageUri, existing = existing, canSpill = false)
         assertNull(limited.attachment)
-        assertEquals(context.getString(R.string.chat_composer_photo_limit), limited.notice)
+        assertEquals(context.getString(R.string.chat_composer_photo_limit, 20), limited.notice)
 
         val (_, videoUri) = source("movie.mp4", byteArrayOf(1, 2, 3, 4))
-        val video = assertNotNullAttachment(importDroppedAttachment(context, videoUri, 0))
+        val video = assertNotNullAttachment(importDroppedAttachment(context, videoUri))
         assertTrue(video.video)
         assertFalse(video.image)
         context.contentResolver.openInputStream(Uri.parse(video.uri)).use {
             assertArrayEquals(byteArrayOf(1, 2, 3, 4), it!!.readBytes())
         }
+        val fourVideos = List(MAX_COMPOSER_VIDEOS) { ComposerAttachment("v$it", "v$it.mp4", "", image = false, video = true) }
+        val fifthVideo = importDroppedAttachment(context, videoUri, existing = fourVideos)
+        assertNull(fifthVideo.attachment)
+        assertEquals(context.getString(R.string.chat_composer_video_limit, MAX_COMPOSER_VIDEOS), fifthVideo.notice)
     }
 
     @Test fun directoriesAndNonFilePayloadsAreRejected() {
         val directory = File(context.cacheDir, "chat-captures").apply { mkdirs() }
-        assertNull(importDroppedAttachment(context, Uri.fromFile(directory), 0).attachment)
-        assertNotNull(importDroppedAttachment(context, Uri.fromFile(directory), 0).notice)
-        assertNull(importDroppedAttachment(context, Uri.parse("https://example.com/file"), 0).attachment)
-        assertNull(importDroppedAttachment(context, Uri.parse("content://missing.authority/document"), 0).attachment)
-        assertNotNull(importDroppedAttachment(context, Uri.parse("content://missing.authority/document"), 0).notice)
+        assertNull(importDroppedAttachment(context, Uri.fromFile(directory)).attachment)
+        assertNotNull(importDroppedAttachment(context, Uri.fromFile(directory)).notice)
+        assertNull(importDroppedAttachment(context, Uri.parse("https://example.com/file")).attachment)
+        assertNull(importDroppedAttachment(context, Uri.parse("content://missing.authority/document")).attachment)
+        assertNotNull(importDroppedAttachment(context, Uri.parse("content://missing.authority/document")).notice)
     }
 
     @Test fun copyLimitAdmitsTheBoundaryAndDeletesAnOverflowPartial() {
@@ -108,7 +113,7 @@ class ComposerDropImportTest {
     @Test fun declaredOversizeBecomesAnInvalidAttachmentWithoutACopy() {
         val (file, uri) = source("huge.bin", byteArrayOf(1))
         RandomAccessFile(file, "rw").use { it.setLength(MAX_COMPOSER_FILE_BYTES + 1) }
-        val result = importDroppedAttachment(context, uri, 0)
+        val result = importDroppedAttachment(context, uri)
         val attachment = assertNotNullAttachment(result)
         assertEquals(DraftUploadState.Invalid, attachment.uploadState)
         assertEquals(MAX_COMPOSER_FILE_BYTES + 1, attachment.size)
@@ -124,7 +129,7 @@ class ComposerDropImportTest {
         assertTrue(leftDrops(listOf(drop), emptyList(), "app", keptNow = listOf(drop.uri)).isEmpty())
 
         val (_, uri) = source("owned.bin", byteArrayOf(1))
-        val imported = assertNotNullAttachment(importDroppedAttachment(context, uri, 0))
+        val imported = assertNotNullAttachment(importDroppedAttachment(context, uri))
         deleteDrop(context, imported.uri)
         assertFalse(attachmentReadable(context, imported))
         val captureUri = "content://${context.packageName}.chat.files/chat-captures/owned.bin"

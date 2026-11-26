@@ -234,7 +234,7 @@ func (n *Node) setCodexDesktopSettings(ctx context.Context, id string, src codex
 	if model == "" && effort == "" {
 		return nil
 	}
-	if !codexDesktopAvailable(src.home) {
+	if !codexDesktopBusAvailable(src.home) {
 		return codexDesktopUnavailable(ctx)
 	}
 	if model != "" && !proto.ValidModelID(model) {

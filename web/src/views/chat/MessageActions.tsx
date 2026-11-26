@@ -13,7 +13,7 @@
 // While the chat picks messages to forward at once (#3838, Forward to's Select messages…), a message with a Forward has a
 // checkbox over it (Picking.tsx PickRow, which comes with Forward to): a click anywhere on it picks it or unpicks it, the
 // tick before it; its menus and bars are off. Not picking, the row is drawn as it always was.
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { clock } from "../../lib/format";
 import { sendDraft, type QuotedTask } from "../../lib/drafts";
@@ -24,21 +24,21 @@ import type { Item } from "../../lib/types";
 import { copyText, cx, type MenuItem } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { NO_HOVER, useMedia } from "../../ui/media-query";
+import { scrollBehavior } from "../../ui/stream/motion";
 import { useChatActions, type ChatActions } from "./chat-actions";
 import { pickParts } from "./picking-parts";
-import { useIsLatestMessage } from "./latest-message-time";
+import { LatestReplyId, useIsLatestMessage } from "./latest-message-time";
 import { useReplyTranslation, type ReplyTranslationSource } from "../../lib/reply-translation";
 import { Markdown } from "../../ui/Markdown";
 import { ReplyTranslationButton } from "./ReplyTranslationButton";
 import { lazyDialog, lazyOverlay } from "../LazyOverlay";
 
-// Hidden until the pointer comes, so it is not part of the first screen (startup-preload.ts): its row is kept while it
-// loads, so nothing moves when it comes.
+// Keep the reply controls in a separate chunk, with a reserved row while they load under a finished reply.
 const replyBar = () => import("./ReplyBar");
 const StarAvailability = lazy(() => replyBar().then((m) => ({ default: m.StarAvailability })));
 const StarBadge = lazy(() => replyBar().then((m) => ({ default: m.StarBadge })));
 const ReplyBar = lazy(() => replyBar().then((m) => ({ default: m.ReplyBar })));
-// what the exchange cost, at the end of a touch screen's row (the reply bar has it on hover)
+// What the exchange cost, at the end of a touch screen's row or the desktop reply bar.
 const TurnUsage = lazy(() => replyBar().then((m) => ({ default: m.TurnUsage })));
 const SelectMessageText = lazyDialog(() => replyBar().then((m) => m.SelectMessageText));
 const MessageMenu = lazyOverlay(() => replyBar().then((m) => m.MessageMenu));
@@ -81,8 +81,8 @@ export function messageContextActions(text: string, chat: ChatActions | null, fo
 /** Wraps a message: right-click / long press opens its menu. A hover bar goes beside it (`side`, your own bubbles: they had
  *  no row under them, so the layout does not move; the time leads that bar, #5285), over its top right corner (`corner`, a
  *  task's card: no row under it either), or under it (`bar`, a finished turn's last reply: ReplyBar). Without any of those
- *  it has the menus only. `task`: "Quote" quotes it as that task. The chat's last message keeps its time on screen
- *  (#5285): a last reply's in its bar (ReplyBar `pinned`) and the touch row, your own bubble's under it (UserBubble). */
+ *  it has the menus only. `task`: "Quote" quotes it as that task. The latest finished reply keeps its bar visible on
+ *  desktop (#15428) and shows its time in the touch row. Your last user bubble keeps its time under it (#5285). */
 export function MessageActions({
   text,
   editText,
@@ -139,10 +139,15 @@ export function MessageActions({
   const canTranslate = bar && !isUser && Boolean(text.trim());
   const touch = useMedia(NO_HOVER);
   const latest = useIsLatestMessage(ts);
+  const latestReplyId = useContext(LatestReplyId);
+  const pinned = Boolean(itemId && itemId === latestReplyId);
   const forwarded = itemId ?? messageId;
   const pick: ForwardPick | undefined = forwarded ? { itemId: forwarded, text, isUser: Boolean(isUser), ts, images, photos } : undefined;
   const chat = useChatActions();
   const [starAvailable, setStarAvailable] = useState<"read" | "write" | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const actions = messageActions(chat, text, Boolean(isUser), ts, task, pick, editText);
   // the chat picks messages to forward (#3838): the checkbox over this one, when it is one to forward
   const picker = chat?.forward ? chat.pick : undefined;
@@ -171,6 +176,23 @@ export function MessageActions({
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
   const opened = useRef(0);
 
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+
+  const triggerCopy = () => {
+    void copyText(text);
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  const scrollToTop = () => {
+    const el = rootRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+  };
+
   const openAt = (x: number, y: number) => setMenu({ anchor: { x, y } });
   const close = () => setMenu(null);
 
@@ -183,6 +205,7 @@ export function MessageActions({
 
   return (
     <div
+      ref={rootRef}
       className={cx("group/msg", (side || corner || PickRow || starAvailable) && "relative", PickRow && (side ? "isolate" : "isolate pl-7"), className)}
       onPointerEnter={side ? (e) => e.pointerType !== "touch" && placeBar(e.currentTarget) : undefined}
       onFocus={side ? (e) => placeBar(e.currentTarget) : undefined}
@@ -245,12 +268,13 @@ export function MessageActions({
       {canTranslate && translation.error && <p role="alert" className="mt-1 text-xs text-red">{translation.error}</p>}
       {picking ? null : bar ? (
         <Suspense fallback={<div data-reply-bar="loading" className="mt-1.5 hidden h-6 [@media(hover:hover)]:block" />}>
-          <ReplyBar text={text} ts={ts} pinned={latest} itemId={itemId} more={actions} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} usage={usage} usageMs={usageMs} ttftMs={ttftMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
+          <ReplyBar text={text} ts={ts} pinned={pinned} itemId={itemId} more={actions} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} usage={usage} usageMs={usageMs} ttftMs={ttftMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
         </Suspense>
       ) : (side || corner) && (
       <div
         ref={barRef}
         data-side-bar={side ? (below ? "below" : "beside") : undefined}
+        data-chat-find-skip="true"
         className={cx(
           "hidden h-6 items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:hover)]:flex",
           moreAnchor && "opacity-100", // the ⋯ menu is open: its bar stays while the pointer is in the menu
@@ -267,18 +291,35 @@ export function MessageActions({
         {side && ts && !latest && <span className="mr-1 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
         {actions
           .filter((a) => !(side && (a.key === "forward" || a.key === "context")))
-          .map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              aria-label={a.key === "copy" ? (isUser ? t("chat-messageactions.copy_message") : t("chat-messageactions.copy_reply")) : a.label}
-              title={a.label}
-              onClick={a.onSelect}
-              className="flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
-            >
-              <Icon name={a.icon} size={14} />
-            </button>
-          ))}
+          .map((a) => {
+            const isCopy = a.key === "copy";
+            return (
+              <button
+                key={a.key}
+                type="button"
+                aria-label={isCopy ? (isUser ? t("chat-messageactions.copy_message") : t("chat-messageactions.copy_reply")) : a.label}
+                title={isCopy && copied ? t("lib-terminal-clipboard.copied") : a.label}
+                onClick={isCopy ? triggerCopy : a.onSelect}
+                className={cx(
+                  "flex size-6 items-center justify-center rounded-[6px] transition-colors hover:bg-hover-2",
+                  isCopy && copied ? "text-green" : "text-ink-3 hover:text-ink-2",
+                )}
+              >
+                <Icon name={isCopy && copied ? "check" : a.icon} size={14} />
+              </button>
+            );
+          })}
+        {!side && !isUser && (
+          <button
+            type="button"
+            aria-label={t("chat-messageactions.scroll_to_top")}
+            title={t("chat-messageactions.scroll_to_top")}
+            onClick={scrollToTop}
+            className="flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
+          >
+            <Icon name="arrowUp" size={14} />
+          </button>
+        )}
         {hasMore && (
           <button
             type="button"
@@ -311,7 +352,7 @@ export function MessageActions({
           >
             <Icon name="more" size={14} />
           </button>
-          {latest && ts && <span data-latest-time className="-ml-3 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
+          {pinned && ts && <span data-latest-time className="-ml-3 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
           {usage && (
             <Suspense fallback={null}>
               <TurnUsage usage={usage} ms={usageMs} ttftMs={ttftMs} persona={chat?.assistant} touch />

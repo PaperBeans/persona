@@ -38,6 +38,9 @@ type Registry struct {
 	// run is what Start was given, to start a connector switched on later; stop cancels a running one's Run / Watch.
 	run  *starter
 	stop map[string]context.CancelFunc
+	// lifecycle orders whole-registry starts and stops. workers includes a removed connector until it returns.
+	lifecycle sync.Mutex
+	workers   sync.WaitGroup
 	// sent is told of every gated write that went out (SetSent).
 	sent func(ctx context.Context, s Sent)
 }
@@ -290,6 +293,13 @@ func (r *Registry) ReadOnly(name string) bool {
 	c := r.Owner(name)
 	t, ok := As[ReadTools](c)
 	return ok && has(t.Tools(), name)
+}
+
+// InboxVisibilityPreflight says whether the tool's provider positively declares the manager's source-visibility
+// enforcement. Absence is not evidence of enforcement: the assistant's fallback must fail closed for unverifiable reads.
+func (r *Registry) InboxVisibilityPreflight(name string) bool {
+	c := r.Owner(name)
+	return c != nil && c.Manifest().Has(CapInboxVisibility)
 }
 
 // ForAgents says whether the tool name is a connector's that the coding agents get too (Manifest.AgentTools).

@@ -6,19 +6,22 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
-const previews = vi.hoisted(() => new Map<string, number>());
-vi.mock("../lib/format", async (load) => {
-  const real = await load<typeof import("../lib/format")>();
-  return { ...real, sessionPreview: (s: Session) => {
-    previews.set(s.session_id, (previews.get(s.session_id) ?? 0) + 1);
-    return real.sessionPreview(s);
-  } };
+const draftReads = vi.hoisted(() => new Map<string, number>());
+vi.mock("../lib/drafts", async (load) => {
+  const real = await load<typeof import("../lib/drafts")>();
+  return {
+    ...real,
+    useLeftDraft: (key: string | null) => {
+      if (key) draftReads.set(key, (draftReads.get(key) ?? 0) + 1);
+      return real.useLeftDraft(key);
+    },
+  };
 });
-import { getState, refresh, reset } from "../lib/store";
+import { getState, refresh, reset, upsertSession } from "../lib/store";
 import { credentialOwner, setToken } from "../lib/api";
 import { refreshWorkspaceCatalog, workspaceTarget, type HostWorkspace } from "../lib/workspace-catalog";
 import type { Machine, Session } from "../lib/types";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, AgentsList } from "./Sidebar";
 import { t } from "../i18n";
 import type { WorkspaceTreeActions } from "./SidebarTree";
 import { defaultManager } from "../lib/manager-choice";
@@ -31,7 +34,10 @@ const agent = (id: string, space: string, patch: Partial<Session> = {}): Session
 let host: HTMLDivElement, root: Root;
 let inventory: HostWorkspace[], sessions: Session[], pinned: string[];
 let request: ReturnType<typeof vi.fn>;
-const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
+  for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+};
 const render = async (actions?: WorkspaceTreeActions) => {
   await act(() => refresh());
   act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} workspaceActions={actions} />));
@@ -42,7 +48,7 @@ const disclosure = (name: string) => host.querySelector<HTMLButtonElement>(`butt
 const click = (el: HTMLElement) => act(() => el.click());
 
 beforeEach(() => {
-  previews.clear(); localStorage.clear(); reset(); setToken("catalog-fixture");
+  draftReads.clear(); localStorage.clear(); reset(); setToken("catalog-fixture");
   localStorage.setItem("persona.agentGrouping", "repo");
   inventory = [workspace("root", { is_main: true }), workspace("middle", { parent_source_id: "root" }), workspace("leaf", { parent_source_id: "middle", project_id: "project-b", project_name: "Project B" }), workspace("empty")];
   sessions = [agent("Leaf Agent", "leaf")]; pinned = [];
@@ -76,10 +82,12 @@ describe("By repo catalog integration", () => {
     expect([...holder.querySelectorAll("a")].map((el) => el.textContent)).toHaveLength(1);
     expect(holder.querySelector("a")!.textContent).toContain("Saved conversation");
     expect([...host.querySelectorAll("a")].filter((el) => el.textContent?.includes("Saved conversation"))).toHaveLength(1);
-    expect(title("sibling").closest("[data-workspace-key]")!.querySelectorAll("a")).toHaveLength(0);
+    // Unpinned empty sibling stays hidden by default.
+    expect(title("sibling")).toBeUndefined();
     inventory = inventory.map((w) => ({ ...w, pinned_at: undefined }));
     await act(() => refreshWorkspaceCatalog()); await flush();
-    expect(holder.querySelectorAll("a")).toHaveLength(0);
+    // Unpinning moves the saved conversation to Recent and hides the now-empty workspace by default.
+    expect(title("pinned")).toBeUndefined();
   });
 
   it("does not use a workspace pin to override an explicit state filter", async () => {
@@ -92,6 +100,7 @@ describe("By repo catalog integration", () => {
   });
 
   it("refreshes host pins and unpins without changing selection, folds or Persona session pins", async () => {
+    localStorage.setItem("persona.showEmptyWorkspaces", "1");
     inventory = [workspace("main", { source: "paseo", is_main: true, cwd: "/code/shared" }),
       workspace("pinned-empty", { source: "paseo", cwd: "/code/shared", pinned_at: "2026-11-16T10:00:00Z" }),
       workspace("local")];
@@ -104,16 +113,18 @@ describe("By repo catalog integration", () => {
     const holder = before.closest("[data-workspace-key]")!;
     expect(holder.querySelector(`[title="${t("sidebar.pinned")}"]`)).toBeTruthy();
     expect(title("main").closest("[data-workspace-key]")!.querySelector(`[title="${t("sidebar.pinned")}"]`)).toBeNull();
+    // Empty leaf workspaces start folded by default; clicking opens and selects it.
+    expect(disclosure("pinned-empty").getAttribute("aria-expanded")).toBe("false");
     click(before);
     expect(before.getAttribute("aria-pressed")).toBe("true");
-    expect(disclosure("pinned-empty").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure("pinned-empty").getAttribute("aria-expanded")).toBe("true");
     inventory = inventory.map((w) => ({ ...w, pinned_at: undefined }));
     await act(() => refreshWorkspaceCatalog()); await flush();
     expect(workspaceOrder().filter((id) => id !== "local")).toEqual(["main", "pinned-empty"]);
     expect(title("pinned-empty")).toBe(before);
     expect(holder.querySelector(`[title="${t("sidebar.pinned")}"]`)).toBeNull();
     expect(before.getAttribute("aria-pressed")).toBe("true");
-    expect(disclosure("pinned-empty").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure("pinned-empty").getAttribute("aria-expanded")).toBe("true");
     expect([...host.querySelectorAll("a")].filter((el) => el.textContent?.includes("Local pin"))).toHaveLength(1);
     expect(getState().pins.sessions).toEqual(pinned);
     expect(request.mock.calls.some(([, init]) => init && (init as RequestInit).method === "PUT")).toBe(false);
@@ -137,16 +148,17 @@ describe("By repo catalog integration", () => {
 
   it("does not rebuild Agent rows on an unchanged catalog refresh", async () => {
     await render();
-    const before = title("root"); previews.clear();
+    const before = title("root"); draftReads.clear();
     await act(() => refreshWorkspaceCatalog()); await flush();
     expect(title("root")).toBe(before);
-    expect([...previews.keys()]).toEqual([]);
+    expect([...draftReads.keys()]).toEqual([]);
   });
 
-  it("loads independent of the board, exposes empty ancestry and lets titles and arrows toggle the same disclosure", async () => {
+  it("loads independent of the board, exposes empty ancestry, hides standalone empties by default, and lets titles and arrows toggle the same disclosure", async () => {
     const onSelectWorkspace = vi.fn();
     await render({ onSelectWorkspace });
-    expect(inventory.every((w) => title(w.title))).toBe(true);
+    expect(["root", "middle", "leaf"].every((name) => Boolean(title(name)))).toBe(true);
+    expect(title("empty")).toBeUndefined();
     expect(title("leaf").textContent).toBe("leafProject B");
     expect(request.mock.calls.some(([url]) => String(url).endsWith("/workspace-board"))).toBe(false);
     expect(getState().sessions[machine.id]).toHaveLength(1);
@@ -159,7 +171,7 @@ describe("By repo catalog integration", () => {
     click(disclosure("root"));
     expect(disclosure("root").getAttribute("aria-expanded")).toBe("true");
     expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
-    for (const name of ["root", "middle", "leaf", "empty"]) {
+    for (const name of ["root", "middle", "leaf"]) {
       click(title(name));
       expect(disclosure(name).getAttribute("aria-expanded")).toBe("false");
       click(title(name));
@@ -188,10 +200,10 @@ describe("By repo catalog integration", () => {
     let reads = 0;
     request.mockImplementation((url: string) => String(url).endsWith("/workspaces") && ++reads === 1 ? oldRead : original(url));
     await render();
-    inventory = [workspace("replacement")];
+    inventory = [workspace("replacement", { pinned_at: "2026-11-16T10:00:00Z" })];
     act(() => setToken("catalog-fixture-next")); await flush();
     expect(title("replacement")).toBeTruthy();
-    await act(async () => { complete(new Response(JSON.stringify({ workspaces: [workspace("obsolete")] }), { headers: { "Content-Type": "application/json" } })); });
+    await act(async () => { complete(new Response(JSON.stringify({ workspaces: [workspace("obsolete", { pinned_at: "2026-11-16T10:00:00Z" })] }), { headers: { "Content-Type": "application/json" } })); });
     await flush();
     expect(title("replacement")).toBeTruthy();
     expect(title("obsolete")).toBeUndefined();
@@ -213,6 +225,7 @@ describe("By repo catalog integration", () => {
   });
 
   it("passes the same exact target to pointer and keyboard-accessible menu entry points", async () => {
+    localStorage.setItem("persona.showEmptyWorkspaces", "1");
     const onWorkspaceMenu = vi.fn(); await render({ onWorkspaceMenu });
     const button = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("workspace-tree.actions", { name: "empty" })}"]`)!;
     click(button);
@@ -223,17 +236,104 @@ describe("By repo catalog integration", () => {
   });
 
   it("refreshes a renamed workspace without changing identity, selection or the remembered disclosure", async () => {
+    localStorage.setItem("persona.showEmptyWorkspaces", "1");
     await render();
+    expect(disclosure("empty").getAttribute("aria-expanded")).toBe("false");
     click(title("empty"));
     const key = title("empty").closest("[data-workspace-key]")!.getAttribute("data-workspace-key");
     inventory = inventory.map((w) => w.source_id === "empty" ? { ...w, title: "Renamed" } : w);
     await act(() => refreshWorkspaceCatalog()); await flush();
     expect(title("Renamed").getAttribute("aria-pressed")).toBe("true");
     expect(title("Renamed").closest("[data-workspace-key]")!.getAttribute("data-workspace-key")).toBe(key);
-    expect(disclosure("Renamed").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure("Renamed").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("offers a default-off Show empty workspaces toggle in the Agents list menu under By repo while excluding dead and hidden empties", async () => {
+    inventory = [
+      ...inventory,
+      workspace("dead-empty", { available: false }),
+      workspace("hidden-empty", { hidden_by_directory: true }),
+      workspace("codex-empty", { source: "codex_app", project_id: "codex:1", project_name: "Codex App" }),
+    ];
+    await render();
+    expect(title("empty")).toBeUndefined();
+    expect(title("codex-empty")).toBeUndefined();
+    expect(title("dead-empty")).toBeUndefined();
+    expect(title("hidden-empty")).toBeUndefined();
+    const listMenuButton = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("sidebar.list_menu")}"]`)!;
+    expect(listMenuButton).toBeTruthy();
+    click(listMenuButton);
+    await flush();
+    const toggleItem = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find((el) => el.textContent?.includes(t("sidebar.show_empty_workspaces")))!;
+    expect(toggleItem).toBeTruthy();
+    // Unchecked by default; clicking turns it on, persists locally, and shows live available empties folded.
+    expect(toggleItem.querySelector("svg.invisible")).not.toBeNull();
+    click(toggleItem);
+    await flush();
+    expect(localStorage.getItem("persona.showEmptyWorkspaces")).toBe("1");
+    expect(title("empty")).toBeTruthy();
+    expect(disclosure("empty").getAttribute("aria-expanded")).toBe("false");
+    expect(title("codex-empty")).toBeTruthy();
+    expect(title("dead-empty")).toBeUndefined();
+    expect(title("hidden-empty")).toBeUndefined();
+    // Clicking again hides unpinned empties and persists off.
+    click(toggleItem);
+    await flush();
+    expect(localStorage.getItem("persona.showEmptyWorkspaces")).toBe("0");
+    expect(title("empty")).toBeUndefined();
+    expect(title("codex-empty")).toBeUndefined();
+  });
+
+  it("auto-expands an untouched empty workspace when a new Agent arrives while respecting explicit user folds", async () => {
+    inventory = [
+      workspace("untouched", { pinned_at: "2026-11-16T10:00:00Z" }),
+      workspace("explicitly-folded", { pinned_at: "2026-11-16T09:00:00Z" }),
+    ];
+    sessions = [];
+    await render();
+    expect(disclosure("untouched").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure("explicitly-folded").getAttribute("aria-expanded")).toBe("false");
+    // User opens then explicitly folds `explicitly-folded`, storing an explicit fold choice.
+    click(disclosure("explicitly-folded"));
+    expect(disclosure("explicitly-folded").getAttribute("aria-expanded")).toBe("true");
+    click(disclosure("explicitly-folded"));
+    expect(disclosure("explicitly-folded").getAttribute("aria-expanded")).toBe("false");
+    // A new Agent starts in both workspaces from another device.
+    act(() => {
+      upsertSession(agent("Fresh A", "untouched"));
+      upsertSession(agent("Fresh B", "explicitly-folded"));
+    });
+    await flush();
+    expect(disclosure("untouched").getAttribute("aria-expanded")).toBe("true");
+    expect(disclosure("explicitly-folded").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("synchronizes Show empty workspaces across simultaneously mounted Sidebar and AgentsList views", async () => {
+    await act(() => refresh());
+    act(() => root.render(
+      <div>
+        <div data-dual="sidebar"><Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} /></div>
+        <div data-dual="page"><AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} /></div>
+      </div>,
+    ));
+    await flush();
+    const sidebarBox = host.querySelector<HTMLElement>('[data-dual="sidebar"]')!;
+    const pageBox = host.querySelector<HTMLElement>('[data-dual="page"]')!;
+    const hasEmpty = (box: HTMLElement) => [...box.querySelectorAll("[data-workspace-key]")]
+      .some((el) => JSON.parse(el.getAttribute("data-workspace-key")!)[4] === "empty");
+    expect(hasEmpty(sidebarBox)).toBe(false);
+    expect(hasEmpty(pageBox)).toBe(false);
+    click(sidebarBox.querySelector<HTMLButtonElement>(`button[aria-label="${t("sidebar.list_menu")}"]`)!);
+    await flush();
+    const toggleItem = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find((el) => el.textContent?.includes(t("sidebar.show_empty_workspaces")))!;
+    click(toggleItem);
+    await flush();
+    expect(hasEmpty(sidebarBox)).toBe(true);
+    expect(hasEmpty(pageBox)).toBe(true);
   });
 
   it("keeps matching Agent ancestors and hides standalone empties under a state filter", async () => {
+    localStorage.setItem("persona.showEmptyWorkspaces", "1");
     sessions[0] = { ...sessions[0], status: "needs_you", state: "needs_you" };
     localStorage.setItem("persona.agentFilter", "needs");
     await render();

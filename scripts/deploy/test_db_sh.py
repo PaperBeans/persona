@@ -131,7 +131,10 @@ class DbShTestCase(unittest.TestCase):
         result = self.run_with(None, containers="persona-postgres=persona jarvis-postgres=jarvis",
                                volumes="persona-pgdata jarvis-pgdata")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("persona-postgres exists but hub.json's database_url is not its database", result.stderr)
+        # Linux CI differs from the macOS fixture; retain its actual path in a failed assertion without printing
+        # successful fixture output. The fake database URL is a constant, not a real credential.
+        detail = "stdout:\n" + result.stdout[-4000:] + "\nstderr:\n" + result.stderr[-4000:] + "\nDocker calls:\n" + self.calls()[-8000:]
+        self.assertIn("persona-postgres exists but hub.json's database_url is not its database", result.stderr, detail)
         self.assert_nothing_made()
         calls = self.calls()
         self.assertIn("start jarvis-postgres", calls)

@@ -68,6 +68,12 @@ func (s *Service) interactionOutcome(ctx context.Context, id string) string {
 // away, and nothing is said about it. One it still reports a while after its answer went, with no answer waiting for
 // it, retries delivery from its durable outcome rather than asking the user again.
 func (s *Service) askOnPhone(list []proto.Interaction) {
+	s.reconcilePhoneAsks(list, nil)
+}
+
+// canWithdraw limits a partial inventory to the cards its source actually read.
+// A complete published snapshot accounts for every card and leaves it nil.
+func (s *Service) reconcilePhoneAsks(list []proto.Interaction, canWithdraw func(string) bool) {
 	f := &s.fleet
 	f.askMu.Lock()
 	defer f.askMu.Unlock()
@@ -95,6 +101,9 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		q := &askedOne{cancel: cancel}
+		if ix.ToolName == sessionReviewTool {
+			q.ready = make(chan struct{})
+		}
 		f.asked[ix.ID] = q
 		go func(ix proto.Interaction) {
 			defer func() {
@@ -102,7 +111,17 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 				q.ended = time.Now()
 				f.askMu.Unlock()
 			}()
-			r, err := s.waitOwnedQuestion(ctx, ix)
+			r, err := s.waitOwnedQuestionReady(ctx, ix, q.ready)
+			if q.ready != nil {
+				select {
+				case <-q.ready:
+				default:
+					// History may already hold an answer, or its read may have failed
+					// before this waiter could register. Release callers in either case.
+					q.registrationErr = err
+					close(q.ready)
+				}
+			}
 			if err != nil {
 				if ctx.Err() == nil {
 					s.logf("assistant: question %s: %v", ix.ID, err)
@@ -123,7 +142,7 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 		}(ix)
 	}
 	for id, q := range f.asked {
-		if !now[id] {
+		if !now[id] && (canWithdraw == nil || canWithdraw(id)) {
 			q.cancel()
 			delete(f.asked, id)
 		}
@@ -135,6 +154,10 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 type askedOne struct {
 	cancel context.CancelFunc
 	ended  time.Time
+	// A stored review can appear in the app's inventory before its ordinary
+	// question waiter registers. Only that review's caller waits on ready.
+	ready           chan struct{}
+	registrationErr error
 }
 
 // askAgainAfter is how long a question the assistant still reports after its answer went may stay off the phone.

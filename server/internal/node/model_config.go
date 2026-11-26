@@ -20,11 +20,12 @@ import (
 type modelExecution struct {
 	Source modelhttp.Source `json:"ModelSource,omitzero"`
 
-	Strict           bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
-	TaskInstructions string `json:"-"`
-	TaskAttachments  string `json:"-"`
-	Model            string
-	Effort           string
+	CodexEffortFallback string `json:"-"`
+	Strict              bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
+	TaskInstructions    string `json:"-"`
+	TaskAttachments     string `json:"-"`
+	Model               string
+	Effort              string
 	// Speed is a one-shot Agent start choice, resolved only against the actual terminal dispatch. FastMode is the
 	// Claude Code form. Neither is kept as process state or included in the execution fingerprint.
 	Speed    string `json:"-"`
@@ -88,6 +89,13 @@ type modelExecution struct {
 	// NewModelChoice classifies this request against the previous recovery chain. It is per-turn provenance, never
 	// persisted or included in the execution fingerprint, and is committed only when the input is delivered.
 	NewModelChoice bool `json:"-"`
+	// PersistedModel marks a model restored from sessionState.Model when the caller supplied no model choice on this
+	// turn (for example after cross-engine launcher fallback cleared options). Per-turn provenance only: never
+	// persisted or included in the execution fingerprint.
+	PersistedModel bool `json:"-"`
+	// FromRecovery marks a model chosen by automatic recovery or a temporary fallback hold rather than an explicit
+	// user/hub choice. Per-turn provenance only: never persisted or included in the execution fingerprint.
+	FromRecovery bool `json:"-"`
 	// SecretTicket: the hand-off a new Claude Code start puts in its environment (secretenv.go). Per start, never
 	// part of a fingerprint, never kept for a resume.
 	SecretTicket string `json:"-"`

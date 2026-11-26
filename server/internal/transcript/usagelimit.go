@@ -50,6 +50,10 @@ func UsageLimitReset(text string, at time.Time) (time.Time, bool) {
 	if assistantwire.GatewayQuotaText(text) {
 		return GatewayAvailableAgain(text, at)
 	}
+	return usageLimitClockReset(text, at)
+}
+
+func usageLimitClockReset(text string, at time.Time) (time.Time, bool) {
 	m := usageLimitReset.FindStringSubmatch(text)
 	if m == nil || at.IsZero() {
 		return time.Time{}, false
@@ -97,7 +101,7 @@ func UsageLimitReset(text string, at time.Time) (time.Time, bool) {
 	return t.UTC(), true
 }
 
-var gatewayAvailable = lazyre.New(`(?i)available again at (?:(\d{4}-\d{2}-\d{2})\s+)?(\d{2}:\d{2})\s*UTC\b`)
+var gatewayAvailable = lazyre.New(`(?i)available again at (?:(\d{4}-\d{2}-\d{2})\s+)?(\d{2}:\d{2}(?::\d{2})?)\s*UTC\b`)
 
 // GatewayAvailableAgain reads the UTC reset given by a gateway. Undated clocks are anchored to the error's
 // timestamp, never the time a stopped session happens to be listed after its reset.
@@ -113,7 +117,11 @@ func GatewayAvailableAgain(text string, at time.Time) (time.Time, bool) {
 		}
 		date = at.UTC().Format("2006-01-02")
 	}
-	t, err := time.Parse("2006-01-02 15:04", date+" "+m[2])
+	layout := "2006-01-02 15:04"
+	if len(m[2]) == 8 {
+		layout = "2006-01-02 15:04:05"
+	}
+	t, err := time.Parse(layout, date+" "+m[2])
 	if err != nil {
 		return time.Time{}, false
 	}

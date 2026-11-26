@@ -18,7 +18,7 @@ registerHooks({
   }
 });
 
-const { KnowledgeWorkspace } = await import('../entry/src/main/ets/models/KnowledgeWorkspace.ets');
+const { KnowledgeWorkspace, KnowledgeListEntry, RecordingFactsDraft } = await import('../entry/src/main/ets/models/KnowledgeWorkspace.ets');
 const { ResourceRow } = await import('../entry/src/main/ets/models/Wire.ets');
 
 function clone(value) { return structuredClone(value); }
@@ -47,6 +47,16 @@ function entry(kind, id, manager = 'work', fields = {}) {
   row.path = kind; row.manager = manager;
   return row;
 }
+
+test('phone project sections match the list wire format and cached detail metadata', () => {
+  const fromList = new KnowledgeListEntry(entry('projects','focus','work',{extra:'short · active',importance:'P0',relevance:92,tags:['mobile']}));
+  assert.deepEqual([fromList.section,fromList.duration,fromList.priority,fromList.relevance,fromList.tags], ['focus','short','P0',92,['mobile']]);
+  for (const [extra,importance,section] of [['long · paused','P2','active'],['short · done','P0','done'],['long · ignored','P1','ignored']])
+    assert.equal(new KnowledgeListEntry(entry('projects','id','work',{extra,importance})).section,section);
+  const cached = new KnowledgeListEntry(entry('projects','old','work',{meta:{kind:'long',status:'active',importance:'P1',relevance:80,tags:['old']}}));
+  assert.deepEqual([cached.section,cached.duration,cached.relevance,cached.tags], ['focus','long',80,['old']]);
+  assert.equal(new KnowledgeListEntry(entry('recordings','id','work',{importance:'P0'})).section,'all');
+});
 
 function fixture(options = {}) {
   const shared = { calls: [], views: new Map(), request: options.request, handoffs: [], createdAgents: [], blocked: new Set() };
@@ -169,6 +179,32 @@ test('Knowledge list, tags and global search use the existing routes and retain 
   assert.ok(shared.calls.some((call) => call.path === '/api/v1/kb-search?q=calendar&results=1'));
   assert.equal(workspace.results[0].entry.manager, client.profile.manager);
   assert.deepEqual(workspace.results[0].hits, ['Found calendar', 'A second match']);
+
+  const beforeTag = shared.calls.length;
+  workspace.setTag('later');
+  assert.equal(workspace.tag, 'later');
+  assert.equal(workspace.query, 'calendar');
+  assert.equal(shared.calls.length, beforeTag);
+  assert.deepEqual(workspace.results[0].hits, ['Found calendar', 'A second match']);
+  workspace.query = '';
+  await workspace.refresh();
+  assert.equal(shared.calls.at(-1).path, '/api/v1/kb/projects?tag=later');
+});
+
+test('the pushed All Meetings list keeps its filter without rewriting the Knowledge landing preference', async () => {
+  const { workspace, client, shared } = await opened();
+  workspace.setTag('focus');
+  await workspace.refresh();
+  const original = new Map(shared.views);
+  const meetings = new KnowledgeWorkspace();
+  await meetings.open(client, undefined, [], 'meetings');
+  meetings.setTag('later');
+  await meetings.refresh();
+  assert.equal(meetings.tag, 'later');
+  assert.deepEqual(shared.views, original);
+  await workspace.open(client);
+  assert.equal(workspace.kind, 'projects');
+  assert.equal(workspace.tag, 'focus');
 });
 
 test('detail reads preserve owner, query matches, timeline, related entries and Moments route', async () => {
@@ -577,4 +613,160 @@ test('Knowledge detail immutable leaves key by full content while minutes select
   ]) assert.ok(page.includes(key), 'missing content-sensitive native ForEach key: ' + key);
   assert.ok(page.includes("this.selectedActions.includes(Wire.text(action, 'id'))"));
   assert.equal(page.split('JSON.stringify([index, line])').length - 1, 2, 'search snippets and timeline lines keep full-line identity');
+});
+
+test('knowledge and recording actions reserve space for an enlarged label', () => {
+  const source = readFileSync(new URL('../entry/src/main/ets/components/KnowledgeWorkspacePage.ets', import.meta.url), 'utf8');
+  for (const id of ['knowledge.filters', 'recordings.capture', 'knowledge.ask']) {
+    const end = source.indexOf(`.id('${id}')`);
+    const start = source.lastIndexOf('Button({', end);
+    assert.ok(end > start && start >= 0, `missing native button ${id}`);
+    const button = source.slice(start, end);
+    assert.ok(button.includes(`.id('${id}.label')`), `missing measurable label for ${id}`);
+    assert.match(button, /constraintSize\(\{minHeight:[^}\n]*fontScale/, `font-scaled minimum height for ${id}`);
+    assert.doesNotMatch(button, /\.height\(\s*\d+\s*\)/, `fixed height clips the label in ${id}`);
+    assert.match(button, /\.flexShrink\(1\)|\.layoutWeight\(/, `label must fit beside its icon in ${id}`);
+  }
+});
+
+test('All Meetings combines imported and recorded entries by meeting id, merges tags, and preserves the original source', async () => {
+  const e=fixture({request({path}) {
+    if(path==='/api/v1/kb/meetings') return {items:[
+      {id:'cal-1',kind:'meetings',name:'Calendar review',updated:'2026-01-03T00:00:00Z',source:'calendar'},
+      {id:'standup',kind:'meetings',name:'Daily',updated:'2026-01-01T00:00:00Z'}],tags:['team','planning']};
+    if(path==='/api/v1/kb/recordings')return {items:[
+      {id:'rec-1',kind:'recordings',name:'Recorded review',meeting_id:'cal-1',updated:'2026-01-04T00:00:00Z'}],tags:['team','audio']};
+  }});
+  const w=new KnowledgeWorkspace();
+  await w.open(e.client,undefined,[],'meetings');
+  assert.deepEqual(w.entries.map(r=>[r.path,r.id]),[['recordings','rec-1'],['meetings','standup']]);
+  assert.deepEqual(w.tags,['team','planning','audio']);
+  assert.equal((await w.openEntry(w.entries[0])).data().imported_meeting.source,'calendar');
+  assert.ok(e.shared.calls.every(c=>c.manager==='work'&&c.method==='GET'));
+});
+
+test('Meetings search excludes unrelated knowledge leads and retains independent filter history', async()=>{
+  const e=fixture({request({path}) {
+    if(path.startsWith('/api/v1/kb-search?'))return {results:['projects','recordings','meetings'].map(kind=>({entry:{kind,id:kind,name:kind},count:1,hits:[{line:'hit'}]}))};
+    return {items:[],tags:[]};
+  }});
+  const w=new KnowledgeWorkspace();await w.open(e.client,undefined,[],'recordings');
+  w.setQuery('review');await w.refresh();
+  assert.deepEqual(w.results.map(hit=>hit.entry.path),['recordings','meetings']);
+  await flush();w.hide();
+  const general=new KnowledgeWorkspace();await general.open(e.client);
+  assert.equal(general.query,'');assert.equal(general.kind,'projects');
+  await w.open(e.client,undefined,[],'recordings');assert.equal(w.query,'review');w.hide();
+});
+
+test('a late meetings response cannot replace a different active category', async()=>{
+  const gate=deferred(),requested=deferred();
+  const e=fixture({request({path}) {
+    if(path==='/api/v1/kb/meetings'){ requested.resolve();return gate.promise; }
+    if(path==='/api/v1/kb/recordings')return {items:[],tags:[]};
+    if(path==='/api/v1/kb/topics')return {items:[{kind:'topics',name:'Local storage',id:'storage'}],tags:['notes']};
+  }});
+  const w=new KnowledgeWorkspace();const opening=w.open(e.client,undefined,[],'meetings');await requested.promise;
+  w.setKind('topics');await w.refresh();
+  gate.resolve({items:[{kind:'meetings',id:'late',name:'old'}],tags:['old']});await opening;
+  assert.equal(w.kind,'topics');assert.deepEqual(w.entries.map(r=>r.id),['storage']);assert.deepEqual(w.tags,['notes']);
+});
+
+test('confirmed recording facts modify only the owner’s pinned text and keep a separate metadata draft', async () => {
+  let pinned = '';
+  const row=entry('recordings','phone/meeting','owner');
+  const env=await opened({request(call) {
+    if (!call.path.endsWith('phone%2Fmeeting')) return;
+    if (call.method === 'PUT') {
+      assert.deepEqual(Object.keys(call.body).sort(), ['expected_pinned','pinned']);
+      assert.equal(call.body.expected_pinned,pinned);
+      pinned=call.body.pinned;
+      return {ok:true};
+    }
+    return {supports_expected_pinned:true,detail:{id:row.id,kind:'recordings',meta:{pinned,importance:'P2'},summary:'meeting'}};
+  }},row);
+  env.workspace.beginEdit();env.workspace.setEditTags('my draft');
+  assert.ok(await env.workspace.saveFacts('  agenda verified  ',''));
+  assert.equal(env.workspace.detail.meta.pinned,'agenda verified');
+  assert.equal(env.workspace.editOpen,true);
+  assert.equal(env.workspace.editTags,'my draft');
+  assert.ok(await env.workspace.saveFacts('','agenda verified'));
+  assert.equal(env.workspace.detail.meta.pinned,'');
+  const writes=calls(env,'PUT','/api/v1/kb/recordings/');
+  assert.equal(writes.length,2);assert.ok(writes.every(call=>call.manager==='owner' && !!call.op));
+});
+
+test('opening a recording from a knowledge search keeps the Hub matches in the displayed detail', async () => {
+  const row=entry('recordings','meeting-1','owner',{opened_from_query:'agenda'});
+  const env=await opened({},row);
+  assert.ok(calls(env,'GET','/api/v1/kb/recordings/meeting-1?q=agenda').length);
+  assert.match(env.workspace.matches[0].line,/agenda/);
+  const page=readFileSync(new URL('../entry/src/main/ets/components/KnowledgeWorkspacePage.ets',import.meta.url),'utf8');
+  const extract=(current,next)=>page.slice(page.indexOf('@Builder '+current+'('),page.indexOf('@Builder '+next+'('));
+  assert.match(extract('recordingDetail','detailContent'),/this\.entryEvidence\(\)/);
+  assert.match(extract('entryEvidence','recordingDetail'),/knowledge\.match\./);
+});
+
+test('a recording fact acknowledgement leaves newer typing and a reopened editor intact', async () => {
+  for (const action of ['type','reopen','unchanged','reject']) {
+    const entered=deferred(), gate=deferred(), row=entry('recordings','voice-1','owner');
+    let stored='';
+    const env=await opened({request:async(call)=>{
+      if (!call.path.endsWith('/voice-1')) return;
+      if (call.method==='PUT') {
+        const sent=call.body.pinned;entered.resolve();await gate.promise;
+        if (action==='reject') throw failure(409,'request_updated');
+        stored=sent;return {ok:true};
+      }
+      return {supports_expected_pinned:true,detail:{id:row.id,kind:'recordings',meta:{pinned:stored},summary:'recording'}};
+    }},row);
+    const draft=new RecordingFactsDraft();draft.begin('');draft.edit('original edit');
+    const pending=draft.save(env.workspace);await entered.promise;
+    if (action==='type') draft.edit('typed while saving');
+    if (action==='reopen') {draft.close();draft.begin('new editor');}
+    gate.resolve();await pending;
+    assert.equal(draft.open,action!=='unchanged');
+    assert.equal(draft.text,{type:'typed while saving',reopen:'new editor',unchanged:'',reject:'original edit'}[action]);
+    assert.equal(stored,action==='reject'?'':'original edit');
+  }
+});
+
+test('recording corrections preserve both device drafts across a conflict and require a second explicit save',async()=>{
+  let stored='prior';
+  const request=async call=>{
+    if (!call.path.endsWith('/meeting-1')) return;
+    if (call.method==='PUT') {
+      if (call.body.expected_pinned!==stored) throw failure(409,'conflict');
+      stored=call.body.pinned;return {ok:true};
+    }
+    return {supports_expected_pinned:true,detail:{id:'meeting-1',kind:'recordings',meta:{pinned:stored}}};
+  };
+  const row=entry('recordings','meeting-1','owner');
+  const [one,two]=await Promise.all([opened({request},row),opened({request},row)]);
+  const a=new RecordingFactsDraft(),b=new RecordingFactsDraft();
+  a.begin('prior');a.edit('device one');b.begin('prior');b.edit('device two');
+  await Promise.all([a.save(one.workspace),b.save(two.workspace)]);
+  const pending=a.open?a:b, workspace=a.open?one.workspace:two.workspace, winner=stored;
+  assert.notEqual(a.open,b.open);assert.equal(pending.conflict,true);assert.equal(pending.baseline,winner);
+  assert.notEqual(pending.text,winner);assert.equal(workspace.error,'phone_facts_changed');
+  const retained=pending.text;await pending.save(workspace);assert.equal(stored,retained);assert.equal(pending.open,false);
+  const legacy=await opened({},row);
+  assert.equal(legacy.workspace.supportsExpectedPinned,false);
+  assert.equal(await legacy.workspace.saveFacts('overwrite',''),false);
+  assert.equal(calls(legacy,'PUT','/api/v1/kb/').length,0);
+});
+test('a recording switched while its mutation journal is staged fails owner admission before dispatch',async()=>{
+  const row=entry('recordings','meeting-1','owner');
+  const options={request(call) {if(call.path.endsWith('/meeting-1')) return {supports_expected_pinned:true,detail:{kind:'recordings',id:'meeting-1',meta:{}}}}};
+  const env=await opened(options,row),repo=env.owner.repo,original=repo.call.bind(repo),entered=deferred(),release=deferred();
+  let sent=false;
+  repo.call=async function(path,method,body,op,admit) {
+    if(method!=='PUT') return original(path,method,body,op,admit);
+    entered.resolve();await release.promise;
+    if(!admit()) throw failure(0,'request_updated');
+    sent=true;return {};
+  };
+  const saving=env.workspace.saveFacts('draft','');
+  await entered.promise;env.workspace.hide();release.resolve();
+  assert.equal(await saving,false);assert.equal(sent,false);
 });

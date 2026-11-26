@@ -1,0 +1,40 @@
+{
+  "string": [
+    {
+      "name": "style_plan_question",
+      "value": "このプランで進めますか？"
+    },
+    {
+      "name": "style_plan_run_detail",
+      "value": "以降は個別に確認しません"
+    },
+    {
+      "name": "style_plan_edits",
+      "value": "承認、編集を自動承認"
+    },
+    {
+      "name": "style_plan_edits_detail",
+      "value": "ファイルの編集は確認せず、その他の操作は通常どおり確認します"
+    },
+    {
+      "name": "style_plan_return_hint",
+      "value": "差し戻して変更点を説明…"
+    },
+    {
+      "name": "style_plan_mode_edits",
+      "value": "編集を自動承認"
+    },
+    {
+      "name": "style_plan_mode_all",
+      "value": "フルアクセス"
+    },
+    {
+      "name": "style_plan_mode_auto",
+      "value": "自動レビュー"
+    },
+    {
+      "name": "style_plan_mode_default",
+      "value": "デフォルト権限"
+    }
+  ]
+}

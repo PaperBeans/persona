@@ -281,7 +281,7 @@ func TestRecordingRejectedRevisionModelInputAndLegacyEdits(t *testing.T) {
 	u.Bookmarks = []RecordingBookmark{{At: 2, Label: "Synthetic bookmark"}}
 	mustStoreRecording(t, e, recID, u, now)
 	got, _ := e.Store.Recording(recID)
-	if got.Pinned != "Keep this fact" || !reflect.DeepEqual(got.Tags, []string{"kept"}) || !got.fieldLocked("tags") || !reflect.DeepEqual(got.Projects, []string{"synthetic-project"}) {
+	if got.Pinned != "Keep this fact" || !reflect.DeepEqual(got.Tags, []string{"kept"}) || !taggingFieldLocked(&got.Tagging, "tags") || !reflect.DeepEqual(got.Projects, []string{"synthetic-project"}) {
 		t.Fatalf("protected fields lost: %+v", got)
 	}
 	if project, _ := e.Store.Project("synthetic-project"); project == nil || !reflect.DeepEqual(project.Items, []string{KindRecording + "/" + recID}) {

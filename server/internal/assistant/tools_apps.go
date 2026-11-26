@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -180,10 +181,10 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		switch {
 		case a.Kind != kb.KindRecording || json.Unmarshal(d.Meta, &trimmed) != nil || trimmed.At == nil:
 		case trimmed.Kind == kb.RecordingDay:
-			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_days); only the recap above is kept, until "+
+			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_text_days); only the recap above is kept, until "+
 				"assistant.minutes_days after the day (0 means forever, the default), and it can't be written again.\n", trimmed.At.In(s.location(ctx)).Format("2006-01-02"))
 		default:
-			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_days); only the minutes above are kept, until "+
+			fmt.Fprintf(&b, "\ntranscript.md: expired %s (assistant.recording_text_days); only the minutes above are kept, until "+
 				"assistant.minutes_days after the meeting (0 means forever, the default), and they can't be made again.\n", trimmed.At.In(s.location(ctx)).Format("2006-01-02"))
 		}
 		switch {
@@ -296,8 +297,9 @@ func prefix(p, s string) string {
 
 // toolInteractionAnswer answers another agent's question for the user (docs/assistant/assistant.md). A permission or
 // a plan is answered here only by the supervisor it was handed to (ask_route.go): it is the supervisor's call, kept
-// as the assistant's (AnsweredBy), never the user's, and one that is the user's alone (userApproval) is refused for
-// ask_escalate. A terminal dialog handed to it is answered the same way (answerScreenCard). Any other permission, plan
+// as the assistant's (AnsweredBy), never the user's. For a permission or plan, denial executes nothing; only an
+// affirmative answer that is the user's alone (userApproval) is refused for ask_escalate. A terminal dialog handed to
+// it is answered by answerScreenCard. Any other permission, plan
 // or terminal dialog is the user's to decide, and an assistant conversation (this one among them) is never answered by
 // the assistant.
 func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args json.RawMessage) (string, error) {
@@ -375,17 +377,20 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 }
 
 // answerApprovalCard is interaction_answer on permission or plan card ix: only the conversation supervising its task
-// that it was handed to (or the main conversation) may allow or deny it, and not one that is the user's alone.
+// that it was handed to (or the main conversation) may allow or deny it. Denial executes nothing; only allowing one
+// that is the user's alone (userApproval) is refused for ask_escalate.
 func (s *Service) answerApprovalCard(ctx context.Context, self string, ix proto.Interaction, allow *bool, reason string) (string, error) {
 	todo, routed := s.routedTo(ix.ID, self, s.isMain(ctx, self))
 	if !routed {
 		return "", fmt.Errorf("interaction %s is a %s (approval) that was not handed to you as its task's supervisor: only the user can answer it in the app", ix.ID, ix.Kind)
 	}
-	if why := userApproval(ix); why != "" {
-		return "", fmt.Errorf("interaction %s %s: only the user decides it; hand it to them with ask_escalate (todo_id %s), with your recommendation", ix.ID, why, todo)
-	}
 	if allow == nil {
 		return "", errors.New("allow is required for a permission or plan card: true allows the tool (approves the plan), false denies it")
+	}
+	if *allow {
+		if why := userApproval(ix); why != "" {
+			return "", fmt.Errorf("interaction %s %s: only the user decides it; hand it to them with ask_escalate (todo_id %s), with your recommendation", ix.ID, why, todo)
+		}
 	}
 	reason = clip(oneLine(reason), 120)
 	if err := s.answeredApproval(ctx, todo, self, ix, *allow, reason); err != nil {
@@ -737,7 +742,7 @@ func (s *Service) toolInboxDraft(ctx context.Context, self string, args json.Raw
 }
 
 // recordingsAt is what kb_get adds to calendar item kind/id (meetings or events, id as stored): the recordings matched
-// to it by time (kb/minutes.go matchRecordings), as their calendar item or their imported meeting (#8872), which hold
+// to it by time (modules/recording/writers/minutes.go matchRecordings), as their calendar item or their imported meeting (#8872), which hold
 // its minutes; "" when there are none.
 func (s *Service) recordingsAt(ctx context.Context, e *kb.Engine, kind, id string) string {
 	var at []kb.Entry
@@ -758,7 +763,7 @@ func (s *Service) recordingsAt(ctx context.Context, e *kb.Engine, kind, id strin
 }
 
 // matchedAt says whether ref names calendar item kind/id (id as stored).
-func matchedAt(ref *kb.MeetingRef, kind, id string) bool {
+func matchedAt(ref *recordingwire.MeetingRef, kind, id string) bool {
 	return ref != nil && ref.Kind == kind && kb.SafeID(ref.ID) == id
 }
 

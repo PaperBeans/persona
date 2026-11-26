@@ -37,11 +37,16 @@ func TestPlannedTaskAgentKindUsesStartAnswerWithoutChangingStart(t *testing.T) {
 		sess.Agent = "codex"
 		return nil
 	}
+	// The node has reported its empty inventory. A background refresh of its todo marks can use that list
+	// while this test counts every node call the planned start and link make.
+	s.syncTodoTokens("box", []proto.Session{})
+	tokenSendDone(t, s, "box")
 	before := f.callCount()
 	todo := startAgentKindPlanTask(t, s, PlanTask{
 		Title: "Record the started kind", Prompt: "Inspect the regression", Machine: "box", Cwd: "/code/app",
 		Readonly: true, Permission: "plan", Launcher: "codex", Model: "model-from-plan", Effort: "high",
 	})
+	tokenSendDone(t, s, "box")
 	after := f.callCount()
 	starts := f.started()
 	if len(starts) != 1 {

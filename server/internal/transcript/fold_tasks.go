@@ -45,22 +45,24 @@ func foldTaskSnapshots(run []proto.Item, uses map[string]proto.Item) []proto.Fol
 		if !ok {
 			continue
 		}
-		switch use.ToolName {
-		case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList":
-		default:
+		if !planTools[use.ToolName] {
 			continue
 		}
-		input, output := taskObject(use.ToolInput), strings.TrimSpace(result.Text)
+		input, output := taskObject(use.ToolInput), strings.TrimSpace(StripToolResultTimestampHeaders(result.Text))
 		obj := taskObject([]byte(output))
 		if string(obj["success"]) == "false" || (obj["error"] != nil && string(obj["error"]) != "null") {
 			continue
 		}
 		snapshot := proto.FoldTaskSnapshot{Entries: []proto.FoldTask{}, SourceItemID: use.ID, SourceToolUseID: use.ToolUseID, SourceSeq: use.Seq}
 		switch use.ToolName {
-		case "TodoWrite":
-			raw, exists := obj["todos"]
+		case "TodoWrite", claudeDesktopPlan:
+			key := "todos"
+			if use.ToolName == claudeDesktopPlan {
+				key = "items"
+			}
+			raw, exists := obj[key]
 			if !exists {
-				raw = input["todos"]
+				raw = input[key]
 			}
 			var todos []taskFields
 			if string(raw) == "null" || json.Unmarshal(raw, &todos) != nil {

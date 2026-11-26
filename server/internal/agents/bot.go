@@ -168,6 +168,11 @@ func (s *BotSource) Messages(ctx context.Context, key, cursor string, limit int)
 	return &MessagePage{Session: &sess, Messages: page.Messages, HasMore: page.HasMore, NextCursor: page.NextCursor}, nil
 }
 
+func (s *BotSource) prepareSend(ctx context.Context, clientID, text string) error {
+	_, err := s.ops.prepare(ctx, s.reg, clientID, text)
+	return err
+}
+
 func (s *BotSource) Send(ctx context.Context, key, clientID, text string) (json.RawMessage, error) {
 	if key != BotSessionKey {
 		return nil, fail(http.StatusNotFound, "agents: unknown bot endpoint")

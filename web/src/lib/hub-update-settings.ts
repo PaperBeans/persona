@@ -3,19 +3,22 @@ import { t } from "../i18n";
 import { api } from "./api";
 import { workingUpdateTitle, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus } from "./hub-update";
 
-export const checkHubUpdate = () => api<HubUpdateStatus>("/hub/update/check", { method: "POST" });
+export const checkHubUpdate = (preview = false) => api<HubUpdateStatus>("/hub/update/check", { method: "POST", json: preview ? { preview: true } : undefined });
+export const startLatestHubUpdate = () => api<HubUpdateStatus>("/hub/update", { method: "POST", json: { target: "latest" } });
+export const cancelHubUpdate = () => api<HubUpdateStatus>("/hub/update/cancel", { method: "POST" });
 export const hubUpdateHistory = () => api<{ history: HubUpdateRecord[] | null }>("/hub/update/history").then(r => r.history ?? []);
 export const hubUpdateBackups = () => api<{ backups: HubUpdateBackup[] }>("/hub/update/backups").then(r => r.backups);
 export const applyHubUpdateBackup = (id: string) => api<HubUpdateStatus>(`/hub/update/backups/${encodeURIComponent(id)}/apply`, { method: "POST" });
 
 /** An update is under way (the progress row, no buttons). */
-export function updateWorking(s: HubUpdateStatus): boolean {
-  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "restarting", "confirming"].includes(s.state);
+export function updateWorking(s: Pick<HubUpdateStatus, "state">): boolean {
+  return ["resolving", "building", "applying_backup", "backing_up", "downloading", "waiting_idle", "installing", "restarting", "confirming"].includes(s.state);
 }
 
 /** A state that ends an update: the history has a new line. */
 export function updateFinished(prev: string | undefined, next: string): boolean {
-  return prev !== next && ["updated", "rolled_back", "failed"].includes(next);
+  return prev !== next && (["updated", "rolled_back", "failed"].includes(next) ||
+    (next === "idle" && prev !== undefined && updateWorking({ state: prev })));
 }
 
 export function updateStateTitle(s: HubUpdateStatus): string {
@@ -38,32 +41,45 @@ export function updateStateTitle(s: HubUpdateStatus): string {
 export const DOCKER_COMMAND = "docker compose pull && docker compose up -d";
 
 export function channelTitle(channel: string): string {
+  if (channel === "web-dev") return t("settings-hubsettings.web_dev");
+  if (channel === "beta") return t("settings-hubsettings.beta_channel");
   return channel === "release" ? t("lib-hub-update.channel_release") : channel === "docker" ? "Docker" : t("lib-hub-update.channel_dev");
 }
 
 export function recordTitle(result: string): string {
+  if (result === "cancelled") return t("settings-hubsettings.cancelled");
   return t(result === "updated" ? "lib-hub-update.result_updated" : result === "rolled_back" ? "lib-hub-update.result_rolled_back" : result === "held" ? "lib-hub-update.result_held" : "lib-hub-update.result_failed");
 }
 
-export function recordTone(result: string): "green" | "orange" | "red" {
+export function recordTone(result: string): "green" | "orange" | "red" | "neutral" {
+  if (result === "cancelled") return "neutral";
   return result === "updated" ? "green" : result === "rolled_back" || result === "held" ? "orange" : "red";
 }
 
-/** What the "Update" group shows: a Docker hub's instructions, why it doesn't update itself, a newer release, an update
- *  under way, or "Up to date". */
+/** What the "Update" group shows for the running build and the selected source. */
 export type UpdateView =
   | { kind: "docker" }
   | { kind: "cannot"; why: string }
   | { kind: "newer"; working: boolean }
   | { kind: "working" }
+  | { kind: "source_behind"; warning: string }
+  | { kind: "ahead" }
+  | { kind: "unchecked" }
   | { kind: "current" };
 
 export function updateView(s: HubUpdateStatus): UpdateView {
   if (s.channel === "docker") return { kind: "docker" };
-  if (!s.can_update) return { kind: "cannot", why: s.why_not ? t("lib-hub-update.cannot_update_why", { why: s.why_not }) : t("lib-hub-update.cannot_update") };
   const working = updateWorking(s);
-  if (s.latest?.newer) return { kind: "newer", working };
-  return working ? { kind: "working" } : { kind: "current" };
+  if (s.can_update && s.latest?.newer) return { kind: "newer", working };
+  if (working) return { kind: "working" };
+  if (s.source !== "web-dev") {
+    const warning = sourceBehindWarning(s);
+    if (warning) return { kind: "source_behind", warning };
+    if (s.latest && s.latest.build > 0 && s.build > s.latest.build) return { kind: "ahead" };
+  }
+  if (!s.can_update) return { kind: "cannot", why: s.why_not ? t("lib-hub-update.cannot_update_why", { why: s.why_not }) : t("lib-hub-update.cannot_update") };
+  if (!s.last_check && !s.latest) return { kind: "unchecked" };
+  return { kind: "current" };
 }
 
 /** The warning under a newer release: it went back before, or auto-update holds it back. */

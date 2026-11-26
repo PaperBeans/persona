@@ -96,7 +96,7 @@ class SpaceEntryScreenTest {
         val sidebar = AssistantSidebarHost()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                CompositionLocalProvider(LocalAssistantSidebarHost provides sidebar) {
+                CompositionLocalProvider(LocalAssistantSidebarHost provides sidebar, LocalSpaceConversationsEnabled provides MutableStateFlow(true)) {
                     AssistantScreen(navigator, hub, hub, hub::startConversation, composerService = null, mainConversationSender = hub,
                         management = management,
                         assistantChatContent = { key, options ->

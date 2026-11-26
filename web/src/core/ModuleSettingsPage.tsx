@@ -4,7 +4,8 @@
 import { createElement, Suspense } from "react";
 import { lazyPage, type LazyPageComponent } from "../lib/lazy-page";
 import { Loading } from "../ui/atoms";
-import { enabledSettingsTabs, loadModule, useModuleStates, type ModuleSettingsProps } from "./module-host";
+import { loadModule, useModuleStates, type ModuleSettingsProps } from "./module-host";
+import { enabledSettingsTabs } from "./module-settings";
 
 const pages = new Map<string, LazyPageComponent<ModuleSettingsProps>>();
 

@@ -224,6 +224,43 @@ func TestLarkEditRetiresTheGrantOfItsOwnCard(t *testing.T) {
 	}
 }
 
+func TestLarkEditHookRetiresDetachedContinuationGrantByApprovalID(t *testing.T) {
+	const origID = "ix_detached_claude_orig"
+	r := newLarkEditRig(t, func(ix proto.Interaction) proto.Resolution {
+		return proto.Resolution{Allow: boolp(true), ApprovalID: origID, EditedText: "edited after detach"}
+	})
+	cwd := t.TempDir()
+	base := r.processIn(cwd, testThread)
+	spec := runLarkEditHook(t, r, cwd, `ex POST /conversations/F1/messages '{"text":"original"}'`, nil)
+	if spec["permissionDecision"] != "allow" {
+		t.Fatalf("detached edited Allow = %#v", spec)
+	}
+	updated, _ := spec["updatedInput"].(map[string]any)
+	command, _ := updated["command"].(string)
+	v := classifyLark(command, r.n.larkCfg.Gates, cwd, r.n.larkCLIRisk(r.n.larkCfg))
+	if len(v.calls) != 1 {
+		t.Fatalf("updated command = %q (%+v)", command, v)
+	}
+	url := base + "/api/v1/conversations/F1/messages"
+	if code, _ := send(t, http.MethodPost, url, `{"text":"original"}`); code != http.StatusForbidden {
+		t.Fatalf("original body after detached edit = %d, want 403", code)
+	}
+	if code, _ := send(t, http.MethodPost, url, v.calls[0].Body); code != http.StatusOK {
+		t.Fatalf("detached edited body = %d, want 200", code)
+	}
+	waitFor(t, "detached edited sent report", func() bool {
+		r.hub.mu.Lock()
+		defer r.hub.mu.Unlock()
+		return len(r.hub.larkSent) == 1
+	})
+	r.hub.mu.Lock()
+	report := r.hub.larkSent[0]
+	r.hub.mu.Unlock()
+	if report.Text != "edited after detach" || report.LetThrough.EditedFrom != "original" || report.LetThrough.InteractionID != origID {
+		t.Fatalf("detached sent report = %#v, want InteractionID=%q EditedFrom=original", report, origID)
+	}
+}
+
 func TestLarkEditHookUnchangedAndDenyAnswersKeepOrdinaryBehavior(t *testing.T) {
 	t.Run("unchanged text uses the original grant without updatedInput", func(t *testing.T) {
 		r := newLarkEditRig(t, func(ix proto.Interaction) proto.Resolution { return editedAllow(ix, "same") })
@@ -386,6 +423,8 @@ func TestEditableTextFieldsRejectsAmbiguousJSON(t *testing.T) {
 		`{"text":"one","mentions":[],"mentions":[]}`,
 		`["text"]`,
 		`{"text":"one"} {"text":"two"}`,
+		`{"text":"hi"}}`,
+		`{"text":"hi"}]`,
 		`{"text":null}`,
 		`{"text":" "}`,
 		`{"content":{"text":"nested"}}`,
@@ -395,4 +434,76 @@ func TestEditableTextFieldsRejectsAmbiguousJSON(t *testing.T) {
 			t.Errorf("ambiguous or non-text body accepted: %s", body)
 		}
 	}
+}
+
+func TestLarkEditAppliesHotReloadedRulesAndGateReorderWithoutLeakingOriginalGrant(t *testing.T) {
+	prevCLI := larkContextFromCLI
+	larkContextFromCLI = func(context.Context, *Node, proto.AssistantLark, larkCall) larkCardContext {
+		return larkCardContext{}
+	}
+	t.Cleanup(func() { larkContextFromCLI = prevCLI })
+
+	t.Run("hot-reloaded deny rule during wait refuses edit with literal dollar and leaves zero grants", func(t *testing.T) {
+		var r *spaceRig
+		r = newLarkEditRig(t, func(ix proto.Interaction) proto.Resolution {
+			// Simulate a config refresh adding a deny rule while the card waits on the phone.
+			r.n.mu.Lock()
+			r.n.larkCfg.Gates[0].Rules = append([]proto.LarkRule{
+				{Method: http.MethodPost, Path: "/conversations/*/messages", Body: map[string]any{"text": "hot-blocked"}, Action: "deny"},
+			}, r.n.larkCfg.Gates[0].Rules...)
+			r.n.mu.Unlock()
+			return editedAllow(ix, "hot-blocked")
+		})
+		cwd := t.TempDir()
+		base := r.processIn(cwd, testThread)
+		spec := runLarkEditHook(t, r, cwd, `ex POST /conversations/F1/messages '{"text":"price $5"}'`, nil)
+		if spec["permissionDecision"] != "deny" || spec["updatedInput"] != nil {
+			t.Fatalf("hot-reloaded deny edit = %#v, want deny without updatedInput", spec)
+		}
+		p := r.n.gates()
+		p.mu.Lock()
+		grants := len(p.grants)
+		p.mu.Unlock()
+		if grants != 0 {
+			t.Fatalf("%d grant(s) leaked after hot-reloaded deny edit", grants)
+		}
+		if code, _ := send(t, http.MethodPost, base+"/api/v1/conversations/F1/messages", `{"text":"price $5"}`); code != http.StatusForbidden {
+			t.Fatalf("original literal-dollar body = %d, want 403", code)
+		}
+		if code, _ := send(t, http.MethodPost, base+"/api/v1/conversations/F1/messages", `{"text":"arbitrary"}`); code != http.StatusForbidden {
+			t.Fatalf("wildcard body = %d, want 403", code)
+		}
+	})
+
+	t.Run("hot-reloaded gate reorder during wait resolves gate by command name", func(t *testing.T) {
+		var r *spaceRig
+		r = newLarkEditRig(t, func(ix proto.Interaction) proto.Resolution {
+			// Reorder Gates so "ex" moves from index 0 to index 1 while the card waits.
+			other := proxiedGate(r.api.URL)
+			other.Command = "othercmd"
+			r.n.mu.Lock()
+			r.n.larkCfg.Gates = []proto.CommandGate{other, r.n.larkCfg.Gates[0]}
+			r.n.mu.Unlock()
+			return editedAllow(ix, "reordered ok")
+		})
+		cwd := t.TempDir()
+		base := r.processIn(cwd, testThread)
+		spec := runLarkEditHook(t, r, cwd, `ex POST /conversations/F1/messages '{"text":"before"}'`, nil)
+		if spec["permissionDecision"] != "allow" {
+			t.Fatalf("reordered gate edit = %#v, want allow", spec)
+		}
+		updated, _ := spec["updatedInput"].(map[string]any)
+		cmd, _ := updated["command"].(string)
+		v := classifyLark(cmd, r.n.larkCfg.Gates, cwd, r.n.larkCLIRisk(r.n.larkCfg))
+		if len(v.calls) != 1 || v.calls[0].Gate != 1 {
+			t.Fatalf("reordered updated command = %q (%+v)", cmd, v)
+		}
+		url := base + "/api/v1/conversations/F1/messages"
+		if code, _ := send(t, http.MethodPost, url, `{"text":"before"}`); code != http.StatusForbidden {
+			t.Fatalf("unedited original body = %d, want 403", code)
+		}
+		if code, _ := send(t, http.MethodPost, url, v.calls[0].Body); code != http.StatusOK {
+			t.Fatalf("reordered edited call = %d, want 200", code)
+		}
+	})
 }

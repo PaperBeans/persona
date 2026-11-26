@@ -332,7 +332,7 @@ onHubEvent("hello", (msg) => {
   answeredOverview = [];
   const edits = sendingOverview ? -1 : editsOverview;
   const version = overviewVersion();
-  api<{ start?: string; pages?: unknown; overview?: unknown }>("/navigation").then(
+  api<{ start?: string; pages?: unknown; overview?: unknown }>("/navigation", { dedupe: false }).then(
     (r) => {
       if (overtaken()) return;
       noteStartPageSynced();

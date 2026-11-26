@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
@@ -133,9 +134,11 @@ type clientOpWriter struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
+	lang   i18n.Lang
 }
 
 func (w *clientOpWriter) Header() http.Header { return w.header }
+func (w *clientOpWriter) Lang() i18n.Lang     { return w.lang }
 func (w *clientOpWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
@@ -196,7 +199,7 @@ func (h *Hub) executeClientOp(w http.ResponseWriter, r *http.Request, kind, id s
 			_ = persist() // A panic may have happened after the side effect.
 		}
 	}()
-	capture := &clientOpWriter{header: make(http.Header)}
+	capture := &clientOpWriter{header: make(http.Header), lang: i18n.OfWriter(w)}
 	next(capture, r)
 	capture.WriteHeader(http.StatusOK)
 	state = clientOpState(capture.status, capture.body.Bytes())
@@ -227,7 +230,7 @@ func (h *Hub) executeClientOp(w http.ResponseWriter, r *http.Request, kind, id s
 	for key, values := range capture.header {
 		w.Header()[key] = values
 	}
-	writeClientOpResult(w, saved)
+	writeClientOpResultForKind(w, kind, saved)
 }
 
 func clientOpState(status int, body []byte) string {
@@ -248,10 +251,17 @@ func clientOpState(status int, body []byte) string {
 }
 
 func writeClientOpResult(w http.ResponseWriter, result clientOpResult) {
+	writeClientOpResultForKind(w, "", result)
+}
+
+func writeClientOpResultForKind(w http.ResponseWriter, kind string, result clientOpResult) {
 	if result.ContentType != "" {
 		w.Header().Set("Content-Type", result.ContentType)
 	}
 	localized := i18n.InboxJSON(i18n.OfWriter(w), result.Body)
+	if (kind == "modes" || kind == "message") && result.Status >= 400 {
+		localized = apierr.LocalizeErrorJSON(i18n.OfWriter(w), localized)
+	}
 	if !bytes.Equal(localized, result.Body) {
 		w.Header().Del("Content-Length")
 	}
@@ -272,7 +282,7 @@ func (h *Hub) waitClientOp(w http.ResponseWriter, r *http.Request, op *db.Client
 				writeErrorBody(w, http.StatusServiceUnavailable, map[string]any{"state": "unknown"})
 				return
 			}
-			writeClientOpResult(w, result)
+			writeClientOpResultForKind(w, op.Kind, result)
 			return
 		case "unknown":
 			// Start, checkout and reply retries must not repeat side effects or replace a recorded HTTP outcome.
@@ -283,7 +293,7 @@ func (h *Hub) waitClientOp(w http.ResponseWriter, r *http.Request, op *db.Client
 				op.Kind == meetingJustMeOp || op.Kind == meetingFollowupOp || op.Kind == todoAnswerOp || op.Kind == todoRouteOp || op.Kind == todoCreateOp {
 				var result clientOpResult
 				if json.Unmarshal(op.Result, &result) == nil && result.Status >= 200 && result.Status <= 599 {
-					writeClientOpResult(w, result)
+					writeClientOpResultForKind(w, op.Kind, result)
 					return
 				}
 			}

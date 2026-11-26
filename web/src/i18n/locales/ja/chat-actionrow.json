@@ -38,5 +38,6 @@
   "status_running": "実行中",
   "status_error": "エラー",
   "status_done": "完了",
-  "no_content": "内容がありません"
+  "no_content": "内容がありません",
+  "diff_skipped_other": "{count} 行省略"
 }

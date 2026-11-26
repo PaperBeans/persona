@@ -135,13 +135,17 @@ describe("another manager's extension page", () => {
     expect(onOpen).toHaveBeenLastCalledWith("example-wechat@m-1");
   });
 
-  it("the default's own page names no manager anywhere", async () => {
+  it("keeps default extension requests unscoped and stamps its external source bindings with the default owner", async () => {
     setRoster(ROSTER);
     act(() => root.render(<Extensions open="example-wechat" onOpen={() => {}} onChannel={() => {}} onConnector={() => {}} />));
     await flush();
+    await act(async () => { await vi.dynamicImportSettled(); });
     const sw = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="进收件箱"]')!;
     expect(sw.getAttribute("aria-checked")).toBe("false");
-    expect(calls.filter((c) => !c.url.endsWith("/managers")).every((c) => c.header === null)).toBe(true);
+    const named = calls.filter((c) => !c.url.endsWith("/managers") && c.header !== null);
+    expect(named.map(({ url, header }) => [url, header])).toEqual([
+      ["/api/v1/assistant/external-source-bindings/summary?provider=wechat", ROSTER.default],
+    ]);
   });
 
   it("leaves out what the extension may read: extension trust is the default manager's", async () => {

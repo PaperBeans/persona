@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"strings"
 	"time"
@@ -98,12 +99,12 @@ func (s *Recordings) handoffRoute(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, err)
 		return
 	}
-	m, rec, err := e.MeetingRead(id)
+	m, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil {
 		writeMeetingError(w, err)
 		return
 	}
-	minutes := e.Store.HasMinutes(rec.ID)
+	minutes := writersOf(e).HasMinutes(rec.ID)
 	transcript := in.Transcript && rec.Chars > 0 && !rec.Trimmed()
 	switch {
 	case meetingRunning(rec, m, time.Now()):
@@ -115,13 +116,13 @@ func (s *Recordings) handoffRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), handoffSendWait)
 	defer cancel()
-	h := kb.MeetingHandoff{ID: rand.Text(), At: time.Now().UTC(), MachineID: in.MachineID, SessionID: in.SessionID,
-		Title: in.Title, Transcript: transcript, State: kb.HandoffSent}
-	h.Problem = s.handoffSend(ctx, e, rec, kb.SessionRef{MachineID: in.MachineID, SessionID: in.SessionID}, in.Text, transcript)
+	h := recordingwire.MeetingHandoff{ID: rand.Text(), At: time.Now().UTC(), MachineID: in.MachineID, SessionID: in.SessionID,
+		Title: in.Title, Transcript: transcript, State: recordingwire.HandoffSent}
+	h.Problem = s.handoffSend(ctx, e, rec, recordingwire.SessionRef{MachineID: in.MachineID, SessionID: in.SessionID}, in.Text, transcript)
 	if h.Problem != "" {
-		h.State = kb.HandoffFailed
+		h.State = recordingwire.HandoffFailed
 	}
-	if _, err := e.MeetingUpdate(rec.ID, func(m *kb.Meeting, _ kb.Recording) error {
+	if _, err := writersOf(e).MeetingUpdate(rec.ID, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
 		m.AddHandoff(h)
 		return nil
 	}); err != nil {
@@ -133,7 +134,7 @@ func (s *Recordings) handoffRoute(w http.ResponseWriter, r *http.Request) {
 
 // handoffSend checks ref as an Agent that may take the meeting and sends it the hand-off's message; "" when it went,
 // else the problem.
-func (s *Recordings) handoffSend(ctx context.Context, e *kb.Engine, rec kb.Recording, ref kb.SessionRef, text string, transcript bool) string {
+func (s *Recordings) handoffSend(ctx context.Context, e *kb.Engine, rec recordingwire.Recording, ref recordingwire.SessionRef, text string, transcript bool) string {
 	t, verdict := s.attendeeCheck(ctx, ref, time.Now())
 	switch {
 	case verdict == attendeeNotAllowed:
@@ -154,7 +155,7 @@ func (s *Recordings) handoffSend(ctx context.Context, e *kb.Engine, rec kb.Recor
 
 // handoffText is the hand-off's message: the meeting's name, calendar title, start and minutes (its transcript too when
 // asked, within handoffTranscriptRunes) in a context block, then the owner's line.
-func (s *Recordings) handoffText(ctx context.Context, e *kb.Engine, rec kb.Recording, text string, transcript bool) string {
+func (s *Recordings) handoffText(ctx context.Context, e *kb.Engine, rec recordingwire.Recording, text string, transcript bool) string {
 	loc := s.location(ctx)
 	d := prompts.MeetingHandoff{Title: feedMeetingName(rec, loc), Started: rec.StartedAt.In(loc).Format("2006-01-02 15:04 MST"), Text: text}
 	if rec.Calendar != nil {
@@ -165,7 +166,7 @@ func (s *Recordings) handoffText(ctx context.Context, e *kb.Engine, rec kb.Recor
 	}
 	if transcript {
 		var lines []string
-		for _, sg := range kb.MeetingLines(e.Store.RecordingSegments(rec.ID)) { // Persona's echo is not the meeting's
+		for _, sg := range recordingwire.MeetingLines(e.Store.RecordingSegments(rec.ID)) { // Persona's echo is not the meeting's
 			lines = append(lines, "["+meetingClock(sg.Start)+"] "+oneLine(sg.Text))
 		}
 		d.Transcript, d.Cut = cutMiddle(strings.Join(lines, "\n"), handoffTranscriptRunes)

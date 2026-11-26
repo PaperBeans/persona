@@ -12,23 +12,24 @@ import (
 // manager it is its entry in the roster (hub/managers.go): where its last handshake said it runs, and when it was
 // last connected.
 type BusIdentity struct {
-	ID        string
-	Role      string // manager (the only role so far)
-	Name      string
-	CreatedAt time.Time // when its current token was made
-	Host      string
-	OS        string
-	Arch      string
-	Deploy    string // child (the hub started it), service, docker, external
-	Version   string
-	LastSeen  *time.Time // when it was last connected (its handshake, or the moment it dropped); nil: never
+	ID         string
+	Role       string // manager (the only role so far)
+	Name       string
+	CreatedAt  time.Time // when its current token was made
+	Host       string
+	MachineUID string
+	OS         string
+	Arch       string
+	Deploy     string // child (the hub started it), service, docker, external
+	Version    string
+	LastSeen   *time.Time // when it was last connected (its handshake, or the moment it dropped); nil: never
 }
 
-const busIdentityColumns = `id, role, name, created_at, host, os, arch, deploy, version, last_seen`
+const busIdentityColumns = `id, role, name, created_at, host, machine_uid, os, arch, deploy, version, last_seen`
 
 func scanBusIdentity(r pgx.Row) (BusIdentity, error) {
 	var b BusIdentity
-	err := r.Scan(&b.ID, &b.Role, &b.Name, &b.CreatedAt, &b.Host, &b.OS, &b.Arch, &b.Deploy, &b.Version, &b.LastSeen)
+	err := r.Scan(&b.ID, &b.Role, &b.Name, &b.CreatedAt, &b.Host, &b.MachineUID, &b.OS, &b.Arch, &b.Deploy, &b.Version, &b.LastSeen)
 	return b, err
 }
 
@@ -77,8 +78,8 @@ func (d *DB) SeeBusIdentity(ctx context.Context, id string, where *BusIdentity) 
 		_, err := d.pool.Exec(ctx, `UPDATE bus_identities SET last_seen = now() WHERE id = $1`, id)
 		return err
 	}
-	_, err := d.pool.Exec(ctx, `UPDATE bus_identities SET host = $2, os = $3, arch = $4, deploy = $5, version = $6,
-		last_seen = now() WHERE id = $1`, id, where.Host, where.OS, where.Arch, where.Deploy, where.Version)
+	_, err := d.pool.Exec(ctx, `UPDATE bus_identities SET host = $2, machine_uid = $3, os = $4, arch = $5, deploy = $6, version = $7,
+		last_seen = now() WHERE id = $1`, id, where.Host, where.MachineUID, where.OS, where.Arch, where.Deploy, where.Version)
 	return err
 }
 

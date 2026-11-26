@@ -89,12 +89,16 @@ func TestSuperviseReviewDoesNotAssertCompletion(t *testing.T) {
 					}}
 					text := RenderSupervise(data)
 					// i18n-ignore: review is a notification, not an acceptance verdict.
-					wants := []string{"signal=review", "待逐项复核，不代表完成", event.detail}
-					wants = append(wants, criteria...)
+					wants := []string{"signal=review", "待逐项复核，不代表完成", "验收标准用 todo_get 取原文", event.detail}
 					wants = append(wants, event.evidence...)
 					for _, want := range wants {
 						if !strings.Contains(text, want) {
 							t.Errorf("review message lost %q:\n%s", want, text)
+						}
+					}
+					for _, criterion := range criteria {
+						if strings.Contains(text, criterion) {
+							t.Errorf("review message repeats criterion %q:\n%s", criterion, text)
 						}
 					}
 					// i18n-ignore: the old blanket completion claim must not return.

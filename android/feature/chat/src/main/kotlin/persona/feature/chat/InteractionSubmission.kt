@@ -17,7 +17,7 @@ internal fun AnswerDraft.forStorage(interaction: Interaction): AnswerDraft =
         persona.core.domain.answer.ElicitationForm.fields(interaction.elicitation?.requestedSchema).none { it.key == key && it.secret }
     }))
 
-internal enum class InteractionSubmission(@androidx.annotation.StringRes val notice: Int, val withdraw: Boolean) {
+enum class InteractionSubmission(@androidx.annotation.StringRes val notice: Int, val withdraw: Boolean) {
     Answered(R.string.chat_interaction_answered, true),
     /** The hub had this card answered already (here, its event missed, or elsewhere): nothing new was sent. */
     AlreadyAnswered(R.string.chat_interaction_already, true),
@@ -42,7 +42,7 @@ internal enum class InteractionSubmission(@androidx.annotation.StringRes val not
 }
 
 /** How one answer went, with what the hub said about a card that was over (docs/protocol/protocol.md, #1673). */
-internal data class InteractionReply(
+data class InteractionReply(
     val submission: InteractionSubmission,
     /** The answer that took effect, for [InteractionSubmission.AlreadyAnswered]. */
     val effective: Resolution? = null,
@@ -72,6 +72,7 @@ internal data class InteractionReply(
             AnswerReceipt(interaction, sent).text(res) ?: res.getString(submission.notice)
         effective != null -> res.getString(R.string.chat_interaction_already_with, AnsweredText.summary(res, interaction, effective))
         submission == InteractionSubmission.Refused && reason != null -> res.getString(R.string.chat_interaction_refused_reason, reason)
+        submission == InteractionSubmission.Unknown && reason != null -> res.getString(submission.notice) + " " + reason
         submission == InteractionSubmission.ResolvedElsewhere -> res.getString(when (endedStatus) {
             "expired" -> R.string.chat_interaction_ended_expired
             "cancelled" -> R.string.chat_interaction_ended_cancelled
@@ -83,19 +84,27 @@ internal data class InteractionReply(
     }
 }
 
-internal suspend fun submitInteraction(submit: suspend () -> ResolveOutcome): InteractionReply = try {
+internal suspend fun submitInteraction(
+    keepUnconfirmedReason: Boolean = false,
+    submit: suspend () -> ResolveOutcome,
+): InteractionReply = try {
     val outcome = submit()
     if (outcome.already) InteractionReply(InteractionSubmission.AlreadyAnswered, effective = outcome.resolution)
     else InteractionReply(InteractionSubmission.Answered)
 } catch (error: CancellationException) {
     throw error
-} catch (gone: InteractionGoneException) {
-    InteractionReply(InteractionSubmission.ResolvedElsewhere, endedStatus = gone.status)
-} catch (_: InteractionPromptChangedException) {
-    InteractionReply(InteractionSubmission.PromptChanged)
 } catch (error: Exception) {
-    if (refusedByHub(error)) InteractionReply(InteractionSubmission.Refused, reason = hubReason(error))
-    else InteractionReply(InteractionSubmission.Unknown)
+    classifyInteractionFailure(error, keepUnconfirmedReason)
+}
+
+fun classifyInteractionFailure(error: Exception, keepUnconfirmedReason: Boolean = false): InteractionReply = when {
+    error is CancellationException -> throw error
+    error is InteractionGoneException -> InteractionReply(InteractionSubmission.ResolvedElsewhere, endedStatus = error.status)
+    error is InteractionPromptChangedException -> InteractionReply(InteractionSubmission.PromptChanged)
+    keepUnconfirmedReason && hubCodedFailure(error)?.code == "command_input_unconfirmed" ->
+        InteractionReply(InteractionSubmission.Unknown, reason = hubReason(error))
+    refusedByHub(error) -> InteractionReply(InteractionSubmission.Refused, reason = hubReason(error))
+    else -> InteractionReply(InteractionSubmission.Unknown, reason = hubReason(error).takeIf { keepUnconfirmedReason })
 }
 
 /**

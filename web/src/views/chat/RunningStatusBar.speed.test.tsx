@@ -260,7 +260,7 @@ describe("the end of a turn", () => {
   });
 
   it("gives the keyboard back to the composer when a pinned card closes after the turn", async () => {
-    const dock = (ui: React.ReactElement) => <div data-chat-dock><textarea data-composer />{ui}</div>;
+    const dock = (ui: React.ReactElement) => <div data-chat-dock><div contentEditable tabIndex={0} data-composer-input />{ui}</div>;
     draw(dock(bar(line(1, 50))));
     await loaded();
     for (let s = 2; s <= 5; s++) {
@@ -273,7 +273,7 @@ describe("the end of a turn", () => {
     click(q("[data-speed-close]")!);
     expect(speed()).toBeNull();
     await tick(0);
-    expect(document.activeElement).toBe(q("[data-composer]"));
+    expect(document.activeElement).toBe(q("[data-composer-input]"));
   });
 
   it("says no Done after background subagents or a workflow", async () => {

@@ -18,7 +18,32 @@ type Item struct {
 	// Signals are why the item concerns the owner, as far as the source can tell (Signal*): the knowledge base's
 	// selection decides by them which documents it keeps. A source that cannot tell one leaves it out.
 	Signals []string `json:"signals,omitempty"`
+	// The fields below are optional and only some sources set them (the Lark user sync, internal/larksyncwire); an
+	// item without them is kept exactly as before.
+	//
+	// CanonicalKey is the content's identity across sources ("feishu_doc:<obj_token>"): two sources handing over the
+	// same key are one item, kept once, with both in Sources.
+	CanonicalKey string `json:"canonical_key,omitempty"`
+	// Aliases are other IDs the same content is stored under by other sources (a wiki node token).
+	Aliases []string `json:"aliases,omitempty"`
+	// Revision only grows: an item handed over with a lower revision than the stored one does not replace it.
+	Revision int64  `json:"revision,omitempty"`
+	BodyHash string `json:"body_hash,omitempty"`
+	// Content is the item's text (a document as Markdown, a meeting's transcript), bounded by the source.
+	Content string `json:"content,omitempty"`
+	// Sources are every place the content was read from.
+	Sources []SourceRef `json:"sources,omitempty"`
 	Tagging
+}
+
+// SourceRef is one place a piece of content was read from: a channel (the connector or source name), the binding
+// within it (a Lark user sync binding key, "" for a single-account source), how it was found and when.
+type SourceRef struct {
+	Channel string    `json:"channel"`
+	Binding string    `json:"binding,omitempty"`
+	Account string    `json:"account,omitempty"`
+	Entry   string    `json:"entry,omitempty"`
+	SeenAt  time.Time `json:"seen_at,omitempty"`
 }
 
 // What a source can tell about a document and the owner (Item.Signals).
@@ -64,6 +89,9 @@ type Tagging struct {
 	// Excluded: the links the user removed by hand, by list ("people", "chats", "projects", "items"), which automatic
 	// writes leave out (docs/assistant/knowledge.md "Removed links").
 	Excluded map[string][]string `json:"excluded,omitempty"`
+	// Persisted: the knowledge base read this from an entity's stored metadata. Set by the store only; never on the
+	// wire and never in a file.
+	Persisted bool `json:"-"`
 }
 
 // Provenance is who last wrote a locked field and from what.

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -285,10 +286,18 @@ func (n *Node) modesOf(id string) (mode, effort string) {
 
 // setModes changes a running session's permission mode and / or effort level ("" leaves one as it is).
 func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
-	return n.updateModes(ctx, id, mode, effort, nil)
+	return n.updateModes(ctx, id, mode, effort, nil, nil)
 }
 
-func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending *bool) error {
+func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending, changed *bool) error {
+	markChanged := func() {
+		if changed != nil {
+			*changed = true
+		}
+	}
+	if mode == "" && effort == "" {
+		return nil
+	}
 	if !n.isAssistantSession(id) {
 		if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
 			return err
@@ -301,7 +310,11 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			if effort == "" {
 				return nil
 			}
-			return n.setCodexEffort(ctx, id, c, t, effort)
+			if err := n.setCodexEffort(ctx, id, c, t, effort); err != nil {
+				return err
+			}
+			markChanged()
+			return nil
 		}
 	}
 	if err := validModes(mode, effort); err != nil {
@@ -327,6 +340,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 					n.stopAssistant(id)
 				}
 				n.notifySessions()
+				markChanged()
 				return nil // an active one restarts with it at the next idle message
 			}
 			if p.needsRestartFor(mode) {
@@ -342,6 +356,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 					n.noteModes(id, "", effort)
 					n.persistModes(id, "", effort)
 					n.notifySessions()
+					markChanged()
 					return nil // both wait for the restart at the next idle message
 				}
 				if !active {
@@ -349,11 +364,16 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 					n.noteModes(id, "", effort)
 					n.persistModes(id, "", effort)
 					n.notifySessions()
+					markChanged()
 					return nil
 				}
 				mode = "" // Keep the active turn; the next idle message restarts it in bypass mode.
 			}
-			return n.applyAssistantModes(ctx, p, mode, effort)
+			if err := n.applyAssistantModes(ctx, p, mode, effort); err != nil {
+				return err
+			}
+			markChanged()
+			return nil
 		}
 		n.noteModes(id, mode, effort)
 		n.persistModes(id, mode, effort, true)
@@ -361,7 +381,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			if h, _, _ := n.runtimes.belongs(id); h != nil {
 				st, _ := n.state.get(id)
 				params := map[string]any{"session_id": id, "permission_mode": mode, "effort": effort, "assistant": true}
-				if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(id, "", st)); env != nil {
+				if env := n.assistantEnvForRuntime(h, n.runtimeAssistantCwd(id, "", st), id); env != nil {
 					params["env"] = env
 				}
 				cctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
@@ -381,6 +401,7 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			}
 		} // else: applied when the next message starts the process
 		n.notifySessions()
+		markChanged()
 		return nil
 	}
 	if n.codexPath(id) != "" || n.traexPath(id) != "" { // not driven through an app-server: no way to set either
@@ -393,9 +414,11 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 			}
 			n.noteModes(id, "", effort)
 			n.notifySessions()
+			markChanged()
 			return nil
 		}
 	}
+	applied := false
 	if mode != "" {
 		// Allow All for a claude that has no bypass flag: no key reaches it, so it is restarted in it once its turn is
 		// over (mode_restart.go, #6476). Any other pick drops such a restart that waits.
@@ -404,18 +427,25 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 				if err := n.queueModeRestart(id, mode); err != nil {
 					return err
 				}
+				applied = true
 				mode = ""
 				if effort == "" {
+					markChanged()
 					return nil
 				}
 			}
 		} else {
-			n.dropModeRestart(id, mode)
+			if n.dropModeRestart(id, mode) {
+				applied = true
+			}
 		}
 	}
 	if effort != "" {
 		unlock, err := n.inputTurn(ctx, id)
 		if err != nil {
+			if applied {
+				return partialModesErr(err)
+			}
 			return err
 		}
 		defer unlock()
@@ -424,27 +454,94 @@ func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending
 	defer unlockModes()
 	pane, err := n.paneFor(ctx, id)
 	if err != nil {
+		if applied {
+			return partialModesErr(n.noPaneForModes(id))
+		}
 		return n.noPaneForModes(id)
 	}
 	if mode != "" {
 		stopDriving := n.driveModes(id)
-		err := n.tuiSetMode(ctx, pane, mode)
+		modeChanged, err := n.tuiSetMode(ctx, pane, mode)
 		stopDriving()
 		if err != nil {
+			if applied || modeChanged {
+				return partialModesErr(err)
+			}
 			return err
 		}
 		n.noteModes(id, mode, "")
+		if modeChanged {
+			applied = true
+		}
 	}
 	if effort != "" {
 		if c, ok := n.outsideClaude(id); ok && (c.Status == "busy" || c.Status == "waiting") {
-			return fmt.Errorf("Agent 正在工作，这一轮结束后再改思考强度")
-		}
-		if err := n.setTerminalEffort(ctx, id, pane, effort, pending); err != nil {
+			err := fmt.Errorf("Agent 正在工作，这一轮结束后再改思考强度")
+			if applied {
+				return partialModesErr(err)
+			}
 			return err
 		}
+		if err := n.setTerminalEffort(ctx, id, pane, effort, pending); err != nil {
+			if applied {
+				return partialModesErr(err)
+			}
+			return err
+		}
+		applied = true
+	}
+	if applied {
+		markChanged()
 	}
 	n.notifySessions()
 	return nil
+}
+
+// partialModesErr preserves an error's code and details while marking delivered="unknown", partial=true and
+// retryable=false (with a partial-change summary) when an earlier change in the same session.modes request (model,
+// launcher cancellation or permission mode) already took effect, so clients reconcile current settings while
+// client_ops records the partial request as "unknown" instead of "failed".
+func partialModesErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var re *rpc.Error
+	code := ""
+	origMsg := err.Error()
+	var data map[string]any
+	if errors.As(err, &re) {
+		code = re.Code
+		origMsg = re.Message
+		if len(re.Data) > 0 {
+			_ = json.Unmarshal(re.Data, &data)
+		}
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["delivered"] = deliveredUnknown
+	data["partial"] = true
+	data["retryable"] = false
+	partialKey := "rpc-errors.modes_partial_failed"
+	switch code {
+	case notDelivered:
+		if reason, _ := data["reason"].(string); reason == "terminal_finished" {
+			partialKey = "rpc-errors.modes_partial_terminal_finished"
+		} else {
+			partialKey = "rpc-errors.modes_partial_not_delivered"
+		}
+	case screen.DialogOpen:
+		partialKey = "rpc-errors.modes_partial_dialog_open"
+	}
+	if _, hasDetail := data["detail"]; !hasDetail && origMsg != "" {
+		data["detail"] = origMsg
+	}
+	msg := i18n.T(i18n.Default, partialKey)
+	if code == "" && origMsg != "" {
+		msg += "：" + origMsg
+	}
+	b, _ := json.Marshal(data)
+	return &rpc.Error{Code: code, Message: msg, Data: b}
 }
 
 // noPaneForModes is the refusal of a mode, effort, model or ultracode change for a session with no pane to drive. A
@@ -524,29 +621,31 @@ func tuiMode(screen string) string {
 	return ""
 }
 
-// tuiSetMode presses shift+tab until the footer shows the wanted mode.
-func (n *Node) tuiSetMode(ctx context.Context, pane, mode string) error {
+// tuiSetMode presses shift+tab until the footer shows the wanted mode, reporting whether any key was pressed.
+func (n *Node) tuiSetMode(ctx context.Context, pane, mode string) (bool, error) {
+	changed := false
 	for range len(tuiModeCycle) + 1 {
 		screen, err := n.readPane(ctx, pane, "visible", 60)
 		if err != nil {
-			return err
+			return changed, err
 		}
 		cur := tuiMode(screen)
 		if cur == mode {
-			return nil
+			return changed, nil
 		}
 		if cur == "" {
-			return fmt.Errorf("终端里没看到 Claude Code 的输入框（可能有对话框挡着）")
+			return changed, fmt.Errorf("终端里没看到 Claude Code 的输入框（可能有对话框挡着）")
 		}
 		if err := n.sendKeys(ctx, pane, "shift+tab"); err != nil {
-			return err
+			return changed, err
 		}
+		changed = true
 		time.Sleep(350 * time.Millisecond)
 	}
 	if mode == "bypassPermissions" {
-		return fmt.Errorf("「全部放行」只能在新开 Agent 时选，运行中切不过去")
+		return changed, fmt.Errorf("「全部放行」只能在新开 Agent 时选，运行中切不过去")
 	}
-	return fmt.Errorf("切换权限模式没成功：终端里循环一圈也没出现 %s", mode)
+	return changed, fmt.Errorf("切换权限模式没成功：终端里循环一圈也没出现 %s", mode)
 }
 
 // tuiPromptEmpty reports whether nothing is typed in the TUI's input box (the hint text on a fresh session counts as
@@ -592,6 +691,9 @@ func (n *Node) tuiSetEffort(ctx context.Context, pane, effort string) error {
 	}
 	if !n.canTypeText(pane) { // a host that types only whole submissions (herdr-core): the command is one
 		if err := n.hostPrompt(ctx, pane, "/effort"); err != nil {
+			if r := deliveryRefusal(err); r != nil {
+				return r
+			}
 			return err
 		}
 	} else {

@@ -47,7 +47,7 @@ process of its own, but the node is the one place that turns sessions, items and
 
 ## Configuration
 
-`~/.persona/managed-agents.json` (`--config` for another file), read again within 10 seconds of a change. Keep it 0600:
+`~/.persona/managed-agents.json` (`$PERSONA_HOME/managed-agents.json` when `PERSONA_HOME` is set, matching `runtime.sock`; `--config` for another file), read again within 10 seconds of a change. Keep it 0600:
 it holds no key, but says where they are.
 
 ```json
@@ -79,7 +79,7 @@ it holds no key, but says where they are.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `runtime` / `name` (top level) | `managed-agents` / `Managed Agents` | The runtime id and what the apps call it. Change both to run two companions on one computer |
+| `runtime` / `name` (top level) | `managed-agents` / `Managed Agents` | The runtime id and what the apps call it. Change both to run two companions on one computer; changing them on reload reconnects under the new identity |
 | `id` | required | Lowercase letters, digits and `-`, at most 24; the prefix of this profile's session ids (`<id>.<MA session id>`) |
 | `name` | `id` | Shown after the agent's name in a group's title when there are several profiles |
 | `mode` | required | `cloud` or `self`. A `self` profile needs `base_url` |
@@ -97,7 +97,7 @@ it holds no key, but says where they are.
 | `start` | none | `{agent, environment_id?, label?, launcher?, body?}`: offer New Agent on this agent. `launcher` defaults to `ma-<id>`; `body` is more of the create request (resources, vault ids) |
 | `question_tools`, `plan_tools` | `["AskQuestion", "AskUserQuestion"]`, `["ExitPlanMode"]` | Custom tools answered on the phone as question and plan cards |
 | `stream` | `true` | Follow a watched session's event stream for live text; polling alone otherwise |
-| `poll_seconds`, `recent_minutes` | `3`, `30` | How often running, waiting, watched and recently active sessions are read again |
+| `poll_seconds`, `recent_minutes` | `3`, `30` | How often each profile's running, waiting, watched and recently active sessions are read again (1–60 s, per profile, re-armed on reload) |
 | `images` | `base64` | `none` sends a message's pictures as nothing (servers without image blocks) |
 | `disabled` | `false` | Keep the profile, list nothing from it |
 
@@ -131,12 +131,12 @@ when the server answers 401 or 403 (a key you rotated is read again):
 | --- | --- |
 | Session list | `GET <prefix>/sessions` (newest first), plus `sessions` and the ones started from Persona read with `GET <prefix>/sessions/{id}`; archived sessions and other agents' (with `agents`) left out. Rows through `rt.recent` (7 days, 80; running and waiting always) |
 | Grouping | Space per MA agent (`<profile>:<agent id>`), named by the agent |
-| Status | From the log: a pending ask → `blocked` (Needs you), running → `working`, idle → `done`, terminated → `offline`; the session's own `status` before its log is read |
+| Status | From the log: a pending ask → `blocked` (Needs you), running → `working`, idle → `done`, terminated → `offline`; the session's own `status` before its log is read (followed sessions are reconciled with bounded concurrency before connecting, so idle sessions with warm containers report `done` from the first push) |
 | Conversation | `GET <prefix>/sessions/{id}/events?order=asc&limit=100`, following `next_page`, deduped by event id (the server's `after` is a hint, not a filter). seq = the event's position in the log; history `ma:<session>` |
-| Items | `user.message` → user text and images; `agent.message` → reply; `agent.thinking` → thinking; `agent.tool_use` / `agent.mcp_tool_use` / `agent.custom_tool_use` → tool call (names mapped to the apps' set: `bash` → `Bash`…; MCP as `mcp__<server>__<tool>`); `agent.tool_result` / `agent.mcp_tool_result` / `user.custom_tool_result` → result; a denial → an error result; `user.interrupt` → interrupted notice; `session.error` (not while it is `retrying`) → error notice; `agent.thread_context_compacted` → compaction divider. Status, span, usage and other events take a seq and show nothing |
+| Items | `user.message` → user text and images; `agent.message` → reply; `agent.thinking` → thinking; `agent.tool_use` / `agent.mcp_tool_use` / `agent.custom_tool_use` → tool call (names mapped to the apps' set: `bash` → `Bash`…; MCP as `mcp__<server>__<tool>`); `agent.tool_result` / `agent.mcp_tool_result` / `user.tool_result` / `user.custom_tool_result` → result; a denial → an error result; `user.interrupt` → interrupted notice; `session.error` (not while it is `retrying`) → error notice; `agent.thread_context_compacted` → compaction divider. Status, span, usage and other events take a seq and show nothing |
 | Live text | While a session is watched: `GET <prefix>/sessions/{id}/events/stream?event_deltas=agent.message&event_deltas=agent.thinking`; reply deltas → `session.delta`, ended when the full event lands. A server without the stream is polled |
 | Send | `POST <prefix>/sessions/{id}/events` `{events: [{type: "user.message", content}]}` (text, base64 image blocks), with the model credentials; deduped by `client_msg_id` in the SDK; `{queued: true}` while a turn runs |
-| Interrupt | `user.interrupt`; settled once the log says the turn ended (10 s at most) |
+| Interrupt | `user.interrupt`; settled once the loaded log confirms `done` or `terminated` (10 s at most), and open cards are withdrawn once the log records the interrupt or turn end |
 | Start | `POST <prefix>/sessions` `{agent, environment_id?, project_name?, title, …body}`, then the first message |
 | Permission card | A tool call with `evaluated_permission: "ask"` that the latest `requires_action` names and nothing answered → `user.tool_confirmation` `allow` / `deny` (with the denial's words as `deny_message`) |
 | Question / plan card | A configured custom tool call → `user.custom_tool_result` whose text is JSON: `{answers: {question: label}}`, or `{decision: "approved" \| "changes_requested", executionMode, feedback}` |

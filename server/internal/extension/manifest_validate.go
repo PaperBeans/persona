@@ -75,6 +75,14 @@ func (m *Manifest) Validate() error {
 	}
 	errs = append(errs, m.validateModel()...)
 	errs = append(errs, m.validateTools()...)
+	if u := m.Upgrade; u != nil {
+		if u.Backup != "" && u.Backup != BackupAuto && u.Backup != BackupRequired {
+			bad("upgrade.backup %q: auto or required", u.Backup)
+		}
+		if (u.Prepare || u.HealthCheck) && !m.Runtime.SpeaksRPC() {
+			bad("upgrade.prepare and upgrade.health_check need a runtime that speaks the protocol")
+		}
+	}
 	for _, name := range sortedKeys(m.Contributes) {
 		p, known := Points[name]
 		if !known {

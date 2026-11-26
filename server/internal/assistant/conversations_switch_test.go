@@ -60,11 +60,18 @@ type conversationSwitchTestRig struct {
 
 func newConversationSwitchTestRig(t *testing.T) *conversationSwitchTestRig {
 	t.Helper()
-	s, f, d, _ := historyFixture(t, func(string, ...any) {})
+	return newConversationSwitchTestRigWithHub(t, nil)
+}
+
+func newConversationSwitchTestRigWithHub(t *testing.T, wrapHub func(Hub) Hub) *conversationSwitchTestRig {
+	t.Helper()
+	s, f, d, _ := historyFixtureWithHub(t, func(string, ...any) {}, wrapHub)
 	r := &conversationSwitchTestRig{s: s, f: f, d: d}
+	f.mu.Lock()
 	for _, id := range []string{"fresh-chat", "busy-chat", "target-chat", "restored-chat", "independent-chat"} {
 		f.known[id] = true
 	}
+	f.mu.Unlock()
 	r.setTurn(proto.StatusWorking)
 	f.answerNode("assistant.segment.check", func(_ string, raw json.RawMessage) (any, error) {
 		var p map[string]any
@@ -522,6 +529,14 @@ func TestConversationSwitchesRefuseIndependentChanges(t *testing.T) {
 		started := conversationSwitchTestDecode(t, code, raw)
 		conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"fresh-chat": "switched"})
 
+		// The batch projection can be saved just before the operation's accepted commit. An independent
+		// operation may start only after that real commit, not merely after its batch says switched.
+		waitFor(t, "the original operation to accept", func() bool {
+			op, err := r.d.ConversationSwitch(context.Background(), "server", "fresh-chat",
+				conversationSwitchTestItemFor(t, started, "fresh-chat").OperationID)
+			return err == nil && op != nil && op.Phase == "accepted"
+		})
+
 		// This deliberately independent operation has no batch before-image. The
 		// fixture's durable-before-prepare gate applies only to batch operations.
 		r.mu.Lock()
@@ -622,4 +637,188 @@ func TestConversationSwitchToolPreviewIsReadOnly(t *testing.T) {
 	if calls := conversationSwitchTestUnexpectedPreviewCalls(r); len(calls) != 0 {
 		t.Fatalf("tool preview reached a node: %+v", calls)
 	}
+}
+
+func TestConversationSwitchRestoreWithInheritedPermissionMode(t *testing.T) {
+	t.Run("forward inherits non-default permission mode", func(t *testing.T) {
+		r := newConversationSwitchTestRig(t)
+		r.f.mu.Lock()
+		for i := range r.f.sessions["server"] {
+			if r.f.sessions["server"][i].SessionID == "fresh-chat" {
+				r.f.sessions["server"][i].PermissionMode = "bypassPermissions"
+			}
+		}
+		r.f.mu.Unlock()
+
+		code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"conversation_ids":["fresh-chat"],"launcher":"fallback"}`)
+		started := conversationSwitchTestDecode(t, code, raw)
+		item := conversationSwitchTestItemFor(t, started, "fresh-chat")
+		if item.Before.PermissionMode != "bypassPermissions" || item.Target.PermissionMode != "bypassPermissions" {
+			t.Fatalf("inherited permission mode not recorded: %+v", item)
+		}
+		conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"fresh-chat": "switched"})
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`"}`)
+		restoring := conversationSwitchTestDecode(t, code, raw)
+		if restoring.BatchID == "" || restoring.RestoreOf != started.BatchID {
+			t.Fatalf("restore refused or missing batch id: %+v", restoring)
+		}
+		restored := conversationSwitchTestDrive(t, r.s, restoring.BatchID, map[string]string{"fresh-chat": "switched"})
+		p := conversationSwitchTestPreparationFor(t, r, conversationSwitchTestItemFor(t, restored, "fresh-chat"))
+		if p["launcher"] != "sub" || p["model"] != "old-model" || p["effort"] != "high" || p["permission_mode"] != "bypassPermissions" {
+			t.Fatalf("restore preparation: %+v", p)
+		}
+	})
+
+	t.Run("legacy batch with empty target permission mode restores and still fences real changes", func(t *testing.T) {
+		r := newConversationSwitchTestRig(t)
+		ctx := context.Background()
+		r.f.mu.Lock()
+		for i := range r.f.sessions["server"] {
+			if r.f.sessions["server"][i].SessionID == "fresh-chat" {
+				r.f.sessions["server"][i].PermissionMode = "bypassPermissions"
+			}
+		}
+		r.f.mu.Unlock()
+
+		code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"conversation_ids":["fresh-chat"],"launcher":"fallback"}`)
+		started := conversationSwitchTestDecode(t, code, raw)
+		conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"fresh-chat": "switched"})
+
+		// Simulate a batch saved before Target.PermissionMode inherited Before.PermissionMode.
+		state, _, err := r.s.loadConversationSwitches(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.Batches[0].Items[0].Target.PermissionMode = ""
+		if err := r.s.saveConversationSwitches(ctx, state); err != nil {
+			t.Fatal(err)
+		}
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`","preview":true}`)
+		preview := conversationSwitchTestDecode(t, code, raw)
+		if got := conversationSwitchTestItemFor(t, preview, "fresh-chat"); got.Outcome != "ready" {
+			t.Fatalf("legacy batch restore preview refused: %+v", got)
+		}
+
+		// A real independent permission-mode change on the new segment must still be refused.
+		c, err := r.d.LogicalConversation(ctx, "server", "fresh-chat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		active, ok := c.Active()
+		if !ok {
+			t.Fatalf("missing active segment: %+v", c)
+		}
+		plan := "plan"
+		if err := r.d.SetConversationSegmentModes(ctx, "server", "fresh-chat", c.Epoch, active.ID, nil, nil, &plan); err != nil {
+			t.Fatal(err)
+		}
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`","preview":true}`)
+		refused := conversationSwitchTestDecode(t, code, raw)
+		if got := conversationSwitchTestItemFor(t, refused, "fresh-chat"); got.Outcome != "refused" {
+			t.Fatalf("independent permission mode change was not fenced: %+v", got)
+		}
+	})
+}
+
+func TestConversationSwitchRestoreUsesRecordedItemMachine(t *testing.T) {
+	addOtherChat := func(r *conversationSwitchTestRig) {
+		r.f.mu.Lock()
+		r.f.known["other-chat"] = true
+		r.f.sessions["other"] = []proto.Session{{
+			SessionID: "other-chat",
+			MachineID: "other",
+			Assistant: true,
+			Agent:     "claude",
+			Launcher:  "sub",
+			Model:     "old-model",
+			Effort:    "high",
+			Status:    proto.StatusIdle,
+			State:     proto.StateIdle,
+		}}
+		r.f.mu.Unlock()
+	}
+
+	t.Run("HTTP restore preview and execution resolve on old.Machine", func(t *testing.T) {
+		r := newConversationSwitchTestRig(t)
+		addOtherChat(r)
+
+		code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"conversation_ids":["other-chat"],"machine_id":"other","launcher":"fallback","model":"new-model"}`)
+		started := conversationSwitchTestDecode(t, code, raw)
+		conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"other-chat": "switched"})
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`","preview":true}`)
+		preview := conversationSwitchTestDecode(t, code, raw)
+		if got := conversationSwitchTestItemFor(t, preview, "other-chat"); got.Outcome != "ready" || got.Machine != "other" {
+			t.Fatalf("HTTP restore preview on non-default machine: %+v", got)
+		}
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`"}`)
+		restoring := conversationSwitchTestDecode(t, code, raw)
+		if restoring.BatchID == "" || restoring.RestoreOf != started.BatchID {
+			t.Fatalf("HTTP restore on non-default machine refused: %+v", restoring)
+		}
+		restored := conversationSwitchTestDrive(t, r.s, restoring.BatchID, map[string]string{"other-chat": "switched"})
+		got := conversationSwitchTestItemFor(t, restored, "other-chat")
+		if got.Machine != "other" || got.Target.Launcher != "sub" || got.Target.Model != "old-model" {
+			t.Fatalf("HTTP restore item mismatch: %+v", got)
+		}
+	})
+
+	t.Run("HTTP restore cancels unfinished switch on old.Machine", func(t *testing.T) {
+		r := newConversationSwitchTestRig(t)
+		addOtherChat(r)
+		conversationSwitchTestUnknownReceipt(r)
+
+		code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"conversation_ids":["other-chat"],"machine_id":"other","launcher":"fallback","model":"new-model"}`)
+		started := conversationSwitchTestDecode(t, code, raw)
+		item := conversationSwitchTestItemFor(t, started, "other-chat")
+		conversationSwitchTestWaitSwitch(t, r, item, "in_doubt", "fake receipt unavailable")
+		conversationSwitchTestSettle(t, r.s)
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`","preview":true}`)
+		preview := conversationSwitchTestItemFor(t, conversationSwitchTestDecode(t, code, raw), "other-chat")
+		if preview.Outcome != "ready" || preview.Machine != "other" {
+			t.Fatalf("unfinished restore preview on non-default machine: %+v", preview)
+		}
+
+		code, raw = conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"restore_batch_id":"`+started.BatchID+`"}`)
+		restoring := conversationSwitchTestDecode(t, code, raw)
+		got := conversationSwitchTestItemFor(t, restoring, "other-chat")
+		if restoring.BatchID == "" || got.Outcome != "switched" || got.Machine != "other" || !strings.Contains(got.Reason, "cancelled") {
+			t.Fatalf("unfinished restore cancel on non-default machine: %+v", restoring)
+		}
+	})
+
+	t.Run("MCP restore preview and execution resolve on old.Machine", func(t *testing.T) {
+		r := newConversationSwitchTestRig(t)
+		addOtherChat(r)
+
+		// Execute a forward switch on machine "other" via HTTP (same space "") so it completes cleanly, then restore via MCP.
+		code, raw := conversationSwitchTestCall(t, r.s, http.MethodPost, "/api/v1/assistant/conversation-switches", "", `{"conversation_ids":["other-chat"],"machine_id":"other","launcher":"fallback","model":"new-model"}`)
+		started := conversationSwitchTestDecode(t, code, raw)
+		conversationSwitchTestDrive(t, r.s, started.BatchID, map[string]string{"other-chat": "switched"})
+
+		text, err := r.s.runTool(context.Background(), "server", "main-chat", "conversations_switch", json.RawMessage(`{"restore_batch_id":"`+started.BatchID+`","preview":true}`))
+		if err != nil || !strings.Contains(text, `"machine": "other"`) || !strings.Contains(text, `"outcome": "ready"`) {
+			t.Fatalf("MCP restore preview on non-default machine: %q %v", text, err)
+		}
+
+		execText, execErr := r.s.runTool(ownerConfirmed(context.Background()), "server", "main-chat", "conversations_switch", json.RawMessage(`{"restore_batch_id":"`+started.BatchID+`"}`))
+		if execErr != nil {
+			t.Fatalf("MCP restore execution error: %v", execErr)
+		}
+		var report conversationSwitchTestReport
+		if err := json.Unmarshal([]byte(execText), &report); err != nil {
+			t.Fatalf("decode MCP restore report %q: %v", execText, err)
+		}
+		if report.BatchID == "" || report.RestoreOf != started.BatchID {
+			t.Fatalf("MCP restore on non-default machine refused: %+v", report)
+		}
+		restored := conversationSwitchTestDrive(t, r.s, report.BatchID, map[string]string{"other-chat": "switched"})
+		if got := conversationSwitchTestItemFor(t, restored, "other-chat"); got.Machine != "other" || got.Target.Launcher != "sub" {
+			t.Fatalf("MCP restore item mismatch: %+v", got)
+		}
+	})
 }

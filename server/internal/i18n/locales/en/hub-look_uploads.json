@@ -9,5 +9,12 @@
   "too_many_pixels": "The image has too many pixels. Use a smaller one",
   "too_many": "There are already {max} uploaded avatars. Delete one first",
   "not_found": "This avatar is no longer on the hub",
-  "not_uploaded": "Only avatars made from an uploaded image can be deleted here"
+  "not_uploaded": "Only avatars made from an uploaded image can be changed or deleted here",
+  "bad_state": "Unknown avatar state",
+  "bad_color": "Choose auto or a #RRGGBB color",
+  "bad_crop": "The crop must be a square of at least {px} pixels inside the image",
+  "bad_fields": "This avatar update is empty or combines fields that don't go together",
+  "mark_without_image": "Choose a picture for this state before changing its mark",
+  "animation_too_long": "The animation is too long. Use one up to {seconds} seconds",
+  "too_many_frames": "The animation has too many frames to process. Use a shorter or smaller one"
 }

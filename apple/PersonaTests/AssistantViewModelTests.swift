@@ -224,7 +224,7 @@ struct AssistantViewModelTests {
     @Test func unsupportedGeneratedComponentsUseFallbackRatherThanBlankCards() {
         let future = #"{"fallback":"文字说明","sections":[{"items":[{"type":"hologram","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(future) == nil)
-        // A card is drawn at `ExtensionUIContext.cardVersion` (11, #12544): UI version 4's header is drawn, not left out.
+        // A card is drawn at `ExtensionUIContext.cardVersion` (12, #14730): UI version 4's header is drawn, not left out.
         let header = #"{"fallback":"文字说明","sections":[{"items":[{"type":"header","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(header) != nil)
         var card = view()

@@ -175,6 +175,135 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, aske
 	return selected, nil
 }
 
+// assistantAuthProfile resolves the Claude profile claude.auth_status checks for an assistant launcher without
+// creating directories, copying transcripts, or mutating state (#14424). It follows assistantProfileSelection:
+//   - a scoped node always stays in its sessionScope.claude;
+//   - a non-managed wrapper launcher that sets its own CLAUDE_CONFIG_DIR runs there (unless an Agent-SDK-started
+//     conversation keeps running `command claude`);
+//   - an existing conversation checks its recorded, live, or transcript profile unless that profile is another
+//     launcher's private profile (<data dir>/profiles/<other>), in which case launcher checks its own new-conversation
+//     profile;
+//   - otherwise (or when conversation has no recorded or transcript profile), it resolves the new-conversation profile:
+//     asked (e.g. "legacy"), else the launcher's own profile, else Persona's private profile (<data dir>/profiles/<launcher>).
+func (n *Node) assistantAuthProfile(ctx context.Context, launcher, conversation, asked string) (string, bool, error) {
+	normalize := func(dir string) (string, error) {
+		if dir == "legacy" {
+			dir = n.legacyAssistantProfile(ctx, launcher)
+		}
+		if dir == "default" {
+			return dir, nil
+		}
+		dir = proto.ExpandHome(dir, n.home)
+		if !filepath.IsAbs(dir) {
+			return "", errors.New("config_dir must be absolute, start with ~/, or be default or legacy")
+		}
+		return filepath.Clean(dir), nil
+	}
+	if n.sessionScope != nil {
+		if asked == "" || asked == "legacy" {
+			return n.sessionScope.claude, false, nil
+		}
+		dir, err := normalize(asked)
+		if err != nil {
+			return "", false, err
+		}
+		if dir == "default" || !sameScopePath(dir, n.sessionScope.claude) {
+			return "", false, errors.New("config_dir must stay in the node's session scope")
+		}
+		return n.sessionScope.claude, false, nil
+	}
+	itself := conversation != "" && n.claudeItself(conversation, launcher)
+	own := ""
+	if _, managed := n.managedLauncher(launcher); !managed && !itself {
+		if raw := n.assistantLauncherProfile(ctx, launcher); raw != "" {
+			var err error
+			own, err = normalize(raw)
+			if err != nil {
+				return "", false, err
+			}
+		}
+	}
+	newProfile := func() (string, error) {
+		sel := asked
+		if sel == "" {
+			if own != "" {
+				return own, nil
+			}
+			sel = n.assistantLauncherProfile(ctx, launcher)
+			if sel == "" {
+				sel = filepath.Join(n.assistantProfilesRoot(), launcher)
+			}
+		}
+		sel, err := normalize(sel)
+		if err != nil {
+			return "", err
+		}
+		if own != "" && !sameAssistantProfile(sel, own) {
+			return "", errors.New("config_dir conflicts with the launcher's own profile; restore that profile or use a compatible launcher")
+		}
+		return sel, nil
+	}
+	if own != "" {
+		sel, err := newProfile()
+		return sel, false, err
+	}
+	selected := ""
+	if conversation != "" {
+		if n.state != nil {
+			st, _ := n.state.get(conversation)
+			selected = st.ConfigDir
+		}
+		n.mu.Lock()
+		p := n.procs[conversation]
+		n.mu.Unlock()
+		running := false
+		if p != nil {
+			p.mu.Lock()
+			if selected == "" {
+				selected = p.model.ConfigDir
+			}
+			running = p.alive() && p.launcher == launcher && sameAssistantProfile(p.model.ConfigDir, selected)
+			p.mu.Unlock()
+		}
+		if path := n.transcriptPath(conversation); path != "" && isClaudeTranscript(path, conversation) {
+			project := filepath.Dir(path)
+			projects := filepath.Dir(project)
+			mine := filepath.Join(n.assistantConfigPath(selected), "projects", filepath.Base(project), filepath.Base(path))
+			copied := selected != "" && fileExists(mine)
+			if filepath.Base(projects) == "projects" && (!copied || !running && !holdsNewestCopy(mine, path)) {
+				newest := filepath.Dir(projects)
+				st, lerr := os.Lstat(projects)
+				if !n.privateProfile(newest) || (lerr == nil && st.Mode()&os.ModeSymlink != 0) {
+					legacy := n.legacyAssistantProfile(ctx, launcher)
+					if sameScopePath(projects, filepath.Join(n.assistantConfigPath(legacy), "projects")) {
+						newest = legacy
+					} else if sameScopePath(newest, filepath.Join(n.home, ".claude")) {
+						newest = "default"
+					}
+				}
+				selected = newest
+			}
+		}
+	}
+	if selected == "" {
+		sel, err := newProfile()
+		return sel, false, err
+	}
+	selected, err := normalize(selected)
+	if err != nil {
+		return "", false, err
+	}
+	if selected != "default" {
+		profile := n.assistantConfigPath(selected)
+		owner := filepath.Base(profile)
+		if owner != launcher && n.privateProfile(profile) && sameScopePath(profile, filepath.Join(n.assistantProfilesRoot(), owner)) {
+			sel, err := newProfile()
+			return sel, false, err
+		}
+	}
+	return selected, itself, nil
+}
+
 // An assistant conversation an older node started on the Agent SDK with the plain claude launcher ran Claude Code's
 // executable itself, never a `claude` alias or shell function, in the profile the node chose for it (Persona's own,
 // <data>/profiles/claude, unless one was asked for). Through such an alias or function that sets a profile of its own,

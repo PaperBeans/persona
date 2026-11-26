@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/extension"
@@ -26,8 +28,8 @@ const speechPoint = "speech"
 
 // volcRef is the extension's transcription contribution as the assistant names it (meeting_transcription_extension),
 // "" without the module.
-func volcRef() string {
-	v, ok := builtinext.VolcSpeech()
+func volcRef(s moduleswitch.Set) string {
+	v, ok := builtinext.VolcSpeech(s)
 	if !ok {
 		return ""
 	}
@@ -130,7 +132,7 @@ func volcTranslations(volc builtinext.Volc) extension.Translations {
 // addVolcExtension registers the built-in extension, off until the owner turns it on, unless a package was installed
 // under its id before (it keeps the id, as for the voice extension).
 func (h *Manager) addVolcExtension(ctx context.Context, reg *extension.Registry, store extension.Store) {
-	volc, ok := builtinext.VolcSpeech()
+	volc, ok := builtinext.VolcSpeech(h.modules())
 	if !ok { // the module is not in this build
 		return
 	}
@@ -152,27 +154,27 @@ func (h *Manager) addVolcExtension(ctx context.Context, reg *extension.Registry,
 }
 
 // isVolc says whether p is the built-in Volcengine speech extension.
-func isVolc(p *extension.Extension) bool {
-	volc, ok := builtinext.VolcSpeech()
+func isVolc(s moduleswitch.Set, p *extension.Extension) bool {
+	volc, ok := builtinext.VolcSpeech(s)
 	return ok && p != nil && p.Record.ID == volc.ExtensionID && p.Record.Source == extension.SourceBuiltin
 }
 
 // volcID is the extension's id ("" without the module).
-func volcID() string {
-	volc, _ := builtinext.VolcSpeech()
+func volcID(s moduleswitch.Set) string {
+	volc, _ := builtinext.VolcSpeech(s)
 	return volc.ExtensionID
 }
 
 // volcSecretKey is the name of the extension's key's secret ("" without the module).
-func volcSecretKey() string {
-	volc, _ := builtinext.VolcSpeech()
+func volcSecretKey(s moduleswitch.Set) string {
+	volc, _ := builtinext.VolcSpeech(s)
 	return volc.SecretKey
 }
 
 // volcView adds to the extension's view: needs_setup while no key is saved (it runs, so that saving one can be
 // checked, but nothing transcribes or reads aloud).
 func (ps *extensions) volcView(ctx context.Context, p *extension.Extension, v *ExtensionView) {
-	if !p.Record.Enabled || !isVolc(p) || ps.reg.SecretsSet(ctx, p)[volcSecretKey()] {
+	if !p.Record.Enabled || !isVolc(ps.modules(), p) || ps.reg.SecretsSet(ctx, p)[volcSecretKey(ps.modules())] {
 		return
 	}
 	if v.Status == host.StateError || v.Status == extensionIncompatible {
@@ -187,7 +189,7 @@ func (h *Manager) volcMeetings(ctx context.Context) (on, known bool) {
 	if err := h.callAssistant(ctx, assistantwire.MethodMeetingTranscriptionChoice, assistantwire.MeetingTranscriptionChoose{}, &res); err != nil {
 		return false, false
 	}
-	return res.Extension == volcRef(), true
+	return res.Extension == volcRef(h.modules()), true
 }
 
 // volcConfigWrite takes the switch out of the settings about to be saved and, when it differs from the assistant's
@@ -218,7 +220,7 @@ func (h *Manager) volcConfigWrite(ctx context.Context, p *extension.Extension, r
 	}
 	var res assistantwire.MeetingTranscriptionChoice
 	err := h.callAssistant(ctx, assistantwire.MethodMeetingTranscriptionChoice,
-		assistantwire.MeetingTranscriptionChoose{Set: true, Use: want, Extension: volcRef()}, &res)
+		assistantwire.MeetingTranscriptionChoose{Set: true, Use: want, Extension: volcRef(h.modules())}, &res)
 	if err != nil {
 		return nil, false, err
 	}
@@ -241,7 +243,7 @@ func sameSettings(a, b map[string]json.RawMessage) bool {
 
 // volcDetail shows the switch as the assistant's choice is.
 func (h *Manager) volcDetail(ctx context.Context, p *extension.Extension, d *ExtensionDetail) {
-	if !isVolc(p) || d.Config == nil {
+	if !isVolc(h.modules(), p) || d.Config == nil {
 		return
 	}
 	on, _ := h.volcMeetings(ctx)

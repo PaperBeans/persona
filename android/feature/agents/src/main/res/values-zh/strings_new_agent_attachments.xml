@@ -8,5 +8,5 @@
     <string name="agents_attach_moved">上传到“%1$s”的文件已移除。要发给这台电脑，请重新添加。</string>
     <string name="agents_attach_remove">移除 %1$s</string>
     <string name="agents_attach_upload_failed">「%1$s」没发出去：%2$s</string>
-    <string name="agents_attach_photo_limit">一次最多 4 张</string>
+    <string name="agents_attach_photo_limit">一次最多 %1$d 张</string>
 </resources>

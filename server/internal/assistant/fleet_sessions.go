@@ -52,6 +52,8 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		s.noteUpstreamRow(machine, sess, now) // consecutive upstream 5xx / pool-exhaustion turns (fleet_upstream.go)
 		s.availSeen(machine, &sess, was, now) // the owner's wait for a reply (availability.go)
 		prev := was.Status
+		wasWorking := prev == proto.StatusWorking || was.WorkingBeforeUnknown
+		reconnectStop := reconnected || was.ReconnectedBeforeUnknown
 		if a2aIdle(sess) && (!was.A2AIdle || reconnected) {
 			a2aIdleRefs = append(a2aIdleRefs, a2aRef{machine, sess.SessionID})
 		}
@@ -59,7 +61,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		// stop never showed, only the woken flag turning on. It is held work all the same (#4187, #4419). By the
 		// background seen during the turn, not only in the last list: the list's background and its woken flag are
 		// not always read together.
-		if prev == proto.StatusWorking && sess.WokeByTask && !was.WokeByTask {
+		if wasWorking && sess.WokeByTask && !was.WokeByTask {
 			s.turnsBook().holdIfBackground(key)
 		}
 		switch {
@@ -78,9 +80,9 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			s.replyWorked(machine, sess.SessionID) // answered: a question it asks next is a new one (agents_reply.go)
 			ref, row := SessionRef{MachineID: machine, SessionID: sess.SessionID}, startRow{Rev: sess.Rev, At: sess.UpdatedAt}
 			s.inOrder(func() { s.turnStartedObserved(context.Background(), ref, newTurn, row) }) // after the items that came before it
-		case prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) && reconnected:
+		case wasWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) && reconnectStop:
 			unsure = append(unsure, sess) // reconnectedTurnEnd, once the list is kept
-		case prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle):
+		case wasWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle):
 			// After its finished push is decided against the mark; held while its background work runs.
 			defer s.justMeEnded(machine, sess.SessionID, backgroundRunning(sess))
 			s.turnEndSeen(machine, sess, now)
@@ -100,7 +102,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			fm.isAssistant(sess) {
 			inlineUpdates = append(inlineUpdates, SessionRef{MachineID: machine, SessionID: sess.SessionID})
 		}
-		if sess.Status != prev && sess.Status != proto.StatusWorking && !(prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle)) {
+		if sess.Status != prev && sess.Status != proto.StatusWorking && !(wasWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle)) {
 			// Stopped with no end seen (a restart, an interrupt, a card): a meeting turn there is over (meeting_turns.go).
 			s.meetingTurnStopped(machine, sess.SessionID, sess, prev == "")
 			if id := sess.SessionID; prev == proto.StatusWorking { // by id: a closure over sess would put every row on the heap
@@ -114,7 +116,8 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
 	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.pruneGoneUpstream(machine, list)
-	s.fleetKeep(machine, list, connected, unsure)
+	s.observeIdleSessions(machine, list, connected)
+	s.fleetKeep(machine, list, connected, unsure, before, reconnected)
 	for _, ref := range a2aIdleRefs {
 		s.inOrder(func() { s.a2aRecipientIdle(context.Background(), ref) })
 	}
@@ -147,11 +150,14 @@ func (s *Service) turnEndSeen(machine string, sess proto.Session, now time.Time)
 		s.inOrder(func() { go s.turnEnded(context.Background(), ref, true) })
 		return
 	}
-	s.notifyFinished(machine, sess.SessionID, s.turnsBook().ended(machine+"/"+sess.SessionID, now, backgroundRunning(sess)))
+	ctx := context.Background()
+	background := backgroundRunning(sess)
+	end := s.endSupervisionTurn(ctx, sess.SessionID, now, background || limitTakenUp(sess, now))
+	s.notifyFinished(machine, sess.SessionID, s.turnsBook().ended(machine+"/"+sess.SessionID, now, background), end)
 	s.suggestTurnEnded(machine, sess) // the next message, when nothing else suggests it (suggest_next.go)
 	// A new assistant conversation is named after its first turn; a task from one may be done. After the items of the
 	// turn (a channel's answer is read from them).
-	s.inOrder(func() { go s.TurnEnded(context.Background(), ref) })
+	s.inOrder(func() { go s.TurnEnded(context.WithValue(ctx, supervisionEndKey{}, end), ref) })
 }
 
 // reconnectedTurnEnd is sess's stop in the first list of its node's new connection, taken as the end of its turn only
@@ -180,6 +186,11 @@ type turnPrev struct {
 	Rev        int64
 	LastText   string
 	UpdatedAt  time.Time
+	// WorkingBeforeUnknown remembers that the session was working immediately before one or more transient
+	// StatusUnknown polls, so working -> unknown -> done|idle still triggers turnEndSeen without losing the
+	// turn-end edge. ReconnectedBeforeUnknown carries whether a reconnect occurred before or during that gap.
+	WorkingBeforeUnknown     bool
+	ReconnectedBeforeUnknown bool
 	// Launcher is what the session runs on: the admission gate's launcher groups count by it (admission.go).
 	Launcher string
 }
@@ -202,21 +213,31 @@ func (s *Service) fleetPreviousConn(machine string) time.Time {
 // fleetKeepPrevious keeps what setSessions reads of list for the machine's next one. A session id listed twice keeps
 // its later row.
 func (s *Service) fleetKeepPrevious(machine string, list []proto.Session) {
-	s.fleetKeep(machine, list, time.Time{}, nil)
+	s.fleetKeep(machine, list, time.Time{}, nil, nil, false)
 }
 
 // fleetKeep is fleetKeepPrevious for a list that came on the node connection conn. The rows of unsure are kept as
-// unknown: a stop not taken as the end of a turn, so its working again is no new turn either.
-func (s *Service) fleetKeep(machine string, list []proto.Session, conn time.Time, unsure []proto.Session) {
+// unknown without preserving prior working state: a stop not taken as the end of a turn, so neither working again
+// nor a repeated stopped poll fires a spurious turn start or end.
+func (s *Service) fleetKeep(machine string, list []proto.Session, conn time.Time, unsure []proto.Session, before map[string]turnPrev, reconnected bool) {
 	next := make(map[string]turnPrev, len(list))
 	for i := range list { // by index: a range value copies every (large) session it passes
 		sess := &list[i]
-		next[sess.SessionID] = turnPrev{Status: sess.Status, WokeByTask: sess.WokeByTask, Rev: sess.Rev,
+		p := turnPrev{Status: sess.Status, WokeByTask: sess.WokeByTask, Rev: sess.Rev,
 			LastText: sess.LastText, UpdatedAt: sess.UpdatedAt, Launcher: sess.Launcher, A2AIdle: a2aIdle(*sess)}
+		if sess.Status == proto.StatusUnknown {
+			if was := before[sess.SessionID]; was.Status == proto.StatusWorking || was.WorkingBeforeUnknown {
+				p.WorkingBeforeUnknown = true
+				p.ReconnectedBeforeUnknown = reconnected || was.ReconnectedBeforeUnknown
+			}
+		}
+		next[sess.SessionID] = p
 	}
 	for i := range unsure {
 		p := next[unsure[i].SessionID]
 		p.Status = proto.StatusUnknown
+		p.WorkingBeforeUnknown = false
+		p.ReconnectedBeforeUnknown = false
 		next[unsure[i].SessionID] = p
 	}
 	s.fleet.mu.Lock()
@@ -340,6 +361,7 @@ func (s *Service) publishListAtArchiveMark(machine string, fixed ...uint64) []pr
 	}
 	// Whether told now or the same as told last: when its first Just finished row runs out (republishFinished).
 	s.noteFinishedDue(machine, finishedDue(list, justFinishedFor(s.triageCfg(context.Background()))))
+	s.attachViews(machine, list) // Session.view (fleet_views.go)
 	msg := assistantwire.FleetSessions{MachineID: machine, Sessions: list, Muted: s.mutedSessions(machine, list)}
 	// json.Marshal's bytes, encoded into the one buffer and compared with the list told last by length and SHA-256: a
 	// list that is the same (most of them) is not told again, and none of them is kept (#3197: 3.6 MB at 20 computers
@@ -432,6 +454,7 @@ func (s *Service) tellArchived(machine string, part archivedPart, hide map[[2]st
 		f.archived = map[string]archivedSent{}
 	}
 	f.archived[machine] = sent
+	s.attachArchivedViews(machine, rows) // Session.view on the archived rows too (fleet_views.go)
 	s.hub.Tell(assistantwire.EventFleetArchived, assistantwire.FleetArchived{MachineID: machine, Sessions: rows})
 }
 
@@ -562,12 +585,20 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	for i := range list {
 		list[i].MachineID = machine
 		list[i].PendingInteractions = counts[list[i].SessionID]
-		list[i].Assistant = isAssistantSession(&list[i], dir, m.manager)
+		if !list[i].LogicalPlaceholder {
+			list[i].Assistant = isAssistantSession(&list[i], dir, m.manager)
+		}
 		if !list[i].Assistant && bgMatch.matches(&list[i]) {
 			list[i].Assistant = true
 		}
 		if list[i].Assistant && list[i].Space == "" {
-			list[i].Space = identity.SpaceOf(list[i].Cwd)
+			if list[i].LogicalPlaceholder {
+				if sp, known := s.logicalRowSpace(context.Background(), list[i]); known {
+					list[i].Space = sp
+				}
+			} else {
+				list[i].Space = identity.SpaceOf(list[i].Cwd)
+			}
 		}
 		if t := shown[list[i].SessionID].Title; t != "" && list[i].Assistant {
 			list[i].Title = t // "MMDD | type | topic", the user's own, "Persona" for the main one (titles.go)

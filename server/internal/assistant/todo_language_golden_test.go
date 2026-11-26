@@ -54,6 +54,7 @@ func modelPrompt(call modelCall) string {
 }
 
 func TestGoldenTodoLanguageDelivery(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, locale := range []string{"zh-Hans", "en", "ja"} {
 		t.Run(locale, func(t *testing.T) {
 			e := newThreadEnv(t, nil)

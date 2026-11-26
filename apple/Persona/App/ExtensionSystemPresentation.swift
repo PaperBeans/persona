@@ -98,7 +98,7 @@ private struct ExtensionSystemPresentation: ViewModifier {
             NavigationStack {
                 Group {
                     if let ui = route.link.ui {
-                        ExtensionPageView(plugin: route.link.owner, ui: ui, title: String(localized: "Extensions"),
+                        ExtensionPageView(plugin: route.link.owner, ui: ui, title: openedTitle(route.link, ui: ui),
                                           state: route.link.state, group: route.link.group, initial: route)
                     } else {
                         EmptyStateView(symbol: Theme.Icon.plugins, title: String(localized: "No Page to Open"),
@@ -111,6 +111,14 @@ private struct ExtensionSystemPresentation: ViewModifier {
             }
             .environment(app)
         } else { content }
+    }
+
+    /// The title a page opened by a link starts with, until its View has one: a Dashboards page its place's (the index's
+    /// for one not pinned), any other page Extensions.
+    private func openedTitle(_ link: ExtensionSystemLink, ui: String) -> String {
+        guard DashboardsUI.owns(link.owner) else { return String(localized: "Extensions") }
+        let places = link.group == app.hub?.group ? ExtensionSlots.shared.pages : []
+        return DashboardsUI.title(view: nil, place: DashboardsUI.placeTitle(ui, in: places), ui: ui)
     }
 }
 

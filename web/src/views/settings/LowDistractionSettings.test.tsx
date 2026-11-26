@@ -67,6 +67,69 @@ describe("LowDistractionSettings", () => {
     expect(toggle()?.getAttribute("aria-checked")).toBe("false");
   });
 
+  it("exposes held pushes inside settings only while enabled and loads intercepts on demand", async () => {
+    await mount({ enabled: false });
+    expect(host.querySelector('[data-settings-row="held-pushes"]')).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    act(() => toggle()!.click());
+    await act(async () => last().resolve({ enabled: true }));
+    const row = host.querySelector<HTMLButtonElement>('[data-settings-row="held-pushes"]')!;
+    expect(row).not.toBeNull();
+    // Turning the switch on does not eagerly poll /push/intercepts before the user opens the list.
+    expect(calls.some((c) => c.path === "/push/intercepts")).toBe(false);
+
+    act(() => row.click());
+    expect(last()).toMatchObject({ path: "/push/intercepts", method: "GET" });
+    await act(async () => last().resolve({ intercepts: [{ at: new Date().toISOString(), level: "P1", reason: "ln_p1_held", title: "Digest waiting" }] }));
+    expect(document.body.textContent).toContain("Digest waiting");
+  });
+
+  it("clears held pushes across credential switch A -> B even when B's intercept read fails", async () => {
+    await mount({ enabled: true });
+    act(() => host.querySelector<HTMLButtonElement>('[data-settings-row="held-pushes"]')!.click());
+    expect(last()).toMatchObject({ path: "/push/intercepts", method: "GET" });
+    await act(async () => last().resolve({ intercepts: [{ at: new Date().toISOString(), level: "P1", reason: "ln_p1_held", title: "Secret Hub A push" }] }));
+    expect(document.body.textContent).toContain("Secret Hub A push");
+
+    // Switch to credential B: closes dialog, clears A's cached records, and only reads /push/ln-mode.
+    const countBeforeSwitch = calls.length;
+    act(() => setToken("token-b"));
+    expect(calls.slice(countBeforeSwitch).map((c) => c.path)).toEqual(["/push/ln-mode"]);
+    await act(async () => last().resolve({ enabled: true }));
+
+    // Reopen under B: A's record must never flash while loading or stay behind when B fails.
+    act(() => host.querySelector<HTMLButtonElement>('[data-settings-row="held-pushes"]')!.click());
+    expect(last()).toMatchObject({ path: "/push/intercepts", method: "GET" });
+    expect(document.body.textContent).not.toContain("Secret Hub A push");
+    await act(async () => last().reject(Object.assign(new Error("hub B unavailable"), { status: 503 })));
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(t("push-intercepts.held_load_failed"));
+    expect(document.body.textContent).not.toContain("Secret Hub A push");
+  });
+
+  it("drops a late held-push response from credential A so it cannot pollute credential B", async () => {
+    await mount({ enabled: true });
+    act(() => host.querySelector<HTMLButtonElement>('[data-settings-row="held-pushes"]')!.click());
+    const interceptsA = last();
+    expect(interceptsA).toMatchObject({ path: "/push/intercepts", method: "GET" });
+
+    // Switch to B while A's /push/intercepts is still in flight.
+    act(() => setToken("token-b"));
+    await act(async () => last().resolve({ enabled: true }));
+    act(() => host.querySelector<HTMLButtonElement>('[data-settings-row="held-pushes"]')!.click());
+    const interceptsB = last();
+    expect(interceptsB).toMatchObject({ path: "/push/intercepts", method: "GET" });
+
+    // A's response arrives late: must be ignored completely.
+    await act(async () => interceptsA.resolve({ intercepts: [{ at: new Date().toISOString(), level: "P1", reason: "ln_p1_held", title: "Late Hub A item" }] }));
+    expect(document.body.textContent).not.toContain("Late Hub A item");
+
+    // B's response arrives and renders cleanly.
+    await act(async () => interceptsB.resolve({ intercepts: [{ at: new Date().toISOString(), level: "P1", reason: "ln_p1_held", title: "Fresh Hub B item" }] }));
+    expect(document.body.textContent).toContain("Fresh Hub B item");
+    expect(document.body.textContent).not.toContain("Late Hub A item");
+  });
+
   it("goes back and says so when the hub refuses the change", async () => {
     await mount({ enabled: true });
     act(() => toggle()!.click());

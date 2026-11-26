@@ -12,6 +12,8 @@ vi.hoisted(() => {
 });
 import { connect, flushPushes, getState, reset } from "../lib/store";
 import type { Machine, Session } from "../lib/types";
+import { stateCount } from "../lib/state-labels";
+import { href } from "../lib/router";
 import { Machines } from "./Machines";
 import { MachineDetail } from "./machines/MachineDetail";
 import { SpacePage } from "./SpacePage";
@@ -139,6 +141,11 @@ describe("on a hub that pages its Agents list", () => {
     await flush();
     expect(footer("MacBook")?.textContent).toBe("2 个 Agent，1 个在工作");
     expect(footer("NAS")?.textContent).toBe("1 个 Agent");
+    const waiting = card("NAS")?.querySelector<HTMLAnchorElement>(`a[href="${href({ name: "session", mid: "nas", sid: "n1" })}"]`);
+    expect(waiting?.textContent).toBe(stateCount("needs_you", 1));
+    expect(card("MacBook")?.textContent).not.toContain(stateCount("needs_you", 0));
+    act(() => waiting!.click());
+    expect(location.pathname).toBe(waiting!.pathname);
     expect(fullReads).toBe(1);
   });
 
@@ -149,10 +156,14 @@ describe("on a hub that pages its Agents list", () => {
     await flush();
     expect(footer("MacBook")?.textContent).toBe("正在读取 Agent…");
     expect(footer("MacBook")?.getAttribute("data-agents")).toBe("loading");
+    expect(card("NAS")?.textContent).not.toContain(stateCount("needs_you", 0));
+    expect(card("NAS")?.textContent).not.toContain(stateCount("needs_you", 1));
     await act(async () => { held.forEach((go) => go()); });
     await flush();
     expect(footer("MacBook")?.textContent).toBe("没能读到 Agent");
     expect(footer("NAS")?.getAttribute("data-agents")).toBe("failed");
+    expect(card("NAS")?.textContent).not.toContain(stateCount("needs_you", 0));
+    expect(card("NAS")?.textContent).not.toContain(stateCount("needs_you", 1));
     expect(host.textContent).not.toContain("没有在跑的 Agent");
   });
 

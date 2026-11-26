@@ -123,6 +123,17 @@ describe("the palette's 前往 (the Mac's quick open)", () => {
 });
 
 describe("a page's words", () => {
+  it("do not take \"dashboard\" for Overview: Dashboards is a place of its own (#15017)", async () => {
+    await initI18n("en");
+    try {
+      const overview = { key: "home", title: "Overview", icon: "list" as const, to: { name: "home" } as const, words: placeWords("home") };
+      const dashboards = { key: "p:-pages/index", title: "Dashboards", icon: "list" as const, to: { name: "home" } as const };
+      expect(placeHits([overview, dashboards], "dashboard").map((h) => h.key)).toEqual(["p:p:-pages/index"]);
+      expect(placeHits([overview, dashboards], "overview").map((h) => h.key)).toEqual(["p:home"]);
+    } finally {
+      await initI18n("zh-Hans");
+    }
+  });
   it("answer to the Chinese names in an English UI too (the Mac's quick open)", async () => {
     await initI18n("en");
     try {

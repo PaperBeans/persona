@@ -146,6 +146,8 @@
     <string name="knowledge_ui_minutes_stale">議事録が変更されました。最新版を表示しています。追加する前にアクション項目を確認してください。</string>
     <string name="knowledge_ui_minutes_due">期限 %1$s</string>
     <string name="knowledge_ui_minutes_transcript_expired">文字起こしは保存期間を過ぎました。この議事録だけが残っています。</string>
+    <string name="knowledge_ui_minutes_paused">議事録は一時停止中です</string>
+    <string name="knowledge_ui_minutes_paused_note">このハブでは会議の録音がオフのため、新しい内容は書き込まれません。すでにある内容はそのまま残ります。</string>
     <string name="knowledge_ui_handoff_title">エージェントに任せる</string>
     <string name="knowledge_ui_handoff_open_dialog">エージェントに任せる…</string>
     <string name="knowledge_ui_handoff_pick">エージェントを選ぶ</string>

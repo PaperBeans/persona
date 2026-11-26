@@ -273,14 +273,33 @@ const KEPT_PREFIX = "outbox-msg:";
 const keptKey = (key: string, id: string) => `${KEPT_PREFIX}${key}/${id}`;
 type Outgoing = Pick<OutboxEntry, "id" | "text" | "images" | "at" | "launcher" | "model"> & Partial<Pick<OutboxEntry, "newId" | "inDoubt" | "error" | "code" | "state" | "wordsOnly" | "acceptedAt" | "clearable" | "relay">>;
 
-/** Keeps one message's words until its transcript copy arrives (pictures are not kept: they would fill the
- *  storage). Storage can be full or refused; the message then lasts only as long as the page. */
+// In-memory image payloads (and image-only sends that have no text to persist) kept across client-side
+// conversation switches in the same tab, keyed by keptKey(key, id). Never written to localStorage.
+const keptImages = new Map<string, OutboxImage[]>();
+const keptImageOnly = new Map<string, Outgoing>();
+const cloneImages = (images: OutboxImage[]): OutboxImage[] => images.map(({ mime, data }) => ({ mime, data }));
+
+/** Keeps one message's words until its transcript copy arrives (pictures stay in memory for same-tab navigation,
+ *  never in localStorage where they would fill the quota). Storage can be full or refused; the message then lasts
+ *  only as long as the page. */
 export function keepOutgoing(key: string, e: Outgoing) {
   if (conversationKeyDeleted(key)) return;
-  if (!e.text.trim()) return;
+  const hasText = Boolean(e.text.trim());
+  const hasImages = e.images.length > 0;
+  if (!hasText && !hasImages) return;
+  const storageKey = keptKey(key, e.id);
+  if (!hasText) {
+    keptImageOnly.set(storageKey, { ...e, images: cloneImages(e.images) });
+    keptImages.set(storageKey, cloneImages(e.images));
+    return;
+  }
+  keptImageOnly.delete(storageKey);
   try {
-    storeValue(keptKey(key, e.id), JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, inDoubt: e.inDoubt, error: e.error, code: e.code, relay: e.relay, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, clearable: e.clearable, images: e.images.length }));
+    storeValue(storageKey, JSON.stringify({ id: e.id, text: e.text, at: e.at, launcher: e.launcher, model: e.model, newId: e.newId, inDoubt: e.inDoubt, error: e.error, code: e.code, relay: e.relay, state: e.state, acceptedAt: e.acceptedAt, wordsOnly: e.wordsOnly, clearable: e.clearable, images: e.images.length }));
+    if (hasImages) keptImages.set(storageKey, cloneImages(e.images));
+    else keptImages.delete(storageKey);
   } catch {
+    keptImages.delete(storageKey);
     // only this page's copy then
   }
 }
@@ -295,35 +314,52 @@ export function acceptOutgoing(key: string, id: string, acceptedAt = Date.now())
   if (entries.some((e) => e.id === id && e.state !== "sent")) {
     setOutbox(key, entries.map((e) => e.id === id ? { ...e, state: "sent", acceptedAt, error: undefined, code: undefined, clearable: undefined, newId: undefined, inDoubt: undefined } : e));
   }
+  const storageKey = keptKey(key, id);
+  const mem = keptImageOnly.get(storageKey);
+  if (mem) {
+    keptImageOnly.set(storageKey, { ...mem, state: "sent", acceptedAt, error: undefined, code: undefined, clearable: undefined, newId: undefined, inDoubt: undefined });
+  }
   try {
-    const saved = storedValue(keptKey(key, id));
+    const saved = storedValue(storageKey);
     if (saved === null) return;
-    storeValue(keptKey(key, id), JSON.stringify({ ...JSON.parse(saved), state: "sent", acceptedAt, error: undefined, code: undefined, newId: undefined, inDoubt: undefined }));
+    storeValue(storageKey, JSON.stringify({ ...JSON.parse(saved), state: "sent", acceptedAt, error: undefined, code: undefined, newId: undefined, inDoubt: undefined }));
   } catch {
     // storage unavailable: keep only the current page's bubble
   }
 }
 
 export function forgetOutgoing(key: string, id: string) {
+  const storageKey = keptKey(key, id);
+  keptImages.delete(storageKey);
+  keptImageOnly.delete(storageKey);
   try {
-    removeStoredValue(keptKey(key, id));
+    removeStoredValue(storageKey);
   } catch {
     // nothing to clear
   }
 }
 
-function keptEntries(key: string): (Omit<Outgoing, "images"> & { lostImages: boolean })[] {
-  const out: (Omit<Outgoing, "images"> & { lostImages: boolean })[] = [];
+function keptEntries(key: string): (Outgoing & { lostImages: boolean })[] {
+  const out: (Outgoing & { lostImages: boolean })[] = [];
+  const seen = new Set<string>();
+  const prefix = keptKey(key, "");
   try {
-    const prefix = keptKey(key, "");
     for (let i = 0; i < localStorage.length; i++) {
       const name = localStorage.key(i);
       if (!name?.startsWith(prefix)) continue;
       const { images, ...k } = JSON.parse(storedValue(name) ?? "null") as Omit<Outgoing, "images"> & { images?: number };
-      if (k.id && typeof k.text === "string") out.push({ ...k, lostImages: Boolean(images) });
+      if (k.id && typeof k.text === "string") {
+        const kept = keptImages.get(name);
+        out.push({ ...k, images: kept ? cloneImages(kept) : [], lostImages: Boolean(images) && !kept?.length });
+        seen.add(k.id);
+      }
     }
   } catch {
-    // storage unavailable or an unreadable entry: nothing to bring back
+    // storage unavailable or an unreadable entry: nothing to bring back from localStorage
+  }
+  for (const [name, k] of keptImageOnly) {
+    if (!name.startsWith(prefix) || seen.has(k.id)) continue;
+    out.push({ ...k, images: cloneImages(k.images), lostImages: false });
   }
   return out;
 }
@@ -353,13 +389,15 @@ export function restoreOutbox(mid: string, sid: string, inFlight: string[] = [])
     return true;
   });
   if (!back.length) return;
-  const entries = back.map(({ lostImages, ...k }): OutboxEntry => ({ ...k, images: [], state: k.state === "sent" ? "sent" : "failed", code: k.state === "sent" ? undefined : k.code, restored: true, error: k.state === "sent" ? undefined : lostImages ? t("lib-outbox.not_confirmed_images") : k.error ?? t("lib-outbox.not_confirmed") }));
+  const entries = back.map(({ lostImages, images, ...k }): OutboxEntry => ({ ...k, images, state: k.state === "sent" ? "sent" : "failed", code: k.state === "sent" ? undefined : k.code, restored: true, error: k.state === "sent" ? undefined : lostImages ? t("lib-outbox.not_confirmed_images") : k.error ?? t("lib-outbox.not_confirmed") }));
   setOutbox(key, [...list(key), ...entries]);
 }
 
 /** A fresh page for the tests: every conversation can restore its unconfirmed messages once again. */
 export function resetRestoredForTests() {
   restored.clear();
+  keptImages.clear();
+  keptImageOnly.clear();
 }
 
 /** How the node says your own message went into a Claude outside Persona's terminals (session.send's answer). */
@@ -665,5 +703,8 @@ export function adoptedConversation(sid: string): { machine: string; manager?: s
 onConversationDeleted((mid, sid) => {
   const key = outboxKey(mid, sid);
   for (const entry of keptEntries(key)) forgetOutgoing(key, entry.id);
+  const prefix = keptKey(key, "");
+  for (const name of [...keptImages.keys()]) if (name.startsWith(prefix)) keptImages.delete(name);
+  for (const name of [...keptImageOnly.keys()]) if (name.startsWith(prefix)) keptImageOnly.delete(name);
   restored.delete(key);
 });

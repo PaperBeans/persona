@@ -65,7 +65,7 @@ class VoiceModuleTest {
         for (hub in listOf(services, null)) {
             val missing = mutableListOf<NavKey>()
             val provider = entryProvider<NavKey>(fallback = { key -> missing += key; NavEntry(key) {} }) {
-                VoiceModule.navEntries(this, ModuleNavContext(navigator, hub, unavailable = {}))
+                VoiceModule.navEntries(this, ModuleNavContext(navigator, hub, unavailable = {}, audioFocus = persona.core.moduleapi.AudioBroker.withoutSystem().forModule(VoiceModule)))
             }
             val _ = provider(VoiceRoute("voice"))
             assertTrue(missing.isEmpty())

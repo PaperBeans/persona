@@ -29,6 +29,7 @@ Lark 会話 id：f2
   - kind reply：text はExample ownerの一人称の返信本文（Lark は短い口語で形式的な挨拶なし。メールは来信の言語と丁寧さに合わせる）。
     Example ownerが一押しでそのまま送るので、確認できた事実だけを書きます。不明な日時、数字、結論や本人しか決められないことを作らず、【】などの空欄も残さず、省いて note に説明します。
   - kind agent：Agent に任せる。text は指示（machine、cwd は任意）。Example ownerが「開始」を押すまで起動しません。
+  - kind handoff：すでにこの件を担当している既存の会話（上に挙げた候補から選択）へ引き継ぐ。machine と session にその会話を指定し、text に渡すメモを書く。Example ownerが確認するまで送られません。
   - kind todo：メッセージにExample ownerがすべき用事があれば、text は動詞で始まる明確な作業名（グループ名、人名なし、20 文字以内）。due は明記された締切だけ。日付だけなら 2006-01-02（終日）、時刻があればタイムゾーン差付き RFC 3339。「明日」「金曜」は発信日基準。不明なら due を省き note に記載。Example ownerは一押しで追加でき、先にタイトルと日付を編集することもできます。
   - kind conclusion：対応済みで text は結論。outcome は fyi（Example ownerが知るだけ）か done（対応不要）。
   Example ownerが判断する必要があるとき（顧客に返答する前に同僚へ確認するなど）は handback=true にし、確認後あなたへの指示として戻します。

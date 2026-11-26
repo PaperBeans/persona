@@ -241,7 +241,7 @@ func TestWorkCardCancelSerializesWithOlderWrites(t *testing.T) {
 	s.waitWorkEvents()
 	old := entryOf(t, s, "s1")
 	blocked := &blockedWorkWriteStore{failingDeferredWorkStore: st, started: make(chan struct{}), release: make(chan struct{})}
-	s.store = func() Store { return blocked }
+	s.setStore(func() Store { return blocked })
 	oldDone := make(chan struct{})
 	go func() { s.saveWork(old); close(oldDone) }()
 	<-blocked.started
@@ -283,7 +283,7 @@ func TestWorkCardCancelMergesConcurrentSameTurnWithdrawal(t *testing.T) {
 	s, _, ix := deferredCardFixture(t, st)
 	s.waitWorkEvents()
 	blocked := &blockedWorkWriteStore{failingDeferredWorkStore: st, started: make(chan struct{}), release: make(chan struct{})}
-	s.store = func() Store { return blocked }
+	s.setStore(func() Store { return blocked })
 	cancelDone := make(chan error, 1)
 	go func() {
 		_, err := s.workAnswer(context.Background(), ix.ID, proto.Resolution{Cancel: true})

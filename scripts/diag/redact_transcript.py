@@ -12,6 +12,7 @@ An enum-like value that names a host or URL (git.example.invalid:team/repo, http
 After running it, review the output by hand before committing: no internal domains / IPs, host names, people, emails,
 repository names or tokens. `--words` lists every string kept as is: vocabulary words on the first line, then one line
 each for object keys, enum values, versions, model names, the mcp__ prefix, tag and attribute names, file extensions.
+The output file is replaced only when the conversion finishes successfully.
 """
 from __future__ import annotations
 
@@ -22,7 +23,9 @@ import os
 import random
 import re
 import secrets
+import stat
 import sys
+import tempfile
 
 PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 MAX_STR = 6000  # longer strings are cut (the parser's own clipping has unit tests)
@@ -30,7 +33,7 @@ MAX_STR = 6000  # longer strings are cut (the parser's own clipping has unit tes
 ENUM_KEYS = {
     "type", "subtype", "role", "kind", "phase", "status", "level", "commandMode", "operation", "userType", "entrypoint",
     "permissionMode", "stop_reason", "stop_sequence", "media_type", "effort", "mode", "source", "hookEvent", "approval_policy",
-    "change", "channel", "cronKind", "taskKind", "stop_type", "service_tier", "action",
+    "change", "channel", "cronKind", "taskKind", "stop_type", "service_tier", "action", "reasoning_effort",
 }
 VERSION_KEYS = {"version", "cli_version"}
 MODEL_RE = re.compile(r"(claude|gpt|o\d|codex)[A-Za-z0-9._\[\]-]*")
@@ -245,6 +248,31 @@ def parse_spec(spec: str):
     return path, want
 
 
+def redact_sources(sources, out, redactor, skip_types):
+    count = 0
+    for path, want in sources:
+        ranges = iter(want or ())
+        active = next(ranges, None)
+        with open(path, errors="replace") as f:
+            for i, line in enumerate(f, 1):
+                if want is not None:
+                    while active is not None and i >= active.stop:
+                        active = next(ranges, None)
+                    if active is None:
+                        break
+                    if i < active.start:
+                        continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") in skip_types:
+                    continue
+                out.write(json.dumps(redactor.obj(entry), ensure_ascii=False, separators=(",", ":")) + "\n")
+                count += 1
+    return count
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-o", "--out", required=True)
@@ -257,32 +285,25 @@ def main():
         sources = [parse_spec(spec) for spec in args.src]
     except ValueError as error:
         ap.error(f"invalid line selection: {error}")
-    if os.path.exists(args.out) and any(os.path.samefile(args.out, path) for path, _ in sources):
-        ap.error("output must not refer to an input transcript")
-
+    output = os.path.realpath(args.out)
     r = Redactor()
-    n = 0
-    with open(args.out, "w") as out:
-        for path, want in sources:
-            ranges = iter(want or ())
-            active = next(ranges, None)
-            with open(path, errors="replace") as f:
-                for i, line in enumerate(f, 1):
-                    if want is not None:
-                        while active is not None and i >= active.stop:
-                            active = next(ranges, None)
-                        if active is None:
-                            break
-                        if i < active.start:
-                            continue
-                    try:
-                        e = json.loads(line)
-                    except ValueError:
-                        continue
-                    if not isinstance(e, dict) or e.get("type") in args.skip_type:
-                        continue
-                    out.write(json.dumps(r.obj(e), ensure_ascii=False, separators=(",", ":")) + "\n")
-                    n += 1
+    try:
+        mode = None
+        if os.path.exists(output):
+            mode = os.stat(output).st_mode
+            if not stat.S_ISREG(mode):
+                ap.error("output must be a regular file")
+            if any(os.path.samefile(output, path) for path, _ in sources):
+                ap.error("output must not refer to an input transcript")
+        with tempfile.TemporaryDirectory(prefix=".redact-", dir=os.path.dirname(output)) as directory:
+            pending = os.path.join(directory, "output.jsonl")
+            with open(pending, "w") as out:
+                n = redact_sources(sources, out, r, args.skip_type)
+            if mode is not None:
+                os.chmod(pending, stat.S_IMODE(mode))
+            os.replace(pending, output)
+    except OSError as error:
+        ap.error(f"cannot redact transcript: {error}")
     print(f"wrote {n} lines to {args.out}", file=sys.stderr)
     if args.words:
         print(r.kept_report(), file=sys.stderr)

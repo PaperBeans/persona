@@ -323,6 +323,8 @@ internal fun KnowledgeDetailScreen(
     navigator: Navigator,
     openLinkInApp: (String) -> Unit,
     onNewAgent: ((KnowledgeAgentStart) -> Unit)? = null,
+    /** The hub's recording module is on ([knowledgeEntries] reads its flag); off, a recording's page only reads (#15214). */
+    recordingOn: Boolean = true,
 ) {
     val page by model.page.collectAsStateWithLifecycle()
     val sending by model.sending.collectAsStateWithLifecycle()
@@ -373,7 +375,9 @@ internal fun KnowledgeDetailScreen(
     }
     LaunchedEffect(tagging.saved) { if (tagging.saved > 0) editing = false }
     // While the hub writes a recording's minutes, the page reads it again every few seconds (as the web's, every 5 s).
-    val minutesPending = page.detail?.meta.string("minutes_state") == "pending"
+    // What this recording's page may do and say here, worked out once and handed down (#15214).
+    val access = remember(page.detail?.paused, recordingOn) { RecordingAccess.of(page.detail, recordingOn) }
+    val minutesPending = minutesPolled(page.detail, access)
     LaunchedEffect(minutesPending, lifecycle) {
         if (minutesPending) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) { delay(MinutesPollMillis); model.refresh() }
@@ -383,7 +387,7 @@ internal fun KnowledgeDetailScreen(
     val copyText = rememberCopy()
     val detail = page.detail
     val entry = detail?.entry()
-    val canHand = detail?.let { meetingHandoffEligible(it, meetingTargets) } == true
+    val canHand = access.writes && detail?.let { meetingHandoffEligible(it, meetingTargets) } == true
     val latestHandoff = newerMeetingHandoff(meetingWork.made, latestMeetingHandoff(detail?.meta, model.namespace))
     val handoffOpen = handoffSheet != null
     fun showHandoff(again: MeetingHandoff?) { model.showMeetingHandoff(again) }
@@ -470,7 +474,7 @@ internal fun KnowledgeDetailScreen(
                     dirs(detail.meta.strings("dirs"))
                     // A recording's minutes (#2738), right above its transcript as on iOS; a time scrolls to its line.
                     val lines = transcript(detail.segments)
-                    facts?.let { recorded -> minutesView(detail, recorded)?.let { view ->
+                    facts?.let { recorded -> minutesView(detail, recorded, access)?.let { view ->
                         recordingMinutes(view, MinutesActions(
                             busy = minutesWork.busy || page.loading, message = minutesWork.message,
                             make = model::makeMinutes, add = model::addMinutesTodos,
@@ -521,7 +525,7 @@ internal fun KnowledgeDetailScreen(
         PointSheet(point, crumbs, detail?.links.orEmpty(), { source -> openPoint = null; navigator.open(source, model.owner) }, { openPoint = null })
     }
     if (editing && entry != null) KnowledgeTagEditor(entry, tagging, onSave = model::saveTags, onDismiss = { editing = false })
-    if (handoffOpen && detail != null && meetingTargets.isNotEmpty()) {
+    if (handoffOpen && access.writes && detail != null && meetingTargets.isNotEmpty()) {
         MeetingHandoffSheet(meetingTargets, machineRows, meetingHandoffTranscriptOffered(detail), handoffSheet?.again, meetingWork,
             onSend = model::handOff,
             onDismiss = model::dismissMeetingHandoff)

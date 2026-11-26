@@ -11,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/nwverse/persona/server/internal/modules/all/node" // the screen-share module, as the node runs it
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/node/screenport"
 	"github.com/nwverse/persona/server/internal/streams"
 )
@@ -37,9 +38,9 @@ const (
 
 func newLinkRig(t *testing.T) *linkRig {
 	t.Helper()
-	newLinks := screenport.New()
-	if newLinks == nil {
-		t.Skip("built without the screen-share module (persona_without_screen_share, persona_core_only)")
+	var links screenport.Links
+	if factory := screenport.New(); factory != nil {
+		links = factory(t.Logf)
 	}
 	vnc, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -72,9 +73,15 @@ func newLinkRig(t *testing.T) *linkRig {
 		r.hub.Event(e, b)
 		return nil
 	})
-	r.n = &Node{screens: newScreenLogins(), streams: nodeMux,
-		links: newLinks(t.Logf)}
+	r.n = &Node{screens: newScreenLogins(), streams: nodeMux, links: links}
 	return r
+}
+
+func needsScreenLinkModule(t *testing.T) {
+	t.Helper()
+	if screenport.New() == nil {
+		t.Skip("built without the screen-share module (persona_without_screen_share, persona_core_only)")
+	}
 }
 
 // dial is port.dial as the hub sends it; the phone's end of the stream comes back with the node's answer.
@@ -138,21 +145,32 @@ func linkFrame(typ byte, body []byte) []byte {
 // Sharing's bytes on the stream exactly as they come, both ways, and an answer without link. The same for a link
 // asked for on another port or without a pair.
 func TestPortDialWithoutASessionIsTheRawStream(t *testing.T) {
+	t.Cleanup(func() { hubModules.Store(nil) })
 	for _, tc := range []struct {
 		why    string
 		params map[string]any
+		off    bool
 	}{
-		{"no link asked (old hub, web, old app)", map[string]any{"port": screenPort, "pair": "K"}},
-		{"no pair", map[string]any{"port": screenPort, "link": true}},
-		{"another port", map[string]any{"port": 8080, "pair": "K", "link": true}},
+		{"no link asked (old hub, web, old app)", map[string]any{"port": screenPort, "pair": "K"}, false},
+		{"no pair", map[string]any{"port": screenPort, "link": true}, false},
+		{"another port", map[string]any{"port": 8080, "pair": "K", "link": true}, false},
+		{"the module is switched off at run time", map[string]any{"port": screenPort, "pair": "K", "link": true}, true},
 	} {
 		t.Run(tc.why, func(t *testing.T) {
+			hubModules.Store(nil)
+			if tc.off {
+				if screenport.New() == nil {
+					t.Skip("the run-time switch case needs the screen-share module in this build")
+				}
+				setHubModules([]string{moduleswitch.Marker})
+			}
 			r := newLinkRig(t)
 			phone, res, err := r.dial("p1", tc.params)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := res["link"]; ok || r.n.links.Len() != 0 {
+			links := r.n.screenLinks()
+			if _, ok := res["link"]; ok || links != nil && links.Len() != 0 {
 				t.Fatalf("answer %v: no session for this stream", res)
 			}
 			ss := r.screenSharing()
@@ -173,6 +191,9 @@ func TestPortDialWithoutASessionIsTheRawStream(t *testing.T) {
 // A phone that asked for a session: the answer says link, the stream starts with the session's paths, and Screen
 // Sharing's bytes come as the RFB channel's data. A relay rejoining needs the live session and its token.
 func TestPortDialWithLinkCarriesTheSession(t *testing.T) {
+	needsScreenLinkModule(t)
+	hubModules.Store(nil)
+	t.Cleanup(func() { hubModules.Store(nil) })
 	r := newLinkRig(t)
 	phone, res, err := r.dial("p1", map[string]any{"port": screenPort, "pair": "K", "link": true})
 	if err != nil {
@@ -222,6 +243,9 @@ func TestPortDialWithLinkCarriesTheSession(t *testing.T) {
 // screen.dial joins the pair's session only when the phone asked for it and the session is there; a relay rejoining
 // video needs a live video channel.
 func TestScreenDialJoinsTheSession(t *testing.T) {
+	needsScreenLinkModule(t)
+	hubModules.Store(nil)
+	t.Cleanup(func() { hubModules.Store(nil) })
 	r := newLinkRig(t)
 	if _, _, err := r.dial("p1", map[string]any{"port": screenPort, "pair": "K", "link": true}); err != nil {
 		t.Fatal(err)
@@ -260,5 +284,47 @@ func TestScreenDialJoinsTheSession(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"id": "v2", "pair": "K", "link": true, "attach": true})
 	if _, err := r.n.screenDial(context.Background(), body); dialErrCode(t, err) != "session_gone" {
 		t.Fatal("a video relay rejoined a session with no live video")
+	}
+}
+
+// A video stream asked for a screen session still starts as raw video when the build has no module or the hub
+// switched it off. The Core route remains available; only the module's session answer is absent.
+func TestScreenDialWithoutASessionStartsRawVideo(t *testing.T) {
+	t.Cleanup(func() { hubModules.Store(nil) })
+	for _, off := range []bool{false, true} {
+		t.Run(map[bool]string{false: "module unavailable or no session", true: "module switched off"}[off], func(t *testing.T) {
+			hubModules.Store(nil)
+			r := newLinkRig(t)
+			if off {
+				if screenport.New() == nil {
+					t.Skip("the run-time switch case needs the screen-share module in this build")
+				}
+				// Start a real live session while the module is on, then switch it off: the fallback cannot pass
+				// merely because the registry was empty.
+				if _, res, err := r.dial("p1", map[string]any{"port": screenPort, "pair": "K", "link": true}); err != nil || res["link"] != 1 {
+					t.Fatalf("setup screen session: %v %v", res, err)
+				}
+				setHubModules([]string{moduleswitch.Marker})
+			}
+			r.n.screens.byID["K"] = &screenPair{result: rfbLoginSignedIn, open: true}
+			var calls int
+			var linked bool
+			r.n.screenStart = func(_ context.Context, _, _ string, _, link, _ bool, _ func()) (bool, error) {
+				calls++
+				linked = link
+				return link, nil
+			}
+			body, _ := json.Marshal(map[string]any{"id": "v", "pair": "K", "link": true})
+			res, err := r.n.screenDial(context.Background(), body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 || linked {
+				t.Fatalf("raw video screenStart calls=%d linked=%v, want one raw call", calls, linked)
+			}
+			if _, ok := res.(map[string]any)["link"]; ok {
+				t.Fatalf("raw video answered as a screen session: %v", res)
+			}
+		})
 	}
 }

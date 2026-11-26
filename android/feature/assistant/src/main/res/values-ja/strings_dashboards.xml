@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_settings_dashboards_header">ダッシュボード</string>
+    <string name="assistant_settings_dashboards">Persona にダッシュボードを作らせる</string>
+    <string name="assistant_settings_dashboards_caption">オンにすると、アシスタントが何度も見返すページを下書きします。チャットで「保存」をタップするとサイドバーに表示されます。</string>
+</resources>

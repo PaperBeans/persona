@@ -3,7 +3,9 @@ package assistant
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,34 +245,29 @@ func TestMainChatLauncherFallbackDiscoveryHonorsCancellation(t *testing.T) {
 	f.launcherList = []proto.Launcher{{Name: "cx", Agent: "codex"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	params := map[string]any{"launcher": "wrap", "model": "claude-opus-5-5"}
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.finishMainChatModel(ctx, "server", "assistant", params, false)
-		done <- err
-	}()
-	waitFor(t, "the first fresh discovery", func() bool {
-		for _, call := range launcherListCalls(f) {
-			if call["refresh"] == true {
-				return true
-			}
-		}
-		return false
-	})
-	gate := make(chan struct{})
+	type fallbackLookup struct{}
+	ctx = context.WithValue(ctx, fallbackLookup{}, true)
+	var lookedUp atomic.Bool
 	f.mu.Lock()
-	f.launcherGate = gate
-	f.mu.Unlock()
-	t.Cleanup(func() { close(gate) })
-	waitFor(t, "the fallback discovery", func() bool { return len(launcherListCalls(f)) >= 4 })
-	cancel()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("fallback discovery cancellation returned %v", err)
+	f.onLauncherModels = func(callCtx context.Context, name string) {
+		if name == "claude" && callCtx.Value(fallbackLookup{}) == true {
+			lookedUp.Store(true)
+			cancel()
 		}
-	case <-time.After(time.Second):
-		t.Fatal("cancellation left fallback discovery blocked")
+	}
+	f.mu.Unlock()
+	wanted := map[string]any{"launcher": "wrap", "model": "claude-opus-5-5", "permission_mode": "plan"}
+	params := maps.Clone(wanted)
+	ctx, reported := withLauncherNote(ctx)
+	note, err := s.finishMainChatModel(ctx, "server", "assistant", params, false)
+	if !lookedUp.Load() {
+		t.Fatal("the configured fallback never reached model discovery")
+	}
+	if !errors.Is(err, context.Canceled) || note != "" || *reported != "" {
+		t.Fatalf("fallback discovery cancellation returned note %q, error %v", note, err)
+	}
+	if !maps.Equal(params, wanted) {
+		t.Fatalf("cancellation changed the requested launch: %v", params)
 	}
 }
 

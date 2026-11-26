@@ -2,6 +2,12 @@
 
 Pitfalls, unusual behavior, and the trade-offs made at the time (originally in "Lessons" in `CLAUDE.md`; see the index in `docs/lessons/README.md`). Add new lessons to the relevant section, or start a section if none fits.
 
+## Anchor trailers belong to the wire body (#15410)
+
+An inline reference's trailer ends one text item. A forward can join another item after it, and a paged transcript
+can cut it partway. Hide the trailer line in both cases. Global chat search also has to strip trailers from rows
+already in its index, before cutting snippets. Preserve the complete wire body for edit and replay.
+
 ## Inline HTML is not one Markdown node (#9420)
 
 An inline script or style can have its tags in separate raw HTML nodes and its body in ordinary text, emphasis or code-span nodes. Track the hidden element across nodes when building searchable prose, but keep literal code examples and ordinary preview formatting. Render separate source fields independently so an unclosed tag in one cannot hide text from another; test the real search index, not only the text helper.
@@ -90,6 +96,11 @@ Use synthetic conversations for screenshots, not the user's real main conversati
 - User images take two paths: ordinary messages contain user image blocks; messages sent while Claude is working are "absorbed mid-turn" as `attachment/queued_command`, with images in the prompt's block array
   (before 2026-10-29, the parser took only text blocks, so bubbles showed no images). In App turns awakened by background tasks, keep the user's images together with their message in the original position, not in the work trace.
 - A long chat's slow first screen is not caused by the hub / node (cold read: 0.12 s), but by the page being too large: one long Codex session's last two turns contained 1412 entries and 1.08 MB, with just 6 reply entries; the rest were tools and thinking already collapsed in the UI.
+- A navigation read can seek to a cold source line using the file's offset table (#15736). Establish the branch
+  topology first so an old question and its reply stay hidden after a rewind in the parsed tail. A detached window
+  has its own covered interval. Attach it to a chat view at that interval so the ordinary continuity fill can
+  still detect actual gaps. Scope preview extraction at the source because filtering positions after excerpt
+  extraction cannot remove a reply already copied from a frozen segment's tail.
 - Codex commentary is assistant text, not `Reasoning` (#5853). Keep an internal-only `Narration` marker so folding can handle completed narration without exposing a new wire kind or counting it as thinking. Only the latest page leaves the newest commentary visible until a final answer follows; a historical page may end before a final answer stored on the next page. Changing only the item kind let 110 commentary rows escape the fold and broke the long-session 40-item / 32 KB budget; cover real running pages, completed folds, expansion merging and golden output together.
 - The App requests `fold_work`. Pages read backward from the end replace each work segment with one `kind: fold` entry (counts and ranges only). Expanding a work row fetches it with `from_seq` / `through_seq`
   (`docs/protocol/protocol.md`, "Folded work"). `after_seq` catch-up and live pushes are not folded. Neither are tool_use entries still running or tool_result entries whose other half is outside the page, or they cannot be paired.
@@ -240,6 +251,17 @@ A view that fetches once per id cannot recover when the store puts the same id b
 - Esc stops only the tool call that is running. The queue survives and starts the next turn, so "stop" and "the queued
   message" are independent; after an interrupt, look for the queued message becoming a new turn rather than assuming the
   interrupt cancelled it. The parser must not treat that later turn as a new user message typed after the stop.
+
+## Messages queued behind a turn with no tool call come back as one line (2026-11-24, #14338, Claude Code 2.1.330)
+
+- A turn that makes no more tool calls has no tool boundary left to take a queued message at. When it ends, Claude Code
+  dequeues every message queued meanwhile and writes them as **one** `user` line. Each message keeps its own blocks, in
+  the order typed: the assistant's live snapshot, interjection note, pictures and text.
+- Seen with bursts of five and six channel messages sent within seconds. The first message had its own line. The others
+  shared the next one.
+- Anything that ties a send to "its line" must let one line hold several sends. The echo now splits such a line into
+  each send's items (`docs/protocol/protocol.md`, "Matching pending messages"). Before that, a folded channel run waited
+  for messages that were never tied, and ended asking for a resend.
 
 ## A herdr started from inside a Claude session makes its panes write no transcript (measured Claude Code 2.1.2xx; re-check)
 

@@ -12,23 +12,31 @@ import (
 )
 
 // A cluster that moved out of a big package (#7891) stays out. Each row is one moved cluster: the old package's directory,
-// the subpackage it went to, and the file-name prefixes the cluster's files had. The old package may not get such a
-// file back (test files may stay), and may not declare again a name the subpackage exports. The subpackage's own size is
-// not limited, and neither is the old package's: only the moved parts must not flow back. Add a row in every PR that
-// moves a cluster; never remove one.
+// the subpackage it went to, the file-name prefixes the cluster's files had, and the names it had in the old package
+// when they are not the ones the subpackage exports (a rule that moved into a core under its domain's own name). The
+// old package may not get such a file back (test files may stay), and may not declare again the names the row lists,
+// or, when it lists none, a name the subpackage exports. The subpackage's own size is not limited, and neither is the old package's: only the
+// moved parts must not flow back. Add a row in every PR that moves a cluster; never remove one.
 var movedClusters = []struct {
 	oldPkg, subPkg string
 	filePrefixes   []string
+	names          []string
 }{
-	{"node", "node/clipshare", []string{"clipshare"}},
-	{"node", "modules/phone-extra/nodeiphone", []string{"iphone"}}, // moved on into the phone-extra module (#14258)
-	{"node", "node/nodekit", nil},                                  // helpers shared by the clusters: no file prefix, names only
-	{"assistant", "assistant/chatsearch", []string{"search_text"}},
-	{"assistant", "assistant/saved", []string{"saved_"}},
-	{"assistant", "assistant/kbhistory", []string{"kb_history"}},
-	{"assistant", "assistant/archiverecovery", []string{"kb_archive_recovery"}},
-	{"assistant", "assistant/kbsent", []string{"kb_sent"}},
-	{"db", "assistant/repositorystore", []string{"todo_repositories", "workspace_naming", "task_workspaces"}},
+	{"node", "node/clipshare", []string{"clipshare"}, nil},
+	{"node", "modules/phone-extra/nodeiphone", []string{"iphone"}, nil}, // moved on into the phone-extra module (#14258)
+	{"node", "node/nodekit", nil, nil},                                  // helpers shared by the clusters: no file prefix, names only
+	{"assistant", "assistant/chatsearch", []string{"search_text"}, nil},
+	{"assistant", "assistant/saved", []string{"saved_"}, nil},
+	{"assistant", "modules/knowledge-ui/kbhistory", []string{"kb_history"}, nil}, // moved on into the knowledge-ui module (#14407)
+	{"assistant", "assistant/archiverecovery", []string{"kb_archive_recovery"}, nil},
+	{"assistant", "modules/knowledge-ui/kbsent", []string{"kb_sent"}, nil}, // moved on into the knowledge-ui module (#14407)
+	{"db", "assistant/repositorystore", []string{"todo_repositories", "workspace_naming", "task_workspaces"}, nil},
+	// The needs-you rules (#15250): fleetcount.AgentsNeedsYou decides them, fleetcountadapt renders them, fleetview
+	// writes the text they share with the working rows. agentKey and keyOf stay with foldSidesIn until it moves too.
+	{"assistant", "assistant/fleetcount", nil, []string{"needer", "needsYou", "waitingSince", "liveCounts", "cardStands",
+		"supervisorHeldCard", "supervisorHeldOnly"}},
+	{"assistant", "assistant/fleetcount/fleetcountadapt", nil, []string{"needItem", "linkItem"}},
+	{"assistant", "assistant/fleetview", nil, []string{"agentTitle", "agentPlace", "interactionDetail", "unixSeconds"}},
 }
 
 const clusterHint = "put the code in the subpackage instead (docs/server/architecture.md, tracking issue #7891)"
@@ -54,6 +62,14 @@ func TestMovedClustersStayOut(t *testing.T) {
 			for _, n := range topLevelNames(t, f, false) {
 				declared[n] = base
 			}
+		}
+		for _, n := range c.names {
+			if where, ok := declared[n]; ok {
+				t.Errorf("internal/%s/%s declares %s again, which moved to internal/%s; %s", c.oldPkg, where, n, c.subPkg, clusterHint)
+			}
+		}
+		if c.names != nil {
+			continue
 		}
 		subFiles, err := filepath.Glob(filepath.Join("..", filepath.FromSlash(c.subPkg), "*.go"))
 		if err != nil || len(subFiles) == 0 {

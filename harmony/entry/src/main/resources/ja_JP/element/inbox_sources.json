@@ -1,0 +1,52 @@
+{
+  "string": [
+    {
+      "name": "phone_sources_graph",
+      "value": "ソースの関係図"
+    },
+    {
+      "name": "phone_sources_direct",
+      "value": "直接"
+    },
+    {
+      "name": "phone_sources_all",
+      "value": "すべて"
+    },
+    {
+      "name": "phone_sources_inbox",
+      "value": "受信箱へ"
+    },
+    {
+      "name": "phone_sources_kb",
+      "value": "ナレッジへ"
+    },
+    {
+      "name": "phone_sources_idle",
+      "value": "読めない"
+    },
+    {
+      "name": "phone_sources_empty",
+      "value": "まだソースがありません"
+    },
+    {
+      "name": "phone_sources_empty_hint",
+      "value": "受信箱やナレッジベースに入れているソースはまだありません。"
+    },
+    {
+      "name": "phone_sources_graph_hint",
+      "value": "各ソースがどの拡張機能から来て、どう読まれ、どこへ入るか。タップすると経路全体が見えます。"
+    },
+    {
+      "name": "phone_sources_open",
+      "value": "設定を開く"
+    },
+    {
+      "name": "phone_sources_ask",
+      "value": "アシスタントで設定"
+    },
+    {
+      "name": "phone_sources_duplicate",
+      "value": "「{name}」と同じものを持ってくる可能性があります。重複していたらどちらかをオフにしてください。"
+    }
+  ]
+}

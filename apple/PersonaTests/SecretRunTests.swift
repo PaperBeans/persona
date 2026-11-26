@@ -1,7 +1,31 @@
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import Persona
 import PersonaWire
+
+/// Raw non-sudo env input and strict sudo-only stdin input. Keeping the wire dictionaries here lets the tests compile
+/// before the request model learns `delivery`; the UI fixture can use the same contract without sharing test code.
+private enum SecretRunDeliveryFixture {
+    static let envCommands = [#"sh -c 'printf "%s" "$PERSONA_SECRET"'"#, #"sh -c 'test -n "$PERSONA_SECRET"'"#]
+    static let stdinCommands = ["sudo -S -k -p '' cp backup.plist /Library/LaunchDaemons/",
+                                "sudo -S -k -p '' launchctl bootstrap system /Library/LaunchDaemons/backup.plist"]
+
+    static func interaction(delivery: String?, commands: [String]) throws -> Interaction {
+        var toolInput: [String: Any] = ["machine": "studio", "machine_name": "Mac Studio", "purpose": "Run the backup check",
+                                        "commands": commands]
+        toolInput["delivery"] = delivery
+        let warning = delivery == "env" ? "\nEvery listed command receives the typed secret via PERSONA_SECRET." : ""
+        let raw: [String: Any] = [
+            "id": "ix_secret_run_env", "machine_id": "server", "session_id": "s1", "kind": "permission",
+            "tool_name": "secret_run", "tool_input": toolInput,
+            "summary": commands.map { "$ " + $0 }.joined(separator: "\n") + warning,
+            "fields": [["key": "password", "label": "Password", "secret": true]],
+        ]
+        return try JSON.decoder.decode(Interaction.self, from: JSONSerialization.data(withJSONObject: raw))
+    }
+}
 
 /// The password card (secret_run): what the card shows from its input, and how the chat's tool row reads the tool's
 /// JSON result back, command by command.
@@ -63,6 +87,45 @@ struct SecretRunTests {
         var bash = ix
         bash.toolName = "Bash"
         #expect(!bash.isSecretRun)
+    }
+
+    @Test func deliveryDefaultsToStdinAndReadsTheExplicitEnvOptIn() throws {
+        for delivery in [Optional<String>.none, "stdin"] {
+            var raw = try #require(input.object)
+            raw["delivery"] = delivery.map(JSONValue.string)
+            let request = try #require(SecretRunRequest(.object(raw)))
+            #expect(request.commands == commands)
+            #expect(Self.delivery(in: request) == "stdin", "missing or explicit stdin is the unchanged default")
+        }
+
+        let env = try SecretRunDeliveryFixture.interaction(delivery: "env", commands: SecretRunDeliveryFixture.envCommands)
+        let request = try #require(SecretRunRequest(env.toolInput))
+        #expect(request.commands == SecretRunDeliveryFixture.envCommands)
+        #expect(Self.delivery(in: request) == "env", "the explicit non-sudo env opt-in survives request parsing")
+    }
+
+    /// Every quick path reads `requiresInput`, including WatchInteractionView: it replaces Allow with the input-required
+    /// note and leaves only Deny. The phone's Watch projection must carry the env card and the server's warning verbatim.
+    @Test func envDeliveryKeepsTheFreshCardAndWatchApprovalGuards() throws {
+        let ix = try SecretRunDeliveryFixture.interaction(delivery: "env", commands: SecretRunDeliveryFixture.envCommands)
+        #expect(ix.isSecretRun)
+        #expect(ix.requiresInput)
+        #expect(ApproveFirstIntent.resolution(for: ix) == nil)
+
+        var withoutField = ix
+        withoutField.fields = nil
+        #expect(withoutField.requiresInput, "a malformed env card cannot become quick-approvable")
+        #expect(ApproveFirstIntent.resolution(for: withoutField) == nil)
+
+        let model = AppModel()
+        model.replaceInteractions("", [ix])
+        let watch = try #require(model.watchSummary().interactions.first { $0.id == ix.id })
+        #expect(watch.requiresInput, "Watch shows its existing input-required note, never Allow")
+        #expect(watch.summary == ix.summary)
+        #expect(watch.summary?.contains("PERSONA_SECRET") == true)
+        for command in SecretRunDeliveryFixture.envCommands {
+            #expect(watch.summary?.contains(command) == true, "Watch retains the command verbatim")
+        }
     }
 
     @Test func theRowIsNamedForAPasswordRunWithItsPurpose() {
@@ -195,8 +258,123 @@ struct SecretRunTests {
         guard case .parsed = SecretRunResult.reading(resultItem(whole)) else { Issue.record("an uncut result parses as it is"); return }
     }
 
+    /// Reads the expected parsed delivery without naming a production property that does not exist on the base client.
+    /// A String or an enum raw value both describe themselves as `stdin` / `env`; optionals are unwrapped first.
+    private static func delivery(in request: SecretRunRequest) -> String? {
+        guard let stored = Mirror(reflecting: request).children.first(where: { $0.label == "delivery" })?.value,
+              let value = unwrapped(stored) else { return nil }
+        return String(describing: value)
+    }
+
+    private static func unwrapped(_ value: Any) -> Any? {
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .optional else { return value }
+        guard let wrapped = mirror.children.first?.value else { return nil }
+        return unwrapped(wrapped)
+    }
+
     private func resultItem(_ text: String, fullSize: Int? = nil) -> Item {
         Item(id: "2#0", seq: 2, ts: Date(timeIntervalSince1970: 2), role: "user", kind: .toolResult, text: text,
              toolUseID: "t1", toolName: nil, toolInput: nil, isError: nil, fullSize: fullSize, image: nil)
+    }
+}
+
+/// The real card's accessibility tree: env has an explicit warning and still offers only this card's Decline / Run;
+/// stdin and a legacy card with no delivery have no env warning. Screenshots are opt-in and written only to PERSONA_SHOTS.
+@MainActor @Suite(.serialized)
+struct SecretRunDeliveryCardTests {
+    private struct Element {
+        var id: String
+        var label: String
+        var button: Bool
+        var enabled: Bool
+    }
+
+    @Test func envCardWarnsAndKeepsEveryCommandAndOnlyDeliberateRun() async throws {
+        let elements = try await render(delivery: "env", commands: SecretRunDeliveryFixture.envCommands)
+        let warning = try #require(elements.first { $0.id == "secret-run.env-warning" },
+                                   "env delivery must warn that every listed command receives the typed secret")
+        #expect(warning.label.contains("PERSONA_SECRET"))
+
+        let listed = try #require(elements.first { $0.id == "secret-run.commands" })
+        for command in SecretRunDeliveryFixture.envCommands {
+            #expect(listed.label.contains(command), "the env card dropped or rewrote its command: \(command)")
+        }
+        let buttons = elements.filter(\.button)
+        let run = try #require(buttons.first { $0.id == "secret-run.run" })
+        #expect(!run.enabled, "Run stays disabled until this run's secret is typed")
+        #expect(buttons.contains { $0.label == String(localized: "Decline") })
+        for quick in [String(localized: "Allow [Notification Actions ce7ef2]"),
+                      String(localized: "Approve [Interaction Views 905819]"), String(localized: "Always Allow in Session")] {
+            #expect(!buttons.contains { $0.label == quick }, "no quick or remembered approval for env: \(quick)")
+        }
+    }
+
+    @Test func stdinAndLegacyCardsHaveNoEnvWarningAndKeepTheirCommands() async throws {
+        for delivery in [Optional("stdin"), nil] {
+            let elements = try await render(delivery: delivery, commands: SecretRunDeliveryFixture.stdinCommands)
+            #expect(!elements.contains { $0.id == "secret-run.env-warning" }, "delivery: \(delivery ?? "missing")")
+            let listed = try #require(elements.first { $0.id == "secret-run.commands" })
+            for command in SecretRunDeliveryFixture.stdinCommands {
+                #expect(listed.label.contains(command), "delivery \(delivery ?? "missing") changed a command")
+            }
+        }
+    }
+
+    private var appearance: String { ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] ?? "light" }
+    private var largeText: Bool { ProcessInfo.processInfo.environment["PERSONA_SHOTS_LARGE"] == "1" }
+
+    private func render(delivery: String?, commands: [String]) async throws -> [Element] {
+        try automation(true)
+        defer { try? automation(false) }
+        let ix = try SecretRunDeliveryFixture.interaction(delivery: delivery, commands: commands)
+        let model = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: "secret-run-\(UUID().uuidString)"))
+        model.forgetRestoredForTests()
+        model.apiForTests = FakeHub().client
+        model.replaceInteractions("", [ix])
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let scheme: ColorScheme = appearance == "dark" ? .dark : .light
+        let size: ContentSizeCategory = largeText ? .accessibilityExtraExtraExtraLarge : .large
+        window.rootViewController = UIHostingController(rootView: ScrollView {
+            SecretRunForm(interaction: ix).padding()
+        }.environment(model).environment(\.colorScheme, scheme).environment(\.sizeCategory, size))
+        window.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
+        window.backgroundColor = .systemBackground
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+
+        var elements = cardElements(in: window)
+        for _ in 0..<30 where !elements.contains(where: { $0.id == "secret-run.commands" })
+            || !elements.contains(where: { $0.id == "secret-run.run" }) {
+            try await Task.sleep(for: .milliseconds(100))
+            elements = cardElements(in: window)
+        }
+        shot(window, "secret-run-\(delivery ?? "legacy")-\(appearance)-\(largeText ? "largest" : "default")")
+        return elements.map {
+            Element(id: $0.id, label: $0.label, button: $0.traits.contains(.button), enabled: !$0.traits.contains(.notEnabled))
+        }
+    }
+
+    private func cardElements(in window: UIWindow) -> [RuntimeCLI.Element] {
+        RuntimeCLI.elements(matching: [:]).filter { RuntimeCLI.view(of: $0.object)?.window === window }
+    }
+
+    private func shot(_ window: UIWindow, _ name: String) {
+        guard let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] else { return }
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? image.pngData()?.write(to: URL(fileURLWithPath: dir + "/\(name).png"))
+    }
+
+    private func automation(_ on: Bool) throws {
+        let handle = try #require(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let set = try #require(dlsym(handle, "_AXSSetAutomationEnabled"))
+        typealias Enable = @convention(c) (Int32) -> Void
+        unsafeBitCast(set, to: Enable.self)(on ? 1 : 0)
     }
 }

@@ -49,10 +49,10 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     const html = render({ pane_id: "w1:p1" });
     expect(mark(html)).toMatch(/aria-label="终端"/);
     expect(mark(html)).toMatch(/title="终端"/);
-    expect(mark(html)).toContain("text-source-terminal");
+    expect(mark(html)).toContain("text-ink-3");
     expect(mark(html)).toContain("<svg");
     expect(mark(html)).not.toMatch(/>终端</); // no visible word any more
-    expect(link(html)).toMatch(/title="整理文档\n终端/); // the row's tooltip names it too: the mark hides while hovered
+    expect(link(html)).not.toContain(" title=");
   });
   it("draws a desktop app's own chat as a window, in its own color", () => {
     for (const patch of [{ space_kind: "codex_app", source_kind: "codex_history" }, { host: "paseo", source_kind: "runtime", source_instance_id: "paseo" }]) {
@@ -68,6 +68,13 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     expect(linked).toMatch(/^<span data-source="feishu" role="link" tabindex="0"[^>]*aria-label="飞书群 · 在飞书里打开这个话题"/);
     expect(linked).toContain("<img");
   });
+  it("keeps the source mark and pending count without trailing age", () => {
+    const timed = render({ pane_id: "botmux:oc_1/t1", external_url: "https://example.com/topic",
+      updated_at: "2026-11-20T08:00:00Z", pending_interactions: 2 });
+    expect(timed).not.toContain("data-row-age");
+    expect(timed).toMatch(/data-source="feishu"[\s\S]*role="link"[\s\S]*>2<\/span><\/a>/);
+    expect(render({ pane_id: "w1:p1" })).not.toContain("data-row-age");
+  });
   it("draws none for other sources, Persona's conversations and a tab with several panes", () => {
     expect(mark(render({}))).toBeUndefined();
     expect(mark(render({ source_kind: "runtime", source_instance_id: "dsh" }))).toBeUndefined();
@@ -79,27 +86,33 @@ describe("where an agent was opened, as a mark at its row's end (#2526)", () => 
     expect(mark(render({ pane_id: "w1:p1" }))).toContain("group-hover/row:invisible");
     expect(mark(renderToStaticMarkup(<SessionRow {...rowProps} s={{ ...session, pane_id: "w1:p1" }} active />))).not.toContain("invisible");
   });
-  it("tells terminal and desktop apart by shape too: a bare prompt, and a framed window", () => {
+  it("tells terminal and desktop apart by shape too: a framed terminal prompt, and a framed window", () => {
     const svg = (html: string) => mark(html)!.match(/<svg[^>]*>(.*?)<\/svg>/)![1];
     const terminal = svg(render({ pane_id: "w1:p1" }));
     const desktop = svg(render({ space_kind: "codex_app", source_kind: "codex_history" }));
-    expect(terminal).not.toContain("<rect"); // no frame: a prompt chevron and an underscore
+    expect(terminal).toContain("<rect"); // framed terminal icon with prompt chevron and underscore
     expect(desktop).toContain("<rect");
     expect(terminal).not.toBe(desktop);
   });
-  it("drops a writable desktop runtime's name from the row's end, where its marks already say it", () => {
+  it("leaves a runtime's name out of the visible tail whether or not it can send", () => {
     const paseo = { host: "paseo", source_kind: "runtime", source_instance_id: "paseo", agent_label: "Paseo" };
     const writable = render({ ...paseo, capabilities: { read: true, send: true } });
     expect(writable).not.toMatch(/>Paseo</);
-    expect(link(writable)).toContain("Paseo"); // still in the row's tooltip
-    // read-only: the end still says why
-    expect(render({ ...paseo, capabilities: { read: true, send: false } })).toMatch(/>[^<]*Paseo[^<]*</);
+    expect(render({ ...paseo, capabilities: { read: true, send: false } })).not.toMatch(/>[^<]*Paseo[^<]*</);
   });
-  it("keeps the title's width first when words sit at the row's end", () => {
+  it("gives the title the text column instead of reserving room for source words", () => {
     const html = render({ space_kind: "codex_app", source_kind: "codex_history", agent_name: "Codex App" });
-    expect(html).toMatch(/<span class="[^"]*flex-1 truncate[^"]*basis-auto[^"]*">整理文档<\/span>/);
-    expect(html).toMatch(/<span class="[^"]*min-w-6 shrink-\[20\][^"]*">[^<]*Codex/);
-    expect(render({ pane_id: "w1:p1" })).not.toContain("basis-auto"); // nothing at the end: as before
+    expect(html).toMatch(/<span class="[^"]*flex-1 truncate[^"]*min-w-0[^"]*">整理文档<\/span>/);
+    expect(html).not.toMatch(/>[^<]*Codex App[^<]*</);
+    expect(html).not.toContain("basis-auto");
+    expect(link(html)).not.toContain(" title=");
+  });
+  it("keeps a Persona title's date, kind and topic, with unread styling", () => {
+    const title = "1125 | Design | Sidebar review";
+    const html = render({ title, assistant: true, state: "unread", agent_name: "Antigravity", source_kind: "runtime", updated_at: "2026-11-20T08:00:00Z" }, { showState: false, keepTrailing: true });
+    expect(html).toMatch(/class="[^"]*font-medium text-ink[^"]*">1125 \| Design \| Sidebar review<\/span>/);
+    expect(html).not.toMatch(/>[^<]*Antigravity[^<]*</);
+    expect(html).not.toContain("data-row-age");
   });
 });
 
@@ -127,6 +140,16 @@ describe("an agent's row with 「Agent 行显示详情」 (#2430)", () => {
     expect(danger).toContain("text-orange");
     expect(danger).not.toContain("text-red");
   });
+  it("renders the agy context bar and share only with a known window", () => {
+    setAgentDetails(true);
+    const agy = { ...session, agent: "agy", model: "gemini-4-carbon-high", context_tokens: 262_144 };
+    const known = render({ ...agy, context_window: 1_048_576 });
+    expect(known).toContain('role="progressbar"');
+    expect(known).toContain('aria-valuenow="25"');
+    expect(known).toContain(t("context.label", { percent: 25 }));
+    const unknown = render({ ...agy, model: "custom", context_window: 0 });
+    expect(unknown).not.toMatch(/progressbar|%/);
+  });
   it("draws no second line for a session that says nothing, or for a conversation of the assistant", () => {
     setAgentDetails(true);
     const plain = { ...session, cwd: "" };
@@ -149,6 +172,14 @@ describe("a personal agent's row", () => {
     const html = renderToStaticMarkup(<AgentRow {...props} active={false} />);
     expect(link(html)).not.toContain("aria-current");
     expect(pin(html)).toMatch(/class="[^"]*\bopacity-0\b/);
+  });
+  it("keeps an unread badge and renders identical resting markup when only activity time changes", () => {
+    const read = renderToStaticMarkup(<AgentRow {...props} active={false} />);
+    const recent = { ...s, rankTimeMs: Date.now() };
+    expect(renderToStaticMarkup(<AgentRow {...props} s={recent} active={false} />)).toBe(read);
+    const unread = renderToStaticMarkup(<AgentRow {...props} s={{ ...recent, unreadCount: 3 }} active={false} />);
+    expect(unread).toMatch(/font-medium text-ink[^>]*>周报助手<\/span>/);
+    expect(unread).toMatch(/tabular-nums[^>]*>3<\/span>/);
   });
 });
 
@@ -212,10 +243,10 @@ describe("a session's associated tab name (#7595)", () => {
   const render = (patch: Partial<Session>, extra = {}) => renderToStaticMarkup(<SessionRow {...rowProps} s={{ ...session, ...patch }} hint="Project" active={false} {...extra} />);
   const tabName = (label: string) => t("sidebar.tab_named", { label });
 
-  it("stays visible beside an aged terminal row and follows a rename", () => {
+  it("stays visible on a terminal row and follows a rename", () => {
     const first = render(named);
     expect(first).toContain(tabName("Release Review"));
-    expect(first).toContain("Project");
+    expect(first).not.toMatch(/>[^<]*Project[^<]*</);
 
     const renamed = render({ ...named, slot_name: "Triage" });
     expect(renamed).toContain(tabName("Triage"));

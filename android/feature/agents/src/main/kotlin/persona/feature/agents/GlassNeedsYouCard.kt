@@ -31,6 +31,8 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcon
 import persona.core.domain.answer.*
 import persona.core.domain.sort.NeedsYouRow
+import persona.core.domain.sort.displayTabName
+import persona.core.domain.sort.displayTitle
 import java.time.Instant
 
 /** One row inside the Agents page's compact grouped Glass "Needs you" card (matching iOS `InteractionPreviewCard`). */
@@ -260,12 +262,14 @@ internal fun GlassNeedsYouWaitingRow(
     owner: Session?,
     machine: String?,
     sidebar: Boolean,
+    preferHerdrTabName: Boolean = false,
     onClick: () -> Unit,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val sessionName = owner?.let {
-        if (sidebar) it.displayTitle else it.title.takeIf(String::isNotBlank) ?: it.sessionId
+        if (sidebar) it.displayTitle(preferHerdrTabName)
+        else it.displayTabName(preferHerdrTabName) ?: it.title.takeIf(String::isNotBlank) ?: it.sessionId
     }
     val place = glassPlaceLine(sessionName, machine)
     Row(

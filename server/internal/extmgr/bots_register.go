@@ -10,6 +10,7 @@ import (
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larksyncwire"
 )
 
 // Binding the Lark bot in one authorization (#4347, docs/extensions/bots.md "Pairing and permissions"): the bind step
@@ -70,7 +71,7 @@ func (h *Manager) registrar() botport.Registrar {
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.registrar == nil && botport.Available() {
+	if b.registrar == nil && botport.Available(h.modules()) {
 		b.registrar = botport.NewRegistrar("")
 	}
 	return b.registrar
@@ -108,7 +109,9 @@ func (h *Manager) beginFeishuRegistration(ctx context.Context, errText string) (
 		h.logf("bots: registration: %v", botport.ErrUnavailable)
 		return connector.Prompt{Error: errText}, false
 	}
-	ch, err := r.Begin(ctx, region, botRegisterName)
+	// The app also asks for the user scopes of the sync's tier (TierDocs unless the owner chose another), so the
+	// owner can authorize it to read as them right after (larksync_auth.go) without registering again.
+	ch, err := r.BeginWith(ctx, region, botRegisterName, larksyncwire.RegisterOptions{UserScopes: larksyncwire.ScopesFor(h.larkSyncPrimaryTier(ctx))})
 	if err != nil {
 		h.logf("bots: registration: %v", err)
 		return connector.Prompt{Error: errText}, false
@@ -285,7 +288,7 @@ func (h *Manager) finishFeishuRegistration(ctx context.Context, reg botRegistrat
 	}
 	// Best-effort, as after typed credentials: the template opened the scopes and the callback; this subscribes the
 	// events over the long connection and submits the publish.
-	if !botport.Available() {
+	if !botport.Available(h.modules()) {
 		return "", botport.ErrUnavailable
 	}
 	if rep := botport.New(reg.AppID, secret, domain).AutoConfigure(ctx); rep.Detail != "" {

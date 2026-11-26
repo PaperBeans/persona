@@ -3,7 +3,6 @@ package persona.module.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
-import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -17,6 +16,9 @@ import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import persona.core.moduleapi.AudioFocus
+import persona.core.moduleapi.AudioGrant
+import persona.core.moduleapi.AudioUse
 
 /**
  * The phone's side of a voice conversation: the microphone going up and the extension's voice coming down. Behind an
@@ -75,17 +77,18 @@ internal fun legacySpeakerphone(types: List<Int>): Boolean =
 
 /**
  * The real thing: `VOICE_COMMUNICATION` recording with the system's echo canceller and noise suppressor (on the
- * loudspeaker the model must not hear itself), communication mode routed to a headset or the loudspeaker, audio focus
- * for the call, and a stream player for what the extension says. Everything is put back in [stop].
+ * loudspeaker the model must not hear itself), communication mode routed to a headset or the loudspeaker, the audio as
+ * a conversation from the core's broker ([focus], which takes Android's audio focus for it), and a stream player for what
+ * the extension says. Everything is put back in [stop]. A call taking the audio ends the conversation like a lost microphone.
  */
-internal class AndroidVoiceAudio(context: Context) : VoiceAudio {
+internal class AndroidVoiceAudio(context: Context, private val focus: AudioFocus) : VoiceAudio {
     private val manager = context.applicationContext.getSystemService(AudioManager::class.java)
     private val lock = Any()
     @Volatile private var closed = false
     private var savedMode: Int? = null
     private var savedSpeakerphone: Boolean? = null
     private var startedSco = false
-    private var focus: AudioFocusRequest? = null
+    private var grant: AudioGrant? = null
     private var effects = emptyList<AudioEffect>()
     private var track: AudioTrack? = null
     private var recorder: AudioRecord? = null
@@ -99,6 +102,9 @@ internal class AndroidVoiceAudio(context: Context) : VoiceAudio {
 
     override fun start(inputRate: Int, outputRate: Int, listener: VoiceAudio.Listener): Boolean = synchronized(lock) {
         if (closed || recorder != null) return false
+        // The core's broker first: while something that outranks a conversation (a call) holds the audio, it does not start.
+        grant = focus.request(VoiceModule.id, AudioUse.Conversation, onLost = { if (!closed) listener.onMicrophoneLost() })
+            ?: return false
         try {
             route()
             val output = startPlayer(outputRate, listener)
@@ -130,8 +136,6 @@ internal class AndroidVoiceAudio(context: Context) : VoiceAudio {
             throw error
         }
         savedMode = previous
-        focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(attributes).build()
-            .also { manager.requestAudioFocus(it) }
     }
 
     /** API 30: the loudspeaker for a call without a headset, Bluetooth SCO for a Bluetooth headset. */
@@ -261,7 +265,7 @@ internal class AndroidVoiceAudio(context: Context) : VoiceAudio {
         // The player and the microphone release their own device when their threads end; one never started is ours.
         if (player == null) track?.release()
         if (mic == null) recorder?.release()
-        focus?.let { manager.abandonAudioFocusRequest(it) }
+        grant?.release()
         savedMode?.let { mode ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) manager.clearCommunicationDevice() else restoreLegacyRoute()
             manager.mode = mode

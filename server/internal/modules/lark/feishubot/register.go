@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/larksyncwire"
 )
 
 // Creating the app in one authorization (docs/extensions/bots.md "Pairing and permissions"): the accounts site's
@@ -45,6 +47,17 @@ func (r *Registrar) WithHost(host string) *Registrar {
 
 // Begin starts a registration of an app named name in region.
 func (r *Registrar) Begin(ctx context.Context, region, name string) (RegisterChallenge, error) {
+	return r.BeginWith(ctx, region, name, larksyncwire.RegisterOptions{})
+}
+
+// BeginWith is Begin that also asks for the user scopes of the daily sync (opts.UserScopes: what the app may read as
+// the person who authorizes it later), and, with opts.AppID, adds them to that existing app instead of creating a
+// new one. Zero options ask for exactly what Begin always asked for.
+//
+// Adding scopes to an existing app follows the platform's one-click permission docs: the begin form names the app
+// (client_id) and the addons repeat it (app_id). Which of the two the accounts site reads is not verified, so both
+// are sent; a site that ignores them creates a new app, which the poll's App ID shows.
+func (r *Registrar) BeginWith(ctx context.Context, region, name string, opts larksyncwire.RegisterOptions) (RegisterChallenge, error) {
 	var out struct {
 		DeviceCode              string `json:"device_code"`
 		UserCode                string `json:"user_code"`
@@ -56,12 +69,17 @@ func (r *Registrar) Begin(ctx context.Context, region, name string) (RegisterCha
 		Error                   string `json:"error"`
 		ErrorDescription        string `json:"error_description"`
 	}
-	err := r.post(ctx, region, url.Values{
+	form := url.Values{
 		"action":            {"begin"},
 		"archetype":         {"PersonalAgent"},
 		"auth_method":       {"client_secret"},
 		"request_user_info": {"open_id tenant_brand"},
-	}, &out)
+	}
+	appID := strings.TrimSpace(opts.AppID)
+	if appID != "" {
+		form.Set("client_id", appID)
+	}
+	err := r.post(ctx, region, form, &out)
 	if err != nil {
 		return RegisterChallenge{}, err
 	}
@@ -75,7 +93,7 @@ func (r *Registrar) Begin(ctx context.Context, region, name string) (RegisterCha
 	if strings.TrimSpace(out.DeviceCode) == "" || raw == "" {
 		return RegisterChallenge{}, fmt.Errorf("registration: no device code or page in the answer")
 	}
-	page, err := registrationPage(raw, name)
+	page, err := registrationPage(raw, name, appID, opts.UserScopes)
 	if err != nil {
 		return RegisterChallenge{}, err
 	}
@@ -143,8 +161,9 @@ func (r *Registrar) post(ctx context.Context, region string, form url.Values, ou
 }
 
 // registrationPage adds the app's name and what it asks for beyond the template (addons: the tenant scopes and the
-// card callback, gzip'd JSON in base64url) to the authorization page's address.
-func registrationPage(raw, name string) (string, error) {
+// card callback, gzip'd JSON in base64url) to the authorization page's address. userScopes, when any, ask for the
+// user scopes too ("scopes.user"); appID names the existing app they are added to.
+func registrationPage(raw, name, appID string, userScopes []string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err
@@ -156,10 +175,18 @@ func registrationPage(raw, name string) (string, error) {
 		}
 	}
 	if q.Get("addons") == "" { // one the platform put there itself is left as it is
-		addons, err := encodeAddons(map[string]any{
-			"scopes":    map[string]any{"tenant": registerScopes},
+		scopes := map[string]any{"tenant": registerScopes}
+		if len(userScopes) > 0 {
+			scopes["user"] = userScopes
+		}
+		payload := map[string]any{
+			"scopes":    scopes,
 			"callbacks": map[string]any{"items": []string{"card.action.trigger"}},
-		})
+		}
+		if appID != "" {
+			payload["app_id"] = appID
+		}
+		addons, err := encodeAddons(payload)
 		if err != nil {
 			return "", err
 		}

@@ -30,16 +30,16 @@ func TestDevelopmentProgressStatusAndCleanup(t *testing.T) {
 		t.Run(c.operation, func(t *testing.T) {
 			h, _, _, _ := updatingHub(t, newPublisher(t, "unused", 202611021700), update.Release)
 			u := h.upd
-			first := update.DevelopmentStep(c.operation, c.first, true)
+			first := update.DevelopmentStep(c.operation, c.first)
 			u.startDevelopmentPhase(first, "legacy")
 			if v, _ := getUpdate(t, u); v.DevelopmentProgress == nil || v.DevelopmentProgress.Step != c.first {
 				t.Fatalf("missing initial development step: %+v", v.DevelopmentProgress)
 			}
 			var late func(update.DevelopmentProgress)
-			p := update.DevelopmentStep(c.operation, c.step, true)
+			p := update.DevelopmentStep(c.operation, c.step)
 			done, total := int64(0), int64(3)
 			p.ItemDone, p.ItemTotal, p.ElapsedSeconds = &done, &total, 29
-			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, _ any, report func(update.DevelopmentProgress)) error {
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, _ any, _ func(), report func(update.DevelopmentProgress)) error {
 				late = report
 				report(p)
 				v, raw := getUpdate(t, u)
@@ -49,7 +49,7 @@ func TestDevelopmentProgressStatusAndCleanup(t *testing.T) {
 				}
 				return nil
 			}
-			if err := u.runDevelopment(context.Background(), c.operation, nil, nil); err != nil {
+			if err := u.runDevelopment(context.Background(), c.operation, nil, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			u.set(c.next, "next", "")
@@ -80,15 +80,17 @@ func TestDevelopmentAppliesOlderProgramBackupThroughSharedInstaller(t *testing.T
 			version := update.DevelopmentVersion{ID: "snapshot-fixture", Version: "web-dev-older", Build: 202611010001, Commit: strings.Repeat("b", 40), UpdatedAt: "2026-11-01T10:00:00Z"}
 			prepared := filepath.Join(u.dir, "development", "prepare_backup-fixture", "artifacts")
 			phases := make(chan string, 8)
-			u.devRun = func(ctx context.Context, cfg *update.DevelopmentConfig, dir, operation string, input map[string]any, result any, report func(update.DevelopmentProgress)) error {
+			u.devRun = func(ctx context.Context, cfg *update.DevelopmentConfig, dir, operation string, input map[string]any, result any, _ func(), report func(update.DevelopmentProgress)) error {
 				phases <- operation
 				var response any
 				switch operation {
+				case "preflight":
+					return nil
 				case "backups":
 					response = map[string]any{"backups": []update.DevelopmentVersion{version}}
 				case "prepare_backup":
 					if corrupt {
-						report(update.DevelopmentStep(operation, "verify_snapshot", cfg.Backup.Builtin))
+						report(update.DevelopmentStep(operation, "verify_snapshot"))
 						return errors.New("corrupt snapshot at /fixture/private/snapshot")
 					}
 					if input["backup_id"] != version.ID {
@@ -423,7 +425,7 @@ func TestDevelopmentBackupsAPIDistinguishesFailureFromEmptyList(t *testing.T) {
 	u.loaded, u.settings.Source = true, "web-dev"
 	h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}}
 	failed := true
-	u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, _ any, _ func(update.DevelopmentProgress)) error {
+	u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, _ any, _ func(), _ func(update.DevelopmentProgress)) error {
 		if failed {
 			return errors.New("fixture unavailable backup directory")
 		}
@@ -595,7 +597,7 @@ func TestDevelopmentRepeatedCheckDoesNotMutatePublishedCandidate(t *testing.T) {
 			published := &update.Published{Manifest: &update.Manifest{Version: "frozen", Build: 202611130001}, Development: candidate}
 			u.release, u.running = published, active
 			u.settings.History = []updateRecord{{Source: "web-dev", Commit: candidate.Commit, Result: "rolled_back", ToBuild: 202611120001, ToVersion: "previous-attempt"}}
-			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, result any, _ func(update.DevelopmentProgress)) error {
+			u.devRun = func(_ context.Context, _ *update.DevelopmentConfig, _, _ string, _ map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
 				*result.(*update.DevelopmentCandidate) = *candidate
 				return nil
 			}
@@ -649,7 +651,7 @@ func TestDevelopmentHeldHistorySkipsUnbuiltBadAndUnresolvedCandidates(t *testing
 }
 
 func TestDevelopmentUsesSharedInstallAndPreservesRecovery(t *testing.T) {
-	for _, failure := range []string{"", "automatic", "build", "backup", "adopt", "preimage", "partial", "restore"} {
+	for _, failure := range []string{"", "automatic", "preflight", "build", "backup", "adopt", "preimage", "partial", "restore"} {
 		t.Run(failure, func(t *testing.T) {
 			p := newPublisher(t, "unused", 202611021700)
 			h, machine, target, execs := updatingHub(t, p, "release")
@@ -681,8 +683,24 @@ func TestDevelopmentUsesSharedInstallAndPreservesRecovery(t *testing.T) {
 				os.Mkdir(filepath.Join(filepath.Dir(target), "persona-manager.new"), 0700)
 			}
 			var phases []string
-			u.devRun = func(ctx context.Context, c *update.DevelopmentConfig, dir, operation string, input map[string]any, result any, _ func(update.DevelopmentProgress)) error {
+			u.devRun = func(ctx context.Context, c *update.DevelopmentConfig, dir, operation string, input map[string]any, result any, _ func(), _ func(update.DevelopmentProgress)) error {
 				phases = append(phases, operation)
+				if operation == "preflight" && failure == "preflight" {
+					// Run the embedded helper against a synthetic installation.
+					home := t.TempDir()
+					if err := os.WriteFile(filepath.Join(home, "hub.json"), []byte(`{"database_url":"fixture-secret"}`), 0600); err != nil {
+						t.Fatal(err)
+					}
+					c.Backup.Directory = t.TempDir()
+					if err := os.Chmod(c.Backup.Directory, 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(c.Backup.Directory, "coordination-pending.json"), nil, 0600); err != nil {
+						t.Fatal(err)
+					}
+					input["runtime"], input["hub_database"] = home, "fixture-secret"
+					return update.DevelopmentRequest(ctx, c, dir, operation, input, result, nil, nil)
+				}
 				if operation == failure {
 					return errors.New("fixture phase failed")
 				}
@@ -795,7 +813,14 @@ func TestDevelopmentUsesSharedInstallAndPreservesRecovery(t *testing.T) {
 				if u.adoptionUnresolved() {
 					t.Fatal("fully restored attempt kept an unresolved fence")
 				}
-				if failure == "build" && len(phases) != 2 {
+				if failure == "preflight" {
+					want := su(h.userLang(), "backup_reason_coordination")
+					if !slices.Equal(phases, []string{"resolve", "preflight"}) || !strings.Contains(u.view().Error, want) || strings.Contains(u.view().Error, "fixture-secret") ||
+						!strings.Contains(u.view().Error, su(h.userLang(), "development_step_preflight")) {
+						t.Fatalf("wrong preflight failure: %v, %s", phases, u.view().Error)
+					}
+				}
+				if failure == "build" && !slices.Equal(phases, []string{"resolve", "preflight", "build"}) {
 					t.Fatal("backup ran after failed build")
 				}
 				return

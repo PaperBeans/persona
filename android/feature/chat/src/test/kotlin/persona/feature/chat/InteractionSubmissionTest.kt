@@ -55,6 +55,21 @@ class InteractionSubmissionTest {
     private class HubAnswer(override val status: Int?, override val code: String? = null, message: String = "HTTP $status") :
         java.io.IOException(message), HubCodedFailure
 
+    @Test fun aCommandInputReplyRetainsTheHubReasonWithoutAssumingDelivery() = runTest {
+        val error = HubAnswer(502, "internal", "The command refused the line")
+        val chat = submitInteraction(keepUnconfirmedReason = true) { throw error }
+        assertEquals(InteractionReply(InteractionSubmission.Unknown, reason = "The command refused the line"), chat)
+        assertEquals(CardAnswer.Unconfirmed, chat.card)
+        assertEquals(chat, classifyInteractionFailure(error, keepUnconfirmedReason = true))
+        assertNull(submitInteraction { throw error }.reason)
+        val unconfirmed = classifyInteractionFailure(HubAnswer(409, "command_input_unconfirmed", "Computer did not confirm"), true)
+        assertEquals(CardAnswer.Unconfirmed, unconfirmed.card)
+        assertEquals("Computer did not confirm", unconfirmed.reason)
+        val definite = classifyInteractionFailure(HubAnswer(409, "command_input_refused", "Nothing was typed"), true)
+        assertEquals(CardAnswer.Refused, definite.card)
+        assertEquals("Nothing was typed", definite.reason)
+    }
+
     // #1881: a refusal the hub answered leaves the card answerable with its words; only a lost receipt stays unconfirmed.
     @Test fun aRefusalTheHubAnsweredIsNotUnconfirmed() = runTest {
         val codex = submitInteraction { throw HubAnswer(409, "input_draft", "The terminal has a draft in its input box") }

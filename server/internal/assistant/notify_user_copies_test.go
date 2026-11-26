@@ -42,6 +42,7 @@ func notifyCopyService(t *testing.T, res NotifyResult) (*Service, *fakeHub) {
 // hours) gets no copy on the Feishu bot or the channels either, and marks none of them pushed: the scheduled task's
 // turn-end mirror then goes as it would without the notice (#8268).
 func TestNotifyUserHeldByPushGradingSendsNoChannelCopy(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, reason := range []string{"ln_p1_held", "ln_dedup_12h"} {
 		t.Run(reason, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -85,6 +86,7 @@ func TestNotifyUserHeldByPushGradingSendsNoChannelCopy(t *testing.T) {
 // copied as before; the answer says where the copies went, and with no device taking the push it no longer says the
 // user was not alerted. The copies mark their channels pushed, so the turn-end mirrors stand aside.
 func TestNotifyUserLetThroughIsCopiedAndSaysSo(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	synctest.Test(t, func(t *testing.T) {
 		zero := 0
 		s, f := notifyCopyService(t, NotifyResult{OK: true, Devices: &zero, Reason: "no_device"})
@@ -121,6 +123,7 @@ func TestNotifyUserLetThroughIsCopiedAndSaysSo(t *testing.T) {
 // The Feishu copy's first card has not landed when notify_user's wait is over: the answer says the copy was sent and
 // its delivery is not confirmed; the card still lands afterwards and marks the bot pushed.
 func TestNotifyUserCopyNotConfirmedInTime(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	synctest.Test(t, func(t *testing.T) {
 		s, entered, release := feishuPushHub(t, nil)
 		landed := sync.OnceFunc(func() { close(release) })
@@ -153,6 +156,7 @@ func TestNotifyUserCopyNotConfirmedInTime(t *testing.T) {
 // A Feishu copy that fails, with no device taking the push either: the answer says both, and that the user was not
 // alerted.
 func TestNotifyUserCopyFailedSaysTheUserWasNotAlerted(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	synctest.Test(t, func(t *testing.T) {
 		s, _, release := feishuPushHub(t, errors.New("feishu down"))
 		close(release)
@@ -204,7 +208,7 @@ func TestNotifyUserWithoutCopiesAnswersAsBefore(t *testing.T) {
 // What the answer says for each devices outcome once copies went out, in English and Chinese.
 func TestNotifyUserAnswerWithCopies(t *testing.T) {
 	devices := func(n int) *int { return &n }
-	feishu := func(state string) pushCopy { return pushCopy{channel: channel.Feishu, state: state} }
+	feishu := func(state copyState) pushCopy { return pushCopy{channel: channel.Feishu, state: state} }
 	cases := []struct {
 		lang   i18n.Lang
 		res    NotifyResult

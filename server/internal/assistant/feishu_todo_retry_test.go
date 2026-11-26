@@ -12,6 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -61,6 +62,7 @@ func installRetryTodo(s *Service, todo Todo) {
 }
 
 func TestFeishuTodoReminderRecovery(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name                       string
 		postErr                    error
@@ -142,7 +144,7 @@ func TestFeishuTodoReminderRecovery(t *testing.T) {
 					}
 				}
 				if accepted > 0 && (tc.postErr == nil || !tc.always) {
-					target := s.botTargetFor("", "om_todo_retry_1")
+					target := s.larkModule().Route("", "om_todo_retry_1")
 					wantTodo := todo.ID
 					if tc.health {
 						wantTodo = ""
@@ -157,6 +159,7 @@ func TestFeishuTodoReminderRecovery(t *testing.T) {
 }
 
 func TestFeishuTodoReminderMultipartRecovery(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, s, _ := todoReminderHub(t)
 	synctest.Test(t, func(t *testing.T) {
 		var capture todoRetryPosts
@@ -189,7 +192,7 @@ func TestFeishuTodoReminderMultipartRecovery(t *testing.T) {
 				t.Fatalf("card %d changed its key or payload on retry", i)
 			}
 			mid := fmt.Sprintf("om_todo_retry_%d", i+1)
-			if target := s.botTargetFor("", mid); target.TodoID != todo.ID || target.SessionID != "m1" {
+			if target := s.larkModule().Route("", mid); target.TodoID != todo.ID || target.SessionID != "m1" {
 				t.Fatalf("card %d lost reply routing: %+v", i, target)
 			}
 		}
@@ -209,6 +212,7 @@ func TestFeishuTodoReminderMultipartRecovery(t *testing.T) {
 }
 
 func TestFeishuTodoReminderOccurrenceKeys(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	_, s, posts := todoReminderHub(t)
 	at := time.Date(2026, 11, 21, 10, 0, 0, 123, time.UTC)
 	todo := Todo{ID: "todo_identity", Title: "Reminder", RemindAt: &at}
@@ -238,6 +242,7 @@ func TestFeishuTodoReminderOccurrenceKeys(t *testing.T) {
 }
 
 func TestFeishuTodoReminderStopsObsoleteOccurrence(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, change := range []string{"done", "deleted", "rearmed", "removed"} {
 		t.Run(change, func(t *testing.T) {
 			f, s, _ := todoReminderHub(t)
@@ -290,12 +295,13 @@ func (h *todoRetrySourceHub) DeviceCall(ctx context.Context, p DeviceCall) (json
 
 // These controls concern authorization and privacy, not the provider's response to a duplicate UUID.
 func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, change := range []string{"owner", "generation", "health disconnected", "unknown source", "known ordinary", "companion after bot", "companion after unknown first", "route refusal", "initial companion"} {
 		t.Run(change, func(t *testing.T) {
 			f, s, _ := todoReminderHub(t)
 			source := &todoRetrySourceHub{fakeHub: f}
 			s.hub = source
-			s.workbenchOn(FeishuFeatures{Workbench: true}, true) // unrelated standing-card loop stays outside the virtual clock
+			s.larkModule().WorkbenchOn(FeishuFeatures{Workbench: true}, true) // unrelated standing-card loop stays outside the virtual clock
 			synctest.Test(t, func(t *testing.T) {
 				changed := false
 				var capture todoRetryPosts
@@ -310,13 +316,10 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 					return FeishuStatus{Ready: true, Owner: owner, PairedAt: paired, PublicURL: "https://hub.example.com", Features: FeishuFeatures{Pushes: true, Workbench: true}}, nil
 				})
 				companion := func() {
-					s.fbot.mu.Lock()
-					s.loadBotLocked(context.Background())
-					s.fbot.st.Companions = []CompanionBot{{Kind: CompanionNotify, Name: "Synthetic", AppID: "cli_synthetic"}}
-					s.fbot.mu.Unlock()
-					s.companions.mu.Lock()
-					s.companions.polled = time.Now()
-					s.companions.mu.Unlock()
+					s.larkModule().Book(context.Background(), func(b assistantwire.ChatBook) {
+						b.SetCompanions([]CompanionBot{{Kind: CompanionNotify, Name: "Synthetic", AppID: "cli_synthetic"}})
+					})
+					s.boardProbe(t).NoticesPolled()
 				}
 				f.answerAppBlocking(AppFeishu, FeishuPost, func(raw json.RawMessage) (any, error) {
 					n, mid := capture.record(raw, change != "route refusal")
@@ -359,9 +362,7 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 				}
 				s.feishuTodoReminder("server", "m1", todo.Title, todo.Notes, todo)
 				posts, _ := capture.snapshot()
-				s.companions.mu.Lock()
-				notices := len(s.companions.list)
-				s.companions.mu.Unlock()
+				notices, _ := s.boardProbe(t).NoticesState()
 				switch change {
 				case "owner", "generation", "route refusal":
 					if len(posts) != 1 {
@@ -415,6 +416,7 @@ func TestFeishuTodoReminderRetryAuthority(t *testing.T) {
 
 // The fake never promises an old message ID for duplicate UUIDs. Acceptance and a usable receipt are separate.
 func TestFeishuTodoReminderUnknownDuplicateReceipt(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, paused := range []bool{false, true} {
 		t.Run(fmt.Sprint(paused), func(t *testing.T) {
 			f, s, _ := todoReminderHub(t)

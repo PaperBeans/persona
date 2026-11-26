@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "phone_agent_display_title",
+      "value": "表示"
+    },
+    {
+      "name": "phone_agent_display_avatar",
+      "value": "アバター"
+    },
+    {
+      "name": "phone_agent_display_compact",
+      "value": "2 行"
+    },
+    {
+      "name": "phone_agent_display_cards",
+      "value": "状態カード"
+    },
+    {
+      "name": "phone_agent_display_list",
+      "value": "コンパクトリスト"
+    },
+    {
+      "name": "phone_agent_recommended",
+      "value": "推奨"
+    },
+    {
+      "name": "phone_agent_recommended_accessible",
+      "value": "{value}、推奨"
+    },
+    {
+      "name": "phone_agent_deny_choice",
+      "value": "拒否"
+    }
+  ]
+}

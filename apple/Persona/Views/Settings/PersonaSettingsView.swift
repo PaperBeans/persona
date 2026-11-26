@@ -5,7 +5,9 @@ import SwiftUI
 /// colors only under Theme Color › Match Avatar (`ThemeColorPicker`). The tree is rebuilt, as for a style; Appearance stays open because
 /// the settings path is AppModel's. A package is downloaded first and kept on the phone.
 /// With a hub that makes avatars from images (`look_uploads`, #2405), New from Photo ends the grid (`AvatarCropView`), and an
-/// avatar made that way can be deleted with the button in its card's corner (`UploadedAvatarDelete`).
+/// avatar made that way can be deleted with the button in its card's corner (`UploadedAvatarDelete`); with one that also
+/// edits them (`look_uploads_states`, #15449), Edit in the other corner opens the same sheet filled from its package
+/// (`UploadedAvatarEdit`).
 struct PersonaPicker: View {
     @Environment(AppModel.self) private var model
     @State private var uploads = AvatarUploadsModel()
@@ -80,13 +82,20 @@ struct PersonaPicker: View {
         }
         .disabled(uploads.loading)
         .accessibilityLabel(String(localized: "New from Photo"))
-        .accessibilityHint(String(localized: "Makes an avatar from an image of your own"))
+        .accessibilityHint(String(localized: "Makes an avatar from an image of your own, or drop an image here"))
         .accessibilityIdentifier("persona-new")
+        .modifier(AvatarPictureDrop(enabled: !uploads.loading, radius: Theme.Radius.card, inset: -Theme.Space.xs,
+                                    accessibilityHint: nil, targetID: "new",
+                                    dropped: { data in
+                                        if let sheet = await uploads.dropOnNew(data) { cropping = sheet }
+                                    },
+                                    failed: uploads.failedToRead))
     }
 
     @ViewBuilder private var newCardMenu: some View {
-        Button { choosingPhoto = true } label: { Label(String(localized: "Choose from Photos"), systemImage: Theme.Icon.photos) }
-        Button { choosingFile = true } label: { Label(String(localized: "Choose Image File"), systemImage: Theme.Icon.file) }
+        AvatarPictureSourceButtons(slot: .mainNew) { source in
+            if source == .files { choosingFile = true } else { choosingPhoto = true }
+        }
     }
 
     private var newCardLabel: some View {
@@ -115,7 +124,10 @@ struct PersonaPicker: View {
 
     #if DEBUG
     /// Opened once a launch: `-showAvatarCrop <image path>` (with `-showAvatarCropName <name>`) the crop sheet,
-    /// `-showAvatarDelete <id>` the question before deleting that uploaded avatar (once it is listed).
+    /// `-showAvatarEdit <id>` the sheet editing that uploaded avatar (once it is listed), `-showAvatarDelete <id>` the
+    /// question before deleting it. In either sheet `-showAvatarStatePicture <image path>` gives Thinking and Working
+    /// that picture (Working with its mark off), `-showAvatarCropColor <#RRGGBB>` chooses that theme color, and
+    /// `-showAvatarCropPage color|states` opens that page.
     private static var debugOpened = false
 
     private func debugOpen() async {
@@ -126,7 +138,19 @@ struct PersonaPicker: View {
             try? await Task.sleep(for: .seconds(1))
             guard let sheet = await uploads.picked(data) else { return }
             sheet.name = d.string(forKey: "showAvatarCropName") ?? ""
+            await debugFill(sheet)
             cropping = sheet
+        } else if let id = d.string(forKey: "showAvatarEdit") {
+            Self.debugOpened = true
+            for _ in 0..<20 {
+                if let p = store.offered.first(where: { $0.id == id }), let sheet = uploads.edit(p) {
+                    try? await Task.sleep(for: .seconds(1))
+                    await debugFill(sheet)
+                    cropping = sheet
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         } else if let id = d.string(forKey: "showAvatarDelete") {
             Self.debugOpened = true
             for _ in 0..<20 {
@@ -137,6 +161,20 @@ struct PersonaPicker: View {
                 }
                 try? await Task.sleep(for: .milliseconds(500))
             }
+        }
+    }
+
+    /// The sheet's state pictures and theme color from the launch arguments, for screenshots.
+    private func debugFill(_ sheet: AvatarUploadModel) async {
+        let d = UserDefaults.standard
+        if let path = d.string(forKey: "showAvatarStatePicture"), let data = FileManager.default.contents(atPath: path),
+           let picture = await sheet.load(data) {
+            sheet.give(.thinking, picture)
+            sheet.give(.working, picture)
+            sheet.states[.working]?.mark = false
+        }
+        if let hex = d.string(forKey: "showAvatarCropColor").flatMap(PersonaPalette.hex) {
+            sheet.color = .chosen(hex)
         }
     }
     #endif
@@ -222,6 +260,54 @@ struct PersonaPicker: View {
         .modifier(UploadedAvatarDelete(persona: p, deletable: uploads.canDelete(p), deleting: uploads.deleting.contains(p.id)) {
             confirmingDelete = p
         })
+        .modifier(UploadedAvatarEdit(persona: p, editable: uploads.canEdit(p) && !uploads.deleting.contains(p.id)) {
+            cropping = uploads.edit(p)
+        })
+        .modifier(AvatarPictureDrop(accepts: uploads.canEdit(p),
+                                    enabled: !uploads.loading && !uploads.deleting.contains(p.id),
+                                    radius: Theme.Radius.card, inset: -Theme.Space.xs, targetID: p.id,
+                                    dropped: { data in
+                                        if let sheet = await uploads.drop(data, on: p) { cropping = sheet }
+                                    },
+                                    failed: uploads.failedToRead))
+    }
+}
+
+/// An avatar made from an upload, on a hub that edits them (#15449): an Edit button in its card's top leading corner,
+/// always shown, and the same as a VoiceOver action on the card, as Delete has the other corner (not a context menu, for
+/// the reason `UploadedAvatarDelete` gives). It opens the avatar sheet filled from the package.
+private struct UploadedAvatarEdit: ViewModifier {
+    var persona: Persona
+    var editable: Bool
+    var edit: () -> Void
+
+    func body(content: Content) -> some View {
+        if editable {
+            content
+                .accessibilityAction(named: Text("Edit Avatar"), edit)
+                .overlay(alignment: .topLeading) { button }
+        } else {
+            content
+        }
+    }
+
+    private var button: some View {
+        Button(action: edit) {
+            ThemedIcon(Theme.Icon.edit)
+                .font(Theme.Font.label)
+                .foregroundStyle(Theme.accent)
+                .scaledFrame(width: Theme.Size.iconS, height: Theme.Size.iconS)
+                // The style's round button over a picture, as Delete's.
+                .chromeSurface(in: Circle())
+                .padding(Theme.Space.xs)
+                // The whole corner answers, a finger's size even at the smaller text sizes.
+                .tapTargetFrame(alignment: .topLeading)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(String(localized: "Edit \(persona.name)"))
+        .accessibilityLabel(String(localized: "Edit \(persona.name)"))
+        .accessibilityIdentifier("persona-edit-\(persona.id)")
     }
 }
 

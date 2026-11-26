@@ -8,15 +8,15 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
-// every render of a SessionRow reads its preview once: counted per session
-const previews = vi.hoisted(() => new Map<string, number>());
-vi.mock("../lib/format", async (load) => {
-  const real = await load<typeof import("../lib/format")>();
+// every render of a SessionRow reads its left draft once: counted per session
+const draftReads = vi.hoisted(() => new Map<string, number>());
+vi.mock("../lib/drafts", async (load) => {
+  const real = await load<typeof import("../lib/drafts")>();
   return {
     ...real,
-    sessionPreview: (s: Parameters<typeof real.sessionPreview>[0]) => {
-      previews.set(s.session_id, (previews.get(s.session_id) ?? 0) + 1);
-      return real.sessionPreview(s);
+    useLeftDraft: (key: string | null) => {
+      if (key) draftReads.set(key, (draftReads.get(key) ?? 0) + 1);
+      return real.useLeftDraft(key);
     },
   };
 });
@@ -46,7 +46,7 @@ const menu = () => document.querySelector('[role="menu"]');
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("persona.agentGrouping", "machine");
-  previews.clear();
+  draftReads.clear();
   vi.stubGlobal("fetch", vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(answers[new URL(url, "http://x").pathname] ?? {}), { headers: { "Content-Type": "application/json" } }))));
   history.replaceState(null, "", "/");
   host = document.createElement("div");
@@ -71,18 +71,18 @@ async function renderTree() {
 describe("a herdr tab with several panes", () => {
   it("keeps its lead row across pushes for another agent", async () => {
     await renderTree();
-    expect(previews.get("a1")).toBeGreaterThan(0);
-    previews.clear();
+    expect(draftReads.get("mac/a1")).toBeGreaterThan(0);
+    draftReads.clear();
 
     for (let i = 1; i <= 10; i++) {
       act(() => upsertSession({ ...getState().sessions.mac.find((s) => s.session_id === "b1")!, title: `别的标签页 ${i}` }));
       await flush();
     }
     expect(host.textContent).toContain("别的标签页 10");
-    expect(previews.get("b1")).toBeGreaterThanOrEqual(10);
-    // the lead's preview is read once by its row in the tab (a1 is also the first pane row under it): none of them again
-    expect(previews.get("a1") ?? 0).toBe(0);
-    expect(previews.get("a2") ?? 0).toBe(0);
+    expect(draftReads.get("mac/b1")).toBeGreaterThanOrEqual(10);
+    // the lead's left draft is read once by its row in the tab (a1 is also the first pane row under it): none of them again
+    expect(draftReads.get("mac/a1") ?? 0).toBe(0);
+    expect(draftReads.get("mac/a2") ?? 0).toBe(0);
   });
 
   it("opens the tab's menu from its ⋯ and on a right click, after pushes too", async () => {

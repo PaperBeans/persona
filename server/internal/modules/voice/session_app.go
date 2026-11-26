@@ -62,8 +62,9 @@ func (c *conversation) readApp() {
 			c.dropAudio, c.lastAudio, c.cutAt = true, time.Now(), time.Time{}
 			c.pace.playEnd = c.lastAudio // the app drops what it had not played
 			c.closeAsst()
-			c.mu.Unlock()
 			c.sendApp(map[string]any{"type": "clear"})
+			c.closeReply(true)
+			c.mu.Unlock()
 		case "text":
 			text := strings.TrimSpace(msg.Text)
 			if text == "" {
@@ -148,6 +149,7 @@ func (c *conversation) cutIn(now time.Time, voiced bool, n int) {
 	c.pace.playEnd = now // the app drops what it had not played
 	c.closeAsst()
 	c.sendApp(map[string]any{"type": "clear"})
+	c.closeReply(true)
 }
 
 // replyAfterCut: after the energy rule cut the model off (cutAt), audio coming now is its next reply, not the rest of the

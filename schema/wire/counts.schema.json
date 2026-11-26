@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "counts.schema.json",
+  "title": "Counts view",
+  "description": "The counts people see, as one manager works them out (docs/protocol/counts.md, #15512; step 6 of docs/plans/plan-derived-counts.md): one view per manager, relayed by the hub as it is, added up by each client over the managers in a surface's scope. One named field per count id and no surfaces map: each client names the ids it draws. Samples in spec/fixtures/counts/view_samples.json.",
+  "x-out": {
+    "ts": "web/src/lib/counts-wire.ts",
+    "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/CountsWire.swift",
+    "go": "server/internal/assistantwire/counts_gen.go",
+    "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/CountsWire.kt"
+  },
+  "x-guard": ["arkts", "rust"],
+  "x-guard-keys": ["agents_needs_you", "todos_needs_you"],
+  "$defs": {
+    "CountsView": {
+      "description": "One manager's counts. A view with a new epoch replaces the one kept; within an epoch a lower rev loses to a higher one.",
+      "type": "object",
+      "required": ["epoch", "rev", "as_of", "build", "counts"],
+      "properties": {
+        "epoch": {
+          "$ref": "#/$defs/CountsEpoch"
+        },
+        "rev": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Goes up with every view the manager makes in this epoch."
+        },
+        "as_of": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-type": "int64",
+          "description": "When the manager made the view, in Unix milliseconds: only to say how old a kept view is."
+        },
+        "build": {
+          "type": "string",
+          "description": "The manager build that made the view (its version), so a number can be read against the definition that build applies (docs/protocol/counts.md, \"Changing a count\")."
+        },
+        "counts": {
+          "$ref": "#/$defs/CountsViewCounts"
+        },
+        "totals": {
+          "$ref": "#/$defs/CountsViewTotals"
+        }
+      }
+    },
+    "CountsEpoch": {
+      "type": "string",
+      "x-id": "CountsEpoch",
+      "minLength": 1,
+      "description": "One run of the manager: a restart starts a new epoch, and its rev starts again. Opaque: only compared."
+    },
+    "CountsViewCounts": {
+      "description": "Each count the manager works out, by its id. A count the manager does not work out (a build from before the id) is absent, never 0.",
+      "type": "object",
+      "properties": {
+        "agents_needs_you": {
+          "$ref": "#/$defs/CountsViewCount",
+          "description": "The Agents that need the owner (docs/protocol/counts.md, \"agents_needs_you\")."
+        },
+        "todos_needs_you": {
+          "$ref": "#/$defs/CountsViewCount",
+          "description": "The to-dos that need the owner, N of the To-dos list (docs/protocol/counts.md, \"todos_needs_you\")."
+        }
+      }
+    },
+    "CountsViewTotals": {
+      "description": "Each count's n again, by its id, for what reads a number without its rows: the hub copies it as it is into pushes and widget wakes, and never decodes counts.",
+      "type": "object",
+      "properties": {
+        "agents_needs_you": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-pointer": true,
+          "description": "counts.agents_needs_you.n."
+        },
+        "todos_needs_you": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-pointer": true,
+          "description": "counts.todos_needs_you.n."
+        }
+      }
+    },
+    "CountsViewCount": {
+      "description": "One count: its number, the rows it counts and the rows the list keeps but the count leaves out.",
+      "type": "object",
+      "required": ["n"],
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The number drawn: the counted rows, as many as keys lists plus more."
+        },
+        "keys": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/CountsRow"
+          },
+          "description": "The counted rows, oldest first, at most 200; absent when none."
+        },
+        "held": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/CountsHeldRow"
+          },
+          "description": "Rows the list keeps but the count leaves out, oldest first, at most 200; absent when none."
+        },
+        "more": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The counted rows keys leaves out: n less the rows keys lists. Absent when keys lists them all."
+        }
+      }
+    },
+    "CountsRow": {
+      "description": "One counted row.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CountsRowKey"
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountsCardID"
+          },
+          "description": "The row's pending cards, oldest first: a card on no session is its own one card. Absent for a session that waits in its terminal with no card."
+        }
+      }
+    },
+    "CountsHeldRow": {
+      "description": "One row the count leaves out, and why.",
+      "type": "object",
+      "required": ["id", "why"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CountsRowKey"
+        },
+        "why": {
+          "$ref": "#/$defs/CountsHeldReason"
+        }
+      }
+    },
+    "CountsRowKey": {
+      "type": "string",
+      "x-id": "CountsRowKey",
+      "pattern": "^(agent:[^/]+/.+|card:.+)$",
+      "description": "A row as the shared fixtures key it: agent:<machine>/<session> for a session (its children's and sides' cards under it), card:<interaction id> for a card on no session."
+    },
+    "CountsCardID": {
+      "type": "string",
+      "x-id": "CountsCardID",
+      "minLength": 1,
+      "description": "A pending card's interaction id, as POST /api/v1/interactions/{id}/resolve takes it."
+    },
+    "CountsHeldReason": {
+      "type": "string",
+      "enum": ["muted", "held"],
+      "x-enum": "closed",
+      "description": "Why a row is listed but not counted: muted, the owner muted the agent or its space; held, its only cards are questions the assistant is still deciding whether it may answer (D11 of docs/plans/plan-derived-counts.md). A word a client does not know reads as its Unknown, and the row stays uncounted."
+    }
+  }
+}

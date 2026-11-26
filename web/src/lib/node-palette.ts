@@ -2,16 +2,20 @@
 // mode its menu items are listed as commands, under "Pane · <the pane's title>" (or "Tab · …") and "Space · <its space>",
 // in the words the menus use and with the names as written (Moshi's "Workspace · …" was English in every language and
 // drawn in capitals). They are the same items the node's context menu has (lib/node-actions.ts): a rename asks for the
-// name in a small dialog, a close asks once more, a failure is a toast. Registered when this module is first imported.
+// name in a small dialog, a close asks once more, a failure is a toast. Registered when this module is first imported: by views/Palette.tsx the first time it
+// opens (or by the Terminal page, which tells it the panes), never by the first screen or the idle tier.
 import { t } from "../i18n";
 import { errorText } from "./api";
 import { defaultNodeDeps, nodeActions, sessionNode, termPaneNode, termSpaceNode, termTabNode, type MenuNode } from "./node-actions";
 import { registerContextCommands, type PaletteCommand, type PaletteContext } from "./palette";
+import { askConfirm, askText } from "./node-ask";
 import { getState, refresh } from "./store";
 import type { TermSpace } from "./terminals";
 import { sessionTitle } from "./format";
 import { toast } from "../ui/atoms";
 import type { MenuItem } from "../ui/menu-model";
+
+export { answerAsk, getAsk, subscribeAsk, type NodeAsk } from "./node-ask";
 
 // ── what the palette cannot read by itself ───────────────
 
@@ -40,27 +44,6 @@ function childrenOf(key: string, load: () => Promise<MenuItem[]>): MenuItem[] {
   }
   return [];
 }
-
-// ── asking for a name, asking once more ──────────────────
-
-export type NodeAsk =
-  | { kind: "text"; title: string; label: string; value: string; resolve: (v: string | null) => void }
-  | { kind: "confirm"; title: string; body: string; label: string; resolve: (v: boolean) => void };
-
-let asking: NodeAsk | null = null;
-const askListeners = new Set<() => void>();
-const setAsk = (a: NodeAsk | null) => {
-  asking = a;
-  askListeners.forEach((f) => f());
-};
-export const getAsk = () => asking;
-export const subscribeAsk = (f: () => void) => {
-  askListeners.add(f);
-  return () => void askListeners.delete(f);
-};
-export const answerAsk = () => setAsk(null);
-const askText = (title: string, label: string, value: string) => new Promise<string | null>((resolve) => setAsk({ kind: "text", title, label, value, resolve }));
-const askConfirm = (title: string, body: string, label: string) => new Promise<boolean>((resolve) => setAsk({ kind: "confirm", title, body, label, resolve }));
 
 // ── the nodes of where the user is ───────────────────────
 

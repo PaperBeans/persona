@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -12,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/wireids"
 )
 
 // "Archive and close" (docs/protocol/protocol.md "Agent session archives"): the session is archived, then its agent is
@@ -45,6 +47,8 @@ type agentArchiveCloseResult struct {
 	Outcome   string
 	ReasonKey string
 	Detail    string
+	// Session is the id the archive is kept under (archiveSessionOf): a pane's row's conversation's own id.
+	Session string
 }
 
 // agentCloseBusy: closing the agent now would cut off work, or something it runs the user may be using.
@@ -69,6 +73,7 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 		return agentArchiveCloseResult{}, err
 	}
 	res := svc.retireArchived(ctx, row)
+	res.Session = archiveSessionOf(row)
 	if res.Closed {
 		// What the agent wrote while it was closed must not bring the session back (agentArchive.activeAfter).
 		if _, err := svc.noteAgentArchiveClosed(ctx, row, time.Now().UTC(), true); err != nil {
@@ -81,30 +86,89 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 	return res, nil
 }
 
+// retireActivityGuard carries the session activity version and pane observed before a guarded idle close so the node
+// rejects concurrent activity version or pane changes before closing the terminal.
+type retireActivityGuard struct {
+	Enabled   bool
+	Rev       int64
+	HasRev    bool
+	UpdatedAt time.Time
+	Pane      string
+}
+
+type sessionRetireParams struct {
+	Session           wireids.SessionID `json:"session_id"`
+	CloseTerminal     bool              `json:"close_terminal,omitempty"`
+	ExpectedRev       int64             `json:"expected_rev,omitempty"`
+	HasExpectedRev    bool              `json:"has_expected_rev,omitempty"`
+	ExpectedUpdatedAt time.Time         `json:"expected_updated_at,omitzero"`
+	ExpectedPane      string            `json:"expected_pane_id,omitempty"`
+}
+
+func isUnknownRetireMethod(err error, method string) bool {
+	if err == nil {
+		return false
+	}
+	var re *rpc.Error
+	if errors.As(err, &re) {
+		msg := strings.ToLower(re.Message)
+		if re.Code == "unknown_method" || strings.Contains(msg, "unknown method") || strings.Contains(msg, "method_not_found") {
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unknown method") && (method == "" || strings.Contains(err.Error(), method))
+}
+
 // retireArchived closes the archived session's agent through its node. A runtime with a declared close capability
-// uses session.close; a terminal agent uses session.retire, and the result says how that went.
-func (svc *Service) retireArchived(ctx context.Context, row proto.Session) agentArchiveCloseResult {
+// uses session.close; a terminal agent uses session.retire; guarded idle closes use session.retire_guarded and fail
+// closed on older nodes or unconfirmed responses without degrading to unguarded close.
+func (svc *Service) retireArchived(ctx context.Context, row proto.Session, guards ...retireActivityGuard) agentArchiveCloseResult {
 	if row.Status == proto.StatusOffline {
 		return agentArchiveCloseResult{Outcome: archiveCloseNotRunning}
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentArchiveCloseTimeout)
 	defer cancel()
 	var out struct {
-		Closed bool `json:"closed"`
+		Closed        bool `json:"closed"`
+		GuardVerified bool `json:"guard_verified"`
+	}
+	guarded := len(guards) > 0 && guards[0].Enabled
+	runtimeClose := row.Capabilities != nil && row.Capabilities.Close != nil && *row.Capabilities.Close
+	if guarded && runtimeClose {
+		return agentArchiveCloseResult{
+			Outcome:   archiveCloseRefused,
+			ReasonKey: "hub-agent_archives.close_engine",
+			Detail:    "guarded idle close is not supported for runtime close",
+		}
 	}
 	method := deviceSessionRetire
-	runtimeClose := row.Capabilities != nil && row.Capabilities.Close != nil && *row.Capabilities.Close
-	if runtimeClose {
+	if guarded {
+		method = deviceSessionRetireGuarded
+	} else if runtimeClose {
 		method = "session.close"
 	}
 	// close_terminal: the user asked to close it (a node before #4754 closes it anyway).
-	params := map[string]any{"session_id": row.SessionID}
-	if !runtimeClose {
-		params["close_terminal"] = true
+	params := sessionRetireParams{
+		Session:       wireids.SessionID(row.SessionID),
+		CloseTerminal: !runtimeClose,
+	}
+	if guarded {
+		g := guards[0]
+		params.ExpectedRev = g.Rev
+		params.HasExpectedRev = g.HasRev
+		params.ExpectedUpdatedAt = g.UpdatedAt
+		params.ExpectedPane = g.Pane
 	}
 	err := svc.call(ctx, row.MachineID, method, params, &out)
 	var re *rpc.Error
 	switch {
+	case err == nil && guarded && !out.GuardVerified:
+		return agentArchiveCloseResult{
+			Outcome:   archiveCloseRefused,
+			ReasonKey: "hub-agent_archives.close_node_old",
+			Detail:    "node did not confirm guarded retire verification",
+		}
 	case err == nil && (runtimeClose || out.Closed):
 		svc.logf("agent archive %s/%s: closed its agent", row.MachineID, row.SessionID)
 		return agentArchiveCloseResult{Closed: true, Outcome: archiveCloseClosed}
@@ -115,9 +179,13 @@ func (svc *Service) retireArchived(ctx context.Context, row proto.Session) agent
 		return agentArchiveCloseResult{Outcome: archiveCloseRefused, ReasonKey: retireRefusalKey(why), Detail: why}
 	case errors.Is(err, ErrNoDevice) || apierr.NodeCode(err) == "node_unreachable":
 		return agentArchiveCloseResult{Outcome: archiveCloseOffline, ReasonKey: "hub-agent_archives.close_offline"}
-	case errors.As(err, &re) && strings.Contains(re.Message, "session.retire"):
-		// a node from before session.retire ("unknown method"): it cannot close it this way
-		return agentArchiveCloseResult{Outcome: archiveCloseRefused, ReasonKey: "hub-agent_archives.close_node_old", Detail: re.Message}
+	case isUnknownRetireMethod(err, method):
+		detail := err.Error()
+		if errors.As(err, &re) && strings.TrimSpace(re.Message) != "" {
+			detail = re.Message
+		}
+		// a node from before session.retire or session.retire_guarded ("unknown method"): refuse fail-closed
+		return agentArchiveCloseResult{Outcome: archiveCloseRefused, ReasonKey: "hub-agent_archives.close_node_old", Detail: detail}
 	default:
 		svc.logf("agent archive %s/%s: close: %v", row.MachineID, row.SessionID, err)
 		return agentArchiveCloseResult{Outcome: archiveCloseFailed, ReasonKey: "hub-agent_archives.close_failed", Detail: err.Error()}
@@ -152,7 +220,8 @@ func (svc *Service) noteAgentArchiveClosed(ctx context.Context, s proto.Session,
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
 		return 0, err
 	}
-	key := runtimeListID(s.MachineID, s.SessionID)
+	sid := archiveSessionOf(s) // where noteAgentArchiveAt kept it
+	key := runtimeListID(s.MachineID, sid)
 	rec, ok := b.records[key]
 	if !ok || !rec.Archived || s.ArchiveChangedAt == nil || !rec.ChangedAt.Equal(*s.ArchiveChangedAt) {
 		return 0, nil
@@ -164,7 +233,7 @@ func (svc *Service) noteAgentArchiveClosed(ctx context.Context, s proto.Session,
 		return 0, err
 	}
 	if retryNative {
-		svc.nativeArchiveWanted(s, true) // its terminal is gone: the tool's archive goes through now
+		svc.nativeArchiveWanted(proto.Session{MachineID: s.MachineID, SessionID: sid}, true) // its terminal is gone: the tool's archive goes through now
 	}
 	return b.writes.Load(), nil
 }
@@ -182,11 +251,12 @@ func (svc *Service) retryNativeArchiveClosed(ctx context.Context, s proto.Sessio
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
 		return
 	}
-	rec, ok := b.records[runtimeListID(s.MachineID, s.SessionID)]
+	sid := archiveSessionOf(s)
+	rec, ok := b.records[runtimeListID(s.MachineID, sid)]
 	if !ok || !rec.Archived || s.ArchiveChangedAt == nil || !rec.ChangedAt.Equal(*s.ArchiveChangedAt) {
 		return
 	}
-	svc.nativeArchiveWanted(s, true)
+	svc.nativeArchiveWanted(proto.Session{MachineID: s.MachineID, SessionID: sid}, true)
 }
 
 // archiveAndCloseHTTP is POST /api/v1/sessions/{mid}/{sid}/archive?close=1: 200 once archived, with what the close
@@ -208,5 +278,5 @@ func (svc *Service) archiveAndCloseHTTP(w http.ResponseWriter, r *http.Request, 
 		mid = m.ID
 	}
 	apierr.WriteJSON(w, map[string]any{"ok": true, "archived": true, "close": closeBody,
-		"native": svc.nativeArchiveAwaited(r.Context(), mid, r.PathValue("sid"))})
+		"native": svc.nativeArchiveAwaited(r.Context(), mid, cmp.Or(res.Session, r.PathValue("sid")))})
 }

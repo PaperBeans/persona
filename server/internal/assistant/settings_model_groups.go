@@ -223,6 +223,7 @@ func (s *Service) setModelGroupProvider(ctx context.Context, id string, v json.R
 	revision := prep.purpose.Revision
 	return &ownChange{
 		applyChecksProposal: true,
+		revision:            &revision,
 		cardText:            func(lang i18n.Lang) string { return prep.card(lang) },
 		apply: func(ctx context.Context) (string, error) {
 			return s.applyModelGroupProvider(ctx, id, providerID, revision, l, approved)

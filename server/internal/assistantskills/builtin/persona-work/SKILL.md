@@ -5,7 +5,7 @@ description: Use for to-dos, delegation and review, Agent status, machine availa
 
 # Managing work in Persona
 
-Choose the action from what the person wants to happen now. Read its reference before calling the corresponding Persona tool. Find `work_tools_search` by that exact name in the runtime’s tool search if necessary. Give it the exact Persona tool names from the reference, separated by spaces. For an unnamed action, search a name fragment such as `agent_`, then select the matching name. After the list refreshes, select those names in the runtime’s tool search and call the original tools. If discovery is unavailable, use the original tools already offered by the runtime.
+Choose the action from what the person wants to happen now. Read the matching reference below for the exact Persona tool name. Call the tool if available. If the runtime defers it, find it by its exact name in the runtime's tool search, then call it.
 
 - **Record.** “Add preparing the checklist to my to-dos” asks for one saved item. Record it and stop. See [To-dos and reminders](references/record.md).
 - **Delegate.** “Have someone prepare that checklist and bring it back for review” asks for execution. Find the existing item and use `task_plan` with its link. Starting an Agent directly creates independent work. Report the linked plan’s actual state or the reason Persona refused it. See [Delegating work](references/delegate.md).

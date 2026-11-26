@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/kbwire"
 	"net/http"
 	"slices"
 	"strings"
@@ -17,25 +18,26 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // Asking Persona during an attended meeting (POST /api/v1/recordings/{id}/ask, docs/assistant/meeting-minutes.md
-// "Attending a meeting"): every question is kept in the recording's live log (kb.LiveAsk), so a retry with the same id
+// "Attending a meeting"): every question is kept in the recording's live log (recordingwire.LiveAsk), so a retry with the same id
 // is answered from it and never makes a second answer. It is answered in the background by one model call (purpose
-// meeting.answer, no tools) whose input is the meeting material and nothing else (kb.MeetingMaterial, "What the hub
+// meeting.answer, no tools) whose input is the meeting material and nothing else (recordingwire.MeetingMaterial, "What the hub
 // gives the answering model"); the request waits askHold for it. A question pending in a live log that this process
 // is not answering was being answered by one that is gone: it reads as failed, interrupted (settleAsksLocked), and
 // asking it again tries it again.
 
-const purposeMeetingAnswer = kb.PurposeMeetingAnswer
+const purposeMeetingAnswer = recordingwire.PurposeMeetingAnswer
 
 // purposeMeetingMinutes is the model purpose a meeting's minutes are written on (#7980): Information processing's
 // until it is set apart. meeting.answer stays a use of Information processing: it answers when the room cannot.
-const purposeMeetingMinutes = kb.PurposeMeetingMinutes
+const purposeMeetingMinutes = recordingwire.PurposeMeetingMinutes
 
 // purposeMeetingTitle names a recording while it records (#8873).
-const purposeMeetingTitle = kb.PurposeMeetingTitle
+const purposeMeetingTitle = recordingwire.PurposeMeetingTitle
 
 // A question's states, how it was asked, and why it failed (the contract's; the errors are an open set).
 const (
@@ -94,30 +96,30 @@ func (b *meetingAsks) finished(id, askID string, done chan struct{}) {
 	}
 }
 
-// askView is a question as the routes answer it: kb.LiveAsk without the hub's own fields.
+// askView is a question as the routes answer it: recordingwire.LiveAsk without the hub's own fields.
 type askView struct {
-	ID             string         `json:"id"`
-	Question       string         `json:"question"`
-	QuestionSource string         `json:"question_source"`
-	At             *float64       `json:"at,omitempty"`
-	State          string         `json:"state"`
-	Answer         string         `json:"answer"`
-	Lang           string         `json:"lang"`
-	Speak          bool           `json:"speak"`
-	Sources        []kb.AskSource `json:"sources"`
-	Error          string         `json:"error,omitempty"`
-	AskedAt        time.Time      `json:"asked_at"`
-	AnsweredAt     *time.Time     `json:"answered_at,omitempty"`
+	ID             string                    `json:"id"`
+	Question       string                    `json:"question"`
+	QuestionSource string                    `json:"question_source"`
+	At             *float64                  `json:"at,omitempty"`
+	State          string                    `json:"state"`
+	Answer         string                    `json:"answer"`
+	Lang           string                    `json:"lang"`
+	Speak          bool                      `json:"speak"`
+	Sources        []recordingwire.AskSource `json:"sources"`
+	Error          string                    `json:"error,omitempty"`
+	AskedAt        time.Time                 `json:"asked_at"`
+	AnsweredAt     *time.Time                `json:"answered_at,omitempty"`
 	// Room meetings (meeting_room_ask.go): how it is answered once its first attempt went out, and a heard
 	// question's lines.
-	Via   string           `json:"via,omitempty"`
-	Heard []kb.LiveSegment `json:"heard,omitempty"`
+	Via   string                      `json:"via,omitempty"`
+	Heard []recordingwire.LiveSegment `json:"heard,omitempty"`
 }
 
 // viewAsk is a as the routes show it: an answer and sources only once answered, an error only once failed.
-func viewAsk(a kb.LiveAsk) askView {
+func viewAsk(a recordingwire.LiveAsk) askView {
 	v := askView{ID: a.ID, Question: a.Question, QuestionSource: a.QuestionSource, At: a.At, State: a.State, Lang: a.Lang,
-		Speak: a.Speak, Sources: []kb.AskSource{}, AskedAt: a.AskedAt.UTC(), Via: a.Via, Heard: a.Heard}
+		Speak: a.Speak, Sources: []recordingwire.AskSource{}, AskedAt: a.AskedAt.UTC(), Via: a.Via, Heard: a.Heard}
 	switch a.State {
 	case askAnswered:
 		v.Answer, v.Sources, v.AnsweredAt = a.Answer, append(v.Sources, a.Sources...), a.AnsweredAt
@@ -156,7 +158,7 @@ func parseAsk(raw []byte) (askRequest, error) {
 		return req, i18n.Err("assistant-meeting.bad_ask_id")
 	}
 	var ok bool
-	if req.ID, ok = kb.RecordingID(id); !ok {
+	if req.ID, ok = recordingwire.RecordingID(id); !ok {
 		return req, i18n.Err("assistant-meeting.bad_ask_id")
 	}
 	bad := func(field string) error {
@@ -266,11 +268,11 @@ func (s *Recordings) askRoute() {
 }
 
 // asksRead is recording id's live log and its stored upload, its questions settled (settleAsksLocked).
-func (s *Recordings) asksRead(e *kb.Engine, id string) (kb.Live, kb.Recording, error) {
+func (s *Recordings) asksRead(e *kb.Engine, id string) (recordingwire.Live, recordingwire.Recording, error) {
 	b := &s.asks
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	l, rec, err := e.LiveRead(id)
+	l, rec, err := writersOf(e).LiveRead(id)
 	if err == nil {
 		s.settleAsksLocked(e, rec, &l)
 	}
@@ -278,14 +280,14 @@ func (s *Recordings) asksRead(e *kb.Engine, id string) (kb.Live, kb.Recording, e
 }
 
 // askNow is question askID of recording id as it is now.
-func (s *Recordings) askNow(e *kb.Engine, id, askID string) (kb.LiveAsk, bool) {
+func (s *Recordings) askNow(e *kb.Engine, id, askID string) (recordingwire.LiveAsk, bool) {
 	l, _, err := s.asksRead(e, id)
 	if err != nil {
-		return kb.LiveAsk{}, false
+		return recordingwire.LiveAsk{}, false
 	}
-	i := slices.IndexFunc(l.Asks, func(a kb.LiveAsk) bool { return a.ID == askID })
+	i := slices.IndexFunc(l.Asks, func(a recordingwire.LiveAsk) bool { return a.ID == askID })
 	if i < 0 {
-		return kb.LiveAsk{}, false
+		return recordingwire.LiveAsk{}, false
 	}
 	return l.Asks[i], true
 }
@@ -294,22 +296,22 @@ func (s *Recordings) askNow(e *kb.Engine, id, askID string) (kb.LiveAsk, bool) {
 // process is not answering them (it restarted meanwhile), in l and, when it can, in the live log. s.asks.mu is held.
 // In a room meeting such a question is taken up again instead (meeting_room_ask.go): its attempt may be in the room,
 // whose turn settles it, and one never sent goes again under the same id.
-func (s *Recordings) settleAsksLocked(e *kb.Engine, rec kb.Recording, l *kb.Live) {
+func (s *Recordings) settleAsksLocked(e *kb.Engine, rec recordingwire.Recording, l *recordingwire.Live) {
 	id := rec.ID
 	running := s.asks.running[id]
-	stale := func(a kb.LiveAsk) bool { return a.State == askPending && running[a.ID] == nil }
+	stale := func(a recordingwire.LiveAsk) bool { return a.State == askPending && running[a.ID] == nil }
 	if !slices.ContainsFunc(l.Asks, stale) {
 		return
 	}
 	if rec.RoomMeeting() && !e.Store.ReadOnly() {
 		for _, a := range l.Asks {
-			if stale(a) && a.Via != kb.AskViaMaterial {
+			if stale(a) && a.Via != recordingwire.AskViaMaterial {
 				s.askRunLocked(e, id, a) // the room's: taken up again
 			}
 		}
 		running = s.asks.running[id]
 	}
-	settle := func(asks []kb.LiveAsk) {
+	settle := func(asks []recordingwire.LiveAsk) {
 		for i, a := range asks {
 			if stale(a) {
 				asks[i] = failAsk(a, askInterrupted)
@@ -320,35 +322,35 @@ func (s *Recordings) settleAsksLocked(e *kb.Engine, rec kb.Recording, l *kb.Live
 	if e.Store.ReadOnly() {
 		return // shown as interrupted; written once it can be
 	}
-	if _, err := e.LiveUpdate(id, func(l *kb.Live, _ kb.Recording) error { settle(l.Asks); return nil }); err != nil {
+	if _, err := writersOf(e).LiveUpdate(id, func(l *recordingwire.Live, _ recordingwire.Recording) error { settle(l.Asks); return nil }); err != nil {
 		s.logf("recording %s: interrupted questions: %v", id, err)
 	}
 }
 
 // failAsk is a, failed for why.
-func failAsk(a kb.LiveAsk, why string) kb.LiveAsk {
-	a.State, a.Error, a.Answer, a.Sources, a.AnsweredAt = askFailed, why, "", []kb.AskSource{}, nil
+func failAsk(a recordingwire.LiveAsk, why string) recordingwire.LiveAsk {
+	a.State, a.Error, a.Answer, a.Sources, a.AnsweredAt = askFailed, why, "", []recordingwire.AskSource{}, nil
 	return a
 }
 
 // askStart answers req for recording id from the question stored with its id, else makes the question and starts
 // answering it, in the contract's order: errOpIDReused for an id stored with another question or at (only a failed
-// one goes on and is tried again), kb.ErrReadOnly, kb.ErrNotAttending, errAsksFull, errAskBusy. done is closed once
+// one goes on and is tried again), kbwire.ErrReadOnly, recordingwire.ErrNotAttending, errAsksFull, errAskBusy. done is closed once
 // the answer is stored (nil when nothing is answering it). lang is the request's language, for a recording without
 // its own.
-func (s *Recordings) askStart(ctx context.Context, e *kb.Engine, id string, req askRequest, lang string) (a kb.LiveAsk, done <-chan struct{}, err error) {
+func (s *Recordings) askStart(ctx context.Context, e *kb.Engine, id string, req askRequest, lang string) (a recordingwire.LiveAsk, done <-chan struct{}, err error) {
 	b := &s.asks
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	l, rec, err := e.LiveRead(id)
+	l, rec, err := writersOf(e).LiveRead(id)
 	if err != nil {
 		return a, nil, err
 	}
 	id = rec.ID
 	s.settleAsksLocked(e, rec, &l)
 	retry := false
-	var failed kb.LiveAsk
-	if i := slices.IndexFunc(l.Asks, func(x kb.LiveAsk) bool { return strings.EqualFold(x.ID, req.ID) }); i >= 0 {
+	var failed recordingwire.LiveAsk
+	if i := slices.IndexFunc(l.Asks, func(x recordingwire.LiveAsk) bool { return strings.EqualFold(x.ID, req.ID) }); i >= 0 {
 		stored := l.Asks[i]
 		if stored.QuestionSent != req.Question || !sameAt(stored.At, req.At) || stored.Spoken != req.Spoken {
 			return stored, nil, errOpIDReused
@@ -367,18 +369,18 @@ func (s *Recordings) askStart(ctx context.Context, e *kb.Engine, id string, req 
 	}
 	switch {
 	case !s.meetingWritable(ctx, e):
-		return a, nil, kb.ErrReadOnly // and no model call
+		return a, nil, kbwire.ErrReadOnly // and no model call
 	case !rec.Answering(): // off, or a room that only takes notes (#8851)
-		return a, nil, kb.ErrNotAttending
-	case rec.RoomMeeting() && rec.Conv.Room.State == kb.RoomEnded, rec.RoomMeeting() && rec.Conv.Room.State == kb.RoomDeleted:
+		return a, nil, recordingwire.ErrNotAttending
+	case rec.RoomMeeting() && rec.Conv.Room.State == recordingwire.RoomEnded, rec.RoomMeeting() && rec.Conv.Room.State == recordingwire.RoomDeleted:
 		return a, nil, errMeetingEnded // ask in the follow-up
 	case kept >= maxAsks:
 		return a, nil, errAsksFull
 	case len(b.running[id]) >= maxAsksAnswering:
 		return a, nil, errAskBusy
 	}
-	a = kb.LiveAsk{ID: req.ID, QuestionSent: req.Question, QuestionSource: askTyped, At: req.At, LiveNext: req.LiveNext,
-		State: askPending, Sources: []kb.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second), Spoken: req.Spoken}
+	a = recordingwire.LiveAsk{ID: req.ID, QuestionSent: req.Question, QuestionSource: askTyped, At: req.At, LiveNext: req.LiveNext,
+		State: askPending, Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second), Spoken: req.Spoken}
 	switch {
 	case req.Question == "":
 		a.QuestionSource = askHeard
@@ -392,30 +394,30 @@ func (s *Recordings) askStart(ctx context.Context, e *kb.Engine, id string, req 
 		// swallow it. A room ask while the room is unavailable fails at once: the phone asks a new question.
 		a.Via, a.Attempts = failed.Via, slices.Clone(failed.Attempts)
 		// Only attempts that went out count: one never sent is sent now under its own id.
-		a.Attempts = slices.DeleteFunc(a.Attempts, func(x kb.AskAttempt) bool { return x.SentAt.IsZero() })
+		a.Attempts = slices.DeleteFunc(a.Attempts, func(x recordingwire.AskAttempt) bool { return x.SentAt.IsZero() })
 	}
-	roomDown := retry && a.Via == kb.AskViaRoom && rec.Conv.Room.State != kb.RoomReady
-	if retry && a.Via == kb.AskViaRoom && !roomDown {
+	roomDown := retry && a.Via == recordingwire.AskViaRoom && rec.Conv.Room.State != recordingwire.RoomReady
+	if retry && a.Via == recordingwire.AskViaRoom && !roomDown {
 		k := len(a.Attempts) + 1
-		a.Attempts = append(a.Attempts, kb.AskAttempt{K: k, MsgID: askMsgID(a.ID, k)})
+		a.Attempts = append(a.Attempts, recordingwire.AskAttempt{K: k, MsgID: askMsgID(a.ID, k)})
 	}
 	if roomDown {
 		a = failAsk(a, askRoomUnavailble)
 	}
-	if _, err := e.LiveUpdate(id, func(l *kb.Live, r kb.Recording) error {
+	if _, err := writersOf(e).LiveUpdate(id, func(l *recordingwire.Live, r recordingwire.Recording) error {
 		if !r.Answering() {
-			return kb.ErrNotAttending // an upload turned it off, or to notes, meanwhile
+			return recordingwire.ErrNotAttending // an upload turned it off, or to notes, meanwhile
 		}
-		l.Asks = slices.DeleteFunc(l.Asks, func(x kb.LiveAsk) bool { return x.ID == a.ID }) // the failed one asked again
+		l.Asks = slices.DeleteFunc(l.Asks, func(x recordingwire.LiveAsk) bool { return x.ID == a.ID }) // the failed one asked again
 		if len(l.Asks) >= maxAsks {
 			return errAsksFull
 		}
 		// Fixed now, from the role and the recording then: what the phone says aloud and in which voice.
-		a.Speak, a.Lang = r.AttendanceRole() == kb.AttendanceParticipant, cmp.Or(strings.TrimSpace(r.Language), lang)
+		a.Speak, a.Lang = r.AttendanceRole() == recordingwire.AttendanceParticipant, cmp.Or(strings.TrimSpace(r.Language), lang)
 		l.Asks = append(l.Asks, a)
 		return nil
 	}); err != nil {
-		return kb.LiveAsk{}, nil, err
+		return recordingwire.LiveAsk{}, nil, err
 	}
 	if roomDown {
 		return a, nil, nil
@@ -425,7 +427,7 @@ func (s *Recordings) askStart(ctx context.Context, e *kb.Engine, id string, req 
 
 // askRunLocked starts answering question a of recording id in the background; the channel closed once its answer is
 // stored. s.asks.mu is held.
-func (s *Recordings) askRunLocked(e *kb.Engine, id string, a kb.LiveAsk) chan struct{} {
+func (s *Recordings) askRunLocked(e *kb.Engine, id string, a recordingwire.LiveAsk) chan struct{} {
 	b := &s.asks
 	ch := make(chan struct{})
 	if b.running == nil {
@@ -452,14 +454,14 @@ func sameAt(a, b *float64) bool {
 // answerAsk answers question a of recording id and stores the answer (or why it failed), then closes done. It runs
 // past the request, at most askTimeout; if the service stops first nothing is stored, and the question reads as
 // interrupted after the restart.
-func (s *Recordings) answerAsk(e *kb.Engine, id string, a kb.LiveAsk, done chan struct{}) {
+func (s *Recordings) answerAsk(e *kb.Engine, id string, a recordingwire.LiveAsk, done chan struct{}) {
 	defer func() {
 		s.asks.finished(id, a.ID, done)
 		close(done)
 	}()
-	var out kb.LiveAsk
+	var out recordingwire.LiveAsk
 	ctx := s.runCtx()
-	if _, rec, err := e.LiveRead(id); err == nil && rec.RoomMeeting() {
+	if _, rec, err := writersOf(e).LiveRead(id); err == nil && rec.RoomMeeting() {
 		out = s.answerInRoom(ctx, e, id, a) // the room answers it (meeting_room_ask.go)
 	} else {
 		tctx, cancel := context.WithTimeout(ctx, s.tm().askTimeout)
@@ -469,8 +471,8 @@ func (s *Recordings) answerAsk(e *kb.Engine, id string, a kb.LiveAsk, done chan 
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return
 	}
-	_, err := e.LiveUpdate(id, func(l *kb.Live, _ kb.Recording) error {
-		i := slices.IndexFunc(l.Asks, func(x kb.LiveAsk) bool { return x.ID == a.ID })
+	_, err := writersOf(e).LiveUpdate(id, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		i := slices.IndexFunc(l.Asks, func(x recordingwire.LiveAsk) bool { return x.ID == a.ID })
 		if i < 0 || l.Asks[i].State != askPending || !l.Asks[i].AskedAt.Equal(a.AskedAt) {
 			return errAskGone
 		}
@@ -506,15 +508,15 @@ type meetingReply struct {
 
 // answerMeetingAsk is question a of recording id answered from the meeting material, or failed. A heard question first
 // waits for the live sentences up to the tap, and is what was said in the heardSeconds before it.
-func (s *Recordings) answerMeetingAsk(ctx context.Context, e *kb.Engine, id string, a kb.LiveAsk) kb.LiveAsk {
-	failed := func(why string) kb.LiveAsk {
+func (s *Recordings) answerMeetingAsk(ctx context.Context, e *kb.Engine, id string, a recordingwire.LiveAsk) recordingwire.LiveAsk {
+	failed := func(why string) recordingwire.LiveAsk {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			why = askModelTimeout
 		}
 		return failAsk(a, why)
 	}
 	question := a.Question
-	var heard []kb.LiveSegment
+	var heard []recordingwire.LiveSegment
 	if a.QuestionSource == askHeard {
 		l, err := s.awaitHeard(ctx, e, id, a)
 		if err != nil {
@@ -529,7 +531,7 @@ func (s *Recordings) answerMeetingAsk(ctx context.Context, e *kb.Engine, id stri
 		}
 		question = strings.Join(texts, " ")
 	}
-	m, err := e.MeetingMaterial(id, question)
+	m, err := writersOf(e).MeetingMaterial(id, question)
 	if err != nil {
 		return failed(askModelError)
 	}
@@ -563,8 +565,8 @@ func (s *Recordings) answerMeetingAsk(ctx context.Context, e *kb.Engine, id stri
 }
 
 // awaitLive is recording id's live log once it holds next positions, waiting at most askLiveWait; without next at once.
-func awaitLive(ctx context.Context, tm timings, e *kb.Engine, id string, next *int) (kb.Live, error) {
-	l, _, err := e.LiveRead(id)
+func awaitLive(ctx context.Context, tm timings, e *kb.Engine, id string, next *int) (recordingwire.Live, error) {
+	l, _, err := writersOf(e).LiveRead(id)
 	if err != nil || next == nil {
 		return l, err
 	}
@@ -575,7 +577,7 @@ func awaitLive(ctx context.Context, tm timings, e *kb.Engine, id string, next *i
 			return l, ctx.Err()
 		case <-time.After(tm.askLivePoll):
 		}
-		if l, _, err = e.LiveRead(id); err != nil {
+		if l, _, err = writersOf(e).LiveRead(id); err != nil {
 			return l, err
 		}
 	}
@@ -584,8 +586,8 @@ func awaitLive(ctx context.Context, tm timings, e *kb.Engine, id string, next *i
 
 // heardLines are the live sentences with text said in the heardSeconds up to at: any that overlaps them, so a
 // sentence still being said at the tap (its end can fall a little past at once the phone cuts its audio) is kept.
-func heardLines(segs []kb.LiveSegment, at float64) []kb.LiveSegment {
-	var out []kb.LiveSegment
+func heardLines(segs []recordingwire.LiveSegment, at float64) []recordingwire.LiveSegment {
+	var out []recordingwire.LiveSegment
 	for _, sg := range segs {
 		if sg.Text != "" && sg.Start <= at && sg.End >= at-heardSeconds {
 			out = append(out, sg)
@@ -596,8 +598,8 @@ func heardLines(segs []kb.LiveSegment, at float64) []kb.LiveSegment {
 
 // answerInput is material m as the answering model reads it, for question a (heard: the lines before the tap). The
 // to-dos of the earlier meetings' action items say only whether they are open or done.
-func (s *Recordings) answerInput(ctx context.Context, m kb.MeetingMaterial, a kb.LiveAsk, heard []kb.LiveSegment) prompts.MeetingAnswerInput {
-	lines := func(segs []kb.LiveSegment) []prompts.MeetingLine {
+func (s *Recordings) answerInput(ctx context.Context, m recordingwire.MeetingMaterial, a recordingwire.LiveAsk, heard []recordingwire.LiveSegment) prompts.MeetingAnswerInput {
+	lines := func(segs []recordingwire.LiveSegment) []prompts.MeetingLine {
 		out := make([]prompts.MeetingLine, 0, len(segs))
 		for _, sg := range segs {
 			out = append(out, prompts.MeetingLine{At: meetingClock(sg.Start), Text: oneLine(sg.Text)})
@@ -679,10 +681,10 @@ func plainAnswer(s string) string {
 
 // answerSources are the sources the model named that the material holds: its earlier meetings (by id) and their
 // projects (by slug), each once, in the model's order. Anything else is dropped.
-func answerSources(m kb.MeetingMaterial, named []json.RawMessage) []kb.AskSource {
-	out := []kb.AskSource{}
-	add := func(src kb.AskSource) {
-		if !slices.ContainsFunc(out, func(x kb.AskSource) bool { return x.Kind == src.Kind && x.ID == src.ID }) {
+func answerSources(m recordingwire.MeetingMaterial, named []json.RawMessage) []recordingwire.AskSource {
+	out := []recordingwire.AskSource{}
+	add := func(src recordingwire.AskSource) {
+		if !slices.ContainsFunc(out, func(x recordingwire.AskSource) bool { return x.Kind == src.Kind && x.ID == src.ID }) {
 			out = append(out, src)
 		}
 	}
@@ -699,17 +701,17 @@ func answerSources(m kb.MeetingMaterial, named []json.RawMessage) []kb.AskSource
 			ref = cmp.Or(obj.ID, obj.Slug)
 		}
 		ref = strings.TrimSpace(ref)
-		ref = strings.TrimPrefix(strings.TrimPrefix(ref, kb.KindRecording+"/"), kb.KindProject+"/")
+		ref = strings.TrimPrefix(strings.TrimPrefix(ref, recordingwire.KindRecording+"/"), kb.KindProject+"/")
 		if ref == "" {
 			continue
 		}
 		for _, em := range m.Earlier {
 			if strings.EqualFold(em.ID, ref) {
-				add(kb.AskSource{Kind: kb.KindRecording, ID: em.ID, Name: em.Name, When: em.When, Start: em.Start, End: em.End})
+				add(recordingwire.AskSource{Kind: recordingwire.KindRecording, ID: em.ID, Name: em.Name, When: em.When, Start: em.Start, End: em.End})
 			}
 			for _, p := range em.Projects {
 				if p.Slug == ref {
-					add(kb.AskSource{Kind: kb.KindProject, ID: p.Slug, Name: p.Name})
+					add(recordingwire.AskSource{Kind: kb.KindProject, ID: p.Slug, Name: p.Name})
 				}
 			}
 		}

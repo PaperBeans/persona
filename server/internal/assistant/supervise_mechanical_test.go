@@ -469,7 +469,7 @@ func TestMechanicalDeliveryPersistenceFailureFailsOpen(t *testing.T) {
 		t.Fatal("could not seed persisted delivery")
 	}
 	st := s.store().(*memStore)
-	st.failPut = errors.New("disk unavailable")
+	st.setFailPut(errors.New("disk unavailable"))
 	f.answerNode("git.pr", func(string, json.RawMessage) (any, error) {
 		return map[string]any{"pr": map[string]any{
 			"url": todo.PRURL, "state": "MERGED", "head_oid": "head-1", "mergeable": "MERGEABLE", "checks_state": "passing",

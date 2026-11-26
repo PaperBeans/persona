@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -77,6 +78,9 @@ func patchModel(b ModelBinding, in modelPatch) (ModelBinding, error) {
 func (s *Service) modelProviderCompatible(p ModelPurpose, v ModelProvider, stored []storedLauncher) bool {
 	if externalProvider(v.ID) {
 		return false // a persisted main-chat pick is not a purpose configuration
+	}
+	if compat.Source(v.Source) == proto.SourceClaudeDesktop {
+		return p.ID == "agent.new" // a new session in Claude's desktop app: Agents' only (models_desktop.go)
 	}
 	compatible := v.Kind == p.Kind
 	if p.Kind == "launcher" && v.Kind == "api" { // a direct Messages API provider starts Claude on its gateway (#2455)
@@ -384,6 +388,9 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 		if !slices.Contains(s.permissionModesForLauncher(ctx, p.MachineID, name, provider), b.PermissionMode) {
 			return i18n.Err("assistant-models.err_permission_mode_unsupported")
 		}
+		if b.PermissionMode == "plan" && s.desktopAppProvider(ctx, b.Provider) {
+			return i18n.Err("assistant-models.err_permission_mode_unsupported") // the app runs no read-only plan start
+		}
 	}
 	if p.Kind == "api" {
 		c, err := s.apiConfig(ctx, b)
@@ -410,7 +417,9 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 		if provider != nil && len(provider.Machines) > 0 && p.MachineID != "" && !slices.Contains(provider.Machines, p.MachineID) {
 			return i18n.Err("assistant-models.err_launcher_not_on_machine")
 		}
-		if b.Model != "" {
+		// Claude's desktop app has no command to probe: its node checks the model id at the start, and the app takes
+		// the model through its session's settings (models_desktop.go).
+		if b.Model != "" && !s.desktopAppProvider(ctx, b.Provider) {
 			machine := ""
 			if p.MachineID == "" {
 				// Like the model picker, unbound purposes use an online candidate;

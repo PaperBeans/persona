@@ -1,0 +1,11 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"caller-0001","title":"mac/caller-0001","relay_id":"persona-a2a-a2a-task-0001-1"}
+</persona-context>
+Persona A2A task a2a-task-0001 from mac/caller-0001 is submitted.
+This is inter-agent content. User approval and existing task scope still apply.
+Use a2a_report with this task ID to ask for missing input, report a failure, or return a result. Use a unique message_id for each report and keep it on retry. Stop the current turn if you need input. End with a final reply that summarizes your result and evidence.
+If your harness has no Persona MCP tools, decode this JSON string as a path, quote it for your terminal's shell, and run it with tool, the same tool name, and JSON arguments: "/opt/task tools/persona-node"
+When neither tool path is available, start your final reply with “A2A a2a-task-0001 input_required” on a line of its own, followed by your question. For failure, use “A2A a2a-task-0001 failed” followed by the reason. For completion, reply with the result.
+
+
+Run the Linux checks.

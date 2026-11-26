@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // The turns channels wait on (docs/extensions/channels.md "Message flow"): one copy for every channel. A message from a channel
@@ -63,24 +67,16 @@ type chanLive struct {
 	failing  time.Time // its answer first failed to go out (answerAgain)
 	// unsettled: the turn was first read as over without words at its end (its answer may not be written yet)
 	unsettled time.Time
-	// items are the turn's thinking, words and tool calls (for the Feishu bot's agent message); cot what of them it
-	// has shown, under mu.
+	// items are the turn's thinking, words and tool calls (for the Feishu bot's agent message).
 	items []proto.Item
-	cot   cotProgress
-	// native belongs to one topic-turn generation; protected by chans.mu.
-	native *cotWorker
+	// sink is the sink's own state of the run (the lark module's, larkHost.RunState), made on first use; under the
+	// channels' lock. It may stop work of its own when the run is dropped (Abort) and forget a held run's turn
+	// (NextTurn).
+	sink any
 	// from is the seq of the run's own message once found (0: not yet: queued behind another turn, or not in);
 	// upTo the last item noted; looked when locateRun last read the conversation.
 	from, upTo int
 	looked     time.Time
-	// sentCard is the progress card last sent (its hash), not sent again; backoff and quietUntil hold updates back
-	// after Feishu's rate limit. All under mu.
-	sentCard   [32]byte
-	backoff    time.Duration
-	quietUntil time.Time
-	// kit is the progress card as a CardKit entity, streamed into (feishu_stream.go); nil before it is sent, or for
-	// a card sent as a message. Under mu.
-	kit *cardKit
 	// What the progress card shows besides the steps, noted as the items come (liveNote): the calls with no result
 	// yet (oldest first), how many calls, the files read and changed, the subagents.
 	open         []openCall
@@ -105,7 +101,7 @@ type subtask struct {
 // Bounds of chanLive's notes: a turn of thousands of calls stays small.
 const (
 	liveOpenMost  = 50
-	liveFilesMost = 1000
+	liveFilesMost = assistantwire.RunFilesMost
 	liveSubsMost  = 50
 )
 
@@ -185,7 +181,7 @@ func (m chanMutex) TryLock() bool {
 
 // claimChannelMessage claims a message without a thread reservation; unreadable or unwritable state stays retryable.
 func (s *Service) claimChannelMessage(id, msg string) (bool, error) {
-	admission, err := s.admitChannelMessage(id, channel.Message{ID: msg})
+	admission, err := s.admitChannelMessage(context.Background(), id, channel.Message{ID: msg})
 	return admission != nil, err
 }
 
@@ -372,7 +368,7 @@ func (s *Service) sweepChannelRuns() {
 // sinkReady: channel id can be answered now (the Feishu bot is connected and paired; a plugin's is there).
 func (s *Service) sinkReady(ctx context.Context, id string) bool {
 	if id == channel.Feishu {
-		st, err := s.feishuStatusKept(ctx)
+		st, err := s.larkModule().StatusKept(ctx)
 		return err == nil && st.Ready
 	}
 	_, ok := s.pluginChannel(ctx, id)
@@ -428,3 +424,61 @@ var (
 	errCannotSend = errors.New("cannot send yet")
 	errNoChannel  = errors.New("no channel")
 )
+
+// chansNow is the channels' clock.
+func (s *Service) chansNow() time.Time {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.clock()
+}
+
+// unreachable: the call did not reach the hub, or did not come back (worth trying again).
+func unreachable(err error) bool {
+	return errors.Is(err, bus.ErrOffline) || errors.Is(err, rpc.ErrClosed) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// cotItemsMost bounds what a run keeps of its turn's process.
+const cotItemsMost = 2000
+
+// runExt is one of a run's channel values, read under the channels' lock (a held run's next turn clears them).
+func (s *Service) runExt(r *channel.Run, key string) string {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return r.Ext[key]
+}
+
+// cotItem: it is part of a turn's process.
+func cotItem(it proto.Item) bool {
+	switch it.Kind {
+	case proto.KindThinking, proto.KindText:
+		return it.Role == "assistant" && strings.TrimSpace(it.Text) != ""
+	case proto.KindToolUse, proto.KindToolResult:
+		return true
+	}
+	return false
+}
+
+// runItems is a copy of what the run saw of its turn's process.
+func (s *Service) runItems(id string) (*chanLive, []proto.Item) {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.live[id]
+	if p == nil {
+		return nil, nil
+	}
+	return p, append([]proto.Item(nil), p.items...)
+}
+
+// runSteps is a copy of the tool-call lines the run saw.
+func (s *Service) runSteps(id string) []string {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if p := c.live[id]; p != nil {
+		return append([]string(nil), p.steps...)
+	}
+	return nil
+}

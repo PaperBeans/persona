@@ -13,6 +13,11 @@ import (
 // presence for unchanged native properties. The input is strict native vocabulary;
 // assistant fields and executable/unknown properties can never be restored.
 func FitNative(raw []byte, slot UISlot, version int, lang i18n.Lang) (json.RawMessage, error) {
+	return FitNativeFor(raw, slot, version, nil, lang)
+}
+
+// FitNativeFor is FitNative honoring client-declared unsupported component types.
+func FitNativeFor(raw []byte, slot UISlot, version int, unsupported []string, lang i18n.Lang) (json.RawMessage, error) {
 	// Validated as UIStreamView (which holds it to View too), decoded and
 	// checked as CheckViewJSON checks it: that View is the one fitted.
 	view, err := wire.DecodeCheckedStreamViewJSON(raw)
@@ -23,7 +28,7 @@ func FitNative(raw []byte, slot UISlot, version int, lang i18n.Lang) (json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	if _, err = fit(&view, slot, version, true, lang); err != nil {
+	if _, err = fit(&view, slot, version, unsupported, true, lang); err != nil {
 		return nil, err
 	}
 	after, err := json.Marshal(view)

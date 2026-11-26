@@ -120,6 +120,8 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 		companion                      bool
 	}{
 		{name: "explicit herdr with companion", startHost: proto.EngineHerdr, model: "example-low", effort: "low", companion: true},
+		// A New Agent start with the default host keeps its pane (#10237); a task the assistant starts names the
+		// companion instead (host agy, below and TestAgyCompanionHostAwayIsRefused; assistant/start_host.go, #13447).
 		{name: "default herdr with companion", model: "example-medium", effort: "medium", companion: true},
 		{name: "herdr without companion", startHost: proto.EngineHerdr, model: "example-high", effort: "high"},
 		{name: "extra high", startHost: proto.EngineHerdr, model: "example-xhigh", effort: "xhigh"},
@@ -204,14 +206,14 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 				t.Fatalf("terminal-less catalog = %s, %v", models, err)
 			}
 			res, err = nodeCall(t, n, "session.start", map[string]any{
-				"cwd": home, "launcher": agyAgent, "host": agyAgent, "model": "companion-model", "effort": "high",
+				"cwd": home, "launcher": agyAgent, "host": agyAgent, "model": "companion-model", "effort": "high", "defer_mcp": true,
 			})
 			if err != nil || !strings.Contains(string(res), "agy-companion") {
 				t.Fatalf("terminal-less session = %s, %v", res, err)
 			}
 			var args runtimeStartParams
 			starts := companion.got("session.start")
-			if len(starts) != 1 || json.Unmarshal(starts[0], &args) != nil || args.Model != "companion-model" || args.Effort != "high" {
+			if len(starts) != 1 || json.Unmarshal(starts[0], &args) != nil || args.Model != "companion-model" || args.Effort != "high" || !args.DeferMCP {
 				t.Fatalf("companion start = %s", starts)
 			}
 			if got, err := os.ReadFile(calls); err != nil || string(got) != "models\n" {
@@ -221,6 +223,228 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 				t.Fatal("companion start created a pane")
 			}
 		})
+	}
+}
+
+// A start naming the companion (host agy) while none is connected is refused with agy_companion_offline before any
+// pane opens, not the generic unknown host; the same start without the host opens its pane, as a task the hub sent to
+// the companion by itself does then (#13447). A companion that connects takes it, and once it leaves it is away again.
+func TestAgyCompanionHostAwayIsRefused(t *testing.T) {
+	n, f, home := herdrNode(t)
+	catalog, _ := fakeAgyModels(t, home)
+	writeFile(t, catalog, "local-model\tLocal Model\n")
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+	f.after(func(c herdrCall) {
+		if c.Method == "pane.send_input" && strings.Contains(c.String(), "HERDR_AGENT=agy") {
+			f.reply("session.snapshot", snapshot(nil, nil, []any{
+				agentOf(agyAgent, "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, agyAgent),
+			}, nil))
+			f.setScreen("w1:p2", agyIdleScreen)
+		}
+	})
+	start := func(host string) (json.RawMessage, error) {
+		p := map[string]any{"cwd": home, "launcher": agyAgent, "workspace_id": "w1", "async": true}
+		if host != "" {
+			p["host"] = host
+		}
+		return nodeCall(t, n, "session.start", p)
+	}
+	if _, err := start(proto.HostAgy); refusalCode(err) != proto.CodeAgyCompanionOffline {
+		t.Fatalf("terminal-less start with no companion: %v, want %s", err, proto.CodeAgyCompanionOffline)
+	}
+	if len(f.trace("tab.create")) != 0 || len(f.trace("pane.send_input")) != 0 {
+		t.Fatal("a refused terminal-less start reached herdr")
+	}
+	res, err := start("")
+	var started struct{ Session proto.Session }
+	if err != nil || json.Unmarshal(res, &started) != nil || started.Session.PaneID != "w1:p2" {
+		t.Fatalf("the same start in the default host = %s, %v", res, err)
+	}
+
+	n.logger = log.New(io.Discard, "", 0)
+	n.runtimeSock = filepath.Join(filepath.Dir(f.sock), "runtime.sock")
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	if _, err := n.listenRuntimeSocket(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hello := assistantRuntimeHello()
+	hello["runtime"], hello["agent"], hello["launcher"] = agyAgent, agyAgent, agyAgent
+	hello["launchers"] = []map[string]any{{"name": agyAgent, "agent": agyAgent}}
+	companion := dialRuntime(t, n, hello)
+	companion.mu.Lock()
+	companion.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": proto.Session{SessionID: "agy-companion", Cwd: home, Status: proto.StatusIdle}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	companion.mu.Unlock()
+	if res, err := start(proto.HostAgy); err != nil || !strings.Contains(string(res), "agy-companion") {
+		t.Fatalf("terminal-less start with the companion connected = %s, %v", res, err)
+	}
+	_ = companion.conn.Close()
+	waitFor(t, "the companion gone", func() bool { return !n.agyRuntimeConnected() })
+	if _, err := start(proto.HostAgy); refusalCode(err) != proto.CodeAgyCompanionOffline {
+		t.Fatalf("terminal-less start after the companion left: %v", err)
+	}
+	if len(f.trace("tab.create")) != 1 {
+		t.Fatalf("panes opened: %d, want only the default host's one", len(f.trace("tab.create")))
+	}
+}
+
+func TestAgyStartResolvesSuffixedModelEffort(t *testing.T) {
+	n, _, home := herdrNode(t)
+	catalog, _ := fakeAgyModels(t, home)
+	writeFile(t, catalog, "example-medium\tExample (Medium)\nexample-high\tExample (High)\nexample-xhigh\tExample (XHigh)\n")
+	ctx := withStartHost(t.Context(), proto.EngineHerdr)
+	model, err := n.agyPaneStartModel(ctx, agyAgent, "example-medium", "high")
+	if err != nil || model != "example-high" {
+		t.Fatalf("mismatched effort did not select its advertised variant: %q, %v", model, err)
+	}
+	if _, err := n.agyPaneStartModel(ctx, agyAgent, "example-medium", "max"); err == nil || !strings.Contains(err.Error(), `does not offer effort "max"`) {
+		t.Fatalf("unsupported model effort was accepted: %v", err)
+	}
+	if model, err := n.agyPaneStartModel(ctx, agyAgent, "", "high"); model != "" || err != nil {
+		t.Fatalf("effort-only start changed the CLI's default model: %q, %v", model, err)
+	}
+	if err := validModesFor(agyAgent, "", "ultra"); err == nil {
+		t.Fatal("Antigravity accepted Claude/Codex-incompatible effort")
+	}
+	spec := agentLaunch{Agent: agyAgent, Launcher: agyAgent, Model: "example-medium", Effort: "high", AgyConversation: startID}
+	argv, ok := n.agentResumeArgv(spec, startID)
+	if !ok || !strings.Contains(argv[1], "--model example-high --effort high --conversation "+startID) {
+		t.Fatalf("restore kept conflicting flags or lost the conversation: %q", argv)
+	}
+}
+
+// A read-only agy task the hub sends to the companion (host agy, plan) reaches it in plan mode only when the companion
+// promises read-only starts (caps.readonly, as the Antigravity companion does); otherwise it is refused before anything
+// starts. Either way no pane opens (#13464).
+func TestAgyCompanionPlanStartNeedsReadonly(t *testing.T) {
+	for _, readonly := range []bool{true, false} {
+		t.Run(map[bool]string{true: "readonly", false: "unverified"}[readonly], func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			n.logger = log.New(io.Discard, "", 0)
+			n.runtimeSock = filepath.Join(filepath.Dir(f.sock), "runtime.sock")
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			if _, err := n.listenRuntimeSocket(ctx); err != nil {
+				t.Fatal(err)
+			}
+			hello := assistantRuntimeHello()
+			hello["runtime"], hello["agent"], hello["launcher"] = agyAgent, agyAgent, agyAgent
+			hello["launchers"] = []map[string]any{{"name": agyAgent, "agent": agyAgent}}
+			hello["caps"].(map[string]any)["readonly"] = readonly
+			companion := dialRuntime(t, n, hello)
+			companion.mu.Lock()
+			companion.answer = func(method string, _ json.RawMessage) (any, error) {
+				if method == "session.start" {
+					return map[string]any{"session": proto.Session{SessionID: "agy-readonly", Cwd: home, Status: proto.StatusIdle}}, nil
+				}
+				return map[string]any{"ok": true}, nil
+			}
+			companion.mu.Unlock()
+			_, err := nodeCall(t, n, "session.start", map[string]any{"cwd": home, "launcher": agyAgent, "host": proto.HostAgy,
+				"permission_mode": "plan", "prompt": "Inspect the project"})
+			starts := companion.got("session.start")
+			var start map[string]any
+			switch {
+			case readonly && (err != nil || len(starts) != 1 || json.Unmarshal(starts[0], &start) != nil || start["permission_mode"] != "plan"):
+				t.Fatalf("read-only start on the companion: %v, starts %s", err, starts)
+			case !readonly && (rpcCode(err) != "readonly_unsupported" || len(starts) != 0):
+				t.Fatalf("read-only start on a companion without caps.readonly: %v, starts %s", err, starts)
+			}
+			if len(f.trace("tab.create")) != 0 {
+				t.Fatal("a read-only companion start opened a pane")
+			}
+		})
+	}
+}
+
+func TestAgyCompanionBypassStartReachesCompanion(t *testing.T) {
+	n, f, home := herdrNode(t)
+	n.logger = log.New(io.Discard, "", 0)
+	n.runtimeSock = filepath.Join(filepath.Dir(f.sock), "runtime.sock")
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	if _, err := n.listenRuntimeSocket(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hello := assistantRuntimeHello()
+	hello["runtime"], hello["agent"], hello["launcher"] = agyAgent, agyAgent, agyAgent
+	hello["launchers"] = []map[string]any{{"name": agyAgent, "agent": agyAgent}}
+	companion := dialRuntime(t, n, hello)
+	companion.mu.Lock()
+	companion.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": proto.Session{SessionID: "agy-readonly-bypass", Cwd: home, Status: proto.StatusIdle}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	companion.mu.Unlock()
+	_, err := nodeCall(t, n, "session.start", map[string]any{
+		"cwd": home, "launcher": agyAgent, "host": proto.HostAgy,
+		"permission_mode": proto.ModeBypass, "prompt": "Inspect the project",
+	})
+	starts := companion.got("session.start")
+	var start map[string]any
+	if err != nil || len(starts) != 1 || json.Unmarshal(starts[0], &start) != nil || start["permission_mode"] != proto.ModeBypass {
+		t.Fatalf("bypass companion start: %v, starts %s", err, starts)
+	}
+	if len(f.trace("tab.create")) != 0 {
+		t.Fatal("a companion bypass start opened a pane")
+	}
+}
+
+func TestAgyRuntimeSessionSendForwardsMode(t *testing.T) {
+	n, f, home := herdrNode(t)
+	n.logger = log.New(io.Discard, "", 0)
+	n.runtimeSock = filepath.Join(filepath.Dir(f.sock), "runtime.sock")
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	if _, err := n.listenRuntimeSocket(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hello := assistantRuntimeHello()
+	hello["runtime"], hello["agent"], hello["launcher"] = agyAgent, agyAgent, agyAgent
+	hello["launchers"] = []map[string]any{{"name": agyAgent, "agent": agyAgent}}
+	companion := dialRuntime(t, n, hello)
+	companion.mu.Lock()
+	companion.answer = func(method string, _ json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": proto.Session{SessionID: "agy-deferred-send", Cwd: home, Status: proto.StatusIdle, Starting: true}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	companion.mu.Unlock()
+	if _, err := nodeCall(t, n, "session.start", map[string]any{
+		"cwd": home, "launcher": agyAgent, "host": proto.HostAgy,
+		"permission_mode": proto.ModeBypass, "defer_mcp": true, "prompt": "Start work",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeCall(t, n, "session.send", map[string]any{
+		"session_id": "agy-deferred-send", "text": "Start work", "permission_mode": proto.ModeBypass,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeCall(t, n, "session.send", map[string]any{
+		"session_id": "agy-deferred-send", "text": "Follow up",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sends := companion.got("session.send")
+	if len(sends) != 2 {
+		t.Fatalf("companion sends = %d, want 2: %s", len(sends), sends)
+	}
+	var first, second map[string]any
+	if json.Unmarshal(sends[0], &first) != nil || first["mode"] != proto.ModeBypass {
+		t.Fatalf("first send = %s, want mode=%s", sends[0], proto.ModeBypass)
+	}
+	if json.Unmarshal(sends[1], &second) != nil || second["mode"] != nil {
+		t.Fatalf("second send = %s, want omitted mode", sends[1])
 	}
 }
 

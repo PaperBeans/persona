@@ -188,6 +188,11 @@ func SameDatabase(a, b string) bool {
 // token (removed in the app, or installed again elsewhere) it says so once and returns bus.ErrRevoked, not trying
 // again with it.
 func RunManager(ctx context.Context, build update.Build, dir string) error {
+	return RunManagerWith(ctx, build, dir, MainHooks{})
+}
+
+// RunManagerWith is RunManager with h.
+func RunManagerWith(ctx context.Context, build update.Build, dir string, h MainHooks) error {
 	logger := log.New(os.Stderr, "manager: ", log.LstdFlags)
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -214,8 +219,11 @@ func RunManager(ctx context.Context, build update.Build, dir string) error {
 	} else if created {
 		logger.Printf("[%s] made its database %s", c.ID, db.DatabaseName(url))
 	}
+	hostDataDir := h.HostDataDir
+	if hostDataDir == "" {
+		hostDataDir = identity.HomeDir()
+	}
 	// What it starts (extensions, tools) finds its data directory, not the hub's.
-	_ = identity.Setenv("PERSONA_HOME", dir)
 	_ = identity.Setenv("PERSONA_HOME", dir)
 	deploy := identity.Getenv("PERSONA_ASSISTANT_DEPLOY")
 	if deploy == "" {
@@ -225,7 +233,8 @@ func RunManager(ctx context.Context, build update.Build, dir string) error {
 		}
 	}
 	return run(ctx, build, runOptions{ID: c.ID, Hub: c.Hub, Token: c.Token, Fingerprint: c.Fingerprint, Deploy: deploy,
-		Dir: dir, ConfigFile: file, ExtConfig: ext, DatabaseURL: url, StopWhenRevoked: true, Logf: logger.Printf})
+		Dir: dir, HostDataDir: hostDataDir, ConfigFile: file, ExtConfig: ext, DatabaseURL: url, StopWhenRevoked: true,
+		Logf: logger.Printf, Ready: h.Ready, PendingRestart: h.PendingRestart})
 }
 
 // pinnedHTTPClient dials the hub only when its TLS key is fp's.

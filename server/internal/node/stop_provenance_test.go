@@ -36,6 +36,9 @@ func TestStopRPCPersistsItsProvenance(t *testing.T) {
 		{"archive and close", "session.retire", map[string]any{"close_terminal": true}, proto.StopUser},
 		{"old retire has no provenance", "session.retire", map[string]any{}, proto.StopUnknown},
 		{"confirmed maintenance stop", "session.stop", map[string]any{"retire": true, "stop_cause": proto.StopRestart}, proto.StopRestart},
+		{"supervision timeout stop", "session.stop", map[string]any{"stop_cause": proto.StopTimeout}, proto.StopTimeout},
+		{"non-retire stop ignores idle cause", "session.stop", map[string]any{"stop_cause": proto.StopIdle}, proto.StopUser},
+		{"close terminal ignores timeout cause", "session.retire", map[string]any{"close_terminal": true, "stop_cause": proto.StopTimeout}, proto.StopUser},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			n, f, home := herdrNode(t)
@@ -44,8 +47,12 @@ func TestStopRPCPersistsItsProvenance(t *testing.T) {
 			cwd := mkdir(t, filepath.Join(home, "project"))
 			n.state.put(sidA, sessionState{Launcher: "claude", Cwd: cwd, Pane: "w1:p1", AppMode: "plan",
 				StartedAt: time.Now().Add(-time.Hour)})
+			status := proto.StatusIdle
+			if tc.name == "supervision timeout stop" {
+				status = proto.StatusWorking
+			}
 			n.agents[sidA] = host.Agent{Agent: "claude", PaneID: "w1:p1", TabID: "w1:t1",
-				WorkspaceID: "w1", AgentStatus: proto.StatusIdle}
+				WorkspaceID: "w1", AgentStatus: status}
 			quitsOn(f, "w1:p1", sidA, nil, shellPane("w1:p1", "w1:t1", "w1", cwd, sidA))
 			tc.params["session_id"] = sidA
 			if _, err := request(t, n, tc.method, tc.params); err != nil {
@@ -54,6 +61,11 @@ func TestStopRPCPersistsItsProvenance(t *testing.T) {
 			st, _ := n.state.get(sidA)
 			if st.StopCause != tc.want || st.AppMode != "plan" || st.Launcher != "claude" {
 				t.Fatalf("stop lost its provenance or launch constraints: %+v", st)
+			}
+			if tc.want == proto.StopTimeout {
+				if err := n.supervisorResumeAllowed(sidA, "", ""); err != nil {
+					t.Fatalf("supervisor resume refused after timeout stop: %v", err)
+				}
 			}
 		})
 	}

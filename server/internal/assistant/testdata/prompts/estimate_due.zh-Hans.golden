@@ -4,5 +4,5 @@
 
 1. 任务「Example task」（todo_example，signal=estimate_due）：（到了系统预估的验收点：预估 30 分钟，从派工或上次调整预估起已过 30 分钟。这只是验收提醒，不是超期判定。
 ）
-   验收标准：PR merged to main；a test covers landscape
+   验收标准用 todo_get 取原文
    最初的要求（2026-11-03 用户原话）：please fix the login crash before Friday

@@ -116,7 +116,7 @@ func cloneSessionReviewDocument(doc sessionReviewDocument) sessionReviewDocument
 
 // sessionReviewRecords reads the book once. A failed read never becomes an empty book that a later write could erase.
 func (s *Service) sessionReviewRecords(ctx context.Context) ([]sessionReview, error) {
-	if s.store == nil {
+	if s.storeFn.Load() == nil {
 		return nil, errSessionReviewStore
 	}
 	b := &s.sessionReviews
@@ -141,7 +141,7 @@ func (s *Service) sessionReviewRecords(ctx context.Context) ([]sessionReview, er
 // changeSessionReviews serializes local writers, uses acknowledged CAS on the real store, and updates memory only
 // after the write succeeds. The in-memory test store uses its acknowledged PutSetting; production always has CAS.
 func (s *Service) changeSessionReviews(ctx context.Context, change func(*sessionReviewDocument) error) error {
-	if s.store == nil {
+	if s.storeFn.Load() == nil {
 		return errSessionReviewStore
 	}
 	b := &s.sessionReviews

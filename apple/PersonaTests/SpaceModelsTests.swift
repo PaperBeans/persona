@@ -287,7 +287,7 @@ struct SpaceModelsTests {
         hub.on("PUT", "/api/v1/assistant/extension-trust/qa-mail") { _ in throw APIError(status: 500, message: "no") }
         let trust = ExtensionTrustModel(extensionID: "qa-mail", deps: deps(hub))
         await trust.load()
-        await trust.setCategory("finance", on: true)
+        await trust.allowCategory("finance", on: true)
         #expect(trust.trust?.categories == [])
         let old = ExtensionTrustModel(extensionID: "qa-mail", deps: deps(FakeHub()))
         await old.load()

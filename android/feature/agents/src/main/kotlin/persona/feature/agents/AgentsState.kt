@@ -60,6 +60,9 @@ class AgentsPreferences @Inject constructor(
             hiddenBotmuxHubs = hubs.filter { pair ->
                 p[showBotmuxKey(pair.scope)]?.let { !it } ?: (p[legacyHideBotmux] == true && p.ownsLegacy(pair))
             }.mapTo(mutableSetOf()) { it.namespace },
+            herdrTabNameHubs = hubs.filter { pair ->
+                p[useHerdrTabNameKey(pair.scope)] == true
+            }.mapTo(mutableSetOf()) { it.namespace },
             foldedTabs = p[foldedTabsKey].orEmpty(),
             folds = AgentGrouping.entries.associateWith { p[foldsKey(it)].orEmpty() },
             pins = AgentPreferences(remote.pins.spaces, remote.pins.sessions, remote.pins.allowed),
@@ -84,7 +87,7 @@ class AgentsPreferences @Inject constructor(
     }
     suspend fun grouping(value: AgentGrouping) { store.edit { it[stringPreferencesKey("grouping")] = value.name } }
     suspend fun sort(value: AgentSort) { store.edit { it[stringPreferencesKey("sort")] = value.name } }
-    internal suspend fun watchDisplaySettings(refresh: Flow<Int>) = displayHubs.paired().collectLatest { hubs ->
+    suspend fun watchDisplaySettings(refresh: Flow<Int>) = displayHubs.paired().collectLatest { hubs ->
         coroutineScope {
             for (pair in hubs) launch {
                 combine(pair.hello, refresh) { hello, _ -> hello }.collectLatest { hello ->
@@ -111,9 +114,39 @@ class AgentsPreferences @Inject constructor(
         }
         store.edit {
             it[showBotmuxKey(pair.scope)] = acknowledged.showBotmux
+            acknowledged.useHerdrTabName?.let { enabled -> it[useHerdrTabNameKey(pair.scope)] = enabled }
+                ?: it.remove(useHerdrTabNameKey(pair.scope))
             if (it[migrationScope] == pair.scope) {
                 it.remove(legacyHideBotmux)
                 it.remove(migrationScope)
+            }
+        }
+    }
+
+    override val useHerdrTabName: Flow<Boolean?>
+        get() = combine(store.data, displayHubs.paired()) { p, hubs ->
+            val selected = hubs.firstOrNull { it.selected } ?: hubs.singleOrNull() ?: return@combine null
+            p[useHerdrTabNameKey(selected.scope)]
+        }
+
+    override suspend fun refreshHerdrTabName() {
+        val hubs = displayHubs.paired().first()
+        val selected = hubs.firstOrNull { it.selected } ?: hubs.singleOrNull() ?: return
+        try { refreshDisplay(selected) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Offline and older hubs keep the last acknowledged value. */ }
+    }
+
+    override suspend fun setUseHerdrTabName(enabled: Boolean) {
+        val hubs = displayHubs.paired().first()
+        val selected = hubs.firstOrNull { it.selected } ?: hubs.singleOrNull()
+            ?: throw IllegalStateException("No paired hub selected")
+        displayLocks.getOrPut(selected.scope) { Mutex() }.withLock {
+            val acknowledged = selected.api.setUseHerdrTabName(enabled)
+            store.edit {
+                it[showBotmuxKey(selected.scope)] = acknowledged.showBotmux
+                acknowledged.useHerdrTabName?.let { value -> it[useHerdrTabNameKey(selected.scope)] = value }
+                    ?: it.remove(useHerdrTabNameKey(selected.scope))
             }
         }
     }
@@ -153,6 +186,7 @@ private val rowStyleKey = stringPreferencesKey("row-style")
 private val legacyHideBotmux = booleanPreferencesKey("hide-botmux")
 private val migrationScope = stringPreferencesKey("hide-botmux-migration-scope")
 private fun showBotmuxKey(scope: String) = booleanPreferencesKey("agents-show-botmux:$scope")
+private fun useHerdrTabNameKey(scope: String) = booleanPreferencesKey("agents-use-herdr-tab-name:$scope")
 private fun Preferences.ownsLegacy(pair: AgentsDisplayHub) = this[migrationScope]?.let { it == pair.scope } ?: pair.selected
 private fun foldsKey(grouping: AgentGrouping) = stringSetPreferencesKey("folds-${grouping.name}")
 
@@ -165,6 +199,8 @@ data class AgentsPreferencesSnapshot(
     val sort: AgentSort = AgentSort.State,
     /** Hub namespaces whose sessions from botmux are hidden in the merged Agents list. */
     val hiddenBotmuxHubs: Set<String?> = emptySet(),
+    /** Hub namespaces whose `use_herdr_tab_name` preference is enabled (#13899). */
+    val herdrTabNameHubs: Set<String?> = emptySet(),
     /** The herdr tabs whose agents the list folds to the tab's row ([AgentTab.foldKey]); every other tab is open. */
     val foldedTabs: Set<String> = emptySet(),
     /** Each grouping's folded sections and computers ([AgentsPreferences.folds]). */
@@ -175,6 +211,7 @@ data class AgentsPreferencesSnapshot(
     val range: AgentRange = AgentRange.Running,
 ) {
     internal fun hides(session: Session) = session.isBotmux && GroupKeys.namespaceOf(session.machineId) in hiddenBotmuxHubs
+    fun prefersHerdrTabName(session: Session): Boolean = GroupKeys.namespaceOf(session.machineId) in herdrTabNameHubs
     /** What Glass draws the agents as (iOS `AgentListDisplay`); Brief and Board read [compact] alone. */
     val display: AgentListDisplay get() = AgentListDisplay.of(rowStyle, compact)
 }

@@ -1,0 +1,92 @@
+{
+  "string": [
+    {
+      "name": "intake_today",
+      "value": "今日"
+    },
+    {
+      "name": "intake_water",
+      "value": "水分"
+    },
+    {
+      "name": "intake_protein",
+      "value": "たんぱく質"
+    },
+    {
+      "name": "intake_ml",
+      "value": "ml"
+    },
+    {
+      "name": "intake_g",
+      "value": "g"
+    },
+    {
+      "name": "intake_goal",
+      "value": "目標：{goal} {unit}"
+    },
+    {
+      "name": "intake_ratio",
+      "value": "{today} / {goal} {unit}"
+    },
+    {
+      "name": "intake_cup",
+      "value": "コップ1杯"
+    },
+    {
+      "name": "intake_other",
+      "value": "量を指定"
+    },
+    {
+      "name": "intake_log_grams",
+      "value": "グラムで記録"
+    },
+    {
+      "name": "intake_water_amount",
+      "value": "水分量（ml）"
+    },
+    {
+      "name": "intake_protein_amount",
+      "value": "たんぱく質量（g）"
+    },
+    {
+      "name": "intake_water_hint",
+      "value": "1〜3,000 mlを小数第1位までで入力してください。"
+    },
+    {
+      "name": "intake_protein_hint",
+      "value": "0.1〜200 gを小数第1位までで入力してください。"
+    },
+    {
+      "name": "intake_log",
+      "value": "記録"
+    },
+    {
+      "name": "intake_undo",
+      "value": "取り消す"
+    },
+    {
+      "name": "health_intake_logged",
+      "value": "記録しました"
+    },
+    {
+      "name": "health_intake_undone",
+      "value": "記録を取り消しました"
+    },
+    {
+      "name": "health_intake_update",
+      "value": "先にhubを更新してください"
+    },
+    {
+      "name": "health_intake_load_failed",
+      "value": "今日の記録を読み込めませんでした。"
+    },
+    {
+      "name": "health_intake_record_failed",
+      "value": "この記録を保存できませんでした。"
+    },
+    {
+      "name": "health_intake_undo_failed",
+      "value": "この記録を取り消せませんでした。"
+    }
+  ]
+}

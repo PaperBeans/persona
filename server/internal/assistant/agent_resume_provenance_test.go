@@ -21,7 +21,7 @@ func TestAssistantResumeProvenanceMatrix(t *testing.T) {
 	// Every stop but the user's: an unknown one too, an Agent that quit by itself or that its machine's restart cut off
 	// (#11528).
 	causes := []proto.StopCause{proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart, proto.StopUsageLimit, proto.StopTransientError,
-		proto.StopResumeFailed, proto.StopCompactFailed, proto.StopUnknown}
+		proto.StopResumeFailed, proto.StopCompactFailed, proto.StopTimeout, proto.StopUnknown}
 	for _, source := range []string{"ordinary", "codex_history"} {
 		statuses := []string{proto.StatusOffline, proto.StatusInterrupted}
 		if source == "codex_history" {

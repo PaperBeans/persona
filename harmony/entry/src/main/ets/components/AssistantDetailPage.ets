@@ -15,6 +15,7 @@ export struct AssistantDetailPage {
   @Param active: boolean = false;
   @Require @Param itemId: string;
   @Require @Param kind: string;
+  @Event onOpenTriage: () => void = () => {};
   @Event onOpenResource: (row: ResourceRow) => void = (_row: ResourceRow) => {};
   @Event onLink: (address: string) => void = (_address: string) => {};
   @Local feed: AssistantFeedModel = new AssistantFeedModel();
@@ -159,7 +160,7 @@ export struct AssistantDetailPage {
       Scroll() {
         Column({ space: Tokens.gap }) {
           if (!this.active || !this.routeActive || this.feed.itemLookupStatus !== 'found' || !this.currentItem()) this.unavailable()
-          else AssistantCards({ model: this.model, feed: this.feed, item: this.currentItem(), detailOnly: true,
+          else AssistantCards({ model: this.model, feed: this.feed, item: this.currentItem(), detailOnly: true, onOpenTriage: () => { if (this.active && this.routeActive) this.onOpenTriage(); },
             active: this.active && this.model.connected, onOpenTodo: (row: ResourceRow) => { if (this.active && this.routeActive) this.onOpenResource(row); }, onOpenSession: (row: ResourceRow) => { if (this.active && this.routeActive) this.onOpenResource(row); }, onOpenResource: (row: ResourceRow) => {
               if (this.active && this.routeActive) this.onOpenResource(row);
             }, onLink: (address: string) => { if (this.active && this.routeActive) this.onLink(address); } })

@@ -26,6 +26,24 @@ describe("/permissions", () => {
     expect(canPickPermissions(undefined)).toBe(false);
   });
 
+  it("is offered for running runtimes declaring two or more capabilities.permission_modes", () => {
+    const listed = (over: Partial<Session> = {}) =>
+      session({
+        agent: "paseo",
+        source_kind: "runtime",
+        pane_id: undefined,
+        capabilities: { read: true, send: true, modes: false, permission_modes: ["default", "bypassPermissions"] },
+        ...over,
+      });
+    expect(canPickPermissions(listed())).toBe(true);
+    expect(canPickPermissions(listed({ state: "working", status: "working" }))).toBe(true);
+    expect(canPickPermissions(listed({ agent: "codex" }))).toBe(true);
+    // offline or fewer than two listed modes: picker is not shown
+    expect(canPickPermissions(listed({ state: "offline", status: "offline" }))).toBe(false);
+    expect(canPickPermissions(listed({ capabilities: { read: true, send: true, modes: false, permission_modes: ["default"] } }))).toBe(false);
+    expect(canPickPermissions(listed({ capabilities: { read: true, send: true, modes: false, permission_modes: [] } }))).toBe(false);
+  });
+
   it("opens the conversation's picker, and only that one's; none: the words go as text", () => {
     const a = vi.fn();
     const b = vi.fn();

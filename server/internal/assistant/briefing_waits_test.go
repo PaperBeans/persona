@@ -206,9 +206,9 @@ func TestBriefDirectionsListStoppedWork(t *testing.T) {
 		t.Fatalf("private row = %+v", private)
 	}
 	raw, _ := json.Marshal(dirs)
-	facts := &briefFacts{At: now, loc: time.UTC, l: i18n.ZhHans, Directions: dirs}
+	facts := &briefFacts{At: now, Loc: time.UTC, Lang: string(i18n.ZhHans), Directions: dirs}
 	briefCardView, plain, _ := e.s.briefCard(facts, "Morning briefing", "")
-	modelText := facts.modelText()
+	modelText := e.s.briefModelText(facts)
 	for _, d := range dirs {
 		for _, w := range d.Waits {
 			if w.TodoID == "" {
@@ -290,7 +290,7 @@ func TestBriefDirectionsUseHubZoneNamesAndTaskLinks(t *testing.T) {
 	if want := todoLink(testWeb, parked); w.Link != want {
 		t.Fatalf("parked task link = %q, want %q", w.Link, want)
 	}
-	card, plain, _ := e.s.briefCard(&briefFacts{At: now, l: i18n.ZhHans, loc: e.s.location(ctx), web: testWeb, Directions: dirs}, "Evening briefing", "")
+	card, plain, _ := e.s.briefCard(&briefFacts{At: now, Lang: string(i18n.ZhHans), Loc: e.s.location(ctx), Web: testWeb, Directions: dirs}, "Evening briefing", "")
 	if !strings.Contains(card.JSON(), "]("+w.Link+")") {
 		t.Errorf("rich card has no clickable task link %s: %s", w.Link, card.JSON())
 	}

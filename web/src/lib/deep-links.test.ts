@@ -113,6 +113,25 @@ describe("deep links: pages and paths", () => {
     }
   });
 
+  it.each([
+    ["integrations", "extension:tools@work", "integration"],
+    ["connectors", "github@work", "connector"],
+    ["channels", "chat@work", "channel"],
+    ["extensions", "tools@work/ui/status", "extension"],
+  ])("opens %s app links on their settings detail", (tab, item, key) => {
+    const path = appPath(`persona://open/settings/${tab}/${item}?token=discarded`);
+    expect(path).toBe(`/settings?tab=${tab}&${key}=${encodeURIComponent(item)}`);
+    expect(appPage(new URL(`persona://open/settings/${tab}@work`))?.page)
+      .toEqual({ page: "settings", tab, manager: "work" });
+  });
+
+  it("keeps embedded escapes when an integration source app link becomes a Settings query", () => {
+    const state = JSON.stringify({ id: "file%20name/path%2Fchild" });
+    const sub = `-sources@work/${encodeURIComponent(state)}`;
+    const path = appPath(`persona://open/settings/integrations/${sub}`);
+    expect(path).toBe(`/settings?tab=integrations&integration=${encodeURIComponent(sub)}`);
+  });
+
   it("opens Labs settings from web and app links", () => {
     expect(pageOfPath("/settings", "tab=labs")).toEqual({ page: "settings", tab: "labs" });
     expect(appPage(new URL("persona://open/settings?tab=labs"))?.page).toEqual({ page: "settings", tab: "labs" });
@@ -121,6 +140,36 @@ describe("deep links: pages and paths", () => {
   it("opens Labs without carrying setting changes or credentials from the link", () => {
     expect(appPath("persona://open/settings?tab=labs&enabled=1&token=x")).toBe("/settings?tab=labs");
     expect(pageOfPath("/settings", "?tab=labs&enabled=1&token=x")).toEqual({ page: "settings", tab: "labs" });
+  });
+
+  it("preserves Inbox Sources deep links including state and manager across query and path forms", () => {
+    const state = JSON.stringify({ p: "source", id: "sub_1" });
+    const enc = encodeURIComponent(state);
+    expect(pageOfPath("/settings", `?tab=sources&state=${enc}&manager=work`)).toEqual({
+      page: "settings",
+      tab: "sources",
+      item: state,
+      manager: "work",
+    });
+    expect(pagePath({ page: "settings", tab: "sources", item: state, manager: "work" })).toBe(
+      `/settings?tab=sources&state=${enc}&manager=work`,
+    );
+    expect(pageOfPath("/settings/sources")).toEqual({ page: "settings", tab: "sources" });
+    expect(pageOfPath(`/settings/sources/${enc}`, "?manager=work")).toEqual({
+      page: "settings",
+      tab: "sources",
+      item: state,
+      manager: "work",
+    });
+    expect(pageOfPath(`/settings/sources@work/${enc}`)).toEqual({
+      page: "settings",
+      tab: "sources",
+      item: state,
+      manager: "work",
+    });
+    expect(appPath(`persona://open/settings/sources/${enc}?manager=work`)).toBe(
+      `/settings?tab=sources&state=${enc}&manager=work`,
+    );
   });
 
   it("keeps the knowledge kinds and settings tabs of the pages that define them", () => {

@@ -10,6 +10,8 @@ import { currentLanguage } from "../i18n";
 
 /** hello / health `features`: the hub makes avatars from uploaded images. Without it the picker offers no upload. */
 export const LOOK_UPLOADS_FEATURE = "look_uploads";
+/** hello / health `features`: per-state pictures, animated uploads, theme color and PATCH editing (#15449). */
+export const LOOK_UPLOADS_STATES_FEATURE = "look_uploads_states";
 
 /** What the file picker takes: the formats the hub reads (the first frame of a GIF). */
 export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
@@ -90,10 +92,10 @@ export function zoomCrop(img: Size, c: Crop, zoom: number, view: number, px = vi
 }
 
 /** What the export (and the crop box on screen) draws: the square in image pixels (sx, sy, side) and the side of the image it makes (never larger
- *  than the crop, never over EXPORT_MAX). */
-export function exportRect(img: Size, c: Crop): { sx: number; sy: number; side: number; out: number } {
+ *  than the crop, never over `maxSide`). */
+export function exportRect(img: Size, c: Crop, maxSide = EXPORT_MAX): { sx: number; sy: number; side: number; out: number } {
   const side = cropSide(img, c.zoom);
-  return { sx: c.x - side / 2, sy: c.y - side / 2, side, out: Math.max(1, Math.min(EXPORT_MAX, Math.round(side))) };
+  return { sx: c.x - side / 2, sy: c.y - side / 2, side, out: Math.max(1, Math.min(maxSide, Math.round(side))) };
 }
 
 /** A picked image, decoded upright (its EXIF orientation applied; a GIF's first frame), and how to let it go. */
@@ -143,8 +145,8 @@ function payload(dataURL: string): string {
 }
 
 /** The crop drawn into a square canvas at exportRect's size: base64 of a PNG, or of a JPEG when the PNG is too big. */
-export function exportCrop(source: CanvasImageSource, img: Size, c: Crop, doc: Document = document): { image: string; mime: string; side: number } {
-  const r = exportRect(img, clampCrop(img, c));
+export function exportCrop(source: CanvasImageSource, img: Size, c: Crop, doc: Document = document, maxSide = EXPORT_MAX): { image: string; mime: string; side: number } {
+  const r = exportRect(img, clampCrop(img, c), maxSide);
   const canvas = doc.createElement("canvas");
   canvas.width = r.out;
   canvas.height = r.out;
@@ -200,9 +202,9 @@ export interface UploadAnswer {
 
 /** Sends a JSON body and reports the bytes sent (fetch cannot). Rejects with an ApiError carrying the hub's code and
  *  words, a TypeError when the hub can't be reached, or an AbortError. */
-export type ProgressPost = <T>(path: string, json: unknown, opts: { onProgress?: (sent: number, total: number) => void; signal?: AbortSignal }) => Promise<T>;
+export type ProgressPost = <T>(path: string, json: unknown, opts: { onProgress?: (sent: number, total: number) => void; signal?: AbortSignal; method?: "POST" | "PATCH" }) => Promise<T>;
 
-export const xhrPost: ProgressPost = <T,>(path: string, json: unknown, opts: { onProgress?: (sent: number, total: number) => void; signal?: AbortSignal }) =>
+export const xhrPost: ProgressPost = <T,>(path: string, json: unknown, opts: { onProgress?: (sent: number, total: number) => void; signal?: AbortSignal; method?: "POST" | "PATCH" }) =>
   new Promise<T>((resolve, reject) => {
     const body = JSON.stringify(json);
     const xhr = new XMLHttpRequest();
@@ -218,7 +220,7 @@ export const xhrPost: ProgressPost = <T,>(path: string, json: unknown, opts: { o
       xhr.abort();
     };
     if (opts.signal?.aborted) return reject(new DOMException("aborted", "AbortError"));
-    xhr.open("POST", `${BASE}/api/v1${path}`);
+    xhr.open(opts.method ?? "POST", `${BASE}/api/v1${path}`);
     xhr.setRequestHeader("Authorization", `Bearer ${getToken()}`);
     // the hub words its refusals in the interface language (docs/protocol/i18n.md "Protocol")
     xhr.setRequestHeader("Accept-Language", currentLanguage());

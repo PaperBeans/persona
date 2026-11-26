@@ -11,7 +11,8 @@ import (
 // TodoPhase: the to-do's state in the domain (proposal 6.3): needs_you, the owner has to act; working, Persona or an
 // Agent works on it now; waiting, it waits on something named; ready, finished work nobody has ticked; todo, nobody
 // works on it and nothing waits; someday, the owner put it off; done, closed. done holds exactly when the to-do is
-// closed, and a start that failed reads as open. Open: a newer hub may send other values.
+// closed, and a start that failed reads as open. Closed: a client decodes a value a newer hub sends as unknown and
+// counts it.
 const (
 	TodoPhaseNeedsYou = "needs_you"
 	TodoPhaseWorking  = "working"
@@ -27,7 +28,8 @@ var TodoPhases = []string{"needs_you", "working", "waiting", "ready", "todo", "s
 
 // TodoListSection: where the list draws the row, in the list's order (proposal 3.4): needs_you; can_wait, folded at
 // the foot of Needs you, listed but not counted; working; waiting; todo; just_finished, open work finished and not
-// ticked, and closed work not seen yet within 24 hours; someday; done. Open: a newer hub may send other values.
+// ticked, and closed work not seen yet within 24 hours; someday; done. Closed: a client decodes a value a newer hub
+// sends as unknown, counts it and draws the row in no section.
 const (
 	TodoListSectionNeedsYou     = "needs_you"
 	TodoListSectionCanWait      = "can_wait"
@@ -44,7 +46,7 @@ var TodoListSections = []string{"needs_you", "can_wait", "working", "waiting", "
 
 // TodoReason: why the row is where it is: the row of proposal 6.3 that placed it
 // (docs/design/proposals/todos-redesign.md 3.4 and 6.3 say which reasons each section holds). Inactivity is a mark
-// (TodoSummary.inactive), not a reason. Open: a newer hub may send other values.
+// (TodoSummary.inactive), not a reason. Closed: a client decodes a value a newer hub sends as unknown and counts it.
 const (
 	TodoReasonFailedStart       = "failed_start"
 	TodoReasonAgentAsks         = "agent_asks"
@@ -83,7 +85,9 @@ const (
 var TodoReasons = []string{"failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest"}
 
 // TodoLineKey: the line keys produced by this version of the projection; see the Line keys table in
-// spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+// spec/fixtures/todo-view/README.md. Closed: a client reads a row's TodoLine.key as one of these, a newer key as
+// unknown, and draws no line for that. TodoLine.key itself stays a string: a timeline entry's line takes the keys of
+// spec/fixtures/todo-rounds/README.md.
 const (
 	TodoLineKeyFailedStart     = "failed_start"
 	TodoLineKeyAgentAsks       = "agent_asks"
@@ -374,7 +378,8 @@ var TodoMessageStates = []string{"sending", "processing", "delivered", "queued",
 // run_started, run_ended and run_failed, a run put on the to-do, let go of, or not started; interrupted, a run whose
 // latest turn in the round was cut off; ask, a question for the owner; decision, a call Persona, a run or the hub
 // made; result, what the work came to; closed, the to-do was closed; scope, its scope changed; review, parked, report
-// and overdue, supervision nobody asked for. Open: a newer hub may send other values, which clients skip.
+// and overdue, supervision nobody asked for. Closed: a client decodes a value a newer hub sends as unknown, counts it
+// and skips the entry.
 const (
 	TodoEntryTypeInstruction = "instruction"
 	TodoEntryTypeAnswer      = "answer"

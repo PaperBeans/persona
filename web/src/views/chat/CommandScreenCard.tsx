@@ -8,6 +8,7 @@ import { t } from "../../i18n";
 import { allowDeny, commandAsk, type CommandAsk } from "../../lib/command-ask";
 import { countdownLine, originalWords, riskLine } from "../../lib/command-ask-lines";
 import { agentLabel } from "../../lib/mentions";
+import type { TapGuardHandle } from "../../lib/tap-guard";
 import type { Interaction } from "../../lib/types";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { Button, cx, Kbd } from "../../ui/atoms";
@@ -16,17 +17,60 @@ import { DigitHint } from "./Choice";
 import { Card, CloseBlockedAgent, OptionLabel, resolve, useCardKeys } from "./Interactions";
 import { useChatCardTapGuard } from "./card-tap-guard";
 
-export function CommandScreenCard({ ix }: { ix: Interaction }) {
+export interface CommandScreenCardProps {
+  ix: Interaction;
+  /** Controlled answer handler replacing the default `resolve(ix, body)` network and toast path. */
+  onResolve?: (body: Record<string, unknown>) => Promise<unknown> | void;
+  /** Controlled hand-back handler (`null` hides Hand back; omitted routes through `onResolve` or default `resolve`). */
+  onDismiss?: (() => Promise<unknown> | void) | null;
+  /** Explicit tap-guard handle (`null` disables the default chat tap-guard surface; omitted uses `useChatCardTapGuard`). */
+  tapGuard?: TapGuardHandle | null;
+  /** Controlled close-blocked-agent action (`null` hides the control without reading the store; omitted renders default `CloseBlockedAgent`). */
+  onCloseBlockedAgent?: (() => Promise<unknown> | void) | null;
+}
+
+export function CommandScreenCard(props: CommandScreenCardProps) {
+  if (props.tapGuard !== undefined) {
+    return <CommandScreenCardView {...props} resolvedTapGuard={props.tapGuard ?? undefined} />;
+  }
+  return <DefaultCommandScreenCard {...props} />;
+}
+
+function DefaultCommandScreenCard(props: CommandScreenCardProps) {
+  const tapGuard = useChatCardTapGuard(props.ix);
+  return <CommandScreenCardView {...props} resolvedTapGuard={tapGuard} />;
+}
+
+function CommandScreenCardView({
+  ix,
+  onResolve,
+  onDismiss,
+  onCloseBlockedAgent,
+  resolvedTapGuard,
+}: CommandScreenCardProps & { resolvedTapGuard?: TapGuardHandle }) {
   const d = ix.dialog;
   const ask = commandAsk(d) ?? { command: d?.command ?? "", deadlineAllows: false };
   const pair = allowDeny(d);
   const options = d?.options ?? [];
   const [busy, setBusy] = useState<string | null>(null);
-  const go = async (body: Record<string, unknown>, key: string) => {
+  const pending = useRef(false);
+  const run = async (key: string, action: () => Promise<unknown> | void) => {
+    if (pending.current) return;
+    pending.current = true;
     setBusy(key);
-    await resolve(ix, body);
-    setBusy(null);
+    try {
+      await action();
+    } finally {
+      pending.current = false;
+      setBusy(null);
+    }
   };
+  const go = (body: Record<string, unknown>, key: string) =>
+    run(key, () => (onResolve ? onResolve(body) : resolve(ix, body)));
+  const handleDismiss =
+    onDismiss === null || (onDismiss === undefined && ix.no_hand_back)
+      ? undefined
+      : () => void (onDismiss ? run("dismiss", onDismiss) : go({ dismiss: true }, "dismiss"));
   // digits pick the prompt's options by place, as the terminal reads them; Enter allows, as on the permission card, and
   // Deny stays an explicit press
   const keys = useCardKeys({
@@ -41,22 +85,21 @@ export function CommandScreenCard({ ix }: { ix: Interaction }) {
       void go({ option: pair.allow.key }, pair.allow.key);
     },
   });
-  const tapGuard = useChatCardTapGuard(ix);
   return (
     <Card
       kicker={t("chat-interactions.permission_kicker")}
       title={t("chat-commandask.title", { agent: agentLabel({ agent: ix.agent, agent_label: ix.agent_label }) })}
       cardKeys={keys}
-      tapGuard={tapGuard}
-      onDismiss={() => go({ dismiss: true }, "dismiss")}
+      tapGuard={resolvedTapGuard}
+      onDismiss={handleDismiss}
       busy={busy !== null}
       footer={<div className="flex w-full min-w-0 flex-col gap-2">
         {pair ? (
           <span className="flex w-full min-w-0 items-center justify-between gap-2">
-            <Button tone="quiet" busy={busy === pair.deny.key} disabled={busy !== null} onClick={() => go({ option: pair.deny.key }, pair.deny.key)}>
+            <Button tone="quiet" busy={busy === pair.deny.key} disabled={busy !== null} onClick={() => void go({ option: pair.deny.key }, pair.deny.key)}>
               {t("chat-interactions.deny")}
             </Button>
-            <Button tone="primary" busy={busy === pair.allow.key} disabled={busy !== null} onClick={() => go({ option: pair.allow.key }, pair.allow.key)}>
+            <Button tone="primary" busy={busy === pair.allow.key} disabled={busy !== null} onClick={() => void go({ option: pair.allow.key }, pair.allow.key)}>
               {t("chat-interactions.allow")}
               {keys.focused && <Kbd>Enter</Kbd>}
             </Button>
@@ -64,7 +107,11 @@ export function CommandScreenCard({ ix }: { ix: Interaction }) {
         ) : (
           <span className="text-[11.5px] text-ink-3">{t("chat-interactions.screen_hint")}</span>
         )}
-        <CloseBlockedAgent ix={ix} disabled={busy !== null} />
+        {onCloseBlockedAgent === undefined ? (
+          <CloseBlockedAgent ix={ix} disabled={busy !== null} />
+        ) : onCloseBlockedAgent ? (
+          <ControlledCloseBlockedAgent disabled={busy !== null} onClose={onCloseBlockedAgent} />
+        ) : null}
       </div>}
     >
       <CommandAskBody ask={ask} />
@@ -76,7 +123,7 @@ export function CommandScreenCard({ ix }: { ix: Interaction }) {
               type="button"
               disabled={busy !== null}
               data-tap-answer
-              onClick={() => go({ option: o.key }, o.key)}
+              onClick={() => void go({ option: o.key }, o.key)}
               className="touch-hit -mx-1.5 flex items-start gap-2 rounded-control px-1.5 py-1.5 text-left transition-colors hover:bg-hover disabled:opacity-60"
             >
               <span className="mt-[1px] flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-[5px] bg-field px-1 font-mono text-[10.5px] text-ink-2 shadow-hairline">{o.key}</span>
@@ -91,6 +138,34 @@ export function CommandScreenCard({ ix }: { ix: Interaction }) {
         </div>
       )}
     </Card>
+  );
+}
+
+function ControlledCloseBlockedAgent({ disabled, onClose }: { disabled: boolean; onClose: () => Promise<unknown> | void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const pending = useRef(false);
+  const close = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setClosing(true);
+    try {
+      await onClose();
+      setConfirming(false);
+    } finally {
+      pending.current = false;
+      setClosing(false);
+    }
+  };
+  if (!confirming) return <Button className="min-h-11" disabled={disabled} onClick={() => setConfirming(true)}>{t("chat-interactions.close_agent")}</Button>;
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="text-ink-2">{t("chat-interactions.close_agent_hint")}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button className="min-h-11" disabled={disabled || closing} onClick={() => setConfirming(false)}>{t("chat-interactions.close_agent_cancel")}</Button>
+        <Button className="min-h-11" tone="danger" busy={closing} disabled={disabled || closing} onClick={() => void close()}>{t("chat-interactions.close_agent_confirm")}</Button>
+      </div>
+    </div>
   );
 }
 

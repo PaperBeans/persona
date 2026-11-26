@@ -22,7 +22,7 @@ let root: Root;
 const flush = async () => {
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
-const row = () => host.querySelector<HTMLAnchorElement>('a[title="Persona 的主对话"]')!;
+const row = () => host.querySelector<HTMLAnchorElement>('a[aria-description="Persona 的主对话"]')!;
 const hint = () => row().querySelector("[data-persona-chord]")?.textContent ?? null;
 
 beforeEach(() => {

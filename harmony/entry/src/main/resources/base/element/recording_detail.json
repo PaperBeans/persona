@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "recording_detail_ask",
+      "value": "Ask Persona"
+    },
+    {
+      "name": "recording_detail_folder_access",
+      "value": "Persona, the AI twin and the agents on your computers can all read this folder directly."
+    },
+    {
+      "name": "recording_facts_instruction",
+      "value": "Write what Persona should always take as true about “{name}”. Persona reads this but never changes it."
+    },
+    {
+      "name": "recording_facts_delete",
+      "value": "Delete Confirmed Facts"
+    },
+    {
+      "name": "recording_facts_edit",
+      "value": "Edit Confirmed Facts"
+    },
+    {
+      "name": "recording_facts_deleted",
+      "value": "Confirmed facts deleted"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedAgentsDisplay } from "../../lib/agents-display";
+import { setToken } from "../../lib/api";
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
   g.ResizeObserver ??= class {
@@ -69,6 +70,8 @@ let root: Root;
 beforeEach(() => {
   localStorage.clear();
   reset();
+  // Establish the fixture's credential before seeding: a later first credential read resets the display store.
+  setToken("agents-filter-fixture");
   // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
   seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   resetAgentListFilters();
@@ -157,6 +160,8 @@ describe("Agents list Filter menu (#4397) on the title row, the search in ⌘K (
     expect(rows[0].getAttribute("data-pinned")).toBe("true");
     expect(rows[0].textContent).toContain("Mac Studio");
     expect(rows[0].textContent).toContain("orca");
+    expect(rows[0].textContent).not.toContain("Codex");
+    expect(rows[1].textContent).not.toContain("Claude Code");
 
     // a facet page: pick one machine, the menu stays open and the chip appears
     await openFilterMenu();

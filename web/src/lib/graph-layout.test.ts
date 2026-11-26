@@ -194,4 +194,130 @@ describe("tree layout: wide leaf runs fold into columns", () => {
     (g as { layout?: string }).layout = "layered";
     expect(layOutGraph(g, [], { maxLeafRows: 6 })).toEqual(layOutGraph(g));
   });
+
+  for (const direction of ["right", "down"] as const) {
+    it(`keeps a mixed named group (non-leaf + wide leaves) in one column so its frame encloses no non-member descendants, ${direction}`, () => {
+      const g: LayoutGraph = {
+        direction,
+        nodes: [
+          { id: "root" },
+          { id: "svc0", group: "Services" },
+          { id: "sub0" },
+          { id: "sub1" },
+          ...Array.from({ length: 8 }, (_, i) => ({ id: `svc${i + 1}`, group: "Services" })),
+          ...Array.from({ length: 8 }, (_, i) => ({ id: `w${i}`, group: "Workers" })),
+        ],
+        edges: [
+          { from: "root", to: "svc0" },
+          { from: "svc0", to: "sub0" },
+          { from: "svc0", to: "sub1" },
+          ...Array.from({ length: 8 }, (_, i) => ({ from: "root", to: `svc${i + 1}` })),
+          ...Array.from({ length: 8 }, (_, i) => ({ from: "root", to: `w${i}` })),
+        ],
+      };
+      const got = layOutGraph(g, [], { maxLeafRows: 6 });
+      apart(got.at);
+      const col = (p: [number, number]) => (direction === "right" ? p[0] : p[1]);
+      // Every member of the mixed group stays at depth 1 so its frame never spans into svc0's descendants at depth 2.
+      for (let i = 0; i <= 8; i++) expect(col(got.at[`svc${i}`])).toBe(1);
+      expect(col(got.at.sub0)).toBe(2);
+      expect(col(got.at.sub1)).toBe(2);
+      // The pure-leaf sibling group beside it still packs into multiple columns.
+      expect(new Set(Array.from({ length: 8 }, (_, i) => col(got.at[`w${i}`])))).toEqual(new Set([1, 2]));
+      // No frame bounding box encloses any non-member node.
+      for (const frame of got.frames) {
+        const members = new Set(frame.members);
+        const xs = frame.members.map((id) => got.at[id][0]);
+        const ys = frame.members.map((id) => got.at[id][1]);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        for (const [id, [x, y]] of Object.entries(got.at)) {
+          if (members.has(id)) continue;
+          const inside = x >= minX - 1e-9 && x <= maxX + 1e-9 && y >= minY - 1e-9 && y <= maxY + 1e-9;
+          expect(inside, `node ${id} should not fall inside frame ${frame.group}`).toBe(false);
+        }
+      }
+    });
+  }
+});
+
+describe("layered layout: groupByTitle keeps same-group nodes contiguous per layer", () => {
+  const multiParentGroups = (direction: "right" | "down"): LayoutGraph => ({
+    layout: "layered",
+    direction,
+    nodes: [
+      { id: "gw1" }, { id: "gw2" }, { id: "gw3" }, { id: "gw4" },
+      { id: "a1", group: "Auth" },
+      { id: "b1", group: "Billing" },
+      { id: "a2", group: "Auth" },
+      { id: "b2", group: "Billing" },
+    ],
+    edges: [
+      { from: "gw1", to: "a1" },
+      { from: "gw2", to: "b1" },
+      { from: "gw3", to: "a2" },
+      { from: "gw4", to: "b2" },
+    ],
+  });
+
+  for (const direction of ["right", "down"] as const) {
+    it(`aggregates interleaved multi-parent groups into one contiguous frame each, ${direction}`, () => {
+      const got = layOutGraph(multiParentGroups(direction), [], { groupByTitle: true });
+      const slot = (id: string) => (direction === "right" ? got.at[id][1] : got.at[id][0]);
+      const layer = (id: string) => (direction === "right" ? got.at[id][0] : got.at[id][1]);
+      expect(got.frames).toEqual([
+        { group: "Auth", members: ["a1", "a2"] },
+        { group: "Billing", members: ["b1", "b2"] },
+      ]);
+      // Auth sits together at consecutive unit slots, followed by a 0.25 group gap before Billing.
+      expect(layer("a1")).toBe(1);
+      expect(layer("a2")).toBe(1);
+      expect(slot("a2") - slot("a1")).toBeCloseTo(1, 9);
+      expect(slot("b1") - slot("a2")).toBeCloseTo(1.25, 9);
+      expect(slot("b2") - slot("b1")).toBeCloseTo(1, 9);
+      // Upstream gateways follow the aggregated group order so edges do not cross.
+      expect(slot("gw1")).toBeLessThan(slot("gw3"));
+      expect(slot("gw3")).toBeLessThan(slot("gw2"));
+      expect(slot("gw2")).toBeLessThan(slot("gw4"));
+    });
+  }
+
+  it("prevents an ungrouped node from splitting a named group across different parents", () => {
+    const g: LayoutGraph = {
+      layout: "layered",
+      nodes: [
+        { id: "r1" }, { id: "r2" }, { id: "r3" }, { id: "r4" },
+        { id: "a1", group: "Workers" },
+        { id: "plain" },
+        { id: "a2", group: "Workers" },
+        { id: "b1", group: "Storage" },
+      ],
+      edges: [
+        { from: "r1", to: "a1" },
+        { from: "r2", to: "plain" },
+        { from: "r3", to: "a2" },
+        { from: "r4", to: "b1" },
+      ],
+    };
+    const got = layOutGraph(g, [], { groupByTitle: true });
+    expect(got.frames).toEqual([
+      { group: "Workers", members: ["a1", "a2"] },
+      { group: "Storage", members: ["b1"] },
+    ]);
+    expect(got.at.a2[1] - got.at.a1[1]).toBeCloseTo(1, 9);
+    expect(got.at.plain[1]).toBeGreaterThan(got.at.a2[1]);
+    expect(got.at.b1[1]).toBeGreaterThan(got.at.plain[1]);
+  });
+
+  it("preserves the cross-platform shared layered spec when groupByTitle is omitted", () => {
+    const defaultGot = layOutGraph(multiParentGroups("right"));
+    expect(defaultGot.frames).toEqual([
+      { group: "Auth", members: ["a1"] },
+      { group: "Billing", members: ["b1"] },
+      { group: "Auth", members: ["a2"] },
+      { group: "Billing", members: ["b2"] },
+    ]);
+  });
 });

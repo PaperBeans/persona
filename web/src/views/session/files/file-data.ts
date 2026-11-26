@@ -1,7 +1,8 @@
 // What the file viewer's views share: a binary file's bytes and the code coloring's classes. Kept out of FileView,
 // which imports the notebook and Office views, so they never import it back.
 import { fileDownloadURL } from "../../../lib/api";
-import { base64Bytes, type FileContent, type TokenKind } from "../../../lib/files";
+import { base64Bytes, type FileContent } from "../../../lib/files";
+import type { TokenKind } from "../../../lib/files-syntax";
 import { t } from "../../../i18n";
 
 /** A binary file's whole bytes: from file/download when the hub streams it, else the base64 an older hub sent. */

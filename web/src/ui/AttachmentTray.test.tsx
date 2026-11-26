@@ -51,6 +51,14 @@ describe("AttachmentTray", () => {
     expect(onRemove).toHaveBeenCalledWith("a");
   });
 
+  it("keeps a read-only picture opener's label and omits remove", () => {
+    const onOpen = vi.fn();
+    act(() => root.render(<AttachmentTray attachments={[{ id: "a", name: "a.png", url: "blob:a" }]} onOpen={onOpen} openLabel={(name) => `View ${name}`} />));
+    act(() => button("View a.png").click());
+    expect(onOpen).toHaveBeenCalledWith("a");
+    expect(button("移除 a.png")).toBeNull();
+  });
+
   it("gives the ✕ the corner's tap area, reaching further into a file's tile only", () => {
     act(() => root.render(<AttachmentTray attachments={[{ id: "a", name: "a.png", url: "blob:a" }, { id: "b", name: "b.txt" }]} onRemove={() => {}} />));
     const pic = button("移除 a.png").classList;
@@ -65,10 +73,10 @@ describe("AttachmentTray", () => {
   it("keeps the corner's area out of a picture's middle and off the row above", () => {
     const css = readFileSync(join(__dirname, "../styles.css"), "utf8");
     const r = cornerReach(css);
-    // a picture is size-14 (56 px); its ✕ is size-4.5 (18 px) at top-0.5 right-0.5: x 36 to 54, y 2 to 20
-    expect(36 - r.left).toBeGreaterThan(28);
-    expect(20 + r.down).toBeLessThan(28);
-    // the tiles' rows are gap-1.5 (6 px) apart: it reaches into the gap, not the tile above it
+    // The 52 px photo has an 18 px control at top-0.5 right-px: x 33 to 51, y 2 to 20.
+    expect(33 - r.left).toBeGreaterThan(26);
+    expect(20 + r.down).toBeLessThanOrEqual(26);
+    // The standalone tray's 6 px row gap still contains the outward reach.
     expect(2 - r.up).toBe(-6);
     // and right as far as touch-hit's 44 px square around the ✕ does, no further (it must not make a page scroll)
     expect(r.right).toBe((44 - 18) / 2);

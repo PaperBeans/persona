@@ -105,7 +105,7 @@ func (n *Node) withCodexAppLauncher(list []proto.Launcher) (out []proto.Launcher
 	if _, err := codexAppCLI(); err != nil {
 		return list, false
 	}
-	return append(slices.Clone(list), proto.Launcher{Name: codexAppLauncher, Source: codexAppSource, Agent: "codex"}), true
+	return append(slices.Clone(list), proto.Launcher{Name: codexAppLauncher, Source: codexAppSource, Agent: "codex", DisplayName: "Codex App"}), true
 }
 
 // startInCodexApp starts a new chat in the Codex App for a start with its launcher; handled false for any other start
@@ -140,6 +140,9 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 		return nil, refusal("codex_needs_prompt", "在 Codex App 里新开对话需要第一条消息，这次没有发送。", nil)
 	}
 	model, effort := strings.TrimSpace(p.Model), strings.TrimSpace(p.Effort)
+	if (model != "" || effort != "") && !codexDesktopBusAvailable(home) {
+		return nil, codexDesktopUnavailable(ctx)
+	}
 	if model != "" && !proto.ValidModelID(model) {
 		return nil, fmt.Errorf("invalid model %q", model)
 	}
@@ -151,6 +154,12 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 	dir, err := n.codexAppStartDir(p.Cwd, cmp.Or(prompt, nameHint))
 	if err != nil {
 		return nil, err
+	}
+	backend := backendLaunchFrom(ctx)
+	if backend != nil {
+		if err := backend.beforeDispatch(""); err != nil {
+			return nil, err
+		}
 	}
 	var thread string
 	if projectID == "" {
@@ -171,6 +180,11 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 		Launcher: codexAppLauncher, Status: proto.StatusIdle, StartedByPersona: true, UpdatedAt: time.Now().UTC()}
 	n.state.put(s.SessionID, sessionState{Launcher: codexAppLauncher, Cwd: dir, StartedAt: s.UpdatedAt,
 		DesktopPendingModel: model, DesktopPendingEffort: effort})
+	if backend != nil {
+		if receiptErr := backend.executor.recordLaunchSession(s.SessionID); receiptErr != nil {
+			return nil, receiptErr
+		}
+	}
 	if err != nil {
 		return s, desktopCreatedError(s, err, false)
 	}

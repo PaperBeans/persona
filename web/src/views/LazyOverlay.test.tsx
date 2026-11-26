@@ -109,7 +109,7 @@ describe("the first screen's dialogs", () => {
   it.each([
     ["./machines/AddComputerEntry.tsx", "./AddComputer"],
     ["./assistant/Readiness.tsx", "../machines/AddComputer"],
-    ["./assistant/Persona.tsx", "./LookUpload"],
+    ["./assistant/PersonaPicker.tsx", "./LookUpload"],
     ["./chat/ModelPill.tsx", "./SessionModelPanel"],
   ])("%s loads %s on demand", (file, dialog) => {
     const source = read(file);

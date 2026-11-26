@@ -1,20 +1,26 @@
 // Machines: every computer's CPU / memory / network now and over the last hour (docs/server/machines.md), as Insight Cards. "Add computer"
 // (feature machines_add) adds one from here, and a computer waiting to be confirmed (trust pending) says so on its card.
-import { memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { storedValue, storeValue } from "../lib/compatibility";
 import { lazyPage } from "../lib/lazy-page";
-import { concernOf, launcherFailing, machineAlerts, orderMachines, type AlertKind, type LauncherHealthRecord } from "../lib/machine-alerts";
+import { useScrollMemory } from "../lib/scroll-memory";
+import { openUsageMap, takeUsageFocus } from "../lib/usage-map-link";
+import { alertLabel, concernOf, launcherFailing, loadDefinition, machineAlerts, orderMachines, type AlertKind, type LauncherHealthRecord } from "../lib/machine-alerts";
 import { t as tr } from "../i18n";
 import { canAddComputer, isPending, machineErrorText, neverConnected } from "../lib/add-computer";
 import { api, enc, errorText } from "../lib/api";
 import { readinessChanged } from "../lib/readiness";
+import "./machines/machine-views.css";
+import { ENGINE_SECTION_ID } from "./machines/engine-anchor";
+import { openNewAgent } from "../lib/new-agent";
+import { stateCount } from "../lib/state-labels";
 import { stateOf } from "../lib/format";
 import { hubLabel, routeText } from "../lib/mesh";
 import { machineDeployment } from "../lib/machine-deploy";
 import { classifyConnection } from "../lib/node-health";
-import { href, navigate, onLinkClick, type Route } from "../lib/router";
-import { currentRoster, managerOrder, multiManager, offlineManagerOf, useRoster } from "../lib/managers";
-import { defaultManager, withManager } from "../lib/manager-choice";
+import { href, navigate, onLinkClick, useRoute, type Route } from "../lib/router";
+import { hostedManagerAttention, hostedManagersForMachine, offlineManagerOf, useRoster, type Manager } from "../lib/managers";
+import { useMachineMetrics } from "../lib/machine-metrics";
 import { onHubEvent, useStore } from "../lib/store";
 import { useFullAgentSessions } from "../lib/sessions";
 import { documentPage, visiblePoll } from "../lib/visible-poll";
@@ -22,9 +28,8 @@ import type { Machine, MachineMetrics, Session } from "../lib/types";
 import { Button, cx, EASE, IconButton, Loading, toast } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { Empty } from "./assistant/parts";
-import { AddComputer, type PendingComputer } from "./machines/AddComputer";
-import { HelpDialog } from "./assistant/Readiness";
-import { MachineDeploy } from "./machines/MachineDeploy";
+import { lazyDialog, lazyOverlay } from "./LazyOverlay";
+import type { PendingComputer } from "./machines/AddComputer";
 import { MachineMetricsSummary } from "./machines/MachineMetricsSummary";
 import { AlertChips } from "./machines/MachineAlertChips";
 import { MachineAlertSheet } from "./machines/MachineAlertSheet";
@@ -35,20 +40,20 @@ import { useScopedMachines } from "../lib/current-assistant";
 import { t } from "../i18n";
 import { addTokens, formatTokens, hitRate, percentText, totalTokens, type UsageTokens } from "../lib/tokens";
 
-// Lazy-loaded on demand when the user switches to the Ports & Processes view (#12352).
-const PortsProcessesPanel = lazyPage(() => import("./machines/PortsProcessesPanel").then((m) => m.PortsProcessesPanel));
-// Lazy-loaded on demand when the user switches to the Toolchain view (#12350).
-const ToolchainPanel = lazyPage(() => import("./machines/ToolchainPanel").then((m) => m.ToolchainPanel));
-// Lazy-loaded on demand when the user switches to the Services & Containers view (#12353).
-const ServicesPanel = lazyPage(() => import("./machines/ServicesPanel").then((m) => m.ServicesPanel));
-// Lazy-loaded read-only file browser chunk (keeps Machines initial bundle and first-screen budget untouched).
-const FileBrowserPanel = lazyPage(() => import("./machines/FileBrowserPanel").then((m) => m.FileBrowserPanel));
-// Lazy-loaded on demand when the user switches to the Network Diagnostics view (#12351).
-const NetworkPanel = lazyPage(() => import("./machines/NetworkPanel").then((m) => m.NetworkPanel));
-// Lazy-loaded on demand when the user switches to the Storage view (#12349).
-const StoragePanel = lazyPage(() => import("./machines/StoragePanel").then((m) => m.StoragePanel));
-
+const MachineDetail = lazyPage(() => import("./machines/MachineDetail").then(m => m.MachineDetail));
 const ResourcesPanel = lazyPage(() => import("./machines/ResourcesPanel").then((m) => m.ResourcesPanel));
+
+const NOOP = () => {};
+type MachineDeployProps = ComponentProps<typeof import("./machines/MachineDeploy").MachineDeploy>;
+
+// Loaded strictly on demand when the user opens Add computer or Help, or when a card has a deployment banner (no idle preload).
+const AddComputer = lazyDialog(() => import("./machines/AddComputer").then((m) => m.AddComputer));
+const HelpDialog = lazyOverlay(() => import("./assistant/ReadinessHelp").then((m) => m.HelpDialog));
+const MachineDeploy = lazyOverlay<MachineDeployProps & { onClose: () => void }>(() =>
+  import("./machines/MachineDeploy").then(({ MachineDeploy: Deploy }) => function LazyMachineDeploy(props: MachineDeployProps & { onClose: () => void }) {
+    return <Deploy machine={props.machine} className={props.className} onDetails={props.onDetails} hostedManagers={props.hostedManagers} />;
+  }),
+);
 
 export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // with several assistants, the current one's computers (docs/assistant/managers.md "Clients"); one: as before
@@ -60,25 +65,41 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // Hubs without machines_add get the plain how-to instead of the in-app flow.
   const [helping, setHelping] = useState(false);
   const [answering, setAnswering] = useState("");
-  const [metrics, setMetrics] = useState<MachineMetrics[] | null>(null);
-  const [error, setError] = useState("");
+  const { metrics, error } = useMachineMetrics();
   // Each computer's agents. A hub that pages its Agents list pushes no sessions, so the store holds none of them: they
   // are read as the Agents list reads them (each parent once, folded; the assistant's conversations are no agents),
   // and until that read is in, a card says so rather than "No agents running".
   const full = useFullAgentSessions();
   const agents = useMemo(() => agentCounts(full.sessions), [full.sessions]);
   const known: AgentsKnown = full.loaded ? "yes" : full.error ? "failed" : "loading";
-  const [view, setView] = useState<MachinesView>(() => {
-    const saved = storedValue(VIEW_KEY);
-    return saved === "capabilities" || saved === "toolchain" || saved === "files" || saved === "services" || saved === "storage" ? saved : "cards";
-  });
+  const route = useRoute();
+  const [savedView, setView] = useState<MachinesView>(() => fleetChoice(storedValue(VIEW_KEY)));
+  const choice = fleetChoice(history.state?.fleetView ?? savedView);
+  const view = machines.length < 2 && choice === "capabilities" ? "cards" : choice;
+  const fleetView = view !== "resources";
   const chooseView = (v: MachinesView) => {
-    if (v === "cards" || v === "capabilities" || v === "toolchain" || v === "services" || v === "files" || v === "storage") storeValue(VIEW_KEY, v);
+    history.replaceState({ ...history.state, fleetView: v }, "");
+    if (v !== "resources") {
+      storeValue(VIEW_KEY, v);
+    }
     setView(v);
   };
-  // The alert sheet (#8037): one for the page, outside every card, on one computer's alert.
-  const [sheet, setSheet] = useState<{ mid: string; kind: AlertKind } | null>(null);
-  const openAlert = useCallback((mid: string, kind: AlertKind) => setSheet({ mid, kind }), []);
+  const [sheet, setSheet] = useState<{ mid: string; kind: Exclude<AlertKind, "disk"> } | null>(null);
+  useEffect(() => {
+    if (route.name !== "machines") return;
+    const req = takeUsageFocus();
+    if (req) navigate({ name: "machine", mid: req.mid, subview: "storage", mode: "reclaim" }, true);
+  }, [route.name]);
+  const legacyEngine = route.name === "machine" && !route.subview && location.hash === "#" + ENGINE_SECTION_ID ? route.mid : null;
+  useEffect(() => {
+    if (legacyEngine) navigate({ name: "machine", mid: legacyEngine, subview: "management" }, true);
+  }, [legacyEngine]);
+  const openAlert = useCallback((mid: string, kind: AlertKind) => {
+    if (kind === "disk") {
+      setSheet(null);
+      openUsageMap(mid);
+    } else setSheet({ mid, kind });
+  }, []);
   const records = useLauncherHealth();
   const issues = useMemo(() => {
     const by = new Map<string, number>();
@@ -86,42 +107,22 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     return by;
   }, [records.list]);
   const launcherIssues = useCallback((mid: string) => issues.get(mid) ?? 0, [issues]);
+  // Co-located Manager assistants per machine, computed once per roster/machine change.
+  const hostedByMachine = useMemo(() => {
+    const map = new Map<string, readonly Manager[]>();
+    if (!roster) return map;
+    for (const m of machines) {
+      const list = hostedManagersForMachine(roster, m);
+      if (list.length) map.set(m.id, list);
+    }
+    return map;
+  }, [roster, machines]);
+
   // the cards with something wrong first, as the apps order them (MachineConcern)
   const ordered = useMemo(() => orderMachines(machines, (m) => {
     const mm = metrics?.find((x) => x.machine_id === m.id);
-    return concernOf(m, machineAlerts({ machine: m, metrics: mm, launchers: issues.get(m.id) ?? 0, managerOffline: !!offlineManagerOf(roster, m) }), agents.get(m.id)?.[2] ?? 0);
+    return concernOf(m, machineAlerts({ machine: m, metrics: mm, launchers: issues.get(m.id) ?? 0, managerOffline: !!offlineManagerOf(roster, m) }), agents.get(m.id)?.needsYou ?? 0);
   }), [machines, metrics, issues, roster, agents]);
-
-  useEffect(() => {
-    let dead = false;
-    const previous = new Map<string, MachineMetrics[]>();
-    const load = async () => {
-      const roster = currentRoster();
-      const ids = multiManager(roster) ? managerOrder(roster).filter((m) => m.online).map((m) => m.id) : [defaultManager()];
-      const results = await Promise.allSettled(ids.map((id) => api<{ machines: MachineMetrics[] }>(withManager("/metrics", id))));
-      if (dead) return;
-      const failed = results.find((r) => r.status === "rejected");
-      if (failed && results.every((r) => r.status === "rejected")) {
-        setError(errorText(failed.reason));
-        return;
-      }
-      const merged = new Map<string, MachineMetrics>();
-      results.forEach((r, i) => {
-        if (r.status === "fulfilled") previous.set(ids[i], r.value.machines ?? []);
-        for (const m of previous.get(ids[i]) ?? []) {
-          if (!merged.has(m.machine_id)) merged.set(m.machine_id, m);
-        }
-      });
-      setMetrics([...merged.values()]);
-      setError("");
-    };
-    // Right away and every 10 s while the tab is shown; a hidden tab asks nothing and loads again when shown.
-    const stop = visiblePoll(() => void load(), 10_000, documentPage);
-    return () => {
-      dead = true;
-      stop();
-    };
-  }, []);
 
   // Stable callbacks, so the memoized cards keep their props when the page renders again.
   const reconnect = useCallback(async (id: string): Promise<void> => {
@@ -148,6 +149,41 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   }, []);
   const addAgain = useCallback((again: PendingComputer) => setAdding({ again }), []);
 
+  if (route.name === "machine") {
+    return <div className="@container h-full">
+      <div className="flex h-full min-w-0">
+        {machines.length > 1 && <nav aria-label={t("machines.title")} className="hidden w-52 shrink-0 overflow-y-auto border-r border-line p-2 @3xl:block">
+          <a className="flex min-h-11 items-center gap-2 px-2 text-label font-medium text-ink-2 hover:text-ink"
+            href={href({ name: "machines" })} onClick={e => onLinkClick(e, { name: "machines" })}>
+            <Icon name="chevronLeft" size={14} />{t("machines.title")}
+          </a>
+          {ordered.map(m => {
+            const to = { ...route, mid: m.id, mode: undefined, path: m.id === route.mid ? route.path : undefined };
+            const counts = agents.get(m.id);
+            const alert = machineAlerts({ machine: m, metrics: metrics?.find(mm => mm.machine_id === m.id),
+              launchers: launcherIssues(m.id), managerOffline: !!offlineManagerOf(roster, m) })[0];
+            return <a key={m.id} href={href(to)} onClick={e => onLinkClick(e, to)} aria-current={m.id === route.mid ? "page" : undefined}
+              className="block rounded-control px-3 py-2 text-label hover:bg-hover aria-[current=page]:bg-field">
+              <span className="block truncate font-medium text-ink">{m.name}</span>
+              <span className="flex items-center gap-1.5 text-submeta text-ink-2">
+                <span aria-hidden className={cx("size-2 rounded-full", m.online ? "bg-green" : "bg-ink-3")} />
+                {t(m.online ? "machines.online" : "machines.offline")}
+              </span>
+              {known === "yes" && !!counts?.needsYou && <span className="block text-submeta text-orange">{stateCount("needs_you", counts.needsYou)}</span>}
+              {known === "yes" && !!counts?.working && <span className="block text-submeta text-ink-2">{stateCount("working", counts.working)}</span>}
+              {alert && alert.kind !== "offline" && <span className="block text-submeta text-orange">{alertLabel(alert)}</span>}
+            </a>;
+          })}
+        </nav>}
+        <div className="min-w-0 flex-1">
+          <Suspense fallback={<Loading />}><MachineDetail key={route.mid} mid={route.mid}
+            subview={route.subview ?? (legacyEngine ? "management" : route.range ? "monitoring" : "work")} mode={route.mode} onToggleSidebar={onToggleSidebar} /></Suspense>
+        </div>
+      </div>
+    </div>;
+  }
+
+  const fleetWidth = machines.length === 1 ? "max-w-3xl" : "max-w-[1560px]";
   const add = (
     <Button tone="primary" icon="plus" onClick={() => (canAdd ? setAdding({ again: null }) : setHelping(true))}>
       {t("machines.add")}
@@ -160,24 +196,31 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         <IconButton icon="sidebar" label={t("machines.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <h1 className="text-[14px] font-semibold text-ink">{t("machines.title")}</h1>
         <div className="flex-1" />
-        {<Segmented compact value={view} onChange={chooseView} label={t("machines.view_label")} options={[{ v: "resources", label: t("resources.title") }, { v: "cards", label: t("machines.view_cards") }, { v: "capabilities", label: t("machines.view_capabilities") }, { v: "procs", label: t("machines.view_procs") }, { v: "services", label: t("machines.view_services") }, { v: "files", label: t("machines.view_files") }, { v: "toolchain", label: t("machines.view_toolchain") }, { v: "network", label: t("machines-network.tab_label") }, { v: "storage", label: t("machines.view_storage") }]} />}
-        <span className="text-[11.5px] text-ink-3 max-sm:hidden">{t("machines.refresh_interval", { seconds: 10 })}</span>
         {machines.length > 0 && canAdd && add}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <FleetScroll view={view}>
+        <div className={cx("mx-auto px-5 pt-3 sm:px-8", fleetWidth)}>
+          <div className="machine-views w-fit max-w-full">
+            <Segmented<MachinesView> compact wrap value={view} onChange={chooseView} label={t("machines.view_label")} options={[
+              { v: "cards", label: t("machines.view_cards") },
+              ...(machines.length > 1 ? [{ v: "capabilities" as const, label: t("machines.view_capabilities") }] : []),
+              { v: "resources", label: t("resources.assistant_resources") },
+            ]} />
+          </div>
+        </div>
         {/* two columns, three on a wide screen: the cards used to stop at 1000px and leave half a wide window empty; a full-row item takes col-span-full, since md:col-span-2 alone leaves a third of the row to the next card */}
-        <div className="mx-auto grid max-w-[1560px] grid-cols-1 gap-3 px-5 py-6 sm:px-8 md:grid-cols-2 2xl:grid-cols-3">
-          {view !== "resources" && <TodayTokens machines={machines} metrics={metrics} />}
+        <div className={cx("mx-auto grid grid-cols-1 gap-3 px-5 py-6 sm:px-8", fleetWidth, machines.length !== 1 && "md:grid-cols-2 2xl:grid-cols-3")}>
+          {fleetView && machines.length > 1 && <TodayTokens machines={machines} metrics={metrics} />}
           {view === "resources" && <div className="col-span-full"><Suspense fallback={<Loading />}><ResourcesPanel /></Suspense></div>}
-          {!metrics && !error && <Loading />}
+          {fleetView && !metrics && !error && (!loaded || machines.length > 0) && <Loading />}
           {/* a failed refresh says so even with the last numbers on screen (iOS / Android keep their notice up) */}
-          {error && (
+          {fleetView && error && (
             <p role="alert" className="flex items-start gap-2 rounded-[8px] bg-red-tint px-3 py-2 text-[12.5px] text-red col-span-full">
               <Icon name="warning" size={14} className="mt-px shrink-0" />
               <span className="min-w-0 break-words">{metrics ? t("machines.refresh_failed_stale", { error, seconds: 10 }) : t("machines.load_failed", { error })}</span>
             </p>
           )}
-          {loaded && machines.length === 0 && (metrics || error) && (
+          {view !== "resources" && loaded && machines.length === 0 && (
             <div className="col-span-full">
               <Empty icon="machine" title={error && !metrics ? t("machines.empty_unavailable") : t("machines.empty_title")} action={add}>
                 {t("machines.empty_body_add")}
@@ -189,52 +232,14 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               <MachineCapabilities machines={machines} metrics={metrics} launcherIssues={launcherIssues} onAlert={openAlert} />
             </div>
           )}
-          {view === "procs" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <PortsProcessesPanel machines={machines} />
-              </Suspense>
-            </div>
-          )}
-          {view === "toolchain" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <ToolchainPanel machines={machines} />
-              </Suspense>
-            </div>
-          )}
-          {view === "services" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <ServicesPanel machines={machines} />
-              </Suspense>
-            </div>
-          )}
-          {view === "files" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <FileBrowserPanel machines={machines} />
-              </Suspense>
-            </div>
-          )}
-          {view === "network" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <NetworkPanel machines={ordered} />
-              </Suspense>
-            </div>
-          )}
-          {view === "storage" && machines.length > 0 && (
-            <div className="col-span-full">
-              <Suspense fallback={<Loading />}>
-                <StoragePanel machines={machines} />
-              </Suspense>
-            </div>
+          {view === "cards" && machines.length > 0 && (
+            <p className="col-span-full text-submeta text-ink-3">{t("machines.refresh_interval", { seconds: 10 })}</p>
           )}
           {view === "cards" && ordered.map((m, index) => (
               <MachineCard
                 key={m.id}
                 m={m}
+                onlyComputer={machines.length === 1}
                 index={index}
                 metrics={metrics?.find((x) => x.machine_id === m.id)}
                 hub={hubLabel(m, machines)}
@@ -245,15 +250,22 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                 onAnswer={answer}
                 onAddAgain={addAgain}
                 managerOffline={offlineManagerOf(roster, m)?.name}
-                agents={agents.get(m.id)?.[0] ?? 0}
-                working={agents.get(m.id)?.[1] ?? 0}
+                hostedManagers={hostedByMachine.get(m.id) ?? NO_MANAGERS}
+                agents={agents.get(m.id)?.total ?? 0}
+                working={agents.get(m.id)?.working ?? 0}
+                needsYou={known === "yes" ? agents.get(m.id)?.needsYou ?? 0 : undefined}
+                waitingSid={agents.get(m.id)?.waitingSid}
                 known={known}
                 launcherIssues={issues.get(m.id) ?? 0}
                 onAlert={openAlert}
               />
           ))}
+          {/* what load counts, under the cards that show it (#12519; the apps' footnote) */}
+          {view === "cards" && metrics && machines.length > 0 && (
+            <p className="col-span-full px-1 text-submeta leading-relaxed text-ink-3" data-testid="load-definition">{loadDefinition()}</p>
+          )}
         </div>
-      </div>
+      </FleetScroll>
       <AlertSheetHost sheet={sheet} machines={machines} metrics={metrics} sessions={full.sessions} known={known} records={records} launcherIssues={launcherIssues} roster={roster} onKind={openAlert} onClose={() => setSheet(null)} onReconnect={reconnect} />
       <AddComputer open={!!adding} again={adding?.again} onClose={() => setAdding(null)} />
       {helping && <HelpDialog topic="add_computer" machine="" step={null} onClose={() => setHelping(false)} onAction={() => {}} />}
@@ -263,6 +275,7 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
 type CardProps = {
   m: Machine;
+  onlyComputer: boolean;
   index: number;
   metrics: MachineMetrics | undefined;
   hub: string;
@@ -274,9 +287,13 @@ type CardProps = {
   onAddAgain: (again: PendingComputer) => void;
   /** Its manager's name when that manager is offline (several managers): why it is offline, and no Reconnect. */
   managerOffline?: string;
+  /** Installed Manager assistants hosted on this computer, empty when none. */
+  hostedManagers: readonly Manager[];
   /** Its agents that are not offline, and how many of them work; `known`: whether the list they come from is in. */
   agents: number;
   working: number;
+  needsYou?: number;
+  waitingSid?: string;
   known: AgentsKnown;
   /** Launchers failing or blocked on it (docs/server/launcher-health.md). */
   launcherIssues: number;
@@ -289,9 +306,11 @@ type AgentsKnown = "yes" | "loading" | "failed";
 // One computer's card. It is memoized and gets its own computer's agents as numbers: a change to another computer's
 // agents leaves its props as they were, so it (and its Stat, Spark, MachineDeploy) does not render again. Nor does a
 // machines push that only moved last_seen on (sameCard).
-const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, route, canAdd, answering, onReconnect, onAnswer, onAddAgain, managerOffline, agents, working, known, launcherIssues, onAlert }: CardProps) {
+const MachineCard = memo(function MachineCard({ m, onlyComputer, index, metrics: mm, hub, route, canAdd, answering, onReconnect, onAnswer, onAddAgain, managerOffline, hostedManagers, agents, working, needsYou, waitingSid, known, launcherIssues, onAlert }: CardProps) {
   const detail = { name: "machine" as const, mid: m.id };
-  const { expectedDisconnect } = machineDeployment(m);
+  const waiting: Route = waitingSid ? { name: "session", mid: m.id, sid: waitingSid } : detail;
+  const deployment = machineDeployment(m);
+  const { expectedDisconnect } = deployment;
   const pending = isPending(m);
   // why it is offline: the hub's error_code in our words, else from the error text, and what to do
   const coded = pending ? "" : machineErrorText(m.error_code);
@@ -300,33 +319,76 @@ const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, rout
   const alerts = machineAlerts({ machine: m, metrics: mm, launchers: launcherIssues, managerOffline: !!managerOffline }).filter((a) => a.kind !== "mismatch" && a.kind !== "deploy_failed");
   const versions = [m.claude_version && `claude ${m.claude_version}`, m.herdr_version && `herdr ${m.herdr_version}`].filter(Boolean).join(" · ");
   return (
-    <section onClick={(e) => openFromCard(e, detail)} className="cursor-pointer overflow-hidden rounded-card bg-surface shadow-card" style={{ animation: `fade-up 420ms ${EASE} ${index * 60}ms both` }}>
+    <section onClick={(e) => openFromCard(e, detail)} className="cursor-pointer overflow-hidden rounded-card bg-surface shadow-card card-interactive" style={{ animation: `fade-up 420ms ${EASE} ${index * 60}ms both` }}>
       <div className="flex items-start gap-3 px-4 pt-3.5">
         <span className={cx("flex size-9 shrink-0 items-center justify-center rounded-[9px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
           <Icon name="machine" size={16} />
         </span>
-        <a href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="group/title min-w-0 flex-1 rounded-[6px]">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-[14px] font-semibold text-ink group-hover/title:underline">{m.name}</h2>
-            {hub && (
-              <span title={route ? `${hub} · ${route}` : hub} className="inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-field px-1.5 text-[11px] font-medium text-ink-2">
-                <Icon name="hub" size={11} />
-                {hub}
+        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2">
+          <a href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="group/title min-w-0 grow basis-48 rounded-control">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-[14px] font-semibold text-ink group-hover/title:underline">{m.name}</h2>
+              {hub && (
+                <span title={route ? `${hub} · ${route}` : hub} className="inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-field px-1.5 text-[11px] font-medium text-ink-2">
+                  <Icon name="hub" size={11} />
+                  {hub}
+                </span>
+              )}
+              <span className={cx("inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium", m.online ? "bg-green-tint text-green" : "bg-field text-ink-3")}>
+                <span className={cx("size-1.5 rounded-full", m.online ? "bg-green" : "bg-ink-3")} />
+                {m.online ? t("machines.online") : neverConnected(m) ? t("machines.not_connected_yet") : t("machines.offline")}
               </span>
-            )}
-            <span className={cx("inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[11px] font-medium", m.online ? "bg-green-tint text-green" : "bg-field text-ink-3")}>
-              <span className={cx("size-1.5 rounded-full", m.online ? "bg-green" : "bg-ink-3")} />
-              {m.online ? t("machines.online") : neverConnected(m) ? t("machines.not_connected_yet") : t("machines.offline")}
-            </span>
-          </div>
-          <p className="truncate text-[11.5px] text-ink-3">{[m.system?.name || m.os, m.system?.model, m.system?.cpu].filter(Boolean).join(" · ") || m.hostname}</p>
-        </a>
+            </div>
+            <p className="truncate text-[11.5px] text-ink-3">{[m.system?.name || m.os, m.system?.model, m.system?.cpu].filter(Boolean).join(" · ") || m.hostname}</p>
+          </a>
+          {needsYou !== undefined && needsYou > 0 && (
+            <a href={href(waiting)} onClick={(e) => onLinkClick(e, waiting)}
+              className="inline-flex min-h-11 shrink-0 items-center rounded-control focus-visible:outline-accent">
+              <span className="whitespace-nowrap rounded-full bg-field px-2 py-1 text-submeta font-medium text-attention">
+                {stateCount("needs_you", needsYou)}
+              </span>
+            </a>
+          )}
+        </div>
         {!m.online && !expectedDisconnect && !pending && !managerOffline && (
           <Button tone="secondary" icon="retry" onClick={() => onReconnect(m.id)}>
             {t("machines.reconnect")}
           </Button>
         )}
       </div>
+      {hostedManagers.length > 0 && (
+        <div
+          className={cx("mx-4 mt-2 flex flex-wrap items-center gap-1.5", !m.online && !alerts.length && !pending && !managerOffline && !coded && !connFailure && !m.node_mismatch && !m.deploying && !m.deploy_phase && !m.deploy_error && "mb-3")}
+          data-testid="hosted-managers"
+        >
+          {hostedManagers.map((hm) => {
+            const attention = hostedManagerAttention(hm, m.node_version);
+            const warn = attention !== null;
+            const statusText = attention === "pending_restart"
+              ? t("machines.manager_pending_restart")
+              : attention === "version_lag"
+                ? t("machines.manager_version_lag")
+                : hm.online ? t("machines.online") : t("machines.offline");
+            return (
+              <span
+                key={hm.id}
+                data-hosted-manager={hm.id}
+                data-manager-state={attention ?? (hm.online ? "online" : "offline")}
+                title={[hm.name, statusText, hm.version].filter(Boolean).join(" · ")}
+                className={cx(
+                  "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-submeta font-medium",
+                  warn ? "bg-orange-tint text-orange" : hm.online ? "bg-inset text-ink-2 shadow-hairline" : "bg-field text-ink-3",
+                )}
+              >
+                <Icon name="spark" size={11} className={cx("shrink-0", warn ? "text-orange" : hm.online ? "text-ai" : "text-ink-3")} />
+                <span className={cx("truncate", !warn && hm.online && "text-ink")}>{t("machines.hosted_assistant", { name: hm.name })}</span>
+                <span aria-hidden className={cx("size-1.5 shrink-0 rounded-full", warn ? "bg-orange" : hm.online ? "bg-green" : "bg-ink-3")} />
+                <span className={cx("shrink-0 whitespace-nowrap", !warn && hm.online && "text-green")}>{statusText}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
       {pending && (
         <div className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-[8px] bg-orange-tint px-2.5 py-2 text-[12px] text-ink" data-trust="pending">
           <Icon name="shield" size={14} className="shrink-0 text-orange" />
@@ -376,7 +438,20 @@ const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, rout
       )}
       {/* an offline card has no metrics under them: the chips keep their own room above the footer */}
       <AlertChips alerts={alerts} onOpen={(kind) => onAlert(m.id, kind)} className={m.online ? undefined : "mb-3"} />
-      <MachineDeploy machine={m} className="mt-2" onDetails={() => onAlert(m.id, m.deploy_error ? "deploy_failed" : "mismatch")} />
+      {deployment.visible && (
+        <MachineDeploy machine={m} hostedManagers={hostedManagers} className="mt-2" onDetails={() => onAlert(m.id, m.deploy_error ? "deploy_failed" : "mismatch")} onClose={NOOP} />
+      )}
+      {onlyComputer && !pending && m.online && <div className="flex flex-wrap gap-2 px-4 py-2">
+        <Button tone="primary" className="[@media(pointer:coarse)]:min-h-11" icon="plus" onClick={() => openNewAgent({ machineId: m.id })}>{t("space-page.new_agent")}</Button>
+        {(["files", "storage"] as const).map(subview => {
+          const to = { ...detail, subview };
+          return <a key={subview} href={href(to)} onClick={e => onLinkClick(e, to)}
+            className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-control bg-surface px-3 text-label font-medium text-ink shadow-btn hover:bg-hover [@media(pointer:coarse)]:min-h-11">
+            <Icon name={subview === "files" ? "folder" : "archive"} size={14} stroke={2.1} />
+            {t(subview === "files" ? "machines.view_files" : "machines.view_storage")}
+          </a>;
+        })}
+      </div>}
       <MachineMetricsSummary machine={m} metrics={mm} />
       {/* the gap keeps the state and the versions apart when the versions have to shorten */}
       <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-2 text-[11.5px] text-ink-3">
@@ -390,39 +465,69 @@ const MachineCard = memo(function MachineCard({ m, index, metrics: mm, hub, rout
   );
 }, sameCard);
 
+const NO_MANAGERS: readonly Manager[] = [];
+
 // Every machines push brings new machine objects with last_seen moved on. The card reads last_seen only for whether
 // there is one (neverConnected), so a machine that differs in nothing else draws the same card.
 function sameCard(a: CardProps, b: CardProps): boolean {
-  for (const k of Object.keys(b) as (keyof CardProps)[]) if (k !== "m" && !Object.is(a[k], b[k])) return false;
+  for (const k of Object.keys(b) as (keyof CardProps)[]) {
+    if (k === "m" || k === "hostedManagers") continue;
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  if (!sameHostedManagers(a.hostedManagers, b.hostedManagers)) return false;
   return a.m === b.m || cardKey(a.m) === cardKey(b.m);
+}
+
+function sameHostedManagers(a: readonly Manager[], b: readonly Manager[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!, y = b[i]!;
+    if (x.id !== y.id || x.name !== y.name || x.online !== y.online || x.version !== y.version || !!x.pending_restart !== !!y.pending_restart) return false;
+  }
+  return true;
 }
 
 const cardKey = (m: Machine) => JSON.stringify({ ...m, last_seen: !!m.last_seen });
 
-/** By computer: its agents that are not offline (the assistant's conversations are not agents), and how many of them
- *  work. */
-function agentCounts(list: readonly Session[]): Map<string, readonly [number, number, number]> {
-  const by = new Map<string, [number, number, number]>();
+/** Counts use the same folded session list as the Agents page. */
+function agentCounts(list: readonly Session[]) {
+  const by = new Map<string, { total: number; working: number; needsYou: number; waitingSid?: string }>();
   for (const s of list) {
     if (s.assistant) continue;
-    const st = stateOf(s);
-    if (st === "offline") continue;
-    const n = by.get(s.machine_id) ?? [0, 0, 0];
-    n[0]++;
-    if (st === "working") n[1]++;
-    if (st === "needs_you") n[2]++;
-    by.set(s.machine_id, n);
+    const state = stateOf(s);
+    if (state === "offline") continue;
+    const counts = by.get(s.machine_id) ?? { total: 0, working: 0, needsYou: 0 };
+    counts.total++;
+    if (state === "working") counts.working++;
+    if (state === "needs_you") {
+      counts.needsYou++;
+      counts.waitingSid ??= s.session_id;
+    }
+    by.set(s.machine_id, counts);
   }
   return by;
 }
 
-type MachinesView = "resources" | "cards" | "capabilities" | "procs" | "services" | "files" | "toolchain" | "network" | "storage";
+type MachinesView = "resources" | "cards" | "capabilities";
 const VIEW_KEY = "persona.machines.view";
+function fleetChoice(value: unknown): MachinesView {
+  return value === "capabilities" || value === "resources" ? value : "cards";
+}
+
+function FleetScroll({ view, children }: { view: MachinesView; children: React.ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useScrollMemory(box, "machines/" + view);
+  return <div ref={box} className="min-h-0 flex-1 overflow-y-auto">{children}</div>;
+}
 
 /** The launcher health records (GET /api/v1/launchers/health), kept current by the hub's `launcher_health` events and
- *  read again every minute while the page is shown; none from a hub without them. `merge` takes records a check returned. */
-function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void } {
+ *  read again every minute while the page is shown; none from a hub without them. `merge` takes records a check returned,
+ *  `reload` reads them all again now. */
+function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void; reload: () => void } {
   const [list, setList] = useState<LauncherHealthRecord[]>([]);
+  const loadRef = useRef<() => void>(() => {});
+  const reload = useCallback(() => loadRef.current(), []);
   const merge = useCallback((records: LauncherHealthRecord[]) => {
     if (!records.length) return;
     setList((now) => {
@@ -440,6 +545,7 @@ function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: L
         () => {}, // an older hub has none: no launcher alerts
       );
     };
+    loadRef.current = load;
     const stop = visiblePoll(load, 60_000, documentPage);
     const off = onHubEvent("launcher_health", (msg) => {
       const record = (msg as { record?: LauncherHealthRecord }).record;
@@ -447,21 +553,22 @@ function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: L
     });
     return () => {
       dead = true;
+      loadRef.current = () => {};
       stop();
       off();
     };
   }, [merge]);
-  return { list, merge };
+  return { list, merge, reload };
 }
 
 /** The alert sheet for the computer and alert asked for; closed (with its exit) when none is. */
 function AlertSheetHost({ sheet, machines, metrics, sessions, known, records, launcherIssues, roster, onKind, onClose, onReconnect }: {
-  sheet: { mid: string; kind: AlertKind } | null;
+  sheet: { mid: string; kind: Exclude<AlertKind, "disk"> } | null;
   machines: Machine[];
   metrics: MachineMetrics[] | null;
   sessions: readonly Session[];
   known: AgentsKnown;
-  records: { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void };
+  records: { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void; reload: () => void };
   launcherIssues: (mid: string) => number;
   roster: ReturnType<typeof useRoster>;
   onKind: (mid: string, kind: AlertKind) => void;
@@ -488,6 +595,7 @@ function AlertSheetHost({ sheet, machines, metrics, sessions, known, records, la
       onClose={onClose}
       onReconnect={onReconnect}
       onRecords={records.merge}
+      onReloadRecords={records.reload}
     />
   );
 }

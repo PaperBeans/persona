@@ -57,7 +57,7 @@ export function cardKeyAction(e: CardKeyEvent, root: Element | null): CardKeyAct
 /** The chat's composer on this page, if there is one to type into; the card's Esc hands focus back to it. The dock
  *  holds it (only there — a comment being edited in the transcript is not the composer). */
 export function focusComposer(): boolean {
-  const el = [...document.querySelectorAll<HTMLTextAreaElement>(`[data-chat-dock] ${COMPOSER_INPUT}`)].find((t) => !t.disabled && t.getClientRects().length > 0);
+  const el = [...document.querySelectorAll<HTMLElement>(`[data-chat-dock] ${COMPOSER_INPUT}`)].find((t) => !t.matches(":disabled,[aria-disabled=true]") && t.getClientRects().length > 0);
   if (!el) return false;
   el.focus();
   return true;

@@ -1,16 +1,23 @@
 // Package imessageport is how the iMessage connector module reaches the node (docs/architecture/core-and-modules.md
 // "Provider seams"): the node's composition root (internal/modules/all/node) provides the module's handler of the hub's
 // connector.* RPCs, and the node answers them with it. A build without the module (persona_without_imessage,
-// persona_core_only) provides none, and the node answers as on a computer with no Messages: an empty connector.list,
-// and no connector to read. It is its own package so that the composition root need not import the node.
+// persona_core_only) provides none, and neither does a node whose hub announced the module switched off
+// (moduleswitch.FromFeatures): the node answers as on a computer with no Messages, an empty connector.list and no
+// connector to read. It is its own package so that the composition root need not import the node.
 package imessageport
 
-import "github.com/nwverse/persona/server/internal/imessagewire"
+import (
+	"github.com/nwverse/persona/server/internal/imessagewire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
+)
 
-var serve imessagewire.LocalConnector
+var port = moduleswitch.NewPort[imessagewire.LocalConnector]("node/imessageport")
 
-// Provide sets the module's handler; the node's composition root calls it from init.
-func Provide(f imessagewire.LocalConnector) { serve = f }
+// Provide sets the module's handler under its module id; the node's composition root calls it from init.
+func Provide(module string, f imessagewire.LocalConnector) { port.Provide(module, f) }
 
-// Serve is the module's handler, nil when this build has no iMessage module.
-func Serve() imessagewire.LocalConnector { return serve }
+// Serve is the module's handler, nil when this build has no iMessage module or s switched it off.
+func Serve(s moduleswitch.Set) imessagewire.LocalConnector {
+	f, _ := port.Get(s)
+	return f
+}

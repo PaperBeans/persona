@@ -95,7 +95,7 @@ export const SIDEBAR_DEFAULT = 284;
 export const SIDEBAR_MIN = 240;
 export const SIDEBAR_MAX = 480;
 
-/** Space between the Web shell columns at desktop widths (#7522). */
+/** Desktop shell outer card inset and gap between main and an open side panel (#7522, #14696). */
 export const PANEL_GAP = 6;
 
 /** What the conversation beside the side panel keeps at the least (#5148): its input box and header still fit. */
@@ -180,3 +180,11 @@ export const CHANGES_DIFF_MIN = 160;
 /** Deep indentation yields space to the file name and its count rather than hiding the entire name. */
 export const CHANGES_TREE_INDENT = 12;
 export const CHANGES_TREE_INDENT_MAX_SHARE = 0.4;
+
+/** Resizable directory-tree sidebar defaults and storage keys (#14926). */
+export const TREE_PANE_DEFAULT = 240;
+export const TREE_PANE_MIN = 160;
+export const TREE_PANE_MAX = 420;
+export const TREE_PANE_VIEWER_MIN = 200;
+export const FILES_TREE_WIDTH_KEY = "persona.filesTreeWidth";
+export const CHANGES_TREE_WIDTH_KEY = "persona.changesTreeWidth";

@@ -57,6 +57,7 @@ class AppleRenameTests(unittest.TestCase):
         self.assertFalse((APPLE / 'PersonaLink/Sources' / (FORMER_NAME + 'Link')).exists())
         self.assertFalse((APPLE / 'PersonaLink/Sources/PersonaLink').exists())
         self.assertTrue((APPLE / 'PersonaLink/Sources/PersonaScreen').is_dir())
+        self.assertTrue((APPLE / 'PersonaLink/App/Sources/PersonaLink').is_dir())
         tracked = subprocess.run(['git', 'ls-files', '--', 'mac'], cwd=ROOT, capture_output=True, text=True, check=True).stdout
         self.assertEqual(tracked, '', 'the independent Link helper package is apple/PersonaLink/')
         self.assertIn('name: Persona\n', PROJECT)
@@ -240,10 +241,22 @@ class AppleRenameTests(unittest.TestCase):
         script = (ROOT / 'scripts/app/mac-link.sh').read_text()
         # Persona Screen is the package's one product, built by name (#7927: swift build, kept by its sources).
         self.assertIn('PersonaScreen "$@"', script)
-        self.assertNotIn('-scheme PersonaLink', script)
         self.assertNotIn('--product PersonaLink', script)
         self.assertIn('persona-link" install --node-bin', script)
-        self.assertNotIn('open "/Applications/Persona Link.app"', script)
+
+    def test_menu_bar_app_is_a_package_of_its_own_with_the_canonical_process_name(self):
+        # Apart from Persona Screen's package, so building the App never changes Screen's bits (#7927).
+        package = (APPLE / 'PersonaLink/App/Package.swift').read_text()
+        self.assertIn('name: "PersonaLink"', package)
+        self.assertIn('path: "Sources/PersonaLink"', package)
+        info = plistlib.loads((APPLE / 'PersonaLink/App/Info.plist').read_bytes())
+        self.assertEqual(info['CFBundleExecutable'], 'PersonaLink')
+        self.assertTrue(info['LSUIElement'])
+        script = (ROOT / 'scripts/app/mac-link.sh').read_text()
+        self.assertIn('-scheme PersonaLink', script)
+        self.assertIn('cp "$products/PersonaLink" "$APP/Contents/MacOS/PersonaLink"', script)
+        self.assertIn('pkill -x PersonaLink', script)
+        self.assertIn('open "/Applications/Persona Link.app"', script)
 
     def test_entitlement_checker_accepts_only_the_canonical_product(self):
         spec = importlib.util.spec_from_file_location('entitlements', ROOT / 'scripts/release/entitlements.py')

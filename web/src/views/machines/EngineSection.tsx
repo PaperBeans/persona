@@ -2,7 +2,7 @@
 // come from. The engines its node found ("Available" with the version / "Not detected", and why one cannot be used), or every known
 // engine while it is offline; a choice stays here until "Save" (PUT …/engine), which the hub takes offline too. Pushes
 // of the machine refresh the choice until the user starts changing it; a failed save keeps it for another try.
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import {
   canSaveEngine,
@@ -22,51 +22,93 @@ import { Button, cx, EASE, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { EngineHostsSection } from "./EngineHostsSection";
 import { ENGINE_SECTION_ID } from "./engine-anchor";
+import { beginEngineSave, finishEngineSave, isLatestEngineSave } from "./engine-save";
 import { t } from "../../i18n";
 
 export function EngineSection({ machine, heading }: { machine: Machine; heading: React.ReactNode }) {
   // A hub with sets (#2576): several engines checked side by side plus a default; an older hub, one engine.
-  if (supportsHostSets(machine)) return <EngineHostsSection machine={machine} heading={heading} />;
-  return <SingleEngineSection machine={machine} heading={heading} />;
+  if (supportsHostSets(machine)) return <EngineHostsSection key={machine.id} machine={machine} heading={heading} />;
+  return <SingleEngineSection key={machine.id} machine={machine} heading={heading} />;
 }
 
 function SingleEngineSection({ machine, heading }: { machine: Machine; heading: React.ReactNode }) {
   const current = currentEngine(machine);
+  const [prevMachineId, setPrevMachineId] = useState(machine.id);
+  const [prevCurrent, setPrevCurrent] = useState(current);
   const [selected, setSelected] = useState(current);
   const [edited, setEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  // Another machine, or the hub says it changed: the picker follows until the user starts editing.
-  useEffect(() => {
-    if (!edited && !saving) setSelected(current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machine.id, current]);
-  useEffect(() => {
+  if (prevMachineId !== machine.id) {
+    setPrevMachineId(machine.id);
+    setPrevCurrent(current);
+    setSelected(current);
     setEdited(false);
+    setSaving(false);
     setError("");
+  } else if (!saving && prevCurrent !== current) {
+    setPrevCurrent(current);
+    if (!edited) {
+      setSelected(current);
+    } else if (selected === current) {
+      // Remote state converged to the unsaved draft: clear the latch so future pushes follow the hub.
+      setEdited(false);
+      setError("");
+    }
+  }
+  const machineIdRef = useRef(machine.id);
+  const saveSeqRef = useRef(0);
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      savingRef.current = false;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (machineIdRef.current !== machine.id) {
+      machineIdRef.current = machine.id;
+      saveSeqRef.current += 1;
+      savingRef.current = false;
+    }
   }, [machine.id]);
 
   const choose = (id: string) => {
+    if (savingRef.current) return;
     setSelected(id);
     setEdited(id !== current);
     setError("");
   };
 
   const save = async () => {
-    if (saving) return;
+    if (savingRef.current) return;
+    const targetId = machine.id;
+    const seq = ++saveSeqRef.current;
+    const saveId = beginEngineSave(targetId);
+    savingRef.current = true;
     setSaving(true);
     setError("");
+    const isCurrent = () => mountedRef.current && machineIdRef.current === targetId && saveSeqRef.current === seq;
     try {
-      const saved = await api<Machine>(`/machines/${enc(machine.id)}/engine`, { method: "PUT", json: { engine: selected } });
-      applyMachine(saved);
+      const saved = await api<Machine>(`/machines/${enc(targetId)}/engine`, { method: "PUT", json: { engine: selected } });
+      if (isLatestEngineSave(targetId, saveId)) applyMachine(saved);
+      if (!isCurrent()) return;
       setSelected(currentEngine(saved));
       setEdited(false);
       toast(t("machines-enginesection.saved", { engine: engineName(currentEngine(saved), saved.engines?.length ? saved : machine) }), "ok");
     } catch (e) {
+      if (!isCurrent()) return;
       setError(engineSaveError(errorText(e)));
     } finally {
-      setSaving(false);
+      finishEngineSave(targetId, saveId);
+      if (isCurrent()) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   };
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_settings_dashboards_header">仪表盘</string>
+    <string name="assistant_settings_dashboards">让 Persona 做仪表盘</string>
+    <string name="assistant_settings_dashboards_caption">开启后，助手可以起草你会常回来看的页面，你在聊天里点「保留」后它出现在侧边栏。</string>
+</resources>

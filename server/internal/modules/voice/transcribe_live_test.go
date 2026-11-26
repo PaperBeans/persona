@@ -22,6 +22,47 @@ func trCaptionJob() (*trJob, *trSession) {
 // trAt is recording second at in samples.
 func trAt(at float64) int64 { return int64(math.Round(at * trRate)) }
 
+func TestFirstCaptionAtSpeechOnsetBelongsToTheNewWindow(t *testing.T) {
+	j, session := trCaptionJob()
+	cut, onset := trAt(6.1), trAt(6.4)
+	j.windows[0].to = cut
+	j.windows = append(j.windows, &trWin{n: 1, from: cut, to: -1})
+	j.nextWin = 2
+	j.vad.spans = [][2]int64{{trAt(3.8), trAt(5.6)}}
+	j.vad.open, j.vad.from, j.vad.last = true, onset, trAt(6.5)
+
+	// The reader can receive the first words while the sending goroutine still reports exactly the onset.
+	// A timestamp one sample earlier is still in silence and must not adopt a future utterance.
+	if start := j.captionStart(session, onset-1); start >= cut {
+		t.Fatalf("caption before the new speech starts at sample %d, past the cut %d", start, cut)
+	}
+	j.caption(session, tevent{kind: tevCaption, item: "third", text: "下周三"}, onset, onset)
+	if got := j.captionText(session, j.windows[0]); got != "" {
+		t.Fatalf("the preceding window took the first words of the next sentence: %q", got)
+	}
+	if got := j.captionText(session, j.windows[1]); got != "下周三" {
+		t.Fatalf("next window caption = %q", got)
+	}
+}
+
+func TestRollingCaptionKeepsTheFirstWordsOfItsFirstWindow(t *testing.T) {
+	j, s := trCaptionJob()
+	// The replacement hears the tail of the preceding window while its old peer still owns it.
+	s.window, s.feed = 3, trAt(15.9)
+	j.windows = []*trWin{{n: 2, from: trAt(10.1), to: trAt(16.5)}, {n: 3, from: trAt(16.5), to: -1}}
+	j.nextWin = 4
+	j.vad.spans = [][2]int64{{trAt(13.2), trAt(16)}, {trAt(17), trAt(19)}}
+	const item = "one-upstream-item"
+	j.caption(s, tevent{kind: tevCaption, item: item, text: "Finishing the earlier discussion."}, trAt(16.2), trAt(.3))
+	j.caption(s, tevent{kind: tevCaption, item: item, text: "Can we get the dashboard"}, trAt(17.1), trAt(1.2))
+	j.windows = j.windows[1:] // the old peer finished its window before the new sentence was complete
+	const whole = "Can we get the dashboard numbers before Friday?"
+	j.caption(s, tevent{kind: tevCaption, item: item, text: whole}, trAt(18.9), trAt(3))
+	if got := j.captionText(s, j.windows[0]); got != whole {
+		t.Fatalf("the replacement's first window got %q, want %q", got, whole)
+	}
+}
+
 // trFrameAt is one caption frame and where the session's audio was when it came, in recording seconds.
 type trFrameAt struct {
 	at    float64

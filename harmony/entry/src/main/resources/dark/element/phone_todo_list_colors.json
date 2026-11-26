@@ -1,0 +1,28 @@
+{
+  "color": [
+    {
+      "name": "todo_notice_mark",
+      "value": "#FF9F0A"
+    },
+    {
+      "name": "todo_notice_fill",
+      "value": "#202023"
+    },
+    {
+      "name": "todo_review_caution_fill",
+      "value": "#24FF9F0A"
+    },
+    {
+      "name": "todo_review_positive_fill",
+      "value": "#1F30D158"
+    },
+    {
+      "name": "todo_review_danger_fill",
+      "value": "#1FFF5F57"
+    },
+    {
+      "name": "todo_review_neutral_fill",
+      "value": "#3D767680"
+    }
+  ]
+}

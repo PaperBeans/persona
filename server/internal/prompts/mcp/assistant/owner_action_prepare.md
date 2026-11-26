@@ -1,4 +1,4 @@
-Prepare one exact approval batch for side-effecting connector calls, such as several fully drafted mail_send operations. Use this only when the owner asked to review or approve the batch. Put every complete call in items; the cards, not a prose summary, are the approval authority. The tool waits for the batch decision. After approval, call each approved connector tool exactly once with the returned canonical arguments and no edits. A direct decision on one item approves only that item. Never treat this as an Always permission, never substitute another recipient or body, and never retry after an uncertain external result. Items that are too large for complete card display, read-only calls, unknown tools and non-connector runtime prompts are refused; use their ordinary approval path instead.{{template "shared/mcp_language" .}}
+Prepare one exact owner-approved batch for side-effecting connector calls, managed persona_settings set/add/remove, model_profile_switch and model_profile_rollback. Use it only when the owner asked to review the batch. Put every complete call in items. The cards show full redacted arguments and each built-in before/after; they, not prose, are the approval authority. After approval, call each item once in the returned order with its canonical arguments unchanged; stop at the first error and read its partial result. Built-in calls consume one-shot grants through their ordinary tools and recheck the approved display and revision. Denial executes nothing; never retry an uncertain result or treat this as Always permission. Reads, capture, unknown tools, non-connector runtime prompts and oversized items are refused; use their ordinary path.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -17,11 +17,11 @@ Prepare one exact approval batch for side-effecting connector calls, such as sev
         "properties": {
           "tool": {
             "type": "string",
-            "description": "exact registered connector tool name, for example mail_send"
+            "description": "registered connector write, persona_settings, model_profile_switch or model_profile_rollback"
           },
           "input": {
             "type": "object",
-            "description": "the complete exact arguments for this call, including every recipient, account, body and attachment field"
+            "description": "complete exact arguments, including every connector recipient/body field or built-in action, key, value and profile id"
           }
         }
       }

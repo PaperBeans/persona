@@ -292,7 +292,7 @@ func TestModelProfileSwitchKeepsTheMainChatsConfigDir(t *testing.T) {
 	if _, err := s.applyModelProfile(ctx, "economy", by); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := s.modelRecord(ctx, "assistant"); r.Binding != (ModelBinding{Model: "test-selected", ConfigDir: assistantConfigDirLegacy}) {
+	if r, _ := s.modelRecord(ctx, "assistant"); r.Binding != (ModelBinding{Provider: "launcher.gw", Model: "test-selected", ConfigDir: assistantConfigDirLegacy}) {
 		t.Fatalf("switch lost the profile choice: %+v", r.Binding)
 	}
 	setModel(t, s, "assistant", ModelBinding{Model: "test-selected"}) // back to Persona's own profile since the switch
@@ -332,7 +332,7 @@ func TestStoredModelProfileConfigDirIsNotTheProfiles(t *testing.T) {
 	if _, err := s.applyModelProfile(ctx, "economy", by); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := s.modelRecord(ctx, "assistant"); r.Binding != (ModelBinding{Model: "test-selected"}) {
+	if r, _ := s.modelRecord(ctx, "assistant"); r.Binding != (ModelBinding{Provider: "launcher.gw", Model: "test-selected"}) {
 		t.Fatalf("switch took the stored profile's config_dir: %+v", r.Binding)
 	}
 	setModel(t, s, "assistant", ModelBinding{Model: "test-selected", ConfigDir: assistantConfigDirLegacy}) // chosen since the switch

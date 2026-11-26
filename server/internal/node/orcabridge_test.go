@@ -124,6 +124,46 @@ func TestOrcaBridgeListsChats(t *testing.T) {
 	}
 }
 
+// Both bridges shorten the preview before sending a runtime snapshot. Preserve line boundaries
+// long enough to distinguish the delivery marker from a mention in ordinary text.
+func TestBridgeReportedBotmuxPreview(t *testing.T) {
+	const marker = "BOTMUX_NOTHING_TO_SEND"
+	for _, tc := range []struct {
+		name string
+		row  func(string) map[string]any
+	}{
+		{"Orca", func(reply string) map[string]any {
+			return orcaRow(orcart.Worktree{}, orcart.AgentRow{LastAssistantMessage: reply}, &orcaHead{provider: orcaChatUUID})
+		}},
+		{"Cindy", func(reply string) map[string]any {
+			row, _ := mapCindySessionRow(cindyDBRow{ID: "sample", ListPreview: reply}, false, false, nil)
+			return row
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &runtimeConn{}
+			for _, step := range []struct{ reply, want string }{
+				{marker + "\nBuild passed.", "Build passed."},
+				{marker + "\r\n" + marker, "Build passed."},
+				{"The literal " + marker + " is documented.", "The literal " + marker + " is documented."},
+			} {
+				raw, err := json.Marshal(tc.row(step.reply))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var row proto.Session
+				if err := json.Unmarshal(raw, &row); err != nil {
+					t.Fatal(err)
+				}
+				h.sessions = normalizeRuntimeSessions(h, []proto.Session{row})
+				if got := h.sessions[0].LastText; got != step.want {
+					t.Fatalf("preview for %q: got %q, want %q", step.reply, got, step.want)
+				}
+			}
+		})
+	}
+}
+
 // Before the transcript is on disk the bridge answers session.items with an empty page the hub can read: history,
 // when present, is the transcript's version string (the hub's itemSpan), never a bool (#4886).
 func TestOrcaBridgeItemsBeforeTranscriptDecodeAsSpan(t *testing.T) {

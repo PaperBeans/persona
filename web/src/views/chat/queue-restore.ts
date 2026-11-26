@@ -6,6 +6,8 @@ import { restoreFiles } from "../../lib/composer-files";
 import { sendDraft, type DraftImage } from "../../lib/drafts";
 import { addContext, newContext, type ContextRef } from "../../lib/links";
 import { queuedDraft, type QueuedParts } from "../../lib/queue";
+import { joinInline, writeInlineDraft } from "../../lib/inline-mentions";
+import { readInlineBody } from "../../lib/inline-message";
 import type { Session } from "../../lib/types";
 import { toast } from "../../ui/atoms";
 import { t } from "../../i18n";
@@ -33,10 +35,15 @@ export interface QueuedImage {
  *  as their paths, so nothing that was sent is lost; `images` are photos that came back with it (a Persona chat's). */
 export async function restoreQueued(draftKey: string, session: Session, p: QueuedParts, images: QueuedImage[] = []) {
   // its files back to their tiles over the box (#8361); only ones past the limit go in as paths
-  const text = queuedDraft({ text: p.text, files: restoreFiles(draftKey, p.files) });
+  const overflow = restoreFiles(draftKey, p.files);
+  const inline = p.inlineTrailer && readInlineBody(p.text + p.inlineTrailer, p.contexts);
+  const paths = queuedDraft({ text: "", files: overflow });
+  const text = inline ? writeInlineDraft(joinInline(inline.document, [paths ? ` ${paths}` : ""])) : queuedDraft({ text: p.text, files: overflow });
   if (text) sendDraft(draftKey, { type: "append", text });
   // a kind this composer has no chip of its own for is shown as a quote and sent back as it came
-  for (const c of p.contexts) addContext(draftKey, { ...newContext(c.kind as ContextRef["kind"], c.title, c.url, c.text), ...(c.attrs ? { attrs: c.attrs } : {}) });
+  for (const c of p.contexts) if (!inline || !inline.used.has(c)) {
+    addContext(draftKey, { ...newContext(c.kind as ContextRef["kind"], c.title, c.url, c.text), ...(c.attrs ? { attrs: c.attrs } : {}) });
+  }
   images.forEach((img, i) => sendDraft(draftKey, { type: "image", image: { name: `photo-${i + 1}.${img.mime.split("/")[1] || "png"}`, ...img } }));
   if (!p.photos.length) return;
   const read = await Promise.all(p.photos.map((path) => readPhoto(session.machine_id, path, session.cwd)));

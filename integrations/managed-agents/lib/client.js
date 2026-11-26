@@ -4,6 +4,7 @@
 // POSTs. Nothing here logs; errors are redacted before they leave.
 
 const TIMEOUT_MS = 30_000
+const networkDetail = (err) => err?.cause?.code ?? (err?.name === 'TimeoutError' ? 'timed out' : err?.message ?? String(err))
 
 export class ApiError extends Error {
   constructor(message, status, code) {
@@ -49,7 +50,7 @@ export function createClient(profile, secrets, { fetch: doFetch = globalThis.fet
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
       })
     } catch (err) {
-      throw new ApiError(secrets.redact(`${profile.id}: ${method} ${path}: ${err.cause?.code ?? err.name === 'TimeoutError' ? 'timed out' : err.message}`), 0, 'network')
+      throw new ApiError(secrets.redact(`${profile.id}: ${method} ${path}: ${networkDetail(err)}`), 0, 'network')
     }
     const text = await res.text()
     let json
@@ -121,7 +122,7 @@ export function createClient(profile, secrets, { fetch: doFetch = globalThis.fet
         res = await doFetch(url(`/sessions/${encodeURIComponent(id)}/events/stream`, { event_deltas: ['agent.message', 'agent.thinking'] }), { headers: h, redirect: 'error', signal })
       } catch (err) {
         if (signal?.aborted) return
-        throw new ApiError(secrets.redact(`${profile.id}: stream: ${err.cause?.code ?? err.message}`), 0, 'network')
+        throw new ApiError(secrets.redact(`${profile.id}: stream: ${networkDetail(err)}`), 0, 'network')
       }
       if (!res.ok || !res.body) {
         if (res.status === 401 || res.status === 403) secrets.forget()
@@ -144,7 +145,7 @@ export function createClient(profile, secrets, { fetch: doFetch = globalThis.fet
           }
         }
       } catch (err) {
-        if (!signal?.aborted) throw new ApiError(secrets.redact(`${profile.id}: stream: ${err.message}`), 0, 'network')
+        if (!signal?.aborted) throw new ApiError(secrets.redact(`${profile.id}: stream: ${networkDetail(err)}`), 0, 'network')
       }
     },
   }

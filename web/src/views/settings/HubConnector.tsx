@@ -8,7 +8,7 @@
 import { OwnerMark } from "./OwnerMark";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
-import { otherManager, ownedSub, pinManagerAt, sameManager, useChosenManager } from "../../lib/manager-choice";
+import { otherManager, ownedSub, pinManagerAt, sameManager, useChosenManager, useShownManager } from "../../lib/manager-choice";
 import { isOpenBeside } from "./open-beside";
 import {
   canSendStep, CI_MODES, deleteIMessageData, imessageAIFooter, imessageStatus, setIMessageAI, connectorBrand, connectorLogin, connectorLogout, connectorState, connectorSummary, connectorTone, deleteConnectorArchive,
@@ -19,7 +19,7 @@ import {
 } from "../../lib/connectors";
 import { useChannels } from "../../lib/channels";
 import { ago } from "../../lib/format";
-import { useLarkOn } from "../../lib/store";
+import { useLarkOn, useStore } from "../../lib/store";
 import { latestRequest } from "../../lib/visible-poll";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { BrandMark } from "../../ui/BrandMark";
@@ -31,6 +31,7 @@ import { Group, Row, Switch } from "./SettingsParts";
 import { scoped, useScope } from "../../lib/current-assistant";
 import { OfflineState, useShownOffline } from "../ManagerParts";
 import { SubscriptionsEntry } from "../subscriptions/SubscriptionsEntry";
+import { ConnectorExternalSourceSettings } from "../../features/external-sources/ExternalSourceSettingsEntry";
 
 const DOT: Record<ConnectorTone, string> = { green: "bg-green", orange: "bg-orange", red: "bg-red", idle: "bg-line-strong" };
 const fieldClass = "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
@@ -215,6 +216,7 @@ export function ConnectorDetail({ id, manager, onBack, onChannel }: { id: string
       {onChannel && <ChannelLink id={id} manager={manager} onOpen={onChannel} />}
       {/* source subscriptions (#2041) are the default manager's */}
       {c && !manager && <SubscriptionsEntry pick={(l) => l.connector === id} scope={{ c: id }} />}
+      {c && <ConnectorExternalSourceSettings ids={[id]} manager={manager} />}
       {c && id !== "imessage" && !signsInHere(c) && !undescribed(c) && (
         <p className="-mt-4 mb-6 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("settings-hubconnector.hub_side_note")}</p>
       )}
@@ -256,7 +258,7 @@ function InfoRow({ k, v }: { k: string; v: string }) {
 // ── switch, feeds, sign-out and delete ───────────────────
 
 /** What a page's actions share: busy while one runs, the hub's errors as toasts. */
-function useActions(id: string, reload: () => Promise<void>) {
+export function useActions(id: string, reload: () => Promise<void>) {
   const [busy, setBusy] = useState("");
   const run = async (what: string, fn: () => Promise<unknown>, done?: (r: unknown) => void) => {
     setBusy(what);
@@ -274,7 +276,7 @@ function useActions(id: string, reload: () => Promise<void>) {
 }
 type Actions = ReturnType<typeof useActions>;
 
-function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
+export function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
   return (
     <Group footer={switchFooter(c)}>
       <div className="flex items-center gap-3 px-4 py-2.5">
@@ -286,7 +288,7 @@ function SwitchGroup({ c, a }: { c: HubConnector; a: Actions }) {
   );
 }
 
-function FeedsGroup({ c, a }: { c: HubConnector; a: Actions }) {
+export function FeedsGroup({ c, a }: { c: HubConnector; a: Actions }) {
   const [confirm, setConfirm] = useState(false);
   const [deleted, setDeleted] = useState("");
   if (c.archive === undefined && c.inbox === undefined) return null;
@@ -359,7 +361,7 @@ export function ExtensionConnectorGroup({ c, reload, onOpen }: { c: HubConnector
   );
 }
 
-function DataGroup({ c, a, logout }: { c: HubConnector; a: Actions; logout: boolean }) {
+export function DataGroup({ c, a, logout }: { c: HubConnector; a: Actions; logout: boolean }) {
   const [confirm, setConfirm] = useState<"" | "logout" | "delete">("");
   const [deleted, setDeleted] = useState("");
   const showsLogout = logout && (isSignedIn(c) || !!c.via);
@@ -573,6 +575,8 @@ export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent
     return () => void (live.current = false);
   }, []);
   // Also a channel (WeChat): a step this page cannot draw can be done in Settings › Channels instead.
+  const manager = useShownManager();
+  const integrationsV2 = useStore((s) => s.assistant?.integrations_v2 === true && sameManager(s.assistant.manager, manager));
   const isChannel = useChannels().some((x) => x.id === c.id);
 
   /** True when signing in is done. */
@@ -623,6 +627,7 @@ export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent
       values={values}
       busy={busy}
       isChannel={isChannel}
+      integrationsV2={integrationsV2}
       onChange={(name, v) => setValues((cur) => ({ ...cur, [name]: v }))}
       onSubmit={() => void send(prompt.step ?? "", values)}
       onRestart={() => (cancel(), void send("", {}))}
@@ -638,12 +643,13 @@ export function SignInSteps({ c, reload, footer, startLabel, startTone = "accent
 }
 
 /** One sign-in step as the hub sent it: its hint and error, then fields, a device code, a QR code, or why it can't be drawn. */
-export function SignInStep({ name, prompt, values, busy, isChannel, onChange, onSubmit, onRestart, onCancel }: {
+export function SignInStep({ name, prompt, values, busy, isChannel, integrationsV2, onChange, onSubmit, onRestart, onCancel }: {
   name: string;
   prompt: ConnectorPrompt;
   values: Record<string, string>;
   busy: boolean;
   isChannel?: boolean;
+  integrationsV2?: boolean;
   onChange: (field: string, value: string) => void;
   onSubmit: () => void;
   onRestart: () => void;
@@ -689,7 +695,7 @@ export function SignInStep({ name, prompt, values, busy, isChannel, onChange, on
       ) : view === "qr_link" ? (
         <QRLinkStep url={prompt.url!} app={name} onCancel={onCancel} />
       ) : view === "unsupported" ? (
-        <UnsupportedStep elsewhere={isChannel ? t("settings-hubconnector.bind_in_channels", { name }) : undefined} onRestart={onRestart} onCancel={onCancel} />
+        <UnsupportedStep elsewhere={isChannel ? t(integrationsV2 ? "settings-hubconnector.bind_in_integrations" : "settings-hubconnector.bind_in_channels", { name }) : undefined} onRestart={onRestart} onCancel={onCancel} />
       ) : (
         <form
           className="flex flex-col"
@@ -730,7 +736,7 @@ export function SignInStep({ name, prompt, values, busy, isChannel, onChange, on
 
 // ── GitHub ───────────────────────────────────────────────
 
-function GitHubSections({ c, reload }: { c: HubConnector; reload: () => Promise<void> }) {
+export function GitHubSections({ c, reload, hideFeeds = false }: { c: HubConnector; reload: () => Promise<void>; hideFeeds?: boolean }) {
   const a = useActions(c.id, reload);
   const [auth, setAuth] = useState<GitHubAuth | null>(null);
   const [authError, setAuthError] = useState("");
@@ -798,14 +804,14 @@ function GitHubSections({ c, reload }: { c: HubConnector; reload: () => Promise<
           {missing.flatMap((m) => m.affects).map((x) => <p key={x} className="px-4 py-2 text-[12.5px] text-ink-2">{x}</p>)}
         </Group>
       )}
-      <FeedsGroup c={c} a={a} />
+      {!hideFeeds && <FeedsGroup c={c} a={a} />}
       <DataGroup c={c} a={a} logout={false} />
     </>
   );
 }
 
 /** GitHub's "Inbox": which CI failures come in, and repositories that bring nothing in (PUT …/github/settings {options}). */
-function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [o, setO] = useState(options);
   const [repo, setRepo] = useState("");
   const [error, setError] = useState("");
@@ -862,7 +868,7 @@ function GitHubInbox({ options, onSaved }: { options: GitHubInboxOptions; onSave
 
 /** lark-cli's watched documents (PUT …/larkcli/settings {options}, sent whole so the chat options stay): links and Wiki
  * spaces whose comments that mention you come in, and whether every comment on a document you own does. */
-function LarkCLIDocuments({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function LarkCLIDocuments({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [o, setO] = useState(options);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -920,7 +926,7 @@ function LinkList({ label, placeholder, values, disabled, onChange }: { label: s
 }
 
 /** lark-cli's triage rules: what counts as Needs you for its items, in the user's words (sent with the other options). */
-function LarkCLITriage({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
+export function LarkCLITriage({ options, onSaved }: { options: LarkCLIInboxOptions; onSaved: (c: HubConnector) => void }) {
   const [text, setText] = useState(options.triage_rules);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

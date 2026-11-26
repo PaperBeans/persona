@@ -6,12 +6,17 @@ import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.contracts.api.ResolveOutcome
 import persona.core.domain.answer.*
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.domain.sort.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
 import persona.core.designsystem.Haptic
 import persona.core.designsystem.ListTapMotion
 import persona.core.designsystem.ListTapMotionKind
+import persona.feature.chat.InteractionReply
+import persona.feature.chat.InteractionSubmission
+import persona.feature.chat.classifyInteractionFailure
+import persona.feature.chat.isCommandInputPermission
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -180,6 +185,8 @@ internal class AgentsViewModel(
     private var previousContext: List<Any?>? = null
     private val _delivery = MutableStateFlow<Map<String, RequestDelivery>>(emptyMap())
     val delivery = _delivery.asStateFlow()
+    private val _commandInputErrors = MutableStateFlow<Map<String, InteractionReply>>(emptyMap())
+    val commandInputErrors = _commandInputErrors.asStateFlow()
     private val _requestHistory = MutableStateFlow<List<Interaction>>(emptyList())
     val requestHistory = _requestHistory.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
@@ -359,12 +366,15 @@ internal class AgentsViewModel(
         else {
             val counts = status.counts
             val machineCounts = status.machineCounts
+            // A parent marked seen locally stays counted Unread while a side is unread; once held sides are seen, drop immediately (#13524).
+            val clearedUnread = unreadClearedBySeen(projected.sessions, projected.sessions.map { it.listSession(projected.preferences).session })
             val quickCounts = AgentQuickFilter.entries.associateWith { filter ->
                 when (filter) {
                     // The hub counts them among working and apart too (#6045): Working leaves them out, as iOS.
                     AgentQuickFilter.Feishu -> counts.larkGroups(projected.list.counts)
                     AgentQuickFilter.BackgroundWaiting -> counts.backgroundWaiting
                     AgentQuickFilter.Working -> ((counts.state[AgentState.Working.wire] ?: 0) - counts.backgroundWaiting).coerceAtLeast(0)
+                    AgentQuickFilter.Unread -> ((counts.state[AgentState.Unread.wire] ?: 0) - clearedUnread).coerceAtLeast(0)
                     else -> filter.state?.let { counts.state[it.wire] ?: 0 }
                         ?: if (filter == AgentQuickFilter.All) counts.total else projected.list.counts[filter] ?: 0
                 }
@@ -507,6 +517,8 @@ internal class AgentsViewModel(
                 }
                 previous = pending
                 _delivery.update { RequestDeliveries.prune(it, pending) }
+                val pendingIds = pending.mapTo(mutableSetOf()) { it.id }
+                _commandInputErrors.update { errors -> errors.filterKeys { it in pendingIds } }
             }
         }
         if (operations != null) {
@@ -661,6 +673,14 @@ internal class AgentsViewModel(
         change(session.machineId, R.string.agents_notice_renamed) {
             if (renamer != null) renamer.rename(session, edit.title, edit.tabName)
             else it.session(session, AgentSessionEdit(title = edit.title, tab = edit.tabName))
+        }
+    }
+    fun renameUnified(session: Session, name: String) {
+        val edit = SessionRename.unifiedChanges(session, name)
+        if (!edit.changed) return
+        change(session.machineId, R.string.agents_notice_renamed) {
+            if (renamer != null) renamer.renameUnified(session, name)
+            else it.session(session, AgentSessionEdit(title = edit.title, tab = edit.tabName), unified = true)
         }
     }
     fun renameSpace(session: Session, name: String) {
@@ -1003,8 +1023,7 @@ internal class AgentsViewModel(
     fun answer(interaction: Interaction, action: AnswerAction, draft: AnswerDraft = AnswerDraft(), fullPlanRead: Boolean = false) {
         val latest = interactions.pending.value.firstOrNull { it.id == interaction.id } ?: return
         if (latest != interaction || latest.expired(Instant.now()) || RequestDeliveries.locks(_delivery.value[interaction.id])) return
-        // A session whose source does not approve (a Codex thread not joined live) is answered on the computer.
-        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canApprove == false) {
+        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canAnswerInteraction(latest) == false) {
             _notice.value = AgentText(R.string.agents_notice_approve_blocked); return
         }
         if (hubGroups.groups.value.stateFor(latest.machineId, connection.state.value) != ConnectionState.Online) {
@@ -1012,6 +1031,7 @@ internal class AgentsViewModel(
         }
         val result = AnswerBuilder.build(latest, action, draft, AnswerContext(fullPlanRead = fullPlanRead))
         val resolution = result.resolution ?: return
+        _commandInputErrors.update { it - latest.id }
         _delivery.update { it + (interaction.id to RequestDelivery.Sending) }
         viewModelScope.launch {
             try {
@@ -1019,7 +1039,7 @@ internal class AgentsViewModel(
                     interactions.replyOwnerApproval(latest, phrase)
                     ResolveOutcome()
                 } ?: interactions.resolveOutcome(interaction.id, resolution,
-                    handoffCard = interaction.isSecretHandoff && resolution.allow == true)
+                    handoffCard = (latest.isSecretHandoff || latest.secretRun?.delivery == "env") && resolution.allow == true)
                 _delivery.update { it + (interaction.id to RequestDelivery.Sent) }
                 val effective = if (outcome.already) outcome.resolution else resolution
                 // The notice outlives the card: it keeps the answer without a password card's typed value (#1581).
@@ -1030,6 +1050,17 @@ internal class AgentsViewModel(
                 _delivery.update { it + (interaction.id to RequestDelivery.Unknown) }
                 throw e
             } catch (e: Exception) {
+                if (latest.isCommandInputPermission) {
+                    val problem = classifyInteractionFailure(e, keepUnconfirmedReason = true)
+                    if (!problem.withdraw) {
+                        _commandInputErrors.update { it + (latest.id to problem) }
+                        if (problem.submission == InteractionSubmission.Refused) {
+                            _delivery.update { it + (latest.id to RequestDelivery.Retry) }
+                            problem.submission.haptic?.let(_haptics::tryEmit)
+                            return@launch
+                        }
+                    }
+                }
                 // A lost acknowledgement must never cause an automatic duplicate approval.
                 _delivery.update { it + (interaction.id to RequestDelivery.Unknown) }
                 answerFailureHaptic(e)?.let(_haptics::tryEmit)

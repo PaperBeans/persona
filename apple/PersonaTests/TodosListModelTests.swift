@@ -78,7 +78,7 @@ struct TodosListModelTests {
         #expect(!list.ready, "nothing drawn before the first read")
         await store.refresh(api: hub.client)
         try await waitForListTest { list.ready && !list.groups.isEmpty }
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working, TodoListSection.todo])
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue, TodoListSection.todo.rawValue])
         #expect(list.filterOptions.map(\.choice) == TodosChoice.allCases)
         #expect(list.needsYou == 1)
         let kyoto = try #require(list.row("/t01")?.content)
@@ -102,7 +102,7 @@ struct TodosListModelTests {
         list.start()
         await store.refresh(api: hub.client)
         try await waitForListTest { list.groups.count == 2 }
-        #expect(list.groups.map(\.id) == [TodoListSection.working, TodoListSection.todo])
+        #expect(list.groups.map(\.id) == [TodoListSection.working.rawValue, TodoListSection.todo.rawValue])
         #expect(list.row("/old")?.content.said?.rest == "Buy milk", "a plain To do says its notes' first line")
         let before = list.layout
         await store.refresh(api: hub.client)
@@ -171,21 +171,21 @@ struct TodosListModelTests {
         try await waitForListTest { store.countsSource.counts.inProgress == 4 } // the numbers never wait
         // Held: a proof that something did not happen needs a moment to have happened in; the store has told the list.
         try await Task.sleep(for: .milliseconds(100))
-        #expect(list.groups.map(\.id) == [TodoListSection.working, TodoListSection.todo], "held while scrolled")
+        #expect(list.groups.map(\.id) == [TodoListSection.working.rawValue, TodoListSection.todo.rawValue], "held while scrolled")
         #expect(list.row("/a")?.content.mark == .working, "what it says waits too")
         // b comes to need the owner: that lands at once, alone; a's move and words still wait.
         hub.on("GET", "/api/v1/todos", json: Self.list([
             TodoViewJSON.row("a", view: TodoViewJSON.view(TodoListSection.waiting, line: "pr_open")),
             TodoViewJSON.row("b", view: TodoViewJSON.view(TodoListSection.needsYou, asks: ["todo:decision@1"], line: "decision"))]))
         await store.refresh(api: hub.client)
-        try await waitForListTest { list.groups.first?.id == TodoListSection.needsYou }
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working])
+        try await waitForListTest { list.groups.first?.id == TodoListSection.needsYou.rawValue }
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue])
         #expect(list.row("/b")?.content.mark == .needs && list.row("/b")?.content.asks == 1)
         #expect(list.row("/a")?.content.mark == .working)
         let arrived = try #require(list.row("/a")?.arrivals)
         // The list rests: the rest lands, a fading in where it now is.
         list.hold.set(.scrolling, false)
-        try await waitForListTest { list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.waiting] }
+        try await waitForListTest { list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.waiting.rawValue] }
         #expect(list.row("/a")?.content.mark == .waiting)
         #expect(list.row("/a")?.arrivals == arrived + 1, "a re-filed row fades in")
         #expect(list.row("/b")?.arrivals == 1, "b faded in once, when it came to need the owner")
@@ -267,15 +267,15 @@ struct TodosListModelTests {
         try await waitForListTest { list.groups.count == 2 }
         list.hold.set(.scrolling, true)
         list.choice = .needsYou
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou])
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue])
         #expect(list.groups[0].folds.first?.open == false)
-        list.toggle(TodoListSection.canWait)
-        #expect(list.groups[0].folds.first?.open == true && list.unfolded == [TodoListSection.canWait])
+        list.toggle(TodoListSection.canWait.rawValue)
+        #expect(list.groups[0].folds.first?.open == true && list.unfolded == [TodoListSection.canWait.rawValue])
         list.choice = .all
         list.sort = .due
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working], "a sort never moves a section")
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue], "a sort never moves a section")
         list.byProject = true
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, "project:"])
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, "project:"])
     }
 
     /// The Filter: a choice draws its sections at once; one that leaves Needs you out says how many it hides, in the
@@ -295,20 +295,22 @@ struct TodosListModelTests {
         try await waitForListTest { list.groups.count == 3 }
         #expect(list.hiddenNeeds == 0 && list.subtitle(place: "All To-dos") == "", "All hides nothing")
         list.choice = .inProgress
-        #expect(list.groups.map(\.id) == [TodoListSection.working])
+        #expect(list.groups.map(\.id) == [TodoListSection.working.rawValue])
         #expect(list.hiddenNeeds == 1, "the guard line: 1 more needs you")
         let subtitle = list.subtitle(place: "All To-dos")
         #expect(subtitle.hasPrefix(TodosChoice.inProgress.title) && subtitle.contains("1"), "\(subtitle)")
         list.choice = .needsYou
-        #expect(list.hiddenNeeds == 0 && list.groups.map(\.id) == [TodoListSection.needsYou])
+        #expect(list.hiddenNeeds == 0 && list.groups.map(\.id) == [TodoListSection.needsYou.rawValue])
         list.choice = .todo
         list.query = "passport"
+        try await waitForListTest { list.searchedWords == "passport" }
         #expect(list.searching && list.hiddenNeeds == 0 && list.subtitle(place: "All To-dos") == "", "a search sets the choice aside")
-        #expect(list.groups.map(\.id) == [TodoListSection.todo] && list.groups[0].keys == ["/t"])
+        #expect(list.groups.map(\.id) == [TodoListSection.todo.rawValue] && list.groups[0].keys == ["/t"])
         list.query = "kyoto"
-        #expect(list.isEmpty, "nothing open matches")
+        try await waitForListTest { list.searchedWords == "kyoto" }
+        #expect(list.isEmpty, "nothing matches")
         list.query = ""
-        #expect(list.choice == .todo && list.hiddenNeeds == 1, "the choice is back once the field is cleared")
+        #expect(list.choice == .todo && list.hiddenNeeds == 1, "the choice is back at once once the field is cleared")
         list.choice = .all // Show All
         #expect(list.groups.count == 3)
     }
@@ -328,8 +330,9 @@ struct TodosListModelTests {
         await store.refresh(api: hub.client)
         try await waitForListTest { list.groups.count == 2 }
         list.query = "ryokan"
-        #expect(list.searching && list.groups.first?.folds.first?.open == true)
-        list.toggle(TodoListSection.canWait)
+        try await waitForListTest { list.searching }
+        #expect(list.groups.first?.folds.first?.open == true)
+        list.toggle(TodoListSection.canWait.rawValue)
         list.query = ""
         #expect(list.unfolded.isEmpty && list.groups.first?.folds.first?.open == false, "folded, as before the search")
     }
@@ -358,7 +361,7 @@ struct TodosListModelTests {
         hub.on("GET", "/api/v1/todos", json: busy)
         await store.refresh(api: hub.client)
         try await waitForListTest { !list.calm }
-        #expect(list.choice == .all && list.groups.map(\.id) == [TodoListSection.working, TodoListSection.todo])
+        #expect(list.choice == .all && list.groups.map(\.id) == [TodoListSection.working.rawValue, TodoListSection.todo.rawValue])
     }
 
     /// Back puts a list back at its end only while a scroll left it resting there (`TodoListView.backToTheEnd`). A
@@ -409,7 +412,7 @@ struct TodosListModelTests {
         list.byProject = true
         #expect(list.groups.contains { $0.id == "project:kyoto" })
         #expect(list.row("/w")?.content.caption?.contains("Kyoto trip") == false, "its heading says it")
-        #expect(Array(list.groups.map(\.id).suffix(2)) == ["tail:" + TodoListSection.someday, "tail:" + TodoListSection.done],
+        #expect(Array(list.groups.map(\.id).suffix(2)) == ["tail:" + TodoListSection.someday.rawValue, "tail:" + TodoListSection.done.rawValue],
                 "Someday and Done today fold after the last card: \(list.groups.map(\.id))")
         #expect(list.row("/s")?.content.caption?.contains("Kyoto trip") == true,
                 "Someday's fold: \(list.row("/s")?.content.caption ?? "nil")")
@@ -445,8 +448,8 @@ struct TodosListModelTests {
         list.start()
         await store.refresh(api: hub.client)
         try await waitForListTest { list.groups.count == 2 }
-        let working = { list.groups.first { $0.id == TodoListSection.working }?.keys ?? [] }
-        let needs = { list.groups.first { $0.id == TodoListSection.needsYou }?.keys ?? [] }
+        let working = { list.groups.first { $0.id == TodoListSection.working.rawValue }?.keys ?? [] }
+        let needs = { list.groups.first { $0.id == TodoListSection.needsYou.rawValue }?.keys ?? [] }
         #expect(working() == ["/a", "/b", "/c"], "Suggested: the hub's rank")
         list.sort = .activity
         #expect(needs() == ["/n", "/m"], "Needs you keeps the hub's order under every sort")
@@ -559,7 +562,7 @@ struct TodosListWritesTests {
         let row = try #require(list.row("/a"))
         #expect(row.content.struck && row.content.closed, "ticked")
         #expect(toasts.shown.last?.action != nil, "Done · Undo")
-        #expect(list.groups.first { $0.id == TodoListSection.todo }?.keys == ["/a"], "it stays where it is meanwhile")
+        #expect(list.groups.first { $0.id == TodoListSection.todo.rawValue }?.keys == ["/a"], "it stays where it is meanwhile")
         guard case .takeBack? = list.tick(of: "/a") else { Issue.record("a second tap takes it back"); return }
         #expect(hub.sent("PATCH", "/api/v1/todos/a").isEmpty, "nothing goes within the window")
         try await waitForListTest { !hub.sent("PATCH", "/api/v1/todos/a").isEmpty }
@@ -569,7 +572,7 @@ struct TodosListWritesTests {
         try await waitForListTest { outbox.entries.isEmpty }
         try await waitForListTest { list.row("/a")?.content.struck == false }
         #expect(list.row("/a")?.content.closed == true, "closed, as the hub's view says")
-        #expect(list.groups.contains { $0.id == TodoListSection.justFinished }, "filed where the hub put it")
+        #expect(list.groups.contains { $0.id == TodoListSection.justFinished.rawValue }, "filed where the hub put it")
     }
 
     @Test func undoWithinTheWindowSendsNothing() async throws {
@@ -617,7 +620,7 @@ struct TodosListWritesTests {
         list.someday("/a")
         try await waitForListTest { list.row("/a")?.content.someday == true }
         list.outOfSomeday("/a")
-        try await waitForListTest { list.groups.first { $0.id == TodoListSection.todo }?.keys == ["/a"] }
+        try await waitForListTest { list.groups.first { $0.id == TodoListSection.todo.rawValue }?.keys == ["/a"] }
         try await Task.sleep(for: .milliseconds(500)) // past the window: nothing may have gone
         #expect(hub.sent("PUT", "/api/v1/todos/a/someday").isEmpty && hub.sent("DELETE", "/api/v1/todos/a/someday").isEmpty)
         #expect(outbox.entries.isEmpty)
@@ -699,9 +702,9 @@ struct TodosListWritesTests {
         #expect(list.needsYou == 1)
         list.someday("/n")
         try await waitForListTest { store.countsSource.needsYou == 0 }
-        try await waitForListTest { list.groups.last?.tail?.id == TodoListSection.someday }
+        try await waitForListTest { list.groups.last?.tail?.id == TodoListSection.someday.rawValue }
         #expect(list.needsYou == 0, "N moves at once, everywhere")
-        #expect(!list.groups.contains { $0.id == TodoListSection.needsYou })
+        #expect(!list.groups.contains { $0.id == TodoListSection.needsYou.rawValue })
         #expect(list.groups.last?.tail?.keys == ["/n"], "folded under Someday, after the last card")
         #expect(hub.sent("PUT", "/api/v1/todos/n/someday").isEmpty)
         try await waitForListTest { !hub.sent("PUT", "/api/v1/todos/n/someday").isEmpty }
@@ -761,8 +764,8 @@ struct TodosListWritesTests {
             return Data(#"{"todo":{"id":"t9","title":"Buy stamps"}}"#.utf8)
         }
         #expect(list.create(title: "  Buy stamps ", notes: ""))
-        try await waitForListTest { list.groups.first { $0.id == TodoListSection.todo }?.keys.count == 2 }
-        let todo = try #require(list.groups.first { $0.id == TodoListSection.todo })
+        try await waitForListTest { list.groups.first { $0.id == TodoListSection.todo.rawValue }?.keys.count == 2 }
+        let todo = try #require(list.groups.first { $0.id == TodoListSection.todo.rawValue })
         let new = try #require(todo.keys.first)
         #expect(new != "/a" && list.row(new)?.content.saving == true && list.row(new)?.content.title == "Buy stamps")
         #expect(store.countsSource.counts.sections[TodoListSection.todo] == 2, "counted at once")
@@ -771,7 +774,7 @@ struct TodosListWritesTests {
         #expect(post.headers[OpRetry.header] != nil)
         release.go()
         try await waitForListTest { outbox.entries.isEmpty }
-        let keys = list.groups.first { $0.id == TodoListSection.todo }?.keys ?? []
+        let keys = list.groups.first { $0.id == TodoListSection.todo.rawValue }?.keys ?? []
         #expect(keys.contains("/t9") && !keys.contains(new), "the hub's row in its place: \(keys)")
     }
 

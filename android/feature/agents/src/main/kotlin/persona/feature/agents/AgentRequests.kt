@@ -22,6 +22,7 @@ import persona.feature.chat.SecretRunActions
 import persona.feature.chat.SecretRunSummary
 import persona.feature.chat.SecretHandoffActions
 import persona.feature.chat.SecretHandoffSummary
+import persona.feature.chat.isCommandInputPermission
 import persona.feature.chat.rememberTransientSecret
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -180,6 +181,7 @@ internal fun RequestDetail(
     blockedReason: String? = null,
     /** False for a session without a terminal: no "handle in terminal" note in the request. */
     terminalHelp: Boolean = true,
+    refusal: String? = null,
 ) {
     var linkVisible by remember(request) { mutableStateOf(false) }
     val feedback = LocalAppFeedback.current
@@ -192,14 +194,15 @@ internal fun RequestDetail(
                 onEdit = { _, _ -> feedback?.notice(openForEdit) },
                 onVisibilityChanged = { linkVisible = it }, manager = request.manager) { inset ->
                 Column(Modifier.fillMaxSize().padding(bottom = inset).imePadding(), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-                    JRow(request.headline.text(), subtitle = request.sessionTitle, leadingIcon = request.decisionKind.icon)
+                    val headline = if (request.isCommandInputPermission) request.cardTitle(agentResources()) else request.headline.text()
+                    JRow(headline, subtitle = request.sessionTitle, leadingIcon = request.decisionKind.icon)
                     // The editor below announces "Sending" itself; announcing it here too would say it twice.
                     delivery?.let { RequestDeliveryStatus(it, live = false) }
                     if (!online && !readOnly) Text(stringResource(R.string.agents_request_offline), style = PersonaTheme.type.caption, color = PersonaTheme.palette.cautionText)
                     Box(Modifier.weight(1f)) {
                         persona.feature.chat.RequestEditor(request, machine, busy = RequestDeliveries.locks(delivery), uncertain = delivery == RequestDelivery.Unknown,
                             online = online, readOnly = readOnly, onTerminal = onTerminal, linkVisible = linkVisible,
-                            blockedReason = blockedReason, terminalHelp = terminalHelp,
+                            blockedReason = blockedReason, terminalHelp = terminalHelp, refusal = refusal,
                             onAnswer = { action, draft, read -> if (!readOnly) onAnswer(request, action, draft, read) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
@@ -228,7 +231,7 @@ internal fun RequestDeliveryStatus(delivery: RequestDelivery, live: Boolean = tr
 }
 
 internal val Interaction.decisionKind: DecisionKind get() = when (kind) {
-    "permission" -> if (toolName == "Bash" || isSecretRun) DecisionKind.Command else DecisionKind.Tool
+    "permission" -> if (toolName == "Bash" || isSecretRun || isCommandInputPermission) DecisionKind.Command else DecisionKind.Tool
     "plan" -> DecisionKind.Plan
     "question" -> DecisionKind.Question
     "elicitation" -> DecisionKind.Form

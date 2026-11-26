@@ -25,5 +25,8 @@
   "rolled_back_body": "{name} {version} 起不来，已回到 {from}，不再自动升级到这个版本",
   "upgraded_title": "扩展已自动升级",
   "upgraded_body": "{name} 升级到了 {version}",
-  "not_from_market": "只有从扩展市场装的扩展会自动升级"
+  "not_from_market": "只有从扩展市场装的扩展会自动升级",
+  "prepare_failed": "扩展还没准备好升级：{why}",
+  "backup_failed": "数据没能备份，而这个扩展要求升级前必须备份：{why}",
+  "not_running": "它的程序没在运行"
 }

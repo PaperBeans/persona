@@ -5,7 +5,10 @@
 # with this machine's private values (docs/operations/testing.md "Privacy scan"), then squash-merges exactly the head
 # and the message it scanned and deletes the branch. CI cannot do this: it does not have the values.
 # It also refuses a merge that would leave the fixed-sleep or web font ratchet failing on main for a file the PR changes
-# (scripts/ci/changed_ratchets.py, #7977): CI runs those on main only on a schedule.
+# (scripts/ci/changed_ratchets.py, #7977): CI runs those on main only on a schedule. And it refuses a PR that changes
+# Persona Core without the `core-change` label and a reason (scripts/hooks/core-change-check.py, #14916), and one that
+# adds a weak type to the contract packages or the hub's handlers, counted on the merge result
+# (scripts/ci/merge_wire_types.py).
 set -euo pipefail
 expect_head="${PR_WATCH_EXPECT_HEAD:-}"
 expect_base="${PR_WATCH_EXPECT_BASE:-}"
@@ -61,7 +64,7 @@ trap 'rm -rf "$tmp"' EXIT
 # The snapshot and all later writes run while holding persona-pr-merge.lock.
 # One snapshot, so every field comes from the same moment. The squash message is passed to the merge instead of being
 # left to GitHub, which would take the title and body as they are when it merges, edits after the scan included.
-gh pr view "$pr" --json headRefOid,headRefName,isCrossRepository,baseRefName,title,body > "$tmp/pr.json"
+gh pr view "$pr" --json headRefOid,headRefName,isCrossRepository,baseRefName,title,body,labels > "$tmp/pr.json"
 # A release PR is not mergeable on privacy checks alone: all its platform jobs must have verified the proposed
 # merge result. Ordinary PRs retain the existing exact-head/privacy path.
 if [[ "$(python3 -c 'import json; print(json.load(open("'"$tmp"'/pr.json"))["title"])')" == release:* ]]; then
@@ -99,6 +102,18 @@ python3 "$root/scripts/privacy_check.py" --range "$base_sha..$head" --message "$
 # Only the files the PR changes, as the merge leaves them: a file main already fails is left to its own fix.
 python3 "$root/scripts/ci/changed_ratchets.py" --root "$root" --base "$base_sha" --head "$head" \
   || { echo "merge-pr: #$pr not merged: fix the ratchet failures above in the PR first" >&2; exit 1; }
+# A PR that changes Persona Core carries the `core-change` label and says why (schema/core-paths.txt, #14916). The
+# label and description come from the snapshot above; the changed files from the diff of the verified head itself
+# (no renames: a moved file lists both names), never from the PR files API, which follows the PR if it moves after
+# the check. Module-only, docs-only and tests-only PRs pass untouched.
+git -C "$root" diff --no-renames --name-only -z "$base_sha...$head" > "$tmp/changed-files" \
+  || { echo "merge-pr: could not list the files #$pr changes" >&2; exit 1; }
+python3 "$root/scripts/hooks/core-change-check.py" --snapshot "$tmp/pr.json" --files-from "$tmp/changed-files" "$pr" \
+  || { echo "merge-pr: #$pr not merged: it changes Persona Core; fix what the check above asks for first" >&2; exit 1; }
+# The merge as it will land, counted: a weak type the PR adds to the contract packages or the hub's handlers is refused
+# here, not found on main later (scripts/ci/merge_wire_types.py, #15397). Needs Go; without it nothing is merged.
+python3 "$root/scripts/ci/merge_wire_types.py" --root "$root" --base "$base_sha" --head "$head" \
+  || { echo "merge-pr: #$pr not merged: type the weak fields above in the PR first" >&2; exit 1; }
 # From outside the repository, by name: gh then only merges on GitHub. (--delete-branch inside a worktree also checks
 # out the base branch locally and fails when another worktree holds it; and it fails when GitHub already deleted the
 # branch on merge.) The branch is deleted here instead, if it is still there.

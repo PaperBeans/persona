@@ -1,0 +1,108 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_title",
+      "value": "Connect Hub"
+    },
+    {
+      "name": "phone_pair_method",
+      "value": "Connection method"
+    },
+    {
+      "name": "phone_pair_password",
+      "value": "Password sign-in"
+    },
+    {
+      "name": "phone_pair_token",
+      "value": "Scan or token"
+    },
+    {
+      "name": "phone_pair_https",
+      "value": "HTTPS hub address"
+    },
+    {
+      "name": "phone_pair_address",
+      "value": "Server Address"
+    },
+    {
+      "name": "phone_pair_code",
+      "value": "Pairing code"
+    },
+    {
+      "name": "phone_pair_photo",
+      "value": "Choose from Photos"
+    },
+    {
+      "name": "phone_pair_manual",
+      "value": "Enter Manually"
+    },
+    {
+      "name": "phone_pair_command",
+      "value": "Command line"
+    },
+    {
+      "name": "phone_pair_other_info",
+      "value": "Type the address, connect through an SSH tunnel, or make a code with a command on the hub's machine."
+    },
+    {
+      "name": "phone_pair_command_info",
+      "value": "If you use the terminal on the hub's machine: run this line there and it prints a QR code and a pairing link."
+    },
+    {
+      "name": "phone_pair_password_info",
+      "value": "Enter the connection password set by your administrator in the system sign-in window. Use QR pairing for self-signed certificates."
+    },
+    {
+      "name": "phone_password_address",
+      "value": "Enter a valid HTTPS hub address."
+    },
+    {
+      "name": "phone_password_expired",
+      "value": "Sign-in authorization expired. Sign in again."
+    },
+    {
+      "name": "phone_password_browser",
+      "value": "Could not open the system sign-in window."
+    },
+    {
+      "name": "phone_pair_photo_invalid",
+      "value": "Choose a photo containing one hub pairing code."
+    },
+    {
+      "name": "phone_pair_access",
+      "value": "Cloudflare Access"
+    },
+    {
+      "name": "phone_pair_access_info",
+      "value": "For a hub published through Cloudflare Access, enter the service token’s Client ID and Client Secret. They are saved securely on this device with this hub’s pairing."
+    },
+    {
+      "name": "phone_pair_ssh",
+      "value": "Connect via SSH Tunnel"
+    },
+    {
+      "name": "phone_pair_ssh_info",
+      "value": "If this device can't reach the hub's address (different network, no VPN), you can go through an SSH server that can reach the hub."
+    },
+    {
+      "name": "phone_pair_access_id",
+      "value": "Client ID"
+    },
+    {
+      "name": "phone_pair_access_secret",
+      "value": "Client Secret"
+    },
+    {
+      "name": "phone_pair_ssh_configured",
+      "value": "Connect to this hub through the configured SSH tunnel."
+    },
+    {
+      "name": "phone_pair_camera_reason",
+      "value": "Use the camera to scan a pairing QR code when connecting to a hub."
+    },
+    {
+      "name": "phone_pair_scan_info",
+      "value": "Scan the QR code shown when the hub was set up, or the one from Settings › Devices › Connect a new device on a connected device."
+    }
+  ]
+}

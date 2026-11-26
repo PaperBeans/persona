@@ -41,7 +41,7 @@ let tree: TodoTree | undefined;
 function show(all: Session[], ms: Machine[], activeKey: string) {
   tree = shareTree(tree, buildTodoTree(all.map((x) => ({ ...x })), ms, todos, { spaces: [], sessions: [] }));
   renders.length = 0;
-  act(() => root.render(<TodoTreeView tree={tree!} machines={ms} activeKey={activeKey} {...stable} />));
+  act(() => root.render(<TodoTreeView tree={tree!} activeKey={activeKey} {...stable} />));
   // distinct: a node that comes to hold the open row (or stops) renders twice in a row (useFolded adjusts while rendering)
   return [...new Set(renders)].sort();
 }

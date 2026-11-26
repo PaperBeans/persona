@@ -79,6 +79,9 @@ func (s *Service) resolvePreparedAnswer(ctx context.Context, p *pending, r proto
 	case r.UserDenied():
 		a.reportStatus = "denied"
 		text = cmpOr(a.op.Denied, "The user declined the change: nothing changed.")
+		if note := strings.TrimSpace(r.Message); note != "" {
+			text += " Owner note: " + note
+		}
 	case r.UserAllowed():
 		a.reportStatus = "resolved"
 		applyCtx := ctx
@@ -237,7 +240,7 @@ func (s *Service) finishPrepared(p *pending, status string) {
 		// The original tool call is still waiting, so its result is the one place
 		// to identify the expired interaction. A clarified card instead uses its
 		// existing durable journal below; starting another delivery would duplicate it.
-		a.outcome.Text = approvalResultText(p.ix.ID, status, a.outcome.Text)
+		a.outcome.Text = approvalResultTextWithSummary(p.ix.ID, status, safeInteractionSummary(p.ix), a.outcome.Text)
 	}
 	text := a.outcome.Text
 	journalStatus := a.reportStatus

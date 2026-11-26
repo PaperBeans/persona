@@ -54,7 +54,7 @@ func tierOf(ps modelProfiles, profile, tier string) (ModelTier, bool) {
 
 // A tier's model goes to the agent as --model and its description is in every snapshot: both are checked on save.
 func TestCheckModelTiers(t *testing.T) {
-	if checkTierModel("review", ModelTier{Launcher: "claude", Model: "x;rm"}) == nil || checkTierModel("review", ModelTier{Launcher: "claude", Model: "gw/model-x[1m]"}) != nil {
+	if checkTierModel("review", ModelTier{Launcher: "claude", Model: "x;rm"}, nil) == nil || checkTierModel("review", ModelTier{Launcher: "claude", Model: "gw/model-x[1m]"}, nil) != nil {
 		t.Error("checkTierModel")
 	}
 	for name, tier := range map[string]ModelTier{
@@ -149,7 +149,7 @@ func TestModelTiersSetting(t *testing.T) {
 	ps, st := storedTiers(t, s)
 	want := ModelTier{Launcher: "fast", Model: "m-review", Effort: "high", Description: "Code review"}
 	for _, id := range []string{"economy", "performance"} {
-		if got, _ := tierOf(ps, id, "review"); got != want {
+		if got, _ := tierOf(ps, id, "review"); !got.equal(want) {
 			t.Fatalf("%s review: %+v", id, got)
 		}
 	}
@@ -168,10 +168,10 @@ func TestModelTiersSetting(t *testing.T) {
 		t.Fatalf("description: %s", out)
 	}
 	ps, _ = storedTiers(t, s)
-	if got, _ := tierOf(ps, "economy", "review"); got != (ModelTier{Launcher: "fast", Model: "m-review", Effort: "high", Description: "Careful review"}) {
+	if got, _ := tierOf(ps, "economy", "review"); !got.equal(ModelTier{Launcher: "fast", Model: "m-review", Effort: "high", Description: "Careful review"}) {
 		t.Fatalf("partial edit: %+v", got)
 	}
-	if got, _ := tierOf(ps, "performance", "review"); got != want {
+	if got, _ := tierOf(ps, "performance", "review"); !got.equal(want) {
 		t.Fatalf("profiles was not kept to: %+v", got)
 	}
 	answer(true, nil, nil)
@@ -179,7 +179,7 @@ func TestModelTiersSetting(t *testing.T) {
 		t.Fatalf("launcher: %s", out)
 	}
 	ps, _ = storedTiers(t, s)
-	if got, _ := tierOf(ps, "performance", "review"); got != (ModelTier{Launcher: "claude", Description: "Code review"}) {
+	if got, _ := tierOf(ps, "performance", "review"); !got.equal(ModelTier{Launcher: "claude", Description: "Code review"}) {
 		t.Fatalf("a new launcher kept the old model: %+v", got)
 	}
 	if out, _ := set(`{"tier":"review","launcher":"claude","profiles":["performance"]}`); !strings.Contains(out, "Nothing to change") {
@@ -222,7 +222,7 @@ func TestModelTiersSetting(t *testing.T) {
 	if out, isErr := set(`{"tier":"review","remove":true}`); !isErr {
 		t.Fatalf("removing what no profile has: %s", out)
 	}
-	if out, _ := tool(`{"action":"get","key":"model_profiles.tiers"}`); !strings.Contains(out, "- Economy (economy), in use:\n  - standard = claude") ||
+	if out, _ := tool(`{"action":"get","key":"model_profiles.tiers"}`); !strings.Contains(out, "- Economy (economy), in use:\n  - dev = claude (also answers to standard)") ||
 		!strings.Contains(out, "- Performance (performance): no tiers") {
 		t.Fatalf("get:\n%s", out)
 	}
@@ -347,7 +347,7 @@ func TestGoldenAssistantSnapshotTiers(t *testing.T) {
 	golden(t, "assistant_snapshot.tiers", prompts.RenderSnapshot(prompts.Snapshot{Now: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC), Zone: "UTC",
 		ModelProfile: &prompts.SnapshotProfile{ID: "performance", Name: "Performance", Tiers: []prompts.SnapshotTier{
 			{Name: "review", Launcher: "gw", Model: "gw/model-x", Effort: "high", Speed: "fast", Description: "Code review and design"},
-			{Name: "standard", Launcher: "claude"},
+			{Name: "dev", Launcher: "claude", More: 2, Aliases: []string{"standard", "bulk"}},
 		}}}))
 }
 
@@ -362,7 +362,7 @@ func TestLegacyTierModelBlocksNothing(t *testing.T) {
 		}
 	}
 	for _, p := range profilesOf(t, s).Profiles {
-		if p.Tiers["strong"].Model != "" || p.Tiers["standard"].Model != "" {
+		if p.Tiers["core"].Model != "" || p.Tiers["dev"].Model != "" {
 			t.Fatalf("a template copied a model that is no model id: %+v", p.Tiers)
 		}
 	}
@@ -420,7 +420,7 @@ func TestTierCardOnUnsavedTemplates(t *testing.T) {
 		}
 	}()
 	r := s.Tool(ctx, ToolCall{Name: "persona_settings", MachineID: "server", SessionID: "c1",
-		Arguments: json.RawMessage(`{"action":"set","key":"model_profiles.tiers","value":{"tier":"standard","description":"Everyday"}}`)})
+		Arguments: json.RawMessage(`{"action":"set","key":"model_profiles.tiers","value":{"tier":"dev","description":"Everyday"}}`)})
 	if out := r.Content[0].Text; !strings.Contains(out, "changed after the card") {
 		t.Fatalf("approved over a changed configuration: %s", out)
 	}
@@ -433,7 +433,7 @@ func TestTierCardOnUnsavedTemplates(t *testing.T) {
 func TestDeletedProfileInUse(t *testing.T) {
 	s, _, _ := modelService(t)
 	putTierProfiles(t, s, "gone", map[string]ModelTier{"quick": {Launcher: "claude"}}, nil)
-	if _, err := s.tierModel(context.Background(), "quick"); err == nil || !strings.Contains(err.Error(), "no longer exists") {
+	if _, err := s.pickTierCandidate(context.Background(), "quick", tierFacts{}); err == nil || !strings.Contains(err.Error(), "no longer exists") {
 		t.Fatalf("tier: %v", err)
 	}
 	if got := s.modelProfileContext(context.Background()); got == nil || !got.Gone || got.ID != "gone" {

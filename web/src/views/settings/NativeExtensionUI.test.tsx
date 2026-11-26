@@ -29,6 +29,7 @@ vi.mock("../../lib/extension-ui", async (original) => ({
     return { sections: [{ items: [{ type: "text", text: `HTTP ${ui}` }, { type: "button", title: "HTTP next", action: { id: "next", push: { ui: "legacy-detail" } } }] }] };
   },
 }));
+import { openOverlay, overlayDepth } from "../../lib/back-close";
 import { NativeExtensionUI } from "./NativeExtensionUI";
 import { LegacyExtensionUI } from "./ExtensionView";
 import charts from "../../../../schema/extension/examples/View.v6-charts.json";
@@ -40,7 +41,7 @@ beforeEach(() => {
   history.replaceState({}, "", "/extension/example/main");
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); seam.entries.forEach((e) => e.adapter.dispose()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); seam.entries.forEach((e) => e.adapter.dispose()); host.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const nativeView = (): View => ({ sections: [{ key: "section", items: [{ type: "text", key: "text", text: "Native entry" }, { type: "button", key: "next", title: "Native next", action: { id: "next", push: { ui: "detail" } } }] }] });
 function gapView(): View {
   const view = structuredClone(charts) as View;
@@ -98,6 +99,27 @@ describe("native navigation repairs", () => {
       history.back(); await popped;
     });
     expect(top().textContent).toContain("Native entry");
+  });
+  it("replaces an open overlay's entry when pushing so closing the overlay does not undo the push", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backSpy = vi.spyOn(history, "back");
+    seam.views = [nativeView(), gapView()];
+    await mount();
+    const onOverlayPop = vi.fn();
+    const closeOverlay = openOverlay(onOverlayPop);
+    const lenAtOverlay = history.length;
+    expect(overlayDepth()).toBe(1);
+
+    await click("Native next");
+    closeOverlay();
+    await act(async () => { await vi.runAllTimersAsync(); });
+
+    expect(backSpy).not.toHaveBeenCalled();
+    expect(onOverlayPop).not.toHaveBeenCalled();
+    expect(history.length).toBe(lenAtOverlay);
+    expect(overlayDepth()).toBe(0);
+    expect(history.state.extPage).toBe(2);
+    expect(top().textContent).toContain("HTTP detail");
   });
   it.each(["local", "receipt"])("replaces the eighth page for a %s push without an extra history entry", async (source) => {
     await mount();

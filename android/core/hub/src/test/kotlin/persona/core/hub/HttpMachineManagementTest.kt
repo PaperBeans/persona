@@ -600,6 +600,22 @@ class HttpModelConfigurationTest {
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"invalid tier"}"""))
         assertEquals(400, (runCatching { models.saveProfile("performance", input) }.exceptionOrNull() as HubFailure).status)
         server.takeRequest()
+
+        // Capture live configuration sends minimal { revision, name, description?, capture: true }.
+        server.enqueue(MockResponse().setBody(profilesJson.replace("\"revision\": 4", "\"revision\": 6")))
+        val captureInput = ModelProfileSaveInput.capture(revision = 5, name = "Performance", description = "Strong models")
+        val captured = models.saveProfile("performance", captureInput)
+        assertTrue(captured is ModelProfileSave.Saved)
+        assertEquals(6L, (captured as ModelProfileSave.Saved).view.revision)
+        val captureReq = server.takeRequest()
+        assertEquals("PUT", captureReq.method)
+        assertEquals("/api/v1/model-profiles/performance", captureReq.path)
+        val captureBody = JsonCodec.parseToJsonElement(captureReq.body.readUtf8()).jsonObject
+        assertEquals(setOf("revision", "name", "description", "capture"), captureBody.keys)
+        assertEquals(5L, captureBody["revision"]?.jsonPrimitive?.long)
+        assertEquals("Performance", captureBody["name"]?.jsonPrimitive?.content)
+        assertEquals("Strong models", captureBody["description"]?.jsonPrimitive?.content)
+        assertEquals(true, captureBody["capture"]?.jsonPrimitive?.boolean)
         Unit
     }
 }

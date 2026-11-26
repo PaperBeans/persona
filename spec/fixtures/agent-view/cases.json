@@ -1,0 +1,1904 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "cards_of_one_session_are_one_row",
+      "description": "A session with a plan, a question and a permission waiting is one row; its cards sit under it, oldest first. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Support HEIC in the photo sync",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-plan",
+            "machine_id": "studio",
+            "session_id": "s1",
+            "kind": "plan",
+            "created_at": "2026-11-10T08:00:00Z",
+            "plan": "## Support HEIC\n- convert on export"
+          },
+          {
+            "id": "ix-question",
+            "machine_id": "studio",
+            "session_id": "s1",
+            "kind": "question",
+            "created_at": "2026-11-10T08:01:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ix-permission",
+            "machine_id": "studio",
+            "session_id": "s1",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:02:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 3
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_session_waiting_in_its_terminal_is_a_row",
+      "description": "The hub says a session needs the user but no card was read (a prompt only its terminal shows): it is a row with no cards. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "macbook",
+            "session_id": "s2",
+            "title": "Login form",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "macbook/s2",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "rows_go_oldest_first",
+      "description": "Rows go by their oldest card or, with none, by when the session started waiting. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "s1",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "s2",
+            "title": "s2",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:05:00Z",
+            "state_since": "2026-11-10T08:05:00Z"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "s3",
+            "title": "s3",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:10:00Z",
+            "state_since": "2026-11-10T08:10:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-3",
+            "machine_id": "macbook",
+            "session_id": "s3",
+            "kind": "question",
+            "created_at": "2026-11-10T08:10:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ix-1",
+            "machine_id": "studio",
+            "session_id": "s1",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          },
+          {
+            "id": "macbook/s2",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "counted": true,
+              "rank": 0
+            }
+          },
+          {
+            "id": "macbook/s3",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_card_with_no_session_is_its_own_row",
+      "description": "Cards that belong to no session (personad ask outside herdr) are a row each, even on the same computer. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [],
+        "interactions": [
+          {
+            "id": "ix-a",
+            "machine_id": "mac",
+            "session_id": "",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ],
+            "session_title": "backup.sh"
+          },
+          {
+            "id": "ix-b",
+            "machine_id": "mac",
+            "session_id": "",
+            "kind": "question",
+            "created_at": "2026-11-10T08:01:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ],
+            "session_title": "deploy.sh"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": []
+      }
+    },
+    {
+      "name": "a_card_makes_its_session_wait_whatever_its_state",
+      "description": "A pending card puts its session in Needs you even while the session's state still says working. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "s1",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-1",
+            "machine_id": "studio",
+            "session_id": "s1",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:00:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "persona_conversations_are_not_agents",
+      "description": "The assistant's own conversations and their cards belong to the Persona tab: never a row here. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "server",
+            "session_id": "chat",
+            "title": "Persona",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "assistant": true
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-chat",
+            "machine_id": "server",
+            "session_id": "chat",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "server/chat",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "rank": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "muted_and_quiet_agents_are_rows_but_not_on_the_badge",
+      "description": "A muted agent, an agent in a muted space and a quiet task's agent still need the user and stay rows; the section's header, the Needs you filter and the tab's badge leave them out (the main conversation tells about a quiet task's agent), so the header says 2 over the five rows. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "s1",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "s2",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:01:00Z",
+            "state_since": "2026-11-10T08:01:00Z",
+            "space_name": "weather"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s3",
+            "title": "s3",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:02:00Z",
+            "state_since": "2026-11-10T08:02:00Z",
+            "space_name": "weather"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "s4",
+            "title": "s4",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:03:00Z",
+            "state_since": "2026-11-10T08:03:00Z"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "s5",
+            "title": "s5",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:04:00Z",
+            "state_since": "2026-11-10T08:04:00Z"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [
+            "studio/s1"
+          ],
+          "spaces": [
+            "studio/weather"
+          ],
+          "allowed": [
+            "studio/s3"
+          ]
+        },
+        "quiet": [
+          "macbook/s4"
+        ]
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "rank": 1
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "rank": 1
+            }
+          },
+          {
+            "id": "studio/s3",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "counted": true,
+              "rank": 0
+            }
+          },
+          {
+            "id": "macbook/s4",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "rank": 1
+            }
+          },
+          {
+            "id": "macbook/s5",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "terminal_dialog"
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "other_states_do_not_need_the_user",
+      "description": "Working, unread (finished, including one awaiting a reply), idle and offline sessions without a card are not rows. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "w",
+            "title": "w",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "u",
+            "title": "u",
+            "cwd": "/home/user/project",
+            "state": "unread",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "r",
+            "title": "r",
+            "cwd": "/home/user/project",
+            "state": "unread",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "awaits_reply": true
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "i",
+            "title": "i",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "o",
+            "title": "o",
+            "cwd": "/home/user/project",
+            "state": "offline",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/w",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "turn"
+              },
+              "rank": 20
+            }
+          },
+          {
+            "id": "studio/u",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "unseen"
+              },
+              "rank": 30
+            }
+          },
+          {
+            "id": "studio/r",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "asks",
+                "unseen": true
+              },
+              "rank": 30
+            }
+          },
+          {
+            "id": "macbook/i",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "seen"
+              },
+              "rank": 40
+            }
+          },
+          {
+            "id": "macbook/o",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "not_running"
+              },
+              "rank": 42
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_childs_card_counts_under_its_parent",
+      "description": "A child the hub folds under its parent (folded_under) asks: its card sits under the parent's row, which waits through the children rollup while its own state says working. One row, counted once. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "lead",
+            "title": "Release notes",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "children": {
+              "total": 1,
+              "working": 0,
+              "needs_you": 1
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "worker",
+            "title": "Check the changelog",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:05:00Z",
+            "state_since": "2026-11-10T08:05:00Z",
+            "folded_under": "lead"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-child",
+            "machine_id": "studio",
+            "session_id": "worker",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:05:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test",
+            "folded_under": "lead"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/lead",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          },
+          {
+            "id": "studio/worker",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "rank": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_side_counts_under_its_parent",
+      "description": "A side session (folded_as side: a desktop app's side chat or /btw question) asks while its parent is idle: the side is no row of its own; its card sits under the parent's row, which waits through the sides it holds. One row, counted once. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "main",
+            "title": "Photo sync",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "children": {
+              "total": 1,
+              "needs_you": 1,
+              "sides": 1,
+              "sides_needs_you": 1
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "btw",
+            "title": "Which formats?",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:03:00Z",
+            "state_since": "2026-11-10T08:03:00Z",
+            "folded_under": "main",
+            "folded_as": "side"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-side",
+            "machine_id": "studio",
+            "session_id": "btw",
+            "kind": "question",
+            "created_at": "2026-11-10T08:03:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ],
+            "folded_under": "main",
+            "folded_as": "side"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/main",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          },
+          {
+            "id": "studio/btw",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "rank": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_quiet_tasks_card_is_a_row_but_not_on_the_badge",
+      "description": "A quiet task's agent asks with a card: it is a row with its card, but the section's header, the Needs you filter and the tab's badge leave it out, as they do a quiet task's agent waiting in its terminal (the main conversation tells about it). The other agent's card counts. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "macbook",
+            "session_id": "q",
+            "title": "Weekly report",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          },
+          {
+            "machine_id": "macbook",
+            "session_id": "p",
+            "title": "Login form",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:01:00Z",
+            "state_since": "2026-11-10T08:01:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-quiet",
+            "machine_id": "macbook",
+            "session_id": "q",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ix-plain",
+            "machine_id": "macbook",
+            "session_id": "p",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:01:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": [
+          "macbook/q"
+        ]
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "macbook/q",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "rank": 1
+            }
+          },
+          {
+            "id": "macbook/p",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_directory_hidden_card_counts_nowhere",
+      "description": "A session an Agent-folder hide rule matches (hidden_by_directory) asks with a card: neither it nor its card is a row, and the badge does not count it. The visible agent's card counts. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "h",
+            "title": "Scratch",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "hidden_by_directory": true
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "v",
+            "title": "Visible",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:01:00Z",
+            "state_since": "2026-11-10T08:01:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-hidden",
+            "machine_id": "studio",
+            "session_id": "h",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:00:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test"
+          },
+          {
+            "id": "ix-visible",
+            "machine_id": "studio",
+            "session_id": "v",
+            "kind": "question",
+            "created_at": "2026-11-10T08:01:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/h",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "rank": 1
+            }
+          },
+          {
+            "id": "studio/v",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_held_card_is_listed_but_counts_nowhere",
+      "description": "A question the assistant is still deciding whether it may answer for the user (delegating) is held: its session is a row with the card, answerable there, but no count includes it until the card is handed to the user, though the session's state says needs_you (D11's state path). (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "d",
+            "title": "Pick a port",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-delegating",
+            "machine_id": "studio",
+            "session_id": "d",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ],
+            "delegating": true
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/d",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1,
+                "held": true
+              },
+              "rank": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_handed_card_beside_a_held_one_counts",
+      "description": "Only held cards leave the count: a session with a held question and a permission card already handed to the user is a row, with both cards, and it counts. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "m",
+            "title": "Release notes",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-held",
+            "machine_id": "studio",
+            "session_id": "m",
+            "kind": "question",
+            "created_at": "2026-11-10T08:00:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ],
+            "delegating": true
+          },
+          {
+            "id": "ix-handed",
+            "machine_id": "studio",
+            "session_id": "m",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:01:00Z",
+            "tool_name": "Bash",
+            "summary": "npm test"
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/m",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 2
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_routed_terminal_question_is_held",
+      "description": "A parsed terminal question that went to its task's supervisor (delegating, kind screen) is the supervisor's until it passes it up with ask_escalate: the card is in no row and its session, whose needs_you comes only from the terminal dialog behind it, is no row either, so nothing lists or counts it. The owner confirmed D11's case for routed terminal questions on 2026-11-23 (docs/plans/plan-derived-counts.md, 6.1). (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "t",
+            "title": "Port the demo",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-terminal",
+            "machine_id": "studio",
+            "session_id": "t",
+            "kind": "screen",
+            "created_at": "2026-11-10T08:00:00Z",
+            "screen": "Which port should the demo use?\n\n❯ 1. 8080\n  2. 9090\n",
+            "dialog": {
+              "question": "Which port should the demo use?",
+              "options": [
+                {
+                  "key": "1",
+                  "label": "8080",
+                  "keys": [
+                    "1"
+                  ]
+                },
+                {
+                  "key": "2",
+                  "label": "9090",
+                  "keys": [
+                    "2"
+                  ]
+                }
+              ],
+              "rev": "5f0c2a9d41b7"
+            },
+            "delegating": true
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/t",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "turn"
+              },
+              "rank": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a_supervisor_held_card_beside_an_open_one_leaves_the_row",
+      "description": "A permission its task's supervisor holds (delegating, kind permission) is in no row, while a question already handed to the user in the same session still makes it wait: the session is one row with the question alone, and it counts once. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "p",
+            "title": "Clean the build folder",
+            "cwd": "/home/user/project",
+            "state": "needs_you",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-held-permission",
+            "machine_id": "studio",
+            "session_id": "p",
+            "kind": "permission",
+            "created_at": "2026-11-10T08:00:00Z",
+            "tool_name": "Bash",
+            "summary": "rmdir build",
+            "delegating": true
+          },
+          {
+            "id": "ix-asked",
+            "machine_id": "studio",
+            "session_id": "p",
+            "kind": "question",
+            "created_at": "2026-11-10T08:01:00Z",
+            "questions": [
+              {
+                "question": "Which port should the demo use?",
+                "options": [
+                  {
+                    "label": "8080"
+                  },
+                  {
+                    "label": "9090"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/p",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "an_elicitation_makes_its_session_wait",
+      "description": "An MCP server's form (kind elicitation) is the session's only card while its state still says working: the session waits, is a row and counts on the badge. (from spec/fixtures/needs-you)",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "e",
+            "title": "Sign in to the tracker",
+            "cwd": "/home/user/project",
+            "state": "working",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix-form",
+            "machine_id": "studio",
+            "session_id": "e",
+            "kind": "elicitation",
+            "created_at": "2026-11-10T08:00:00Z",
+            "mcp_server_name": "tracker",
+            "elicitation": {
+              "mode": "form",
+              "message": "Choose a project",
+              "requested_schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/e",
+            "view": {
+              "phase": "needs_you",
+              "reason": {
+                "kind": "cards",
+                "n": 1
+              },
+              "counted": true,
+              "rank": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "interrupted_is_an_error",
+      "description": "A session its computer's node restart cut off (status interrupted, state unknown) is an error, restart_interrupted, resumable (D-C); one whose capabilities take neither messages nor a terminal is not resumable.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "interrupted",
+            "state": "unknown"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "interrupted",
+            "state": "unknown",
+            "capabilities": {
+              "read": true,
+              "send": false,
+              "interrupt": false,
+              "approve": false,
+              "terminal": false,
+              "attach": false
+            }
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "restart_interrupted",
+                "resumable": true
+              },
+              "rank": 10
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "restart_interrupted"
+              },
+              "rank": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_is_idle",
+      "description": "A session whose host does not say where it stands (state unknown) is idle, host_unknown (D-B); a state from a newer peer reads the same.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "unknown",
+            "state": "unknown"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "working",
+            "state": "paused"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "host_unknown"
+              },
+              "rank": 41
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "host_unknown"
+              },
+              "rank": 41
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "awaiting_reply_is_done_and_not_counted",
+      "description": "A session stopped on a question to the owner (awaits_reply) is done, asks, with its question, and not counted (D-A): seen ranks after unread.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "idle",
+            "awaits_reply": true,
+            "asks": "Should I merge the PR now?",
+            "asks_read": true
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "unread",
+            "awaits_reply": true,
+            "asks": "Which port should the demo use?",
+            "asks_read": true
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "asks",
+                "question": "Should I merge the PR now?"
+              },
+              "rank": 31
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "asks",
+                "question": "Which port should the demo use?",
+                "unseen": true
+              },
+              "rank": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "working_and_background",
+      "description": "A session at work is working, turn; one working only because of background work is working, background, with waiting when that work only waits; muted, it sorts last among the working.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "working",
+            "state": "working"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "working",
+            "background_working": true,
+            "background": [
+              {
+                "id": "b1",
+                "kind": "shell",
+                "description": "npm run dev",
+                "started_at": "2026-11-10T07:50:00Z"
+              }
+            ]
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s3",
+            "title": "Task s3",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "working",
+            "background_working": true,
+            "background_waiting": true,
+            "background": [
+              {
+                "id": "b2",
+                "kind": "shell",
+                "description": "sleep 600",
+                "started_at": "2026-11-10T07:50:00Z"
+              }
+            ]
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s4",
+            "title": "Task s4",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "working",
+            "state": "working"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [
+            "studio/s4"
+          ],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "turn"
+              },
+              "rank": 20
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "background"
+              },
+              "rank": 21
+            }
+          },
+          {
+            "id": "studio/s3",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "background",
+                "waiting": true
+              },
+              "rank": 22
+            }
+          },
+          {
+            "id": "studio/s4",
+            "view": {
+              "phase": "working",
+              "reason": {
+                "kind": "turn"
+              },
+              "rank": 29
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "finished_seen_and_offline",
+      "description": "A finished session the owner has not seen is done, unseen; seen and finished a short while ago, done, just_finished; seen, idle, seen; no process, idle, not_running.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "unread"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "idle",
+            "work": {
+              "phase": "done",
+              "just_finished": true
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s3",
+            "title": "Task s3",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "idle",
+            "state": "idle"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s4",
+            "title": "Task s4",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "offline",
+            "state": "offline"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "unseen"
+              },
+              "rank": 30
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "done",
+              "reason": {
+                "kind": "just_finished"
+              },
+              "rank": 32
+            }
+          },
+          {
+            "id": "studio/s3",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "seen"
+              },
+              "rank": 40
+            }
+          },
+          {
+            "id": "studio/s4",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "not_running"
+              },
+              "rank": 42
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "errors",
+      "description": "A turn a model error ended is an error, model, with its code; a usage limit is usage_limit with when it resets, ranked after the others when its CLI goes on by itself; a refused start is start_refused with its code and details; Persona's own Stop is no error.",
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "studio",
+            "session_id": "s1",
+            "title": "Task s1",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "unread",
+            "turn_error": "API Error: 401 invalid x-api-key",
+            "turn_error_code": "auth_failed",
+            "turn_error_kind": "user"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s2",
+            "title": "Task s2",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "idle",
+            "turn_error": "Usage limit reached",
+            "turn_error_kind": "usage_limit",
+            "turn_error_code": "rate_limited",
+            "turn_error_resets_at": "2026-11-10T13:00:00Z",
+            "turn_error_resumes": true
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s3",
+            "title": "Task s3",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "idle",
+            "turn_error": "Usage limit reached",
+            "turn_error_kind": "usage_limit",
+            "turn_error_code": "rate_limited"
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s4",
+            "title": "Task s4",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "offline",
+            "state": "offline",
+            "start_error": "Claude Code is not installed on studio.",
+            "start_error_code": "claude_missing",
+            "start_error_args": {
+              "where": "studio"
+            }
+          },
+          {
+            "machine_id": "studio",
+            "session_id": "s5",
+            "title": "Task s5",
+            "cwd": "/home/user/project",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "state_since": "2026-11-10T08:00:00Z",
+            "status": "done",
+            "state": "idle",
+            "turn_error": "Stopped",
+            "turn_error_kind": "stopped"
+          }
+        ],
+        "interactions": [],
+        "mutes": {
+          "sessions": [],
+          "spaces": [],
+          "allowed": []
+        },
+        "quiet": []
+      },
+      "expected": {
+        "views": [
+          {
+            "id": "studio/s1",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "model",
+                "code": "auth_failed"
+              },
+              "rank": 10
+            }
+          },
+          {
+            "id": "studio/s2",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "usage_limit",
+                "resets_at": "2026-11-10T13:00:00Z",
+                "resumes": true
+              },
+              "rank": 11
+            }
+          },
+          {
+            "id": "studio/s3",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "usage_limit"
+              },
+              "rank": 10
+            }
+          },
+          {
+            "id": "studio/s4",
+            "view": {
+              "phase": "error",
+              "reason": {
+                "kind": "start_refused",
+                "code": "claude_missing",
+                "args": {
+                  "where": "studio"
+                }
+              },
+              "rank": 10
+            }
+          },
+          {
+            "id": "studio/s5",
+            "view": {
+              "phase": "idle",
+              "reason": {
+                "kind": "seen"
+              },
+              "rank": 40
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -105,9 +105,10 @@ func TestPostCommandAdmissionPolicies(t *testing.T) {
 					envelope["event"].(map[string]any)["sender"].(map[string]any)["sender_type"] = tc.senderType
 					event, _ = json.Marshal(envelope)
 				}
-				// Count only what this message makes the bot do: the bot's start-up read of its own identity (after the
-				// pairing and each settings change above) is in the background and may come after the count (#14219).
-				w.botInfoRead(t)
+				// Count only what this message makes the bot do: the bot's start-up calls (its identity read and its long
+				// connection's first attempt, after the pairing and each settings change above) are in the background and
+				// may come after the count (#14219, #14986).
+				w.botStarted(t)
 				total := w.api.total()
 				w.send(t, event)
 				// The accepted /read is handed without an API send; ordinary topic and /ai paths likewise.

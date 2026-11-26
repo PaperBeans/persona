@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The water and protein page (#13176): the declarative page of the hub's intake route in a full page of its own, for the
 // state in `?state=`, drawn again when the hub says a record was added, undone or a goal saved (`health_intake`), and a
-// way back to the Health home. Today's rings open it.
+// way back to the Health home. Today's rings open it. The strength training pages (#14713) are the same route's: titled
+// as the hub's page titles itself, drawn again on `health_strength`, and a draft's page saved or cancelled goes back.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,12 +10,22 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const hub = vi.hoisted(() => ({
   calls: [] as { path: string; body?: Record<string, unknown> }[],
   listeners: new Map<string, Set<(m: Record<string, unknown>) => void>>(),
+  // the title the hub's page gives itself, by the state asked for ("" none)
+  title: (state: string): string => {
+    const s = JSON.parse(state || "{}") as { kind?: string; page?: string };
+    return s.page === "strength.edit" ? "Adjust" : s.page ? "Strength training" : s.kind === "protein" ? "Protein" : "Water";
+  },
 }));
 vi.mock("../../lib/api", async (orig) => ({
   ...(await orig<typeof import("../../lib/api")>()),
   api: async (path: string, init: { json?: Record<string, unknown> } = {}) => {
     hub.calls.push({ path, body: init.json });
-    return { view: { title: "Water", sections: [{ items: [{ type: "text", text: `drawn ${hub.calls.length}` }] }] } };
+    const state = String(init.json?.state ?? "");
+    const title = hub.title(state);
+    const button = state.includes("strength.edit") ? [{ type: "button", title: "Save", action: { id: "save", submit: true } }] : [];
+    const view = { ...(title ? { title } : {}), state, sections: [{ items: [{ type: "text", text: `drawn ${hub.calls.length}` }, ...button] }] };
+    // a draft's Save: the hub's answer asks for the page to be taken off
+    return init.json?.action === "save" ? { view, pop: true } : { view };
   },
 }));
 vi.mock("../../lib/store", async (orig) => {
@@ -29,8 +40,8 @@ vi.mock("../../lib/store", async (orig) => {
   };
 });
 
-import { healthIntakePath, healthIntakeState } from "../../lib/health-intake-ui";
-import { HealthIntakePage, kindOf } from "./HealthIntakePage";
+import { healthIntakePath, healthIntakeState, strengthPath, strengthState } from "../../lib/health-intake-ui";
+import { HealthIntakePage, isStrength, kindOf } from "./HealthIntakePage";
 import { t } from "../../i18n";
 
 vi.hoisted(() => {
@@ -76,14 +87,15 @@ describe("the page", () => {
   it("opens the page for the state a ring's link carries, over the hub's intake route", async () => {
     await open(healthIntakePath("protein"));
     expect(drawn()[0].body).toMatchObject({ state: healthIntakeState("protein") });
-    expect(host.querySelector("h1")?.textContent).toBe(t("health.today_protein"));
+    // the header says the title the hub's page gives itself
+    expect(host.querySelector("h1")?.textContent).toBe("Protein");
     expect(host.textContent).toContain("drawn 1");
   });
 
   it("and the water link's state opens the water page", async () => {
     await open(healthIntakePath("water"));
     expect(drawn()[0].body).toMatchObject({ state: healthIntakeState("water") });
-    expect(host.querySelector("h1")?.textContent).toBe(t("health.today_water"));
+    expect(host.querySelector("h1")?.textContent).toBe("Water");
   });
 
   it("opens water when there is no state, as the hub does, or one it can't read", async () => {
@@ -119,5 +131,63 @@ describe("the page", () => {
     act(() => root.render(<LegacyExtensionUI extension="demo" ui="home" />));
     await settle();
     expect(hub.listeners.get("health_intake")?.size ?? 0).toBe(0);
+  });
+});
+
+describe("the strength training pages", () => {
+  const realTitle = hub.title;
+  afterEach(() => {
+    hub.title = realTitle;
+  });
+
+  it("opens the page its state names, titled as the hub's page titles itself, not as water", async () => {
+    await open(strengthPath("strength.overview"));
+    expect(drawn()[0].body).toMatchObject({ state: strengthState("strength.overview") });
+    expect(host.querySelector("h1")?.textContent).toBe("Strength training");
+    expect(host.querySelector("h1")?.textContent).not.toBe(t("health.today_water"));
+    expect(isStrength(strengthState("strength.edit"))).toBe(true);
+    expect(isStrength(healthIntakeState("water"))).toBe(false);
+    expect(isStrength("not json")).toBe(false);
+  });
+
+  it("says strength training until the hub's page names itself", async () => {
+    hub.title = () => "";
+    await open(strengthPath("strength.home"));
+    expect(host.querySelector("h1")?.textContent).toBe(t("health.strength_title"));
+  });
+
+  it("is drawn again when the hub says strength training changed", async () => {
+    await open(strengthPath("strength.overview"));
+    expect(drawn()).toHaveLength(1);
+    vi.useFakeTimers();
+    act(() => void hub.listeners.get("health_strength")?.forEach((l) => l({ type: "health_strength" })));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    vi.useRealTimers();
+    await settle();
+    expect(drawn()).toHaveLength(2);
+    expect(drawn()[1].body).toMatchObject({ state: strengthState("strength.overview") });
+  });
+
+  it("goes back to where a draft's page was opened from once it is saved, and home when opened on its own", async () => {
+    const draft = JSON.stringify({ page: "strength.edit", draft: "00000000-0000-4000-8000-000000000001", rev: 1 });
+    const path = `/extension/-health-intake/pages?state=${encodeURIComponent(draft)}`;
+    // opened from a chat: the chat's entry is under it
+    history.replaceState(null, "", "/persona/chat-1");
+    history.pushState(null, "", path);
+    const back = vi.spyOn(history, "back").mockImplementation(() => {});
+    await open(path);
+    expect(host.querySelector("h1")?.textContent).toBe("Adjust");
+    await act(async () => host.querySelector<HTMLButtonElement>("button:not([aria-label])")!.click());
+    await settle();
+    expect(drawn().at(-1)?.body).toMatchObject({ action: "save" });
+    expect(back).toHaveBeenCalledTimes(1);
+    back.mockRestore();
+    // a page of its own (nothing under it in this tab): the Health home
+    const length = vi.spyOn(history, "length", "get").mockReturnValue(1);
+    await open(path);
+    await act(async () => host.querySelector<HTMLButtonElement>("button:not([aria-label])")!.click());
+    await settle();
+    expect(location.pathname).toBe("/health/new");
+    length.mockRestore();
   });
 });

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nwverse/persona/sdk/go/wire"
@@ -73,7 +74,7 @@ func TestExtensionBrowserGrantsAndPluggableBackends(t *testing.T) {
 		t.Fatalf("machines = %+v, want 2 (ego + cdp)", list.Machines)
 	}
 
-	// browser.run on default ego backend uses isolated ext-<extID>-<slot> session.
+	// browser.run on default ego backend uses unambiguous isolated session per (extID, slot).
 	runOut, err := granted.Handle(context.Background(), "browser.run", json.RawMessage(`{"machine_id":"mac","slot":"pac-muse","script":"return 1"}`))
 	if err != nil {
 		t.Fatalf("browser.run ego: %v", err)
@@ -81,16 +82,59 @@ func TestExtensionBrowserGrantsAndPluggableBackends(t *testing.T) {
 	if runOut.(wire.BrowserRunResult).Backend != DefaultBrowserBackend {
 		t.Fatalf("ego result = %+v", runOut)
 	}
+	wantSession := browserSessionName("club-ext", "pac-muse")
 	calls := seen()
 	foundIsolated := false
 	for _, c := range calls {
-		if c.Method == "browser.call" && c.Params["session"] == "ext-club-ext-pac-muse" {
+		if c.Method == "browser.call" && c.Params["session"] == wantSession {
 			foundIsolated = true
 		}
 	}
 	if !foundIsolated {
-		t.Fatalf("expected isolated ext-club-ext-pac-muse session in node calls: %+v", calls)
+		t.Fatalf("expected isolated %s session in node calls: %+v", wantSession, calls)
 	}
+
+	// Colliding hyphenated (extID, slot) pairs must map to distinct session names.
+	collideExt := kbExtensionSpec(t, h, "club", extension.Permissions{Hub: []string{extension.ScopeBrowserRun}})
+	if _, err := collideExt.Handle(context.Background(), "browser.run", json.RawMessage(`{"machine_id":"mac","slot":"ext-pac-muse","script":"return 1"}`)); err != nil {
+		t.Fatalf("collide browser.run: %v", err)
+	}
+	otherSession := browserSessionName("club", "ext-pac-muse")
+	if otherSession == wantSession {
+		t.Fatalf("colliding session names: %q == %q", otherSession, wantSession)
+	}
+
+	// timeout_ms bounds and empty/null params return invalid_params consistently.
+	for _, raw := range []json.RawMessage{
+		nil,
+		json.RawMessage(``),
+		json.RawMessage(`null`),
+		json.RawMessage(`{"machine_id":"mac","slot":"pac-muse","script":"return 1","timeout_ms":-1}`),
+		json.RawMessage(`{"machine_id":"mac","slot":"pac-muse","script":"return 1","timeout_ms":120001}`),
+	} {
+		_, err := granted.Handle(context.Background(), "browser.run", raw)
+		var re *rpc.Error
+		if !errors.As(err, &re) || re.Code != "invalid_params" {
+			t.Fatalf("browser.run(%s): got %v, want invalid_params", raw, err)
+		}
+	}
+
+	// Concurrent browser.machines + fleet refresh must stay race-free under -race.
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				h.refreshBrowser(context.Background(), mac)
+			}
+			_, err := granted.Handle(context.Background(), "browser.machines", json.RawMessage(`{}`))
+			if err != nil {
+				t.Errorf("concurrent browser.machines: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
 
 	// browser.run on custom cdp backend dispatches to fakeCDPBackend.
 	cdpOut, err := granted.Handle(context.Background(), "browser.run", json.RawMessage(`{"machine_id":"cdp-box","backend":"cdp","slot":"pac-duet","script":"return 2"}`))

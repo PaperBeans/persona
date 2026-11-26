@@ -301,4 +301,48 @@ describe("To-dos grouped by 常驻", () => {
     expect(sections()).toHaveLength(0);
     expect(localStorage.getItem("persona.todos.grouping")).toBe("direction");
   });
+
+  it("prioritizes explicit direction_id only when todos_v2=true and reverts immediately when off (#15653)", async () => {
+    localStorage.setItem("persona.todos.grouping", "direction");
+    const movedTodos = [
+      // Runtime tree lists t-infra under lead-b, but explicit direction_id points to lead-a (Product)
+      todo("t-infra", "Infra", { direction_id: "lead-a" }),
+      // Unset direction_id falls back to runtime tree (lead-a)
+      todo("t-ask", "Ask"),
+      // Explicit direction_id activates a previously empty direction (lead-empty)
+      todo("t-card", "Card", { direction_id: "lead-empty" }),
+      // Explicit direction_id not in directionTree gets a fallback section before secretary
+      todo("t-own", "Own", { direction_id: "lead-custom" }),
+    ];
+
+    // 1. todos_v2=false (default): 100% legacy runtime directionTree grouping
+    seed({
+      todos: movedTodos,
+      assistant: { machine_id: "m1", main: "main", conversations: [], todos_v2: false },
+    });
+    await render();
+    expect(sections().map((s) => s.dataset.group)).toEqual(["direction:lead-b", "direction:lead-a", "direction:secretary"]);
+    expect(sections()[0].textContent).toContain("Infra");
+    expect(sections()[1].textContent).not.toContain("Infra");
+
+    // 2. todos_v2=true: explicit direction_id takes precedence immediately
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    seed({
+      todos: movedTodos,
+      assistant: {
+        machine_id: "m1",
+        main: "main",
+        conversations: [{ machine_id: "m1", session_id: "lead-custom", title: "Custom Stream", cwd: "", status: "idle", updated_at: at }],
+        todos_v2: true,
+      },
+    });
+    await render();
+    expect(sections().map((s) => s.dataset.group)).toEqual(["direction:lead-empty", "direction:lead-a", "direction:lead-custom"]);
+    expect(sections()[0].textContent).toContain("Card");
+    expect(sections()[1].textContent).toContain("Ask");
+    expect(sections()[1].textContent).toContain("Infra");
+    expect(sections()[2].querySelector("button")?.textContent).toContain("Custom Stream");
+    expect(sections()[2].textContent).toContain("Own");
+  });
 });

@@ -659,3 +659,255 @@ func TestDirectionTreeSessionsChangedSchedulesABuild(t *testing.T) {
 		t.Fatalf("an agent's state through SessionsChanged: told %d times", n-first)
 	}
 }
+
+func TestDirectionTreeSupervisorHeldDirectAndFoldedSubagentCards(t *testing.T) {
+	e := treeEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	recent := now.Add(-10 * time.Minute)
+	older := now.Add(-20 * time.Minute)
+
+	e.f.setSessions("mac",
+		proto.Session{MachineID: "mac", SessionID: "s-alpha-direct", Title: "Alpha direct", Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 1, StateSince: recent, UpdatedAt: recent},
+		proto.Session{MachineID: "mac", SessionID: "s-alpha-parent", Title: "Alpha parent", Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 1, StateSince: recent, UpdatedAt: recent},
+		proto.Session{MachineID: "mac", SessionID: "s-alpha-sub", Title: "Alpha subagent", Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 1, StateSince: recent, UpdatedAt: recent},
+		proto.Session{MachineID: "mac", SessionID: "s-alpha-idle", Title: "Alpha idle", Status: proto.StatusIdle, State: proto.StateIdle, StateSince: recent, UpdatedAt: recent},
+		proto.Session{MachineID: "mac", SessionID: "s-beta-mixed", Title: "Beta mixed", Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 2, StateSince: recent, UpdatedAt: recent},
+	)
+
+	// Fold s-alpha-sub under s-alpha-parent as fleet_fold does on the hub.
+	e.s.fleet.foldMu.Lock()
+	if e.s.fleet.folds == nil {
+		e.s.fleet.folds = map[string]sessionFold{}
+	}
+	e.s.fleet.folds["mac"] = sessionFold{under: map[string]string{"s-alpha-sub": "s-alpha-parent"}}
+	e.s.fleet.foldMu.Unlock()
+
+	e.s.fleet.mu.Lock()
+	if e.s.fleet.interactions == nil {
+		e.s.fleet.interactions = map[string]*pending{}
+	}
+	e.s.fleet.interactions["ix-alpha-direct-ro"] = &pending{ix: proto.Interaction{
+		ID: "ix-alpha-direct-ro", MachineID: "mac", SessionID: "s-alpha-direct",
+		Kind: proto.IxPermission, ToolName: "Read", Delegating: true,
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.interactions["ix-alpha-sub-ro"] = &pending{ix: proto.Interaction{
+		ID: "ix-alpha-sub-ro", MachineID: "mac", SessionID: "s-alpha-sub",
+		Kind: proto.IxPermission, ToolName: "Read", Delegating: true,
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	// Claimed card must be ignored by pendingOf and heldOnlySessions.
+	e.s.fleet.interactions["ix-alpha-claimed"] = &pending{claimed: true, ix: proto.Interaction{
+		ID: "ix-alpha-claimed", MachineID: "mac", SessionID: "s-alpha-direct",
+		Kind: proto.IxPermission, ToolName: "Bash", Delegating: false,
+		CreatedAt: older, ExpiresAt: now.Add(time.Hour),
+	}}
+	// Beta mixed run: older held card + newer escalated owner card -> must surface as needs_you.
+	e.s.fleet.interactions["ix-beta-held-old"] = &pending{ix: proto.Interaction{
+		ID: "ix-beta-held-old", MachineID: "mac", SessionID: "s-beta-mixed",
+		Kind: proto.IxPermission, ToolName: "Read", Delegating: true,
+		CreatedAt: older, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.interactions["ix-beta-escalated"] = &pending{ix: proto.Interaction{
+		ID: "ix-beta-escalated", MachineID: "mac", SessionID: "s-beta-mixed",
+		Kind: proto.IxPermission, ToolName: "Bash", Delegating: false,
+		CreatedAt: recent, ExpiresAt: now.Add(time.Hour),
+	}}
+	e.s.fleet.mu.Unlock()
+
+	directHeldID := e.task("dir-alpha direct held permission", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-alpha-direct", Title: "Alpha direct"}}
+	})
+	foldedHeldID := e.task("dir-alpha folded subagent held permission", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-alpha-parent", Title: "Alpha parent"}}
+	})
+	failedStartID := e.task("dir-alpha supervised failed start", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_a", UpdatedAt: recent}
+		td.DoneAt = &recent
+		td.StartError = "Worker failed to boot"
+	})
+	userCheckID := e.task("dir-alpha user check", func(td *Todo) {
+		td.Supervision = &Supervision{
+			Supervisor: "conv_lead_a",
+			State:      reviewUserCheck,
+			UpdatedAt:  recent,
+			Reviews:    []TaskReview{{At: recent, Verdict: reviewAccepted, UserCheck: true}},
+		}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-alpha-idle", Title: "Alpha idle"}}
+	})
+	genuineDecideID := e.task("dir-alpha owner decision", func(td *Todo) {
+		td.Supervision = &Supervision{
+			Supervisor: "conv_lead_a",
+			State:      reviewNeedsUser,
+			UpdatedAt:  recent,
+			Reviews:    []TaskReview{{At: recent, Verdict: reviewNeedsUser, Reason: "Confirm release channel"}},
+		}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-alpha-idle", Title: "Alpha idle"}}
+	})
+	mixedBetaID := e.task("dir-beta mixed cards", func(td *Todo) {
+		td.Supervision = &Supervision{Supervisor: "conv_lead_b", UpdatedAt: recent}
+		td.Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-beta-mixed", Title: "Beta mixed"}}
+	})
+
+	tr := e.s.directionTree(ctx, now)
+	dirAlpha := tr.Directions[0]
+	dirBeta := tr.Directions[1]
+
+	taskMap := func(d treeDirection) map[string]treeTask {
+		m := map[string]treeTask{}
+		for _, tk := range d.Tasks {
+			m[tk.ID] = tk
+		}
+		return m
+	}
+	alphaTasks := taskMap(dirAlpha)
+	betaTasks := taskMap(dirBeta)
+
+	if alphaTasks[directHeldID].State != treeWorking {
+		t.Errorf("direct held task state = %q, want %q", alphaTasks[directHeldID].State, treeWorking)
+	}
+	if got := alphaTasks[directHeldID].Agents[0].State; got != proto.StateWorking {
+		t.Errorf("direct held agent state = %q, want %q", got, proto.StateWorking)
+	}
+	if alphaTasks[foldedHeldID].State != treeWorking {
+		t.Errorf("folded held task state = %q, want %q", alphaTasks[foldedHeldID].State, treeWorking)
+	}
+	if got := alphaTasks[foldedHeldID].Agents[0].State; got != proto.StateWorking {
+		t.Errorf("folded held parent agent state = %q, want %q", got, proto.StateWorking)
+	}
+	if alphaTasks[failedStartID].State != treeWorking {
+		t.Errorf("supervised failed start state = %q, want %q", alphaTasks[failedStartID].State, treeWorking)
+	}
+	// An open personal verification is the owner's to pass: the projection lists it under Needs you (reason verify,
+	// #16002), and the tree follows the projection.
+	if alphaTasks[userCheckID].State != treeNeedsYou {
+		t.Errorf("user_check task state = %q, want %q", alphaTasks[userCheckID].State, treeNeedsYou)
+	}
+	if alphaTasks[genuineDecideID].State != treeNeedsYou {
+		t.Errorf("owner decision task state = %q, want %q", alphaTasks[genuineDecideID].State, treeNeedsYou)
+	}
+	if !dirAlpha.Running {
+		t.Errorf("dir-alpha Running = false, want true while supervisor handles held agent cards")
+	}
+	if dirAlpha.Counts.NeedsYou != 2 {
+		t.Fatalf("dir-alpha counts = %+v, want NeedsYou=2 (the owner decision and the personal verification)", dirAlpha.Counts)
+	}
+	if got := dirAlpha.Counts.Working + dirAlpha.Counts.NeedsYou + dirAlpha.Counts.Stuck + dirAlpha.Counts.Review + dirAlpha.Counts.Planned; got != len(dirAlpha.Tasks) {
+		t.Fatalf("dir-alpha 5-state sum = %d, len(tasks) = %d", got, len(dirAlpha.Tasks))
+	}
+	if betaTasks[mixedBetaID].State != treeNeedsYou || dirBeta.Counts.NeedsYou != 1 {
+		t.Fatalf("dir-beta mixed task = %+v counts = %+v, want needs_you=1", betaTasks[mixedBetaID], dirBeta.Counts)
+	}
+	if got := betaTasks[mixedBetaID].Agents[0].State; got != proto.StateNeedsYou {
+		t.Errorf("mixed agent state = %q, want %q", got, proto.StateNeedsYou)
+	}
+
+	// Cross-surface agreement: sum of direction tree NeedsYou == projection Counts.NeedsYou.
+	projCounts := e.s.todoProjectionOf(ctx, e.s.treeTodos(), now).counts()
+	treeNeeds := 0
+	for _, d := range tr.Directions {
+		treeNeeds += d.Counts.NeedsYou
+	}
+	if treeNeeds != projCounts.NeedsYou || treeNeeds != 3 {
+		t.Fatalf("before escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 3", treeNeeds, projCounts.NeedsYou)
+	}
+
+	// Escalate the folded sub-agent's card to the user: counts must move to 3 in dir-alpha and 4 overall.
+	e.s.fleet.mu.Lock()
+	e.s.fleet.interactions["ix-alpha-sub-ro"].ix.Delegating = false
+	e.s.fleet.mu.Unlock()
+
+	trAfter := e.s.directionTree(ctx, now)
+	dirAlphaAfter := trAfter.Directions[0]
+	alphaAfter := taskMap(dirAlphaAfter)
+	if alphaAfter[foldedHeldID].State != treeNeedsYou || alphaAfter[foldedHeldID].Agents[0].State != proto.StateNeedsYou {
+		t.Fatalf("after escalation: folded task=%+v, want task/agent needs_you", alphaAfter[foldedHeldID])
+	}
+	if dirAlphaAfter.Counts.NeedsYou != 3 {
+		t.Fatalf("after escalation: dir-alpha counts=%+v, want NeedsYou=3", dirAlphaAfter.Counts)
+	}
+	projAfter := e.s.todoProjectionOf(ctx, e.s.treeTodos(), now).counts()
+	treeNeedsAfter := 0
+	for _, d := range trAfter.Directions {
+		treeNeedsAfter += d.Counts.NeedsYou
+	}
+	if treeNeedsAfter != projAfter.NeedsYou || treeNeedsAfter != 4 {
+		t.Fatalf("after escalation: treeNeeds=%d projCounts.NeedsYou=%d, want both 4", treeNeedsAfter, projAfter.NeedsYou)
+	}
+}
+
+func TestCardStateChangedRefreshesTodoViewsAndDirectionTree(t *testing.T) {
+	e := treeEnv(t)
+	e.s.dtree.after = e.clock.After
+	e.s.tview.after = e.clock.After
+	e.clock.advance(time.Minute)
+	ctx := context.Background()
+
+	id := e.task("dir-alpha card refresh", supervisedBy("conv_lead_a"))
+	e.s.todos.mu.Lock()
+	e.s.todos.todos[id].Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-parent"}}
+	e.s.todos.activeBySession[[2]string{"mac", "s-parent"}] = id
+	e.s.todos.mu.Unlock()
+
+	e.s.fleet.foldMu.Lock()
+	if e.s.fleet.folds == nil {
+		e.s.fleet.folds = map[string]sessionFold{}
+	}
+	e.s.fleet.folds["worker-box"] = sessionFold{
+		under:        map[string]string{"s-child": "s-parent"},
+		underMachine: map[string]string{"s-child": "mac"},
+	}
+	e.s.fleet.foldMu.Unlock()
+
+	e.f.setSessions("mac", proto.Session{MachineID: "mac", SessionID: "s-parent", State: proto.StateNeedsYou, PendingInteractions: 1})
+	e.s.directionTreeSync(ctx)
+
+	resetFlags := func() {
+		e.s.dtree.mu.Lock()
+		e.s.dtree.armed = false
+		e.s.dtree.mu.Unlock()
+		e.s.tview.mu.Lock()
+		e.s.tview.armed = false
+		e.s.tview.machines = nil
+		e.s.tview.mu.Unlock()
+	}
+	checkArmed := func(label string, want bool) {
+		e.s.dtree.mu.Lock()
+		treeArmed := e.s.dtree.armed
+		e.s.dtree.mu.Unlock()
+		e.s.tview.mu.Lock()
+		runQueued := e.s.tview.machines["mac"]
+		e.s.tview.mu.Unlock()
+		if treeArmed != want || runQueued != want {
+			t.Fatalf("%s: treeArmed=%v runQueued=%v, want %v", label, treeArmed, runQueued, want)
+		}
+	}
+
+	// Unrelated machine does not schedule refreshes.
+	resetFlags()
+	e.s.cardStateChanged(proto.Interaction{ID: "ix-other", MachineID: "other", SessionID: "s-x", Delegating: true})
+	checkArmed("unrelated machine", false)
+
+	// Cross-machine folded child card routing triggers parent machine todoRunsChanged and directionTreeSoon.
+	resetFlags()
+	e.s.cardStateChanged(proto.Interaction{ID: "ix-child", MachineID: "worker-box", SessionID: "s-child", Delegating: true})
+	checkArmed("cross-machine folded child", true)
+
+	// Direct show / tellApps / finished trigger both even without session byte changes.
+	ix := proto.Interaction{ID: "ix-direct", MachineID: "mac", SessionID: "s-parent", Kind: proto.IxPermission, ToolName: "Read", Delegating: true}
+	resetFlags()
+	e.s.show(ix)
+	checkArmed("show(delegating)", true)
+
+	resetFlags()
+	ix.Delegating = false
+	e.s.tellApps(ix)
+	checkArmed("tellApps(escalated)", true)
+
+	resetFlags()
+	e.s.finished(&pending{ix: ix})
+	checkArmed("finished(resolved)", true)
+}

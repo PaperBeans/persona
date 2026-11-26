@@ -85,7 +85,7 @@ func TestTriageReadsDurableAnswers(t *testing.T) {
 	// Fresh services read the same durable history; no in-memory decision cache is required.
 	for range 2 {
 		s, f := workService(t)
-		s.store = func() Store { return store }
+		s.setStore(func() Store { return store })
 		f.setSessions("box", stopped("s1", "收到，结果到了就发"))
 		f.triage = `{"phase":"blocked","on":"user","questions":[{"question":"Post on #123 now?"}]}`
 		triage(t, s, "s1")
@@ -120,7 +120,7 @@ func (brokenTriageHistory) Interactions(context.Context, string, string, int) ([
 
 func TestTriageHistoryFailureIsRetryable(t *testing.T) {
 	s, f := workService(t)
-	s.store = func() Store { return brokenTriageHistory{newFleetMem()} }
+	s.setStore(func() Store { return brokenTriageHistory{newFleetMem()} })
 	f.setSessions("box", stopped("s1", "Post now?"))
 	triage(t, s, "s1")
 	if _, ok := s.workEntry([2]string{"box", "s1"}); ok || len(f.triageAsked) != 0 || len(s.workCards()) != 0 {

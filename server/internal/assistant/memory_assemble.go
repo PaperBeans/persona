@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -36,12 +37,22 @@ const (
 	assembleInbox
 )
 
-// Budgets: a standing channel takes at most memoryStandingSpaceMax bytes of its own track's entries and
-// memoryStandingPersonalMax of personal ones from elsewhere; a hand-off at most memoryHandOffMax.
+// Budgets, in bytes of entry text (#15312): the ledger's and the memory extension's are kept apart, so neither spends
+// the other's. Of the ledger, a standing channel takes at most memoryStandingSpaceMax of its own track's entries and
+// memoryStandingPersonalMax of personal ones from elsewhere, a hand-off at most memoryHandOffMax. Of the memory
+// extension, a standing channel takes at most the budget it states (memoryExtensionBatch.standingBudget: by default
+// memoryExtensionStandingDefault, never more than memoryExtensionStandingMost) whichever scene its entries are in, a
+// hand-off at most memoryExtensionHandOffMax.
 const (
 	memoryStandingSpaceMax    = 1536
 	memoryStandingPersonalMax = 1536
 	memoryHandOffMax          = 1536
+	// memoryExtensionStandingDefault is the memory extension's standing budget when it states none; about 30 short
+	// rules. Every main-conversation message's snapshot may carry it (sent again only when it changes).
+	memoryExtensionStandingDefault = 4096
+	// memoryExtensionStandingMost caps the standing budget an extension may state.
+	memoryExtensionStandingMost = 8192
+	memoryExtensionHandOffMax   = 1536
 	// memoryAssemblePages bounds how many pages of the ledger an assembly reads, newest first: past them only older
 	// entries are left, which no budget would take before the newer ones.
 	memoryAssemblePages = 10
@@ -62,6 +73,9 @@ type assembleFor struct {
 	TopicKnown bool
 	// Query is the text general entries must bear on for a hand-off or the Inbox (memoryRelevantTerms).
 	Query string
+	// ExtensionStanding is the memory extension's standing budget (memoryExtensionBatch.standingBudget); 0:
+	// memoryExtensionStandingDefault.
+	ExtensionStanding int
 }
 
 // assembled is what an assembly carries, in the ledger's order, and the ids of the sensitive ones among them.
@@ -80,10 +94,12 @@ func (a assembled) IDs() []string {
 }
 
 // assembleEntries is entries (oldest first) as f takes them: each let through by entryCarried, then the newest that
-// fit the role's budget. Pure: info is how usage sees each entry.
+// fit the role's budget, the ledger's and the memory extension's entries each spending their own (an entry that does
+// not fit is left out, and a smaller older one may still fit). Pure: info is how usage sees each entry.
 func assembleEntries(entries []proto.AssistantEntry, f assembleFor, info func(proto.AssistantEntry) infoUse) assembled {
 	var out assembled
 	spaceLeft, personalLeft, handOffLeft := memoryStandingSpaceMax, memoryStandingPersonalMax, memoryHandOffMax
+	extStandingLeft, extHandOffLeft := cmp.Or(min(f.ExtensionStanding, memoryExtensionStandingMost), memoryExtensionStandingDefault), memoryExtensionHandOffMax
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
 		u := info(e)
@@ -91,21 +107,25 @@ func assembleEntries(entries []proto.AssistantEntry, f assembleFor, info func(pr
 			continue
 		}
 		size := len(e.Text)
-		switch f.Role {
-		case assembleStanding:
-			left := &personalLeft
-			if entryScene(u, f) == sceneSourceTrack {
-				left = &spaceLeft
-			}
+		ext := strings.HasPrefix(e.ID, memoryExtensionIDPrefix)
+		var left *int
+		switch {
+		case f.Role == assembleStanding && ext:
+			left = &extStandingLeft
+		case f.Role == assembleStanding && entryScene(u, f) == sceneSourceTrack:
+			left = &spaceLeft
+		case f.Role == assembleStanding:
+			left = &personalLeft
+		case f.Role == assembleHandOff && ext:
+			left = &extHandOffLeft
+		case f.Role == assembleHandOff:
+			left = &handOffLeft
+		}
+		if left != nil {
 			if size > *left {
 				continue
 			}
 			*left -= size
-		case assembleHandOff:
-			if size > handOffLeft {
-				continue
-			}
-			handOffLeft -= size
 		}
 		out.Entries = append(out.Entries, e)
 		if u.sensitive() {
@@ -267,6 +287,7 @@ func (s *Service) assembleMemory(ctx context.Context, f assembleFor, p proto.Ass
 	if f.Role == assembleStanding {
 		ext = ext.standingOnly()
 	}
+	f.ExtensionStanding = ext.standingBudget()
 	all, info := s.memorySources(ctx, entries, ext)
 	if len(all) == 0 {
 		return assembled{}, err

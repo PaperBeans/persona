@@ -107,7 +107,7 @@ func TestNativeArchiveFollowsPersonaArchive(t *testing.T) {
 	}
 	// Persona's records survive a restart, the tool's with them.
 	restarted, _ := archiveTestService(t)
-	restarted.s.store = func() Store { return ft.st }
+	restarted.s.setStore(func() Store { return ft.st })
 	if err := restarted.s.loadNativeArchives(t.Context()); err != nil {
 		t.Fatal(err)
 	}

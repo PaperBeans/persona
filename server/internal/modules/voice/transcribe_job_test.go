@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,12 +71,17 @@ func trProduction(t *testing.T) {
 	setVar(t, &trUsageMost, 200*time.Millisecond)
 }
 
+var trFixtureProviderID atomic.Uint64
+
 // trLive is a plugin whose one upstream is the stand-in for script s.
 func trLive(t *testing.T, s voicetest.Script) (*Plugin, *httptest.Server, *lockedLog, *voicetest.Live) {
 	t.Helper()
 	live := voicetest.NewLive(t, s)
-	pl, srv, logs := speakPlugin(t, Config{Providers: []Provider{{ID: "t", URL: live.URL(), Dialect: DialectLive, Key: "k",
-		DefaultModel: "m1"}}, Default: "t/m1"})
+	// A recycled loopback port belongs to a new stand-in. Give it its own provider identity so its first
+	// info request observes an unnegotiated upstream, and later jobs still share this upstream's actual grant.
+	id := fmt.Sprintf("test-live-%d", trFixtureProviderID.Add(1))
+	pl, srv, logs := speakPlugin(t, Config{Providers: []Provider{{ID: id, URL: live.URL(), Dialect: DialectLive, Key: "k",
+		DefaultModel: "m1"}}, Default: id + "/m1"})
 	return pl, srv, logs, live
 }
 
@@ -323,6 +329,11 @@ func TestTranscriptionCaptionsAsMeasured(t *testing.T) {
 	for name, items := range map[string]bool{"one item": false, "an item per sentence": true} {
 		t.Run(name, func(t *testing.T) {
 			trFast(t)
+			// trFast leaves 80 ms of wall time between a window's end and the point where a caption frame counts as one
+			// that ran past the settled window (captionPast). A busy machine can stall a frame that long while the
+			// test streams 20 times real time; the job then moves the rest of that caption to the next window, and the
+			// interim caption carries only the tail, which is no sentence's beginning. Production waits 1.5 s.
+			setVar(t, &trSettleWall, time.Second)
 			_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionItems: items})
 			tc := startTr(t, srv, liveStart())
 			tc.next(extwire.TFReady)
@@ -676,6 +687,9 @@ func TestTranscriptionRollover(t *testing.T) {
 	trFast(t)
 	setVar(t, &trSessionMost, 400*time.Millisecond)
 	setVar(t, &trRollOverlap, 200*time.Millisecond)
+	// At the fixture's 200x catch-up, a healthy delayed reply otherwise crosses the one-second
+	// audio-time stale cutoff and is assigned to the next window. Production keeps five seconds at 4x.
+	setVar(t, &trReplyWait, time.Minute)
 	_, srv, logs, live := trLive(t, voicetest.Script{Sentences: trScript})
 	tc := startTr(t, srv, liveStart())
 	tc.next(extwire.TFReady)

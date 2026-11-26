@@ -67,9 +67,9 @@ final class InboxHandOffModel {
         var record: (String, SessionKey, InboxHandoffRecordKind, String, UUID) async throws -> Void
         /// Shows the message as sent in that conversation under the client id, which its transcript copy carries.
         var showMain: (SessionKey, String, UUID) -> Void
-        /// An older hub's main chat: sends the text there as a plain message (starting the conversation when there is
-        /// none); the conversation it went to.
-        var plainToMain: (String) async throws -> SessionKey
+        /// An older hub's main chat: sends the text there as a plain message under the attempt's client id (starting
+        /// the conversation when there is none); the conversation it went to.
+        var plainToMain: (String, UUID) async throws -> SessionKey
         /// Starts a new Persona conversation with the text: the conversation.
         var startNew: (String) async throws -> SessionKey
         /// Sends the text to an Agent and waits for its pending message's terminal outcome, with the refusal's reason.
@@ -160,7 +160,7 @@ final class InboxHandOffModel {
                 model.showSent(key, text: text, images: [], id: clientID)
                 Task { await model.refreshAssistant() } // the hand-off may have started the main conversation
             },
-            plainToMain: { text in
+            plainToMain: { text, clientID in
                 let key: SessionKey
                 let client = try api()
                 // The item's manager's main conversation: the Persona page's when it shows that manager and has read its
@@ -176,10 +176,10 @@ final class InboxHandOffModel {
                     model.sendNow(main, text: text) // a failure shows in the conversation, with Retry
                     key = main
                 } else if let main { // sendNow does nothing for a conversation not listed
-                    try await client.send(main, text: text)
+                    try await client.send(main, text: text, clientMsgID: clientID.uuidString, opID: clientID)
                     key = main
                 } else {
-                    let s = try await AssistantStart.run(receipts: model.hubFeatures.contains(AssistantStart.feature)) { op in
+                    let s = try await AssistantStart.run(receipts: model.hubFeatures.contains(AssistantStart.feature), op: clientID) { op in
                         try await client.startConversation(prompt: text, main: true, opID: op)
                     }
                     model.began(s, text: text)
@@ -469,7 +469,7 @@ final class InboxHandOffModel {
             if tried.inDoubt { throw InDoubt() }
             // An older hub or manager: the text goes to the main chat as a plain message, with nothing to write back to.
             do {
-                sent = (.main, try await deps.plainToMain(text))
+                sent = (.main, try await deps.plainToMain(text, tried.id))
             } catch {
                 settle(tried, after: error)
                 throw error

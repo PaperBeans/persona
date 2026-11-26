@@ -3,13 +3,13 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"maps"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -277,7 +277,7 @@ func TestMeetingTurnStuckEnds(t *testing.T) {
 	ft := newFleetTest(t)
 	fastDone(ft)
 	s, ctx := ft.s, context.Background()
-	ref := kb.SessionRef{MachineID: "mac", SessionID: "s1"}
+	ref := recordingwire.SessionRef{MachineID: "mac", SessionID: "s1"}
 	work := proto.Session{SessionID: "s1", Title: "Fix login", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
 		UpdatedAt: time.Now()}
 	done := work

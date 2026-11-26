@@ -280,9 +280,10 @@ class CloseoutShotsTest {
             rule.onNodeWithText("Other…", useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithContentDescription("More answers").assertIsDisplayed()
             // a step that cannot be undone: the first press arms the option and sends nothing
-            rule.onNode(hasText("Release now") and hasClickAction()).performClick(); settle()
+            rule.onNode(hasText("Release now") and hasClickAction() and hasAnyAncestor(hasTestTag("decision-answers"))).performClick(); settle()
             assertTrue(api.answers.isEmpty())
             rule.onNode(hasText("Confirm: Release now") and hasClickAction()).assertIsDisplayed()
+            rule.onNodeWithTag("decision-leads-confirm-0", useUnmergedTree = true).assertTextEquals("Tap again to confirm")
             shot("decision-armed-${variant(s, d)}")
             // the fixed answers and the options that did not fit are in the menu
             rule.onNodeWithContentDescription("More answers").performClick(); settle()

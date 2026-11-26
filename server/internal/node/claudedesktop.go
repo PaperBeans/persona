@@ -139,6 +139,7 @@ type claudeDesktopEntry struct {
 	parent      string   // the local_<uuid> this one came from (spawnedFrom.sessionId, else forkedFromSessionId), or ""
 	task        string   // the scheduled task this session is a run of (scheduledTaskId), or ""
 	created     int64    // when the app made the session (createdAt, ms; 0 unknown): the newest run of a task heads it
+	activity    int64    // when the session was last active (lastActivityAt, ms; 0 unknown): the newest entry of a session describes it
 
 	// focused and turnEdge (ms, 0 unknown): when the app last brought the session into view (lastFocusedAt), and when a
 	// turn of it last began or ended (lastTurnEdgeAt). claudedesktop_unread.go reads them.
@@ -238,6 +239,7 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	}
 	current := make(map[string]bool, len(paths))
 	byLocal := map[string]claudeDesktopEntry{} // the readable entries by the app's own id, to find a side session's parent
+	byLocalAt := map[string]time.Time{}        // the file time of each entry byLocal holds, for newerDesktopEntry
 	var started []claudeDesktopEntry           // the unarchived entries another session started or forked
 	runs := map[string][]claudeDesktopEntry{}  // a scheduled task → its unarchived runs no session started
 	for _, p := range paths {
@@ -290,7 +292,12 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 			}
 		}
 		if e.local != "" {
-			byLocal[e.local] = e
+			// One session can have several entries: a copy under each account's directory, and older ones left behind
+			// that still name an earlier transcript. The most recently active one describes the session, whichever is
+			// read last (#15262): a side session's parent is that one's transcript and archived state.
+			if cur, ok := byLocal[e.local]; !ok || !newerDesktopEntry(cur, byLocalAt[e.local], e, st.ModTime()) {
+				byLocal[e.local], byLocalAt[e.local] = e, st.ModTime()
+			}
 			key := filepath.Join(filepath.Dir(p), "deleted_"+strings.TrimPrefix(e.local, "local_"))
 			currentEntries[key] = true
 			a := claudeDesktopFiles.associations[key]
@@ -365,6 +372,16 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 	return x
 }
 
+// newerDesktopEntry: of two entries for one session, a (its file written at) describes the session rather than b: it
+// was active later (lastActivityAt), or at the same time and its file was written later. Equal on both, b does, so the
+// entry read last stands as it did before entries were compared.
+func newerDesktopEntry(a claudeDesktopEntry, at time.Time, b claudeDesktopEntry, bt time.Time) bool {
+	if a.activity != b.activity {
+		return a.activity > b.activity
+	}
+	return at.After(bt)
+}
+
 // desktopAssociationTranscripts bounds what one readable entry retains: its current transcript first, then each
 // distinct valid earlier transcript. The entry itself is already capped at 4 MiB; these caps bound the retained copy.
 func desktopAssociationTranscripts(e claudeDesktopEntry) []string {
@@ -432,6 +449,7 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		TurnEdge    float64         `json:"lastTurnEdgeAt"`
 		Task        string          `json:"scheduledTaskId"`
 		Created     float64         `json:"createdAt"`
+		Activity    float64         `json:"lastActivityAt"`
 		Detached    bool            `json:"lineageDetached"` // moved to the sidebar's top level: the old lineage stays, unnested
 	}
 	if json.Unmarshal(b, &raw) != nil || !validID(raw.Transcript) {
@@ -466,7 +484,7 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 	}
 	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd, originCwd: origin, environment: environment,
 		local: localID(raw.Local), parent: localID(parent), focused: int64(raw.Focused), turnEdge: int64(raw.TurnEdge),
-		task: raw.Task, created: int64(raw.Created)}
+		task: raw.Task, created: int64(raw.Created), activity: int64(raw.Activity)}
 }
 
 // mentionedIDs are the session ids in the first 64 KB of an entry that cannot be read (cut short while the app wrote
@@ -509,8 +527,11 @@ func localID(id string) string {
 func (x claudeDesktopIndex) listed(id string) bool { return x.visible[id] }
 
 // maxDesktopOffline bounds the desktop app's sessions the offline list shows (the newest, whatever their age); they are
-// counted on their own, not toward the 80 of the others.
-const maxDesktopOffline = 100
+// counted on their own, not toward the 80 of the others. It only guards against a runaway index: the list follows the
+// sidebar, which keeps every unarchived session. It was 100, and a sidebar outgrows that (one Mac had 208 top-level
+// sessions): the ones quiet for a week or more were cut, newest transcript first, while the sidebar still showed them
+// (#15522).
+const maxDesktopOffline = 1000
 
 // hidden: the offline list leaves transcript id out as the desktop app's sidebar does. shown are the transcripts the
 // list has shown so far (newest first, so a session's current one comes before its earlier ones).

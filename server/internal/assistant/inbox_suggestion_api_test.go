@@ -34,9 +34,15 @@ func TestInboxSuggestionInstructWithoutSuggestion(t *testing.T) {
 				t.Fatalf("chain from %s: %+v", state, e)
 			}
 			toldConv(t, h, "Check the current state and try again")
+			// The conversation records the send before the inbox acknowledges the delivered note.
+			waitFor(t, "the delivered instruction to leave the inbox queue", func() bool {
+				h.inbox.mu.Lock()
+				defer h.inbox.mu.Unlock()
+				return len(it.Agent.Pending) == 0
+			})
 			h.inbox.mu.Lock()
 			defer h.inbox.mu.Unlock()
-			if it.Agent.SessionID != "s1" || it.Handling.State != HandlingLooking || it.Handling.Error != "" || len(it.Agent.Pending) != 0 {
+			if it.Agent.SessionID != "s1" || it.Handling.State != HandlingLooking || it.Handling.Error != "" || it.Agent.Wake || len(it.Agent.Pending) != 0 {
 				t.Fatalf("handling after %s: %+v %+v", state, it.Agent, it.Handling)
 			}
 		})

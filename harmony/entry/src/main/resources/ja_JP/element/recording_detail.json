@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "recording_detail_ask",
+      "value": "Personaに聞く"
+    },
+    {
+      "name": "recording_detail_folder_access",
+      "value": "Persona、AI分身、各コンピューターのエージェントがこのフォルダーを直接読み取れます。"
+    },
+    {
+      "name": "recording_facts_instruction",
+      "value": "「{name}」について、Persona が常に事実として扱う内容を書いてください。Persona はこれを参照しますが、変更はしません。"
+    },
+    {
+      "name": "recording_facts_delete",
+      "value": "確認済みの事実を削除"
+    },
+    {
+      "name": "recording_facts_edit",
+      "value": "確認済みの事実を編集"
+    },
+    {
+      "name": "recording_facts_deleted",
+      "value": "確認済みの事実を削除しました"
+    }
+  ]
+}

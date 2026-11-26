@@ -86,7 +86,9 @@ import OSLog
                                  elapsed: capture.timeline, previous: previous, now: now,
                                  answer: answered?.text, answeredAt: answered?.at,
                                  topic: topic, topicPlace: topicPlace, roomMissing: roomMissing, talking: talking,
-                                 transcribed: transcribed)
+                                 transcribed: transcribed,
+                                 // Read here, so the activity follows the hub's recording module at once (#15214).
+                                 module: RecordingModule.allowance)
         // Once a minute while it records, the activity hears it still does (#9108): when iOS ends the app, it goes stale.
         let content = Self.alive(drawn, now: now)
         if let alive = content.aliveAt { wake(at: Date(timeIntervalSince1970: alive + Self.aliveEvery)) }
@@ -170,7 +172,8 @@ import OSLog
     nonisolated static func content(entry: RecordingEntry, recording: Bool, interrupted: Bool, elapsed: Double,
                                     previous: Content?, now: Date, answer: String? = nil, answeredAt: Date? = nil,
                                     topic: String? = nil, topicPlace: TopicPlace? = nil, roomMissing: Bool = false,
-                                    talking: Bool = false, transcribed: Transcribed? = nil) -> Content {
+                                    talking: Bool = false, transcribed: Transcribed? = nil,
+                                    module: RecordingAllowance = .on) -> Content {
         let phase: Content.Phase = recording ? .recording : interrupted ? .interrupted : .paused
         let keep = recording && previous?.phase == .recording
         let since = recording ? (keep ? previous?.runningSince : nil) ?? now.timeIntervalSince1970 - elapsed : nil
@@ -196,6 +199,8 @@ import OSLog
             content.topicNumber = topicPlace.number
             content.topicCount = topicPlace.count
         }
+        // Only said when off, so the state is byte for byte what it was with the module on (#15214).
+        if module == .off { content.module = .off }
         return content
     }
 

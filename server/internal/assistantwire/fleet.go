@@ -39,6 +39,8 @@ const (
 	EventMutes = "fleet.mutes"
 	// EventSeen: an app looked at a session (its WebSocket's seen) (FleetSeen).
 	EventSeen = "fleet.seen"
+	// EventInteractionSeen: an app displayed a pending interaction card to the user (FleetInteractionSeen).
+	EventInteractionSeen = "fleet.interaction_seen"
 )
 
 // The hub's apps the manager calls for what is still the hub's to run (app.call).
@@ -137,12 +139,19 @@ type Clients struct {
 	// be pushed a card now (#2433): an elicitation waits for it as other cards do. Only Elicitation keeps meaning a
 	// connected app, so a manager from before this field hands such a request back as it did; an older hub sends none.
 	ElicitationPush bool `json:"elicitation_push"`
+	// AppOnline: at least one full user app (iOS, macOS, Android, web) is connected to the hub.
+	AppOnline bool `json:"app_online,omitempty"`
 }
 
 // FleetSeen is EventSeen's params.
 type FleetSeen struct {
 	MachineID string `json:"machine_id"`
 	SessionID string `json:"session_id"`
+}
+
+// FleetInteractionSeen is EventInteractionSeen's params.
+type FleetInteractionSeen struct {
+	InteractionID string `json:"interaction_id"`
 }
 
 // The kinds of push the manager asks the hub for (Notification.Kind besides NotifyPush).
@@ -203,7 +212,8 @@ type FleetStats struct {
 	Loads    []FleetLoad `json:"loads,omitempty"`
 }
 
-// FleetLoad is a machine's 1-minute load average over its cores, in percent (rounded to 5).
+// FleetLoad is a machine's 1-minute load average over its cores, in percent (rounded to 10: the tenth of a core the
+// apps print, so 150 is "1.5 per core").
 type FleetLoad struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`

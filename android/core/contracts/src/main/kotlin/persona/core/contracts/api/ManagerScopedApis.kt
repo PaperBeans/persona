@@ -64,6 +64,25 @@ private class ManagerChannels(private val source: ChannelManagement, private val
 private class ManagerFeishuBot(private val source: FeishuBotSettings, private val owner: RequestManager) : FeishuBotSettings {
     override suspend fun status() = withContext(owner) { source.status() }
     override suspend fun update(update: FeishuBotUpdate) = withContext(owner) { source.update(update) }
+    // Asked of the source only when a page reads it: a scoped API is made without calling the one it scopes.
+    override val sync: LarkSyncSettings? get() = source.sync?.let { ManagerLarkSync(it, owner) }
+}
+
+private class ManagerLarkSync(private val source: LarkSyncSettings, private val owner: RequestManager) : LarkSyncSettings {
+    override suspend fun view() = withContext(owner) { source.view() }
+    override suspend fun setSchedule(hour: Int) = withContext(owner) { source.setSchedule(hour) }
+    override suspend fun createBot(label: String, tier: String, region: String) = withContext(owner) { source.createBot(label, tier, region) }
+    override suspend fun register(botId: String, step: String) = withContext(owner) { source.register(botId, step) }
+    override suspend fun addScopes(botId: String, tier: String) = withContext(owner) { source.addScopes(botId, tier) }
+    override suspend fun removeBot(botId: String) = withContext(owner) { source.removeBot(botId) }
+    override suspend fun authorize(botId: String, redirectUri: String, tier: String?) =
+        withContext(owner) { source.authorize(botId, redirectUri, tier) }
+    override suspend fun pollAuthorize(botId: String) = withContext(owner) { source.pollAuthorize(botId) }
+    override suspend fun finishOAuth(state: String, code: String) = withContext(owner) { source.finishOAuth(state, code) }
+    override suspend fun setBindingEnabled(key: String, enabled: Boolean) = withContext(owner) { source.setBindingEnabled(key, enabled) }
+    override suspend fun removeBinding(key: String) = withContext(owner) { source.removeBinding(key) }
+    override suspend fun runBinding(key: String) = withContext(owner) { source.runBinding(key) }
+    override suspend fun oauthRedirectUri() = withContext(owner) { source.oauthRedirectUri() }
 }
 
 private class ManagerStandingAuthorizations(

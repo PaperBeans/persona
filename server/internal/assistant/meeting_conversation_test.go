@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"strings"
 	"testing"
@@ -74,7 +75,7 @@ func TestMeetingJustMe(t *testing.T) {
 	if card = nodeCardFor(r.s, card); !card.Private {
 		t.Fatal("a Just me turn's card is not private")
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); len(l.Asks) != 0 {
+	if l, _, _ := recW(r.engine()).LiveRead(meetingRec); len(l.Asks) != 0 {
 		t.Fatalf("stored with the recording: %+v", l.Asks)
 	}
 	// The turn runs and ends: the mark stays a little for what is decided after the end, then a new turn drops it.
@@ -127,9 +128,9 @@ func TestMeetingFollowup(t *testing.T) {
 	p := "/api/v1/recordings/" + meetingRec + "/followup"
 	r.roomUp(meetingRec, "listener")
 	r.do("POST", livePath(meetingRec), "", `{"from":0,"segments":[{"start":10,"end":14,"text":"Ada: who owns the test?"}]}`, http.StatusOK)
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: askOne, Question: "Who owns the test?", QuestionSource: askTyped, State: askAnswered, Answer: "Bo does.",
-			Sources: []kb.AskSource{}, AskedAt: time.Now().UTC(), Via: kb.AskViaRoom})
+	if _, err := recW(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ kb.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: askOne, Question: "Who owns the test?", QuestionSource: askTyped, State: askAnswered, Answer: "Bo does.",
+			Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC(), Via: recordingwire.AskViaRoom})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -139,7 +140,7 @@ func TestMeetingFollowup(t *testing.T) {
 	r.upload(meetingRec, 2, map[string]any{"room": map[string]any{"attendance": "listener"}, "ended_at": end, "complete": true, "title": "Design review",
 		"segments": []map[string]any{{"start": 0, "end": 9, "text": "We keep the cap."}, {"start": 10, "end": 19, "text": "Bo owns the test."}}})
 	wantCode(t, r.do("POST", p, "", map[string]any{"id": callOne, "text": "Draft the email."}, http.StatusConflict), codeMeetingRunning)
-	if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room.State = kb.RoomEnded; return nil }); err != nil {
+	if _, err := recW(r.engine()).MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room.State = kb.RoomEnded; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	r.do("POST", p, "", map[string]any{"id": callOne}, http.StatusBadRequest)
@@ -223,18 +224,20 @@ func TestMeetingFollowupAnyRecording(t *testing.T) {
 // a meeting trimmed with its minutes still gets one.
 func TestMeetingFollowupTrimmed(t *testing.T) {
 	d := newDayFixture(t)
+	setSettings(t, d.s, func(v *Settings) { days := 14; v.RecordingTextDays = &days }) // the text is kept forever by default
 	d.putDay(dayRec, 100, d.owner, nil)
 	d.do("POST", segmentsPath(dayRec), "", dayLines(100, 101), http.StatusOK)
 	d.do("POST", "/api/v1/recordings/"+dayRec+"/minutes", "", nil, http.StatusAccepted)
 	d.recap(dayRec)
 	d.engine().PruneRecordings(time.Now().AddDate(0, 0, 20))
-	if rec, _ := d.engine().Store.Recording(dayRec); rec == nil || !rec.Trimmed() || rec.Chars == 0 || d.engine().Store.HasMinutes(dayRec) {
+	if rec, _ := d.engine().Store.Recording(dayRec); rec == nil || !rec.Trimmed() || rec.Chars == 0 || recW(d.engine()).HasMinutes(dayRec) {
 		t.Fatalf("not a trimmed day with its chars and no minutes: %+v", rec)
 	}
 	wantCode(t, d.do("POST", "/api/v1/recordings/"+dayRec+"/followup", "", map[string]any{"id": callOne, "text": "What did I promise?"},
 		http.StatusConflict), codeNoMaterial)
 
 	r := newRoomFixture(t)
+	setSettings(t, r.s, func(v *Settings) { days := 14; v.RecordingTextDays = &days })
 	r.upload(meetingRec, 1, map[string]any{"complete": true, "ended_at": time.Now().UTC().Format(time.RFC3339),
 		"segments": []map[string]any{{"start": 0, "end": 9, "text": "We keep the cap."}}})
 	r.minutesFor(meetingRec, `{"title":"Design review","decisions":[{"text":"Keep the cap","line":1}]}`)
@@ -265,7 +268,7 @@ func TestMeetingConversationsOnAnOlderNode(t *testing.T) {
 	end := time.Now().UTC().Format(time.RFC3339)
 	r.upload(meetingRec, 2, map[string]any{"room": map[string]any{"attendance": "listener"}, "ended_at": end, "complete": true, "title": "Design review",
 		"segments": []map[string]any{{"start": 0, "end": 9, "text": "We keep the cap."}}})
-	if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room.State = kb.RoomEnded; return nil }); err != nil {
+	if _, err := recW(r.engine()).MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room.State = kb.RoomEnded; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	out := r.do("POST", "/api/v1/recordings/"+meetingRec+"/followup", "", map[string]any{"id": callOne, "text": "Draft the email."}, http.StatusOK)
@@ -283,8 +286,8 @@ func TestMeetingFollowupPending(t *testing.T) {
 	r.upload(meetingRec, 1, map[string]any{"ended_at": end, "complete": true, "segments": []map[string]any{{"start": 0, "end": 9, "text": "We keep the cap."}}})
 	want := meetingSessionID(meetingRec, partFollowup)
 	pending := func() {
-		if _, err := r.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error {
-			m.Followup = &kb.MeetingFollowup{MachineID: "server", SessionID: want, Pending: true, OpID: callOne}
+		if _, err := recW(r.engine()).MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error {
+			m.Followup = &recordingwire.MeetingFollowup{MachineID: "server", SessionID: want, Pending: true, OpID: callOne}
 			return nil
 		}); err != nil {
 			t.Fatal(err)

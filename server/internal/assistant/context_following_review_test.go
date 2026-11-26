@@ -177,7 +177,7 @@ func TestBriefFollowingReturnedMattersIgnoreTheCheckTime(t *testing.T) {
 	waitingTomorrow := InboxItem{ID: "tomorrow", Title: "tomorrow", Now: NowWaiting, Follow: &InboxFollow{CheckAt: &tomorrow}}
 	waitingNoCheck := InboxItem{ID: "no-check", Title: "no-check", Now: NowWaiting, Follow: &InboxFollow{CheckAt: &tomorrow}}
 
-	_, due := briefFollowing([]InboxItem{ask, dueNow, waitingToday, waitingTomorrow, waitingNoCheck}, now, time.UTC)
+	_, due := briefFollowing(t, []InboxItem{ask, dueNow, waitingToday, waitingTomorrow, waitingNoCheck}, now, time.UTC)
 	want := []string{"today", "ask", "due"}
 	if got := briefFollowingTestTitles(due); !reflect.DeepEqual(got, want) {
 		t.Fatalf("due titles = %v, want %v (the returned ones are due past today)", got, want)
@@ -209,7 +209,7 @@ func TestFollowingSelectionIsByStateKey(t *testing.T) {
 	}
 	wantIDs, dueIDs := []string{}, []string{}
 	for _, it := range items {
-		waitingRows, dueRows := briefFollowing([]InboxItem{it}, now, time.UTC)
+		waitingRows, dueRows := briefFollowing(t, []InboxItem{it}, now, time.UTC)
 		if len(waitingRows) > 0 {
 			wantIDs = append(wantIDs, it.ID)
 		}

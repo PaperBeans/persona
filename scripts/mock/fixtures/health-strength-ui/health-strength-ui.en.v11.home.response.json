@@ -1,0 +1,116 @@
+{
+  "view": {
+    "title": "Strength training",
+    "sections": [
+      {
+        "title": "Latest session",
+        "items": [
+          {
+            "type": "text",
+            "text": "2026-11-24 · Exercises: 3 · Sets: 9"
+          },
+          {
+            "type": "row",
+            "value": "Sets: 4",
+            "title": "Bench press"
+          },
+          {
+            "type": "row",
+            "value": "Sets: 2",
+            "title": "Dumbbell shoulder press"
+          },
+          {
+            "type": "row",
+            "value": "Sets: 3",
+            "title": "坐姿推胸"
+          }
+        ]
+      },
+      {
+        "title": "Last 7 days",
+        "items": [
+          {
+            "type": "chart",
+            "title": "Sets",
+            "kind": "bar",
+            "series": [
+              {
+                "name": "Sets",
+                "points": [
+                  {
+                    "label": "11-19",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-20",
+                    "value": 8
+                  },
+                  {
+                    "label": "11-21",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-22",
+                    "value": 6
+                  },
+                  {
+                    "label": "11-23",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-24",
+                    "value": 8
+                  },
+                  {
+                    "label": "11-25",
+                    "value": 0
+                  }
+                ]
+              }
+            ],
+            "unit": "sets"
+          }
+        ]
+      },
+      {
+        "title": "Recent personal records",
+        "items": [
+          {
+            "type": "row",
+            "value": "55 kg × 10",
+            "title": "Lat pulldown",
+            "subtitle": "2026-11-22"
+          },
+          {
+            "type": "row",
+            "value": "80 kg × 6",
+            "title": "深蹲",
+            "subtitle": "2026-11-22"
+          },
+          {
+            "type": "row",
+            "value": "60 kg × 8",
+            "title": "Bench press",
+            "subtitle": "2026-11-20"
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "type": "button",
+            "title": "View",
+            "action": {
+              "id": "overview",
+              "push": {
+                "state": "{\"page\":\"strength.overview\"}",
+                "title": "Strength training"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.home\",\"metric\":\"weight\",\"days\":30}"
+  }
+}

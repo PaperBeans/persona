@@ -5,6 +5,7 @@ import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
 import { onShownHint } from "../../lib/shown-hints";
 import { filterQuery, SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
+import { boundedCounts } from "../../lib/sessions";
 import { groupMachines, holdsPlace, JUST_FINISHED_KEY, type GroupDimension, type SessionGroup, type SessionPlace, type TodoNames } from "../../lib/session-groups";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
 import { SearchField } from "../../ui/SearchField";
@@ -25,7 +26,7 @@ import { nestUnderParents, type StableRowOrder } from "../../lib/side-sessions";
 import { sameValue } from "../../lib/stable-lines";
 import { lazyPage } from "../../lib/lazy-page";
 import { NeedsCount, ShowMoreRow } from "../SidebarSection";
-import type { GroupedSessionsProps, GroupedSource } from "./GroupedSessions";
+import type { GroupedSessionsProps, GroupedSource, HeldSeenGroups } from "./GroupedSessions";
 import { useSessionGroups } from "./use-session-groups";
 
 // The list drawn by group is a chunk of its own, loaded when a Browse by is chosen (or was, last time): the default
@@ -44,6 +45,9 @@ export interface PagedSessionListProps<T> {
   renderRow: (row: T, within?: GroupDimension, group?: SessionGroup) => ReactNode;
   personal?: boolean;
   label?: (dimension: string, value: string) => string;
+  /** The personal list's Browse by account: the mark drawn before an account's name (its provider's), in its group's
+   *  heading and in the account picker. The id `label` replaces stays the name's tooltip there. */
+  accountMark?: (account: string) => ReactNode;
   /** The hub's computer order, shared with the complete list; count maps alone cannot carry it (#11801). */
   machineOrder?: readonly string[];
   /** The hub names this collection's projects and spaces (`sessions_catalog`): a repository checked out on several
@@ -96,6 +100,8 @@ export interface PagedGrouping<T> {
   /** The words ⌘K's "Filter Agents list" put on the list (#6589), sent as the search: the sidebar's list has no field of
    *  its own, `chips` says what narrows it where the field was. */
   query?: string; chips?: ReactNode;
+  /** Rows read during this visit kept in place (#12585). */
+  heldSeen?: HeldSeenGroups<T>;
 }
 
 /** The complete list's quick filters on the paged list (`sessions_quick_filters`, #6662), in place of its state chips:
@@ -129,7 +135,7 @@ export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText, holdCounts }: PagedSessionListProps<T>) {
+export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, accountMark, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText, holdCounts }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
   const [typed, setTyped] = useState("");
   // the sidebar's groupings take ⌘K's words (#6589); every other list its own field's, once typing pauses
@@ -178,12 +184,13 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const summaryMode = root.isSummary();
   // a hub that folds child sessions (#5120): every read and count of this list leaves them out, as the root's do
   const rootsMode = root.isRoots();
+  const crossMachineMode = root.isCrossMachineHierarchy();
   const queryPath = `${path}${path.includes("?") ? "&" : "?"}`;
-  const countsPath = rootsMode ? `${queryPath}roots=1&` : queryPath;
+  const countsPath = rootsMode ? `${queryPath}roots=1&${crossMachineMode ? "cross_machine_hierarchy=1&" : ""}` : queryPath;
   const rowOrder = grouping?.rowOrder;
   const presentation = useMemo(() => rowOrder ? { ...rowOrder, parentOf } : undefined, [rowOrder, parentOf]);
-  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode, roots: rootsMode, pageCounts: () => root.usesPageCounts(), presentation }) : root,
-    [filtered, path, identity, compare, removeIdentity, summaryMode, rootsMode, root, filters, presentation]);
+  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode, roots: rootsMode, crossMachineHierarchy: crossMachineMode, pageCounts: () => root.usesPageCounts(), presentation }) : root,
+    [filtered, path, identity, compare, removeIdentity, summaryMode, rootsMode, crossMachineMode, root, filters, presentation]);
   // The root is shared with the hub's counts and invalidation. Apply the same retention as a filtered list instead of
   // letting an activity-only transport prefix displace a flat list's shown rows (#11801).
   // The sidebar's list also lets go of it when the activity order is chosen (Settings › Agents), which has none.
@@ -278,7 +285,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   // The groups of the chosen dimension, for the value pill and the sections: everything that narrows the list but the
   // group itself. Their counts follow the state tab, so a group's number is the number of rows it lists.
   const groupScope: ListFilters = useMemo(() => ({ ...facetFilters, ...chip }), [facetFilters, chip]);
-  const scopeNeeds = scopeCounts?.state?.needs_you;
+  const scopeNeeds = scopeCounts ? boundedCounts(scopeCounts, false).needs : undefined;
   // the facets' own read when the groups are drawn from them: its failure is theirs (audit item 4: the root list's read
   // failing left the sections on "Loading…" for good)
   const facetsFailure = facetScoped ? facetError : rootPage.error ?? "";
@@ -302,6 +309,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   // By state drawn from those same counts (no chip narrows the groups): the sections the held agents left (Unread, Just
   // finished) are smaller, Seen larger
   const chipless = !Object.keys(filters).some((key) => (CHIP_KEYS as readonly string[]).includes(key));
+  const heldSeen = grouping?.heldSeen;
   const countedGroups = useMemo(() => {
     const groups = grouped.groups;
     if (!groups || dimension !== "state" || !chipless || !held || !coupledCounts || held === coupledCounts) return groups;
@@ -369,7 +377,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const clock = useNow(60_000, Boolean(activeAt && win));
   const start = activeAt ? windowStart(win, clock) : null;
   // the Needs you chip's number for this scope: the server's, by the same rule as the chip
-  const needsYouTotal = chip.state ? (chip.state === "needs_you" ? visiblePageTotal : 0) : chip.pane_source ? page.counts?.state?.needs_you : scopeCounts?.state?.needs_you;
+  const needsYouTotal = chip.state ? (chip.state === "needs_you" ? visiblePageTotal : 0) : chip.pane_source ? (page.counts ? boundedCounts(page.counts, false).needs : undefined) : scopeNeeds;
   const rowNeedsYou = needsYou ?? (() => false);
   const split = activityActiveAt && start !== null
     ? splitByActivity(activityRows, activityActiveAt, start, { total: visiblePageTotal, hasMore: page.hasMore, needsYou: rowNeedsYou, needsYouTotal })
@@ -447,13 +455,14 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     return () => parent.removeEventListener("scroll", scroll);
   }, [list, getScrollElement, sections, hasMore, page.loadingMore, page.error, margin, totalSize]);
 
-  const stateTotals = shownCounts?.state ?? {};
-  // the quick filters' numbers, as the complete list counts them: Working without the ones waiting in the background
-  const quickCounts = useMemo((): FilterCounts | undefined => {
-    if (!shownCounts) return undefined;
-    const by = shownCounts.state ?? {}, waiting = shownCounts.background_waiting ?? 0, origin = shownCounts.pane_source ?? {};
-    return { needs: by.needs_you ?? 0, unread: by.unread ?? 0, working: Math.max(0, (by.working ?? 0) - waiting), bg_waiting: waiting, feishu: origin.feishu ?? 0, terminal: origin.terminal ?? 0 };
-  }, [shownCounts]);
+  const adjusted = useMemo(() => (shownCounts ? boundedCounts(shownCounts, false) : undefined), [shownCounts]);
+  const stateTotals: Record<string, number> = adjusted ? { ...shownCounts!.state, needs_you: adjusted.needs, working: adjusted.working + adjusted.waiting } : shownCounts?.state ?? {};
+  // the quick filters' numbers, as the complete list counts them: Working without the ones waiting in the background,
+  // and agents waiting only on supervisor-held cards counted Working instead of Needs you (lib/sessions.ts boundedCounts)
+  const quickCounts = useMemo((): FilterCounts | undefined => adjusted ? {
+    needs: adjusted.needs, unread: adjusted.unread, working: adjusted.working, bg_waiting: adjusted.waiting,
+    feishu: shownCounts!.pane_source?.feishu ?? 0, terminal: shownCounts!.pane_source?.terminal ?? 0,
+  } : undefined, [shownCounts, adjusted]);
   const onQuickCounts = quick?.onCounts;
   useEffect(() => { onQuickCounts?.(quickCounts); }, [onQuickCounts, quickCounts]);
   // the fixed group order: the menu lists a bounded number of them, and the picked one whatever its place
@@ -468,6 +477,10 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const machineName = (id: string) => label?.("machine", id) ?? id;
   // a to-do and a state come named; a computer, and a space or account a hub without the catalog knows by id, by the caller
   const groupName = (g: SessionGroup) => g.members || dimension === "project" || dimension === "todo" || dimension === "state" ? g.name : label?.(dimension, g.key) ?? g.name;
+  // only the personal list's accounts: every other grouping keeps its plain name
+  const accounts = personal && dimension === "group";
+  const groupLead = accounts && accountMark ? (g: SessionGroup) => (g.members ? undefined : accountMark(g.key)) : undefined;
+  const groupTip = accounts ? (g: SessionGroup) => { const name = groupName(g); return name !== g.key ? g.key : undefined; } : undefined;
   // the lines under a group's name in the menu: a project's remote and directories, a space's computer
   const severalMachines = groupMachines(allGroups ?? []) > 1;
   const groupDetail = (g: SessionGroup): string | undefined => {
@@ -485,8 +498,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   };
   const chooseGroup = (key: string) => setPicked(key ? groups.find((g) => g.key === key) ?? null : null);
   // an open section reads the collection as the list above it does
-  const source: GroupedSource<T> = useMemo(() => ({ path, identity, compare, removeIdentity, event, summary: summaryMode, roots: rootsMode, parentOf, rowOrder, excludeIdentities, hold: Boolean(grouping?.hold) && Boolean(grouping?.byUpdate) }),
-    [path, identity, compare, removeIdentity, event, summaryMode, rootsMode, parentOf, rowOrder, excludeIdentities, grouping?.hold, grouping?.byUpdate]);
+  const source: GroupedSource<T> = useMemo(() => ({ path, identity, compare, removeIdentity, event, summary: summaryMode, roots: rootsMode, crossMachineHierarchy: crossMachineMode, parentOf, rowOrder, excludeIdentities, hold: Boolean(grouping?.hold) && Boolean(grouping?.byUpdate) }),
+    [path, identity, compare, removeIdentity, event, summaryMode, rootsMode, crossMachineMode, parentOf, rowOrder, excludeIdentities, grouping?.hold, grouping?.byUpdate]);
   const openRow = sections && isOpen && placeOf ? rootPage.rows.find(isOpen) : undefined;
   const autoMore = useRef(0);
   useEffect(() => {
@@ -542,8 +555,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
           {dimension === "group" && !personal && !cataloged && <PickChip label={t("paged-agents.machine")} header={t("paged-agents.machine")} value={machine} shown={machine ? machineName(machine) : t("paged-agents.all_machines")}
             items={[{ key: "", label: t("paged-agents.all_machines") }, ...machines.map(([id, n]) => ({ key: id, label: machineName(id), hint: String(n) }))]}
             onChoose={(id) => { setMachine(id); setPicked(null); }} />}
-          {dimension && <PickChip label={t("paged-agents.group_filter")} header={dimensionLabel} value={value} shown={picked ? groupName(picked) : allOf} grow
-            items={[{ key: "", label: allOf }, ...groups.map((g) => ({ key: g.key, label: groupName(g), hint: String(g.count), detail: groupDetail(g) }))]}
+          {dimension && <PickChip label={t("paged-agents.group_filter")} header={dimensionLabel} value={value} shown={picked ? groupName(picked) : allOf} lead={picked ? groupLead?.(picked) : undefined} grow
+            items={[{ key: "", label: allOf }, ...groups.map((g) => ({ key: g.key, label: groupName(g), hint: String(g.count), detail: groupDetail(g), lead: groupLead?.(g), tip: groupTip?.(g) }))]}
             onChoose={chooseGroup} />}
           {personal && <SearchField value={providerQuery} onChange={setProviderQuery} placeholder={t("paged-agents.provider")} tone="inset" icon={false} className="min-w-0 flex-1" />}
         </div>}
@@ -556,13 +569,13 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
       {/* not twice: the list's own error with its Retry says it (its groups', or its rows') */}
       {(facetError || scopeError) && !(sections ? grouped.error : page.error) && <p role="alert" className="px-2 text-xs text-red">{facetError || scopeError}</p>}
       {sections && <>
-        {allGroups && allGroups.length > 0 && <Suspense fallback={loadingLine}>
+        {allGroups && (allGroups.length > 0 || (dimension === "state" && Boolean(heldSeen?.rows.length) && (chipless || chip.state === "unread"))) && <Suspense fallback={loadingLine}>
           <GroupedSessions groups={allGroups} dimension={dimension as GroupDimension} kind={personal ? "personal" : "runtime"} scope={groupScope} source={source}
-            renderRow={renderRow} groupName={groupName} machineName={machineName} open={openPlace} foldScope={grouping?.foldScope} />
+            renderRow={renderRow} groupName={groupName} groupLead={groupLead} groupTip={groupTip} machineName={machineName} open={openPlace} foldScope={grouping?.foldScope} heldSeen={heldSeen} placeOf={placeOf} justFinished={justFinished} chipless={chipless} />
         </Suspense>}
         {!allGroups && !grouped.error && loadingLine}
         {grouped.error && <ListError text={failureText(grouped.error)} onRetry={grouped.retry} />}
-        {allGroups && !allGroups.length && !grouped.error && <p className="px-2 py-2 text-xs text-ink-3">{t("sidebar.no_match")}</p>}
+        {allGroups && !allGroups.length && !(dimension === "state" && Boolean(heldSeen?.rows.length) && (chipless || chip.state === "unread")) && !grouped.error && <p className="px-2 py-2 text-xs text-ink-3">{t("sidebar.no_match")}</p>}
       </>}
       {!sections && <><div ref={container} data-virtual-sessions className="relative" style={{ height: totalSize }}>
         {virtual.getVirtualItems().map((item) => {
@@ -632,13 +645,14 @@ function useWidth(el: HTMLElement | null): number {
 
 /** A pill that names what is chosen and opens the choices in the design system's menu (no native select). The menu is
  *  as wide as its pill, like a select's list, and never narrower than a menu is anywhere else. */
-function PickChip({ label, header = label, value, shown, items, onChoose, grow = false }: { label: string; header?: string; value: string; shown: string; items: { key: string; label: string; hint?: string; detail?: string }[]; onChoose: (key: string) => void; grow?: boolean }) {
+function PickChip({ label, header = label, value, shown, lead, items, onChoose, grow = false }: { label: string; header?: string; value: string; shown: string; lead?: ReactNode; items: { key: string; label: string; hint?: string; detail?: string; lead?: ReactNode; tip?: string }[]; onChoose: (key: string) => void; grow?: boolean }) {
   const menu = useMenu();
   const width = Math.max(useWidth(menu.anchor), SESSION_LIST_METRICS.pickMenuMin);
   const rows: MenuItem[] = items.map((it, i) => ({ ...it, radio: true, checked: it.key === value, divider: i === 1, onSelect: () => onChoose(it.key) }));
   return <>
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} title={shown} onClick={menu.open}
       className={cx("touch-hit relative z-10 flex h-6 min-w-0 items-center gap-1 whitespace-nowrap rounded-full bg-inset px-2 text-[11.5px] shadow-hairline transition-colors duration-150 hover:bg-hover", value ? "font-medium text-ink" : "text-ink-2", grow && "flex-1")}>
+      {lead}
       <span className="min-w-0 flex-1 truncate text-left">{shown}</span>
       <Icon name="chevron" size={11} className="shrink-0 text-ink-3" />
     </button>

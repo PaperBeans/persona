@@ -19,7 +19,7 @@ describe("capabilityRow", () => {
       tools: { state: "ok", tools: [{ id: "docker", version: "27.3.1" }, { id: "git", version: "" }] },
     });
     expect(row).toMatchObject({ name: "Studio Mac", presence: "online", system: "macOS 26.1 · arm64", model: "Mac mini", cores: 10, memory: 32 * GB, diskFree: 200 * GB, engines: ["herdr 0.9.5"] });
-    expect(row.runtimes).toEqual({ state: "ok", value: [{ id: "claude", name: "Claude Code", entries: ["claude", "Team relay"] }, { id: "codex", name: "Codex", entries: ["codex"] }] });
+    expect(row.runtimes).toEqual({ state: "ok", value: [{ id: "claude", name: "Claude Code", entries: ["Claude Code", "Team relay"] }, { id: "codex", name: "Codex", entries: ["Codex"] }] });
     expect(row.tools.state === "ok" && toolsText(row.tools.value)).toBe("Docker 27.3.1 · Git");
     expect(row.reach).not.toBe("");
   });
@@ -35,7 +35,7 @@ describe("capabilityRow", () => {
   });
 
   it("groups one runtime's named entries", () => {
-    expect(runtimeGroups([{ name: "codex", agent: "codex" }, { name: "codex-local", display_name: "Codex (local)", agent_type: "codex" }])).toEqual([{ id: "codex", name: "Codex", entries: ["codex", "Codex (local)"] }]);
+    expect(runtimeGroups([{ name: "codex", agent: "codex" }, { name: "codex-local", display_name: "Codex (local)", agent_type: "codex" }])).toEqual([{ id: "codex", name: "Codex", entries: ["Codex", "Codex (local)"] }]);
   });
 
   it("tells OS families", () => {

@@ -656,7 +656,7 @@ struct TodoCacheTests {
     /// Views and counts come with the list, apart from its rows, and a 304 applies the ones read with the tag again.
     @Test func viewsAndCountsSurviveAListThatDidNotChange() async throws {
         let view = TodoSummary(phase: TodoPhase.working, section: TodoListSection.working, reason: TodoReason.agentRunning, rank: 0)
-        let counts = TodoCounts(open: 1, needsYou: 0, inProgress: 1, sections: [TodoListSection.working: 1])
+        let counts = TodoCounts(open: 1, needsYou: 0, inProgress: 1, sections: TodoCountsSections(working: 1))
         var answers = [TodosPage(list: [TodoItem(id: "a", title: "A")], views: ["a": view], counts: counts, etag: "t1"),
                        TodosPage(list: nil, etag: "t1")]
         let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, read: { _, _ in answers.removeFirst() },

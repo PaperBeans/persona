@@ -21,6 +21,8 @@ import { Composer, type Outgoing } from "../../views/chat/Composer";
 import { conversationTitle, newestFirst } from "../../views/assistant/conversations";
 import { HealthReports } from "./HealthReports";
 import { HealthToday } from "./HealthToday";
+import { HealthItemsAsk, HealthItemsEditor } from "./HealthItems";
+import { useHealthItems } from "./useHealthItems";
 import { REPORT_FILES, startHealthConversation, uploadReports } from "./reports";
 import { Empty, SectionTitle } from "../../views/assistant/parts";
 import { t } from "../../i18n";
@@ -135,6 +137,13 @@ function HealthHome({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // a report picked in the box goes to the space's machine, into its reports/
   const { list, mid, error, reload } = useHealthConversations();
   const [seed, setSeed] = useState(0);
+  // what Health tracks (#14716): only on a hub that keeps the list; without it Today is drawn as it always was
+  const items = useHealthItems();
+  const [editing, setEditing] = useState(false);
+  // the list went (the default manager moved): an open edit of it ends rather than coming back by itself on the new one
+  useEffect(() => {
+    if (!items.state) setEditing(false);
+  }, [items.state]);
 
   // one conversation per message: the box empties at once (Composer), so a second send would start a second one
   const [starting, setStarting] = useState(false);
@@ -181,11 +190,14 @@ function HealthHome({ onToggleSidebar }: { onToggleSidebar: () => void }) {
           <Icon name="heart" size={14} className="text-accent-ink" />
           {t("health.title")}
         </h1>
+        {items.enabled && <IconButton icon="sliders" label={t("health.items_edit")} onClick={() => setEditing(true)} disabled={!items.state} active={editing} />}
         <IconButton icon="retry" label={t("health.refresh")} onClick={() => void reload()} />
       </header>
+      {items.enabled && <HealthItemsEditor items={items} open={editing && Boolean(items.state)} onClose={() => setEditing(false)} />}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[760px] px-4 py-6 sm:px-8" style={{ animation: `fade-up 320ms ${EASE} both` }}>
-          <HealthToday />
+          {items.enabled && items.ask && <HealthItemsAsk items={items} />}
+          <HealthToday items={items.enabled ? { kinds: items.shown, error: items.error, reload: items.reload } : undefined} />
           <div className="mb-5 flex flex-col items-center text-center">
             <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-inset text-accent-ink shadow-raised">
               <Icon name="heart" size={22} />

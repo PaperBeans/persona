@@ -508,21 +508,26 @@ func (s *Service) remedyGoesTo(to string, list []superviseSignal) {
 // remedyTurnEnded: conversation id's turn ended. A supervision turn that carried a failed start (remedySeen, by its
 // hold, in the conversation the message was for) ends what it left: a start still being remedied and not starting
 // again fails for good; a failure the turn did not tell the user about gets the hub's notice.
-func (s *Service) remedyTurnEnded(ctx context.Context, id string) {
+func (s *Service) remedyTurnEnded(ctx context.Context, id string) supervisionEnd {
+	end := s.endSupervisionTurn(ctx, id, time.Now(), false)
+	s.remedyFinishedStarts(ctx, end)
+	return end
+}
+
+func (s *Service) remedyFinishedStarts(ctx context.Context, end supervisionEnd) {
+	if end.hold.At.IsZero() {
+		return
+	}
 	b := &s.supervise
 	b.mu.Lock()
-	held, ok := b.hold[id]
-	told := b.visible[id]
 	var due []string
-	if ok {
-		for todo, seen := range b.failSeen {
-			if seen.to != "" && seen.to != id {
-				continue // another conversation's message carried it
-			}
-			if !held.Before(seen.at) {
-				due = append(due, todo)
-				delete(b.failSeen, todo)
-			}
+	for todo, seen := range b.failSeen {
+		if seen.to != "" && seen.to != end.key {
+			continue // another conversation's message carried it
+		}
+		if !end.hold.At.Before(seen.at) {
+			due = append(due, todo)
+			delete(b.failSeen, todo)
 		}
 	}
 	b.mu.Unlock()
@@ -532,10 +537,10 @@ func (s *Service) remedyTurnEnded(ctx context.Context, id string) {
 			continue
 		}
 		if t.DoneAt == nil {
-			s.giveUpStart(ctx, todo, "assistant", told)
+			s.giveUpStart(ctx, todo, "assistant", end.hold.Visible)
 			continue
 		}
-		if t.StartError != "" && !told && !t.Cancelled() {
+		if t.StartError != "" && !end.hold.Visible && !t.Cancelled() {
 			s.failedStartNotice(ctx, t.Origin, t, "", t.StartError)
 		}
 	}

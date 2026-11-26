@@ -144,6 +144,33 @@ func (s *Service) conversationPolicy(ctx context.Context, sid string) TrackPolic
 	return policyOf(s.conversationUse(ctx, sid))
 }
 
+// putConversationCategories attaches conversation sid's accumulated information categories to an assistant.send,
+// session.send (via SendParams) or assistant.answer_again call so its process gets PERSONA_CATEGORIES when started or
+// resumed (#13246). When the conversation's categories are not known (a turn waiting to be tagged, an unreadable store,
+// an unknown track or unplaced conversation), categories_unknown tells the node to leave PERSONA_CATEGORIES unset
+// rather than fall back to the directory's default categories.
+func (s *Service) putConversationCategories(ctx context.Context, sid string, p map[string]any) {
+	delete(p, "categories")
+	delete(p, "categories_unknown")
+	if sid == "" {
+		return
+	}
+	space, known := s.conversationSpace(ctx, sid)
+	if !known {
+		p["categories_unknown"] = true
+		return
+	}
+	cats, _, ok := s.categoryStateIn(ctx, sid, space, known)
+	if !ok || s.infoTagWaiting.has(sid) {
+		p["categories_unknown"] = true
+		return
+	}
+	if cats == nil {
+		cats = []string{}
+	}
+	p["categories"] = cats
+}
+
 // infoNoneTagged is the category kept for a conversation tagged with none: it says the conversation was tagged, and
 // is no category (normalCategories leaves it out).
 const infoNoneTagged = ""

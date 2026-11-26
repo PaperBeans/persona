@@ -182,14 +182,17 @@ describe("a Persona conversation on the generic session route says its foregroun
     expect(sendFeedback()).toBeNull();
     expect(host.querySelectorAll('[data-work-group="live"], [data-message-feedback]')).toHaveLength(1);
 
-    // An empty transcript still needs an in-stream fallback while loading.
+    // An empty transcript while loading renders only the single "Loading chat" loader, never a second "Processing…" spinner.
     const cached = transcript.items;
     act(() => { transcript.items = []; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).toBeNull();
     expect(liveWorkLine()).toBeNull();
-    expect(sendFeedback()?.getAttribute("data-message-feedback")).toBe("processing");
-    expect(host.querySelectorAll('[data-work-group="live"], [data-message-feedback]')).toHaveLength(1);
+    expect(sendFeedback()).toBeNull();
+    const statuses = [...host.querySelectorAll('[role="status"]')];
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]?.textContent).toContain("正在读取对话");
+    expect(host.textContent).not.toContain("处理中…");
     act(() => { transcript.items = cached; transcript.loading = false; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).toBeNull();
@@ -272,5 +275,19 @@ describe("Agent chats never render duplicate competing Working… timers (#12380
     expect(dockBar()).toBeNull();
     expect(liveWorkLine()).not.toBeNull();
     expect(workClocks()).toHaveLength(1);
+  });
+
+  it("renders a single Loading chat spinner when entering a working Assistant chat whose history is still loading", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Persona", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", assistant: true } as Session;
+    transcript.items = [];
+    transcript.loading = true;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />));
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(sendFeedback()).toBeNull();
+    const loaders = [...host.querySelectorAll('[role="status"]')];
+    expect(loaders).toHaveLength(1);
+    expect(loaders[0]?.textContent).toContain("正在读取对话");
+    expect(host.textContent).not.toContain("处理中…");
   });
 });

@@ -14,7 +14,7 @@ import { comparePosition, isDone, mergeMessages, withToken, type InboxItem, type
 import { cardText, emojiLabel, partRuns } from "../../lib/inbox-page";
 import { LARK_ATTACHMENT_REPLY_FEATURE, LARK_ATTACHMENTS_FEATURE, routeAllowed, type LarkAttachment } from "../../lib/lark-attachments";
 import { larkPath, olAccount } from "../../lib/lark-accounts";
-import { larkAccount } from "../../lib/lark-chats";
+import { larkAccount } from "../../lib/lark-account";
 import {
   cardButtons, chatImages, draftKey, isVoice, loadDraft, mergeAround, reactionsOf, readMark, ReadReceipts, readStates, react,
   statusOf, toggledReactions, type LarkProfileRef, type ReadState,
@@ -45,6 +45,9 @@ import { newClientID, useLarkOutbox, type LarkOutgoing } from "./LarkOutbox";
 import { LarkPinsDialog } from "./LarkPins";
 import { isSummaryCard, LarkSummaryCard } from "./LarkSummaryCard";
 import { LarkTopicCard, LarkTopicDialog, useTopicReplies } from "./LarkTopicCard";
+import { LarkWriteGate, useLarkWrites } from "./lark-write-gate";
+
+export { LarkWriteGate, useLarkWrites };
 
 const PAGE = 30;
 
@@ -173,6 +176,7 @@ export function LarkThread(props: LarkThreadProps) {
 }
 
 function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps) {
+  const readOnly = !useLarkWrites();
   const feed = chat.feed;
   const ol = chat.account;
   const manager = useItemManager();
@@ -675,10 +679,10 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
     <div
       className="flex h-full min-h-0 flex-col"
       onDragOver={(e) => {
-        if (support.files && e.dataTransfer.types.includes("Files")) e.preventDefault();
+        if (!readOnly && support.files && e.dataTransfer.types.includes("Files")) e.preventDefault();
       }}
       onDrop={(e) => {
-        if (!support.files || !e.dataTransfer.files.length) return;
+        if (readOnly || !support.files || !e.dataTransfer.files.length) return;
         e.preventDefault();
         composer.current?.addFiles(e.dataTransfer.files);
       }}
@@ -705,9 +709,9 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
                   account={ol}
                   replies={topicReplies}
                   onOpen={setOpenTopic}
-                  onReply={handleReply}
+                  onReply={readOnly ? undefined : handleReply}
                   onCopy={handleCopy}
-                  onPin={onPinsOpen && !changingPin && !pinRecheck && canAddPin(m) ? setAdding : undefined}
+                  onPin={!readOnly && onPinsOpen && !changingPin && !pinRecheck && canAddPin(m) ? setAdding : undefined}
                   flash={flash?.id === m.id ? flash.n : undefined}
                 >
                   <MessageBody m={m} translateTo={translateTo} />
@@ -717,17 +721,17 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
                 compact={m.id !== firstNew && followsOn(m, page.messages[i - 1])}
                 receipt={m.is_mine ? receipts.get(m.id) : undefined}
                 translateTo={translateTo}
-                onReply={handleReply}
+                onReply={readOnly ? undefined : handleReply}
                 onAskPersona={handleAskPersona}
                 askingPersona={asking}
                 onCopy={handleCopy}
-                onRetry={outbox.retry}
+                onRetry={readOnly ? undefined : outbox.retry}
                 onCheck={outbox.check}
-                onDiscard={outbox.discard}
-                threadAttachments={support.files && support.routed}
-                onPin={onPinsOpen && !changingPin && !pinRecheck ? setAdding : undefined}
-                onReact={setReacting}
-                onToggleReaction={toggleReaction}
+                onDiscard={readOnly ? undefined : outbox.discard}
+                threadAttachments={!readOnly && support.files && support.routed}
+                onPin={!readOnly && onPinsOpen && !changingPin && !pinRecheck ? setAdding : undefined}
+                onReact={readOnly ? undefined : setReacting}
+                onToggleReaction={readOnly ? undefined : toggleReaction}
                 flash={flash?.id === m.id ? flash.n : undefined}
               />}
             </div>
@@ -762,7 +766,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
         </div>
       )}
       </div>
-      <LarkComposer
+      {!readOnly && <LarkComposer
         key={dk}
         ref={composer}
         draft={dk}
@@ -773,7 +777,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
         onClearReply={() => setReplyTo(null)}
         onSend={handleSend}
         attachments={support.files}
-      />
+      />}
       {viewing && (
         <ImageViewer
           images={(shown >= 0 ? images : [{ id: viewing, src: viewing }]).map((i) => ({ id: i.id, src: i.src, label: t("inbox-larkthread.image_name") }))}
@@ -781,7 +785,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
           onClose={() => setViewing(null)}
         />
       )}
-      {reacting && (
+      {!readOnly && reacting && (
         <ReactionPicker
           mine={new Set(reactionsOf(reacting).filter((r) => r.mine).map((r) => r.key.toLowerCase()))}
           onPick={(key) => {
@@ -797,7 +801,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
           feed={feed}
           account={ol}
           onClose={() => setPerson(null)}
-          onChat={(f, name) => {
+          onChat={readOnly ? undefined : (f, name) => {
             setPerson(null);
             setDirect({ feed: f, name });
           }}
@@ -810,11 +814,11 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
           </div>
         </Dialog>
       )}
-      {pinsOpen && <LarkPinsDialog feed={feed} topic={topic} account={ol} onClose={closePins} onOpen={openPin} />}
+      {pinsOpen && <LarkPinsDialog feed={feed} topic={topic} account={ol} readOnly={readOnly} onClose={closePins} onOpen={openPin} />}
       {openTopic && <LarkTopicDialog topic={openTopic} account={ol} onClose={() => setOpenTopic(null)} renderMessage={(m) => <Message m={m} nested translateTo={translateTo} />} />}
       {pinThread && <PinThreadDialog target={pinThread} translateTo={translateTo} onClose={() => setPinThread(null)} />}
       <Dialog
-        open={adding !== null}
+        open={!readOnly && adding !== null}
         onClose={() => setAdding(null)}
         title={t("inbox-larkthread.pin_confirm")}
         footer={(
@@ -1226,6 +1230,7 @@ const Message = memo(function Message({
   const ol = useContext(ChatAccount);
   const manager = useItemManager();
   const tools = useContext(Tools);
+  const readOnly = !useLarkWrites();
   // only a nested message reads the chat's receipts: the list's rows would all render again on each change
   const state = nested ? use(Receipts).get(m.id) : receipt;
   // read for its change alone: a new day draws the message again, so its time below gains the date
@@ -1307,7 +1312,7 @@ const Message = memo(function Message({
                 {onDiscard && <button type="button" onClick={() => onDiscard(m)} className="whitespace-nowrap text-ink-3 hover:text-ink hover:underline">{t("inbox-larkthread.discard")}</button>}
               </span>
             )}
-            {m.failed && m.local_state !== "unknown" && (
+            {m.failed && m.local_state !== "unknown" && onRetry && (
               <button
                 type="button"
                 onClick={() => onRetry?.(m)}
@@ -1330,7 +1335,7 @@ const Message = memo(function Message({
         )}
         {history && <LarkEditHistoryDialog message={m} display={display} renderParts={(parts) => <Parts mid={m.id} parts={parts} />} onClose={() => setHistory(false)} />}
         {translateTo && <TranslationLine m={m} target={translateTo} />}
-        <Reactions reactions={reactions} onToggle={onToggleReaction && !m.sending ? (key) => onToggleReaction(m, key) : undefined} />
+        <Reactions reactions={reactions} readOnly={readOnly} onToggle={onToggleReaction && !m.sending ? (key) => onToggleReaction(m, key) : undefined} />
 
         {replies > 0 && !nested && (
           <button type="button" onClick={() => void openThread()} className="mt-1 flex items-center gap-1 text-[11.5px] font-medium whitespace-nowrap text-accent-ink hover:underline">
@@ -1338,7 +1343,7 @@ const Message = memo(function Message({
             {thread ? t("inbox-larkthread.hide_replies") : t("inbox-larkthread.replies", { count: replies })}
           </button>
         )}
-        {thread && <ThreadPanel root={m} thread={thread} setThread={setThread} translateTo={translateTo} attachments={threadAttachments} />}
+        {thread && <ThreadPanel root={m} thread={thread} setThread={setThread} translateTo={translateTo} attachments={threadAttachments} readOnly={readOnly} />}
       </div>
       {compact && mark && <span className="flex shrink-0 self-end pb-1"><ReadMarkView mark={mark} /></span>}
 
@@ -1409,12 +1414,13 @@ const Message = memo(function Message({
 });
 
 /** A thread opened under its first message: the replies, and a box to reply in the thread (iOS LarkThreadView). */
-function ThreadPanel({ root, thread, setThread, translateTo, attachments }: {
+function ThreadPanel({ root, thread, setThread, translateTo, attachments, readOnly = false }: {
   root: LarkMessage;
   thread: LarkMessage[];
   setThread: React.Dispatch<React.SetStateAction<LarkMessage[] | null>>;
   translateTo?: string;
   attachments?: boolean;
+  readOnly?: boolean;
 }) {
   const ol = useContext(ChatAccount);
   const manager = useItemManager();
@@ -1430,9 +1436,9 @@ function ThreadPanel({ root, thread, setThread, translateTo, attachments }: {
   return (
     <div className="mt-1 border-l-2 border-line pl-1">
       {thread.length
-        ? thread.map((r) => <Message key={r.id} m={r} nested translateTo={translateTo} onRetry={outbox.retry} onCheck={outbox.check} onDiscard={outbox.discard} />)
+        ? thread.map((r) => <Message key={r.id} m={r} nested translateTo={translateTo} onRetry={readOnly ? undefined : outbox.retry} onCheck={outbox.check} onDiscard={readOnly ? undefined : outbox.discard} />)
         : <p className="px-2 py-1 text-[11.5px] text-ink-3">{t("inbox-larkthread.replies_unavailable")}</p>}
-      <LarkComposer
+      {!readOnly && <LarkComposer
         compact
         attachments={attachments}
         placeholder={t("inbox-larkthread.thread_placeholder")}
@@ -1445,7 +1451,7 @@ function ThreadPanel({ root, thread, setThread, translateTo, attachments }: {
           void outbox.send(outs);
           return true;
         }}
-      />
+      />}
     </div>
   );
 }
@@ -1533,6 +1539,7 @@ function pictureBox(meta: Record<string, unknown>): CSSProperties | undefined {
 function Block({ p, mid }: { p: LarkPart; mid?: string }) {
   const meta = p.metadata ?? {};
   const tools = useContext(Tools);
+  const readOnly = !useLarkWrites();
   const ol = useContext(ChatAccount);
   const manager = useItemManager();
   switch (p.kind) {
@@ -1564,7 +1571,7 @@ function Block({ p, mid }: { p: LarkPart; mid?: string }) {
           {c.title && <p className="text-[13px] font-semibold text-ink">{c.title}</p>}
           {c.lines.map((l, i) => <p key={i} className="text-[12.5px] whitespace-pre-wrap text-ink-2">{l}</p>)}
           {!c.title && !c.lines.length && <p className="text-[12.5px] text-ink-3">{p.text || t("inbox-larkthread.card_placeholder")}</p>}
-          <CardButtons buttons={cardButtons(meta)} messageID={mid && !mid.startsWith("temp-") ? mid : undefined} account={ol} onDone={tools?.refresh} />
+          <CardButtons buttons={cardButtons(meta).filter((b) => !readOnly || Boolean(b.url))} messageID={mid && !mid.startsWith("temp-") ? mid : undefined} account={ol} onDone={tools?.refresh} />
         </div>
       );
     }

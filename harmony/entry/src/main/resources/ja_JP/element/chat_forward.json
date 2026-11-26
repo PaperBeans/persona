@@ -1,0 +1,156 @@
+{
+  "string": [
+    {
+      "name": "chat_forward_action",
+      "value": "転送"
+    },
+    {
+      "name": "chat_forward_to",
+      "value": "転送先"
+    },
+    {
+      "name": "chat_forward_count",
+      "value": "{1}件を選択"
+    },
+    {
+      "name": "chat_forward_questions",
+      "value": "質問を含める"
+    },
+    {
+      "name": "chat_forward_export",
+      "value": "画像を書き出す"
+    },
+    {
+      "name": "chat_forward_share",
+      "value": "画像として共有…"
+    },
+    {
+      "name": "chat_forward_select",
+      "value": "複数選択…"
+    },
+    {
+      "name": "chat_forward_recent",
+      "value": "最近"
+    },
+    {
+      "name": "chat_forward_new",
+      "value": "新しいエージェント…"
+    },
+    {
+      "name": "chat_forward_new_detail",
+      "value": "コンピュータ、フォルダ、モデルを選びます"
+    },
+    {
+      "name": "chat_forward_search",
+      "value": "チャット、コンピュータ、プロジェクトを検索"
+    },
+    {
+      "name": "chat_forward_no_matches",
+      "value": "一致するチャットはありません"
+    },
+    {
+      "name": "chat_forward_from",
+      "value": "{1} から転送"
+    },
+    {
+      "name": "chat_forward_many",
+      "value": "転送された{1}件のメッセージ"
+    },
+    {
+      "name": "chat_forward_me",
+      "value": "自分"
+    },
+    {
+      "name": "chat_forward_single_note",
+      "value": "上の転送されたメッセージを見てください。"
+    },
+    {
+      "name": "chat_forward_several_note",
+      "value": "上の転送されたメッセージを見てください。"
+    },
+    {
+      "name": "chat_forward_cut",
+      "value": "（原文はさらに長く、ここで切れています。）"
+    },
+    {
+      "name": "chat_forward_computer_file",
+      "value": "（{1} 上のファイル：{2}）"
+    },
+    {
+      "name": "chat_forward_file",
+      "value": "（ファイル：{1}）"
+    },
+    {
+      "name": "chat_forward_limit",
+      "value": "30件まで選択できます。"
+    },
+    {
+      "name": "chat_forward_byline",
+      "value": "："
+    },
+    {
+      "name": "chat_forward_source_conversation",
+      "value": "会話"
+    },
+    {
+      "name": "chat_forward_source_patrol",
+      "value": "巡回チェック"
+    },
+    {
+      "name": "chat_forward_source_followup",
+      "value": "定期フォローアップ"
+    },
+    {
+      "name": "chat_forward_source_scheduled_task",
+      "value": "定期タスクから送信"
+    },
+    {
+      "name": "chat_forward_source_supervision",
+      "value": "進捗確認"
+    },
+    {
+      "name": "chat_forward_source_meeting",
+      "value": "会議"
+    },
+    {
+      "name": "chat_forward_source_system",
+      "value": "システム"
+    },
+    {
+      "name": "chat_forward_route_from_persona",
+      "value": "{1} から転送 · Persona へ"
+    },
+    {
+      "name": "chat_forward_route_persona",
+      "value": "Persona へ"
+    },
+    {
+      "name": "chat_forward_route_agent",
+      "value": "{1} へ"
+    },
+    {
+      "name": "chat_forward_route_cross",
+      "value": "{1} から転送 · {3} の {2} へ"
+    },
+    {
+      "name": "chat_forward_route_on",
+      "value": "{2} の {1} へ"
+    },
+    {
+      "name": "chat_forward_remove",
+      "value": "転送を解除"
+    },
+    {
+      "name": "chat_context_only_note",
+      "value": "上の内容を参照してください。"
+    },
+    {
+      "name": "chat_context_image_note",
+      "value": "画像を見てください"
+    },
+    {
+      "name": "chat_context_files_note",
+      "value": "添付ファイルを見てください"
+    }
+  ]
+}

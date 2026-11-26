@@ -27,7 +27,11 @@ globalThis.__recordingNativeTest = { fileIo: recordingFileIo };
 
 registerHooks({
   resolve(specifier, context, next) {
-    if (context.parentURL?.endsWith('/KnowledgeRecording.ets') && specifier === './Wire')
+    if (specifier === './MeetingAudioNetwork') return {url:'data:text/javascript,export const meetingAudioNetwork = {}',shortCircuit:true};
+    if (specifier === './MeetingHubAudio' || specifier === './Wire' && context.parentURL?.endsWith('/MeetingHubAudio.ets')) return {url:new URL(specifier+'.ets',context.parentURL).href,shortCircuit:true};
+    if (context.parentURL?.endsWith('/KnowledgeRecording.ets') && specifier === './MeetingRoom')
+      return { url: new URL('./MeetingRoom.ets', context.parentURL).href, shortCircuit: true };
+    if ((context.parentURL?.endsWith('/MeetingRoom.ets') || context.parentURL?.endsWith('/KnowledgeRecording.ets')) && specifier === './Wire')
       return { url: new URL('./Wire.ets', context.parentURL).href, shortCircuit: true };
     if (context.parentURL?.endsWith('/KnowledgeRecording.ets') && specifier === '../platform/NativeRecording')
       return { url: new URL('../platform/NativeRecording.ets', context.parentURL).href, shortCircuit: true };
@@ -41,7 +45,7 @@ registerHooks({
       const sources = {
         '@kit.AbilityKit': 'export const abilityAccessCtrl = {}; export const common = {}; export const Permissions = {};',
         '@kit.AudioKit': 'export const audio = {};',
-        '@kit.CoreSpeechKit': 'export const speechRecognizer = {};',
+        '@kit.CoreSpeechKit': 'export const speechRecognizer = {}; export const textToSpeech = {};',
         '@kit.CoreFileKit': 'export const fileIo = globalThis.__recordingNativeTest.fileIo;',
         '@kit.ArkTS': 'export const util = {};'
       };
@@ -79,6 +83,15 @@ function deferred() {
 
 class RecordingPlatformStub {
   records = new Map();
+  rooms = new Map();
+  loadRoom(id) { return this.rooms.has(id) ? clone(this.rooms.get(id)) : undefined; }
+  saveRoom(room) { this.rooms.set(room.id,clone(room)); }
+  async startRoomSpeech(final) { this.finalLine=final; }
+  spoken=[];
+  async speakRoom(id,text,language,admit) { if (admit()) this.spoken.push({id,text,language}); }
+  echoRequests=[];
+  stopRoomVoice() { this.stops=(this.stops || 0)+1; }
+  async enableSpeakerEcho(id) { this.echoRequests.push(id); return this.activeId===id; }
   activeId = '';
   bytes = 64000;
   transcribeCalls = [];
@@ -147,7 +160,7 @@ function makeClient(overrides = {}) {
     return JSON.stringify({ id: path.slice('/api/v1/recordings/'.length), revision: data.revision, status: 'stored' });
   } } };
   const client = {
-    connected: state.connected, demo: false, profile,
+    connected: state.connected, demo: false, features: overrides.features || [], profile,
     scope() { return JSON.stringify([profile.id, profile.hubId, profile.manager]); },
     connectionGeneration() { return state.generation; },
     owns(generation, scope) { return this.connected && generation === state.generation && scope === this.scope(); },
@@ -182,6 +195,103 @@ test('stop closes the capture into a durable local recording without uploading a
   assert.equal(model.entry.duration, 2);
   assert.equal(platform.records.get(id).captureState, 'stopped');
   assert.deepEqual(state.calls, []);
+});
+
+test('meeting preflight keeps its chosen title and kind through local capture, reopening, and transcript publication', async () => {
+  const { model, platform, state } = await opened();
+  assert.equal(await model.start('meeting', '  Design review  '), true);
+  const id = model.entry.id;
+  assert.equal(await model.stop(), true);
+  assert.equal(platform.records.get(id).kind, 'meeting');
+  const reopened = newModel(platform);
+  await reopened.open(state.client, state.client.profile.manager, { filesDir: '/private' });
+  reopened.selectEntry(id);
+  assert.equal(await reopened.transcribeAndUpload(), true);
+  const body = JSON.parse(state.calls[0].body);
+  assert.equal(body.title, 'Design review');
+  assert.equal(body.kind, 'meeting');
+  assert.equal(Object.hasOwn(body, 'audio'), false);
+});
+
+test('only an explicitly invited meeting streams final synthetic lines to its dedicated room; answering and ending never send PCM or target the main chat',async()=>{
+  const live=[],asks=[],requests=[];
+  const e=await opened({features:['meeting_attendance','meeting_conversation'],request:async({method,path,body})=>{
+    const v=body ? JSON.parse(body) : {};
+    requests.push({method,path,v});
+    const rid=path.split('/')[4];
+    if (method==='PUT') return JSON.stringify({id:rid,status:'stored',revision:v.revision,attendance:v.room.attendance,room:{state:'ready'}});
+    if (method==='POST' && path.endsWith('/live')) {
+      for (const [i,line] of v.segments.entries()) if(v.from+i>=live.length) live.push(line);
+      return JSON.stringify({next:live.length,attendance:'listener',room:{state:'ready'}});
+    }
+    if (method==='POST' && path.endsWith('/ask')) {
+      const ask={id:v.id,question:v.question,state:'answered',answer:'Synthetic room answer'}; asks.push(ask); return JSON.stringify({ask});
+    }
+    return JSON.stringify({next:live.length,asks,attendance:'listener',room:{state:'ready'}});
+  }});
+  assert.equal(await e.model.start('meeting','Review','listener',true),true);
+  try {
+    await e.model.room.sync();
+    await e.platform.finalLine(0,1,'Finished line');
+    await e.model.room.sync();
+    assert.equal(await e.model.askRoom('What was decided?'),true);
+    assert.equal(e.model.room.shownAsks[0].answer,'Synthetic room answer');
+    assert.equal(await e.model.stop(),true); await e.model.room.sync();
+    assert.deepEqual(live,[{start:0,end:1,text:'Finished line'}]);
+    assert.equal(e.platform.rooms.get(e.model.entry.id).ended,true);
+    const start=requests.find(x=>x.method==='PUT');
+    assert.deepEqual(start.v.room,{attendance:'listener'}); assert.equal(start.v.private,true);
+    assert.equal(Object.hasOwn(start.v,'attendance'),false); assert.equal(Object.hasOwn(start.v,'ended_at'),false);
+    const end=requests.filter(x=>x.method==='PUT').at(-1);
+    assert.equal(end.v.complete,true);
+    assert.ok(end.v.revision>start.v.revision);
+    assert.ok(requests.every(x=>x.path.startsWith('/api/v1/recordings/') && !Object.hasOwn(x.v,'audio') && !Object.hasOwn(x.v,'attending_session')));
+  } finally { await e.model.dispose(); }
+  const unsupported=await opened({features:['meeting_attendance']});
+  assert.equal(await unsupported.model.start('meeting','Review','listener'),false);
+  assert.equal(unsupported.state.calls.length,0);
+});
+
+test('only a participant who asked for an audible answer invokes the speaker, and an acknowledged answer plays once',async()=>{
+  for (const [role,speak,count] of [['listener',true,0],['participant',false,0],['participant',true,1]]) {
+    let ask;
+    const e=await opened({features:['meeting_conversation','meeting_attendance'],request:async({method,path,body})=>{
+      const v=body ? JSON.parse(body) : {};
+      if (method==='PUT') return JSON.stringify({id:path.split('/').at(-1),status:'stored',attendance:role,room:{state:'ready'}});
+      if (method==='POST' && path.endsWith('/ask')) {
+        ask={id:v.id,state:'answered',answer:'Synthetic answer',speak,lang:'en-US'};
+        return JSON.stringify({ask});
+      }
+      return JSON.stringify({next:0,room:{state:'ready'},asks:ask?[ask]:[]});
+    }});
+    assert.equal(await e.model.start('meeting','Fixture',role),true);await e.model.room.sync();
+    assert.equal(await e.model.askRoom('Question?'),true);
+    await e.model.room.sync(); await e.model.room.sync();
+    assert.equal(e.platform.spoken.length,count);
+    if (count) assert.equal(e.platform.spoken[0].text,'Synthetic answer');
+    await e.model.stop(); await e.model.room.sync(); await e.model.dispose();
+  }
+});
+
+test('changing the speaker updates the existing private room before any new asks and requests native echo only when opted in',async()=>{
+  const uploads=[]; let activeRole='off';
+  const e=await opened({features:['meeting_conversation','meeting_attendance'],request:async({method,path,body})=>{
+    const value=body ? JSON.parse(body) : {};
+    if (method==='PUT') { uploads.push(value); activeRole=value.room.attendance;
+      return JSON.stringify({id:path.split('/').at(-1),status:'stored',attendance:activeRole,room:{state:'ready'}}); }
+    return JSON.stringify({next:0,asks:[],room:{state:'ready'}});
+  }});
+  try {
+    assert.equal(await e.model.start('meeting','Synthetic speaker','listener',true),true); await e.model.room.sync();
+    assert.equal(await e.model.setRoomSpeaker(true,false),true); assert.equal(e.platform.echoRequests.length,0);
+    assert.equal(await e.model.setRoomSpeaker(false,false),true); assert.equal(e.platform.stops,1);
+    assert.equal(await e.model.setRoomSpeaker(true,true),true); assert.deepEqual(e.platform.echoRequests,[e.model.entry.id]);
+    assert.equal(e.model.entry.roomRole,'participant');
+    assert.deepEqual(uploads.map(u=>u.room.attendance),['listener','participant','listener','participant']);
+    assert.ok(uploads.every((u,n)=>u.private && !Object.hasOwn(u,'attending_session') && (!n || u.revision>uploads[n-1].revision)));
+    await e.model.stop(); await e.model.room.sync();
+    assert.equal(await e.model.setRoomSpeaker(false,true),false);
+  } finally { await e.model.dispose(); }
 });
 
 test('transcription failure keeps local audio and an explicit retry can transcribe and sync text', async () => {
@@ -427,4 +537,26 @@ test('forget purges persisted files when no recording model was opened this laun
   assert.equal(recordingSdkFiles.has(directory + '/' + forgottenId + '.pcm'), false);
   assert.equal(recordingSdkFiles.has(directory + '/' + otherId + '.json'), true);
   assert.equal(recordingSdkFiles.has(directory + '/' + otherId + '.pcm'), true);
+});
+
+test('local playback uses the selected capture and stops when the page backgrounds or the paired profile changes',async()=>{
+  const {model,platform,state}=await opened();
+  const id=await startAndStop(model);
+  let admitted,ended,stops=0;
+  platform.playLocal=async(entry,admit,done)=>{assert.equal(entry.id,id);admitted=admit;ended=done;};
+  platform.stopPlayback=async()=>{stops++;};
+  assert.equal(await model.playSelected(),true);assert.equal(admitted(),true);
+  await model.stopForBackground();assert.equal(stops,1);assert.equal(admitted(),false);assert.equal(model.playingId,'');
+  ended(true);assert.equal(model.error,'');
+  assert.equal(await model.playSelected(),true);
+  state.generation++;assert.equal(admitted(),false);
+  await model.dispose();assert.equal(stops,2);
+});
+
+test('an invalid audio file reports a local playback error without requesting a recording upload',async()=>{
+  const {model,platform,state}=await opened();
+  await startAndStop(model);const before=state.calls.length;
+  platform.playLocal=async()=>{throw new Error('invalid audio');};
+  assert.equal(await model.playSelected(),false);assert.equal(model.playingId,'');
+  assert.equal(model.error,'phone_record_play_failed');assert.equal(state.calls.length,before);
 });

@@ -36,6 +36,17 @@ function queryFor(profile: string, reference: string = '', kind: string = ''): a
 export class SshSecrets {
   privateKey: Uint8Array = new Uint8Array(0);
   passphrase: Uint8Array = new Uint8Array(0);
+  static fromText(privateKey: string, passphrase: string): SshSecrets {
+    const result = new SshSecrets(); result.privateKey = bytes(privateKey); result.passphrase = bytes(passphrase);
+    if (!result.privateKey.length || result.privateKey.length > MAX_KEY || result.passphrase.length > MAX_PASSPHRASE ||
+      privateKey.includes('\u0000') || passphrase.includes('\u0000')) {
+      result.clear(); throw new Error('ssh_invalid_key');
+    }
+    return result;
+  }
+  copy(): SshSecrets {
+    const result = new SshSecrets(); result.privateKey = this.privateKey.slice(); result.passphrase = this.passphrase.slice(); return result;
+  }
   clear(): void { this.privateKey.fill(0); this.passphrase.fill(0); }
 }
 
@@ -91,12 +102,14 @@ export class SshCredentialVault {
     }
   }
   async put(profile: string, privateKey: string, passphrase: string, admit: () => boolean): Promise<string> {
+    const material = SshSecrets.fromText(privateKey, passphrase);
+    try { return await this.putSecrets(profile, material, admit); } finally { material.clear(); }
+  }
+  async putSecrets(profile: string, material: SshSecrets, admit: () => boolean): Promise<string> {
     validProfile(profile);
-    const key = bytes(privateKey), phrase = bytes(passphrase), epoch = this.epoch(profile);
+    if (!material.privateKey.length || material.privateKey.length > MAX_KEY || material.passphrase.length > MAX_PASSPHRASE) throw new Error('ssh_invalid_key');
+    const key = material.privateKey.slice(), phrase = material.passphrase.slice(), epoch = this.epoch(profile);
     const reference: string = util.generateRandomUUID();
-    if (key.length === 0 || key.length > MAX_KEY || phrase.length > MAX_PASSPHRASE || privateKey.includes('\u0000') || passphrase.includes('\u0000')) {
-      key.fill(0); phrase.fill(0); throw new Error('ssh_invalid_key');
-    }
     try {
       await this.queue(profile, async (): Promise<void> => {
         if (!this.current(profile, epoch, admit)) throw new Error('ssh_cancelled');

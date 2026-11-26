@@ -145,7 +145,7 @@ func TestExtensionTrustDecidesReads(t *testing.T) {
 // or a scoped device gets 403; the user's own changes are kept, and a track's own categories cannot be taken away.
 func TestInfoAccessRoutesAreTheUsers(t *testing.T) {
 	s, st := trustService(t)
-	for _, role := range []string{roleExtension, "scoped"} {
+	for _, role := range []string{roleExtension, "agent", "scoped"} {
 		if w := serveAs(s, role, http.MethodPut, "/api/v1/assistant/extension-trust/qa-memory", `{"trust":"owner","categories":[]}`); w.Code != http.StatusForbidden {
 			t.Errorf("%s set trust: %d", role, w.Code)
 		}

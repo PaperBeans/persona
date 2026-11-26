@@ -87,6 +87,12 @@ export function notePickedName(name: string | null) {
 export interface ShownIdentity {
   id: string;
   name: string;
+  /** Display-only: whether this identity was the roster's default assistant (keeps the Persona face while the roster loads). */
+  isDefault?: boolean;
+  /** Display-only: the last status subtitle shown under the assistant name, preventing subtitle jumps while loading. */
+  line?: string;
+  /** Display-only: the last presence dot tone shown on the avatar while online. */
+  tone?: "green" | "grey" | "accent";
 }
 
 export const DISPLAY_IDENTITY_KEY = `persona.shownAssistant${BASE ? `:${BASE}` : ""}`;
@@ -95,8 +101,13 @@ function storedShownIdentity(): ShownIdentity | null {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(DISPLAY_IDENTITY_KEY) ?? "null");
     if (!value || typeof value !== "object") return null;
-    const { id, name } = value as Record<string, unknown>;
-    return typeof id === "string" && id && typeof name === "string" && name ? { id, name } : null;
+    const { id, name, isDefault, line, tone } = value as Record<string, unknown>;
+    if (typeof id !== "string" || !id || typeof name !== "string" || !name) return null;
+    const out: ShownIdentity = { id, name };
+    if (typeof isDefault === "boolean") out.isDefault = isDefault;
+    if (typeof line === "string" && line) out.line = line;
+    if (tone === "green" || tone === "grey" || tone === "accent") out.tone = tone;
+    return out;
   } catch {
     return null; // unavailable storage or malformed JSON: the in-memory identity still lasts this page
   }
@@ -113,7 +124,11 @@ export function shownIdentity(): ShownIdentity | null {
 /** Records (or clears) the identity for the sidebar's head. Null is for a fresh roster with no installed current
  *  assistant, a genuinely old hub, and test cleanup; merely reloading or failing to read a roster does not call it. */
 export function noteShownIdentity(identity: ShownIdentity | null) {
-  const unchanged = rememberedIdentity?.id === identity?.id && rememberedIdentity?.name === identity?.name;
+  const unchanged = rememberedIdentity?.id === identity?.id
+    && rememberedIdentity?.name === identity?.name
+    && rememberedIdentity?.isDefault === identity?.isDefault
+    && rememberedIdentity?.line === identity?.line
+    && rememberedIdentity?.tone === identity?.tone;
   if (unchanged && identity) return;
   rememberedIdentity = identity;
   try {

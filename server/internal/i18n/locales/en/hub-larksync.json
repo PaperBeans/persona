@@ -1,0 +1,18 @@
+{
+  "unavailable": "Daily sync isn't available on this hub",
+  "settings_unavailable": "Couldn't read the daily sync settings. Try again in a moment",
+  "no_bot": "That bot isn't set up for daily sync",
+  "no_binding": "That account isn't connected to daily sync",
+  "no_app": "This bot has no app yet: finish setting it up first",
+  "bad_redirect": "The return address must be the web app's /lark-oauth page",
+  "auth_expired": "The authorization ran out. Start it again",
+  "auth_failed": "Lark didn't accept the authorization. Start it again",
+  "auth_denied": "The authorization was declined in Lark",
+  "register_hint": "Open the page in Lark and confirm: Persona creates an app that reads your chats and documents for your knowledge base. On another device, scan the code with Lark instead.",
+  "device_hint": "Open the page in Lark (or scan the code with Lark) and allow Persona to read as you",
+  "device_open_link": "Open in Lark",
+  "reauth_title": "Lark sync needs your OK again",
+  "reauth_body_one": "Authorize {label} again within {count} day so the daily sync keeps going",
+  "reauth_body_other": "Authorize {label} again within {count} days so the daily sync keeps going",
+  "account_n": "Account {n}"
+}

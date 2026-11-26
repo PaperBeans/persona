@@ -75,7 +75,7 @@ func searchUserText(s string) string {
 	s = searchPastedRe.Regexp().ReplaceAllString(s, "$1")
 	s = searchImagesRe.Regexp().ReplaceAllString(s, "")
 	s = searchImageNumRe.Regexp().ReplaceAllString(s, "")
-	s = strings.TrimSpace(s)
+	s = strings.TrimSpace(transcript.WithoutInlineReferenceAnchors(s))
 	return strings.TrimSpace(searchActionRe.Regexp().ReplaceAllString(s, ""))
 }
 

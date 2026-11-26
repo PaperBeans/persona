@@ -1,0 +1,84 @@
+{
+  "string": [
+    {
+      "name": "todo_detail_title",
+      "value": "待办标题"
+    },
+    {
+      "name": "todo_detail_due",
+      "value": "截止时间"
+    },
+    {
+      "name": "todo_detail_all_day",
+      "value": "全天"
+    },
+    {
+      "name": "todo_detail_due_value",
+      "value": "截止"
+    },
+    {
+      "name": "todo_detail_remind",
+      "value": "提醒我"
+    },
+    {
+      "name": "todo_detail_remind_at",
+      "value": "提醒时间"
+    },
+    {
+      "name": "todo_detail_priority",
+      "value": "优先级"
+    },
+    {
+      "name": "todo_detail_high",
+      "value": "高"
+    },
+    {
+      "name": "todo_detail_normal",
+      "value": "普通"
+    },
+    {
+      "name": "todo_detail_low",
+      "value": "低"
+    },
+    {
+      "name": "todo_detail_project",
+      "value": "项目"
+    },
+    {
+      "name": "todo_detail_none",
+      "value": "不归类"
+    },
+    {
+      "name": "todo_detail_agents",
+      "value": "{n} 个 Agent"
+    },
+    {
+      "name": "todo_detail_created",
+      "value": "{text}创建"
+    },
+    {
+      "name": "todo_detail_reminded",
+      "value": "已于 {text} 提醒"
+    },
+    {
+      "name": "todo_detail_notes",
+      "value": "说明"
+    },
+    {
+      "name": "todo_detail_unsupported",
+      "value": "此 Hub 未保存此项。"
+    },
+    {
+      "name": "todo_detail_hand_to_agent",
+      "value": "交给 Agent"
+    },
+    {
+      "name": "todo_detail_done",
+      "value": "完成"
+    },
+    {
+      "name": "todo_detail_empty_notes",
+      "value": "暂无说明"
+    }
+  ]
+}

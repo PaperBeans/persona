@@ -1,0 +1,17 @@
+{
+  "create_binding": "建立收件箱关联 {binding}，用于之后收到的更新。",
+  "update_binding": "将收件箱关联从 {before} 改为 {after}。",
+  "delete_binding": "移除收件箱关联 {binding}。其他规则可能接管，包括自动创建待办。",
+  "set_policy": "替换 {source} 的转发规则。继承这条规则的来源将对之后收到的更新使用新设置。",
+  "declined": "你拒绝了转发规则变更。",
+  "realtime": "收到更新后立即转发。",
+  "digest": "汇总转发更新。",
+  "on_demand": "在你请求时显示更新。",
+  "off": "关闭这条规则的自动转发。",
+  "interval": "汇总间隔设为 {minutes} 分钟。",
+  "fyi": "仅供接收方参考。",
+  "owner": "允许接收方根据更新采取行动。",
+  "inherit_new_work": "新工作沿用继承的规则。继承的规则和更具体的规则都可能允许自动创建待办。",
+  "auto_todo": "允许 Persona 自动创建待办，无需逐次询问。",
+  "ask_owner": "此范围内，创建待办前会先询问。更具体的规则仍可能允许自动创建待办。"
+}

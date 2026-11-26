@@ -40,5 +40,8 @@
   "count_none": "対応が必要な項目はありません",
   "count_sep": "・",
   "later_done": "処理済み",
-  "later_handled": "処理済みにしました。"
+  "later_handled": "処理済みにしました。",
+  "pr_followup_host_not_connected": "監視していません：{host} に接続されていません。",
+  "pr_followup_unsupported_host": "監視していません：{host} のレビューや競合状態を Persona が読み取れません。",
+  "pr_followup_unwatched": "監視していません：コードホストに接続されていません。"
 }

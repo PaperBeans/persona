@@ -1,14 +1,14 @@
 import { DeviceLook } from '../models/DeviceLook';
-import { deviceLookAccentText } from '../core/DeviceLook';
+import { deviceLookAccentText, deviceLookIconAccent } from '../core/DeviceLook';
 
 /** Scope tokens follow the native application configuration, including explicit appearance overrides. */
 export function nativeLookTheme(look: DeviceLook, style: string, dark: boolean = false): CustomTheme {
   const palette = look.palette(style);
   const current = dark ? palette.dark : palette.light;
   return {
-    colors: { brand: current.brand, fontEmphasize: current.emphasize, iconEmphasize: current.emphasize,
+    colors: { brand: current.brand, fontEmphasize: current.emphasize, iconEmphasize: deviceLookIconAccent(look.accentId,style,dark,current),
       compBackgroundEmphasize: current.brand, fontOnPrimary: deviceLookAccentText(current.brand), iconOnPrimary: deviceLookAccentText(current.brand) },
-    darkColors: { brand: palette.dark.brand, fontEmphasize: palette.dark.emphasize, iconEmphasize: palette.dark.emphasize,
+    darkColors: { brand: palette.dark.brand, fontEmphasize: palette.dark.emphasize, iconEmphasize: deviceLookIconAccent(look.accentId,style,true,palette.dark),
       compBackgroundEmphasize: palette.dark.brand, fontOnPrimary: deviceLookAccentText(palette.dark.brand), iconOnPrimary: deviceLookAccentText(palette.dark.brand) }
   };
 }

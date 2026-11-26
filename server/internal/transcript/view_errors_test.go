@@ -34,7 +34,7 @@ func TestViewErrorsAreNotTheUsersWords(t *testing.T) {
 			t.Errorf("%s: user texts %q, want just the message", name, texts)
 		}
 	}
-	if got := codexUserText(feedback + "\nAdd a bakery stop."); got != "Add a bakery stop." {
+	if got, _ := codexUserPart(feedback + "\nAdd a bakery stop."); got != "Add a bakery stop." {
 		t.Errorf("codex: %q", got)
 	}
 }

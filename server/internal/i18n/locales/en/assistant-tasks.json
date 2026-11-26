@@ -21,6 +21,8 @@
   "fixed_launcher_unhealthy": "Launcher {launcher} is unavailable on fixed computer {machine}: {reason}. This task stays on that computer; retry after its health recovers.",
   "launcher_not_on_machine": "Launcher {launcher} isn’t on {machine}, so nothing was started. Launchers that computer has: {launchers}",
   "launcher_swapped": "{launcher} isn’t on {machine}, so this runs on {to} with its default model",
+  "launcher_desktop_default": "{launcher} opens only the New Agent starts you make, so this runs on {to} with its default model",
+  "launcher_desktop_default_model": "{launcher} opens only the New Agent starts you make, so this runs on {to} with the model you chose, {model}",
   "launcher_swapped_model": "{launcher} isn’t on {machine}, so this runs on {to} with the model you chose, {model}",
   "speed_type": "speed must be a string: standard, fast or ultrafast",
   "speed_invalid": "invalid Agent speed {speed}: use standard, fast or ultrafast",
@@ -99,5 +101,11 @@
   "start_link_lost": "The connection to “{machine}” dropped, and after it reconnected the task had not started: {reason}",
   "start_machine_busy": "“{machine}” stayed connected but did not answer in time (it may be too busy): {reason}",
   "start_link_down": "The connection to “{machine}” dropped and did not come back in time: {reason}",
-  "start_goal_skipped": "started without a start goal: {reason}"
+  "codex_effort_terminal": "Codex will start in the terminal to use the requested reasoning effort. Approvals and questions will use the terminal screen.",
+  "start_goal_skipped": "started without a start goal: {reason}",
+  "side_handover_title": "“{title}” moved to main chat",
+  "side_handover_archived": "Task “{title}” moved to the main conversation because “{origin}” was archived.",
+  "side_handover_gone": "Task “{title}” moved to the main conversation because “{origin}” is no longer available.",
+  "placement_waiting": "Waiting for automatic computer placement.",
+  "placement_no_match": "No online computer currently matches this task's placement constraints and capacity limits."
 }

@@ -2,6 +2,7 @@
 <!-- Settings › Lark bot (#2806); words shared with the web (settings-feishubot, lib-feishu-bot). -->
 <resources>
     <string name="settings_feishu_bot_title">飞书机器人</string>
+    <string name="settings_lark_bot_module_off">hub 所在的机器上关闭了飞书，所以这里不能设置或更改飞书机器人。已有的内容都会保留。</string>
     <string name="settings_feishu_bot_footer">在飞书里私聊这个机器人，就是在和 Persona 说话。机器人只回应配对过的你，群里不回应。</string>
     <string name="settings_feishu_bot_enable">打开飞书机器人</string>
     <string name="settings_feishu_bot_last_event">最近收到</string>
@@ -33,4 +34,6 @@
     <string name="settings_feishu_bot_not_saved">保存失败：%1$s</string>
     <string name="settings_feishu_bot_secret_filled">已填写，点验证并保存</string>
     <string name="settings_feishu_bot_unpairs">换成别的 App ID 会解除现在的配对，保存后到机器人的渠道页重新配对。</string>
+    <string name="settings_feishu_bot_step_sync_permissions">如需知识同步，还要开通以下用户权限：offline_access, search:message, drive:drive:readonly, drive:drive.metadata:readonly, docx:document:readonly, docs:document.content:read, sheets:spreadsheet:readonly, bitable:app:readonly, wiki:wiki:readonly, wiki:node:retrieve, wiki:space:retrieve, minutes:minutes:readonly, minutes:minutes.transcript:export, im:chat:read, im:chat:readonly, im:message:readonly, im:message.group_msg:get_as_user, im:message.p2p_msg:get_as_user, drive:file:download, contact:user.base:readonly, contact:contact.base:readonly。发布权限并完成所需的管理员审批后，需要重新授权以补齐权限；人名补救会在授权后自动重跑。</string>
+    <string name="settings_mail_module_off">hub 所在的机器上关闭了邮件，所以这里不能添加或更改邮箱账号。收件箱里已有的邮件会保留。</string>
 </resources>

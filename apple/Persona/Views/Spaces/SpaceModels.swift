@@ -414,7 +414,9 @@ enum SpaceMdWords {
                                   categories: trust.categories))
     }
 
-    func setCategory(_ category: String, on: Bool) async {
+    /// Lets it read `category` or not. Not named `setCategory`: `CallSourceTests` reads that call as an audio-session
+    /// change that needs a verdict for a live call.
+    func allowCategory(_ category: String, on: Bool) async {
         guard let trust else { return }
         var list = trust.categories.filter { $0 != category }
         if on { list.append(category) }

@@ -72,6 +72,35 @@ class AndroidBuildPerfTest(unittest.TestCase):
         # an older `am` that prints no LaunchState
         self.assertEqual(perf.cold_start_ms("TotalTime: 2422"), 2422)
 
+    def test_cold_report_omits_timed_out_launches(self):
+        launches = iter((
+            "Status: timeout\nLaunchState: COLD\nTotalTime: 5000\nComplete\n",
+            "Status: timeout\nTotalTime: 5000\nComplete\n",
+            "Status: ok\nLaunchState: COLD\nTotalTime: 230\nComplete\n",
+            "TotalTime: 330\nComplete\n",
+        ))
+
+        def adb(command, **kwargs):
+            args = command[4:]
+            if args == ["wm", "size"]:
+                stdout = "Physical size: 1080x2400"
+            elif args[:3] == ["am", "start", "-W"]:
+                stdout = next(launches)
+            else:
+                stdout = ""
+            return subprocess.CompletedProcess(command, 0, stdout)
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = pathlib.Path(directory) / "out.json"
+            argv = ["android_build_perf", "synthetic", str(out), "debug=test.app"]
+            with (patch.object(sys, "argv", argv), patch.dict(os.environ, {"CHAT": "", "ONLY": "agents"}),
+                  patch.object(perf, "RUNS", 0), patch.object(perf, "COLD", 4), patch.object(perf.time, "sleep"),
+                  patch.object(subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
+                perf.main()
+            saved = json.loads(out.read_text())["debug/cold_start_ms"]
+        self.assertEqual(saved["values"], [230, 330])
+        self.assertEqual((saved["n"], saved["median"]), (2, 280))
+
     def test_links_open_the_list_and_a_conversation(self):
         self.assertEqual(perf.scenarios(None, None), dict(agents="persona://open?tab=agents"))
         both = perf.scenarios("server/s-1", None)
@@ -112,7 +141,7 @@ class AndroidBuildPerfTest(unittest.TestCase):
                 argv = ["android_build_perf", "synthetic", str(out), "debug=test.app"]
                 with (patch.object(sys, "argv", argv), patch.dict(os.environ, {"CHAT": "", "ONLY": "agents"}),
                       patch.object(perf, "RUNS", 2), patch.object(perf, "COLD", 0), patch.object(perf.time, "sleep"),
-                      patch.object(perf.subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
+                      patch.object(subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
                     with self.assertRaises(SystemExit) as error:
                         perf.main()
                     self.assertEqual(str(error.exception), expected)

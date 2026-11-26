@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import persona.core.contracts.Machine
+import persona.core.contracts.Session
+import persona.core.contracts.SessionKey
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.domain.sort.*
@@ -33,8 +35,12 @@ internal fun MachineSpacesScreen(
     onDetails: () -> Unit,
     onOpenSpace: (AgentSpace) -> Unit,
     onOpenAgent: (AgentSession) -> Unit,
+    sessions: List<Session> = emptyList(),
+    onOpenSide: ((AgentSession, SessionKey) -> Unit)? = null,
 ) {
     val shown = remember(rows, machineId, preferences.pins, preferences.mutes) { machineProjects(rows, machineId, preferences.pins, preferences.mutes) }
+    val visibleSessions = remember(sessions, preferences) { sessions.map { it.listSession(preferences).session } }
+    val visibleSessionsByKey = remember(visibleSessions) { visibleSessions.associateBy { it.key } }
     val resources = agentResources()
     val working = stringResource(R.string.agents_projects_working)
     val idle = stringResource(R.string.agents_projects_idle)
@@ -52,8 +58,8 @@ internal fun MachineSpacesScreen(
                     shown.tally.counts, waiting = shown.tally.waiting)
             }
         }
-        projectSection("busy", working, Status.Working, shown.busy, busy = true, preferences, resources, now, agentsOf, onOpenSpace, onOpenAgent)
-        projectSection("idle", idle, Status.Idle, shown.idle, busy = false, preferences, resources, now, agentsOf, onOpenSpace, onOpenAgent)
+        projectSection("busy", working, Status.Working, shown.busy, busy = true, preferences, resources, now, agentsOf, onOpenSpace, onOpenAgent, visibleSessions, visibleSessionsByKey, onOpenSide)
+        projectSection("idle", idle, Status.Idle, shown.idle, busy = false, preferences, resources, now, agentsOf, onOpenSpace, onOpenAgent, visibleSessions, visibleSessionsByKey, onOpenSide)
         if (loaded && shown.projects == 0) item("empty", contentType = "empty") {
             JEmptyState(stringResource(R.string.agents_projects_empty_title),
                 stringResource(if (machine?.online == false) R.string.agents_projects_empty_offline else R.string.agents_projects_empty_hint),
@@ -77,6 +83,8 @@ private fun LazyListScope.projectSection(
     id: String, title: String, tone: Status, projects: List<MachineProject>, busy: Boolean, preferences: AgentsPreferencesSnapshot,
     resources: android.content.res.Resources, now: Instant, agentsOf: (Int) -> String,
     onOpenSpace: (AgentSpace) -> Unit, onOpenAgent: (AgentSession) -> Unit,
+    visibleSessions: List<Session>, visibleSessionsByKey: Map<SessionKey, Session>,
+    onOpenSide: ((AgentSession, SessionKey) -> Unit)?,
 ) {
     if (projects.isEmpty()) return
     item("$id-header", contentType = "header") { JSectionHeader(title, count = projects.size, countTone = tone) }
@@ -87,10 +95,13 @@ private fun LazyListScope.projectSection(
         JGroupItem(GroupPosition.of(index, lines.size), grouped = true) {
             when (line) {
                 is ProjectLine.Agent -> Box(Modifier.padding(horizontal = rowPadding)) {
+                    val sideUnread = unreadSideSummary(line.agent.session, visibleSessionsByKey[line.agent.session.key], visibleSessions)
                     // As iOS: the agent's row, no menu, a tap opens it.
                     SlotRow(line.agent, null, AgentRowMetadata(), now, compact = false, pinned = line.agent.id in preferences.pins.sessions,
                         muted = preferences.mutes.mutes(line.agent), depth = 0, position = GroupPosition.Single, located = false,
-                        onOpen = { onOpenAgent(line.agent) }, menuItems = null)
+                        onOpen = { onOpenAgent(line.agent) }, menuItems = null,
+                        sideUnread = sideUnread, onOpenSide = onOpenSide?.let { cb -> { side -> cb(line.agent, side) } },
+                        preferHerdrTabName = preferences.prefersHerdrTabName(line.agent.session))
                 }
                 is ProjectLine.Project -> {
                     val project = line.project

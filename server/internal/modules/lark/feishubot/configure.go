@@ -97,7 +97,10 @@ func configureIssue(err error) (ConfigureIssue, string) {
 		return IssueUnderReview, apiErr.Msg
 	case 210031, 210032, 210034:
 		return IssueIncompatible, apiErr.Msg
-	case 230002, 230003: // forbidden / not authorized, as the config API answers it
+	// 230002/230003: config API forbidden / not authorized; 99991672 (missing app scope) and 99991676 (token no permission)
+	// from Feishu general error codes (https://open.feishu.cn/document/ukTMukTMukTM/ugjM14COyUjL4ITN).
+	// 99991679 is user_access_token missing user authorization and does not apply to tenant-token config calls.
+	case 230002, 230003, 99991672, 99991676:
 		return IssuePatchScope, apiErr.Msg
 	}
 	return IssueUnreachable, fmt.Sprintf("%d %s", apiErr.Code, apiErr.Msg)

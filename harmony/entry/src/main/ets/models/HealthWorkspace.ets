@@ -1,10 +1,19 @@
 import type { ClientModel } from './ClientModel';
 import type { HubRepository } from './HubRepository';
 import { ResourceRow, Wire } from './Wire';
+import { HealthIntakeModel } from './HealthIntake';
 
 const HEALTH_SPACE: string = 'health';
 const MEMORY_INDEX: string = 'MEMORY.md';
 const MAX_HEALTH_REPORT_BYTES: number = 32 * 1024 * 1024;
+export const HEALTH_SUGGESTIONS: string[] = [
+  'health_question_sleep', 'health_question_steps', 'health_question_resting_heart_rate', 'health_log_weight'
+];
+
+function conversationUpdatedAt(data: Record<string, Object>): number {
+  const at = Date.parse(Wire.text(data, 'updated_at'));
+  return Number.isFinite(at) ? at : Number.MIN_SAFE_INTEGER;
+}
 
 class HealthOwner {
   root: ClientModel;
@@ -55,6 +64,7 @@ function payload(keys: string[], values: Object[]): Record<string, Object> { ret
 /** The native, manager-owned Health space. It never changes the selected global manager. */
 @ObservedV2
 export class HealthWorkspace {
+  readonly intake: HealthIntakeModel = new HealthIntakeModel();
   @Trace conversations: ResourceRow[] = [];
   @Trace memories: HealthMemoryFile[] = [];
   @Trace reports: HealthReport[] = [];
@@ -74,6 +84,7 @@ export class HealthWorkspace {
 
   private client: ClientModel | undefined;
   private healthClient: ClientModel | undefined;
+  private historyReadGeneration: number = 0;
   private owner: string = '';
   private viewScope: string = '';
   private rootGeneration: number = 0;
@@ -88,6 +99,7 @@ export class HealthWorkspace {
 
   async open(client: ClientModel): Promise<void> {
     const revision = ++this.revision;
+    this.intake.close();
     this.client = client; this.healthClient = undefined; this.owner = '';
     this.rootGeneration = client.connectionGeneration(); this.rootScope = client.scope(); this.rootManager = client.profile.manager;
     this.viewScope = JSON.stringify([this.rootScope, this.rootManager]);
@@ -110,7 +122,7 @@ export class HealthWorkspace {
     } finally { if (this.revision === revision) this.loading = false; }
   }
 
-  hide(): void { this.revision++; this.client = undefined; this.healthClient = undefined; this.conversations = []; this.memories = []; this.reports = []; }
+  hide(): void { this.revision++; this.intake.close(); this.client = undefined; this.healthClient = undefined; this.conversations = []; this.memories = []; this.reports = []; }
 
   async refresh(): Promise<void> {
     const client = this.client;
@@ -254,14 +266,40 @@ export class HealthWorkspace {
       if (!this.current(owner, revision, target) || !this.canArchiveConversation(row)) return false;
       if (owner.client.operationBlocked(path)) { this.writeState = 'pending'; this.error = 'pending_action'; return false; }
       const captured = owner;
-      await captured.repository.call(path, 'POST', {}, operationId(),
+      const response = await captured.repository.call(path, 'POST', {}, operationId(),
         (): boolean => this.current(captured, revision, target) && this.canArchiveConversation(row), true);
-      if (!this.current(owner, revision, target) || !this.canArchiveConversation(row)) return false;
-      this.writeState = 'done'; this.conversations = this.conversations.filter((item: ResourceRow) => item.key() !== target); return true;
+      if (!this.current(owner, revision, target)) return false;
+      if ((Wire.has(response, 'ok') && !Wire.bool(response, 'ok')) ||
+        (Wire.has(response, 'archived') && !Wire.bool(response, 'archived'))) throw new Error('health_request_failed');
+      this.conversations = this.conversations.filter((item: ResourceRow) => item.key() !== target);
+      this.writeState = 'done';
+      try { await this.readArchivedHistory(owner, revision); }
+      catch (failure) { if (this.current(owner, revision, target)) this.error = this.errorCode(failure as Error); }
+      return true;
     } catch (failure) {
-      if (!owner || !this.current(owner, revision, target)) return false;
-      this.writeState = this.unknownWrite(failure as Error); this.error = this.errorCode(failure as Error); return false;
+      if (!owner) {
+        if (this.revision === revision && this.healthClient === client && this.client === root) {
+          this.writeState = 'failed'; this.error = this.errorCode(failure as Error);
+        }
+        return false;
+      }
+      if (!this.current(owner, revision, target)) return false;
+      this.writeState = this.unknownWrite(failure as Error); this.error = this.errorCode(failure as Error);
+      if (this.writeState === 'unknown' || this.writeState === 'pending') {
+        try { await this.readArchivedHistory(owner, revision); } catch (_) { /* Keep the unresolved write visible. */ }
+      }
+      return false;
     } finally { if (this.revision === revision && this.healthClient === client && this.client === root) this.busy = false; }
+  }
+
+  private async readArchivedHistory(owner: HealthOwner, revision: number): Promise<void> {
+    const read = ++this.historyReadGeneration;
+    const snapshot = await owner.repository.call('/api/v1/assistant?space=' + HEALTH_SPACE);
+    if (read !== this.historyReadGeneration || !this.current(owner, revision, owner.target)) return;
+    if (Wire.text(snapshot, 'machine_id') !== owner.machine || !Array.isArray(snapshot['conversations'])) {
+      throw new Error('request_updated');
+    }
+    this.conversations = this.historyRows(snapshot, owner);
   }
 
   openMemory(file: HealthMemoryFile): void {
@@ -385,12 +423,20 @@ export class HealthWorkspace {
     } finally { if (this.revision === revision && this.healthClient === client && this.client === root) this.busy = false; }
   }
 
+  composerOwner(): string {
+    const child=this.healthClient;
+    return JSON.stringify([this.rootScope,this.rootGeneration,this.owner,child?.scope() || '',child?.connectionGeneration(),this.machine]);
+  }
+
   canUploadReports(): boolean {
-    return !!this.healthClient && !!this.machine && this.reportUploadAllowed && !this.busy;
+    // The first render precedes connection to the owner's view. Read the observable readiness first
+    // so ArkUI enables the existing controls when the default machine is confirmed.
+    return this.reportUploadAllowed && !this.busy && !!this.machine && !!this.healthClient?.connected &&
+      !!this.client?.connected && this.client.owns(this.rootGeneration,this.rootScope);
   }
 
   canStartConversation(): boolean {
-    return !!this.healthClient && !!this.machine && this.reportUploadAllowed && !this.busy &&
+    return this.canUploadReports() &&
       !['pending', 'unknown'].includes(this.conversationWriteState);
   }
 
@@ -461,9 +507,11 @@ export class HealthWorkspace {
       Wire.text(data, 'space') === HEALTH_SPACE;
   }
 
-  canArchiveConversation(row: ResourceRow): boolean {
-    return this.isHealthConversation(row) && this.conversations.some((item: ResourceRow) => item.key() === row.key());
+  listedConversation(row: ResourceRow): ResourceRow | undefined {
+    return this.isHealthConversation(row) ? this.conversations.find((item: ResourceRow) => item.key() === row.key()) : undefined;
   }
+
+  canArchiveConversation(row: ResourceRow): boolean { return !!this.listedConversation(row); }
 
   openReport(report: HealthReport, record: boolean): ResourceRow | undefined {
     const path = record ? report.recordPath : report.path;
@@ -527,13 +575,23 @@ export class HealthWorkspace {
   }
 
   private clearOwnerState(): void {
+    this.intake.close();
     this.healthClient = undefined; this.owner = ''; this.machine = '';
     this.conversations = []; this.memories = []; this.reports = []; this.selectedMemory = undefined; this.memoryDraft = '';
     this.writeState = ''; this.conversationWriteState = ''; this.memoryWriteState = ''; this.reportUploadState = ''; this.reportUploadAllowed = false;
   }
 
   private async load(owner: HealthOwner, revision: number): Promise<void> {
+    this.intake.bind(owner.client,owner.root.features.includes('health_intake'),() => this.current(owner,revision),
+      async ():Promise<boolean> => {
+        const checked=await this.ownerSnapshot(owner.root,owner.client,this.healthTarget(owner.manager),revision);
+        return this.current(checked,revision) && checked.manager===owner.manager;
+      });
+    await Promise.all([this.loadResources(owner,revision),this.intake.refresh()]);
+  }
+  private async loadResources(owner: HealthOwner, revision: number): Promise<void> {
     // The health list itself supplies the manager's configured assistant machine and health cwd.
+    const read = ++this.historyReadGeneration;
     const assistant = await owner.repository.call('/api/v1/assistant?space=' + HEALTH_SPACE);
     if (!this.current(owner, revision, owner.target)) return;
     owner.machine = Wire.text(assistant, 'machine_id'); this.machine = owner.machine;
@@ -545,15 +603,7 @@ export class HealthWorkspace {
       const machine = Wire.rows(machineList, 'machines').find((item: Record<string, Object>) => Wire.text(item, 'id') === expectedMachine);
       this.reportUploadAllowed = !!machine && this.machineUsable(machine, owner.manager);
     } catch (_) { this.reportUploadAllowed = false; }
-    const chats = Wire.rows(assistant, 'conversations').filter((data: Record<string, Object>) =>
-      !Wire.text(data, 'space') || Wire.text(data, 'space') === HEALTH_SPACE).map((data: Record<string, Object>) => {
-      const row = ResourceRow.from(data, 'conversation'); row.manager = owner.manager;
-      row.machine = Wire.text(data, 'machine_id', owner.machine); row.session = Wire.text(data, 'session_id', row.id);
-      row.path = Wire.text(data, 'cwd');
-      const stamp = row.data(); stamp['space'] = HEALTH_SPACE; row.raw = JSON.stringify(stamp);
-      return row;
-    }).filter((row: ResourceRow) => !row.isDone());
-    this.conversations = chats;
+    if (read === this.historyReadGeneration) this.conversations = this.historyRows(assistant, owner);
     this.error = this.reportUploadAllowed ? '' : 'health_default_manager_unavailable';
 
     let memoryFailure: Error | undefined;
@@ -614,6 +664,19 @@ export class HealthWorkspace {
     }
   }
 
+  private historyRows(assistant: Record<string, Object>, owner: HealthOwner): ResourceRow[] {
+    const inSpace = Wire.rows(assistant, 'conversations').filter((data: Record<string, Object>) =>
+      !Wire.bool(data, 'archived') && (!Wire.text(data, 'space') || Wire.text(data, 'space') === HEALTH_SPACE));
+    inSpace.sort((a: Record<string, Object>, b: Record<string, Object>): number => conversationUpdatedAt(b) - conversationUpdatedAt(a));
+    return inSpace.map((data: Record<string, Object>) => {
+      const row = ResourceRow.from(data, 'conversation'); row.manager = owner.manager;
+      row.machine = Wire.text(data, 'machine_id', owner.machine); row.session = Wire.text(data, 'session_id', row.id);
+      row.path = Wire.text(data, 'cwd');
+      const stamp = row.data(); stamp['space'] = HEALTH_SPACE; row.raw = JSON.stringify(stamp);
+      return row;
+    }).filter((row: ResourceRow) => !row.isDone());
+  }
+
   private unknownWrite(error: Error): string {
     const data = error as Object as Record<string, Object>;
     return Wire.bool(data, 'resultPending') ? 'pending' : Wire.bool(data, 'resultUnknown') ? 'unknown' : 'failed';
@@ -633,7 +696,8 @@ export class HealthWorkspace {
   private machineUsable(machine: Record<string, Object>, manager: string): boolean {
     return Wire.text(machine, 'id').length > 0 &&
       (!Wire.text(machine, 'manager') || Wire.text(machine, 'manager') === manager) &&
-      Wire.bool(machine, 'online') && ['personal', 'work'].includes(Wire.text(machine, 'trust')) &&
+      Wire.bool(machine, 'online') && (!Wire.has(machine,'trust') || typeof machine['trust']==='string') &&
+      ['', 'personal', 'work'].includes(Wire.text(machine, 'trust')) &&
       !Wire.bool(machine, 'pending') && !Wire.bool(machine, 'pending_confirm');
   }
 

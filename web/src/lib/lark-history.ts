@@ -1,7 +1,37 @@
 // Older pages of a Feishu chat, loaded as the list nears its top (iOS LarkHistoryPaging, #1033), and where the list
 // stands against its newest end for "Back to latest" (iOS LarkFollow / LarkPager.latest, #1034). Pure logic; LarkThread wires it.
 import { comparePosition, type LarkMessage, type LarkPage } from "./inbox";
-import type { LarkConversation } from "./lark-chats";
+
+/** GET /api/v1/lark/conversations: one chat (server/internal/lark/feed.go Conversation). */
+export interface LarkConversation {
+  id: string;
+  name: string;
+  avatar?: string;
+  avatar_url?: string;
+  is_group: boolean;
+  is_topic?: boolean;
+  unread: number;
+  marked_unread?: boolean;
+  at_me: boolean;
+  at_all?: boolean;
+  muted: boolean;
+  pinned?: boolean;
+  tags?: string[];
+  preview: string;
+  preview_sender?: string;
+  is_mine: boolean;
+  updated_at: string;
+  read_position?: string;
+  mention_position?: string;
+  /** Client only: the Feishu account the chat is in (`ol_account`); undefined: the hub's own. */
+  ol_account?: number;
+}
+
+export interface LarkConversationPage {
+  account_id?: string;
+  conversations: LarkConversation[];
+  next_cursor?: string;
+}
 
 /** Why older paging stopped: it waits for a click on the header line. */
 export type HistoryProblem = "failed" | "stopped" | "account_changed" | "signed_out";

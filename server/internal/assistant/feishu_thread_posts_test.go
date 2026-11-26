@@ -15,7 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A todo bound to a chat topic tells it what happens (feishu_thread_posts.go, #5279): a decision, an Agent's turn
+// A todo bound to a chat topic tells it what happens (the lark module's thread_posts.go, #5279): a decision, an Agent's turn
 // ending or needing the user, the todo accepted or closed, in one short line a minute at most. All ids are placeholders.
 
 // fakeClock is the poster's clock and timer: nothing fires until advance runs it, in order.
@@ -114,8 +114,8 @@ func newPostEnv(t *testing.T) *postEnv {
 func (e *postEnv) bound(title, thread string) string {
 	e.t.Helper()
 	id := e.create(title).ID
+	seedTopicAnchor(e.t, e.s, e.f, testChat, thread, "om_"+thread)
 	e.must("PUT", "/api/v1/todos/"+id+"/thread", `{"channel":"feishu","chat_id":"`+testChat+`","thread_id":"`+thread+`"}`)
-	e.s.rememberTopicMessage(context.Background(), testChat, thread, "om_"+thread)
 	return id
 }
 
@@ -149,6 +149,7 @@ func mustContain(t *testing.T, what, got string, wants ...string) {
 
 // 1. A decision noted on a bound todo is said in its topic, with the link back to the todo, a moment later.
 func TestThreadPostsANewDecision(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.bound("发版", testThread)
 	e.decide(id, "先发安卓")
@@ -165,6 +166,7 @@ func TestThreadPostsANewDecision(t *testing.T) {
 
 // 2. What happens within a minute is one line; the next line is not before the minute is over.
 func TestThreadPostsJoinWithinAMinute(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.bound("发版", testThread)
 	e.decide(id, "先发安卓")
@@ -197,6 +199,7 @@ func TestThreadPostsJoinWithinAMinute(t *testing.T) {
 
 // Many decisions are counted, and the line quotes only the first few.
 func TestThreadPostsQuoteFewDecisions(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.bound("发版", testThread)
 	for i := 1; i <= 5; i++ {
@@ -213,6 +216,7 @@ func TestThreadPostsQuoteFewDecisions(t *testing.T) {
 // 3. What the user said in the topic is already there: not said again (and a bot's own line would not come back as a
 // reply). The other sources are said.
 func TestThreadPostsNotWhatTheTopicSaid(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.bound("发版", testThread)
 	e.deliver(topicEvent("om_t1", "先发安卓"))
@@ -254,6 +258,7 @@ func TestThreadPostsNotWhatTheTopicSaid(t *testing.T) {
 // The bot's own line in the topic is no reply: it is not from the owner (a bot's messages carry no user sender), so the
 // topic path drops it before anything is recorded or handed on.
 func TestThreadBotsOwnLineIsNoReply(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newPostEnv(t)
 	id := e.bound("发版", testThread)
 	e.must("PUT", "/api/v1/todos/"+id+"/agents/box/agent01", "")
@@ -291,9 +296,9 @@ func newFleetPost(t *testing.T) *fleetPost {
 	ft.f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) { return map[string]any{"message_id": "om_x"}, nil })
 	clk := newFakeClock()
 	clk.install(ft.s)
+	seedTopicAnchor(t, ft.s, ft.f, testChat, testThread, "om_anchor")
 	putTodo(ft.s, Todo{ID: "todo_f", Title: "修登录", Thread: &TodoThread{Channel: "feishu", ChatID: testChat, ThreadID: testThread},
 		Agents: []TodoAgent{{MachineID: "mac", SessionID: "s1"}}})
-	ft.s.rememberTopicMessage(context.Background(), testChat, testThread, "om_anchor")
 	return &fleetPost{ft, clk}
 }
 
@@ -321,6 +326,7 @@ func (p *fleetPost) askKind(t *testing.T, id, kind, summary string) {
 
 // 4. The agent's turn ends: a line; it needs the user: a line.
 func TestThreadPostsAgentFinishedAndNeedsYou(t *testing.T) {
+	needsLarkLayer(t)
 	p := newFleetPost(t)
 	driveAgentDone(p.ft, agentSession())
 	p.clk.waitPending(t, 1)
@@ -351,6 +357,7 @@ func TestThreadPostsAgentFinishedAndNeedsYou(t *testing.T) {
 
 // With the cards switch off there is no card anywhere: the line is the notice, and carries what is asked.
 func TestThreadPostsNeedsYouWithNoCardCarriesTheAsk(t *testing.T) {
+	needsLarkLayer(t)
 	p := newFleetPost(t)
 	p.ft.f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_a", PairedAt: time.Unix(100, 0), PublicURL: testWeb, Chats: []string{testChat},
@@ -368,6 +375,7 @@ func TestThreadPostsNeedsYouWithNoCardCarriesTheAsk(t *testing.T) {
 
 // ... but what a permission asks (a command, a path) is not for a group: the line only says the Agent needs the user.
 func TestThreadPostsNeedsYouWithNoCardNeverQuotesAPermission(t *testing.T) {
+	needsLarkLayer(t)
 	p := newFleetPost(t)
 	p.ft.f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_a", PairedAt: time.Unix(100, 0), PublicURL: testWeb, Chats: []string{testChat},
@@ -389,6 +397,7 @@ func TestThreadPostsNeedsYouWithNoCardNeverQuotesAPermission(t *testing.T) {
 // The card is where the run was asked, and the topic is compared by chat and thread: a topic run of another thread of the
 // same chat does not hide the line of this one.
 func TestThreadPostsNeedsYouNotHiddenByAnotherTopicsRun(t *testing.T) {
+	needsLarkLayer(t)
 	p := newFleetPost(t)
 	c := &p.ft.s.chans
 	c.mu.Lock()
@@ -410,25 +419,13 @@ func TestThreadPostsNeedsYouNotHiddenByAnotherTopicsRun(t *testing.T) {
 	}
 }
 
-// An agent with no name is "an agent", not two spaces; a bare directory mark is no name.
-func TestThreadPostTextWithoutAnAgentName(t *testing.T) {
+// An agent with no name is "an agent", not two spaces: a bare directory mark is no name (the line's wording is the lark
+// module's, TestThreadPostTextWithoutAnAgentName there).
+func TestThreadNameOfAnAgentWithoutOne(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, name := range []string{"", ".", "/", "  "} {
 		if got := threadName(name); got != "" {
 			t.Fatalf("threadName(%q) = %q", name, got)
-		}
-	}
-	for _, c := range []struct {
-		ev   threadEvent
-		want string
-	}{
-		{threadEvent{kind: threadAgentNeeds, dm: true}, "有个 Agent 需要你，已发到私聊"},
-		{threadEvent{kind: threadAgentNeeds}, "有个 Agent 需要你"},
-		{threadEvent{kind: threadAgentNeeds, text: "删缓存吗"}, "有个 Agent 需要你：删缓存吗"},
-		{threadEvent{kind: threadAgentFinished}, "有个 Agent 这一轮结束了"},
-	} {
-		got := threadPostText("", []threadEvent{c.ev}, "")
-		if got != c.want || strings.Contains(got, "  ") {
-			t.Errorf("%+v: %q, want %q", c.ev, got, c.want)
 		}
 	}
 }
@@ -436,6 +433,7 @@ func TestThreadPostTextWithoutAnAgentName(t *testing.T) {
 // A card asked in the topic itself (its run was asked there) is right there already: no line about it. One of an agent
 // whose todo has no thread is not said anywhere.
 func TestThreadPostsNoLineForACardInTheTopicItself(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	p := newFleetPost(t)
 	c := &p.ft.s.chans
 	c.mu.Lock()
@@ -453,6 +451,7 @@ func TestThreadPostsNoLineForACardInTheTopicItself(t *testing.T) {
 // A conversation with a private run and a topic's: the card goes to the DM and the topic gets its own line saying so
 // (feishu_cards.go); no second line about the same card.
 func TestThreadPostsNoLineWhenTheCardWentToTheDM(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	p := newFleetPost(t)
 	c := &p.ft.s.chans
 	c.mu.Lock()
@@ -474,10 +473,12 @@ func TestThreadPostsNoLineWhenTheCardWentToTheDM(t *testing.T) {
 // Two lines that read the same under one anchor are two messages: every line has its own key (Feishu drops a send whose
 // key it has seen, and the reply's usual key is made of the parent and the words). The stub does what Feishu does.
 func TestThreadPostsSameWordsTwiceBothArrive(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	seen := map[string]bool{}
 	var landed []string
 	var keys []string
+	id := e.bound("发版", testThread) // its anchor seeded before the lines are counted
 	e.f.answerApp(AppFeishu, FeishuText, func(p json.RawMessage) (any, error) {
 		var m map[string]any
 		_ = json.Unmarshal(p, &m)
@@ -494,7 +495,6 @@ func TestThreadPostsSameWordsTwiceBothArrive(t *testing.T) {
 		}
 		return map[string]any{"message_id": "om_x"}, nil
 	})
-	id := e.bound("发版", testThread)
 	for range [3]int{} {
 		e.decide(id, "先发安卓")
 		e.clk.advance(threadPostEvery)
@@ -515,6 +515,7 @@ func TestThreadPostsSameWordsTwiceBothArrive(t *testing.T) {
 // The anchor message was withdrawn: the hub fails the call (it does not drop the line into the group). The assistant
 // forgets that anchor, says nothing until the owner writes again in the topic, and then replies under the new message.
 func TestThreadPostsAnchorGone(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	gone := true
 	e.f.answerApp(AppFeishu, FeishuText, func(p json.RawMessage) (any, error) {
@@ -528,7 +529,7 @@ func TestThreadPostsAnchorGone(t *testing.T) {
 	id := e.bound("发版", testThread)
 	e.decide(id, "先发安卓")
 	e.clk.advance(threadPostEvery)
-	if got := e.s.topicMessage(context.Background(), testChat, testThread); got != "" {
+	if got := e.s.larkModule().TopicAnchor(context.Background(), testChat, testThread); got != "" {
 		t.Fatalf("the withdrawn anchor %q is still remembered", got)
 	}
 	n := len(e.posts()) // the one failed call
@@ -544,18 +545,14 @@ func TestThreadPostsAnchorGone(t *testing.T) {
 	if len(got) != n+1 || got[n]["reply_to"] != "om_new" || !strings.Contains(textOf(got[n]), "最后发网页") {
 		t.Fatalf("after the owner wrote again: %v", got[n:])
 	}
-	// A newer anchor that came meanwhile is not forgotten with the old one.
-	e.s.rememberTopicMessage(context.Background(), testChat, testThread, "om_old")
-	e.s.rememberTopicMessage(context.Background(), testChat, testThread, "om_newer")
-	e.s.forgetTopicMessage(context.Background(), testChat, testThread, "om_old")
-	if got := e.s.topicMessage(context.Background(), testChat, testThread); got != "om_newer" {
-		t.Fatalf("anchor %q", got)
-	}
+	// A newer anchor that came meanwhile is not forgotten with the old one: the module's
+	// TestTopicAnchorForgetKeepsANewerOne.
 }
 
 // What the user wrote in the private chat as the answer to a "Please verify" card stays there; every other manual
 // decision (a hand-written one) is posted.
 func TestThreadPostsNotWhatWasSaidInThePrivateChat(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.bound("验收", testThread)
 	store := e.s.todoDB()
@@ -581,6 +578,7 @@ func TestThreadPostsNotWhatWasSaidInThePrivateChat(t *testing.T) {
 
 // 5. The todo accepted, done, closed by the hub's judge, or closed because its agent never started: a line each.
 func TestThreadPostsTodoAcceptedOrClosed(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newPostEnv(t)
 	said := func(n int) string {
@@ -633,6 +631,7 @@ func TestThreadPostsTodoAcceptedOrClosed(t *testing.T) {
 
 // Accepted and done together are one line, the done one.
 func TestThreadPostsAcceptedThenDoneIsOneLine(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newPostEnv(t)
 	id := e.bound("验收", testThread)
@@ -653,10 +652,11 @@ func TestThreadPostsAcceptedThenDoneIsOneLine(t *testing.T) {
 // 6. A topic whose chat the bot may not send into gets nothing: what an agent bound (todo_bind_thread takes any chat_id)
 // is not a place to write to.
 func TestThreadPostsNothingToAChatNotInTheList(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.create("发版").ID
+	seedTopicAnchor(t, e.s, e.f, "oc_made_up", "omt_x", "om_x")
 	e.must("PUT", "/api/v1/todos/"+id+"/thread", `{"channel":"feishu","chat_id":"oc_made_up","thread_id":"omt_x"}`)
-	e.s.rememberTopicMessage(context.Background(), "oc_made_up", "omt_x", "om_x")
 	e.decide(id, "先发安卓")
 	e.must("PATCH", "/api/v1/todos/"+id, `{"done":true}`)
 	e.clk.advance(time.Hour)
@@ -667,14 +667,14 @@ func TestThreadPostsNothingToAChatNotInTheList(t *testing.T) {
 	// The same todo's topic, once its chat is on the list, is said into (the list is read when the line goes out).
 	id2 := e.bound("在名单里", "omt_listed")
 	e.chats = nil
-	e.s.feishuForgetStatus()
+	e.s.larkModule().ForgetStatus()
 	e.decide(id2, "先发安卓")
 	e.clk.advance(time.Hour)
 	if got := e.posts(); len(got) != 0 {
 		t.Fatalf("said with no chat on the list: %v", got)
 	}
 	e.chats = []string{testChat}
-	e.s.feishuForgetStatus()
+	e.s.larkModule().ForgetStatus()
 	e.decide(id2, "再发 iOS")
 	e.clk.advance(time.Hour)
 	mustContain(t, "line", textOf(e.onlyPost(t)), "再发 iOS")
@@ -682,6 +682,7 @@ func TestThreadPostsNothingToAChatNotInTheList(t *testing.T) {
 
 // 7. A todo with no thread says nothing, and queues nothing.
 func TestThreadPostsNothingWithoutAThread(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newPostEnv(t)
 	id := e.create("发版").ID
 	e.decide(id, "先发安卓")
@@ -705,6 +706,7 @@ func TestThreadPostsNothingWithoutAThread(t *testing.T) {
 
 // 8. The line goes into the topic: the chat, as a reply in its thread, to the latest message the owner said there.
 func TestThreadPostsGoIntoTheTopicByItsLatestMessage(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	id := e.create("发版").ID
 	e.must("PUT", "/api/v1/todos/"+id+"/thread", `{"channel":"feishu","chat_id":"`+testChat+`","thread_id":"`+testThread+`"}`)
@@ -726,34 +728,23 @@ func TestThreadPostsGoIntoTheTopicByItsLatestMessage(t *testing.T) {
 	}
 
 	// It survives a restart: the message is kept with the chat's state.
-	e2 := e.s.topicMessage(context.Background(), testChat, testThread)
+	e2 := e.s.larkModule().TopicAnchor(context.Background(), testChat, testThread)
 	if e2 != "om_t2" {
 		t.Fatalf("anchor %q", e2)
 	}
-	e.s.fbot.mu.Lock()
-	kept := e.s.fbot.st.Topics[testChat+"/"+testThread]
-	e.s.fbot.mu.Unlock()
-	if kept == nil || kept.MessageID != "om_t2" {
+	var stored botState
+	if _, err := e.s.store().Setting(context.Background(), botStateKey, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if kept := stored.Topics[testChat+"/"+testThread]; kept == nil || kept.MessageID != "om_t2" {
 		t.Fatalf("kept %+v", kept)
 	}
 }
 
-// The remembered messages are bounded, and old ones go.
-func TestTopicAnchorsAreBounded(t *testing.T) {
-	now := time.Now()
-	m := map[string]*topicAnchor{"old": {MessageID: "om_old", At: now.Add(-topicAnchorsKeepFor - time.Hour)}}
-	for i := 0; i < topicAnchorsKeep+10; i++ {
-		m[fmt.Sprintf("k%d", i)] = &topicAnchor{MessageID: "om", At: now.Add(-time.Duration(i) * time.Minute)}
-	}
-	pruneTopicAnchors(m, now)
-	if len(m) != topicAnchorsKeep || m["old"] != nil || m["k0"] == nil || m[fmt.Sprintf("k%d", topicAnchorsKeep+9)] != nil {
-		t.Fatalf("kept %d: old %v", len(m), m["old"])
-	}
-}
-
-// A topic's first message opens a to-do (feishu_thread_open.go); that message is where the to-do's first line replies
+// A topic's first message opens a to-do (the lark module's thread_open.go); that message is where the to-do's first line replies
 // to: it is remembered before the opening path takes the message, so the first progress hangs under the topic's root.
 func TestThreadPostsFirstProgressRepliesUnderTheRootMessage(t *testing.T) {
+	needsLarkLayer(t)
 	e := newPostEnv(t)
 	e.deliver(rootEvent("om_root", "发天气 App 1.3 版"))
 	todo := onlyTodo(e.s)
@@ -773,3 +764,10 @@ func TestThreadPostsFirstProgressRepliesUnderTheRootMessage(t *testing.T) {
 	}
 	mustContain(t, "line", textOf(p), "先发安卓", testWeb+"/todos/"+todo.ID)
 }
+
+// The lark module's topic-line pacing these tests run against (its thread_posts.go): a line a minute at most, quoting
+// three decisions.
+const (
+	threadPostEvery = time.Minute
+	threadPostShown = 3
+)

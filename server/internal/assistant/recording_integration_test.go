@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -22,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/recordinghost"
@@ -61,7 +63,7 @@ func TestBusHelloNamesRecordingDay(t *testing.T) {
 	p, _ := b.client.HelloParams().(map[string]any)
 	caps, _ := p["capabilities"].([]string)
 	// The recording module's capabilities, only when the build has it (persona_without_recording leaves them out).
-	if on := recordinghost.InBuild(); slices.Contains(caps, assistantwire.CapabilityRecordingDay) != on ||
+	if on := recordinghost.InBuild(moduleswitch.Set{}); slices.Contains(caps, assistantwire.CapabilityRecordingDay) != on ||
 		slices.Contains(caps, assistantwire.CapabilityMeetingAttendance) != on {
 		t.Fatalf("capabilities %v (module in the build: %v)", caps, on)
 	}
@@ -78,7 +80,7 @@ func TestEveningFactsDayIsBounded(t *testing.T) {
 		d.Actions = append(d.Actions, prompts.BriefDayAction{Who: "Bo", What: fmt.Sprintf("Thing %d", i)})
 	}
 	d.Parts = []prompts.BriefDayPart{{Part: 1, Made: "21:00", Upto: "20:58", Summary: strings.Repeat("概", 300)}}
-	briefDayBound(d)
+	briefDayBound(t, d)
 	if n := prompts.BriefDayRunes(d); n > briefDayRunes || n < briefDayRunes-200 {
 		t.Fatalf("%d runes", n)
 	}
@@ -95,6 +97,7 @@ func TestEveningFactsDayIsBounded(t *testing.T) {
 // which the knowledge base keeps) sends it to the others, with the same id and keys; a refusal that sending again
 // cannot help counts as taken: the hub's, a channel with nowhere to send it, a channel's own coded refusal.
 func TestDayRecapPushTakenByAll(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	d := newDayFixture(t)
 	setEvening(t, d.s, "06:30", true)
 	larkFails, chanFails := 1, 1 // the answers run under d.f.mu
@@ -143,7 +146,7 @@ func TestDayRecapPushTakenByAll(t *testing.T) {
 		t.Helper()
 		r, _ := e.Store.Recording(dayRec)
 		r.RecapPushTook = took // what the knowledge base keeps of the calls before (kb's tellDayRecap)
-		now, err := e.DayRecapWritten(context.Background(), *r, *rc)
+		now, err := tellDayRecap(e, *r, *rc)
 		took = append(took, now...)
 		return err
 	}
@@ -208,6 +211,7 @@ func TestDayRecapPushTakenByAll(t *testing.T) {
 // After a restart the push goes only to the destinations that did not take it: the knowledge base keeps those that
 // did with the recording (the assistant keeps nothing), so the phone and a channel that took it get no second copy.
 func TestDayRecapPushAfterRestart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	d := newDayFixture(t)
 	setEvening(t, d.s, "06:30", true)
 	larkFails := 1
@@ -240,7 +244,7 @@ func TestDayRecapPushAfterRestart(t *testing.T) {
 		t.Fatalf("the phone and the channel took it, the Lark bot not: %+v", r)
 	}
 	// Restarted: told with the recording as stored.
-	took, err := e.DayRecapWritten(context.Background(), *r, *rc)
+	took, err := tellDayRecap(e, *r, *rc)
 	if err != nil || !slices.Equal(took, []string{channel.Feishu}) {
 		t.Fatalf("after a restart: took %v, %v", took, err)
 	}
@@ -272,7 +276,7 @@ func TestDayRecapPushPhoneKeyIsReserved(t *testing.T) {
 	e := d.engine()
 	r, _ := e.Store.Recording(dayRec)
 	r.RecapPushTook = []string{"phone"} // the plugin channel took it, the phone not yet
-	took, err := e.DayRecapWritten(context.Background(), *r, *rc)
+	took, err := tellDayRecap(e, *r, *rc)
 	if err != nil || !slices.Contains(took, dayPushPhone) || slices.Contains(took, "phone") || len(d.f.pushed()) != 1 ||
 		len(d.f.appParams(AppChannels, ChannelsSend)) != 0 {
 		t.Fatalf("took %v, %v: %d pushes, %d sends", took, err, len(d.f.pushed()), len(d.f.appParams(AppChannels, ChannelsSend)))
@@ -301,7 +305,7 @@ func TestDayRecapPushRefPerChannel(t *testing.T) {
 	d.do("POST", "/api/v1/recordings/"+dayRec+"/minutes", "", nil, http.StatusAccepted)
 	rc := d.recap(dayRec)
 	r, _ := d.engine().Store.Recording(dayRec)
-	if _, err := d.engine().DayRecapWritten(context.Background(), *r, *rc); err != nil {
+	if _, err := tellDayRecap(d.engine(), *r, *rc); err != nil {
 		t.Fatal(err)
 	}
 	refs := map[string]any{}
@@ -317,6 +321,7 @@ func TestDayRecapPushRefPerChannel(t *testing.T) {
 // The section stays within 4000 runes whatever a valid day holds: 500 gaps of as many reasons, a dozen parts. The
 // reasons with the most time and the first and latest parts are listed, the others counted.
 func TestEveningFactsDayBoundsGapsAndParts(t *testing.T) {
+	needsBriefingModule(t)
 	d := newDayFixture(t)
 	var gaps []map[string]any
 	for i := range 500 {
@@ -347,7 +352,7 @@ func TestEveningFactsDayBoundsGapsAndParts(t *testing.T) {
 	if len(day.Parts) != briefDayParts || day.PartsLeft != 7 || day.Parts[0].Part != 1 || day.Parts[len(day.Parts)-1].Part != 12 {
 		t.Errorf("parts %+v, %d left", day.Parts, day.PartsLeft)
 	}
-	text := f.modelText()
+	text := d.s.briefModelText(f)
 	for _, want := range []string{"；另有 494 种原因共 494 段 494 分钟", "  - 中间另有 7 个部分没列出\n", "Standup"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("facts lack %q:\n%s", want, text)
@@ -377,7 +382,7 @@ func TestEveningFactsDayBoundsEverything(t *testing.T) {
 	for range 50 {
 		d.Actions = append(d.Actions, prompts.BriefDayAction{Who: strings.Repeat("人", 40), What: strings.Repeat("事", briefDayWhat)})
 	}
-	briefDayBound(d)
+	briefDayBound(t, d)
 	if n := prompts.BriefDayRunes(d); n > briefDayRunes {
 		t.Fatalf("%d runes", n)
 	}
@@ -414,13 +419,13 @@ func TestMinutesPastMeetingTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	const id = "44444444-4444-4444-8444-444444444444"
-	up := kb.RecordingUpload{Revision: 1, StartedAt: start, Duration: 30, Device: "phone", Complete: true, Kind: kb.RecordingMeeting,
+	up := recordingwire.RecordingUpload{Revision: 1, StartedAt: start, Duration: 30, Device: "phone", Complete: true, Kind: kb.RecordingMeeting,
 		Segments: []kb.RecordingSegment{{Start: 0, End: 9, Text: "Ada: the export drops large entries"},
 			{Start: 10, End: 19, Text: "we keep the cap"}, {Start: 20, End: 29, Text: "Bo adds the regression test by Friday"}}}
-	if st, err := e.PutRecording(id, up, start.Add(time.Minute)); err != nil || st.Status != kb.RecordingStored {
+	if st, err := recW(e).PutRecording(id, up, start.Add(time.Minute)); err != nil || st.Status != recordingwire.RecordingStored {
 		t.Fatalf("put: %v %v", st, err)
 	}
-	if n := e.WriteMinutes(ctx, 2); n != 1 {
+	if n := e.RecordingProvider().WriteMinutes(ctx, 2); n != 1 {
 		t.Fatalf("wrote %d", n)
 	}
 
@@ -494,6 +499,7 @@ func TestMinutesPastMeetingTools(t *testing.T) {
 // kb_get on a meeting imported from a connected app lists the recording whose calendar match is an overlapping event
 // but whose imported meeting it is (#8872).
 func TestKBGetImportedMeetingListsItsRecording(t *testing.T) {
+	needsRecordingModule(t) // the calendar match runs in the module's minutes round
 	f := newFakeHub()
 	s := kbServiceOn(t, f, newKBStore(), t.TempDir(), func(string, ...any) {})
 	setSettings(t, s, func(v *Settings) { v.Timezone = "Asia/Shanghai" })
@@ -510,12 +516,12 @@ func TestKBGetImportedMeetingListsItsRecording(t *testing.T) {
 		}
 	}
 	const id = "55555555-5555-4555-8555-555555555555"
-	up := kb.RecordingUpload{Revision: 1, StartedAt: start, Duration: 120, Device: "phone", Complete: true, Kind: kb.RecordingMeeting,
+	up := recordingwire.RecordingUpload{Revision: 1, StartedAt: start, Duration: 120, Device: "phone", Complete: true, Kind: kb.RecordingMeeting,
 		Segments: []kb.RecordingSegment{{Start: 0, End: 9, Text: "we keep the cap"}}}
-	if st, err := e.PutRecording(id, up, start.Add(3*time.Minute)); err != nil || st.Status != kb.RecordingStored {
+	if st, err := recW(e).PutRecording(id, up, start.Add(3*time.Minute)); err != nil || st.Status != recordingwire.RecordingStored {
 		t.Fatalf("put: %v %v", st, err)
 	}
-	e.WriteMinutes(context.Background(), 2)
+	e.RecordingProvider().WriteMinutes(context.Background(), 2)
 	if r, _ := e.Store.Recording(id); r.Meeting == nil || r.Meeting.ID != "e1" || r.ImportedMeeting == nil || r.ImportedMeeting.ID != "m1" {
 		t.Fatalf("matched %+v, imported %+v", r.Meeting, r.ImportedMeeting)
 	}
@@ -633,7 +639,7 @@ func TestJustMeMarkHoldsThroughBackgroundWork(t *testing.T) {
 		if tr == nil {
 			t.Fatal("no turn tracked")
 		}
-		ft.s.notifyFinishedNow("mac", "s1", tr.gen, ft.s.notifyTimings())
+		ft.s.notifyFinishedNow("mac", "s1", tr.gen, ft.s.notifyTimings(), supervisionEnd{})
 	}
 	work := proto.Session{SessionID: "s1", Title: "Main", Cwd: "/code/app", Agent: "claude", Assistant: true, Status: proto.StatusWorking,
 		PaneID: "p1", UpdatedAt: now()}
@@ -745,11 +751,11 @@ func TestMeetingPhotoNoteTool(t *testing.T) {
 		}
 		return b.String()
 	}
-	rev := r.engine().PhotosRev(meetingRec)
+	rev := recWrites(r.engine()).PhotosRev(meetingRec)
 	if res := call(sid, `{"photo":1,"text":"  The Q3 budget on the board is 40k.  "}`); res.IsError {
 		t.Fatalf("note: %s", text(res))
 	}
-	if ps := r.photosOf(meetingRec); ps[0]["note"] != "The Q3 budget on the board is 40k." || r.engine().PhotosRev(meetingRec) != rev+1 {
+	if ps := r.photosOf(meetingRec); ps[0]["note"] != "The Q3 budget on the board is 40k." || recWrites(r.engine()).PhotosRev(meetingRec) != rev+1 {
 		t.Fatalf("noted %v", ps[0])
 	}
 	for name, c := range map[string]struct{ args, want string }{
@@ -936,7 +942,9 @@ func TestMeetingRoomTools(t *testing.T) {
 		return b.String()
 	}
 	// Each line's offset, then the clock time a batch gives it in the user's zone (what a highlight's said_at copies).
-	clock := func(sec float64) string { return kb.LiveClock(*rec, sec, loc) }
+	clock := func(sec float64) string { // the module's LiveClock: the moment's "15:04" in the user's zone
+		return rec.StartedAt.Add(time.Duration(sec * float64(time.Second))).In(loc).Format("15:04")
+	}
 	if got := text(call("meeting_lines", `{"to":100}`)); got != "[1:01 · "+clock(61)+"] Ada: keep the cap." {
 		t.Fatalf("lines %q", got)
 	}
@@ -1015,7 +1023,7 @@ func TestRecordingFollowsItsModule(t *testing.T) {
 		name string
 		off  []string
 		on   bool
-	}{{"build", nil, recordinghost.InBuild()}, {"switched off", []string{recordinghost.ModuleID}, false}} {
+	}{{"build", nil, recordinghost.InBuild(moduleswitch.Set{})}, {"switched off", []string{recordinghost.ModuleID}, false}} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeHub()
 			s := withSettings(t, f, New(Options{Hub: f, Logf: testLogf(t), ModulesOff: c.off}))
@@ -1045,3 +1053,20 @@ func TestRecordingFollowsItsModule(t *testing.T) {
 		})
 	}
 }
+
+// tellDayRecap tells the recording module of recap rc of day recording r as its round does for a push that is due:
+// the module's own callback (writers.Writers.TellDayRecap), reached through the knowledge base's provider.
+func tellDayRecap(e *kb.Engine, r kb.Recording, rc kb.DayRecap) ([]string, error) {
+	return e.RecordingProvider().(interface {
+		TellDayRecap(context.Context, kb.Recording, kb.DayRecap) ([]string, error)
+	}).TellDayRecap(context.Background(), r, rc)
+}
+
+// recordingWrites is what these tests call of the recording module's writers (writers.Writers), reached as
+// tellDayRecap reaches them: through the knowledge base's provider.
+type recordingWrites interface {
+	PhotosRev(rawID string) int64
+	TranscriptionUpdate(rawID string, fn func(t *kb.MeetingTranscription, r kb.Recording) error) (kb.MeetingTranscription, error)
+}
+
+func recWrites(e *kb.Engine) recordingWrites { return e.RecordingProvider().(recordingWrites) }

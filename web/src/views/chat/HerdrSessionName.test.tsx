@@ -63,7 +63,7 @@ describe("sidebar and chat header naming", () => {
     await act(refreshAgentsDisplay);
     expect(sidebar().textContent).toContain(session.slot_name);
     expect(sidebar().textContent).not.toContain(session.title);
-    expect(sidebar().getAttribute("title")).toContain(`\n${session.title}`);
+    expect(sidebar().hasAttribute("title")).toBe(false);
     expect(header().textContent).toBe(session.slot_name);
     expect(header().getAttribute("title")).toContain(`\n${session.title}`);
     draw({ ...session, slot_name: "Owner's new name" });

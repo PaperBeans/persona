@@ -83,17 +83,54 @@ nonisolated struct PersonaManifest: Codable, Sendable, Hashable {
     /// Made by the hub from an uploaded image (`POST /api/v1/looks/uploads`).
     var isUploaded: Bool { source?.kind == Source.upload }
 
-    /// `source`: read leniently, so a package whose `source` is something else is still listed (only `kind` is used).
+    /// `source`: read leniently, so a package whose `source` is something else is still listed. An uploaded avatar's
+    /// also says what its owner chose (#15449), for its Edit sheet: the theme color's seed and whether it is
+    /// automatic, and which states have a picture of their own, each with its mark on or off.
     struct Source: Codable, Sendable, Hashable {
         static let upload = "upload"
         var kind: String?
+        /// The theme color's seed and whether the hub took it from the picture; nil when the package says nothing of it.
+        var color: Color?
+        /// The states with a picture of their own (raw values), each with its mark; nil for one made before.
+        var states: [String: State]?
 
-        enum CodingKeys: String, CodingKey { case kind }
+        struct Color: Codable, Sendable, Hashable {
+            /// "#RRGGBB".
+            var seed: String?
+            var auto: Bool
+        }
 
-        init(kind: String?) { self.kind = kind }
+        /// `{"own": true, "mark"}`: the state has a picture of its own.
+        struct State: Codable, Sendable, Hashable {
+            var own: Bool
+            /// The hub draws the state's mark on the picture (a thought bubble, the working arc…).
+            var mark: Bool
+
+            init(own: Bool = true, mark: Bool) {
+                self.own = own
+                self.mark = mark
+            }
+
+            init(from decoder: any Decoder) throws {
+                let c = try? decoder.container(keyedBy: CodingKeys.self)
+                own = c.flatMap { try? $0.decodeIfPresent(Bool.self, forKey: .own) } ?? true
+                mark = c.flatMap { try? $0.decodeIfPresent(Bool.self, forKey: .mark) } ?? true
+            }
+        }
+
+        enum CodingKeys: String, CodingKey { case kind, color, states }
+
+        init(kind: String?, color: Color? = nil, states: [String: State]? = nil) {
+            self.kind = kind
+            self.color = color
+            self.states = states
+        }
 
         init(from decoder: any Decoder) throws {
-            kind = (try? decoder.container(keyedBy: CodingKeys.self)).flatMap { try? $0.decodeIfPresent(String.self, forKey: .kind) }
+            let c = try? decoder.container(keyedBy: CodingKeys.self)
+            kind = c.flatMap { try? $0.decodeIfPresent(String.self, forKey: .kind) }
+            color = c.flatMap { try? $0.decodeIfPresent(Color.self, forKey: .color) }
+            states = c.flatMap { try? $0.decodeIfPresent([String: State].self, forKey: .states) }
         }
     }
 

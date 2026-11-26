@@ -133,7 +133,7 @@ func TestPushGradingHeldPushSourcesPersist(t *testing.T) {
 			machine: "mac", session: "agent-dedup",
 			record: func(t *testing.T, h *Hub) {
 				const key = "notify:manager-a//dedup-source"
-				if allow, _ := h.push.applyPushGrading(pushPolicy{level: assistantwire.LevelP0, relatedKey: key}); !allow {
+				if allow, _ := h.push.applyPushGrading(pushPolicy{level: assistantwire.LevelP0, relatedKey: key, manager: "manager-a"}); !allow {
 					t.Fatal("the P0 setup push was held")
 				}
 				_, err := h.deliverNotify(notifyRequest{Title: "dedup", ID: "dedup-source",

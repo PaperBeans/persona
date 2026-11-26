@@ -225,3 +225,112 @@ struct SideSessionsPresentation: ViewModifier {
     var shown: SessionKey?
     init(shown: SessionKey? = nil) { self.shown = shown }
 }
+
+extension EnvironmentValues {
+    /// Opens an unread folded side session directly in its parent's chat from an Agents row (#13524).
+    @Entry var openUnreadSide: SideSessionOpener? = nil
+}
+
+/// `\.openUnreadSide`: one object for the life of the list that hands it down, given that view's current closure each
+/// time its body runs (`set`), matching `SpaceOpener` (#10303) so rows do not redraw for a closure change.
+@MainActor final class SideSessionOpener {
+    private var open: (SessionKey, SessionKey) -> Void = { _, _ in }
+
+    func set(_ open: @escaping (SessionKey, SessionKey) -> Void) -> SideSessionOpener {
+        self.open = open
+        return self
+    }
+
+    func callAsFunction(parent: SessionKey, side: SessionKey) { open(parent, side) }
+}
+
+/// The line under a parent row's title while one or more folded side sessions keep it Unread (#13524, web #13496):
+/// in the unread tint, naming the most recent unread side ("+N" for others) and opening that side directly in one tap
+/// through the parent's side-session view. Before folded rows are loaded on a paged list it shows only the count,
+/// non-clickable (taps fall through to the parent row), and fetches the parent's folded rows once.
+struct SideUnreadLine: View {
+    var parent: SessionKey
+    var summary: SideFold.UnreadSummary
+    @Environment(\.openUnreadSide) private var openUnreadSide
+    @Environment(AppModel.self) private var model
+
+    /// Accessible spoken description for a named unread side and any other unread sides.
+    static func spoken(_ summary: SideFold.UnreadSummary) -> String {
+        guard let title = summary.latestTitle else { return countText(summary.count) }
+        let main = String(localized: "Side session “\(title)” has a new reply")
+        guard !summary.otherTitles.isEmpty else { return main }
+        let joined = summary.otherTitles.formatted(.list(type: .and))
+        let also = String(localized: "Also with new replies: \(joined)")
+        return main + ". " + also
+    }
+
+    /// Hover tooltip text (iPad pointer / Mac).
+    static func helpText(_ summary: SideFold.UnreadSummary) -> String {
+        guard let title = summary.latestTitle else { return countText(summary.count) }
+        var lines = [String(localized: "Open side session “\(title)”")]
+        if !summary.otherTitles.isEmpty {
+            let joined = summary.otherTitles.formatted(.list(type: .and))
+            lines.append(String(localized: "Also with new replies: \(joined)"))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func lineText(title: String) -> String {
+        String(localized: "New side reply: \(title)")
+    }
+
+    static func countText(_ count: Int) -> String {
+        String(localized: "\(count) side sessions have new replies")
+    }
+
+    var body: some View {
+        if let sideKey = summary.latestKey, let title = summary.latestTitle {
+            Button {
+                Haptics.tap()
+                if let openUnreadSide {
+                    openUnreadSide(parent: parent, side: sideKey)
+                } else {
+                    model.openChat = sideKey
+                }
+            } label: {
+                HStack(spacing: Theme.Space.xs) {
+                    ThemedIcon(Theme.Icon.sideSessions)
+                        .font(Theme.Font.caption)
+                    Text(Self.lineText(title: title))
+                        .font(Theme.Font.caption)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if summary.extraCount > 0 {
+                        Text(verbatim: "+\(summary.extraCount)")
+                            .font(Theme.Font.captionMedium.monospacedDigit())
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                .foregroundStyle(StatusPalette.unread.text)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(Self.helpText(summary))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.spoken(summary))
+            .accessibilityHint(String(localized: "Open side session “\(title)”"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("agents.row.sideUnread")
+        } else {
+            HStack(spacing: Theme.Space.xs) {
+                ThemedIcon(Theme.Icon.sideSessions)
+                    .font(Theme.Font.caption)
+                Text(Self.countText(summary.count))
+                    .font(Theme.Font.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(StatusPalette.unread.text)
+            .accessibilityIdentifier("agents.row.sideUnreadCount")
+            .task(id: parent) {
+                await model.refreshUnreadSides(parent)
+            }
+        }
+    }
+}

@@ -24,9 +24,13 @@ const call = (seq: number): Item[] => [
 const earlier = [{ id: "u1#0", seq: 1, role: "user", kind: "text", text: "Earlier question", ts: "2026-11-07T09:00:00Z" } as Item, said(2, "Earlier answer.")];
 const folded = [said(3, "Checked the folder first."), ...call(3)];
 
+let apiOverride: ((path: string) => Promise<ItemsPage> | undefined) | undefined;
+
 vi.mock("../../lib/api", async (orig) => ({
   ...(await orig<typeof import("../../lib/api")>()),
   api: vi.fn(async (path: string): Promise<ItemsPage> => {
+    const custom = apiOverride?.(path);
+    if (custom) return custom;
     if (path.includes("before_seq=")) return { items: earlier, to_seq: 2 } as ItemsPage;
     if (path.includes("through_seq=")) return { items: folded, to_seq: 4 } as ItemsPage;
     return { items: [prompt], to_seq: 5, has_more: true } as ItemsPage;
@@ -61,8 +65,10 @@ const mount = async () => {
 beforeEach(() => {
   vi.useFakeTimers();
   assistant = false;
+  apiOverride = undefined;
 });
 afterEach(() => {
+  apiOverride = undefined;
   act(() => root.unmount());
   vi.useRealTimers();
 });
@@ -90,8 +96,10 @@ describe("an agent's live text", () => {
     await delta("");
     expect(tr.streaming).toBe("Closing words.");
     expect(tr.streamEnded).toBe(true);
+    expect(tr.streamEndedThrough).toBe(5);
     items([said(6, "Closing words.")], 5);
     expect(tr.streaming).toBe("");
+    expect(tr.streamEndedThrough).toBeUndefined();
     expect(tr.items.at(-1)?.text).toBe("Closing words.");
   });
 
@@ -187,5 +195,200 @@ describe("the assistant's live text", () => {
     await delta("Writing the reply");
     await act(() => tr.loadEarlier());
     expect(tr.streaming).toBe("Writing the reply");
+  });
+
+  it("keeps a preview with a late echo until the next input really arrives", async () => {
+    items([said(6, "The prior turn has an answer.")], 5);
+    await delta("The turn is answering.");
+    items([{ ...prompt, id: "u7#0", seq: 7 }], 6);
+    expect(tr.streaming).toBe("The turn is answering.");
+    items([{ ...prompt, id: "u7#1", seq: 8, kind: "image" }], 7);
+    expect(tr.streaming).toBe("The turn is answering.");
+    await delta("");
+    expect(tr.streamEndedThrough).toBe(8);
+    items([{ ...prompt, id: "u9", seq: 9, kind: "image" }], 8);
+    expect(tr.streaming).toBe("");
+    expect(tr.streamEndedThrough).toBeUndefined();
+  });
+
+  it("drops an already bound reply before an old end marker can attach to the next input", async () => {
+    await delta("The reply to the already echoed input.");
+    items([{ ...prompt, id: "u6", seq: 6 }], 5);
+    await delta("");
+    expect(tr.streaming).toBe("");
+    expect(tr.streamEndedThrough).toBeUndefined();
+  });
+});
+
+describe("itemCoalescer coherency across page commits, replays, reads, rewrites, and live handoff", () => {
+  it("preserves buffered live items when a non-replacing reconnect readPage commits inside the 48ms window", async () => {
+    await mount();
+    // Leading-edge emit at t=0
+    items([said(6, "First live reply")], 5);
+    expect(tr.items.map((i) => i.id)).toContain("a6#0");
+
+    // Buffered non-critical live item at t=5ms (covered advances to 7)
+    vi.advanceTimersByTime(5);
+    items([said(7, "Buffered second reply")], 6);
+    expect(tr.items.map((i) => i.id)).not.toContain("a7#0");
+
+    // Reconnect triggers readPage(false) returning an older HTTP snapshot (to_seq: 6) inside the 48ms window
+    apiOverride = () => Promise.resolve({ items: [prompt, said(6, "First live reply")], to_seq: 6, has_more: true } as ItemsPage);
+    vi.advanceTimersByTime(5);
+    await act(async () => {
+      listener!.reconnected!();
+    });
+    await act(async () => void vi.advanceTimersByTime(100));
+
+    expect(tr.items.map((i) => i.id)).toContain("a7#0");
+    expect(tr.items.find((i) => i.id === "a7#0")?.text).toBe("Buffered second reply");
+  });
+
+  it("preserves buffered live items on a non-skipping socket replay (including empty replay) inside the 48ms window", async () => {
+    await mount();
+    items([said(6, "First")], 5);
+    vi.advanceTimersByTime(5);
+    items([said(7, "Buffered before replay")], 6);
+    expect(tr.items.map((i) => i.id)).not.toContain("a7#0");
+
+    vi.advanceTimersByTime(5);
+    act(() =>
+      listener!.items!({
+        items: [prompt, said(6, "First")],
+        from_seq: 5,
+        to_seq: 6,
+        has_more: true,
+      } as ItemsEvent),
+    );
+    await act(async () => void vi.advanceTimersByTime(100));
+
+    expect(tr.items.map((i) => i.id)).toContain("a7#0");
+    expect(tr.items.find((i) => i.id === "a7#0")?.text).toBe("Buffered before replay");
+
+    // Also verify empty non-skipping replay preserves a newly buffered item
+    items([said(8, "Second leading")], 7);
+    vi.advanceTimersByTime(5);
+    items([said(9, "Buffered before empty replay")], 8);
+    expect(tr.items.map((i) => i.id)).not.toContain("a9#0");
+    vi.advanceTimersByTime(5);
+    act(() => listener!.items!({ machine_id: "macbook", session_id: "a1f3c2d4-0000-4000-8000-000000000001", items: [], from_seq: 9, to_seq: 9, has_more: true }));
+    await act(async () => void vi.advanceTimersByTime(100));
+    expect(tr.items.find((i) => i.id === "a9#0")?.text).toBe("Buffered before empty replay");
+  });
+
+  it("does not let a buffered live item overwrite a newer expandFold or gap-fill pull read", async () => {
+    await mount();
+    items([said(6, "First")], 5);
+    vi.advanceTimersByTime(5);
+    // Buffered older version of a7#0 inside the 48ms window
+    items([said(7, "stale v1")], 6);
+    expect(tr.items.map((i) => i.id)).not.toContain("a7#0");
+
+    // expandFold lands a newer version of a7#0 inside the same 48ms window
+    apiOverride = (path) => {
+      if (path.includes("through_seq=")) {
+        return Promise.resolve({ items: [said(7, "fresh v2")], to_seq: 7 } as ItemsPage);
+      }
+      return undefined;
+    };
+    vi.advanceTimersByTime(5);
+    await act(() =>
+      tr.expandFold({ id: "f7#0", seq: 7, role: "assistant", kind: "fold", fold: { through_seq: 7 } } as unknown as Item),
+    );
+    await act(async () => void vi.advanceTimersByTime(100));
+    expect(tr.items.find((i) => i.id === "a7#0")?.text).toBe("fresh v2");
+
+    // Gap-fill pull() flushes buffered older item before applying newer after_seq result
+    let resolvePull!: (p: ItemsPage) => void;
+    apiOverride = (path) => {
+      if (path.includes("after_seq=")) {
+        return new Promise<ItemsPage>((r) => { resolvePull = r; });
+      }
+      return undefined;
+    };
+    // Trigger gap (from_seq: 10 > covered 7) to schedule pull at +1500ms
+    act(() => listener!.items!({ items: [said(10, "After gap")], from_seq: 10, to_seq: 10 } as ItemsEvent));
+    // Advance to trigger gap-fill pull (in flight)
+    await act(async () => void vi.advanceTimersByTime(1500));
+    // While pull is in flight, emit leading edge then buffer stale a8#0 inside 48ms window
+    items([said(11, "Leading before pull resolves")], 10);
+    vi.advanceTimersByTime(5);
+    items([said(8, "stale pull v1")], 7);
+    expect(tr.items.map((i) => i.id)).not.toContain("a8#0");
+
+    // Pull resolves inside the 48ms window with fresh a8#0
+    await act(async () => {
+      resolvePull({ items: [said(8, "fresh pull v2"), said(9, "Gap step 9")], to_seq: 9 } as ItemsPage);
+    });
+    await act(async () => void vi.advanceTimersByTime(100));
+    expect(tr.items.find((i) => i.id === "a8#0")?.text).toBe("fresh pull v2");
+  });
+
+  it("cancels buffered items from a superseded history when rewritten() fires", async () => {
+    apiOverride = () => Promise.resolve({ items: [prompt], to_seq: 5, has_more: false, history: "h1" } as ItemsPage);
+    await mount();
+
+    act(() => listener!.items!({ items: [said(6, "h1 step 1")], from_seq: 5, to_seq: 6, history: "h1" } as ItemsEvent));
+    vi.advanceTimersByTime(5);
+    act(() => listener!.items!({ items: [said(7, "h1 stale buffered")], from_seq: 6, to_seq: 7, history: "h1" } as ItemsEvent));
+    expect(tr.items.map((i) => i.id)).not.toContain("a7#0");
+
+    // Keep the replacement readPage pending while the 48ms window elapses
+    let resolveNext!: (p: ItemsPage) => void;
+    apiOverride = () => new Promise<ItemsPage>((r) => { resolveNext = r; });
+
+    vi.advanceTimersByTime(5);
+    act(() => listener!.items!({ items: [said(1, "h2 start")], from_seq: 0, to_seq: 1, history: "h2" } as ItemsEvent));
+    await act(async () => void vi.advanceTimersByTime(100));
+
+    expect(tr.items.map((i) => i.id)).not.toContain("a7#0");
+
+    // Cleanly resolve the pending read
+    await act(async () => {
+      resolveNext({ items: [said(1, "h2 start")], to_seq: 1, has_more: false, history: "h2" } as ItemsPage);
+    });
+    expect(tr.items.map((i) => i.id)).toEqual(["a1#0"]);
+  });
+
+  it("commits the final assistant reply synchronously when it ends an active streaming preview inside the 48ms window", async () => {
+    assistant = true;
+    await mount();
+    await delta("Final answer.");
+    expect(tr.streaming).toBe("Final answer.");
+
+    // Trigger leading-edge emit with a tool item (streaming preview stays active)
+    items([{ id: "t6#0", seq: 6, role: "assistant", kind: "tool_use", tool_use_id: "toolu_6", tool_name: "Read" } as Item], 5);
+    expect(tr.streaming).toBe("Final answer.");
+
+    // Within 48ms, the final assistant reply arrives and ends the live preview: it must commit immediately with no blank flash
+    vi.advanceTimersByTime(5);
+    items([said(7, "Final answer.")], 6);
+
+    expect(tr.streaming).toBe("");
+    expect(tr.items.find((i) => i.id === "a7#0")?.text).toBe("Final answer.");
+  });
+
+  it("commits buffered agent block synchronously on partial unlandedLive trim from onItems and onDelta", async () => {
+    await mount();
+    // Case 1a: onDelta active, leading-edge tool emit, then Block one arrives inside 48ms window and trims streaming to Block two
+    await delta("Block one.\n\nBlock two.\n");
+    expect(tr.streaming).toBe("Block one.\n\nBlock two.\n");
+    items([{ id: "t6#0", seq: 6, role: "assistant", kind: "tool_use", tool_use_id: "toolu_6", tool_name: "Read" } as Item], 5);
+    vi.advanceTimersByTime(5);
+    items([said(7, "Block one.")], 6);
+    expect(tr.streaming).toBe("Block two.\n");
+    expect(tr.items.find((i) => i.id === "a7#0")?.text).toBe("Block one.");
+
+    // Case 1b: Block three buffered in coalescer when onDelta arrives and trims against latest
+    await act(async () => void vi.advanceTimersByTime(100));
+    items([{ id: "tr8#0", seq: 8, role: "user", kind: "tool_result", tool_use_id: "toolu_6", text: "ok" } as Item], 7);
+    vi.advanceTimersByTime(5);
+    items([said(9, "Block three.")], 8);
+    expect(tr.items.map((i) => i.id)).not.toContain("a9#0");
+
+    vi.advanceTimersByTime(5);
+    act(() => listener!.delta!("Block three.\n\nBlock four.\n"));
+    expect(tr.items.find((i) => i.id === "a9#0")?.text).toBe("Block three.");
+    expect(tr.streaming).toBe("Block four.\n");
   });
 });

@@ -11,7 +11,7 @@ The table below is for Orca; where the herdr engine differs is in the table in t
 | Capability | Windows (Orca) | Notes |
 | --- | --- | --- |
 | Build | ✅ | `GOOS=windows go build ./...`; process groups, signals, file locks and CPU time are in `internal/osproc` and each package's `_windows.go` |
-| Desktop notifications and Needs-you overlay | Electron only | The independent Link scheduled task has no tray UI. The Electron desktop's NSIS installation, system notifications and overlay still require Windows acceptance; they are not claimed here |
+| Tray icon and panel | ✅ | `install` also starts the tray at sign-in: connection state, reconnect, restart or install the background service, pairing (active and passive), renaming the computer. No notifications. See "Tray" below |
 | Resident node, persona-link active mode | ✅ | `persona-link install` installs a scheduled task that starts at logon, restarts on exit and shows no window ("Install and start at logon" below); there is no one-line install script or installer package (#1179) |
 | List Orca sessions and state | ✅ | One snapshot per second, as on macOS |
 | Read transcripts and session info | ✅ | `%USERPROFILE%\.claude\projects\<encoded directory>\<id>.jsonl`; the directory encoding is the same as Claude Code's (every non-alphanumeric becomes `-`, `C:\Users\…` → `C--Users-…`) |
@@ -95,13 +95,14 @@ go build -o persona-link.exe .\cmd\persona-link
 No administrator needed. On Windows, `install` does, in order:
 
 1. With `--pair`, pair first; `--listen` switches to passive mode (same as Linux, see [link.md](link.md), "Linux (headless)").
-2. If the scheduled task is running, end it first (a running program file can't be replaced) and wait for persona-link to release its run lock. If another persona-link is running (say, a foreground `persona-link run`), it asks you to stop it. Stop the retired tray UI yourself before upgrading; it is no longer managed by this CLI.
+2. If the scheduled task is running, end it first (a running program file can't be replaced) and wait for persona-link to release its run lock. If another persona-link is running (say, a foreground `persona-link run`), it asks you to stop it. A running tray is asked to quit, for the same reason.
 3. Copy itself to `~/.persona/bin/persona-link.exe`; copy the personad given by `--personad` to `~/.persona/bin/personad.exe`. Unlike Linux, if one is given it is always replaced:
    running `install` again with a new personad is the way to upgrade by hand (the hub can update it too, "Updates through the hub" below). If none is given and there is no `personad.exe`, only persona-link is installed (same as `--no-node`).
 4. Put another copy at `~/.persona/bin/persona-link-service.exe`: the same program, with only the subsystem in the PE header changed from console to GUI (`guicopy.go`).
 5. Write `~/.persona/persona-link-task.xml` (UTF-16), register the scheduled task "Persona Link" with `schtasks /Create /XML`, start it with `schtasks /Run`, and wait for it to connect to the hub (same as Linux, up to 20 seconds).
+6. Install the tray for this user and start it: the sign-in entry, the handlers for `persona://` links and the previous brand's ones and the running tray ("Tray" below). `--no-tray` skips it and removes the sign-in entry.
 
-The scheduled task and the separately installed Electron desktop are independent. No tray process, sign-in entry or `persona-link tray` command is installed. An obsolete tray from an older installation may be removed through Windows' own Startup settings; its historical registry and WebView2 details are in [windows-records.md](../archive/operations/windows-records.md).
+Persona Link is complete on its own: the scheduled task and the tray need no other Persona program on the computer.
 
 The "Persona Link" scheduled task:
 
@@ -126,9 +127,10 @@ is a release or your own `go build`, the supervisor is the same program. Approac
 
 | Command | On Windows |
 | --- | --- |
-| `persona-link status` | An extra line "Background service: scheduled task "Persona Link" · state · starts at logon"; the state is whatever schtasks prints in the system language (Running / 正在运行, the Chinese-locale "Running"…), shown but not parsed. There is no retired `tray` status field |
-| `persona-link uninstall [--purge]` | Ends and deletes the scheduled task (the node stops with it), deletes `persona-link-task.xml` and `persona-link-service.exe`. `--purge` is as on Linux and also deletes the supervisor's logs and lock. It does not change the separately installed desktop app |
-| `persona-link reconnect` | Sets the running connector's named reconnect event; also available through the fixed desktop setup action |
+| `persona-link status` | An extra line "Background service: scheduled task "Persona Link" · state · starts at logon"; the state is whatever schtasks prints in the system language (Running / 正在运行, the Chinese-locale "Running"…), shown but not parsed. Then a line for the tray: running or not, starts at sign-in or not (`tray` in `--json`) |
+| `persona-link uninstall [--purge]` | Ends and deletes the scheduled task (the node stops with it), deletes `persona-link-task.xml` and `persona-link-service.exe`. quits the tray and removes its sign-in entry, its link handlers and WebView2's cache. `--purge` is as on Linux and also deletes the supervisor's logs and lock |
+| `persona-link reconnect` | Sets the running connector's named reconnect event, as the tray's **Reconnect now** does |
+| `persona-link tray [--open <link>]` | Runs the tray (what the sign-in entry runs). A second one shows the running tray's panel, or hands it the link |
 | `persona-link name [<new>\|--reset]` | As on Linux: shows or changes what the hub calls this computer ([link.md](link.md), "The computer's name") |
 | `persona-link node install` / `node uninstall` | Not installed separately: the node is in the same scheduled task; use `install` (with node) / `install --no-node` |
 | `persona-link node status [--json]` | Whether the scheduled task includes the node, and the task's state |
@@ -147,11 +149,33 @@ The hub updates a Windows node the way it updates any other ([node-update.md](no
 
 The first update needs a supervisor that passes `--supervised`: install once with a persona-link and personad from this change on. The hub sends the `personad-windows-<arch>.exe` it finds among its node builds (`~/.persona/bin/nodes`, "Node packages" in [node-update.md](node-update.md)), or the same program's `.exe.gz` from the immutable versioned release manifest. A Windows node's downloaded filename keeps `.exe`, including in the manager's cache.
 
-## Reconnect without a tray
+## Tray
 
-Windows has no `SIGUSR1` / `SIGUSR2`. persona-link waits on named events, `Local\PersonaLink.<hash of link.json's path>.recheck` and `.reconnect` (`internal/link/poke*.go`). `persona-link reconnect` sets the latter, and pairing sets `recheck` so a running connector reads the new credential immediately. The Electron setup window calls only these fixed CLI actions.
+The tray icon is the Windows counterpart of the Mac menu bar App ([link.md](link.md), "Tray and menu bar App"): it shows the link's state and does what the App's menu does, item for item.
+Persona Link only pairs the computer and keeps its connection: the tray posts no notifications, shows no "Needs you" list and does not open or drive sessions.
+It is part of persona-link (`internal/linktray`, `persona-link tray`), not a separate program, so it is always the same version as the connector it manages. Pure Go, no cgo: Win32 for the icon, the menu and the windows, WebView2 (`wailsapp/go-webview2`) for the panel and the pairing window.
 
-The connector watches network changes itself with `NotifyIpInterfaceChange` (`internal/netaddr`), as it does with netlink on Linux. The scheduled task, supervisor and resident node do not depend on Electron, WebView2 or the retired tray. The former implementation is preserved as historical evidence in [windows-records.md](../archive/operations/windows-records.md).
+- **What runs**: `install` writes "Persona Link" under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `"%USERPROFILE%\.persona\bin\persona-link-service.exe" tray` (the GUI-subsystem copy, so no console window) and starts it right away.
+  The tray is not in the scheduled task: the supervisor's Job would end it with the task, and `install` starts it outside any Job (`CREATE_BREAKAWAY_FROM_JOB`) so it outlives the terminal that ran `install`.
+  The panel's switch **Show in tray at sign-in** (or Settings › Apps › Startup) only changes the sign-in entry; the background service runs either way.
+- **One per data directory**: a named mutex; a second `tray` hands its link (or "show the panel") to the running one over `WM_COPYDATA` and exits. `install` asks the running tray to quit before replacing the program and starts the new one afterwards.
+- **State is read, never asked**: `link.json`, `link.status.json` and whether the pid in it is a live persona-link (`OpenProcess` and the image name). The data directory is watched (`FindFirstChangeNotification`), so changes show at once;
+  otherwise it reads them every second while the panel or the pairing window is open and every 3 seconds when not. The scheduled task's state (schtasks, about 50 ms) is read every 30 seconds and after each action.
+- **Reconnect now and network changes**: Windows has no `SIGUSR1` / `SIGUSR2`. persona-link waits on two named events instead, `Local\PersonaLink.<hash of link.json's path>.recheck` and `.reconnect` (`internal/link/poke*.go`), which the tray and `persona-link reconnect` set;
+  pairing sets `recheck` so a running persona-link reads the new credential at once. persona-link watches network changes itself with `NotifyIpInterfaceChange` (`internal/netaddr`), as it does with netlink on Linux.
+- **Icon**: the Persona helper, the same art as the app icon (`server/internal/linktray/art`, made by `scripts/assets/make_icon.py link`), drawn at the notification area's size and DPI. It is faded while the link is not up (connecting, offline, not paired), and a colored dot in its corner marks the states that need you (waiting for your OK on the phone, background service not running, offline), in the light or dark taskbar's shade (`icons.go`; `LINKTRAY_ICON_SHEET=<dir> go test ./internal/linktray/ -run Icon` writes them out to look at).
+  Left click opens the panel; right click is a native menu with the same actions, which works without WebView2.
+- **Panel and pairing window**: HTML pages (`internal/linktray/web`; every size and color comes from `tokens.css`) loaded from memory, with no server and nothing fetched. The panel is a flyout over acrylic next to the icon, on the taskbar's side;
+  the pairing window (active and passive, as in the Mac App) is a normal window over Mica. Both follow the system's light or dark mode, accent color, transparency setting and the monitor's DPI (per-monitor v2).
+  The backdrops need Windows 11 22H2 (build 22621); earlier builds get a solid background. Slow actions (install, restart, pair) run off the UI thread, and their result shows in the panel in the user's words.
+- **Rename this computer…**: in the panel (and the right-click menu) while connected to a hub that renames computers and once the computer is confirmed. It opens a name field in the panel; Save asks the running
+  persona-link to have the hub rename it, as `persona-link name` does ([link.md](link.md), "The computer's name"), and the panel says the hub's answer. The status line shows the name the hub gives the computer.
+- **Links**: `persona://` links, and the previous brand's ones that older hubs print, open the pairing window with the link filled in (`HKCU\Software\Classes\<scheme>`, running `tray --open "%1"`).
+  A scheme that another program already handles is left alone (a desktop App's phone link must keep working), and uninstall removes only the handlers that are ours.
+- **Language**: Windows' display language, en / zh-Hans / ja (`internal/i18n/locales/*/link-tray.json`). The failures it recognizes (hub unreachable, link refused, no background service) are explained in that language, with the raw error after the explanation.
+- **WebView2**: Windows 11 always has the runtime. On Windows 10 without it, clicking the icon says so in a message box and shows the native menu. WebView2 keeps the tray's profile (a cache, nothing of the user's) in `%LOCALAPPDATA%\Persona\LinkTray`, and `uninstall` deletes it.
+  `PERSONA_TRAY_DEVTOOLS=1` turns on the developer tools (F12); a port number (`PERSONA_TRAY_DEVTOOLS=9333`) also opens remote debugging on that port, for Playwright's `connect_over_cdp`.
+- **Pages in a browser**: `LINKTRAY_PAGES=<dir> go test ./internal/linktray/ -run TestWritePages` writes every sample state's panel and the pairing window, in each language and theme, as HTML files.
 
 ## hub in Docker Desktop on the same computer
 
@@ -226,6 +250,16 @@ The node's `node.sock`, `runtime.sock` and `node-attach.sock` are still AF_UNIX 
 They weren't switched to named pipes: Go's `net` supports them directly, so the hooks, persona-link and `--stdio` forwarding code didn't change a line. Listening, connecting, half-close (`CloseWrite`) and replacing a leftover socket file were verified on a real Windows 11 machine.
 Limits: the path can't exceed 108 bytes (a very deep `%USERPROFILE%` gives `bind: invalid argument`); permission bits like `0600` mean nothing on Windows, so it relies on the user directory's own ACL.
 
+**Runtimes on Node.js use a named pipe.** Node.js on Windows treats every `net.connect` path as a named pipe and cannot
+reach an AF_UNIX socket (`connect EACCES`), so the built-in Antigravity, opencode and Paseo companions never connected to
+`runtime.sock`: agy stayed the plain CLI launcher, which can start Agents but not the main chat. The node therefore also
+listens on `\\.\pipe\persona-runtime-<random>` and passes that path to the companions it starts (`--socket` and
+`PERSONA_RUNTIME_SOCKET`; `server/internal/node/runtimepipe_windows.go`). The name is new on every start and handed only
+to processes the node starts, after the node owns the pipe, so nobody can create it first. Its DACL allows only the
+node's account, remote clients are refused, and its handles are not inheritable. As on the socket, the node does not know
+the connecting process. If the pipe cannot be created, the node logs `runtime pipe:` and passes `runtime.sock` as before.
+A runtime started by hand on Windows still defaults to `runtime.sock` and cannot connect.
+
 ## Orca
 
 - **Transport**: the Windows build of Orca writes `named-pipe` (`\\.\pipe\orca-<pid>-…`) and `websocket` in `orca-runtime.json` (`%APPDATA%\orca\`), with no `unix`.
@@ -277,5 +311,5 @@ If Git Bash can't be found, these commands don't start (the machine info has no 
 
 ## Real-machine checks
 
-The earlier platform support was checked on a real Windows 10 or 11 machine between 2026-11-03 and 2026-11-07: Orca and Claude through the hub and an Android phone, the herdr engine, install and start at logon, the former tray, Claude outside Persona's terminals, and Codex. Those historical checks do not constitute acceptance of the new Electron desktop or the removal of that tray on Windows. The newer desktop project and session changes have the narrower validation scope described above.
+The earlier platform support was checked on a real Windows 10 or 11 machine between 2026-11-03 and 2026-11-07: Orca and Claude through the hub and an Android phone, the herdr engine, install and start at logon, the tray, Claude outside Persona's terminals, and Codex. The tray's return with the Persona helper icon and without notifications (2026-11-25) was checked on a real Windows 11 machine against a live hub: the panel, its state lines and the sign-in switch. The newer desktop project and session changes have the narrower validation scope described above.
 What ran, what was found on the way, and what each check could not cover are in `docs/archive/operations/windows-records.md`.

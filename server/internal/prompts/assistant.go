@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/modapi"
 )
 
 type AssistantSelectedFile struct{ Name, Path string }
@@ -64,6 +66,16 @@ type AssistantClaudeMD struct {
 	// BackgroundSupervisor: the background supervisor follows up the tasks no leader supervises (#4927), so the main
 	// conversation is told it no longer reviews them itself. False keeps the text as it was.
 	BackgroundSupervisor bool
+	// PhoneTools reports a real device phone_* tool other than calendar, whose query guidance is gated separately.
+	// Always-available write-queue tools and a lone calendar tool do not enable unrelated iPhone procedures.
+	PhoneTools bool
+	// PhoneCalendar keeps calendar-specific guidance conditional on that device tool being available.
+	PhoneCalendar bool
+	// PhoneCalendarWrite keeps the exact-occurrence safeguards when only calendar update/delete tools are mounted.
+	PhoneCalendarWrite bool
+	// FullViewGuide retains the complete rich-view procedure for older nodes and nodes where the managed
+	// persona-views skill is not ready. The default is the compact, on-demand form.
+	FullViewGuide bool
 	// UrgentCall: the owner turned urgent calls on (docs/assistant/urgent-call.md): when to call and the "what counts
 	// as urgent" rules. nil adds nothing.
 	UrgentCall *UrgentCall
@@ -102,9 +114,6 @@ func UrgentRuleBuiltinIn(id, language string) string {
 
 func RenderAssistantClaudeMD(d AssistantClaudeMD) string { return render("assistant/claude_md", d) }
 
-// RenderSupervisionInstructions is identical for every authorized supervisor and event.
-func RenderSupervisionInstructions() string { return render("assistant/supervision_instructions", nil) }
-
 // AssistantHealthClaudeMD is the health space's CLAUDE.md (docs/assistant/health.md).
 type AssistantHealthClaudeMD struct {
 	Owner    string // "" is "user"
@@ -112,8 +121,12 @@ type AssistantHealthClaudeMD struct {
 	StateDir string
 	// HealthDir is the health space's directory name in StateDir: "" is the built-in manager's "health", another's
 	// "health-<id>" (identity.HealthDirName).
-	HealthDir string
-	Language  string
+	HealthDir      string
+	Language       string
+	Water          bool // The owner's added intake items; false when the Health module is absent or unavailable.
+	Strength       bool
+	Protein        bool
+	ItemsAvailable bool // The module can add items, including when neither intake item is added yet.
 }
 
 func RenderAssistantHealthClaudeMD(d AssistantHealthClaudeMD) string {
@@ -278,6 +291,10 @@ type SnapshotTask struct {
 	// Plan: its agent's own task list, nil when it keeps none or Reported is newer (a report says more).
 	Plan  *SnapshotAgentPlan
 	Owner SnapshotOwner
+	// Origin conversation attribution for tasks opened outside the main chat (rendered in the main overview, #13657).
+	OriginID, OriginTitle, OriginLink string
+	// SupervisedElsewhere marks a task supervised by another conversation, shown read-only in the main overview.
+	SupervisedElsewhere bool
 }
 
 // SnapshotOwner is whose a task in the snapshot is, never rendered: the conversation that handed it out (its todo's
@@ -324,10 +341,13 @@ type SnapshotProfile struct {
 	Unreadable, Gone bool
 }
 
-// SnapshotTier is one tier of the profile in use: what an Agent started on it runs on ("" model or effort: the
-// launcher's), and when to use it.
+// SnapshotTier is one tier of the profile in use: what an Agent started on it runs on first ("" model or effort: the
+// launcher's), how many other candidates follow it (the hub picks among them at dispatch), the older names it answers
+// to, and when to use it.
 type SnapshotTier struct {
 	Name, Launcher, Model, Effort, Speed, PermissionMode, Description string
+	More                                                              int
+	Aliases                                                           []string
 }
 
 // Snapshot is the live context a starting assistant gets in its system prompt.
@@ -514,181 +534,37 @@ type TaskRun struct {
 	// Facts: the run's facts Persona worked out (RenderBriefFacts), above the task's prompt; "" for a task without them.
 	Facts string
 	State string // formatted scheduled-task state and update instructions
+	// PageHeader: for a routine bound to a dashboard page (#13020), the rendered page_routine_run header.
+	PageHeader string
 }
 
 func RenderTaskRun(t TaskRun) string { return render("assistant/task_run", t) }
 
-// BriefFacts are the facts of a morning or evening routine's run, as the model is given them (assistant/routine_facts):
-// the lines are ready to read; the totals count more than the lines when the lists were cut.
-type BriefFacts struct {
-	// NorthStar: the lines the report opens with (the interruptions and the availability today, their change against
-	// yesterday until the same time, and where they come from), ready to read.
-	NorthStar                                                        []string
-	ConfirmationSummary                                              string
-	Confirmations                                                    []string
-	Hours                                                            int // how far back "done" and "not through" look
-	WaitingTotal, DoneTotal, FailedTotal, AcceptTotal, ProgressTotal int
-	WaitingUnknown                                                   bool // the cards waiting were not read yet: say nothing of whether any waits
-	Card                                                             bool // a Lark card lists them for the user: the model need not
-	LaterTotal                                                       int  // questions Agents left for a briefing: the model says how many, never lists them
-	Waiting                                                          []string
-	Done                                                             []string
-	Failed                                                           []BriefFailed
-	Accept                                                           []BriefAccept
-	Progress                                                         []BriefProgress
-	// InboxWaiting and InboxDue are read-only follow-up facts for the model only; neither is on the card or in the push.
-	InboxWaiting, InboxDue []BriefFollow
-	Leaders                []BriefLeader // one per direction (#3609)
-	// Directions are the deterministic per-direction wait lists, main included. Every direction keeps all owner-wait
-	// rows and folds only its non-owner tail; More says how many rows the direction link holds beyond it.
-	Directions       []BriefDirection
-	DisabledRoutines []BriefDisabledRoutine
-	// Briefs: the open pieces of work that need the owner or changed since the last briefing, in their own words;
-	// BriefsDone: those that ended since, once, with each criterion's result (#3822).
-	Briefs, BriefsDone []BriefTask
-	// Day: the evening routine's today's all-day recording (#4741), for the model only; nil leaves the section out.
-	Day *BriefDay
-	// Setup: the lines of the weekly recommended-setup block (#5085), ready to read; none leaves the section out.
-	Setup []string
-	// Captures: the quick-capture lines (#13502), ready to read; a sensitive capture is only counted. None leaves the
-	// section out.
-	Captures []string
-}
-
-// BriefDay is today's all-day recording in the evening routine's facts (#4741), the day's parts merged by time; the
-// clock times are the owner's ("15:04", with the date when it is not today). Nothing of it is in the card, the brief
-// item or a channel, so the model says it even when Card is set.
-type BriefDay struct {
-	Date     string // the owner's today, YYYY-MM-DD
-	From, To string // when it was recorded: from its start to its end, or now while it is open
-	// Transcribed is how far its text goes when that is short of To (the phone transcribes and uploads as it can).
-	Transcribed string
-	// Gaps are the time with no text by reason, the reasons with the most of it; GapReasonsLeft counts the other
-	// reasons, GapsLeft their stretches and GapMinutesLeft their minutes.
-	Gaps                                     []BriefDayGap
-	GapReasonsLeft, GapsLeft, GapMinutesLeft int
-	// Parts are each part's recap or, without one, its state, the first and the latest ones; PartsLeft counts those
-	// from the middle left out (the section's bound).
-	Parts     []BriefDayPart
-	PartsLeft int
-	// Timeline is every part's recap entries by time; Left counts those from the middle of the day left out (the
-	// section's bound).
-	Timeline []BriefDayEntry
-	Left     int
-	// Actions are the suggested to-dos the user has not confirmed, by time; ActionsLeft counts those left out.
-	Actions     []BriefDayAction
-	ActionsLeft int
-}
-
-// BriefDayGap is the time of one reason with no text (paused, interrupted, stopped, pending, lost, erased, or the
-// phone's own word): how many stretches, how many minutes in all, the longest of them (More: there are others).
-type BriefDayGap struct {
-	Reason         string
-	Count, Minutes int
-	Ranges         []string
-	More           bool
-}
-
-// BriefDayPart is one part of the day: its recap (Made when it was written, Upto how far it read, Summary) and State
-// "pending" or "failed" when a newer one is being written or failed; without a recap, State is "pending", "failed",
-// "none" (nothing transcribed in Recorded minutes) or "" (not due yet).
-type BriefDayPart struct {
-	Part           int
-	Made, Upto     string
-	Final, Partial bool
-	Summary        string
-	State          string
-	Recorded       int
-}
-
-// BriefDayEntry is one entry of the day's timeline, without its points.
-type BriefDayEntry struct {
-	From, To string
-	Meeting  bool
-	Title    string
-}
-
-// BriefDayAction is a suggested to-do not confirmed yet.
-type BriefDayAction struct{ Who, What string }
+// BriefFacts and the briefing prompt types are defined in the pure contract package internal/modapi and aliased here
+// so both prompts and internal/modules/briefing share them without importing each other.
+type (
+	BriefFacts           = modapi.BriefFacts
+	BriefDay             = modapi.BriefDay
+	BriefDayGap          = modapi.BriefDayGap
+	BriefDayPart         = modapi.BriefDayPart
+	BriefDayEntry        = modapi.BriefDayEntry
+	BriefDayAction       = modapi.BriefDayAction
+	BriefTask            = modapi.BriefTask
+	BriefCriterion       = modapi.BriefCriterion
+	BriefLeader          = modapi.BriefLeader
+	BriefDirection       = modapi.BriefDirection
+	BriefWait            = modapi.BriefWait
+	BriefDisabledRoutine = modapi.BriefDisabledRoutine
+	BriefFailed          = modapi.BriefFailed
+	BriefAccept          = modapi.BriefAccept
+	BriefFollow          = modapi.BriefFollow
+	BriefProgress        = modapi.BriefProgress
+)
 
 // BriefDayRunes is how many runes day adds to the facts (the evening routine keeps it about 4000).
 func BriefDayRunes(day *BriefDay) int {
 	return utf8.RuneCountInString(RenderBriefFacts(BriefFacts{Day: day})) - utf8.RuneCountInString(RenderBriefFacts(BriefFacts{}))
 }
-
-// BriefTask is one piece of work in the briefing, told from its brief: Date and Words are when the owner asked and
-// what they wrote (Words "" when they did not ask: then By says who started it, and Goal what for); Now is where it
-// stands in a line, Need what is wanted from the owner, Scope the scope changes since the last briefing, Result each
-// criterion's outcome for one that ended.
-type BriefTask struct {
-	Date, Words, By, Goal string
-	Now, Need             string
-	// Status: the closeout's status when Now is the agent's own account (done, not_done, blocked). Decide: it waits
-	// for the owner's decision and no ask words it. Cancelled: one that ended by being cancelled.
-	Status          string
-	Decide, Overdue bool
-	Cancelled       bool
-	// Parked: it is parked waiting for the owner's priority call, and this is the reason in one sentence ("" otherwise).
-	Parked          string
-	Scope, AlsoDone []string
-	Result          []BriefCriterion
-}
-
-// BriefCriterion is one criterion's result in the briefing: met, not_met, unchecked, or dropped by scope change Change.
-type BriefCriterion struct{ Criterion, State, Change string }
-
-// BriefLeader is one direction in the briefing's facts: its name, its open tasks, those waiting for the owner, those
-// past their inactivity thresholds, and its leader's latest summary of the day (empty parts: none).
-type BriefLeader struct {
-	Name                     string
-	Open, Waiting, Stuck     int
-	Reached, Doing, NeedsYou string
-}
-
-// BriefDirection is one direction's open-work count and deterministic wait rows. Main and leader directions alike keep
-// every owner-wait row; only the non-owner tail is folded into More. Line is ready to read in the owner's language.
-type BriefDirection struct {
-	ID, Name, Link             string
-	Owner                      bool
-	Open, Active, Undispatched int
-	Waits                      []BriefWait
-	More                       int
-}
-
-// BriefWait is one stopped task or unanswered card. Kind is needs_user, review, question, permission, private,
-// parked, capacity, orphaned, overdue or stalled. Since/Until are zero when the ledger did not record them.
-type BriefWait struct {
-	TodoID, InteractionID string
-	Title, Kind           string
-	Since                 time.Time
-	Until                 time.Time
-	WaitingOn, Reason     string
-	Link, Line            string
-}
-
-// BriefDisabledRoutine is a disabled daily report or patrol. DisabledAt is nil for routines saved before the hub
-// recorded the transition; Line says "disable time not recorded" rather than substituting LastRun.
-type BriefDisabledRoutine struct {
-	ID, Title, Direction, Kind string
-	DisabledAt                 *time.Time
-	Link, Line                 string
-}
-
-// BriefFailed is one thing that did not go through: a task whose agent did not start, a scheduled run that failed
-// (Run) or was skipped (Skipped).
-type BriefFailed struct {
-	Title, Why   string
-	Run, Skipped bool
-}
-
-// BriefAccept is a task waiting to be verified, with what it changed in the words of its "Please verify" card.
-type BriefAccept struct{ Line, Changed string }
-
-// BriefFollow is one Inbox matter in the briefing's model-only facts: its title, who or what it waits on and next step.
-type BriefFollow struct{ Title, Who, Next string }
-
-// BriefProgress is a task being worked on and its stage ("plan", "develop", "review", "merge", "deploy", "verify"; "" not known).
-type BriefProgress struct{ Title, Stage string }
 
 func RenderBriefFacts(b BriefFacts) string { return render("assistant/routine_facts", b) }
 
@@ -931,6 +807,7 @@ type SuperviseEntry struct {
 	Ask             string              // needs_you: what it asks
 	Recommend       string              // escalated: the option the leader recommends
 	LeaderGone      bool                // decide: its task leader agent cannot be reached, so the supervisor takes the task over
+	SupervisorGone  bool                // decide: its assigned Assistant supervisor cannot receive the relay, so main takes over
 	Background      bool                // escalated: by the background supervisor, not a leader conversation (#4927)
 	DoneWhen        []string            // what done means
 	Round           int                 // reworks so far
@@ -940,9 +817,11 @@ type SuperviseEntry struct {
 	Last            string              // what its agent said last
 	Closeout        *SuperviseCloseout  // the closeout its agent ended the turn with (#3612), nil when it wrote none
 	Link            string              // the task's page ("" when the hub has no public_url)
-	Quiet           bool                // the user was not pushed about it
-	Orphan          string              // orphaned: why nobody works on it (error, closed, offline)
-	Review          *SuperviseReviewed  // review: what the independent reviewer found (#2173), nil when none ran
+	// Origin conversation that dispatched the task, preserved across hand-overs (#13657).
+	OriginID, OriginTitle, OriginLink string
+	Quiet                             bool               // the user was not pushed about it
+	Orphan                            string             // orphaned: why nobody works on it (error, closed, offline)
+	Review                            *SuperviseReviewed // review: what the independent reviewer found (#2173), nil when none ran
 	// report: what its agent reported (progress, question, blocked, done), its words, evidence and step.
 	// Reported: on the entry of a turn's end (review, idle, unjudged, interrupted), the kind of the report its agent
 	// made before it stopped, told in that one entry (assistant.joinTurnReports); Said, Evidence and Step are the report's.
@@ -992,6 +871,8 @@ type SuperviseEntry struct {
 	ExternalInfo *NeedsUserExternalInfo
 	// ParentCloseout: localized closeout guidance when all part_of children of an open parent to-do are done (#13100).
 	ParentCloseout string
+	// OutageRecovery: localized coalesced recovery summary after a provider-wide outage held interrupted/unjudged signals (#13158).
+	OutageRecovery string
 }
 
 // SuperviseTodoReady describes an open, unstarted to-do ready to advance once all of its after prerequisites are met.
@@ -1181,6 +1062,8 @@ type RuntimeInstructions struct {
 	Dir       string
 	Index     string // MEMORY.md, trimmed
 	Truncated bool   // Index is the start of a longer one
+	// MemoryTools tells remote runtimes (caps.remote_agent) to read and write shared memory via memory_read / memory_write.
+	MemoryTools bool
 	// Gates are the skills' gated commands this machine runs as tools (a plugin's assistant.gate with a tool).
 	Gates []RuntimeGate
 }
@@ -1359,9 +1242,6 @@ func RenderWorkspaceMention(w WorkspaceMention) string {
 	return render("assistant/workspace_mention", w)
 }
 
-// RenderWorkoutReport describes one consented workout, never a medical diagnosis.
-func RenderWorkoutReport(data string) string { return render("assistant/workout_report", data) }
-
 // SuperviseCloseout is an agent's own closeout as a supervision message shows it: its claim, to be checked.
 type SuperviseCloseout struct {
 	Status, Waiting   string
@@ -1420,11 +1300,13 @@ func RenderTodoDirection(d DirectionNotes) string {
 
 // SegmentHandoff continues the same logical conversation on a new engine.
 type SegmentHandoff struct {
-	Language string
-	Summary  string
-	Recent   []HandoffTurn
-	Text     string
-	Partial  bool
+	Language     string
+	FromLauncher string
+	FromModel    string
+	Summary      string
+	Recent       []HandoffTurn
+	Text         string
+	Partial      bool
 }
 
 func RenderSegmentHandoff(h SegmentHandoff) string { return render("assistant/segment_handoff", h) }

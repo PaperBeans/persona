@@ -88,7 +88,7 @@ func TestHubRoleOff(t *testing.T) {
 	if f := p.of("line"); len(f) != 2 || f[1]["n"] != 1.0 {
 		t.Fatalf("lines %v", f)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := recW(h.engine()).MeetingRead(meetingRec)
 	if tl := m.Transcription.Timeline; tl == nil || len(tl.Roles) != 3 {
 		t.Fatalf("the timeline: %+v", m.Transcription)
 	}
@@ -234,7 +234,7 @@ func TestHubUsage(t *testing.T) {
 	p.send(map[string]any{"type": "end", "at": 2.0})
 	p.waitClosed()
 	waitFor(t, "the usage kept", func() bool {
-		m, _, _ := h.engine().MeetingRead(meetingRec)
+		m, _, _ := recW(h.engine()).MeetingRead(meetingRec)
 		return m.Transcription.UsageSeconds == 42
 	})
 	if len(p.texts()) != 1 {

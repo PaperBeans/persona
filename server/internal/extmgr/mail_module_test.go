@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/mailport"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/mailwire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 
 	// The built-in modules, as the manager links them: the mail module provides itself to mailport.
 	_ "github.com/nwverse/persona/server/internal/modules/all"
@@ -22,7 +23,7 @@ import (
 // persona_core_only).
 func needsMailModule(t *testing.T) mailwire.Factory {
 	t.Helper()
-	f := mailport.Factory()
+	f := mailport.Factory(moduleswitch.Set{})
 	if f == nil {
 		t.Skip("this build has no mail module (persona_without_mail or persona_core_only)")
 	}

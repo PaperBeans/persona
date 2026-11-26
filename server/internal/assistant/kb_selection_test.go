@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/nwverse/persona/server/internal/assistant/kbhistory"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -165,6 +164,7 @@ func TestKBSelectionUnreadableKeepsEverything(t *testing.T) {
 // The candidates are the source's chats with ids, names, kinds and flags, each with its per-item setting and what
 // the selection reads of it. A renamed chat keeps its setting by id, and the setting takes the new name.
 func TestKBSelectionCandidates(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	chats := []connectorwire.HistoryChat{{ID: "d1", Name: "Direct One", Kind: "dm", Estimate: 10},
 		{ID: "g1", Name: "Group One", Kind: "group", Muted: true, Estimate: 900},
 		{ID: "p1", Name: "Posts", Kind: "group", Source: "posts", Collapsed: true}}
@@ -219,14 +219,10 @@ func TestKBSelectionCandidates(t *testing.T) {
 
 // While the import is stopped, the candidates come from the plan's list without asking the source.
 func TestKBSelectionCandidatesWhileStopped(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	s, fh, data := historyToolService(t, nil, []connectorwire.HistoryChat{{ID: "d1", Name: "Direct One", Kind: "dm"}})
-	p := &kbhistory.Plan{Source: "chat", Chats: []kbhistory.PlanChat{{ID: "d1", Name: "Direct One", Kind: "dm"}}}
-	if err := kbhistory.SavePlan(data, p); err != nil {
-		t.Fatal(err)
-	}
-	if err := kbhistory.WriteStop(data, kbhistory.Stop{By: "tool"}); err != nil {
-		t.Fatal(err)
-	}
+	saveHistoryPlan(t, data, historyPlanFile{Source: "chat", Chats: []historyPlanChat{{ID: "d1", Name: "Direct One", Kind: "dm"}}})
+	writeHistoryStop(t, data, historyStopFile{By: "tool"})
 	w := selectionCall(t, s, "GET", "/api/v1/kb/selection/candidates?source=chat", "", roleFull)
 	var out kbSelectionCandidates
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 || !out.Cached || len(out.Chats) != 1 {

@@ -1,0 +1,80 @@
+{
+  "string": [
+    {
+      "name": "background_activity",
+      "value": "Background activity"
+    },
+    {
+      "name": "activity_empty",
+      "value": "No background activity"
+    },
+    {
+      "name": "activity_empty_detail",
+      "value": "Completed quiet rounds stay here for you to inspect."
+    },
+    {
+      "name": "activity_record",
+      "value": "Handled in the background"
+    },
+    {
+      "name": "activity_answered",
+      "value": "Answered"
+    },
+    {
+      "name": "activity_task",
+      "value": "Task"
+    },
+    {
+      "name": "activity_expand",
+      "value": "Show details"
+    },
+    {
+      "name": "activity_handoff_active",
+      "value": "Already Active"
+    },
+    {
+      "name": "activity_handoff_resumed",
+      "value": "Resumed"
+    },
+    {
+      "name": "activity_handoff_continuation",
+      "value": "Continuation"
+    },
+    {
+      "name": "activity_handoff_new",
+      "value": "New"
+    },
+    {
+      "name": "activity_me",
+      "value": "Me"
+    },
+    {
+      "name": "activity_input",
+      "value": "Supervision input"
+    },
+    {
+      "name": "activity_no_motion",
+      "value": "No activity yet"
+    },
+    {
+      "name": "activity_starting_agent",
+      "value": "Starting the agent"
+    },
+    {
+      "name": "activity_task_gone",
+      "value": "This task no longer exists"
+    },
+    {
+      "name": "activity_closed",
+      "value": "Closed before an Agent started"
+    },
+    {
+      "name": "activity_starting",
+      "value": "Starting"
+    },
+    {
+      "name": "activity_start_failed",
+      "value": "Couldn’t start the Agent"
+    }
+  ]
+}

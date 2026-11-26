@@ -19,7 +19,7 @@ func TestAgentsProviderORCapabilityAdvertisement(t *testing.T) {
 	if !slices.Contains(h.features(), capability) || slices.Contains(proto.Features, capability) {
 		t.Fatalf("personal-Agent provider OR needs a dedicated hub capability, not a node capability: %v", h.features())
 	}
-	if hello, _ := h.hello()["features"].([]string); !slices.Contains(hello, capability) {
+	if hello := h.hello().Features; !slices.Contains(hello, capability) {
 		t.Fatalf("hello does not advertise %q: %v", capability, hello)
 	}
 	for _, from := range []source{sourceLoopback, sourceLAN} {

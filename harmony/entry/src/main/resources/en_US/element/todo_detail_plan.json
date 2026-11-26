@@ -1,0 +1,84 @@
+{
+  "string": [
+    {
+      "name": "todo_detail_title",
+      "value": "To-do title"
+    },
+    {
+      "name": "todo_detail_due",
+      "value": "Due Date"
+    },
+    {
+      "name": "todo_detail_all_day",
+      "value": "All Day"
+    },
+    {
+      "name": "todo_detail_due_value",
+      "value": "Due"
+    },
+    {
+      "name": "todo_detail_remind",
+      "value": "Remind Me"
+    },
+    {
+      "name": "todo_detail_remind_at",
+      "value": "Remind At"
+    },
+    {
+      "name": "todo_detail_priority",
+      "value": "Priority"
+    },
+    {
+      "name": "todo_detail_high",
+      "value": "High"
+    },
+    {
+      "name": "todo_detail_normal",
+      "value": "Normal"
+    },
+    {
+      "name": "todo_detail_low",
+      "value": "Low"
+    },
+    {
+      "name": "todo_detail_project",
+      "value": "Project"
+    },
+    {
+      "name": "todo_detail_none",
+      "value": "None"
+    },
+    {
+      "name": "todo_detail_agents",
+      "value": "{n} agents"
+    },
+    {
+      "name": "todo_detail_created",
+      "value": "Created {text}"
+    },
+    {
+      "name": "todo_detail_reminded",
+      "value": "Reminded {text}"
+    },
+    {
+      "name": "todo_detail_notes",
+      "value": "Notes"
+    },
+    {
+      "name": "todo_detail_unsupported",
+      "value": "This Hub did not save this field."
+    },
+    {
+      "name": "todo_detail_hand_to_agent",
+      "value": "Hand to Agent"
+    },
+    {
+      "name": "todo_detail_done",
+      "value": "Done"
+    },
+    {
+      "name": "todo_detail_empty_notes",
+      "value": "No notes yet"
+    }
+  ]
+}

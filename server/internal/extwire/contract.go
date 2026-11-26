@@ -22,8 +22,11 @@ const (
 	// ScopeBrowserRun lets an extension list browser-enabled computers (browser.machines) and run scripts inside an
 	// extension-isolated task space (browser.run) via a pluggable BrowserBackend (e.g. ego lite, future CDP). Granted
 	// by name only (#12866).
-	ScopeBrowserRun   = "browser.run"
-	ScopeNotify       = "notify"
+	ScopeBrowserRun = "browser.run"
+	ScopeNotify     = "notify"
+	// ScopePushGrading lets an extension manage its own push grading layer and preview grading decisions.
+	// It is granted by name only and does not include reading held pushes or changing the owner's base settings.
+	ScopePushGrading  = "push.grading"
 	ScopeAssistantAsk = "assistant.ask"
 	ScopeTodosRead    = "todos.read"
 	ScopeTodosWrite   = "todos.write"
@@ -64,6 +67,14 @@ const (
 	// ScopeMarketRefreshOwn: asking for a background read of only the marketplace the calling extension was installed
 	// from. It is never inherited through an all-scope token; the manifest must name it and the owner must approve it.
 	ScopeMarketRefreshOwn = "market.refresh_own"
+	// ScopeAssistantEvents: telling the assistant's existing main conversation about something the extension observed
+	// (assistant.event). It starts, restarts and replaces nothing, and reads nothing back: assistant.ask and
+	// assistant.read do not include it.
+	ScopeAssistantEvents = "assistant.events"
+	// ScopeLarkMessagesRead: receiving event.lark.messages metadata notifications when Lark user sync commits new
+	// messages to the outbox (binding, chat_id, message_id, sender_open_id, at, type; no message body). Granted by
+	// name only, not covered by the legacy full-hub grant.
+	ScopeLarkMessagesRead = "lark.messages.read"
 	// ScopeCallPrefix and an extension's id: calling that extension's own HTTP (/api/v1/extensions/<id>/…).
 	ScopeCallPrefix = "extensions.call:"
 )

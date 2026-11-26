@@ -219,6 +219,104 @@ func TestBotSendUnknownRetryRestartAndPayloadConflict(t *testing.T) {
 	}
 }
 
+func TestBotSendConflictAfterOutboxEvictionPreservesOriginal(t *testing.T) {
+	FollowUps = nil
+	kv := &memKV{m: map[string][]byte{}}
+	caller := &fakeBotCaller{pages: map[string]BotPage{testBotRegistration.SessionID: testBotPage()}}
+	registry := NewBotRegistry(kv, caller)
+	original, err := registry.Source(testBotRegistration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(kv, nil, nil, original)
+	ctx := context.Background()
+	sessionID := "bot_research:endpoint"
+	clientID := NewClientID()
+	const originalText = "original assignment"
+	sent, err := svc.Send(ctx, sessionID, clientID, originalText, "test")
+	if err != nil || sent.Entry.Status != OutSent {
+		t.Fatalf("original send %+v %v", sent, err)
+	}
+
+	// Fill the real bounded outbox with newer rows to evict only the audit row; the bot operation book must retain the ID.
+	for i := 0; i < outboxMax; i++ {
+		entry := OutboxEntry{ClientID: fmt.Sprintf("eviction-%03d", i), SessionID: sessionID, Status: OutSent,
+			CreatedAt: sent.Entry.CreatedAt.Add(time.Duration(i+1) * time.Nanosecond)}
+		if err := svc.out.put(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := svc.out.get(ctx, clientID); ok {
+		t.Fatal("original outbox row was not evicted")
+	}
+	var book map[string]botOperation
+	if ok, err := kv.Setting(ctx, botOperationsKey, &book); !ok || err != nil {
+		t.Fatalf("operation book missing: %v %v", ok, err)
+	}
+	originalOperation, ok := book[clientID]
+	if !ok || originalOperation.EndpointID != testBotRegistration.ID || originalOperation.MachineID != testBotRegistration.MachineID ||
+		originalOperation.SessionID != testBotRegistration.SessionID || originalOperation.TextSHA256 != textSHA256(originalText) {
+		t.Fatalf("original client-ID binding was not retained: %+v", originalOperation)
+	}
+	before := map[string]string{outboxKey: string(kv.m[outboxKey]), botOperationsKey: string(kv.m[botOperationsKey])}
+	sendsBefore := caller.count("agentbot.send")
+	assertRejectedWithoutMutation := func(label string, err error) {
+		t.Helper()
+		if HTTPStatus(err) != http.StatusConflict {
+			t.Errorf("%s: got status %d, want 409 (%v)", label, HTTPStatus(err), err)
+		}
+		if got := caller.count("agentbot.send"); got != sendsBefore {
+			t.Errorf("%s reached transport: sends=%d, want %d", label, got, sendsBefore)
+		}
+		for _, key := range []string{outboxKey, botOperationsKey} {
+			if got := string(kv.m[key]); got != before[key] {
+				t.Errorf("%s mutated %s", label, key)
+			}
+		}
+	}
+
+	_, err = svc.Send(ctx, sessionID, clientID, "changed assignment", "test")
+	assertRejectedWithoutMutation("changed payload", err)
+
+	reboundRegistration := testBotRegistration
+	reboundRegistration.MachineID = "machine-rebound"
+	reboundRegistration.SessionID = "claude_rebound"
+	caller.setPage(reboundRegistration.SessionID, testBotPage())
+	rebound, err := registry.Source(reboundRegistration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reboundSvc := NewService(kv, nil, nil, rebound)
+	_, err = reboundSvc.Send(ctx, sessionID, clientID, originalText, "test")
+	assertRejectedWithoutMutation("changed binding", err)
+
+	retried, err := svc.Send(ctx, sessionID, clientID, originalText, "test")
+	if err != nil || retried.Entry.Status != OutSent || (!retried.Duplicate && string(retried.Upstream) != `{"accepted":true}`) {
+		t.Errorf("original retry did not return its duplicate/accepted outcome: %+v %v", retried, err)
+	}
+	wantSends := sendsBefore + 1
+	if retried != nil && retried.Duplicate {
+		wantSends = sendsBefore
+	}
+	var transportCalls []botCallSeen
+	for _, call := range caller.calls {
+		if call.method == "agentbot.send" {
+			transportCalls = append(transportCalls, call)
+		}
+	}
+	if len(transportCalls) != wantSends {
+		t.Errorf("original retry transport sends=%d, want %d", len(transportCalls), wantSends)
+	} else if retried != nil && !retried.Duplicate {
+		last := transportCalls[len(transportCalls)-1]
+		if last.machine != originalOperation.MachineID || last.params["operation_id"] != originalOperation.OperationID || last.params["text"] != originalText {
+			t.Errorf("original retry escaped its operation binding: %+v", last)
+		}
+	}
+	if got := string(kv.m[botOperationsKey]); got != before[botOperationsKey] {
+		t.Error("original retry replaced the persistent operation")
+	}
+}
+
 func TestUnhealthyBotDoesNotDisableHealthyBot(t *testing.T) {
 	caller := &fakeBotCaller{pages: map[string]BotPage{testBotRegistration.SessionID: testBotPage()}}
 	good := newTestBot(t, nil, caller)

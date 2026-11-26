@@ -12,8 +12,8 @@ import { SegmentView } from "./SegmentView";
 
 vi.mock("../../ui/Markdown", () => ({ Markdown: ({ text }: { text: string }) => <div data-markdown>{text}</div> }));
 vi.mock("./MessageActions", () => ({ MessageActions: ({ children }: { children?: ReactNode }) => <>{children}</> }));
-vi.mock("./FileCards", () => ({ FileCards: () => null, ReplyFiles: () => null }));
-vi.mock("./PortChips", () => ({ ReplyPorts: () => null }));
+vi.mock("./LazyFileCards", () => ({ LazyFileCards: () => null, LazyReplyFiles: () => null }));
+vi.mock("./LazyTurnExtras", () => ({ LazyTurnImages: () => null, LazyReplyPorts: () => null, LazyTurnChanges: () => null }));
 vi.mock("../../lib/message-send", async (importOriginal) => ({ ...await importOriginal<typeof import("../../lib/message-send")>(), useMessageFeedback: () => "" }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -97,6 +97,23 @@ describe("deferred long-chat exchanges", () => {
     expect(observer.disconnected).toBe(true);
     await act(async () => draw(seg, offscreen));
     expect(host.querySelector("[data-markdown]")).not.toBeNull();
+  });
+
+  it("keeps a promoted relay's original out of its deferred placeholder", async () => {
+    const original = "Synthetic relay transport details\n".repeat(8).trim();
+    const seg = segment();
+    seg.user = { ...seg.user!, text: original, source: { kind: "conversation", title: "Synthetic source" }, promotedRelay: true };
+    await act(async () => draw(seg, offscreen));
+    expect(host.querySelector("[data-segment-placeholder]")?.textContent).not.toContain(original);
+
+    await act(async () => FakeIntersectionObserver.all[0]!.fire(true));
+    const source = host.querySelector('[data-message-source="conversation"]');
+    expect(source?.textContent).not.toContain(original);
+    const disclosure = source?.querySelector<HTMLButtonElement>("button[aria-expanded]");
+    expect(disclosure?.getAttribute("aria-expanded")).toBe("false");
+    expect(source?.querySelector("[data-markdown]")).toBeNull();
+    await act(async () => disclosure!.click());
+    expect(source?.querySelector("[data-markdown]")?.textContent).toContain("Synthetic relay transport details");
   });
 
   it("mounts the exact search target immediately and keeps it after reveal clears", async () => {

@@ -3,11 +3,10 @@ package recording
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // A failed question asked again before the failed attempt let go of its slot (it stored its failure, then waits for
@@ -17,9 +16,9 @@ func TestMeetingAskRetryKeepsItsSlot(t *testing.T) {
 	m := newMeetingFixture(t)
 	m.upload(meetingRec, 1, map[string]any{"attendance": "participant"})
 	e := m.engine()
-	if _, err := e.LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, failAsk(kb.LiveAsk{ID: askOne, QuestionSent: "Who owns the test?", Question: "Who owns the test?",
-			QuestionSource: askTyped, State: askPending, Sources: []kb.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second)}, askModelUnavailable))
+	if _, err := writersOf(e).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		l.Asks = append(l.Asks, failAsk(recordingwire.LiveAsk{ID: askOne, QuestionSent: "Who owns the test?", Question: "Who owns the test?",
+			QuestionSource: askTyped, State: askPending, Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second)}, askModelUnavailable))
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -64,8 +63,8 @@ func TestPlainAnswer(t *testing.T) {
 func TestViewAsk(t *testing.T) {
 	at, next := 3.5, 4
 	done := time.Date(2026, 11, 10, 7, 12, 9, 0, time.UTC)
-	raw, _ := json.Marshal(viewAsk(kb.LiveAsk{ID: askOne, QuestionSent: "q", QuestionSource: askTyped, At: &at, LiveNext: &next, State: askPending,
-		Answer: "leftover", Sources: []kb.AskSource{{Kind: "projects", ID: "x"}}, Error: "old", AnsweredAt: &done, Fed: true,
+	raw, _ := json.Marshal(viewAsk(recordingwire.LiveAsk{ID: askOne, QuestionSent: "q", QuestionSource: askTyped, At: &at, LiveNext: &next, State: askPending,
+		Answer: "leftover", Sources: []recordingwire.AskSource{{Kind: "projects", ID: "x"}}, Error: "old", AnsweredAt: &done, Fed: true,
 		AskedAt: time.Date(2026, 11, 10, 7, 12, 3, 0, time.UTC)}))
 	if string(raw) != `{"id":"`+askOne+`","question":"","question_source":"typed","at":3.5,"state":"pending","answer":"","lang":"","speak":false,`+
 		`"sources":[],"asked_at":"2026-11-10T07:12:03Z"}` {

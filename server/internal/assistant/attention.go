@@ -78,9 +78,6 @@ func (s *Service) attentionStored(ctx context.Context) assistantwire.Attention {
 	gen := c.gen
 	c.mu.Unlock()
 	a := assistantwire.Attention{Mode: assistantwire.AttentionNormal}
-	if s.store == nil {
-		return a
-	}
 	st := s.store()
 	if st == nil {
 		return a
@@ -210,7 +207,7 @@ func newAttention(set assistantwire.AttentionSet, by string, now time.Time, know
 // putAttention stores a, refreshes the cache, wakes attentionLoop to end it on time, and reports the new profile to
 // the hub.
 func (s *Service) putAttention(ctx context.Context, a assistantwire.Attention) error {
-	if s.store == nil || s.store() == nil {
+	if s.store() == nil {
 		return errAttentionStore
 	}
 	if err := s.store().PutSetting(ctx, attentionSettingsKey, a); err != nil {

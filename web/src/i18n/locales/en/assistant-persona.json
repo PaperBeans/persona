@@ -16,6 +16,7 @@
   "upload": "Upload",
   "upload_sub": "Use your own image",
   "upload_label": "Upload an image as an avatar",
+  "edit_label": "Edit {name}",
   "delete": "Delete",
   "delete_label": "Delete {name}",
   "delete_title": "Delete “{name}”?",

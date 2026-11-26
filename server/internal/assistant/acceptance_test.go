@@ -396,14 +396,10 @@ func TestAcceptanceReplyWithMedia(t *testing.T) {
 			card := askOf(s, id).MessageID
 			ev := dmReply("om_reply", "", card, card)
 			ev.Message.MessageType, ev.Message.Content = c.msgType, c.content
-			st, err := s.feishuStatus(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
 			f.mu.Lock()
 			before := len(f.agentSent)
 			f.mu.Unlock()
-			s.feishuMessage(ev, st, "")
+			feishuSay(t, s, f, nil, ev, "")
 			f.mu.Lock()
 			sent := f.agentSent[before:]
 			f.mu.Unlock()
@@ -419,7 +415,7 @@ func TestAcceptanceReplyWithMedia(t *testing.T) {
 
 // A reply "Pass" to a "Please verify" card whose round was already handled is answered, as its button is: the reply is
 // taken as an answer (it is not sent on to the Agent either), so one that gets nothing back reads as the bot ignoring
-// the owner while the same press on the card says "already handled" (feishu_card_actions.go).
+// the owner while the same press on the card says "already handled" (the lark module's card_actions.go).
 func TestAcceptancePassReplyWhenAlreadyHandled(t *testing.T) {
 	needsLarkLayer(t)
 	ctx := context.Background()
@@ -486,7 +482,7 @@ func TestAcceptanceReopenRound(t *testing.T) {
 			a.Context.MessageID = mid
 			return &a
 		}
-		s.botCardAction(ctx, press(old), "")
+		s.larkModule().Action(ctx, press(old), "")
 		if a := askOf(s, id); !a.AcceptedAt.IsZero() || onlyTodo(s).Stage == "verify" {
 			t.Fatalf("the first round's button verified the second round: %+v stage=%q", a, onlyTodo(s).Stage)
 		}
@@ -500,7 +496,7 @@ func TestAcceptanceReopenRound(t *testing.T) {
 			len(got) != 2 || !strings.Contains(got[0], "已经处理过了") || !strings.Contains(got[1], "已经处理过了") {
 			t.Fatalf("routed=%d notes=%q ask=%+v stage=%q", len(f.agentSent)-before, got, a, onlyTodo(s).Stage)
 		}
-		s.botCardAction(ctx, press("om_round2"), "")
+		s.larkModule().Action(ctx, press("om_round2"), "")
 		if askOf(s, id).AcceptedAt.IsZero() || onlyTodo(s).Stage != "verify" {
 			t.Fatal("the second round's own button did not accept it")
 		}

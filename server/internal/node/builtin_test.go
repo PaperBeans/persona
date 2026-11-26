@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/node/iphoneport"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -118,7 +119,7 @@ func TestBuiltinProgramsInInfoAndNeverAPackage(t *testing.T) {
 	}
 	// node.info lists iphone only with the phone-extra module (internal/node/iphoneport).
 	want := []string{"cua", "ego", "imessage"}
-	if iphoneport.Get() != nil {
+	if iphoneport.Get(moduleswitch.Set{}) != nil {
 		want = append(want, "iphone")
 	}
 	if got := builtinProgramsInfo(); !slices.Equal(got, want) {

@@ -108,8 +108,10 @@ openMacTodo
 openMachineClipboard
 openMachineDetail
 openMachineFiles
+openMachineMonitor
 openMachinePage
 openMachines
+openMachinesFootnote
 openMailLabel
 openMailThread
 openManagerPage
@@ -198,6 +200,7 @@ openTranslationSettings
 openTriageSettings
 openUploadDemo
 openUrgentCallSettings
+openUsageMap
 openViewedImage
 openVoice
 openWelcome
@@ -226,8 +229,13 @@ showAssistantSwitcher
 showAttachCamera
 showAutoScroll
 showAvatarCrop
+showAvatarCropColor
 showAvatarCropName
+showAvatarCropPage
 showAvatarDelete
+showAvatarDropTarget
+showAvatarEdit
+showAvatarStatePicture
 showBlankLanding
 showBrowserLoginSample
 showButtonContrast
@@ -292,6 +300,7 @@ showGitReload
 showHandOffNewAgent
 showHealthActivityExample
 showHealthHomeTrendsExample
+showHealthItemsEditor
 showHealthTrends
 showHerdrStart
 showHomeState
@@ -437,6 +446,7 @@ showSwiftUIJumps
 showSystemCallService
 showTaskBoard
 showTaskDetail
+showTellHealthResult
 showTerminalUpload
 showTerminalsUnlinked
 showTestNotification

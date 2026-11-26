@@ -13,6 +13,14 @@
 - 2026-10-30 10:00 · lark-f1 · 定了周五灰度
 - 2026-10-30 11:00 · lark-f2 · 提前到周四
 
+# 方向记忆（新的在前；来源记录）
+## 结果
+- [todo-demo/machine-demo/session-demo/3/1] 周四灰度已完成 https://example.com/pr/42 · 2026-10-30T03:00:00Z · agent_reported · 主管未验收
+## 仍有效的决定和原因（不同 ID 分别保留）
+- [todo-demo/machine-demo/session-demo/3/1/decision/1] 哪天灰度？ → 周四灰度；原因：周五有冻结；结果：周四灰度已完成；来源时间：2026-10-30T03:00:00Z · agent_reported · 主管未验收
+## 踩过的坑
+- 不要只看旧摘要 · 2026-10-30T03:00:00Z · agent_reported · 主管未验收
+
 # 相关会话
 
 ## lark-f1

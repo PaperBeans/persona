@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -11,17 +12,28 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
+// reloadDrainWindow bounds how long Prepare keeps headless admission closed after the handoff grace
+// while waiting for an active turn or compaction once RPCs have drained. reloadBlockLogEvery
+// rate-limits repeated reminder logs while waiting on long-running assistants. Vars so tests change them.
+var (
+	reloadDrainWindow   = 30 * time.Second
+	reloadBlockLogEvery = 5 * time.Minute
+)
+
 // ResidentReload drains work while Attach is still serving. Only the final exec closes existing connections;
 // idle conversations that need the SIGKILL fallback are reaped before that transport gap begins.
 type ResidentReload struct {
-	mu             sync.Mutex
-	active         int
-	paused         bool
-	headlessPaused bool
-	grace          time.Duration
-	graceSet       bool
-	idle           chan struct{}
-	peers          map[*rpc.Peer]func()
+	mu                    sync.Mutex
+	active                int
+	paused                bool
+	headlessPaused        bool // controlled by manager sessions.list update_handoff (SetHeadlessPaused)
+	prepareHeadlessPaused bool // controlled by Prepare during bounded handoff drain
+	preparing             bool // true while Prepare is actively waiting to reload
+	grace                 time.Duration
+	graceSet              bool
+	idle                  chan struct{}
+	peers                 map[*rpc.Peer]func()
+	logger                *log.Logger
 }
 
 func (r *ResidentReload) enter() (func(), error) {
@@ -53,10 +65,41 @@ func (r *ResidentReload) enterHeadless() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.paused || r.headlessPaused {
+	if r.paused || r.headlessPaused || r.prepareHeadlessPaused {
 		return &rpc.Error{Code: nodeproto.CodeRestarting, Message: nodeproto.CodeRestarting}
 	}
 	return nil
+}
+
+// SetLogger routes reload wait diagnostics to logger instead of the process default logger.
+func (r *ResidentReload) SetLogger(logger *log.Logger) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.logger = logger
+	r.mu.Unlock()
+}
+
+func (r *ResidentReload) logf(format string, args ...any) {
+	r.mu.Lock()
+	logger := r.logger
+	r.mu.Unlock()
+	if logger != nil {
+		logger.Printf(format, args...)
+	} else {
+		log.Printf(format, args...)
+	}
+}
+
+// Preparing reports whether Prepare is currently waiting to drain and restart the resident node.
+func (r *ResidentReload) Preparing() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.preparing
 }
 
 // SetHeadlessPaused controls only new external assistant turns. Other RPCs and recovery of an admitted turn continue.
@@ -100,16 +143,25 @@ func (n *Node) SetResidentReload(r *ResidentReload) { n.reload = r }
 func (r *ResidentReload) Resume() {
 	r.mu.Lock()
 	r.paused = false
+	r.prepareHeadlessPaused = false
 	r.mu.Unlock()
 }
 
 // Prepare never stops an answering conversation or an admitted RPC. Natural idle pauses admission immediately;
-// after the grace it stays paused while admitted replies and current turns finish. New requests get an explicit
-// not-started code. A pre-transfer headless pause stays in force until the manager clears it.
+// after the grace it drains admitted RPCs and holds only headless admission for a bounded window so short
+// continuous turns finish without locking out read-only RPCs, session.stop/session.interrupt, or unrelated
+// conversations when a long-running background task or turn blocks reload. A pre-transfer headless pause
+// stays in force until the manager clears it.
 func (r *ResidentReload) Prepare(ctx context.Context) error {
 	r.mu.Lock()
 	grace, graceSet := r.grace, r.graceSet
+	r.preparing = true
 	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.preparing = false
+		r.mu.Unlock()
+	}()
 	if !graceSet {
 		grace = time.Duration(proto.DefaultNodeUpdateHandoffGraceSeconds) * time.Second
 	}
@@ -117,39 +169,143 @@ func (r *ResidentReload) Prepare(ctx context.Context) error {
 	if grace > 0 {
 		handoffDeadline = time.Now().Add(grace)
 	}
+	var (
+		drainDeadline time.Time
+		deferredIDs   map[string]struct{}
+		lastAction    string
+		lastLogAt     time.Time
+	)
+	logBlocking := func(action string, busy []busyAssistant) {
+		now := time.Now()
+		if action == lastAction && !lastLogAt.IsZero() && now.Sub(lastLogAt) < reloadBlockLogEvery {
+			return
+		}
+		lastAction, lastLogAt = action, now
+		r.logf("resident reload: %s; waiting for busy assistant(s): %s", action, formatBusyAssistants(busy))
+	}
 	for {
 		if err := ctx.Err(); err != nil {
+			r.Resume()
 			return err
 		}
-		expired := !handoffDeadline.IsZero() && !time.Now().Before(handoffDeadline)
-		r.mu.Lock()
-		idle, ready := r.idle, r.active == 0
-		if ready || expired {
-			r.paused = true
-		}
-		if expired {
-			r.headlessPaused = true
-		}
-		r.mu.Unlock()
-		if ready {
-			if !AssistantsBusy() {
-				break
+		busy := busyAssistants()
+		if len(busy) == 0 {
+			// Any previously deferred long-running work has now cleared; reset deferred state
+			// so a subsequent turn starting during active-RPC draining cannot inherit it.
+			deferredIDs = nil
+			drainDeadline = time.Time{}
+			now := time.Now()
+			expired := !handoffDeadline.IsZero() && !now.Before(handoffDeadline)
+			r.mu.Lock()
+			idle, ready := r.idle, r.active == 0
+			if ready || expired {
+				r.paused = true
 			}
-			if !expired {
+			if expired {
+				r.prepareHeadlessPaused = true
+			}
+			r.mu.Unlock()
+			if ready {
+				if len(busyAssistants()) == 0 {
+					break
+				}
 				r.Resume()
+				continue
 			}
-		}
-		delay := 200 * time.Millisecond
-		if !expired && !handoffDeadline.IsZero() {
-			delay = min(delay, time.Until(handoffDeadline))
-		}
-		timer := time.NewTimer(delay)
-		if !ready {
+			delay := 200 * time.Millisecond
+			if !expired && !handoffDeadline.IsZero() {
+				delay = min(delay, max(time.Until(handoffDeadline), 0))
+			}
+			timer := time.NewTimer(delay)
 			select {
 			case <-idle:
 			case <-timer.C:
 			case <-ctx.Done():
 				timer.Stop()
+				r.Resume()
+				return ctx.Err()
+			}
+			timer.Stop()
+			continue
+		}
+
+		now := time.Now()
+		hasTasks := hasBusyBackgroundTasks(busy)
+		// Once every conversation that caused us to defer has cleared, re-arm the handoff grace
+		// so a new stream of continuous turns cannot starve the pending reload.
+		if len(deferredIDs) > 0 && !anyIDBusy(busy, deferredIDs) {
+			deferredIDs = nil
+			drainDeadline = time.Time{}
+			if grace > 0 {
+				handoffDeadline = now.Add(grace)
+			}
+		}
+		expired := !handoffDeadline.IsZero() && !now.Before(handoffDeadline)
+
+		var (
+			idle  chan struct{}
+			ready bool
+		)
+		if !expired {
+			r.mu.Lock()
+			r.paused = false
+			r.prepareHeadlessPaused = false
+			r.mu.Unlock()
+		} else if hasTasks {
+			// Background tasks can run for tens of minutes or wait on this node's own RPCs; never wedge
+			// RPC or headless admission while waiting for them to exit.
+			r.mu.Lock()
+			r.paused = false
+			r.prepareHeadlessPaused = false
+			r.mu.Unlock()
+			drainDeadline = time.Time{}
+			logBlocking("keeping RPCs open while background task(s) finish", busy)
+		} else if len(deferredIDs) > 0 {
+			r.mu.Lock()
+			r.paused = false
+			r.prepareHeadlessPaused = false
+			r.mu.Unlock()
+			logBlocking("bounded drain window elapsed; resumed headless admission", busy)
+		} else {
+			r.mu.Lock()
+			idle, ready = r.idle, r.active == 0
+			if !ready && drainDeadline.IsZero() {
+				r.paused = true
+				r.prepareHeadlessPaused = true
+			} else {
+				r.paused = false
+				if drainDeadline.IsZero() {
+					drainDeadline = now.Add(reloadDrainWindow)
+				}
+				if !now.Before(drainDeadline) {
+					r.prepareHeadlessPaused = false
+					deferredIDs = busyIDSet(busy)
+				} else {
+					r.prepareHeadlessPaused = true
+				}
+			}
+			r.mu.Unlock()
+			if len(deferredIDs) > 0 {
+				logBlocking("bounded drain window elapsed; resumed headless admission", busy)
+			} else {
+				logBlocking("draining busy assistant work before restart", busy)
+			}
+		}
+
+		delay := 200 * time.Millisecond
+		if !expired && !handoffDeadline.IsZero() {
+			delay = min(delay, max(time.Until(handoffDeadline), 0))
+		} else if !drainDeadline.IsZero() && len(deferredIDs) == 0 {
+			delay = min(delay, max(time.Until(drainDeadline), 0))
+		}
+		timer := time.NewTimer(delay)
+		if expired && !hasTasks && len(deferredIDs) == 0 && !ready && drainDeadline.IsZero() && idle != nil {
+			select {
+			case <-idle:
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				r.Resume()
 				return ctx.Err()
 			}
 		} else {
@@ -157,6 +313,7 @@ func (r *ResidentReload) Prepare(ctx context.Context) error {
 			case <-timer.C:
 			case <-ctx.Done():
 				timer.Stop()
+				r.Resume()
 				return ctx.Err()
 			}
 		}
@@ -168,7 +325,11 @@ func (r *ResidentReload) Prepare(ctx context.Context) error {
 		return true
 	})
 	stopAndWait(procs)
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		r.Resume()
+		return err
+	}
+	return nil
 }
 
 func (r *ResidentReload) Announce(ctx context.Context) error {

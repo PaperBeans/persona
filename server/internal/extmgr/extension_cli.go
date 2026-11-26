@@ -55,14 +55,19 @@ const extensionUsage = `usage: personad extension <command> (also: personad ext,
   uninstall <id> [--keep-data] [--cascade] [--members]
                                     --members: a pack's members go with it
   market list                       the extension markets this hub reads
-  market add <spec> [--token]       a market: https://example.com/extensions/ (its persona-extensions.json),
+  market add <spec> [--token] [--key=ed25519:…]
+                                    a market: https://example.com/extensions/ (its persona-extensions.json),
                                     a .json URL, github:owner/repo[@ref] or
                                     git:<address>[#branch]; --token reads one from stdin, --token-from=<market id>
-                                    uses that registered market's token (never shown)
+                                    uses that registered market's token (never shown); --key (repeatable) is a public
+                                    key its index must be signed with (a private market, see sign-index)
   market set-spec <id> <spec>       the market moved (a renamed repository): same id, so what was installed from it
                                     stays its own
   market remove <id> | refresh <id>
   market token <id> [--clear]       set the market's token (read from stdin) and read it again; --clear removes it
+  market key list <id>              a private market's trusted public keys
+  market key add <id> <ed25519:…>   trust one more key (rotation: add the new one, re-sign, then remove the old one)
+  market key remove <id> <key id>   stop trusting a key; with none left the market is unsigned again
   search [words]                    the markets' extensions
   install market:<market>/<id>      install (or upgrade) one of a market's extensions
   auto-upgrade on|off [<id>]        market extensions upgrade themselves (all of them, or one)
@@ -78,6 +83,8 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 	switch args[0] {
 	case "new", "test", "pack":
 		return extensionBuildCommand(ctx, args, stdout, stderr)
+	case "keygen", "sign-index":
+		return marketSignCommand(args, stdout)
 	case "help", "-h", "--help":
 		fmt.Fprintln(stdout, clitext.Named(extensionUsage+extensionBuildUsage))
 		return nil
@@ -218,13 +225,25 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 				}
 				body["token"] = tok
 			}
+			var keys []string
 			for _, a := range args[1:] {
 				if from, ok := strings.CutPrefix(a, "--token-from="); ok {
 					body["token_from"] = from
 				}
+				if key, ok := strings.CutPrefix(a, "--key="); ok {
+					keys = append(keys, key)
+				}
 			}
 			var m MarketView
-			if err := c.do(ctx, "POST", "/api/v1/extensions/-/markets", body, &m); err != nil {
+			var in any = body
+			if len(keys) > 0 {
+				withKeys := map[string]any{"keys": keys}
+				for k, v := range body {
+					withKeys[k] = v
+				}
+				in = withKeys
+			}
+			if err := c.do(ctx, "POST", "/api/v1/extensions/-/markets", in, &m); err != nil {
 				return err
 			}
 			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.market", i18n.Args{"id": m.ID, "name": m.Name, "count": m.Extensions}))
@@ -264,6 +283,8 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			}
 			fmt.Fprintln(stdout, line)
 			return nil
+		case "key":
+			return marketKeyCommand(ctx, c, l, positional[1:], stdout)
 		case "remove", "refresh":
 			if positional[0] == "remove" {
 				return c.do(ctx, "DELETE", "/api/v1/extensions/-/markets/"+url.PathEscape(positional[1]), nil, nil)
@@ -477,7 +498,9 @@ type extensionArgs struct {
 	min, max  int      // positional arguments (a market command's include its own word); max -1: any number
 	options   []string // exact words; one ending in "=" takes a value after it (--token-from=<id>)
 	exclusive bool     // at most one of the options
-	usage     string   // printed with a mistake; extensionUsage when empty
+	// repeatable: options (ending in "=") that may be given several times and do not count for exclusive.
+	repeatable []string
+	usage      string // printed with a mistake; extensionUsage when empty
 }
 
 // extensionCommandArgs are the hub commands and their arguments; `audit` parses its own, and new / test / pack need
@@ -504,7 +527,8 @@ var extensionCommandArgs = map[string]extensionArgs{
 	"contributions":   {min: 1, max: 1, usage: extensionModelUsage},
 	"contribution":    {min: 3, max: 3, usage: extensionModelUsage},
 	"market list":     {min: 1, max: 1},
-	"market add":      {min: 2, max: 2, options: []string{"--token", "--token-from="}, exclusive: true},
+	"market add":      {min: 2, max: 2, options: []string{"--token", "--token-from="}, exclusive: true, repeatable: []string{"--key="}},
+	"market key":      {min: 3, max: 4},
 	"market set-spec": {min: 3, max: 3},
 	"market remove":   {min: 2, max: 2},
 	"market refresh":  {min: 2, max: 2},
@@ -546,15 +570,20 @@ func checkExtensionArgs(args []string) error {
 	mistake := func(format string, a ...any) error {
 		return fmt.Errorf("%s: %s\n%s", clitext.Named("personad extension "+name), fmt.Sprintf(format, a...), usage)
 	}
+	var single []string // the options exclusive is about
 	for _, o := range options {
 		known := func(want string) bool { return o == want || strings.HasSuffix(want, "=") && strings.HasPrefix(o, want) }
 		switch {
-		case strings.HasSuffix(o, "=") && slices.Contains(spec.options, o): // --token-from= with nothing after it
+		case strings.HasSuffix(o, "=") && (slices.Contains(spec.options, o) || slices.Contains(spec.repeatable, o)): // --token-from= with nothing after it
 			return mistake("%s needs a value", o)
+		case slices.ContainsFunc(spec.repeatable, known):
+			continue
 		case !slices.ContainsFunc(spec.options, known):
 			return mistake("unknown option %q", o)
-		case spec.exclusive && o != options[0]:
-			return mistake("%q and %q do not go together", options[0], o)
+		}
+		single = append(single, o)
+		if spec.exclusive && o != single[0] {
+			return mistake("%q and %q do not go together", single[0], o)
 		}
 	}
 	if len(positional) < spec.min {

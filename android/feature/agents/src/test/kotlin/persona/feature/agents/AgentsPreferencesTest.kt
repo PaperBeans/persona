@@ -187,4 +187,64 @@ class AgentsPreferencesTest {
         store.data.value = preferencesOf(stringPreferencesKey("row-style") to "removed-value")
         assertEquals(AgentListDisplay.Avatar, shown())
     }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun herdrTabNameSettingSyncsCachesPerHubAndUpdatesOnlyAfterHubAcknowledges() = runTest {
+        val values = MutableStateFlow<Preferences>(emptyPreferences())
+        val store = object : DataStore<Preferences> {
+            override val data = values
+            override suspend fun updateData(transform: suspend (Preferences) -> Preferences) =
+                transform(values.value).also { values.value = it }
+        }
+        val hubPrefs = object : HubPreferences {
+            override val preferences = MutableStateFlow(HubPreferencesSnapshot())
+            override suspend fun refresh() = Unit
+            override suspend fun togglePin(path: String, space: Boolean) = Unit
+            override suspend fun toggleMute(path: String, space: Boolean) = Unit
+            override suspend fun markSeen(session: SessionKey, version: String) = Unit
+        }
+        class Api(var setting: AgentsDisplaySettings) : AgentDisplayApi {
+            var writeFails = false
+            override suspend fun read() = setting
+            override suspend fun migrateHidden() = setting
+            override suspend fun setUseHerdrTabName(enabled: Boolean): AgentsDisplaySettings {
+                if (writeFails) error("Hub offline")
+                setting = setting.copy(useHerdrTabName = enabled)
+                return setting
+            }
+        }
+        val socket = MutableStateFlow<SocketHello?>(SocketHello(1, Hello(protocol = 1, serverVersion = "fixture")))
+        val primary = Api(AgentsDisplaySettings(showBotmux = true, configured = true, useHerdrTabName = true))
+        val secondary = Api(AgentsDisplaySettings(showBotmux = true, configured = true, useHerdrTabName = false))
+        val legacy = Api(AgentsDisplaySettings(showBotmux = true, configured = true, useHerdrTabName = null))
+        val pairs = MutableStateFlow(listOf(
+            AgentsDisplayHub("scope-a", null, selected = true, socket, primary),
+            AgentsDisplayHub("scope-b", "g11111111", selected = false, socket, secondary),
+        ))
+        val reload = MutableStateFlow(0)
+        val prefs = AgentsPreferences(store, hubPrefs, AgentsDisplayHubs { pairs })
+        backgroundScope.launch { prefs.watchDisplaySettings(reload) }
+        runCurrent()
+
+        assertEquals(setOf<String?>(null), prefs.snapshots.first().herdrTabNameHubs)
+        assertEquals(true, prefs.useHerdrTabName.first())
+
+        // Failed writes keep the last acknowledged hub value.
+        primary.writeFails = true
+        val _ = runCatching { prefs.setUseHerdrTabName(false) }
+        assertEquals(true, prefs.useHerdrTabName.first())
+        assertEquals(setOf<String?>(null), prefs.snapshots.first().herdrTabNameHubs)
+
+        // Confirmed writes update both the setting flow and the per-hub namespace set.
+        primary.writeFails = false
+        prefs.setUseHerdrTabName(false)
+        assertEquals(false, prefs.useHerdrTabName.first())
+        assertEquals(emptySet<String?>(), prefs.snapshots.first().herdrTabNameHubs)
+
+        // Older hubs that omit use_herdr_tab_name stay null (switch hidden) and off.
+        pairs.value = listOf(AgentsDisplayHub("scope-old", null, selected = true, socket, legacy))
+        runCurrent()
+        assertEquals(null, prefs.useHerdrTabName.first())
+        assertEquals(emptySet<String?>(), prefs.snapshots.first().herdrTabNameHubs)
+    }
 }

@@ -6,10 +6,17 @@
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { stateDir } from '../../runtime-sdk/lib/identity.js'
 import { parseRef } from './secrets.js'
 
-export const DEFAULT_CONFIG = join(homedir(), '.persona', 'managed-agents.json')
 export const RUNTIME_ID = 'managed-agents'
+export const RUNTIME_NAME = 'Managed Agents'
+
+export function defaultConfigPath(home = homedir(), env = process.env) {
+  return join(stateDir(home, env), 'managed-agents.json')
+}
+
+export const DEFAULT_CONFIG = defaultConfigPath()
 
 // What each API family needs besides the key. `ark` is Volcengine Ark's Managed Agents, `claude` the API it follows
 // (Claude Managed Agents); a self-hosted server speaks one of the two.
@@ -38,12 +45,12 @@ const SECRET_HEADER = /^(authorization|x-api-key|api-key|proxy-authorization|coo
 export class ConfigError extends Error {}
 
 /** Reads and checks the file; an absent file is no profiles (the companion waits and rereads). */
-export async function loadConfig(path = DEFAULT_CONFIG, { log = () => {} } = {}) {
+export async function loadConfig(path = defaultConfigPath(), { log = () => {} } = {}) {
   let text
   try {
     text = await readFile(path, 'utf8')
   } catch (err) {
-    if (err.code === 'ENOENT') return { profiles: [], problems: [`no config at ${path}`] }
+    if (err.code === 'ENOENT') return { runtime: RUNTIME_ID, name: RUNTIME_NAME, profiles: [], problems: [`no config at ${path}`] }
     throw new ConfigError(`cannot read ${path}: ${err.code ?? err.message}`)
   }
   try {
@@ -77,7 +84,7 @@ export function parseConfig(raw) {
   }
   return {
     runtime: typeof raw.runtime === 'string' && /^[a-z0-9][a-z0-9_.-]{0,31}$/.test(raw.runtime) ? raw.runtime : RUNTIME_ID,
-    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 40) : 'Managed Agents',
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 40) : RUNTIME_NAME,
     profiles,
     problems,
   }

@@ -5,7 +5,7 @@ import Foundation
 /// it overlaps a stretch Persona spoke in (`RecordingSpan`, widened by `margin`) and its words are what Persona said there
 /// (`containment` of its character bigrams), so whatever someone else says meanwhile stays the meeting's. Echo lines stay
 /// on the recording, marked; they are left out of what is built from the meeting. The hub's copy of the rule is
-/// `server/internal/kb/echo.go`; both run the cases in spec/fixtures/meeting-echo.
+/// `server/internal/modules/recording/writers/echo.go`; both run the cases in spec/fixtures/meeting-echo.
 nonisolated enum MeetingEcho {
     /// Seconds a stretch is widened by on both sides: the recognizer's times are a little off. A starting value, to
     /// calibrate against labelled recordings.

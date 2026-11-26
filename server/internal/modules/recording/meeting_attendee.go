@@ -2,10 +2,10 @@ package recording
 
 import (
 	"context"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"slices"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -31,7 +31,7 @@ var attendeeNeverOrigins = []string{"lark_agent", "channel", "extension", "inbox
 // attendeeTarget is the session a batch goes to: ref by its real ids (the main chat's too), persona when it is one of
 // the assistant's conversations (assistant.send resumes one that stopped) rather than an Agent (session.send).
 type attendeeTarget struct {
-	ref     kb.SessionRef
+	ref     recordingwire.SessionRef
 	persona bool
 }
 
@@ -86,31 +86,31 @@ func attendeeVerdict(sess proto.Session, f attendeeFacts) string {
 
 // attendeeRef is the session recording r is attended by: the one its upload names, else the main chat as it is now;
 // false when there is none (no main chat).
-func (s *Recordings) attendeeRef(ctx context.Context, r kb.Recording) (kb.SessionRef, bool) {
+func (s *Recordings) attendeeRef(ctx context.Context, r recordingwire.Recording) (recordingwire.SessionRef, bool) {
 	if a := r.AttendingSession; a != nil && a.MachineID != "" && a.SessionID != "" {
 		return *a, true
 	}
 	cfg := s.settings(ctx)
 	if cfg.Main == "" || cfg.MachineID == "" {
-		return kb.SessionRef{}, false
+		return recordingwire.SessionRef{}, false
 	}
-	return kb.SessionRef{MachineID: cfg.MachineID, SessionID: cfg.Main}, true
+	return recordingwire.SessionRef{MachineID: cfg.MachineID, SessionID: cfg.Main}, true
 }
 
 // attendeeCheck checks ref for a batch now: the target, and attendeeVerdict's word.
-func (s *Recordings) attendeeCheck(ctx context.Context, ref kb.SessionRef, now time.Time) (attendeeTarget, string) {
+func (s *Recordings) attendeeCheck(ctx context.Context, ref recordingwire.SessionRef, now time.Time) (attendeeTarget, string) {
 	return s.attendeeCheckFor(ctx, ref, now, "")
 }
 
 // attendeeCheckFor is attendeeCheck for recording's meeting: its own room is exempt from "Sessions that never
 // attend", which refuses every guest conversation; any other meeting's room is refused all the same.
-func (s *Recordings) attendeeCheckFor(ctx context.Context, ref kb.SessionRef, now time.Time, recording string) (attendeeTarget, string) {
+func (s *Recordings) attendeeCheckFor(ctx context.Context, ref recordingwire.SessionRef, now time.Time, recording string) (attendeeTarget, string) {
 	return s.attendeeCheckRead(ctx, ref, now, recording, nil)
 }
 
 // attendeeCheckRead is attendeeCheckFor with the session's row as a look read it already (a lean room's, #8253), nil:
 // read now.
-func (s *Recordings) attendeeCheckRead(ctx context.Context, ref kb.SessionRef, now time.Time, recording string, rd *roomRead) (attendeeTarget, string) {
+func (s *Recordings) attendeeCheckRead(ctx context.Context, ref recordingwire.SessionRef, now time.Time, recording string, rd *roomRead) (attendeeTarget, string) {
 	ref.MachineID = s.canonical(ref.MachineID) // an id another one absorbed: that one
 	t := attendeeTarget{ref: ref}
 	var f attendeeFacts

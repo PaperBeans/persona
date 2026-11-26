@@ -145,16 +145,20 @@ nonisolated enum MentionRows {
         return rows.filter { name($0).lowercased().hasPrefix(f) } + rows.filter { !name($0).lowercased().hasPrefix(f) }
     }
 
-    /// The second line of a session's row: who answers there and its folder.
-    static func sessionDetail(_ s: Session) -> String {
-        [s.agentLabel, s.folderName].filter { !$0.isEmpty }.joined(separator: " · ")
+    /// The second line of a session's row: optional differing CLI title (when herdr tab name is promoted), who answers
+    /// there, and its folder.
+    static func sessionDetail(_ s: Session, preferHerdrTabName: Bool = false) -> String {
+        [s.displayTitleDetail(preferTab: preferHerdrTabName), s.agentLabel, s.folderName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
-    /// Other agents' sessions matching the query by title or by agent and folder, most recently active first.
+    /// Other agents' sessions matching the query by title, herdr tab name, or by agent and folder, most recently active first.
     static func sessions(_ all: [Session], except: SessionKey?, query: String, limit: Int = 8) -> [Session] {
         let q = query.lowercased()
         return all.filter { $0.key != except && !$0.assistant }
-            .filter { q.isEmpty || $0.displayTitle.lowercased().contains(q) || sessionDetail($0).lowercased().contains(q) }
+            .filter { q.isEmpty || $0.displayTitle.lowercased().contains(q) || ($0.slotName?.lowercased().contains(q) == true) || sessionDetail($0).lowercased().contains(q) }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
             .prefix(limit)
             .map { $0 }
@@ -220,7 +224,8 @@ nonisolated enum MentionRows {
     /// The rows for a query. `listing` is the folder `folder(for:cwd:)` names, nil until it is read: browsing shows that
     /// folder's entries alone; otherwise the chat's files, the session folder's entries, workspaces, then the sessions.
     static func rows(query: String, cwd: String?, used: [String], listing: [FileEntry]?, sessions all: [Session],
-                     except: SessionKey?, workspaces workspaceRows: [MentionRow] = []) -> [MentionRow] {
+                     except: SessionKey?, workspaces workspaceRows: [MentionRow] = [],
+                     preferHerdrTabName: (Session) -> Bool = { _ in false }) -> [MentionRow] {
         let entries = listing ?? []
         if let target = browseTarget(query, cwd: cwd) {
             let hits = entries.filter { nameMatches($0.name, target.filter) }
@@ -253,7 +258,9 @@ nonisolated enum MentionRows {
         }
         out.append(contentsOf: workspaceRows)
         for s in sessions(all, except: except, query: q) {
-            out.append(MentionRow(id: "session:\(s.key.path)", name: s.displayTitle, detail: sessionDetail(s), kind: .session(s.key)))
+            let prefer = preferHerdrTabName(s)
+            out.append(MentionRow(id: "session:\(s.key.path)", name: s.displayTitle(preferTab: prefer),
+                                  detail: sessionDetail(s, preferHerdrTabName: prefer), kind: .session(s.key)))
         }
         return Array(out.prefix(limit))
     }
@@ -406,6 +413,7 @@ struct ComposerMentionMenu: View {
             .onChange(of: source.cwd ?? "") { _, _ in rebuild() }
             .onChange(of: folders.revision) { _, _ in rebuild() }
             .onChange(of: workspaces.rows) { _, _ in rebuild() }
+            .onChange(of: model.herdrTabNameGroups) { _, _ in rebuild() }
             // Agent menus do not observe machine-name changes or project an empty workspace catalog (performance P5).
             .onChange(of: source.workspaces ? model.machineChoices : []) { _, _ in
                 workspaces.update(query: token.query, machines: model.namedMachines,
@@ -427,7 +435,8 @@ struct ComposerMentionMenu: View {
         let listing = dir.flatMap { folders.entries(in: $0) }
         let browsing = MentionRows.browseTarget(token.query, cwd: cwd) != nil
         let rows = MentionRows.rows(query: token.query, cwd: cwd, used: used ?? [], listing: listing,
-                                    sessions: model.sessionsNow, except: source.except, workspaces: workspaces.rows)
+                                    sessions: model.sessionsNow, except: source.except, workspaces: workspaces.rows,
+                                    preferHerdrTabName: { model.prefersHerdrTabName(for: $0) })
         let empty: MentionMenu.Empty = dir != nil && listing == nil ? .reading : browsing ? .noMatchInFolder : .noMatch
         let next = MentionProjection(directory: dir, rows: rows, empty: empty)
         if next != projection { projection = next }

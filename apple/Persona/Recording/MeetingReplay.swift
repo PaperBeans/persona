@@ -49,6 +49,7 @@ import OSLog
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private(set) var audio: AVAudioPlayer?
     @ObservationIgnored private var sessionActive = false
+    @ObservationIgnored private var audioLease: AudioSessionBroker.Lease?
     nonisolated private static let log = Logger(subsystem: "persona", category: "recording")
 
     var length: Double { tape?.length ?? 0 }
@@ -174,6 +175,8 @@ import OSLog
         audio?.stop()
         audio = nil
         hasAudio = false
+        audioLease?.release()
+        audioLease = nil
         guard sessionActive else { return }
         sessionActive = false
         Self.deactivateSession()
@@ -184,7 +187,7 @@ import OSLog
             LiveCallGate.sessionQueue.sync {
                 // A call that went live owns the session now: deactivating it here would stop the call's audio.
                 guard !LiveCallGate.liveNow else { return }
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                try? AudioSessionBroker.shared.setActive(false, options: .notifyOthersOnDeactivation)
             }
         }
     }
@@ -203,12 +206,11 @@ import OSLog
                 let player = try AVAudioPlayer(contentsOf: file)
                 player.enableRate = true
                 player.prepareToPlay()
-                let session = AVAudioSession.sharedInstance()
                 // Ordered with the call's own category: a call that went live while the file opened keeps its session.
                 let activated = try LiveCallGate.sessionQueue.sync { () -> Bool in
                     guard !LiveCallGate.liveNow else { return false }
-                    try session.setCategory(.playback, mode: .spokenAudio)
-                    try session.setActive(true)
+                    try AudioSessionBroker.shared.setCategory(.playback, mode: .spokenAudio)
+                    try AudioSessionBroker.shared.setActive(true)
                     return true
                 }
                 guard activated else { return nil }
@@ -225,6 +227,7 @@ import OSLog
             return
         }
         sessionActive = true
+        audioLease = AudioSessionBroker.shared.acquire(id: "recording.replay", module: "recording", kind: .playback)
         audio = box.player
         syncAudio()
     }

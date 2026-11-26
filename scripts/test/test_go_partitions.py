@@ -49,7 +49,7 @@ class PartitionTests(unittest.TestCase):
             gp.patterns(["Test%06d%s" % (i, "x" * 40) for i in range(6000)], 2)
 
     def test_only_the_packages_themselves_are_partitioned(self):
-        for name in ("node", "assistant"):
+        for name in ("node", "assistant", "devices", "db"):
             self.assertEqual(gp.partitioned("./internal/" + name), "./internal/" + name)
             self.assertEqual(gp.partitioned("./internal/%s/" % name), "./internal/" + name)
             self.assertEqual(gp.partitioned("github.com/example/persona/server/internal/" + name), "./internal/" + name)
@@ -57,6 +57,7 @@ class PartitionTests(unittest.TestCase):
         self.assertFalse(gp.is_partitioned("github.com/example/persona/server/internal/nodeupdate"))
         self.assertFalse(gp.is_partitioned("github.com/example/persona/server/internal/assistantwire"))
         self.assertFalse(gp.is_partitioned("github.com/example/persona/server/internal/assistant/fleet"))
+        self.assertFalse(gp.is_partitioned("github.com/example/persona/server/internal/db/dbtest"))
 
     def test_split_keeps_the_rest_in_order_and_names_each_partitioned_package_once(self):
         module = "github.com/example/persona/server"
@@ -73,6 +74,18 @@ class PartitionTests(unittest.TestCase):
                 self.assertEqual(len(gp.list_patterns("/server", package)), partitions)
             self.assertEqual(listed.call_args.args[0], ["go", "test", "-list", ".*", package])
             self.assertEqual(listed.call_args.kwargs["cwd"], "/server")
+
+    def test_list_patterns_forwards_wrapper_prefix_and_build_flags(self):
+        listing = "TestA\nTestB\nok  \texample\t0.1s\n"
+        prefix = ["python3", "server_test_env.py", "--database-file", "/tmp/db.json", "--"]
+        flags = ["-tags", "persona_core_only", "-race", "-trimpath"]
+        env = {"GOFLAGS": "-trimpath"}
+        with mock.patch.object(gp.subprocess, "check_output", return_value=listing) as listed:
+            patterns = gp.list_patterns("/server", "./internal/assistant", env=env, prefix=prefix, flags=flags)
+        self.assertEqual(patterns, ["^(TestA)$", "^(TestB)$"])
+        self.assertEqual(listed.call_args.args[0], [*prefix, "go", "test", *flags, "-list", ".*", "./internal/assistant"])
+        self.assertEqual(listed.call_args.kwargs["cwd"], "/server")
+        self.assertIs(listed.call_args.kwargs["env"], env)
 
     def test_a_package_that_splits_itself_is_partitioned_and_still_has_its_own_split(self):
         # go_test_partitioned.py leaves these to their own TestMain under a <dir>/... argument: a package that lost its

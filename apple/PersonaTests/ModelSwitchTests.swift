@@ -290,6 +290,9 @@ struct ModelSwitchTests {
         #expect(try JSONSerialization.jsonObject(with: body) as? [String: String] == ["model": "~vendor/model-latest[1m]"])
         #expect(SessionModes.launcher(try session()) == "claude")
         #expect(SessionModes.launcher(try session(#","launcher":"cc_gateway""#)) == "cc_gateway")
+        #expect(SessionModes.launcher(try session(#","agent":"codex","codex_route":"terminal""#)) == "codex")
+        #expect(SessionModes.launcher(try session(#","agent":"codex","codex_route":"terminal","launcher":"gateway""#)) == "gateway")
+        #expect(SessionModes.launcher(try session(#","agent":"codex","space_kind":"codex_app""#)) == "codex-app")
     }
 
     /// The composer menus that type `/model` (the shell's, BeautifulUI's): "Other Model…" opens the field instead (its

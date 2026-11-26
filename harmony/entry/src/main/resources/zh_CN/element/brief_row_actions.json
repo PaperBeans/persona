@@ -1,0 +1,68 @@
+{
+  "string": [
+    {
+      "name": "brief_row_accept",
+      "value": "通过"
+    },
+    {
+      "name": "brief_row_got_it",
+      "value": "知道了"
+    },
+    {
+      "name": "brief_row_recommendation",
+      "value": "按推荐来"
+    },
+    {
+      "name": "brief_row_complete",
+      "value": "直接完成"
+    },
+    {
+      "name": "brief_row_handle",
+      "value": "已处理"
+    },
+    {
+      "name": "brief_row_accepted",
+      "value": "已验收"
+    },
+    {
+      "name": "brief_row_noted",
+      "value": "已收下"
+    },
+    {
+      "name": "brief_row_recommended",
+      "value": "已按推荐来"
+    },
+    {
+      "name": "brief_row_handled",
+      "value": "已标记为处理过"
+    },
+    {
+      "name": "brief_row_already",
+      "value": "已经处理过了"
+    },
+    {
+      "name": "brief_row_unsupported",
+      "value": "hub 版本太旧，用不了这个按钮"
+    },
+    {
+      "name": "brief_row_unknown",
+      "value": "结果待确认，请先核对操作状态。"
+    },
+    {
+      "name": "brief_row_pending",
+      "value": "等待确认"
+    },
+    {
+      "name": "brief_row_accept_failed",
+      "value": "验收失败，请重试。"
+    },
+    {
+      "name": "brief_row_complete_failed",
+      "value": "任务未能完成，请重试。"
+    },
+    {
+      "name": "brief_row_handle_failed",
+      "value": "标记失败，请重试。"
+    }
+  ]
+}

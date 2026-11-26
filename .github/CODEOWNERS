@@ -1,1 +1,106 @@
 /docs/SUPER_RULES.md @chyroc
+
+# BEGIN persona-core (generated from schema/core-paths.txt by scripts/hooks/codeowners.py; do not edit)
+/.github/CODEOWNERS @chyroc @szupzj18
+/android/module-guard-baseline.txt @chyroc @szupzj18
+/android/core/contracts/ @chyroc @szupzj18
+/android/core/data/ @chyroc @szupzj18
+/android/core/domain/ @chyroc @szupzj18
+/android/core/hub/ @chyroc @szupzj18
+/android/core/inbox/ @chyroc @szupzj18
+/android/core/moduleapi/ @chyroc @szupzj18
+/android/core/rustcore/ @chyroc @szupzj18
+/android/core/rustcore-android/ @chyroc @szupzj18
+/apple/modules-core-only.yml @chyroc @szupzj18
+/apple/modules.yml @chyroc @szupzj18
+/apple/Packages/PersonaCore/ @chyroc @szupzj18
+/apple/Packages/PersonaKit/ @chyroc @szupzj18
+/apple/Packages/PersonaModuleAPI/ @chyroc @szupzj18
+/apple/Packages/PersonaWire/ @chyroc @szupzj18
+/apple/Persona/App/Modules.swift @chyroc @szupzj18
+/native/ @chyroc @szupzj18
+/native/iphone-bridge/
+/schema/core-paths.txt @chyroc @szupzj18
+/schema/module-classification.txt @chyroc @szupzj18
+/schema/module.schema.json @chyroc @szupzj18
+/scripts/ci/core-only-smoke.py @chyroc @szupzj18
+/scripts/ci/module-e2e.py @chyroc @szupzj18
+/scripts/ci/web_module_boundary_ratchet.py @chyroc @szupzj18
+/scripts/hooks/codeowners.py @chyroc @szupzj18
+/scripts/hooks/core-change-check.py @chyroc @szupzj18
+/scripts/hooks/merge-pr.sh @chyroc @szupzj18
+/scripts/test/apple_module_refs_baseline.json @chyroc @szupzj18
+/scripts/test/core_paths.py @chyroc @szupzj18
+/scripts/test/fake_gh.py @chyroc @szupzj18
+/scripts/test/module_classification.py @chyroc @szupzj18
+/scripts/test/test_apple_module_refs.py @chyroc @szupzj18
+/scripts/test/test_codeowners.py @chyroc @szupzj18
+/scripts/test/test_core_change_check.py @chyroc @szupzj18
+/scripts/test/test_core_paths.py @chyroc @szupzj18
+/scripts/test/test_core_references_no_module.py @chyroc @szupzj18
+/scripts/test/test_merge_pr_sh.py @chyroc @szupzj18
+/scripts/test/test_module_classification.py @chyroc @szupzj18
+/scripts/test/test_module_flags.py @chyroc @szupzj18
+/scripts/test/test_module_schema.py @chyroc @szupzj18
+/sdk/go/ @chyroc @szupzj18
+/server/ @chyroc @szupzj18
+/server/internal/lark/
+/server/internal/orcart/
+/server/internal/protectedapps/
+/server/internal/rexcli/
+/server/internal/terncli/
+/server/internal/modules/briefing/
+/server/internal/modules/github/
+/server/internal/modules/health/
+/server/internal/modules/imessage/
+/server/internal/modules/knowledge-ui/
+/server/internal/modules/lark/
+/server/internal/modules/mail/
+/server/internal/modules/office/
+/server/internal/modules/phone-extra/
+/server/internal/modules/recording/
+/server/internal/modules/screen-share/
+/server/internal/modules/voice/
+/server/internal/modules/volc/
+/server/scripts/transcribelive/
+/web/eslint.modules.config.mjs @chyroc @szupzj18
+/web/src/core/module-boundary.lint.test.ts @chyroc @szupzj18
+/web/src/core/module-features.ts @chyroc @szupzj18
+/web/src/core/module-flags.ts @chyroc @szupzj18
+/web/src/core/module-host.test.ts @chyroc @szupzj18
+/web/src/core/module-host.ts @chyroc @szupzj18
+/web/src/core/module-hub-memory.test.tsx @chyroc @szupzj18
+/web/src/core/module-hub-reset.test.ts @chyroc @szupzj18
+/web/src/core/module-hub-storage.ts @chyroc @szupzj18
+/web/src/core/module-settings.ts @chyroc @szupzj18
+/web/src/core/module-switch-write.ts @chyroc @szupzj18
+/web/src/core/module-switch.ts @chyroc @szupzj18
+/web/src/lib/agent-filter.ts @chyroc @szupzj18
+/web/src/lib/agent-groups.ts @chyroc @szupzj18
+/web/src/lib/agent-kind.ts @chyroc @szupzj18
+/web/src/lib/agent-outgoing.ts @chyroc @szupzj18
+/web/src/lib/agent-repos-core.ts @chyroc @szupzj18
+/web/src/lib/hub-notify.ts @chyroc @szupzj18
+/web/src/lib/hub-update.ts @chyroc @szupzj18
+/web/src/lib/hubs.ts @chyroc @szupzj18
+/web/src/lib/machine-diagnosis.ts @chyroc @szupzj18
+/web/src/lib/model-config.ts @chyroc @szupzj18
+/web/src/lib/model-id.ts @chyroc @szupzj18
+/web/src/lib/model-profiles.ts @chyroc @szupzj18
+/web/src/lib/session-actions.ts @chyroc @szupzj18
+/web/src/lib/session-groups.ts @chyroc @szupzj18
+/web/src/lib/session-history.ts @chyroc @szupzj18
+/web/src/lib/session-list.ts @chyroc @szupzj18
+/web/src/lib/session-review-agent.ts @chyroc @szupzj18
+/web/src/lib/task-association.ts @chyroc @szupzj18
+/web/src/lib/task-cards.ts @chyroc @szupzj18
+/web/src/lib/task-completion-check.ts @chyroc @szupzj18
+/web/src/lib/task-repositories.ts @chyroc @szupzj18
+/web/src/lib/task-trust.ts @chyroc @szupzj18
+/web/src/lib/todo-pushes.ts @chyroc @szupzj18
+/web/src/lib/todo-reorganize.ts @chyroc @szupzj18
+/web/src/lib/todo-tree.ts @chyroc @szupzj18
+/web/src/lib/todo-triage.ts @chyroc @szupzj18
+/web/src/lib/todo-view-wire.ts @chyroc @szupzj18
+/web/src/lib/configuration/ @chyroc @szupzj18
+# END persona-core

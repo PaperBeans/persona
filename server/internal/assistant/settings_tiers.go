@@ -22,24 +22,29 @@ import (
 // first (a launcher no computer has never reaches the card), shown on the approval card, and saved at the revision the
 // card was made from: profiles edited in the meantime are a conflict, never overwritten.
 
-// tierEdit is model_profiles.tiers' set value. A field left out keeps the tier's own; a different launcher drops the
-// old model and effort (they were the old launcher's), as a provider change does in Model Settings.
+// tierEdit is model_profiles.tiers' set value. A field left out keeps the tier's own. The flat fields are the first
+// candidate's: a different launcher drops its old model and effort (they were the old launcher's), as a provider change
+// does in Model Settings, and keeps the other candidates. Candidates, when given, replace the whole ordered list (the
+// flat fields then edit its first); aliases, when given, replace the older names the tier answers to. Tier may name a
+// tier by an alias.
 type tierEdit struct {
-	Tier           string   `json:"tier"`
-	Launcher       *string  `json:"launcher"`
-	Model          *string  `json:"model"`
-	Effort         *string  `json:"effort"`
-	Speed          *string  `json:"speed"`
-	PermissionMode *string  `json:"permission_mode"`
-	Description    *string  `json:"description"`
-	Profiles       []string `json:"profiles"`
-	Remove         bool     `json:"remove"`
+	Tier           string           `json:"tier"`
+	Launcher       *string          `json:"launcher"`
+	Model          *string          `json:"model"`
+	Effort         *string          `json:"effort"`
+	Speed          *string          `json:"speed"`
+	PermissionMode *string          `json:"permission_mode"`
+	Description    *string          `json:"description"`
+	Candidates     *[]TierCandidate `json:"candidates"`
+	Aliases        *[]string        `json:"aliases"`
+	Profiles       []string         `json:"profiles"`
+	Remove         bool             `json:"remove"`
 }
 
-// tierChange is what a set does to one profile: the tier before and after (nil: none).
+// tierChange is what a set does to one profile: the tier (its own name, an alias resolved) before and after (nil: none).
 type tierChange struct {
-	ID, Name      string
-	Before, After *ModelTier
+	ID, Name, Tier string
+	Before, After  *ModelTier
 }
 
 // editTiers applies e to ps (fresh from the store; changed in place) and says what changed in which profile. Only the
@@ -59,52 +64,78 @@ func editTiers(ps *modelProfiles, e tierEdit, now time.Time) ([]tierChange, erro
 		}
 		p := ps.Profiles[i]
 		p.Tiers = maps.Clone(p.Tiers)
-		was, had := p.Tiers[e.Tier]
+		name := e.Tier
+		if own, ok := p.lookupTier(e.Tier); ok {
+			name = own // an alias edits the tier that answers to it
+		}
+		was, had := p.Tiers[name]
 		if e.Remove {
 			if !had {
 				continue
 			}
-			delete(p.Tiers, e.Tier)
+			delete(p.Tiers, name)
 		} else {
 			t := was
-			if e.Launcher != nil && strings.TrimSpace(*e.Launcher) != t.Launcher {
-				t = ModelTier{Launcher: strings.TrimSpace(*e.Launcher), Description: t.Description}
+			if e.Candidates != nil {
+				t.Candidates = slices.Clone(*e.Candidates)
+				for i := range t.Candidates {
+					c := &t.Candidates[i]
+					c.Launcher, c.Model, c.Effort = strings.TrimSpace(c.Launcher), strings.TrimSpace(c.Model), strings.TrimSpace(c.Effort)
+					c.Speed, c.PermissionMode = strings.TrimSpace(c.Speed), strings.TrimSpace(c.PermissionMode)
+				}
+				if len(t.Candidates) == 0 {
+					return nil, fmt.Errorf("tier %s needs at least one candidate", e.Tier)
+				}
+				t.normalize()
+			}
+			first := t.first()
+			if e.Launcher != nil && strings.TrimSpace(*e.Launcher) != first.Launcher {
+				first = TierCandidate{Launcher: strings.TrimSpace(*e.Launcher)}
 			}
 			for _, f := range []struct {
 				set  *string
 				into *string
-			}{{e.Model, &t.Model}, {e.Effort, &t.Effort}, {e.Speed, &t.Speed}, {e.PermissionMode, &t.PermissionMode}, {e.Description, &t.Description}} {
+			}{{e.Model, &first.Model}, {e.Effort, &first.Effort}, {e.Speed, &first.Speed}, {e.PermissionMode, &first.PermissionMode}, {e.Description, &t.Description}} {
 				if f.set != nil {
 					*f.into = strings.TrimSpace(*f.set)
 				}
 			}
+			t.setFirst(first)
+			if e.Aliases != nil {
+				t.Aliases = slices.Clone(*e.Aliases)
+			}
+			t.normalize()
 			if !had && t.Launcher == "" {
 				return nil, fmt.Errorf("%s (%s) has no tier %s yet: give its launcher to add it there, or name other profiles", p.Name, p.ID, e.Tier)
 			}
-			if had && t == was {
+			if had && t.equal(was) {
 				continue
 			}
 			if p.Tiers == nil {
 				p.Tiers = map[string]ModelTier{}
 			}
-			p.Tiers[e.Tier] = t
+			p.Tiers[name] = t
 		}
 		if err := checkModelTiers(p.Tiers); err != nil {
 			return nil, fmt.Errorf("%s (%s): %w", p.Name, p.ID, err)
 		}
-		if t, ok := p.Tiers[e.Tier]; ok {
-			if err := checkTierModel(e.Tier, t); err != nil { // only the tier edited: another's old model blocks nothing
+		if t, ok := p.Tiers[name]; ok {
+			var before *ModelTier
+			if had {
+				before = &was
+			}
+			if err := checkTierModel(name, t, before); err != nil { // only the tier edited: another's old model blocks nothing
 				return nil, fmt.Errorf("%s (%s): %w", p.Name, p.ID, err)
 			}
 		}
 		if len(p.Tiers) == 0 {
 			p.Tiers = nil
 		}
-		c := tierChange{ID: p.ID, Name: p.Name}
+		c := tierChange{ID: p.ID, Name: p.Name, Tier: name}
 		if had {
 			c.Before = &was
 		}
-		if t, ok := p.Tiers[e.Tier]; ok {
+		if t, ok := p.Tiers[name]; ok {
 			c.After = &t
 		}
 		p.UpdatedAt = now
@@ -119,9 +150,9 @@ func editTiers(ps *modelProfiles, e tierEdit, now time.Time) ([]tierChange, erro
 
 // sameTierChanges: whether two sets of changes are the same, profile by profile.
 func sameTierChanges(a, b []tierChange) bool {
-	same := func(x, y *ModelTier) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
+	same := func(x, y *ModelTier) bool { return (x == nil) == (y == nil) && (x == nil || x.equal(*y)) }
 	return slices.EqualFunc(a, b, func(x, y tierChange) bool {
-		return x.ID == y.ID && same(x.Before, y.Before) && same(x.After, y.After)
+		return x.ID == y.ID && x.Tier == y.Tier && same(x.Before, y.Before) && same(x.After, y.After)
 	})
 }
 
@@ -180,16 +211,26 @@ func (s *Service) setModelTiers(ctx context.Context, v json.RawMessage) (*ownCha
 	if !modelTierName.MatchString(e.Tier) {
 		return nil, i18n.Err("assistant-model_profiles.err_tier_name", i18n.Args{"tier": e.Tier})
 	}
-	given := e.Launcher != nil || e.Model != nil || e.Effort != nil || e.Speed != nil || e.PermissionMode != nil || e.Description != nil
+	given := e.Launcher != nil || e.Model != nil || e.Effort != nil || e.Speed != nil || e.PermissionMode != nil || e.Description != nil ||
+		e.Candidates != nil || e.Aliases != nil
 	switch {
 	case e.Remove && given:
 		return nil, errors.New("remove takes only tier and profiles")
 	case !e.Remove && !given:
-		return nil, errors.New("give what to set (launcher, model, effort, speed, permission_mode, description), or remove: true")
+		return nil, errors.New("give what to set (launcher, model, effort, speed, permission_mode, description, candidates, aliases), or remove: true")
+	}
+	var launchers []string
+	if e.Candidates != nil {
+		for _, c := range *e.Candidates {
+			launchers = append(launchers, strings.TrimSpace(c.Launcher))
+		}
 	}
 	if e.Launcher != nil {
+		launchers = append(launchers, strings.TrimSpace(*e.Launcher))
+	}
+	for _, l := range slices.Compact(slices.Sorted(slices.Values(launchers))) {
 		// before the card, and outside models.mu: a computer may be asked for its launchers
-		if err := s.tierLauncherCheck(ctx, strings.TrimSpace(*e.Launcher)); err != nil {
+		if err := s.tierLauncherCheck(ctx, l); err != nil {
 			return nil, err
 		}
 	}
@@ -204,8 +245,11 @@ func (s *Service) setModelTiers(ctx context.Context, v json.RawMessage) (*ownCha
 		return nil, err
 	}
 	for _, c := range changes {
-		if c.After != nil && c.After.PermissionMode != "" {
-			if !slices.Contains(s.permissionModesForLauncher(ctx, "", c.After.Launcher, nil), c.After.PermissionMode) {
+		if c.After == nil {
+			continue
+		}
+		for _, cand := range c.After.list() {
+			if cand.PermissionMode != "" && !slices.Contains(s.permissionModesForLauncher(ctx, "", cand.Launcher, nil), cand.PermissionMode) {
 				return nil, fmt.Errorf("%s (%s): %w", c.Name, c.ID, i18n.Err("assistant-models.err_permission_mode_unsupported"))
 			}
 		}
@@ -217,10 +261,16 @@ func (s *Service) setModelTiers(ctx context.Context, v json.RawMessage) (*ownCha
 		return nil, errors.New("no database on this hub")
 	}
 	revision := ps.Revision
-	return &ownChange{applyChecksProposal: true, cardText: func(l i18n.Lang) string {
+	profileAfter := map[string]ModelProfile{}
+	for _, change := range changes {
+		if i := slices.IndexFunc(ps.Profiles, func(p ModelProfile) bool { return p.ID == change.ID }); i >= 0 {
+			profileAfter[change.ID] = cloneModelProfile(ps.Profiles[i])
+		}
+	}
+	return &ownChange{applyChecksProposal: true, revision: &revision, modelProfileWrite: true, profileAfter: profileAfter, cardText: func(l i18n.Lang) string {
 		lines := make([]string, 0, len(changes))
 		for _, c := range changes {
-			lines = append(lines, i18n.T(l, "assistant-settings_tool.change_model_tier", i18n.Args{"profile": c.Name, "tier": e.Tier,
+			lines = append(lines, i18n.T(l, "assistant-settings_tool.change_model_tier", i18n.Args{"profile": c.Name, "tier": c.Tier,
 				"before": tierCardText(l, c.Before), "after": tierCardText(l, c.After)}))
 		}
 		return strings.Join(lines, "\n")
@@ -229,12 +279,12 @@ func (s *Service) setModelTiers(ctx context.Context, v json.RawMessage) (*ownCha
 	}, nil
 }
 
-// tierCardText is a tier as the approval card shows it in l.
+// tierCardText is a tier as the approval card shows it in l: every candidate, in order.
 func tierCardText(l i18n.Lang, t *ModelTier) string {
 	if t == nil {
 		return i18n.T(l, "assistant-settings_tool.none")
 	}
-	text := t.runs()
+	text := t.allRuns()
 	if t.Description != "" {
 		text += " — " + t.Description
 	}
@@ -280,7 +330,7 @@ func (s *Service) saveTierEditLocked(ctx context.Context, revision int64, e tier
 	// one event for the edit, however many profiles it changed: <profile>.tiers.<name> each
 	event := ModelProfileEvent{At: now, Action: "save", By: ProfileActor{Kind: "assistant"}}
 	for _, c := range changes {
-		event.Changed = append(event.Changed, c.ID+".tiers."+e.Tier)
+		event.Changed = append(event.Changed, c.ID+".tiers."+c.Tier)
 	}
 	state.record(event)
 	ps.Revision++
@@ -293,7 +343,7 @@ func (s *Service) saveTierEditLocked(ctx context.Context, revision int64, e tier
 		done = append(done, c.ID)
 	}
 	for _, p := range ps.Profiles {
-		if _, ok := p.Tiers[e.Tier]; !ok {
+		if _, ok := p.lookupTier(e.Tier); !ok {
 			without = append(without, p.ID)
 		}
 	}
@@ -329,9 +379,12 @@ func (s *Service) getModelTiers(ctx context.Context) (string, error) {
 		}
 		for _, name := range slices.Sorted(maps.Keys(p.Tiers)) {
 			t := p.Tiers[name]
-			b.WriteString("\n  - " + name + " = " + t.runs())
+			b.WriteString("\n  - " + name + " = " + t.allRuns())
 			if t.Description != "" {
 				b.WriteString(" — " + t.Description)
+			}
+			if len(t.Aliases) > 0 {
+				b.WriteString(" (also answers to " + strings.Join(t.Aliases, ", ") + ")")
 			}
 		}
 		b.WriteByte('\n')
@@ -347,5 +400,6 @@ func (s *Service) getModelTiers(ctx context.Context) (string, error) {
 const modelTiersValue = `{"tier": a name (lowercase letters, digits, _ -), "launcher": a launcher name, "model": a model id ("" the launcher's default), ` +
 	`"effort": a level ("" the launcher's), "speed": standard | fast | ultrafast ("" the launcher's), ` +
 	`"permission_mode": default | acceptEdits | plan | auto | bypassPermissions ("" the launcher's), "description": when to use it (one line, at most 100 characters), ` +
-	`"profiles": [profile ids] (default: every profile), "remove": true to delete it}; a field left out keeps the tier's own ` +
-	`(a different launcher drops the old model, effort, speed and permission_mode), a new tier needs its launcher`
+	`"candidates": [{"launcher", "model", "effort", "speed", "permission_mode"}, …] the ordered launchers the tier may run on, at most 6 (the hub takes the first usable one; the flat fields are the first), ` +
+	`"aliases": [older names the tier answers to], "profiles": [profile ids] (default: every profile), "remove": true to delete it}; ` +
+	`a field left out keeps the tier's own (a different launcher drops the first candidate's old model, effort, speed and permission_mode), a new tier needs its launcher`

@@ -1,4 +1,4 @@
-Undo the last model-profile switch using its saved before-image. Restores only touched model settings, not launcher credentials. Inspect the rollback preview with model_profiles_list first; a second rollback redoes the switch.{{template "shared/mcp_language" .}}
+Undo the latest profile switch, restoring touched model settings only. Inspect the preview first; another rollback may redo it.{{template "shared/mcp_language" .}}
 
 ```json
 {

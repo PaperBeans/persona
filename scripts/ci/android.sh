@@ -161,6 +161,9 @@ if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
   run_check 'generated design tokens' python3 -B "$ROOT/scripts/assets/gen_tokens.py" --check \
     --kotlin "$ROOT/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"
   run_check 'icon meanings' python3 -B "$ROOT/scripts/assets/gen_icon_meanings.py" --check
+  # Domain modules (docs/server/architecture.md "Domain model", 'Client modules'): every android/core/<ctx>/domain
+  # module, the kit and the adapt packages, found by name.
+  run_check 'client domain modules (Android)' python3 -B ../test/test_client_domain_modules.py AndroidDomain
   # The module guard's rules (build-logic ModuleGuard); the guard itself, :app:moduleGuard, runs with the lane's tasks.
   cd "$ROOT/android"
   run_check 'module guard tests' bash ./gradlew --no-daemon --no-watch-fs --console=plain --max-workers="$WORKERS" \

@@ -5,12 +5,18 @@ import SwiftUI
 /// It goes by the measured widths, not by the text size: a short label stays beside its neighbor at sizes where a
 /// longer one, or a longer translation, has to stack. A button tells how narrow it can be with its words whole through
 /// its label's `buttonLabelLine()`; one whose label doesn't is taken to fit. A single button takes the row's width.
+///
+/// `packed` (a To-dos row's answers, #10465: one prominent choice and Options ⌄): each at its own width from the leading
+/// edge, `spacing` apart, while all fit whole on one line; else one above the other, the first on top, each at its own
+/// width. A label is never cut, so a row's answers stack where a long translation or a large text size needs it.
 struct StackingButtonRow: Layout {
     var spacing: CGFloat = Theme.Space.m
     var stackedSpacing: CGFloat = Theme.Space.s
+    var packed = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard !subviews.isEmpty else { return .zero }
+        if packed { return packedSize(proposal, subviews) }
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? idealWidth(subviews)
         if sideBySide(width, subviews) {
             let offer = ProposedViewSize(width: share(width, subviews.count), height: proposal.height)
@@ -22,6 +28,7 @@ struct StackingButtonRow: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        if packed { return placePacked(in: bounds, subviews) }
         if sideBySide(bounds.width, subviews) {
             // As an HStack places them: equal shares, centered on the row's middle.
             let each = share(bounds.width, subviews.count)
@@ -38,6 +45,48 @@ struct StackingButtonRow: Layout {
             let height = s.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
             s.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: height))
             y += height + stackedSpacing
+        }
+    }
+
+    // MARK: Packed
+
+    /// Each at its own width, the widest the row's width: what `packed` lays out.
+    private func sizes(_ subviews: Subviews, width: CGFloat) -> [CGSize] {
+        subviews.map { s in
+            let ideal = s.sizeThatFits(.unspecified)
+            return ideal.width <= width ? ideal : s.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        }
+    }
+
+    private func packedFits(_ sizes: [CGSize], width: CGFloat) -> Bool {
+        sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(sizes.count - 1) <= width
+    }
+
+    private func packedSize(_ proposal: ProposedViewSize, _ subviews: Subviews) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? .greatestFiniteMagnitude
+        let sizes = sizes(subviews, width: width)
+        if packedFits(sizes, width: width) {
+            let used = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(sizes.count - 1)
+            return CGSize(width: min(used, width), height: sizes.map(\.height).max() ?? 0)
+        }
+        let height = sizes.reduce(0) { $0 + $1.height } + stackedSpacing * CGFloat(sizes.count - 1)
+        return CGSize(width: min(sizes.map(\.width).max() ?? 0, width), height: height)
+    }
+
+    private func placePacked(in bounds: CGRect, _ subviews: Subviews) {
+        let sizes = sizes(subviews, width: bounds.width)
+        if packedFits(sizes, width: bounds.width) {
+            var x = bounds.minX
+            for (s, size) in zip(subviews, sizes) {
+                s.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            return
+        }
+        var y = bounds.minY
+        for (s, size) in zip(subviews, sizes) {
+            s.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(size))
+            y += size.height + stackedSpacing
         }
     }
 

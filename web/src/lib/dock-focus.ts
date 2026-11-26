@@ -13,7 +13,7 @@ export function lostWith(last: Element | null, active: Element | null, body: Ele
 
 /** The chat's own message box (Composer's `data-composer-input`). Quote bars and comment cards near it hold textareas too:
  *  focusing and blurring "the composer" never takes one of those by mistake. */
-export const COMPOSER_INPUT = "textarea[data-composer-input]";
+export const COMPOSER_INPUT = "[data-composer-input]";
 
 const EDITABLE = "input, textarea, select, [contenteditable=''], [contenteditable='true']";
 

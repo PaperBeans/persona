@@ -21,10 +21,10 @@ export interface MentionToken {
   query: string;
 }
 
-/** The `@word` being typed just before the caret: at the start or after whitespace, so an e-mail address is not one. */
+/** A typed `@word` at a word boundary. Object replacement characters mark atomic editor tokens. */
 export function mentionAt(text: string, caret: number): MentionToken | null {
   const before = text.slice(0, caret);
-  const m = /(^|\s)@([^\s@]*)$/.exec(before);
+  const m = /(^|[\s\uFFFC\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])@([^\s@\uFFFC]*)$/u.exec(before);
   if (!m) return null;
   const start = before.length - m[2].length - 1;
   return { start, end: caret, query: m[2] };

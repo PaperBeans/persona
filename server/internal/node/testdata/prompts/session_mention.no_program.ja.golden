@@ -1,0 +1,9 @@
+<persona-context kind="context" title="Login fix" url="persona://session/box/0d000000-0000-4000-8000-00000000000b">
+Another session: Login fix (Codex)
+Folder: /code/app
+It last said: The test now waits for the server.
+
+この引用は別の Persona の会話の一部です。machine_id は「box」、session_id は「0d000000-0000-4000-8000-00000000000b」です。続きを読むには、この 2 つの ID で Persona のツール a2a_read を呼び出してください（turns は最大 10）。ユーザーの依頼がこの会話への質問や作業の依頼を求める場合は、この ID と新しい message_id、本文を指定して a2a_send を呼び出してください。Persona MCP のツールがない場合は、同じツールをターミナルから実行してください：personad に引数 `tool a2a_read`（または `tool a2a_send`）と JSON オブジェクトを 1 つ渡します。例：{"machine_id":"box","session_id":"0d000000-0000-4000-8000-00000000000b"}。
+</persona-context>
+
+What did it change?

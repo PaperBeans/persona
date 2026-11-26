@@ -66,6 +66,11 @@ func (b *inboxBook) restore(w *inboxWrite) {
 		return
 	}
 	cur, agent, handling := w.it, w.it.Agent, w.it.Handling
+	if cur.Last != p.Last {
+		// An Inbox version whose transaction failed cannot leave a receipt
+		// behind for a later, unrelated save.
+		cur.externalMoves, cur.externalChecking = nil, false
+	}
 	cv, pv := reflect.ValueOf(cur).Elem(), reflect.ValueOf(&p).Elem()
 	for i := range cv.NumField() {
 		switch name := cv.Type().Field(i).Name; name {
@@ -73,6 +78,10 @@ func (b *inboxBook) restore(w *inboxWrite) {
 		case "SuggestionAttempts":
 			cur.SuggestionAttempts = restoreSuggestionAttempts(p.SuggestionAttempts, cur.SuggestionAttempts)
 		default:
+			// Unexported runtime state is absent from the JSON snapshot and cannot be interfaced.
+			if cv.Type().Field(i).PkgPath != "" {
+				continue
+			}
 			if !reflect.DeepEqual(cv.Field(i).Interface(), pv.Field(i).Interface()) {
 				cv.Field(i).Set(pv.Field(i))
 			}

@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/herdr"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
@@ -216,11 +218,30 @@ func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt t
 		if n.logger != nil {
 			n.logger.Printf("the message did not reach the transcript of %s, typing it again", id)
 		}
+		priorWatch := watch
 		watch = n.watchPrompt(id, text)
 		typedAt = time.Now()
 		if err := n.promptClaude(ctx, pane, text); err != nil {
+			// Attempt 1 was already typed into the pane, so never return delivered=none on a retry failure. Only when
+			// the retry is proven to have typed nothing (deliveryRefusal) can a late transcript record on the original
+			// watch confirm delivery without hiding a possible duplicate paste from the retry.
 			if r := deliveryRefusal(err); r != nil {
-				return false, r
+				if priorWatch.took() {
+					return true, nil
+				}
+				dialog := clipDialog(head, 120)
+				retryCode := rpcCode(r)
+				data, _ := json.Marshal(map[string]any{
+					"delivered":  deliveredUnknown,
+					"reason":     "guide_retry_refused",
+					"dialog":     dialog,
+					"retry_code": retryCode,
+				})
+				return false, &rpc.Error{
+					Code:    "delivery_unknown",
+					Message: i18n.T(i18n.Default, "rpc-errors.guide_retry_refused", i18n.Args{"dialog": dialog, "retry_code": retryCode}),
+					Data:    data,
+				}
 			}
 			return false, uncertain(err)
 		}

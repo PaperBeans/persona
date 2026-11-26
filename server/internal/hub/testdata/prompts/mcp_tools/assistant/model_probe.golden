@@ -1,0 +1,77 @@
+{
+  "name": "model_probe",
+  "description": "Run bounded real samples through a saved provider; configuration unchanged, secrets hidden. Returns status, latency, blocks, usage, retries and redacted text.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "provider": {
+        "type": "string"
+      },
+      "api": {
+        "type": "string",
+        "enum": [
+          "messages",
+          "chat"
+        ]
+      },
+      "model": {
+        "type": "string"
+      },
+      "effort": {
+        "type": "string"
+      },
+      "samples": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 10,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "system": {
+              "type": "string"
+            },
+            "user": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "user"
+          ]
+        }
+      },
+      "concurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4,
+        "default": 1
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1024,
+        "default": 256
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30,
+        "default": 30
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "provider",
+      "samples"
+    ]
+  }
+}

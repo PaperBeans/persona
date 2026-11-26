@@ -478,4 +478,48 @@ describe("a decision in the Needs you tray", () => {
     expect(row().textContent).toContain(t("assistant-brief.take"));
     expect(row().querySelector("[data-decision-option]")).toBeNull();
   });
+
+  it.each([
+    { name: "GitHub PR", url: "https://github.com/nwverse/persona/pull/14659", label: "PR #14659" },
+    { name: "GitLab MR", url: "https://gitlab.example.com/team/app/-/merge_requests/1468", label: "MR !1468" },
+    { name: "GitHub Issue", url: "https://github.com/nwverse/persona/issues/14659", label: "Issue #14659" },
+    { name: "generic external URL", url: "https://docs.example.com/specs/rollout", label: t("assistant-decisionrow.open_link_host", { host: "docs.example.com" }) },
+  ])("renders a concise external evidence link for $name", async ({ url, label }) => {
+    ask = { ...decision, link: url };
+    await mount();
+    const link = row().querySelector<HTMLAnchorElement>('[data-decision-link="external"]')!;
+    expect(link).not.toBeNull();
+    expect(link.href).toBe(url);
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(link.title).toBe(url);
+    expect(link.textContent).toBe(label);
+    expect(link.getAttribute("aria-label")).toBe(t("assistant-decisionrow.open_link_aria", { label }));
+  });
+
+  it("navigates safely in-app for a same-origin Persona link without answering the decision", async () => {
+    const internal = `${location.origin}/s/demo/worker?view=chat`;
+    ask = { ...decision, link: internal };
+    await mount();
+    const link = row().querySelector<HTMLAnchorElement>('[data-decision-link="internal"]')!;
+    expect(link).not.toBeNull();
+    expect(link.target).toBe("");
+    expect(link.rel).toBe("");
+    expect(link.textContent).toBe(t("assistant-decisionrow.open_link"));
+    act(() => link.click());
+    expect(opened()).toBe("/s/demo/worker?view=chat");
+    expect(posts).toHaveLength(0);
+  });
+
+  it.each([
+    { name: "same-origin self-link", url: `${location.origin}/todos/decision-task` },
+    { name: "self-link with trailing slash", url: "https://hub.example.com/todos/decision-task/" },
+    { name: "javascript scheme", url: "javascript:alert(1)" },
+    { name: "data scheme", url: "data:text/html,hi" },
+    { name: "non-URL text", url: "not-a-valid-url" },
+  ])("omits invalid or redundant self-link: $name", async ({ url }) => {
+    ask = { ...decision, link: url };
+    await mount();
+    expect(row().querySelector("[data-decision-link]")).toBeNull();
+  });
 });

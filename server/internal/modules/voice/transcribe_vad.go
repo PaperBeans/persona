@@ -106,8 +106,8 @@ func (v *trVAD) speech(from, to int64) [][2]int64 {
 	return out
 }
 
-// speechStart is where the speech going on at at began, or where the next speech before to begins when at is in a
-// silence; at when there is none.
+// speechStart finds the current speech onset or the next onset through to, inclusive.
+// It returns at when there is no speech in that interval.
 func (v *trVAD) speechStart(at, to int64) int64 {
 	spans := v.spans
 	if v.open {
@@ -117,7 +117,7 @@ func (v *trVAD) speechStart(at, to int64) int64 {
 		if s[1] <= at {
 			continue
 		}
-		if s[0] < to {
+		if s[0] <= to {
 			return s[0]
 		}
 		break

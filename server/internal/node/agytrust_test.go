@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -67,6 +68,21 @@ func TestAgyTrustFolderScreenReadiness(t *testing.T) {
 				t.Errorf("unexpected keys: %v", got)
 			}
 		})
+	}
+}
+
+func TestAgyStartupErrorsPreemptReadiness(t *testing.T) {
+	n, f, _ := herdrNode(t)
+	const pane = "w1:p2"
+	const diagnostic = `error: invalid model selection (--model "" --effort "max"): model has no "max" effort`
+	f.setScreen(pane, diagnostic+"\n"+agyIdleScreen)
+	if err := n.agyTrustFolder(t.Context(), pane); err == nil || err.Error() != diagnostic {
+		t.Fatalf("readiness accepted an invalid selection: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if _, _, err := n.waitWorkAgent(ctx, pane, agyAgent, nil); err == nil || err.Error() != diagnostic {
+		t.Fatalf("process discovery missed an exit before agy was detected: %v", err)
 	}
 }
 
@@ -368,7 +384,7 @@ func TestAgySendReadsWorkingUntilHerdrShowsTheTurn(t *testing.T) {
 	n, f, home := herdrNode(t)
 	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
 	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, ""))
-	f.reply("agent.prompt", map[string]any{})
+	stubAgyNativePrompt(t, n, f, agyTestPane, agyTestID)
 	if _, err := request(t, n, "session.send", map[string]any{"session_id": agyTestRow, "text": "count to 300"}); err != nil {
 		t.Fatal(err)
 	}

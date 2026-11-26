@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/nwverse/persona/server/internal/assistant/kbhistory"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,6 +60,7 @@ func storedSelection(t *testing.T, s *Service) *kb.Selection {
 // clears a stop (slow keeps the slowest pace two hours); a change that reads more takes the approval back, one that
 // reads less does not; stop writes STOP, status says where it is.
 func TestHistoryTools(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	f := false
 	cfg := &assistantwire.KBHistory{Enabled: true, Sources: []assistantwire.KBHistorySource{{Name: "chat", NeedsSearchIndex: &f}}}
 	chats := []connectorwire.HistoryChat{{ID: "d1", Name: "Direct One", Kind: "dm", Estimate: 1200}, {ID: "g1", Name: "Group One", Kind: "group", Estimate: 90000},
@@ -77,7 +77,7 @@ func TestHistoryTools(t *testing.T) {
 			t.Fatalf("plan lacks %q:\n%s", want, out)
 		}
 	}
-	p, ok, err := kbhistory.LoadPlan(data, "chat")
+	p, ok, err := loadHistoryPlanErr(t, data, "chat")
 	if err != nil || !ok || p.ApprovedAt != nil || len(p.Chats) != 3 {
 		t.Fatalf("plan %+v %v %v", p, ok, err)
 	}
@@ -119,7 +119,7 @@ func TestHistoryTools(t *testing.T) {
 	}
 
 	out = runHistoryTool(t, s, "kb_history_stop", `{"reason":"checking the group Secret Name"}`)
-	if st, stopped := kbhistory.ReadStop(data); !stopped || st.By != "tool" || st.Code != "asked" || st.Text != "checking the group Secret Name" || out != i18n.T(l, "assistant-kb_history.stop_done") {
+	if st, stopped := readHistoryStop(t, data); !stopped || st.By != "tool" || st.Code != "asked" || st.Text != "checking the group Secret Name" || out != i18n.T(l, "assistant-kb_history.stop_done") {
 		t.Fatalf("stop: %q %+v", out, st)
 	}
 	// The owner's words stay out of the log: they may name a chat or a person.
@@ -140,15 +140,15 @@ func TestHistoryTools(t *testing.T) {
 	if out != i18n.T(l, "assistant-kb_history.resume_done_slow", i18n.Args{"source": "chat"}) {
 		t.Fatalf("resume: %s", out)
 	}
-	if _, stopped := kbhistory.ReadStop(data); stopped {
+	if _, stopped := readHistoryStop(t, data); stopped {
 		t.Fatal("STOP stayed")
 	}
-	p, _, _ = kbhistory.LoadPlan(data, "chat")
+	p, _, _ = loadHistoryPlanErr(t, data, "chat")
 	if p.ApprovedAt == nil || len(p.Approved) != 3 || !p.Approved["m1"].Whole || p.Approved["g1"].Whole || p.ApprovedUnlisted == nil {
 		t.Fatalf("approval %+v", p)
 	}
 	// The two slow hours start with the first call, not with the approval.
-	if st := kbhistory.ReadStatus(data)["chat"]; !st.SlowPending || !st.SlowUntil.IsZero() {
+	if st := readHistoryStatus(t, data)["chat"]; !st.SlowPending || !st.SlowUntil.IsZero() {
 		t.Fatalf("slow start %+v", st)
 	}
 	if out := runHistoryTool(t, s, "kb_history_status", `{}`); !strings.Contains(out, i18n.T(l, "assistant-kb_history.status_slow_pending")) {
@@ -164,7 +164,7 @@ func TestHistoryTools(t *testing.T) {
 
 	// Reading less keeps the approval: a chat not read, a shorter back_days.
 	out = runHistoryTool(t, s, "kb_history_plan", `{"source":"chat","set":[{"chat":"d1","read":false}],"back_days":30}`)
-	if p, _, _ = kbhistory.LoadPlan(data, "chat"); p.ApprovedAt == nil || strings.Contains(out, i18n.T(l, "assistant-kb_history.set_revoked")) {
+	if p, _, _ = loadHistoryPlanErr(t, data, "chat"); p.ApprovedAt == nil || strings.Contains(out, i18n.T(l, "assistant-kb_history.set_revoked")) {
 		t.Fatalf("narrowed: %s", out)
 	}
 	if b := storedSelection(t, s).History["chat"].BackDays; b == nil || *b != 30 {
@@ -174,7 +174,7 @@ func TestHistoryTools(t *testing.T) {
 	for _, change := range []string{`"set":[{"chat":"g1","read":true,"store":true}]`, `"back_days":null`} {
 		runHistoryTool(t, s, "kb_history_resume", `{"source":"chat"}`)
 		out = runHistoryTool(t, s, "kb_history_plan", `{"source":"chat",`+change+`}`)
-		if p, _, _ = kbhistory.LoadPlan(data, "chat"); p.ApprovedAt != nil || !strings.Contains(out, i18n.T(l, "assistant-kb_history.set_revoked")) {
+		if p, _, _ = loadHistoryPlanErr(t, data, "chat"); p.ApprovedAt != nil || !strings.Contains(out, i18n.T(l, "assistant-kb_history.set_revoked")) {
 			t.Fatalf("%s kept the approval: %s", change, out)
 		}
 	}
@@ -188,7 +188,7 @@ func TestHistoryTools(t *testing.T) {
 		return assistantwire.HistoryChatsResult{Chats: append(renamed, connectorwire.HistoryChat{ID: "d2", Name: "Direct Two", Kind: "dm"})}, nil
 	})
 	out = runHistoryTool(t, s, "kb_history_plan", `{"source":"chat"}`)
-	p, _, _ = kbhistory.LoadPlan(data, "chat")
+	p, _, _ = loadHistoryPlanErr(t, data, "chat")
 	if p.ApprovedAt != nil || !strings.Contains(out, i18n.T(l, "assistant-kb_history.plan_changed", i18n.Args{"count": 1})) {
 		t.Fatalf("approval after new chats: %s", out)
 	}
@@ -202,7 +202,7 @@ func TestHistoryTools(t *testing.T) {
 		return nil, &rpc.Error{Code: "UPSTREAM_TIMEOUT", Message: "slow"}
 	})
 	out = runHistoryTool(t, s, "kb_history_plan", `{"source":"chat"}`)
-	stop, stopped := kbhistory.ReadStop(data)
+	stop, stopped := readHistoryStop(t, data)
 	if !stopped || stop.Code != "call_timeout" || stop.Args["method"] != "history_chats" || !strings.Contains(out, i18n.T(l, "assistant-kb_history.reason_call_timeout", i18n.Args{"method": "history_chats", "code": "upstream_timeout"})) {
 		t.Fatalf("a timed-out list: %+v %v\n%s", stop, stopped, out)
 	}
@@ -220,6 +220,7 @@ func TestHistoryTools(t *testing.T) {
 
 // A name two chats have is refused with their ids, and nothing changes.
 func TestHistoryToolsAmbiguousName(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	f := false
 	cfg := &assistantwire.KBHistory{Enabled: true, Sources: []assistantwire.KBHistorySource{{Name: "chat", NeedsSearchIndex: &f}}}
 	s, _, _ := historyToolService(t, cfg, []connectorwire.HistoryChat{{ID: "g1", Name: "Team", Kind: "group"}, {ID: "g2", Name: "Team", Kind: "group"}})
@@ -237,6 +238,7 @@ func TestHistoryToolsAmbiguousName(t *testing.T) {
 
 // Enabled without sources: the status says what is missing, not that it is off.
 func TestHistoryStatusWithoutSources(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	s, _, _ := historyToolService(t, &assistantwire.KBHistory{Enabled: true}, nil)
 	l := s.lang(context.Background())
 	if out := runHistoryTool(t, s, "kb_history_status", `{}`); out != i18n.T(l, "assistant-kb_history.no_sources") {
@@ -246,6 +248,7 @@ func TestHistoryStatusWithoutSources(t *testing.T) {
 
 // With kb.history off, the tools say so and ask no connector anything.
 func TestHistoryToolsOff(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	s, fh, data := historyToolService(t, nil, []connectorwire.HistoryChat{{ID: "d1", Kind: "dm"}})
 	l := s.lang(context.Background())
 	for _, call := range [][2]string{{"kb_history_plan", `{}`}, {"kb_history_resume", `{"source":"chat"}`}, {"kb_history_status", `{}`}} {
@@ -256,7 +259,7 @@ func TestHistoryToolsOff(t *testing.T) {
 	if n := len(fh.appParams(AppConnectors, assistantwire.ConnectorsHistoryChats)) + len(fh.appParams(AppConnectors, assistantwire.ConnectorsArchives)); n != 0 {
 		t.Fatalf("%d connector calls while off", n)
 	}
-	if _, ok, _ := kbhistory.LoadPlan(data, "chat"); ok {
+	if _, ok, _ := loadHistoryPlanErr(t, data, "chat"); ok {
 		t.Fatal("a plan was made while off")
 	}
 	// Stopping always works: it only writes STOP.
@@ -276,12 +279,9 @@ func TestHistoryConfigFromManagerJSON(t *testing.T) {
 	if !h.On() || len(h.Sources) != 2 || h.Sources[0].Name != "zeta" || h.Sources[1].Name != "alpha" {
 		t.Fatalf("history %+v", h)
 	}
-	z, a := kbhistory.PaceFor(h.Sources[0]), kbhistory.PaceFor(h.Sources[1])
-	if z.Profile != "standard" || z.Interval != (assistantwire.KBRange{4, 9}) || h.Sources[0].SearchIndexNeeded() {
-		t.Fatalf("zeta %+v", z)
-	}
-	if a.Profile != "careful" || a.PageLimit != 5 || a.QuietHours != (assistantwire.KBRange{2, 2}) || !h.Sources[1].SearchIndexNeeded() {
-		t.Fatalf("alpha %+v", a)
+	// The paces the profiles and overrides give are the knowledge-ui module's (kbhistory.TestPaceFromManagerJSON).
+	if h.Sources[0].SearchIndexNeeded() || !h.Sources[1].SearchIndexNeeded() {
+		t.Fatalf("needs_search_index %+v", h.Sources)
 	}
 	back, err := json.Marshal(h)
 	if err != nil || !strings.HasPrefix(string(back), `{"enabled":true,"sources":{"zeta":`) {
@@ -301,19 +301,12 @@ func TestHistoryConfigFromManagerJSON(t *testing.T) {
 			t.Fatalf("%s was taken", bad)
 		}
 	}
-	// slow_factor stretches every interval and rest.
-	var two assistantwire.KBHistory
-	if err := json.Unmarshal([]byte(`{"sources":{"x":{"profile":"standard","slow_factor":2}}}`), &two); err != nil {
-		t.Fatal(err)
-	}
-	if p := kbhistory.PaceFor(two.Sources[0]); p.Interval != (assistantwire.KBRange{6, 16}) || p.Rest != (assistantwire.KBRange{4, 20}) {
-		t.Fatalf("slow factor %+v", p)
-	}
 }
 
 // While the selection cannot be read (and never was since a restart), the tools neither list by it, approve by it nor
 // change it: they say to try again, and the plan and the document stay as they are.
 func TestHistoryToolsWaitForTheSelection(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	f := false
 	cfg := &assistantwire.KBHistory{Enabled: true, Sources: []assistantwire.KBHistorySource{{Name: "chat", NeedsSearchIndex: &f}}}
 	fh := newFakeHub()
@@ -341,7 +334,7 @@ func TestHistoryToolsWaitForTheSelection(t *testing.T) {
 			t.Fatalf("%s %s: %s", call[0], call[1], out)
 		}
 	}
-	if p, ok, _ := kbhistory.LoadPlan(data, "chat"); !ok || p.ApprovedAt != nil {
+	if p, ok, _ := loadHistoryPlanErr(t, data, "chat"); !ok || p.ApprovedAt != nil {
 		t.Fatalf("plan %+v", p)
 	}
 	if ok, _ := st.memStore.Setting(context.Background(), kbSelectionKey, &json.RawMessage{}); ok {
@@ -353,6 +346,7 @@ func TestHistoryToolsWaitForTheSelection(t *testing.T) {
 // one: status and resume say so until the index lane (kb_lanes.go) has built it, and no longer afterwards. Without
 // the lane, or with an index that failed a check, the import would write into an archive search cannot keep up with.
 func TestHistoryWaitsForTheSearchIndexTheLaneBuilds(t *testing.T) {
+	needsKnowledgeUIModule(t)
 	cfg := &assistantwire.KBHistory{Enabled: true, Sources: []assistantwire.KBHistorySource{{Name: "chat"}}}
 	s, _, data := historyToolService(t, cfg, []connectorwire.HistoryChat{{ID: "d1", Name: "Direct One", Kind: "dm", Estimate: 10}})
 	ctx := context.Background()
@@ -361,7 +355,7 @@ func TestHistoryWaitsForTheSearchIndexTheLaneBuilds(t *testing.T) {
 	state := i18n.T(l, "assistant-kb_history.state_needs_search_index")
 	runHistoryTool(t, s, "kb_history_plan", `{}`)
 
-	if e.Store.SearchIndexReady() || s.historyDriver(data).IsIndexed() {
+	if e.Store.SearchIndexReady() || historyIndexedNow(s, data) {
 		t.Fatal("a new archive says it has a search index")
 	}
 	if out := runHistoryTool(t, s, "kb_history_status", `{}`); !strings.Contains(out, waits) || !strings.Contains(out, state) {
@@ -381,7 +375,7 @@ func TestHistoryWaitsForTheSearchIndexTheLaneBuilds(t *testing.T) {
 		t.Fatal("the knowledge base has no index lane")
 	}
 	s.kbRunLane(ctx, e, lane)
-	if !e.Store.SearchIndexReady() || !s.historyDriver(data).IsIndexed() {
+	if !e.Store.SearchIndexReady() || !historyIndexedNow(s, data) {
 		t.Fatal("no search index after the index lane ran")
 	}
 	if out := runHistoryTool(t, s, "kb_history_status", `{}`); strings.Contains(out, waits) || strings.Contains(out, state) {
@@ -390,15 +384,12 @@ func TestHistoryWaitsForTheSearchIndexTheLaneBuilds(t *testing.T) {
 	if out := runHistoryTool(t, s, "kb_history_resume", `{"source":"chat"}`); strings.Contains(out, waits) {
 		t.Fatalf("resume with the index:\n%s", out)
 	}
-	if kbhistory.Indexed(nil) { // not open: nothing says it has one
-		t.Fatal("no knowledge base, yet indexed")
-	}
 }
 
 // readAllLogs is every line of the import's logs under data.
 func readAllLogs(t *testing.T, data string) string {
 	t.Helper()
-	files, _ := filepath.Glob(filepath.Join(kbhistory.Dir(data), "log-*.jsonl"))
+	files, _ := filepath.Glob(filepath.Join(historyDirOf(data), "log-*.jsonl"))
 	var b strings.Builder
 	for _, f := range files {
 		raw, _ := os.ReadFile(f)

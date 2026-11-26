@@ -56,6 +56,9 @@ type Connectors interface {
 type Options struct {
 	Store      Store
 	Connectors Connectors
+	// ReadAllowed fences one subscription before connector calls or stored content reads. Nil permits every read; a
+	// false answer pauses only that subscription, never an unrelated source on the same manager.
+	ReadAllowed func(ctx context.Context, sub Subscription) bool
 	// Location is the user's time zone: {{since_date}}, daily_at, times without a zone.
 	Location func() *time.Location
 	// Audit records a change (plugin_audit): on connector, action by whom, with detail that holds no content.
@@ -166,6 +169,10 @@ func New(o Options) *Service {
 }
 
 func (s *Service) now() time.Time { return s.o.Clock.Now().UTC() }
+
+func (s *Service) readAllowed(ctx context.Context, sub Subscription) bool {
+	return s.o.ReadAllowed == nil || s.o.ReadAllowed(ctx, sub)
+}
 
 // shown is s as the API shows it: off while both destinations are off, its floor of intervals filled in.
 func shown(sub Subscription) Subscription {
@@ -482,6 +489,9 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	}
 	if !c.ready() {
 		return fail(&Problem{CodeNotConnected, "The connector cannot be reached now."})
+	}
+	if sub != nil && !s.readAllowed(ctx, *sub) {
+		return fail(&Problem{CodeNotConnected, "The source is paused by private-chat visibility."})
 	}
 	sources, err := s.catalog(ctx, c, time.Minute)
 	if err != nil {

@@ -42,3 +42,18 @@ test('HarmonyOS standalone permission mode names match the shared table (#10363)
     }
   }
 });
+
+test('the native chat menu and session settings expose the same field-specific controls',()=>{
+  const page=readFileSync(new URL('../entry/src/main/ets/pages/Index.ets',import.meta.url),'utf8');
+  const settings=readFileSync(new URL('../entry/src/main/ets/components/SettingsPage.ets',import.meta.url),'utf8');
+  for(const [field,route] of [['model','session_model'],['effort','session_effort'],['permission_mode','session_permissions']]){
+    assert.ok(page.split('\n').some(line=>line.includes(`sessionModeAvailable(owner.selected, '${field}')`) && line.includes(`this.openSettings('${route}', true)`)));
+    assert.ok(settings.includes(`this.page === '${route}') this.sessionModePage('${field}')`));
+  }
+  for(const directory of ['base','en_US','zh_CN','ja_JP']){
+    const strings=new Map(json(new URL(`../entry/src/main/resources/${directory}/element/string.json`,import.meta.url)).string.map(({name,value})=>[name,value]));
+    for(const key of ['model','session_models_empty','session_effort_none','session_effort_minimal','session_effort_ultra']){
+      assert.ok(strings.get(key)?.trim(),`${directory} ${key}`);
+    }
+  }
+});

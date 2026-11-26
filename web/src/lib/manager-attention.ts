@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 import type { AgentMutes } from "./agent-groups";
 import { stateOf } from "./format";
-import { requestHome } from "./child-sessions";
+import { requestHome, requestHomeMachine } from "./child-sessions";
 import { supervisorHeld, supervisorHeldOnly } from "./supervisor-held";
 import { useShownManager } from "./manager-choice";
 import { installedManagers, multiManager, ownerIn, useRoster, type ManagerList } from "./managers";
@@ -42,11 +42,12 @@ export function waitingAgents(list: ManagerList, sessions: readonly Session[], i
       continue;
     }
     // a child session's card counts for its parent (#5120): one agent waiting, however many of its children ask
+    const homeMid = requestHomeMachine(ix);
     const home = requestHome(ix);
-    const key = keyOf(ix.machine_id, home);
+    const key = keyOf(homeMid, home);
     const s = byKey.get(key);
     // a session not in the list (not read yet): muted by its own switch only, as interactionMuted does
-    if (s ? !counted(s) : isMuted({ machine_id: ix.machine_id, session_id: home }, mutes)) continue;
+    if (s ? !counted(s) : isMuted({ machine_id: homeMid, session_id: home }, mutes)) continue;
     add(ix.manager, key);
   }
   return Object.fromEntries([...waiting].map(([id, keys]) => [id, keys.size]));

@@ -83,116 +83,25 @@ var (
 // the first line, and where the last complete line ends (what follows is a line still being written). Big blocks and
 // byte searches: a few hundred MB in a fraction of a second.
 func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash, ultracode, background []int, first []byte, lastNL int64, err error) {
-	const block = 4 << 20
-	keep := int64(max(len(seedNotification), len(seedStdout), len(seedHandback)) - 1) // a marker split across two blocks
-	buf := make([]byte, block+keep)
-	type hit struct {
-		off        int64
-		id         string // a notification's task id; bash: "!"
-		bash       bool
-		ultracode  bool
-		background bool
+	var s scanState
+	if err := scanBlocks(fh, &s, 0, size); err != nil {
+		return nil, nil, nil, nil, nil, nil, 0, err
 	}
-	var hits []hit
-	starts = append(starts, 0)
-	firstDone := false
-	claude := false // the first line is read and is no Codex rollout's
-	for off := int64(0); off < size; off += block {
-		n := min(block+keep, size-off)
-		if _, err := fh.ReadAt(buf[:n], off); err != nil && err != io.EOF {
-			return nil, nil, nil, nil, nil, nil, 0, err
-		}
-		data := buf[:n]
-		own := min(int64(block), n) // bytes this block owns; the rest is the next block's start, read for markers
-		if !firstDone {
-			if j := bytes.IndexByte(data[:own], '\n'); j >= 0 {
-				first, firstDone = append(first, data[:j]...), true
-				claude = !isCodexLine(first)
-			} else {
-				first = append(first, data[:own]...)
-			}
-		}
-		markers := seedMarkers
-		if claude {
-			markers = markers[:len(markers)-1] // only a Codex rollout backgrounds commands: a Claude transcript pays nothing
-		}
-		for _, m := range markers {
-			for i := 0; ; {
-				j := bytes.Index(data[i:], m)
-				if j < 0 || int64(i+j) >= own {
-					break
-				}
-				h := hit{off: off + int64(i+j), bash: bytes.Equal(m, seedBash), ultracode: bytes.Equal(m, seedUltracode) || bytes.Equal(m, seedStdout),
-					background: bytes.Equal(m, seedBackgrounded)}
-				// A backgrounded command's id, and whether the line is one, are read with the line (codexPendingAt).
-				if bytes.Equal(m, seedHandback) {
-					near := data[i+j+len(m) : min(len(data), i+j+len(m)+200)]
-					if z := bytes.IndexByte(near, '"'); z > 0 {
-						h.id = string(near[:z])
-					}
-				} else if !h.bash && !h.ultracode && !h.background { // the task id follows the marker: "<task-notification>\n<task-id>…</task-id>"
-					near := data[i+j : min(len(data), i+j+300)]
-					if a := bytes.Index(near, []byte("<task-id>")); a >= 0 {
-						if z := bytes.Index(near[a:], []byte("</task-id>")); z > 0 {
-							h.id = string(near[a+len("<task-id>") : a+z])
-						}
-					}
-				}
-				hits = append(hits, h)
-				i += j + 1
-			}
-		}
-		for i := int64(0); i < own; {
-			j := bytes.IndexByte(data[i:own], '\n')
-			if j < 0 {
-				break
-			}
-			i += int64(j) + 1
-			lastNL = off + i
-			starts = append(starts, lastNL)
-		}
-	}
-	starts = starts[:len(starts)-1] // the last entry is where the line still being written (or nothing) starts
-	sort.Slice(hits, func(i, j int) bool { return hits[i].off < hits[j].off })
-	for _, h := range hits {
-		if h.off >= lastNL {
-			break
-		}
-		line := sort.Search(len(starts), func(i int) bool { return starts[i] > h.off }) // 1-based line holding h
-		if h.background {
-			if len(background) == 0 || background[len(background)-1] != line {
-				background = append(background, line)
-			}
-		} else if h.ultracode {
-			if len(ultracode) == 0 || ultracode[len(ultracode)-1] != line {
-				ultracode = append(ultracode, line)
-			}
-		} else if h.bash {
-			if len(bash) == 0 || bash[len(bash)-1] != line {
-				bash = append(bash, line)
-			}
-		} else {
-			length := lastNL - starts[line-1]
-			if line < len(starts) {
-				length = starts[line] - starts[line-1]
-			}
-			if length > 64<<10 {
-				var prefix [1024]byte
-				n, _ := fh.ReadAt(prefix[:], starts[line-1])
-				if seedRequestTypeRe.Match(prefix[:n]) {
-					continue
-				}
-			}
-			notif = append(notif, notifSeed{line, h.id})
-		}
-	}
-	return starts, notif, bash, ultracode, background, first, lastNL, nil
+	return scanFinish(fh, s)
 }
 
 // openWindow reads a big file cold: counts its lines, parses the window at its end. ok is false when no turn start
-// is close enough to the end to make a window worth it (the caller reads the file whole). Callers hold f.mu.
-func (f *File) openWindow(fh *os.File, size int64) (fresh []proto.Item, ok bool, err error) {
-	starts, notif, bash, ultracode, background, first, lastNL, err := scanLines(fh, size)
+// is close enough to the end to make a window worth it (the caller reads the file whole). The scan starts from what
+// an earlier one of the same file kept (scan_cache.go), except for a strict read. Callers hold f.mu.
+func (f *File) openWindow(fh *os.File, st os.FileInfo, strict bool) (fresh []proto.Item, ok bool, err error) {
+	size := st.Size()
+	scan := scanLinesCached
+	if strict {
+		scan = func(_ string, fh *os.File, _ os.FileInfo) ([]int64, []notifSeed, []int, []int, []int, []byte, int64, error) {
+			return scanLines(fh, size)
+		}
+	}
+	starts, notif, bash, ultracode, background, first, lastNL, err := scan(f.Path, fh, st)
 	if err != nil {
 		return nil, false, err
 	}
@@ -595,12 +504,17 @@ func (f *File) loadOlder() int64 {
 	if f.tree == nil {
 		f.tree = &branchTree{}
 	}
-	if len(f.tree.prepend(pre.recs)) > 0 || len(pre.hidden) > 0 {
+	if f.coldInputs != nil {
+		older = withoutLines(older, f.tree.hidden)
+	} else if len(f.tree.prepend(pre.recs)) > 0 || len(pre.hidden) > 0 {
 		older = withoutLines(older, f.tree.hidden)
 		f.items = withoutLines(f.items, f.tree.hidden)
 	}
 	f.items = append(older, f.items...)
 	f.base = b - 1
+	if f.base == 0 {
+		f.coldInputs = nil
+	}
 	if f.base == 0 && !f.partialMeta {
 		f.win = nil
 	}

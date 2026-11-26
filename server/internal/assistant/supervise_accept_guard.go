@@ -7,7 +7,7 @@ import (
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
-// Guarding a bare `task_review accepted` (#12026). A supervised task must not vanish from the owner's Needs-you list
+// Guarding a bare `task_review accepted` (#12026, extended structurally by supervise_accept_scope_guard.go #13169). A supervised task must not vanish from the owner's Needs-you list
 // when its result does not settle anything: the agent was blocked on information only the owner has, its closeout
 // status was not done, or a read-only evaluation / research came back inconclusive, ineffective or only partly done.
 // Such an accept is refused with the fixes that keep the task with the owner: needs_user (owner-only information),

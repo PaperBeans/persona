@@ -380,6 +380,7 @@ final class Dictation {
     /// `finish()` is waiting for the recognizer's last words; set when they came.
     @ObservationIgnored private var finishing = false
     @ObservationIgnored private var gotFinal = false
+    @ObservationIgnored private var audioLease: AudioSessionBroker.Lease?
 
     /// A recognizer for the language the owner speaks (`DictationLanguage`): their choice, else the language of `hints`
     /// (the draft and their recent messages in this chat), else the last sure choice, else the interface language.
@@ -451,9 +452,8 @@ final class Dictation {
             Self.audioQueue.async {
                 guard !LiveCallGate.liveNow else { return c.resume(returning: .call) }
                 do {
-                    let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-                    try session.setActive(true, options: .notifyOthersOnDeactivation)
+                    try AudioSessionBroker.shared.setCategory(.record, mode: .measurement, options: .duckOthers)
+                    try AudioSessionBroker.shared.setActive(true, options: .notifyOthersOnDeactivation)
                     c.resume(returning: .opened)
                 } catch {
                     c.resume(returning: .failed)
@@ -477,13 +477,14 @@ final class Dictation {
         engine.prepare()
         do { try engine.start() } catch {
             engine.inputNode.removeTap(onBus: 0)
-            if callGate() == nil { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+            if callGate() == nil { try? AudioSessionBroker.shared.setActive(false, options: .notifyOthersOnDeactivation) }
             RecordingMicrophone.shared.release(microphoneOwner)
             return String(localized: "Couldn't open the microphone")
         }
         self.engine = engine
         self.request = request
         self.update = update
+        audioLease = AudioSessionBroker.shared.acquire(id: "core.dictation", kind: .meetingRecording)
         isListening = true
         listeningRun = UUID(); let run = listeningRun
         task = Self.recognize(recognizer, request) { [weak self] heard, done in
@@ -560,6 +561,8 @@ final class Dictation {
     private func stopListening(settling: Bool = false) {
         finishing = false
         meter.reset()
+        audioLease?.release()
+        audioLease = nil
         guard RecordingMicrophone.shared.release(microphoneOwner) else { return }
         listeningRun = UUID()
         engine?.stop()
@@ -580,11 +583,11 @@ final class Dictation {
                 guard RecordingMicrophone.shared.isFree, (self?.callGate() ?? LiveCallGate.dictationRefusal) == nil else { return }
                 Self.audioQueue.async {
                     guard !LiveCallGate.liveNow else { return }
-                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                    try? AudioSessionBroker.shared.setActive(false, options: .notifyOthersOnDeactivation)
                 }
             }
         } else {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            try? AudioSessionBroker.shared.setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 

@@ -60,6 +60,7 @@ import { buildTodoAgentGroups, type Todo } from "../lib/todos";
 import type { Machine, Session } from "../lib/types";
 import type { UsageAccount } from "../lib/usage-windows";
 import { Sidebar } from "./Sidebar";
+import { SidebarRowHoverHost } from "./SidebarRowHover";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -142,13 +143,17 @@ async function mount() {
   act(() => connect());
   act(() => { FakeSocket.last.readyState = 1; FakeSocket.last.onopen?.(); });
   await push({ type: "hello", server_version: "v1", event_stream: "stream", event_seq: 1, resumed: true, features: ["sessions_delta"] });
-  act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
+  act(() => root.render(<>
+    <Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />
+    <SidebarRowHoverHost />
+  </>));
   await flush();
   // Drain mount effects and collapse transitions, then keep the clock fixed across the measured pushes.
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   await flush();
   expect(host.textContent).toContain("Build app");
-  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("20");
+  // the strip reads what is left (#14690): 20% used is 80% remaining
+  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("80");
   expect(buildTodoTree).toHaveBeenCalled();
   expect(buildTodoAgentGroups).toHaveBeenCalled();
   for (const [name, count] of shellReads()) {
@@ -256,13 +261,23 @@ describe("the sidebar shell across store pushes", () => {
     expect(row()).toBeNull(); // completion clears the filter's kept matches too
   });
 
-  it("updates computer and hub names in agent rows and rebuilds when a computer goes offline", async () => {
+  it("updates computer and hub names in the card and rebuilds when a computer goes offline", async () => {
     await mount();
-    expect(host.textContent).toContain("Home · Laptop");
+    const link = row()!;
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true, addEventListener() {} } as unknown as MediaQueryList);
+    vi.spyOn(link, "getBoundingClientRect").mockReturnValue({ top: 100, height: 32 } as DOMRect);
+    const card = () => document.querySelector("[data-sidebar-row-hover-card]");
+    expect(link.textContent).not.toContain("Home · Laptop");
+    act(() => link.dispatchEvent(new PointerEvent("pointerover", { pointerType: "mouse", bubbles: true })));
+    await act(async () => { vi.advanceTimersByTime(250); });
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(card()?.textContent).toContain("Home · Laptop");
     await push({ type: "machines", machines: machines.map((m) => m.id === "laptop" ? { ...m, name: "Notebook", hub_name: "Studio" } : m) });
-    expect(host.textContent).toContain("Studio · Notebook");
-    expect(host.textContent).not.toContain("Home · Laptop");
+    expect(card()?.textContent).toContain("Studio · Notebook");
+    expect(card()?.textContent).not.toContain("Home · Laptop");
     expect(buildTodoTree).toHaveBeenCalled();
+    act(() => link.dispatchEvent(new PointerEvent("pointerout", { pointerType: "mouse", bubbles: true, relatedTarget: document.body })));
+    expect(card()).toBeNull();
     clearCounts();
     await push({ type: "machines", machines: getState().machines.map((m) => m.id === "laptop" ? { ...m, online: false } : m) });
     expect(buildTodoTree).toHaveBeenCalled();
@@ -277,7 +292,7 @@ describe("the sidebar shell across store pushes", () => {
     await flush();
     expect(row()?.closest('[data-tree-branch="recent"]')).toBeTruthy();
     await push({ type: "machines", machines });
-    expect(host.textContent).toContain("Home · Laptop");
+    expect(getState().machines[0].name).toBe("Laptop");
     expect(host.textContent).toContain("2/2");
   });
 
@@ -287,7 +302,7 @@ describe("the sidebar shell across store pushes", () => {
     act(() => document.dispatchEvent(new Event("visibilitychange")));
     await flush();
     expect(renders.get("usage")).toBeGreaterThan(0);
-    expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("65");
+    expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("35"); // 65% used, 35% left
     expect(buildTodoTree).not.toHaveBeenCalled();
   });
 });

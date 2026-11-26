@@ -8,12 +8,52 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
-const projectLogWindow = 40
+const (
+	projectLogWindow            = 40
+	projectSummaryOutcomesMost  = 5
+	projectSummaryDecisionsMost = 5
+	projectSummaryPitfallsMost  = 3
+	// projectPromptChatsMost is how many of a project's linked chats its rewrite reads (projectPromptChats).
+	projectPromptChatsMost = 8
+)
+
+// promptChat is a linked chat a rewrite reads, with its archive entry when the store has one.
+type promptChat struct {
+	id string
+	c  *Chat
+}
+
+// projectPromptChats is the linked chats a rewrite reads: the projectPromptChatsMost summarized most recently
+// (Chat.CompressedAt), newest first, the link order breaking ties and chats never summarized going last. A
+// long-running project links dozens of chats over months in the order they were linked; the first eight were where it
+// started, not where it stands (#15308). CompressedAt is written only when a compression succeeds (compress.go), not
+// when messages arrive, so a message coming in while the model works does not reorder the input and void the
+// rewrite (commitProject compares the inputs); a chat summarized meanwhile does, as its new summary would anyway.
+func (e *Engine) projectPromptChats(p *Project) []promptChat {
+	chats := make([]promptChat, 0, len(p.Chats))
+	for _, id := range p.Chats {
+		pc := promptChat{id: id}
+		if c, ok := e.Store.Chat(id); ok {
+			pc.c = c
+		}
+		chats = append(chats, pc)
+	}
+	at := func(pc promptChat) time.Time {
+		if pc.c == nil {
+			return time.Time{}
+		}
+		return pc.c.CompressedAt
+	}
+	slices.SortStableFunc(chats, func(a, b promptChat) int { return at(b).Compare(at(a)) })
+	return chats[:min(len(chats), projectPromptChatsMost)]
+}
 
 type projectFieldRecord struct {
 	Writer       string                `json:"writer"`
@@ -145,6 +185,26 @@ func sameProjectCutoff(a, b kbwire.ProjectCutoff) bool {
 		a.TimelineTruncated == b.TimelineTruncated && slices.EqualFunc(a.Sources, b.Sources, sameProjectEvidenceRef)
 }
 
+// projectMemoryResultID returns the outcome ID encoded by M2's typed decision IDs and M1's legacy inline-decision
+// projection. The legacy todo/agent/turn/item tuple is deliberately not a fallback: parallel items can share it.
+func projectMemoryResultID(decisionID string) string {
+	if base, ok := strings.CutSuffix(decisionID, ":legacy-decision"); ok {
+		return base
+	}
+	if i := strings.LastIndex(decisionID, "/decision/"); i >= 0 {
+		return decisionID[:i]
+	}
+	return ""
+}
+
+func projectMemoryVerification(r ProjectMemoryRecord) (string, bool) {
+	verification := r.Verification
+	if verification == "" {
+		verification = ProjectMemoryAgentReported
+	}
+	return verification, verification == ProjectMemoryAgentReported
+}
+
 // projectEvidence reads the same bounded input on the read and refresh paths.
 // Pending chat messages are reported separately because they were not in the prompt.
 func (e *Engine) projectEvidence(p *Project, timeline projectTimeline) (projectInput, []kbwire.ProjectEvidenceRef) {
@@ -162,14 +222,15 @@ func (e *Engine) projectEvidence(p *Project, timeline projectTimeline) (projectI
 	if p.Pinned != "" {
 		add(KindProject+"/"+p.Slug+"/meta.json#pinned", "", p.Pinned)
 	}
-	for _, cid := range p.Chats[:min(len(p.Chats), 8)] {
+	for _, linked := range e.projectPromptChats(p) {
+		cid := linked.id
 		sum := e.Store.Summary(KindChat, cid)
 		if r := []rune(sum); len(r) > 1500 {
 			sum = string(r[:1500]) + "…"
 		}
 		ref := KindChat + "/" + cid
 		pc := prompts.KBProjectChat{ID: cid, Summary: sum}
-		if c, ok := e.Store.Chat(cid); ok {
+		if c := linked.c; c != nil {
 			id, _ := canonicalSourceURL(c.SourceURL)
 			if id == "" {
 				id = ref
@@ -195,6 +256,30 @@ func (e *Engine) projectEvidence(p *Project, timeline projectTimeline) (projectI
 	for _, moment := range in.Moments {
 		ref := "moments/posts/" + moment.ID
 		add(ref, ref, moment)
+	}
+	if memory, ok := e.ProjectMemoryForDispatch(p.Slug, projectSummaryOutcomesMost, projectSummaryDecisionsMost, projectSummaryPitfallsMost); ok {
+		in.Memory = &prompts.KBProjectMemory{}
+		results := map[string]string{}
+		for _, r := range memory.Outcomes {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Outcomes = append(in.Memory.Outcomes, prompts.KBProjectMemoryOutcome{ID: r.ID, Text: r.Conclusion,
+				Links: r.Links, When: r.RecordedAt, Verification: verification, Unaccepted: unaccepted})
+			results[r.ID] = r.Conclusion
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
+		for _, r := range memory.Decisions {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Decisions = append(in.Memory.Decisions, prompts.KBProjectMemoryDecision{ID: r.ID, Question: r.Question,
+				Choice: r.Decision, Reason: r.Reason, Result: results[projectMemoryResultID(r.ID)], When: r.RecordedAt,
+				Verification: verification, Unaccepted: unaccepted})
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
+		for _, r := range memory.Pitfalls {
+			verification, unaccepted := projectMemoryVerification(r)
+			in.Memory.Pitfalls = append(in.Memory.Pitfalls, prompts.KBProjectMemoryPitfall{Text: r.Conclusion,
+				When: r.RecordedAt, Verification: verification, Unaccepted: unaccepted})
+			add(KindProject+"/"+p.Slug+"/memory.jsonl#"+r.ID, r.ID, r)
+		}
 	}
 	return in, pending
 }

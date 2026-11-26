@@ -5,14 +5,15 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
-import { askRow, briefBody, type BriefRow, type FeedItem } from "../../lib/feed";
-import type { TodoAsk } from "../../lib/todos";
+import { briefBody, askRow } from "../../lib/brief-rows";
+import { type BriefRow, type FeedItem } from "../../lib/feed";
+import type { Todo, TodoAsk } from "../../lib/todos";
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/api", async (orig) => ({ ...(await orig<typeof import("../../lib/api")>()), api }));
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast }));
-import { FeedLineView } from "./Tasks";
+import { FeedLineView, NeedsYouBody } from "./Tasks";
 import { AcceptRow, meta } from "./Brief";
 import { getState, reset } from "../../lib/store";
 import { loadPages } from "../../lib/lazy-page";
@@ -257,6 +258,21 @@ describe("a brief item", () => {
     expect(host.textContent).not.toContain("直接完成");
   });
 
+  it("preserves non-deployed verification verdicts and Pass action on brief accept rows", async () => {
+    const accept = [
+      { id: "todo_m1", title: "合入待部署", detail: "PR 已合并", verdict: "✅ 做完了：已合未部署，按下面验收", waited_s: 60, asked_at: ASKED },
+      { id: "todo_n1", title: "本地文档更新", detail: "补齐说明", verdict: "✅ 做完了：请验收结果", waited_s: 60, asked_at: ASKED },
+    ];
+    draw(item(body({ accept })));
+    const [merged, neutral] = rows("accept");
+    expect(merged.querySelector("[data-brief-verdict]")?.textContent).toBe("✅ 做完了：已合未部署，按下面验收");
+    expect(merged.textContent).not.toContain("已部署，按下面验收");
+    expect(neutral.querySelector("[data-brief-verdict]")?.textContent).toBe("✅ 做完了：请验收结果");
+    const pass = [...merged.querySelectorAll("button")].find((b) => b.textContent === "通过")!;
+    await act(async () => pass.click());
+    expect(api).toHaveBeenCalledWith("/todos/todo_m1/accept", { method: "POST", json: { asked_at: ASKED } });
+  });
+
   it("offers direct completion in live Pending even without a recommendation", () => {
     drawDecision({ id: "todo_no_recommendation", title: "Synthetic decision", outcome: "decide", waited_s: 60, asked_at: ASKED });
     expect([...rows("accept")[0].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["打开", "直接完成"]);
@@ -407,5 +423,53 @@ describe("a row's meta line", () => {
     // the chat a waiting or later row came from, which Open opens in the app (#12055)
     expect(briefBody(item(body({ waiting: [{ id: "ix2", title: "x", waited_s: 1, machine_id: "box", session_id: "ag1" }] })))!.waiting[0]).toMatchObject({ machine_id: "box", session_id: "ag1" });
     expect(briefBody(item(body({ waiting: [{ id: "ix3", title: "x", waited_s: 1, machine_id: 7, session_id: {} }] })))!.waiting[0]).toEqual({ id: "ix3", title: "x", waited_s: 1 });
+  });
+});
+
+describe("NeedsYouBody open acceptance ask", () => {
+  it("renders the active verification summary and PR in both the live tray and briefing", async () => {
+    const summary = "Both routes have step-free access.";
+    const link = "https://example.com/travel/routes/pull/7";
+    const todo: Todo = {
+      id: "trip", title: "Review the route", created_at: ASKED, updated_at: ASKED,
+      supervision: { supervisor: "main", state: "user_check", reviews: [] },
+      ask: { verdict: "Done: please verify the result", summary, link, asked_at: ASKED },
+    };
+    await import("./TaskDecision");
+    await act(async () => {
+      root.render(<NeedsYouBody item={{ kind: "task", key: "task:trip", todo, status: "needs_you", asks: [], countsOpen: true }} />);
+    });
+    await vi.waitFor(() => expect(host.querySelector("a")?.href).toBe(link));
+    expect(host.textContent).toContain(summary);
+    expect(host.querySelector("a")?.textContent).toBe("PR #7");
+    draw(item(body({ accept: [{ id: todo.id, title: todo.title, detail: summary, evidence_link: link, asked_at: ASKED }] })));
+    expect(host.querySelector('[data-brief-row="accept"] a')?.getAttribute("href")).toBe(link);
+  });
+
+  it("loads AcceptRow lazily through NeedsYouPart with row attributes and Accept action intact", async () => {
+    const todo: Todo = {
+      id: "todo_lazy_ask",
+      title: "验证懒加载验收卡",
+      created_at: ASKED,
+      updated_at: ASKED,
+      ask: { verdict: "✅ 做完了：请验收", asked_at: ASKED },
+    };
+    await import("./TaskDecision");
+    await act(async () => {
+      root.render(<NeedsYouBody item={{ kind: "task", key: "task:todo_lazy_ask", todo, status: "needs_you", asks: [], countsOpen: true }} />);
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await Promise.resolve(); });
+      expect(host.querySelector('[data-brief-row="accept"]')).not.toBeNull();
+    });
+    const wrap = host.querySelector<HTMLElement>('[data-needs-row="task:todo_lazy_ask"]')!;
+    expect(wrap).not.toBeNull();
+    expect(wrap.getAttribute("data-counts-open")).toBe("true");
+    expect(wrap.textContent).toContain("验证懒加载验收卡");
+    expect(wrap.textContent).toContain("✅ 做完了：请验收");
+    const pass = [...wrap.querySelectorAll("button")].find((b) => b.textContent === "通过")!;
+    await act(async () => pass.click());
+    expect(api).toHaveBeenCalledWith("/todos/todo_lazy_ask/accept", { method: "POST", json: { asked_at: ASKED } });
+    expect(wrap.querySelector("[data-brief-accepted=accepted]")?.textContent).toBe("已验收");
   });
 });

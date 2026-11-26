@@ -321,6 +321,8 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 	ctx := context.Background()
 	store := &ledgerDown{DB: taskRecoveryDatabase(t)}
 	s, _, task := newSupervisedServiceOn(t, store)
+	runCardlessManager(t, s)
+	quietDigest(s)
 	holdDigest(s)
 	if _, err := reviewErr(s, task.ID, externalPRParkArgs(externalPRSource)); err != nil {
 		t.Fatal(err)
@@ -336,8 +338,13 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 	if string(old) != string(after) || pendingReviewSignal(s, task.ID) || len(forge.calls) != 1 {
 		t.Fatal("failed ledger write published a receipt/review, or source was not read")
 	}
+	// End the old manager while its ledger is still unavailable. Its timer
+	// must not claim the recovery wake from the next process.
+	stopCardlessManager(s)
 	store.down.Store(false)
-	again, _ := restartedOn(t, store)
+	again, previousHub := restartedOn(t, store)
+	runCardlessManager(t, again)
+	quietDigest(again)
 	holdDigest(again)
 	again.deploy.forge = &externalPRForge{terminal: "merged"}
 	again.sweepPRStatuses(ctx, now.Add(time.Minute))
@@ -346,7 +353,9 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 		externalPRReceipt(t, got)["state"] != "merged" {
 		t.Fatal("reconstruction did not retry and commit the same external source")
 	}
+	stopCardlessManager(again)
 	third, hub := restartedOn(t, store)
+	quietDigest(third)
 	holdDigest(third)
 	if err := third.ensureTodosLoaded(ctx); err != nil {
 		t.Fatal(err)
@@ -374,12 +383,25 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 	// conv2 is only a legacy side-supervisor, not an explicit manual leader: the recovered wake follows universal-main
 	// routing (#5732), without changing the external source's identity or duplicating the receipt.
 	third.signal(signals[0])
+	setSuperviseTimings(third, shortSuperviseTimings)
 	sendPendingPRConflicts(third)
-	hub.mu.Lock()
-	message := sentText(hub.sends)
-	hub.mu.Unlock()
+	receipt := "The bound PR is merged: " + externalPRSource
+	previousHub.mu.Lock()
+	deliveredBeforeRestart := strings.Contains(sentText(previousHub.sends), receipt)
+	previousHub.mu.Unlock()
+	if deliveredBeforeRestart {
+		t.Fatal("the previous manager delivered the receipt reserved for recovery")
+	}
+	// Relay delivery is asynchronous: observe the actual main-conversation message before restarting again.
+	var message string
+	waitFor(t, "the recovered PR receipt to reach main", func() bool {
+		hub.mu.Lock()
+		message = sentText(hub.sends)
+		hub.mu.Unlock()
+		return hub.sentTo("conv1") == 1 && strings.Contains(message, receipt)
+	})
 	if hub.sentTo("conv1") != 1 || hub.sentTo("conv2") != 0 ||
-		!strings.Contains(message, "The bound PR is merged: "+externalPRSource) {
+		!strings.Contains(message, receipt) {
 		t.Fatalf("recovered wake did not reach main with the receipt: %q", message)
 	}
 

@@ -16,9 +16,12 @@ const LAUNCHER_AUTHS: string[] = ['api_key', 'bearer'];
 export struct AdminWorkspacePage {
   @Require @Param model: ClientModel;
   @Param page: string = '';
+  @Param createManagerOnly: boolean = false;
   @Param active: boolean = false;
   @Param refreshRevision: number = 0;
   @Param row: ResourceRow | undefined = undefined;
+  @Param installingManager: string = '';
+  private focusedInstallation: string = '';
   @Event onOpenResource: (row: ResourceRow) => void = (_row: ResourceRow) => {};
   @Event onOpenMachine: (row: ResourceRow) => void = (_row: ResourceRow) => {};
   @Local workspace: AdminWorkspace = new AdminWorkspace();
@@ -44,6 +47,11 @@ export struct AdminWorkspacePage {
     if (!this.activePage) { this.workspace.hide(); return; }
     this.workspace.open(this.model, this.page, true, this.row).then(() => {
       if (revision !== this.routeRevision || !this.activePage) return;
+      if (this.page === 'managers' && this.installingManager && this.focusedInstallation !== this.installingManager &&
+          this.workspace.managers.some((manager: AdminManager) => manager.id === this.installingManager && !!manager.installing)) {
+        this.workspace.selectManager(this.installingManager);
+        this.focusedInstallation = this.installingManager;
+      }
     }).catch(() => undefined);
   }
 
@@ -410,6 +418,20 @@ export struct AdminWorkspacePage {
         }.width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
         .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
+      if (typeof this.workspace.assistantData['recent_task_chats'] === 'boolean') Column({space:6}) {
+        Text(tr('phone_sidebar_recent_heading')).fontSize(Tokens.meta).maxFontScale(Tokens.interfaceScaleFor(Tokens.meta)).fontColor(Colors.secondary)
+        Row({space:Tokens.inset}) {
+          SymbolGlyph($r('sys.symbol.clock')).fontSize('22vp').fontColor([Colors.link])
+          Text(tr('phone_sidebar_show_scheduled')).layoutWeight(1).fontSize(Tokens.body).maxFontScale(Tokens.interfaceScaleFor(Tokens.body))
+            .fontColor(Colors.ink).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis})
+          Toggle({type:ToggleType.Switch,isOn:Wire.bool(this.workspace.assistantData,'recent_task_chats')})
+            .enabled(!this.workspace.saving).accessibilityText(tr('phone_sidebar_show_scheduled')).onChange((on:boolean) => {
+              this.workspace.setRecentTaskChats(this.workspace.capture('/api/v1/assistant'),on).catch(() => undefined);
+            }).id('admin.assistant.recent_task_chats')
+        }.width('100%').constraintSize({minHeight:48}).padding({left:Tokens.inset,right:Tokens.inset}).backgroundColor(Colors.surface).borderRadius(Tokens.inset)
+        Text(tr('phone_sidebar_recent_help')).fontSize(Tokens.caption).maxFontScale(Tokens.interfaceScaleFor(Tokens.caption))
+          .fontColor(Colors.secondary).width('100%').id('admin.assistant.recent_task_chats.help')
+      }.width('100%').alignItems(HorizontalAlign.Start)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
 
@@ -448,6 +470,17 @@ export struct AdminWorkspacePage {
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
         .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
     }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder private createManagerForm() {
+    Column({ space: Tokens.gap }) {
+      this.title(this.createManagerOnly ? 'phone_new_assistant' : 'admin_new_manager')
+      TextInput({ text: this.newManagerName, placeholder: tr('admin_manager_name') })
+        .onChange((value: string) => this.newManagerName = value).id('admin.manager.new_name')
+      Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_create_manager')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_create_manager', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_create_manager')).bindTips(tr('admin_create_manager'))
+        .enabled(this.writeAllowed() && !!this.newManagerName.trim()).onClick(() => this.confirmCreateManager()).id('admin.manager.create')
+    }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
+      .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
   }
 
   @Builder private managersContent() {
@@ -493,14 +526,7 @@ export struct AdminWorkspacePage {
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
         .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
 
-      Column({ space: Tokens.gap }) {
-        this.title('admin_new_manager')
-        TextInput({ text: this.newManagerName, placeholder: tr('admin_manager_name') })
-          .onChange((value: string) => this.newManagerName = value).id('admin.manager.new_name')
-        Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('admin_create_manager')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('admin_create_manager', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('admin_create_manager')).bindTips(tr('admin_create_manager'))
-          .enabled(this.writeAllowed() && !!this.newManagerName.trim()).onClick(() => this.confirmCreateManager()).id('admin.manager.create')
-      }.width('100%').alignItems(HorizontalAlign.Start).padding(Tokens.inset)
-        .backgroundColor($r('sys.color.comp_background_tertiary')).borderRadius(Tokens.inset)
+      this.createManagerForm()
 
       Column({ space: Tokens.gap }) {
         this.title('admin_move_machine')
@@ -774,6 +800,7 @@ export struct AdminWorkspacePage {
         this.feedback()
         if (this.page === 'assistant') this.assistantContent()
         else if (this.page === 'memory') this.memoryContent()
+        else if (this.page === 'managers' && this.createManagerOnly) this.createManagerForm()
         else if (this.page === 'managers') this.managersContent()
         else if (this.page === 'launchers') this.launcherContent()
         else if (this.page === 'engine') this.engineContent()

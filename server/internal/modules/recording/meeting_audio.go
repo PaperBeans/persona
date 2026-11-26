@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
 	"math"
 	"net/http"
 	"strconv"
@@ -18,6 +19,8 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"github.com/nwverse/persona/server/internal/transcribejob"
 )
 
@@ -42,8 +45,8 @@ const (
 // Limits of the audio socket and the gap uploads.
 const (
 	maxAudioFrame = 64 << 10 // a binary frame: whole samples
-	// A text frame: a whole timeline fits, kb.MaxTimelineSpans spans each with up to 4000 bytes of answer and
-	// kb.MaxTimelineRoles role changes. The answers are about 4 MB as UTF-8; JSON may escape them to twice that
+	// A text frame: a whole timeline fits, recordingwire.MaxTimelineSpans spans each with up to 4000 bytes of answer and
+	// recordingwire.MaxTimelineRoles role changes. The answers are about 4 MB as UTF-8; JSON may escape them to twice that
 	// (quotes and backslashes, or a sender that writes \u escapes for non-ASCII text), so the limit takes 8 MB of
 	// text and the JSON around it.
 	maxAudioText    = 8704 << 10
@@ -90,7 +93,7 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 	p := newPhoneSocket(c)
 	defer p.wait()
 	id := r.PathValue("id")
-	aw, err := e.AudioOpen(id)
+	aw, err := writersOf(e).AudioOpen(id)
 	if code := s.audioRefusal(ctx, e, err); code != "" {
 		if aw != nil {
 			_ = aw.Close()
@@ -99,7 +102,7 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer aw.Close()
-	rid, _ := kb.RecordingID(id)
+	rid, _ := recordingwire.RecordingID(id)
 	run := s.hubRunFor(e, rid)
 	if run == nil {
 		p.fail(codeTranscriptionFinal) // its live pass is over
@@ -139,20 +142,20 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 	if !timer.Stop() {
 		return // too late: refused
 	}
-	var tl *kb.Timeline
-	if t, ok := kb.ParseTimeline(start.Timeline); ok {
+	var tl *recordingwire.Timeline
+	if t, ok := recordingwire.ParseTimeline(start.Timeline); ok {
 		tl = &t
 	}
 	from := aw.HeldTo()
-	held, _ := e.AudioHeld(rid)
-	gaps := kb.GapsIn(held, 0, from)
+	held, _ := writersOf(e).AudioHeld(rid)
+	gaps := recordingwire.GapsIn(held, 0, from)
 	if gaps == nil {
 		gaps = [][2]float64{}
 	}
 	run.begin(p, tl, from, gaps) // ready, then the standing problem
 
 	// The audio and the frames, acknowledged about every audioAckEvery.
-	pos := int64(math.Round(from * kb.AudioRate))
+	pos := int64(math.Round(from * recordingwire.AudioRate))
 	var wrote atomic.Bool
 	stopAcks := make(chan struct{})
 	defer close(stopAcks)
@@ -194,9 +197,9 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 			if len(raw) == 0 {
 				continue
 			}
-			at := float64(pos) / kb.AudioRate
+			at := float64(pos) / recordingwire.AudioRate
 			err := aw.Write(at, raw)
-			if err != nil && !errors.Is(err, kb.ErrAudioFull) {
+			if err != nil && !errors.Is(err, recordingwire.ErrAudioFull) {
 				p.fail(audioWriteCode(err))
 				return
 			}
@@ -224,7 +227,7 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 				p.fail(codeBadFrame)
 				return
 			}
-			pos = int64(math.Round(at * kb.AudioRate))
+			pos = int64(math.Round(at * recordingwire.AudioRate))
 		case "role":
 			if hasAt {
 				run.roleFrame(at, f.Attendance)
@@ -235,7 +238,7 @@ func (s *Recordings) audioSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		case "end":
 			if !hasAt {
-				at = float64(pos) / kb.AudioRate
+				at = float64(pos) / recordingwire.AudioRate
 			}
 			ended = true
 			s.audioEnd(e, run, p, aw, rid, at)
@@ -249,8 +252,8 @@ func finiteTime(t float64) bool { return !math.IsNaN(t) && !math.IsInf(t, 0) && 
 
 // audioEnd is the phone's end at recording second at on socket p: the recording's end is stored, the audio
 // acknowledged up to it, the job's last sentences sent as lines (within audioEndWait), then the socket closed 1000.
-func (s *Recordings) audioEnd(e *kb.Engine, run *hubRun, p *phoneSocket, aw *kb.AudioWriter, id string, at float64) {
-	if _, err := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+func (s *Recordings) audioEnd(e *kb.Engine, run *hubRun, p *phoneSocket, aw *writers.AudioWriter, id string, at float64) {
+	if _, err := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 		t.End = at
 		return nil
 	}); err != nil {
@@ -315,19 +318,19 @@ func (r *hubRun) finishLive(p *phoneSocket, end float64) {
 func (s *Recordings) audioRefusal(ctx context.Context, e *kb.Engine, err error) string {
 	writable := s.meetingWritable(ctx, e)
 	switch {
-	case errors.Is(err, kb.ErrRecordingDeleted):
+	case errors.Is(err, recordingwire.ErrRecordingDeleted):
 		return codeRecordingDeleted
-	case errors.Is(err, kb.ErrNotFound):
+	case errors.Is(err, kbwire.ErrNotFound):
 		return codeRecordingNotFound
-	case !writable, errors.Is(err, kb.ErrReadOnly):
+	case !writable, errors.Is(err, kbwire.ErrReadOnly):
 		return assistantwire.CodeKBReadOnly
 	case err == nil:
 		return ""
-	case errors.Is(err, kb.ErrNotHub):
+	case errors.Is(err, recordingwire.ErrNotHub):
 		return codeNotHub
-	case errors.Is(err, kb.ErrTranscriptExpired):
+	case errors.Is(err, recordingwire.ErrTranscriptExpired):
 		return codeTranscriptExpired
-	case errors.Is(err, kb.ErrTranscriptionFinal):
+	case errors.Is(err, recordingwire.ErrTranscriptionFinal):
 		return codeTranscriptionFinal
 	}
 	s.logf("audio socket: %v", err)
@@ -337,19 +340,19 @@ func (s *Recordings) audioRefusal(ctx context.Context, e *kb.Engine, err error) 
 // audioWriteCode is the code of the fatal error for a write of the socket's audio that failed with err.
 func audioWriteCode(err error) string {
 	switch {
-	case errors.Is(err, kb.ErrRecordingDeleted), errors.Is(err, kb.ErrNotFound):
+	case errors.Is(err, recordingwire.ErrRecordingDeleted), errors.Is(err, kbwire.ErrNotFound):
 		return codeRecordingDeleted
-	case errors.Is(err, kb.ErrReadOnly):
+	case errors.Is(err, kbwire.ErrReadOnly):
 		return assistantwire.CodeKBReadOnly
-	case errors.Is(err, kb.ErrTranscriptExpired):
+	case errors.Is(err, recordingwire.ErrTranscriptExpired):
 		return codeTranscriptExpired
-	case errors.Is(err, kb.ErrTranscriptionFinal):
+	case errors.Is(err, recordingwire.ErrTranscriptionFinal):
 		return codeTranscriptionFinal
-	case errors.Is(err, kb.ErrAudioFull):
+	case errors.Is(err, recordingwire.ErrAudioFull):
 		return codeAudioFull
-	case errors.Is(err, kb.ErrBadAudio):
+	case errors.Is(err, recordingwire.ErrBadAudio):
 		return codeBadFrame
-	case errors.Is(err, kb.ErrNotHub):
+	case errors.Is(err, recordingwire.ErrNotHub):
 		return codeNotHub
 	}
 	return codeHubFailed
@@ -510,12 +513,12 @@ func (s *Recordings) audioPut(w http.ResponseWriter, r *http.Request) {
 		apierr.WriteCode(w, http.StatusForbidden, assistantwire.CodeKBReadOnly, i18n.Err("assistant-kb_routes.read_only"))
 		return
 	}
-	gaps, err := e.AudioPut(id, at, raw)
+	gaps, err := writersOf(e).AudioPut(id, at, raw)
 	if gaps == nil {
 		gaps = [][2]float64{}
 	}
 	switch {
-	case errors.Is(err, kb.ErrAudioFull):
+	case errors.Is(err, recordingwire.ErrAudioFull):
 		body := apierr.LocalizedBody(http.StatusRequestEntityTooLarge, codeAudioFull, i18n.Err("assistant-meeting.audio_full"), i18n.OfWriter(w))
 		body["gaps"] = gaps
 		apierr.WriteBody(w, http.StatusRequestEntityTooLarge, body)

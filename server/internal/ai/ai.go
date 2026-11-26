@@ -121,9 +121,15 @@ func sameOrigin(a, b *url.URL) bool {
 	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
 }
 
-// NewRun is a client whose requests run answers instead of an HTTP API: no gate, no key (a launcher's CLI on a
-// computer, cfg.RunLauncher).
+// NewRun sends requests through a launcher callback. Each configured launcher shares a gate
+// with other clients running the same model on the same computer.
 func NewRun(cfg Config, run func(context.Context, Request) (Reply, error)) *Client {
+	if cfg.RunLauncher != "" && run != nil {
+		g := gateForRun(cfg)
+		return &Client{cfg: cfg, run: func(ctx context.Context, r Request) (Reply, error) {
+			return g.run(ctx, r, run)
+		}}
+	}
 	return &Client{cfg: cfg, run: run}
 }
 
@@ -629,6 +635,10 @@ func messagesThinkingDisabledUnsupported(model string) bool {
 	return false
 }
 
+// DisabledThinking is the Messages API's thinking object that turns thinking off. It is built here, with the rest of
+// the providers' request formats, so callers that force it (the model probe) send the same bytes.
+func DisabledThinking() map[string]any { return map[string]any{"type": "disabled"} }
+
 // ApplyReasoningEffort keeps connection probes and runtime calls on the same wire format.
 // False means this protocol cannot express the requested effort; Chat and Responses validate model-specific levels upstream.
 func ApplyReasoningEffort(body map[string]any, api, model, effort string) bool {
@@ -657,7 +667,7 @@ func ApplyReasoningEffort(body map[string]any, api, model, effort string) bool {
 			case messagesThinkingDisabledUnsupported(model):
 				body["output_config"] = map[string]any{"effort": "low"}
 			default:
-				body["thinking"] = map[string]any{"type": "disabled"}
+				body["thinking"] = DisabledThinking()
 			}
 		case "low", "medium", "high", "xhigh", "max":
 			body["output_config"] = map[string]any{"effort": effort}
@@ -839,17 +849,17 @@ func (c *Client) JSONMax(ctx context.Context, system, user string, maxTokens int
 }
 
 // ErrNoObject: the reply holds no JSON object at all.
-var ErrNoObject = errors.New("ai: no JSON object in reply")
+var ErrNoObject = aiwire.ErrNoObject
 
 // ErrUnterminated: the reply's JSON object never closes (and the reply was not cut off at max_tokens).
-var ErrUnterminated = errors.New("ai: unterminated JSON object in reply")
+var ErrUnterminated = aiwire.ErrUnterminated
 
 // ErrTruncated: the reply stopped at max_tokens before the answer was complete, even with the room doubled.
-var ErrTruncated = errors.New("ai: reply cut off at max_tokens")
+var ErrTruncated = aiwire.ErrTruncated
 
 // ErrRefused: the model declined the request (the Messages API's stop_reason "refusal", e.g. a safety classifier).
 // The same input is declined again, so sending it as is once more only spends a call.
-var ErrRefused = errors.New("ai: the model declined to answer")
+var ErrRefused = aiwire.ErrRefused
 
 // RefusalError is ErrRefused with what the upstream said: StopReason is "refusal" (the Messages API's stop_reason, a
 // Responses API refusal part or a Chat Completions refusal delta) or "content_filter" (an incomplete response's reason

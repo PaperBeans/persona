@@ -1,6 +1,7 @@
 // Package modapi is the module contract of Persona Core (docs/architecture/core-and-modules.md): what a built-in
 // feature module declares about itself (Info, the manifest of schema/module.schema.json), what it is (Module), and the
-// one way it reaches the core (Host). It holds types, constants and the list of client-only module ids, imports nothing but the standard library,
+// one way it reaches the core (Host). It holds types, constants and the list of client-only module ids, imports nothing but the standard library and the
+// contract's ID types (internal/wireids),
 // and is a contract package (internal/archguard/testdata/contracts.txt): the core (internal/assistant/kernel serves
 // Host) and the modules (internal/modules/<id>) both import it, never each other.
 package modapi
@@ -79,7 +80,8 @@ type Module interface {
 }
 
 // Host is everything a module may use of the core. It grows one method per slot as the server learns to serve the
-// slot (docs/architecture/core-and-modules.md "Slots"); a module never reaches the core any other way.
+// slot (docs/architecture/core-and-modules.md "Slots"), and narrow read/write ports for the ledgers a module acts on;
+// a module never reaches the core any other way.
 type Host interface {
 	// Logf writes to the manager's log, prefixed with the module's id.
 	Logf(format string, args ...any)
@@ -89,24 +91,28 @@ type Host interface {
 	AddScheduleFacts(ScheduleFacts) error
 	// AddHubRoute serves one declared "METHOD /api/v1/…" route while the module is loaded.
 	AddHubRoute(pattern string, handler http.HandlerFunc) error
-	// AddMCPTool serves one declared assistant tool while the module is loaded.
-	AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error
+	// AddMCPTool serves one declared assistant tool (Info.MCPTools names it) while the module is loaded.
+	// The tool is built with Tool (typed arguments, decoded strictly) or as an MCPTool value (tool.go).
+	AddMCPTool(MCPTool) error
 	// AddBackgroundJob runs one declared loop under the Service Run context while the module is loaded.
 	AddBackgroundJob(name string, run func(context.Context) error) error
+
+	// Narrow core ports a module uses at run time (each may be nil in registration-only tests).
+	Tasks() TaskPort
+	Todos() TodoPort
+	Inbox() InboxPort
+	Later() LaterPort
+	Schedule() SchedulePort
+	Feed() FeedPort
+	Delivery() DeliveryPort
+	DayRecap() DayRecapPort
+	Prompts() PromptPort
 }
 
 // BackgroundJob is a module-owned loop. Run inherits Service.Run's cancellation; an off module never starts it.
 type BackgroundJob struct {
 	Name string
 	Run  func(context.Context) error
-}
-
-// MCPTool is a module's assistant tool definition and handler. Run receives the calling machine, conversation and JSON arguments.
-type MCPTool struct {
-	Name        string
-	Description string
-	InputSchema json.RawMessage
-	Run         func(context.Context, string, string, json.RawMessage) (string, error)
 }
 
 // Setting is a module's value in persona_settings. The core keeps the stored value (also while the module is off,
@@ -124,13 +130,17 @@ type Setting struct {
 }
 
 // ScheduleFacts is a module's part in the facts a scheduled routine with facts on opens with (the briefing). The core
-// gathers the ledgers it owns (to-dos, cards, agents, queues); the module decides when stopped work counts as waiting
-// and how much of it is shown. Without it, such a routine opens with no facts.
+// owns the ledgers (to-dos, cards, agents, queues, schedule); the module gathers the briefing snapshot, builds its feed
+// item, manages per-run retention and model-failure fallbacks, and decides when stopped work counts as waiting. Without
+// it, such a routine opens with no facts.
 type ScheduleFacts struct {
 	// Setting is the key of the module's Setting the rules read ("" for none).
 	Setting string
 	// Waits are the wait rules for the setting's stored value (nil: never set).
 	Waits func(stored json.RawMessage) WaitRules
+	// Runner owns the briefing's fact gathering, feed item, fallback and schedule lifecycle hooks (optional for
+	// wait-only test modules).
+	Runner ScheduleFactsRunner
 }
 
 // WaitRules say when stopped work is waiting and how many rows a direction shows.
@@ -163,5 +173,5 @@ type WaitRow struct {
 // hub. An id leaves this list in the PR that gives the module a server half with its own feature
 // (internal/modules/all checks that no built-in module is listed).
 func ClientModules() []string {
-	return []string{"glasses", "health", "knowledge-ui"}
+	return []string{"glasses"}
 }

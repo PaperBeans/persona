@@ -1140,10 +1140,10 @@ func (h *Hub) sessionListHint(before, revision string) listHint {
 	return hint
 }
 
-// send queues the hint for c: with since and changed when c asked for them in its URL and is not an extension's token
-// (which never sees a space conversation, and so must not see its id change either).
+// send queues the hint for c: with since and changed when c asked for them in its URL and is not restricted from
+// space conversations (which must not see a space conversation's id change either).
 func (hint listHint) send(c *client) {
-	if hint.detailed != nil && c.urlFeatures[featureSessionsListChanges] && c.role != roleExtension {
+	if hint.detailed != nil && c.urlFeatures[featureSessionsListChanges] && c.role != roleExtension && c.role != roleReadOnly && c.role != roleScoped {
 		c.queue(hint.detailed)
 		return
 	}

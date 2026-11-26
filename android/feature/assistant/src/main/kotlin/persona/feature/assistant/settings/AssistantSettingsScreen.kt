@@ -20,6 +20,7 @@ import persona.core.contracts.Machine
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantConfig
 import persona.core.contracts.api.AssistantManagement
+import persona.core.contracts.api.AssistantPagesFeature
 import persona.core.contracts.api.AssistantRepository
 import persona.core.contracts.api.BackgroundSupervisor
 import persona.core.contracts.api.HubManagers
@@ -180,6 +181,8 @@ private fun AssistantSettingsDetails(
             foldBackground = { scope.launch { controller.setMainBackgroundFolded(it) } },
             recentTaskChats = { scope.launch { controller.setRecentTaskChats(it) } },
             nextSuggestions = { scope.launch { controller.setNextSuggestions(it) } },
+            dashboards = { scope.launch { controller.setDashboards(it) } },
+            showDashboards = dashboardsShown(LocalHubFeatures.current, owner, LocalManagerRoster.current?.defaultManagerId),
             superviseOwn = { scope.launch { controller.setMainSupervisesOwnTasks(it) } },
             closeEndedTerminals = { scope.launch { controller.setCloseEndedTerminals(it) } },
             ownerApproval = { scope.launch { controller.setOwnerReplyApproval(it) } },
@@ -240,6 +243,13 @@ private fun AssistantSettingsDetails(
     }
 }
 
+/**
+ * Whether Settings › Assistant shows the Dashboards switch (#15017): the hub says `assistant_pages`, which only its default
+ * manager announces, and the page is that assistant's ([defaultManager]; a hub without a roster has only the one).
+ */
+internal fun dashboardsShown(features: Set<String>, owner: String, defaultManager: String?): Boolean =
+    AssistantPagesFeature in features && owner == (defaultManager ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER)
+
 @Composable
 internal fun Caption(text: String) {
     Text(text, Modifier.padding(top = Tokens.Space.s, start = Tokens.Space.xs, end = Tokens.Space.xs),
@@ -281,6 +291,9 @@ private fun SettingsHome(
     foldBackground: (Boolean) -> Unit = {},
     recentTaskChats: (Boolean) -> Unit = {},
     nextSuggestions: (Boolean) -> Unit = {},
+    dashboards: (Boolean) -> Unit = {},
+    /** The hub says `assistant_pages` and this page is the default assistant's (#15017): the Dashboards switch shows. */
+    showDashboards: Boolean = false,
     superviseOwn: (Boolean) -> Unit = {},
     closeEndedTerminals: (Boolean) -> Unit = {},
     ownerApproval: (Boolean) -> Unit = {},
@@ -443,6 +456,16 @@ private fun SettingsHome(
                         leadingIcon = PersonaIcons.ai, enabled = !state.busy) },
                 ))
                 item("next-suggestions-caption") { Caption(stringResource(R.string.assistant_settings_next_suggestions_caption)) }
+            }
+
+            // #15017: Dashboards, off by default (absent is off); only on a hub that says assistant_pages, for its default assistant.
+            if (showDashboards) {
+                item("dashboards") { JSectionHeader(stringResource(R.string.assistant_settings_dashboards_header)) }
+                rows("dashboards", listOf(
+                    { JSwitchRow(stringResource(R.string.assistant_settings_dashboards), config.dashboards ?: false, dashboards,
+                        leadingIcon = PersonaIcons.pluginChart, enabled = !state.busy) },
+                ))
+                item("dashboards-caption") { Caption(stringResource(R.string.assistant_settings_dashboards_caption)) }
             }
 
             // #4927 / #5084: the background supervisor's off switch and its model, shown only by a hub that has it.

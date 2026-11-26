@@ -8,9 +8,7 @@
   "details": "詳細",
   "memory": "メモリ",
   "load": "負荷",
-  "disk": "ディスク",
   "cores_other": "{count}コア",
-  "per_core": "コアあたり {value}",
   "processes_memory": "メモリを多く使っているプログラム",
   "processes_cpu": "CPU を多く使っているプログラム",
   "processes_loading": "このコンピュータで何がリソースを使っているか確認しています…",
@@ -40,7 +38,6 @@
   "stop_failed_item": "「{title}」を止められませんでした：{error}",
   "handoff": "ほかのコンピュータに引き継ぐ",
   "volume_used": "{used} / {total} · {percent}",
-  "disk_free": "空き {size}",
   "disk_loading": "ディスクを何が使っているか確認しています…",
   "folders_title": "ホームフォルダ内の大きいフォルダ",
   "folders_none": "大きいフォルダは見つかりませんでした。",
@@ -156,5 +153,8 @@
   "handoff_confirm_body_other": "{source} の作業 {count} 件を {target} に引き継ぎます：",
   "handoff_confirm_note": "Persona がメインチャットで対応して結果を知らせます。{source} の Agent は新しい Agent が始まってから止めます。",
   "handoff_confirm": "Persona に送る",
-  "mismatch_resolved": "このコンピュータの Persona は hub と同じデプロイになりました。"
+  "mismatch_resolved": "このコンピュータの Persona は hub と同じデプロイになりました。",
+  "mismatch_hosted_managers": "再デプロイすると共有の personad プログラムが更新され、同居するアシスタント（{names}）はアイドル時に自動で再起動します。",
+  "deploy_done_pending_restart": "同居するアシスタント（{names}）は処理中のため、アイドル状態になり次第、自動で再起動して新しいビルドに切り替わります。",
+  "redeploy_confirm_managers": "同居するアシスタント（{names}）はこのコンピュータの personad を共有しており、更新後アイドル時に自動で再起動します。"
 }

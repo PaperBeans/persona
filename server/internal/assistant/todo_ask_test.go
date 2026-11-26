@@ -93,6 +93,45 @@ func TestTodoListCarriesTheDecisionWaiting(t *testing.T) {
 	}
 }
 
+func TestTodoGetReportsTheCurrentPendingDecision(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "The rollout options are ready.")
+	get := func() string {
+		t.Helper()
+		args, _ := json.Marshal(map[string]string{"id": todo.ID})
+		got, err := s.runTool(t.Context(), "server", "conv1", "todo_get", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	const pending = "pending user decision (needs_user"
+	if got := get(); strings.Contains(got, pending) {
+		t.Fatalf("pending decision before task_review: %s", got)
+	}
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict": "needs_user", "reason": "How should the release proceed?", "recommend": "Try a staged rollout",
+		"options": []DecisionOption{{Label: "Try a staged rollout", LeadsTo: "Check a small group first"}, {Label: "Wait for verification", LeadsTo: "Keep the current release"}},
+	})
+	ask := listedAsk(t, s, todo.ID)
+	at := ask["asked_at"].(string)
+	got := get()
+	for _, want := range []string{pending, at, "How should the release proceed?", "recommended: Try a staged rollout", "Wait for verification: Keep the current release"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("todo_get missing %q: %s", want, got)
+		}
+	}
+	rec := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]string{"asked_at": at, "option": "Wait for verification"})
+	s.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/todos/"+todo.ID+"/accept", strings.NewReader(string(body))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("choose the alternate option: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := get(); strings.Contains(got, pending) {
+		t.Fatalf("still pending after the answer: %s", got)
+	}
+}
+
 // A conclusion that only tells (done, cannot be done) is an ask too, without a recommendation; the to-dos nobody waits on
 // have none.
 func TestTodoListCarriesAConclusionWithoutRecommendation(t *testing.T) {
@@ -635,5 +674,104 @@ func TestTodoFixturesListTheManagersRisk(t *testing.T) {
 		if checked[name] == 0 {
 			t.Errorf("%s: no listed ask was checked", name)
 		}
+	}
+}
+
+// GET /api/v1/todos exposes ask.link for valid http(s) evidence links (PRs, MRs, docs, sessions), while omitting
+// invalid schemes and redundant self-links to the to-do's own /todos/<id> page (#14659).
+func TestTodoListExposesValidAskLinkAndFiltersSelfAndUnsafeLinks(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "Ready for MR review.")
+	const mrURL = "https://gitlab.example.com/team/app/-/merge_requests/1468"
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":   "needs_user",
+		"reason":    "Approve assigning reviewers on MR !1468?",
+		"recommend": "Assign reviewers",
+		"link":      mrURL,
+	})
+	ask := listedAsk(t, s, todo.ID)
+	if ask == nil || ask["link"] != mrURL {
+		t.Fatalf("ask.link = %v, want %q", ask["link"], mrURL)
+	}
+
+	// Self-link to the to-do's own page and invalid/unsafe schemes are omitted from GET /api/v1/todos.
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"self link with webBase", "https://hub.example.com/todos/" + todo.ID, ""},
+		{"self link with trailing slash", "https://hub.example.com/todos/" + todo.ID + "/", ""},
+		{"self link on another host", "https://old.example.com/todos/" + todo.ID, ""},
+		{"other todo link kept", "https://hub.example.com/todos/todo_other", "https://hub.example.com/todos/todo_other"},
+		{"agent session link kept", "https://hub.example.com/s/box/s1", "https://hub.example.com/s/box/s1"},
+		{"github pr kept", "https://github.com/nwverse/persona/pull/14659", "https://github.com/nwverse/persona/pull/14659"},
+		{"javascript scheme rejected", "javascript:alert(1)", ""},
+		{"file scheme rejected", "file:///etc/passwd", ""},
+		{"bare scheme rejected", "https://", ""},
+		{"plain text rejected", "not a url", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s.accept.mu.Lock()
+			s.accept.asks[todo.ID].Link = tc.raw
+			s.accept.mu.Unlock()
+			gotAsk := listedAsk(t, s, todo.ID)
+			got, present := gotAsk["link"]
+			if tc.want == "" {
+				if present {
+					t.Fatalf("link %q should be omitted, got %v", tc.raw, got)
+				}
+			} else if got != tc.want {
+				t.Fatalf("link %q: got %v, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUserCheckSummaryAndEvidenceOnListAndBrief(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "The itinerary is ready.")
+	const summary = "Both train connections leave time for transfers."
+	const link = "https://docs.example.com/itinerary"
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict": "accepted", "user_check": true, "reason": "  " + summary + "  ",
+		"note": "Reviewed the final itinerary.", "link": link, "checks": completeReviewChecks(todoNow(s, todo.ID)),
+	})
+	ask := listedAsk(t, s, todo.ID)
+	if ask["summary"] != summary || ask["link"] != link || ask["outcome"] != nil {
+		t.Fatalf("verification ask = %+v", ask)
+	}
+	needsBriefingModule(t)
+	rows := s.briefBodyOf(s.briefFactsAt(t.Context(), time.Now(), ""), "Review").Accept
+	if len(rows) != 1 || rows[0].Detail != summary || rows[0].EvidenceLink != link || rows[0].Verdict != ask["verdict"] {
+		t.Fatalf("briefing acceptance = %+v", rows)
+	}
+}
+
+func TestVerificationDetailsFromOlderAsks(t *testing.T) {
+	const web = "https://hub.example.com"
+	const verdict = "Done: please verify the result"
+	w := awaitingAccept{todo: "trip", machine: "node", session: "worker",
+		review: &TaskReview{Verdict: reviewAccepted, Note: "  The route is ready. "}}
+	for _, tc := range []struct {
+		reason, link, wantSummary, wantLink string
+	}{
+		{"", web + "/s/node/worker?tab=chat", "The route is ready.", ""},
+		{" Checked both routes. ", web + "/todos/trip", "Checked both routes.", ""},
+		{verdict, "https://example.com/team/trips/pull/7", "", "https://example.com/team/trips/pull/7"},
+	} {
+		w.ask = acceptAsk{Reason: tc.reason, Link: tc.link}
+		if summary, link := w.verificationDetails(web, verdict); summary != tc.wantSummary || link != tc.wantLink {
+			t.Errorf("details = %q, %q; want %q, %q", summary, link, tc.wantSummary, tc.wantLink)
+		}
+	}
+	s, _, todo := acceptedForUserCheck(t)
+	before := listedAsk(t, s, todo.ID)
+	s.accept.mu.Lock()
+	s.accept.asks[todo.ID].Reason = before["verdict"].(string)
+	s.accept.mu.Unlock()
+	ask := listedAsk(t, s, todo.ID)
+	if ask["summary"] != nil || ask["link"] != nil || ask["asked_at"] != before["asked_at"] {
+		t.Errorf("legacy ask with duplicate verdict: %+v", ask)
 	}
 }

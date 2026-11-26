@@ -35,6 +35,11 @@ internal class AppNavigator(
     private val leavePlaceRoot: () -> Boolean = { false },
     /** The Inbox was navigated to (a link to it in a chat or from the hub) on this tab: its list opens as on entry (#9053). */
     private val onInboxEntered: (AppTab) -> Unit = {},
+    /**
+     * Merged sidebar layout (#13165): an Agent opened from inside a Persona page stays on that root's stack
+     * instead of moving to the Agents tab, so picking another sidebar item and returning restores it.
+     */
+    private val keepPersonaAgents: () -> Boolean = { false },
 ) : Navigator {
     /**
      * Pages [navigate] pushed onto another tab's stack, and the tab each was opened from: back from such a page returns
@@ -118,7 +123,7 @@ internal class AppNavigator(
         openedFrom.remove(target)
         replaceBackStack(stack, listOf(AgentsRoute, target))
         if (target is ChatRoute) {
-            stacks.getValue(AppTab.Persona).removeAll { it is ChatRoute && sameConversation(it, target) }
+            stacks.getValue(AppTab.Persona).removeAll { page -> page.chat()?.let { sameConversation(it, target) } == true }
         }
         onSelectTab(AppTab.Agents)
     }
@@ -167,10 +172,14 @@ internal class AppNavigator(
         // A kindless conversation reopened from the other tab instead restores its existing page and saved UI state.
         val fromInbox = chat != null && chat.source is RouteSource.InboxItem &&
             (chat.kind == ConversationKind.Assistant || chatTab(chat) == AppTab.Persona)
+        val keepAgentOnPersona = chat != null && keepPersonaAgents() && selectedTab() == AppTab.Persona &&
+            chat.machineId.isNotBlank() && chat.sessionId.isNotBlank() &&
+            (route !is InteractionRoute || route.requestId.isNotBlank())
         val resolved = when {
             chat == null -> null
-            chat.kind == null && existingTab != null && existingTab != selectedTab() -> ResolvedRoute(existingTab, route)
             fromInbox -> null
+            keepAgentOnPersona -> ResolvedRoute(AppTab.Persona, route)
+            chat.kind == null && existingTab != null && existingTab != selectedTab() -> ResolvedRoute(existingTab, route)
             chat.kind != null -> Router().parse(RouteInput.Internal(route))
             // Keep the kindless key itself: normalizing it would replace the existing page and lose its saved UI state.
             else -> {
@@ -273,6 +282,7 @@ internal class AppNavigator(
                     return@chatEntry
                 }
                 if (owner != tab) {
+                    if (tab == AppTab.Persona && owner == AppTab.Agents && keepPersonaAgents()) return@chatEntry
                     stack.removeAll { it == chat }
                     val source = inboxSource(chat)
                     // At regular width the item is a root switch, then the chat sits on that host.

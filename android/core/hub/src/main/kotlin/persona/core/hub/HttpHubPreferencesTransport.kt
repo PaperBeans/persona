@@ -40,6 +40,8 @@ class HttpHubPreferencesTransport(
     override suspend fun read() = JsonCodec.decodeFromString<AgentsDisplaySettings>(request("GET", displayPath))
     override suspend fun migrateHidden() = JsonCodec.decodeFromString<AgentsDisplaySettings>(
         request("PUT", displayPath, """{"show_botmux":false,"only_if_unset":true}"""))
+    override suspend fun setUseHerdrTabName(enabled: Boolean) = JsonCodec.decodeFromString<AgentsDisplaySettings>(
+        request("PUT", displayPath, """{"use_herdr_tab_name":$enabled}"""))
 
     private companion object { val displayPath = listOf("agents", "display-settings") }
 }

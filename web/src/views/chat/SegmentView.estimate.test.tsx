@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { segments, type Segment } from "../../lib/turns";
 import type { Item } from "../../lib/types";
-import { ENGINE_DIVIDER_HEIGHT, MODEL_DIVIDER_HEIGHT, SegmentView, segmentHeight } from "./SegmentView";
+import { ENGINE_DIVIDER_HEIGHT, MODEL_DIVIDER_HEIGHT, SegmentView, segmentHeight, TOOL_VIEW_HEIGHT } from "./SegmentView";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,5 +70,20 @@ describe("an exchange's guessed height", () => {
     expect(estimate() - without).toBeLessThanOrEqual(57);
     draw(plain);
     expect(estimate()).toBe(without);
+  });
+
+  it("estimates a promoted relay's collapsed source row, not its hidden original text", () => {
+    const relayed: Item = { ...user, text: "Synthetic relay transport details\n".repeat(8).trim(), source: { kind: "conversation", title: "Synthetic source" } };
+    const ordinary = segments([relayed])[0].user;
+    const promoted = { ...ordinary!, promotedRelay: true };
+    expect(segmentHeight(promoted, [])).toBeLessThan(segmentHeight(ordinary, []));
+    expect(segmentHeight(promoted, [])).toBe(72);
+  });
+
+  it("includes compact tool_views height and gap in segmentHeight estimate", () => {
+    const nodes = [{ kind: "group", id: "g", children: [] }] as never[];
+    const msg = segments([user])[0].user;
+    expect(segmentHeight(msg, nodes, false, false, 1) - segmentHeight(msg, nodes, false, false, 0)).toBe(TOOL_VIEW_HEIGHT + 14);
+    expect(segmentHeight(msg, nodes, false, false, 2) - segmentHeight(msg, nodes, false, false, 1)).toBe(TOOL_VIEW_HEIGHT + 8);
   });
 });

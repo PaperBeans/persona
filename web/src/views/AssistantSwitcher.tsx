@@ -3,7 +3,7 @@
 // assistant head while the roster loads or a temporary read fails. A hub without a roster keeps the earlier product
 // row (AppMark, Persona and the hub's connection status) and its original menu.
 // The current pick is kept per hub (lib/manager-choice.ts), including while its roster loads after a reload.
-import { memo, useId, useState } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { useAssistantIdentity } from "../lib/assistant-identity";
 import { BREATHING, connStatus, phaseTone, type ConnPhase } from "../lib/connection";
@@ -13,6 +13,7 @@ import { loadRoster, managerError, managerOf, managerOrder, multiManager, renewC
 import { refreshReadiness } from "../lib/readiness";
 import { navigate, type Route } from "../lib/router";
 import { routeAfterSwitch } from "../lib/persona-nav";
+import { sameValue } from "../lib/stable-lines";
 import { AppMark } from "../ui/AppMark";
 import { AssistantAvatar } from "../ui/AssistantAvatar";
 import { PersonaAvatar } from "./assistant/Persona";
@@ -77,13 +78,28 @@ const DefaultAssistantFace = memo(function DefaultAssistantFace({ tone, waiting 
 });
 
 // Waiting counts keep their separate gate: only several installed assistants subscribe to sessions and cards. One
-// assistant still shows identity and the roster without subscribing to those counts.
+// assistant still shows identity and the roster without subscribing to those counts, and SwitcherRow stays mounted
+// across roster arrival so the avatar and menu never flash or reset.
 export const AssistantSwitcher = memo(function AssistantSwitcher(props: SwitcherProps) {
-  return multiManager(useRoster()) ? <CountedSwitcher {...props} /> : <SwitcherRow {...props} badges={NO_BADGES} />;
+  const several = multiManager(useRoster());
+  const [badges, setBadges] = useState<Record<string, number>>(NO_BADGES);
+  return (
+    <>
+      {several && <ManagerBadgesCollector onChange={setBadges} />}
+      <SwitcherRow {...props} badges={several ? badges : NO_BADGES} />
+    </>
+  );
 });
 
-function CountedSwitcher(props: SwitcherProps) {
-  return <SwitcherRow {...props} badges={useManagerBadges()} />;
+export function ManagerBadgesCollector({ onChange }: { onChange: (badges: Record<string, number>) => void }) {
+  const badges = useManagerBadges();
+  const published = useRef<Record<string, number> | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (published.current && sameValue(published.current, badges)) return;
+    published.current = badges;
+    onChange(badges);
+  }, [badges, onChange]);
+  return null;
 }
 
 /** The roster's rows (each assistant, then New assistant and Manage assistants…) and the dialogs they open: the one list
@@ -203,10 +219,12 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
   ];
 
   const name = me?.name ?? "Persona";
-  const tone = known ? statusLine(known, now).tone : undefined;
+  const tone = known ? statusLine(known, now).tone : me?.tone;
+  const assistantLine = known ? switcherLine(known, now) : me?.line;
   // The default assistant is the Persona of the main conversation: show its chosen look's face (so changing the look
-  // changes this face too), not the first-letter disc every other assistant keeps (#6401).
-  const isDefaultAssistant = !!me && me.id === roster?.default;
+  // changes this face too), not the first-letter disc every other assistant keeps (#6401). While the roster loads, keep
+  // the remembered default flag so the head does not flash a green first-letter circle before the roster arrives.
+  const isDefaultAssistant = !!me && (roster ? me.id === roster.default : Boolean(me.isDefault));
   return (
     <>
       <button
@@ -232,8 +250,8 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
           <span className="block truncate text-[13px] leading-tight font-medium text-ink">{name}</span>
           <span id={statusId} className="flex items-center gap-1.5 truncate text-[11px] leading-tight text-ink-3">
             {/* the hub out of reach matters more than the assistant's own state: its line and dot take the place */}
-            {known && linked ? (
-              <span className="truncate">{switcherLine(known, now)}</span>
+            {assistantLine && linked ? (
+              <span className="truncate">{assistantLine}</span>
             ) : (
               <>
                 <span aria-hidden data-conn-dot className={cx("size-1.5 shrink-0 rounded-full", phaseTone(phase).color)} style={phaseTone(phase).breathing ? BREATHING : undefined} />
@@ -255,11 +273,14 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
 /** Settings' Switch beside "<name>'s settings": the sidebar's list of assistants (the same rows: switch, New assistant,
  *  Manage assistants…) under a text button. Shown with one assistant too; a hub without a roster has none to show. */
 export function AssistantSwitchButton({ route }: { route: Route }) {
-  return multiManager(useRoster()) ? <CountedSwitchButton route={route} /> : <SwitchButton route={route} badges={NO_BADGES} />;
-}
-
-function CountedSwitchButton({ route }: { route: Route }) {
-  return <SwitchButton route={route} badges={useManagerBadges()} />;
+  const several = multiManager(useRoster());
+  const [badges, setBadges] = useState<Record<string, number>>(NO_BADGES);
+  return (
+    <>
+      {several && <ManagerBadgesCollector onChange={setBadges} />}
+      <SwitchButton route={route} badges={several ? badges : NO_BADGES} />
+    </>
+  );
 }
 
 function SwitchButton({ route, badges }: { route: Route; badges: Record<string, number> }) {

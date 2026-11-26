@@ -17,10 +17,18 @@ export class NavigationContext {
         const data = Wire.parse(param); result.page = Wire.text(data, 'page');
         const target = Wire.text(data, 'target'); if (target) { result.row = NavigationContext.rowFrom(target); result.scoped = !!result.row.id; }
       } else result.page = param;
-    } else if (['session', 'conversation', 'resource', 'tools', 'history', 'inbox', 'todo', 'knowledge', 'file', 'todo_source', 'todo_thread', 'computer', 'extension', 'assistant'].includes(name)) {
+    } else if (['session', 'conversation', 'resource', 'tools', 'history', 'inbox', 'todo', 'knowledge', 'file', 'todo_source', 'todo_thread', 'computer', 'machine_settings', 'extension', 'assistant'].includes(name)) {
       result.row = NavigationContext.rowFrom(param); result.scoped = !!result.row.id;
     }
     return result;
+  }
+  static installingManager(scope: string, id: string): string {
+    return JSON.stringify(Wire.payload(['page','roster_scope','installing_manager'],['managers',scope,id]));
+  }
+  static installingManagerFor(param: string, scope: string): string {
+    if (!param || !param.startsWith('{')) return '';
+    const data = Wire.parse(param);
+    return Wire.text(data,'page') === 'managers' && Wire.text(data,'roster_scope') === scope ? Wire.text(data,'installing_manager') : '';
   }
   static settings(page: string, row?: ResourceRow): string {
     return row ? JSON.stringify(Wire.payload(['page', 'target'], [page, JSON.stringify(row)])) : page;

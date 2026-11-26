@@ -44,7 +44,7 @@ func (e *gatewayQuotaWaitError) Error() string { return e.queue.Reason }
 
 type gatewayQueueStore interface {
 	UnstartedQueuedTodo(context.Context, string, string, time.Time) (bool, error)
-	ClaimUnstartedTaskQueue(context.Context, string, int, string, time.Time, json.RawMessage, json.RawMessage, time.Time) (bool, error)
+	ClaimUnstartedTaskQueue(context.Context, string, int, string, time.Time, json.RawMessage, json.RawMessage, json.RawMessage, time.Time) (bool, error)
 }
 
 type gatewayQueueStateError struct{ cause error }
@@ -58,7 +58,7 @@ func (t PlanTask) claimedGatewayStart() bool {
 }
 
 func (t PlanTask) startWithoutReplay() bool {
-	return t.RequestGate != "" || t.claimedGatewayStart()
+	return t.RequestGate != "" || t.claimedGatewayStart() || t.HandoffID != ""
 }
 
 func (s *Service) gatewayPool(ctx context.Context, launcher string) (GatewayQuotaPool, bool) {
@@ -136,6 +136,7 @@ func (s *Service) persistGatewayWait(ctx context.Context, task PlanTask, wait Ta
 	return s.patchPlanTask(pctx, task.planID, task.planIndex, func(current *PlanTask) {
 		if current.TodoID == task.TodoID && current.Queue == nil {
 			current.Queue = &wait
+			current.Placement = queuedPlacement(task, &wait)
 			current.Error, current.ErrorCode, current.ErrorArgs = "", "", nil
 		}
 	})
@@ -166,6 +167,14 @@ func (s *Service) retryGatewayWait(ctx context.Context, plan *TaskPlan, i int, t
 		if recovery := s.gatewayWaitRecovery(ctx, queue.Gateway, now); !recovery.IsZero() {
 			next := s.gatewayWaiting(ctx, queue.Gateway, queue.QueuedAt, now, recovery, queue.Attempt+1)
 			s.replaceTaskQueue(ctx, task, &next, queueCAS)
+			return
+		}
+	}
+	if s.settings(ctx).todosV2On() {
+		if refs := s.activeTodoBlockerRefs(ctx, task.TodoID); len(refs) > 0 {
+			q := s.blockerWaitQueue(refs)
+			q.Retry = queue.Retry
+			s.replaceTaskQueue(ctx, task, q, queueCAS)
 			return
 		}
 	}

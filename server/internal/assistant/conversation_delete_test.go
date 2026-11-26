@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,11 +116,11 @@ func TestDeletePersonaStorageFailure(t *testing.T) {
 	st := &memStore{vals: map[string][]byte{}}
 	s := newServiceOn(t, f, st)
 	setSettings(t, s, func(v *Settings) { v.MachineID = "server" })
-	st.failPut = errors.New("synthetic storage unavailable")
+	st.setFailPut(errors.New("synthetic storage unavailable"))
 	if err := s.deleteConversation(context.Background(), "server", "work-0000-0000"); err == nil {
 		t.Fatal("failed storage acknowledged")
 	}
-	st.failPut = nil
+	st.setFailPut(nil)
 	if err := s.conversationAvailable(context.Background(), "server", "work-0000-0000"); err != nil {
 		t.Fatalf("failed delete changed memory: %v", err)
 	}
@@ -312,4 +315,243 @@ func TestDeletePersonaRefusesAnotherChatsUnfinishedSupervisor(t *testing.T) {
 	if err := s.conversationAvailable(ctx, "server", "work-0000-0000"); err != nil {
 		t.Fatalf("refusal hid supervisor: %v", err)
 	}
+}
+
+type durableDeletionCountingStore struct {
+	*memStore
+	dmu            sync.Mutex
+	settingReads   atomic.Int64
+	singleReads    atomic.Int64
+	idReads        atomic.Int64
+	onSettingRead  func()
+	onSingleRead   func(machine, session string)
+	failSettingKey error
+}
+
+func newDurableDeletionCountingStore() *durableDeletionCountingStore {
+	return &durableDeletionCountingStore{memStore: &memStore{vals: map[string][]byte{}}}
+}
+
+func (st *durableDeletionCountingStore) Setting(ctx context.Context, key string, v any) (bool, error) {
+	if key == deletedConversationsKey {
+		st.settingReads.Add(1)
+		st.dmu.Lock()
+		hook, fail := st.onSettingRead, st.failSettingKey
+		st.dmu.Unlock()
+		if hook != nil {
+			hook()
+		}
+		if fail != nil {
+			return false, fail
+		}
+	}
+	return st.memStore.Setting(ctx, key, v)
+}
+
+func (st *durableDeletionCountingStore) ledgerLocked(ctx context.Context) map[string]json.RawMessage {
+	rows := map[string]json.RawMessage{}
+	_, _ = st.memStore.Setting(ctx, deletedConversationsKey, &rows)
+	return rows
+}
+
+func (st *durableDeletionCountingStore) PutConversationDeletion(ctx context.Context, machine, session string, row json.RawMessage) error {
+	st.dmu.Lock()
+	defer st.dmu.Unlock()
+	rows := st.ledgerLocked(ctx)
+	rows[runtimeListID(machine, session)] = row
+	return st.memStore.PutSetting(ctx, deletedConversationsKey, rows)
+}
+
+func (st *durableDeletionCountingStore) ConversationDeletion(ctx context.Context, machine, session string) (json.RawMessage, bool, error) {
+	st.singleReads.Add(1)
+	st.dmu.Lock()
+	hook, fail := st.onSingleRead, st.failSettingKey
+	st.dmu.Unlock()
+	if hook != nil {
+		hook(machine, session)
+	}
+	if fail != nil {
+		return nil, false, fail
+	}
+	st.dmu.Lock()
+	defer st.dmu.Unlock()
+	raw, ok := st.ledgerLocked(ctx)[runtimeListID(machine, session)]
+	return raw, ok, nil
+}
+
+func (st *durableDeletionCountingStore) ConversationDeletedID(ctx context.Context, session string) (bool, error) {
+	st.idReads.Add(1)
+	st.dmu.Lock()
+	defer st.dmu.Unlock()
+	for _, raw := range st.ledgerLocked(ctx) {
+		var row deletedConversation
+		if json.Unmarshal(raw, &row) == nil && row.ID == session {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func TestDeletionRowsDurableCachesWithinTTLAndRefreshesAfter(t *testing.T) {
+	ctx := context.Background()
+	st := newDurableDeletionCountingStore()
+	f := healthHub()
+	f.sessions["server"] = append(f.sessions["server"],
+		proto.Session{MachineID: "server", SessionID: "cross-proc-0000", Assistant: true, Status: proto.StatusIdle, Title: "Cross process chat"},
+		proto.Session{MachineID: "server", SessionID: "hidden-seg-0000", Assistant: true, Status: proto.StatusIdle, Title: "Hidden segment"},
+	)
+	s := newServiceOn(t, f, st)
+	setSettings(t, s, func(v *Settings) { v.MachineID, v.Main = "server", "main-0000-0000" })
+
+	var clockMu sync.Mutex
+	now := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	s.deletedConversations.now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		now = now.Add(d)
+		clockMu.Unlock()
+	}
+
+	base := []proto.Session{
+		{MachineID: "server", SessionID: "work-0000-0000", Assistant: true, Status: proto.StatusIdle, Title: "Work"},
+		{MachineID: "server", SessionID: "cross-proc-0000", Assistant: true, Status: proto.StatusIdle, Title: "Cross"},
+		{MachineID: "server", SessionID: "hidden-seg-0000", Assistant: true, Status: proto.StatusIdle, Title: "Hidden"},
+		{MachineID: "server", SessionID: "other-agent-0000", Status: proto.StatusIdle, Title: "Agent"},
+	}
+
+	// Warm the cache and issue 100 high-frequency deletionRows calls inside the TTL window.
+	st.settingReads.Store(0)
+	const calls = 100
+	for i := range calls {
+		if i == 50 {
+			advance(deletedConversationsTTL - time.Millisecond)
+		}
+		list := append([]proto.Session(nil), base...)
+		got := s.deletionRows(ctx, "server", list, true)
+		if len(got) != len(base) {
+			t.Fatalf("call %d: got %d rows, want %d", i, len(got), len(base))
+		}
+	}
+	if reads := st.settingReads.Load(); reads != 1 {
+		t.Fatalf("durable deletionRows performed %d DB reads over %d calls within TTL, want 1 (>95%% reduction)", reads, calls)
+	}
+
+	// Same-process deletion writes through immediately and refreshes the cache TTL.
+	if err := s.deleteConversation(ctx, "server", "work-0000-0000"); err != nil {
+		t.Fatal(err)
+	}
+	readsAfterDelete := st.settingReads.Load()
+	advance(time.Second) // would have expired the initial load, but not the write-through refresh
+	got := s.deletionRows(ctx, "server", append([]proto.Session(nil), base...), true)
+	if st.settingReads.Load() != readsAfterDelete {
+		t.Fatalf("deletionRows after write-through refresh performed extra DB read: got %d, want %d", st.settingReads.Load(), readsAfterDelete)
+	}
+	if !got[0].IsDeleted() || got[0].SessionID != "work-0000-0000" {
+		t.Fatalf("write-through tombstone missing from cached deletionRows: %+v", got[0])
+	}
+
+	// Cross-process write directly to durable store: authoritative single check sees it immediately;
+	// cached deletionRows stays cached until TTL elapses, then reloads and sees both tombstone and hidden segment.
+	crossRaw, _ := json.Marshal(deletedConversation{Machine: "server", ID: "cross-proc-0000", At: now})
+	if err := st.PutConversationDeletion(ctx, "server", "cross-proc-0000", crossRaw); err != nil {
+		t.Fatal(err)
+	}
+	hiddenRaw, _ := json.Marshal(deletedConversation{Hidden: true, Machine: "server", ID: "hidden-seg-0000", At: now})
+	if err := st.PutConversationDeletion(ctx, "server", "hidden-seg-0000", hiddenRaw); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.conversationAvailable(ctx, "server", "cross-proc-0000"); convCode(err) != "conversation_deleted" {
+		t.Fatalf("single-row authoritative check missed cross-process tombstone: %v", err)
+	}
+	withinTTL := s.deletionRows(ctx, "server", append([]proto.Session(nil), base...), true)
+	if st.settingReads.Load() != readsAfterDelete {
+		t.Fatalf("deletionRows reloaded before TTL expired: %d != %d", st.settingReads.Load(), readsAfterDelete)
+	}
+	if withinTTL[1].IsDeleted() {
+		t.Fatalf("expected cached view before TTL expiry, got %+v", withinTTL[1])
+	}
+
+	advance(deletedConversationsTTL)
+	afterTTL := s.deletionRows(ctx, "server", append([]proto.Session(nil), base...), true)
+	if gotReads := st.settingReads.Load(); gotReads != readsAfterDelete+1 {
+		t.Fatalf("deletionRows after TTL expiry read %d times, want %d", gotReads, readsAfterDelete+1)
+	}
+	if len(afterTTL) != 3 {
+		t.Fatalf("expected hidden segment filtered out (3 rows), got %d: %+v", len(afterTTL), afterTTL)
+	}
+	if !afterTTL[0].IsDeleted() || afterTTL[0].SessionID != "work-0000-0000" ||
+		!afterTTL[1].IsDeleted() || afterTTL[1].SessionID != "cross-proc-0000" ||
+		afterTTL[2].IsDeleted() || afterTTL[2].SessionID != "other-agent-0000" {
+		t.Fatalf("unexpected rows after TTL refresh: %+v", afterTTL)
+	}
+
+	// Missing tombstone on complete=true is appended even when omitted from node inventory.
+	missingOnly := s.deletionRows(ctx, "server", nil, true)
+	if len(missingOnly) != 2 || missingOnly[0].SessionID != "cross-proc-0000" || missingOnly[1].SessionID != "work-0000-0000" {
+		t.Fatalf("complete=true missing tombstones: %+v", missingOnly)
+	}
+	if st.settingReads.Load() != readsAfterDelete+1 {
+		t.Fatalf("cached read after refresh hit DB unexpectedly: %d", st.settingReads.Load())
+	}
+}
+
+func BenchmarkDeletionRowsDurable(b *testing.B) {
+	ctx := context.Background()
+	st := newDurableDeletionCountingStore()
+	ledger := map[string]deletedConversation{}
+	at := time.Date(2026, 11, 26, 0, 0, 0, 0, time.UTC)
+	for i := range 20 {
+		m := "box"
+		if i >= 10 {
+			m = "other"
+		}
+		sid := fmt.Sprintf("deleted-%03d", i)
+		ledger[runtimeListID(m, sid)] = deletedConversation{
+			Hidden:  i == 0,
+			Machine: m,
+			ID:      sid,
+			At:      at,
+		}
+	}
+	if err := st.PutSetting(ctx, deletedConversationsKey, ledger); err != nil {
+		b.Fatal(err)
+	}
+	f := newFakeHub()
+	f.devices = []Device{{ID: "box", Home: "/home/u"}}
+	d := newFleetDevs()
+	d.add("box", "Computer")
+	s := New(Options{Hub: f, Devices: d, Store: func() Store { return st }})
+
+	base := make([]proto.Session, 200)
+	for i := range base {
+		sid := fmt.Sprintf("session-%04d", i)
+		if i < 3 {
+			sid = fmt.Sprintf("deleted-%03d", i)
+		}
+		base[i] = proto.Session{
+			MachineID: "box",
+			SessionID: sid,
+			Assistant: i < 10,
+			Status:    proto.StatusIdle,
+			Title:     "Example session",
+		}
+	}
+	work := make([]proto.Session, 0, len(base)+16)
+	work = s.deletionRows(ctx, "box", append(work[:0], base...), true)
+
+	st.settingReads.Store(0)
+	b.ReportAllocs()
+	b.ResetTimer()
+	var ops int64
+	for b.Loop() {
+		ops++
+		work = s.deletionRows(ctx, "box", append(work[:0], base...), true)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(st.settingReads.Load())/float64(ops), "db-reads/op")
 }

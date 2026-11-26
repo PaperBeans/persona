@@ -595,10 +595,10 @@ func TestReadinessDismiss(t *testing.T) {
 		t.Fatalf("after a restart: %+v", r)
 	}
 	// The same result again is not written again.
-	puts := st.puts
+	puts := st.putCount()
 	getReadiness(t, s, "", "")
-	if st.puts != puts {
-		t.Fatalf("written again: %d → %d", puts, st.puts)
+	if after := st.putCount(); after != puts {
+		t.Fatalf("written again: %d → %d", puts, after)
 	}
 	if status, _ := serveJSON(t, s, "POST", "/api/v1/assistant/readiness/dismiss", "", `{"dismissed":false}`); status != 200 {
 		t.Fatal(status)
@@ -932,5 +932,273 @@ func TestReadinessUnknownStatusNotWaitedFor(t *testing.T) {
 	readinessClaudeRetry = time.Hour // the new answer is the one kept
 	waitFor(t, "the new status", func() bool {
 		return readinessStep(t, getReadiness(t, s, "", ""), StepModel).State == StepOK
+	})
+}
+
+func authCalls(f *fakeHub) []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]map[string]any(nil), f.authParams...)
+}
+
+func lastAuthCall(t *testing.T, f *fakeHub) map[string]any {
+	t.Helper()
+	calls := authCalls(f)
+	if len(calls) == 0 {
+		t.Fatal("no claude.auth_status call")
+	}
+	return calls[len(calls)-1]
+}
+
+// profileAuth simulates a node whose private assistant profile and legacy/machine-default profile have independent
+// sign-in states: plain calls (without purpose "assistant") and explicit legacy calls inspect legacySignedIn, while
+// default assistant calls inspect privateSignedIn.
+func profileAuth(privateSignedIn, legacySignedIn bool) func(string, map[string]any) proto.ClaudeAuthStatus {
+	return func(_ string, params map[string]any) proto.ClaudeAuthStatus {
+		signedIn := legacySignedIn
+		if params["purpose"] == "assistant" && params["config_dir"] != assistantConfigDirLegacy {
+			signedIn = privateSignedIn
+		}
+		if signedIn {
+			return proto.ClaudeAuthStatus{State: proto.ClaudeLoggedIn, AuthMethod: "claude.ai"}
+		}
+		return proto.ClaudeAuthStatus{State: proto.ClaudeNotLoggedIn, AuthMethod: "none"}
+	}
+}
+
+// Readiness passes assistant profile context to claude.auth_status using the same wire fields launchers.check sends:
+// purpose "assistant", optional config_dir (omitted for Persona's default private profile), and optional conversation.
+func TestReadinessAuthStatusPassesAssistantContext(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mainID    string
+		configDir string
+	}{
+		{name: "default-private-with-main", mainID: "m1"},
+		{name: "default-private-without-main"},
+		{name: "legacy-with-main", mainID: "m1", configDir: assistantConfigDirLegacy},
+		{name: "legacy-without-main", configDir: assistantConfigDirLegacy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, s, _ := readyMachine(t)
+			setSettings(t, s, func(v *Settings) { v.Main = tc.mainID })
+			if tc.configDir != "" {
+				setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", ConfigDir: tc.configDir})
+			}
+			f.mu.Lock()
+			f.authBy = func(_ string, _ map[string]any) proto.ClaudeAuthStatus {
+				return proto.ClaudeAuthStatus{State: proto.ClaudeLoggedIn, AuthMethod: "claude.ai"}
+			}
+			f.mu.Unlock()
+
+			getReadiness(t, s, "", "en")
+			p := lastAuthCall(t, f)
+			if p["name"] != "claude" || p["purpose"] != "assistant" {
+				t.Fatalf("claude.auth_status params = %v, want name=claude purpose=assistant", p)
+			}
+			if tc.mainID == "" {
+				if v, ok := p["conversation"]; ok {
+					t.Fatalf("claude.auth_status sent unexpected conversation=%v (%v)", v, p)
+				}
+			} else if p["conversation"] != tc.mainID {
+				t.Fatalf("claude.auth_status conversation = %v, want %q (%v)", p["conversation"], tc.mainID, p)
+			}
+			if tc.configDir == "" {
+				if v, ok := p["config_dir"]; ok {
+					t.Fatalf("claude.auth_status sent unexpected config_dir=%v for default private profile (%v)", v, p)
+				}
+			} else if p["config_dir"] != tc.configDir {
+				t.Fatalf("claude.auth_status config_dir = %v, want %q (%v)", p["config_dir"], tc.configDir, p)
+			}
+		})
+	}
+}
+
+// Readiness reflects the sign-in state of the profile the main chat actually runs in: a signed-out machine-default
+// ~/.claude must not force setup mode when Persona's private profile is signed in, and a signed-in ~/.claude must not
+// mask a signed-out private profile.
+func TestReadinessAuthStatusUsesAssistantProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		configDir       string
+		privateSignedIn bool
+		legacySignedIn  bool
+		wantMode        string
+		wantModelState  string
+		wantModelCode   string
+	}{
+		{
+			name:            "private-signed-in-default-signed-out",
+			privateSignedIn: true,
+			legacySignedIn:  false,
+			wantMode:        ReadinessFull,
+			wantModelState:  StepOK,
+		},
+		{
+			name:            "private-signed-out-default-signed-in",
+			privateSignedIn: false,
+			legacySignedIn:  true,
+			wantMode:        ReadinessSetup,
+			wantModelState:  StepProblem,
+			wantModelCode:   proto.TurnErrorNotLoggedIn,
+		},
+		{
+			name:            "legacy-signed-in-private-signed-out",
+			configDir:       assistantConfigDirLegacy,
+			privateSignedIn: false,
+			legacySignedIn:  true,
+			wantMode:        ReadinessFull,
+			wantModelState:  StepOK,
+		},
+		{
+			name:            "legacy-signed-out-private-signed-in",
+			configDir:       assistantConfigDirLegacy,
+			privateSignedIn: true,
+			legacySignedIn:  false,
+			wantMode:        ReadinessSetup,
+			wantModelState:  StepProblem,
+			wantModelCode:   proto.TurnErrorNotLoggedIn,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, s, _ := readyMachine(t)
+			if tc.configDir != "" {
+				setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", ConfigDir: tc.configDir})
+			}
+			f.mu.Lock()
+			f.authBy = profileAuth(tc.privateSignedIn, tc.legacySignedIn)
+			f.mu.Unlock()
+
+			r := getReadiness(t, s, "", "en")
+			m := readinessStep(t, r, StepModel)
+			if r.Mode != tc.wantMode || r.Ready != (tc.wantMode == ReadinessFull) ||
+				m.State != tc.wantModelState || m.Code != tc.wantModelCode {
+				t.Fatalf("readiness mode=%s ready=%v model=%+v, want mode=%s state=%s code=%q (auth params=%v)",
+					r.Mode, r.Ready, m, tc.wantMode, tc.wantModelState, tc.wantModelCode, authCalls(f))
+			}
+		})
+	}
+}
+
+// Switching Main chat's config_dir between private and legacy, or changing the main conversation, must not serve a
+// stale cached claude.auth_status from the previous profile within the 10-minute cache TTL.
+func TestReadinessAuthCacheSeparatesProfilesAndConversations(t *testing.T) {
+	t.Run("switch-private-to-legacy", func(t *testing.T) {
+		f, s, _ := readyMachine(t)
+		f.mu.Lock()
+		f.authBy = profileAuth(true, false)
+		f.mu.Unlock()
+
+		first := getReadiness(t, s, "", "en")
+		if first.Mode != ReadinessFull || readinessStep(t, first, StepModel).State != StepOK {
+			t.Fatalf("initial private readiness = %+v (auth params=%v)", first, authCalls(f))
+		}
+		callsAfterFirst := len(authCalls(f))
+
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", ConfigDir: assistantConfigDirLegacy})
+		second := getReadiness(t, s, "", "en")
+		m := readinessStep(t, second, StepModel)
+		if second.Mode != ReadinessSetup || m.State != StepProblem || m.Code != proto.TurnErrorNotLoggedIn {
+			t.Fatalf("after switching to legacy: mode=%s model=%+v, want setup/not_logged_in (auth params=%v)",
+				second.Mode, m, authCalls(f))
+		}
+		if len(authCalls(f)) <= callsAfterFirst {
+			t.Fatalf("switching config_dir reused stale auth cache: calls=%v", authCalls(f))
+		}
+		if p := lastAuthCall(t, f); p["config_dir"] != assistantConfigDirLegacy {
+			t.Fatalf("after switching to legacy: last auth params = %v", p)
+		}
+	})
+
+	t.Run("switch-legacy-to-private", func(t *testing.T) {
+		f, s, _ := readyMachine(t)
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", ConfigDir: assistantConfigDirLegacy})
+		f.mu.Lock()
+		f.authBy = profileAuth(false, true)
+		f.mu.Unlock()
+
+		first := getReadiness(t, s, "", "en")
+		if first.Mode != ReadinessFull || readinessStep(t, first, StepModel).State != StepOK {
+			t.Fatalf("initial legacy readiness = %+v (auth params=%v)", first, authCalls(f))
+		}
+		callsAfterFirst := len(authCalls(f))
+
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude"})
+		second := getReadiness(t, s, "", "en")
+		m := readinessStep(t, second, StepModel)
+		if second.Mode != ReadinessSetup || m.State != StepProblem || m.Code != proto.TurnErrorNotLoggedIn {
+			t.Fatalf("after switching to private: mode=%s model=%+v, want setup/not_logged_in (auth params=%v)",
+				second.Mode, m, authCalls(f))
+		}
+		if len(authCalls(f)) <= callsAfterFirst {
+			t.Fatalf("switching config_dir reused stale auth cache: calls=%v", authCalls(f))
+		}
+		if p := lastAuthCall(t, f); p["config_dir"] != nil {
+			t.Fatalf("after switching to private: last auth params = %v", p)
+		}
+	})
+
+	t.Run("main-conversation-change", func(t *testing.T) {
+		f, s, _ := readyMachine(t)
+		f.mu.Lock()
+		f.authBy = func(_ string, params map[string]any) proto.ClaudeAuthStatus {
+			if params["purpose"] == "assistant" && params["conversation"] == "m1" {
+				return proto.ClaudeAuthStatus{State: proto.ClaudeLoggedIn, AuthMethod: "claude.ai"}
+			}
+			return proto.ClaudeAuthStatus{State: proto.ClaudeNotLoggedIn, AuthMethod: "none"}
+		}
+		f.mu.Unlock()
+
+		first := getReadiness(t, s, "", "en")
+		if first.Mode != ReadinessFull || readinessStep(t, first, StepModel).State != StepOK {
+			t.Fatalf("initial m1 readiness = %+v (auth params=%v)", first, authCalls(f))
+		}
+		callsAfterFirst := len(authCalls(f))
+
+		setSettings(t, s, func(v *Settings) { v.Main = "m2" })
+		second := getReadiness(t, s, "", "en")
+		m := readinessStep(t, second, StepModel)
+		if second.Mode != ReadinessSetup || m.State != StepProblem || m.Code != proto.TurnErrorNotLoggedIn {
+			t.Fatalf("after changing main conversation: mode=%s model=%+v, want setup/not_logged_in (auth params=%v)",
+				second.Mode, m, authCalls(f))
+		}
+		if len(authCalls(f)) <= callsAfterFirst {
+			t.Fatalf("changing main conversation reused stale auth cache: calls=%v", authCalls(f))
+		}
+		if p := lastAuthCall(t, f); p["conversation"] != "m2" {
+			t.Fatalf("after changing main conversation: last auth params = %v", p)
+		}
+	})
+}
+
+// Older nodes that ignore extra claude.auth_status fields or lack claude.auth_status altogether remain compatible.
+func TestReadinessAuthStatusOlderNodeCompat(t *testing.T) {
+	t.Run("ignores-extra-params", func(t *testing.T) {
+		f, s, _ := readyMachine(t)
+		f.auth = map[string]proto.ClaudeAuthStatus{"server/claude": {State: proto.ClaudeLoggedIn, AuthMethod: "claude.ai"}}
+		r := getReadiness(t, s, "", "en")
+		if r.Mode != ReadinessFull || readinessStep(t, r, StepModel).State != StepOK {
+			t.Fatalf("older node logged_in: %+v", r)
+		}
+
+		f2, s2, _ := readyMachine(t)
+		f2.auth = map[string]proto.ClaudeAuthStatus{"server/claude": {State: proto.ClaudeNotLoggedIn, AuthMethod: "none"}}
+		r2 := getReadiness(t, s2, "", "en")
+		if m := readinessStep(t, r2, StepModel); r2.Mode != ReadinessSetup || m.Code != proto.TurnErrorNotLoggedIn {
+			t.Fatalf("older node not_logged_in: %+v", r2)
+		}
+	})
+
+	t.Run("unknown-method", func(t *testing.T) {
+		f, s, _ := readyMachine(t)
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", ConfigDir: assistantConfigDirLegacy})
+		r := getReadiness(t, s, "", "en")
+		if m := readinessStep(t, r, StepModel); r.Mode != ReadinessFull || m.State != StepUnknown {
+			t.Fatalf("older node without claude.auth_status: %+v", r)
+		}
+		getReadiness(t, s, "", "en")
+		if calls := authCalls(f); len(calls) != 1 {
+			t.Fatalf("older node without claude.auth_status asked %d times, want 1", len(calls))
+		}
 	})
 }

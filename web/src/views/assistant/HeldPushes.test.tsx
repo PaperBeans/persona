@@ -3,7 +3,8 @@ import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n";
-import { HeldPushesEntry } from "./HeldPushes";
+import { setToken } from "../../lib/api";
+import { HeldPushesDialog, HeldPushesEntry } from "./HeldPushes";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const NOW = new Date("2026-11-14T04:00:00Z");
@@ -90,5 +91,48 @@ describe("held-push entry", () => {
     await renderEntry();
     await act(async () => host.querySelector<HTMLButtonElement>("[data-held-pushes-entry]")!.click());
     expect(document.body.textContent).toContain("No pushes were held today.");
+  });
+
+  it("loads intercepts on demand when HeldPushesDialog opens and stays idle while closed", async () => {
+    await act(async () => {
+      root.render(<StrictMode><HeldPushesDialog open={false} onClose={() => {}} /></StrictMode>);
+    });
+    expect(requests).toEqual([]);
+    await act(async () => {
+      root.render(<StrictMode><HeldPushesDialog open onClose={() => {}} /></StrictMode>);
+    });
+    expect(requests.some((path) => path.endsWith("/api/v1/push/intercepts"))).toBe(true);
+    expect(requests.some((path) => path.includes("/ln-mode"))).toBe(false);
+    expect(document.body.textContent).toContain("Review the release");
+  });
+
+  it("isolates HeldPushesDialog across credential switches and ignores stale in-flight responses", async () => {
+    setToken("cred-a");
+    let resolveA!: (res: Response) => void;
+    let rejectB!: (err: unknown) => void;
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      call += 1;
+      if (call === 1) return new Promise<Response>((resolve) => { resolveA = resolve; });
+      return new Promise<Response>((_resolve, reject) => { rejectB = reject; });
+    }));
+    await act(async () => {
+      root.render(<HeldPushesDialog open onClose={() => {}} />);
+    });
+    // Switch credential A -> B while A's request is still in flight.
+    await act(async () => {
+      setToken("cred-b");
+    });
+    // A resolves late: must never appear under B.
+    await act(async () => {
+      resolveA(json({ intercepts: [{ at, level: "P1", reason: "ln_p1_held", title: "Stale Cred A Push" }] }));
+    });
+    expect(document.body.textContent).not.toContain("Stale Cred A Push");
+    // B fails: dialog shows failure alert and zero records from A.
+    await act(async () => {
+      rejectB(new Error("offline"));
+    });
+    expect(document.body.querySelector('[role="alert"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain("Stale Cred A Push");
   });
 });

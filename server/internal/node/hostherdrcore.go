@@ -287,21 +287,26 @@ func (h *herdrCoreHost) Prompt(ctx context.Context, pane host.PaneRef, text stri
 		return inputErr(err)
 	}
 	if fromTerminal(*t).Agent == "" {
-		return host.Mark(fmt.Errorf("herdr-core: no agent runs in %s any more", pane.ID), host.ErrNotDelivered)
+		err := host.Mark(fmt.Errorf("herdr-core: no agent runs in %s any more", pane.ID), host.ErrNotDelivered)
+		if t.State != "live" || (t.Foreground != nil && isShell(t.Foreground)) {
+			return host.Mark(err, errTerminalFinished)
+		}
+		return err
 	}
 	return inputErr(h.c.Send(ctx, pane.ID, text))
 }
 
 // inputErr marks the herdr-core refusals that typed nothing (host.ErrNotDelivered): a program reporting a dialog
-// (blocked, also host.ErrDialogOpen), a status that changed, a terminal not ready, finished or gone.
+// (blocked, also host.ErrDialogOpen), a finished or missing terminal (also errTerminalFinished), or a transient refusal.
 func inputErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case herdrcore.IsKind(err, "blocked"):
 		return host.Mark(host.Mark(err, host.ErrNotDelivered), host.ErrDialogOpen)
-	case herdrcore.IsKind(err, "status_mismatch"), herdrcore.IsKind(err, "unavailable"), herdrcore.IsKind(err, "finished"),
-		herdrcore.IsKind(err, "not_found"), errors.Is(err, herdrcore.ErrNoSocket):
+	case herdrcore.IsKind(err, "finished"), herdrcore.IsKind(err, "not_found"):
+		return host.Mark(host.Mark(hcErr(err), host.ErrNotDelivered), errTerminalFinished)
+	case herdrcore.IsKind(err, "status_mismatch"), herdrcore.IsKind(err, "unavailable"), errors.Is(err, herdrcore.ErrNoSocket):
 		return host.Mark(hcErr(err), host.ErrNotDelivered)
 	}
 	return err
@@ -357,7 +362,16 @@ func (h *herdrCoreHost) Watch(ctx context.Context, _ []host.PaneRef, changed fun
 }
 
 // hcAgents names the agents herdr-core's status reports (status.app, the program's own word) the way the node does.
-var hcAgents = map[string]string{"claude-code": "claude", "claude": "claude", "codex": "codex"}
+var hcAgents = map[string]string{
+	"claude-code": "claude",
+	"claude":      "claude",
+	"codex":       "codex",
+	"antigravity": agyAgent,
+	"traex":       traexAgent,
+	"traecli":     traexAgent,
+	"trae-cli":    traexAgent,
+	"trae_cli":    traexAgent,
+}
 
 // hcStatus maps OSC 7501 states to the node's; error has no counterpart (the program said something failed, not what
 // it does now).
@@ -365,9 +379,9 @@ var hcStatus = map[string]string{
 	"idle": proto.StatusIdle, "working": proto.StatusWorking, "blocked": proto.StatusBlocked, "done": proto.StatusDone,
 }
 
-// fromTerminal is a terminal as an agent pane. Its agent is what its status names (claude or codex), else what runs in
-// it (a claude that has not reported yet) — none when a shell, classic herdr or nothing is in the foreground; its
-// space and slot are the Herdr app's when the app opened it, else its directory.
+// fromTerminal is a terminal as an agent pane. Its agent is what its status names (claude, codex, agy, or traex), else
+// what runs in it (an agent that has not reported yet) — none when a shell, classic herdr or nothing is in the
+// foreground; its space and slot are the Herdr app's when the app opened it, else its directory.
 func fromTerminal(t herdrcore.Terminal) host.Agent {
 	a := host.Agent{
 		Name: t.Name, Cwd: t.Cwd, PaneID: host.PaneRef{Kind: host.HerdrCore, ID: t.Address}.String(),
@@ -384,35 +398,69 @@ func fromTerminal(t herdrcore.Terminal) host.Agent {
 		return a // nothing runs (finished): a status left behind is not an agent
 	}
 	a.ForegroundCwd = t.Foreground.Cwd
+	a.ForegroundPID = t.Foreground.Pid
+	if len(t.Foreground.Argv) > 0 {
+		a.ForegroundArgv = slices.Clone(t.Foreground.Argv)
+	}
 	if nestedHerdr(t.Foreground) || isShell(t.Foreground) {
 		// Classic herdr's client: whatever runs inside belongs to herdr. A shell: the agent that reported the status
 		// has exited (herdr-core keeps a program's last status until the terminal's own program ends).
 		return a
 	}
+	fgAgent := ""
+	if len(t.Foreground.Argv) > 0 {
+		fgAgent = hcAgentProgram(t.Foreground.Argv[0])
+	}
+	if fgAgent == "" && t.Foreground.Name != "" {
+		fgAgent = hcAgentProgram(t.Foreground.Name)
+	}
 	if t.Status != nil && t.Status.App != "" {
-		k, ok := hcAgents[t.Status.App]
+		app := strings.ToLower(t.Status.App)
+		k, ok := hcAgents[app]
+		if !ok && fgAgent == traexAgent && app == "trae" {
+			k, ok = traexAgent, true
+		}
 		if !ok {
 			return a // a program the node does not drive: left to the panes a compatible CLI may claim
+		}
+		// TRAE CLI is Codex-compatible and may report OSC 7501 under app "codex".
+		// When the terminal's foreground program is TRAE CLI, keep it as traex with its native status.
+		if k == "codex" && fgAgent == traexAgent {
+			k = traexAgent
 		}
 		a.Agent = k
 		a.AgentStatus = hcStatus[t.Status.State]
 		if a.AgentStatus == "" {
 			a.AgentStatus = proto.StatusUnknown
 		}
-		return a
+		return withAgyPresence(a, t.Foreground)
 	}
-	if len(t.Foreground.Argv) > 0 {
-		if k := hcAgentProgram(t.Foreground.Argv[0]); k != "" {
-			a.Agent, a.AgentStatus = k, proto.StatusUnknown
-		}
+	if fgAgent != "" {
+		a.Agent, a.AgentStatus = fgAgent, proto.StatusUnknown
+	}
+	return withAgyPresence(a, t.Foreground)
+}
+
+// withAgyPresence names an agy terminal's conversation: herdr-core does not report it, the presence lock its agy holds
+// open does (agypresence.go, #13603).
+func withAgyPresence(a host.Agent, fg *herdrcore.Foreground) host.Agent {
+	if a.Agent == agyAgent && fg != nil {
+		a.AgentSession = agyPresenceSession(fg.Pid)
 	}
 	return a
 }
 
-// hcAgentProgram is the agent a program name or path is ("claude", "codex", also as claude.exe), else "".
+// hcAgentProgram is the agent a program name or path is ("claude", "codex", "agy", "traex", also with .exe), else "".
 func hcAgentProgram(name string) string {
-	if k := strings.TrimSuffix(filepath.Base(name), ".exe"); k == "claude" || k == "codex" {
-		return k
+	switch strings.ToLower(strings.TrimSuffix(filepath.Base(name), ".exe")) {
+	case "claude":
+		return "claude"
+	case "codex":
+		return "codex"
+	case agyAgent:
+		return agyAgent
+	case "traex", "traecli", "trae-cli", "trae_cli":
+		return traexAgent
 	}
 	return ""
 }

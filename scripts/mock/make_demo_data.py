@@ -18,7 +18,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.environ.get("PERSONA_DEMO_OUTPUT", os.path.join(HERE, "..", "..", "apple", "Persona", "Resources", "Demo.json"))
 
-os.environ.update(MOCK_TASKS="1", MOCK_RICH="1")
+# The bundled demo has no strength pages, so its Health Items catalog omits strength.
+os.environ.update(MOCK_TASKS="1", MOCK_RICH="1", MOCK_HEALTH_STRENGTH="off")
 sys.path.insert(0, HERE)
 import mock_hub as m  # noqa: E402
 import mail_mock  # noqa: E402  the mail domain mock_hub loaded (scripts/mock/mock_domains.py)
@@ -188,6 +189,10 @@ MINI["engines"] = [{"id": "herdr", "name": "herdr", "available": False},
                    {"id": "herdr-both", "name": "herdr + Herdr App", "available": False},
                    {"id": "orca", "name": "Orca", "available": True}]
 
+health_items = health_intake_mock.health_items_state()
+health_intake = health_intake_mock.health_intake_snapshot()
+health_intake["items"] = list(health_items["items"])
+
 data = {
     "machines": machines,
     "sessions": sessions + m.ASSISTANT,
@@ -200,7 +205,8 @@ data = {
     "todos": m.sorted_todos(),
     "runs": m.RUNS,
     "memory": m.MEMORY,
-    "health_intake": health_intake_mock.health_intake_snapshot(),
+    "health_items": health_items,
+    "health_intake": health_intake,
     "health_intake_ui": {f"{locale}.{version}.{page}": health_intake_ui.answer({
         "context": {"locale": locale, "ui_version": version},
         "state": json.dumps({"kind": kind, "edit": edit})})

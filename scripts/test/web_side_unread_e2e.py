@@ -77,10 +77,15 @@ def run(browser, label, base, shots):
     lead = line.locator("[data-side-lead]")
     if lead.is_visible() != (width > 300) or (width > 300 and WORDS[locale] not in text):
         fail(f"{tag}: the lead is {'shown' if lead.is_visible() else 'hidden'} in a {width} px sidebar ({text!r})")
-    # nothing in the line runs past the row's column into its end (the hint, the age)
-    spill = line.evaluate("el => el.getBoundingClientRect().right - el.closest('a').querySelector('[data-row-age]')?.getBoundingClientRect().left")
-    if spill is not None and spill > 0:
-        fail(f"{tag}: the line runs {spill} px under the row's age")
+    # The text column ends before the remaining trailing marks.
+    spill = line.evaluate("""el => {
+      const column = el.parentElement;
+      const next = column.nextElementSibling;
+      const right = next?.getBoundingClientRect().left ?? el.closest('a').getBoundingClientRect().right;
+      return el.getBoundingClientRect().right - right;
+    }""")
+    if spill > 0:
+        fail(f"{tag}: the line runs {spill} px past its text column")
     if row.locator("[data-row-line]").count():
         fail(f"{tag}: the review's own seen words still stand under the side's dot")
     if row.locator(".status-mark").first.get_attribute("data-state") != "unread":

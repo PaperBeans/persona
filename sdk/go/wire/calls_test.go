@@ -140,3 +140,34 @@ func TestValidateReadsNullsAsTheHub(t *testing.T) {
 		}
 	}
 }
+
+// assistant.event's params are strict and bounded, as the hub holds them.
+func TestValidateAssistantEvent(t *testing.T) {
+	for _, ok := range []string{
+		`{"key":"k","title":"t"}`,
+		`{"key":"k","title":"t","severity":"critical","body":"b","action_hint":"a","state":"firing","replace":false}`,
+	} {
+		if err := ValidateParams("assistant.event", json.RawMessage(ok)); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		`{"title":"t"}`,                          // no key
+		`{"key":"k"}`,                            // no title
+		`{"key":"","title":"t"}`,                 // empty key
+		`{"key":"k","title":"t","severity":"x"}`, // unknown severity
+		`{"key":"k","title":"t","extra":1}`,      // strict
+		`{"key":"k","title":"` + strings.Repeat("x", 201) + `"}`,
+		`{"key":"k","title":"t","body":"` + strings.Repeat("x", 4001) + `"}`,
+	} {
+		if err := ValidateParams("assistant.event", json.RawMessage(bad)); err == nil {
+			t.Errorf("%.60s: holds, but should not", bad)
+		}
+	}
+	if err := ValidateResult("assistant.event", json.RawMessage(`{"delivery":"replaced"}`)); err != nil {
+		t.Error(err)
+	}
+	if err := ValidateResult("assistant.event", json.RawMessage(`{"delivery":"sent"}`)); err == nil {
+		t.Error("an unknown delivery holds")
+	}
+}

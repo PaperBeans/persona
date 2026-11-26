@@ -1,6 +1,38 @@
 {
   "string": [
     {
+      "name": "cloudflare_access_required",
+      "value": "この Hub は Cloudflare Access で保護されています。サービストークンが必要です"
+    },
+    {
+      "name": "cloudflare_access_rejected",
+      "value": "Cloudflare Access がサービストークンを拒否しました"
+    },
+    {
+      "name": "cloudflare_access_incomplete",
+      "value": "クライアント ID とクライアントシークレットの両方を入力してください"
+    },
+    {
+      "name": "cloudflare_access_invalid",
+      "value": "Cloudflare Access のサービストークンを確認してください"
+    },
+    {
+      "name": "phone_switcher_expiry",
+      "value": "インストール中 · コードはあと {minutes} 分で期限切れ"
+    },
+    {
+      "name": "phone_switcher_expired",
+      "value": "インストール中 · コードの期限切れ"
+    },
+    {
+      "name": "phone_switcher_synced",
+      "value": "オフライン · 最終同期 {time}"
+    },
+    {
+      "name": "project_temporary_session",
+      "value": "一時セッション"
+    },
+    {
       "name": "module_desc",
       "value": "Persona モバイルクライアント"
     },
@@ -95,6 +127,18 @@
     {
       "name": "search",
       "value": "検索"
+    },
+    {
+      "name": "agents_search_prompt",
+      "value": "スペース、タブ、セッション、内容を検索"
+    },
+    {
+      "name": "agent_source_lark_group",
+      "value": "Larkグループ"
+    },
+    {
+      "name": "agent_grouping_current",
+      "value": "グループ：{group}"
     },
     {
       "name": "search_sessions",
@@ -397,12 +441,36 @@
       "value": "送信済み"
     },
     {
+      "name": "chat_feedback_sending",
+      "value": "送信中…"
+    },
+    {
+      "name": "chat_feedback_processing",
+      "value": "処理中…"
+    },
+    {
       "name": "pending",
       "value": "保留中"
     },
     {
       "name": "completed",
       "value": "完了"
+    },
+    {
+      "name": "phone_working_seconds",
+      "value": "作業中{s}秒"
+    },
+    {
+      "name": "phone_working_minutes",
+      "value": "作業中{m}分"
+    },
+    {
+      "name": "phone_working_minutes_seconds",
+      "value": "作業中{m}分{s}秒"
+    },
+    {
+      "name": "phone_working_hours_minutes",
+      "value": "作業中{h}時間{m}分"
     },
     {
       "name": "work_summary",
@@ -1045,6 +1113,14 @@
       "value": "ワークスペース"
     },
     {
+      "name": "project_join_space",
+      "value": "スペースに参加"
+    },
+    {
+      "name": "project_join_help",
+      "value": "選択したワークツリーで新しいタブを開きます。"
+    },
+    {
       "name": "latest",
       "value": "最新のメッセージ"
     },
@@ -1067,6 +1143,70 @@
     {
       "name": "takeover",
       "value": "引き継ぐ"
+    },
+    {
+      "name": "session_git_staged_count",
+      "value": "{count} 件をステージ済み"
+    },
+    {
+      "name": "session_git_changes_count",
+      "value": "{count} 件の変更"
+    },
+    {
+      "name": "session_git_choose_files",
+      "value": "コミットするファイルを選択"
+    },
+    {
+      "name": "session_git_detached_commit",
+      "value": "ブランチに切り替えてコミット"
+    },
+    {
+      "name": "session_git_pull_no_directory",
+      "value": "このペインのフォルダーがわかりません。"
+    },
+    {
+      "name": "session_git_pull_not_a_repository",
+      "value": "このフォルダは Git リポジトリにありません。"
+    },
+    {
+      "name": "session_git_pull_detached_head",
+      "value": "HEAD が切り離されています。先にブランチに切り替えてください。"
+    },
+    {
+      "name": "session_git_pull_no_upstream",
+      "value": "このブランチにはアップストリームブランチがありません。先にコンピュータで設定してください。"
+    },
+    {
+      "name": "session_git_pull_uncommitted_changes",
+      "value": "作業ツリーにコミットしていない変更があります。コンピュータでコミットかスタッシュしてからプルしてください。"
+    },
+    {
+      "name": "session_git_pull_not_fast_forward",
+      "value": "ブランチとアップストリームの両方に新しいコミットがあるため、早送りできません。コンピュータでマージかリベースしてください。"
+    },
+    {
+      "name": "session_git_pulling",
+      "value": "取得中"
+    },
+    {
+      "name": "session_git_pull_latest",
+      "value": "最新のコードを取得"
+    },
+    {
+      "name": "session_git_pulled",
+      "value": "最新のコードを取得しました"
+    },
+    {
+      "name": "session_git_up_to_date",
+      "value": "すでに最新です"
+    },
+    {
+      "name": "session_git_commit_action",
+      "value": "コミット…"
+    },
+    {
+      "name": "session_git_binary",
+      "value": "バイナリ"
     },
     {
       "name": "session_tools_binary_file",
@@ -2230,7 +2370,7 @@
     },
     {
       "name": "health_ask_placeholder",
-      "value": "健康について質問"
+      "value": "健康について質問…"
     },
     {
       "name": "health_chats",
@@ -2290,15 +2430,19 @@
     },
     {
       "name": "health_question_sleep",
-      "value": "睡眠を改善するには？"
+      "value": "今週の睡眠はどうでしたか？"
     },
     {
       "name": "health_question_steps",
-      "value": "毎日の歩数から何がわかりますか？"
+      "value": "直近7日間の歩数は先週と比べてどうですか？"
+    },
+    {
+      "name": "health_question_resting_heart_rate",
+      "value": "今日の体重62.5kgを記録して"
     },
     {
       "name": "health_log_weight",
-      "value": "体重を記録"
+      "value": "今日の体重62.5kgを記録して"
     },
     {
       "name": "health_log_water",
@@ -2362,7 +2506,7 @@
     },
     {
       "name": "health_try_asking",
-      "value": "質問してみましょう"
+      "value": "聞いてみる"
     },
     {
       "name": "health_upload_pdf",
@@ -2374,7 +2518,7 @@
     },
     {
       "name": "health_upload_report",
-      "value": "レポートをアップロード"
+      "value": "健康診断の結果をアップロード"
     },
     {
       "name": "knowledge_agent_prompt",
@@ -2435,6 +2579,14 @@
     {
       "name": "knowledge_kind_recordings",
       "value": "録音"
+    },
+    {
+      "name": "phone_lark_meeting_notes",
+      "value": "Lark の議事録"
+    },
+    {
+      "name": "phone_original_meeting_notes",
+      "value": "元の議事録"
     },
     {
       "name": "knowledge_minutes",
@@ -2923,6 +3075,34 @@
     {
       "name": "branch_chat",
       "value": "会話を分岐"
+    },
+    {
+      "name": "chat_lift_select",
+      "value": "テキストを選択"
+    },
+    {
+      "name": "chat_lift_multiple",
+      "value": "複数選択"
+    },
+    {
+      "name": "chat_lift_me",
+      "value": "自分"
+    },
+    {
+      "name": "chat_lift_quote_part",
+      "value": "選択したテキストを引用 · {author}"
+    },
+    {
+      "name": "chat_lift_quote_whole",
+      "value": "引用 · {author}"
+    },
+    {
+      "name": "chat_lift_remove_quote",
+      "value": "引用を取り消す"
+    },
+    {
+      "name": "chat_lift_quote",
+      "value": "引用"
     },
     {
       "name": "use_as_context",
@@ -4621,6 +4801,46 @@
       "value": "質問を取り消す"
     },
     {
+      "name": "agent_group_repo",
+      "value": "リポジトリ別"
+    },
+    {
+      "name": "agent_group_todo",
+      "value": "ToDo別"
+    },
+    {
+      "name": "agent_group_app",
+      "value": "アプリ別"
+    },
+    {
+      "name": "agent_group_recent",
+      "value": "最近使用した項目"
+    },
+    {
+      "name": "agent_group_direction",
+      "value": "常駐別"
+    },
+    {
+      "name": "agent_app_claude",
+      "value": "Claude デスクトップアプリ"
+    },
+    {
+      "name": "agent_app_codex",
+      "value": "Codex App"
+    },
+    {
+      "name": "agent_app_desktop",
+      "value": "{agent}デスクトップ版"
+    },
+    {
+      "name": "agent_show_all_count",
+      "value": "すべて表示（{count}件）"
+    },
+    {
+      "name": "agent_group_machine",
+      "value": "マシン別"
+    },
+    {
       "name": "agent_group_state",
       "value": "状態別"
     },
@@ -4693,6 +4913,174 @@
       "value": "種類"
     },
     {
+      "name": "map_point_title",
+      "value": "ナレッジポイント"
+    },
+    {
+      "name": "map_from",
+      "value": "出典"
+    },
+    {
+      "name": "map_confirmed",
+      "value": "%s に確認"
+    },
+    {
+      "name": "map_active",
+      "value": "進行中"
+    },
+    {
+      "name": "map_done",
+      "value": "完了"
+    },
+    {
+      "name": "map_paused",
+      "value": "一時停止"
+    },
+    {
+      "name": "map_unrated",
+      "value": "未評価"
+    },
+    {
+      "name": "map_other",
+      "value": "その他"
+    },
+    {
+      "name": "map_summary",
+      "value": "概要"
+    },
+    {
+      "name": "map_goal",
+      "value": "目標"
+    },
+    {
+      "name": "map_role",
+      "value": "自分の役割"
+    },
+    {
+      "name": "map_latest",
+      "value": "最新の進捗"
+    },
+    {
+      "name": "map_notes",
+      "value": "メインチャットの記録"
+    },
+    {
+      "name": "map_dirs",
+      "value": "コードフォルダ"
+    },
+    {
+      "name": "map_chats",
+      "value": "関連する会話"
+    },
+    {
+      "name": "map_people",
+      "value": "関連する人"
+    },
+    {
+      "name": "map_topics",
+      "value": "トピック"
+    },
+    {
+      "name": "map_topic_count",
+      "value": "トピック"
+    },
+    {
+      "name": "map_points",
+      "value": "ナレッジポイント"
+    },
+    {
+      "name": "map_sources",
+      "value": "出典"
+    },
+    {
+      "name": "map_with_summary",
+      "value": "概要あり"
+    },
+    {
+      "name": "map_knowledge",
+      "value": "ナレッジ"
+    },
+    {
+      "name": "map_by_topic",
+      "value": "トピック別"
+    },
+    {
+      "name": "map_by_status",
+      "value": "状態別"
+    },
+    {
+      "name": "map_topics_off",
+      "value": "ナレッジポイントの整理はオフです"
+    },
+    {
+      "name": "map_topics_none",
+      "value": "トピックはまだありません"
+    },
+    {
+      "name": "map_projects_none",
+      "value": "プロジェクトはまだありません"
+    },
+    {
+      "name": "map_topics_off_info",
+      "value": "「設定 › ナレッジの選択」で「ナレッジポイントをトピックごとに整理」をオンにすると、Persona がバックグラウンドで整理を始めます。"
+    },
+    {
+      "name": "map_topics_none_info",
+      "value": "Persona はバックグラウンドで、プロジェクトのタイムラインと会話から後で役立つ知識を取り出し、トピックごとに整理します。整理が進むにつれてマップが埋まっていきます。"
+    },
+    {
+      "name": "map_projects_none_info",
+      "value": "Persona が会話や Agent の作業からプロジェクトを整理すると、ここに表示されます。"
+    },
+    {
+      "name": "map_open_selection",
+      "value": "ナレッジの選択を開く"
+    },
+    {
+      "name": "map_why",
+      "value": "理由"
+    },
+    {
+      "name": "map_cause",
+      "value": "原因"
+    },
+    {
+      "name": "map_concept",
+      "value": "概念"
+    },
+    {
+      "name": "map_decision",
+      "value": "決定"
+    },
+    {
+      "name": "map_practice",
+      "value": "やり方"
+    },
+    {
+      "name": "map_pitfall",
+      "value": "落とし穴"
+    },
+    {
+      "name": "map_fact",
+      "value": "事実"
+    },
+    {
+      "name": "map_question",
+      "value": "未決"
+    },
+    {
+      "name": "map_point",
+      "value": "ポイント"
+    },
+    {
+      "name": "map_partial",
+      "value": "読み込めなかった項目があります（%s 件）。"
+    },
+    {
+      "name": "knowledge_frequent_tags",
+      "value": "よく使うタグ"
+    },
+    {
       "name": "knowledge_filter_tag",
       "value": "タグ"
     },
@@ -4739,6 +5127,3466 @@
     {
       "name": "agent_delivery_waiting",
       "value": "{computer} を待っています。"
+    },
+    {
+      "name": "project_search",
+      "value": "プロジェクトやワークツリーを検索"
+    },
+    {
+      "name": "project_all_machines",
+      "value": "すべてのコンピュータ"
+    },
+    {
+      "name": "project_worktrees",
+      "value": "件のワークツリー"
+    },
+    {
+      "name": "project_agent_count",
+      "value": "{count} 件のエージェント"
+    },
+    {
+      "name": "project_sessions",
+      "value": "件のセッション"
+    },
+    {
+      "name": "project_empty",
+      "value": "接続中のコンピュータにプロジェクトがありません。"
+    },
+    {
+      "name": "project_no_sessions",
+      "value": "このワークツリーにエージェントはいません。"
+    },
+    {
+      "name": "project_catalog_unavailable",
+      "value": "プロジェクト一覧を取得できませんでした。"
+    },
+    {
+      "name": "project_catalog_partial",
+      "value": "一部のコンピュータの情報を更新できませんでした。"
+    },
+    {
+      "name": "project_gone",
+      "value": "このプロジェクトまたはワークツリーは一覧にありません。"
+    },
+    {
+      "name": "project_worktree",
+      "value": "ワークツリー"
+    },
+    {
+      "name": "project_start_here",
+      "value": "このワークツリーで開始"
+    },
+    {
+      "name": "welcome_morning",
+      "value": "おはようございます"
+    },
+    {
+      "name": "welcome_afternoon",
+      "value": "こんにちは"
+    },
+    {
+      "name": "welcome_evening",
+      "value": "こんばんは"
+    },
+    {
+      "name": "project_free_directory",
+      "value": "ディレクトリを入力"
+    },
+    {
+      "name": "project_count",
+      "value": "件のプロジェクト"
+    },
+    {
+      "name": "project_view_worktree",
+      "value": "ワークツリーを表示"
+    },
+    {
+      "name": "project_start_unavailable",
+      "value": "選択中のコンピュータは利用できません。プロジェクトを更新してもう一度お試しください。"
+    },
+    {
+      "name": "tree_create",
+      "value": "ワークツリーを作成"
+    },
+    {
+      "name": "tree_rename_current_name",
+      "value": "ホスト上の現在の名前"
+    },
+    {
+      "name": "tree_rename_requested_name",
+      "value": "リクエストした名前"
+    },
+    {
+      "name": "tree_rename_original_name",
+      "value": "変更前に表示されていた名前"
+    },
+    {
+      "name": "tree_rename_keep_current",
+      "value": "現在の名前を保持してリクエストを解除"
+    },
+    {
+      "name": "tree_rename_previous_directory",
+      "value": "以前のワークツリーのディレクトリ"
+    },
+    {
+      "name": "tree_rename_removed_explanation",
+      "value": "以前のワークツリーは削除されました。このデバイスで以前の名前変更を確認済みにできます。"
+    },
+    {
+      "name": "tree_rename_removed_continue",
+      "value": "以前のワークツリーは削除済みです。名前変更を続ける"
+    },
+    {
+      "name": "tree_rename_keep_explanation",
+      "value": "現在の名前を保持すると、この端末のリクエストを解除します。その後、新しい名前を入力できます。"
+    },
+    {
+      "name": "tree_rename_check_again",
+      "value": "名前またはワークスペースが変更されました。現在の名前をもう一度確認してください。"
+    },
+    {
+      "name": "tree_rename",
+      "value": "ワークツリー名を変更"
+    },
+    {
+      "name": "tree_cleanup",
+      "value": "ワークツリーを削除"
+    },
+    {
+      "name": "tree_remove",
+      "value": "削除"
+    },
+    {
+      "name": "tree_source",
+      "value": "元のワークツリー"
+    },
+    {
+      "name": "tree_actions",
+      "value": "ワークツリーの操作"
+    },
+    {
+      "name": "tree_location",
+      "value": "場所"
+    },
+    {
+      "name": "tree_checkout",
+      "value": "チェックアウト"
+    },
+    {
+      "name": "tree_branch",
+      "value": "ブランチ"
+    },
+    {
+      "name": "tree_base_branch",
+      "value": "現在のブランチ"
+    },
+    {
+      "name": "tree_branch_hint",
+      "value": "新しいブランチ名"
+    },
+    {
+      "name": "tree_path_hint",
+      "value": "チェックアウト先"
+    },
+    {
+      "name": "tree_automatic",
+      "value": "自動で名前を付ける"
+    },
+    {
+      "name": "tree_display_name",
+      "value": "ワークツリー名"
+    },
+    {
+      "name": "tree_cleanup_preview",
+      "value": "削除内容の確認"
+    },
+    {
+      "name": "tree_dirty_files",
+      "value": "変更されたファイル"
+    },
+    {
+      "name": "tree_force",
+      "value": "コミットされていない変更を破棄"
+    },
+    {
+      "name": "tree_delete_branch",
+      "value": "Git ブランチも削除"
+    },
+    {
+      "name": "tree_revoke_unused_preview",
+      "value": "未使用の確認を取り消してプレビューし直す"
+    },
+    {
+      "name": "tree_cleanup_present",
+      "value": "前回の確認時にはワークツリーが残っていました。しばらくしてから削除結果を再度確認してください。"
+    },
+    {
+      "name": "tree_cleanup_removing",
+      "value": "ワークツリーを削除しています。しばらくしてから結果を確認してください。"
+    },
+    {
+      "name": "tree_check_result",
+      "value": "削除結果を確認"
+    },
+    {
+      "name": "tree_created",
+      "value": "ワークツリーを作成しました"
+    },
+    {
+      "name": "tree_renamed",
+      "value": "ワークツリー名を変更しました"
+    },
+    {
+      "name": "tree_cleaned",
+      "value": "ワークツリーを削除しました"
+    },
+    {
+      "name": "tree_cleaned_branch",
+      "value": "ワークツリーを削除しました。ブランチが削除されたか確認してください。"
+    },
+    {
+      "name": "tree_preview_changed",
+      "value": "クリーンアップのプレビューが無効になりました。もう一度プレビューしてから確定してください。"
+    },
+    {
+      "name": "tree_changed_files",
+      "value": "削除前に未コミットの変更を確認してください。"
+    },
+    {
+      "name": "tree_main_protected",
+      "value": "メインのチェックアウトを保持してください。"
+    },
+    {
+      "name": "tree_repo_unavailable",
+      "value": "ホストがリポジトリを識別できませんでした。"
+    },
+    {
+      "name": "phone_settings_search",
+      "value": "設定を検索"
+    },
+    {
+      "name": "phone_settings_assistant",
+      "value": "現在のアシスタント"
+    },
+    {
+      "name": "phone_settings_device",
+      "value": "このデバイス"
+    },
+    {
+      "name": "phone_settings_hub",
+      "value": "Hub"
+    },
+    {
+      "name": "phone_settings_common_groups_footer",
+      "value": "この 2 つのグループは、どのアシスタントを選んでいても同じです。"
+    },
+    {
+      "name": "phone_machines",
+      "value": "マシン"
+    },
+    {
+      "name": "phone_machine_manage",
+      "value": "コンピュータを管理"
+    },
+    {
+      "name": "phone_machine_detail",
+      "value": "マシンの詳細"
+    },
+    {
+      "name": "phone_cores",
+      "value": "コア"
+    },
+    {
+      "name": "phone_ram",
+      "value": "メモリ"
+    },
+    {
+      "name": "phone_other_agents",
+      "value": "その他"
+    },
+    {
+      "name": "phone_today_tokens",
+      "value": "今日のトークン"
+    },
+    {
+      "name": "phone_record_search",
+      "value": "録音を検索"
+    },
+    {
+      "name": "phone_record_start",
+      "value": "録音を開始"
+    },
+    {
+      "name": "phone_configure_path",
+      "value": "ワークスペースとランチャー"
+    },
+    {
+      "name": "phone_launcher_default",
+      "value": "マシンのデフォルト"
+    },
+    {
+      "name": "phone_connect_hub",
+      "value": "Hub に接続"
+    },
+    {
+      "name": "phone_local_demo",
+      "value": "ローカルデモを見る"
+    },
+    {
+      "name": "phone_welcome_intro",
+      "value": "チャット、エージェント、ワークスペースにアクセスできます。"
+    },
+    {
+      "name": "phone_scheduled",
+      "value": "スケジュール済み"
+    },
+    {
+      "name": "phone_history",
+      "value": "実行履歴"
+    },
+    {
+      "name": "phone_no_schedules",
+      "value": "スケジュールはまだありません"
+    },
+    {
+      "name": "health_default_manager_unavailable",
+      "value": "健康レポートを追加するには Hub のデフォルトアシスタントに接続してください。"
+    },
+    {
+      "name": "phone_attention",
+      "value": "負荷が高い"
+    },
+    {
+      "name": "phone_network",
+      "value": "ネットワーク"
+    },
+    {
+      "name": "phone_rate",
+      "value": "現在"
+    },
+    {
+      "name": "phone_hit_rate",
+      "value": "キャッシュヒット率"
+    },
+    {
+      "name": "phone_total",
+      "value": "合計"
+    },
+    {
+      "name": "phone_preset",
+      "value": "エージェントのプリセット"
+    },
+    {
+      "name": "phone_default_preset",
+      "value": "カスタム"
+    },
+    {
+      "name": "phone_read_only_recording",
+      "value": "録音はまだありません"
+    },
+    {
+      "name": "phone_directory_read_failed",
+      "value": "ディレクトリを読み込めませんでした。パスを確認して再試行してください。"
+    },
+    {
+      "name": "flow_all_chats",
+      "value": "すべてのチャット"
+    },
+    {
+      "name": "flow_search_chats",
+      "value": "会話の内容を検索"
+    },
+    {
+      "name": "flow_search_local",
+      "value": "この端末で見つかった結果を表示中"
+    },
+    {
+      "name": "flow_search_partial",
+      "value": "一部の会話を索引付け中"
+    },
+    {
+      "name": "flow_start_tab_name",
+      "value": "タブ名（任意）"
+    },
+    {
+      "name": "flow_start_tab_name_placeholder",
+      "value": "空欄なら最初のメッセージから名前を付けます"
+    },
+    {
+      "name": "flow_start_tab_name_help",
+      "value": "新しいセッションのタブ名です。空欄の場合は最初のメッセージから名付けます。"
+    },
+    {
+      "name": "flow_first_message",
+      "value": "最初のメッセージ"
+    },
+    {
+      "name": "flow_pick_machine",
+      "value": "コンピュータを選択"
+    },
+    {
+      "name": "flow_pick_tree",
+      "value": "ワークスペースを選択"
+    },
+    {
+      "name": "flow_choose_folder",
+      "value": "フォルダで選択"
+    },
+    {
+      "name": "flow_folder_search",
+      "value": "パスを入力"
+    },
+    {
+      "name": "flow_use_folder",
+      "value": "このフォルダを使用"
+    },
+    {
+      "name": "flow_folder_empty",
+      "value": "サブフォルダはありません"
+    },
+    {
+      "name": "flow_use_default",
+      "value": "デフォルトを使用"
+    },
+    {
+      "name": "flow_model",
+      "value": "モデル"
+    },
+    {
+      "name": "flow_effort",
+      "value": "推論の強度"
+    },
+    {
+      "name": "flow_start",
+      "value": "エージェントを開始"
+    },
+    {
+      "name": "flow_recent_setups",
+      "value": "最近の構成"
+    },
+    {
+      "name": "flow_workspace_search",
+      "value": "ワークスペースまたはブランチを検索"
+    },
+    {
+      "name": "flow_start_options",
+      "value": "起動オプション"
+    },
+    {
+      "name": "flow_draft_optional",
+      "value": "最初のメッセージ（任意）"
+    },
+    {
+      "name": "flow_models_offline",
+      "value": "モデルを取得できません"
+    },
+    {
+      "name": "project_checkout_primary",
+      "value": "メイン"
+    },
+    {
+      "name": "project_worktree_idle",
+      "value": "アイドル"
+    },
+    {
+      "name": "project_primary",
+      "value": "メイン"
+    },
+    {
+      "name": "project_children",
+      "value": "個の子ワークツリー"
+    },
+    {
+      "name": "project_detached",
+      "value": "分離した HEAD"
+    },
+    {
+      "name": "project_copy_path",
+      "value": "ディレクトリパスをコピー"
+    },
+    {
+      "name": "project_open",
+      "value": "プロジェクトを開く"
+    },
+    {
+      "name": "project_show_all",
+      "value": "すべて表示"
+    },
+    {
+      "name": "project_idle_repositories",
+      "value": "アイドルのリポジトリ"
+    },
+    {
+      "name": "machine_status_online",
+      "value": "オンライン"
+    },
+    {
+      "name": "machine_online_ratio",
+      "value": "{online}/{total} 台オンライン"
+    },
+    {
+      "name": "machine_running_high",
+      "value": "{count} 台が高負荷"
+    },
+    {
+      "name": "machine_waiting_agents",
+      "value": "{count} 件の確認待ち"
+    },
+    {
+      "name": "machine_high_cpu",
+      "value": "CPU 高負荷"
+    },
+    {
+      "name": "machine_low_memory",
+      "value": "メモリ残量低下"
+    },
+    {
+      "name": "machine_full_disk",
+      "value": "ディスク残量低下"
+    },
+    {
+      "name": "machine_high_load",
+      "value": "高負荷"
+    },
+    {
+      "name": "machine_load",
+      "value": "負荷"
+    },
+    {
+      "name": "machine_monitor",
+      "value": "モニタリング"
+    },
+    {
+      "name": "machine_hour",
+      "value": "1 時間"
+    },
+    {
+      "name": "machine_six_hours",
+      "value": "6 時間"
+    },
+    {
+      "name": "machine_day",
+      "value": "24 時間"
+    },
+    {
+      "name": "machine_no_samples",
+      "value": "この期間のサンプルはありません"
+    },
+    {
+      "name": "machine_monitor_unavailable",
+      "value": "モニタリングを読み込めません"
+    },
+    {
+      "name": "machine_history_hint",
+      "value": "グラフに触れると、その時点の値を確認できます。"
+    },
+    {
+      "name": "machine_now",
+      "value": "最新"
+    },
+    {
+      "name": "machine_disk",
+      "value": "ディスク"
+    },
+    {
+      "name": "machine_per_minute",
+      "value": "{value}/分"
+    },
+    {
+      "name": "machine_all_agents",
+      "value": "{count} 件をすべて表示"
+    },
+    {
+      "name": "machine_no_agents",
+      "value": "実行中のエージェントはありません"
+    },
+    {
+      "name": "machine_offline_agents",
+      "value": "接続後にエージェントが表示されます。"
+    },
+    {
+      "name": "machine_pending",
+      "value": "確認待ち"
+    },
+    {
+      "name": "machine_never",
+      "value": "未接続"
+    },
+    {
+      "name": "machine_update_needed",
+      "value": "ノードを更新できます"
+    },
+    {
+      "name": "machine_problem_service",
+      "value": "サービスが停止しています。このコンピュータの Persona Link から再インストールしてください。"
+    },
+    {
+      "name": "machine_problem_link",
+      "value": "Persona Link がオフラインか、コンピュータがスリープ中です。"
+    },
+    {
+      "name": "machine_problem_never",
+      "value": "このコンピュータでペアリングリンクを開いてください。"
+    },
+    {
+      "name": "machine_problem_version",
+      "value": "このコンピュータで Persona Link を再インストールし、ノードを更新してください。"
+    },
+    {
+      "name": "machine_problem_manager",
+      "value": "担当アシスタント「{name}」がオフラインです。"
+    },
+    {
+      "name": "machine_agent_idle",
+      "value": "アイドル"
+    },
+    {
+      "name": "machine_problem_timeout",
+      "value": "接続がタイムアウトしました。ネットワークが不安定か、コンピュータがスリープしています。復帰を待つか、ネットワークを切り替えてから再接続してください。"
+    },
+    {
+      "name": "machine_os",
+      "value": "オペレーティングシステム"
+    },
+    {
+      "name": "machine_arch",
+      "value": "アーキテクチャ"
+    },
+    {
+      "name": "machine_hostname",
+      "value": "ホスト名"
+    },
+    {
+      "name": "machine_cpu_cores",
+      "value": "{count} コア"
+    },
+    {
+      "name": "machine_time_unavailable",
+      "value": "この Hub にコンピュータはありません。"
+    },
+    {
+      "name": "settings_agent_options_title",
+      "value": "エージェント"
+    },
+    {
+      "name": "settings_language_options_title",
+      "value": "アプリの言語"
+    },
+    {
+      "name": "settings_this_assistant",
+      "value": "現在のアシスタント"
+    },
+    {
+      "name": "settings_alias_models",
+      "value": "モデル プロバイダ API キー"
+    },
+    {
+      "name": "settings_alias_appearance",
+      "value": "表示 ダーク ライト テーマ 文字"
+    },
+    {
+      "name": "settings_alias_language",
+      "value": "言語 中国語 英語 日本語"
+    },
+    {
+      "name": "settings_alias_machines",
+      "value": "コンピュータ サーバー ホスト Mac"
+    },
+    {
+      "name": "settings_alias_agents",
+      "value": "エージェント ランチャー 自動化 ツール"
+    },
+    {
+      "name": "machine_today",
+      "value": "今日"
+    },
+    {
+      "name": "flow_navigation",
+      "value": "スマートフォンのナビゲーション"
+    },
+    {
+      "name": "flow_separate",
+      "value": "個別"
+    },
+    {
+      "name": "flow_merged",
+      "value": "統合サイドバー"
+    },
+    {
+      "name": "phone_chat_thoughts",
+      "value": "思考"
+    },
+    {
+      "name": "project_copy_name",
+      "value": "ワークツリー名をコピー"
+    },
+    {
+      "name": "project_open_parent",
+      "value": "親ワークツリーを開く"
+    },
+    {
+      "name": "flow_inbox_progress",
+      "value": "対応中"
+    },
+    {
+      "name": "flow_inbox_fyi",
+      "value": "参考"
+    },
+    {
+      "name": "flow_inbox_collapsed",
+      "value": "折りたたみ"
+    },
+    {
+      "name": "flow_inbox_section_empty",
+      "value": "この分類に項目はありません"
+    },
+    {
+      "name": "flow_inbox_older_done",
+      "value": "過去の完了済み項目を読み込む"
+    },
+    {
+      "name": "flow_todo_due",
+      "value": "期日"
+    },
+    {
+      "name": "flow_todo_no_due",
+      "value": "期限なし"
+    },
+    {
+      "name": "flow_todo_today",
+      "value": "今日"
+    },
+    {
+      "name": "flow_todo_week",
+      "value": "今週"
+    },
+    {
+      "name": "flow_todo_month",
+      "value": "今月"
+    },
+    {
+      "name": "flow_todo_order",
+      "value": "並べ替え"
+    },
+    {
+      "name": "flow_todo_recent",
+      "value": "最近の更新"
+    },
+    {
+      "name": "flow_todo_priority",
+      "value": "優先度"
+    },
+    {
+      "name": "flow_todo_overdue",
+      "value": "期限超過"
+    },
+    {
+      "name": "knowledge_kind_topics",
+      "value": "トピック"
+    },
+    {
+      "name": "phone_all_meetings",
+      "value": "すべての会議"
+    },
+    {
+      "name": "phone_record_local",
+      "value": "このデバイスに残っている録音"
+    },
+    {
+      "name": "phone_record_audio_local",
+      "value": "音声はこのデバイスに保存されます。文字起こしを確認するとテキストがナレッジに同期されます。"
+    },
+    {
+      "name": "phone_record_play",
+      "value": "録音を再生"
+    },
+    {
+      "name": "phone_record_play_failed",
+      "value": "この録音を再生できませんでした"
+    },
+    {
+      "name": "session_find_files",
+      "value": "ファイルとフォルダを検索"
+    },
+    {
+      "name": "session_find_here",
+      "value": "「{folder}」とその中のフォルダ・{count} 件"
+    },
+    {
+      "name": "session_find_unavailable",
+      "value": "このフォルダ内のみ検索できます"
+    },
+    {
+      "name": "session_folder_back",
+      "value": "前のフォルダ"
+    },
+    {
+      "name": "session_folder_forward",
+      "value": "次のフォルダ"
+    },
+    {
+      "name": "file_crumb_home",
+      "value": "ホームフォルダ"
+    },
+    {
+      "name": "file_crumb_session",
+      "value": "セッション"
+    },
+    {
+      "name": "session_enter_path",
+      "value": "パスへ移動"
+    },
+    {
+      "name": "session_project_folder",
+      "value": "セッションのフォルダ"
+    },
+    {
+      "name": "session_show_hidden",
+      "value": "隠しファイルを表示"
+    },
+    {
+      "name": "session_git_history",
+      "value": "コミット"
+    },
+    {
+      "name": "session_git_earlier",
+      "value": "以前のコミットを読み込む"
+    },
+    {
+      "name": "session_git_history_error",
+      "value": "コミットの情報を読み込めません"
+    },
+    {
+      "name": "session_git_patch",
+      "value": "差分を表示"
+    },
+    {
+      "name": "session_git_remote_gone",
+      "value": "上流ブランチは削除されました"
+    },
+    {
+      "name": "session_git_detached",
+      "value": "分離した HEAD"
+    },
+    {
+      "name": "session_git_changed_paths",
+      "value": "変更ファイル"
+    },
+    {
+      "name": "session_git_untracked",
+      "value": "未追跡"
+    },
+    {
+      "name": "session_git_change_conflict",
+      "value": "競合"
+    },
+    {
+      "name": "session_git_untracked_file",
+      "value": "未追跡ファイル"
+    },
+    {
+      "name": "phone_agents_current_hub",
+      "value": "現在の Hub のみ"
+    },
+    {
+      "name": "flow_todo_hub",
+      "value": "Hub の状態で分類"
+    },
+    {
+      "name": "flow_todo_can_wait",
+      "value": "後で対応"
+    },
+    {
+      "name": "flow_todo_someday",
+      "value": "いつか"
+    },
+    {
+      "name": "flow_todo_plain",
+      "value": "未着手"
+    },
+    {
+      "name": "flow_todo_suggested",
+      "value": "推奨順"
+    },
+    {
+      "name": "phone_chat_intro_main",
+      "value": "メインのチャットです。プロジェクトの進捗、対応が必要なメッセージ、エージェントの作業状況について質問できます。"
+    },
+    {
+      "name": "phone_chat_intro_side",
+      "value": "このチャットの話題を選ぶか、質問を入力してください。"
+    },
+    {
+      "name": "phone_chat_help_skills",
+      "value": "コンピュータとモデルを接続すると、Persona が作業の進捗を確認し、受信トレイやタスクを整理します。チャットは前回の続きから再開できます。"
+    },
+    {
+      "name": "phone_chat_help_model",
+      "value": "設定でモデルプロバイダを設定するか、接続済みのコンピュータで対応するエージェントにサインインしてから、ここでチャットを始めてください。"
+    },
+    {
+      "name": "phone_chat_phone_read",
+      "value": "この質問に答えるため、スマートフォンのデータを使用する場合があります。必要に応じてシステムが許可を求めます。"
+    },
+    {
+      "name": "phone_chat_ask_agenda",
+      "value": "今日の予定は？"
+    },
+    {
+      "name": "phone_chat_ask_mail",
+      "value": "返信が必要なメールは？"
+    },
+    {
+      "name": "phone_chat_ask_agents",
+      "value": "エージェントは今何をしている？"
+    },
+    {
+      "name": "phone_chat_ask_lark",
+      "value": "今日の Lark の重要なメッセージは？"
+    },
+    {
+      "name": "mail_compose",
+      "value": "メールを作成"
+    },
+    {
+      "name": "session_tools_replace_confirm",
+      "value": "既存の項目を置き換えますか？"
+    },
+    {
+      "name": "session_tools_file_edit_confirm",
+      "value": "この変更を適用しますか？"
+    },
+    {
+      "name": "session_tools_rename",
+      "value": "名前を変更"
+    },
+    {
+      "name": "session_tools_terminal_screen_control_active",
+      "value": "ターミナルの操作が有効です"
+    },
+    {
+      "name": "session_tools_terminal_screen_view_only",
+      "value": "表示のみ"
+    },
+    {
+      "name": "upstream_error",
+      "value": "接続先のサービスがリクエストを処理できませんでした。"
+    },
+    {
+      "name": "storage_unavailable",
+      "value": "端末のストレージが利用できません。"
+    },
+    {
+      "name": "receipt_storage_failed",
+      "value": "操作結果をこの端末に保存できませんでした。"
+    },
+    {
+      "name": "scope_retired",
+      "value": "接続先が変わりました。このページを開き直してください。"
+    },
+    {
+      "name": "invalid",
+      "value": "サービスでこのリクエストを受け付けられませんでした。"
+    },
+    {
+      "name": "unauthorized",
+      "value": "続けるには再度サインインしてください。"
+    },
+    {
+      "name": "forbidden",
+      "value": "この操作を行う権限がありません。"
+    },
+    {
+      "name": "not_found",
+      "value": "指定された項目が見つかりません。"
+    },
+    {
+      "name": "method_not_allowed",
+      "value": "接続先のサービスではこの操作を利用できません。"
+    },
+    {
+      "name": "conflict",
+      "value": "項目の状態が変わりました。更新して現在の状態を確認してください。"
+    },
+    {
+      "name": "node_offline",
+      "value": "選択したコンピュータはオフラインです。"
+    },
+    {
+      "name": "internal",
+      "value": "サービスが操作を完了できませんでした。"
+    },
+    {
+      "name": "http_error",
+      "value": "サービスからエラーが返されました。"
+    },
+    {
+      "name": "request_failed",
+      "value": "リクエストを完了できませんでした。"
+    },
+    {
+      "name": "transport_failed",
+      "value": "サービスに接続できませんでした。"
+    },
+    {
+      "name": "redirect_refused",
+      "value": "サービスから別のアドレスへの転送が要求されました。"
+    },
+    {
+      "name": "response_too_large",
+      "value": "応答が大きすぎるため、この端末で開けません。"
+    },
+    {
+      "name": "tree_retry_same_request",
+      "value": "同じリクエストを再試行"
+    },
+    {
+      "name": "tree_check_worktree_result",
+      "value": "操作結果を確認"
+    },
+    {
+      "name": "tree_confirm_not_created",
+      "value": "作成されていないことを確認してやり直す"
+    },
+    {
+      "name": "tree_verify_original_checkout",
+      "value": "最初に指定したブランチとディレクトリで、以前のリクエストを確認してください。"
+    },
+    {
+      "name": "phone_switch_assistant",
+      "value": "アシスタントを切り替える"
+    },
+    {
+      "name": "phone_manage_assistants",
+      "value": "アシスタントを管理"
+    },
+    {
+      "name": "settings_search_results",
+      "value": "検索結果"
+    },
+    {
+      "name": "settings_assistant_named",
+      "value": "{name}の設定"
+    },
+    {
+      "name": "machine_net_down",
+      "value": "受信"
+    },
+    {
+      "name": "machine_net_up",
+      "value": "送信"
+    },
+    {
+      "name": "machine_empty_title",
+      "value": "コンピュータはまだありません"
+    },
+    {
+      "name": "machine_empty_detail",
+      "value": "Hub に接続したコンピュータがここに表示されます。"
+    },
+    {
+      "name": "machine_swap",
+      "value": "スワップ"
+    },
+    {
+      "name": "machine_total_bytes",
+      "value": "合計 {size}"
+    },
+    {
+      "name": "machine_battery",
+      "value": "バッテリー"
+    },
+    {
+      "name": "machine_charging",
+      "value": "充電中"
+    },
+    {
+      "name": "machine_temperature",
+      "value": "温度"
+    },
+    {
+      "name": "chat_away_recap",
+      "value": "離れている間のまとめ"
+    },
+    {
+      "name": "session_space_starter",
+      "value": "起動元"
+    },
+    {
+      "name": "session_space_agents",
+      "value": "このワークスペースのエージェント {count} 件"
+    },
+    {
+      "name": "phone_chat_expand_editor",
+      "value": "エディタを拡大"
+    },
+    {
+      "name": "phone_chat_close_editor",
+      "value": "エディタを閉じる"
+    },
+    {
+      "name": "phone_chat_hide_keyboard",
+      "value": "キーボードを閉じる"
+    },
+    {
+      "name": "phone_chat_dictation",
+      "value": "音声入力"
+    },
+    {
+      "name": "phone_dictation_preparing",
+      "value": "端末の音声入力を準備中…"
+    },
+    {
+      "name": "phone_dictation_listening",
+      "value": "聞き取り中…"
+    },
+    {
+      "name": "phone_dictation_finishing",
+      "value": "文字起こしを完了しています…"
+    },
+    {
+      "name": "phone_dictation_review",
+      "value": "テキストを確認して下書きに追加してください。"
+    },
+    {
+      "name": "phone_dictation_insert",
+      "value": "下書きに追加"
+    },
+    {
+      "name": "phone_dictation_empty",
+      "value": "音声を認識できませんでした。"
+    },
+    {
+      "name": "phone_dictation_unavailable",
+      "value": "端末の音声入力を利用できません。キーボードのマイクを使用できます。"
+    },
+    {
+      "name": "phone_dictation_keyboard_language",
+      "value": "この言語はキーボードのマイクで音声入力できます。"
+    },
+    {
+      "name": "phone_dictation_keyboard",
+      "value": "キーボードを開く"
+    },
+    {
+      "name": "phone_dictation_too_long",
+      "value": "下書きの文字数が上限に達しました。文字起こしをコピーするか、下書きを短くしてください。"
+    },
+    {
+      "name": "phone_agent_folders",
+      "value": "エージェントのフォルダ"
+    },
+    {
+      "name": "phone_claude_config",
+      "value": "Claude Code 設定"
+    },
+    {
+      "name": "phone_codex_config",
+      "value": "Codex 設定"
+    },
+    {
+      "name": "phone_agy_config",
+      "value": "Antigravity 設定"
+    },
+    {
+      "name": "phone_agent_followup",
+      "value": "エージェントのフォローアップ"
+    },
+    {
+      "name": "phone_agent_layout",
+      "value": "Agents リストのレイアウト"
+    },
+    {
+      "name": "phone_agent_tools_note",
+      "value": "このアシスタントのコンピュータで使うエージェントツールと自動化。"
+    },
+    {
+      "name": "phone_folder_pattern",
+      "value": "フォルダのパスまたはパターン"
+    },
+    {
+      "name": "phone_folder_hide",
+      "value": "非表示"
+    },
+    {
+      "name": "phone_folder_block",
+      "value": "収集を停止"
+    },
+    {
+      "name": "phone_follow_start_requested",
+      "value": "依頼されたタスクを開始"
+    },
+    {
+      "name": "phone_follow_agent_tasks",
+      "value": "エージェントのタスクをフォロー"
+    },
+    {
+      "name": "phone_follow_naming",
+      "value": "エージェントのセッションを自動命名"
+    },
+    {
+      "name": "phone_follow_supervise",
+      "value": "メインチャットでタスクを管理"
+    },
+    {
+      "name": "phone_follow_close_ended",
+      "value": "終了したターミナルを閉じる"
+    },
+    {
+      "name": "phone_dictation",
+      "value": "音声入力"
+    },
+    {
+      "name": "phone_system_input",
+      "value": "システム入力方式"
+    },
+    {
+      "name": "phone_dictation_os_note",
+      "value": "音声入力とその言語は現在のシステムキーボードで管理します。"
+    },
+    {
+      "name": "phone_language_system_note",
+      "value": "システムに従う場合、端末の最優先の言語が中国語（繁体字を含む）なら簡体字中国語、日本語なら日本語、それ以外なら英語を使用します。Hub からの通知とアシスタントの返信にもこの言語が使われます。"
+    },
+    {
+      "name": "phone_search_conversation_count",
+      "value": "{count} 件の会話"
+    },
+    {
+      "name": "phone_todo_waiting_hidden",
+      "value": "「{filter}」の対象外に対応が必要な項目が {count} 件あります。"
+    },
+    {
+      "name": "phone_kb_confirmed",
+      "value": "確認済みの情報"
+    },
+    {
+      "name": "phone_kb_add_fact",
+      "value": "確認済みの情報を追加"
+    },
+    {
+      "name": "phone_kb_fact_note",
+      "value": "Persona がこの項目を更新しても修正内容は保持されます。"
+    },
+    {
+      "name": "phone_kb_profile",
+      "value": "プロフィール"
+    },
+    {
+      "name": "flow_recent_folders",
+      "value": "最近使ったフォルダ"
+    },
+    {
+      "name": "flow_folder_up",
+      "value": "1つ上へ"
+    },
+    {
+      "name": "flow_use_named_folder",
+      "value": "「{name}」を使用"
+    },
+    {
+      "name": "flow_model_id_empty",
+      "value": "モデルIDを入力してください"
+    },
+    {
+      "name": "flow_model_id_start",
+      "value": "英字か数字で始めてください（または ~ の後に英字か数字）"
+    },
+    {
+      "name": "flow_model_id_space",
+      "value": "モデルIDにスペースは使えません"
+    },
+    {
+      "name": "flow_model_id_control",
+      "value": "モデルIDに改行や制御文字は使えません"
+    },
+    {
+      "name": "flow_model_id_character",
+      "value": "モデルIDに「{character}」は使えません。英数字と . _ - / : @ [ ] を使ってください"
+    },
+    {
+      "name": "flow_model_id_length",
+      "value": "長すぎます：256 バイトまで"
+    },
+    {
+      "name": "flow_model_id_rule",
+      "value": "英数字と . _ - / : @ [ ] が使え、英字か数字で始めます。ゲートウェイの latest エイリアスは ~ で始められます。"
+    },
+    {
+      "name": "flow_model_id_note",
+      "value": "今回の開始にだけ使います。実行されると「以前入力したもの」に表示されます。"
+    },
+    {
+      "name": "flow_typed_model_title",
+      "value": "その他のモデル"
+    },
+    {
+      "name": "flow_typed_model_use",
+      "value": "使用"
+    },
+    {
+      "name": "flow_enter_model_id",
+      "value": "モデルIDを入力…"
+    },
+    {
+      "name": "flow_use_model_id",
+      "value": "「{id}」を使用"
+    },
+    {
+      "name": "flow_unlisted_model_start",
+      "value": "リストにありません。今回の開始は入力どおりのIDを使います"
+    },
+    {
+      "name": "flow_other_model",
+      "value": "その他のモデル…"
+    },
+    {
+      "name": "phone_conditional_read_only",
+      "value": "この Hub では表示のみ可能です。編集するには Hub を更新してください。"
+    },
+    {
+      "name": "phone_rules_changed",
+      "value": "別のデバイスでルールが更新されました。最新の内容を確認して変更を適用してください。"
+    },
+    {
+      "name": "phone_facts_changed",
+      "value": "別のデバイスで確認済みの事実が更新されました。下書きは保持されています。最新の内容を確認して保存してください。"
+    },
+    {
+      "name": "phone_new_assistant",
+      "value": "新しいアシスタント"
+    },
+    {
+      "name": "phone_assistant_title",
+      "value": "アシスタント"
+    },
+    {
+      "name": "session_back_to_chat",
+      "value": "チャットに戻る"
+    },
+    {
+      "name": "knowledge_focus",
+      "value": "注目"
+    },
+    {
+      "name": "knowledge_other_active",
+      "value": "進行中のその他の項目"
+    },
+    {
+      "name": "knowledge_not_project",
+      "value": "プロジェクトではない項目"
+    },
+    {
+      "name": "phone_meeting_start",
+      "value": "会議を開始"
+    },
+    {
+      "name": "phone_todo_section_needs",
+      "value": "要対応"
+    },
+    {
+      "name": "phone_todo_section_working",
+      "value": "作業中"
+    },
+    {
+      "name": "phone_todo_section_pr",
+      "value": "マージ待ちのPR"
+    },
+    {
+      "name": "phone_todo_section_open",
+      "value": "その他の未完了"
+    },
+    {
+      "name": "phone_todo_section_recent",
+      "value": "完了したばかり"
+    },
+    {
+      "name": "phone_todo_section_delivered",
+      "value": "交付済み・レビュー待ち"
+    },
+    {
+      "name": "phone_todo_section_shelved",
+      "value": "保留"
+    },
+    {
+      "name": "phone_todo_section_done",
+      "value": "完了"
+    },
+    {
+      "name": "phone_todo_list",
+      "value": "リスト"
+    },
+    {
+      "name": "session_find_in_folder",
+      "value": "「{folder}」内を検索"
+    },
+    {
+      "name": "chat_ask_persona",
+      "value": "Personaに聞く"
+    },
+    {
+      "name": "session_message_to_agent",
+      "value": "{agent} にメッセージ"
+    },
+    {
+      "name": "session_git_pull_request",
+      "value": "プルリクエスト"
+    },
+    {
+      "name": "session_git_push_before_pr",
+      "value": "先にブランチをプッシュしてからプルリクエストを作成します"
+    },
+    {
+      "name": "session_git_create_pr",
+      "value": "プルリクエストを作成"
+    },
+    {
+      "name": "project_idle_named",
+      "value": "{count} 件の待機中"
+    },
+    {
+      "name": "flow_start_chat",
+      "value": "チャットを開始"
+    },
+    {
+      "name": "flow_launcher_model_once",
+      "value": "ランチャーとモデル（今回のみ）"
+    },
+    {
+      "name": "flow_directory_address_hint",
+      "value": "上のパスを編集し、Return で移動できます。~ はホームフォルダです。"
+    },
+    {
+      "name": "flow_start_model_settings_hint",
+      "value": "デフォルトでは「モデル設定 › 新規エージェント」の設定を使います。ここでの選択は今回のセッションだけに適用され、全体のデフォルトは変わりません。"
+    },
+    {
+      "name": "flow_start_machine_launchers_hint",
+      "value": "このマシンのClaude Code / Codexランチャーです。ターミナルエンジンの新しいタブで実行します。"
+    },
+    {
+      "name": "flow_start_model_terminal_hint",
+      "value": "{about}モデルはターミナルで /modelを入力したときと同じです。"
+    },
+    {
+      "name": "flow_model_default_hint",
+      "value": "モデルを指定しない場合、ランチャーの既定値を使います。"
+    },
+    {
+      "name": "flow_model_count",
+      "value": "{count} 個のモデル"
+    },
+    {
+      "name": "flow_model_id_search",
+      "value": "検索またはモデル ID を入力"
+    },
+    {
+      "name": "project_pending_count",
+      "value": "保留中 {count} 件"
+    },
+    {
+      "name": "flow_model_manual_hint",
+      "value": "一覧にないモデルは、ゲートウェイのモデルを含め、ID を入力して使用できます。"
+    },
+    {
+      "name": "session_git_no_pr",
+      "value": "このブランチにはまだプルリクエストがありません"
+    },
+    {
+      "name": "session_git_pr_read_failed",
+      "value": "プルリクエストを読み込めませんでした"
+    },
+    {
+      "name": "session_git_pr_body",
+      "value": "説明"
+    },
+    {
+      "name": "session_git_pr_draft",
+      "value": "下書き"
+    },
+    {
+      "name": "chat_recap_written",
+      "value": "{time}に作成"
+    },
+    {
+      "name": "chat_recap_group_title",
+      "value": "不在中のまとめ・{count}回"
+    },
+    {
+      "name": "chat_recap_latest_written",
+      "value": "最新・{time}に作成"
+    },
+    {
+      "name": "chat_recap_open_one",
+      "value": "不在中のまとめ、タップして表示"
+    },
+    {
+      "name": "chat_recap_open_group",
+      "value": "不在中のまとめ{count}件、タップして表示"
+    },
+    {
+      "name": "session_git_partly_staged",
+      "value": "一部をステージ済み"
+    },
+    {
+      "name": "session_git_file_count",
+      "value": "{count} 件のファイル"
+    },
+    {
+      "name": "session_git_base_branch",
+      "value": "ベースブランチ"
+    },
+    {
+      "name": "phone_record_meeting",
+      "value": "会議"
+    },
+    {
+      "name": "phone_record_note",
+      "value": "メモ"
+    },
+    {
+      "name": "phone_start_note",
+      "value": "メモを開始"
+    },
+    {
+      "name": "phone_meeting_calendar",
+      "value": "カレンダーの予定名を使う"
+    },
+    {
+      "name": "phone_meeting_calendar_empty",
+      "value": "今日の予定はありません"
+    },
+    {
+      "name": "phone_meeting_local_transcription",
+      "value": "この端末で文字起こし"
+    },
+    {
+      "name": "phone_calendar_all_day",
+      "value": "終日"
+    },
+    {
+      "name": "phone_calendar_moved",
+      "value": "{due}に移動しました"
+    },
+    {
+      "name": "phone_meeting_auto_invite",
+      "value": "会議に Persona を自動で招待"
+    },
+    {
+      "name": "phone_meeting_auto_off_note",
+      "value": "会議はあなただけで始まります。必要なときに会議ページで Persona を招待してください。議事録と要点はどちらでも作られます。"
+    },
+    {
+      "name": "phone_meeting_auto_on_note",
+      "value": "どの会議も Persona が参加した状態で始まり、画面で回答します。会議から外すには会議ページで操作します。"
+    },
+    {
+      "name": "phone_meeting_experimental",
+      "value": "実験的機能"
+    },
+    {
+      "name": "phone_meeting_echo",
+      "value": "スピーカー使用時のエコー除去"
+    },
+    {
+      "name": "phone_meeting_echo_note",
+      "value": "会議中にスピーカーをオンにすると、マイクが一瞬止まります。"
+    },
+    {
+      "name": "phone_meeting_echo_unavailable",
+      "value": "この端末は音声収録時のエコー除去に対応していません。"
+    },
+    {
+      "name": "phone_meeting_echo_restore",
+      "value": "エコー除去を使用できないため、通常のマイクで録音を続けています。"
+    },
+    {
+      "name": "phone_meeting_speaker",
+      "value": "回答を読み上げる"
+    },
+    {
+      "name": "phone_calendar_day",
+      "value": "日"
+    },
+    {
+      "name": "phone_calendar_week",
+      "value": "週"
+    },
+    {
+      "name": "phone_calendar_month",
+      "value": "月"
+    },
+    {
+      "name": "phone_inbox_search",
+      "value": "タイトル、差出人、内容を検索"
+    },
+    {
+      "name": "phone_inbox_waiting_agents",
+      "value": "あなたを待っている Agent"
+    },
+    {
+      "name": "phone_inbox_mention",
+      "value": "@自分"
+    },
+    {
+      "name": "phone_inbox_dm",
+      "value": "DM"
+    },
+    {
+      "name": "phone_inbox_group",
+      "value": "グループチャット"
+    },
+    {
+      "name": "phone_inbox_done",
+      "value": "対応済み"
+    },
+    {
+      "name": "phone_new_chat_title",
+      "value": "新しいチャット"
+    },
+    {
+      "name": "phone_plan_fullscreen",
+      "value": "プランを全画面で表示"
+    },
+    {
+      "name": "phone_interaction_terminal",
+      "value": "コンピューターのターミナルで対応"
+    },
+    {
+      "name": "decision_allow_session",
+      "value": "このセッションでは常に許可"
+    },
+    {
+      "name": "decision_scope_reads",
+      "value": "この会話中、このディレクトリ内のすべての読み取り"
+    },
+    {
+      "name": "decision_scope_edits",
+      "value": "この会話中、このディレクトリ内のすべてのファイル編集"
+    },
+    {
+      "name": "decision_scope_commands",
+      "value": "この会話内のすべてのコマンド"
+    },
+    {
+      "name": "decision_scope_tool",
+      "value": "この会話内でのこのツールのすべての呼び出し"
+    },
+    {
+      "name": "decision_scope_custom",
+      "value": "許可した範囲はこの会話中、引き続き許可されます"
+    },
+    {
+      "name": "decision_other_choice",
+      "value": "その他の回答…"
+    },
+    {
+      "name": "phone_agent_permission_preview",
+      "value": "{tool}：{target}"
+    },
+    {
+      "name": "phone_agent_plan_approval",
+      "value": "プランの承認待ち"
+    },
+    {
+      "name": "phone_agent_asks",
+      "value": "{agent} からの質問"
+    },
+    {
+      "name": "phone_agent_needs_approval",
+      "value": "承認待ち"
+    },
+    {
+      "name": "session_task_more",
+      "value": "ほか {count} 件"
+    },
+    {
+      "name": "session_task_approve_run",
+      "value": "承認して自動実行"
+    },
+    {
+      "name": "session_task_auto_edits",
+      "value": "編集を自動承認"
+    },
+    {
+      "name": "session_task_return",
+      "value": "差し戻す"
+    },
+    {
+      "name": "session_brief_stage_plan",
+      "value": "プラン"
+    },
+    {
+      "name": "session_brief_stage_develop",
+      "value": "開発"
+    },
+    {
+      "name": "session_brief_stage_review",
+      "value": "レビュー"
+    },
+    {
+      "name": "session_brief_stage_merge",
+      "value": "マージ"
+    },
+    {
+      "name": "session_brief_stage_deploy",
+      "value": "デプロイ"
+    },
+    {
+      "name": "session_brief_stage_verify",
+      "value": "検証済み"
+    },
+    {
+      "name": "session_brief_stage_summary",
+      "value": "{total}ステップ中{step} · {name}"
+    },
+    {
+      "name": "session_brief_stage_accessibility",
+      "value": "ステージ：{name}（{total}ステップ中{step}）"
+    },
+    {
+      "name": "session_brief_waiting_count",
+      "value": "あなた待ち（{count}）"
+    },
+    {
+      "name": "session_brief_waiting_unknown",
+      "value": "あなた待ち（?）"
+    },
+    {
+      "name": "session_brief_waiting_note",
+      "value": "再起動直後のため、あなた待ちのカードをまだ読み込めていません。エージェントのタブで確認してください。"
+    },
+    {
+      "name": "session_brief_empty",
+      "value": "ありません。"
+    },
+    {
+      "name": "session_brief_accept_count",
+      "value": "確認待ち（{count}）"
+    },
+    {
+      "name": "session_brief_later_count",
+      "value": "後で答えてよいもの（{count}）"
+    },
+    {
+      "name": "session_brief_progress_count",
+      "value": "進行中（{count}）"
+    },
+    {
+      "name": "session_brief_setup",
+      "value": "おすすめの設定"
+    },
+    {
+      "name": "session_brief_setup_note",
+      "value": "Persona 自身の過去 7 日間の記録から計算しました（期間を明記している項目を除く）。何も変更していません。以下はどれも、あなたが自分で変更するまで今のままです。"
+    },
+    {
+      "name": "session_brief_open_named",
+      "value": "開く：{title}"
+    },
+    {
+      "name": "session_brief_more",
+      "value": "ほか {count} 件"
+    },
+    {
+      "name": "session_brief_stage_done",
+      "value": "{value}、{total}ステップ中{step}、完了"
+    },
+    {
+      "name": "session_brief_stage_current",
+      "value": "{value}、{total}ステップ中{step}、現在のステップ"
+    },
+    {
+      "name": "session_brief_stage_ahead",
+      "value": "{value}、{total}ステップ中{step}、これから"
+    },
+    {
+      "name": "session_brief_waited",
+      "value": "{value}待ち"
+    },
+    {
+      "name": "session_brief_nudged",
+      "value": "催促済み"
+    },
+    {
+      "name": "session_brief_recommended",
+      "value": "おすすめ：{value}"
+    },
+    {
+      "name": "session_brief_skipped",
+      "value": "スキップ・{value}"
+    },
+    {
+      "name": "session_brief_run_failed",
+      "value": "実行に失敗・{value}"
+    },
+    {
+      "name": "session_brief_start_failed",
+      "value": "開始できませんでした・{value}"
+    },
+    {
+      "name": "session_brief_days",
+      "value": "{count}日"
+    },
+    {
+      "name": "session_brief_hours",
+      "value": "{count}時間"
+    },
+    {
+      "name": "session_brief_minutes",
+      "value": "{count}分"
+    },
+    {
+      "name": "session_brief_past",
+      "value": "過去{hours}時間：完了 {done} 件・未達 {failed} 件"
+    },
+    {
+      "name": "session_git_stage_all",
+      "value": "すべてステージ"
+    },
+    {
+      "name": "session_git_unstage_all",
+      "value": "すべてステージ解除"
+    },
+    {
+      "name": "phone_keyboard_settings",
+      "value": "キーボード設定"
+    },
+    {
+      "name": "phone_dictation_automatic_note",
+      "value": "自動では下書きと最近の発言から、端末内の中国語認識かキーボード入力を選びます。判定できない場合は前回の認識言語、その次にアプリの言語を使用します。"
+    },
+    {
+      "name": "phone_meeting_invite",
+      "value": "Persona を招待"
+    },
+    {
+      "name": "phone_meeting_remove",
+      "value": "会議から外す"
+    },
+    {
+      "name": "phone_meeting_onscreen",
+      "value": "画面で回答"
+    },
+    {
+      "name": "phone_meeting_aloud",
+      "value": "声で回答"
+    },
+    {
+      "name": "phone_meeting_private",
+      "value": "非公開の会議"
+    },
+    {
+      "name": "phone_meeting_room",
+      "value": "会議中の会話"
+    },
+    {
+      "name": "phone_meeting_live_note",
+      "value": "音声はこの端末に残り、テキストは会議の会話とナレッジに同期されます。"
+    },
+    {
+      "name": "meeting_room_privacy_local_days",
+      "value": "音声はこの端末に残り、テキストは会議の会話に同期され、ナレッジに {days} 日間保存されます。"
+    },
+    {
+      "name": "meeting_room_text_shared",
+      "value": "テキストは会議の会話にも同期されます。"
+    },
+    {
+      "name": "phone_meeting_live_ready",
+      "value": "Persona は会議に参加しています"
+    },
+    {
+      "name": "phone_meeting_live_starting",
+      "value": "会議の会話に接続中…"
+    },
+    {
+      "name": "phone_meeting_unavailable",
+      "value": "現在 Persona はこの会議に参加できません。"
+    },
+    {
+      "name": "phone_meeting_retry",
+      "value": "接続が中断しました。会議の文字起こしは端末に保存されています。"
+    },
+    {
+      "name": "phone_meeting_full",
+      "value": "ライブ文字起こしが上限に達しました。"
+    },
+    {
+      "name": "phone_meeting_ask",
+      "value": "この会議で質問"
+    },
+    {
+      "name": "phone_meeting_question",
+      "value": "この会議について質問"
+    },
+    {
+      "name": "phone_meeting_closed",
+      "value": "会議が終了しました"
+    },
+    {
+      "name": "phone_meeting_role",
+      "value": "Persona のデフォルトの役割"
+    },
+    {
+      "name": "phone_meeting_role_listener",
+      "value": "聞くだけ"
+    },
+    {
+      "name": "phone_meeting_role_participant",
+      "value": "参加"
+    },
+    {
+      "name": "phone_meeting_role_note_off",
+      "value": "Persona はこの会議に加わりません。議事録は会議のあとに作られます。"
+    },
+    {
+      "name": "phone_meeting_role_note_listener",
+      "value": "Persona が会議を聞きます。このスマートフォンから質問すると画面で答え、声には出しません。"
+    },
+    {
+      "name": "phone_meeting_role_note_participant",
+      "value": "Persona が会議を聞き、「Personaに聞く」をタップすると声で答えます。"
+    },
+    {
+      "name": "phone_meeting_in_front",
+      "value": "ほかの人の前で"
+    },
+    {
+      "name": "phone_meeting_material",
+      "value": "会議に関わる内容だけで答えます：過去の議事録、プロジェクトの進み具合、To-Do の担当者。"
+    },
+    {
+      "name": "phone_meeting_privacy",
+      "value": "個人的なチャット、メール、健康、その他の個人データには触れません。"
+    },
+    {
+      "name": "phone_meeting_explicit_voice",
+      "value": "声に出すのは「Personaに聞く」をタップしたときだけで、参加しているときに限ります。"
+    },
+    {
+      "name": "phone_meeting_limits_note",
+      "value": "会議中は何を聞かれても、hub が Persona にこの制限を守らせます。"
+    },
+    {
+      "name": "phone_meeting_default_note",
+      "value": "会議の録音はこの設定で始まります。1 回だけ変えるときは、開始前に「録音」ページで選び直します。"
+    },
+    {
+      "name": "phone_meeting_speech_unavailable",
+      "value": "ライブ認識を使用できません。端末への録音と質問の入力はできます。"
+    },
+    {
+      "name": "phone_meeting_off",
+      "value": "オフ"
+    },
+    {
+      "name": "phone_meeting_topics",
+      "value": "トピック"
+    },
+    {
+      "name": "phone_meeting_no_answer",
+      "value": "この会議では質問に回答できませんでした。"
+    },
+    {
+      "name": "phone_knowledge_selection",
+      "value": "ナレッジの選択"
+    },
+    {
+      "name": "ks_individual",
+      "value": "個別設定のチャットとドキュメント"
+    },
+    {
+      "name": "ks_individual_hint",
+      "value": "ここでの設定は下のすべてのルールより優先されます。削除すると、そのチャットやドキュメントは再びルールに従います。"
+    },
+    {
+      "name": "ks_add_chat",
+      "value": "チャットを追加…"
+    },
+    {
+      "name": "ks_add_doc",
+      "value": "ドキュメントを追加…"
+    },
+    {
+      "name": "ks_remove",
+      "value": "設定を削除"
+    },
+    {
+      "name": "ks_priority",
+      "value": "優先度 {level}"
+    },
+    {
+      "name": "ks_messages",
+      "value": "チャットのルール · 優先度 1"
+    },
+    {
+      "name": "ks_docs",
+      "value": "ドキュメントのルール · 優先度 1"
+    },
+    {
+      "name": "ks_up",
+      "value": "上へ移動"
+    },
+    {
+      "name": "ks_down",
+      "value": "下へ移動"
+    },
+    {
+      "name": "ks_join",
+      "value": "「{name}」を優先度 {level} に結合"
+    },
+    {
+      "name": "ks_split",
+      "value": "「{name}」を別の優先度に分ける"
+    },
+    {
+      "name": "ks_store",
+      "value": "一致した内容を保存"
+    },
+    {
+      "name": "ks_text_days",
+      "value": "テキストの保持日数"
+    },
+    {
+      "name": "ks_attachment_days",
+      "value": "添付ファイルの保持日数"
+    },
+    {
+      "name": "ks_include_all",
+      "value": "@all もメンションとして扱う"
+    },
+    {
+      "name": "ks_context",
+      "value": "前後に残すメッセージ数"
+    },
+    {
+      "name": "ks_context_hint",
+      "value": "自分の各メッセージの前後 0〜200 件を残し、後から文脈がわかるようにします。空欄は 50 件です。"
+    },
+    {
+      "name": "ks_days_hint",
+      "value": "1〜36500 日。空欄の場合はハブの保持設定を使います。添付ファイルがテキストより長く保持されることはありません。"
+    },
+    {
+      "name": "ks_doc_days_hint",
+      "value": "1〜36500 日。空欄の場合、削除期限は設定されません。"
+    },
+    {
+      "name": "ks_invalid",
+      "value": "上記の範囲の整数を入力するか、空欄にしてください。"
+    },
+    {
+      "name": "ks_source",
+      "value": "提供元"
+    },
+    {
+      "name": "ks_mode",
+      "value": "保存する内容"
+    },
+    {
+      "name": "ks_days",
+      "value": "保持日数"
+    },
+    {
+      "name": "ks_chat_editor",
+      "value": "チャットの設定"
+    },
+    {
+      "name": "ks_doc_editor",
+      "value": "ドキュメントの設定"
+    },
+    {
+      "name": "ks_list_chats",
+      "value": "ナレッジにすでに内容があるチャットです。メール、Issue、プルリクエストは常に保存されます。"
+    },
+    {
+      "name": "ks_list_docs",
+      "value": "ナレッジにすでにあるドキュメントです。"
+    },
+    {
+      "name": "ks_empty_chat",
+      "value": "チャットはまだありません"
+    },
+    {
+      "name": "ks_empty_doc",
+      "value": "ドキュメントはまだありません"
+    },
+    {
+      "name": "ks_empty_hint",
+      "value": "ナレッジに内容が保存されると、ここで個別に設定できます。"
+    },
+    {
+      "name": "ks_off",
+      "value": "オフ"
+    },
+    {
+      "name": "ks_on",
+      "value": "オン"
+    },
+    {
+      "name": "ks_day_count",
+      "value": "{days}日"
+    },
+    {
+      "name": "ks_skip",
+      "value": "読み取らない"
+    },
+    {
+      "name": "ks_rules_chat",
+      "value": "メンションと自分の発言のみ"
+    },
+    {
+      "name": "ks_rules_doc",
+      "value": "ルールに従う"
+    },
+    {
+      "name": "ks_all",
+      "value": "すべて保存"
+    },
+    {
+      "name": "ks_skip_hint",
+      "value": "新しい内容は、自分へのメンションも含めて読み取りも保存もしません。保存済みの内容は残ります。"
+    },
+    {
+      "name": "ks_rules_chat_hint",
+      "value": "他のルールにかかわらず、「自分へのメンション」と「自分の発言」のルールで残る内容だけを保存します。"
+    },
+    {
+      "name": "ks_rules_doc_hint",
+      "value": "ドキュメントのルールに従って読み取り、保存します。"
+    },
+    {
+      "name": "ks_all_chat_hint",
+      "value": "すべてのメッセージを保存します。日数を空欄にすると、適用されるルールまたはハブのテキスト保持期間に従います。"
+    },
+    {
+      "name": "ks_all_doc_hint",
+      "value": "ルールにかかわらずこのドキュメントを保存します。日数を空欄にすると削除期限は設定されません。"
+    },
+    {
+      "name": "ks_not_read",
+      "value": "読み取らない"
+    },
+    {
+      "name": "ks_personal",
+      "value": "メンションと自分の発言"
+    },
+    {
+      "name": "ks_by_rules",
+      "value": "ルールに従う"
+    },
+    {
+      "name": "ks_everything",
+      "value": "すべて"
+    },
+    {
+      "name": "ks_old_hub",
+      "value": "このハブはまだナレッジの選択に対応していません。ハブを更新すると、ここで保存する内容を選べます。"
+    },
+    {
+      "name": "ks_future",
+      "value": "このハブの選択には、このバージョンのアプリが認識できない設定が含まれています。ここで変更するにはアプリを更新してください。何も変更していません。"
+    },
+    {
+      "name": "ks_changed",
+      "value": "選択の設定が別のデバイスで変更されました。確認してからもう一度お試しください。"
+    },
+    {
+      "name": "ks_no_id",
+      "value": "ナレッジにこの項目の取得元が記録されていないため、個別設定を追加できません。"
+    },
+    {
+      "name": "ks_not_selectable",
+      "value": "メール、Issue、プルリクエストは常に保存され、選択の設定は適用されません。"
+    },
+    {
+      "name": "ks_topics",
+      "value": "ナレッジポイントをトピックごとに整理"
+    },
+    {
+      "name": "ks_map",
+      "value": "ナレッジマップを開く"
+    },
+    {
+      "name": "ks_map_title",
+      "value": "ナレッジマップ"
+    },
+    {
+      "name": "ks_topic",
+      "value": "トピック"
+    },
+    {
+      "name": "ks_removed",
+      "value": "設定を削除しました"
+    },
+    {
+      "name": "ks_undo",
+      "value": "取り消す"
+    },
+    {
+      "name": "ks_priority_hint",
+      "value": "上の優先度から順に確認します。一致するルールがある最初の優先度で決まり、一致したルールが 1 つでもオンなら保存、すべてオフなら保存しません。それより下は確認しません。ルールをオフにしても新しいメッセージの保存が止まるだけで、保存済みの内容は保持日数が過ぎるまで残ります。"
+    },
+    {
+      "name": "ks_docs_hint",
+      "value": "ドキュメントも同じ順序で判定します。ここで日数を設定した場合だけ削除期限が付き、設定しなければ従来どおり保持されます。"
+    },
+    {
+      "name": "ks_rule_mentions",
+      "value": "自分へのメンション"
+    },
+    {
+      "name": "ks_rule_mine",
+      "value": "自分の発言"
+    },
+    {
+      "name": "ks_rule_dm",
+      "value": "個人チャット"
+    },
+    {
+      "name": "ks_rule_group",
+      "value": "グループチャット"
+    },
+    {
+      "name": "ks_rule_bot",
+      "value": "ボットとアプリ"
+    },
+    {
+      "name": "ks_rule_official",
+      "value": "公式アカウント"
+    },
+    {
+      "name": "ks_rule_muted",
+      "value": "ミュートしたチャット"
+    },
+    {
+      "name": "ks_rule_collapsed",
+      "value": "折りたたんだチャット"
+    },
+    {
+      "name": "ks_rule_done",
+      "value": "完了したチャット"
+    },
+    {
+      "name": "ks_rule_comment_mentions",
+      "value": "コメントでのメンション"
+    },
+    {
+      "name": "ks_rule_authored",
+      "value": "自分が作成したドキュメント"
+    },
+    {
+      "name": "ks_rule_viewed",
+      "value": "自分が閲覧したドキュメント"
+    },
+    {
+      "name": "ks_detail_mentions",
+      "value": "どのチャットでも、自分宛ての @メンションを含むメッセージ"
+    },
+    {
+      "name": "ks_detail_mine",
+      "value": "自分が送ったメッセージと、その前後のメッセージ"
+    },
+    {
+      "name": "ks_detail_dm",
+      "value": "相手との 1 対 1 のチャット"
+    },
+    {
+      "name": "ks_detail_group",
+      "value": "ミュート、折りたたみ、完了のいずれもしていないグループ"
+    },
+    {
+      "name": "ks_detail_bot",
+      "value": "ボット、アプリ、AI エージェントとのチャット"
+    },
+    {
+      "name": "ks_detail_official",
+      "value": "公式・サービス・システムのアカウント"
+    },
+    {
+      "name": "ks_detail_muted",
+      "value": "ミュートしたチャット"
+    },
+    {
+      "name": "ks_detail_collapsed",
+      "value": "折りたたんだチャット"
+    },
+    {
+      "name": "ks_detail_done",
+      "value": "完了にしたチャット"
+    },
+    {
+      "name": "ks_detail_comment_mentions",
+      "value": "コメントに自分宛ての @メンションがあるドキュメント"
+    },
+    {
+      "name": "ks_detail_authored",
+      "value": "自分が作成したドキュメント"
+    },
+    {
+      "name": "ks_detail_viewed",
+      "value": "自分が開いたドキュメント"
+    },
+    {
+      "name": "ks_detail_doc_mentions",
+      "value": "自分宛ての @メンションがあるドキュメント"
+    },
+    {
+      "name": "ks_load_error",
+      "value": "ナレッジの選択を読み込めませんでした"
+    },
+    {
+      "name": "ks_save_error",
+      "value": "ナレッジの選択を保存できませんでした"
+    },
+    {
+      "name": "ks_discard",
+      "value": "変更を破棄"
+    },
+    {
+      "name": "phone_meeting_voice_unavailable",
+      "value": "回答を表示しました。この端末では読み上げられませんでした。"
+    },
+    {
+      "name": "chat_tray_needs",
+      "value": "あなたの対応が必要"
+    },
+    {
+      "name": "chat_tray_progress",
+      "value": "進行中"
+    },
+    {
+      "name": "phone_settings_models",
+      "value": "モデル"
+    },
+    {
+      "name": "phone_settings_profile",
+      "value": "アシスタントのプロフィール"
+    },
+    {
+      "name": "phone_settings_display",
+      "value": "外観と表示"
+    },
+    {
+      "name": "phone_settings_language_dictation",
+      "value": "言語と音声入力"
+    },
+    {
+      "name": "phone_settings_switch",
+      "value": "切り替え"
+    },
+    {
+      "name": "phone_settings_system_language",
+      "value": "システムと同じ（{language}）"
+    },
+    {
+      "name": "phone_settings_owner_note",
+      "value": "「{name}」の設定だけを表示しています。ほかのアシスタントを変更するには、先に切り替えてください。"
+    },
+    {
+      "name": "chat_tray_other",
+      "value": "別の会話"
+    },
+    {
+      "name": "phone_drawer_recent",
+      "value": "最近"
+    },
+    {
+      "name": "phone_drawer_schedules",
+      "value": "定期タスク"
+    },
+    {
+      "name": "phone_drawer_health",
+      "value": "ヘルスケア"
+    },
+    {
+      "name": "meeting_reminders",
+      "value": "会議の前に通知"
+    },
+    {
+      "name": "meeting_reminder_body",
+      "value": "{time} に開始します。録音しますか？"
+    },
+    {
+      "name": "meeting_calendar_allow",
+      "value": "カレンダーへのアクセスを許可"
+    },
+    {
+      "name": "meeting_notifications_allow",
+      "value": "通知を許可"
+    },
+    {
+      "name": "meeting_reminder_footer",
+      "value": "カレンダーの会議が始まる1分前に、録音するかどうかをこの端末で通知します。"
+    },
+    {
+      "name": "meeting_calendar_needed",
+      "value": "通知にはこの端末のカレンダーへのアクセスが必要です。"
+    },
+    {
+      "name": "meeting_reminder_unavailable",
+      "value": "この端末の会議通知を更新できませんでした。"
+    },
+    {
+      "name": "meeting_transcription",
+      "value": "会議の文字起こし"
+    },
+    {
+      "name": "meeting_mode_device",
+      "value": "デバイス上"
+    },
+    {
+      "name": "meeting_mode_hub",
+      "value": "Hub 上"
+    },
+    {
+      "name": "meeting_service",
+      "value": "音声サービス"
+    },
+    {
+      "name": "meeting_service_builtin",
+      "value": "内蔵サービス"
+    },
+    {
+      "name": "meeting_glossary",
+      "value": "用語集"
+    },
+    {
+      "name": "meeting_glossary_hint",
+      "value": "1行に1語ずつ入力してください。最大200語、1語につき40文字です。"
+    },
+    {
+      "name": "meeting_glossary_limit",
+      "value": "各40文字以内で200語まで入力できます。"
+    },
+    {
+      "name": "meeting_privacy_device",
+      "value": "デバイス上で文字起こしすると音声は端末に残ります。確認後にテキストをHubに同期します。"
+    },
+    {
+      "name": "meeting_privacy_hub",
+      "value": "Hub文字起こし対応端末は会議の音声をHubと「{service}」に送信します。"
+    },
+    {
+      "name": "meeting_speech_not_ready",
+      "value": "Hubの音声サービスの準備ができていないため、デバイス上で文字起こしします。"
+    },
+    {
+      "name": "meeting_privacy_this_phone",
+      "value": "この端末の録音は端末内に保存されます。確認した文字起こしだけがHubに同期されます。"
+    },
+    {
+      "name": "meeting_reminder_quota",
+      "value": "システムがPersonaのバックグラウンド通知件数を制限しているため、これ以上の会議通知を設定できません。"
+    },
+    {
+      "name": "meeting_reminder_none",
+      "value": "現在設定されている会議通知はありません。"
+    },
+    {
+      "name": "meeting_reminder_count",
+      "value": "この端末で設定済みの会議通知：{count}件。"
+    },
+    {
+      "name": "kb_search_profiles",
+      "value": "プロフィールとチャット履歴を検索"
+    },
+    {
+      "name": "kb_minutes_ago",
+      "value": "{n}分前"
+    },
+    {
+      "name": "kb_yesterday",
+      "value": "昨日"
+    },
+    {
+      "name": "kb_relevance_value",
+      "value": "関連度{n}"
+    },
+    {
+      "name": "kb_people",
+      "value": "人物"
+    },
+    {
+      "name": "kb_events",
+      "value": "予定"
+    },
+    {
+      "name": "meeting_this_device",
+      "value": "この端末"
+    },
+    {
+      "name": "meeting_transcription_label",
+      "value": "文字起こし"
+    },
+    {
+      "name": "meeting_cloud_service",
+      "value": "クラウド · {service}"
+    },
+    {
+      "name": "meeting_hub_unavailable",
+      "value": "この端末 · 現在ハブで文字起こしできません"
+    },
+    {
+      "name": "meeting_start_privacy_cloud",
+      "value": "この会議の音声はハブ経由で {service} に送られ、文字起こしされます。議事録が完成すると、ハブの音声は削除されます。"
+    },
+    {
+      "name": "meeting_start_privacy_cloud_days",
+      "value": "この会議の音声はハブ経由で {service} に送られます。議事録が完成するとハブの音声は削除され、文字起こしは {days} 日間保存されます。"
+    },
+    {
+      "name": "meeting_start_privacy_local_days",
+      "value": "音声はこのデバイスに残り、テキストはナレッジに同期されて {days} 日間保存されます。"
+    },
+    {
+      "name": "meeting_start_confirm_title",
+      "value": "この会議の音声を送信しますか？"
+    },
+    {
+      "name": "meeting_start_send",
+      "value": "録音を開始して送信"
+    },
+    {
+      "name": "meeting_start_opt_in",
+      "value": "この端末から音声を送るには、会議の開始時に毎回クラウドの文字起こしを選んで確認してください。"
+    },
+    {
+      "name": "meeting_wifi_only",
+      "value": "Wi-Fi のみでハブに音声を送信"
+    },
+    {
+      "name": "meeting_wifi_note",
+      "value": "この端末のみの設定です。モバイル通信や従量制の回線では音声を端末に保持し、従量制でない Wi-Fi に接続すると送信します。音声は 1 時間で約 115 MB です。"
+    },
+    {
+      "name": "meeting_cloud_transcription",
+      "value": "ハブでの文字起こし"
+    },
+    {
+      "name": "meeting_audio_negotiating",
+      "value": "この会議の文字起こしサービスをハブに確認しています。"
+    },
+    {
+      "name": "meeting_audio_connecting",
+      "value": "ハブに接続しています。"
+    },
+    {
+      "name": "meeting_audio_live",
+      "value": "ハブがこの会議を文字起こししています。"
+    },
+    {
+      "name": "meeting_audio_reconnecting",
+      "value": "ハブに再接続しています。音声は端末に保持されています。"
+    },
+    {
+      "name": "meeting_audio_waiting_network",
+      "value": "許可された回線に接続すると、ハブに音声を送信します。"
+    },
+    {
+      "name": "meeting_audio_fallback",
+      "value": "この会議ではハブの文字起こしを利用できません。録音はこの端末で利用できます。"
+    },
+    {
+      "name": "meeting_audio_finishing",
+      "value": "ハブが文字起こしを仕上げています。"
+    },
+    {
+      "name": "meeting_audio_final",
+      "value": "ハブでの文字起こしが完了しました。"
+    },
+    {
+      "name": "meeting_audio_failed",
+      "value": "ハブで文字起こしを完了できませんでした。録音はこの端末で利用できます。"
+    },
+    {
+      "name": "meeting_audio_revoked",
+      "value": "ハブへの音声の送信を停止しました。"
+    },
+    {
+      "name": "meeting_audio_previous",
+      "value": "この録音ではハブの文字起こしが選択されました。"
+    },
+    {
+      "name": "meeting_audio_processing_problem",
+      "value": "ハブの文字起こしで問題が発生しました。"
+    },
+    {
+      "name": "meeting_audio_received",
+      "value": "ハブが受信した音声は {seconds} 秒です"
+    },
+    {
+      "name": "meeting_audio_withdraw",
+      "value": "音声の送信を停止"
+    },
+    {
+      "name": "meeting_audio_withdraw_note",
+      "value": "この会議の今後の音声送信を停止します。ハブが受信済みの音声には保存設定が適用されます。"
+    },
+    {
+      "name": "meeting_configured_service",
+      "value": "ハブに設定された音声サービス"
+    },
+    {
+      "name": "meeting_start_options",
+      "value": "会議のオプション"
+    },
+    {
+      "name": "meeting_language_chinese",
+      "value": "中国語"
+    },
+    {
+      "name": "meeting_language_unavailable",
+      "value": "文字起こしの言語を確認できません。もう一度試してください。"
+    },
+    {
+      "name": "meeting_input_label",
+      "value": "マイク"
+    },
+    {
+      "name": "meeting_input_automatic",
+      "value": "システムのデフォルト"
+    },
+    {
+      "name": "meeting_bluetooth_input",
+      "value": "Bluetooth マイク"
+    },
+    {
+      "name": "meeting_phone_input",
+      "value": "端末のマイク"
+    },
+    {
+      "name": "meeting_input_changed",
+      "value": "選んだマイクを利用できません。別の入力を選び、もう一度開始してください。"
+    },
+    {
+      "name": "meeting_note_without_minutes",
+      "value": "議事録は作らず、Persona も加わりません。"
+    },
+    {
+      "name": "decision_to_decide",
+      "value": "選択待ち"
+    },
+    {
+      "name": "decision_previous",
+      "value": "前へ"
+    },
+    {
+      "name": "decision_next",
+      "value": "次へ"
+    },
+    {
+      "name": "decision_view_in_chat",
+      "value": "元のメッセージ"
+    },
+    {
+      "name": "decision_skip",
+      "value": "スキップ"
+    },
+    {
+      "name": "decision_skip_plan",
+      "value": "これはプランの承認のためスキップできません。進めない場合は差し戻してください。"
+    },
+    {
+      "name": "decision_skip_permission",
+      "value": "これは権限のリクエストのためスキップできません。実行させない場合は「拒否」をタップしてください。"
+    },
+    {
+      "name": "decision_skip_terminal",
+      "value": "これはターミナルから読み取った質問のため、まだスキップできません。選ばない場合は「チャットで伝える」をタップしてください。"
+    },
+    {
+      "name": "phone_sidebar_directions",
+      "value": "常駐"
+    },
+    {
+      "name": "phone_sidebar_show_scheduled",
+      "value": "定期タスクのチャットを表示"
+    },
+    {
+      "name": "phone_sidebar_label_separator",
+      "value": "、"
+    },
+    {
+      "name": "phone_sidebar_source_spawned",
+      "value": "チャットから派生"
+    },
+    {
+      "name": "phone_sidebar_source_extension",
+      "value": "拡張機能から"
+    },
+    {
+      "name": "phone_sidebar_source_lark",
+      "value": "Lark /agentから"
+    },
+    {
+      "name": "phone_sidebar_source_other",
+      "value": "その他"
+    },
+    {
+      "name": "phone_sidebar_unread",
+      "value": "未確認"
+    },
+    {
+      "name": "chat_queued_followup",
+      "value": "補足（後で送信）"
+    },
+    {
+      "name": "chat_pending_cards_count",
+      "value": "保留中{count}件"
+    },
+    {
+      "name": "phone_all_chats_display_options",
+      "value": "表示オプション"
+    },
+    {
+      "name": "phone_session_info",
+      "value": "セッション情報"
+    },
+    {
+      "name": "phone_session_info_action",
+      "value": "{title}、セッション情報を表示"
+    },
+    {
+      "name": "phone_session_runtime",
+      "value": "実行"
+    },
+    {
+      "name": "phone_session_usage",
+      "value": "使用量"
+    },
+    {
+      "name": "phone_session_context",
+      "value": "コンテキスト"
+    },
+    {
+      "name": "phone_session_output",
+      "value": "生成量"
+    },
+    {
+      "name": "phone_session_started",
+      "value": "開始"
+    },
+    {
+      "name": "phone_session_folder",
+      "value": "フォルダ"
+    },
+    {
+      "name": "phone_start_default_model",
+      "value": "デフォルトモデル"
+    },
+    {
+      "name": "phone_start_configured_model",
+      "value": "モデル設定：{model}"
+    },
+    {
+      "name": "phone_start_typed_model",
+      "value": "手入力のモデルID"
+    },
+    {
+      "name": "phone_start_typed_model_id",
+      "value": "手入力のモデルID：{id}"
+    },
+    {
+      "name": "phone_start_named_preset",
+      "value": "プリセット {preset}"
+    },
+    {
+      "name": "phone_start_preset",
+      "value": "プリセット"
+    },
+    {
+      "name": "phone_session_permissions",
+      "value": "権限"
+    },
+    {
+      "name": "phone_session_effort",
+      "value": "思考の強さ"
+    },
+    {
+      "name": "phone_session_extra_high",
+      "value": "とても高い"
+    },
+    {
+      "name": "phone_session_not_running",
+      "value": "停止中"
+    },
+    {
+      "name": "phone_session_background_work",
+      "value": "作業中（バックグラウンド）"
+    },
+    {
+      "name": "phone_session_turns",
+      "value": "{n}ターン"
+    },
+    {
+      "name": "phone_session_turn_one",
+      "value": "{n}ターン"
+    },
+    {
+      "name": "phone_session_workspace",
+      "value": "ワークスペース {space} を開く"
+    },
+    {
+      "name": "phone_todo_did_not_start",
+      "value": "起動失敗"
+    },
+    {
+      "name": "phone_todo_start_failure",
+      "value": "起動に失敗しました：{reason}"
+    },
+    {
+      "name": "phone_todo_not_handed",
+      "value": "まだエージェントに任せていません"
+    },
+    {
+      "name": "phone_sidebar_recent_heading",
+      "value": "サイドバーの「最近」"
+    },
+    {
+      "name": "phone_sidebar_recent_help",
+      "value": "定期タスクとバックグラウンド監督が始めたチャットも、時間順にサイドバーの「最近」に並びます。すべてのデバイスに反映されます。"
+    },
+    {
+      "name": "phone_chat_pin",
+      "value": "常駐にする"
+    },
+    {
+      "name": "phone_chat_unpin",
+      "value": "常駐をやめる"
+    },
+    {
+      "name": "phone_chat_pin_title",
+      "value": "常駐にしますか？"
+    },
+    {
+      "name": "phone_chat_pin_message",
+      "value": "このチャットは常駐に移り、「最近」には出なくなります。"
+    },
+    {
+      "name": "phone_chat_unpin_title",
+      "value": "常駐をやめますか？"
+    },
+    {
+      "name": "phone_chat_unpin_message",
+      "value": "「{name}」は「最近」に戻ります。進行中のタスクはメインチャットの監督に戻り、終了や削除はされません。"
+    },
+    {
+      "name": "phone_chat_unpin_filing",
+      "value": "追加したものはそのまま残ります。"
+    },
+    {
+      "name": "phone_chat_pinned",
+      "value": "常駐にしました"
+    },
+    {
+      "name": "phone_chat_unpinned",
+      "value": "常駐をやめました"
+    },
+    {
+      "name": "phone_chat_archived",
+      "value": "アーカイブ済み"
+    },
+    {
+      "name": "phone_chat_move",
+      "value": "移動…"
+    },
+    {
+      "name": "phone_chat_own",
+      "value": "単独にする"
+    },
+    {
+      "name": "phone_chat_moved",
+      "value": "「{name}」に移動しました"
+    },
+    {
+      "name": "phone_chat_already_moved",
+      "value": "すでに「{name}」にあります"
+    },
+    {
+      "name": "phone_chat_own_set",
+      "value": "単独にしました"
+    },
+    {
+      "name": "phone_chat_own_already",
+      "value": "すでに単独です"
+    },
+    {
+      "name": "phone_chat_direction_unavailable",
+      "value": "このハブでは使えません"
+    },
+    {
+      "name": "phone_chat_undo",
+      "value": "取り消す"
+    },
+    {
+      "name": "phone_chat_move_undone",
+      "value": "移動を取り消しました"
+    },
+    {
+      "name": "phone_chat_direction_full",
+      "value": "この方向はいっぱいです。"
+    },
+    {
+      "name": "phone_chat_direction_supervised",
+      "value": "このチャットは監督対象のタスクに従います。"
+    },
+    {
+      "name": "phone_all_chats_lark",
+      "value": "Lark /agent"
+    },
+    {
+      "name": "phone_all_chats_mine",
+      "value": "自分"
+    },
+    {
+      "name": "phone_all_chats_empty",
+      "value": "ここにはチャットがありません"
+    },
+    {
+      "name": "phone_all_chats_empty_detail",
+      "value": "受信トレイのAI分身、定期タスク、Lark /agentが開いたチャットはソースごとにここにまとめられます。"
+    },
+    {
+      "name": "phone_all_chats_filter_count",
+      "value": "{name}、{count}件"
+    },
+    {
+      "name": "phone_inbox_by_source",
+      "value": "ソース別"
+    },
+    {
+      "name": "phone_inbox_by_time",
+      "value": "時間別"
+    },
+    {
+      "name": "phone_inbox_week_ago",
+      "value": "7日以上前"
+    },
+    {
+      "name": "phone_inbox_month_ago",
+      "value": "1か月以上前"
+    },
+    {
+      "name": "phone_inbox_grouping_mode",
+      "value": "グループ：{name}"
+    },
+    {
+      "name": "header_permission_title",
+      "value": "権限モード：{mode}"
+    },
+    {
+      "name": "header_permission_detail_default",
+      "value": "ファイルの編集やコマンドの実行前に毎回確認します"
+    },
+    {
+      "name": "header_permission_detail_acceptEdits",
+      "value": "ファイルは確認なしで編集し、コマンドは確認します"
+    },
+    {
+      "name": "header_permission_detail_plan",
+      "value": "コードを読んでプランを書き、承認後に作業します"
+    },
+    {
+      "name": "header_permission_detail_auto",
+      "value": "リスクを自分で判断し、安全なものはそのまま実行します"
+    },
+    {
+      "name": "header_permission_launcher",
+      "value": "ランチャーに従う"
+    },
+    {
+      "name": "header_permission_launcher_detail",
+      "value": "何を確認するかは自身の承認設定で決まります。すでにすべて許可している場合もあります"
+    },
+    {
+      "name": "header_permission_full_detail",
+      "value": "ファイルの編集もコマンドの実行も確認しません"
+    },
+    {
+      "name": "header_permission_start_only",
+      "value": "何も確認しません。新規作成時のみ選択できます"
+    },
+    {
+      "name": "header_permission_restart",
+      "value": "このターンが終わるとセッションを再起動して適用します。会話はそのまま続きます"
+    },
+    {
+      "name": "header_permission_pending",
+      "value": "このターンが終わるとセッションを再起動してフルアクセスに切り替えます"
+    },
+    {
+      "name": "header_permission_enter",
+      "value": "フルアクセスにしますか？"
+    },
+    {
+      "name": "header_permission_leave",
+      "value": "フルアクセスをやめますか？"
+    },
+    {
+      "name": "header_permission_leave_detail",
+      "value": "このエージェントはフルアクセスで起動していないため、切り替えるとここからは戻せません。"
+    },
+    {
+      "name": "header_space_open",
+      "value": "スペース{space}のすべてのエージェント"
+    },
+    {
+      "name": "header_space_needs",
+      "value": "同じスペースの{count}個のエージェント、要対応のエージェントあり"
+    },
+    {
+      "name": "header_space_count",
+      "value": "同じスペースの{count}個のエージェント"
+    },
+    {
+      "name": "header_space_one",
+      "value": "同じスペースの{count}個のエージェント"
+    },
+    {
+      "name": "phone_decision_height",
+      "value": "カードの高さ"
+    },
+    {
+      "name": "phone_decision_height_hint",
+      "value": "上下にスワイプしてカードの高さを調整します。ダブルタップで最大と標準の高さを切り替えます。"
+    },
+    {
+      "name": "phone_decision_taller",
+      "value": "カードを高くする"
+    },
+    {
+      "name": "phone_decision_shorter",
+      "value": "カードを低くする"
+    },
+    {
+      "name": "phone_decision_full_text",
+      "value": "全文を表示"
+    },
+    {
+      "name": "phone_settings_advanced",
+      "value": "詳細設定"
+    },
+    {
+      "name": "phone_advanced_footer",
+      "value": "外観、言語、ストレージ、デバイスなどの設定。"
+    },
+    {
+      "name": "phone_inbox_sources",
+      "value": "受信箱のソース"
+    },
+    {
+      "name": "phone_hubs",
+      "value": "Hub 接続"
+    },
+    {
+      "name": "phone_pairing",
+      "value": "デバイスとペアリング"
+    },
+    {
+      "name": "phone_settings_build",
+      "value": "ビルド"
+    },
+    {
+      "name": "phone_settings_data_size",
+      "value": "Appデータ"
+    },
+    {
+      "name": "phone_default_permissions",
+      "value": "デフォルト権限"
+    },
+    {
+      "name": "phone_new_conversation_permissions",
+      "value": "新しいチャットの権限"
+    },
+    {
+      "name": "phone_default_permission_footer",
+      "value": "個別に権限を選択していない新しいチャットに適用されます。既存のチャットは現在の権限モードを維持します。"
+    },
+    {
+      "name": "phone_permission_unconfirmed",
+      "value": "サーバーが新しいチャットの権限を確認しませんでした。"
+    },
+    {
+      "name": "phone_inbox_permissions",
+      "value": "受信トレイの権限"
+    },
+    {
+      "name": "phone_follow_agents",
+      "value": "Agents に従う"
+    },
+    {
+      "name": "phone_inbox_permission_hint",
+      "value": "AIツイン自体に保存された選択だけが適用されます。デフォルト権限では、ファイルの編集やコマンドの実行前に確認します。新しいチャットと、停止後に再開するチャットにこの選択を使用し、実行中のチャットは現在のモードを維持します。"
+    },
+    {
+      "name": "phone_search_alias_models",
+      "value": "モデル プロバイダー API キー API Key 用途 サブスクリプション 実行方式"
+    },
+    {
+      "name": "phone_search_alias_assistant",
+      "value": "アシスタント プロフィール 名前 メモリ メモ"
+    },
+    {
+      "name": "phone_search_alias_channels",
+      "value": "チャネル ボット メッセージ WeChat Feishu"
+    },
+    {
+      "name": "phone_search_alias_connectors",
+      "value": "コネクタ メール ソース アカウント 自分として送信"
+    },
+    {
+      "name": "phone_search_alias_phone_inbox_sources",
+      "value": "受信箱 ソース 購読 おすすめ メール ミュート"
+    },
+    {
+      "name": "phone_search_alias_extensions",
+      "value": "拡張機能 プラグイン マーケット ツール インストール"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_options",
+      "value": "Agent Claude Code Codex Antigravity agy セッション トリアージ ランタイム"
+    },
+    {
+      "name": "phone_search_alias_appearance",
+      "value": "外観 表示 色 テーマ スタイル 文字サイズ レイアウト ダーク ライト Return キーボード 送信"
+    },
+    {
+      "name": "phone_search_alias_phone_language_options",
+      "value": "言語 音声入力 ディクテーション キーボード"
+    },
+    {
+      "name": "phone_search_alias_notifications",
+      "value": "通知 プッシュ アラート ロック画面 プライバシー"
+    },
+    {
+      "name": "phone_search_alias_translation",
+      "value": "翻訳 言語"
+    },
+    {
+      "name": "phone_search_alias_storage",
+      "value": "ストレージ キャッシュ ディスク 消去"
+    },
+    {
+      "name": "phone_search_alias_about",
+      "value": "情報 バージョン ビルド commit 診断 新しいチャット チェック"
+    },
+    {
+      "name": "phone_search_alias_phone_hubs",
+      "value": "Hub サーバー 接続 アドレス ネットワーク トンネル"
+    },
+    {
+      "name": "phone_search_alias_hub_update",
+      "value": "Hub サーバー バージョン 更新 アップグレード"
+    },
+    {
+      "name": "phone_search_alias_managers",
+      "value": "アシスタント 管理 作成 デフォルト 切り替え"
+    },
+    {
+      "name": "phone_search_alias_phone_look_avatar",
+      "value": "アバター 顔 Persona アイコン 名前 共有"
+    },
+    {
+      "name": "phone_search_alias_phone_pairing",
+      "value": "デバイス ペアリング Watch 同期 切断 QR コード"
+    },
+    {
+      "name": "phone_search_alias_triage",
+      "value": "セッション トリアージ 委任 質問 権限"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_followup",
+      "value": "エージェント フォロー 監督 アイドル 停止 アーカイブ セッション 名前 ワークスペース タスク 開始"
+    },
+    {
+      "name": "phone_search_alias_phone_look_color",
+      "value": "テーマ 色 パレット"
+    },
+    {
+      "name": "phone_search_alias_phone_look_style",
+      "value": "インターフェース スタイル フォント 文字サイズ"
+    },
+    {
+      "name": "phone_search_alias_phone_look_scheme",
+      "value": "ライト ダーク システム 外観"
+    },
+    {
+      "name": "phone_search_alias_phone_knowledge_selection",
+      "value": "ナレッジベース 選択 ソース 優先順位 保持"
+    },
+    {
+      "name": "phone_search_alias_phone_meeting_options",
+      "value": "会議 録音 参加 文字起こし 議事録 用語集 Wi-Fi ハブ"
+    },
+    {
+      "name": "phone_search_alias_phone_agent_layout",
+      "value": "Agents 一覧 レイアウト 行 カード コンパクト"
+    },
+    {
+      "name": "phone_search_alias_phone",
+      "value": "iPhone データ 権限 写真 連絡先 カレンダー リマインダー 位置 ヘルスケア クリップボード"
+    },
+    {
+      "name": "phone_search_alias_machines",
+      "value": "コンピュータ マシン ノード ペアリング"
+    },
+    {
+      "name": "phone_settings_cache_size",
+      "value": "キャッシュ"
+    },
+    {
+      "name": "phone_search_alias_phone_claude_config",
+      "value": "Claude Code"
+    },
+    {
+      "name": "phone_search_alias_phone_codex_config",
+      "value": "Codex"
+    },
+    {
+      "name": "phone_search_alias_phone_agy_config",
+      "value": "Antigravity agy"
+    },
+    {
+      "name": "phone_model_choose_uses",
+      "value": "用途ごとにモデルを選びます。"
+    },
+    {
+      "name": "phone_model_scope",
+      "value": "適用範囲"
+    },
+    {
+      "name": "phone_model_scope_hint",
+      "value": "カテゴリの設定が既定値になります。個別に設定した用途は、その設定を使います。変更は次の実行から適用されます。"
+    },
+    {
+      "name": "phone_model_provider_keys",
+      "value": "プロバイダーとキー"
+    },
+    {
+      "name": "phone_model_unset",
+      "value": "未設定"
+    },
+    {
+      "name": "phone_model_configured",
+      "value": "個別に設定済み"
+    },
+    {
+      "name": "phone_model_follow_main",
+      "value": "メインチャットに従う"
+    },
+    {
+      "name": "phone_model_none",
+      "value": "モデル設定はまだありません"
+    },
+    {
+      "name": "phone_hub_connected",
+      "value": "ハブに接続済み"
+    },
+    {
+      "name": "phone_hub_connected_ssh",
+      "value": "ハブに接続済み・SSHトンネル経由"
+    },
+    {
+      "name": "phone_hub_new_image",
+      "value": "新しいイメージ"
+    },
+    {
+      "name": "phone_hub_update_available",
+      "value": "アップデートあり"
+    },
+    {
+      "name": "phone_live_screen",
+      "value": "ライブ画面"
+    },
+    {
+      "name": "phone_search_alias_phone_live_screen",
+      "value": "ライブ画面 画面 経路 直接接続 画質 モバイル通信 インターネット共有 スクロール スクロールの速さ 2本指"
+    },
+    {
+      "name": "phone_screen_scroll_speed",
+      "value": "スクロールの速さ"
+    },
+    {
+      "name": "phone_screen_slower",
+      "value": "遅め"
+    },
+    {
+      "name": "phone_screen_default",
+      "value": "標準"
+    },
+    {
+      "name": "phone_screen_faster",
+      "value": "速め"
+    },
+    {
+      "name": "phone_screen_scroll_hint",
+      "value": "コンピュータの画面を2本指でドラッグしたときの、スクロールの速さです。"
+    },
+    {
+      "name": "phone_native_alarms",
+      "value": "アラームとタイマー"
+    },
+    {
+      "name": "phone_search_alias_phone_native_alarms",
+      "value": "アラーム タイマー 時計 目覚まし カウントダウン"
+    },
+    {
+      "name": "phone_alarm_empty",
+      "value": "アラームやタイマーはありません"
+    },
+    {
+      "name": "phone_alarm_empty_note",
+      "value": "Persona が設定したアラームとタイマーがここに表示されます。表示されるのは Persona のものだけで、時計 App のものは表示されません。"
+    },
+    {
+      "name": "phone_native_timers",
+      "value": "タイマー"
+    },
+    {
+      "name": "phone_native_alarms_only",
+      "value": "アラーム"
+    },
+    {
+      "name": "phone_native_timer",
+      "value": "タイマー"
+    },
+    {
+      "name": "phone_native_alarm",
+      "value": "アラーム"
+    },
+    {
+      "name": "phone_alarm_allow",
+      "value": "アラームを許可"
+    },
+    {
+      "name": "phone_alarm_open_settings",
+      "value": "設定を開く"
+    },
+    {
+      "name": "phone_delete_timer",
+      "value": "タイマーを削除"
+    },
+    {
+      "name": "phone_delete_alarm",
+      "value": "アラームを削除"
+    },
+    {
+      "name": "phone_delete_timer_note",
+      "value": "タイマーは止まり、鳴りません。"
+    },
+    {
+      "name": "phone_delete_alarm_note",
+      "value": "このアラームは今後鳴りません。"
+    },
+    {
+      "name": "phone_alarm_changed",
+      "value": "アラームまたはタイマーが変更されました。更新してください。"
+    },
+    {
+      "name": "phone_alarm_access_note",
+      "value": "通知を許可すると、この端末で Persona が設定したアラームとタイマーを管理できます。"
+    },
+    {
+      "name": "phone_timer_seconds",
+      "value": "{seconds} 秒"
+    },
+    {
+      "name": "phone_alarm_day_mon",
+      "value": "月"
+    },
+    {
+      "name": "phone_alarm_day_tue",
+      "value": "火"
+    },
+    {
+      "name": "phone_alarm_day_wed",
+      "value": "水"
+    },
+    {
+      "name": "phone_alarm_day_thu",
+      "value": "木"
+    },
+    {
+      "name": "phone_alarm_day_fri",
+      "value": "金"
+    },
+    {
+      "name": "phone_alarm_day_sat",
+      "value": "土"
+    },
+    {
+      "name": "phone_alarm_day_sun",
+      "value": "日"
+    },
+    {
+      "name": "phone_health_reports",
+      "value": "ヘルスケア"
+    },
+    {
+      "name": "phone_search_alias_phone_health_reports",
+      "value": "ヘルスケア ワークアウト レポート Apple ヘルスケア"
+    },
+    {
+      "name": "phone_auto_workout_reports",
+      "value": "ワークアウトレポートを自動生成"
+    },
+    {
+      "name": "phone_workout_access",
+      "value": "ワークアウト記録の読み取り権限"
+    },
+    {
+      "name": "phone_workout_granted",
+      "value": "許可済み"
+    },
+    {
+      "name": "phone_workout_not_granted",
+      "value": "未許可"
+    },
+    {
+      "name": "phone_workout_unavailable",
+      "value": "この端末では Huawei ヘルスサービスを利用できません。"
+    },
+    {
+      "name": "phone_workout_unknown",
+      "value": "ヘルスサービスで、このアプリのワークアウト読み取り権限を確認できませんでした。"
+    },
+    {
+      "name": "phone_workout_check",
+      "value": "権限を再確認"
+    },
+    {
+      "name": "phone_workout_access_note",
+      "value": "ここでは Persona の読み取り権限を確認します。ワークアウト記録は端末に保存されます。"
+    },
+    {
+      "name": "interaction_supervisor_handling",
+      "value": "監督者が対応中"
+    },
+    {
+      "name": "interaction_supervisor_escalation",
+      "value": "これはまずタスクの監督者に渡されました。監督者が上げたときだけ、あなたに届きます。"
+    },
+    {
+      "name": "agent_reading_expand_header",
+      "value": "{title}、タイトルとタグを表示"
+    },
+    {
+      "name": "session_effort_none",
+      "value": "なし"
+    },
+    {
+      "name": "session_effort_minimal",
+      "value": "最小"
+    },
+    {
+      "name": "session_effort_ultra",
+      "value": "ウルトラ"
+    },
+    {
+      "name": "session_models_empty",
+      "value": "このランチャーには切り替え可能なモデルがありません。"
     }
   ]
 }

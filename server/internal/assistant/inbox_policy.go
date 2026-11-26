@@ -44,7 +44,9 @@ func (s *Service) isInboxModelCall(ctx context.Context, machine, session, origin
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !s.originsLocked(ctx) {
-		return false // a new node still fails closed through its hint; do not break every ordinary call on a store error
+		// An unreadable origin book is not evidence of an ordinary conversation. In particular, an older node without an
+		// origin hint must not turn a persisted Inbox handling session into an unrestricted one during a store outage.
+		return true
 	}
 	o := b.m[session]
 	return o != nil && o.Origin == OriginInbox && (o.MachineID == "" || s.sameMachine(machine, o.MachineID))
@@ -88,8 +90,65 @@ func (s *Service) managerOriginDecision(ctx context.Context, machine, session, s
 // inboxModelRefusal applies only to model/node tool entry points, never runTool. Owner-confirmed reply, Agent and to-do
 // execution deliberately takes the latter path as the owner's action.
 func (s *Service) inboxModelRefusal(ctx context.Context, machine, session, originHint, name string) (proto.ToolResult, bool) {
+	originUnknown := false
+	if originHint != OriginInbox {
+		b := &s.origins
+		b.mu.Lock()
+		originUnknown = !s.originsLocked(ctx)
+		b.mu.Unlock()
+	}
 	if !s.isInboxModelCall(ctx, machine, session, originHint) {
 		return proto.ToolResult{}, false
+	}
+	// Every read profile only narrows the ordinary read-only set below. An intrinsically denied tool therefore needs no
+	// configuration RPC: refuse it directly, preserving that denial even while fresh configuration is unavailable.
+	if !inboxReadOnlyTools[name] && !inboxReadOnlyPhoneTools[name] {
+		known, readOnly := false, false
+		if s.ext != nil {
+			known, readOnly = s.ext.ToolAccess(name)
+		}
+		if !known || !readOnly {
+			if strings.TrimSpace(name) == "" {
+				name = "this tool"
+			}
+			return proto.TextResult("Inbox conversations cannot call "+name+" directly because it may send, interrupt, delegate, "+
+				"or change external state. Use inbox_suggest; the owner-confirmed action will run separately.", true), true
+		}
+	}
+	fullCfg, configErr := s.inboxConfigFresh(ctx)
+	if configErr != nil {
+		return proto.TextResult("Inbox read policy is temporarily unavailable; no source or other tool read was performed.", true), true
+	}
+	agentCfg := fullCfg.Agent
+	if originUnknown && agentCfg.ReadProfile != "" {
+		// A potentially Inbox-originated session cannot use a configured read-profile allowlist while its origin is
+		// unknown. The default profile still admits only the ordinary Inbox read-only tools below, with outward filtering.
+		return proto.TextResult("The conversation origin is temporarily unavailable; no source or other tool read was performed.", true), true
+	}
+	if agentCfg.ReadProfile != "" {
+		// Suggestions never read another source. Every other tool is denied for an unknown profile; source_only admits
+		// only an explicitly named connector tool whose registered interface is read-only.
+		if name == "inbox_suggest" || name == "inbox_draft" {
+			return proto.ToolResult{}, false
+		}
+		if agentCfg.ReadProfile == "source_only" {
+			if name == "lark_search" || name == "larkcli_search" || s.ext != nil && s.ext.ConnectorTool(name) && strings.HasSuffix(name, "_search") {
+				// An explicit read-only marker cannot prove that global search results omitted excluded bodies. Keep search
+				// unavailable in this profile even if a configuration accidentally allowlists it.
+				return proto.TextResult("This Inbox read profile does not allow global search; read a named source chat instead.", true), true
+			}
+			for _, allowed := range agentCfg.ConnectorTools {
+				if name != allowed {
+					continue
+				}
+				if s.ext != nil && s.ext.ConnectorTool(name) {
+					if known, readOnly := s.ext.ToolAccess(name); known && readOnly {
+						return proto.ToolResult{}, false
+					}
+				}
+			}
+		}
+		return proto.TextResult("This Inbox read profile does not allow "+name+"; use only the current item's source context.", true), true
 	}
 	if inboxReadOnlyTools[name] || inboxReadOnlyPhoneTools[name] {
 		return proto.ToolResult{}, false

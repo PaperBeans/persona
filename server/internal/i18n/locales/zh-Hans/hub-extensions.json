@@ -2,5 +2,6 @@
   "missing": "还缺：{fields}",
   "list_separator": "、",
   "no_program": "没有 {platform} 的程序",
+  "module_program_off": "personad {name} 不会启动：它所属的模块已在 modules 设置里关闭",
   "socket_path_too_long": "socket 路径 {path} 有 {length} 字节，本机的 Unix socket 最多 {max} 字节：把 Persona 的数据目录或这个助手的目录换到更短的路径"
 }

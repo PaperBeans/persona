@@ -287,13 +287,16 @@ struct KnowledgeView: View {
             if RecordingLibrary.shared.entry(id)?.isDay == true { RecordingDayView(id: id) } else { RecordingOpen(id: id) }
         } label: { KBRow(entry: e) }
             .accessibilityIdentifier("kb.recording")
-            // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date.
+            // Rename (#8873): a touch and hold, and VoiceOver's actions; not a day, named by its date. Not with the hub's
+            // recording module off (#15214); Delete below stays.
             .contextMenu {
-                if RecordingLibrary.shared.entry(id)?.isDay == false {
+                if RecordingLibrary.shared.entry(id)?.isDay == false, RecordingModule.allowance.offersWrites {
                     Button { renamingRecording = id } label: { Label("Rename", systemImage: Theme.Icon.edit) }
                 }
             }
-            .accessibilityAction(named: Text("Rename")) { if RecordingLibrary.shared.entry(id)?.isDay == false { renamingRecording = id } }
+            .accessibilityAction(named: Text("Rename")) {
+                if RecordingLibrary.shared.entry(id)?.isDay == false, RecordingModule.allowance.offersWrites { renamingRecording = id }
+            }
             .accessibleConfirmationDialog("Delete This Recording?", isPresented: Binding(get: { deletingRecording == id }, set: { if !$0, deletingRecording == id { deletingRecording = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
@@ -625,6 +628,8 @@ struct KBRow: View {
         HStack(spacing: Theme.Space.sm) {
             // Notes and all-day recordings among meetings (#8731); meetings carry none.
             if let t = entry.recordingTag { KBPill(text: t) }
+            // Its minutes or upload wait for the hub's recording module, which is off (#15214).
+            if let t = entry.pausedTag { KBPill(text: t) }
             ImportanceBadge(importance: entry.importance)
             if let n = entry.topicPoints { KBPill(text: String(localized: "\(n) knowledge points")) }
             if let k = entry.projectKind { KBPill(text: k, tint: (entry.extra ?? "").hasPrefix("long") ? Theme.Hue.blue : nil) }
@@ -704,7 +709,7 @@ enum RelevanceMeter {
     }
 }
 
-/// One entry found by a search: its tile and name, then up to two matching lines with what was searched for in bold.
+/// One entry found by a search: its tile and name, then up to two lines with the matches highlighted.
 struct KBHitRow: View {
     var result: KBResult
     var query: String
@@ -736,14 +741,14 @@ struct KBHitRow: View {
         .padding(.vertical, Theme.Space.xxs)
     }
 
-    /// The text with every word searched for in bold primary (the hub matches lines with all the words).
+    /// The accent tint behind every word searched for (the hub matches lines with all the words).
     static func marked(_ text: String, _ query: String) -> AttributedString {
         var a = AttributedString(text)
         for q in query.split(whereSeparator: \.isWhitespace).map(String.init) where !q.isEmpty {
             var from = a.startIndex
             while from < a.endIndex, let r = a[from...].range(of: q, options: .caseInsensitive) {
+                a[r].backgroundColor = Theme.accentTint
                 a[r].foregroundColor = .primary
-                a[r].inlinePresentationIntent = .stronglyEmphasized
                 from = r.upperBound
             }
         }
@@ -817,6 +822,10 @@ struct KnowledgeDetailView: View {
             if let d = detail?.detail {
                 if let query, let matches = detail?.matches { found(matches, query: query, chat: d.kind == KBKind.chats.rawValue ? d.id : nil) }
                 if let facts = ItemFacts(kind: d.kind, meta: d.meta), !facts.isEmpty { factsSection(facts) }
+                // A recording the hub holds back while its recording module is off (#15214): said, with nothing to tap.
+                if d.kind == KBKind.recordings.rawValue, d.paused?.isModuleOff == true {
+                    Section { RecordingPausedNote() }
+                }
                 // A recording that stands for an imported meeting too (#8872): its notes in the app, opened in this one.
                 if let imported = d.importedMeeting {
                     Section {
@@ -829,7 +838,7 @@ struct KnowledgeDetailView: View {
                     Section {
                         ForEach(agents) { s in
                             Button { openAgent(s.key) } label: {
-                                SessionRow(session: s, machine: model.machine(s.machineRef))
+                                SessionRow(session: s, machine: model.machine(s.machineRef), preferHerdrTabName: model.prefersHerdrTabName(for: s))
                             }
                             .buttonStyle(.plain)
                         }
@@ -1500,7 +1509,7 @@ struct ItemFacts {
     }
 }
 
-/// A place a search found in an entry: where (Profile, Chat History · day), the line with the words in bold, and for a message
+/// A place a search found in an entry: where (Profile, Chat History · day), the line with the matches highlighted, and for a message
 /// the one before and after it in grey.
 struct KBMatchRow: View {
     var match: KBMatch
@@ -1529,7 +1538,7 @@ struct KBMatchRow: View {
     }
 }
 
-/// One archived message: who and when on a line, then what was said, the searched words in bold.
+/// One archived message: who and when on a line, then what was said, with the searched words highlighted.
 struct KBMessageText: View {
     var line: KBMessageLine
     var query: String

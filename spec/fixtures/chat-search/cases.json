@@ -20,6 +20,24 @@
    "index": "我想去青石巷 BlueLane 看看"
   },
   {
+   "name": "inline_references",
+   "description": "Selected references leave their readable label in the message. Their transport anchors are hidden in search and previews.",
+   "item": {
+    "id": "inline1#0",
+    "seq": 1,
+    "role": "user",
+    "kind": "text",
+    "text": "Use Review.\n\n<!-- persona-inline-v1 [[7,6,\"[\\\"skill\\\",\\\"opaque-anchor\\\"]\"]] -->"
+   },
+   "fields": [
+    [
+     "text",
+     "Use Review."
+    ]
+   ],
+   "index": "Use Review."
+  },
+  {
    "name": "quoted_context",
    "description": "A quoted selection travels in a persona-context tag: the chat shows it as a chip that opens, so search in chat finds its title and text as Quoted; the index keeps only the user's own words.",
    "item": {
@@ -76,6 +94,24 @@
     ]
    ],
    "index": "Open the map"
+  },
+  {
+   "name": "page_tap",
+   "description": "A tap on a kept page (Dashboards, #15017) carries the same tag, its view naming the reserved extension and the page (-pages/pg_…): hidden and left out of the index the same way.",
+   "item": {
+    "id": "u19#0",
+    "seq": 19,
+    "role": "user",
+    "kind": "text",
+    "text": "Done today\n分钟：32\n<persona-action view=\"-pages/pg_3f9a1c0d5e7b2a41\" action=\"done_today\">{\"values\":{\"minutes\":\"32\"}}</persona-action>"
+   },
+   "fields": [
+    [
+     "text",
+     "Done today\n分钟：32"
+    ]
+   ],
+   "index": "Done today\n分钟：32"
   },
   {
    "name": "view_errors",

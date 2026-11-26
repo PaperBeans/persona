@@ -3,6 +3,8 @@ package extmgr
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -17,9 +19,19 @@ import (
 )
 
 // DefaultBrowserBackend is the built-in ego lite backend name.
-const DefaultBrowserBackend = "ego"
+const (
+	DefaultBrowserBackend = "ego"
+	maxBrowserTimeoutMs   = 120000
+)
 
 var browserSlotRe = lazyre.New(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// browserSessionName maps (extID, slot) to an unambiguous browser task session name.
+// Hashing extID prevents collisions when both extension IDs and slots contain hyphens.
+func browserSessionName(extID, slot string) string {
+	sum := sha256.Sum256([]byte(extID))
+	return "ext-" + hex.EncodeToString(sum[:12]) + "-" + slot
+}
 
 // BrowserBackend is a pluggable cross-machine browser automation driver exposed to extensions granted browser.run
 // (#12866). The default implementation is ego lite (egoBrowserBackend); additional backends such as CDP or Playwright
@@ -87,7 +99,7 @@ func (e *egoBrowserBackend) Machines(context.Context) ([]wire.BrowserMachine, er
 	if e.h == nil {
 		return out, nil
 	}
-	for _, m := range e.h.machines {
+	for _, m := range e.h.machinesNow() {
 		b := e.h.browserOf(m)
 		if b == nil || !b.Enabled {
 			continue
@@ -109,7 +121,7 @@ func (e *egoBrowserBackend) Run(ctx context.Context, extID string, p wire.Browse
 		return wire.BrowserRunResult{}, &rpc.Error{Code: "browser_unavailable", Message: err.Error()}
 	}
 	in := map[string]any{
-		"session": "ext-" + extID + "-" + p.Slot,
+		"session": browserSessionName(extID, p.Slot),
 		"script":  p.Script,
 	}
 	if p.TimeoutMs > 0 {
@@ -174,18 +186,20 @@ func (ps *extensions) extensionBrowserCall(ctx context.Context, id, method strin
 		return wire.BrowserMachinesResult{Machines: machines}, nil
 	case "browser.run":
 		var p wire.BrowserRunParams
-		if len(bytes.TrimSpace(params)) == 0 {
-			return nil, &rpc.Error{Code: "invalid_params", Message: "machine_id, slot and script are required"}
-		}
-		dec := json.NewDecoder(bytes.NewReader(params))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&p); err != nil {
-			return nil, &rpc.Error{Code: "invalid_params", Message: err.Error()}
+		if len(bytes.TrimSpace(params)) > 0 {
+			dec := json.NewDecoder(bytes.NewReader(params))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&p); err != nil {
+				return nil, &rpc.Error{Code: "invalid_params", Message: err.Error()}
+			}
 		}
 		p.MachineID = strings.TrimSpace(p.MachineID)
 		p.Slot = strings.TrimSpace(p.Slot)
 		if p.MachineID == "" || !browserSlotRe.MatchString(p.Slot) || strings.TrimSpace(p.Script) == "" {
 			return nil, &rpc.Error{Code: "invalid_params", Message: "machine_id, valid slot ([a-z0-9_-]{1,32}) and script are required"}
+		}
+		if p.TimeoutMs < 0 || p.TimeoutMs > maxBrowserTimeoutMs {
+			return nil, &rpc.Error{Code: "invalid_params", Message: "timeout_ms must be between 0 and 120000"}
 		}
 		backendName := strings.ToLower(strings.TrimSpace(p.Backend))
 		if backendName == "" {

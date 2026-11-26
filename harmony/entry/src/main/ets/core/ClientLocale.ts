@@ -11,8 +11,12 @@ export function setClientLanguage(language: string): void {
   preference = ['en-US', 'zh-CN', 'ja-JP'].includes(language) ? language : 'default';
 }
 
+export function supportedInterfaceLocale(tag: string): string {
+  const language = tag.toLowerCase().split(/[-_]/)[0];
+  return language === 'zh' ? 'zh-Hans' : language === 'ja' ? 'ja' : 'en';
+}
+
 /** Wire locale follows the committed UI preference; only system mode reads the OS language. */
 export function clientLocale(systemLanguage: string): string {
-  const language = (preference === 'default' ? systemLanguage : preference).toLowerCase().split(/[-_]/)[0];
-  return language === 'zh' ? 'zh-Hans' : language === 'ja' ? 'ja' : 'en';
+  return supportedInterfaceLocale(preference === 'default' ? systemLanguage : preference);
 }

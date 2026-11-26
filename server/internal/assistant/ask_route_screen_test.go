@@ -1,8 +1,10 @@
 package assistant
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -24,14 +26,43 @@ func commandScreen(id, session string) proto.Interaction {
 
 // A supervised Agent's terminal command approval goes to its supervisor only: no push, the card shown as delegating,
 // the supervisor told the command and the warning. The supervisor picks the option itself, kept as the assistant's
-// answer; an unrelated conversation cannot. An Agent of no supervised task still rings the user.
+// answer; an unrelated conversation cannot. An unsupervised Agent's non-six-class dialog goes to the main conversation
+// without pushing to the owner, while a six-class dialog (folder trust) still rings the owner.
 func TestSupervisedCommandScreenStaysWithItsSupervisor(t *testing.T) {
 	e := newRouteEnv(t, nil, false)
+	// List the unsupervised screen sessions as blocked on mac so any concurrent
+	// syncScreenInteractions pass sees them as live screen dialogs rather than stale cards.
+	macSessions := append(append([]proto.Session(nil), e.agents...),
+		proto.Session{SessionID: "unrelated-session", MachineID: "mac", Title: "Plain terminal", Cwd: "/code/other", Status: proto.StatusBlocked, UpdatedAt: time.Now().UTC()},
+		proto.Session{SessionID: "unrelated-session-2", MachineID: "mac", Title: "Trust folder", Cwd: "/code/other2", Status: proto.StatusBlocked, UpdatedAt: time.Now().UTC()},
+	)
+	e.sessions("mac", macSessions...)
+	e.f.setSessions("mac", macSessions...)
 	plain := commandScreen("ordinary", "unrelated-session")
 	plainAnswer := e.raise(plain)
-	waitFor(t, "the unsupervised dialog pushed to the owner", func() bool { return e.pushesOf(plain.ID) == 1 })
-	if e.lastShown(plain.ID).Delegating {
-		t.Fatal("an unsupervised Agent's dialog went to a supervisor")
+	waitFor(t, "the unsupervised dialog routed to the main conversation", func() bool {
+		for _, m := range laterFor(e.s, "conv1") {
+			if m.From == cardAgentQuestion && strings.Contains(m.Text, "interaction_id="+plain.ID) {
+				return true
+			}
+		}
+		return false
+	})
+	if !e.lastShown(plain.ID).Delegating {
+		t.Fatal("an unsupervised non-owner dialog was not marked delegating")
+	}
+
+	trust := commandScreen("trust-folder", "unrelated-session-2")
+	trust.Dialog.Command, trust.Dialog.Warning = "", ""
+	trust.Dialog.Question = "Quick safety check: Is this a project you trust?"
+	trust.Dialog.Options = []screen.Option{
+		{Key: "1", Label: "Yes, I trust this folder", Keys: []string{"enter"}},
+		{Key: "2", Label: "No, exit", Keys: []string{"down", "enter"}},
+	}
+	trustAnswer := e.raise(trust)
+	waitFor(t, "the six-class trust dialog pushed to the owner", func() bool { return e.pushesOf(trust.ID) == 1 })
+	if e.lastShown(trust.ID).Delegating {
+		t.Fatal("a six-class folder trust dialog went to a supervisor")
 	}
 
 	ix := commandScreen("scr_mac_worker-1_r1", "worker-1")
@@ -66,13 +97,20 @@ func TestSupervisedCommandScreenStaysWithItsSupervisor(t *testing.T) {
 	if n := e.pushesOf(ix.ID); n != 0 {
 		t.Fatalf("the supervised dialog rang the owner %d times", n)
 	}
-	if n := e.pushesOf(plain.ID); n != 1 {
-		t.Fatalf("the unsupervised dialog rang %d times", n)
+	if n := e.pushesOf(plain.ID); n != 0 {
+		t.Fatalf("the unsupervised non-owner dialog rang %d times", n)
+	}
+	if n := e.pushesOf(trust.ID); n != 1 {
+		t.Fatalf("the six-class trust dialog rang %d times, want 1", n)
 	}
 	if err := e.s.resolve(plain.ID, proto.Resolution{Option: "2"}); err != nil {
 		t.Fatal(err)
 	}
 	answerOf(t, plainAnswer)
+	if err := e.s.resolve(trust.ID, proto.Resolution{Option: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	answerOf(t, trustAnswer)
 }
 
 // allow picks a supervised dialog's Yes or No; a dialog that is the user's (a deletion Claude Code cannot rule out, a
@@ -177,5 +215,74 @@ func TestSupervisorHeldAgentsAreNotTheUsers(t *testing.T) {
 		if it.SessionID == "held" {
 			t.Fatalf("the supervisor-held agent is listed: %+v", it)
 		}
+	}
+}
+
+// An out-of-order sequenced snapshot from a concurrent publish must not revert fleet.rep
+// or trigger a spurious sessionsChanged/syncScreenInteractions pass. Unsequenced direct
+// snapshots (Seq == 0) remain authoritative.
+func TestFleetTakeSnapshotIgnoresStaleSeq(t *testing.T) {
+	ft := newFleetTest(t)
+	s := ft.s
+	ft.sessions("mac", proto.Session{SessionID: "worker-1", MachineID: "mac", Status: proto.StatusBlocked})
+
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   10,
+		Todos: &TodoReport{Links: []TodoLink{{MachineID: "mac", SessionID: "worker-1", TodoID: "t1"}}},
+	})
+
+	ix := commandScreen("stale-check", "unlisted-session")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.waitInteraction(ctx, ix)
+		done <- r
+	}()
+	waitFor(t, "card stale-check", func() bool { _, ok := s.pendingIx(ix.ID); return ok })
+
+	// Stale sequenced snapshot arrives after Seq 10: must be dropped without reverting links
+	// or cancelling pending screen cards via a spurious sessionsChanged("mac").
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   9,
+		Todos: &TodoReport{Links: []TodoLink{}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotSeq := s.fleet.rep.seq
+	gotLink := s.fleet.rep.links[[2]string{"mac", "worker-1"}]
+	s.fleet.rep.mu.RUnlock()
+	if gotSeq != 10 || gotLink.TodoID != "t1" {
+		t.Fatalf("stale snapshot overwrote fleet.rep: seq=%d link=%+v", gotSeq, gotLink)
+	}
+	if _, ok := s.pendingIx(ix.ID); !ok {
+		t.Fatal("stale snapshot triggered sessionsChanged and cancelled pending screen card")
+	}
+	if err := s.resolve(ix.ID, proto.Resolution{Option: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	// Newer sequenced snapshot applies cleanly.
+	s.fleetTakeSnapshot(Snapshot{
+		Seq:   11,
+		Todos: &TodoReport{Links: []TodoLink{}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotSeq = s.fleet.rep.seq
+	gotLinks := len(s.fleet.rep.links)
+	s.fleet.rep.mu.RUnlock()
+	if gotSeq != 11 || gotLinks != 0 {
+		t.Fatalf("newer snapshot not applied: seq=%d links=%d", gotSeq, gotLinks)
+	}
+
+	// Unsequenced direct snapshot (Seq == 0) remains authoritative.
+	s.fleetTakeSnapshot(Snapshot{
+		Todos: &TodoReport{Links: []TodoLink{{MachineID: "mac", SessionID: "worker-2", TodoID: "t2"}}},
+	})
+	s.fleet.rep.mu.RLock()
+	gotLink2 := s.fleet.rep.links[[2]string{"mac", "worker-2"}]
+	s.fleet.rep.mu.RUnlock()
+	if gotLink2.TodoID != "t2" {
+		t.Fatalf("unsequenced snapshot not applied: link=%+v", gotLink2)
 	}
 }

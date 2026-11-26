@@ -468,8 +468,8 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (row.model.variants) return store.resetOverride(row.provider.id, row.model.variants.base);
     if (row.current && live) {
       const patch: PanelOverride = {};
-      // An agy start uses its native default when the request omits effort.
-      const d = state.starting && row.provider.engine === "agy" ? undefined : row.model.defaultEffort;
+      // An agy or codex start uses its configured default when the request omits effort.
+      const d = state.starting && (row.provider.engine === "agy" || row.provider.engine === "codex") ? undefined : row.model.defaultEffort;
       if (d && row.setup.effort && row.setup.effort !== d) patch.effort = d;
       // no default known: back to none, the model's own (an Agent not started yet; a running one sends nothing for it)
       else if (!d && row.setup.effort) patch.effort = "";
@@ -547,7 +547,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (row.kind === "typed") return { text: `${name} · ${t("ui-modelpanel.use_typed_note")}` };
     if (row.kind === "preset") return { text: `${name} · ${row.preset?.description || row.model.name}` };
     if (row.model.custom) return { text: `${name} · ${t("ui-modelpanel.typed_before")}` };
-    if (!searching && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
+    if (!searching && !columns && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: name };
     if (!searching && row.kind === "model") return { text: row.model.description ?? "", describes: true };
     return { text: name };
   };

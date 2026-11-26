@@ -214,6 +214,100 @@ test('an unknown message send stays pending through refresh and cannot send agai
   assert.equal(replyCalls, 1, 'verification never causes an automatic resend');
 });
 
+function mainPlanFixture(options={}) {
+  const manager=options.manager || 'work', group=options.group || 'one-hub';
+  const offered={...plan('shared'),conversation:'ordinary',space:'design'};
+  let response=feedPage([],{shared:offered},options.legacy?{}:{pending_plan_ids:['shared']});
+  let read=async()=>({plan:offered});const writes=[];
+  const f=fixture(async call=>{
+    if(call.path.includes('/feed?')) return response;
+    if(call.path.startsWith('/api/v1/todos')) return {todos:[]};
+    if(call.method==='GET' && call.path==='/api/v1/task-plans/shared?manager='+manager)return read();
+    if(call.method==='POST') {
+      assert.equal(call.admit(),true);writes.push([call.path,call.body,call.repository.owner]);
+      const state=call.path.endsWith('/start')?'started':'dismissed';
+      response=feedPage([],{},options.legacy?{}:{pending_plan_ids:[]});
+      return {plan:{...offered,state}};
+    }
+    return {};
+  },{manager,row:conversation(options.conversation||'main',manager)});
+  f.model.profile.id=group;f.model.mainId='main'; f.model.mainMachineId=options.mainMachine||'';
+  const feed=new AssistantFeedModel();
+  return {...f,feed,offered,writes,load:()=>feed.open(f.model,f.row),setPage:value=>{response=value},setRead:fn=>{read=fn}};
+}
+
+test('Main starts or dismisses the original pending plan exactly once on the captured manager; merely opening performs only reads',async()=>{
+  for(const action of ['start','dismiss']) {
+    const v=mainPlanFixture();await v.load();assert.deepEqual(v.feed.items,[]);assert.equal(v.feed.planState('shared'),'open');assert.equal(v.writes.length,0);
+    assert.equal(await v.feed.refreshPlan('shared'),true);assert.equal(v.feed.planCanStart('shared'),true);assert.equal(v.writes.length,0);
+    const version=JSON.stringify(v.feed.plans.shared);
+    assert.equal(await (action==='start'?v.feed.startPlan('shared',false,undefined,version):v.feed.dismissPlan('shared',version)),true);
+    assert.deepEqual(v.writes,[['/api/v1/task-plans/shared/'+action,action==='start'?{remember:false}:{},'work']]);
+    assert.equal(v.feed.planCanStart('shared'),false);
+  }
+});
+
+test('an empty authoritative pending index withdraws an open plan even when its old feed body remains or a detail GET returns late',async()=>{
+  const v=mainPlanFixture();await v.load();let signal,release;
+  const waiting=new Promise(ok=>{signal=ok});v.setRead(()=>new Promise(ok=>{release=ok;signal()}));
+  const opening=v.feed.refreshPlan('shared');await waiting;
+  v.setPage(feedPage([],{shared:v.offered},{pending_plan_ids:[]}));await v.feed.refresh();
+  release({plan:v.offered});assert.equal(await opening,false);assert.equal(v.feed.planState('shared'),'unknown');assert.equal(v.feed.planCanDismiss('shared'),false);
+  assert.equal(v.writes.length,0);
+});
+
+test('manager, Hub, displayed source, role, Health, changed plans and a missing detail constrain a plan write from Main',async()=>{
+  for(const bad of [{manager:'other'},{group:'other-hub'},{conversation:'different-origin'},{space:'health'},
+                    {state:'started'},{tasks:[{title:'Changed task'}]},404]) {
+    const v=mainPlanFixture();await v.load();
+    v.setRead(async()=>{if(bad===404)throw Object.assign(new Error('gone'),{status:404});return {plan:{...v.offered,...bad}}});
+    assert.equal(await v.feed.startPlan('shared',false,undefined,JSON.stringify(v.offered)),false);
+    assert.deepEqual(v.writes,[]);
+  }
+  const v=mainPlanFixture();await v.load();v.state.canApprove=false;assert.equal(await v.feed.dismissPlan('shared'),false);assert.deepEqual(v.writes,[]);
+  const ordinary=mainPlanFixture({conversation:'other'});await ordinary.load();assert.equal(ordinary.feed.planState('shared'),'unknown');
+  const wrongMachine=mainPlanFixture({mainMachine:'another'});await wrongMachine.load();assert.equal(wrongMachine.feed.planState('shared'),'unknown');
+  const second=mainPlanFixture({manager:'other',group:'two'});await second.load();await second.feed.refreshPlan('shared');
+  assert.equal(await second.feed.dismissPlan('shared'),true);assert.equal(second.writes[0][2],'other');assert.deepEqual(v.writes,[]);
+});
+
+test('retiring Main or switching owners during the mutation journal refuses the actual foreign-conversation post',async()=>{
+  for(const action of ['start','dismiss']) {
+    const v=mainPlanFixture();await v.load();await v.feed.refreshPlan('shared');
+    const real=v.repository.call.bind(v.repository);let denied=0;
+    v.repository.call=async(path,method,...rest)=>{
+      if(method==='POST'){
+        v.model.mainId='replacement';const admit=rest[2];assert.equal(admit(),false);
+        denied++;throw Object.assign(new Error('updated'),{status:409});
+      }
+      return real(path,method,...rest);
+    };
+    const version=JSON.stringify(v.offered);
+    const ok=action==='start'?await v.feed.startPlan('shared',false,undefined,version):await v.feed.dismissPlan('shared',version);
+    assert.equal(ok,false);assert.equal(denied,1);assert.deepEqual(v.writes,[]);
+  }
+});
+
+test('the definitive plan event updates the same scoped live row and a stale detail read cannot reopen it',async()=>{
+  const v=mainPlanFixture();await v.load();let release,opened;
+  const begun=new Promise(ok=>{opened=ok});v.setRead(()=>new Promise(ok=>{release=ok;opened()}));
+  const reading=v.feed.refreshPlan('shared');await begun;
+  v.setPage(feedPage([],{},{pending_plan_ids:[]}));
+  v.state.handlers[0](JSON.stringify({type:'task_plan',manager:'foreign',plan:{...v.offered,state:'dismissed'}}));
+  assert.equal(v.feed.planState('shared'),'open');
+  v.state.handlers[0](JSON.stringify({type:'task_plan',manager:'work',plan:{...v.offered,state:'dismissed'}}));
+  release({plan:v.offered});await reading;await v.feed.refresh();
+  assert.notEqual(v.feed.planState('shared'),'open');assert.deepEqual(v.writes,[]);
+});
+
+test('the scoped legacy feed can offer an open ordinary plan without a pending index, but a fresh scoped health or foreign offer is excluded',async()=>{
+  const v=mainPlanFixture({legacy:true});await v.load();assert.equal(v.feed.planState('shared'),'open');
+  for(const extra of [{space:'health'},{manager:'other'},{group:'different'}]) {
+    const fresh=mainPlanFixture({legacy:true});fresh.setPage(feedPage([],{shared:{...fresh.offered,...extra}}));await fresh.load();
+    assert.equal(fresh.feed.planState('shared'),'unknown');assert.deepEqual(fresh.writes,[]);
+  }
+});
+
 test('an unknown plan start is reconciled and blocked from a second start', async () => {
   const openPlan = plan('plan-unknown');
   let startCalls = 0;
@@ -707,4 +801,53 @@ test('a successful page retry reports its current success and a repeated cursor 
  feed.nextCursor='tail';assert.equal(await feed.loadMore(),false);assert.ok(feed.error);assert.equal(feed.nextCursor,'tail');
  fail=false;repeat=true;assert.equal(await feed.loadMore(),false);assert.equal(feed.nextCursor,'tail','a cursor loop is not authoritative exhaustion');
  repeat=false;assert.equal(await feed.loadMore(),true);assert.equal(feed.error,'');assert.equal(feed.nextCursor,'');
+});
+
+test('a legacy Hub without a conversation feed keeps its message history usable and probes again after reopening', async () => {
+  let supported = false, reads = 0;
+  const f = fixture(async call => {
+    if (call.path.includes('/feed?')) {
+      reads++;
+      if (!supported) throw Object.assign(new Error('not found'), {status: 404});
+      return {items: []};
+    }
+    return {todos: []};
+  });
+  const feed = new AssistantFeedModel();
+  await feed.open(f.model, f.row);
+  assert.equal(feed.feedUnavailable, true);
+  assert.equal(feed.error, '');
+  await feed.refresh();
+  assert.equal(reads, 1);
+  supported = true;
+  await feed.open(f.model, f.row);
+  assert.equal(reads, 2);
+  assert.equal(feed.hasLoaded, true);
+  assert.equal(feed.feedUnavailable, false);
+});
+
+test('a failed or denied activity-feed read remains visible and retryable', async () => {
+  let status = 403;
+  const {feed} = await opened(async () => { throw Object.assign(new Error('failed'), {status}); });
+  assert.equal(feed.feedUnavailable, false);
+  assert.equal(feed.error, 'permission_denied');
+  status = 503; await feed.refresh();
+  assert.equal(feed.feedUnavailable, false);
+  assert.equal(feed.error, 'failed');
+});
+
+test('the task dock includes linked work from this supervising conversation even when its activity scrolled out of the feed', async () => {
+  const {feed}=await opened(({path})=>{
+    if (path.includes('/feed?')) return {items:[],task_cards:[]};
+    if (path.startsWith('/api/v1/todos?')) return {todos:[
+      {id:'local-task',title:'Owned work',origin:conversationId,manager:managerId,created_at:timestamp},
+      {id:'other-chat',origin:'another-conversation',manager:managerId},
+      {id:'other-manager',origin:conversationId,manager:'other-manager'}
+    ]};
+    return {};
+  });
+  assert.deepEqual(feed.taskCardsForConversation().map(card=>card.todo_id),['local-task']);
+  assert.equal(feed.openTodo('local-task').title,'Owned work');
+  assert.equal(feed.openTodo('other-chat'),undefined);
+  assert.equal(feed.openTodo('other-manager'),undefined);
 });

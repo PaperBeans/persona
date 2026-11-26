@@ -1,0 +1,169 @@
+{
+  "view": {
+    "title": "力量训练",
+    "sections": [
+      {
+        "title": "等你确认",
+        "items": [
+          {
+            "type": "row",
+            "title": "今天的计划",
+            "subtitle": "2026-11-25 03:05",
+            "action": {
+              "id": "draft:f8af2ed3-552f-5821-bfa7-aa160f4b4978",
+              "push": {
+                "state": "{\"page\":\"strength.edit\",\"metric\":\"weight\",\"days\":30,\"draft\":\"f8af2ed3-552f-5821-bfa7-aa160f4b4978\"}",
+                "title": "今天的计划"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "力量训练 · 待确认",
+            "subtitle": "2026-11-25 03:05",
+            "action": {
+              "id": "draft:eab6a89c-2e1c-5369-8b38-dea38b1a90cc",
+              "push": {
+                "state": "{\"page\":\"strength.edit\",\"metric\":\"weight\",\"days\":30,\"draft\":\"eab6a89c-2e1c-5369-8b38-dea38b1a90cc\"}",
+                "title": "力量训练 · 待确认"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "title": "动作",
+        "items": [
+          {
+            "type": "row",
+            "title": "Bench press",
+            "subtitle": "上次：2026-11-24 · 60 kg × 8 · 最好：60 kg",
+            "action": {
+              "id": "exercise:14e78d25-f6d8-5e35-84fc-e31bbb1b8178",
+              "push": {
+                "state": "{\"page\":\"strength.exercise\",\"exercise\":\"14e78d25-f6d8-5e35-84fc-e31bbb1b8178\",\"metric\":\"weight\",\"days\":30}",
+                "title": "Bench press"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "Dumbbell shoulder press",
+            "subtitle": "上次：2026-11-24 · 16 kg × 10 · 最好：16 kg",
+            "action": {
+              "id": "exercise:1a664f13-5559-5a1a-a92e-a1a9ec89441d",
+              "push": {
+                "state": "{\"page\":\"strength.exercise\",\"exercise\":\"1a664f13-5559-5a1a-a92e-a1a9ec89441d\",\"metric\":\"weight\",\"days\":30}",
+                "title": "Dumbbell shoulder press"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "Lat pulldown",
+            "subtitle": "上次：2026-11-22 · 55 kg × 10 · 最好：55 kg",
+            "action": {
+              "id": "exercise:414be15a-052b-5d21-958f-ea019279e657",
+              "push": {
+                "state": "{\"page\":\"strength.exercise\",\"exercise\":\"414be15a-052b-5d21-958f-ea019279e657\",\"metric\":\"weight\",\"days\":30}",
+                "title": "Lat pulldown"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "坐姿推胸",
+            "subtitle": "上次：2026-11-24 · 50 kg × 10 · 最好：50 kg",
+            "action": {
+              "id": "exercise:ac4326b9-d3e6-5fee-8440-e812d00d9fa2",
+              "push": {
+                "state": "{\"page\":\"strength.exercise\",\"exercise\":\"ac4326b9-d3e6-5fee-8440-e812d00d9fa2\",\"metric\":\"weight\",\"days\":30}",
+                "title": "坐姿推胸"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "深蹲",
+            "subtitle": "上次：2026-11-22 · 80 kg × 6 · 最好：80 kg",
+            "action": {
+              "id": "exercise:8a13204f-ca7f-58bb-9548-f40fba0d0dd7",
+              "push": {
+                "state": "{\"page\":\"strength.exercise\",\"exercise\":\"8a13204f-ca7f-58bb-9548-f40fba0d0dd7\",\"metric\":\"weight\",\"days\":30}",
+                "title": "深蹲"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "title": "本周各肌群组数（不含热身）",
+        "items": [
+          {
+            "type": "row",
+            "title": "Chest",
+            "subtitle": "6 组"
+          },
+          {
+            "type": "row",
+            "title": "Shoulders",
+            "subtitle": "2 组"
+          }
+        ]
+      },
+      {
+        "title": "最近一次训练",
+        "items": [
+          {
+            "type": "text",
+            "text": "2026-11-24 · 3 个动作 · 9 组"
+          },
+          {
+            "type": "row",
+            "value": "4 组",
+            "title": "Bench press"
+          },
+          {
+            "type": "row",
+            "value": "2 组",
+            "title": "Dumbbell shoulder press"
+          },
+          {
+            "type": "row",
+            "value": "3 组",
+            "title": "坐姿推胸"
+          }
+        ]
+      },
+      {
+        "title": "下次计划",
+        "items": [
+          {
+            "type": "row",
+            "title": "今天的计划",
+            "subtitle": "2026-11-25",
+            "action": {
+              "id": "draft:f8af2ed3-552f-5821-bfa7-aa160f4b4978",
+              "push": {
+                "state": "{\"page\":\"strength.edit\",\"metric\":\"weight\",\"days\":30,\"draft\":\"f8af2ed3-552f-5821-bfa7-aa160f4b4978\"}",
+                "title": "今天的计划"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "type": "button",
+            "title": "管理动作",
+            "action": {
+              "id": "manage"
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.overview\",\"metric\":\"weight\",\"days\":30}"
+  }
+}

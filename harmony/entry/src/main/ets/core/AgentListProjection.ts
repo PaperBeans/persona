@@ -1,4 +1,5 @@
 export interface AgentListRow {
+  // The core key includes the owning Hub and manager when source filters are enabled.
   id: string;
   raw: Record<string, Object>;
   source: Object;
@@ -12,6 +13,7 @@ export interface AgentListPreferences {
 }
 export interface AgentListInput {
   rows: AgentListRow[];
+  includeSourceFilters?: boolean;
   history: boolean;
   grouping: string;
   quick: string;
@@ -34,11 +36,22 @@ export interface CoreAgentListGroup {
   parent?: string;
   state_counts?: Record<string, Object>;
   spoken?: string;
+  presentation?: string;
+  titleKey?: string;
+  subtitle?: string;
+  firstProject?: boolean;
+  lastProject?: boolean;
+  capped?: boolean;
 }
 export interface CoreAgentListProjection {
   counts: Record<string, Object>;
+  filter_counts?: Record<string, Object>;
   groups: CoreAgentListGroup[];
   unread_shown: string[];
+  filtered?: string[];
+  /** The query and machine matches before a phone quick filter is applied. */
+  queryMatches?: string[];
+  unpinned?: string[];
   quiet_title?: string | null;
 }
 export interface CoreSortInput {

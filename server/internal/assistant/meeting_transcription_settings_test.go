@@ -75,7 +75,7 @@ func TestMeetingTranscriptionDefaultSetting(t *testing.T) {
 	check(put(`{"meeting_glossary":[" Alice\nBo ","alice bo","","\t ","  A   B  "]}`), "device", "", []any{"Alice Bo", "A B"}, true)
 	check(put(`{"meeting_transcription_default":"hub","meeting_transcription_extension":"example/text"}`), "hub", "example/text", []any{"Alice Bo", "A B"}, true)
 	check(put(`{"recording_days":40}`), "hub", "example/text", []any{"Alice Bo", "A B"}, true)
-	restarted := New(Options{Hub: newFakeHub().withMachine(), Store: s.store})
+	restarted := New(Options{Hub: newFakeHub().withMachine(), Store: s.storeAccessor()})
 	restarted.trans = f
 	check(transcriptionSettingsRequest(t, restarted, "GET", "", "", 200), "hub", "example/text", []any{"Alice Bo", "A B"}, true)
 	f.set(extwire.TranscriptionInfo{}, errors.New("disabled"))
@@ -409,7 +409,7 @@ func TestMeetingTranscriptionCardsAndNoDatabase(t *testing.T) {
 	}
 	// Finish the readiness check before replacing the store it reads.
 	recWait(t, s)
-	s.store = func() Store { return nil }
+	s.setStore(func() Store { return nil })
 	if _, err := change.apply(ctx); err == nil {
 		t.Fatal("applied after database disappeared")
 	}

@@ -3,7 +3,8 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { parseConfig } from '../lib/config.js'
+import { createClient } from '../lib/client.js'
+import { defaultConfigPath, loadConfig, parseConfig } from '../lib/config.js'
 import { createSecrets, parseRef } from '../lib/secrets.js'
 
 const KEY = 'ark-0123456789abcdef'
@@ -83,4 +84,45 @@ test('redact takes every resolved value and bearer tokens out of text', async ()
 test('a value that would break a header is refused', async () => {
   const s = createSecrets({ env: { K: 'a\nb-cdef' } })
   await assert.rejects(s.resolve('env:K'), /line break/)
+})
+
+test('redact takes short resolved secrets out of text without corrupting longer matches', async () => {
+  const s = createSecrets({ env: { S2: 'xy', S3: 'k12', LONG: 'k12-longer-secret' } })
+  await s.resolve('env:S2')
+  await s.resolve('env:S3')
+  await s.resolve('env:LONG')
+  assert.equal(s.redact('echo xy and k12 and k12-longer-secret'), 'echo <redacted> and <redacted> and <redacted>')
+  const single = createSecrets({ env: { S1: 'a', S2: 'abc-secret' } })
+  await single.resolve('env:S1')
+  await single.resolve('env:S2')
+  assert.equal(single.redact('token=a ref=abc-secret'), 'token=<redacted> ref=<redacted>')
+})
+
+test('defaultConfigPath honors PERSONA_HOME like runtime.sock', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'ma-home-'))
+  assert.equal(defaultConfigPath(home, {}), join(home, '.persona', 'managed-agents.json'))
+  assert.equal(defaultConfigPath(home, { PERSONA_HOME: '/custom/persona' }), join('/custom/persona', 'managed-agents.json'))
+  assert.equal(defaultConfigPath(home, { PERSONA_HOME: '~/alt-state' }), join(home, 'alt-state', 'managed-agents.json'))
+  const missing = await loadConfig(join(home, 'missing.json'))
+  assert.equal(missing.runtime, 'managed-agents')
+  assert.equal(missing.name, 'Managed Agents')
+  assert.deepEqual(missing.profiles, [])
+})
+
+test('network errors preserve err.cause.code and only report timed out on TimeoutError', async () => {
+  const { profiles } = parseConfig({ profiles: [{ id: 'lab', mode: 'self', base_url: 'http://127.0.0.1:9999', api_key: 'env:K' }] })
+  const secrets = createSecrets({ env: { K: 'secret-val' } })
+  const makeErr = (err) => createClient(profiles[0], secrets, { fetch: async () => { throw err } })
+
+  const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+  await assert.rejects(makeErr(refused).listSessions(), (e) => e.code === 'network' && e.message.includes('ECONNREFUSED') && !e.message.includes('timed out'))
+
+  const notFound = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })
+  await assert.rejects(makeErr(notFound).listSessions(), (e) => e.code === 'network' && e.message.includes('ENOTFOUND') && !e.message.includes('timed out'))
+
+  const timeout = new DOMException('aborted', 'TimeoutError')
+  await assert.rejects(makeErr(timeout).listSessions(), (e) => e.code === 'network' && e.message.includes('timed out'))
+
+  const plain = new Error('socket hang up')
+  await assert.rejects(makeErr(plain).listSessions(), (e) => e.code === 'network' && e.message.includes('socket hang up') && !e.message.includes('timed out'))
 })

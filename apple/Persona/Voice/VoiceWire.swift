@@ -223,6 +223,21 @@ nonisolated enum VoiceLink: Equatable, Sendable {
     }
 }
 
+/// Where one of the voice's replies begins or ends, as the extension says (`reply` frame, feature `reply`, #14932): the
+/// jitter buffer then needs no silence to tell (`VoicePlayout`, #14933). An extension without the feature sends none.
+nonisolated enum VoiceReplyEdge: Equatable, Sendable {
+    case start, end
+    case other(String)
+
+    init(wire: String) {
+        switch wire {
+        case "start": self = .start
+        case "end": self = .end
+        default: self = .other(wire)
+        }
+    }
+}
+
 /// The `code` of an `error` frame (docs/assistant/voice.md 3.3).
 nonisolated enum VoiceErrorCode: Equatable, Sendable {
     case noUpstream, upstreamForbidden, upstreamUnavailable, upstreamFailed
@@ -293,6 +308,8 @@ nonisolated enum VoiceFrame: Equatable, Sendable {
     case run(VoiceRun)
     case ask(VoiceAsk)
     case link(VoiceLink)
+    /// A reply of the voice begins or ends (protocol 2, feature `reply`).
+    case reply(VoiceReplyEdge)
     case error(VoiceFailure)
     case other(type: String)
 
@@ -332,6 +349,8 @@ nonisolated enum VoiceFrame: Equatable, Sendable {
             return .ask(VoiceAsk(interactionID: id, state: VoiceAskState(wire: str(o["state"]) ?? ""), by: str(o["by"])))
         case "link":
             return .link(VoiceLink(wire: str(o["state"]) ?? ""))
+        case "reply":
+            return .reply(VoiceReplyEdge(wire: str(o["state"]) ?? ""))
         case "error":
             return .error(VoiceFailure(code: str(o["code"]).map(VoiceErrorCode.init(wire:)), message: str(o["message"]) ?? "",
                                        fatal: o["fatal"]?.bool ?? false))

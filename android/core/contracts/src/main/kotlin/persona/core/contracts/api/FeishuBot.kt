@@ -14,6 +14,9 @@ interface FeishuBotSettings {
 
     /** `PUT /api/v1/bots/feishu` with only what [update] holds; credentials the hub can't verify are its words (400). */
     suspend fun update(update: FeishuBotUpdate): FeishuBotStatus
+
+    /** The bot's daily sync into the knowledge base ([LarkSyncSettings]); null where this client has none. */
+    val sync: LarkSyncSettings? get() = null
 }
 
 @Serializable data class FeishuBotStatus(

@@ -70,9 +70,13 @@ nonisolated struct HealthIntake: Decodable, Sendable, Equatable {
     var days: [Day]
     var zone: String
     var waterExtension: String?
+    /// Missing on older hubs means both intake items remain available.
+    var items: [String]?
+
+    func contains(_ kind: Kind) -> Bool { items?.contains(kind.rawValue) ?? true }
 
     private nonisolated enum CodingKeys: String, CodingKey {
-        case water, protein, days, zone
+        case water, protein, days, zone, items
         case waterExtension = "water_extension"
     }
 

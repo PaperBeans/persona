@@ -3,17 +3,20 @@
 // (AgentConditionsMenu.tsx) loads with its first click. The opened palette loads the shared query helpers.
 import { useEffect, useState } from "react";
 import { t } from "../../i18n";
-import type { Session } from "../../lib/types";
+import type { AgentPins } from "../../lib/pins";
+import type { Machine, Session } from "../../lib/types";
 import { cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 
 /** `search`: lib/agent-search.ts once loaded; `want` asks for it. `onDone`: the menu closed (the field takes the keys again). */
-export function AgentConditions({ query, onQuery, search, want, sessions, onDone }: {
+export function AgentConditions({ query, onQuery, search, want, sessions, machines, pins, onDone }: {
   query: string;
   onQuery: (next: string) => void;
   search: typeof import("../../lib/agent-search") | null;
   want: () => void;
   sessions: Session[];
+  machines?: Machine[];
+  pins?: AgentPins;
   onDone: () => void;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -51,7 +54,7 @@ export function AgentConditions({ query, onQuery, search, want, sessions, onDone
         <Icon name="filter" size={14} stroke={2} />
         {count > 0 && <span className="tabular-nums leading-none">{count}</span>}
       </button>
-      {open && anchor && search && menu && <menu.AgentConditionsMenu anchor={anchor} query={query} onQuery={onQuery} search={search} sessions={sessions} onClose={close} />}
+      {open && anchor && search && menu && <menu.AgentConditionsMenu anchor={anchor} query={query} onQuery={onQuery} search={search} sessions={sessions} machines={machines} pins={pins} onClose={close} />}
     </>
   );
 }

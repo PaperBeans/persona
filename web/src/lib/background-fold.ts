@@ -1,4 +1,4 @@
-import type { AssistantInfo } from "./types";
+import type { AssistantInfo, Session } from "./types";
 
 /**
  * Whether a chat folds its background rounds (#4314, #6595): the main conversation and the leader conversations
@@ -13,4 +13,10 @@ export function foldsBackgroundRounds(
   if (assistant.main_background_folded === false) return false;
   if (assistant.main && sessionId === assistant.main) return true;
   return assistant.leaders?.includes(sessionId) ?? false;
+}
+
+/** A user question, failed turn, or blocked session still needs a visible final reply when routine relays are quiet. */
+export function relayNeedsAttention(session?: Session): boolean {
+  return !!session && Boolean(session.awaits_reply || session.turn_error_kind || session.status === "blocked" ||
+    session.status === "interrupted" || session.work?.phase === "blocked");
 }

@@ -6,10 +6,10 @@ import Testing
 /// The voice orb (`VoiceOrb`, docs/assistant/voice.md「Design system」): its motion is a pure function of phase, time and level
 /// (`VoiceOrbPose`), held here to the tokens: Android's pace, a still frame with Reduce Motion, and inside its box.
 @MainActor struct VoiceOrbTests {
-    /// The breath and the beat are Android's (`Voice.kt`), so the two apps' orbs move alike.
+    /// The breath and the beat are Android's (`VoiceComponents.kt` in `:module:voice`), so the two apps' orbs move alike.
     @Test func paceMatchesAndroid() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let kotlin = try String(contentsOf: root.appending(path: "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Voice.kt"),
+        let kotlin = try String(contentsOf: root.appending(path: "android/module/voice/src/main/kotlin/persona/module/voice/VoiceComponents.kt"),
                                 encoding: .utf8)
         func millis(_ name: String) throws -> Double {
             let re = try NSRegularExpression(pattern: "\(name) = ([0-9]+)")

@@ -4,6 +4,8 @@
 // Catalogs are locales/<lang>/<namespace>.json, flat "name": "text", embedded in the binary; a key is
 // "<namespace>.<name>". Placeholders are {name}; a numeric "count" picks <key>_one / <key>_other when those exist.
 // A key missing in a language falls back to en, then zh-Hans, then the key itself (the catalog test keeps them equal).
+//
+//persona:layer library
 package i18n
 
 import (

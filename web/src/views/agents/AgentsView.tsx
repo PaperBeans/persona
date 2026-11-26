@@ -5,6 +5,7 @@ import { AgentAvatar, type AvatarSession } from "./AgentAvatar";
 import {
   blockView,
   fetchMessages,
+  personalAgentDraftKey,
   fetchAgentOutbox,
   arrangeSessions,
   togglePin,
@@ -45,6 +46,7 @@ import { fetchHiddenSessions, personalHideDeps, personalOrder, personalSessions,
 import { SESSIONS_LIST_FEATURE } from "../../lib/session-list";
 import { useStore } from "../../lib/store";
 import { PagedSessionList } from "./PagedSessionList";
+import { useAccountGroups } from "./account-groups";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
 
 export function AgentsView({ id, onToggleSidebar }: { id?: string; onToggleSidebar: () => void }) {
@@ -74,11 +76,12 @@ function AgentList({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 function BoundedAgentList({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const prefs = useAgentPrefs();
   const { sessions, loaded, error, hints } = useAgentList();
+  const accounts = useAccountGroups();
   return <div className="flex h-full flex-col">
     <Header title={t("agents-agentsview.title")} sub={t("agents-agentsview.subtitle")} onToggleSidebar={onToggleSidebar} />
     <div className="min-h-0 flex-1 overflow-y-auto"><div className={SESSION_LIST_STYLE.personalPage}>
       {loaded && !error && sessions.length > 0 && <SourceNotice hints={hints} />}
-      <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal renderRow={(s) => <div className={SESSION_LIST_STYLE.personalRow}>
+      <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal label={accounts.label} accountMark={accounts.accountMark} renderRow={(s) => <div className={SESSION_LIST_STYLE.personalRow}>
         <a href={href({ name: "agents", id: s.id })} onClick={(e) => onLinkClick(e, { name: "agents", id: s.id })} className="flex min-w-0 flex-1 items-center gap-2">
           <AgentAvatar s={s} size={SESSION_LIST_METRICS.avatar} /><span className={SESSION_LIST_STYLE.personalTitle}>{s.title || t("lib-format.untitled_session")}</span>
           {s.unreadCount > 0 && <span className={SESSION_LIST_STYLE.personalBadge}>{s.unreadCount}</span>}
@@ -424,12 +427,8 @@ function MessageRow({ m }: { m: AgentMessage }) {
   );
 }
 
-/** The draft key for a personal agent's box: stable while its rows are recreated, and shaped so no sidebar row reads it
- *  (the draft indicator only asks for `draft:<machine>/<session>` keys). */
-const agentDraftKey = (id: string) => `agent:${id}`;
-
 export function AgentComposer({ id, disabled, reason, onSend }: { id: string; disabled: boolean; reason: string; onSend: (text: string) => void }) {
-  const draftKey = agentDraftKey(id);
+  const draftKey = personalAgentDraftKey(id);
   const [text, setText] = useState(() => storedPageDraft(draftKey));
   useEffect(() => {
     storePageDraft(draftKey, text);

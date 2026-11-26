@@ -3,15 +3,15 @@ import { shownManager, useShownManager } from "../lib/manager-choice";
 // ⌘K: Beautiful UI's Search, over every agent and Persona conversation — and the terminal panes of the computers
 // (lib/terminals.ts, the /terminal page's data). `>` first (or ⌘⇧P) is command mode: the registered commands with their
 // shortcuts, and whatever other modules add through registerContextCommands (lib/palette.ts). docs/web/web.md"Keyboard shortcuts".
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { credentialOwner, subscribeCredentialOwner, enc, api } from "../lib/api";
 import { machineWithHub } from "../lib/mesh";
 import { createPortal } from "react-dom";
 import { ago, sessionDisplayTab, sessionTitle, sessionTitleDetail, shortPath, stateOf, tabLabel } from "../lib/format";
 import { useHerdrTabName } from "../lib/agents-display";
-import { appCommands, commandKeys, contextCommands, filterCommands, inboxHits, matchPaletteWords, orderGroups, parseQuery, placeHits, openPaletteWith, setPaletteQuery, terminalHits, usePalette, type InboxHit, type MachinePanes, type PaletteCommand, type PlaceHit, type PlaceInput, type TerminalHit } from "../lib/palette";
+import { appCommands, commandKeys, contextCommands, filterCommands, inboxHits, matchPaletteWords, orderGroups, parseQuery, placeHits, openPaletteWith, setPaletteQuery, terminalHits, usePalette, type InboxHit, type MachinePanes, type PaletteCommand, type PaletteContext, type PlaceHit, type PlaceInput, type TerminalHit } from "../lib/palette";
 import { isDone, itemRoute, useInbox, type InboxItem } from "../lib/inbox";
-import { useNavPages } from "./Sidebar";
+import { useNavPages, type NavPage } from "./Sidebar";
 import type { EvidenceSnippet } from "../lib/agent-chatlist-filter";
 import { storedValue } from "../lib/compatibility";
 import { useScope } from "../lib/current-assistant";
@@ -26,17 +26,18 @@ import { href, navigate, type Route } from "../lib/router";
 import { composing } from "../lib/send-history";
 import { useAgentSessions } from "../lib/sessions";
 import { PALETTE_RECENT_CHATS, shownChats, useRecentChats } from "../lib/recent-chats";
-import { chordParts, handlerOf, runShortcut, SCOPE_LABEL, useBindings } from "../lib/shortcuts";
+import { chordParts, handlerOf, runShortcut, SCOPE_LABEL, useBindings, type Bindings } from "../lib/shortcuts";
 import { useStore } from "../lib/store";
 import { buildTerminalTree, type PanesResponse } from "../lib/terminals";
-import type { Session } from "../lib/types";
+import { NO_PINS, type AgentPins } from "../lib/pins";
+import type { AssistantInfo, Interaction, Machine, Session } from "../lib/types";
 import { AgentMark, SessionMark } from "../ui/AgentMark";
 import { CARD_OUT, EASE, EXIT_MS, IconButton, Kbd, toast, useExit } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { useEscapeClose, useModalFocus } from "../ui/overlay";
 import { useCloseOnBack } from "../lib/back-close";
-import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit, usePaletteFiles, type FileRow } from "./palette/FilesSection";
+import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit, usePaletteFiles, type FileRow, type PaletteFiles } from "./palette/FilesSection";
 import { AgentConditions } from "./palette/AgentConditions";
 import { useSavedSearches, type SavedSearchPanel } from "./palette/SavedSearches";
 import type { SavedAgentSearch } from "../lib/saved-agent-searches";
@@ -124,13 +125,193 @@ function score(s: Session, q: string, machine: string, persona = false, preferTa
 }
 
 const HOME: Route = { name: "home" };
+const NO_INTERACTIONS: Interaction[] = [];
+const NO_SESSIONS_BY_MACHINE: Record<string, Session[]> = {};
+const NO_FEATURES: string[] = [];
+const EMPTY_BINDINGS: Bindings = {};
+const EMPTY_TREES: Record<string, PanesResponse> = {};
+const EMPTY_ROWS: Row[] = [];
+const NEVER_DELETED = () => false;
+const NOOP = () => {};
+const defaultNotify = (message: string) => { toast(message); };
+const defaultAvailable = (id: string) => Boolean(handlerOf(id));
+const nodeLoaderIds = new WeakMap<() => Promise<void>, number>();
+let nextNodeLoaderId = 0;
+function nodeLoaderIdOf(loader: () => Promise<void>): number {
+  let id = nodeLoaderIds.get(loader);
+  if (id === undefined) {
+    id = ++nextNodeLoaderId;
+    nodeLoaderIds.set(loader, id);
+  }
+  return id;
+}
+
+function markSnippetParts(snippet: string, ranges: readonly [number, number][]): [string, boolean][] {
+  const out: [string, boolean][] = [];
+  let at = 0;
+  for (const [a0, b0] of [...ranges].sort((x, y) => x[0] - y[0])) {
+    const a = Math.max(at, Math.min(a0, snippet.length));
+    const b = Math.max(a, Math.min(b0, snippet.length));
+    if (a > at) out.push([snippet.slice(at, a), false]);
+    if (b > a) out.push([snippet.slice(a, b), true]);
+    at = b;
+  }
+  if (at < snippet.length) out.push([snippet.slice(at), false]);
+  return out.length ? out : [[snippet, false]];
+}
+
+export type PaletteNavPage = Pick<NavPage, "k" | "label" | "icon" | "to">;
+export type PaletteRecentChats = { entries: string[]; current: string };
+export type PaletteSavedSearches = ReturnType<typeof useSavedSearches>;
+export type PaletteRuntimeSearch = ReturnType<typeof useRuntimeSearch>;
+
+export interface PaletteProps {
+  open: boolean;
+  onClose: () => void;
+  onNewAgent: () => void;
+  pane?: { mid: string; sid: string };
+  route?: Route;
+  listShown?: boolean;
+  /** Controlled query string; skips `usePalette()` and `setPaletteQuery`. */
+  query?: string;
+  /** Controlled query setter replacing `setPaletteQuery`. */
+  onQueryChange?: (next: string) => void;
+  /** Controlled reopen callback when returning from Saved searches; replaces `openPaletteWith`. */
+  onOpenWithQuery?: (query: string) => void;
+  /** Controlled Agent sessions; skips `useAgentSessions()`. */
+  sessions?: readonly Session[];
+  /** Controlled Assistant info (`null` when absent); skips `useStore(s => s.assistant)`. */
+  assistant?: AssistantInfo | null;
+  /** Controlled machines list; skips `useStore(s => s.machines)`. */
+  machines?: readonly Machine[];
+  /** Controlled Agent pins; skips `useStore(s => s.pins)`. */
+  pins?: AgentPins;
+  /** Controlled interactions; skips `useStore(s => s.interactions)`. */
+  interactions?: readonly Interaction[];
+  /** Controlled per-machine sessions for terminal trees; skips `useStore(s => s.sessions)`. */
+  sessionsByMachine?: Record<string, Session[]>;
+  /** Controlled hub feature flags; skips `useStore(s => s.features)`. */
+  features?: readonly string[];
+  /** Controlled to-dos support flag; skips `useStore(s => s.todosSupported)`. */
+  todosSupported?: boolean;
+  /** Controlled complete-list flag; skips `useScope()` and `localStorage`. */
+  completeList?: boolean;
+  /** Controlled inbox items; skips `useInbox()`. */
+  inboxItems?: readonly InboxItem[];
+  /** Controlled navigation pages for "Go to"; skips `useNavPages()`. */
+  pages?: readonly PaletteNavPage[];
+  /** Controlled recent chats ledger; skips `useRecentChats()`. */
+  recentChats?: PaletteRecentChats;
+  /** Controlled shortcut bindings; skips `useBindings()`. */
+  bindings?: Bindings;
+  /** Controlled Herdr tab-name preference; skips `useHerdrTabName()`. */
+  preferTab?: boolean;
+  /** Controlled credential owner scope key; skips global credential subscription. */
+  credentialOwner?: string;
+  /** Controlled active manager scope key; skips `useShownManager()`. */
+  manager?: string;
+  /** Controlled deletion epoch/scope; skips `useStore(conversationDeletionScope)`. */
+  deletionScope?: number;
+  /** Controlled deletion revision; skips `useStore(conversationDeletionRevision)`. */
+  deletionRevision?: number;
+  /** Controlled deleted-conversation predicate; skips `conversationDeleted()`. */
+  isConversationDeleted?: (machineId: string, sessionId: string) => boolean;
+  /** Controlled saved-searches & search-module handle; skips `useSavedSearches`. */
+  savedSearches?: PaletteSavedSearches;
+  /** Controlled runtime search state/actions; skips `useRuntimeSearch`. */
+  runtimeSearch?: PaletteRuntimeSearch;
+  /** Controlled files section state; skips `usePaletteFiles`. */
+  files?: PaletteFiles;
+  /** Controlled file open callback replacing `openFileHit`. */
+  onOpenFile?: (row: FileRow) => void;
+  /** Controlled file mention copy callback replacing `copyFileMention`. */
+  onCopyFileMention?: (row: FileRow) => Promise<void> | void;
+  /** Controlled terminal panes map per machine; skips `/machines/:mid/panes` requests. */
+  panesByMachine?: Record<string, PanesResponse>;
+  /** Controlled terminal panes loader replacing `api("/machines/:mid/panes")`. */
+  loadMachinePanes?: (machineId: string, signal: AbortSignal) => Promise<PanesResponse>;
+  /** Controlled assistant chat search replacing `searchAssistantChats`. */
+  searchAssistant?: (query: string, signal: AbortSignal) => Promise<AssistantSearchAnswer | null | undefined>;
+  /** Controlled assistant snippet highlighter paired with `searchAssistant`. */
+  markAssistantSnippet?: typeof import("../lib/assistant-search").markParts;
+  /** Controlled command list for `>` mode; skips `node-palette`, `contextCommands`, `handlerOf`, and `runShortcut`. */
+  commands?: readonly PaletteCommand[];
+  /** Controlled context commands replacing global `contextCommands({ route, pane })`. */
+  contextCommands?: readonly PaletteCommand[] | ((ctx: PaletteContext) => PaletteCommand[]);
+  /** Controlled command availability predicate replacing `Boolean(handlerOf(id))`. */
+  isCommandAvailable?: (id: string) => boolean;
+  /** Controlled command runner replacing `runShortcut(id, { digit })`. Return `false` to notify unavailable. */
+  onRunCommand?: (id: string, digit?: number) => boolean | void;
+  /** Controlled node-palette loader (`false` disables lazy `import("../lib/node-palette")`). */
+  loadNodeCommands?: (() => Promise<void>) | false;
+  /** Controlled route href builder replacing `href(route)`. */
+  resolveHref?: (route: Route) => string;
+  /** Controlled navigation callback replacing `navigate(route)`. */
+  onNavigate?: (route: Route) => void;
+  /** Controlled conversation route builder replacing `conversationPage(...)`. */
+  resolveConversationRoute?: (session: Session, at?: string) => Route;
+  /** Controlled inbox route builder replacing `itemRoute(...)`. */
+  resolveInboxRoute?: (item: InboxItem) => Route;
+  /** Controlled Agents-list filter callback replacing `filterAgentList(query)`. */
+  onFilterAgentList?: (query: string) => void;
+  /** Controlled visibility of "Filter Agents list"; skips `useShowFilter()`. */
+  showAgentsFilter?: boolean;
+  /** Controlled notification callback replacing `toast(message)`. */
+  onNotify?: (message: string) => void;
+  /** Set `false` to disable browser-history `useCloseOnBack` on narrow screens. */
+  closeOnBack?: boolean;
+}
+
+interface PaletteSources {
+  route: Route;
+  listShown: boolean;
+  q: string;
+  hasControlledQuery: boolean;
+  setQ: (next: string) => void;
+  sessions: readonly Session[];
+  assistant: AssistantInfo | null;
+  machines: readonly Machine[];
+  pins: AgentPins;
+  interactions: readonly Interaction[];
+  bySession: Record<string, Session[]>;
+  features: readonly string[];
+  completeList: boolean;
+  panesOn: boolean;
+  searchOn: boolean;
+  inboxItems: readonly InboxItem[];
+  pages: readonly PaletteNavPage[];
+  recentChats: PaletteRecentChats;
+  bindings: Bindings;
+  preferTab: boolean;
+  owner: string;
+  manager: string;
+  epoch: number;
+  revision: number;
+  controlledScope: boolean;
+  isDeleted: (machineId: string, sessionId: string) => boolean;
+}
+
+interface ResolvedPaletteProps extends PaletteProps {
+  sources: PaletteSources;
+}
+
+function hasControlledSources(p: PaletteProps): boolean {
+  return p.query !== undefined && p.sessions !== undefined && p.machines !== undefined && p.assistant !== undefined
+    && p.inboxItems !== undefined && p.pages !== undefined && p.recentChats !== undefined
+    && (p.bindings !== undefined || p.commands !== undefined);
+}
 
 /** The conversation "Go back" opens (#2191): the newest opened here, other than the one on the page, that still exists. */
-function previousChat(recent: { entries: string[]; current: string }, sessions: Session[], conversations: Session[]): { s: Session; to: Route } | null {
+function previousChat(
+  recent: PaletteRecentChats,
+  sessions: readonly Session[],
+  conversations: readonly Session[],
+  resolveConversationRoute?: (session: Session) => Route,
+): { s: Session; to: Route } | null {
   const find = (k: string): { s: Session; to: Route } | null => {
     if (k.startsWith("j:")) {
       const s = conversations.find((c) => `j:${c.session_id}` === k);
-      return s ? { s, to: { name: "persona", sid: s.session_id } } : null;
+      return s ? { s, to: resolveConversationRoute ? resolveConversationRoute(s) : { name: "persona", sid: s.session_id } } : null;
     }
     const s = sessions.find((c) => `s:${c.machine_id}/${c.session_id}` === k);
     return s ? { s, to: { name: "session", mid: s.machine_id, sid: s.session_id } } : null;
@@ -140,24 +321,333 @@ function previousChat(recent: { entries: string[]; current: string }, sessions: 
 }
 
 /** `listShown`: the sidebar's column, with its Agents list, is on screen (not a narrow screen's drawer or the rail). */
-export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listShown = true }: { open: boolean; onClose: () => void; onNewAgent: () => void; pane?: { mid: string; sid: string }; route?: Route; listShown?: boolean }) {
-  const preferTab = useHerdrTabName();
-  // what is typed lives in the store (lib/palette.ts): the shortcuts open it in a mode (`>` for commands) and read it
-  const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
-  const manager = useShownManager();
-  const epoch = useStore(conversationDeletionScope);
-  const revision = useStore(conversationDeletionRevision);
+export function Palette(props: PaletteProps) {
+  if (hasControlledSources(props)) {
+    const features = props.features ?? NO_FEATURES;
+    return (
+      <PaletteWithSaved
+        {...props}
+        sources={{
+          route: props.route ?? HOME,
+          listShown: props.listShown ?? true,
+          q: props.query!,
+          hasControlledQuery: true,
+          setQ: props.onQueryChange ?? NOOP,
+          sessions: props.sessions!,
+          assistant: props.assistant!,
+          machines: props.machines!,
+          pins: props.pins ?? NO_PINS,
+          interactions: props.interactions ?? NO_INTERACTIONS,
+          bySession: props.sessionsByMachine ?? NO_SESSIONS_BY_MACHINE,
+          features,
+          completeList: props.completeList ?? true,
+          panesOn: features.includes("terminal_panes"),
+          searchOn: Boolean(props.searchAssistant) || features.includes("assistant_search"),
+          inboxItems: props.inboxItems!,
+          pages: props.pages!,
+          recentChats: props.recentChats!,
+          bindings: props.bindings ?? EMPTY_BINDINGS,
+          preferTab: props.preferTab ?? false,
+          owner: props.credentialOwner ?? "",
+          manager: props.manager ?? "",
+          epoch: props.deletionScope ?? 0,
+          revision: props.deletionRevision ?? 0,
+          controlledScope: true,
+          isDeleted: props.isConversationDeleted ?? NEVER_DELETED,
+        }}
+      />
+    );
+  }
+  return <DefaultPaletteSources {...props} />;
+}
+
+function DefaultPaletteSources(props: PaletteProps) {
+  const defaultPreferTab = useHerdrTabName();
+  const defaultOwner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
+  const defaultManager = useShownManager();
+  const defaultEpoch = useStore(conversationDeletionScope);
+  const defaultRevision = useStore(conversationDeletionRevision);
+  const defaultQuery = usePalette().query;
+  const defaultSessions = useAgentSessions();
+  const defaultRecentChats = useRecentChats();
+  const defaultAssistant = useStore((s) => s.assistant);
+  const defaultMachines = useStore((s) => s.machines);
+  const defaultPins = useStore((s) => s.pins);
+  const defaultInteractions = useStore((s) => s.interactions);
+  const defaultBySession = useStore((s) => s.sessions);
+  const defaultFeatures = useStore((s) => s.features);
+  const defaultTodosSupported = useStore((s) => s.todosSupported);
+  const several = useScope().several;
+  const defaultBindings = useBindings();
+  const defaultInboxItems = useInbox((s) => s.items);
+  const { all: defaultPages } = useNavPages();
+  const features = props.features ?? defaultFeatures;
+  const pins = props.pins ?? defaultPins;
+  const todosSupported = props.todosSupported ?? defaultTodosSupported;
+  const completeList = props.completeList ?? !pagedAgentList({
+    bounded: supportsPagedAgents(features as string[]),
+    byTodo: features.includes(SESSIONS_TODO_FEATURE),
+    todosSupported,
+    pins,
+    stored: storedValue(GROUPING_KEY),
+    several,
+  });
+  const hasControlledQuery = props.query !== undefined;
+  return (
+    <PaletteWithSaved
+      {...props}
+      sources={{
+        route: props.route ?? HOME,
+        listShown: props.listShown ?? true,
+        q: hasControlledQuery ? props.query! : defaultQuery,
+        hasControlledQuery,
+        setQ: props.onQueryChange ?? (hasControlledQuery ? NOOP : setPaletteQuery),
+        sessions: props.sessions ?? defaultSessions,
+        assistant: props.assistant !== undefined ? props.assistant : defaultAssistant,
+        machines: props.machines ?? defaultMachines,
+        pins,
+        interactions: props.interactions ?? defaultInteractions,
+        bySession: props.sessionsByMachine ?? defaultBySession,
+        features,
+        completeList,
+        panesOn: features.includes("terminal_panes"),
+        searchOn: Boolean(props.searchAssistant) || features.includes("assistant_search"),
+        inboxItems: props.inboxItems ?? defaultInboxItems,
+        pages: props.pages ?? defaultPages,
+        recentChats: props.recentChats ?? defaultRecentChats,
+        bindings: props.bindings ?? defaultBindings,
+        preferTab: props.preferTab ?? defaultPreferTab,
+        owner: props.credentialOwner ?? defaultOwner,
+        manager: props.manager ?? defaultManager,
+        epoch: props.deletionScope ?? defaultEpoch,
+        revision: props.deletionRevision ?? defaultRevision,
+        controlledScope: props.credentialOwner !== undefined || props.manager !== undefined || props.deletionScope !== undefined,
+        isDeleted: props.isConversationDeleted ?? conversationDeleted,
+      }}
+    />
+  );
+}
+
+interface PaletteWithSavedProps extends ResolvedPaletteProps {
+  saved: PaletteSavedSearches;
+  savedPanel: SavedSearchPanel | null;
+  setSavedPanel: Dispatch<SetStateAction<SavedSearchPanel | null>>;
+}
+
+function PaletteWithSaved(props: ResolvedPaletteProps) {
+  const [savedPanel, setSavedPanel] = useState<SavedSearchPanel | null>(null);
+  if (props.savedSearches !== undefined) {
+    return <PaletteWithRuntime {...props} saved={props.savedSearches} savedPanel={savedPanel} setSavedPanel={setSavedPanel} />;
+  }
+  return <DefaultSavedSearchesBridge {...props} savedPanel={savedPanel} setSavedPanel={setSavedPanel} />;
+}
+
+function DefaultSavedSearchesBridge(props: ResolvedPaletteProps & { savedPanel: SavedSearchPanel | null; setSavedPanel: Dispatch<SetStateAction<SavedSearchPanel | null>> }) {
+  const { mode } = parseQuery(props.sources.q);
+  const saved = useSavedSearches(props.open && mode === "jump", props.savedPanel);
+  return <PaletteWithRuntime {...props} saved={saved} />;
+}
+
+interface PaletteWithRuntimeProps extends PaletteWithSavedProps {
+  runtime: PaletteRuntimeSearch;
+}
+
+function PaletteWithRuntime(props: PaletteWithSavedProps) {
+  if (props.runtimeSearch !== undefined) {
+    return <PaletteWithFiles {...props} runtime={props.runtimeSearch} />;
+  }
+  return <DefaultRuntimeSearchBridge {...props} />;
+}
+
+function DefaultRuntimeSearchBridge(props: PaletteWithSavedProps) {
+  const { mode, text } = parseQuery(props.sources.q);
+  const managing = props.savedPanel?.scope === props.saved.scope ? props.savedPanel : null;
+  const runtime = useRuntimeSearch({
+    open: props.open && !managing,
+    jump: mode === "jump",
+    query: text,
+    capable: props.sources.features.includes("sessions_search"),
+    bounded: props.sources.features.includes(SESSIONS_LIST_FEATURE),
+    module: props.saved.module,
+    loadError: props.saved.failed ? t("palette.saved_searches_failed") : "",
+    owner: props.saved.owner,
+  });
+  return <PaletteWithFiles {...props} runtime={runtime} />;
+}
+
+interface PaletteViewProps extends PaletteWithRuntimeProps {
+  scope: string;
+  currentScope: () => boolean;
+  machinePanes: MachinePanes[];
+  resolvedFiles: PaletteFiles;
+}
+
+function PaletteWithFiles(props: PaletteWithRuntimeProps) {
+  const { open, panesByMachine, loadMachinePanes, sources } = props;
+  const { owner, epoch, manager, controlledScope, machines, bySession, panesOn } = sources;
   const scope = JSON.stringify([owner, epoch, manager]);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const currentScope = useCallback(
+    () => scopeRef.current === scope && (controlledScope || scope === JSON.stringify([credentialOwner(), conversationDeletionScope(), shownManager()])),
+    [scope, controlledScope],
+  );
+  const loadPanesRef = useRef(loadMachinePanes);
+  loadPanesRef.current = loadMachinePanes;
+  const hasLoadPanes = Boolean(loadMachinePanes);
+  const hasControlledPanes = panesByMachine !== undefined;
+  const shouldFetchPanes = !hasControlledPanes && (hasLoadPanes || panesOn);
+  const onlineKey = machines.filter((m) => m.online).map((m) => m.id).join("\n");
+  const panesSeqRef = useRef(0);
+  const [treesState, setTreesState] = useState<{ scope: string; token: number; data: Record<string, PanesResponse> }>({ scope: "", token: 0, data: EMPTY_TREES });
+  useLayoutEffect(() => {
+    panesSeqRef.current += 1;
+    setTreesState({ scope, token: 0, data: EMPTY_TREES });
+  }, [scope]);
+  useEffect(() => {
+    if (!open || !shouldFetchPanes || !onlineKey) return;
+    const token = ++panesSeqRef.current;
+    const ctrl = new AbortController();
+    for (const mid of onlineKey.split("\n")) {
+      const req = loadPanesRef.current
+        ? Promise.resolve().then(() => loadPanesRef.current!(mid, ctrl.signal))
+        : api<PanesResponse>(`/machines/${enc(mid)}/panes`, { signal: ctrl.signal });
+      req.then(
+        (res) => {
+          if (ctrl.signal.aborted || panesSeqRef.current !== token || !currentScope()) return;
+          setTreesState((prev) => ({ scope, token, data: prev.token === token ? { ...prev.data, [mid]: res } : { [mid]: res } }));
+        },
+        () => {}, // a computer that cannot be read just has no panes here
+      );
+    }
+    return () => {
+      panesSeqRef.current += 1;
+      ctrl.abort();
+    };
+  }, [open, shouldFetchPanes, onlineKey, scope, currentScope]);
+  const trees = panesByMachine ?? (treesState.scope === scope ? treesState.data : EMPTY_TREES);
+  const machinePanes = useMemo<MachinePanes[]>(
+    () =>
+      machines.flatMap((m) =>
+        trees[m.id] ? [{ mid: m.id, machine: machineWithHub(m.id, machines as Machine[]), spaces: buildTerminalTree(trees[m.id], bySession[m.id] ?? []), sessionIds: new Set((bySession[m.id] ?? []).map((x) => x.session_id)) }] : [],
+      ),
+    [machines, trees, bySession],
+  );
+  if (props.files !== undefined) {
+    return <PaletteView {...props} scope={scope} currentScope={currentScope} machinePanes={machinePanes} resolvedFiles={props.files} />;
+  }
+  return <DefaultFilesBridge {...props} scope={scope} currentScope={currentScope} machinePanes={machinePanes} />;
+}
+
+function DefaultFilesBridge(props: Omit<PaletteViewProps, "resolvedFiles">) {
+  const { mode, text } = parseQuery(props.sources.q);
+  const managing = props.savedPanel?.scope === props.saved.scope ? props.savedPanel : null;
+  const operators = mode === "jump" && Boolean(props.saved.module?.hasSearchOperators(text));
+  const resolvedFiles = usePaletteFiles({
+    open: props.open && !managing,
+    jump: mode === "jump" && !operators,
+    text,
+    route: props.sources.route,
+    pane: props.pane,
+    machinePanes: props.machinePanes,
+  });
+  return <PaletteView {...props} resolvedFiles={resolvedFiles} />;
+}
+
+function PaletteView({
+  open,
+  onClose,
+  onNewAgent,
+  pane,
+  sources,
+  onOpenWithQuery,
+  saved,
+  savedPanel,
+  setSavedPanel,
+  runtime: runtimeSearch,
+  scope,
+  currentScope,
+  machinePanes,
+  resolvedFiles: files,
+  onOpenFile,
+  onCopyFileMention,
+  searchAssistant,
+  markAssistantSnippet,
+  commands: controlledCommands,
+  contextCommands: controlledContextCommands,
+  isCommandAvailable,
+  onRunCommand,
+  loadNodeCommands,
+  resolveHref,
+  onNavigate,
+  resolveConversationRoute,
+  resolveInboxRoute,
+  onFilterAgentList,
+  showAgentsFilter,
+  onNotify,
+  closeOnBack = true,
+}: PaletteViewProps) {
+  const {
+    route, listShown, q, hasControlledQuery, setQ, sessions, assistant, machines, pins, interactions,
+    completeList, panesOn, searchOn, inboxItems, pages, recentChats, bindings, preferTab, owner, epoch, revision, isDeleted,
+  } = sources;
   const account = JSON.stringify([owner, epoch]);
   const priorAccount = useRef(account);
-  const currentScope = useCallback(() => scope === JSON.stringify([credentialOwner(), conversationDeletionScope(), shownManager()]), [scope]);
-  const q = usePalette().query;
-  const setQ = setPaletteQuery;
   const { mode, text } = parseQuery(q);
-  const [savedPanel, setSavedPanel] = useState<SavedSearchPanel | null>(null);
-  const saved = useSavedSearches(open && mode === "jump", savedPanel);
+  // The node the user is on adds its menu as `>` commands (lib/node-palette.ts registers them when imported). They load
+  // the first time the palette is open, off the first screen and the idle tier; the list is drawn again once they have.
+  // A failed load is not kept: the next opening asks again (Palette.node-commands-retry.test.tsx).
+  // Controlled loaders are scoped by active scope + loader identity and reset on scope/loader change or close/reopen,
+  // while default module import preserves its one-time load and retry-on-failure lifecycle.
+  const customNodeLoader = typeof loadNodeCommands === "function" ? loadNodeCommands : undefined;
+  const shouldLoadNode = loadNodeCommands !== false && (Boolean(customNodeLoader) || (controlledCommands === undefined && controlledContextCommands === undefined));
+  const nodeLoadKey = !shouldLoadNode
+    ? ""
+    : customNodeLoader
+      ? JSON.stringify(["custom", scope, nodeLoaderIdOf(customNodeLoader)])
+      : "default";
+  const nodeLoadKeyRef = useRef(nodeLoadKey);
+  nodeLoadKeyRef.current = nodeLoadKey;
+  const nodeLoadSeqRef = useRef(0);
+  const [nodeReady, setNodeReady] = useState<{ key: string; token: number }>({ key: "", token: 0 });
+  const nodeCommandsReady = nodeLoadKey !== "" && nodeReady.key === nodeLoadKey && (!customNodeLoader || open);
+  const nodeCommandsToken = nodeCommandsReady ? nodeReady.token : 0;
+  useLayoutEffect(() => {
+    if (!nodeLoadKey || customNodeLoader) {
+      nodeLoadSeqRef.current += 1;
+      setNodeReady((prev) => (prev.key ? { key: "", token: 0 } : prev));
+      return;
+    }
+    setNodeReady((prev) => (prev.key && prev.key !== nodeLoadKey ? { key: "", token: 0 } : prev));
+  }, [open, nodeLoadKey, customNodeLoader]);
+  useEffect(() => {
+    if (!open || !nodeLoadKey || nodeCommandsReady) return;
+    const token = ++nodeLoadSeqRef.current;
+    let live = true;
+    let req: Promise<unknown>;
+    if (customNodeLoader) {
+      try {
+        req = Promise.resolve(customNodeLoader());
+      } catch {
+        return;
+      }
+    } else {
+      req = import("../lib/node-palette");
+    }
+    void req.then(
+      () => {
+        if (!live || nodeLoadSeqRef.current !== token || nodeLoadKeyRef.current !== nodeLoadKey || !currentScope()) return;
+        setNodeReady({ key: nodeLoadKey, token });
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+      nodeLoadSeqRef.current += 1;
+    };
+  }, [open, nodeLoadKey, nodeCommandsReady, customNodeLoader, currentScope]);
   const managing = savedPanel?.scope === saved.scope ? savedPanel : null;
-  useEffect(() => { if (savedPanel && !managing) setSavedPanel(null); }, [savedPanel, managing]);
+  useEffect(() => { if (savedPanel && !managing) setSavedPanel(null); }, [savedPanel, managing, setSavedPanel]);
   // Both search tools arrive with the opened palette, outside its idle chunk. Their data lifetimes remain
   // independent: saved queries follow the default manager; runtime matches are hub-wide and require typed input.
   const agentSearch = saved.module;
@@ -165,35 +655,23 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   const operators = mode === "jump" && Boolean(agentSearch?.hasSearchOperators(text));
   const [selection, setSelection] = useState<{ query: string; key: string }>({ query: q, key: "" });
   const [box, setBox] = useState<{ top: number; height: number } | null>(null);
-  const sessions = useAgentSessions();
-  // the conversations opened here, newest first, and the one on the page (#2191)
-  const recentChats = useRecentChats();
-  const assistant = useStore((s) => s.assistant);
-  const machines = useStore((s) => s.machines);
-  const pins = useStore((s) => s.pins);
-  const interactions = useStore((s) => s.interactions);
-  const bySession = useStore((s) => s.sessions);
-  // "Filter Agents list" narrows the complete list with what was typed, the hub's paged list with its words alone (the
-  // hub matches the query as text; its operators are the complete list's)
-  const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
-  const runtimeSearchOn = useStore((s) => s.features.includes("sessions_search"));
-  const runtimeSearch = useRuntimeSearch({ open: open && !managing, jump: mode === "jump", query: text, capable: runtimeSearchOn, bounded, module: agentSearch, loadError: saved.failed ? t("palette.saved_searches_failed") : "", owner: saved.owner });
-  const byTodo = useStore((s) => s.features.includes(SESSIONS_TODO_FEATURE));
-  const todosSupported = useStore((s) => s.todosSupported);
-  const several = useScope().several;
-  const agentsPaging = useStore((s) => supportsPagedAgents(s.features));
-  const completeList = !pagedAgentList({ bounded: agentsPaging, byTodo, todosSupported, pins, stored: storedValue(GROUPING_KEY), several });
-  const panesOn = useStore((s) => s.features.includes("terminal_panes"));
-  // Persona chats found by what was said in them too (#6283): the manager's search, merged into the local matches
-  const searchOn = useStore((s) => s.features.includes("assistant_search"));
-  const bindings = useBindings();
-  // "Inbox" and "Go to" (the Mac's quick open): the open inbox items, and the sidebar's pages with Persona and "All chats"
-  const inboxItems = useInbox((s) => s.items);
-  // every page, the ones under More too: finding a page is what this is for
-  const { all: pages } = useNavPages();
+  const formatHref = resolveHref ?? (onNavigate ? JSON.stringify : href);
+  const go = onNavigate ?? navigate;
+  const conversationRouteFor = useCallback(
+    (s: Session, at?: string) => (resolveConversationRoute ? resolveConversationRoute(s, at) : conversationPage(s.session_id, s.machine_id, s.manager, at)),
+    [resolveConversationRoute],
+  );
+  const inboxRouteFor = useCallback(
+    (item: InboxItem) => (resolveInboxRoute ? resolveInboxRoute(item) : itemRoute(item)),
+    [resolveInboxRoute],
+  );
+  const notify = onNotify ?? defaultNotify;
+  const openFile = onOpenFile ?? openFileHit;
+  const copyFile = onCopyFileMention ?? copyFileMention;
+  const applyAgentListFilter = onFilterAgentList ?? filterAgentList;
   // the pages come anew each render: kept by what they are, so the list (and the highlight under it) stays put
   const hasAssistant = Boolean(assistant);
-  const pagesKey = pages.map((p) => [p.k, p.label, p.icon, href(p.to)].join("\u0001")).join("\n");
+  const pagesKey = pages.map((p) => [p.k, p.label, p.icon, formatHref(p.to)].join("\u0001")).join("\n");
   const places = useMemo<PlaceInput[]>(
     () => [
       ...(hasAssistant ? [{ key: "persona", title: t("palette.place_persona"), icon: "home" as const, to: { name: "persona" } as Route }, { key: "history", title: t("sidebar.all_chats"), icon: "list" as const, to: { name: "history" } as Route }] : []),
@@ -216,33 +694,15 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // The terminal panes of the online computers, read when the palette opens (the /terminal page's endpoint).
-  const onlineKey = machines.filter((m) => m.online).map((m) => m.id).join("\n");
-  const [trees, setTrees] = useState<Record<string, PanesResponse>>({});
-  useEffect(() => {
-    if (!open || !panesOn || !onlineKey) return;
-    let live = true;
-    for (const mid of onlineKey.split("\n")) {
-      api<PanesResponse>(`/machines/${enc(mid)}/panes`).then(
-        (res) => live && setTrees((t) => ({ ...t, [mid]: res })),
-        () => {}, // a computer that cannot be read just has no panes here
-      );
-    }
-    return () => {
-      live = false;
-    };
-  }, [open, panesOn, onlineKey]);
-  const machinePanes = useMemo<MachinePanes[]>(
-    () =>
-      machines.flatMap((m) =>
-        trees[m.id] ? [{ mid: m.id, machine: machineWithHub(m.id, machines), spaces: buildTerminalTree(trees[m.id], bySession[m.id] ?? []), sessionIds: new Set((bySession[m.id] ?? []).map((x) => x.session_id)) }] : [],
-      ),
-    [machines, trees, bySession],
-  );
-
   // loaded on intent (the palette is idle-tier, src/startup-preload.ts IDLE_TIER_BUDGET): the first query typed loads
   // lib/assistant-search.ts; asked 200 ms after the last key, each query cancelling the one before
-  const [found, setFound] = useState<{ q: string; scope?: string; answer?: AssistantSearchAnswer; marks?: typeof import("../lib/assistant-search").markParts }>({ q: "" });
+  const searchAssistantRef = useRef(searchAssistant);
+  searchAssistantRef.current = searchAssistant;
+  const hasSearchAssistant = Boolean(searchAssistant);
+  const markSnippetRef = useRef(markAssistantSnippet);
+  markSnippetRef.current = markAssistantSnippet;
+  const searchSeqRef = useRef(0);
+  const [found, setFound] = useState<{ q: string; scope?: string; token: number; answer?: AssistantSearchAnswer; marks?: typeof import("../lib/assistant-search").markParts }>({ q: "", token: 0 });
   // a found chat's line starts just before its match, as much of a lead-in as the row's width holds (#7045)
   const phone = useMedia(PHONE);
   const asked = open && !managing && mode === "jump" && !operators && searchOn && Boolean(assistant) ? text.trim() : "";
@@ -250,34 +710,46 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     if (priorAccount.current !== account) { priorAccount.current = account; onClose(); }
   }, [account, onClose]);
   useEffect(() => {
-    setFound({ q: "", scope });
+    const token = ++searchSeqRef.current;
+    setFound({ q: "", scope, token });
     if (!asked) return;
     const ctrl = new AbortController();
     const id = window.setTimeout(() => {
+      if (searchAssistantRef.current) {
+        Promise.resolve()
+          .then(() => searchAssistantRef.current!(asked, ctrl.signal))
+          .then((answer) => {
+            if (ctrl.signal.aborted || searchSeqRef.current !== token || !currentScope()) return;
+            setFound({ q: asked, scope, token, answer: answer ?? undefined, marks: markSnippetRef.current ?? markSnippetParts });
+          })
+          .catch(() => {});
+        return;
+      }
       void import("../lib/assistant-search")
         .then((m) => {
-          if (ctrl.signal.aborted || !currentScope()) return;
+          if (ctrl.signal.aborted || searchSeqRef.current !== token || !currentScope()) return;
           return m.searchAssistantChats(asked, ctrl.signal).then((answer) => {
-            if (!ctrl.signal.aborted && currentScope()) setFound({ q: asked, scope, answer: answer ?? undefined, marks: m.markParts });
+            if (!ctrl.signal.aborted && searchSeqRef.current === token && currentScope()) setFound({ q: asked, scope, token, answer: answer ?? undefined, marks: m.markParts });
           });
         })
         .catch(() => {}); // a failed search leaves the local matches
     }, 200);
     return () => {
+      searchSeqRef.current += 1;
       clearTimeout(id);
       ctrl.abort();
     };
-  }, [asked, scope, currentScope]);
-  useEffect(() => { setFound((f) => f.answer ? { ...f, answer: { ...f.answer, results: f.answer.results.filter((r) => !conversationDeleted(r.machine_id, r.session_id)) } } : f); }, [revision]);
+  }, [asked, scope, currentScope, hasSearchAssistant]);
+  useEffect(() => { setFound((f) => f.answer ? { ...f, answer: { ...f.answer, results: f.answer.results.filter((r) => !isDeleted(r.machine_id, r.session_id)) } } : f); }, [revision, isDeleted]);
   const answer = asked && found.q === asked && found.scope === scope ? found.answer : undefined;
   const hits = useMemo((): Row[] => {
-    if (mode !== "jump") return [];
+    if (mode !== "jump") return EMPTY_ROWS;
     const query = text.toLowerCase();
     let out: Hit[] = [];
     // an Agent as the list's search found it: its operators, then its name, its project or computer, what is inside it
-    const ctx = { machines, pins, interactions, now: Date.now() };
+    const ctx = { machines: machines as Machine[], pins, interactions: interactions as Interaction[], now: Date.now() };
     for (const s of sessions) {
-      const found = agentSearch ? agentSearch.agentSearchHit(s, text, ctx, preferTab) : { score: score(s, query, machineWithHub(s.machine_id, machines), false, preferTab), snippet: undefined };
+      const found = agentSearch ? agentSearch.agentSearchHit(s, text, ctx, preferTab) : { score: score(s, query, machineWithHub(s.machine_id, machines as Machine[]), false, preferTab), snippet: undefined };
       if (found.score) out.push({ key: `s:${runtimeSearchKey(s)}`, s, to: { name: "session", mid: s.machine_id, sid: s.session_id }, score: found.score + (stateOf(s) === "offline" ? 0 : 5), evidence: found.snippet });
     }
     // The server's grouped matches and evidence are never matched again against truncated summaries.
@@ -286,24 +758,24 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     out = merged?.hits ?? out;
     for (const s of operators ? [] : assistant?.conversations ?? []) {
       const sc = Math.max(score(s, query, "persona", true), s.session_id === assistant?.main ? matchPaletteWords(t("sidebar.main_chat"), query, "") : 0);
-      if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationPage(s.session_id, s.machine_id, s.manager), assistant: true, score: sc });
+      if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationRouteFor(s), assistant: true, score: sc });
     }
     // what the manager found: a chat found by a message opens at it (not one found by its title); one not listed here
     // (archived) is the result's own row
     for (const r of answer?.results ?? []) {
-      if (conversationDeleted(r.machine_id, r.session_id)) continue;
+      if (isDeleted(r.machine_id, r.session_id)) continue;
       const key = `j:${r.session_id}`;
       const hit = r.hits[0];
       const at = r.title_match ? undefined : hit?.item_id;
       const known = out.find((h) => h.key === key);
       if (known) {
         known.said = hit;
-        known.to = conversationPage(r.session_id, known.s.machine_id, known.s.manager, at);
+        known.to = conversationRouteFor(known.s, at);
         continue;
       }
       const s = (assistant?.conversations ?? []).find((c) => c.session_id === r.session_id)
         ?? ({ machine_id: r.machine_id, session_id: r.session_id, title: r.title, cwd: "", status: "idle", assistant: true, archived: r.archived, updated_at: r.updated_at } as Session);
-      out.push({ key, s, to: conversationPage(r.session_id, s.machine_id, s.manager, at), assistant: true, score: r.title_match ? 80 : 40, said: hit });
+      out.push({ key, s, to: conversationRouteFor(s, at), assistant: true, score: r.title_match ? 80 : 40, said: hit });
     }
     // nothing typed: the conversations opened here come first, newest first, without the one on the page (#2191); the
     // first is the one before it, picked already, so ⌘K ⏎ goes back to it
@@ -320,33 +792,41 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     all.sort((a, b) => b.score - a.score || (agentSearch && a.kind === "session" && b.kind === "session" && !a.hit.assistant && !b.hit.assistant
       ? agentSearch.runtimeOrder(a.hit.s, b.hit.s) : byTime(b.at, a.at)));
     const mail = (operators ? [] : inboxHits(inboxItems.filter((it) => !isDone(it)), text)).map((h) => ({ kind: "inbox" as const, key: h.key, hit: h, score: h.score }));
-    const go = (operators ? [] : placeHits(places, text)).map((h) => ({ kind: "place" as const, key: h.key, hit: h, score: h.score }));
+    const goRows = (operators ? [] : placeHits(places, text)).map((h) => ({ kind: "place" as const, key: h.key, hit: h, score: h.score }));
     const savedRows: Row[] = !query && !saved.state.unsupported ? (saved.state.document?.searches ?? []).slice(0, 5).map((item) => ({ kind: "saved", key: `saved:${item.id}`, item })) : [];
     // Loaded runtime pages stay reachable; unrelated local groups retain their existing cap.
     let others = 0;
     const window = all.filter((row) => remoteKeys.has(row.key) || others++ < 40);
-    return [...recentRows, ...savedRows, ...orderGroups<Row & { score: number }>([window, mail, go]).flat()];
-  }, [mode, text, operators, agentSearch, sessions, assistant, machines, pins, interactions, machinePanes, inboxItems, places, recentChats, answer, saved.state.document, saved.state.unsupported, runtimeSearch.hits, runtimeSearch.loaded, runtimeSearch.supported, runtimeSearch.loading, runtimeSearch.loadingMore, runtimeSearch.hasMore, runtimeSearch.error, runtimeSearch.moreError, runtimeSearch.mergeHits, revision, preferTab]);
+    return [...recentRows, ...savedRows, ...orderGroups<Row & { score: number }>([window, mail, goRows]).flat()];
+  }, [mode, text, operators, agentSearch, sessions, assistant, machines, pins, interactions, machinePanes, inboxItems, places, recentChats, answer, saved.state.document, saved.state.unsupported, runtimeSearch.hits, runtimeSearch.loaded, runtimeSearch.supported, runtimeSearch.loading, runtimeSearch.loadingMore, runtimeSearch.hasMore, runtimeSearch.error, runtimeSearch.moreError, runtimeSearch.mergeHits, revision, preferTab, isDeleted, conversationRouteFor]);
 
   // command mode: what other modules offer for here, then the registered commands with their shortcuts
   const commands = useMemo((): Row[] => {
-    if (!open || mode !== "command") return [];
+    if (!open || mode !== "command") return EMPTY_ROWS;
+    if (controlledCommands !== undefined) {
+      return filterCommands([...controlledCommands], text).map((cmd) => ({ kind: "command" as const, key: cmd.id, cmd }));
+    }
     const run = (id: string, digit?: number) => {
-      if (!runShortcut(id, { digit })) toast(t("palette.command_unavailable"));
+      const ok = onRunCommand ? onRunCommand(id, digit) !== false : runShortcut(id, { digit });
+      if (!ok) notify(t("palette.command_unavailable"));
     };
+    const available = isCommandAvailable ?? defaultAvailable;
     // Go back to the previous conversation (#2191): the newest opened here other than the one on the page that still exists
-    const back = previousChat(recentChats, sessions, assistant?.conversations ?? []);
+    const back = previousChat(recentChats, sessions, assistant?.conversations ?? [], resolveConversationRoute);
     const extra: PaletteCommand[] = [
-      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: chatTitle(back.s, back.to.name === "persona", false, preferTab), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
+      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: chatTitle(back.s, back.to.name === "persona", false, preferTab), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => go(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
       { id: "app:new-agent", title: t("palette.new_agent"), section: SCOPE_LABEL.global, icon: "plus", keywords: "new agent", run: onNewAgent },
-      { id: "app:new-conversation", title: t("palette.new_conversation"), section: SCOPE_LABEL.global, icon: "chat", keywords: "persona new", run: () => navigate({ name: "persona-new" }) },
+      { id: "app:new-conversation", title: t("palette.new_conversation"), section: SCOPE_LABEL.global, icon: "chat", keywords: "persona new", run: () => go({ name: "persona-new" }) },
     ];
-    const all = [...contextCommands({ route, pane }), ...appCommands({ bindings, available: (id) => Boolean(handlerOf(id)), run, machines: machines.map((m) => ({ id: m.id, name: m.name })), extra })];
+    const ctxCmds = controlledContextCommands === undefined
+      ? contextCommands({ route, pane })
+      : typeof controlledContextCommands === "function"
+        ? controlledContextCommands({ route, pane })
+        : [...controlledContextCommands];
+    const all = [...ctxCmds, ...appCommands({ bindings, available, run, machines: machines.map((m) => ({ id: m.id, name: m.name })), extra })];
     return filterCommands(all, text).map((cmd) => ({ kind: "command" as const, key: cmd.id, cmd }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `route` is parsed anew each render; its path says it all
-  }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent, recentChats, sessions, assistant, preferTab]);
-  // the files under the directory of the page (#2438): listed after the conversations and panes
-  const files = usePaletteFiles({ open: open && !managing, jump: mode === "jump" && !operators, text, route, pane, machinePanes });
+  }, [open, mode, text, controlledCommands, controlledContextCommands, isCommandAvailable, onRunCommand, bindings, machines, pane?.mid, pane?.sid, formatHref(route), onNewAgent, recentChats, sessions, assistant, preferTab, nodeCommandsToken, go, notify, resolveConversationRoute]);
   const shown = useMemo(() => (mode === "command" ? commands : [...hits, ...files.rows]), [mode, commands, hits, files.rows]);
 
   // Saved shortcuts can arrive or move while the palette is open. Keep the highlighted identity rather than
@@ -383,26 +863,32 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   useEscapeClose(open && !managing, onClose);
   // on a narrow screen Back closes it first, as it does the drawer and the sheets (lib/back-close.ts); a pick that goes
   // to a page takes its entry over, and a sheet opened from it (Saved searches, a command's) reuses it
-  useCloseOnBack(open && !managing, onClose, useMedia(NARROW));
+  const narrow = useMedia(NARROW);
+  useCloseOnBack(open && !managing, onClose, closeOnBack && narrow);
   // the field takes the focus on every open (opened again on its way out, it is not mounted anew)
   useEffect(() => {
     if (open && !managing) input.current?.focus({ preventScroll: true });
   }, [open, managing]);
 
   if (managing && saved.module && saved.model) {
-    const finish = (query: string) => { setSavedPanel(null); openPaletteWith(query); };
+    const finish = (query: string) => {
+      setSavedPanel(null);
+      if (onOpenWithQuery) onOpenWithQuery(query);
+      else if (hasControlledQuery) setQ(query);
+      else openPaletteWith(query);
+    };
     return <saved.module.SavedSearchesDialog key={saved.scope} model={saved.model} initialQuery={managing.initialQuery} onReturn={() => finish(managing.returnQuery)} onApply={finish} />;
   }
   if (!exit.mounted) return null;
   const pick = (r: Row) => {
-    if (!currentScope() || (r.kind === "session" && conversationDeleted(r.hit.s.machine_id, r.hit.s.session_id))) return;
+    if (!currentScope() || (r.kind === "session" && isDeleted(r.hit.s.machine_id, r.hit.s.session_id))) return;
     if (r.kind === "saved") { setQ(r.item.query); input.current?.focus({ preventScroll: true }); return; }
     onClose();
     if (r.kind === "command") r.cmd.run();
-    else if (r.kind === "file") openFileHit(r);
-    else if (r.kind === "inbox") navigate(itemRoute(r.hit.item));
-    else if (r.kind === "place") navigate(r.hit.place.to);
-    else navigate(r.hit.to);
+    else if (r.kind === "file") openFile(r);
+    else if (r.kind === "inbox") go(inboxRouteFor(r.hit.item));
+    else if (r.kind === "place") go(r.hit.place.to);
+    else go(r.hit.to);
   };
   const manage = (save = false) => {
     if (!saved.module || !saved.model) return;
@@ -413,11 +899,11 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   const label = command ? t("palette.command_palette") : t("palette.search_sessions");
   // "Filter Agents list" (#6589): what was typed narrows the Agents list in place, as its own field did, while it finds an
   // Agent; on a narrow screen or beside the rail the list is the Agents page
-  const listable = !command && text !== "" && (completeList || (Boolean(agentSearch) && !operators)) && hits.some((r) => r.kind === "session" && !r.hit.assistant);
+  const listable = !command && text !== "" && showAgentsFilter !== false && (completeList || (Boolean(agentSearch) && !operators)) && hits.some((r) => r.kind === "session" && !r.hit.assistant);
   const filterList = () => {
     onClose();
-    filterAgentList(text);
-    if (!listShown) navigate({ name: "agent-list" });
+    applyAgentListFilter(text);
+    if (!listShown) go({ name: "agent-list" });
   };
 
   // On a narrow screen it sits in the part a soft keyboard leaves (--kb-top / --kb-h, lib/viewport.ts), the card no
@@ -456,7 +942,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
                 const row = shown[active];
                 if (row?.kind === "file" && (e.metaKey || e.ctrlKey)) {
                   onClose();
-                  void copyFileMention(row);
+                  void copyFile(row);
                 } else if (row) pick(row);
               }
             }}
@@ -464,7 +950,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3"
           />
           {/* the Agents list's filter choices, written into the query as its operators (#6589) */}
-          {!command && <AgentConditions query={text} onQuery={(next) => setQ(next && `${next} `)} search={agentSearch} want={saved.retry} sessions={sessions} onDone={() => input.current?.focus({ preventScroll: true })} />}
+          {!command && <AgentConditions query={text} onQuery={(next) => setQ(next && `${next} `)} search={agentSearch} want={saved.retry} sessions={sessions as Session[]} machines={machines as Machine[]} pins={pins} onDone={() => input.current?.focus({ preventScroll: true })} />}
           {!command && <IconButton icon="book" label={t("palette.saved_searches")} disabled={!saved.module || !saved.model} onClick={() => manage()} />}
           {/* the key hints are for a keyboard: a touch screen has none (#1996) */}
           <span className="contents [@media(pointer:coarse)]:hidden">
@@ -573,7 +1059,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             // where it runs
             const cli = h.assistant ? "" : sessionTitleDetail(h.s, preferTab);
             const tab = sessionDisplayTab(h.s, preferTab) ? "" : tabLabel(h.s);
-            const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [cli, [machineWithHub(h.s.machine_id, machines), h.s.space_name, tab].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
+            const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [cli, [machineWithHub(h.s.machine_id, machines as Machine[]), h.s.space_name, tab].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
             return {
               key: h.key,
               heading: sessionsHeading,
@@ -620,7 +1106,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
         </div>
         {!command && saved.module && <saved.module.SavedSearchFooter query={text} state={saved.state} onSave={() => manage(true)} />}
         {!command && saved.failed && <div role="alert" className="px-4 py-2 text-xs text-red">{t("palette.saved_searches_failed")} <button type="button" className="text-accent-ink underline" onClick={saved.retry}>{t("palette.saved_searches_retry")}</button></div>}
-        {listable && saved.module && <saved.module.FilterAgentsList query={text} onFilter={filterList} />}
+        {listable && saved.module && <saved.module.FilterAgentsList query={text} onFilter={filterList} show={showAgentsFilter} />}
         <div className="flex items-center gap-3 border-t border-line bg-inset px-4 py-2 text-[11px] text-ink-3 [@media(pointer:coarse)]:hidden">
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>

@@ -1,9 +1,9 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { util } from '@kit.ArkTS';
 import native from 'libpersona_core_ohos.so';
-import { nativeTestContext } from './NativeContext';
-import type { Action, ChatEvent, ChatPatch, ChatSnapshot, Effect, Request, WireBatch } from '../../main/ets/core/rustcore/Wire';
-import { decodeChatPatch, decodeEffect, encodeAction } from '../../main/ets/core/rustcore/Wire';
+import { nativeTestModuleContext } from './NativeContext';
+import type { Action, ChatEvent, ChatPatch, ChatSnapshot, Effect, Request, WireBatch } from '../generated/Wire';
+import { decodeChatPatch, decodeEffect, encodeAction } from '../generated/Wire';
 
 interface FixtureEvent {
   kind?: string;
@@ -19,9 +19,13 @@ interface FixtureEvent {
   loaded_once?: boolean;
   fold_id?: string;
 }
+interface FixtureInput {
+  initial: FixtureEvent;
+  events: FixtureEvent[];
+}
 interface FixtureCase {
   name: string;
-  input: { initial: FixtureEvent; events: FixtureEvent[] };
+  input: FixtureInput;
   expected: Expected[];
 }
 interface Expected {
@@ -93,6 +97,15 @@ function requestObject(request: Request): ExpectedRequest {
   return {kind: request.kind, from_seq: request.from_seq, through_seq: request.through_seq};
 }
 
+// Request records contain only scalar fields. Keep the sequence ordered and ignore JSON member order.
+function requestSequenceJson(requests: Object[]): string {
+  const keys = new Set<string>();
+  for (const request of requests) {
+    for (const key of Object.keys(request)) keys.add(key);
+  }
+  return JSON.stringify(requests, Array.from(keys).sort());
+}
+
 interface StepDrain {
   patch: ChatPatch;
   effects: Effect[];
@@ -122,7 +135,7 @@ export async function awaitDeliveredEffects(effects: Effect[], expected: Object[
   if (effects.length !== expected.length) {
     throw new Error(label + ': expected ' + expected.length + ' effects, received ' + effects.length);
   }
-  if (JSON.stringify(requests) !== JSON.stringify(expected)) {
+  if (requestSequenceJson(requests) !== requestSequenceJson(expected)) {
     throw new Error(label + ': expected ' + JSON.stringify(expected) + ', received ' + JSON.stringify(requests));
   }
 }
@@ -143,14 +156,14 @@ export async function drainCore(handle: number, chat: string, list: string[], ef
 export default function nativeCoreTests(): void {
   describe('NativePersonaCore', (): void => {
     it('replays_every_shared_fixture_through_the_real_napi_binding', 0, async (): Promise<void> => {
-      const manager = nativeTestContext().resourceManager;
+      const manager = (await nativeTestModuleContext()).resourceManager;
       const files = JSON.parse(util.TextDecoder.create('utf-8').decodeToString(
         await manager.getRawFileContent('core-fixtures/continuity.json'))) as FixtureFile[];
       let cases = 0, steps = 0;
       for (const file of files) {
         for (const fixture of file.document.cases) {
           cases++;
-          let effects: Effect[] = [];
+          const effects: Effect[] = [];
           const handle = native.coreCreateWithChat(native.coreConfig(), (_version: number): void => {},
             (_chat: string, _version: number): void => {}, (bytes: Uint8Array): void => { effects.push(decodeEffect(bytes)); });
           try {
@@ -164,7 +177,6 @@ export default function nativeCoreTests(): void {
               return await drainCore(handle, chat, list, effects, expected, label);
             };
             await drain([], fixture.name + ' open');
-            effects = [];
             for (let index = 0; index < fixture.input.events.length; index++) {
               const expected = fixture.expected[index];
               expect(native.coreDispatch(handle, encodeAction(eventAction(fixture.input.events[index], chat)))).assertTrue();
@@ -176,13 +188,12 @@ export default function nativeCoreTests(): void {
                 expect(effect.chat).assertEqual(chat);
                 requests.push(requestObject(effect.request));
               }
-              effects = step.effects;
-              expect(JSON.stringify(list.map((json: string): Object => JSON.parse(json) as Object))).assertEqual(JSON.stringify(expected.items));
+              expect(list.map((json: string): Object => JSON.parse(json) as Object)).assertDeepEquals(expected.items);
               expect(patch.covered).assertEqual(expected.covered);
               expect(patch.history).assertEqual(expected.history);
               expect(patch.has_more).assertEqual(expected.has_more);
               expect(patch.loaded_once).assertEqual(expected.loaded_once);
-              expect(JSON.stringify(requests)).assertEqual(JSON.stringify(expected.actions));
+              expect(requests).assertDeepEquals(expected.actions);
               steps++;
             }
           } finally { native.coreClose(handle); }

@@ -1,6 +1,7 @@
 package hubcli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,12 @@ import (
 	"github.com/nwverse/persona/server/internal/update"
 )
 
+// startRecordScript returns a script whose command line is published only after the complete write. A direct
+// redirection creates an empty file first, which the polling test can otherwise mistake for the final record.
+func startRecordScript(command, started string) string {
+	return fmt.Sprintf("#!/bin/sh\ntmp=%q\ntrap 'rm -f \"$tmp\"' EXIT\necho %q > \"$tmp\" && mv \"$tmp\" %q\n", started+".tmp", command, started)
+}
+
 // Without a service manager the watchdog stops the hub that would not come up and starts the restored binary itself,
 // with the arguments the hub had (real processes: a sleeping stand-in for the hub, a script for the old binary).
 func TestRestartHubWithoutAServiceManager(t *testing.T) {
@@ -24,7 +31,7 @@ func TestRestartHubWithoutAServiceManager(t *testing.T) {
 	}
 	started := filepath.Join(dir, "started")
 	target := filepath.Join(dir, "bin", "personad")
-	script := "#!/bin/sh\necho \"$@\" > " + started + "\n"
+	script := startRecordScript("$@", started)
 	if err := os.WriteFile(target, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +71,7 @@ func TestRestartHubAsPersonaHub(t *testing.T) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
 	run := filepath.Join(dir, "persona-hub")
-	if err := os.WriteFile(run, []byte("#!/bin/sh\necho \"$0 $@\" > "+started+"\n"), 0o755); err != nil {
+	if err := os.WriteFile(run, []byte(startRecordScript("$0 $1", started)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(dir, "personad")

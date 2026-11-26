@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -226,4 +227,105 @@ test('the generic Assistant environment reaches only its dedicated worker and ea
   await until('second Assistant worker retired', () => !pids()[assistant])
   await call('modes', assistant, { model: 'test-model', env: environment('fake-credential-handle-4') })
   assertEnvironment('fake-credential-handle-4')
+})
+
+test('shared Agent worker exit withdraws pending Agent permission asks and retires autonomous Agent turns without disturbing Assistants', async (t) => {
+  const { node, runtime, assistantDir, start, call, request } = await fixture(t, { promptInactivityMs: 0 })
+  const agent = await start()
+  const assistant = await start({ cwd: assistantDir })
+  const sharedPid = request('session/resume', agent).worker
+  const assistantAsk = Promise.withResolvers()
+  const agentAsk = Promise.withResolvers()
+  t.after(() => {
+    assistantAsk.resolve({ dismiss: true })
+    agentAsk.resolve({ dismiss: true })
+  })
+  node.resolve = (ix) => (ix.session_id === assistant ? assistantAsk.promise : agentAsk.promise)
+
+  await call('modes', assistant, { effort: 'ask-idle' })
+  const assistantCard = await until('Assistant permission card', () => node.asked.find((card) => card.session_id === assistant))
+
+  const rowOf = (sid) => node.last('runtime.sessions')?.sessions.find((row) => row.session_id === sid)
+  await call('modes', agent, { effort: 'wake-idle' })
+  await until('Agent autonomous turn marked working', () => rowOf(agent)?.status === 'working')
+  await call('modes', agent, { effort: 'ask-idle' })
+  const agentCard = await until('Agent autonomous permission card', () => node.asked.find((card) => card.session_id === agent))
+  assert.equal(runtime.idle(), false)
+
+  process.kill(sharedPid, 'SIGKILL')
+
+  await until('Agent permission card withdrawn on shared worker exit', () =>
+    node.all('interaction.cancel').some((ev) => ev.id === agentCard.id))
+  await until('Agent autonomous turn retired on shared worker exit', () => rowOf(agent)?.status !== 'working' && rowOf(agent)?.status !== 'blocked')
+  assert.equal(node.all('interaction.cancel').some((ev) => ev.id === assistantCard.id), false,
+    'Assistant permission card must not be withdrawn when shared Agent worker exits')
+
+  assistantAsk.resolve({ allow: true })
+  await until('runtime returns to idle after shared worker crash', () => runtime.idle())
+})
+
+test('shared Agent worker exit immediately retires an autonomous Agent turn without pending permissions', async (t) => {
+  const { node, runtime, start, call, request } = await fixture(t, { promptInactivityMs: 0 })
+  const agent = await start()
+  const sharedPid = request('session/resume', agent).worker
+  const rowOf = (sid) => node.last('runtime.sessions')?.sessions.find((row) => row.session_id === sid)
+
+  await call('modes', agent, { effort: 'wake-idle' })
+  await until('Agent autonomous turn marked working', () => rowOf(agent)?.status === 'working')
+  assert.equal(runtime.idle(), false)
+
+  process.kill(sharedPid, 'SIGKILL')
+
+  await until('Agent autonomous turn retired on shared worker exit', () => rowOf(agent)?.status !== 'working')
+  await until('runtime returns to idle after shared worker crash', () => runtime.idle())
+})
+
+test('shared Agent worker exit clears stale RUNNING native summary when retiring an autonomous turn', async (t) => {
+  const agyDir = mkdtempSync(join(tmpdir(), 'agy-summary-'))
+  t.after(() => rmSync(agyDir, { recursive: true, force: true }))
+  const { node, runtime, start, call, request } = await fixture(t, { agyDir, promptInactivityMs: 0 })
+  const agent = await start()
+  const rawId = toAgyId(agent)
+  mkdirSync(join(agyDir, 'brain', rawId), { recursive: true })
+  const sharedPid = request('session/resume', agent).worker
+  const rowOf = (sid) => node.last('runtime.sessions')?.sessions.find((row) => row.session_id === sid)
+
+  await call('modes', agent, { effort: 'wake-idle' })
+  await until('Agent autonomous turn marked working', () => !runtime.idle() && rowOf(agent)?.status === 'working')
+
+  const db = new DatabaseSync(join(agyDir, 'conversation_summaries.db'))
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
+    db.prepare('INSERT OR REPLACE INTO conversation_summaries VALUES (?, ?, 0, 0, ?, ?, ?, ?)')
+      .run(rawId, 'CASCADE_RUN_STATUS_RUNNING', 2, '', '[]', new Date().toISOString())
+  } finally {
+    db.close()
+  }
+
+  process.kill(sharedPid, 'SIGKILL')
+
+  await until('Agent exits working despite stale RUNNING summary', () => rowOf(agent)?.status !== 'working')
+  await until('runtime returns to idle after shared worker crash', () => runtime.idle())
+})
+
+test('shared Agent worker exit withdraws a pending ask even after the session is promoted to Assistant', async (t) => {
+  const { node, runtime, start, call, request } = await fixture(t, { promptInactivityMs: 0 })
+  const session = await start()
+  const sharedPid = request('session/resume', session).worker
+  const pendingAsk = Promise.withResolvers()
+  t.after(() => pendingAsk.resolve({ dismiss: true }))
+  node.resolve = () => pendingAsk.promise
+
+  await call('modes', session, { effort: 'ask-idle' })
+  const card = await until('shared worker permission card', () => node.asked.find((ix) => ix.session_id === session))
+  assert.equal(runtime.idle(), false)
+
+  // Promote the idle session to a dedicated Assistant worker while the old shared ask is still open.
+  await call('modes', session, { assistant: true, model: 'test-model' })
+
+  process.kill(sharedPid, 'SIGKILL')
+
+  await until('shared worker permission card withdrawn after Assistant promotion', () =>
+    node.all('interaction.cancel').some((ev) => ev.id === card.id))
+  await until('runtime returns to idle after dead shared worker ask is withdrawn', () => runtime.idle())
 })

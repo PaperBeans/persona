@@ -8,6 +8,7 @@
   "no_match": "没有匹配的内容",
   "used_files": "本会话用过的文件",
   "folder": "文件夹",
+  "browse_folder": "浏览文件夹",
   "session_dir": "会话目录",
   "reading_folder": "正在读取文件夹…",
   "no_match_in_folder": "这个文件夹里没有对得上的",

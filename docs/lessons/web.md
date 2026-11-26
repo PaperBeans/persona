@@ -1,5 +1,32 @@
 # Lessons: web UI and interactions
 
+## A TypeError is not a network failure (#16182)
+
+fetch rejects a failed connection with a TypeError, and JavaScript throws one for a bug in the page's own code.
+`errorText` mapped every TypeError to "Can't reach the hub". The Agents lists run their answer's processing, and the
+store subscribers each publish reaches, inside the read's `try`, so a row the page tripped over showed as a network gap
+that Retry could never close, while the hub logged the read as a 200. `lib/api.ts` now turns fetch's own rejection,
+and a body that breaks off, into `HubUnreachableError`. Only that, or a TypeError carrying the browser's fetch-failure
+message, is a gap (`isNetworkFailure`). Any other TypeError says what broke ("Something went wrong on this page: …") and
+is not retried. When code needs to know whether a request reached the hub, use `isNetworkFailure`, not `instanceof TypeError`.
+
+## A text shimmer needs an opaque source color (#15367)
+
+Setting `color: transparent` also clears any gradient stop that reads `currentColor`.
+Use a transparent glyph fill for the animated gradient and check the painted text in a browser.
+
+## A folder of trees names its repository, it is not one (#13453)
+
+Path inference keys a tree in a folder kept apart from its repository (herdr's `~/.herdr/worktrees/<repository>/<tree>`)
+by that folder. Nothing is checked out there, so a Repo section keyed by it never meets the repository's own section,
+which Git keys by the main checkout. When a tree was removed after its work merged, or has not been read yet, Git places
+none of its Agents, and the repository showed as a second section with its name. Treat such a folder as naming its
+repository, and resolve it against what Git placed on the same computer: another tree of that folder, else the one
+section of that name. When either is ambiguous, keep it apart. A fixture where every session carries `repo_root` never
+reaches this fallback, so test sessions with a removed tree's bare `cwd`. Check the folder is at the computer's home: a
+cwd in a folder of a repository's own tree (`/code/app/.worktrees/feature/src`) has the same shape, and joining by the
+tree's name moved its Agent into an unrelated repository's section.
+
 ## A folded launcher must retain its identity (#10249)
 
 When replacing a launcher rail, do not promote the current launcher's models into a separate Recommended group or
@@ -216,6 +243,11 @@ screen 49 B over its budget. Words the live screen needs only once it is connect
 dynamically (`screen/DisplayMenu.tsx`, namespace `screen-displays`): the build makes that import wait for the rest of the
 catalog, so the first screen does not grow and nothing has to wait for it at run time. Gating ScreenView's own rendering
 on `i18nRest()` does not pass the build: the check reads which namespaces a chunk names, not when it reads them.
+
+Since #14404 the live screen is the screen-share module's page of its own (`web/src/modules/screen-share/standalone.tsx`):
+its namespaces (`screen-share-*`) are the module's catalog, loaded before its code, so they are in no first screen at all.
+What that file imports statically still runs without waiting for the rest of the catalog, so a core key it reads must be
+in the startup list; the build still names one that is not.
 
 ## A mouse event sent again comes out on whole pixels (#5729)
 
@@ -601,7 +633,7 @@ The supervision feed's `body.evidence` is a separate array, not part of `body.te
 
 ## Full-history positions are not a tail-window count (#2338)
 
-The web's `turns=2` initial page and two-turn cache deliberately preserve a small first screen; projecting ticks from those lines cannot enumerate the conversation. Fetch only server count/identity/sequence metadata for the rail, and wait for selection before loading older bodies. Keep backward coverage contiguous; do not merge isolated target windows into live coverage. Count genuine queued inputs by identity, deduplicate text/image siblings, and never use model-role `user` or `session.info.turns` alone as the total. If a richer independent navigation API is being developed elsewhere, keep the temporary adapter narrow and document its migration boundary rather than taking over that task.
+The web's `turns=2` initial page and two-turn cache deliberately preserve a small first screen; projecting ticks from those lines cannot enumerate the conversation. Fetch only server count/identity/sequence metadata for the rail, and wait for selection before loading older bodies. Keep backward coverage contiguous; do not merge isolated target windows into live coverage. Count genuine queued inputs by identity, deduplicate text/image siblings, and never use model-role `user` or `session.info.turns` alone as the total. The compact index and its per-history excerpt cache can now sit in the lazy rail chunk. Keep a selected historical window's cursors separate from the live subscription. Using the live view's last sequence for either direction can silently skip records or cause an unbounded continuity pull (#15813).
 
 ## Render-count tests must separate store pushes from live clocks (#1989)
 
@@ -1540,4 +1572,21 @@ without one read `notes › Agents`; every Agent row under it then ended with `<
 the headings' names. Give both projections the same rule: a level that only repeats its heading's name is left out, and
 the heading takes the row's marks and menu. A host that does not say which workspace is the main checkout (herdr has no
 `is_main`) leaves it to the folder, the workspace at the repository's own folder, and that guess may only mark and
-order the tree: actions keep reading what the host said.
+order the tree: actions keep reading what the host said. Guess only for a host that names no project: a desktop app's
+project lists each of its folders as its own `project_path`, so the section's first folder wore the home mark (#14497).
+
+## Keep a native select's label separate from its choices (#15518)
+
+Use a label linked by ID, with the select beside it. When a label wraps the native select, browser label lookup can
+include the option text in the label. Check the label in a real browser and attach any inherited-policy hint with
+`aria-describedby` so it stays available without changing the control's name.
+
+## A cached first screen is not evidence of an outcome (#16286)
+
+The chat draws its cached page at once and reads the hub's newest page behind it (`useTranscript`, `firstRead`). The
+cache can be older than the last turn's reply, so anything that judges an outcome from it is a guess. "No response
+returned" with Retry was drawn from the cache. While a stalled hub held the read (#16214), each reload showed it again,
+and Retry sent the question a second time although the reply was in the transcript. Draw verdicts and offer actions that
+act on them only once the page holds the newest read, `firstRead` without an `error` (`chatLines` `stale`). A failed
+read keeps its "Refresh failed" pill, which reloads and sends nothing. Test with a cache that lacks the reply and a held
+read (`sync/fake-hub.ts` `hold`), not with a mocked transcript.

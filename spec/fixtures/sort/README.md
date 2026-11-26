@@ -36,6 +36,7 @@
 | 折叠只改变可见行，保留分组成员及计数；按状态的「已看」默认折叠，打开后 folded 里记 `!state/idle`。 | ChatsView 的 `spaceSection`、`stateSections`、`machineSections` | `folded_space_keeps_counts`、`folded_state_and_expanded_idle`、`folded_machine_hides_rows` |
 | 细列表不改变排序和计数，搜索会展开空闲行，显式折叠仍优先。 | ChatsView 的 `slotRow`、`foldedRows`、`spaceSection` | `compact_expands_idle_without_reordering`、`search_expands_idle`、`folded_state_and_expanded_idle` |
 | 打开时为完成未看的会话在离开前保持 held：安静后仍归完成未看分段，不进入行级空闲折叠；所在空间不收进空闲空间。 | `AgentListOrder` 的 `held`、`stays(_:)`、`rank(_:)`、`isQuiet(_:)`；`AppModel.visibleSession`、`markSeen` | `held_quiet_row_keeps_unread_state_section`、`held_quiet_space_stays_active`、`held_row_stays_out_of_quiet_idle_fold` |
+| Rows seen during a visit (#12514; web #12585): every row the list showed as Unread or Just finished during this visit keeps that place once seen (opened, marked, or seen elsewhere), in every grouping and under a quick filter, until the list is refreshed; the open row's `held` is the one-row case. A held row that is seen now is drawn as Seen and left out of its section's count (`held_seen` in the expected group). A row that is working, needs you or is unseen again goes where its state puts it; a muted one held in Just finished is plain Seen. iOS and web for now ("Cases iOS follows first" below). | `AgentListOrder` 的 `heldSeen`、`heldPlace(_:)`、`isHeldSeen(_:)`；`AppModel.seenThisVisit`、`noteShownUnseen`、`releaseSeen`；ChatsView 的 `stateSections`；`web/src/lib/agent-groups.ts`、`web/src/lib/seen-rows.ts` | `next/held_set.json`: `held_set_rows_keep_unread_section_by_status`、`held_set_just_finished_keeps_its_section`、`held_set_quiet_space_stays_active`、`held_set_unread_filter_by_status`、`held_set_rows_that_move_on`、`held_set_machine_section_shows_read_rows` |
 
 ## JSON 结构
 
@@ -64,6 +65,7 @@
 - `expanded_idle` 使用活跃空间 id 或 `machine-机器标识`；`expanded_quiet` 使用空闲空间 id；二者和显式 folded 分开。
 - `compact` 只表示行样式，不参与行为输出。
 - `settings.held` 是打开时为完成未看、尚未离开的完整会话 id；离开后的下一帧应省略它，而非保留一个已失效的持有状态。
+- `settings.held_seen` (cases under `next/` only, #12514) maps a full session id to the place this visit showed it in, `unread` or `just_finished`. It may name rows that are still unseen; only the quiet, seen ones change anything. Without it nothing is held but `held`.
 
 `agents_list.expected`：
 
@@ -72,6 +74,11 @@
 - `folded` 记录标题或空闲空间整体是否折叠；普通组内的空闲行也可能单独隐藏，此时整体 `folded` 仍是 false。
 - 项目分组另有 `state_counts`、`spoken`；空闲空间带 `parent: "quiet"`，对应共同标题 `quiet_title: "空闲的空间"`，没有空闲空间时为 null。
 - `unread_shown` 是传给批量已读的集合，数组保留 filtered 的遍历顺序，不能将它当作展示排序。
+- `held_seen` (cases under `next/` only) lists, in the group's row order, the rows drawn as Seen in a place they are held in: what the section's count leaves out and its Clear Seen counts.
+
+### Cases iOS follows first (`next/`)
+
+`next/` holds cases for a rule iOS has and the other clients take up in their own issues: today the rows seen during a visit (#12514). Its files have the same structure as the files above, and their case names are unique across the domain. iOS (`apple/PersonaTests/SeenThisVisitTests.swift`, `swiftReplaysTheVisitCases`) and the web (`web/src/lib/seen-rows.test.ts`) replay them. The readers of the files above (the Rust core and its C ABI, JNI and ArkTS host replays, Android's Kotlin list, iOS's DEBUG shadow) read only this directory's own `*.json` and pin their case lists, so they do not see `next/` yet. The issue that brings a rule to the core (#12583 here) moves its cases into the file above that fits (`held.json` here) and adds them to those exact lists in the same change. Until then iOS's DEBUG shadow reports a list holding more than one seen Unread row as `held-set-scope` instead of comparing it.
 
 `session_state` 和 `hub_state` 是两个独立阶段。消费端不能把 hub 的状态推导再套到已经携带 `state` 的客户端输入上。
 

@@ -1,0 +1,92 @@
+{
+  "string": [
+    {
+      "name": "intake_today",
+      "value": "今天"
+    },
+    {
+      "name": "intake_water",
+      "value": "喝水"
+    },
+    {
+      "name": "intake_protein",
+      "value": "蛋白质"
+    },
+    {
+      "name": "intake_ml",
+      "value": "毫升"
+    },
+    {
+      "name": "intake_g",
+      "value": "克"
+    },
+    {
+      "name": "intake_goal",
+      "value": "目标：{goal} {unit}"
+    },
+    {
+      "name": "intake_ratio",
+      "value": "{today} / {goal} {unit}"
+    },
+    {
+      "name": "intake_cup",
+      "value": "喝了一杯"
+    },
+    {
+      "name": "intake_other",
+      "value": "其他量"
+    },
+    {
+      "name": "intake_log_grams",
+      "value": "记克数"
+    },
+    {
+      "name": "intake_water_amount",
+      "value": "喝水量（毫升）"
+    },
+    {
+      "name": "intake_protein_amount",
+      "value": "蛋白质量（克）"
+    },
+    {
+      "name": "intake_water_hint",
+      "value": "请输入 1–3,000 毫升，最多一位小数。"
+    },
+    {
+      "name": "intake_protein_hint",
+      "value": "请输入 0.1–200 克，最多一位小数。"
+    },
+    {
+      "name": "intake_log",
+      "value": "记录"
+    },
+    {
+      "name": "intake_undo",
+      "value": "撤销"
+    },
+    {
+      "name": "health_intake_logged",
+      "value": "已记录"
+    },
+    {
+      "name": "health_intake_undone",
+      "value": "已撤销记录"
+    },
+    {
+      "name": "health_intake_update",
+      "value": "先更新 hub"
+    },
+    {
+      "name": "health_intake_load_failed",
+      "value": "未能载入今天的记录。"
+    },
+    {
+      "name": "health_intake_record_failed",
+      "value": "未能保存这条记录。"
+    },
+    {
+      "name": "health_intake_undo_failed",
+      "value": "未能撤销这条记录。"
+    }
+  ]
+}

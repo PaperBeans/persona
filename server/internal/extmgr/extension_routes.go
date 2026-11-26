@@ -264,6 +264,7 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 	h.storageRoutes(api)
 	h.sandboxRoutes(api)
 	h.contributionRoutes(api)
+	h.offloadRoutes(api)
 	h.declaredRoutes(api)
 	ps := func() *extensions { return h.extensions }
 	h.legacyExtensionRoutes(api, "/api/v1/plugins", "/api/v1/extensions")
@@ -365,7 +366,7 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 			return
 		}
 		in.Config = kept
-		if isVolc(p) { // its meetings switch sets the assistant's choice and is not saved with it (volc_extension.go)
+		if isVolc(h.modules(), p) { // its meetings switch sets the assistant's choice and is not saved with it (volc_extension.go)
 			rest, changed, err := h.volcConfigWrite(r.Context(), p, in.Config)
 			if err != nil {
 				writeExtensionResponseError(w, r, http.StatusServiceUnavailable, "assistant_offline", err)

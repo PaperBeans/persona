@@ -3,6 +3,7 @@ package assistant
 import (
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"runtime"
 	"strings"
@@ -170,10 +171,10 @@ func TestMeetingAskLimits(t *testing.T) {
 
 	// 100 questions: the 101st is refused, a stored one still answered.
 	e := m.engine()
-	if _, err := e.LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+	if _, err := recW(e).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ kb.Recording) error {
 		for len(l.Asks) < maxAsks {
-			l.Asks = append(l.Asks, kb.LiveAsk{ID: fmt.Sprintf("b0000000-0000-4000-8000-%012d", len(l.Asks)),
-				Question: "x", QuestionSource: askTyped, State: askAnswered, Answer: "y", Sources: []kb.AskSource{}, AskedAt: time.Now().UTC()})
+			l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: fmt.Sprintf("b0000000-0000-4000-8000-%012d", len(l.Asks)),
+				Question: "x", QuestionSource: askTyped, State: askAnswered, Answer: "y", Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC()})
 		}
 		return nil
 	}); err != nil {
@@ -216,11 +217,11 @@ func TestMeetingAskHeard(t *testing.T) {
 	e := m.engine()
 	go func() { // the phone's lines up to the tap, sent once the question is stored and waits for them
 		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); runtime.Gosched() {
-			if l, _, err := e.LiveRead(meetingRec); err == nil && len(l.Asks) > 0 {
+			if l, _, err := recW(e).LiveRead(meetingRec); err == nil && len(l.Asks) > 0 {
 				break
 			}
 		}
-		_, _, _ = e.LiveAppend(meetingRec, 2, []kb.LiveSegment{{Start: 56, End: 59.5, Text: "Anyone?"}})
+		_, _, _ = recW(e).LiveAppend(meetingRec, 2, []recordingwire.LiveSegment{{Start: 56, End: 59.5, Text: "Anyone?"}})
 	}()
 	ask := meetingAskOf(t, m.do("POST", askPath(meetingRec), "", map[string]any{"id": askOne, "at": 60, "live_next": 3}, http.StatusOK))
 	if ask["state"] != "answered" || ask["question"] != "What did we decide about the cap?" || ask["question_source"] != "heard" || ask["at"] != float64(60) {
@@ -278,9 +279,9 @@ func TestMeetingAskHeardStraddlesTap(t *testing.T) {
 func TestMeetingAskInterruptedByRestart(t *testing.T) {
 	m := newMeetingFixture(t)
 	m.upload(meetingRec, 1, map[string]any{"attendance": "participant"})
-	if _, err := m.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: askOne, Question: "Who owns the test?", QuestionSent: "Who owns the test?", QuestionSource: askTyped,
-			State: askPending, Lang: "en-US", Speak: true, Sources: []kb.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second)})
+	if _, err := recW(m.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ kb.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: askOne, Question: "Who owns the test?", QuestionSent: "Who owns the test?", QuestionSource: askTyped,
+			State: askPending, Lang: "en-US", Speak: true, Sources: []recordingwire.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second)})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -288,13 +289,13 @@ func TestMeetingAskInterruptedByRestart(t *testing.T) {
 	if asks := m.asksOf(meetingRec); len(asks) != 1 || asks[0]["state"] != "failed" || asks[0]["error"] != askInterrupted {
 		t.Fatalf("listed: %v", asks)
 	}
-	if l, _, _ := m.engine().LiveRead(meetingRec); l.Asks[0].State != askFailed || l.Asks[0].Error != askInterrupted {
+	if l, _, _ := recW(m.engine()).LiveRead(meetingRec); l.Asks[0].State != askFailed || l.Asks[0].Error != askInterrupted {
 		t.Fatalf("stored: %+v", l.Asks)
 	}
 	if a := meetingAskOf(t, m.do("POST", askPath(meetingRec), "", map[string]any{"id": askOne, "question": "Who owns the test?"}, http.StatusOK)); a["state"] != "answered" || a["error"] != nil {
 		t.Fatalf("asked again: %v", a)
 	}
-	if l, _, _ := m.engine().LiveRead(meetingRec); len(l.Asks) != 1 {
+	if l, _, _ := recW(m.engine()).LiveRead(meetingRec); len(l.Asks) != 1 {
 		t.Fatalf("a second question for one id: %+v", l.Asks)
 	}
 }
@@ -423,7 +424,7 @@ func TestMeetingAnswerExcludesMeetingsNotMarkedNotPrivate(t *testing.T) {
 			todo := m.earlierMeeting("Earlier transcript")
 			switch mark {
 			case "none":
-				if _, err := m.engine().MeetingUpdate(earlier, func(mt *kb.Meeting, _ kb.Recording) error { mt.Private = nil; return nil }); err != nil {
+				if _, err := recW(m.engine()).MeetingUpdate(earlier, func(mt *kb.Meeting, _ kb.Recording) error { mt.Private = nil; return nil }); err != nil {
 					t.Fatal(err)
 				}
 			case "private":

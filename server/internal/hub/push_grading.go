@@ -13,6 +13,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // Push grading: when its switch is on, the hub delivers pushes by urgency instead of pushing
@@ -33,6 +34,9 @@ const (
 
 	// gradingDedupWindow: how long the same related key stays quiet after it pushed once.
 	gradingDedupWindow = 12 * time.Hour
+	// gradingDedupMaxRetain matches the maximum valid versioned dedup_window (48h) so a shorter window on
+	// another manager or a temporary configuration change cannot evict active dedup entries early.
+	gradingDedupMaxRetain = 48 * time.Hour
 	// gradingConfigTTL bounds how often one Pusher asks the database for the switch while pushes keep coming.
 	gradingConfigTTL = 15 * time.Second
 	// heldPushMax bounds how many held pushes are kept; the oldest go first.
@@ -136,6 +140,7 @@ func sentRows(in []pushSent) []db.PushSent {
 
 // pushPolicy says how urgent one alert push is and what it belongs to. The zero value is P1 with no related key.
 type pushPolicy struct {
+	kind       string
 	level      string
 	relatedKey string
 	todoID     string
@@ -144,6 +149,7 @@ type pushPolicy struct {
 	title      string
 	body       string
 	manager    string
+	extension  string
 	// What an attention mode reads (push_attention.go): how long the owner needs for it (assistantwire.DepthDeep),
 	// the track it comes from, whether it is a finished turn, and whether it is the hub's own alert.
 	depth  string
@@ -153,6 +159,11 @@ type pushPolicy struct {
 	// cardID: the card the push stands for (assistantwire.Notification.CardID): put in the payload as interaction_id
 	// and remembered per device, so the card's end withdraws the push.
 	cardID string
+	// derivedLevel is true when a NotifyPush notification omitted its level and the hub derived
+	// it (so notify_user.main / notify_user.others apply when grading is active); mainConv records
+	// whether the notification originated from the assistant's main conversation.
+	derivedLevel bool
+	mainConv     bool
 }
 
 func (p pushPolicy) levelOr(level string) pushPolicy {
@@ -228,27 +239,146 @@ func (p *Pusher) readPushGrading() (enabled, ok bool) {
 	return found && enabled, true
 }
 
-// setPushGrading writes the switch (hub_settings) and refreshes the cache immediately.
+// setPushGrading writes the owner's switch (hub_settings) and refreshes the cache immediately.
+// Writes respect write quiesce, serialize in-process toggles via gradingSwitchMu, and update
+// both hub.push_grading.enabled (when present) and hub.ln_mode inside one advisory-locked DB
+// transaction so both settings never diverge.
 func (p *Pusher) setPushGrading(ctx context.Context, enabled bool) error {
 	if p == nil || p.store == nil {
 		return errors.New("push settings are not available")
 	}
-	ctx, cancel := context.WithTimeout(ctx, p.storeTimeout)
+	if !quiesceHeld(ctx) {
+		if !p.quiesce.begin() {
+			return i18n.Err("hub-selfupdate.err_quiesced")
+		}
+		defer p.quiesce.end()
+	}
+	p.gradingSwitchMu.Lock()
+	defer p.gradingSwitchMu.Unlock()
+
+	wctx, cancel := context.WithTimeout(ctx, p.storeTimeout)
 	defer cancel()
-	if err := p.store.PutSetting(ctx, gradingSwitchSettingKey, enabled); err != nil {
-		return err
+	if storeAPI, ok := p.store.(pushGradingStoreAPI); ok {
+		if err := storeAPI.SetPushGradingSwitch(wctx, pushGradingBaseSettingKey, gradingSwitchSettingKey, enabled); err != nil {
+			return err
+		}
+	} else {
+		if err := p.store.PutSetting(wctx, gradingSwitchSettingKey, enabled); err != nil {
+			return err
+		}
 	}
 	p.gradingMu.Lock()
 	p.gradingCached, p.gradingCachedAt = &enabled, p.now()
 	p.gradingVersion++
 	p.gradingMu.Unlock()
+	p.invalidatePushGradingCache()
 	return nil
 }
 
-// applyPushGrading decides whether one alert push may go out. With the switch off it allows everything and touches nothing.
-// It runs once per push call, never per device: a held push is one intercepted entry however many devices would have
-// received it. The 12-hour check and the note of a P0 that goes out happen under one hold of gradingMu, so two pushes with
-// the same key at the same moment cannot both pass.
+func (p *Pusher) effectiveCache() *pushGradingEffectiveCache {
+	if p == nil {
+		return nil
+	}
+	p.gradingMu.Lock()
+	c := p.gradingEffective
+	if c == nil {
+		c = newPushGradingEffectiveCache(gradingConfigTTL)
+		c.now = func() time.Time { return p.now() }
+		p.gradingEffective = c
+	}
+	p.gradingMu.Unlock()
+	return c
+}
+
+func (p *Pusher) invalidatePushGradingCache() {
+	if p == nil {
+		return
+	}
+	p.gradingMu.Lock()
+	c := p.gradingEffective
+	p.gradingMu.Unlock()
+	if c != nil {
+		c.invalidate()
+	}
+}
+
+// loadPushGradingSnapshotCached reads the versioned hub.push_grading and
+// hub.push_grading_layer snapshot through the pusher's bounded TTL cache.
+// supported is false when the store does not implement pushGradingStoreAPI.
+func (p *Pusher) loadPushGradingSnapshotCached(ctx context.Context) (snapshot pushGradingSnapshot, supported bool, err error) {
+	if p == nil || p.store == nil {
+		return pushGradingSnapshot{}, false, nil
+	}
+	if _, ok := p.store.(pushGradingStoreAPI); !ok {
+		return pushGradingSnapshot{}, false, nil
+	}
+	rctx, cancel := context.WithTimeout(ctx, p.storeTimeout)
+	defer cancel()
+	snap, err := p.effectiveCache().loadSnapshot(rctx, p.store)
+	if err != nil {
+		return pushGradingSnapshot{}, true, err
+	}
+	return snap, true, nil
+}
+
+// resolveEffectiveFromSnapshot resolves both the full effective configuration
+// (with an applicable layer) and the owner-only base configuration (without any
+// extension layer) for manager, preserving compatibility with the legacy
+// hub.ln_mode switch when hub.push_grading has no explicit enabled flag.
+func (p *Pusher) resolveEffectiveFromSnapshot(
+	snapshot pushGradingSnapshot,
+	hasSnap bool,
+	manager string,
+	draft *pushGradingLayer,
+	dropLayer bool,
+) (cfg pushGradingEffective, baseCfg pushGradingEffective, layerSource string, ownerEnabled bool) {
+	ownerEnabled = p.pushGradingOn()
+	var base *pushGradingConfig
+	var layer *pushGradingConfig
+	if hasSnap {
+		base = snapshot.Base
+		if !dropLayer && snapshot.Layer != nil && normalizeGradingManager(snapshot.Layer.Manager) == normalizeGradingManager(manager) {
+			layer = &snapshot.Layer.Config
+			layerSource = snapshot.Layer.Source
+		}
+	}
+	if draft != nil && normalizeGradingManager(draft.Manager) == normalizeGradingManager(manager) {
+		layer = &draft.Config
+		layerSource = draft.Source
+	}
+	baseCfg = resolvePushGrading(base, nil, "")
+	cfg = resolvePushGrading(base, layer, layerSource)
+	if ownerEnabled && (base == nil || !base.Enabled.set || base.Enabled.null) {
+		baseCfg.Enabled = true
+		baseCfg.By["enabled"] = "base"
+		cfg.Enabled = true
+		cfg.By["enabled"] = "base"
+	}
+	return cfg, baseCfg, layerSource, ownerEnabled
+}
+
+// effectiveGradingFor resolves the per-manager effective push grading
+// configuration without holding gradingMu. On a cold store read failure, it
+// degrades cleanly to the cached owner switch (hub.ln_mode) with defaults.
+func (p *Pusher) effectiveGradingFor(ctx context.Context, manager string) (cfg, baseCfg pushGradingEffective) {
+	snap, supported, err := p.loadPushGradingSnapshotCached(ctx)
+	if err != nil {
+		if p != nil && p.logf != nil {
+			p.logf("push grading: read effective config: %v", err)
+		}
+		cfg, baseCfg, _, _ = p.resolveEffectiveFromSnapshot(pushGradingSnapshot{}, false, manager, nil, false)
+		return cfg, baseCfg
+	}
+	cfg, baseCfg, _, _ = p.resolveEffectiveFromSnapshot(snap, supported, manager, nil, false)
+	return cfg, baseCfg
+}
+
+// applyPushGrading decides whether one alert push may go out. With grading off
+// for this push's manager and no active owner attention mode, it allows
+// everything and touches nothing. It runs once per push call, never per device:
+// a held push is one intercepted entry however many devices would have received
+// it. The dedup check and recording of an allowed push happen under one hold of
+// gradingMu, so concurrent pushes with the same key remain atomic.
 func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string) {
 	level := policy.level
 	if level == "" {
@@ -256,12 +386,7 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 	}
 	now := p.now()
 	attn := p.attentionNow()
-	if !attn.Active() && !p.pushGradingOn() {
-		// The switch is off and no attention mode is in force: every push goes out as before, and the delivery counts
-		// still remember it.
-		p.recordSent(policy, level, now)
-		return true, ""
-	}
+	cfg, baseCfg := p.effectiveGradingFor(context.Background(), policy.manager)
 	key := strings.TrimSpace(policy.relatedKey)
 	in := heldPushRecord{
 		At: now.UTC(), Level: level, Title: policy.title, Body: policy.body, RelatedKey: key, Manager: policy.manager,
@@ -271,57 +396,54 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		// Clients follow a session only as a complete pair; do not persist a half-destination.
 		in.MachineID, in.SessionID = "", ""
 	}
+	mgr := normalizeGradingManager(policy.manager)
 	p.gradingMu.Lock()
-	if attn.Active() {
-		// An attention mode reinterprets the levels whatever hub.ln_mode says (push_attention.go).
-		allow, reason = p.applyAttentionLocked(attn, policy, level, in)
-		p.gradingMu.Unlock()
-		return allow, reason
-	}
-	if level == assistantwire.LevelP0 {
-		// P0 is what the owner must do or decide themself: it always interrupts, before and whatever the 12-hour check
-		// says, so no earlier push with the same key can swallow it. Its key then keeps lower levels quiet for the window.
-		if key != "" {
-			p.noteKeyPushedLocked(key, now)
-		}
+	if !attn.Active() && !cfg.Enabled {
+		// Grading is off for this manager and no attention mode is in force:
+		// every push goes out as before, and the delivery counts still remember it.
 		p.addSentLocked(pushSent{At: now.UTC(), Level: level, RelatedKey: key, Manager: policy.manager})
 		p.gradingMu.Unlock()
 		return true, ""
 	}
-	if key != "" {
-		if last, seen := p.gradingLastAlert[key]; seen && now.Sub(last) < gradingDedupWindow {
-			in.Reason = interceptReasonDedup
-			p.addInterceptLocked(in, false)
-			p.gradingMu.Unlock()
-			return false, interceptReasonDedup
+	eval := evaluatePushGradingDecision(now, cfg, baseCfg, attn, p.gradingLastAlert[mgr], policy)
+	if eval.Allow {
+		if key != "" && (eval.EffectiveLevel == assistantwire.LevelP0 || attn.Active() || cfg.Enabled) {
+			p.noteKeyPushedLocked(mgr, key, now)
 		}
-	}
-	switch level {
-	case assistantwire.LevelP2:
-		in.Reason = interceptReasonP2
-		p.addInterceptLocked(in, false)
+		p.addSentLocked(pushSent{At: now.UTC(), Level: eval.EffectiveLevel, RelatedKey: key, Manager: policy.manager})
 		p.gradingMu.Unlock()
-		return false, interceptReasonP2
-	default: // P1 and anything unknown: held for the list and the briefing rather than alerted.
-		in.Level, in.Reason = assistantwire.LevelP1, interceptReasonP1
-		p.addInterceptLocked(in, true)
-		p.gradingMu.Unlock()
-		return false, interceptReasonP1
+		return true, ""
 	}
+	in.Level = eval.EffectiveLevel
+	in.Reason = eval.LiveReason
+	merge := cfg.MergeHeld && !eval.AttentionHeld && eval.LiveReason == interceptReasonP1 && eval.EffectiveLevel == assistantwire.LevelP1
+	p.addInterceptLocked(in, merge)
+	p.gradingMu.Unlock()
+	return false, eval.LiveReason
 }
 
-// noteKeyPushedLocked remembers that key alerted at now, and forgets keys whose window is over (card keys are unique,
-// so the map would otherwise only grow). gradingMu is held.
-func (p *Pusher) noteKeyPushedLocked(key string, now time.Time) {
+// noteKeyPushedLocked remembers that key alerted on manager at now, and forgets keys older than
+// gradingDedupMaxRetain (48h, the maximum valid dedup_window) across managers so shorter windows
+// on another manager can never evict active dedup entries early. gradingMu is held.
+func (p *Pusher) noteKeyPushedLocked(manager, key string, now time.Time) {
 	if p.gradingLastAlert == nil {
-		p.gradingLastAlert = map[string]time.Time{}
+		p.gradingLastAlert = map[string]map[string]time.Time{}
 	}
-	for k, at := range p.gradingLastAlert {
-		if now.Sub(at) >= gradingDedupWindow {
-			delete(p.gradingLastAlert, k)
+	for m, byKey := range p.gradingLastAlert {
+		for k, at := range byKey {
+			if now.Sub(at) >= gradingDedupMaxRetain {
+				delete(byKey, k)
+			}
+		}
+		if len(byKey) == 0 {
+			delete(p.gradingLastAlert, m)
 		}
 	}
-	p.gradingLastAlert[key] = now
+	mgr := normalizeGradingManager(manager)
+	if p.gradingLastAlert[mgr] == nil {
+		p.gradingLastAlert[mgr] = map[string]time.Time{}
+	}
+	p.gradingLastAlert[mgr][key] = now
 }
 
 // relatedDestination is the legacy destination a held-push client follows when related_key is a to-do or an http(s)
@@ -868,6 +990,7 @@ func (h *Hub) pushGradingRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/push/grading", getSwitch)
 	api.HandleFunc("PUT /api/v1/push/ln-mode", putSwitch)
 	api.HandleFunc("PUT /api/v1/push/grading", putSwitch)
+	h.pushGradingLayerRoutes(api)
 	api.HandleFunc("GET /api/v1/push/intercepts", func(w http.ResponseWriter, r *http.Request) {
 		em := extensionManager(r)
 		if extensionToken(r) && !h.interceptReaderAllowed(r) {

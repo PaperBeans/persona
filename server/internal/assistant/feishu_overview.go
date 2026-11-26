@@ -164,3 +164,7 @@ func packOverview(l i18n.Lang, es []reportEntry, labels map[int]bool) []overview
 	}
 	return cards
 }
+
+// fallbackText strips Markdown metacharacters for a card's rich-text fallback (the lark module's commands.go has the
+// same for its list cards).
+var fallbackText = strings.NewReplacer("`", "", "*", "", "_", "", "[", "", "]", "", "~", "", "\\", "")

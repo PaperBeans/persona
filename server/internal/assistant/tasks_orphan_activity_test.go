@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,8 +99,17 @@ func TestContinuationStopsLiveCodexTaskThroughSessionStop(t *testing.T) {
 		return map[string]any{"stopped": true}, nil
 	})
 
-	if _, err := e.s.toolTaskPlan(ctx, "m1", continuesArgs(todo.ID)); err != nil {
+	res, err := e.s.toolTaskPlan(ctx, "m1", continuesArgs(todo.ID))
+	if err != nil {
 		t.Fatalf("task_plan continues failed: %v", err)
+	}
+	// continuesArgs omits launcher (defaulting to Claude), so continuing a live Codex task waits on a cross-provider card.
+	planID := planIDRe.FindString(res)
+	if planID == "" || !strings.Contains(res, "nothing has started") {
+		t.Fatalf("expected cross-provider continuation card before Start, got: %q", res)
+	}
+	if _, err := e.s.startPlan(ownerStart(ctx), planID, nil, false); err != nil {
+		t.Fatalf("startPlan failed: %v", err)
 	}
 	if !stopped {
 		t.Fatal("expected session.stop to be called for live Codex agent")

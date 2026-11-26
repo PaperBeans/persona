@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "machineid",
+      "description": "A MachineID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "MachineID",
+        "value": "desk-mac"
+      }
+    },
+    {
+      "name": "sessionid",
+      "description": "A SessionID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "SessionID",
+        "value": "6f1c2a9e-7b1d-4c55-9a53-2f0f6c1d0a11"
+      }
+    },
+    {
+      "name": "interactionid",
+      "description": "A InteractionID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "InteractionID",
+        "value": "int_7c3"
+      }
+    },
+    {
+      "name": "todoid",
+      "description": "A TodoID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "TodoID",
+        "value": "todo_a1"
+      }
+    },
+    {
+      "name": "conversationid",
+      "description": "A ConversationID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "ConversationID",
+        "value": "conv_main"
+      }
+    },
+    {
+      "name": "hubid",
+      "description": "A HubID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "HubID",
+        "value": "hub_home"
+      }
+    },
+    {
+      "name": "deviceid",
+      "description": "A DeviceID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "DeviceID",
+        "value": "dev_phone_1"
+      }
+    },
+    {
+      "name": "extensionid",
+      "description": "A ExtensionID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "ExtensionID",
+        "value": "example.weather"
+      }
+    },
+    {
+      "name": "clientmsgid",
+      "description": "A ClientMsgID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "ClientMsgID",
+        "value": "cm_0b9f"
+      }
+    },
+    {
+      "name": "inboxitemid",
+      "description": "A InboxItemID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "InboxItemID",
+        "value": "inb_42"
+      }
+    },
+    {
+      "name": "connectorid",
+      "description": "A ConnectorID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "ConnectorID",
+        "value": "github"
+      }
+    },
+    {
+      "name": "subscriptionid",
+      "description": "A SubscriptionID is a bare string on the wire and reads back as the same bytes.",
+      "expected": {
+        "definition": "SubscriptionID",
+        "value": "sub_9"
+      }
+    },
+    {
+      "name": "agent_ref",
+      "description": "An AgentRef is {machine, session}: both required, no other field.",
+      "expected": {
+        "definition": "AgentRef",
+        "value": {
+          "machine": "desk-mac",
+          "session": "6f1c2a9e-7b1d-4c55-9a53-2f0f6c1d0a11"
+        }
+      }
+    },
+    {
+      "name": "agent_ref_empty_session",
+      "description": "An empty string is a value, not an absent field: it is written back.",
+      "expected": {
+        "definition": "AgentRef",
+        "value": {
+          "machine": "",
+          "session": ""
+        }
+      }
+    }
+  ]
+}

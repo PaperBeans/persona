@@ -17,7 +17,7 @@ const (
 	maxCache            = 64
 	maxSnapshots        = 32
 	snapshotTTL         = 5 * time.Minute
-	maxJournalRevisions = 128
+	maxJournalRevisions = 4096
 	maxJournalChanges   = 16384
 )
 
@@ -345,7 +345,7 @@ type snapshot struct {
 // Index is safe for concurrent use. Its zero value is ready to use; do not copy
 // it after first use. Cached views live only for the current revision. Cursors
 // retain at most 32 immutable views for five minutes, and the journal retains
-// at most 128 revisions and 16,384 changed IDs (whole revisions are evicted).
+// at most 4,096 revisions and 16,384 changed IDs (whole revisions are evicted).
 type Index struct {
 	mu             sync.Mutex
 	epoch          string

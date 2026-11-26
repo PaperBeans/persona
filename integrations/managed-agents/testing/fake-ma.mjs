@@ -105,7 +105,8 @@ export async function startFakeMA(o = {}) {
         const text = (ev.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('')
         setTimeout(() => void agent(s, text, api), 5)
       } else if (ev.type === 'user.interrupt') {
-        setTimeout(() => api.emit(s.id, { type: 'session.status_idle', stop_reason: { type: 'end_turn' } }), 5)
+        if (o.onInterrupt) setTimeout(() => void o.onInterrupt(s, ev, api), 5)
+        else setTimeout(() => api.emit(s.id, { type: 'session.status_idle', stop_reason: { type: 'end_turn' } }), 5)
       } else if (ev.type === 'user.tool_confirmation' || ev.type === 'user.custom_tool_result') {
         setTimeout(() => void o.onAnswer?.(s, ev, api), 5)
       }

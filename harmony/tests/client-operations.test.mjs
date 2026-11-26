@@ -5,9 +5,15 @@ import { readFileSync, existsSync } from 'node:fs';
 
 registerHooks({
   resolve(specifier, context, next) {
+    if (context.parentURL?.endsWith('/ClientModel.ets') && specifier === '../core/PhoneInterfaceStyle')
+      return {url:new URL('../core/PhoneInterfaceStyle.ts',context.parentURL).href,shortCircuit:true};
+    if ((context.parentURL?.endsWith('/Compatibility.ets') || context.parentURL?.endsWith('/ClientModel.ets')) && specifier === '../core/ChatForwardWire')
+      return {url:new URL('../core/ChatForwardWire.ts',context.parentURL).href,shortCircuit:true};
+    if (context.parentURL?.endsWith('/ClientModel.ets') && specifier === '../core/Markdown')
+      return {url:new URL('../core/Markdown.ts',context.parentURL).href,shortCircuit:true};
     if (specifier === '@kit.ArkTS') return {url:'client-boundary:'+specifier,shortCircuit:true};
     if (context.parentURL?.endsWith('/ClientModel.ets')) {
-      if (['./Wire', './AssistantView', './DemoRepository', './NavigationContext', './ChatDraftStore', './HubRepository', './MutationStore', './Compatibility', './InteractionDecision', '../core/ClientLocale', '../core/ClientLocale', '../core/Domain', '../core/ScopePolicy', '../core/StorageOwnership', '../core/MessageContent', '../core/TranscriptCache'].includes(specifier)) {
+      if (['../core/BackgroundActivity', '../core/ChatSendFeedback', '../core/DictationLanguage', './Wire', './AgentAttention', './AssistantView', './DemoRepository', './NavigationContext', './ChatDraftStore', './HubRepository', './MutationStore', './Compatibility', './InteractionDecision', '../core/ClientLocale', '../core/ClientLocale', '../core/Domain', '../core/ScopePolicy', '../core/StorageOwnership', '../core/MessageContent', '../core/TranscriptCache'].includes(specifier)) {
         const base = new URL(specifier, context.parentURL);
         return {url: base.href + (existsSync(new URL(base.href + '.ts')) ? '.ts' : '.ets'), shortCircuit: true};
       }
@@ -22,14 +28,14 @@ registerHooks({
       if (specifier==='../core/StorageOwnership') return {url:new URL(specifier+'.ts',context.parentURL).href,shortCircuit:true};
       return {url:'client-boundary:'+specifier,shortCircuit:true};
     }
-    if (context.parentURL?.endsWith('/InboxWorkspace.ets') || context.parentURL?.endsWith('/TodoWorkspace.ets') ||
+    if (context.parentURL?.endsWith('/InboxWorkspace.ets') || context.parentURL?.endsWith('/TodoWorkspace.ets') || context.parentURL?.endsWith('/TodoHubView.ets') || context.parentURL?.endsWith('/TodoPhoneSections.ets') || context.parentURL?.endsWith('/PhoneTodoDetailEditor.ets') ||
       context.parentURL?.endsWith('/MessageImage.ets') || context.parentURL?.endsWith('/RemoteDocument.ets')) {
       if (specifier === '@kit.ArkTS' || specifier === '../platform/HubTransport') return {url:'client-boundary:'+specifier,shortCircuit:true};
       if (specifier.startsWith('.')) return {url:new URL(specifier.endsWith('.ets') || specifier.endsWith('.ts') ? specifier : specifier + '.ets',context.parentURL).href,shortCircuit:true};
     }
     if((context.parentURL?.endsWith('/NavigationContext.ets')||context.parentURL?.endsWith('/ChatDraftStore.ets')||context.parentURL?.endsWith('/Compatibility.ets'))&&specifier==='./Wire')return {url:new URL('./Wire.ets',context.parentURL).href,shortCircuit:true};
     if(context.parentURL?.endsWith('/QuestionWorkspace.ets') && specifier==='./Wire')return {url:new URL('./Wire.ets',context.parentURL).href,shortCircuit:true};
-    if(context.parentURL?.endsWith('/InteractionDecision.ets')&&specifier.startsWith('.'))return {url:new URL(specifier+'.ets',context.parentURL).href,shortCircuit:true};
+    if(context.parentURL?.endsWith('/AgentAttention.ets') || context.parentURL?.endsWith('/InteractionDecision.ets')&&specifier.startsWith('.'))return {url:new URL(specifier+'.ets',context.parentURL).href,shortCircuit:true};
     return next(specifier, context);
   },
   load(url, context, next) {
@@ -40,6 +46,7 @@ registerHooks({
       export class HubRepository {} export class TranscriptModel {} export class SessionWorkspace {}
       export class SshTunnel { initialize(){} stop(){} async bind(client){this.client=client;} async acquire(){if(globalThis.clientSshAcquire)return globalThis.clientSshAcquire(this.client);return undefined;} async forget(){} }
       export class KnowledgeRecording { static async forgetProfile(){} }
+      export const dictationPreference = {choice:"auto",last:"",load(){},remember(){}};
       export const deviceLook = {async forgetHub(){}};
       export class Pairing {static async reachable(primary,...args){return globalThis.clientPairingAddress ? globalThis.clientPairingAddress(primary,...args) : primary;}} export class PairingTarget {} export class MutationRecord {} export class MutationStore { static forgetHub() {} }
       export class ChatAttachments { static allowHub() {} static async forgetHub() {} static suppressStoredSnapshot(...args) {globalThis.clientAttachmentSuppressed?.push(args);} static async commitStoredSnapshot(...args) {globalThis.clientAttachmentCommits?.push(args);if(globalThis.clientAttachmentCommitGate)await globalThis.clientAttachmentCommitGate();} }
@@ -61,7 +68,7 @@ const {isHubStateKey}=await import('../entry/src/main/ets/core/StorageOwnership.
 const contextReference=JSON.stringify({kind:'todo',id:'source',title:'Source'});
 globalThis.clientTestUUID=0;
 const { ClientModel } = await import('../entry/src/main/ets/models/ClientModel.ets');
-const { HubProfile, ResourceRow, Decision } = await import('../entry/src/main/ets/models/Wire.ets');
+const { HubProfile, ResourceRow, Decision, ChatMessage } = await import('../entry/src/main/ets/models/Wire.ets');
 const { HttpFailure } = await import('client-boundary:../platform/HubTransport');
 const { InboxWorkspace } = await import('../entry/src/main/ets/models/InboxWorkspace.ets');
 const { TodoWorkspace } = await import('../entry/src/main/ets/models/TodoWorkspace.ets');
@@ -80,8 +87,227 @@ function fixture() {
   model.loadChat=async()=>{};
   return {model,writes};
 }
+
+test('whole and partial quotes retain their source and other draft references across the chat wire',async()=>{
+  const {model}=fixture();model.features=['persona_contracts_v1'];
+  const message=new ChatMessage('visible-answer','assistant','Use **the cache** and `max-age`.');
+  message.itemId='answer-source';message.ownerTarget=model.target();model.messages=[message];model.draft='Existing words';
+  const original={kind:'todo',id:'task',title:'Existing task'};model.sourceContext=JSON.stringify(original);
+  let writes=0;model.persistDraft=async()=>{writes++;};
+  assert.equal(await model.quoteMessageContext(message,'Claude','the cache and max-age'),true);
+  const refs=JSON.parse(model.sourceContext).contexts;
+  assert.deepEqual(refs[0],original);assert.deepEqual(refs[1],{kind:'quote',title:'Claude',url:'',msg:'answer-source',text:'the cache and max-age',part:'selection'});
+  assert.deepEqual(model.draftMessageQuotes(),[refs[1]]);assert.equal(model.otherContextTitle(),'Existing task');
+  assert.equal(model.draft,'Existing words');assert.equal(writes,1);
+  assert.ok(model.prepareMessageText().includes('<persona-context kind="quote" title="Claude" url="" msg="answer-source" part="selection">\nthe cache and max-age\n</persona-context>'));
+  for(const sample of ['the cache and max-age','other words'])await model.quoteMessageContext(message,'Claude',sample);
+  assert.equal(writes,1);
+  await model.quoteMessageContext(message,'Claude');assert.equal(writes,2);assert.equal(model.draftMessageQuotes().length,2);
+  await model.quoteMessageContext(message,'Claude','max-age');assert.equal(writes,3);assert.equal(model.draftMessageQuotes().length,3);
+  model.removeMessageQuote(refs[1]);assert.equal(model.draftMessageQuotes().length,2);assert.equal(model.otherContextTitle(),'Existing task');
+  const after=writes;model.messages=[];await model.quoteMessageContext(message,'Claude','cache');assert.equal(writes,after);
+  model.messages=[message];message.ownerTarget='another chat';await model.quoteMessageContext(message,'Claude','cache');assert.equal(writes,after);
+});
+
+
+test('only an identity-matched hello on the current live scope and connection generation supplies a feature version',()=>{
+ const {model}=fixture();
+ model.profile.hubId='verified-id';
+ model.repository.transport={hello(){}};
+ model.repository.close=()=>{};model.reconcileWrites=async()=>{};model.refresh=async()=>{};model.flushNotification=async()=>{};
+ const send=fields=>model.event(JSON.stringify({type:'hello',hub_id:'verified-id',server_version:'0.9.1',features:['client_ops'],...fields}));
+ send({});assert.equal(model.verifiedServerVersion('client_ops'),'0.9.1');assert.equal(model.verifiedServerVersion('missing'),'');
+ model.generation++;assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({});model.profile.manager='work';assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({});model.profile.hubId='another';assert.equal(model.verifiedServerVersion('client_ops'),'');
+ model.profile.hubId='verified-id';send({hub_id:'foreign'});assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({hub_id:''});assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({server_version:''});assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({features:[]});assert.equal(model.verifiedServerVersion('client_ops'),'');
+ send({});model.connected=false;assert.equal(model.verifiedServerVersion('client_ops'),'');
+});
 function decision(model,id='request-one') { const value=new Decision(); value.id=id; value.kind='permission'; value.raw=JSON.stringify({id}); model.decision=value; return value; }
 function deferred() { let resolve,reject; const promise=new Promise((yes,no)=>{resolve=yes;reject=no;}); return {promise,resolve,reject}; }
+
+test('send feedback belongs to the current input and distinguishes acceptance, transcript echo and actual reply', async () => {
+  const {model} = fixture(), received = deferred(), response = deferred();
+  model.sourceContext = ''; model.draft = 'same request text';
+  model.repository.send = async (_row, _text, uuid) => { received.resolve(uuid); await response.promise; return {ok:true}; };
+  const turn = model.send();
+  assert.equal(model.sendFeedbackPhase(), 'sending');
+  const id = await received.promise, target = model.target(), original = model.selected;
+  const post = (seq,role,kind,text,id) => ({id:'item-'+seq,seq,role,kind,text,client_msg_id:id});
+  const rows = [post(40,'user','text','same request text','another-device'),post(41,'assistant','text','older answer')];
+  model.publishTranscript(rows,false);
+  assert.equal(model.sendFeedbackPhase(), 'sending');
+  rows.push(post(42,'user','text','same request text',id));
+  model.publishTranscript(rows,false);
+  assert.equal(model.sendFeedbackPhase(), 'sending', 'a transcript echo alone cannot accept this request');
+  model.selected = new ResourceRow('other','Other','session');
+  response.resolve(); assert.equal(await turn,true); assert.equal(model.sendFeedbackPhase(),'');
+  model.selected = original; assert.equal(model.target(),target); assert.equal(model.sendFeedbackPhase(),'processing');
+  rows.push(post(43,'assistant','thinking','thinking'),post(44,'assistant','tool_use','tool'));
+  model.publishTranscript(rows,false); assert.equal(model.sendFeedbackPhase(),'processing');
+  rows.push(post(45,'assistant','text','answer'));
+  model.publishTranscript(rows,false); assert.equal(model.sendFeedbackPhase(),'');
+  model.publishTranscript(rows,false); await model.restoreLocalDelivery(); assert.equal(model.sendFeedbackPhase(),'');
+});
+
+test('rejected, held and stopped sends keep their native recovery paths and release only the matching activity', async () => {
+  const {model} = fixture(); model.sourceContext = '';
+  model.repository.send = async () => { throw new Error('offline'); };
+  assert.equal(await model.send(), false); assert.equal(model.sendFeedbackPhase(),'');
+  const rejected = model.messages.find(m=>m.localOperation); assert.ok(rejected);
+  assert.equal(model.draft,'exact draft ');
+  const {model:heldModel} = heldFixture();
+  heldModel.draft='for offline machine';
+  heldModel.repository.send=async (_row,text,id)=>({delivered:'later',undelivered:{id,text,state:'waiting',ts:'2026-01-01T00:00:00Z'}});
+  assert.equal(await heldModel.send(),true); assert.equal(heldModel.sendFeedbackPhase(),'');
+  const {model:live} = fixture(); live.sourceContext='';
+  await live.send(); assert.equal(live.sendFeedbackPhase(),'processing');
+  live.selected.state='working';
+  const stop=deferred(), entered=deferred();
+  live.repository.stop=async()=>{entered.resolve();await stop.promise;};
+  const stopping=live.stop();await entered.promise;
+  live.draft='newer request'; await live.send(); stop.resolve(); await stopping;
+  assert.equal(live.sendFeedbackPhase(),'processing','the prior stop cannot finish a newer local attempt');
+  await live.stop(); assert.equal(live.sendFeedbackPhase(),'');
+});
+
+test('cold chat restores only an accepted outbox operation for its owner without resending', async () => {
+  const {model} = fixture(); model.sourceContext='';
+  await model.send();
+  const cold=fixture().model; cold.local=model.local;
+  let writes=0; cold.repository.send=async()=>{writes++;};
+  cold.profile.manager='other-manager';
+  await cold.restoreLocalDelivery(); assert.equal(cold.sendFeedbackPhase(),'');
+  cold.profile.manager='personal'; await cold.restoreLocalDelivery();
+  assert.equal(cold.sendFeedbackPhase(),'processing'); assert.equal(writes,0);
+  cold.selected.state='working'; await cold.stop();
+  const reopened=fixture().model; reopened.local=model.local; await reopened.restoreLocalDelivery();
+  assert.equal(reopened.sendFeedbackPhase(),'');
+  const {ChatDraftStore,ChatOutboxEntry}=await import('../entry/src/main/ets/models/ChatDraftStore.ets');
+  const legacy=new ChatOutboxEntry();legacy.id='old-done';legacy.target=reopened.target();legacy.at=Date.now();legacy.state='done';
+  await new ChatDraftStore(reopened.local).stage(reopened.scope(),legacy);
+  await reopened.restoreLocalDelivery();assert.equal(reopened.sendFeedbackPhase(),'');
+});
+
+test('the accepted window starts on the receipt and fresh terminal snapshots alone can retire it', async () => {
+  const {ChatSendFeedback}=await import('../entry/src/main/ets/core/ChatSendFeedback.ts');
+  const activity=()=>new ChatSendFeedback('local','machine','session',10,1000,'idle','old failure','yesterday');
+  const first=activity();assert.equal(first.visible(1000000),'sending');
+  first.observeSession('offline','','');assert.equal(first.visible(1000000),'sending');
+  first.accept(1000000);first.accept(1001000);assert.equal(first.visible(1059999),'processing');assert.equal(first.visible(1060000),'');
+  const fresh=activity();fresh.accept(1200);fresh.observeSession('idle','old failure','yesterday');assert.equal(fresh.visible(1300),'processing');
+  fresh.observeSession('working','','');fresh.observeSession('idle','','');assert.equal(fresh.visible(1400),'processing');
+  fresh.observeItems([{id:'own',role:'user',kind:'text',seq:11,client_msg_id:'LOCAL'}]);
+  fresh.observeSession('working','','');fresh.observeSession('idle','','');assert.equal(fresh.visible(1500),'');
+  fresh.accept(1600);assert.equal(fresh.visible(1700),'');
+  const failed=activity();failed.accept(1200);failed.observeSession('idle','old failure','today');assert.equal(failed.visible(1500),'');
+  const blocked=activity();blocked.accept(1200);blocked.observeSession('blocked','','');assert.equal(blocked.visible(1500),'');
+});
+
+test('the Beautiful work header starts only after the accepted send has its own visible transcript echo', async () => {
+  const {model}=fixture(),entered=deferred(),reply=deferred();model.sourceContext='';
+  model.repository.send=async (_row,_text,id)=>{entered.resolve(id);await reply.promise;return {ok:true};};
+  const turn=model.send(),id=await entered.promise;assert.equal(model.sendFeedbackWorkHeader(),false);
+  reply.resolve();await turn;assert.equal(model.sendFeedbackPhase(),'processing');assert.equal(model.sendFeedbackWorkHeader(),false);
+  const echo={id:'same-text',seq:4,role:'user',kind:'text',text:model.draft,client_msg_id:'some-other-send'};
+  model.publishTranscript([echo],false);assert.equal(model.sendFeedbackWorkHeader(),false);
+  model.publishTranscript([{...echo,client_msg_id:id}],false);assert.equal(model.sendFeedbackWorkHeader(),true);
+  model.publishTranscript([{...echo,client_msg_id:id},{id:'answer',seq:5,role:'assistant',kind:'text',text:'done'}],false);
+  assert.equal(model.sendFeedbackWorkHeader(),false);
+});
+
+test('a follow-up during Agent approvals sends once to the active session and leaves every request unanswered', async () => {
+  const { model, writes } = fixture();
+  delete model.canSend;
+  model.canCompose = () => true;
+  model.sourceContext = '';
+  model.selected.raw = JSON.stringify({ status: 'blocked' });
+  const request = id => ({ id, kind: 'permission', machine_id: model.selected.machine, session_id: model.selected.session });
+  const raw = [request('approve-build'), request('approve-format')];
+  model.repository.resolve = () => { throw new Error('A note must never resolve a permission'); };
+  model.decisionRefreshSequence = 1;
+  model.replacePendingDecisions(raw, model.selected, model.target(), model.connectionGeneration(), model.scope(), 1);
+  assert.equal(model.agentQueuesMessages(), true);
+  assert.equal(model.decisionBlocksMessage(), false);
+  model.draft = 'Please keep both originals';
+  assert.equal(await model.send(), true);
+  assert.deepEqual(writes.map(([row, text]) => [row.machine, row.session, text]), [['machine-one', 'chat-one', 'Please keep both originals']]);
+  assert.deepEqual(model.pendingDecisions.map(r => [r.id, r.status]), [['approve-build', 'open'], ['approve-format', 'open']]);
+  model.draft = 'A later draft';
+  model.selected = new ResourceRow('other', 'Other', 'session');
+  assert.equal(model.decisionBlocksMessage(), true);
+  assert.equal(await model.send(), false);
+  assert.equal(writes.length, 1);
+});
+
+test('the global Agent badge keeps the newest owned snapshot across out-of-order reads and assistant switches', async () => {
+  const {model} = fixture();
+  const old = deferred(), replaced = deferred();
+  const card = id => ({machine_id: 'test-mac', interaction: {id, kind: 'question'}});
+  const muted = () => false;
+  model.repository.decisions = () => old.promise;
+  const oldRead = model.readInteractionSnapshot();
+  model.repository.decisions = async () => [card('current-a'), card('current-b')];
+  await model.readInteractionSnapshot();
+  old.resolve([card('late')]);
+  await oldRead;
+  assert.equal(model.phoneAgentBadge(muted), 2);
+
+  model.repository.decisions = () => replaced.promise;
+  const replacedRead = model.readInteractionSnapshot();
+  model.profile.manager = 'new-assistant';
+  replaced.resolve([card('previous-owner')]);
+  await replacedRead;
+  assert.equal(model.phoneAgentBadge(muted), 0);
+  model.repository.decisions = async () => [card('my-request')];
+  await model.readInteractionSnapshot();
+  assert.equal(model.phoneAgentBadge(muted), 1);
+  model.connected = false;
+  assert.equal(model.phoneAgentBadge(muted), 0);
+});
+
+test('directory traffic reaches observers without redispatch to phone tools', () => {
+  const {model}=fixture();
+  const observed=[],commands=[];
+  const off=model.observeEvents((raw,type)=>observed.push([type,raw]));
+  model.setDeviceEvents(raw=>commands.push(raw));
+  const directory=JSON.stringify({type:'catalog_preview',sessions:[{session_id:'sample'}]});
+  const tool=JSON.stringify({type:'tool_call',call_id:'one',name:'phone_device_info',args:{}});
+  model.event(directory);
+  model.event(tool);
+  off();
+  model.event(directory);
+  assert.deepEqual(observed,[['catalog_preview',directory],['tool_call',tool]]);
+  assert.deepEqual(commands,[tool]);
+});
+
+test('the phone drawer reads current non-quiet open to-dos before opening the list and coalesces refreshes', async () => {
+  const {model} = fixture();
+  const reads = [], repo = {todos() { const result = deferred(); reads.push(result); return result.promise; }};
+  const row = (id, extra={}) => ResourceRow.from({id,manager:'personal',...extra},'todo');
+  const refresh = () => model.refreshPhoneList('todo', repo, model.generation, model.scope(), false);
+  const first = refresh(), concurrent = refresh();
+  assert.equal(reads.length, 1);
+  reads[0].resolve([row('open'),row('quiet',{quiet:true}),row('closed',{done_at:'2026-11-01'}),row('other',{manager:'other'})]);
+  await Promise.all([first,concurrent]);
+  assert.equal(model.phoneTodoBadge(), 1);
+  await refresh();
+  assert.equal(reads.length, 1);
+  model.todoRead.change++;
+  const delayed = refresh();
+  model.todoRead.change++;
+  const latest = refresh();
+  reads[2].resolve([row('open'),row('another')]);
+  await latest;
+  reads[1].resolve([]);
+  await delayed;
+  assert.equal(model.phoneTodoBadge(), 2);
+  model.profile.manager = 'other';
+  assert.equal(model.phoneTodoBadge(), 0);
+});
 
 function heldFixture() {
   const {model} = fixture();
@@ -1161,6 +1387,27 @@ test('enabled SSH startup failures stop Hub discovery before any direct probe or
  finally{delete globalThis.clientSshAcquire;delete globalThis.clientPairingAddress;model.stopReconnect();}
 });
 
+test('explicit SSH policies select the verified route in the configured order on a paired Hub',async()=>{
+ for(const [policy,direct,ssh,expected] of [
+  ['fallback',true,false,['direct','using-direct']],
+  ['fallback',false,true,['direct','ssh','watch-direct']],
+  ['always',true,true,['ssh']],
+  ['always',true,false,['ssh','direct','using-direct']]
+ ]){
+  const model=new ClientModel(), profile=new HubProfile('policy-hub','','https://selected.invalid/');
+  profile.hubId=profile.id;profile.pin='B'.repeat(43);profile.manager='work';
+  model.profile=profile;model.profiles=[profile];model.foreground=true;model.vault={async get(){return 'synthetic';}};
+  const calls=[];
+  model.ssh.configuration={enabled:true,routePolicy:policy};model.ssh.watchDirect=()=>calls.push('watch-direct');
+  model.ssh.usingDirectAddress=()=>calls.push('using-direct');
+  globalThis.clientSshAcquire=async()=>{calls.push('ssh');if(!ssh)throw Error('ssh_connect_failed');return{isCurrent:()=>true};};
+  globalThis.clientPairingAddress=async(address,...params)=>{calls.push('direct');assert.equal(params.at(-1),true);if(!direct)throw Error('unavailable');return address;};
+  globalThis.clientTestRequest=async()=>{throw Error('end of routing probe');};
+  try{await model.selectProfile(profile,true);assert.deepEqual(calls,expected);}
+  finally{model.stopReconnect();delete globalThis.clientSshAcquire;delete globalThis.clientPairingAddress;delete globalThis.clientTestRequest;}
+ }
+});
+
 test('Hub connection retirement closes the active owner and every retained manager while preserving other Hubs',async()=>{
  const {model}=fixture(),row=new ResourceRow('secondary','','conversation');row.manager='work';model.profiles=[model.profile];let rootClosed=0,secondaryClosed=0,foreignClosed=0;model.repository={close(){rootClosed++;}};
  const select=ClientModel.prototype.selectProfile;ClientModel.prototype.selectProfile=async function(profile){this.profile=profile;this.connected=true;};
@@ -1327,4 +1574,112 @@ test('question resolution rechecks journal-delayed scope, request, capability an
    if(retirement==='uncertain-refresh')assert.equal(request.status,'unknown','a newer authoritative uncertainty must not reopen after admission fails');
   }finally{gate.resolve();globalThis.clientTestRequest=previous;}
  }
+});
+
+test('assistant selection rechecks the source scope and installed, visible roster at the time of the tap', async () => {
+  const { model } = fixture();
+  const calls = [];
+  model.selectManager = async id => { calls.push(id); };
+  const row = (id, data = {}) => ResourceRow.from({ id, ...data }, 'manager');
+  model.managers = [row('ready'), row('hidden', { hidden: true }),
+    row('installing', { installing: '2026-11-21T10:00:00Z' }), row('legacy', { installing: true })];
+  const source = model.scope();
+  for (const id of ['hidden', 'installing', 'legacy', 'missing', model.profile.manager]) {
+    await model.selectListedManager(id, source);
+  }
+  await model.selectListedManager('ready', source + 'previous');
+  assert.deepEqual(calls, []);
+  await model.selectListedManager('ready', source);
+  assert.deepEqual(calls, ['ready']);
+});
+
+test('cancelled pairing restores the prior complete credential and preserves a later replacement with the same device token', async () => {
+  const {HubAccess} = await import('../entry/src/main/ets/core/HubAccess.ts');
+  const origin='https://hub.invalid:443';
+  for (const superseded of [false, true]) {
+    const {model}=fixture(), profile=model.profile, wait=deferred(), entered=deferred();
+    const previous=HubAccess.fromInput(origin,'client','previous');
+    const candidate=HubAccess.fromInput(origin,'client','candidate');
+    const newer=HubAccess.fromInput(origin,'client','newer');
+    let current=previous, allowed=true;
+    model.profiles=[profile]; model.repository.close=()=>{};
+    model.vault={
+      async get(_id,receive){receive?.(current);return 'same-device-token';},
+      async put(_id,token,edge){
+        assert.equal(token,'same-device-token'); current=edge;
+        if(edge===candidate){entered.resolve();await wait.promise;}
+      },
+      async remove(){assert.fail('an active earlier pairing must remain stored');}
+    };
+    const changing=model.useEndpoint({hubId:profile.id,baseUrl:origin,token:'same-device-token',pin:'',managerId:'',access:candidate},'Hub',()=>allowed);
+    await entered.promise;
+    if(superseded)current=newer;
+    allowed=false;wait.resolve();
+    await assert.rejects(changing,/request_updated/);
+    assert.equal(current,superseded?newer:previous);
+  }
+});
+
+test('a failed device-token write restores pending SSH metadata on the verified Hub only',async()=>{
+  const {model}=fixture();model.foreground=true;
+  // The existing selected Hub belongs to a different pairing context.
+  const base='https://new.synthetic.invalid/',id='verified-synthetic-ssh',pin='A'.repeat(43);
+  const previousScope=model.scope(),settled=[];
+  model.local.allowHub=()=>{};model.local.accepts=()=>true;
+  model.vault={async get(){return null;},async put(){throw Error('synthetic device is locked');}};
+  const route={async install(hub,address,spki,view){
+    assert.equal(hub,id);assert.equal(address,base);assert.equal(spki,pin);
+    await view.write('synthetic-pending-ssh');
+    return async committed=>{settled.push(committed);if(!committed)await view.clearIfUnchanged('synthetic-pending-ssh');};
+  }};
+  await assert.rejects(model.useEndpoint({hubId:id,baseUrl:base,pin,token:'synthetic-new-device'},'Synthetic',()=>true,route),/device is locked/);
+  assert.deepEqual(settled,[false]);assert.equal(model.scope(),previousScope);
+  assert.ok([...model.local.data.values()].every(value=>value!=='synthetic-pending-ssh'));
+});
+
+test('forward recipients recheck the current same-Hub inventory, owner, read-only flag, and live machine before accepting a draft',()=>{
+ const {model}=fixture();
+ function destination(id,attrs={}){
+  const r=ResourceRow.from({session_id:id,machine_id:'studio',title:id,state:'idle',...attrs},'session');
+  r.manager='personal';r.group=model.profile.id;return r;
+ }
+ const target=destination('to'),computer=ResourceRow.from({id:'studio',name:'Studio',online:true},'machine');
+ model.machines=[computer];model.sessions=[model.selected,target];
+ assert.equal(model.canForwardTo(target),true);
+ const cross=destination('to');cross.group='second-pair';assert.equal(model.canForwardTo(cross),false);
+ const foreignOwner=destination('to');foreignOwner.manager='work';assert.equal(model.canForwardTo(foreignOwner),false);
+ for(const disallowed of [{archived:true},{space:'health'},{deleted:true},{read_only:true},{source_kind:'new_source',capabilities:{read:true,send:false}},{capabilities:{send:false}}]){
+  model.sessions=[destination('to',disallowed)];assert.equal(model.canForwardTo(target),false,JSON.stringify(disallowed));
+ }
+ model.sessions=[destination('to',{state:'offline',capabilities:{send:true}})];
+ assert.equal(model.canForwardTo(target,false),false);assert.equal(model.canForwardTo(target,true),true);
+ computer.raw=JSON.stringify({online:false});assert.equal(model.canForwardTo(target,true),false);
+ model.sessions=[];assert.equal(model.canForwardTo(target),false);
+});
+
+test('an exact old rename lookup queries only the current owner, machine and source, and rejects a changed connection',async()=>{
+  const {model}=fixture(), args=[],id='30000000-0000-4000-8000-000000000001',scope=model.scope(),group=model.profile.id;
+  const target=JSON.stringify([scope,group,model.profile.manager,'Test %_ host','herdr','old','/fixture/checkout','rename']);
+  const key=model.captureView('worktree-request:'+target).storageKey;
+  model.local.keys=async(...input)=>{args.push(input);return [key,key.replace(',"rename"]',',"clean"]'),'view:somewhere-else:'+target];};
+  assert.deepEqual(await model.savedRenameTargets(group,model.profile.manager,'Test %_ host','herdr',id),[target]);
+  assert.deepEqual(args,[[ 'view:'+scope+':worktree-request:'+JSON.stringify([scope,group,model.profile.manager,'Test %_ host','herdr']).slice(0,-1)+',',id ]]);
+  model.local.keys=async()=>{model.generation++;return [key];};
+  await assert.rejects(model.savedRenameTargets(group,model.profile.manager,'Test %_ host','herdr',id),/request_updated/);
+});
+
+test('the composer can send a quote without an extra note and keeps attachments ahead of the context-only note', async () => {
+  const {model,writes}=fixture();
+  model.features=['persona_contracts_v1'];model.draft='   ';
+  model.sourceContext=JSON.stringify({contexts:[{kind:'quote',title:'Claude',msg:'reply-42',part:'selection',text:'one selected line'}]});
+  assert.equal(model.hasSendableContext(),true);
+  const prepared=model.prepareMessageText();
+  assert.match(prepared,/<persona-context kind="quote"[^>]*msg="reply-42" part="selection">\none selected line\n<\/persona-context>\n\nchat_context_only_note$/);
+  assert.match(model.prepareMessageText('', 'chat_context_image_note'),/\n\nchat_context_image_note$/);
+  assert.equal(await model.send(),true);
+  assert.equal(writes.length,1);assert.equal(writes[0][1],prepared);
+  for(const context of ['', '{}', '{"contexts":[]}', '{broken']) {
+    model.sourceContext=context;model.draft='';assert.equal(model.hasSendableContext(),false);assert.equal(await model.send(),false);
+  }
+  assert.equal(writes.length,1);
 });

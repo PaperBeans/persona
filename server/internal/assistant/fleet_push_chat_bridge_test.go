@@ -108,6 +108,7 @@ func TestChatBridgeNormalFinishIsNotPushed(t *testing.T) {
 // usage limit nothing takes up, a stop the host reports, a stuck turn, and an agent that does not tell its failures.
 // A terminal session's normal finish is pushed as before.
 func TestChatBridgeFailedFinishAndTerminalStillPushed(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name string
 		edit func(*proto.Session)

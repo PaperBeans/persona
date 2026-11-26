@@ -68,10 +68,35 @@ var standardStatusKeys = map[int]string{
 	http.StatusGatewayTimeout:        "http-status.timeout",
 }
 
+// WriteBody writes body, an error, with status, and notes it on w (NoteError).
 func WriteBody(w http.ResponseWriter, status int, body map[string]any) {
+	NoteError(w, status, body)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// ErrorNoter is a ResponseWriter that takes note of the error bodies written to it with WriteBody: the hub's request
+// log says a server error's code and words from them (#14490). A body passed on as bytes, such as another service's
+// answer through a reverse proxy, is never noted.
+type ErrorNoter interface {
+	NoteError(status int, body map[string]any)
+}
+
+// NoteError tells the first writer in w's Unwrap chain that takes note of errors (ErrorNoter) that body goes out with
+// status. For a body the caller built itself and writes as bytes; WriteBody notes its own.
+func NoteError(w http.ResponseWriter, status int, body map[string]any) {
+	for range 16 {
+		if n, ok := w.(ErrorNoter); ok {
+			n.NoteError(status, body)
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
 }
 
 func Body(status int, code string, err error) map[string]any {
@@ -161,7 +186,7 @@ func Call(w http.ResponseWriter, err error) {
 			status = http.StatusNotFound
 		case "conversation_protected":
 			status = http.StatusBadRequest
-		case "internal", "node_unreachable", "timeout":
+		case "internal", "node_unreachable", "timeout", "delivery_unknown":
 			status = http.StatusBadGateway
 		case proto.CodeTerminalNotReady: // the node's new tab would not take the start command; nothing ran
 			status = http.StatusServiceUnavailable
@@ -243,6 +268,73 @@ func LocalizedBody(status int, code string, err error, l i18n.Lang) map[string]a
 	return body
 }
 
+// LocalizeErrorJSON re-translates a stored JSON error body into l using its machine-readable code/reason/partial
+// fields without modifying any other fields (used when replaying stored client_ops receipts under another language).
+func LocalizeErrorJSON(l i18n.Lang, body []byte) []byte {
+	if l == "" || len(body) == 0 {
+		return body
+	}
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil || m == nil {
+		return body
+	}
+	code, _ := m["code"].(string)
+	if code == "" {
+		return body
+	}
+	var key string
+	var args i18n.Args
+	if m["partial"] == true {
+		switch code {
+		case "not_delivered":
+			if reason, _ := m["reason"].(string); reason == "terminal_finished" {
+				key = "rpc-errors.modes_partial_terminal_finished"
+			} else {
+				key = "rpc-errors.modes_partial_not_delivered"
+			}
+		case "dialog_open":
+			key = "rpc-errors.modes_partial_dialog_open"
+		case proto.CodeNodeOutdated:
+			key = "rpc-errors.modes_partial_node_outdated"
+		default:
+			key = "rpc-errors.modes_partial_failed"
+		}
+	} else {
+		switch code {
+		case "not_delivered":
+			if m["delivered"] != "unknown" {
+				reason, _ := m["reason"].(string)
+				key = notDeliveredKeys[reason]
+			}
+		case "dialog_open":
+			key = "rpc-errors.dialog_open"
+		case "delivery_unknown":
+			key = "rpc-errors.in_doubt"
+			if reason, _ := m["reason"].(string); reason == "guide_retry_refused" {
+				dialog, _ := m["dialog"].(string)
+				retryCode, _ := m["retry_code"].(string)
+				if dialog != "" && retryCode != "" {
+					key = "rpc-errors.guide_retry_refused"
+					args = i18n.Args{"dialog": dialog, "retry_code": retryCode}
+				}
+			}
+		}
+	}
+	if key == "" {
+		return body
+	}
+	translated := i18n.T(l, key, args)
+	if cur, _ := m["error"].(string); cur == translated {
+		return body
+	}
+	m["error"] = translated
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 var rpcFailureKeys = map[string]string{
 	"rewind_busy":                "rpc-errors.rewind_busy",
 	"rewind_unsupported":         "rpc-errors.rewind_unsupported",
@@ -258,9 +350,10 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeTurnOverBackground: "rpc-errors.turn_over_background", // a Stop that found the turn over (#10828)
 	"dialog_open":                "rpc-errors.dialog_open",
 	// an owner's message to an Agent with older messages held for it (devices held.go, #10661)
-	"held_ahead":    "rpc-errors.held_ahead",
-	"held_not_kept": "rpc-errors.held_not_kept",
-	"held_full":     "rpc-errors.held_full",
+	"held_ahead":      "rpc-errors.held_ahead",
+	"held_not_kept":   "rpc-errors.held_not_kept",
+	"held_full":       "rpc-errors.held_full",
+	"held_start_full": "rpc-errors.held_start_full",
 	// the first message to a Codex opened with no first message (node/codex_waiting.go, #4961)
 	"codex_not_ready":          "rpc-errors.codex_not_ready",
 	"codex_first_text":         "rpc-errors.codex_first_text",
@@ -273,6 +366,8 @@ var rpcFailureKeys = map[string]string{
 	"prompt_changed":           "rpc-errors.prompt_changed",
 	"attach_busy":              "rpc-errors.attach_busy",
 	proto.CodeTerminalNotReady: "rpc-errors.terminal_not_ready",
+	// a start that named the Antigravity companion while it is not connected (node/starthost.go, #13447)
+	proto.CodeAgyCompanionOffline: "rpc-errors.agy_companion_offline",
 	// a start's new tab stopped on its shell (node/shellsettle.go, #2570)
 	proto.CodeShellWaiting:      "rpc-errors.shell_waiting",
 	proto.CodeStartLineRejected: "rpc-errors.start_line_rejected",
@@ -283,6 +378,7 @@ var rpcFailureKeys = map[string]string{
 	"node_outdated":             "rpc-errors.node_outdated",
 	// A private-profile switch is refused before any message reaches the CLI.
 	"assistant_launcher_profile_switch":  "rpc-errors.assistant_launcher_profile_switch",
+	"assistant_model_unresolved":         "rpc-errors.assistant_model_unresolved",
 	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
@@ -297,6 +393,7 @@ var rpcFailureKeys = map[string]string{
 	// words, naming the launcher, stay in detail
 	proto.CodeLauncherKindMissing: "rpc-errors.launcher_kind_missing",
 	"assistant_in_doubt":          "rpc-errors.in_doubt",
+	"delivery_unknown":            "rpc-errors.in_doubt",
 	// queued messages sent now (#6088)
 	"nothing_queued":        "rpc-errors.nothing_queued",
 	"send_now_unsupported":  "rpc-errors.send_now_unsupported",
@@ -338,11 +435,18 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeModesNotRunning:     "rpc-errors.modes_not_running",
 	proto.CodeModesUnsupported:    "rpc-errors.modes_unsupported",
 	proto.CodeEffortChangePending: "rpc-errors.effort_change_pending",
+	// session.modes on a Codex on the terminal route (node/codex_terminal_modes.go, #12572); the refusal is Codex's words
+	proto.CodeModesCodexVersion:     "rpc-errors.modes_codex_version",
+	proto.CodeModesCodexNoRollout:   "rpc-errors.modes_codex_no_rollout",
+	proto.CodeModesCodexRefused:     "rpc-errors.modes_codex_refused",
+	proto.CodeModesCodexUnconfirmed: "rpc-errors.modes_codex_unconfirmed",
 	// a message to a stopped agent: read-only, its terminal page's Resume brings it back (node stopped.go, #4754)
 	"agent_stopped":      "rpc-errors.agent_stopped",
 	"resume_not_allowed": "rpc-errors.resume_not_allowed",
 	"stop_not_saved":     "rpc-errors.stop_not_saved",
 	"omp_options":        "rpc-errors.omp_options",
+	// a call that would drive an agy conversation an agy in a terminal has open (node/agypresence.go, #13603)
+	"agy_in_terminal": "rpc-errors.agy_in_terminal",
 	// a message to an omp session the node cannot resume: no usable session file (node/ompresume.go)
 	"omp_resume_unknown": "rpc-errors.omp_resume_unknown",
 	// a resume of a conversation the computer has nothing of (node/control.go resumeKnown, #10941)
@@ -384,6 +488,14 @@ var openElsewhereKeys = map[string]string{
 	"agents_list": "rpc-errors.open_elsewhere_agents_list",
 }
 
+// notDeliveredKeys word the node's generic not_delivered refusal by reason (node/sendsafe.go deliveryRefusal);
+// specific refusals that carry their own recovery instructions (a cut dialog, a botmux probe failure, an unread box)
+// omit reason and keep their own words.
+var notDeliveredKeys = map[string]string{
+	"terminal_refused":  "rpc-errors.not_delivered",
+	"terminal_finished": "rpc-errors.not_delivered_finished",
+}
+
 func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	if l == "" {
 		return
@@ -398,6 +510,15 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	code, _ := body["code"].(string)
 	key := rpcFailureKeys[code]
 	args := i18n.Args{"reason": original}
+	if code == "assistant_model_unresolved" {
+		model, _ := body["model"].(string)
+		launcher, _ := body["launcher"].(string)
+		if model != "" && launcher != "" {
+			args["model"], args["launcher"] = model, launcher
+		} else {
+			key = ""
+		}
+	}
 	if code == "assistant_supervision_runtime" {
 		var names []string
 		if values, ok := body["launchers"].([]any); ok {
@@ -431,6 +552,34 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 		where, _ := body["where"].(string)
 		key = openElsewhereKeys[where]
 	}
+	if body["partial"] == true {
+		switch code {
+		case "not_delivered":
+			if reason, _ := body["reason"].(string); reason == "terminal_finished" {
+				key = "rpc-errors.modes_partial_terminal_finished"
+			} else {
+				key = "rpc-errors.modes_partial_not_delivered"
+			}
+		case "dialog_open":
+			key = "rpc-errors.modes_partial_dialog_open"
+		case proto.CodeNodeOutdated:
+			key = "rpc-errors.modes_partial_node_outdated"
+		default:
+			key = "rpc-errors.modes_partial_failed"
+		}
+	} else if code == "not_delivered" && body["delivered"] != "unknown" {
+		reason, _ := body["reason"].(string)
+		key = notDeliveredKeys[reason]
+	} else if code == "delivery_unknown" {
+		if reason, _ := body["reason"].(string); reason == "guide_retry_refused" {
+			dialog, _ := body["dialog"].(string)
+			retryCode, _ := body["retry_code"].(string)
+			if dialog != "" && retryCode != "" {
+				key = "rpc-errors.guide_retry_refused"
+				args["dialog"], args["retry_code"] = dialog, retryCode
+			}
+		}
+	}
 	if errors.Is(err, ErrOffline) {
 		key = "rpc-errors.offline"
 	}
@@ -445,7 +594,7 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	// a summary that names {reason} carries the original words (git's, for a failed pull or push)
 	body["error"] = i18n.T(l, key, args)
 	switch code {
-	case "assistant_launcher_profile_switch", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
+	case "assistant_launcher_profile_switch", "assistant_model_unresolved", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
 		// The native diagnostic is not a person-facing instruction; the stable, translated refusal says what to do.
 		return
 	}
@@ -566,7 +715,7 @@ func Summary(l i18n.Lang, code string, data map[string]any) string {
 // file the launchers are listed in (launcher_shell, rc_file). What a 409 says, and a session's start_error.
 func Sentence(l i18n.Lang, code string, data map[string]any) string {
 	switch code {
-	case "readonly_unsupported", proto.CodeDirectoryUntypable, "omp_options": // refusal needs no request parameters
+	case "readonly_unsupported", proto.CodeDirectoryUntypable, "omp_options", proto.CodeAgyCompanionOffline: // refusal needs no request parameters
 		return i18n.T(l, rpcFailureKeys[code])
 	}
 	if code == proto.CodeShellWaiting || code == proto.CodeStartLineRejected { // a start's new tab (node/shellsettle.go, #2570)

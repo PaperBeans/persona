@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -38,9 +39,16 @@ type RuntimeHost struct {
 	path    string
 	version string
 	logger  *log.Logger
+	// pipe is the named pipe runtimes the node starts dial on Windows (runtimepipe_windows.go); "" elsewhere, or
+	// when it could not be made. Set by Listen before any runtime starts, then fixed.
+	pipe string
 
-	mu   sync.Mutex
-	node *Node // the Node serving a hub connection now; nil between connections
+	mu                   sync.Mutex
+	node                 *Node                           // the Node serving a hub connection now; nil between connections
+	gp                   *gateProxy                      // last attached Node's gate proxy (resident keeper's) so disconnects between hub links release leases
+	leaseDisconnectGrace time.Duration                   // zero: runtimeLeaseDisconnectGrace (tests shorten it)
+	pendingReleases      map[string]*pendingLeaseRelease // runtime id -> deferred disconnect release while same instance may reconnect
+	closed               bool                            // Listen context ended; no new deferred timers are armed
 
 	// The daemons it dials (daemons.go), by id: their ids are reserved against runtimes on the socket.
 	dmu        sync.Mutex
@@ -94,6 +102,9 @@ func (rh *RuntimeHost) attach(n *Node) {
 		rh.reg.clearAssistantPIDs()
 	}
 	rh.node = n
+	if gp := n.existingGates(); gp != nil {
+		rh.gp = gp
+	}
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(true)
@@ -106,11 +117,152 @@ func (rh *RuntimeHost) detach(n *Node) {
 		rh.mu.Unlock()
 		return
 	}
+	if gp := n.existingGates(); gp != nil {
+		rh.gp = gp
+	}
 	rh.node = nil
 	rh.reg.clearAssistantPIDs()
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(false)
+}
+
+// runtimeLeaseDisconnectGrace keeps session-scoped gate proxy leases alive across a brief non-overlapping socket
+// disconnect so a surviving companion process (runtime-sdk RETRY_PRESENT = 1s) reconnecting with the same instance
+// keeps its live Assistant workers' proxy URLs working, while still reclaiming leases if it never returns.
+const runtimeLeaseDisconnectGrace = 15 * time.Second
+
+type pendingLeaseRelease struct {
+	instance string
+	sessions []string
+	timer    *time.Timer
+}
+
+func (rh *RuntimeHost) leaseGrace() time.Duration {
+	if rh.leaseDisconnectGrace > 0 {
+		return rh.leaseDisconnectGrace
+	}
+	return runtimeLeaseDisconnectGrace
+}
+
+func (rh *RuntimeHost) releaseSessionGates(sessions []string) {
+	if len(sessions) == 0 {
+		return
+	}
+	rh.mu.Lock()
+	n, gp := rh.node, rh.gp
+	rh.mu.Unlock()
+	if cur := n.existingGates(); cur != nil {
+		cur.releaseSessions(sessions)
+	} else if gp != nil {
+		gp.releaseSessions(sessions)
+	}
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]struct{}, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, s := range list {
+			if s == "" {
+				continue
+			}
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (rh *RuntimeHost) scheduleSessionGateRelease(h *runtimeConn, procID osproc.ProcIdentity, released []string) {
+	if len(released) == 0 {
+		return
+	}
+	h.mu.Lock()
+	id, instance, pid := h.hello.Runtime, h.hello.Instance, h.pid
+	h.mu.Unlock()
+	dead := pid > 0 && procID.Start != "" && !procID.StillIs(pid)
+
+	var immediate []string
+	rh.mu.Lock()
+	if id == "" || rh.closed {
+		immediate = released
+	} else if activeInst, connected := rh.reg.activeInstance(id); connected {
+		// Another connection for id is already active: same-instance reconnect preserves leases, and
+		// different-instance takeover already handled replacement in onRuntimeHello.
+		_ = activeInst
+	} else if dead {
+		immediate = released
+		if prev := rh.pendingReleases[id]; prev != nil {
+			prev.timer.Stop()
+			delete(rh.pendingReleases, id)
+			immediate = mergeUniqueStrings(prev.sessions, immediate)
+		}
+	} else {
+		if rh.pendingReleases == nil {
+			rh.pendingReleases = map[string]*pendingLeaseRelease{}
+		}
+		sessions := released
+		if prev := rh.pendingReleases[id]; prev != nil {
+			prev.timer.Stop()
+			if prev.instance != "" && instance != "" && prev.instance != instance {
+				immediate = prev.sessions
+			} else {
+				sessions = mergeUniqueStrings(prev.sessions, sessions)
+			}
+		}
+		entry := &pendingLeaseRelease{instance: instance, sessions: sessions}
+		grace := rh.leaseGrace()
+		entry.timer = time.AfterFunc(grace, func() { rh.expirePendingLeaseRelease(id, entry) })
+		rh.pendingReleases[id] = entry
+	}
+	rh.mu.Unlock()
+	rh.releaseSessionGates(immediate)
+}
+
+func (rh *RuntimeHost) expirePendingLeaseRelease(id string, entry *pendingLeaseRelease) {
+	rh.mu.Lock()
+	if rh.pendingReleases[id] != entry {
+		rh.mu.Unlock()
+		return
+	}
+	if activeInst, connected := rh.reg.activeInstance(id); connected && (activeInst == "" || entry.instance == "" || activeInst == entry.instance) {
+		delete(rh.pendingReleases, id)
+		rh.mu.Unlock()
+		return
+	}
+	delete(rh.pendingReleases, id)
+	sessions := rh.reg.unownedSessions(entry.sessions)
+	rh.mu.Unlock()
+	rh.releaseSessionGates(sessions)
+}
+
+func (rh *RuntimeHost) onRuntimeHello(id, instance string, replacedSessions []string) {
+	var toRelease []string
+	rh.mu.Lock()
+	if prev := rh.pendingReleases[id]; prev != nil {
+		prev.timer.Stop()
+		delete(rh.pendingReleases, id)
+		if prev.instance != "" && instance != "" && prev.instance != instance {
+			toRelease = append(toRelease, prev.sessions...)
+		}
+	}
+	rh.mu.Unlock()
+	toRelease = mergeUniqueStrings(toRelease, replacedSessions)
+	rh.releaseSessionGates(toRelease)
+}
+
+func (rh *RuntimeHost) cancelPendingLeaseReleases() {
+	rh.mu.Lock()
+	rh.closed = true
+	for id, entry := range rh.pendingReleases {
+		entry.timer.Stop()
+		delete(rh.pendingReleases, id)
+	}
+	rh.mu.Unlock()
 }
 
 // notifyHub tells every connected runtime whether a hub is connected.
@@ -126,6 +278,7 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 	if _, err := rh.listenOnce(ctx); err != nil {
 		return err
 	}
+	rh.listenPipe(ctx)
 	rh.ctx = ctx
 	rh.startDaemons(ctx)
 	if rh.autoCompanions {
@@ -138,6 +291,7 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
+				rh.cancelPendingLeaseReleases()
 				return
 			case <-t.C:
 			}
@@ -150,6 +304,21 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// dialPath is where a runtime the node starts connects: the named pipe on Windows, whose Node.js cannot reach a Unix
+// socket (runtimepipe_windows.go), else the socket.
+func (rh *RuntimeHost) dialPath() string {
+	if rh.pipe != "" {
+		return rh.pipe
+	}
+	return rh.path
+}
+
+// mcpConfig is the node's mcp.json, beside the runtime socket. It follows rh.path, never dialPath: on Windows that is
+// a pipe name, whose directory is \\.\pipe.
+func (rh *RuntimeHost) mcpConfig() string {
+	return filepath.Join(filepath.Dir(rh.path), "mcp.json")
 }
 
 func (rh *RuntimeHost) listenOnce(ctx context.Context) (net.Listener, error) {
@@ -182,6 +351,7 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	defer c.Close()
 	peer := rpc.New("r", c)
 	pid := 0
+	var procID osproc.ProcIdentity
 	if nc, ok := c.(net.Conn); ok {
 		pid, _ = peerPID(nc) // 0 for a pipe, or where the system does not tell
 	}
@@ -190,6 +360,9 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	// runs would descend from it.
 	if pid > 0 && slices.Contains(nodeLineage(), pid) {
 		pid = 0
+	}
+	if pid > 0 {
+		procID = osproc.Identify(pid)
 	}
 	h := rh.reg.add(peer)
 	h.mu.Lock()
@@ -204,7 +377,8 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	err := peer.Serve(ctx, c)
 	peer.Close(err)
 	cancel()
-	rh.reg.remove(h)
+	released := rh.reg.remove(h)
+	rh.scheduleSessionGateRelease(h, procID, released)
 	if id := h.id(); id != "" {
 		if id == agyRuntimeID {
 			rh.wakeAgyBridge()
@@ -287,10 +461,11 @@ func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hell
 			}
 		}
 	}
-	stale, err := rh.reg.hello(h, hello, rh.reservedID, preempt)
+	stale, replacedSessions, err := rh.reg.registerHello(h, hello, rh.reservedID, preempt)
 	if err != nil {
 		return err
 	}
+	rh.onRuntimeHello(hello.Runtime, hello.Instance, replacedSessions)
 	if yieldedOpencode != nil && !slices.Contains(stale, yieldedOpencode) {
 		stale = append(stale, yieldedOpencode)
 	}
@@ -339,6 +514,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return nil, err
 		}
 		rh.logger.Printf("runtime %s %s #%d connected", hello.Runtime, hello.Version, h.serial)
+		rh.claimCodex(h, hello.CodexClaims)
 		if rh.autoCompanions && (hello.Launcher != "" || len(hello.Launchers) > 0) {
 			if n := rh.current(); n != nil && n.peer != nil {
 				_ = n.peer.Notify("launchers.changed", map[string]any{})
@@ -358,12 +534,16 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// runtime with caps.modes; resume: a runtime with caps.resume that is the machine's engine is asked to take
 		// sessions over (runtimecontrol.go). workspaces: runtime.workspaces is kept and, for a runtime with
 		// caps.workspaces that is the machine's engine, listed as its catalog and asked to make worktrees
-		// (runtimeworkspaces.go).
+		// (runtimeworkspaces.go). codex_claims: hello's codex_claims name Codex app-server instances the node leaves
+		// to the runtime (codex_instance_claims.go), a runtime on the socket's only.
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
-			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp")
+			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp", "remote_agent", "memory_tools", "codex_claims")
 			if hello.Caps.Assistant {
 				features = append(features, "assistant_pids")
+				if hello.Caps.AssistantEnvironment && !hello.Caps.RemoteAgent {
+					features = append(features, "assistant_command_gate")
+				}
 			}
 		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
@@ -415,6 +595,13 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		if assistant && !p.LeaderOnly {
 			res.Tools = append(res.Tools, n.gateTools()...)
+			if h.remoteAgent() {
+				if p.SessionID == "" {
+					res.Tools = append(res.Tools, n.memoryTools()...)
+				} else if _, ok := n.sessionAllowsMemoryTools(p.SessionID); ok {
+					res.Tools = append(res.Tools, n.memoryTools()...)
+				}
+			}
 		}
 		if h.isDaemon() {
 			res.Tools = slices.DeleteFunc(res.Tools, func(tool proto.Tool) bool { return !assistantwire.IsA2ATool(tool.Name) })
@@ -449,7 +636,17 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return n.saveMailAttachment(ctx, p.Args, p.SessionID, assistant, n.guestOf(p.SessionID) != nil), nil
 		}
 		if g := n.gateTool(p.Name); assistant && g != nil {
+			if h.remoteAgent() {
+				rh.reg.markRemote(p.SessionID)
+				n.gates().markRemote(p.SessionID)
+			}
 			return n.assistantGateTool(ctx, g, p.SessionID, p.Args), nil
+		}
+		if isMemoryTool(p.Name) {
+			if !h.remoteAgent() || !assistant {
+				return proto.TextResult("Memory tools require a remote assistant session", true), nil
+			}
+			return n.assistantMemoryTool(ctx, p.Name, p.SessionID, p.Args), nil
 		}
 		var res json.RawMessage
 		params := map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}
@@ -457,6 +654,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			params["origin"] = origin
 		}
 		err := n.peer.Call(ctx, "mcp.call", params, &res)
+		if err == nil {
+			res = n.toolViews.stripRaw(p.SessionID, p.Name, res)
+		}
 		return res, err
 	}
 	return nil, fmt.Errorf("unknown method %s", method)

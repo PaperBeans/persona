@@ -85,7 +85,8 @@ the pane shows, the pointer. `conversation_block` and `conversation_pointer` tak
 
 ### Rows this version does not know
 
-The view's enums are open: a newer hub may send other values (`schema/wire/todo-view.schema.json`).
+A newer hub may send other values of the view's enums (`schema/wire/todo-view.schema.json`): the open ones pass them
+through, and the closed ones (`phase`, `section`, `reason`) decode them as unknown on the clients.
 
 - **A row without `view`** (from a manager that does not name `todo_view`: one of several, or one reconnecting), or
   whose `phase`, `section` or `reason` this version does not know, gets no paper: the page is drawn as it was before

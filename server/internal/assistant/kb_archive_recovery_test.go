@@ -66,7 +66,7 @@ func newArchiveRecoveryReplacement(t *testing.T, r *archiveSwitchRig, dir string
 	bh := NewBusHub(BusOptions{Extensions: calls})
 	bh.hello = Hello{KB: &KBSettings{}}
 	bh.helloOnce.Do(func() { close(bh.helloed) })
-	s := New(Options{Hub: bh, Store: r.s.store, Logf: testLogf(t), KB: &KBOptions{Dir: dir}})
+	s := New(Options{Hub: bh, Store: r.s.storeAccessor(), Logf: testLogf(t), KB: &KBOptions{Dir: dir}})
 	s.inbox.init()
 	bh.svc = s
 	st, err := kb.NewStore(dir)

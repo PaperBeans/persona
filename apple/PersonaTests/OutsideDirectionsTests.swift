@@ -245,6 +245,10 @@ struct OutsideDirectionsTests {
     @Test func removingTheCurrentHubClearsOutsideDirectionsBeforeTheNextHubAnswers() async throws {
         let chosen = UserDefaults.standard.object(forKey: "assistant.current")
         defer { UserDefaults.standard.set(chosen, forKey: "assistant.current") }
+        // `removeGroup` saves the registry to this simulator's keychain. Put back what was there, or every later
+        // `AppModel()` starts paired to this test's "other" group and opens agents as another hub's (#14145).
+        let paired = HubStore.read()
+        defer { if case .registry(let registry) = paired { HubStore.save(registry) } }
         let zone = TimeZone.current.identifier
         let hub = FakeHub()
         hub.on("GET", "/api/v1/assistant", json: #"""

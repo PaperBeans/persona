@@ -1,5 +1,5 @@
 /// <reference types="node" />
-// The Lark chat list (lark-chats.ts) is on the first screen and names an account in its requests. It needs only
+// The Lark chat list (the lark module's lark-chats.ts, #13404) names an account in its requests. It needs only
 // larkPath: importing it from lark-accounts.ts put the accounts store and its words on every first screen.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -11,7 +11,7 @@ const read = (file: string) => readFileSync(new URL(file, import.meta.url), "utf
 
 describe("larkPath", () => {
   it("keeps lark-accounts.ts and its words off the first screen", () => {
-    expect(read("./lark-chats.ts")).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+["']\.\/lark-accounts["']/m);
+    expect(read("../modules/lark/lark-chats.ts")).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+["'](\.\.\/\.\.\/lib)?\.?\/lark-accounts["']/m);
     expect(read("./lark-path.ts")).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+["']\.\/lark-accounts["']/m);
     expect(startup.filter((key) => key === "lib-lark-accounts" || key.startsWith("lib-lark-accounts."))).toEqual([]);
   });

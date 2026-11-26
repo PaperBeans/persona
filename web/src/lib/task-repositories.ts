@@ -70,10 +70,61 @@ export function repositoryLinkTitle(value: unknown): string | undefined {
 }
 export function repositoryDraft(rows: TaskRepository[]): TaskRepositoryInput[] {
   return rows.map((row) => ({ repo_id: row.repo_id, directory_alias: row.directory_alias, requested_ref: { ...row.requested_ref },
-    links: row.links.map(({ kind, number, title }) => {
+    links: row.links.map(({ kind, number, title, role }) => {
       const kept = repositoryLinkTitle(title);
-      return { kind, number, ...(kept ? { title: kept } : {}) };
+      return { kind, number, ...(kept ? { title: kept } : {}), ...(role === "delivery" || role === "reference" ? { role } : {}) };
     }) }));
+}
+
+/**
+ * Delivery role of a bound repository in the multi-repo matrix (#14685):
+ * - `"target"` (Target Repo): no links or at least one gating (`delivery` or unset) link — governs delivery gate (weakest-link rule).
+ * - `"reference"` (Reference Repo): at least one link and every link is `role === "reference"` — read-only context, never blocks closure.
+ */
+export type TaskRepositoryRole = "target" | "reference";
+export type TaskRepositoryMatrixEntry = { repository: TaskRepository; role: TaskRepositoryRole };
+
+export function isReferenceRepositoryLink(link: Pick<TaskRepositoryLink, "role">): boolean {
+  return link.role === "reference";
+}
+
+export function classifyTaskRepositoryRole(repo: Pick<TaskRepository, "links">): TaskRepositoryRole {
+  const links = repo.links ?? [];
+  if (links.length === 0) return "target";
+  return links.every(isReferenceRepositoryLink) ? "reference" : "target";
+}
+
+/**
+ * Partitions bound repositories for the `todos_v2` multi-repo matrix: Target Repos first, Reference Repos second,
+ * keeping relative order stable within each group.
+ */
+export function partitionTaskRepositories(repositories: readonly TaskRepository[]): {
+  target: TaskRepository[];
+  reference: TaskRepository[];
+  ordered: TaskRepositoryMatrixEntry[];
+} {
+  const target: TaskRepository[] = [];
+  const reference: TaskRepository[] = [];
+  for (const repository of repositories) {
+    if (classifyTaskRepositoryRole(repository) === "reference") reference.push(repository);
+    else target.push(repository);
+  }
+  return {
+    target,
+    reference,
+    ordered: [
+      ...target.map((repository) => ({ repository, role: "target" as const })),
+      ...reference.map((repository) => ({ repository, role: "reference" as const })),
+    ],
+  };
+}
+
+/** Compact label for a non-default requested_ref; undefined when using the repository's default branch. */
+export function formatRequestedRef(ref?: RequestedRef): string | undefined {
+  if (!ref || ref.kind === "default") return undefined;
+  const value = ref.value.trim();
+  if (!value) return undefined;
+  return ref.kind === "commit" ? value.slice(0, 7) : value;
 }
 
 const EXTENSION_PROVIDER = /^ext:[a-z0-9][a-z0-9_-]{0,31}\/[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -390,9 +441,10 @@ export function cleanRepositoryDraft(rows: TaskRepositoryInput[]): TaskRepositor
     .filter((link) => !("url" in link) || !!link.url?.trim())
     .map((link): RepositoryLinkInput => {
       const title = repositoryLinkTitle(link.title);
+      const role = link.role === "delivery" || link.role === "reference" ? { role: link.role } : {};
       return "url" in link
-        ? { url: link.url!.trim(), ...(title ? { title } : {}) }
-        : { kind: link.kind, number: link.number, ...(title ? { title } : {}) };
+        ? { url: link.url!.trim(), ...(title ? { title } : {}), ...role }
+        : { kind: link.kind, number: link.number, ...(title ? { title } : {}), ...role };
     }) }));
 }
 

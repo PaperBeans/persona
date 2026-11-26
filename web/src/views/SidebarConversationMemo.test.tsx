@@ -51,7 +51,7 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
 const reads = (key: string) => draftReads.get(key) ?? 0;
-const mainRow = () => host.querySelector<HTMLAnchorElement>(`a[title="${t("sidebar.persona_main")}"]`)!;
+const mainRow = () => host.querySelector<HTMLAnchorElement>(`a[aria-description="${t("sidebar.persona_main")}"]`)!;
 const row = (sid: string) => host.querySelector<HTMLAnchorElement>(`a[href="/persona/${sid}"]`)!;
 const menu = () => document.querySelector('[role="menu"]');
 const push = (mid: string, sid: string, change: Partial<Session>) => {

@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "welcome_action_scan",
+      "value": "QR コードで hub に接続"
+    },
+    {
+      "name": "welcome_action_other",
+      "value": "その他の方法"
+    },
+    {
+      "name": "welcome_action_help",
+      "value": "ヘルプ"
+    },
+    {
+      "name": "welcome_action_demo",
+      "value": "デモ"
+    },
+    {
+      "name": "welcome_action_hint",
+      "value": "hub をセットアップすると画面に QR コードが出ます。接続済みのデバイスで「設定 › デバイス › 新しいデバイスを接続」を開くこともできます"
+    },
+    {
+      "name": "welcome_action_done",
+      "value": "OK"
+    }
+  ]
+}

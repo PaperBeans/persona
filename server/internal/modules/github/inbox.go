@@ -339,7 +339,7 @@ func (c *Connector) applyNotifications(ctx context.Context, ns []notification, c
 		if err := c.rememberMessageLast(ctx, thread, thing.Last, n.UpdatedAt); err != nil {
 			continue
 		}
-		thing.Tags = tagsOf(n, run, kind, thing.Sender)
+		thing.Tags = append(tagsOf(n, run, kind, thing.Sender), thing.Tags...)
 		if !st.enter(epoch) {
 			return moved
 		}

@@ -222,18 +222,18 @@ func TestManualMergeRetargetsLockedRelationshipsAndKeepsCorrections(t *testing.T
 	}
 	c, _ := e.Store.Chat("chat")
 	person, _ := e.Store.Person("person")
-	if strings.Join(c.Projects, ",") != "keep" || strings.Join(person.Projects, ",") != "keep" || !c.fieldLocked("projects") || !person.fieldLocked("projects") {
+	if strings.Join(c.Projects, ",") != "keep" || strings.Join(person.Projects, ",") != "keep" || !taggingFieldLocked(&c.Tagging, "projects") || !taggingFieldLocked(&person.Tagging, "projects") {
 		t.Fatalf("locked reverse relationships not retargeted: %+v %+v", c, person)
 	}
 	for _, kind := range []string{KindDoc, KindMeeting, KindEvent} {
 		it, _ := e.Store.Item(kind, "item")
-		if strings.Join(it.Projects, ",") != "keep" || !it.fieldLocked("projects") {
+		if strings.Join(it.Projects, ",") != "keep" || !taggingFieldLocked(&it.Tagging, "projects") {
 			t.Fatal("item relationship not retargeted", kind, it)
 		}
 	}
 	keep, _ := e.Store.Project("keep")
 	drop, _ := e.Store.Project("drop")
-	if !strings.Contains(keep.Pinned, keepFact) || !strings.Contains(keep.Pinned, dropFact) || keep.Goal != "keep goal" || !keep.fieldLocked("goal") || drop.Pinned != dropFact || drop.Goal != "drop goal" || drop.MergedInto != "keep" {
+	if !strings.Contains(keep.Pinned, keepFact) || !strings.Contains(keep.Pinned, dropFact) || keep.Goal != "keep goal" || !taggingFieldLocked(&keep.Tagging, "goal") || drop.Pinned != dropFact || drop.Goal != "drop goal" || drop.MergedInto != "keep" {
 		t.Fatalf("corrections lost: keep=%+v drop=%+v", keep, drop)
 	}
 }

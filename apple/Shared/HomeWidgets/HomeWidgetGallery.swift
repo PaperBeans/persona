@@ -221,14 +221,23 @@ struct HomeCalendarGallery: View {
 }
 
 /// `-showHomeWidgets YES`: every widget at every Home Screen size, light and dark, with the sample data, over the app
-/// (screenshots and design review; the real proof is the Home Screen itself). `-showHomeWidgets lock`: the Lock
-/// Screen's families instead, and `lock:agents,today` only those kinds (one screenshot holds four).
+/// (screenshots and design review; the real proof is the Home Screen itself). `-showHomeWidgets home:computers`: only
+/// those kinds (one screenshot holds a kind's three sizes). `-showHomeWidgets lock`: the Lock Screen's families
+/// instead, and `lock:agents,today` only those kinds (one screenshot holds four).
 struct HomeGalleryOverlay: View {
+    /// The sample data; with `-recording.phoneModule off`, as the app writes it while the hub's recording module is off
+    /// (#15214): the Record widget then offers no start.
+    private static var sample: HomeSnapshot {
+        var s = HomeSamples.busy(zh: LanguageStore.shared.launched.hasPrefix("zh"), now: .now)
+        if PhoneRecordingAllowance.stored() == .off { s.recordingModule = .off }
+        return s
+    }
+
     @State private var shown = UserDefaults.standard.string(forKey: "showHomeWidgets").flatMap { ["", "NO"].contains($0) ? nil : $0 }
 
     var body: some View {
         if let shown {
-            let entry = HomeEntry(date: .now, snapshot: HomeSamples.busy(zh: LanguageStore.shared.launched.hasPrefix("zh"), now: .now))
+            let entry = HomeEntry(date: .now, snapshot: Self.sample)
             ScrollView([.vertical, .horizontal]) {
                 HomeGallerySheet(title: "Persona", note: nil) {
                     if shown.hasPrefix("health:") {
@@ -241,7 +250,8 @@ struct HomeGalleryOverlay: View {
                             HomeGalleryLockRow(kind: kind, entry: entry)
                         }
                     } else {
-                        ForEach(HomeKind.allCases, id: \.self) { kind in
+                        let only = shown.hasPrefix("home:") ? shown.split(separator: ":").dropFirst().first.map { $0.split(separator: ",").map(String.init) } : nil
+                        ForEach(HomeKind.allCases.filter { only?.contains($0.rawValue) ?? true }, id: \.self) { kind in
                             ForEach(kind.families.filter { [.systemSmall, .systemMedium, .systemLarge].contains($0) }, id: \.self) { family in
                                 HomeGalleryRow(title: "\(kind.rawValue) · \(family)", kind: kind, family: family, looks: [.light, .dark], entry: entry)
                             }

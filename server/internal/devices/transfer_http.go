@@ -1,15 +1,18 @@
 package devices
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -21,6 +24,37 @@ func (d *Devices) transferRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/files/transfer", d.postTransfer)
 	api.HandleFunc("GET /api/v1/files/transfer/{id}", d.getTransferHTTP)
 	api.HandleFunc("DELETE /api/v1/files/transfer/{id}", d.deleteTransfer)
+	api.HandleFunc("GET /api/v1/files/transfer-audit", d.getTransferAudit)
+}
+
+// fileTransferAuditReader reads the audit of the Agents' transfers (db.DB).
+type fileTransferAuditReader interface {
+	FileTransferAudits(ctx context.Context, machine string, limit int) ([]db.FileTransferAudit, error)
+}
+
+// getTransferAudit answers the latest Agents' transfers, newest first: {transfers: [db.FileTransferAudit]}, those of
+// ?machine= (as either end) when given, at most ?limit= (1–500, default 100). Only a device the person signed in with
+// reads it.
+func (d *Devices) getTransferAudit(w http.ResponseWriter, r *http.Request) {
+	if !fullRole(r) {
+		writeErr(w, http.StatusForbidden, errors.New("only a signed-in device can read the transfers' audit"))
+		return
+	}
+	st, ok := d.opts.Store.(fileTransferAuditReader)
+	if !ok {
+		writeJSON(w, map[string]any{"transfers": []db.FileTransferAudit{}})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	list, err := st.FileTransferAudits(r.Context(), strings.TrimSpace(r.URL.Query().Get("machine")), limit)
+	if err != nil {
+		apierr.Call(w, err)
+		return
+	}
+	if list == nil {
+		list = []db.FileTransferAudit{}
+	}
+	writeJSON(w, map[string]any{"transfers": list})
 }
 
 // postTransfer starts a computer to computer transfer (docs/protocol/file-transfer.md): 202 with the transfer, which

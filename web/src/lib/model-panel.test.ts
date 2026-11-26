@@ -419,6 +419,24 @@ describe("a model listed per thinking level (#12315)", () => {
     expect(modelCount([{ id: "default", name: "Default", efforts: [], providerDefault: true }, ...neon])).toBe(1);
   });
 
+  it("keeps all advertised Neon and Hydrogen levels attached to their own row", () => {
+    const hydrogenLevels = [...LEVELS, "max"];
+    const hydrogen = [...hydrogenLevels].reverse().map((e) => level("gemini-4-hydrogen", "Gemini 4 Hydrogen", e, hydrogenLevels));
+    const rows = rowsOf({ providers: [agy({ models: [...neon, ...hydrogen] })] });
+    expect(rows.map((row) => [row.model.name, row.model.efforts])).toEqual([
+      ["Gemini 4 Neon", LEVELS],
+      ["Gemini 4 Hydrogen", hydrogenLevels],
+    ]);
+    expect(levelSetup(rows[0], "xhigh")?.model).toBe("gemini-4-neon-xhigh");
+    expect(levelSetup(rows[1], "xhigh")?.model).toBe("gemini-4-hydrogen-xhigh");
+    expect(levelSetup(rows[1], "max")?.model).toBe("gemini-4-hydrogen-max");
+  });
+
+  it("keeps context qualifiers on a folded row", () => {
+    const models = [level("m", "Model (1M context)", "low"), { ...level("m", "Model", "high"), name: "Model (High) (1M context)" }];
+    expect(rowsOf({ providers: [agy({ models })] })[0].model.name).toBe("Model (1M context)");
+  });
+
   it("leaves models alone whose default effort is not their ID's last word", () => {
     expect(variantGroups([opus, sonnet, gpt]).map((g) => g.map((m) => m.id))).toEqual([["opus"], ["sonnet"], ["gpt-5.5"]]);
     const typed = { ...neon[0], custom: true };

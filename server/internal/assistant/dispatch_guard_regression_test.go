@@ -23,7 +23,7 @@ func TestDispatchGuardMalformedWritesKeepExistingPolicy(t *testing.T) {
 	s := newTestService(t, f)
 	putGuard(t, s, guardPolicy(t, "task_plan"))
 	st := s.store().(*memStore)
-	beforePuts := st.puts
+	beforePuts := st.putCount()
 	_, changed := s.mcpChanges.snapshot()
 	bodies := []string{
 		`{}`,
@@ -44,8 +44,8 @@ func TestDispatchGuardMalformedWritesKeepExistingPolicy(t *testing.T) {
 			}
 		})
 	}
-	if st.puts != beforePuts {
-		t.Fatalf("malformed writes changed the store: puts %d -> %d", beforePuts, st.puts)
+	if puts := st.putCount(); puts != beforePuts {
+		t.Fatalf("malformed writes changed the store: puts %d -> %d", beforePuts, puts)
 	}
 	select {
 	case <-changed:
@@ -74,18 +74,14 @@ func TestDispatchGuardDuplicateRawValuesKeepExistingPolicy(t *testing.T) {
 					t.Fatalf("activate: %d %s", w.Code, w.Body.String())
 				}
 				st := s.store().(*memStore)
-				st.mu.Lock()
-				beforePuts, beforeRaw := st.puts, string(st.vals[dispatchGuardSetting])
-				st.mu.Unlock()
+				beforePuts, beforeRaw := st.snapshotRaw(dispatchGuardSetting)
 				_, changed := s.mcpChanges.snapshot()
 				w = serveAs(s, role, http.MethodPut, dispatchGuardRoute, body)
 				if w.Code != http.StatusBadRequest {
 					t.Fatalf("duplicate raw value returned %d %s", w.Code, w.Body.String())
 				}
-				st.mu.Lock()
-				same := st.puts == beforePuts && string(st.vals[dispatchGuardSetting]) == beforeRaw
-				st.mu.Unlock()
-				if !same {
+				puts, raw := st.snapshotRaw(dispatchGuardSetting)
+				if puts != beforePuts || string(raw) != string(beforeRaw) {
 					t.Fatal("duplicate raw value mutated storage")
 				}
 				select {
@@ -356,9 +352,7 @@ func TestDispatchGuardCaseAliasesKeepExistingPolicy(t *testing.T) {
 				s := newTestService(t, newGuardFakeHub())
 				putGuard(t, s, guardPolicy(t, "task_plan"))
 				st := s.store().(*memStore)
-				st.mu.Lock()
-				beforePuts, beforeRaw := st.puts, string(st.vals[dispatchGuardSetting])
-				st.mu.Unlock()
+				beforePuts, beforeRaw := st.snapshotRaw(dispatchGuardSetting)
 				_, changed := s.mcpChanges.snapshot()
 				out := putGuardRelayed(t, s, role, c.body)
 				if out.Status != http.StatusBadRequest {
@@ -373,10 +367,8 @@ func TestDispatchGuardCaseAliasesKeepExistingPolicy(t *testing.T) {
 				if want := i18n.T(i18n.En, "assistant-dispatch_guard.invalid_json"); response.Error != want {
 					t.Fatalf("error %q, want %q", response.Error, want)
 				}
-				st.mu.Lock()
-				puts, raw := st.puts, string(st.vals[dispatchGuardSetting])
-				st.mu.Unlock()
-				if puts != beforePuts || raw != beforeRaw {
+				puts, raw := st.snapshotRaw(dispatchGuardSetting)
+				if puts != beforePuts || string(raw) != string(beforeRaw) {
 					t.Fatalf("aliased write mutated storage: puts %d -> %d", beforePuts, puts)
 				}
 				select {

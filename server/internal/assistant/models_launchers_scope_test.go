@@ -430,7 +430,8 @@ func TestNewAgentPickerSaysWhyAProviderSkipsThisComputer(t *testing.T) {
 
 // A provider whose latest check failed. Where its own-service rule leaves it out anyway, that rule is the reason the
 // pickers give, the main chat's as New Agent's: with the check passing it would still not be listed. Where it would
-// run, the check alone hides it and no picker calls it skipped.
+// run, the check alone keeps it out of the launchers: New Agent lists it off for that (#14535), never as skipped for
+// its own-service rule, and the main chat's list leaves it out as before.
 func TestAFailedCheckDoesNotChangeTheOwnServiceReason(t *testing.T) {
 	s, f := scopeService(t)
 	f.launcherList = []proto.Launcher{{Name: "claude"}}
@@ -457,7 +458,8 @@ func TestAFailedCheckDoesNotChangeTheOwnServiceReason(t *testing.T) {
 			t.Fatalf("%q: mac lists %v, unavailable %+v", purpose, mac.names(), mac.Unavailable)
 		}
 		server := pickerOf(t, s, "server", purpose)
-		if _, ok := fill(server); slices.Contains(server.names(), "fill") || ok {
+		u, ok := fill(server)
+		if slices.Contains(server.names(), "fill") || (purpose == "assistant") == ok || ok && u.Code != unavailableUnhealthy {
 			t.Fatalf("%q: server lists %v, unavailable %+v", purpose, server.names(), server.Unavailable)
 		}
 	}

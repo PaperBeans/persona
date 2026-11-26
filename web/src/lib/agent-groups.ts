@@ -1,9 +1,23 @@
 import { t } from "../i18n";
 import { backgroundWaiting, byAttention, stateOf } from "./format";
+import { unseen } from "./seen-outbox";
 import { hubWaits } from "./work";
 import type { AgentState, Machine, Session } from "./types";
 import { byTime } from "./times";
 import { stateName } from "./state-labels";
+
+/** Where a held row stays: the section it was shown in before it was seen (#12585, iOS AgentListOrder.Held). */
+export type HeldPlace = "unread" | "just_finished";
+/** Full session key (`machine_id/session_id`) → the section this visit showed it in before it became seen. */
+export type HeldSeenMap = Readonly<Record<string, HeldPlace>>;
+export interface HeldOrderOptions {
+  /** The open agent that had unseen work when opened (`held` in spec/fixtures/sort/held.json). */
+  held?: string | null;
+  /** The open held row was Just finished when opened. */
+  heldJustFinished?: boolean;
+  /** Rows this visit showed as Unread or Just finished (`held_seen` in spec/fixtures/sort/next/held_set.json). */
+  heldSeen?: HeldSeenMap;
+}
 
 export type AgentGrouping = "repo" | "space" | "state" | "machine" | "todo";
 // "By to-do" leads and is the default for a browser that never picked one (#2812); a grouping picked before stays. The
@@ -80,6 +94,8 @@ export interface AgentGroup {
   todoStatus?: string;
   /** What the group is and why its agents are in it, for a name that does not say it alone (a tooltip). */
   hint?: string;
+  /** Held rows in this section that are seen now (#12585): left out of the section's count and offered by Clear seen. */
+  heldSeen?: Session[];
 }
 
 export function splitAgentSessions(all: Session[], machines: Machine[], keepOffline?: (s: Session) => boolean) {
@@ -130,6 +146,14 @@ export function isWaiting(s: Session): boolean {
 
 const NO_MUTES: AgentMutes = { spaces: [], sessions: [] };
 
+/** The place `s` is held in, whether or not it is seen yet; undefined for a row that is not held (#12585). */
+export function heldPlace(s: Session, held?: HeldOrderOptions): HeldPlace | undefined {
+  if (!held) return undefined;
+  const key = `${s.machine_id}/${s.session_id}`;
+  if (held.held && key === held.held) return held.heldJustFinished ? "just_finished" : "unread";
+  return held.heldSeen?.[key];
+}
+
 /** Awaiting Reply (#5096, docs/protocol/agent-states.md): seen, but it stopped on a question to the user nobody has answered yet
  *  (`awaits_reply`), and not muted. Such an agent is not quiet: it never folds into Idle Spaces. */
 export function awaitsReply(s: Session, mutes: AgentMutes = NO_MUTES): boolean {
@@ -137,10 +161,20 @@ export function awaitsReply(s: Session, mutes: AgentMutes = NO_MUTES): boolean {
 }
 
 /** Just finished (#9751, docs/protocol/agent-states.md): seen as far as its state goes, but the hub's triage found its turn
- *  done before anybody looked, less than three hours ago (`work.just_finished`), and not muted. Such an agent is not
- *  quiet: it never folds into Idle Spaces. */
-export function justFinished(s: Session, mutes: AgentMutes = NO_MUTES): boolean {
-  return stateOf(s) === "idle" && Boolean(s.work?.just_finished) && !isMuted(s, mutes);
+ *  done before anybody looked, less than three hours ago (`work.just_finished`), or held there from this visit (#12585),
+ *  and not muted. Such an agent is not quiet: it never folds into Idle Spaces. */
+export function justFinished(s: Session, mutes: AgentMutes = NO_MUTES, held?: HeldOrderOptions): boolean {
+  return stateOf(s) === "idle" && (Boolean(s.work?.just_finished) || heldPlace(s, held) === "just_finished") && !isMuted(s, mutes);
+}
+
+/** A held row that is seen now and still drawn in the place it was held in (Unread, Just finished, or Muted for a muted
+ *  one): that section's count leaves it out and its Clear seen lets it go (#12585, iOS AgentListOrder.isHeldSeen). */
+export function isHeldSeen(s: Session, mutes: AgentMutes = NO_MUTES, held?: HeldOrderOptions): boolean {
+  const st = stateOf(s);
+  if ((st !== "idle" && st !== "unknown") || unseen(s)) return false;
+  const place = heldPlace(s, held);
+  if (!place) return false;
+  return place === "unread" || justFinished(s, mutes, held);
 }
 
 /** What an Awaiting Reply agent asks: what the triage says it waits for (blocked on the user), else the question its last reply
@@ -151,10 +185,22 @@ export function replyAsk(s: Session): string {
   return s.asks?.trim() ?? "";
 }
 
-/** Nothing to look at: seen (or unknown), not waiting on the hub or itself, not waiting for the user's reply, and not
- *  just finished. */
-export function isQuiet(s: Session, mutes: AgentMutes = NO_MUTES): boolean {
-  return ["idle", "unknown"].includes(stateOf(s)) && !isWaiting(s) && !awaitsReply(s, mutes) && !justFinished(s, mutes);
+/** Nothing to look at: seen (or unknown), not held in Unread, not waiting on the hub or itself, not waiting for the
+ *  user's reply, and not just finished. */
+export function isQuiet(s: Session, mutes: AgentMutes = NO_MUTES, held?: HeldOrderOptions): boolean {
+  return ["idle", "unknown"].includes(stateOf(s)) && heldPlace(s, held) !== "unread" && !isWaiting(s) && !awaitsReply(s, mutes) && !justFinished(s, mutes, held);
+}
+
+/** The rows the list shows as Unread or Just finished now, by that section: what this visit notes so each keeps its place
+ *  once seen (#12585, iOS AgentListProjection.needsSeen). */
+export function needsSeenOf(sessions: readonly Session[], mutes: AgentMutes = NO_MUTES): Record<string, HeldPlace> {
+  const out: Record<string, HeldPlace> = {};
+  for (const s of sessions) {
+    const st = stateOf(s);
+    if (st === "unread") out[`${s.machine_id}/${s.session_id}`] = "unread";
+    else if (justFinished(s, mutes)) out[`${s.machine_id}/${s.session_id}`] = "just_finished";
+  }
+  return out;
 }
 
 function isMuted(s: Session, mutes: AgentMutes): boolean {
@@ -169,11 +215,27 @@ function byDate(a: Session, b: Session): number {
   return byTime(date(b), date(a)) || a.session_id.localeCompare(b.session_id) || a.machine_id.localeCompare(b.machine_id);
 }
 
+/** One rank for every grouping (iOS AgentListOrder.rank): needs you → unread → awaiting reply → working →
+ *  waiting in the background → just finished → waiting → muted → seen. */
+export function agentRank(s: Session, mutes: AgentMutes = NO_MUTES, held?: HeldOrderOptions): number {
+  const state = stateOf(s);
+  if (state === "needs_you") return 0;
+  const unread = state === "unread" || (heldPlace(s, held) === "unread" && (state === "idle" || state === "unknown"));
+  const waiting = isWaiting(s);
+  if (isMuted(s, mutes) && (state === "working" || unread || waiting)) return 7;
+  if (unread) return 1;
+  if (awaitsReply(s, mutes)) return 2;
+  if (backgroundWaiting(s)) return 4;
+  if (state === "working") return 3;
+  if (waiting) return 6;
+  return justFinished(s, mutes, held) ? 5 : 8;
+}
+
 // iOS AgentListOrder (#5096): needs you → unread → awaiting reply → working → waiting in the background (#6045) → just
 // finished (#9751) → waiting → muted → seen; needs you always wins,
 // even when a session or its project is muted. "By status" is the only grouping built here ("By machine" is
 // lib/herdr-tree.ts); the argument stays for the callers that name it.
-export function buildAgentGroups(all: Session[], machines: Machine[], _grouping: "state", mutes: AgentMutes = { spaces: [], sessions: [] }, compareSessions: (a: Session, b: Session) => number = byDate): AgentGroup[] {
+export function buildAgentGroups(all: Session[], machines: Machine[], _grouping: "state", mutes: AgentMutes = { spaces: [], sessions: [] }, compareSessions: (a: Session, b: Session) => number = byDate, held?: HeldOrderOptions): AgentGroup[] {
   const { live } = splitAgentSessions(all, machines);
   const groups: AgentGroup[] = [
     { key: "state:needs", name: stateName("needs_you"), state: "needs_you", sessions: [] },
@@ -187,12 +249,11 @@ export function buildAgentGroups(all: Session[], machines: Machine[], _grouping:
     { key: "state:idle", name: stateName("idle"), state: "idle", sessions: [], folded: true },
   ];
   for (const s of live) {
-    const state = stateOf(s);
-    const waiting = isWaiting(s);
-    const index = state === "needs_you" ? 0 : isMuted(s, mutes) && (state === "working" || state === "unread" || waiting) ? 7
-      : state === "unread" ? 1 : awaitsReply(s, mutes) ? 2 : backgroundWaiting(s) ? 4 : state === "working" ? 3 : waiting ? 6
-      : justFinished(s, mutes) ? 5 : 8;
-    groups[index].sessions.push(s);
+    groups[agentRank(s, mutes, held)].sessions.push(s);
   }
-  return groups.filter((g) => g.sessions.length).map((g) => ({ ...g, sessions: g.sessions.sort(compareSessions) }));
+  return groups.filter((g) => g.sessions.length).map((g) => {
+    const sessions = g.sessions.sort(compareSessions);
+    const heldRows = held ? sessions.filter((s) => isHeldSeen(s, mutes, held)) : [];
+    return { ...g, sessions, ...(heldRows.length ? { heldSeen: heldRows } : {}) };
+  });
 }

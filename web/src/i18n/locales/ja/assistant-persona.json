@@ -16,6 +16,7 @@
   "upload": "アップロード",
   "upload_sub": "自分の画像を使う",
   "upload_label": "画像をアップロードしてアバターにする",
+  "edit_label": "「{name}」を編集",
   "delete": "削除",
   "delete_label": "「{name}」を削除",
   "delete_title": "「{name}」を削除しますか？",

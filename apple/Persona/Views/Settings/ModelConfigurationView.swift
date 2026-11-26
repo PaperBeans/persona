@@ -12,9 +12,12 @@ struct ModelConfigurationView: View {
     var showsAdvancedProviders = true
     /// Whose model settings (`ModelSettingsOwner`): the current assistant's, or the default's for what runs on it.
     var owner: ModelSettingsOwner = .current
+    @Environment(AppModel.self) private var app
     @State private var page = ModelConfigurationModel()
+    @State private var profiles = ModelProfilesModel()
     @State private var scopeExpanded = false
     @State private var editing: ModelPurposeRoute?
+    @State private var selectedProfile: ModelProfileSheetRoute?
 
     var body: some View {
         SettingsForm {
@@ -60,6 +63,12 @@ struct ModelConfigurationView: View {
                 EmptyStateView(symbol: Theme.Icon.model, title: String(localized: "No Model Configuration Yet"), message: String(localized: "Connect to a hub that supports model configuration by category to set it up here."))
                     .listRowBackground(Color.clear)
             }
+            ModelProfilesSection(
+                profiles: profiles,
+                onSelect: { selectedProfile = ModelProfileSheetRoute(id: $0.id) },
+                onRollback: { Task { await rollbackProfile() } },
+                onRetry: { Task { await profiles.load() } }
+            )
             if showsAdvancedProviders {
                 Section {
                     NavigationLink(value: ModelLaunchersRoute()) {
@@ -77,11 +86,38 @@ struct ModelConfigurationView: View {
         .themedPage()
         .detailTitle(showsAdvancedProviders ? String(localized: "Models") : String(localized: "Model Settings [Launcher Model Picker 8cbcf7]"))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedProfile) { route in
+            ModelProfileSheet(
+                profileID: route.id,
+                profiles: profiles,
+                purposes: page.purposes,
+                providers: page.providers,
+                onChanged: { await page.load() },
+                onClose: { selectedProfile = nil }
+            )
+        }
         .task {
             page.owner = owner
-            await page.load()
+            profiles.owner = owner
+            async let configLoad: Void = page.load()
+            async let profilesLoad: ModelProfilesCatalog? = profiles.load()
+            _ = await (configLoad, profilesLoad)
         }
-        .refreshable { await page.load() }
+        .refreshable {
+            async let configLoad: Void = page.load()
+            async let profilesLoad: ModelProfilesCatalog? = profiles.load()
+            _ = await (configLoad, profilesLoad)
+        }
+    }
+
+    private func rollbackProfile() async {
+        if await profiles.rollback() {
+            Haptics.success()
+            app.toast = Toast(String(localized: "Rolled back to previous configuration [Model Profiles]"), style: .success)
+            await page.load()
+        } else {
+            Haptics.error()
+        }
     }
 
     @ViewBuilder private func categoryLink(_ category: ModelPurpose) -> some View {
@@ -150,6 +186,15 @@ struct ModelPurposeEditorView: View {
 
     var body: some View {
         SettingsForm {
+            if let error = page.error {
+                Section {
+                    Label(error, systemImage: Theme.Icon.error).font(Theme.Font.label).foregroundStyle(Theme.danger)
+                        .accessibilityIdentifier("model-config-error")
+                    Button("Reload [Lark Chat Pins View 7bdd5c]") { reload() }.lineLimit(1)
+                        .disabled(page.saving || page.loading)
+                        .accessibilityIdentifier("model-config-reload")
+                }
+            }
             if let purpose = page.purpose {
                 Section("In Effect") {
                     if page.followLabel != nil {
@@ -262,14 +307,6 @@ struct ModelPurposeEditorView: View {
                 }
             } else if page.loading {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
-            }
-            if let error = page.error {
-                Section {
-                    Label(error, systemImage: Theme.Icon.error).font(Theme.Font.label).foregroundStyle(Theme.danger)
-                    Button("Reload [Lark Chat Pins View 7bdd5c]") { reload() }.lineLimit(1)
-                        .disabled(page.saving || page.loading)
-                        .accessibilityIdentifier("model-config-reload")
-                }
             }
         }
         .themedPage()

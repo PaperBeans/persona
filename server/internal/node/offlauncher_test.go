@@ -34,7 +34,8 @@ func TestPersonaAgentResumedBareRunsOffItsLauncher(t *testing.T) {
 	st, _ := n.state.get(sidA)
 	st.Launcher, st.Model = "work", "model-w" // started on the gateway launcher, with one of its models
 	n.state.put(sidA, st)
-	scannedClaude(t, n, home, 4242, sidA, procEnv{Cmd: true}) // herdr's bare `claude --resume <id>`
+	pid, exit := idleTerminalTestProcess(t)
+	scannedClaude(t, n, home, pid, sidA, procEnv{Cmd: true}) // herdr's bare `claude --resume <id>`
 	if row := rowOf(t, n, sidA); row.Launcher != "work" || !row.OffLauncher {
 		t.Fatalf("row: launcher %q, off_launcher %v", row.Launcher, row.OffLauncher)
 	}
@@ -45,7 +46,7 @@ func TestPersonaAgentResumedBareRunsOffItsLauncher(t *testing.T) {
 		t.Fatalf("no switch back to its launcher waits: %+v", ps)
 	}
 	f.reset()
-	quitsToShell(f, cwd)
+	quitsOn(f, "w1:p1", sidA, nil, shellPane("w1:p1", "w1:t1", "w1", cwd, sidA), exit)
 	comesUpWhen(f, "w1:p1", func(string) bool { return true })
 	if err := tell(t, n, "go on", true); err != nil {
 		t.Fatalf("send: %v\n%s", err, strings.Join(f.trace(), "\n"))
@@ -60,7 +61,8 @@ func TestPersonaAgentResumedBareRunsOffItsLauncher(t *testing.T) {
 	}
 
 	f.reply("session.snapshot", snapshot(nil, nil, []any{claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", cwd, "")}, nil))
-	scannedClaude(t, n, home, 4343, sidA, procEnv{Cmd: true, MCPConfig: filepath.Join(n.dir, "mcp.json")})
+	newPID, _ := idleTerminalTestProcess(t)
+	scannedClaude(t, n, home, newPID, sidA, procEnv{Cmd: true, MCPConfig: filepath.Join(n.dir, "mcp.json")})
 	if row := rowOf(t, n, sidA); row.Launcher != "work" || row.OffLauncher {
 		t.Fatalf("started by Persona's command: launcher %q, off_launcher %v", row.Launcher, row.OffLauncher)
 	}

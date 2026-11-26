@@ -37,9 +37,11 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: server-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ matrix.shard }}-${{ hashFiles('server/go.sum', 'sdk/go/go.sum') }}-${{ hashFiles('server/**/*.go', 'sdk/go/**/*.go') }}
+          # Core Node compiles the core server. Reuse its main cache when Core Managers has no entry yet.
           restore-keys: |
             server-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ matrix.shard }}-${{ hashFiles('server/go.sum', 'sdk/go/go.sum') }}-
             server-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ matrix.shard }}-
+            ${{ matrix.shard == 'core-managers' && format('server-go-v1-{0}-{1}-{2}-core-node-{3}-', runner.os, runner.arch, steps.go.outputs.go-version, hashFiles('server/go.sum', 'sdk/go/go.sum')) || '' }}
       - uses: oven-sh/setup-bun@v2
         if: matrix.shard == 'other' || matrix.shard == 'core-other'
         with:

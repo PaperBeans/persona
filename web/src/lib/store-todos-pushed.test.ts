@@ -231,4 +231,45 @@ describe("to-do pushes", () => {
     expect(revisionReads() - before).toBe(0);
     expect(todoReads()).toBe(1);
   });
+
+  it("issues a fresh post-push GET /todos instead of joining an in-flight pre-event read before any revision exists", async () => {
+    const stale = refreshTodos({ coalesce: true });
+    await settle();
+    expect(reads).toHaveLength(1);
+
+    revision++;
+    todosPushed();
+    await pushedSettle();
+    expect(reads).toHaveLength(2);
+
+    // Newer post-push read resolves first; stale pre-event read resolving later cannot overwrite it.
+    reads[1]!("after push");
+    await settle();
+    reads[0]!("before push");
+    await stale;
+    await settle();
+    expect(getState().todos.map((t) => t.title)).toEqual(["after push"]);
+  });
+
+  it("issues a fresh post-push GET /todos instead of joining an in-flight passive read after revision changes", async () => {
+    const s = await online();
+    const before = todoReads();
+    const stale = refreshTodos({ coalesce: true });
+    await settle();
+    expect(todoReads() - before).toBe(1);
+    expect(reads).toHaveLength(1);
+
+    revision++;
+    s.push({ type: "todos" });
+    await pushedSettle();
+    expect(todoReads() - before).toBe(2);
+    expect(reads).toHaveLength(2);
+
+    reads[1]!("after push");
+    await settle();
+    reads[0]!("before push");
+    await stale;
+    await settle();
+    expect(getState().todos.map((t) => t.title)).toEqual(["after push"]);
+  });
 });

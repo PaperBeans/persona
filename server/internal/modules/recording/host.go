@@ -2,6 +2,8 @@ package recording
 
 import (
 	"context"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"time"
 
@@ -59,8 +61,8 @@ type Host interface {
 	ChannelPushTo(ctx context.Context, machine, session, title, body, ref string, took func(id string) bool) (map[string]error, error)
 
 	// To-dos made of action items (minutes and day recaps).
-	ActionTodos(ctx context.Context, list []kb.MinutesAction, actions []string, kind, recording string, version int,
-		note func(kb.MinutesAction) string) (out []any, made, byTask map[string]string, err error)
+	ActionTodos(ctx context.Context, list []recordingwire.MinutesAction, actions []string, kind, recording string, version int,
+		note func(recordingwire.MinutesAction) string) (out []any, made, byTask map[string]string, err error)
 	ActionTodo(ctx context.Context, todoID string) string
 
 	// Models.
@@ -109,9 +111,9 @@ type Host interface {
 
 	// Recordings saved into a track (the core's tracks).
 	InSpaceRecording(ctx context.Context, rawID string) bool
-	PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u kb.RecordingUpload)
+	PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u recordingwire.RecordingUpload, clean recordingwire.UploadCleaner)
 	DeleteSpaceRecording(w http.ResponseWriter, r *http.Request, id string) bool
-	SpaceRecordingStates(ctx context.Context) (kept []kb.RecordingState, deleted []string)
+	SpaceRecordingStates(ctx context.Context) (kept []recordingwire.RecordingState, deleted []string)
 
 	// Requests.
 	DecodeLargeBody(w http.ResponseWriter, r *http.Request, v any, limit int64) error
@@ -276,10 +278,10 @@ func (s *Recordings) transcriptionReadyAwait() bool { return s.h.TranscriptionRe
 func (s *Recordings) inSpaceRecording(ctx context.Context, rawID string) bool {
 	return s.h.InSpaceRecording(ctx, rawID)
 }
-func (s *Recordings) putSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u kb.RecordingUpload) {
-	s.h.PutSpaceRecordingRoute(w, r, u)
+func (s *Recordings) putSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u recordingwire.RecordingUpload) {
+	s.h.PutSpaceRecordingRoute(w, r, u, writers.CleanUpload)
 }
-func (s *Recordings) spaceRecordingStates(ctx context.Context) (kept []kb.RecordingState, deleted []string) {
+func (s *Recordings) spaceRecordingStates(ctx context.Context) (kept []recordingwire.RecordingState, deleted []string) {
 	return s.h.SpaceRecordingStates(ctx)
 }
 

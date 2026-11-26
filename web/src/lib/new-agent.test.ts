@@ -206,20 +206,38 @@ describe("本地优先启动", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("sends the picked model and effort with the start, and only the model to a Codex", async () => {
+  it("sends the picked model and explicit effort with Claude and Codex starts, and omits unset effort", async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response({ session })).mockResolvedValueOnce(response({}));
     vi.stubGlobal("fetch", fetcher);
     launchAgent({ ...input, launcher: "claude", model: "opus", effort: "high" });
     await advanceDelivery(0);
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ launcher: "claude", model: "opus", effort: "high" });
 
-    const codex = vi.fn().mockResolvedValueOnce(response({ error: "needs prompt", code: "codex_needs_prompt" }, 409)).mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
-    vi.stubGlobal("fetch", codex);
+    const codexInline = vi.fn().mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
+    vi.stubGlobal("fetch", codexInline);
+    launchAgent({ ...input, launcher: "codex", agentType: "codex", inlinePrompt: true, model: "gpt-5.5-mini", effort: "high" });
+    await advanceDelivery(0);
+    expect(JSON.parse(codexInline.mock.calls[0][1].body)).toMatchObject({
+      launcher: "codex",
+      agent_type: "codex",
+      model: "gpt-5.5-mini",
+      effort: "high",
+      prompt: input.text,
+    });
+
+    const codexUnset = vi.fn().mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
+    vi.stubGlobal("fetch", codexUnset);
+    launchAgent({ ...input, launcher: "codex", agentType: "codex", inlinePrompt: true, model: "gpt-5.5-mini" });
+    await advanceDelivery(0);
+    const unsetBody = JSON.parse(codexUnset.mock.calls[0][1].body);
+    expect(unsetBody).toMatchObject({ launcher: "codex", agent_type: "codex", model: "gpt-5.5-mini", prompt: input.text });
+    expect(unsetBody).not.toHaveProperty("effort");
+
+    const codexRetry = vi.fn().mockResolvedValueOnce(response({ error: "needs prompt", code: "codex_needs_prompt" }, 409)).mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
+    vi.stubGlobal("fetch", codexRetry);
     launchAgent({ ...input, launcher: "codex", model: "gpt-5.5-mini", effort: "high" });
     await advanceDelivery(0);
-    const body = JSON.parse(codex.mock.calls[1][1].body);
-    expect(body).toMatchObject({ launcher: "codex", model: "gpt-5.5-mini", prompt: input.text });
-    expect(body).not.toHaveProperty("effort");
+    expect(JSON.parse(codexRetry.mock.calls[1][1].body)).toMatchObject({ launcher: "codex", model: "gpt-5.5-mini", effort: "high", prompt: input.text });
   });
 
   it("includes permission_mode on inlinePrompt Codex starts and codex_needs_prompt retries", async () => {
@@ -274,8 +292,7 @@ describe("本地优先启动", () => {
       expect(body).toMatchObject({ workspace_id: "empty-nested", host: "orca", cwd: input.cwd, launcher: "custom-codex", model: "typed-model" });
       for (const field of ["permission_mode", "approval_policy", "approvals_reviewer", "sandbox_mode", "network_access", "permissions"]) expect(body).not.toHaveProperty(field);
     }
-    expect(bodies[2]).toMatchObject({ prompt: input.text });
-    expect(bodies[2]).not.toHaveProperty("effort");
+    expect(bodies[2]).toMatchObject({ prompt: input.text, effort: "high" });
     expect(fetcher.mock.calls[0][1].headers.get("X-Persona-Op-Id")).toBe(fetcher.mock.calls[1][1].headers.get("X-Persona-Op-Id"));
     expect(fetcher.mock.calls[2][1].headers.get("X-Persona-Op-Id")).not.toBe(fetcher.mock.calls[0][1].headers.get("X-Persona-Op-Id"));
   });

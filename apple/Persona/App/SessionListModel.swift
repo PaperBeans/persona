@@ -11,6 +11,13 @@ import Observation
     typealias Fetch = @MainActor (SessionListQuery, String?, String?) async throws -> Page
     private(set) var rows: [Row] = []
     private(set) var counts: SessionListCounts?
+    /// Incremented whenever `counts` is replaced by a hub answer or cleared, so views can key local adjustments
+    /// to the exact counts snapshot (#13524).
+    private(set) var countsGeneration: UInt64 = 0
+    /// IDs whose unread count was already deducted from the current `counts` by `keepSeen` (#13524).
+    private(set) var seenAdjustedUnreadIDs: Set<String> = []
+    /// IDs whose rows arrived in the same answer as `counts`; nil means a separate, authoritative counts read.
+    @ObservationIgnored private var countRowIDs: Set<String>?
     private(set) var total = 0
     private(set) var hasMore = false
     private(set) var loading = false
@@ -41,6 +48,8 @@ import Observation
     @ObservationIgnored private var fetch: Fetch
     @ObservationIgnored private var fetchCounts: @MainActor (SessionListQuery) async throws -> SessionListCounts
     @ObservationIgnored var changed: (([Row]) -> Void)?
+    /// A complete row/count publication landed, including a delta that changed only counts.
+    @ObservationIgnored var published: (() -> Void)?
     /// Rows a delta brought that are not in the window (sessions started after it was read, or further down): they
     /// stay out of `rows`, as the window is frozen, but what looks sessions up by id still needs them (#2003: a
     /// to-do's new agent was missing and shown as Follow Up while it worked).
@@ -80,7 +89,8 @@ import Observation
         taskID = nil
         self.query = query
         rows = []
-        counts = nil
+        setHubCounts(nil)
+        countRowIDs = nil
         loaded = false
         loading = false
         paged = false
@@ -208,7 +218,7 @@ import Observation
                     self.rows = self.unique(page.sessions)
                     self.complete = complete
                     self.paged = page.isPaged && !complete
-                    if !self.paged { self.counts = nil }
+                    if !self.paged { self.setHubCounts(nil) }
                     self.snapshotRevision = page.revision
                     self.revision = page.revision
                 } else {
@@ -224,18 +234,33 @@ import Observation
                 if first { self.total = complete ? self.rows.count : page.total ?? self.rows.count }
                 self.cursor = page.nextCursor
                 self.hasMore = page.hasMore == true && page.nextCursor != nil
+                let embedded = self.paged ? page.counts : nil
+                let separateCounts = self.paged && embedded == nil && (first || self.countRowIDs == nil)
+                if self.paged {
+                    if let embedded {
+                        self.countRowIDs = Set(page.sessions.map(self.id))
+                        self.setHubCounts(embedded)
+                    } else if separateCounts {
+                        self.countRowIDs = nil
+                    }
+                } else {
+                    self.countRowIDs = nil
+                }
                 self.loaded = true
                 self.error = nil
                 self.changed?(self.rows)
-                // Render the first page before waiting for aggregates. A counts revision is never a row baseline.
-                if self.paged {
+                // Render the first page before waiting for separate aggregates. Embedded counts already landed with it;
+                // a cursor continuation in coupled mode keeps the first answer's counts instead of replacing them.
+                if separateCounts {
                     let counts = try await self.fetchCounts(self.query)
                     try Task.checkCancellation()
                     guard self.generation == gen else { return }
-                    self.counts = counts
+                    self.setHubCounts(counts)
+                    self.countRowIDs = nil
                 }
                 if !self.hasMore { self.overlays = [:]; self.removed = [] }
                 self.recoveries = 0 // read through: a later expiry (the next hub restart) may rebuild the baseline again
+                self.published?()
             } catch {
                 if self.generation == gen, !Task.isCancelled { self.error = error.localizedDescription }
                 if self.generation == gen, (error as? APIError)?.status == 409, self.recoveries < 1 {
@@ -281,6 +306,8 @@ import Observation
                 var upserts: [String: Row] = [:]
                 var removals = Set<String>()
                 var target: String?
+                var embeddedCounts: SessionListCounts?
+                var embeddedIDs = Set<String>()
                 var total = self.total
                 repeat {
                     let page = try await self.fetch(self.query, next, since)
@@ -288,6 +315,10 @@ import Observation
                     guard self.generation == gen else { return }
                     if let target, target != page.revision { throw APIError(status: 409, message: "List delta changed") }
                     target = page.revision
+                    if let counts = page.counts {
+                        embeddedCounts = counts
+                        embeddedIDs.formUnion(page.sessions.map(self.id))
+                    }
                     for row in page.sessions { upserts[self.id(row)] = row }
                     for token in page.remove ?? [] {
                         guard let key = self.removalID(token) else { throw APIError(status: 0, message: "Invalid list removal") }
@@ -297,9 +328,9 @@ import Observation
                     next = page.hasMore == true ? page.nextCursor : nil
                     if page.hasMore == true && next == nil { throw APIError(status: 0, message: "Missing list cursor") }
                 } while next != nil
-                // A complete copy counts its own rows; a window's counts come from the hub.
-                var counts: SessionListCounts?
-                if !self.complete { counts = try await self.fetchCounts(self.query) }
+                // A complete copy counts its own rows. A window uses embedded counts or, separately, the hub's own.
+                var counts = embeddedCounts
+                if !self.complete, counts == nil { counts = try await self.fetchCounts(self.query) }
                 try Task.checkCancellation()
                 guard self.generation == gen else { return }
                 let window = Set(self.rows.map(self.id))
@@ -310,6 +341,8 @@ import Observation
                 let beyond = upserts.filter { !window.contains($0.key) && !removals.contains($0.key) }
                     .sorted { $0.key < $1.key }.map { $0.value }
                 if self.complete { rows += beyond } // a new session belongs to the whole collection
+                self.countRowIDs = embeddedCounts == nil ? nil : embeddedIDs
+                if !self.complete { self.setHubCounts(counts) }
                 if rows != self.rows { self.rows = rows; self.changed?(rows) }
                 if !self.complete, !beyond.isEmpty { self.outside?(beyond) }
                 if self.hasMore {
@@ -317,10 +350,10 @@ import Observation
                     for (key, row) in upserts where !removals.contains(key) { self.overlays[key] = row; self.removed.remove(key) }
                 }
                 self.total = self.complete ? rows.count : total
-                if !self.complete { self.counts = counts }
                 self.revision = target // only the last successful delta page advances the checkpoint
                 self.error = nil
                 self.recoveries = 0
+                self.published?()
             } catch {
                 guard self.generation == gen, !Task.isCancelled else { return }
                 self.error = error.localizedDescription
@@ -369,18 +402,29 @@ import Observation
         total = first.total ?? fresh.count
         cursor = page.nextCursor
         hasMore = page.hasMore == true && page.nextCursor != nil
+        let embedded = first.isPaged ? first.counts : nil
+        countRowIDs = embedded == nil ? nil : Set(first.sessions.map(id))
+        if let embedded { setHubCounts(embedded) }
         overlays = [:]
         removed = []
         loaded = true
         error = nil
         recoveries = 0
         changed?(rows)
-        if paged {
+        if paged, embedded == nil {
             let counts = try await fetchCounts(query)
             try Task.checkCancellation()
             guard generation == gen else { return }
-            self.counts = counts
+            self.setHubCounts(counts)
+            countRowIDs = nil
         }
+        published?()
+    }
+
+    private func setHubCounts(_ value: SessionListCounts?) {
+        counts = value
+        countsGeneration &+= 1
+        seenAdjustedUnreadIDs = []
     }
 
     private func unique(_ rows: [Row]) -> [Row] {
@@ -390,14 +434,37 @@ import Observation
 }
 
 extension SessionListModel where Row == Session {
-    /// Apply pending local receipts to this window without changing its cursor, revision, row order or counts.
-    func keepSeen(where marked: (SessionKey) -> Bool) {
+    /// Apply pending local receipts to this window without changing its cursor, revision or row order. Only counts
+    /// embedded in the same answer as a held row move; standalone hub counts stay authoritative (#12770).
+    func keepSeen(where marked: (Session) -> Bool) {
         var visible = rows
         var changed = false
-        for i in visible.indices where visible[i].needsSeen() && marked(visible[i].key) {
+        var unread = 0
+        var justFinished = 0
+        for i in visible.indices where visible[i].needsSeen() && marked(visible[i]) {
+            if countRowIDs?.contains(id(visible[i])) == true {
+                // A folded parent with unread sides stays Unread even after its own row is marked seen (#13524).
+                if visible[i].state == .unread, (visible[i].children?.sidesUnread ?? 0) == 0 {
+                    unread += 1
+                    seenAdjustedUnreadIDs.insert(id(visible[i]))
+                }
+                if visible[i].work?.justFinished == true { justFinished += 1 }
+            }
             visible[i].markLocallySeen()
             changed = true
         }
-        if changed { rows = visible }
+        if changed {
+            rows = visible
+            if var held = counts, unread > 0 || justFinished > 0 {
+                if unread > 0 {
+                    held.state["unread"] = max(0, (held.state["unread"] ?? 0) - unread)
+                    held.state["idle"] = (held.state["idle"] ?? 0) + unread
+                }
+                if justFinished > 0, let count = held.justFinished {
+                    held.justFinished = max(0, count - justFinished)
+                }
+                counts = held
+            }
+        }
     }
 }

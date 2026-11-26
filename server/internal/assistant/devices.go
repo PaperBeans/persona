@@ -64,6 +64,10 @@ type Devices interface {
 	// subscription accounts of each upstream provider are schedulable now and when the nearest one recovers.
 	// Read-only, from the manager's in-memory caches; the zero value when no pool is configured.
 	CapacitySnapshot(ctx context.Context) proto.CapacitySnapshot
+	// UsageAccounts is the merged subscription accounts with their 5 h / 7 d windows (proto.UsageAccount), for the
+	// pace-based headroom a tier's candidates are scored by (candidate_headroom.go). Read-only, from the same cache as
+	// CapacitySnapshot; nil when nothing is known.
+	UsageAccounts(ctx context.Context) []proto.UsageAccount
 	// GatewayRetryAt uses a bound, complete gateway inventory with fresh account observations. Zero means no hold.
 	GatewayRetryAt(source, provider string, now time.Time) time.Time
 	// Follow has the node send the manager a session's items and text as they are made (on), or stop.
@@ -83,6 +87,10 @@ type Devices interface {
 	// found is false when no machine holds such a message; err is an *rpc.Error coded for the app otherwise.
 	HeldRetry(ctx context.Context, sid, msg string) (found bool, err error)
 	HeldDelete(ctx context.Context, sid, msg string) (found bool, err error)
+	// AgentTransfer moves a file or a folder from one computer to another for file_transfer (devices agent_transfer.go,
+	// file_transfer.go here), answering once the target has it; the error is a *devices.AgentTransferError when it
+	// did not happen.
+	AgentTransfer(ctx context.Context, t devices.AgentTransfer) (devices.AgentTransferResult, error)
 }
 
 // localDeviceCall is a device.call the manager answers itself: a node's method on a machine it has. The hub still

@@ -12,6 +12,7 @@ import { cardSessionRow, getState, onHubEvent, subscribe, useStore } from "./sto
 import { SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
 import { runtimeAgents, runtimeSessions, supportsPagedAgents } from "./runtime-list";
 import { heldCounts, heldRows } from "./seen-outbox";
+import { holdNotedSeen } from "./seen-rows";
 import { heldSidesOf, useHeldVersion } from "./use-child-sessions";
 import type { Interaction, Session } from "./types";
 
@@ -90,7 +91,9 @@ function createFullCache(owner: string) {
       if (valid()) observeLaunchRows(result.sessions);
       // An unchanged delta leaves the published snapshot (and its older base, which only widens the overlay) as it is.
       if (valid() && (result.changed || !fullSnapshot.loaded)) {
-        fullSnapshot = { sessions: foldRows(directoryVisible(result.sessions)).filter((s) => !s.assistant), loaded: true, error: "", base, epoch: fullSnapshot.epoch };
+        const sessions = foldRows(directoryVisible(result.sessions)).filter((s) => !s.assistant);
+        fullSnapshot = { sessions, loaded: true, error: "", base, epoch: fullSnapshot.epoch };
+        holdNotedSeen(sessions);
         fullChanged();
       }
     } catch (e) {

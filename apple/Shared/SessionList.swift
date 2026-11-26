@@ -22,6 +22,9 @@ nonisolated struct SessionListQuery: Hashable, Sendable {
     /// manager's, its totals and counts with them. Part of the query, so a list for another manager starts over: a
     /// cursor is bound to its filters.
     var manager: String = ""
+    /// One parent's computer (`parent_machine_id`) when querying cross-machine children on a hub with
+    /// `sessions_cross_machine_hierarchy`. Combined with `parentSessionID`, never with `roots`.
+    var parentMachineID = ""
     /// One parent's folded children, every depth (`parent_session_id`). Never combined with `roots` (the hub rejects
     /// that). Not part of the Agents list's query: a child page is its own request and is not merged into the window.
     var parentSessionID = ""
@@ -40,12 +43,19 @@ nonisolated struct SessionListQuery: Hashable, Sendable {
     }
 
     /// The query the hub is sent. `roots=1` only on a windowed list (and its counts) when the hub advertised
-    /// `sessions_hierarchy`. A complete copy keeps every child. A parent query never sends `roots`. The flag is not
-    /// part of the query's identity: one hub's window either folds or it does not.
-    func wireParameters(hierarchy: Bool) -> [String: String] {
+    /// `sessions_hierarchy`; `cross_machine_hierarchy=1` is added alongside `roots=1` when
+    /// `sessions_cross_machine_hierarchy` is supported. A complete copy keeps every child. A parent query never sends
+    /// `roots`. The flags are not part of the query's identity: one hub's window either folds or it does not.
+    func wireParameters(hierarchy: Bool, crossMachineHierarchy: Bool = false) -> [String: String] {
         var out = parameters
+        if !parentMachineID.isEmpty { out["parent_machine_id"] = parentMachineID }
         if !parentSessionID.isEmpty { out["parent_session_id"] = parentSessionID }
-        if hierarchy && !legacy && parentSessionID.isEmpty { out["roots"] = "1" }
+        if hierarchy && !legacy && parentSessionID.isEmpty {
+            out["roots"] = "1"
+            if crossMachineHierarchy { out["cross_machine_hierarchy"] = "1" }
+        } else if crossMachineHierarchy && !parentSessionID.isEmpty && parentMachineID.isEmpty && !machine.isEmpty {
+            out["cross_machine_hierarchy"] = "1"
+        }
         return out
     }
 }
@@ -57,10 +67,26 @@ nonisolated struct SessionListPage<Row: Decodable & Sendable>: Decodable, Sendab
     var nextCursor: String?
     var revision: String?
     var total: Int?
+    /// Hub aggregates delivered with these rows (`with_counts=1`, `sessions_page_counts`), never a separate read.
+    var counts: SessionListCounts? = nil
     var isPaged: Bool { revision != nil && hasMore != nil && total != nil }
     enum CodingKeys: String, CodingKey {
-        case sessions, remove, revision, total
+        case sessions, remove, revision, total, counts
         case hasMore = "has_more", nextCursor = "next_cursor"
+    }
+}
+
+nonisolated extension SessionListPage {
+    /// An invalid optional counts object must not discard an otherwise usable page: the model falls back to `counts=1`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessions = try container.decode([Row].self, forKey: .sessions)
+        remove = try container.decodeIfPresent([String].self, forKey: .remove)
+        hasMore = try container.decodeIfPresent(Bool.self, forKey: .hasMore)
+        nextCursor = try container.decodeIfPresent(String.self, forKey: .nextCursor)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        total = try container.decodeIfPresent(Int.self, forKey: .total)
+        counts = try? container.decodeIfPresent(SessionListCounts.self, forKey: .counts)
     }
 }
 
@@ -71,11 +97,30 @@ nonisolated struct SessionListCounts: Decodable, Equatable, Sendable {
     var group: [String: Int]
     var state: [String: Int]
     var revision: String
+    var justFinished: Int? = nil
+    enum CodingKeys: String, CodingKey {
+        case total, machine, project, group, state, revision
+        case justFinished = "just_finished"
+    }
+}
+
+nonisolated extension SessionListCounts {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        total = try container.decode(Int.self, forKey: .total)
+        machine = try container.decode([String: Int].self, forKey: .machine)
+        project = try container.decode([String: Int].self, forKey: .project)
+        group = try container.decode([String: Int].self, forKey: .group)
+        state = try container.decode([String: Int].self, forKey: .state)
+        revision = try container.decode(String.self, forKey: .revision)
+        // Older hubs omit this additive count; a malformed one does not invalidate the other aggregates.
+        justFinished = try? container.decodeIfPresent(Int.self, forKey: .justFinished)
+    }
 }
 
 extension APIClient {
     func sessionListPage(_ query: SessionListQuery, cursor: String? = nil, since: String? = nil) async throws -> SessionListPage<Session> {
-        var parameters = query.wireParameters(hierarchy: sessionsHierarchy)
+        var parameters = query.wireParameters(hierarchy: sessionsHierarchy, crossMachineHierarchy: sessionsCrossMachineHierarchy)
         if query.legacy {
             // A paging hub pushes no rows, only a hint for each change. Reading the whole list again for every hint was
             // hundreds of KB about once a second while agents worked (#3759): complete pages (no filters, the view
@@ -86,6 +131,7 @@ extension APIClient {
             parameters = ["summary": "0", "limit": String(SessionListQuery.completePageSize)]
             if query.includeHidden { parameters["include_hidden"] = "1" }
         }
+        if sessionsPageCounts && !query.legacy && cursor == nil { parameters["with_counts"] = "1" }
         if let cursor { parameters["cursor"] = cursor }
         if let since { parameters["since"] = since }
         let data = try await request("GET", "/api/v1/sessions", query: parameters)
@@ -138,8 +184,14 @@ extension APIClient {
 
     /// One page of the sessions folded under `parent` on `machine`. Own states, not folded state. Never `roots`
     /// (the hub rejects `roots` together with `parent_session_id`). Not merged into the root window.
+    /// Uses `parent_machine_id` + `parent_session_id` when the hub advertises `sessions_cross_machine_hierarchy`
+    /// (returning same-machine, cross-machine, and archived-parent children), falling back to legacy `machine_id` +
+    /// `parent_session_id` on older hubs.
     func childSessionPage(machine: String, parent: String, cursor: String?, since: String?) async throws -> SessionListPage<Session> {
-        var parameters = SessionListQuery(machine: machine, parentSessionID: parent).wireParameters(hierarchy: false)
+        let query = sessionsCrossMachineHierarchy
+            ? SessionListQuery(parentMachineID: machine, parentSessionID: parent)
+            : SessionListQuery(machine: machine, parentSessionID: parent)
+        var parameters = query.wireParameters(hierarchy: false, crossMachineHierarchy: sessionsCrossMachineHierarchy)
         parameters["summary"] = "1"
         parameters["limit"] = String(SessionListQuery.completePageSize)
         if let cursor { parameters["cursor"] = cursor }
@@ -157,7 +209,10 @@ extension APIClient {
     /// `roots=1` when the hub folds children, so a waiting child is not a row of its own here too.
     func sessionsNeedingYou() async throws -> [Session] {
         var query = ["state": AgentState.needsYou.rawValue, "summary": "1", "limit": "200"]
-        if sessionsHierarchy { query["roots"] = "1" }
+        if sessionsHierarchy {
+            query["roots"] = "1"
+            if sessionsCrossMachineHierarchy { query["cross_machine_hierarchy"] = "1" }
+        }
         let data = try await request("GET", "/api/v1/sessions", query: query)
         let page = try await Task.detached(priority: .utility) {
             try JSON.decoder.decode(SessionListPage<Session>.self, from: data)
@@ -166,7 +221,8 @@ extension APIClient {
     }
 
     func sessionListCounts(_ query: SessionListQuery, personal: Bool = false) async throws -> SessionListCounts {
-        var parameters = query.wireParameters(hierarchy: sessionsHierarchy && !personal)
+        var parameters = query.wireParameters(hierarchy: sessionsHierarchy && !personal,
+                                              crossMachineHierarchy: sessionsCrossMachineHierarchy && !personal)
         parameters["counts"] = "1"
         let data = try await request("GET", personal ? "/api/v1/agents/sessions" : "/api/v1/sessions", query: parameters)
         return try await Task.detached(priority: .utility) { try JSON.decoder.decode(SessionListCounts.self, from: data) }.value

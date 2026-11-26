@@ -117,7 +117,7 @@ class ChatSearchTest {
             }
             assertEquals(case.getValue("name").jsonPrimitive.content, fields, item.searchFields())
         }
-        for (word in listOf("ActionSecret", "persona-action", "ViewErr", "beach.jpg", "InjectedRaw", "RawFollowup", "persona-supervision", "fallback", "persona-view"))
+        for (word in listOf("ActionSecret", "persona-action", "ViewErr", "beach.jpg", "InjectedRaw", "RawFollowup", "persona-supervision", "fallback", "persona-view", "persona-inline-v1", "opaque-anchor"))
             assertTrue(word, searchChat(res, items, word).hits.isEmpty())
         for (hit in searchChat(res, items, "路线").hits) {
             assertFalse(hit.snippet, hit.snippet.contains("persona-") || hit.snippet.contains("fallback"))

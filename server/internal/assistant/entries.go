@@ -24,9 +24,6 @@ type entriesStore interface {
 }
 
 func (s *Service) entriesDB() entriesStore {
-	if s.store == nil {
-		return nil
-	}
 	st, _ := s.store().(entriesStore)
 	return st
 }
@@ -63,6 +60,57 @@ func (s *Service) listEntries(ctx context.Context, p proto.AssistantEntriesParam
 	return st.ListAssistantEntries(ctx, p, personal)
 }
 
+// listEntriesForExtension filters ledger entries by the reading extension's trust and category grants (scene 6,
+// #13548), scanning pages until p.Limit visible entries are gathered or the ledger ends so hidden entries neither
+// produce short pages nor leak their IDs in the continuation cursor.
+func (s *Service) listEntriesForExtension(ctx context.Context, p proto.AssistantEntriesParams, personal bool) (proto.AssistantEntriesResult, error) {
+	if err := db.ValidateAssistantEntriesParams(&p); err != nil {
+		return proto.AssistantEntriesResult{}, conversationsInvalid(assistantwire.MethodAssistantEntriesList, err.Error())
+	}
+	st := s.entriesDB()
+	if st == nil {
+		return proto.AssistantEntriesResult{}, errors.New("entries require the manager database")
+	}
+	grant := readerGrant(ctx)
+	trackUses := map[string]infoUse{}
+	useOf := func(space string) infoUse {
+		if u, ok := trackUses[space]; ok {
+			return u
+		}
+		u := s.trackUse(ctx, space)
+		trackUses[space] = u
+		return u
+	}
+	out := proto.AssistantEntriesResult{Entries: []proto.AssistantEntry{}, After: p.After}
+	batch := p
+	batch.Limit = min(max(p.Limit+1, 51), 200)
+	for {
+		page, err := st.ListAssistantEntries(ctx, batch, personal)
+		if err != nil {
+			return proto.AssistantEntriesResult{}, err
+		}
+		for _, e := range page.Entries {
+			if extensionHidesEntryWith(grant, useOf(e.OriginSpace), e) {
+				continue
+			}
+			if len(out.Entries) < p.Limit {
+				out.Entries = append(out.Entries, e)
+				continue
+			}
+			out.HasMore = true
+			break
+		}
+		if out.HasMore || !page.HasMore || len(page.Entries) == 0 || page.After == batch.After {
+			break
+		}
+		batch.After = page.After
+	}
+	if len(out.Entries) > 0 {
+		out.After = db.EncodeAssistantEntriesCursor(out.Entries[len(out.Entries)-1])
+	}
+	return out, nil
+}
+
 func (s *Service) entriesRoutes() {
 	s.handle("GET /api/v1/assistant/entries", func(w http.ResponseWriter, r *http.Request) {
 		p, err := entriesQuery(r)
@@ -70,18 +118,21 @@ func (s *Service) entriesRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		personal := true
+		var out proto.AssistantEntriesResult
 		if r.Header.Get(RoleHeader) == roleExtension {
-			allowed, granted := s.entriesReadAccess(r.Header.Get(ExtensionHeader))
+			extID := r.Header.Get(ExtensionHeader)
+			allowed, granted := s.entriesReadAccess(extID)
 			if !allowed {
 				body := apierr.CodeBody(w, http.StatusForbidden, "permission_denied", errors.New("assistant.entries.list requires assistant.entries.read"))
 				body["scope"] = extwire.ScopeAssistantEntriesRead
 				apierr.WriteBody(w, http.StatusForbidden, body)
 				return
 			}
-			personal = granted || s.localEntriesReader(r.Context())
+			personal := granted || s.localEntriesReader(r.Context())
+			out, err = s.listEntriesForExtension(s.withExtensionReader(r.Context(), extID), p, personal)
+		} else {
+			out, err = s.listEntries(r.Context(), p, true)
 		}
-		out, err := s.listEntries(r.Context(), p, personal)
 		if err != nil {
 			apierr.Call(w, err)
 			return

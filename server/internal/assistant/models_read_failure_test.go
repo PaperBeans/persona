@@ -111,7 +111,7 @@ func providerReadFixture(t *testing.T) (*Service, *fakeHub, *providerReadFailure
 	// Settle display caches before counting mutation effects.
 	s.launcherViews(context.Background())
 	fault := &providerReadFailureStore{memStore: st.memStore}
-	s.store = func() Store { return fault }
+	s.setStore(func() Store { return fault })
 	return s, f, fault
 }
 

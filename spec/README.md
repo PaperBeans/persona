@@ -24,6 +24,7 @@ spec/
     sync-driver/      one hub group's reconnect, event cursor and lifecycle decisions
     fold-changes/     the files a run of work changed, counted by the hub and the web alike
     fold-sources/     the web pages a run of work used, read by the hub and the web alike
+    dashboards/       Dashboards watch pages (#13020): how the manager draws a watch, when its alert rule trips and pushes
     graph-layout/     an extension graph's layout, reading order and folds, checked by the web, iOS, Android and the hub
     input-clip/       the whole-input bound after the hub and runtime SDK's two string passes
     attention/        Persona Link's "Needs you" summary against the web badge
@@ -56,6 +57,7 @@ spec/
     screen-udp/       the live screen's video over UDP: sealing, packets, Reed-Solomon blocks, checked by the node (Go) and the iPhone
     screen-input/     the live screen's pixel scroll record, checked by the node (Go) and PersonaInputKit (helper and iPhone)
     review/           what the node's git.review answers (empty fields left out), written by the node and decoded by iOS
+    look-colors/      automatic theme color seed extraction from avatar pixels, checked by the hub (Go), web (TypeScript) and Apple (Swift)
     tokens/           设计 token 的校验夹具（如该领域提供）
   tokens/             设计 token 的来源文件，见 D7
 ```
@@ -106,6 +108,8 @@ spec/
 | screen-link | [README](fixtures/screen-link/README.md): the live screen's session wire (#6398), every message framed byte for byte alike by the node and the iPhone's client |
 | file-types | [README](fixtures/file-types/README.md): a `.ts` / `.mts` / `.cts` file typed by its first bytes (#7974), a real TypeScript module and a real MPEG-TS segment, checked by the node and the hub (Go) |
 | graph-layout | [README](fixtures/graph-layout/README.md): an extension view's `graph` (UI version 10, #9727), each node's place in slots, the edges drawn, the reading order with depths, fold counts and group frames, written by the reference `scripts/gen/graph_layout.py` and checked by the web, iOS, Android and the hub |
+| organization-snapshot | [README](fixtures/organization-snapshot/README.md): the owner-only runtime tree, three-state availability mapping, open to-dos, concurrency, dated model observations, and complete or incomplete P0 lineage, replayed by the Go server and reserved for later client implementations |
+| look-colors | [README](fixtures/look-colors/README.md): automatic theme color seed extraction for uploaded avatars (#15449), pinned on tiny synthetic PNGs so the hub (Go), web (TypeScript) and Apple clients (Swift) produce identical `#RRGGBB` seeds |
 | tokens | 见各自 [README](tokens/README.md)；校验夹具如放在 `fixtures/tokens/`，结构由该领域 README 说明 |
 
 ## 夹具约定

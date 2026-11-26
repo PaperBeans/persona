@@ -46,6 +46,3 @@ func (e *Engine) knowledgeOwner() prompts.KBOwner {
 	}
 	return e.writingOwner(lang)
 }
-
-// storedLang is the language of minutes or a recap that say lang: one written before they said any is Chinese.
-func storedLang(lang string) i18n.Lang { return i18n.Lang(lang).Or(i18n.ZhHans) }

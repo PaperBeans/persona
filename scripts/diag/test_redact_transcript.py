@@ -140,6 +140,43 @@ class RangeTests(unittest.TestCase):
 
 
 class OutputTests(unittest.TestCase):
+    def test_failed_later_source_never_publishes_a_partial_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, invalid = root / "valid.jsonl", root / "not-a-transcript"
+            output = root / "output.jsonl"
+            original = '{"line":1}\n'
+            source.write_text(original)
+            invalid.mkdir()
+            command = [sys.executable, "-B", redact.__file__, "-o", str(output), str(source), str(invalid)]
+            for exists in (True, False):
+                with self.subTest(existing_output=exists):
+                    output.unlink(missing_ok=True)
+                    if exists:
+                        output.write_text("keep this output\n")
+                    before = set(root.iterdir())
+                    run = subprocess.run(command, capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(run.returncode, 0)
+                    self.assertEqual(set(root.iterdir()), before)
+                    if exists:
+                        self.assertEqual(output.read_text(), "keep this output\n")
+                    self.assertEqual(source.read_text(), original)
+
+    def test_replacing_a_separate_symlink_target_keeps_link_and_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target, link = (root / name for name in ("source.jsonl", "target.jsonl", "link.jsonl"))
+            source.write_text('{"line":1}\n')
+            target.write_text("old output")
+            target.chmod(0o600)
+            link.symlink_to(target.name)
+            run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(link), str(source)],
+                                 capture_output=True, text=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(target.read_text()), {"line": 1})
+
     def test_skips_non_record_lines_and_keeps_later_valid_entries(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

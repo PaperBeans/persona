@@ -1,8 +1,8 @@
 # Install Persona Link independently on Mac
 
-Persona Link connects this Mac to your Persona hub so the hub can use Agents running here. It is a background connector and resident-node service, not a menu bar app and not a prerequisite of the Electron desktop app.
+Persona Link connects this Mac to your Persona hub so the hub can use Agents running here. It is a background connector and resident-node service, with a menu bar App that shows the connection and pairs the Mac. It stands alone: no other Persona program is needed or manages it.
 
-The independent helper package also contains **Persona Screen**, which owns the Screen Recording permission for live-screen capture, and **Persona Input**, which owns the Accessibility permission for scrolling the live screen by the point ([computer-use.md](../extensions/computer-use.md) "Pixel scrolling (#7775)"). It is not bundled into the Electron desktop's login items or process lifetime. See [link.md](link.md) for connection modes and protocol, and [desktop.md](../desktop/desktop.md) for the separate desktop boundary.
+The independent helper package also contains **Persona Screen**, which owns the Screen Recording permission for live-screen capture, and **Persona Input**, which owns the Accessibility permission for scrolling the live screen by the point ([computer-use.md](../extensions/computer-use.md) "Pixel scrolling (#7775)"). See [link.md](link.md) for connection modes and protocol, and its "Tray and menu bar App" for what the menu shows.
 
 There is no signed distribution package yet. Build from source for local use; this guide does not claim Developer ID signing or notarization.
 
@@ -11,7 +11,7 @@ There is no signed distribution package yet. Build from source for local use; th
 | Requirement | Details |
 | --- | --- |
 | macOS 15 or later | Persona Screen's minimum OS version |
-| Xcode (the full app, not just command-line tools) | Builds Persona Screen with `xcodebuild` |
+| Xcode (the full app, not just command-line tools) | Builds the menu bar App and Persona Screen with `xcodebuild` |
 | Go | Builds persona-link and persona-node, using the version in `server/go.mod` |
 | A running hub | And a browser already connected to it, to add this Mac |
 
@@ -24,14 +24,14 @@ git clone <repository-url> persona && cd persona
 ./scripts/app/mac-link.sh install
 ```
 
-The command builds persona-link, persona-node, Persona Screen and Persona Input, places them under `/Applications/Persona Link.app/Contents/Helpers/`, then registers two independent launchd agents:
+The command builds the menu bar App (`apple/PersonaLink/App`) with persona-link, persona-node, Persona Screen and Persona Input under `/Applications/Persona Link.app/Contents/Helpers/`, registers two independent launchd agents, then opens the App:
 
-- `com.persona.link` runs the connector copied to `~/.persona/bin/persona-link`. This fixed path is also what the Electron setup window invokes.
+- `com.persona.link` runs the connector copied to `~/.persona/bin/persona-link`. The menu bar App runs this same program for its actions.
 - `com.persona.node` runs the resident node. An existing node service is preserved, including its program and data directory.
 
-Both start after installation and at login, and restart on exit. There is no UI to open and no Electron process to keep running. On first LAN use, macOS may ask for local-network permission; allow it if this Mac connects to the hub over the LAN.
+Both start after installation and at login, and restart on exit, whether or not the App runs. The App is the Persona helper in the menu bar: it reads the connector's state files every 1.5 seconds and runs `persona-link` for each action; quitting it leaves the Mac connected. Its **Launch at login** shows the App at login (`SMAppService`, off by default; if macOS wants approval, the menu points to System Settings › General › Login Items). On first LAN use, macOS may ask for local-network permission; allow it if this Mac connects to the hub over the LAN.
 
-Build without installing: `./scripts/app/mac-link.sh build`; output is `apple/PersonaLink/build/Persona Link.app`. Use `UNIVERSAL=1` for Apple silicon and Intel. `mac.link_bundle_id` or `PERSONA_LINK_BUNDLE_ID` controls Persona Screen's bundle-id prefix, defaulting to `app.bundle_id` + `.link`; without either the build stops and says what to set. Keep it the same from build to build: macOS keeps Persona Screen's Screen Recording grant per bundle id, so a Mac that ran a build with another id (such as an earlier `com.example.persona.link` placeholder build) asks for Screen Recording again once (#7569).
+Build without installing: `./scripts/app/mac-link.sh build`; output is `apple/PersonaLink/build/Persona Link.app`. `./scripts/app/mac-link.sh snapshot <directory>` renders every menu state, the pairing window and the icons offscreen, light and dark, without Screen Recording permission. Use `UNIVERSAL=1` for Apple silicon and Intel. `mac.link_bundle_id` or `PERSONA_LINK_BUNDLE_ID` controls Persona Screen's bundle-id prefix, defaulting to `app.bundle_id` + `.link`; without either the build stops and says what to set. Keep it the same from build to build: macOS keeps Persona Screen's Screen Recording grant per bundle id, so a Mac that ran a build with another id (such as an earlier `com.example.persona.link` placeholder build) asks for Screen Recording again once (#7569).
 
 ### Keeping the helpers' permissions across updates
 
@@ -61,17 +61,17 @@ the Mac's page in the iPhone app shows **Live Screen with x264** under Control C
 on, and it is used only while the iPhone is on the same network as the Mac. Uninstalling ffmpeg turns it back to the
 built-in encoder. Details: [computer-use.md](../extensions/computer-use.md) "x264 on a direct LAN (#8859)".
 
-### Moving from the retired menu bar app
+### Moving from the earlier menu bar app
 
-Keep the existing `~/.persona/link.json` and node service. First stop the old menu bar app and any foreground `persona-link run`; otherwise two connectors will contend for the same run lock. The installer does not kill or replace an unmanaged running connector. Do not use `persona-link uninstall --purge`, which would delete the pairing you want to keep.
+The earlier menu bar App ran the connector itself (`persona-link run --parent`). Keep the existing `~/.persona/link.json` and node service; `mac-link.sh install` quits a running Persona Link App before it replaces it. Stop any foreground `persona-link run` yourself; otherwise two connectors will contend for the same run lock. The installer does not kill or replace an unmanaged running connector. Do not use `persona-link uninstall --purge`, which would delete the pairing you want to keep.
 
-The historical migration record is in [link-menu-tray.md](../archive/operations/link-menu-tray.md), not a current setup procedure.
+The historical record is in [link-menu-tray.md](../archive/operations/link-menu-tray.md).
 
 ## Pairing
 
 1. Open **Machines › Add computer** in the signed-in web app, choose Mac, name the computer and copy its pairing link.
-2. If the Electron desktop is installed, open its local setup window and use the advanced **Persona Link** section. This is optional; it does not install Link for you.
-3. Otherwise pair in a terminal:
+2. Send the link to this Mac and open it: the menu bar App opens its pairing window with the link filled in and shows which hub it goes to (macOS knows the `persona://` links only after the App has been opened once). Click **Pair**; it never pairs on its own. You can also paste the link in **Pair / Change connection…**. If the background service is not installed yet, the App installs it after pairing.
+3. Or pair in a terminal:
 
    ```bash
    ~/.persona/bin/persona-link pair - <<< '<pairing-link>'

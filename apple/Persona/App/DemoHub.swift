@@ -41,6 +41,7 @@ final class DemoHub {
     /// Settings › Knowledge Selection: what was saved in the demo (nil: the hub's defaults).
     private var kbSelection: JSONValue?
     private var memory: [JSONValue] = []
+    private var healthItems: JSONValue = .object([:])
     private var intakeEntries: [String: JSONValue] = [:]
     private var prefs: JSONValue = .object([:])
     private var pins: JSONValue = .object([:])
@@ -94,6 +95,7 @@ final class DemoHub {
         lark = (all["lark"]?.object ?? [:]).compactMapValues(\.array)
         tasks = all["tasks"]?.array ?? []
         memory = all["memory"]?.array ?? []
+        healthItems = all["health_items"] ?? .object([:])
         let intake = all["health_intake"]
         let entries = (intake?["water"]?["entries"]?.array ?? []) + (intake?["protein"]?["entries"]?.array ?? [])
         intakeEntries = Dictionary(uniqueKeysWithValues: entries.compactMap { e in e["id"]?.string.map { ($0, e) } })
@@ -181,6 +183,26 @@ final class DemoHub {
         let p = req.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         guard p.count >= 3, p[0] == "api", p[1] == "v1" else { throw notFound() }
         let rest = Array(p.dropFirst(2))
+        if rest == ["assistant", "health", "items"] {
+            if req.method == "GET" { return healthItems }
+            if req.method == "PUT" {
+                let request = body(req)
+                guard request["revision"]?.int == healthItems["revision"]?.int else {
+                    throw APIError(status: 409, message: "Conflict", details: healthItems)
+                }
+                guard let ids = request["items"]?.array?.compactMap(\.string),
+                      ids.count == request["items"]?.array?.count, Set(ids).count == ids.count,
+                      ids.allSatisfy({ ["water", "protein", "activity", "trends"].contains($0) }),
+                      case .object(var value) = healthItems else { throw APIError(status: 400, message: "Invalid health items") }
+                value["items"] = .array(ids.map(JSONValue.string))
+                value["revision"] = .number(Double((value["revision"]?.int ?? 0) + 1))
+                value["saved"] = .bool(true)
+                healthItems = .object(value)
+                broadcast(["type": "health_items", "revision": value["revision"] ?? 0])
+                return healthItems
+            }
+            throw notFound()
+        }
         if rest.starts(with: ["assistant", "health", "intake"]) { return try intakeAnswer(req, rest) }
         do {
             return req.method == "GET" ? try get(rest, req.query) : try change(req.method, rest, body(req))
@@ -227,7 +249,7 @@ final class DemoHub {
                 return ["date": .string(day), "water": .number(total("water", day)), "protein": .number(total("protein", day))]
             }
             return ["water": portion("water", goal: 2000), "protein": portion("protein", goal: 60),
-                    "days": .array(history), "zone": "UTC"]
+                    "days": .array(history), "zone": "UTC", "items": healthItems["items"] ?? .array([])]
         }
         if req.method == "GET", path.count == 3 { return snapshot() }
         var entry: JSONValue?
@@ -753,7 +775,7 @@ final class DemoHub {
         sockets.removeAll { $0.socket == nil }
         sockets.append(WeakSocket(socket: s))
         s.send(["type": "hello", "server_version": "demo", "client_id": "demo",
-                "features": ["file_upload", "terminal_stream", "task_push", "task_inbox", "health_intake", .string(ProviderScopeForm.feature)]])
+                "features": ["file_upload", "terminal_stream", "task_push", "task_inbox", "health_intake", "health_items", .string(ProviderScopeForm.feature)]])
         s.send(["type": "machines", "machines": .array(machines)])
         for m in Set(sessions.compactMap { $0["machine_id"]?.string }).sorted() {
             s.send(["type": "sessions", "machine_id": .string(m), "sessions": .array(sessions.filter { $0["machine_id"]?.string == m })])

@@ -7,14 +7,14 @@ import { getSession, getState, useStore } from "../../lib/store";
 import { withChildSessions } from "../../lib/child-cards";
 import { agentStatus, isNestedSubagentStep, nestedSubagentStatus, nestingKey, subagentFor, withNestedSubagents } from "../../lib/tasks";
 import { turnImages } from "../../lib/turn-images";
-import { TurnImages } from "./TurnImages";
+import { turnToolViews } from "../../lib/turn-tool-views";
 import { exchangeSteps, segmentIdentity, isLoopTick, isOwnMessage, toolChip, type Context, type Segment, type UserMessage } from "../../lib/turns";
 import { usageKey } from "../../lib/turn-usage";
 import type { Item } from "../../lib/types";
 import { ENGINE_SWITCH_KIND } from "../../lib/engine-switch";
 import { planCardStep, workBlocks, type ToolStep, type WorkNode } from "../../lib/work-groups";
 import { NO_WORKFLOW_CALLS } from "../../lib/workflows";
-import { channelOf, useChannels } from "../../lib/channels";
+import { channelOf, useChannels } from "../../lib/channel-source";
 import { splitQuotes } from "../../lib/drafts";
 import { EASE } from "../../ui/atoms";
 import { ChannelMark, OriginMark } from "../../ui/ChannelMark";
@@ -27,13 +27,16 @@ import { ModelChangeDivider } from "./ModelChangeDivider";
 import { EngineSwitchDivider } from "./EngineSwitchDivider";
 import { SourceMessage } from "./SourceMessage";
 import { ContextGroup } from "./ContextGroup";
+import type { InlineBubbleContent } from "./InlineUserBubble";
 import { ForwardBlock, ForwardCards } from "./ForwardCard";
 import { AttachedPhotos } from "./AttachedPhotos";
 import { useFullText } from "./FullText";
-import { FileCards, ReplyFiles } from "./FileCards";
-import { ReplyPorts } from "./PortChips";
+import { LazyFileCards, LazyReplyFiles } from "./LazyFileCards";
+import { LazyReplyPorts, LazyTurnChanges, LazyTurnImages } from "./LazyTurnExtras";
 import { MessageActions } from "./MessageActions";
 import { skillEditText } from "../../lib/skill-mentions";
+import { contextXML } from "../../lib/context-xml";
+import type { ContextRef } from "../../lib/links";
 import { useIsLatestMessage } from "./latest-message-time";
 import { QuoteStack } from "./Quote";
 import { PathText } from "../../ui/PathLinks";
@@ -43,8 +46,7 @@ import { useChatContext } from "./chat-context";
 import { useFreshWords } from "./fresh-words";
 import { Icon } from "../../ui/icons";
 import { WorkGroup, WorkNodes, type WorkProps } from "./WorkGroup";
-import { TurnChanges, turnChangesHeight } from "./TurnChanges";
-import { turnChanges } from "../../lib/turn-changes";
+import { turnChanges, turnChangesHeight } from "../../lib/turn-changes";
 import type { Step } from "../../lib/turns";
 import { useCallSeeker } from "./jump";
 import { t } from "../../i18n";
@@ -54,6 +56,9 @@ import { useReveal } from "./search-reveal";
 
 // a finished reply's Sources row (#9132): its chunk loads only for a turn that looked something up on the web
 const TurnSources = lazy(() => import("./TurnSources").then((m) => ({ default: m.TurnSources })));
+// Out-of-band tool views (UI v12 route maps, etc.): lazy-loaded only when a turn carries Fold.tool_views or tool_result.tool_views
+const ToolViews = lazy(() => import("./ToolViews").then((m) => ({ default: m.ToolViews })));
+const InlineUserBubble = lazy(() => import("./InlineUserBubble").catch(() => ({ default: ({ render }: { render: () => ReactNode }) => render() })));
 
 /** A message longer than this many lines folds to ten of them (FOLDED), with "Expand" under it (the reference client's UserMessage). */
 export const BUBBLE_MAX_LINES = 14;
@@ -77,21 +82,26 @@ export const MODEL_DIVIDER_HEIGHT = 42.5;
  *  same padding, border and 16.5 px line; its 12 px icons are shorter than the line). The handoff opened adds its own
  *  once drawn. */
 export const ENGINE_DIVIDER_HEIGHT = MODEL_DIVIDER_HEIGHT;
+/** Compact tool view card height estimate before a deferred turn mounts. */
+export const TOOL_VIEW_HEIGHT = 244;
+/** A promoted relay's collapsed source row before it mounts: card padding, source title, disclosure and their gaps. */
+const PROMOTED_RELAY_SOURCE_HEIGHT = 72;
 
 /** A finished exchange's height in px before it is first drawn (content-visibility, docs/web/web.md "Long chats"), by
  *  its text the way bubbleLines counts it: its bubble (folded past BUBBLE_MAX_LINES), its words at 2.5 times the
  *  bubble's characters to a line (the column is wider, and Markdown's short and blank lines take less than a line), a
  *  row for each other block, and the model change divider when it has one (`modelChange`), the engine switch divider
  *  folded likewise (`engineSwitch`). Once drawn it keeps its own height. */
-export function segmentHeight(user: UserMessage | undefined, nodes: WorkNode[], modelChange = false, engineSwitch = false): number {
+export function segmentHeight(user: UserMessage | undefined, nodes: WorkNode[], modelChange = false, engineSwitch = false, toolViews = 0): number {
   // gap: the exchange's blocks stand 14 px apart (`gap-3.5`, cindy's msg-stream-items)
   const line = 24, gap = 14, row = 28;
-  const lines = user ? bubbleLines(user.text) : 0;
-  let h = user ? (lines > BUBBLE_MAX_LINES ? 10 : lines) * line + 20 + (user.images.length ? 102 : 0) : 0;
+  const lines = user && !user.promotedRelay ? bubbleLines(user.text) : 0;
+  let h = user ? (user.promotedRelay ? PROMOTED_RELAY_SOURCE_HEIGHT : (lines > BUBBLE_MAX_LINES ? 10 : lines) * line + 20 + (user.images.length ? 102 : 0)) : 0;
   for (const n of nodes) h += n.kind === "step" && n.step.kind === "text" ? bubbleLines(n.step.item.text ?? "", CHARS_PER_LINE * 2.5) * line : row;
   if (modelChange) h += MODEL_DIVIDER_HEIGHT;
   if (engineSwitch) h += ENGINE_DIVIDER_HEIGHT;
-  return Math.round(h + gap * Math.max(0, nodes.length + (user ? 1 : 0) + (modelChange ? 1 : 0) + (engineSwitch ? 1 : 0) - 1));
+  if (toolViews > 0) h += toolViews * TOOL_VIEW_HEIGHT + Math.max(0, toolViews - 1) * 8;
+  return Math.round(h + gap * Math.max(0, nodes.length + (user ? 1 : 0) + (modelChange ? 1 : 0) + (engineSwitch ? 1 : 0) + (toolViews > 0 ? 1 : 0) - 1));
 }
 
 /** `sendState`: a message not in the transcript yet (a sending bubble, the outbox's), marked for the sync scenarios
@@ -112,90 +122,101 @@ export function UserBubble({ msg, mid, sid, pending, sendState, starting, onDele
   // the row above it
   const forwards = msg.contexts.filter((c) => c.kind === "forward");
   const contexts = forwards.length ? msg.contexts.filter((c) => c.kind !== "forward") : msg.contexts;
-  return (
-    <div className="ml-auto flex max-w-[min(100%,488px)] min-w-0 flex-col items-end gap-1.5 pl-[12%]" style={pending ? { animation: `fade-up 300ms ${EASE} both` } : undefined} data-user-bubble data-source-fingerprint={msg.rawInput?.[0]?.source_fingerprint} data-send-state={sendState} data-items={pending || starting ? undefined : [msg.id, ...msg.images.map((i) => i.id)].join(" ")}>
-      {msg.images.length > 0 && (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          {msg.images.map((im) => (
-            <Thumb key={im.id} item={im} mid={mid} sid={sid} size={96} />
+  const fromCard = useContext(CardConversation) ? cardReply(msg.text) : undefined;
+  const whole = fromCard?.text ?? msg.text;
+  const split = useMemo(() => splitQuotes(whole), [whole]);
+  const text = split ? split.rest : whole;
+  const render = (inline?: InlineBubbleContent) => {
+    const remaining = inline?.remaining ?? contexts;
+    const bubble = <BubbleText text={text} quotes={split?.quotes} forwards={forwards} blocks={msg.contexts} fromCard={fromCard?.view}
+      ts={pending || starting ? undefined : msg.ts} mid={mid} sid={sid} own={own} pending={pending && !starting} inline={inline} />;
+    return (
+      <div className="ml-auto flex max-w-[min(100%,488px)] min-w-0 flex-col items-end gap-1.5 pl-[12%]" style={pending ? { animation: `fade-up 300ms ${EASE} both` } : undefined} data-user-bubble data-source-fingerprint={msg.rawInput?.[0]?.source_fingerprint} data-send-state={sendState} data-items={pending || starting ? undefined : [msg.id, ...msg.images.map((i) => i.id)].join(" ")}>
+        {msg.images.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {msg.images.map((im) => (
+              <Thumb key={im.id} item={im} mid={mid} sid={sid} size={96} />
+            ))}
+          </div>
+        )}
+        {msg.photos && <AttachedPhotos paths={msg.photos} mid={mid} sid={sid} />}
+        {remaining.length > 0 && <ContextGroup contexts={remaining} />}
+        {msg.files && <LazyFileCards files={msg.files} mid={mid} />}
+        {(msg.text || forwards.length > 0) &&
+          (starting || pending ? bubble : (
+            <MessageActions text={msg.text} editText={msg.inlineTrailer
+              ? `${msg.contexts.map((c) => contextXML({ ...c, kind: c.kind as ContextRef["kind"], title: c.title ?? "", url: c.url ?? "" })).join("\n")}\n\n${msg.text}${msg.inlineTrailer}`
+              : skillEditText(msg.contexts, msg.text)} isUser ts={msg.ts} side messageId={onDelete ? undefined : msg.id} onDelete={onDelete}
+              starSource={!onDelete && !sendState ? { mid, sid, item: msg.id, fingerprint: msg.rawInput?.[0]?.source_fingerprint, userInputs: msg.rawInput } : undefined}
+              images={msg.images} photos={msg.photos} className="max-w-full">
+              {bubble}
+            </MessageActions>
           ))}
-        </div>
-      )}
-      {msg.photos && <AttachedPhotos paths={msg.photos} mid={mid} sid={sid} />}
-      {contexts.length > 0 && <ContextGroup contexts={contexts} />}
-      {msg.files && <FileCards files={msg.files} mid={mid} />}
-      {(msg.text || forwards.length > 0) &&
-        (starting ? (
-          <BubbleText text={msg.text} blocks={msg.contexts} mid={mid} sid={sid} own={own} />
-        ) : pending ? (
-          <BubbleText text={msg.text} blocks={msg.contexts} mid={mid} sid={sid} own={own} pending />
-        ) : (
-          <MessageActions text={msg.text} editText={skillEditText(msg.contexts, msg.text)} isUser ts={msg.ts} side messageId={onDelete ? undefined : msg.id} onDelete={onDelete}
-            starSource={!onDelete && !sendState ? { mid, sid, item: msg.id, fingerprint: msg.rawInput?.[0]?.source_fingerprint, userInputs: msg.rawInput } : undefined}
-            images={msg.images} photos={msg.photos} className="max-w-full">
-            <BubbleText text={msg.text} blocks={msg.contexts} ts={msg.ts} mid={mid} sid={sid} own={own} />
-          </MessageActions>
-        ))}
-      {pinned && <span className="text-[11px] text-ink-3 tabular-nums" data-latest-time>{clock(msg.ts)}</span>}
-      {/* a message waiting its turn says so under it; one on its way (Sending, Processing, delivery unknown) is said once,
-          by the chat's status line under the last message (ChatView's data-message-feedback), not here as well */}
-      {msg.queued && !pending && !starting && feedback !== "" && <span className="text-[11px] text-ink-3 whitespace-nowrap">{t("chat-segmentview.queued")}</span>}
-      {!pending && !starting && <ChannelSource clientMsgId={msg.client_msg_id} openedBy={openedBy} />}
-    </div>
-  );
+        {pinned && <span className="text-[11px] text-ink-3 tabular-nums" data-latest-time>{clock(msg.ts)}</span>}
+        {/* a message waiting its turn says so under it; one on its way (Sending, Processing, delivery unknown) is said once,
+            by the chat's status line under the last message (ChatView's data-message-feedback), not here as well */}
+        {msg.queued && !pending && !starting && feedback !== "" && <span className="text-[11px] text-ink-3 whitespace-nowrap">{t("chat-segmentview.queued")}</span>}
+        {!pending && !starting && <ChannelSource clientMsgId={msg.client_msg_id} openedBy={openedBy} />}
+      </div>
+    );
+  };
+  // parseUserText keeps the wire trailer separate from display text. Its offsets count back from the end,
+  // so a leading quote can stay a separate card without shifting the anchors in the prose.
+  return msg.inlineTrailer && contexts.length && text ? (
+    <Suspense fallback={render()}><InlineUserBubble body={text + msg.inlineTrailer} contexts={contexts}
+      mid={mid} cwd={getSession(mid, sid)?.cwd} render={render} /></Suspense>
+  ) : render();
 }
 
 /** The bubble's words, folded to ten lines past fourteen; the fold scrolls (the wheel, a trackpad, a finger), with a
  *  fade at its bottom while there is more (fold-scroll.ts). `pending` (still being sent): dimmed, the same fold. A
  *  leading `> ` block ("Quote") is a folded quote card at its top instead of `>` lines (Quote.tsx). */
-function BubbleText({ text: full, blocks, ts, mid, sid, own, pending }: { text: string; blocks: Context[]; ts?: string; mid: string; sid: string; own: boolean; pending?: boolean }) {
-  const forwards = blocks.filter((c) => c.kind === "forward");
+function BubbleText({ text, quotes, forwards, blocks, fromCard, ts, mid, sid, own, pending, inline }: {
+  text: string; quotes?: string[]; forwards: Context[]; blocks: Context[]; fromCard?: string;
+  ts?: string; mid: string; sid: string; own: boolean; pending?: boolean; inline?: InlineBubbleContent;
+}) {
   const fill = own ? "bg-user-bubble" : "bg-neutral-bubble";
-  // a reply sent from a card (in an assistant conversation): its words, without the hub's tag, marked "From a card"
-  const fromCard = useContext(CardConversation) ? cardReply(full) : undefined;
-  const whole = fromCard ? fromCard.text : full;
-  const split = useMemo(() => splitQuotes(whole), [whole]);
-  const text = split ? split.rest : whole;
   const ref = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(() => bubbleLines(text) > BUBBLE_MAX_LINES);
   const [open, setOpen] = useState(false);
+  const hasInline = Boolean(inline);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || open) return;
     // short however narrow: no layout read (opening a long chat read every bubble's, each a forced layout)
-    if (bubbleLines(text, NARROWEST_CHARS) <= BUBBLE_MAX_LINES) {
+    if (!hasInline && bubbleLines(text, NARROWEST_CHARS) <= BUBBLE_MAX_LINES) {
       setLong(false);
       return;
     }
     // its full height in lines (a fold's scrollHeight is all of it)
     const line = parseFloat(getComputedStyle(el).lineHeight) || 24;
     setLong(el.scrollHeight / line > BUBBLE_MAX_LINES + 0.5);
-  }, [text, open]);
+  }, [text, open, hasInline]);
   const folded = long && !open;
   const fold = useFoldScroll(ref, folded, [text]);
   const words = text && (
     <div
       ref={ref}
       {...fold}
-      className={`text-[length:var(--chat-body)] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${folded ? FOLDED : ""}`}
+      className={`text-[length:var(--chat-body)] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${folded ? `${FOLDED} user-bubble-fade` : ""}`}
       data-folded={folded || undefined}
       data-bubble-text
     >
-      <PathText text={text} mid={mid} cwd={getSession(mid, sid)?.cwd} />
+      {inline?.words ?? <PathText text={text} mid={mid} cwd={getSession(mid, sid)?.cwd} />}
     </div>
   );
   return (
-    <div className="flex max-w-full flex-col items-end gap-1" data-from-card={fromCard ? fromCard.view : undefined}>
+    <div className="flex max-w-full flex-col items-end gap-1" data-from-card={fromCard}>
       {fromCard && (
         <span className="flex items-center gap-1 text-[11px] font-medium whitespace-nowrap text-accent">
           <Icon name="check" size={11} />
           {t("ui-assistantcard.from_card")}
         </span>
       )}
-      {split || forwards?.length ? (
+      {quotes || forwards.length ? (
         <div className={`flex max-w-full flex-col gap-1.5 rounded-[12px] ${fill} px-4 py-2.5 text-ink ${pending ? "opacity-60" : ""}`} title={clock(ts)} data-hit-target>
           {forwards.length > 1 ? <ForwardCards blocks={blocks} count={forwards.length} /> : forwards.map((c, i) => <ForwardBlock key={i} c={c} />)}
-          {split && <QuoteStack blocks={split.quotes} mid={mid} sid={sid} />}
+          {quotes && <QuoteStack blocks={quotes} mid={mid} sid={sid} />}
           {words}
         </div>
       ) : (
@@ -208,6 +229,7 @@ function BubbleText({ text: full, blocks, ts, mid, sid, own, pending }: { text: 
           {open ? t("chat-segmentview.collapse") : t("chat-segmentview.expand")}
         </button>
       )}
+      {inline?.details}
     </div>
   );
 }
@@ -287,8 +309,8 @@ export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, st
         </CardItem.Provider>
       </div>
       {full.more}
-      {!live && mid && sid && <ReplyFiles text={text} mid={mid} cwd={cwd} />}
-      {!live && mid && sid && <ReplyPorts text={text} mid={mid} sid={sid} cwd={cwd} />}
+      {!live && mid && sid && <LazyReplyFiles text={text} mid={mid} cwd={cwd} />}
+      {!live && mid && sid && <LazyReplyPorts text={text} mid={mid} sid={sid} cwd={cwd} />}
     </MessageActions>
   );
 });
@@ -395,7 +417,7 @@ export const SegmentView = memo(function SegmentView({
   // When the dock bar already shows the foreground turn's Working… status and elapsed timer, skip the empty non-expandable
   // stream placeholder unless batched live text is streaming above it (#12380).
   const liveRow = working && (!dockTurnClock || streaming !== undefined) && <WorkGroup g={{ kind: "group", id: `work-live-${seg.id}`, children: [], live: true, startedAt: Date.parse(turnStart ?? "") || undefined }} p={p} />;
-  const imageStrip = images.length > 0 && <TurnImages images={images} mid={mid} sid={sid} cwd={getSession(mid, sid)?.cwd} />;
+  const imageStrip = images.length > 0 && <LazyTurnImages images={images} mid={mid} sid={sid} cwd={getSession(mid, sid)?.cwd} />;
   const box = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -429,15 +451,16 @@ export const SegmentView = memo(function SegmentView({
   const usage = !live && !trace ? usageKey(seg.usage) : undefined;
   const groups = usage ? nodes.filter((n) => n.kind === "group") : [];
   const usageMs = groups.length === 1 ? groups[0].durationMs : undefined;
+  const toolViews = useMemo(() => (trace ? [] : turnToolViews(own, mid, sid)), [trace, own, mid, sid]);
   const switched = Boolean(seg.engineSwitch);
-  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, changes, sourced]);
+  const guess = useMemo(() => (offscreen ? ({ "--seg-est": `${segmentHeight(seg.user, nodes, divided, switched, toolViews.length) + (changes ? 12 + turnChangesHeight(changes) : 0) + (sourced ? 14 + SOURCES_HEIGHT : 0)}px` } as CSSProperties) : undefined), [offscreen, seg.user, nodes, divided, switched, toolViews.length, changes, sourced]);
   // Native browser find can still land on the raw words (content-visibility keeps them searchable); the observer then
   // mounts their rich representation. In-chat search uses `revealed` above and goes straight to the exact item instead.
   // The placeholder holds the section's estimate too: otherwise Chrome caches its shorter raw-text height in
   // `contain-intrinsic-block-size: auto`, and the later rich mount starts from a different height than the old body did.
   const placeholder = useMemo(() => {
     if (mounted) return "";
-    const user = trace && seg.user?.rawInput ? seg.user.rawInput.map((i) => i.text) : [seg.user?.text, ...(seg.user?.contexts.map((c) => c.text) ?? [])];
+    const user = trace && seg.user?.rawInput ? seg.user.rawInput.map((i) => i.text) : seg.user?.promotedRelay ? [] : [seg.user?.text, ...(seg.user?.contexts.map((c) => c.text) ?? [])];
     return [...user, ...own.flatMap((s) => s.kind === "tool" ? [toolChip(s.use), s.result?.text] : [s.item.text])].filter(Boolean).join("\n");
   }, [mounted, own, seg.user, trace]);
   return (
@@ -453,10 +476,11 @@ export const SegmentView = memo(function SegmentView({
       <WorkNodes nodes={nodes.slice(0, cut)} p={p} live={live} fade />
       {liveRow}
       {imageStrip}
+      {!trace && toolViews.length > 0 && <Suspense key="tool-views" fallback={null}><ToolViews views={toolViews} /></Suspense>}
       {!live && <Fragment key="before-words">{beforeWords}</Fragment>}
       {(latestItem || streaming !== undefined) && <Suspense key="latest-text" fallback={null}><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} ttftMs={!live && !trace ? seg.ttftMs : undefined} /></Suspense>}
       {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}
-      {changes && <TurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
+      {changes && <LazyTurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
       </Fragment> : <div className="whitespace-pre-wrap" style={{ blockSize: "var(--seg-est)" }} data-segment-placeholder>{placeholder}</div>}
     </section>
   );

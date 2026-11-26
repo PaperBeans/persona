@@ -146,7 +146,8 @@ struct MeetingOptionsMenu: View {
     @StoredValue(RecordingInput.storageKey) private var inputRaw = RecordingInput.phone.rawValue
 
     var body: some View {
-        if capture.state == .idle {
+        // Not with the hub's recording module off (#15214): there is no next start to set up.
+        if capture.state == .idle, RecordingModule.allowance.offersWrites {
             Menu {
                 if form.pickedKind == .meeting, MeetingAttendees.conversation(model) {
                     Toggle(isOn: Bindable(form).pickedPrivate) {

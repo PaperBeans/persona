@@ -15,12 +15,13 @@ import type { Context } from "../../lib/turns";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { lazyPage } from "../../lib/lazy-page";
-import { ForwardBar } from "./ForwardBar";
 
 // several (#3838): over the box Forward to, which puts them there, has loaded it by then
 const group = () => import("./ForwardGroup");
 const ForwardGroupBars = lazyPage(() => group().then((m) => m.ForwardGroupBars));
 const ForwardGroupCards = lazyPage(() => group().then((m) => m.ForwardGroupCards));
+// A single pending forward is only shown after a forward was picked. The picker already loads its bar.
+const ForwardBar = lazyPage(() => import("./ForwardBar").then((m) => m.ForwardBar));
 
 /** The forwards waiting above a composer's input (lib/links.ts addContext); other contexts are ContextChips'. */
 export function ForwardBars({ draftKey, onRemove }: { draftKey: string; onRemove?: () => void }) {
@@ -28,19 +29,19 @@ export function ForwardBars({ draftKey, onRemove }: { draftKey: string; onRemove
   if (!forwards.length) return null;
   return (
     <div className="flex flex-col gap-1.5 px-0.5 pt-0.5" data-forwards>
-      {forwards.length > 1 ? (
-        <Suspense fallback={null}>
+      <Suspense fallback={null}>
+        {forwards.length > 1 ? (
           <ForwardGroupBars forwards={forwards} draftKey={draftKey} onRemove={onRemove} />
-        </Suspense>
-      ) : (
-        <ForwardBar
-          forward={forwards[0]}
-          onRemove={() => {
-            removeContext(draftKey, forwards[0].id);
-            onRemove?.();
-          }}
-        />
-      )}
+        ) : (
+          <ForwardBar
+            forward={forwards[0]}
+            onRemove={() => {
+              removeContext(draftKey, forwards[0].id);
+              onRemove?.();
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

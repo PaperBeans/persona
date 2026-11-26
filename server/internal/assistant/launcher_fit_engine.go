@@ -165,7 +165,7 @@ func (s *Service) launcherKindOn(ctx context.Context, machine, name string) stri
 		return a
 	}
 	switch name {
-	case "codex", "traex", "omp":
+	case "codex", "traex", "omp", "agy":
 		return name
 	}
 	return "claude"

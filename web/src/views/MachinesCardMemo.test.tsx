@@ -21,6 +21,7 @@ vi.mock("../lib/machine-deploy", async (load) => {
   };
 });
 import { getState, refresh, reset, upsertSession } from "../lib/store";
+import { resetRoster, setRoster } from "../lib/managers";
 import type { Machine, Session } from "../lib/types";
 import { Machines } from "./Machines";
 
@@ -58,6 +59,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   reset();
+  resetRoster();
   vi.unstubAllGlobals();
 });
 
@@ -108,5 +110,35 @@ describe("a sessions push on the machines page", () => {
     } finally {
       answers["/api/v1/machines"] = { machines };
     }
+  });
+
+  it("re-renders only the host card when a co-located manager's displayed state changes, and ignores unrelated roster updates", async () => {
+    setRoster({
+      default: "assistant",
+      managers: [{ id: "assistant", name: "主助手", online: true, host: "mac", version: "v1-202611241200" }],
+    });
+    await act(() => refresh());
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    expect(card("MacBook")).toContain("主助手");
+    expect(card("NAS")).not.toContain("主助手");
+    renders.clear();
+
+    // Unrelated roster change (inbox_needs_you): neither card re-renders
+    act(() => setRoster({
+      default: "assistant",
+      managers: [{ id: "assistant", name: "主助手", online: true, host: "mac", version: "v1-202611241200", inbox_needs_you: 3 }],
+    }));
+    await flush();
+    expect([...renders.keys()]).toEqual([]);
+
+    // Hosted manager enters pending_restart: only MacBook re-renders
+    act(() => setRoster({
+      default: "assistant",
+      managers: [{ id: "assistant", name: "主助手", online: true, host: "mac", version: "v1-202611241200", pending_restart: true }],
+    }));
+    await flush();
+    expect(card("MacBook")).toContain("待空闲重启");
+    expect([...renders.keys()]).toEqual(["mac"]);
   });
 });

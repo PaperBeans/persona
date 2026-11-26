@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,6 +28,8 @@ type ConversationSwitch struct {
 	Request       json.RawMessage `json:"request"`
 	Phase         string          `json:"phase"`
 	Error         string          `json:"error,omitempty"`
+	CreatedAt     time.Time       `json:"-"`
+	UpdatedAt     time.Time       `json:"-"`
 }
 
 type LogicalConversation struct {
@@ -88,9 +91,9 @@ func readLogicalConversation(ctx context.Context, q conversationQuerier, machine
 	}
 	var op ConversationSwitch
 	var request []byte
-	err = q.QueryRow(ctx, `SELECT operation_id,expected_epoch,source_segment,coalesce(target_segment,''),request,phase,error
+	err = q.QueryRow(ctx, `SELECT operation_id,expected_epoch,source_segment,coalesce(target_segment,''),request,phase,error,created_at
 	 FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND phase IN ('preparing','prepared','active','in_doubt')`, c.MachineID, c.SessionID).
-		Scan(&op.OperationID, &op.ExpectedEpoch, &op.SourceSegment, &op.TargetSegment, &request, &op.Phase, &op.Error)
+		Scan(&op.OperationID, &op.ExpectedEpoch, &op.SourceSegment, &op.TargetSegment, &request, &op.Phase, &op.Error, &op.CreatedAt)
 	if err == nil {
 		op.Request = json.RawMessage(request)
 		c.Switch = &op
@@ -417,7 +420,8 @@ func (d *DB) AcceptIdleConversationSwitch(ctx context.Context, machine, session,
 		if err != nil || pending {
 			return err
 		}
-		if err := resolveConversationSwitchTx(ctx, tx, machine, session, operation, "accepted", ""); err != nil {
+		// No input carried the handoff: it stays for the conversation's next one (ConversationPendingHandoff, #14488).
+		if err := resolveConversationSwitch(ctx, tx, machine, session, operation, "accepted", "", switchSettlement{keepHandoff: true}); err != nil {
 			return err
 		}
 		accepted = true
@@ -438,6 +442,28 @@ func (d *DB) ResolveConversationSwitch(ctx context.Context, machine, session, op
 }
 
 func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, session, operation, outcome, reason string) error {
+	return resolveConversationSwitch(ctx, tx, machine, session, operation, outcome, reason, switchSettlement{})
+}
+
+// ResolveConversationPreparation applies a failed or unconfirmed preparation only while the operation still
+// owns preparation at its expected epoch. Another manager may have mapped or activated the target during the RPC.
+func (d *DB) ResolveConversationPreparation(ctx context.Context, machine, session, operation, outcome, reason string) error {
+	if outcome != "rejected" && outcome != "in_doubt" {
+		return errors.New("invalid preparation outcome")
+	}
+	return conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+		return resolveConversationSwitch(ctx, tx, machine, session, operation, outcome, reason, switchSettlement{preparationOnly: true})
+	})
+}
+
+type switchSettlement struct {
+	keepHandoff     bool
+	preparationOnly bool
+}
+
+// An idle acceptance keeps its handoff for the conversation's next input. Accepting a switch discards
+// the handoff an earlier idle acceptance kept for the newly retired source.
+func resolveConversationSwitch(ctx context.Context, tx pgx.Tx, machine, session, operation, outcome, reason string, settlement switchSettlement) error {
 	var epoch int64
 	if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&epoch); err != nil {
 		return err
@@ -446,6 +472,9 @@ func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, sessio
 	var expected int64
 	if err := tx.QueryRow(ctx, `SELECT source_segment,coalesce(target_segment,''),phase,expected_epoch FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).Scan(&source, &target, &phase, &expected); err != nil {
 		return err
+	}
+	if settlement.preparationOnly && (epoch != expected || phase != "preparing" && phase != "in_doubt") {
+		return ErrConversationEpoch
 	}
 	if phase == outcome {
 		return nil
@@ -464,6 +493,9 @@ func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, sessio
 			return ErrConversationEpoch
 		}
 		if _, err := tx.Exec(ctx, `UPDATE conversation_segments SET close_pending=true WHERE id=$1 AND state='retired'`, source); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE conversation_switches SET handoff=NULL WHERE logical_machine=$1 AND logical_session=$2 AND operation_id<>$3 AND phase='accepted' AND handoff IS NOT NULL`, machine, session, operation); err != nil {
 			return err
 		}
 	}
@@ -494,15 +526,59 @@ func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, sessio
 			}
 		}
 	}
-	_, err := tx.Exec(ctx, `UPDATE conversation_switches SET phase=$4,error=$5,handoff=CASE WHEN $4 IN ('accepted','rejected') THEN NULL ELSE handoff END,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation, outcome, reason)
+	_, err := tx.Exec(ctx, `UPDATE conversation_switches SET phase=$4,error=$5,handoff=CASE WHEN $4 IN ('accepted','rejected') AND NOT $6::boolean THEN NULL ELSE handoff END,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation, outcome, reason, settlement.keepHandoff)
+	return err
+}
+
+// CancelConversationSwitch settles an operation that has not activated its target as rejected, which keeps the
+// source segment active at the same epoch and abandons a prepared target for closure. It cancels nothing and reports
+// false once the operation activated, settled, or the conversation moved past expectedEpoch: the logical row lock
+// orders it with ActivateConversationSegment, so a concurrent activation either finds the switch rejected or
+// wins and is left alone.
+func (d *DB) CancelConversationSwitch(ctx context.Context, machine, session, operation string, expectedEpoch int64, reason string) (cancelled bool, err error) {
+	err = conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+		var epoch int64
+		if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&epoch); err != nil {
+			return err
+		}
+		var source, phase string
+		var opEpoch int64
+		if err := tx.QueryRow(ctx, `SELECT source_segment,phase,expected_epoch FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).Scan(&source, &phase, &opEpoch); err != nil {
+			return err
+		}
+		if phase != "preparing" && phase != "prepared" && phase != "in_doubt" || opEpoch != expectedEpoch || epoch != expectedEpoch {
+			return nil
+		}
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_segments WHERE id=$1 AND state='active')`, source).Scan(&active); err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		if err := resolveConversationSwitchTx(ctx, tx, machine, session, operation, "rejected", reason); err != nil {
+			return err
+		}
+		cancelled = true
+		return nil
+	})
+	return cancelled, err
+}
+
+// NoteConversationSwitchError keeps the latest failure of an operation that has not activated, so the outcome of
+// one that never finishes names its real cause. A settled or activated operation keeps its own error.
+func (d *DB) NoteConversationSwitchError(ctx context.Context, machine, session, operation, reason string) error {
+	_, err := d.pool.Exec(ctx, `UPDATE conversation_switches s SET error=$4 FROM logical_conversations c
+	 WHERE s.logical_machine=$1 AND s.logical_session=$2 AND s.operation_id=$3 AND s.phase IN ('preparing','prepared','in_doubt')
+	 AND c.machine_id=s.logical_machine AND c.session_id=s.logical_session AND c.epoch=s.expected_epoch`, machine, session, operation, reason)
 	return err
 }
 
 func (d *DB) ConversationSwitch(ctx context.Context, machine, session, operation string) (*ConversationSwitch, error) {
 	var op ConversationSwitch
 	var raw []byte
-	err := d.pool.QueryRow(ctx, `SELECT operation_id,expected_epoch,source_segment,coalesce(target_segment,''),request,phase,error FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).
-		Scan(&op.OperationID, &op.ExpectedEpoch, &op.SourceSegment, &op.TargetSegment, &raw, &op.Phase, &op.Error)
+	err := d.pool.QueryRow(ctx, `SELECT operation_id,expected_epoch,source_segment,coalesce(target_segment,''),request,phase,error,created_at,updated_at FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).
+		Scan(&op.OperationID, &op.ExpectedEpoch, &op.SourceSegment, &op.TargetSegment, &raw, &op.Phase, &op.Error, &op.CreatedAt, &op.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -739,6 +815,12 @@ func (d *DB) ResolveConversationDelivery(ctx context.Context, machine, session, 
 				return err
 			}
 		}
+		if outcome == "accepted" {
+			// The input carried the handoff an idle acceptance kept (drainLogicalInput attaches it): it is used up.
+			if _, err := tx.Exec(ctx, `UPDATE conversation_switches SET handoff=NULL WHERE logical_machine=$1 AND logical_session=$2 AND phase='accepted' AND handoff IS NOT NULL`, machine, session); err != nil {
+				return err
+			}
+		}
 		// A rejected first input can have been requeued by rollback above. Keep
 		// that payload; only terminal states may discard content/provenance.
 		_, err = tx.Exec(ctx, `UPDATE conversation_inputs SET payload='{}'::bytea WHERE logical_machine=$1 AND logical_session=$2 AND client_msg_id=$3 AND state IN ('accepted','rejected')`, machine, session, id)
@@ -796,6 +878,17 @@ func (d *DB) PutConversationHandoff(ctx context.Context, machine, session, opera
 	return err
 }
 
+// ConversationPendingHandoff is the handoff an idle acceptance kept for segment, the conversation's active one: the
+// next input the conversation is sent carries it, and its acceptance discards it (#14488). Nil when there is none.
+func (d *DB) ConversationPendingHandoff(ctx context.Context, machine, session, segment string) (json.RawMessage, error) {
+	var raw []byte
+	err := d.pool.QueryRow(ctx, `SELECT handoff FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND target_segment=$3 AND phase='accepted' AND handoff IS NOT NULL ORDER BY updated_at DESC LIMIT 1`, machine, session, segment).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return json.RawMessage(raw), err
+}
+
 func (d *DB) ConversationPreparation(ctx context.Context, machine, session, operation string) (json.RawMessage, bool, error) {
 	var raw []byte
 	var claimed bool
@@ -806,6 +899,26 @@ func (d *DB) ClaimConversationPreparation(ctx context.Context, machine, session,
 	tag, err := d.pool.Exec(ctx, `UPDATE conversation_switches SET start_claimed=true,updated_at=now() WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3 AND phase='preparing' AND handoff IS NOT NULL AND NOT start_claimed`, machine, session, operation)
 	return tag.RowsAffected() == 1, err
 }
+
+// ConversationPreparedSession returns a saved positive receipt for a current preparation,
+// or an empty session if the node must be consulted. PrepareConversationSegment checks
+// the epoch again under the row lock when mapping either receipt.
+func (d *DB) ConversationPreparedSession(ctx context.Context, machine, session, operation, targetMachine string, epoch int64) (string, error) {
+	var target string
+	err := d.pool.QueryRow(ctx, `SELECT coalesce(p.session_id,'')
+	 FROM conversation_switches s
+	 JOIN logical_conversations c ON c.machine_id=s.logical_machine AND c.session_id=s.logical_session
+	 LEFT JOIN conversation_prepared_candidates p ON p.logical_machine=s.logical_machine AND p.logical_session=s.logical_session
+	 AND p.operation_id=s.operation_id AND p.machine_id=$4
+	 WHERE s.logical_machine=$1 AND s.logical_session=$2 AND s.operation_id=$3
+	 AND c.epoch=$5 AND c.deleted_at IS NULL AND s.expected_epoch=c.epoch AND s.phase IN ('preparing','in_doubt')
+	 ORDER BY p.session_id LIMIT 1`, machine, session, operation, targetMachine, epoch).Scan(&target)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrConversationEpoch
+	}
+	return target, err
+}
+
 func (d *DB) ConversationUnresolvedInput(ctx context.Context, machine, session string) (*ConversationInput, error) {
 	var row ConversationInput
 	var raw []byte
@@ -839,6 +952,45 @@ func (d *DB) ConversationClosureDone(ctx context.Context, machine, session strin
 
 func (d *DB) ConversationInputPending(ctx context.Context, machine, session string) (bool, error) {
 	return conversationInputPending(ctx, d.pool, machine, session)
+}
+
+// MarkConversationSegmentDispatched records durable dispatch evidence on segment
+// before any physical send RPC is attempted on a non-root segment.
+func (d *DB) MarkConversationSegmentDispatched(ctx context.Context, machine, session, segment string) error {
+	if d.sets&ManagerSet == 0 {
+		return errors.New("manager database unavailable")
+	}
+	tag, err := d.pool.Exec(ctx, `UPDATE conversation_segments SET dispatched=true WHERE id=$1 AND logical_machine=$2 AND logical_session=$3 AND state='active'`, segment, machine, session)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrConversationEpoch
+	}
+	return nil
+}
+
+// ConversationSegmentDispatched reports whether segment has any durable dispatch
+// evidence (a direct send marker, or any sending/in_doubt/accepted input since
+// activation), or whether the segment or its activation switch cannot be verified.
+func (d *DB) ConversationSegmentDispatched(ctx context.Context, machine, session, segment string) (bool, error) {
+	if d.sets&ManagerSet == 0 {
+		return true, nil
+	}
+	var dispatched bool
+	err := d.pool.QueryRow(ctx, `SELECT
+		NOT EXISTS(SELECT 1 FROM conversation_segments WHERE id=$3 AND logical_machine=$1 AND logical_session=$2)
+		OR EXISTS(SELECT 1 FROM conversation_segments WHERE id=$3 AND logical_machine=$1 AND logical_session=$2 AND dispatched)
+		OR NOT EXISTS(SELECT 1 FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND target_segment=$3)
+		OR EXISTS(
+			SELECT 1 FROM conversation_inputs i
+			JOIN conversation_switches s
+				ON s.logical_machine=i.logical_machine AND s.logical_session=i.logical_session
+			WHERE s.logical_machine=$1 AND s.logical_session=$2 AND s.target_segment=$3
+				AND i.epoch >= s.expected_epoch + 1
+				AND i.state IN ('sending', 'in_doubt', 'accepted')
+		)`, machine, session, segment).Scan(&dispatched)
+	return dispatched, err
 }
 
 func conversationInputPending(ctx context.Context, q conversationQuerier, machine, session string) (bool, error) {

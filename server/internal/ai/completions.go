@@ -75,7 +75,7 @@ func (c *Client) chatCompletions(ctx context.Context, hc *http.Client, key strin
 				body["max_completion_tokens"] = r.MaxTokens
 				continue
 			}
-			if !droppedStreamOptions && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) && chatRejectsStreamOptions(raw) {
+			if !droppedStreamOptions && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) && ChatRejectsStreamOptions(raw) {
 				droppedStreamOptions = true
 				delete(body, "stream_options")
 				continue
@@ -371,9 +371,9 @@ func chatReasoningFieldError(message, param string) bool {
 	return strings.Contains(compact, "reasoning_effortisnotsupported")
 }
 
-// chatRejectsStreamOptions recognizes an error body that names the stream_options field. Such a server then
+// ChatRejectsStreamOptions recognizes an error body that names the stream_options field. Such a server then
 // streams no usage, and the reply reports zero.
-func chatRejectsStreamOptions(raw []byte) bool {
+func ChatRejectsStreamOptions(raw []byte) bool {
 	body := strings.ToLower(string(raw))
 	return strings.Contains(body, "stream_options") || strings.Contains(body, "include_usage")
 }

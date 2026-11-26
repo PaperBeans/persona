@@ -258,6 +258,7 @@ final class AssistantViewModel: ExtensionViewControlling {
                 case .empty(let empty): if let button = empty.button { actions.append(button.action) }
                 case .graph(let graph): actions.append(contentsOf: graph.nodes.compactMap(\.action))
                 case .scene(let scene): actions.append(contentsOf: (scene.pins ?? []).compactMap(\.action))
+                case .map(let map): actions.append(contentsOf: (map.markers ?? []).compactMap(\.action))
                 default: break
                 }
             }

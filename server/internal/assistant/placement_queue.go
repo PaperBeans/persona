@@ -1,0 +1,1226 @@
+package assistant
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/wireids"
+)
+
+// Two-layer automatic machine placement kernel mechanism:
+//
+// When task_plan omits machine, the task is persisted inside its started plan with TaskQueue.Key == "pending_placement".
+// Visible tasks emit a one-way placement.pending wake event carrying only {plan_id, todo_id, batch_size}. External
+// scheduler extensions granted the named-only tasks.schedule scope poll GET /api/v1/assistant/placement/pending
+// (refreshing a short 60s active lease) and submit CAS assign/defer calls. The kernel re-verifies every hard constraint
+// and atomically reserves an admission slot (claimIfAllowed) before starting the Agent and writing placement.go audit.
+//
+// Fallback is never fail-closed: with no active tasks.schedule lease (or for hidden privacy-space tasks), fallback runs
+// at 0s; with an active lease, any task still unassigned after 15s falls back to admission.go:recommendMachine. Tasks
+// with no matching computer remain queued up to the existing 30m admissionQueueMaxWait bound.
+
+const (
+	pendingPlacementQueueKey = "pending_placement"
+	placementReasonExtension = "extension_assigned"
+	placementReasonFallback  = "fallback_recommend"
+
+	placementLeaseTTL     = 60 * time.Second
+	placementDeferMin     = time.Second
+	placementDeferMax     = 5 * time.Minute
+	placementDeferDefault = 30 * time.Second
+	placementBodyLimit    = 16 << 10
+	placementIdleSweep    = time.Minute
+
+	placementMaxCapabilities = 16
+	placementMaxCandidates   = 32
+	placementMaxTagRunes     = 64
+	placementMaxReasonRunes  = 300
+)
+
+var (
+	pendingPlacementFallbackWait  = 15 * time.Second
+	pendingPlacementRetryInterval = 30 * time.Second
+)
+
+// taskPlacementWait persists automatic placement state inside TaskQueue so hub restarts resume cleanly.
+type taskPlacementWait struct {
+	Version    int       `json:"version"`
+	BatchID    string    `json:"batch_id,omitempty"`
+	BatchSize  int       `json:"batch_size,omitempty"`
+	BatchIndex int       `json:"batch_index,omitempty"`
+	EnqueuedAt time.Time `json:"enqueued_at"`
+	FallbackAt time.Time `json:"fallback_at"`
+	DeferUntil time.Time `json:"defer_until,omitempty"`
+	LastReason string    `json:"last_reason,omitempty"`
+	Notified   bool      `json:"notified,omitempty"`
+}
+
+// placementSchedulerBook holds short-TTL active scheduler leases and coordinates fallback sweeps.
+type placementSchedulerBook struct {
+	mu          sync.Mutex
+	leases      map[string]time.Time // extension id -> lease expiry
+	wake        chan struct{}
+	now         func() time.Time // tests override clock without sleeps
+	inFlight    map[string]bool  // todo_id currently executing fallback
+	manualSweep bool             // tests disable automatic background goroutine when placementFallbackLoop is not running
+	loopRunning atomic.Bool
+}
+
+type placementEventPublisher interface {
+	PlacementEvent(event string, params any) error
+}
+
+func (b *BusHub) PlacementEvent(event string, params any) error { return b.notifyHub(event, params) }
+
+func (s *Service) placementNow() time.Time {
+	s.placementSched.mu.Lock()
+	fn := s.placementSched.now
+	s.placementSched.mu.Unlock()
+	if fn != nil {
+		return fn().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (s *Service) placementWakeChan() chan struct{} {
+	s.placementSched.mu.Lock()
+	defer s.placementSched.mu.Unlock()
+	if s.placementSched.wake == nil {
+		s.placementSched.wake = make(chan struct{}, 1)
+	}
+	return s.placementSched.wake
+}
+
+func (s *Service) wakePendingPlacement() {
+	ch := s.placementWakeChan()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// touchPlacementLease refreshes extID's short-TTL active scheduler lease.
+func (s *Service) touchPlacementLease(extID string, now time.Time) time.Time {
+	extID = strings.TrimSpace(extID)
+	if extID == "" {
+		return time.Time{}
+	}
+	exp := now.Add(placementLeaseTTL)
+	s.placementSched.mu.Lock()
+	if s.placementSched.leases == nil {
+		s.placementSched.leases = map[string]time.Time{}
+	}
+	s.placementSched.leases[extID] = exp
+	s.placementSched.mu.Unlock()
+	return exp
+}
+
+// hasActivePlacementLease reports whether at least one scheduler extension holds an unexpired lease at now.
+func (s *Service) hasActivePlacementLease(now time.Time) bool {
+	s.placementSched.mu.Lock()
+	defer s.placementSched.mu.Unlock()
+	active := false
+	for id, exp := range s.placementSched.leases {
+		if !exp.After(now) {
+			delete(s.placementSched.leases, id)
+			continue
+		}
+		active = true
+	}
+	return active
+}
+
+// normalizePlacementConstraints validates and normalizes optional placement_constraints on t.
+func (s *Service) normalizePlacementConstraints(ctx context.Context, t *PlanTask) error {
+	c := t.PlacementConstraints
+	if c == nil {
+		return nil
+	}
+	out := &assistantwire.PlacementConstraints{
+		OS:         strings.ToLower(strings.TrimSpace(c.OS)),
+		RequireHub: c.RequireHub,
+		Workload:   strings.ToLower(strings.TrimSpace(c.Workload)),
+	}
+	switch out.OS {
+	case "", "linux", "darwin", "windows":
+	default:
+		return fmt.Errorf("placement_constraints.os %q must be linux, darwin, or windows", c.OS)
+	}
+	switch out.Workload {
+	case "", "light", "standard", "heavy":
+	default:
+		return fmt.Errorf("placement_constraints.workload %q must be light, standard, or heavy", c.Workload)
+	}
+	if len(c.Capabilities) > placementMaxCapabilities {
+		return fmt.Errorf("placement_constraints.capabilities accepts at most %d items", placementMaxCapabilities)
+	}
+	if len(c.Capabilities) > 0 {
+		seen := make(map[string]bool, len(c.Capabilities))
+		for _, raw := range c.Capabilities {
+			v := strings.ToLower(strings.TrimSpace(raw))
+			if v == "" {
+				continue
+			}
+			if utf8.RuneCountInString(v) > placementMaxTagRunes {
+				return fmt.Errorf("placement_constraints.capabilities entry exceeds %d characters", placementMaxTagRunes)
+			}
+			if !seen[v] {
+				seen[v] = true
+				out.Capabilities = append(out.Capabilities, v)
+			}
+		}
+	}
+	if len(c.CandidateMachines) > placementMaxCandidates {
+		return fmt.Errorf("placement_constraints.candidate_machines accepts at most %d items", placementMaxCandidates)
+	}
+	if len(c.CandidateMachines) > 0 {
+		seen := make(map[string]bool, len(c.CandidateMachines))
+		for _, raw := range c.CandidateMachines {
+			v := strings.TrimSpace(raw)
+			if v == "" {
+				continue
+			}
+			if m, ok := s.machineByName(ctx, v); ok {
+				v = m.ID
+			}
+			if !seen[v] {
+				seen[v] = true
+				out.CandidateMachines = append(out.CandidateMachines, v)
+			}
+		}
+	}
+	t.PlacementConstraints = out
+	return nil
+}
+
+// machineMatchesPlacementConstraints checks kernel-enforced hard placement constraints for candidate device d.
+// Unknown capability tags are passed through because custom inventory belongs to the extension layer.
+func (s *Service) machineMatchesPlacementConstraints(ctx context.Context, t PlanTask, d Device) (hitKey string, err error) {
+	var m *proto.Machine
+	if s.devs != nil {
+		m, _, _ = s.devs.MachineResources(d.ID)
+	}
+	isHub := s.isHubMachine(ctx, d, m)
+	c := t.PlacementConstraints
+	requireHub := c != nil && c.RequireHub
+	if !requireHub && isHub {
+		return "hub_excluded", errors.New("automatic placement excludes the hub computer unless require_hub is true")
+	}
+	if requireHub && !isHub {
+		return "hub_required", errors.New("placement_constraints.require_hub requires the hub computer")
+	}
+	if c != nil && len(c.CandidateMachines) > 0 {
+		canon := s.canonical(d.ID)
+		matched := false
+		for _, cand := range c.CandidateMachines {
+			if cand == d.ID || cand == canon || cand == d.Name || s.canonical(cand) == canon {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return "not_candidate", fmt.Errorf("computer %q is not in placement_constraints.candidate_machines", firstNonEmpty(d.Name, d.ID))
+		}
+	}
+	osName := machinePlatformOS(m)
+	arch := machinePlatformArch(m)
+	if c != nil && c.OS != "" && osName != c.OS {
+		return "os_mismatch", fmt.Errorf("computer %q does not match required os %q", firstNonEmpty(d.Name, d.ID), c.OS)
+	}
+	if c != nil {
+		for _, capTag := range c.Capabilities {
+			switch capTag {
+			case "darwin", "macos", "xcode":
+				if osName != "darwin" {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q (requires darwin)", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			case "linux":
+				if osName != "linux" {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q (requires linux)", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			case "windows":
+				if osName != "windows" {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q (requires windows)", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			case "arm64", "aarch64":
+				if arch != "arm64" {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q (requires arm64)", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			case "amd64", "x86_64":
+				if arch != "amd64" {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q (requires amd64)", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			case "hub":
+				if !isHub {
+					return "capability_mismatch", fmt.Errorf("computer %q lacks capability %q", firstNonEmpty(d.Name, d.ID), capTag)
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+func (s *Service) pendingPlacementQueueEntry(ctx context.Context, planID string, batchSize, batchIdx int, now time.Time) TaskQueue {
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	fallbackAt := now
+	if s.hasActivePlacementLease(now) {
+		fallbackAt = now.Add(pendingPlacementFallbackWait)
+	}
+	reason := i18n.T(s.lang(ctx), "assistant-tasks.placement_waiting")
+	return TaskQueue{
+		Reason:   reason,
+		Key:      pendingPlacementQueueKey,
+		Attempt:  0,
+		QueuedAt: now,
+		NextAt:   fallbackAt,
+		Placement: &taskPlacementWait{
+			Version:    1,
+			BatchID:    planID,
+			BatchSize:  batchSize,
+			BatchIndex: batchIdx,
+			EnqueuedAt: now,
+			FallbackAt: fallbackAt,
+			Notified:   true,
+		},
+	}
+}
+
+func (s *Service) pendingPlacementPending(ctx context.Context, t Todo) bool {
+	if t.ID == "" {
+		return false
+	}
+	for _, p := range s.queueCandidatePlans(ctx) {
+		if p.State != planStarted {
+			continue
+		}
+		for _, pt := range p.Tasks {
+			if pt.TodoID == t.ID && pt.Queue != nil && pt.Queue.Key == pendingPlacementQueueKey {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Service) placementVisibleToExtensions(ctx context.Context, todoID string) bool {
+	if todoID == "" {
+		return false
+	}
+	return s.todoVerdicts(ctx, []string{todoID}, nil, nil)[todoID] == todoShown
+}
+
+func (s *Service) emitPlacementPending(planID, todoID string, batchSize int) {
+	if planID == "" || todoID == "" || batchSize <= 0 {
+		return
+	}
+	ev := assistantwire.PlacementPendingEvent{PlanID: assistantwire.PlanID(planID), TodoID: wireids.TodoID(todoID), BatchSize: batchSize}
+	if pub, ok := s.hub.(placementEventPublisher); ok {
+		if err := pub.PlacementEvent(assistantwire.EventPlacementPending, ev); err != nil {
+			s.logf("placement: event %s: %v", todoID, err)
+		}
+		return
+	}
+	if pub, ok := s.hub.(todoEventPublisher); ok {
+		if err := pub.TodoEvent(assistantwire.EventPlacementPending, ev); err != nil {
+			s.logf("placement: event %s: %v", todoID, err)
+		}
+	}
+}
+
+func (s *Service) onPendingPlacementEnqueued(ctx context.Context, planID, todoID string, batchSize int) {
+	now := s.placementNow()
+	visible := s.placementVisibleToExtensions(ctx, todoID)
+	if visible {
+		s.emitPlacementPending(planID, todoID, batchSize)
+	}
+	needsImmediate := !visible || !s.hasActivePlacementLease(now)
+	if s.placementSched.loopRunning.Load() {
+		s.wakePendingPlacement()
+		return
+	}
+	s.placementSched.mu.Lock()
+	manual := s.placementSched.manualSweep
+	s.placementSched.mu.Unlock()
+	if needsImmediate && !manual {
+		s.taskStarting.Add(1)
+		go func() {
+			defer s.taskStarting.Add(-1)
+			s.sweepPendingPlacement(s.runCtx())
+		}()
+	}
+}
+
+// placementFallbackLoop resumes persisted pending_placement tasks across hub restarts and drives 0s/15s fallback and 30m timeouts.
+func (s *Service) placementFallbackLoop(ctx context.Context) {
+	s.placementSched.loopRunning.Store(true)
+	defer s.placementSched.loopRunning.Store(false)
+	wake := s.placementWakeChan()
+	for {
+		nextWait := s.sweepPendingPlacement(ctx)
+		if nextWait <= 0 {
+			nextWait = placementIdleSweep
+		}
+		timer := time.NewTimer(nextWait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
+
+// sweepPendingPlacement runs one pass over persisted pending_placement tasks and returns when the next check is due.
+func (s *Service) sweepPendingPlacement(ctx context.Context) time.Duration {
+	cctx, cancel := context.WithTimeout(ctx, taskFailTimeout)
+	defer cancel()
+	if err := s.ensureTodosLoaded(cctx); err != nil {
+		s.logf("placement queue: load todos: %v", err)
+		return placementIdleSweep
+	}
+	now := s.placementNow()
+	activeLease := s.hasActivePlacementLease(now)
+	nextWake := placementIdleSweep
+	updateWake := func(d time.Duration) {
+		if d < 0 {
+			d = 0
+		}
+		if d < nextWake {
+			nextWake = d
+		}
+	}
+
+	for _, p := range s.queueCandidatePlans(cctx) {
+		if p.State != planStarted {
+			continue
+		}
+		for i := range p.Tasks {
+			pt := p.Tasks[i]
+			q := pt.Queue
+			if q == nil || q.Key != pendingPlacementQueueKey {
+				continue
+			}
+			todo, ok := s.todoNow(pt.TodoID)
+			if !ok || todo.DoneAt != nil || todo.Cancelled() {
+				if err := s.patchPlanTask(cctx, p.ID, i, func(t *PlanTask) {
+					if t.Queue != nil && t.Queue.Key == pendingPlacementQueueKey {
+						t.Queue = nil
+					}
+				}); err != nil {
+					s.logf("task %s: placement queue: clear ended task: %v", pt.TodoID, err)
+				}
+				continue
+			}
+			if now.Sub(q.QueuedAt) >= admissionQueueMaxWait {
+				s.failQueuedStart(cctx, p, i, pt, q)
+				continue
+			}
+			pw := q.Placement
+			if pw == nil {
+				pw = &taskPlacementWait{Version: 1, BatchID: p.ID, BatchSize: 1, EnqueuedAt: q.QueuedAt, FallbackAt: q.NextAt}
+			}
+			// If explicitly deferred into the future, wait until DeferUntil (bounded by the 30m overall deadline).
+			if !pw.DeferUntil.IsZero() && pw.DeferUntil.After(now) {
+				updateWake(pw.DeferUntil.Sub(now))
+				updateWake(admissionQueueMaxWait - now.Sub(q.QueuedAt))
+				continue
+			}
+			visible := s.placementVisibleToExtensions(cctx, pt.TodoID)
+			// When a deferred task becomes due while a scheduler extension is active, emit one wake hint and give it its 15s window.
+			if activeLease && visible && !pw.DeferUntil.IsZero() && !pw.Notified {
+				s.emitPlacementPending(p.ID, pt.TodoID, max(pw.BatchSize, 1))
+				_ = s.patchPlanTask(cctx, p.ID, i, func(t *PlanTask) {
+					if t.Queue != nil && t.Queue.Key == pendingPlacementQueueKey && t.Queue.Placement != nil && t.Queue.Placement.Version == pw.Version {
+						t.Queue.Placement.Notified = true
+					}
+				})
+			}
+			fallbackDue := !visible || !activeLease || !pw.FallbackAt.After(now)
+			if !fallbackDue {
+				updateWake(pw.FallbackAt.Sub(now))
+				continue
+			}
+			s.runPlacementFallback(cctx, p, i, pt, pw.Version, now)
+			updateWake(pendingPlacementRetryInterval)
+		}
+	}
+	return nextWake
+}
+
+func (s *Service) runPlacementFallback(ctx context.Context, p *TaskPlan, idx int, pt PlanTask, version int, now time.Time) {
+	s.placementSched.mu.Lock()
+	if s.placementSched.inFlight == nil {
+		s.placementSched.inFlight = map[string]bool{}
+	}
+	if s.placementSched.inFlight[pt.TodoID] {
+		s.placementSched.mu.Unlock()
+		return
+	}
+	s.placementSched.inFlight[pt.TodoID] = true
+	s.placementSched.mu.Unlock()
+	defer func() {
+		s.placementSched.mu.Lock()
+		delete(s.placementSched.inFlight, pt.TodoID)
+		s.placementSched.mu.Unlock()
+	}()
+
+	pl := newPlacement("auto", "enforce")
+	pl.TaskID = pt.TodoID
+	pctx := context.WithValue(ctx, placementKey{}, pl)
+
+	alt, ok := s.recommendMachine(pctx, "", func(d Device) bool {
+		if err := s.leaderOnWorkMachine(&pt, d); err != nil {
+			pl.hit(d.ID, "leader_work_machine", nil)
+			return false
+		}
+		if hitKey, err := s.machineMatchesPlacementConstraints(pctx, pt, d); err != nil {
+			pl.hit(d.ID, hitKey, nil)
+			return false
+		}
+		if strings.HasPrefix(pt.Cwd, "~") && d.Home == "" {
+			pl.hit(d.ID, "directory_missing", nil)
+			return false
+		}
+		dir := proto.ExpandHome(pt.Cwd, d.Home)
+		if assistantWorkspace(d, dir) {
+			pl.hit(d.ID, "assistant_workspace", nil)
+			return false
+		}
+		if pt.Launcher != "" {
+			resolved := s.startLauncher(pctx, pt.Launcher)
+			if !s.launcherOn(pctx, d.ID, resolved) {
+				pl.hit(d.ID, "launcher_missing", nil)
+				return false
+			}
+			if h, bad := s.launcherUnusable(pctx, d.ID, resolved); bad {
+				pl.hit(d.ID, "launcher_unhealthy", i18n.Args{"launcher": resolved, "kind": h.Kind})
+				return false
+			}
+		}
+		if dir != "" && !pt.backendWorkspace() && !s.taskDirectoryExists(pctx, d.ID, dir) {
+			return false
+		}
+		return true
+	})
+
+	var failReason string
+	if ok {
+		reason := "kernel fallback: lowest load"
+		if _, err := s.assignPendingPlacement(pctx, p.ID, p.Conversation, idx, pt, alt.ID, version, placementReasonFallback, reason, pl); err == nil {
+			return
+		} else {
+			failReason = clip(oneLine(err.Error()), placementMaxReasonRunes)
+		}
+	} else {
+		failReason = i18n.T(s.lang(ctx), "assistant-tasks.placement_no_match")
+	}
+
+	retryAt := now.Add(pendingPlacementRetryInterval)
+	if err := s.patchPlanTask(ctx, p.ID, idx, func(t *PlanTask) {
+		if t.TodoID != pt.TodoID || t.Queue == nil || t.Queue.Key != pendingPlacementQueueKey {
+			return
+		}
+		if t.Queue.Placement == nil {
+			t.Queue.Placement = &taskPlacementWait{Version: version, BatchID: p.ID, BatchSize: 1, EnqueuedAt: t.Queue.QueuedAt}
+		}
+		if t.Queue.Placement.Version != version {
+			return
+		}
+		t.Queue.Attempt++
+		t.Queue.Reason = failReason
+		t.Queue.NextAt = retryAt
+		t.Queue.Placement.Version++
+		t.Queue.Placement.LastReason = failReason
+		t.Queue.Placement.DeferUntil = time.Time{}
+		t.Queue.Placement.FallbackAt = retryAt
+		t.Queue.Placement.Notified = true
+		pl.ReasonKey = pendingPlacementQueueKey
+		pl.Reason = failReason
+		pl.WaitAt = retryAt
+		t.Placement = pl
+	}); err != nil {
+		s.logf("task %s: placement fallback requeue: %v", pt.TodoID, err)
+	}
+}
+
+type placementHTTPError struct {
+	status int
+	code   string
+	err    error
+	extra  map[string]any
+}
+
+func (e *placementHTTPError) Error() string { return e.err.Error() }
+func (e *placementHTTPError) Unwrap() error { return e.err }
+
+type placementAssignResult struct {
+	PlanID      string `json:"plan_id"`
+	TodoID      string `json:"todo_id"`
+	Machine     string `json:"machine"`
+	Cwd         string `json:"cwd"`
+	PlacementID string `json:"placement_id"`
+}
+
+// assignPendingPlacement verifies every kernel hard constraint and atomically claims an admission slot (claimIfAllowed)
+// before CAS-committing the target machine into the plan and launching the Agent asynchronously.
+func (s *Service) assignPendingPlacement(
+	ctx context.Context,
+	planID, conversation string,
+	idx int,
+	pt PlanTask,
+	targetMachine string,
+	expectedVersion int,
+	reasonKey, reason string,
+	audit *placement,
+) (*placementAssignResult, error) {
+	m, ok := s.machineByName(ctx, targetMachine)
+	if !ok {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "unknown_machine",
+			err: fmt.Errorf("unknown machine %q", targetMachine)}
+	}
+	if !m.Reachable {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "machine_offline",
+			err: machineOffline(firstNonEmpty(m.Name, m.ID))}
+	}
+	if err := s.leaderOnWorkMachine(&pt, m); err != nil {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "leader_work_machine", err: err}
+	}
+	if hitKey, err := s.machineMatchesPlacementConstraints(ctx, pt, m); err != nil {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "constraint_violated", err: err,
+			extra: map[string]any{"constraint": hitKey}}
+	}
+
+	candidate := pt
+	candidate.Machine = m.ID
+	if strings.HasPrefix(candidate.Cwd, "~") && m.Home == "" {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "directory_missing",
+			err: fmt.Errorf("computer %q has not reported a home directory to expand %q", firstNonEmpty(m.Name, m.ID), candidate.Cwd)}
+	}
+	candidate.Cwd = proto.ExpandHome(candidate.Cwd, m.Home)
+	if assistantWorkspace(m, candidate.Cwd) {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "agent_assistant_workspace",
+			err: i18n.Err("rpc-errors.agent_assistant_workspace")}
+	}
+	if candidate.Cwd != "" && !candidate.backendWorkspace() && !s.taskDirectoryExists(ctx, m.ID, candidate.Cwd) {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "directory_missing",
+			err: fmt.Errorf("directory %q does not exist on %s", candidate.Cwd, firstNonEmpty(m.Name, m.ID))}
+	}
+
+	// Launcher fitting, speed/readonly/mode checks, and launcher health verification on the chosen computer.
+	asked := ""
+	if candidate.CallerPermission != nil {
+		asked = strings.TrimSpace(*candidate.CallerPermission)
+	}
+	own := candidate.launchPick()
+	fit, fitParams, fitOK, err := s.resolveFitPlanTask(ctx, &candidate)
+	if err != nil {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable", err: err}
+	}
+	resolvedLauncher := candidate.Launcher
+	if lp, _ := fitParams["launcher"].(string); lp != "" {
+		resolvedLauncher = lp
+	}
+	takesModes := true
+	if fitOK {
+		if err := checkStartSpeed(fitParams, fit, ""); err != nil {
+			return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable", err: err}
+		}
+		if candidate.Readonly {
+			if err := s.readonlyLauncherRefusal(ctx, m, fitParams, fit); err != nil {
+				return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable", err: err}
+			}
+		}
+		configuredMode, _ := fitParams["permission_mode"].(string)
+		if !candidate.preservePermission {
+			if candidate.CallerPermission != nil {
+				candidate.Permission = *candidate.CallerPermission
+				candidate.normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
+			}
+			switch {
+			case candidate.Readonly:
+				if fit.allowAll() {
+					candidate.Permission = "bypassPermissions"
+				}
+			case configuredMode != "" && fit.supportsPermissionMode(configuredMode):
+				if candidate.Permission == "" {
+					candidate.Permission = configuredMode
+				}
+			case fit.allowAllOver(candidate.Permission):
+				candidate.Permission = "bypassPermissions"
+			}
+		}
+		if takesModes = startTakesModes(fit.agent); !takesModes {
+			if err := startModesRefused(cmp.Or(candidate.Launcher, resolvedLauncher), fit.agent, asked, own.effort); err != nil {
+				return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable", err: err}
+			}
+			candidate.Effort = ""
+			if asked != "" {
+				candidate.Permission = ""
+			}
+		}
+	}
+	if candidate.Permission == "" && takesModes {
+		candidate.Permission = s.taskPermission(ctx, m.ID, nil)
+	}
+	if r, bad := s.launcherUnusableNow(ctx, m.ID, s.startLauncher(ctx, cmp.Or(candidate.Launcher, resolvedLauncher))); bad {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "launcher_unavailable",
+			err: i18n.Err("assistant-tasks.fixed_launcher_unhealthy", i18n.Args{
+				"machine": m.ID, "launcher": cmp.Or(candidate.Launcher, resolvedLauncher), "reason": r.Error,
+			})}
+	}
+	if err := s.resolveTaskWorkspace(ctx, &candidate); err != nil {
+		return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "workspace_unavailable", err: err}
+	}
+	s.resolveTaskRepo(ctx, &candidate)
+
+	pl := audit
+	if pl == nil {
+		pl = newPlacement("auto", "enforce")
+	} else {
+		cp := *pl
+		cp.Candidates = pl.cloneCandidates()
+		pl = &cp
+	}
+	if pt.Placement != nil && pt.Placement.ID != "" {
+		pl.ID = pt.Placement.ID
+		if !pt.Placement.At.IsZero() {
+			pl.At = pt.Placement.At
+		}
+	}
+	pl.TaskID = pt.TodoID
+	pl.Choice = m.ID
+	pl.ReasonKey = reasonKey
+	pl.Reason = clip(oneLine(reason), placementMaxReasonRunes)
+	pl.candidate(m.ID)
+
+	// Atomic admission gate & slot claim. Released on any failure or CAS conflict; handed to runPlanTaskStart on success.
+	var release func()
+	releaseTransferred := false
+	defer func() {
+		if release != nil && !releaseTransferred {
+			release()
+		}
+	}()
+	if s.devs != nil && s.admissionEnabled(ctx) {
+		cfg := s.admissionSettings(ctx)
+		direction := s.taskDirection(ctx, &candidate)
+		launcher := s.startLauncher(ctx, cmp.Or(candidate.Launcher, resolvedLauncher))
+		lim := s.limitsFor(ctx, m.ID, direction, candidate.Project, cfg).withLauncher(cfg, launcher)
+		var violation *i18n.Message
+		release, violation = s.claimIfAllowed(context.WithValue(ctx, placementKey{}, pl), m.ID, direction, lim)
+		if violation != nil {
+			return nil, &placementHTTPError{status: http.StatusUnprocessableEntity, code: "admission_refused",
+				err: s.admissionRefused(context.WithValue(ctx, placementKey{}, pl), m.ID, direction, violation)}
+		}
+	}
+
+	if pl.Reason != "" {
+		candidate.noteWhy(pl.Reason)
+	}
+	candidate.Placement = pl
+
+	var blockerRefs []string
+	if s.settings(ctx).todosV2On() {
+		blockerRefs = s.activeTodoBlockerRefs(ctx, pt.TodoID)
+	}
+
+	wasRetry := false
+	casResult := "not_pending"
+	currentVersion := 0
+	currentMachine := ""
+	if err := s.patchPlanTask(ctx, planID, idx, func(live *PlanTask) {
+		if live.TodoID != pt.TodoID {
+			casResult = "not_found"
+			return
+		}
+		if live.Queue == nil || live.Queue.Key != pendingPlacementQueueKey {
+			casResult = "already_assigned"
+			currentMachine = live.Machine
+			return
+		}
+		liveVer := 1
+		if live.Queue.Placement != nil && live.Queue.Placement.Version > 0 {
+			liveVer = live.Queue.Placement.Version
+		}
+		if liveVer != expectedVersion {
+			casResult = "version_mismatch"
+			currentVersion = liveVer
+			return
+		}
+		wasRetry = live.Queue.Retry
+		live.Machine = candidate.Machine
+		live.Cwd = candidate.Cwd
+		live.Repo = candidate.Repo
+		live.Workspace = candidate.Workspace
+		live.WorkspaceResolved = candidate.WorkspaceResolved
+		live.WorkspaceInferred = candidate.WorkspaceInferred
+		live.Launcher = candidate.Launcher
+		live.Model = candidate.Model
+		live.Effort = candidate.Effort
+		live.Speed = candidate.Speed
+		live.Tier = candidate.Tier
+		live.Permission = candidate.Permission
+		live.Why = candidate.Why
+		live.Placement = pl
+		if len(blockerRefs) > 0 {
+			q := s.blockerWaitQueue(blockerRefs)
+			q.Retry = wasRetry
+			live.Queue = q
+			live.Placement = queuedPlacement(*live, q)
+			pl = live.Placement
+		} else {
+			live.Queue = nil
+		}
+		casResult = "ok"
+	}); err != nil {
+		return nil, err
+	}
+	switch casResult {
+	case "ok":
+	case "version_mismatch":
+		return nil, &placementHTTPError{status: http.StatusConflict, code: "placement_version_mismatch",
+			err:   fmt.Errorf("placement version mismatch: got %d, current is %d", expectedVersion, currentVersion),
+			extra: map[string]any{"current_version": currentVersion}}
+	case "already_assigned":
+		return nil, &placementHTTPError{status: http.StatusConflict, code: "placement_conflict",
+			err:   errors.New("task is no longer waiting for placement"),
+			extra: map[string]any{"machine": currentMachine}}
+	default:
+		return nil, &placementHTTPError{status: http.StatusNotFound, code: "placement_not_found",
+			err: errors.New("pending placement task not found")}
+	}
+
+	s.savePlacement(ctx, pl)
+	if len(blockerRefs) > 0 {
+		s.logf("task %s: placed on %s but deferred until active todo blockers clear (%d active)", pt.TodoID, m.ID, len(blockerRefs))
+		return &placementAssignResult{
+			PlanID:      planID,
+			TodoID:      pt.TodoID,
+			Machine:     m.ID,
+			Cwd:         candidate.Cwd,
+			PlacementID: pl.ID,
+		}, nil
+	}
+	candidate.Queue = nil
+	candidate.admissionRelease = release
+	candidate.admissionClaimMachine = m.ID
+	releaseTransferred = true
+	s.startPlanTaskAsync(planID, conversation, idx, candidate, wasRetry, nil)
+
+	return &placementAssignResult{
+		PlanID:      planID,
+		TodoID:      pt.TodoID,
+		Machine:     m.ID,
+		Cwd:         candidate.Cwd,
+		PlacementID: pl.ID,
+	}, nil
+}
+
+func (s *Service) findPendingPlacementTask(ctx context.Context, todoID string) (*TaskPlan, int, PlanTask, bool) {
+	for _, p := range s.queueCandidatePlans(ctx) {
+		if p.State != planStarted {
+			continue
+		}
+		for i, pt := range p.Tasks {
+			if pt.TodoID == todoID {
+				return p, i, pt, true
+			}
+		}
+	}
+	if todo, ok := s.todoNow(todoID); ok {
+		if p, i, err := s.currentPlanAssignment(ctx, todo); err == nil {
+			return p, i, p.Tasks[i], true
+		}
+	}
+	return nil, 0, PlanTask{}, false
+}
+
+func (s *Service) deferPendingPlacement(ctx context.Context, planID string, idx int, todoID, reason string, nextAt time.Time, expectedVersion int) (int, time.Time, error) {
+	now := s.placementNow()
+	if nextAt.IsZero() {
+		nextAt = now.Add(placementDeferDefault)
+	} else {
+		nextAt = nextAt.UTC()
+		if minAt := now.Add(placementDeferMin); nextAt.Before(minAt) {
+			nextAt = minAt
+		}
+		if maxAt := now.Add(placementDeferMax); nextAt.After(maxAt) {
+			nextAt = maxAt
+		}
+	}
+	reason = clip(oneLine(reason), placementMaxReasonRunes)
+	fallbackAt := nextAt.Add(pendingPlacementFallbackWait)
+	casResult := "not_pending"
+	newVersion := 0
+	currentVersion := 0
+	currentMachine := ""
+	if err := s.patchPlanTask(ctx, planID, idx, func(live *PlanTask) {
+		if live.TodoID != todoID {
+			casResult = "not_found"
+			return
+		}
+		if live.Queue == nil || live.Queue.Key != pendingPlacementQueueKey {
+			casResult = "already_assigned"
+			currentMachine = live.Machine
+			return
+		}
+		if live.Queue.Placement == nil {
+			live.Queue.Placement = &taskPlacementWait{Version: 1, BatchID: planID, BatchSize: 1, EnqueuedAt: live.Queue.QueuedAt}
+		}
+		if live.Queue.Placement.Version != expectedVersion {
+			casResult = "version_mismatch"
+			currentVersion = live.Queue.Placement.Version
+			return
+		}
+		live.Queue.Attempt++
+		live.Queue.Reason = reason
+		live.Queue.NextAt = nextAt
+		live.Queue.Placement.Version++
+		live.Queue.Placement.LastReason = reason
+		live.Queue.Placement.DeferUntil = nextAt
+		live.Queue.Placement.FallbackAt = fallbackAt
+		live.Queue.Placement.Notified = false
+		live.Placement = queuedPlacement(*live, live.Queue)
+		newVersion = live.Queue.Placement.Version
+		casResult = "ok"
+	}); err != nil {
+		return 0, time.Time{}, err
+	}
+	switch casResult {
+	case "ok":
+		s.wakePendingPlacement()
+		return newVersion, nextAt, nil
+	case "version_mismatch":
+		return 0, time.Time{}, &placementHTTPError{status: http.StatusConflict, code: "placement_version_mismatch",
+			err:   fmt.Errorf("placement version mismatch: got %d, current is %d", expectedVersion, currentVersion),
+			extra: map[string]any{"current_version": currentVersion}}
+	case "already_assigned":
+		return 0, time.Time{}, &placementHTTPError{status: http.StatusConflict, code: "placement_conflict",
+			err:   errors.New("task is no longer waiting for placement"),
+			extra: map[string]any{"machine": currentMachine}}
+	default:
+		return 0, time.Time{}, &placementHTTPError{status: http.StatusNotFound, code: "placement_not_found",
+			err: errors.New("pending placement task not found")}
+	}
+}
+
+func writePlacementErr(w http.ResponseWriter, err error) {
+	var pe *placementHTTPError
+	if errors.As(err, &pe) {
+		body := map[string]any{"error": pe.Error(), "code": pe.code}
+		for k, v := range pe.extra {
+			body[k] = v
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(pe.status)
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
+	apierr.Write(w, http.StatusServiceUnavailable, err)
+}
+
+func (s *Service) checkPlacementCaller(w http.ResponseWriter, r *http.Request) (fromExtension bool, extID string, ok bool) {
+	role := r.Header.Get(assistantwire.RoleHeader)
+	if role != "" && role != roleFull && role != roleExtension {
+		apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot access placement scheduling"))
+		return false, "", false
+	}
+	if role == roleExtension {
+		extID = strings.TrimSpace(r.Header.Get(ExtensionHeader))
+		if extID == "" {
+			apierr.Write(w, http.StatusForbidden, errors.New("the extension of this request is unknown"))
+			return false, "", false
+		}
+		s.touchPlacementLease(extID, s.placementNow())
+		return true, extID, true
+	}
+	return false, "", true
+}
+
+// placementRoutes registers the three tasks.schedule endpoints:
+//   - GET  /api/v1/assistant/placement/pending
+//   - POST /api/v1/assistant/placement/{todo_id}/assign
+//   - POST /api/v1/assistant/placement/{todo_id}/defer
+func (s *Service) placementRoutes() {
+	s.handle("GET /api/v1/assistant/placement/pending", func(w http.ResponseWriter, r *http.Request) {
+		fromExt, _, ok := s.checkPlacementCaller(w, r)
+		if !ok {
+			return
+		}
+		ctx := r.Context()
+		if err := s.ensureTodosLoaded(ctx); err != nil {
+			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
+			return
+		}
+		now := s.placementNow()
+		type pendingCandidate struct {
+			planID string
+			pt     PlanTask
+		}
+		var raw []pendingCandidate
+		var todoIDs []string
+		for _, p := range s.queueCandidatePlans(ctx) {
+			if p.State != planStarted {
+				continue
+			}
+			for _, pt := range p.Tasks {
+				if pt.TodoID == "" || pt.Queue == nil || pt.Queue.Key != pendingPlacementQueueKey {
+					continue
+				}
+				todo, exists := s.todoNow(pt.TodoID)
+				if !exists || todo.DoneAt != nil || todo.Cancelled() {
+					continue
+				}
+				if pt.Queue.Placement != nil && !pt.Queue.Placement.DeferUntil.IsZero() && pt.Queue.Placement.DeferUntil.After(now) {
+					continue
+				}
+				raw = append(raw, pendingCandidate{planID: p.ID, pt: pt})
+				todoIDs = append(todoIDs, pt.TodoID)
+			}
+		}
+		var hidden map[string]bool
+		if fromExt && len(todoIDs) > 0 {
+			hidden = s.todosHidden(ctx, todoIDs, nil)
+		}
+		tasks := make([]assistantwire.PlacementPendingTask, 0, len(raw))
+		for _, item := range raw {
+			if hidden[item.pt.TodoID] {
+				continue
+			}
+			q := item.pt.Queue
+			pw := q.Placement
+			ver, batchID, batchSize, batchIdx := 1, item.planID, 1, 0
+			fallbackAt := q.NextAt
+			lastReason := ""
+			if pw != nil {
+				if pw.Version > 0 {
+					ver = pw.Version
+				}
+				if pw.BatchID != "" {
+					batchID = pw.BatchID
+				}
+				if pw.BatchSize > 0 {
+					batchSize = pw.BatchSize
+				}
+				batchIdx = pw.BatchIndex
+				if !pw.FallbackAt.IsZero() {
+					fallbackAt = pw.FallbackAt
+				}
+				lastReason = pw.LastReason
+			}
+			var constraints *assistantwire.PlacementConstraints
+			if item.pt.PlacementConstraints != nil {
+				cp := *item.pt.PlacementConstraints
+				cp.Capabilities = slices.Clone(cp.Capabilities)
+				cp.CandidateMachines = slices.Clone(cp.CandidateMachines)
+				constraints = &cp
+			}
+			tasks = append(tasks, assistantwire.PlacementPendingTask{
+				PlanID:               assistantwire.PlanID(item.planID),
+				TodoID:               wireids.TodoID(item.pt.TodoID),
+				Version:              ver,
+				Role:                 assistantwire.PlacementTaskRole(item.pt.Role),
+				Readonly:             item.pt.Readonly,
+				Launcher:             item.pt.Launcher,
+				Tier:                 item.pt.Tier,
+				Host:                 item.pt.Host,
+				CwdHint:              item.pt.Cwd,
+				MachinePolicy:        item.pt.MachinePolicy,
+				PlacementConstraints: constraints,
+				BatchID:              assistantwire.BatchID(batchID),
+				BatchSize:            batchSize,
+				BatchIndex:           batchIdx,
+				Attempt:              q.Attempt,
+				QueuedAt:             q.QueuedAt,
+				FallbackAt:           fallbackAt,
+				LastReason:           lastReason,
+			})
+		}
+		apierr.WriteJSON(w, map[string]any{
+			"lease_ttl_seconds": int(placementLeaseTTL.Seconds()),
+			"tasks":             tasks,
+		})
+	})
+
+	s.handle("POST /api/v1/assistant/placement/{todo_id}/assign", func(w http.ResponseWriter, r *http.Request) {
+		fromExt, extID, ok := s.checkPlacementCaller(w, r)
+		if !ok {
+			return
+		}
+		todoID := strings.TrimSpace(r.PathValue("todo_id"))
+		if todoID == "" {
+			apierr.Write(w, http.StatusBadRequest, errors.New("todo_id is required"))
+			return
+		}
+		var in struct {
+			Machine string `json:"machine"`
+			Reason  string `json:"reason"`
+			Version int    `json:"version"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, placementBodyLimit))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		in.Machine = strings.TrimSpace(in.Machine)
+		in.Reason = strings.TrimSpace(in.Reason)
+		if in.Machine == "" {
+			apierr.Write(w, http.StatusBadRequest, errors.New("machine is required"))
+			return
+		}
+		if in.Version <= 0 {
+			apierr.Write(w, http.StatusBadRequest, errors.New("version must be a positive integer"))
+			return
+		}
+		ctx := r.Context()
+		if err := s.ensureTodosLoaded(ctx); err != nil {
+			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
+			return
+		}
+		if fromExt && s.todosHidden(ctx, []string{todoID}, nil)[todoID] {
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
+			return
+		}
+		todo, exists := s.todoNow(todoID)
+		if !exists {
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
+			return
+		}
+		if todo.DoneAt != nil || todo.Cancelled() {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusConflict, code: "placement_conflict",
+				err: errors.New("task is no longer open")})
+			return
+		}
+		p, idx, pt, found := s.findPendingPlacementTask(ctx, todoID)
+		if !found {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusNotFound, code: "placement_not_found",
+				err: errors.New("pending placement task not found")})
+			return
+		}
+		if pt.Queue == nil || pt.Queue.Key != pendingPlacementQueueKey {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusConflict, code: "placement_conflict",
+				err:   errors.New("task is no longer waiting for placement"),
+				extra: map[string]any{"machine": pt.Machine}})
+			return
+		}
+		curVer := 1
+		if pt.Queue.Placement != nil && pt.Queue.Placement.Version > 0 {
+			curVer = pt.Queue.Placement.Version
+		}
+		if curVer != in.Version {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusConflict, code: "placement_version_mismatch",
+				err:   fmt.Errorf("placement version mismatch: got %d, current is %d", in.Version, curVer),
+				extra: map[string]any{"current_version": curVer}})
+			return
+		}
+		auditReason := in.Reason
+		if auditReason == "" {
+			if fromExt {
+				auditReason = "assigned by " + extID
+			} else {
+				auditReason = "assigned explicitly"
+			}
+		}
+		res, err := s.assignPendingPlacement(ctx, p.ID, p.Conversation, idx, pt, in.Machine, in.Version, placementReasonExtension, auditReason, nil)
+		if err != nil {
+			writePlacementErr(w, err)
+			return
+		}
+		apierr.WriteJSON(w, map[string]any{
+			"assigned":     true,
+			"plan_id":      res.PlanID,
+			"todo_id":      res.TodoID,
+			"machine":      res.Machine,
+			"cwd":          res.Cwd,
+			"placement_id": res.PlacementID,
+		})
+	})
+
+	s.handle("POST /api/v1/assistant/placement/{todo_id}/defer", func(w http.ResponseWriter, r *http.Request) {
+		fromExt, _, ok := s.checkPlacementCaller(w, r)
+		if !ok {
+			return
+		}
+		todoID := strings.TrimSpace(r.PathValue("todo_id"))
+		if todoID == "" {
+			apierr.Write(w, http.StatusBadRequest, errors.New("todo_id is required"))
+			return
+		}
+		var in struct {
+			Reason  string    `json:"reason"`
+			NextAt  time.Time `json:"next_at"`
+			Version int       `json:"version"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, placementBodyLimit))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		in.Reason = strings.TrimSpace(in.Reason)
+		if in.Reason == "" {
+			apierr.Write(w, http.StatusBadRequest, errors.New("reason is required"))
+			return
+		}
+		if in.Version <= 0 {
+			apierr.Write(w, http.StatusBadRequest, errors.New("version must be a positive integer"))
+			return
+		}
+		ctx := r.Context()
+		if err := s.ensureTodosLoaded(ctx); err != nil {
+			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
+			return
+		}
+		if fromExt && s.todosHidden(ctx, []string{todoID}, nil)[todoID] {
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
+			return
+		}
+		todo, exists := s.todoNow(todoID)
+		if !exists {
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
+			return
+		}
+		if todo.DoneAt != nil || todo.Cancelled() {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusConflict, code: "placement_conflict",
+				err: errors.New("task is no longer open")})
+			return
+		}
+		p, idx, pt, found := s.findPendingPlacementTask(ctx, todoID)
+		if !found {
+			writePlacementErr(w, &placementHTTPError{status: http.StatusNotFound, code: "placement_not_found",
+				err: errors.New("pending placement task not found")})
+			return
+		}
+		newVer, nextAt, err := s.deferPendingPlacement(ctx, p.ID, idx, pt.TodoID, in.Reason, in.NextAt, in.Version)
+		if err != nil {
+			writePlacementErr(w, err)
+			return
+		}
+		apierr.WriteJSON(w, map[string]any{
+			"deferred": true,
+			"plan_id":  p.ID,
+			"todo_id":  pt.TodoID,
+			"version":  newVer,
+			"next_at":  nextAt,
+		})
+	})
+}

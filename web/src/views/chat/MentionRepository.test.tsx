@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // @ bound repositories in the Persona assistant's composer (#12531): fetches GET /api/v1/assistant/repositories on
 // demand when the @ panel opens (with X-Persona-Manager), caps empty queries to EMPTY_PER_GROUP (3), filters by name,
-// aliases, path, canonical_url, and purpose, attaches a removable repository chip, and sends <persona-context kind="repository">
+// aliases, path, canonical_url, and purpose, inserts an atomic repository reference, and sends <persona-context kind="repository">
 // without fabricating local checkout paths.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -9,8 +9,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { t } from "../../i18n";
 import { loadPages } from "../../lib/lazy-page";
 import { getContexts, removeContext } from "../../lib/links";
+import { parseUserText } from "../../lib/turns";
 import { Composer, type Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
+import { changeComposerField, composerField, composerFieldText } from "./composer-test-field";
 
 const REPOSITORIES = [
   {
@@ -102,16 +104,11 @@ const render = (
   machineId?: string,
 ) => act(() => root.render(<Composer draftKey={draftKey} placeholder="" machineId={machineId} mention={mention} onSend={onSend} />));
 
-const box = () => host.querySelector("textarea")!;
+const box = () => composerField(host);
+const tokens = () => [...box().querySelectorAll<HTMLElement>("[data-inline-mention]")];
 
-async function type(text: string) {
-  const el = box();
-  await act(async () => {
-    el.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, text);
-    el.setSelectionRange(text.length, text.length);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+async function type(text: string, append = false) {
+  await act(async () => changeComposerField(box(), text, { append }));
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -176,7 +173,7 @@ describe("@ assistant-bound repositories (#12531)", () => {
     expect(api.mock.calls.filter(([path]) => path === "/assistant/repositories")).toHaveLength(1);
   });
 
-  it("picks via keyboard Enter into a removable chip and sends clean repository context without local checkout paths", async () => {
+  it("inserts with Enter and sends the existing repository context with the inline label", async () => {
     const onSend = vi.fn(async (_m: Outgoing) => true);
     render({ self: "persona-new", files: () => [], repositories: "assistant" }, onSend);
 
@@ -186,14 +183,13 @@ describe("@ assistant-bound repositories (#12531)", () => {
     key("ArrowDown");
     key("Enter");
     expect(options()).toHaveLength(0);
-    expect(box().value).toBe("");
-    expect(host.textContent).toContain(t("link-contextchips.repository"));
-    expect(host.textContent).toContain("Persona");
+    expect(composerFieldText(host)).toBe("Persona ");
+    expect(tokens()[0].title).toBe("https://github.com/nwverse/persona");
 
-    await type("Check open issues");
+    await type("open issues", true);
     await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-composer.send")}"]`)!.click());
 
-    expect(onSend).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     const text = onSend.mock.calls[0][0].text;
     expect(text).toMatch(
       /^<persona-context kind="repository" title="Persona" url="https:\/\/github\.com\/nwverse\/persona" repo_id="repo-1" provider="github" path="nwverse\/persona">\n/,
@@ -202,10 +198,10 @@ describe("@ assistant-bound repositories (#12531)", () => {
     expect(text).toContain("https://github.com/nwverse/persona");
     expect(text).not.toContain('cwd="');
     expect(text).not.toContain('machine="');
-    expect(text.endsWith("</persona-context>\n\nCheck open issues")).toBe(true);
+    expect(parseUserText(text).text).toBe("Persona open issues");
   });
 
-  it("supports Tab selection, pointer click selection, chip removal, and Escape dismissal", async () => {
+  it("supports Tab and pointer selection, atomic removal, and Escape dismissal", async () => {
     const onSend = vi.fn(async (_m: Outgoing) => true);
     render({ self: "persona-new", files: () => [], repositories: "assistant" }, onSend);
 
@@ -213,27 +209,20 @@ describe("@ assistant-bound repositories (#12531)", () => {
     await type("@invoice");
     await waitForOptions(1);
     key("Tab");
-    expect(box().value).toBe("");
-    expect(getContexts("persona-new")).toHaveLength(1);
-    expect(getContexts("persona-new")[0]).toMatchObject({
-      kind: "repository",
-      title: "team/billing-api",
-      url: "https://gitlab.example.com/team/billing-api",
-    });
+    expect(tokens().map((token) => token.textContent)).toEqual(["team/billing-api"]);
 
     // Click picks a second repository
-    await type("@release-bot");
+    await type("@release-bot", true);
     await waitForOptions(1);
     await act(async () => options()[0].click());
-    expect(getContexts("persona-new")).toHaveLength(2);
+    expect(tokens().map((token) => token.textContent)).toEqual(["team/billing-api", "Deploy Kit"]);
 
-    // Remove the first chip
-    await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("link-contextchips.remove_label")}"]`)!.click());
-    expect(getContexts("persona-new")).toHaveLength(1);
-    expect(getContexts("persona-new")[0].title).toBe("Deploy Kit");
+    act(() => getSelection()!.collapse(box(), 0));
+    key("Delete");
+    expect(tokens().map((token) => token.textContent)).toEqual(["Deploy Kit"]);
 
     // Escape closes the menu without selecting
-    await type("@persona");
+    await type("@persona", true);
     await waitForOptions(2);
     key("Escape");
     expect(options()).toHaveLength(0);

@@ -58,7 +58,7 @@ data class ModelProfileTier(
         put("launcher", launcher)
         model?.takeIf(String::isNotBlank)?.let { put("model", it) }
         effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
-        speed?.takeIf(String::isNotBlank)?.let { put("speed", it) }
+        speed?.trim()?.takeIf { it.isNotEmpty() && it != "standard" }?.let { put("speed", it) }
         permissionMode?.takeIf(String::isNotBlank)?.let { put("permission_mode", it) }
         description?.takeIf(String::isNotBlank)?.let { put("description", it) }
     }
@@ -134,7 +134,7 @@ data class ModelProfileSaveInput(
     fun toJson(): JsonObject = buildJsonObject {
         put("revision", revision)
         put("name", name)
-        put("description", description)
+        description.takeIf(String::isNotEmpty)?.let { put("description", it) }
         purposes?.takeIf { it.isNotEmpty() }?.let { map ->
             put("purposes", buildJsonObject {
                 map.forEach { (id, binding) ->
@@ -158,6 +158,21 @@ data class ModelProfileSaveInput(
             })
         }
         if (capture) put("capture", true)
+    }
+
+    companion object {
+        /**
+         * Minimal `PUT /api/v1/model-profiles/{id}` body with `capture: true`: replaces purpose bindings and
+         * managed launcher overrides with the hub's live configuration while preserving [name], optional
+         * [description], and existing Agent presets.
+         */
+        fun capture(revision: Long, name: String, description: String? = null): ModelProfileSaveInput =
+            ModelProfileSaveInput(
+                revision = revision,
+                name = name.trim(),
+                description = description?.trim().orEmpty(),
+                capture = true,
+            )
     }
 }
 

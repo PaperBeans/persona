@@ -169,6 +169,22 @@ class ChatQueueStripTest {
     private val persona = Session(machineId = "box", sessionId = "main", title = "Persona", assistant = true, status = "working",
         queued = listOf("顺便把下周三的会也挪到下午", "再查一下航班", "来自「早报」：会议纪要整理好了，要不要发给参会的人？"), queuedRelayed = 1)
 
+    @Test fun aQuietRelayInAnIdleChatShowsWhenItArrives() {
+        val idle = persona.copy(status = "idle", queued = listOf("来自「早报」（不唤醒）：备忘"), queuedRelayed = 1)
+        rule.setContent {
+            PersonaTheme(style = AppStyle.Glass, reduceMotion = true) {
+                ChatQueueStrip(idle, Queue(), ChatComposerState(), {}, {}, initiallyExpanded = true)
+            }
+        }
+
+        rule.onNodeWithContentDescription("排队中 1 条，已展开").assertExists()
+        rule.onNodeWithContentDescription("还有 1 条别的对话在排队").performClick()
+        rule.onNodeWithText("来自「早报」：备忘").assertExists()
+        rule.onNodeWithText("随下一轮消息送达").assertExists()
+        rule.onNodeWithContentDescription("第 1 条：来自「早报」：备忘。随下一轮消息送达").assertExists()
+        rule.onNodeWithText("不唤醒", substring = true).assertDoesNotExist()
+    }
+
     @Test fun aRelayedMessageIsOnlyCopiedAndTheMovesStopAtTheUsersOwn() {
         assertEquals(listOf(QueueAction.Copy to true), queueActions(2, 2, steers = true))
         assertEquals(listOf(QueueAction.Copy to true), queueActions(0, 0, steers = false))

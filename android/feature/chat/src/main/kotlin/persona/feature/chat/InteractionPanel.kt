@@ -25,6 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import persona.core.contracts.Session
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.contracts.CoreText
 import persona.core.contracts.DialogOption
 import persona.core.contracts.Interaction
@@ -57,6 +59,7 @@ internal fun InteractionPanel(
     onFold: (Interaction, Boolean) -> Unit = { _, _ -> },
     /** Set when the session's source does not let the phone answer: everything is shown, nothing can be sent. */
     blockedReason: String? = null,
+    answerSession: Session? = null,
     /** False for a session without a terminal (a Codex thread, an agent runtime's): no terminal to explain either. */
     terminalHelp: Boolean = true,
     onDiscardLocal: ((Interaction) -> Unit)? = null,
@@ -69,6 +72,7 @@ internal fun InteractionPanel(
     resize: CardResize? = null,
     /** Drawn under a card that is not folded: the rule a question a supervisor passed up suggests (#4929); null: nothing. */
     suggestion: (@Composable (Interaction) -> Unit)? = null,
+    commandInputErrors: Map<String, String> = emptyMap(),
 ) {
     // The card open on its full page, by its id: cards come and go around it (answered on another device, expired).
     var full by rememberSaveable { mutableStateOf<String?>(null) }
@@ -81,11 +85,13 @@ internal fun InteractionPanel(
     val now by produceState(Instant.now(), requests.mapNotNull { it.expiresAt }) {
         while (true) { value = Instant.now(); delay(1_000) }
     }
+    fun blockFor(request: Interaction): String? =
+        blockedReason.takeUnless { answerSession?.canAnswerInteraction(request) == true }
     val body: @Composable (Interaction, Boolean) -> Unit = { request, complete ->
         key(request.id, request.dialog?.rev, complete) {
             RequestEditor(request, machine, busyId != null, request.id in uncertainIds, complete,
-                onTerminal = onTerminal, onExpand = { full = request.id }, linkVisible = linkVisible, blockedReason = blockedReason,
-                terminalHelp = terminalHelp) { action, value, planRead ->
+                onTerminal = onTerminal, onExpand = { full = request.id }, linkVisible = linkVisible, blockedReason = blockFor(request),
+                terminalHelp = terminalHelp, refusal = commandInputErrors[request.id]) { action, value, planRead ->
                 AnswerBuilder.build(request, action, value, AnswerContext(fullPlanRead = planRead)).resolution?.let {
                     onResolve(request, it)
                 }
@@ -93,7 +99,7 @@ internal fun InteractionPanel(
         }
     }
     val closeCard: @Composable (Interaction) -> Unit = { request ->
-        val requestBlock = resolveRequestApprovalBlockedReason(request, blockedReason)
+        val requestBlock = resolveRequestApprovalBlockedReason(request, blockFor(request))
         val stoppedWork = requestBlock != null && request.isManagerWorkCard
         val localOnly = !stoppedWork && (requestBlock != null || (request.kind == "question" && request.canCancel != true))
         if ((localOnly && onDiscardLocal != null) || stoppedWork || (request.kind == "question" && request.canCancel == true)) {
@@ -119,7 +125,8 @@ internal fun InteractionPanel(
                 labels[request.id]?.let { StackLabelLine(it) }
                 DecisionDock(
                     kind = when (request.kind) {
-                        "permission" -> if (request.toolName == "Bash" || request.isSecretRun) DecisionKind.Command else DecisionKind.Tool
+                        "permission" -> if (request.toolName == "Bash" || request.isSecretRun || request.isCommandInputPermission)
+                            DecisionKind.Command else DecisionKind.Tool
                         "plan" -> DecisionKind.Plan
                         "question" -> DecisionKind.Question
                         "elicitation" -> DecisionKind.Form
@@ -132,7 +139,11 @@ internal fun InteractionPanel(
                     preview = request.foldPreview()?.text()?.takeUnless { headline.contains(it) }, onExpand = { full = request.id },
                     headerActions = { closeCard(request) },
                     // an approval says it waits for the user, in the chat as on the web and iOS (#4883)
-                    kicker = if (request.kind == "permission" && !request.isSecretRun) stringResource(DecisionKind.Tool.labelRes) else null,
+                    kicker = when {
+                        request.isCommandInputPermission -> stringResource(R.string.chat_command_input_kicker)
+                        request.kind == "permission" && !request.isSecretRun -> stringResource(DecisionKind.Tool.labelRes)
+                        else -> null
+                    },
                     grabber = if (!folded && resize != null && resize.id == request.id) ({ CardGrabber(resize) }) else null,
                 ) {
                     if (full != request.id) body(request, false)
@@ -155,9 +166,11 @@ internal fun InteractionPanel(
 }
 
 @Composable
-private fun Interaction.cardTitle(): String = dialog?.commandAsk?.let {
-    stringResource(R.string.chat_command_ask_title, agentDisplayName ?: "Claude")
-} ?: headline.text()
+private fun Interaction.cardTitle(): String = when {
+    isCommandInputPermission -> stringResource(R.string.chat_command_input_waiting)
+    dialog?.commandAsk != null -> stringResource(R.string.chat_command_ask_title, agentDisplayName ?: "Claude")
+    else -> headline.text()
+}
 
 /** What a folded card says after its title: what it asks in its own words, else a plan's first line (iOS `previewText`). */
 internal fun Interaction.foldPreview(): CoreText? = dialog?.commandAsk?.let { CoreText.plain(it.description ?: it.command) }
@@ -189,6 +202,7 @@ internal fun InteractionForm(
     blockedReason: String? = null,
     /** False for a session without a terminal: no "handle in terminal" note (there is no terminal to go to). */
     showTerminalHelp: Boolean = true,
+    refusal: String? = null,
 ) {
     val scroll = rememberScrollState()
     var planRead by rememberSaveable(interaction.id, interaction.plan) { mutableStateOf(false) }
@@ -200,6 +214,7 @@ internal fun InteractionForm(
         }
     }
     val secret = interaction.secret == true
+    val command = interaction.commandInput
     // Secrets (a terminal's password, a password card's) live only in this visible form, never in saved state or request drafts.
     var terminalHelp by remember { mutableStateOf(false) }
     val now by produceState(Instant.now(), interaction.expiresAt) {
@@ -268,6 +283,15 @@ internal fun InteractionForm(
                 canDeny = enabled(AnswerAction.Deny), canAllow = enabled(AnswerAction.Allow), canAlways = enabled(AnswerAction.Always),
                 onDeny = { act(AnswerAction.Deny) }, onAllow = { act(AnswerAction.Allow) }, onAlways = { act(AnswerAction.Always) },
                 modifier = Modifier.padding(top = Tokens.Space.s))
+            else if (command != null) DecisionButtons(
+                primary = JAction(stringResource(R.string.chat_tray_send),
+                    enabled = fieldValues["input"].orEmpty().isNotBlank() &&
+                        AnswerBuilder.build(interaction, AnswerAction.Allow, draft.copy(values = fieldValues), context).allowed,
+                ) { act(AnswerAction.Allow, draft.copy(values = fieldValues)) },
+                secondary = JAction(stringResource(R.string.chat_command_input_not_now), enabled = enabled(AnswerAction.Deny)) {
+                    act(AnswerAction.Deny)
+                },
+            )
             // A card with fields (#4641): its form, Deny and Fill In & Allow, no Always.
             else if (interaction.hasFieldsForm) PermissionFieldsActions(interaction.fields.orEmpty(), fieldValues, { fieldValues = it }, editable,
                 canDeny = enabled(AnswerAction.Deny),
@@ -390,6 +414,7 @@ internal fun InteractionForm(
             if (uncertain) PendingBadge(PendingStatus.Unconfirmed)
             if (!readOnly && (uncertain || busy)) Text(stringResource(if (uncertain) R.string.chat_request_uncertain else R.string.chat_request_busy),
                 style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+            if (refusal != null) Text(refusal, style = PersonaTheme.type.callout, color = PersonaTheme.palette.cautionText)
         }
         if (readOnly || (full && !uncertain && !busy)) Text(
             if (readOnly) stringResource(R.string.chat_request_read_only)
@@ -398,6 +423,13 @@ internal fun InteractionForm(
         Spacer(Modifier.height(Tokens.Space.s))
         when (interaction.kind) {
             "permission" -> if (interaction.isSecretRun) SecretRunSummary(interaction)
+            else if (command != null) {
+                CommandInputSummary(command)
+                if (!readOnly) {
+                    Spacer(Modifier.height(Tokens.Space.s))
+                    CommandInputField(command, fieldValues["input"].orEmpty(), { fieldValues = mapOf("input" to it) }, editable)
+                }
+            }
             else if (interaction.isSecretHandoff) SecretHandoffSummary(interaction) else {
                 // Another agent's card says why it asks, in its own words.
                 interaction.reason?.takeIf { interaction.fromOtherAgent && it.isNotBlank() }?.let {
@@ -488,7 +520,7 @@ internal fun InteractionForm(
         if (!interaction.isSecretRun && !interaction.isSecretHandoff) Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if (onTerminal != null || showTerminalHelp) JTextButton(if (onTerminal != null) RequestExpiry.terminalLabel.text() else stringResource(R.string.chat_request_terminal_help),
                 { password = ""; if (onTerminal != null) onTerminal() else terminalHelp = true })
-            if (ApprovalPolicy.actions(AnswerEntry.Conversation, interaction.kind, false).any { it.id == ApprovalAction.Dismiss }) {
+            if (!interaction.noHandBack && ApprovalPolicy.actions(AnswerEntry.Conversation, interaction.kind, false).any { it.id == ApprovalAction.Dismiss }) {
                 JTextButton(stringResource(R.string.chat_request_dismiss), { act(AnswerAction.Dismiss) }, enabled = enabled(AnswerAction.Dismiss))
             }
         }

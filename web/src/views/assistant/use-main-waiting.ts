@@ -48,8 +48,9 @@ export function useMainWaiting(main?: Session) {
   const waiting = useMemo(() => directUserWaiting(entries.needsYou, deferred), [entries.needsYou, deferred]);
   const ownInteractions = useMemo(() => {
     if (!main) return EMPTY_ASKS;
-    return interactions.filter((ix) => ix.machine_id === main.machine_id
-      && (ix.session_id === main.session_id || ix.folded_under === main.session_id || ix.folded_side === main.session_id));
+    return interactions.filter((ix) =>
+      (ix.machine_id === main.machine_id && (ix.session_id === main.session_id || ix.folded_side === main.session_id)) ||
+      ((ix.folded_under_machine_id || ix.machine_id) === main.machine_id && ix.folded_under === main.session_id));
   }, [main, interactions]);
   const ownAsks = useMemo(() => ownInteractions.filter(directUserInteraction), [ownInteractions]);
   const projectedCount = directWaitingCount(waiting, ownAsks);

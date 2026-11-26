@@ -4,6 +4,7 @@
 import { t } from "../../i18n";
 import { tRich } from "../../i18n/rich";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { extensionSignatureLabel } from "../../lib/extension-market";
 import { previewBlocked } from "../../lib/extension-model";
 import { bytes } from "../../lib/format";
 import { Button, Collapse, cx, Dialog, toast, useNow } from "../../ui/atoms";
@@ -154,6 +155,7 @@ function ExtensionRow({
     }
   };
   const contributes = Object.entries(p.contributes ?? {});
+  const sig = extensionSignatureLabel(p.market_signature);
   return (
     <div className="px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -167,6 +169,11 @@ function ExtensionRow({
               {p.version && <span className="font-mono text-[11.5px] text-ink-3">{p.version}</span>}
               {p.attached?.version && <Tag tone="red">{t("admin-logic.ext_program_version", { version: p.attached.version })}</Tag>}
               <Tag tone={p.source === "installed" ? "accent" : "gray"}>{extensionSourceLabel(p.source)}</Tag>
+              {sig && (
+                <Tag tone={sig.tone} title={p.market_signature?.key_id ? t("admin-pages-extensions.signature_key", { key: p.market_signature.key_id }) : undefined}>
+                  {sig.text}
+                </Tag>
+              )}
             </span>
             <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-ink-3">
               <Dot tone={st.tone} pulse={p.status === "starting"} />

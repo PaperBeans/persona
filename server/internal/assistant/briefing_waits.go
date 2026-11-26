@@ -2,8 +2,6 @@ package assistant
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"slices"
 	"strings"
 	"time"
@@ -384,10 +382,4 @@ func (s *Service) briefDisabledRoutines(ctx context.Context, now time.Time, l i1
 		return strings.Compare(a.ID, b.ID)
 	})
 	return out
-}
-
-// briefFallbackID is stable across run IDs and retries: it names the routine and the one scheduled occurrence.
-func briefFallbackID(run ScheduleRun) string {
-	sum := sha256.Sum256([]byte(run.RefID + "\x00" + run.Due.UTC().Format(time.RFC3339Nano)))
-	return hex.EncodeToString(sum[:16])
 }

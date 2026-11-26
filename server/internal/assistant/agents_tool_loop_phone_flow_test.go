@@ -75,7 +75,7 @@ func TestToolLoopPhoneAnswerRetriesAfterWriteFailureAndRestart(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ft := newFleetTest(t)
 			store := &loopPhoneStore{fleetMem: ft.st}
-			ft.s.store = func() Store { return store }
+			ft.s.setStore(func() Store { return store })
 			ft.s.work.switches = &TriageSwitches{Enabled: true, ToolLoop: true}
 			c := proto.Session{SessionID: "s1", Status: proto.StatusWorking, ToolLoop: &proto.ToolLoop{Tool: "Read", Count: 30, Since: time.Now().Add(-time.Minute).UTC()}}
 			ft.d.setSessions("mac", []proto.Session{c})

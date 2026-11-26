@@ -27,7 +27,7 @@ class HubFailure(
     override val status: Int? = null,
     override val code: String? = null,
     val retryable: Boolean = true,
-    val delivered: String? = null,
+    override val delivered: String? = null,
     val retryAfterSeconds: Long? = null,
     cause: Throwable? = null,
     /** The input the hub refused (`field` of its error body) and its reason (`message`), when it names one. */

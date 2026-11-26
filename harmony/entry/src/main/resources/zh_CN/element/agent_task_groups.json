@@ -1,0 +1,100 @@
+{
+  "string": [
+    {
+      "name": "agent_task_manual",
+      "value": "手动开的"
+    },
+    {
+      "name": "agent_task_unassigned",
+      "value": "未归属"
+    },
+    {
+      "name": "agent_task_manual_hint",
+      "value": "你自己在终端里开的、没挂在待办上的 Agent。长按一行 › 关联到待办… 可以归过去。"
+    },
+    {
+      "name": "agent_task_unassigned_hint",
+      "value": "没挂在任何待办上，常是从飞书、手机或别的入口开的。长按一行 › 关联到待办… 可以归过去。"
+    },
+    {
+      "name": "agent_task_secretary",
+      "value": "书记官"
+    },
+    {
+      "name": "agent_task_new_chat",
+      "value": "新对话"
+    },
+    {
+      "name": "agent_task_untitled",
+      "value": "未命名待办"
+    },
+    {
+      "name": "agent_task_detail",
+      "value": "查看待办详情"
+    },
+    {
+      "name": "agent_task_needs_count",
+      "value": "等你 {n}"
+    },
+    {
+      "name": "agent_task_working",
+      "value": "在做"
+    },
+    {
+      "name": "agent_task_needs_you",
+      "value": "等你"
+    },
+    {
+      "name": "agent_task_stuck",
+      "value": "卡住"
+    },
+    {
+      "name": "agent_task_planned",
+      "value": "未开始"
+    },
+    {
+      "name": "agent_task_review",
+      "value": "待验收"
+    },
+    {
+      "name": "agent_task_state_idle",
+      "value": "已看"
+    },
+    {
+      "name": "agent_task_state_unknown",
+      "value": "未知"
+    },
+    {
+      "name": "agent_task_state_unread",
+      "value": "完成未看"
+    },
+    {
+      "name": "agent_task_state_needs_you",
+      "value": "需要你"
+    },
+    {
+      "name": "agent_task_state_working",
+      "value": "工作中"
+    },
+    {
+      "name": "agent_task_state_offline",
+      "value": "未运行"
+    },
+    {
+      "name": "agent_task_count",
+      "value": "{n} 个"
+    },
+    {
+      "name": "agent_task_expanded",
+      "value": "已展开"
+    },
+    {
+      "name": "agent_task_collapsed",
+      "value": "已折叠"
+    },
+    {
+      "name": "agent_task_about",
+      "value": "关于「{title}」"
+    }
+  ]
+}

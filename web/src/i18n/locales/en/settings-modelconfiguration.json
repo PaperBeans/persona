@@ -117,5 +117,7 @@
   "agents": "Agents",
   "usage_one": "Last 7 days: {calls} call · {tokens} tokens",
   "usage_other": "Last 7 days: {calls} calls · {tokens} tokens",
+  "usage_failures_one": "{failures} failed",
+  "usage_failures_other": "{failures} failed",
   "usage_detail": "Last 7 days (UTC): {input} input, {output} output, {cache_write} cache write and {cache_read} cache read tokens; failed calls: {failures}. The tokens shown are input + output + cache writes; cache reads are left out."
 }

@@ -73,7 +73,7 @@ class VoiceShotsTest {
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(760.dp).background(PersonaTheme.palette.background)) {
-                    key(stage) { VoiceScreen(VoiceRoute("voice"), NoNavigator, extensions, "shots", onModelConfiguration = {}) }
+                    key(stage) { VoiceScreen(VoiceRoute("voice"), NoNavigator, extensions, "shots", persona.core.moduleapi.AudioBroker.withoutSystem().forModule(VoiceModule), onModelConfiguration = {}) }
                 }
             }
         }

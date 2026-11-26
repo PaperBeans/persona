@@ -3,10 +3,12 @@ package assistant
 import (
 	"cmp"
 	"context"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -31,17 +33,38 @@ const (
 func decideAsk(a *acceptAsk) bool { return a.Conclusion && a.Outcome == outcomeDecide }
 
 // verdictText is an ask's verdict line: the same words on its Lark card, the briefing's card and `brief` item, the board
-// and the snapshot. A deployed task's ask is done, deployed.
-func verdictText(l i18n.Lang, a *acceptAsk) string {
+// and the snapshot. A verification ask (!a.Conclusion) reflects the to-do's effective delivery state.
+func verdictText(l i18n.Lang, a *acceptAsk, delivery *TodoDelivery) string {
 	label := i18n.T(l, "assistant-reports.verdict_"+cmp.Or(a.Outcome, outcomeDone))
 	reason := a.Reason
 	if !a.Conclusion {
-		reason = i18n.T(l, "assistant-reports.verdict_deployed")
+		reason = verifyReason(l, delivery)
 	}
 	if reason == "" {
 		return label
 	}
 	return i18n.T(l, "assistant-reports.verdict_line", i18n.Args{"verdict": label, "reason": reason})
+}
+
+// verifyReason picks the verification ask's reason from the to-do's effective delivery state: only explicit live says
+// deployed; held states name their gate; none or missing live evidence stays neutral.
+func verifyReason(l i18n.Lang, delivery *TodoDelivery) string {
+	state := ""
+	if delivery != nil {
+		state = delivery.State
+	}
+	switch state {
+	case deliveryLive:
+		return i18n.T(l, "assistant-reports.verdict_deployed")
+	case deliveryPR:
+		return i18n.T(l, "assistant-reports.verdict_verify_pr")
+	case deliveryMerged:
+		return i18n.T(l, "assistant-reports.verdict_verify_merged")
+	case deliveryOff:
+		return i18n.T(l, "assistant-reports.verdict_verify_off")
+	default:
+		return i18n.T(l, "assistant-reports.verdict_verify")
+	}
 }
 
 // recommendText is a decision's recommended option as a line ("" when it is not a decision or recommends nothing).
@@ -55,7 +78,7 @@ func recommendText(l i18n.Lang, a *acceptAsk) string {
 // askSummary is the plain line a card of ask a falls back to, and what the chat list shows of it.
 func askSummary(l i18n.Lang, a *acceptAsk) string {
 	if a.Conclusion {
-		return verdictText(l, a)
+		return verdictText(l, a, nil)
 	}
 	return a.Changed
 }
@@ -124,9 +147,10 @@ func (s *Service) conclusionCard(ctx context.Context, t Todo, a acceptAsk) *botc
 	case a.Outcome == outcomeDecide:
 		color = botcard.Orange
 	}
-	c := botcard.NewCard(title, color, verdictText(l, &a)).Tag(i18n.T(l, "assistant-reports.tag_conclusion"), botcard.Neutral)
+	delivery := currentDelivery(t)
+	c := botcard.NewCard(title, color, verdictText(l, &a, delivery)).Tag(i18n.T(l, "assistant-reports.tag_conclusion"), botcard.Neutral)
 	// The goal, where it is now (with how far the work went out) and the evidence below (#3218).
-	now := botcard.EscapeMarkdown(verdictText(l, &a))
+	now := botcard.EscapeMarkdown(verdictText(l, &a, delivery))
 	if live := liveText(l, s.todoStages(ctx)[t.ID]); live != "" && a.Outcome != outcomeDecide {
 		now += " · " + botcard.EscapeMarkdown(live)
 	}
@@ -269,7 +293,11 @@ func (s *Service) askConclusion(ctx context.Context, t Todo, in conclusionInput)
 	b.mu.Unlock()
 	l := s.botLang(ctx)
 	note, _, _ := strings.Cut(strings.TrimSpace(in.Note), "\n")
-	a := acceptAsk{Conclusion: true, Outcome: in.Outcome, Reason: clip(oneLine(cmp.Or(strings.TrimSpace(in.Reason), note)), 120),
+	reasonLimit := 120
+	if in.Outcome == outcomeDecide {
+		reasonLimit = decisionReasonMaxRunes
+	}
+	a := acceptAsk{Conclusion: true, Outcome: in.Outcome, Reason: clip(oneLine(cmp.Or(strings.TrimSpace(in.Reason), note)), reasonLimit),
 		Recommend: clip(oneLine(in.Recommend), 120), Link: s.conclusionLink(ctx, t, in), AskedAt: time.Now().UTC(), Earlier: earlier}
 	if in.Outcome == outcomeDecide && a.Recommend != "" {
 		a.Deadline, a.Reversible = in.Deadline, in.Reversible
@@ -302,21 +330,74 @@ func lastAgent(t Todo) TodoAgent {
 	return t.Agents[len(t.Agents)-1]
 }
 
-// conclusionLink is the one link of a conclusion: the one the review gave, when it is a web address; else the task's PR;
-// else the first web address in the review's note and evidence; else the agent's conversation; else the task's page.
+// validWebURL returns raw trimmed when it is a well-formed http(s) URL with a non-empty host; "" otherwise.
+func validWebURL(raw string) string {
+	u := strings.TrimSpace(raw)
+	if u == "" || urlRe.FindString(u) != u {
+		return ""
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return u
+	default:
+		return ""
+	}
+}
+
+// todoRepositoryDeliveryPR returns the first canonical delivery PR/MR URL saved in task id's repository bindings.
+// It reads saved bindings without mutating state and skips reference-role links.
+func (s *Service) todoRepositoryDeliveryPR(ctx context.Context, id string) string {
+	st, ok := s.store().(todoRepositoryStore)
+	if !ok {
+		return ""
+	}
+	set, err := st.TodoRepositories(ctx, id)
+	if err != nil {
+		return ""
+	}
+	for _, row := range set.Repositories {
+		for _, l := range row.Links {
+			if l.Kind != "pull_request" {
+				continue
+			}
+			role := l.Role
+			if role == "" {
+				role = repository.LinkRoleDelivery
+			}
+			if role != repository.LinkRoleDelivery {
+				continue
+			}
+			if u := validWebURL(l.CanonicalURL); u != "" {
+				return u
+			}
+		}
+	}
+	return ""
+}
+
+// conclusionLink is the one link of a conclusion: the one the review gave, when it is a web address; else the task's
+// stage PR (or PRURL); else a canonical saved repository delivery PR/MR link; else the first web address in the
+// review's note and evidence; else the agent's conversation; else the task's page.
 func (s *Service) conclusionLink(ctx context.Context, t Todo, in conclusionInput) string {
-	if u := strings.TrimSpace(in.Link); u != "" && urlRe.FindString(u) == u {
+	if u := validWebURL(in.Link); u != "" {
 		return u
 	}
-	if pr := s.todoStages(ctx)[t.ID].PR; pr != "" {
+	if pr := validWebURL(cmp.Or(s.todoStages(ctx)[t.ID].PR, t.PRURL)); pr != "" {
+		return pr
+	}
+	if pr := s.todoRepositoryDeliveryPR(ctx, t.ID); pr != "" {
 		return pr
 	}
 	texts := []string{in.Note}
 	for _, c := range in.Checks {
 		texts = append(texts, c.Evidence)
 	}
-	if u := urlRe.FindString(strings.Join(texts, "\n")); u != "" {
-		return strings.TrimRight(u, ".,;:!?")
+	if u := validWebURL(strings.TrimRight(urlRe.FindString(strings.Join(texts, "\n")), ".,;:!?")); u != "" {
+		return u
 	}
 	web := s.webBase(ctx)
 	if ag := lastAgent(t); web != "" && ag.SessionID != "" {

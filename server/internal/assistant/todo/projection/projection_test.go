@@ -181,6 +181,27 @@ func TestOwnerDecidesWithoutAReview(t *testing.T) {
 	}
 }
 
+func TestPersonalVerificationStaysInNeedsYou(t *testing.T) {
+	f := Facts{ID: "todo_verify", Origin: "conv_lead", CreatedAt: hours(-5), UpdatedAt: hours(-1),
+		Delivery: &Delivery{State: deliveryLive, At: hours(-2)},
+		Ask:      &Ask{Verdict: "Please verify the result", AskedAt: hours(-1)}}
+	if v := View(f, testNow); v.Section != assistantwire.TodoListSectionJustFinished {
+		t.Fatalf("ordinary verification section = %q", v.Section)
+	}
+	f.Supervision = &Supervision{State: reviewUserCheck, UpdatedAt: hours(-1), Reviews: []Review{{Verdict: reviewAccepted, At: hours(-1)}}}
+	views := Views([]Facts{f}, testNow)
+	v := views[0]
+	if v.Phase != assistantwire.TodoPhaseNeedsYou || v.Section != assistantwire.TodoListSectionNeedsYou || v.Reason != assistantwire.TodoReasonVerify {
+		t.Fatalf("personal verification view: %+v", v)
+	}
+	if v.Line == nil || v.Line.Args["text"] != f.Ask.Verdict || !v.Since.Equal(f.Ask.AskedAt) {
+		t.Fatalf("personal verification line and round: %+v", v)
+	}
+	if c := Counts([]Facts{f}, views); c.Open != 1 || c.NeedsYou != 1 {
+		t.Fatalf("personal verification counts: %+v", c)
+	}
+}
+
 // A run's ask is what its pending card asks, by the card's id: the session's own card before the manager's about its
 // turn, then the oldest, then the lesser id, whatever order the cards come in. It is safe only when a notification may
 // answer the card too, one question with options and nothing else, and its asker did not say going ahead cannot be

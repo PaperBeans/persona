@@ -129,19 +129,37 @@ func TestTrackKindSettingsTakeEffect(t *testing.T) {
 	}
 }
 
-// Prepare names each directory's track kind for its processes (#13472, PERSONA_TRACK_KIND): orchestration for the
-// assistant's own, space for the health space, a track's own kind for its directory.
+// Prepare names each directory's track kind and default categories for its processes (#13472 PERSONA_TRACK_KIND,
+// #13246 PERSONA_CATEGORIES): orchestration/[] for the assistant's own, space/[health] for the health space, and a
+// track's own kind and default categories for its directory.
 func TestPrepareNamesTrackKind(t *testing.T) {
 	ctx := context.Background()
 	s, f := spaceTrackService(t)
 	s.devs = spaceDevs{fleetDevs: newFleetDevs()}
-	for _, c := range []struct{ space, kind string }{{"", trackKindOrchestration}, {SpaceHealth, trackKindSpace}, {"qa-plain", trackKindSpace}} {
+	for _, c := range []struct {
+		space, kind string
+		cats        []string
+	}{
+		{"", trackKindOrchestration, []string{}},
+		{SpaceHealth, trackKindHealth, []string{categoryHealth}},
+		{"qa-plain", trackKindSpace, []string{}},
+	} {
 		f.prepared = nil
 		if _, err := s.prepareSpace(ctx, "server", c.space); err != nil {
 			t.Fatalf("%q: %v", c.space, err)
 		}
 		if len(f.prepared) != 1 || f.prepared[0]["track_kind"] != c.kind {
 			t.Errorf("%q: track_kind %v, want %q", c.space, f.prepared, c.kind)
+		}
+		gotCats, ok := f.prepared[0]["categories"].([]any)
+		if !ok || len(gotCats) != len(c.cats) {
+			t.Errorf("%q: categories %#v, want %v", c.space, f.prepared[0]["categories"], c.cats)
+			continue
+		}
+		for i, want := range c.cats {
+			if gotCats[i] != want {
+				t.Errorf("%q: categories[%d] = %v, want %q", c.space, i, gotCats[i], want)
+			}
 		}
 	}
 }

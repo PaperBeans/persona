@@ -62,26 +62,29 @@ func TestGoldenTabName(t *testing.T) {
 	}
 }
 
-// agents.start_params: what a new Agent runs on is Model Settings › Agents (with what the app picked over it), its tab is
-// named when asked; a resume keeps what it runs on; a refusal is the app's to see.
+// agents.start_params: what a new Agent runs on is Model Settings › Agents (with what the app picked over it), its tab gets
+// a local placeholder without asking the model; a resume keeps what it runs on; a refusal is the app's to see.
 func TestAgentStartParams(t *testing.T) {
 	f := newFakeHub()
-	f.tabReply = "fix-login"
 	s := newTestService(t, f)
 	setModel(t, s, "agent.new", ModelBinding{Provider: "launcher.agents-l"})
 	ctx := context.Background()
 	p, err := s.AgentStartParams(ctx, AgentStartParams{MachineID: "box", Params: map[string]any{"cwd": "/code", "launcher": ""},
-		NameFrom: "修登录"})
+		NameFrom: "Fix login"})
 	if err != nil || p["launcher"] != "agents-l" || p["tab_name"] != "fix-login" || p["cwd"] != "/code" {
 		t.Fatalf("new: %v %v", p, err)
 	}
 	p, _ = s.AgentStartParams(ctx, AgentStartParams{MachineID: "box", Params: map[string]any{"launcher": "mine", "tab_name": "kept"},
-		NameFrom: "修登录"})
+		NameFrom: "Fix login"})
 	if p["launcher"] != "mine" || p["tab_name"] != "kept" {
 		t.Fatalf("picked: %v", p)
 	}
+	p, _ = s.AgentStartParams(ctx, AgentStartParams{MachineID: "box", Params: map[string]any{}, NameFrom: "修登录"})
+	if p["tab_name"] != "persona" || len(f.tabAsked) != 0 {
+		t.Fatalf("non-ASCII local placeholder: %v (tab names asked %d)", p, len(f.tabAsked))
+	}
 	p, _ = s.AgentStartParams(ctx, AgentStartParams{MachineID: "box", Params: map[string]any{"resume_session_id": "old"}})
-	if p["launcher"] != nil || p["tab_name"] != nil || len(f.tabAsked) != 1 {
+	if p["launcher"] != nil || p["tab_name"] != nil || len(f.tabAsked) != 0 {
 		t.Fatalf("resume: %v (tab names asked %d)", p, len(f.tabAsked))
 	}
 	setModel(t, s, "agent.new", ModelBinding{Provider: "launcher.other-l"})

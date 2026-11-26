@@ -214,9 +214,9 @@ func (s *Service) noteStop(machine, sid string, p map[string]any) {
 
 // notifyFinished decides, after the delay, whether this end of a turn is worth a push and to which devices. The delay
 // is a timer: a goroutine asleep through it would hold a stack per pending turn end (#2472).
-func (s *Service) notifyFinished(machine, id string, gen int) {
+func (s *Service) notifyFinished(machine, id string, gen int, end supervisionEnd) {
 	t := s.notifyTimings()
-	s.afterTurnCompletion(t.doneDelay(), func() { s.notifyFinishedNow(machine, id, gen, t) })
+	s.afterTurnCompletion(t.doneDelay(), func() { s.notifyFinishedNow(machine, id, gen, t, end) })
 }
 
 // afterTurnCompletion owns a delayed completion so a fixture can stop one still pending and drain one already running
@@ -243,7 +243,7 @@ func (s *Service) afterTurnCompletion(delay time.Duration, run func()) {
 }
 
 // notifyFinishedNow is notifyFinished once its delay is over, with the timings it was read with.
-func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings) {
+func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings, end supervisionEnd) {
 	if s.justMeNow(machine, id) {
 		// A Just me turn: never on a screen but the meeting page (meeting_justme.go). Over all the same unless its
 		// background work goes on (the turn that work's report wakes keeps the mark): its start and its hold are not
@@ -294,7 +294,12 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 		return // the turn goes on: its mark waits for how it ends
 	}
 	// A supervision turn about a failed start ended: what it left of the start ends too (start_remedy.go, #2570).
-	go s.remedyTurnEnded(context.Background(), id)
+	if end.retained {
+		end.hold, _ = s.clearSupervisionHold(context.Background(), end.key, end.hold.At)
+	}
+	if !end.hold.At.IsZero() {
+		go s.remedyFinishedStarts(context.Background(), end)
+	}
 	// "Only long-running turns" is for turns the user started: a quick answer is read where it was asked. A morning briefing or a task notice
 	// has nobody waiting for it; a quick one was never pushed and the user had to go and look (#3438). The mark is
 	// used up by this turn whether it is pushed or dropped (notify_user, seen, muted): left over, the user's own next
@@ -325,7 +330,7 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 		return
 	}
 	// A turn a follow-up (supervision) message started, finished normally (#3124): what the user needs to know went out with notify_user.
-	if s.supervising(id) && assistantwire.SupervisedFinish(sess, true) {
+	if assistantwire.SupervisedFinish(sess, !end.hold.At.IsZero()) {
 		return
 	}
 	if s.quietBackgroundReply(machine, sess) {
@@ -367,6 +372,20 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 			text = counts
 		}
 	}
+	if links := s.consumeSideSupervisionLinks(id); len(links) > 0 && !redact {
+		var missing []string
+		for _, link := range links {
+			if link != "" && !strings.Contains(text, link) {
+				missing = append(missing, link)
+			}
+		}
+		if len(missing) > 0 {
+			if text != "" {
+				text += "\n"
+			}
+			text += strings.Join(missing, "\n")
+		}
+	}
 	s.deliver(Notification{Kind: assistantwire.NotifyDone, DeviceID: machine, Subtitle: place, SessionID: id, Title: head,
 		Body: text, TookMS: took.Milliseconds(), LongMS: long.Milliseconds()})
 	// The same finished turn's one Feishu card (#4674); the sender re-checks the pushes switch and the conversations
@@ -377,23 +396,29 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 }
 
 func (s *Service) quietBackgroundReply(machine string, sess proto.Session) bool {
-	if !sess.Assistant || !assistantwire.SupervisedFinish(sess, true) || sess.AwaitsReply {
+	if !sess.Assistant || sess.AwaitsReply || strings.TrimSpace(sess.FailureReason) != "" || sess.TurnErrorKind != "" ||
+		sess.Status == proto.StatusBlocked || sess.Status == proto.StatusInterrupted || !assistantwire.NormalFinish(sess) {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	cfg := s.settings(ctx)
+	foldRelay := sess.SessionID != "" && sess.SessionID == cfg.Main && cfg.foldRoutineRelayReplies() && quietOn(cfg.MainBackgroundFolded)
+	// Only the native agents reliably distinguish an empty turn from a service failure. A different runtime
+	// can skip an alert only for an opted-in relay with an actual successful answer in its transcript.
+	knownFinish := assistantwire.SupervisedFinish(sess, true)
+	if !knownFinish && !foldRelay {
+		return false
+	}
 	var page struct {
 		Items []proto.Item `json:"items"`
 	}
 	if err := s.call(ctx, machine, DeviceSessionItems, map[string]any{
-		"session_id": sess.SessionID, "turns": 1, "lazy_images": true,
+		"session_id": sess.SessionID, "turns": 2, "lazy_images": true,
 	}, &page); err != nil {
 		return false
 	}
-	if transcript.BackgroundReplyMissing(page.Items) {
-		return true
-	}
-	return s.mainBackgroundFolded(ctx) && s.isMain(ctx, sess.SessionID) && transcript.RoutineConversationReply(page.Items)
+	return knownFinish && transcript.BackgroundReplyMissing(page.Items) || foldRelay && transcript.RoutineConversationReply(page.Items)
 }
 
 // reportSlack is how long before its turn started a scheduled run or notice may have been sent (the node starts the

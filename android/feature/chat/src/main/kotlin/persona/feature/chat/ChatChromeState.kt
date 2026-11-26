@@ -24,7 +24,7 @@ internal fun spaceCompanions(session: Session?, sessions: List<Session>): List<S
     return sessions.filter { other ->
         other.machineId == session.machineId && other.key != session.key && !other.assistant &&
             other.spaceId?.takeIf(String::isNotBlank) == space &&
-            other.foldedUnder?.takeIf(String::isNotBlank)?.let { SessionKey(other.machineId, it) in listed } != true
+            other.foldedUnderKey?.let { it in listed } != true
     // tab by tab, a tab's agents together by their place in it (#2515, as the web's tab groups): the launcher first
     }.sortedWith(compareBy<Session> { it.slotIndex ?: Int.MAX_VALUE }.thenBy { it.slotId.orEmpty() }.then(PaneOrder))
 }
@@ -82,6 +82,20 @@ internal class ChatChromeState(
         scope.launch {
             try {
                 if (service.rename(session, edit.title, edit.tabName)) notice = res.getString(R.string.chat_action_renamed)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { notice = operationFeedback(error).text.resolve(res) }
+            finally { busy = false }
+        }
+    }
+
+    fun renameUnified(session: Session, name: String) {
+        val service = renamer ?: return
+        val edit = SessionRename.unifiedChanges(session, name)
+        if (!canRename || !edit.changed) return
+        busy = true
+        scope.launch {
+            try {
+                if (service.renameUnified(session, name)) notice = res.getString(R.string.chat_action_renamed)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { notice = operationFeedback(error).text.resolve(res) }
             finally { busy = false }

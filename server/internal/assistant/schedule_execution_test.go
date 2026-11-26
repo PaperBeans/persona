@@ -285,7 +285,12 @@ func TestTaskExecutionLegacyEditMergesConcurrentRun(t *testing.T) {
 }
 
 func (h taskDirectoryWaitHub) DeviceCall(ctx context.Context, call DeviceCall) (json.RawMessage, error) {
-	if call.Method == assistantwire.DeviceAssistantDirectory {
+	// Only the slow save's check of its own directory waits: a run of a task in the default directory resolves that
+	// directory too (resolvedTaskCwd, #15004), and goes through.
+	var p struct {
+		Path string `json:"path"`
+	}
+	if call.Method == assistantwire.DeviceAssistantDirectory && json.Unmarshal(call.Params, &p) == nil && p.Path == "/work/project" {
 		close(h.entered)
 		select {
 		case <-h.release:
@@ -563,6 +568,50 @@ func TestTaskExecutionLegacyExplicitChoicesStartFresh(t *testing.T) {
 			}
 			if run := waitRuns(t, s, 1)[0]; run.ConversationReason != "legacy_context" || run.Conversation != "new" {
 				t.Fatalf("legacy decision missing from history: %+v", run)
+			}
+		})
+	}
+}
+
+// A task without a directory of its own runs in the prepared default directory as the node resolves it, the form its
+// selections were made in (#15004). When the node does not resolve it (refuses, answers nothing), the run keeps the
+// prepared path as before: resolving adds no way for a run to fail.
+func TestTaskRunResolvesItsDefaultDirectory(t *testing.T) {
+	const prepared = "/home/me/.persona/assistant" // what the fake node's assistant.prepare answers
+	for _, tc := range []struct {
+		name   string
+		answer nodeAnswer
+		want   string
+	}{
+		{"resolved", func(_ string, raw json.RawMessage) (any, error) {
+			var p struct{ Path string }
+			if err := json.Unmarshal(raw, &p); err != nil || p.Path != prepared {
+				return nil, fmt.Errorf("asked to resolve %s (%v)", raw, err)
+			}
+			return map[string]any{"cwd": "/data/me/.persona/assistant"}, nil
+		}, "/data/me/.persona/assistant"},
+		{"refused", func(string, json.RawMessage) (any, error) {
+			return nil, errors.New("unknown method assistant.directory")
+		}, prepared},
+		{"empty answer", func(string, json.RawMessage) (any, error) { return map[string]any{}, nil }, prepared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHub().withMachine()
+			f.answerNode(assistantwire.DeviceAssistantDirectory, tc.answer)
+			s := newTestService(t, f)
+			r := request(s, "POST", "/api/v1/assistant/tasks", `{"title":"Check files","prompt":"Summarize files","repeat":"interval","every_minutes":30,"enabled":true}`)
+			if r.Code != http.StatusOK {
+				t.Fatalf("create: %d %s", r.Code, r.Body.String())
+			}
+			var got struct{ Task Task }
+			if err := json.Unmarshal(r.Body.Bytes(), &got); err != nil || got.Task.ID == "" || got.Task.Cwd != "" {
+				t.Fatalf("saved: %+v (%v)", got.Task, err)
+			}
+			if _, err := runNow(t, s, got.Task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if p := f.lastSend(t); p["cwd"] != tc.want {
+				t.Fatalf("run started in %v, want %s", p["cwd"], tc.want)
 			}
 		})
 	}

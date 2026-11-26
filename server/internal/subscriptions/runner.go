@@ -243,6 +243,15 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 	case sub.FailCount > 0:
 		trigger = TriggerRetry
 	}
+	if !s.readAllowed(ctx, sub) {
+		// Provider capability is a per-subscription authorization boundary. Do not turn one unsupported source into a
+		// global connector outage, and do not reach its catalog or body pull.
+		next.RunState, next.Error = StateNotConnected, &Problem{CodeNotConnected, "The source is paused by private-chat visibility."}
+		n := s.nextRun(next, start, false)
+		next.NextRunAt = &n
+		s.commit(ctx, sub, next, nil, nil, start, false)
+		return
+	}
 	c, ok := s.o.Connectors.Find(ctx, sub.Connector)
 	if !ok || !c.ready() {
 		// Not a failure and not a run: it resumes by itself once the connector can be called.

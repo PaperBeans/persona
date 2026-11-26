@@ -6,6 +6,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Item, Session } from "../../lib/types";
 import { getQuotes, setQuotes } from "../../lib/drafts";
+import { contextXML, withContexts } from "../../lib/context-xml";
+import { inlineBody } from "../../lib/inline-message";
+import type { ContextRef } from "../../lib/links";
+import { skillContext } from "../../lib/skill-mentions";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -18,7 +22,7 @@ const captured = vi.hoisted(() => ({
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle", state: "idle" } as Session,
 }));
 // one transcript object for every render, as the hook keeps one (a new one each time re-runs the echo checks forever)
-const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "", streamEnded: false }));
+const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, firstRead: true, error: "", hasMore: false, streaming: "", streamEnded: false, streamEndedThrough: undefined as number | undefined }));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 vi.mock("../../lib/store", async (importOriginal) => {
   const store = await importOriginal<typeof import("../../lib/store")>();
@@ -55,6 +59,7 @@ beforeEach(() => {
   transcript.loading = false;
   transcript.streaming = "";
   transcript.streamEnded = false;
+  transcript.streamEndedThrough = undefined;
   transcript.error = "";
   fetcher = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetcher);
@@ -93,6 +98,25 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
   // past EDIT_SEND_SETTLE_MS: the wait for Claude's box after a rewind (#4605)
   const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 2000)); });
   const rewound = (input_cleared = true) => new Response(JSON.stringify({ prompt, restore: "conversation", input_cleared, code_restored: false }));
+
+  it("restores the last message's inline references and leading quote into the composer", async () => {
+    const skill = skillContext({ id: "review", name: "Review", source: "Project", description: "Look for edge cases." });
+    const file: ContextRef = { id: "notes", kind: "file", title: "notes.md", url: "", text: "docs/notes.md", attrs: { path: "docs/notes.md" } };
+    const body = withContexts([skill], `> Quoted words\n\n${inlineBody(["Use ", skill, " on ", file, "."])}`);
+    transcript.items = items().map((item) => item.id === "u2#0" ? { ...item, text: `${body}\n\n${contextXML(file)}` } : item);
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(editButton()).toBeDefined();
+    await act(async () => { editButton()!.click(); await vi.dynamicImportSettled(); });
+    const field = () => host.querySelector("[data-composer-input]");
+    await vi.waitFor(async () => {
+      await act(async () => { await vi.dynamicImportSettled(); });
+      expect([...field()!.querySelectorAll("[data-inline-mention]")].map((token) => token.textContent)).toEqual(["Review", "notes.md"]);
+    });
+    expect(field()?.textContent).toBe("Use Review on notes.md.");
+    expect(getQuotes("hub/c1").list).toMatchObject([{ text: "Quoted words" }]);
+    expect(rewinds()).toHaveLength(0);
+  });
 
   it.each(["Esc Esc", "↑"])("%s puts the last prompt in the box to edit; the rewind runs only when the edit is sent", async (how) => {
     let finish!: () => void;
@@ -344,6 +368,79 @@ describe("a message the launcher switch refused", () => {
 });
 
 describe("a message waiting for its turn to start (#2450)", () => {
+  it("keeps an echoed turn pending while only an existing background command is working", async () => {
+    captured.session = { ...captured.session, status: "working", state: "working",
+      background_working: true, background: [{ id: "existing", kind: "shell", description: "Existing background command" }] };
+    const ts = new Date().toISOString();
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(stopControl()).not.toBeNull();
+  });
+
+
+  it("does not carry the end of a streamed reply into a newly echoed turn", async () => {
+    transcript.items = [
+      { id: "u1", seq: 1, role: "user", kind: "text", text: "Previously asked", ts: new Date(Date.now() - 3_000).toISOString() },
+      { id: "a1", seq: 2, role: "assistant", kind: "text", text: "Previously answered" },
+      { id: "u2", seq: 3, role: "user", kind: "text", text: "Write a status line", ts: new Date().toISOString() },
+    ];
+    transcript.streaming = "Previously answered";
+    transcript.streamEnded = true;
+    transcript.streamEndedThrough = 2;
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(stopControl()).not.toBeNull();
+    expect(host.textContent?.match(/Previously answered/g)).toHaveLength(1);
+  });
+
+  it("does not let an idle update settle an echo during the handoff", async () => {
+    const at = Date.now() - 1_000;
+    captured.session.state_since = new Date(at + 500).toISOString();
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts: new Date(at).toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(stopControl()).not.toBeNull();
+    captured.session = { ...captured.session, state_since: new Date(at + 600).toISOString() };
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    captured.session = { ...captured.session, state: "working", status: "working" };
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+  });
+
+  it("shows retry once a newer idle state that arrived with the echo has settled", async () => {
+    const at = Date.now() - 1_000;
+    captured.session.state_since = new Date(at + 500).toISOString();
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts: new Date(at).toISOString() }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2_100)); });
+    expect(host.textContent).toContain(t("chat-empty-response.no_response"));
+    expect([...host.querySelectorAll("button")].some(b => b.textContent === t("chat-lines.retry"))).toBe(true);
+    expect(stopControl()).toBeNull();
+  });
+
+  it("offers no retry from a page whose newest read failed: the cached turn may have a reply it has not read", async () => {
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts: new Date(Date.now() - 120_000).toISOString() }];
+    transcript.error = "Refresh failed";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    // the "Refresh failed" pill says why and reloads; the turn's own note with its Retry (a second send) is not there
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    transcript.error = "";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(host.textContent).toContain(t("chat-empty-response.no_response"));
+  });
+
   it("keeps an ended reply preview after host completion without keeping its work or interrupt controls running", async () => {
     const ts = new Date().toISOString();
     transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Check this", ts }];
@@ -372,6 +469,23 @@ describe("a message waiting for its turn to start (#2450)", () => {
     expect(interrupts()[0][1]).toMatchObject({ method: "POST" });
     // the hub took it: the wait ends now instead of running out, so no stop button (nor its "Stopping" form) stays
     expect(stopControl()).toBeNull();
+  });
+
+  it("does not apply a stopped echo to a different session with the same transcript ID", async () => {
+    const ts = new Date().toISOString();
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "First chat", ts }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    await esc();
+    await flush();
+    expect(stopControl()).toBeNull();
+
+    captured.session = { ...captured.session, session_id: "c2" };
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Second chat", ts }];
+    act(() => root.render(<ChatView mid="hub" sid="c2" />));
+    await flush();
+    expect(host.textContent).not.toContain(t("chat-empty-response.no_response"));
+    expect(stopControl()).not.toBeNull();
   });
 
   it("with nothing on its way, Esc sends nothing and there is no Interrupt", async () => {

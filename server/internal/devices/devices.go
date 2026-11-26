@@ -126,8 +126,9 @@ type Devices struct {
 	opts Options
 	logf func(format string, args ...any)
 
-	transfers transfers // computer to computer file transfers running or just over (transfer.go)
-	held      heldBook  // the owner's messages held for Agents whose computer is away (held.go)
+	transfers  transfers     // computer to computer file transfers running or just over (transfer.go)
+	held       heldBook      // the owner's messages held for Agents whose computer is away (held.go)
+	heldStarts heldStartBook // the owner's new-Agent starts held while their computer is away (held_starts.go)
 
 	mu    sync.Mutex
 	cfg   devicewire.Config
@@ -625,6 +626,7 @@ func (d *Devices) BusUp() {
 	if ctx != nil {
 		d.rehook(ctx)
 	}
+	d.heldStartWakeAll() // held Agent starts waiting for the bus to the hub go now (held_starts.go)
 	for _, m := range d.machinesNow() {
 		m.mu.Lock()
 		list := slices.Clone(m.sessions)
@@ -876,7 +878,8 @@ func (d *Devices) List() []Summary {
 func (d *Devices) summaryOf(m *Machine) Summary {
 	m.mu.Lock()
 	s := Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-		HomeReal: m.info.HomeReal, DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}
+		HomeReal: m.info.HomeReal, DataDir: m.info.DataDir, Executable: m.info.Executable,
+		Online: m.online || m.warmLocked(time.Now())}
 	m.mu.Unlock()
 	s.Trust = d.machineTrust(m)
 	s.Reachable = m.reachable()
@@ -978,7 +981,11 @@ func (d *Devices) Relist(ctx context.Context, id string) error {
 type Summary struct {
 	ID, Name, Kind, SSHHost, Home, DataDir, Trust string
 	// HomeReal is Home with its links followed, when the node says it is another path (proto.NodeInfo.HomeReal).
-	HomeReal          string
+	HomeReal string
+	// Executable is the file its node runs from (proto.NodeInfo.Executable), as the node.info its connection began with
+	// said: the same for as long as that connection lasts. "" from a node that does not say. The assistant names it to
+	// the Agents there without asking the node again (assistant/task_handoff.go, nodeExecutable).
+	Executable        string
 	Online, Reachable bool
 }
 
@@ -1008,6 +1015,28 @@ func (d *Devices) Shown(id string) (Shown, bool) {
 		s.Until = m.reloadUntil
 	}
 	return s, true
+}
+
+// CurrentConnectionListed reports whether id has a live node connection outside
+// warm/reload grace that has completed at least one sessions.list on this
+// connection (never satisfied by a retained pre-reconnect snapshot).
+func (d *Devices) CurrentConnectionListed(id string) bool {
+	m := d.machineByID(id)
+	if m == nil {
+		return false
+	}
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.peer == nil || !m.online || !m.sessionsListed || now.Before(m.warmUntil) || now.Before(m.reloadUntil) {
+		return false
+	}
+	select {
+	case <-m.peer.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 // Has reports whether id is one of the machines (an entry another one absorbed included).

@@ -50,6 +50,9 @@ func TestNewMainConversationTakesOverOpenTasks(t *testing.T) {
 	s, f, todo, led, side, closed := handoverFixture(t)
 	ctx := context.Background()
 	before := *todo.Supervision
+	// The former main can already have been told this very review.
+	s.sendDigest(ctx)
+	waitFor(t, "the review told to the former main", func() bool { return reviewsTold(f, "conv1", todo.ID) == 1 })
 	if old, _, err := s.newMain(ctx, false, "conv1"); err != nil || old != "conv1" {
 		t.Fatalf("new main: %q %v", old, err)
 	}
@@ -58,8 +61,14 @@ func TestNewMainConversationTakesOverOpenTasks(t *testing.T) {
 		t.Fatalf("started: %+v %v", sess, err)
 	}
 	next := sess.SessionID
+	// The review may go into the relay queue before the node lists the newly started session.
+	s.sendDigest(ctx)
+	f.mu.Lock()
 	f.known[next] = true
-	f.setSessions("server", proto.Session{SessionID: next, MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	f.mu.Unlock()
+	listed := []proto.Session{{SessionID: next, MachineID: "server", Assistant: true, Status: proto.StatusIdle}}
+	f.setSessions("server", listed...)
+	s.SessionsChanged(ctx, DeviceSessions{MachineID: "server", Sessions: listed})
 
 	got := todoNow(s, todo.ID)
 	if got.Origin != next || got.Supervision == nil || got.Supervision.Supervisor != next {
@@ -73,8 +82,12 @@ func TestNewMainConversationTakesOverOpenTasks(t *testing.T) {
 		t.Fatalf("no card in the new conversation: %s", feedKinds(s, next))
 	}
 	waitFor(t, "the review told to the new main conversation", func() bool {
-		return strings.Contains(strings.Join(f.noticesTo(next), "\n"), todo.ID)
+		return reviewsTold(f, next, todo.ID) == 1
 	})
+
+	if _, valid := s.digestEntry(ctx, superviseSignal{Todo: todo.ID, Kind: sigReview, Recipient: "conv1"}, s.webBase(ctx)); valid {
+		t.Fatal("the former review recipient still admitted a delivery after the handover")
+	}
 
 	if l := todoNow(s, led.ID); l.Origin != next || l.Supervision.Supervisor != "lead1" {
 		t.Fatalf("the leader's task: origin %q, supervisor %q", l.Origin, l.Supervision.Supervisor)
@@ -228,5 +241,273 @@ func TestMainTaskHandoverKeepsMainSupervision(t *testing.T) {
 	got = todoNow(s, todo.ID)
 	if got.DoneAt == nil || got.Supervision.State != reviewAccepted || got.Origin != "conv2" || got.Supervision.Supervisor != "conv2" {
 		t.Fatalf("accepted task: %+v, supervision %+v", got, got.Supervision)
+	}
+}
+
+func TestNewMainConversationHandsOverScheduledFollowups(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.setSessions("box")
+	f.known["conv1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) {
+		v.MachineID = "server"
+		v.Main = "conv1"
+		v.MainMachineID = "server"
+		v.Leaders = []string{"lead1"}
+	})
+	now := time.Now().UTC()
+	setTasks(s,
+		Task{ID: "fu_pending", Title: "Check deploy", Prompt: "check", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_done", Title: "Old follow-up", Prompt: "old", Repeat: repeatOnce, At: now.Add(-time.Hour), Enabled: false, LastRun: now.Add(-time.Minute), MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_quiet", Title: "Quiet follow-up", Prompt: "quiet", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, Push: pushAsked, MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_repeat", Title: "Legacy patrol", Prompt: "patrol", Repeat: repeatInterval, EveryMinutes: 30, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_side", Title: "Side follow-up", Prompt: "side", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "side1"},
+		Task{ID: "fu_leader", Title: "Leader follow-up", Prompt: "lead", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "lead1"},
+	)
+
+	if old, _, err := s.newMain(ctx, false, "conv1"); err != nil || old != "conv1" {
+		t.Fatalf("newMain: %q %v", old, err)
+	}
+	// Simulate migrating the new main conversation to another machine/engine before starting it.
+	f.setHello(func(h *Hello) { h.Assistant.MachineID = "box" })
+	setSettings(t, s, func(v *Settings) { v.MachineID = "box" })
+	sess, err := s.start(ctx, StartParams{Main: true})
+	if err != nil || sess.SessionID == "" || sess.MachineID != "box" {
+		t.Fatalf("start new main: %+v %v", sess, err)
+	}
+	next := sess.SessionID
+	f.mu.Lock()
+	f.known[next] = true
+	f.mu.Unlock()
+	f.setSessions("box", proto.Session{SessionID: next, MachineID: "box", Assistant: true, Status: proto.StatusIdle})
+
+	gotPending, _ := taskByID(s, "fu_pending")
+	if gotPending.SessionID != next || gotPending.MachineID != "box" {
+		t.Fatalf("fu_pending = (%q, %q), want (%q, %q)", gotPending.MachineID, gotPending.SessionID, "box", next)
+	}
+	if ran, err := runNow(t, s, "fu_pending"); err != nil || ran.SessionID != next || ran.MachineID != "box" {
+		t.Fatalf("fu_pending ran in (%q, %q) err=%v, want (%q, %q)", ran.MachineID, ran.SessionID, err, "box", next)
+	}
+	if gotDone, _ := taskByID(s, "fu_done"); gotDone.SessionID != "conv1" || gotDone.MachineID != "server" {
+		t.Fatalf("completed follow-up moved: %+v", gotDone)
+	}
+	if gotQuiet, _ := taskByID(s, "fu_quiet"); gotQuiet.SessionID != "" {
+		t.Fatalf("quiet follow-up was not isolated: %q", gotQuiet.SessionID)
+	}
+	if gotRepeat, _ := taskByID(s, "fu_repeat"); gotRepeat.SessionID != "" {
+		t.Fatalf("legacy repeating task was not isolated: %q", gotRepeat.SessionID)
+	}
+	if gotSide, _ := taskByID(s, "fu_side"); gotSide.SessionID != "side1" {
+		t.Fatalf("side conversation follow-up moved: %q", gotSide.SessionID)
+	}
+	if gotLeader, _ := taskByID(s, "fu_leader"); gotLeader.SessionID != "lead1" {
+		t.Fatalf("leader follow-up moved: %q", gotLeader.SessionID)
+	}
+}
+
+func TestClearMainHandsOverScheduledFollowupsOnNextStart(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1"; v.MainMachineID = "server" })
+	setTasks(s, Task{ID: "fu_clear", Title: "After clear", Prompt: "check", Repeat: repeatOnce, At: time.Now().UTC().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"})
+
+	if old, err := s.clearMain(ctx, "conv1"); err != nil || old != "conv1" {
+		t.Fatalf("clearMain: %q %v", old, err)
+	}
+	sess, err := s.start(ctx, StartParams{Main: true})
+	if err != nil || sess.SessionID == "" {
+		t.Fatalf("start after clear: %+v %v", sess, err)
+	}
+	got, _ := taskByID(s, "fu_clear")
+	if got.SessionID != sess.SessionID || got.MachineID != sess.MachineID {
+		t.Fatalf("fu_clear after clear+start = (%q, %q), want (%q, %q)", got.MachineID, got.SessionID, sess.MachineID, sess.SessionID)
+	}
+}
+
+func TestRunTaskDoesNotResurrectArchivedFormerMainBeforeNewMainStarts(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1"; v.MainMachineID = "server" })
+	setTasks(s, Task{ID: "fu_gap", Title: "Due during gap", Prompt: "check", Repeat: repeatOnce, At: time.Now().UTC().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"})
+
+	if old, _, err := s.newMain(ctx, false, "conv1"); err != nil || old != "conv1" {
+		t.Fatalf("newMain: %q %v", old, err)
+	}
+	ran, err := runNow(t, s, "fu_gap")
+	if err != nil {
+		t.Fatalf("runNow during gap: %v", err)
+	}
+	if ran.SessionID == "conv1" {
+		t.Fatalf("follow-up resurrected archived former main conversation %q", ran.SessionID)
+	}
+}
+
+func TestSettingsMainSwitchAndFormerPassHandOverScheduledFollowups(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"], f.known["conv2"] = true, true
+	f.setSessions("server",
+		proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "conv2", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) {
+		v.Main = "conv1"
+		v.MainMachineID = "server"
+		v.Leaders = []string{"conv0"}
+	})
+	setTasks(s,
+		Task{ID: "fu_put", Title: "Settings switch", Prompt: "check", Repeat: repeatOnce, At: time.Now().UTC().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_former", Title: "Former pass", Prompt: "check", Repeat: repeatOnce, At: time.Now().UTC().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv_old"},
+		Task{ID: "fu_leader_former", Title: "Leader former", Prompt: "check", Repeat: repeatOnce, At: time.Now().UTC().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv0"},
+	)
+
+	w, view := permissionSettingsRequest(t, s, "PUT", "/api/v1/assistant", "", "full", `{"main":"conv2"}`)
+	if w.Code != 200 || view.Main != "conv2" {
+		t.Fatalf("PUT main: %d %s", w.Code, w.Body.String())
+	}
+	if got, _ := taskByID(s, "fu_put"); got.SessionID != "conv2" {
+		t.Fatalf("fu_put after PUT main = %q, want conv2", got.SessionID)
+	}
+
+	setSettings(t, s, func(v *Settings) {
+		v.Former = []FormerMain{
+			{MachineID: "server", SessionID: "conv_old", Until: time.Now().UTC()},
+			{MachineID: "server", SessionID: "conv0", Until: time.Now().UTC()},
+		}
+	})
+	s.handOverFormerMainTasks(ctx)
+	if got, _ := taskByID(s, "fu_former"); got.SessionID != "conv2" {
+		t.Fatalf("fu_former after former pass = %q, want conv2", got.SessionID)
+	}
+	if got, _ := taskByID(s, "fu_leader_former"); got.SessionID != "conv0" {
+		t.Fatalf("leader follow-up moved during former pass: %q", got.SessionID)
+	}
+}
+
+func TestMainHandoverResolvesTargetMachineWhenMainMachineIDUnset(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"], f.known["conv2"] = true, true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	f.setSessions("box", proto.Session{SessionID: "conv2", MachineID: "box", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	setSettings(t, s, func(v *Settings) {
+		v.MachineID = "server"
+		v.Main = "conv2"
+		v.MainMachineID = "" // unset legacy/unconfirmed binding; conv2 actually lives on box
+		v.Former = []FormerMain{{MachineID: "server", SessionID: "conv1", Until: now}}
+	})
+	setTasks(s,
+		Task{ID: "fu_run", Title: "Direct run", Prompt: "check", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"},
+		Task{ID: "fu_pass", Title: "Former pass", Prompt: "check", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"},
+	)
+
+	// Before handover runs, runTask must still retarget conv1 -> ("box", "conv2"), not ("server", "conv2").
+	ran, err := runNow(t, s, "fu_run")
+	if err != nil || ran.MachineID != "box" || ran.SessionID != "conv2" {
+		t.Fatalf("fu_run ran in (%q, %q) err=%v, want (box, conv2)", ran.MachineID, ran.SessionID, err)
+	}
+
+	s.handOverFormerMainTasks(ctx)
+	got, _ := taskByID(s, "fu_pass")
+	if got.MachineID != "box" || got.SessionID != "conv2" {
+		t.Fatalf("fu_pass after former pass = (%q, %q), want (box, conv2)", got.MachineID, got.SessionID)
+	}
+}
+
+func TestFormerMainGapDoesNotMarkIsolatedTasksSourceUnavailable(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"], f.known["own-1"] = true, true
+	f.setSessions("server",
+		proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "own-1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1"; v.MainMachineID = "server" })
+	setTasks(s,
+		Task{ID: "patrol_legacy", Title: "Legacy patrol", Prompt: "patrol", Repeat: repeatInterval, EveryMinutes: 30, At: now.Add(time.Hour), Enabled: true,
+			MachineID: "server", SessionID: "conv1", RunMachineID: "server", RunSessionID: "own-1", RunLauncher: "claude"},
+		Task{ID: "fu_quiet_gap", Title: "Quiet follow-up", Prompt: "quiet", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, Push: pushAsked,
+			MachineID: "server", SessionID: "conv1"},
+	)
+
+	if old, _, err := s.newMain(ctx, false, "conv1"); err != nil || old != "conv1" {
+		t.Fatalf("newMain: %q %v", old, err)
+	}
+	if ran, err := runNow(t, s, "patrol_legacy"); err != nil || ran.SessionID != "own-1" {
+		t.Fatalf("patrol_legacy ran in %q err=%v, want own-1", ran.SessionID, err)
+	}
+	if ran, err := runNow(t, s, "fu_quiet_gap"); err != nil || ran.SessionID == "conv1" {
+		t.Fatalf("fu_quiet_gap ran in %q err=%v, must not resurrect conv1", ran.SessionID, err)
+	}
+	sc, err := s.lockedSchedule(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := append([]ScheduleRun(nil), sc.runs...)
+	sc.mu.Unlock()
+	for _, r := range runs {
+		switch r.RefID {
+		case "patrol_legacy":
+			if r.Conversation != "resumed" || r.ConversationReason != "" {
+				t.Fatalf("patrol_legacy run = (%q, %q), want (resumed, \"\")", r.Conversation, r.ConversationReason)
+			}
+		case "fu_quiet_gap":
+			if r.ConversationReason != "" {
+				t.Fatalf("fu_quiet_gap ConversationReason = %q, want \"\"", r.ConversationReason)
+			}
+		}
+	}
+}
+
+func TestSettingsMainAfterClearAndPendingOneOffRetryHandOver(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["conv1"], f.known["conv2"] = true, true
+	f.setSessions("server",
+		proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "conv2", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	s := newTestService(t, f)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1"; v.MainMachineID = "server" })
+	setTasks(s, Task{ID: "fu_after_clear", Title: "After clear", Prompt: "check", Repeat: repeatOnce, At: now.Add(time.Hour), Enabled: true, MachineID: "server", SessionID: "conv1"})
+
+	if old, err := s.clearMain(ctx, "conv1"); err != nil || old != "conv1" {
+		t.Fatalf("clearMain: %q %v", old, err)
+	}
+	w, view := permissionSettingsRequest(t, s, "PUT", "/api/v1/assistant", "", "full", `{"main":"conv2"}`)
+	if w.Code != 200 || view.Main != "conv2" {
+		t.Fatalf("PUT main after clear: %d %s", w.Code, w.Body.String())
+	}
+	if got, _ := taskByID(s, "fu_after_clear"); got.SessionID != "conv2" {
+		t.Fatalf("fu_after_clear after clear + PUT main = %q, want conv2", got.SessionID)
+	}
+
+	// Failed one-off waiting for automatic retry (t.done() == true) must still migrate when PUT switches main.
+	sc := setTasks(s, Task{ID: "fu_retry", Title: "Retry me", Prompt: "check", Repeat: repeatOnce, At: now.Add(-time.Minute),
+		Enabled: false, LastRun: now.Add(-30 * time.Second), LastStatus: runFailed, MachineID: "server", SessionID: "conv2"})
+	sc.mu.Lock()
+	sc.runs = append(sc.runs, ScheduleRun{ID: "run_fail", Kind: "followup", RefID: "fu_retry", At: now.Add(-30 * time.Second), Status: runFailed, Error: "offline"})
+	sc.mu.Unlock()
+	w, view = permissionSettingsRequest(t, s, "PUT", "/api/v1/assistant", "", "full", `{"main":"conv1"}`)
+	if w.Code != 200 || view.Main != "conv1" {
+		t.Fatalf("PUT main back to conv1: %d %s", w.Code, w.Body.String())
+	}
+	if got, _ := taskByID(s, "fu_retry"); got.SessionID != "conv1" {
+		t.Fatalf("fu_retry pending automatic retry = %q, want conv1", got.SessionID)
+	}
+	// conv1 is both active cfg.Main and still listed in cfg.Former; running a task bound to it must stay on conv1.
+	if ran, err := runNow(t, s, "fu_retry"); err != nil || ran.SessionID != "conv1" {
+		t.Fatalf("fu_retry ran in %q err=%v, want active main conv1", ran.SessionID, err)
 	}
 }

@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -16,9 +17,11 @@ import (
 // database (db.SearchItemRow). A sweep finds the conversations whose rev moved since they were read (woken by the
 // nodes' session lists, else every searchIdle) and reads them one at a time: a working one at most every
 // searchWorkingEvery, a new one (the backfill) newest first with a pause between pages. A transcript that was
-// rewritten (its history token changed) is read again from the start; a conversation gone from the list for
-// searchGoneAfter leaves the index. An index emptied under it (`assistant search-reindex`, db.ResetSearch) is read
-// again from the start too: each sweep first looks whether the resets' count moved since its cursors were read.
+// rewritten (its history token changed) is read again from the start, as is one whose read failed because its
+// history moved under it; other failures keep the cursor and wait searchRetryAfter. A conversation gone from the
+// list for searchGoneAfter leaves the index. An index emptied under it (`assistant search-reindex`,
+// db.ResetSearch) is read again from the start too: each sweep first looks whether the resets' count moved since
+// its cursors were read.
 
 // searchStore is what the index keeps in the database; a store without it has no index (search answers titles only).
 type searchStore interface {
@@ -229,28 +232,39 @@ func (s *Service) searchSweep(ctx context.Context) time.Duration {
 		}
 		todo = append(todo, due{c: c, cur: cur, backup: !read})
 	}
+	cursorKeys := make([]searchKey, 0, len(s.search.cursors))
+	for k := range s.search.cursors {
+		cursorKeys = append(cursorKeys, k)
+	}
+	s.search.mu.Unlock()
+
+	deletedKeys := s.deletedSearchKeys(ctx, cursorKeys)
+
 	// Permanent deletions leave immediately, even with an empty inventory.
 	// Ordinary missing chats keep the grace period: the computer may be offline.
 	var drop []searchKey
-	for k := range s.search.cursors {
-		if _, deleted, err := s.deletedConversation(ctx, k.machine, k.session); err == nil && deleted {
-			drop = append(drop, k)
-			continue
+	if len(cursorKeys) > 0 {
+		s.search.mu.Lock()
+		for _, k := range cursorKeys {
+			if _, ok := s.search.cursors[k]; !ok {
+				continue
+			}
+			if deletedKeys[k] {
+				drop = append(drop, k)
+				continue
+			}
+			if len(list) == 0 || listed[k] {
+				continue
+			}
+			since, ok := s.search.gone[k]
+			if !ok {
+				s.search.gone[k] = now
+			} else if now.Sub(since) >= searchGoneAfter {
+				drop = append(drop, k)
+			}
 		}
-		if len(list) == 0 {
-			continue
-		}
-		if listed[k] {
-			continue
-		}
-		since, ok := s.search.gone[k]
-		if !ok {
-			s.search.gone[k] = now
-		} else if now.Sub(since) >= searchGoneAfter {
-			drop = append(drop, k)
-		}
+		s.search.mu.Unlock()
 	}
-	s.search.mu.Unlock()
 
 	for _, k := range drop {
 		if err := s.dropSearchIndex(ctx, st, k.machine, k.session); err != nil {
@@ -299,6 +313,37 @@ func (s *Service) searchSweep(ctx context.Context) time.Duration {
 	return next
 }
 
+// deletedSearchKeys resolves which snapshot cursor keys appear in the cached
+// deletion ledger without holding s.search.mu or issuing per-cursor DB queries.
+func (s *Service) deletedSearchKeys(ctx context.Context, keys []searchKey) map[searchKey]bool {
+	if len(keys) == 0 {
+		return nil
+	}
+	rows, err := s.deletedConversationsSnapshot(ctx)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	aliasesByMachine := map[string][]string{}
+	var deleted map[searchKey]bool
+	for _, k := range keys {
+		aliases, ok := aliasesByMachine[k.machine]
+		if !ok {
+			aliases = s.physicalAliases(k.machine)
+			aliasesByMachine[k.machine] = aliases
+		}
+		for _, alias := range aliases {
+			if _, found := lookupRuntimeListID(rows, alias, k.session); found {
+				if deleted == nil {
+					deleted = map[searchKey]bool{}
+				}
+				deleted[k] = true
+				break
+			}
+		}
+	}
+	return deleted
+}
+
 // searchRead reads a conversation's messages after its cursor into the index, page by page; done: it reached the end.
 func (s *Service) searchRead(ctx context.Context, st searchStore, c proto.Session, cur searchCursor, backfill bool) (searchCursor, bool, error) {
 	reset := false
@@ -308,6 +353,11 @@ func (s *Service) searchRead(ctx context.Context, st searchStore, c proto.Sessio
 		}
 		page, err := s.searchFetch(ctx, c.MachineID, c.SessionID, cur.afterSeq)
 		if err != nil {
+			if errors.Is(err, db.ErrConversationHistoryChanged) {
+				// The history moved under every try of the read, so the cursor may be from its earlier numbering.
+				// The next read starts over; the page that brings the new history clears the old one's rows.
+				cur.afterSeq = 0
+			}
 			return cur, false, err
 		}
 		if !reset && cur.history != "" && page.History != "" && page.History != cur.history {

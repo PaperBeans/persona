@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -198,5 +202,43 @@ func TestSendRetryAfterRestartAndRefusal(t *testing.T) {
 	}
 	if code, _ := call(t, h2.routes(), "POST", sendPath, h2.cfg.Token, body); code != 200 || typed.Load() != 2 {
 		t.Fatalf("retry of a refused send: %d, typed %d", code, typed.Load())
+	}
+}
+
+// A node delivery refusal (dialog_open or not_delivered with delivered=none) maps to HTTP 409 and records the
+// client_ops receipt as "failed" instead of 502 + "unknown".
+func TestSendMessageDeliveryRefusalReturns409AndFailedClientOp(t *testing.T) {
+	for _, tc := range []struct {
+		name, opID, code string
+	}{
+		{name: "dialog_open", opID: "00000000-0000-4000-8000-000000000502", code: "dialog_open"},
+		{name: "not_delivered", opID: "00000000-0000-4000-8000-000000000503", code: "not_delivered"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &clientOpsStore{sharedStore: newSentStore(), ops: map[string]db.ClientOp{}}
+			h := newTestHub(t)
+			h.store = store
+			pipeNode(t, h, "box", func(context.Context) error {
+				return &rpc.Error{Code: tc.code, Message: "refused", Data: json.RawMessage(`{"delivered":"none"}`)}
+			})
+			req := httptest.NewRequest(http.MethodPost, sendPath, strings.NewReader(`{"text":"hello"}`))
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("Authorization", "Bearer "+h.cfg.Token)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Persona-Op-Id", tc.opID)
+			w := httptest.NewRecorder()
+			h.routes().ServeHTTP(w, req)
+			var out map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+				t.Fatalf("decode response %d %q: %v", w.Code, w.Body.String(), err)
+			}
+			if w.Code != http.StatusConflict || out["code"] != tc.code || out["delivered"] != "none" {
+				t.Fatalf("response = %d %v, want 409 code=%q delivered=none", w.Code, out, tc.code)
+			}
+			op, err := store.ClientOp(context.Background(), tc.opID)
+			if err != nil || op == nil || op.State != "failed" {
+				t.Fatalf("client_op = %+v (err=%v), want state=failed", op, err)
+			}
+		})
 	}
 }

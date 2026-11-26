@@ -8,5 +8,5 @@
     <string name="agents_attach_moved">「%1$s」にアップロードしたファイルは外しました。このコンピュータに送るには、もう一度追加してください。</string>
     <string name="agents_attach_remove">%1$sを削除</string>
     <string name="agents_attach_upload_failed">「%1$s」を送信できませんでした：%2$s</string>
-    <string name="agents_attach_photo_limit">一度に4枚まで</string>
+    <string name="agents_attach_photo_limit">一度に%1$d枚まで</string>
 </resources>

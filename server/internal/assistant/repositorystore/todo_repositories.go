@@ -9,16 +9,22 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nwverse/persona/server/internal/assistant/externalsourcestore"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/db"
 )
 
 // Store adds repository persistence to the manager's ordinary database store.
 // Embedding preserves every unrelated assistant store capability on the same connection pool.
-type Store struct{ *db.DB }
+type Store struct {
+	*db.DB
+	*externalsourcestore.Store
+}
 
 // New wraps the assistant manager's database without opening another pool.
-func New(database *db.DB) *Store { return &Store{DB: database} }
+func New(database *db.DB) *Store {
+	return &Store{DB: database, Store: externalsourcestore.New(database)}
+}
 
 func decodeTodoRepositories(id string, revision int64, raw []byte) (repository.TaskSet, error) {
 	out := repository.TaskSet{SchemaVersion: 1, TodoID: id, Revision: revision, Repositories: []repository.TaskRepository{}}

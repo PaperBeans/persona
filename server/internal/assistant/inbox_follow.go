@@ -31,6 +31,7 @@ type InboxFollow struct {
 const (
 	NowConfirmReply   = "confirm_reply"   // a reply suggestion waits for the user
 	NowConfirmAgent   = "confirm_agent"   // an Agent suggestion waits for the user to start it
+	NowConfirmHandoff = "confirm_handoff" // a handoff suggestion waits for the user to hand off to an existing conversation (#13562)
 	NowConfirmTodo    = "confirm_todo"    // a to-do suggestion waits for the user to add it (#6480)
 	NowDecide         = "decide"          // a suggestion handed back: the user decides
 	NowQueued         = "queued"          // queued for the AI
@@ -101,6 +102,8 @@ func (it *InboxItem) nowKey() string {
 			return NowConfirmReply
 		case SuggestAgent:
 			return NowConfirmAgent
+		case SuggestHandoff:
+			return NowConfirmHandoff
 		case SuggestTodo:
 			return NowConfirmTodo
 		}

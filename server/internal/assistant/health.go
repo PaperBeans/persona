@@ -53,6 +53,17 @@ func (s *Service) spaceCwd(ctx context.Context, d Device, space string) string {
 func (s *Service) healthClaudeMD(ctx context.Context, here string) string {
 	hello := s.hello(ctx)
 	d := prompts.AssistantHealthClaudeMD{Owner: strings.TrimSpace(hello.Owner), Notes: s.notes(ctx), Language: answerLanguage(hello.Locale)}
+	if s.healthMod != nil {
+		items, err := s.healthMod.Items(ctx)
+		if err != nil {
+			s.logf("health prompt: items unavailable: %v", err)
+		} else {
+			d.ItemsAvailable = true
+			d.Water = slices.Contains(items, "water")
+			d.Protein = slices.Contains(items, "protein")
+			d.Strength = slices.Contains(items, "strength")
+		}
+	}
 	if name := identity.HealthDirName(s.id); name != identity.SpaceHealth {
 		d.HealthDir = name // another manager's own space (the built-in's is the template's default)
 	}

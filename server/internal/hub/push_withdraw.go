@@ -30,6 +30,11 @@ const (
 	// withdrawKept: how long the hub remembers where a card's push went. A card still pending after this is old
 	// news on the lock screen, and the app clears it when it next lists the cards.
 	withdrawKept = 30 * time.Minute
+	// ownerCardKept: as withdrawKept for one of the assistant's own cards (a plan waiting for Start, a decision, a
+	// needs-user ask, a failed start: Notification.CardID / TodoAskCardID). The app never lists those as pending
+	// interactions, so nothing else clears their push: it stays on the lock screen until the card is over, however
+	// late, and the hub remembers it as long.
+	ownerCardKept = 7 * 24 * time.Hour
 	// withdrawGather: cards over within this of the first go in one push ("always allow" settles several at once).
 	withdrawGather = 5 * time.Second
 	// withdrawEvery: at most one withdrawal push per device this often; what comes between waits for the next.
@@ -54,7 +59,11 @@ type withdrawals struct {
 type cardPush struct {
 	devices map[string]bool
 	at      time.Time
+	keep    time.Duration // withdrawKept, or ownerCardKept for an assistant card's push
 }
+
+// kept: whether the hub still remembers where it went at now.
+func (c cardPush) kept(now time.Time) bool { return now.Sub(c.at) <= cmp.Or(c.keep, withdrawKept) }
 
 type withdrawQueue struct {
 	ids   []string
@@ -74,9 +83,9 @@ func (p *Pusher) sendCard(manager string, policy pushPolicy, build localized, id
 		return ""
 	}
 	policy.manager = manager
-	if policy.level != assistantwire.LevelP0 || p.attentionNow().Active() {
+	if policy.level != assistantwire.LevelP0 || p.filteringFor(manager) {
 		// Extract before applyPushGrading's mode check too: enabling push grading between checks must not hold a source-less card.
-		// An immersive block lets through the cards of the session in focus, which it knows by the source.
+		// An immersive block, owner base config, or extension grading layer may inspect the session in focus, which it knows by the source.
 		policy = pushPolicyWithSource(policy, build(i18n.Default))
 	}
 	if allow, reason := p.applyPushGrading(policy); !allow {
@@ -113,22 +122,33 @@ func cardCollapseID(manager, id string) string {
 // apnsCollapseMax is the longest apns-collapse-id APNs takes, in bytes.
 const apnsCollapseMax = 64
 
-func (p *Pusher) cardPushedTo(id, device string) {
+func (p *Pusher) cardPushedTo(id, device string) { p.cardPushedFor(id, device, withdrawKept) }
+
+// ownerCardPushedTo is cardPushedTo for one of the assistant's own cards (Notification.CardID / TodoAskCardID):
+// remembered for ownerCardKept.
+func (p *Pusher) ownerCardPushedTo(id, device string) { p.cardPushedFor(id, device, ownerCardKept) }
+
+func (p *Pusher) cardPushedFor(id, device string, keep time.Duration) {
 	w := &p.withdrawals
 	now := p.now()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for old, c := range w.pushed {
-		if now.Sub(c.at) > withdrawKept {
+		if !c.kept(now) {
 			delete(w.pushed, old)
 		}
+	}
+	if q := w.queue[device]; q != nil && len(q.ids) > 0 {
+		// A fresh push for the same id (e.g. a superseded to-do decision's new round) supersedes any queued withdrawal
+		// from the earlier round so the delayed background push cannot wipe the new alert.
+		q.ids = slices.DeleteFunc(q.ids, func(queued string) bool { return queued == id })
 	}
 	c, ok := w.pushed[id]
 	if !ok {
 		c = cardPush{devices: map[string]bool{}}
 	}
 	c.devices[device] = true
-	c.at = now
+	c.at, c.keep = now, max(c.keep, keep)
 	w.pushed[id] = c
 }
 
@@ -144,7 +164,7 @@ func (p *Pusher) withdraw(id string) {
 	defer w.mu.Unlock()
 	c, ok := w.pushed[id]
 	delete(w.pushed, id)
-	if !ok || now.Sub(c.at) > withdrawKept {
+	if !ok || !c.kept(now) {
 		return
 	}
 	for device := range c.devices {

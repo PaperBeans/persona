@@ -35,6 +35,14 @@ sealed interface RouteSource {
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
     val side: Boolean = false,
+    /** Opens the unified Session Overview sheet focused on the Subagents section (from parent-row rollup tap). */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val openSubagents: Boolean = false,
+    /** Explicit full subagent detail view opened from Session Overview or a TaskCard; never redirects back to parent. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val subagentDetail: Boolean = false,
 ) : NavKey
 
 @Serializable @SerialName("persona.core.navigation.InboxItemRoute") data class InboxItemRoute(

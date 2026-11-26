@@ -49,7 +49,7 @@ func TestSessionItemsForwardsOnlyTheGivenPaging(t *testing.T) {
 	}
 }
 
-// Index mode has a position-only wire shape, including when no inputs exist. A node that ignores the flag
+// Index mode has a narrow wire shape, including when no inputs exist. A node that ignores the flag
 // must not silently become a zero count: older nodes keep the client's loaded-only compatibility rail.
 func TestSessionItemsUserInputsWireShape(t *testing.T) {
 	for _, c := range []struct {
@@ -64,13 +64,25 @@ func TestSessionItemsUserInputsWireShape(t *testing.T) {
 			"total": 1, "inputs": []any{map[string]any{"id": "input-1#0", "seq": 7, "text": "synthetic body"}},
 			"history": "fixture", "items": []any{map[string]any{"text": "synthetic body"}},
 		}, 200, `{"total":1,"inputs":[{"id":"input-1#0","seq":7}],"history":"fixture"}`},
+		{"excerpts and count", map[string]any{
+			"total": 2, "history": "fixture", "inputs": []any{
+				map[string]any{"id": "input-1#0", "seq": 7, "preview": "Question", "answer": "Answer", "text": "synthetic body"},
+				map[string]any{"id": "input-2#0", "seq": 9, "attachments": 2, "image": "synthetic image"},
+			},
+		}, 200, `{"total":2,"inputs":[{"id":"input-1#0","seq":7,"preview":"Question","answer":"Answer"},{"id":"input-2#0","seq":9,"attachments":2}],"history":"fixture"}`},
 		{"older node", map[string]any{"items": []any{}, "has_more": false}, 502, ""},
 		{"partial index", map[string]any{"total": 2, "inputs": []any{map[string]any{"id": "input-1#0", "seq": 7}}, "history": "fixture"}, 502, ""},
 		{"null index", map[string]any{"total": 0, "inputs": nil, "history": "fixture"}, 502, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			m := wireNode(t, func(p json.RawMessage) any { return c.response })
-			req := httptest.NewRequest("GET", "/api/v1/sessions/m1/s1/items?user_inputs=1", nil)
+			m := wireNode(t, func(p json.RawMessage) any {
+				var params map[string]any
+				if err := json.Unmarshal(p, &params); err != nil || params["user_inputs"] != true || params["before_seq"] != nil {
+					t.Errorf("unexpected projection request: %s, %v", p, err)
+				}
+				return c.response
+			})
+			req := httptest.NewRequest("GET", "/api/v1/sessions/m1/s1/items?user_inputs=1&before_seq=1", nil)
 			req.SetPathValue("sid", "s1")
 			w := httptest.NewRecorder()
 			(&Hub{}).sessionItems(w, req, m)

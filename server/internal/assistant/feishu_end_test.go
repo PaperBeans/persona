@@ -40,6 +40,7 @@ func lastCard(t *testing.T, r *channel.Run, posts []map[string]any) string {
 
 // A normal end: the answer replaces the card, its last line says done, the time and the tools called.
 func TestFeishuEndDoneFooter(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, r, posts := endHub(t)
 	s.finishChannelRun(r, &channel.Result{Answer: "结论在这里"})
 	card := lastCard(t, r, *posts)
@@ -51,6 +52,7 @@ func TestFeishuEndDoneFooter(t *testing.T) {
 
 // Ends that are not normal leave the card in a final state with a header saying so, never "Working".
 func TestFeishuEndStates(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		res  *channel.Result
 		want string
@@ -84,6 +86,7 @@ func checkEnd(t *testing.T, s *Service, f *fakeHub, r *channel.Run, posts *[]map
 
 // The conversation's turn error makes the end "Error"; an answer that only talks about an error is still "Done".
 func TestFeishuCheckEndFailed(t *testing.T) {
+	needsLarkLayer(t)
 	answer := proto.Item{Seq: 5, Role: "assistant", Kind: proto.KindText, Text: "修好了 API Error: 503 时的崩溃"}
 	s, f, r, posts := endHub(t)
 	s.setRunSeen(r)
@@ -102,6 +105,7 @@ func TestFeishuCheckEndFailed(t *testing.T) {
 // A held run whose background work never reported back ends as timed out in the card it still has: the card is
 // rewritten with the note, not left saying it is working.
 func TestFeishuHeldRunGivesUpOnTheCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := endHub(t)
 	s.chans.mu.Lock()
 	r.Held, r.Started = true, time.Now().Add(-channel.HeldMost-time.Minute)
@@ -124,6 +128,7 @@ func (s *Service) setRunSeen(r *channel.Run) {
 // work it waits for never reports back, the wait runs out — and the chat has to hear about it: the ending posts a card
 // of its own, rather than saying nothing and leaving the owner to wonder.
 func TestFeishuHeldRunGivesUpWithoutItsCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := endHub(t)
 	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
 	s.chans.mu.Lock()
@@ -154,6 +159,7 @@ func TestFeishuHeldRunGivesUpWithoutItsCard(t *testing.T) {
 // card left to rewrite, but the chat was told it would answer again — so its ending line goes out as a card of its own,
 // rather than nowhere.
 func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := endHub(t)
 	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
 	s.chans.mu.Lock()
@@ -185,6 +191,7 @@ func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
 // An unrelated user turn ends the held wait without an answer or a quiet-ending card, even while background work
 // remains. Reaction cleanup still uses the normal sink; no conversation content is posted back to the chat.
 func TestFeishuHeldRunUnrelatedUserTurnSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, r, posts := heldRunWithoutCard(t)
 	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1",
 		Background: []proto.BackgroundTask{{ID: "background-work", Kind: "shell"}}}
@@ -205,6 +212,7 @@ func TestFeishuHeldRunUnrelatedUserTurnSaysNothing(t *testing.T) {
 // Live deltas cannot stream an unrelated turn into a held run's new progress card. Its user item ends the run and
 // closes any card already opened, without posting the private text or a new quiet-ending card.
 func TestFeishuHeldRunStopsUnrelatedProgress(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := heldRunWithoutCard(t)
 	sess := proto.Session{Status: proto.StatusWorking, State: proto.StateWorking, MachineID: "server", SessionID: "c1",
 		Background: []proto.BackgroundTask{{ID: "background-work", Kind: "shell"}}}
@@ -258,6 +266,7 @@ func heldRunWithoutCard(t *testing.T) (*Service, *fakeHub, *channel.Run, *[]map[
 // A held run's quiet ending says how it ended. Its background work's turn can be interrupted, hit a model API error or
 // lose its computer: the chat hears that instead of "Done", as a card of its own (the run has none left) (#4228).
 func TestFeishuHeldRunQuietEndSaysHowItEnded(t *testing.T) {
+	needsLarkLayer(t)
 	interrupted := []proto.Item{{Seq: 5, Kind: proto.KindNotice, Role: "system", Text: transcript.InterruptedNotice}}
 	for _, tc := range []struct {
 		name  string
@@ -316,6 +325,7 @@ func cardFooters(t *testing.T, card string) int {
 
 // A quiet ending is not always one to report: a message the owner recalled says nothing, with a card or without one.
 func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, _, r, posts := endHub(t)
 	s.chans.mu.Lock()
 	delete(r.Ext, "card") // recalled before its first progress card
@@ -331,6 +341,7 @@ func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
 // A recalled message whose progress card cannot be written any more says nothing too: the ending is not posted as a
 // card of its own.
 func TestFeishuRecalledEndWithARefusedCardSaysNothing(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, r, posts := endHub(t)
 	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
 		return nil, errors.New("feishu update card: 230025 card is not a card")
@@ -346,6 +357,7 @@ func TestFeishuRecalledEndWithARefusedCardSaysNothing(t *testing.T) {
 // the owner, so it goes out as a card of its own, as a normal answer does — and, like the card it replaces, it says how
 // the wait ended (#4228) rather than always "Done".
 func TestFeishuQuietEndPostsWhenItsCardIsRefused(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name string
 		res  channel.Result
@@ -378,6 +390,7 @@ func TestFeishuQuietEndPostsWhenItsCardIsRefused(t *testing.T) {
 // A quiet ending that never got out because the hub could not be reached is not an ending: the run is kept and tried
 // again, and the retry posts it under the same key, so one that did arrive lands once.
 func TestFeishuQuietEndTriesAgainWhenUnreachable(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := endHub(t)
 	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true}) // it gave its card back
 	*posts = nil
@@ -416,6 +429,7 @@ func TestFeishuQuietEndTriesAgainWhenUnreachable(t *testing.T) {
 
 // The same retry applies when the progress card was refused and the card of its own is what could not reach the hub.
 func TestFeishuQuietEndTriesAgainWhenItsFallbackIsUnreachable(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := endHub(t)
 	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
 		return nil, errors.New("feishu update card: 230025 card is not a card")

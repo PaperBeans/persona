@@ -843,6 +843,12 @@ final class PersonaFrames: Sendable {
         self.images = images
         duration = total
     }
+
+    /// Frames made here (a picked picture's preview in the avatar sheet, #15449).
+    nonisolated init(images: [UIImage], duration: TimeInterval) {
+        self.images = images
+        self.duration = duration
+    }
 }
 
 /// GET /api/v1/looks's `current`, and PUT /api/v1/looks/current's answer.

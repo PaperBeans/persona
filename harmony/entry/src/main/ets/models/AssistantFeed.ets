@@ -1,9 +1,19 @@
+import type { BriefAction, BriefRoute } from './BriefRowActions';
+import { BriefRowLedger, briefLedgerFor, briefRowPath, briefTake, briefWritable } from './BriefRowActions';
 import { receiptWireState } from './AssistantReceipt';
 import { Wire, ResourceRow } from './Wire';
 import type { ClientModel } from './ClientModel';
 import type { HubRepository } from './HubRepository';
 
 function segment(value: string): string { return encodeURIComponent(value); }
+
+export function conversationFeedPath(conversation: string, manager: string, cursor: string = '', since: string = ''): string {
+  let path = '/api/v1/assistant/conversations/' + segment(conversation) + '/feed?paginate=1';
+  if (manager) path += '&manager=' + segment(manager);
+  if (cursor) path += '&cursor=' + segment(cursor);
+  else if (since) path += '&since=' + segment(since);
+  return path;
+}
 
 function textField(value: Object | undefined, key: string, fallback: string = ''): string {
   return Wire.text(Wire.record(value), key, fallback);
@@ -25,6 +35,11 @@ function timestamp(value: string): number {
 function draftPlaceholder(value: string): string {
   const match = /【[^】\n]*】|\{\{[^}\n]*\}\}/.exec(value);
   return match ? match[0] : '';
+}
+
+interface BriefRowOwner {
+  manager: string;
+  target?: ResourceRow;
 }
 
 interface AssistantRouteSnapshot {
@@ -65,6 +80,7 @@ export class PlanEditTask {
 /** Scoped, in-memory projection of one assistant conversation's real Hub feed. */
 @ObservedV2
 export class AssistantFeedModel {
+  @Trace briefRows: BriefRowLedger = new BriefRowLedger();
   @Trace loading: boolean = false;
   @Trace loadingMore: boolean = false;
   @Trace error: string = '';
@@ -80,11 +96,13 @@ export class AssistantFeedModel {
   @Trace planActionErrors: Record<string, Object> = {};
   @Trace taskCards: Record<string, Object>[] = [];
   @Trace todos: Record<string, Object>[] = [];
+  @Trace directoryTodos: Record<string,Object>[] = [];
   @Trace views: Record<string, Object> = {};
   @Trace viewActions: Record<string, Object> = {};
   @Trace viewBlocks: string[] = [];
   @Trace nextCursor: string = '';
   @Trace hasLoaded: boolean = false;
+  @Trace feedUnavailable: boolean = false;
   @Trace editing: boolean = false;
   @Trace editingPlanId: string = '';
   @Trace editingPlanVersion: string = '';
@@ -95,6 +113,10 @@ export class AssistantFeedModel {
   @Trace pendingMessageIds: string[] = [];
   @Trace messageDrafts: Record<string, Object> = {};
   private generation: number = 0;
+  private machineId: string = '';
+  private mainPendingIds: string[] | undefined;
+  private pageRead: number = 0;
+  private lastPlanPage: number = 0;
   private clientGeneration: number = -1;
   private scopeKey: string = '';
   private targetKey: string = '';
@@ -134,8 +156,9 @@ export class AssistantFeedModel {
 
   private clearState(): void {
     this.loading = false; this.loadingMore = false; this.error = ''; this.todoError = ''; this.todosReady = false; this.itemLookupStatus = '';
-    this.conversationId = ''; this.owner = ''; this.items = []; this.plans = {}; this.freshPlanIds = []; this.loadingPlanIds = []; this.planActionErrors = {}; this.taskCards = []; this.todos = [];
-    this.views = {}; this.viewActions = {}; this.viewBlocks = []; this.nextCursor = ''; this.hasLoaded = false;
+    this.machineId = ''; this.mainPendingIds = undefined; this.pageRead = 0; this.lastPlanPage = 0;
+    this.conversationId = ''; this.owner = ''; this.items = []; this.plans = {}; this.freshPlanIds = []; this.loadingPlanIds = []; this.planActionErrors = {}; this.taskCards = []; this.todos = []; this.directoryTodos = [];
+    this.views = {}; this.viewActions = {}; this.viewBlocks = []; this.nextCursor = ''; this.hasLoaded = false; this.feedUnavailable = false;
     this.editing = false; this.editingPlanId = ''; this.editingPlanVersion = ''; this.editTasks = []; this.rememberPlans = [];
     this.busyKeys = []; this.uncertainKeys = []; this.pendingMessageIds = []; this.messageDrafts = {};
   }
@@ -157,10 +180,12 @@ export class AssistantFeedModel {
     let repository: HubRepository;
     try { repository = model.repo(); } catch (_) { this.error = 'offline'; return; }
     this.client = model;
+    this.briefRows = briefLedgerFor(model);
     this.repository = repository;
     this.clientGeneration = model.connectionGeneration();
     this.scopeKey = model.scope();
     this.targetKey = model.target(row);
+    this.machineId = row.machine;
     this.conversationId = row.id;
     this.owner = owner;
     if (!this.current(run)) { this.error = 'request_updated'; return; }
@@ -215,8 +240,20 @@ export class AssistantFeedModel {
   private receiveEvent(raw: string, run: number): void {
     if (!this.current(run) || raw.length > 2 * 1024 * 1024) return;
     const frame = Wire.parse(raw);
-    if (Wire.has(frame, 'manager') && Wire.text(frame, 'manager') !== this.owner || Wire.text(frame, 'conversation') !== this.conversationId) return;
-    const type = Wire.text(frame, 'type');
+    if (Wire.has(frame,'manager') && Wire.text(frame,'manager')!==this.owner) return;
+    const type=Wire.text(frame,'type');
+    if (type==='task_plan') {
+      const plan=Wire.object(frame,'plan'), id=Wire.text(plan,'id'), origin=Wire.text(plan,'conversation');
+      if (!this.matchesPlanOwner(id,plan) || !origin) return;
+      if (origin!==this.conversationId && (!this.isMainConversation() || Wire.text(plan,'space')==='health')) return;
+      this.lastPlanPage=++this.pageRead;
+      if (this.plans[id] && this.planInScope(id,plan) && ['started','dismissed'].includes(Wire.text(plan,'state'))) {
+        this.setPlan(id,plan); this.freshPlanIds=updated(this.freshPlanIds,id,false);
+      }
+      this.refresh().catch(() => undefined);
+      return;
+    }
+    if (Wire.text(frame,'conversation')!==this.conversationId) return;
     if (type === 'assistant_view') {
       const view = Wire.object(frame, 'view'), id = Wire.text(view, 'id'); if (id) this.mergeViews(Wire.payload([id], [view]));
     } else if (type === 'assistant_view_action') {
@@ -233,11 +270,101 @@ export class AssistantFeedModel {
   }
 
   private feedPath(cursor: string = '', since: string = ''): string {
-    let path = '/api/v1/assistant/conversations/' + segment(this.conversationId) + '/feed?paginate=1';
-    if (this.owner) path += '&manager=' + segment(this.owner);
-    if (cursor) path += '&cursor=' + segment(cursor);
-    else if (since) path += '&since=' + segment(since);
-    return path;
+    return conversationFeedPath(this.conversationId, this.owner, cursor, since);
+  }
+
+  private briefOwner(section: string, id: string): BriefRowOwner | undefined {
+    const client=this.client;
+    if (!client) return undefined;
+    if (section==='later') return {manager:this.owner};
+    if (section!=='accept') return undefined;
+    const known=client.todos.filter((task:ResourceRow) => task.id===id && (!task.group || task.group===client.profile.id));
+    const own=known.find((task:ResourceRow) => (task.manager || this.owner)===this.owner);
+    const local=this.directoryTodos.some((task:Record<string,Object>) => Wire.text(task,'id')===id);
+    if (!own && !local && known.length>1) return undefined;
+    // Only a task from a scoped directory can direct the request to another manager.
+    const target=own || (!local && known.length===1 ? known[0] : undefined);
+    return {manager:target?.manager || this.owner,target:target};
+  }
+
+  private briefScope(section: string, row: Record<string,Object>): string {
+    if (!this.client || !this.current(this.generation)) return '';
+    const owner=this.briefOwner(section,Wire.text(row,'id'));
+    return owner ? JSON.stringify([this.client.profile.id,owner.manager]) : '';
+  }
+
+  briefOutcome(section: string, row: Record<string,Object>): string {
+    const scope=this.briefScope(section,row);
+    return scope ? this.briefRows.outcome(scope,section,row) : '';
+  }
+  briefError(section: string, row: Record<string,Object>): string {
+    const scope=this.briefScope(section,row);
+    return scope ? this.briefRows.error(scope,section,row) : '';
+  }
+  briefFailureDetail(section: string, row: Record<string,Object>): string {
+    const scope=this.briefScope(section,row);
+    return scope ? this.briefRows.detail(scope,section,row) : '';
+  }
+
+  private briefRoute(item: Record<string,Object>, section: string, row: Record<string,Object>, visible: () => boolean): BriefRoute | undefined {
+    const client=this.client, repository=this.repository, run=this.generation, route=this.routeSnapshot();
+    const itemId=Wire.text(item,'id'), id=Wire.text(row,'id'), round=Wire.text(row,'asked_at');
+    if (!client || !repository || !itemId || !id || !['accept','later'].includes(section) || Wire.text(item,'kind')!=='brief' ||
+        Wire.text(item,'conversation',this.conversationId)!==this.conversationId || Wire.text(item,'manager',this.owner)!==this.owner ||
+        Wire.text(item,'group',client.profile.id)!==client.profile.id) return undefined;
+    const owner=this.briefOwner(section,id);
+    if (!owner) return undefined;
+    const targetTodo=owner.target, manager=owner.manager;
+    let destination: ClientModel | undefined;
+    let destinationGeneration=-1, destinationScope='';
+    let destinationRepository: HubRepository | undefined;
+    const current = (): boolean => {
+      if (!this.current(run) || !this.routeIsCurrent(route) || !visible() || !client.connected ||
+          client.selected.kind!=='conversation' || !briefWritable(client.selected.data())) return false;
+      if (destination && (!destination.connected || !destination.owns(destinationGeneration,destinationScope) ||
+          destination.profile.id!==client.profile.id || destination.profile.manager!==manager || destination.repo()!==destinationRepository)) return false;
+      const live=this.items.find((v:Record<string,Object>) => Wire.text(v,'id')===itemId);
+      if (!live || Wire.text(live,'kind')!=='brief' || Wire.text(live,'conversation',this.conversationId)!==this.conversationId ||
+          Wire.text(live,'manager',this.owner)!==this.owner || !briefWritable(live)) return false;
+      const match=Wire.rows(Wire.object(live,'body'),section).find((v:Record<string,Object>) => Wire.text(v,'id')===id &&
+        (section==='later' || Wire.text(v,'asked_at')===round && Wire.text(v,'outcome')===Wire.text(row,'outcome') &&
+          Wire.text(v,'recommend')===Wire.text(row,'recommend')));
+      if (!match || !briefWritable(match) || Wire.text(match,'manager',manager)!==manager) return false;
+      if (section==='later') return true;
+      if (this.briefOwner(section,id)?.manager!==manager) return false;
+      const fresh=this.directoryTodos.find((v:Record<string,Object>) => Wire.text(v,'id')===id);
+      if (fresh && (Wire.text(fresh,'manager',this.owner)!==manager || !briefWritable(fresh))) return false;
+      if (!targetTodo) return true;
+      const visibleTodo=client.todos.find((r:ResourceRow) => r.id===id && (!r.group || r.group===client.profile.id) &&
+        (r.manager || this.owner)===manager);
+      return !!visibleTodo && briefWritable(visibleTodo.data());
+    };
+    if (!current()) return undefined;
+    const load=async ():Promise<HubRepository> => {
+      if (!targetTodo || manager===this.owner) return repository;
+      const view=await client.viewFor(targetTodo);
+      if (!current() || !view.connected || view.profile.id!==client.profile.id || view.profile.manager!==manager) throw new Error('request_updated');
+      destination=view; destinationGeneration=view.connectionGeneration(); destinationScope=view.scope(); destinationRepository=view.repo();
+      return destinationRepository;
+    };
+    return {scope:JSON.stringify([client.profile.id,manager]),manager:manager,loadRepository:load,current:current,
+      blocked:(path:string):boolean => (destination || client).operationBlocked(path),
+      reloadTodos:async ():Promise<void> => { if (this.current(run)) await this.refreshTodos(run); }};
+
+  }
+
+  canBriefAction(item: Record<string,Object>, section: string, row: Record<string,Object>, action: BriefAction): boolean {
+    if (this.briefOutcome(section,row)) return false;
+    if (action==='handled' ? section!=='later' : section!=='accept' || !Wire.text(row,'asked_at').trim() ||
+        (action==='accept' ? !briefTake(row) : Wire.text(row,'outcome').trim()!=='decide')) return false;
+    const route=this.briefRoute(item,section,row,() => true);
+    return !!route && !route.blocked(briefRowPath(route.manager,Wire.text(row,'id'),action));
+  }
+
+  async performBriefAction(item: Record<string,Object>, section: string, row: Record<string,Object>, action: BriefAction,
+    visible: () => boolean): Promise<boolean> {
+    const route=this.briefRoute(item,section,row,visible);
+    return route ? this.briefRows.perform(route,section,row,action) : false;
   }
 
   private ownerPath(path: string): string { return this.owner ? path + '?manager=' + segment(this.owner) : path; }
@@ -256,16 +383,60 @@ export class AssistantFeedModel {
     });
   }
 
-  private mergePlans(incoming: Record<string, Object>): void {
-    const next: Record<string, Object> = {};
-    Object.keys(this.plans).forEach((id: string) => next[id] = this.plans[id]);
-    Object.keys(incoming).forEach((id: string) => {
-      const plan = Wire.record(incoming[id]);
-      const conversation = Wire.text(plan, 'conversation');
-      if (conversation && conversation !== this.conversationId) return;
-      next[id] = plan;
-    });
-    this.plans = next;
+  private isMainConversation(): boolean {
+    const client=this.client;
+    return !!client && client.mainId===this.conversationId && (!client.mainMachineId || client.mainMachineId===this.machineId);
+  }
+
+  private matchesPlanOwner(id:string,plan:Record<string,Object>):boolean {
+    return !!id && Wire.text(plan,'id')===id && (!Wire.text(plan,'manager') || Wire.text(plan,'manager')===this.owner) &&
+      (!Wire.text(plan,'group') || Wire.text(plan,'group')===this.client?.profile.id);
+  }
+
+  private planInScope(id:string,plan:Record<string,Object>):boolean {
+    if (!this.matchesPlanOwner(id,plan)) return false;
+    const origin=Wire.text(plan,'conversation'), previous=Wire.text(this.plan(id),'conversation');
+    if (previous && origin!==previous) return false;
+    if (!origin || origin===this.conversationId) {
+      return !this.isMainConversation() || Wire.text(plan,'state')!=='open' || !this.mainPendingIds || this.mainPendingIds.includes(id);
+    }
+    return this.isMainConversation() && Wire.text(plan,'space')!=='health' && !!previous &&
+      (Wire.text(plan,'state')!=='open' || !this.mainPendingIds || this.mainPendingIds.includes(id));
+  }
+
+  private dropPlan(id:string):void {
+    if (!this.plans[id]) return;
+    const next:Record<string,Object>={};
+    for (const key of Object.keys(this.plans)) if (key!==id) next[key]=this.plans[key];
+    this.plans=next; this.freshPlanIds=updated(this.freshPlanIds,id,false);
+  }
+
+  private mergePlans(result:Record<string,Object>,related:string[],complete:boolean):void {
+    const incoming=Wire.object(result,'plans'), main=this.isMainConversation();
+    const hasIndex=main && Array.isArray(result['pending_plan_ids']);
+    if (hasIndex) this.mainPendingIds=Wire.strings(result,'pending_plan_ids');
+    const next:Record<string,Object>={};
+    for (const id of Object.keys(this.plans)) {
+      if (Wire.has(incoming,id)) continue;
+      const old=this.plan(id), origin=Wire.text(old,'conversation'), foreign=!!origin && origin!==this.conversationId;
+      if (main && Wire.text(old,'state')==='open' && (this.mainPendingIds && !this.mainPendingIds.includes(id) ||
+          !hasIndex && complete && foreign)) continue;
+      next[id]=old;
+    }
+    for (const id of Object.keys(incoming)) {
+      const plan=Wire.record(incoming[id]), origin=Wire.text(plan,'conversation'), previous=this.plan(id);
+      if (!this.matchesPlanOwner(id,plan)) continue;
+      if (Wire.text(previous,'conversation') && origin!==Wire.text(previous,'conversation')) continue;
+      if (origin && origin!==this.conversationId) {
+        if (!main || Wire.text(plan,'space')==='health' || Wire.text(plan,'state')!=='open' ||
+            this.mainPendingIds && !this.mainPendingIds.includes(id)) continue;
+      } else if (!related.includes(id) && !this.plans[id] &&
+          !(main && origin && Wire.text(plan,'state')==='open')) continue;
+      if (main && this.mainPendingIds && Wire.text(plan,'state')==='open' && !this.mainPendingIds.includes(id)) continue;
+      next[id]=plan;
+    }
+    this.freshPlanIds=this.freshPlanIds.filter((id:string)=>Wire.has(next,id) && JSON.stringify(next[id])===JSON.stringify(this.plans[id]));
+    this.plans=next;
   }
 
   private mergeTaskCards(incoming: Record<string, Object>[]): void {
@@ -289,24 +460,22 @@ export class AssistantFeedModel {
     });
   }
 
-  private mergePage(result: Record<string, Object>): void {
+  private mergePage(result: Record<string, Object>, sequence:number, complete:boolean): void {
     const incomingItems = Wire.rows(result, 'items').filter((item: Record<string, Object>) => {
       const conversation = Wire.text(item, 'conversation');
       const manager = Wire.text(item, 'manager');
       return (!conversation || conversation === this.conversationId) && (!manager || manager === this.owner);
     });
     this.mergeItems(incomingItems);
-    const plans = Wire.object(result, 'plans');
     const related: string[] = [];
     incomingItems.forEach((item: Record<string, Object>) => {
       const ref = Wire.text(item, 'ref');
       if (Wire.text(item, 'kind') === 'plan' && ref && !related.includes(ref)) related.push(ref);
     });
-    const filteredPlans: Record<string, Object> = {};
-    Object.keys(plans).forEach((id: string) => {
-      if (hasId(related, id) || hasId(Object.keys(this.plans), id)) filteredPlans[id] = plans[id];
-    });
-    this.mergePlans(filteredPlans);
+    if (sequence>=this.lastPlanPage) {
+      this.lastPlanPage=sequence;
+      this.mergePlans(result,related,complete);
+    }
     if (Wire.has(result, 'task_cards') && Array.isArray(result['task_cards'])) this.mergeTaskCards(Wire.rows(result, 'task_cards'));
     this.mergeViews(Wire.object(result, 'views'));
     this.mergeViewActions(Wire.object(result, 'view_actions'));
@@ -320,10 +489,10 @@ export class AssistantFeedModel {
 
   private async readPage(run: number, cursor: string = '', since: string = ''): Promise<Record<string, Object> | undefined> {
     if (!this.current(run) || !this.repository) return undefined;
-    const path = this.feedPath(cursor, since);
+    const path = this.feedPath(cursor, since), sequence=++this.pageRead;
     const result = await this.repository.call(path);
     if (!this.current(run)) return undefined;
-    this.mergePage(result);
+    this.mergePage(result,sequence,!cursor && !since);
     return result;
   }
 
@@ -344,7 +513,7 @@ export class AssistantFeedModel {
 
   async refresh(): Promise<void> {
     const run = this.generation;
-    if (!this.current(run)) return;
+    if (!this.current(run) || this.feedUnavailable) return;
     if (this.refreshPromise && this.refreshRun === run) return this.refreshPromise;
     this.loading = true; this.error = '';
     const work = this.refreshCurrent(run);
@@ -360,10 +529,19 @@ export class AssistantFeedModel {
     try {
       const initial = !this.hasLoaded;
       const since = initial ? '' : this.latestSeenAt();
-      let result = await this.readPage(run, '', since);
+      let result: Record<string,Object> | undefined;
+      try { result = await this.readPage(run, '', since); }
+      catch (error) {
+        // Older Hubs provide the conversation transcript without the optional activity feed.
+        if (initial && this.errorKey(error as Error) === 'unsupported') {
+          if (this.current(run)) this.feedUnavailable = true;
+          return;
+        }
+        throw error as Error;
+      }
       if (!result || !this.current(run)) return;
       if (initial) this.nextCursor = Wire.text(result, 'next_cursor');
-      this.hasLoaded = true;
+      this.feedUnavailable = false; this.hasLoaded = true;
       let cursor = Wire.text(result, 'next_cursor');
       // A refresh window can be large; bound it and continue from its newest timestamp on the next refresh.
       for (let page = 1; cursor && page < 4; page++) {
@@ -459,24 +637,8 @@ export class AssistantFeedModel {
     return this.itemLookupStatus;
   }
 
-  private todoIds(): string[] {
-    const ids: string[] = [];
-    this.taskCards.forEach((card: Record<string, Object>) => { const id = Wire.text(card, 'todo_id'); if (id && !ids.includes(id)) ids.push(id); });
-    Object.keys(this.plans).forEach((planId: string) => Wire.rows(Wire.record(this.plans[planId]), 'tasks').forEach((task: Record<string, Object>) => {
-      const id = Wire.text(task, 'todo_id'); if (id && !ids.includes(id)) ids.push(id);
-    }));
-    this.items.forEach((item: Record<string, Object>) => {
-      if (['task', 'receipt', 'report', 'review', 'answered', 'routed'].includes(Wire.text(item, 'kind'))) {
-        const id = Wire.text(item, 'ref'); if (id && !ids.includes(id)) ids.push(id);
-      }
-    });
-    return ids;
-  }
-
   private async refreshTodos(run: number): Promise<void> {
     if (!this.current(run) || !this.repository) return;
-    const ids = this.todoIds();
-    if (!ids.length) { this.todos = []; this.todoError = ''; this.todosReady = true; return; }
     let path = '/api/v1/todos';
     if (this.owner) path += '?manager=' + segment(this.owner);
     this.todosReady = false;
@@ -484,11 +646,10 @@ export class AssistantFeedModel {
       if (!this.current(run)) return;
       const result = await this.repository.call(path);
       if (!this.current(run)) return;
-      this.todos = Wire.rows(result, 'todos').filter((todo: Record<string, Object>) => {
-        const id = Wire.text(todo, 'id');
-        const manager = Wire.text(todo, 'manager', this.owner);
-        return ids.includes(id) && manager === this.owner && Wire.text(todo, 'origin') === this.conversationId;
-      });
+      this.directoryTodos = Wire.rows(result, 'todos').filter((todo:Record<string,Object>) =>
+        !!Wire.text(todo,'id') && Wire.text(todo,'manager', this.owner) === this.owner);
+      // Workflow writes stay with the supervising conversation, even when its main tray lists the whole directory.
+      this.todos = this.directoryTodos.filter((todo:Record<string,Object>) => Wire.text(todo,'origin') === this.conversationId);
       this.todoError = '';
       this.todosReady = true;
     } catch (error) { if (this.current(run)) { this.todoError = this.errorKey(error as Error); this.todosReady = false; } }
@@ -516,8 +677,7 @@ export class AssistantFeedModel {
   private markUncertain(path: string, value: boolean): void { this.uncertainKeys = updated(this.uncertainKeys, path, value); }
   private setPlan(id: string, plan: Record<string, Object>): void {
     if (!id || Wire.text(plan, 'id') !== id) return;
-    const conversation = Wire.text(plan, 'conversation');
-    if (conversation && conversation !== this.conversationId) return;
+    if (!this.planInScope(id,plan)) return;
     const next: Record<string, Object> = {};
     Object.keys(this.plans).forEach((key: string) => next[key] = this.plans[key]);
     next[id] = plan; this.plans = next;
@@ -541,17 +701,17 @@ export class AssistantFeedModel {
   private planAllowsWrites(): boolean { return !!this.client && this.client.canApprove(); }
   planCanStart(id: string): boolean {
     const path = this.planActionPath(id, 'start');
-    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planIsFresh(id) && this.planState(id) === 'open' &&
+    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planInScope(id,this.plan(id)) && this.planIsFresh(id) && this.planState(id) === 'open' &&
       !hasId(this.busyKeys, 'plan:' + id) && !this.blocked(path);
   }
   planCanDismiss(id: string): boolean {
     const path = this.planActionPath(id, 'dismiss');
-    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planIsFresh(id) && this.planState(id) === 'open' &&
+    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planInScope(id,this.plan(id)) && this.planIsFresh(id) && this.planState(id) === 'open' &&
       !hasId(this.busyKeys, 'plan:' + id) && !this.blocked(path);
   }
   planCanEdit(id: string): boolean {
     const path = this.planActionPath(id, 'start');
-    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planState(id) === 'open' &&
+    return this.current(this.generation) && this.routeAdmitted() && this.planAllowsWrites() && this.planInScope(id,this.plan(id)) && this.planState(id) === 'open' &&
       !hasId(this.busyKeys, 'plan:' + id) && !this.blocked(path);
   }
   planBusy(id: string): boolean { return hasId(this.busyKeys, 'plan:' + id); }
@@ -642,7 +802,7 @@ export class AssistantFeedModel {
     const body = Wire.payload(['remember'], [remember]);
     if (edits) body['tasks'] = edits;
     const admit = (): boolean => this.current(run) && this.repository === repository && this.routeIsCurrent(route) &&
-      this.planAllowsWrites() && this.planState(id) === 'open' && JSON.stringify(this.plan(id)) === planVersion;
+      this.planAllowsWrites() && this.planInScope(id,this.plan(id)) && this.planState(id) === 'open' && JSON.stringify(this.plan(id)) === planVersion;
     this.error = ''; this.setPlanActionError(id, ''); this.markBusy('plan:' + id, true);
     try {
       if (!admit()) {
@@ -653,7 +813,7 @@ export class AssistantFeedModel {
       const response = await repository.call(path, 'POST', body, '', admit);
       if (!this.current(run)) return false;
       const started = Wire.object(response, 'plan');
-      if (Wire.text(started, 'state') !== 'started' || Wire.text(started, 'id') !== id) {
+      if (Wire.text(started, 'state') !== 'started' || !this.planInScope(id,started)) {
         this.markUncertain(path, true); this.error = 'result_unknown'; this.setPlanActionError(id, this.error);
         await this.reconcilePlan(id, run);
         await this.refresh();
@@ -711,7 +871,7 @@ export class AssistantFeedModel {
       return false;
     }
     const admit = (): boolean => this.current(run) && this.repository === repository && this.routeIsCurrent(route) &&
-      this.planAllowsWrites() && this.planState(id) === 'open' && JSON.stringify(this.plan(id)) === planVersion;
+      this.planAllowsWrites() && this.planInScope(id,this.plan(id)) && this.planState(id) === 'open' && JSON.stringify(this.plan(id)) === planVersion;
     this.error = ''; this.setPlanActionError(id, ''); this.markBusy('plan:' + id, true);
     try {
       if (!admit()) {
@@ -722,7 +882,7 @@ export class AssistantFeedModel {
       const response = await repository.call(path, 'POST', Wire.payload([], []), '', admit);
       if (!this.current(run)) return false;
       const dismissed = Wire.object(response, 'plan');
-      if (Wire.text(dismissed, 'state') !== 'dismissed' || Wire.text(dismissed, 'id') !== id) {
+      if (Wire.text(dismissed, 'state') !== 'dismissed' || !this.planInScope(id,dismissed)) {
         this.markUncertain(path, true); this.error = 'result_unknown'; this.setPlanActionError(id, this.error);
         await this.reconcilePlan(id, run); return false;
       }
@@ -741,14 +901,17 @@ export class AssistantFeedModel {
   private async reconcilePlan(id: string, run: number): Promise<void> {
     this.freshPlanIds = updated(this.freshPlanIds, id, false);
     if (!this.current(run) || !this.repository || !this.routeAdmitted()) return;
-    const repository = this.repository;
+    const repository = this.repository, original=this.plan(id), origin=Wire.text(original,'conversation');
+    const fromAnother=!!origin && origin!==this.conversationId;
     const path = this.ownerPath('/api/v1/task-plans/' + segment(id));
     this.loadingPlanIds = updated(this.loadingPlanIds, id, true);
     try {
       const result = await repository.call(path);
       if (!this.current(run) || this.repository !== repository || !this.routeAdmitted()) return;
       const plan = Wire.object(result, 'plan');
-      if (Wire.text(plan, 'id') !== id) {
+      if (Wire.text(plan,'state')==='open' && ['started','dismissed'].includes(this.planState(id))) return;
+      if (!this.planInScope(id,plan) || (fromAnother && Wire.text(this.plan(id),'conversation')!==origin)) {
+        if (fromAnother) this.dropPlan(id);
         this.error = 'request_updated';
         this.setPlanActionError(id, this.error);
         return;
@@ -763,6 +926,7 @@ export class AssistantFeedModel {
     } catch (error) {
       if (this.current(run)) {
         this.error = this.errorKey(error as Error);
+        if (fromAnother && (this.error==='unsupported' || this.error==='permission_denied')) this.dropPlan(id);
         this.setPlanActionError(id, this.error);
       }
       // Keep the feed snapshot readable, but do not admit writes from a failed current-plan read.
@@ -1099,14 +1263,14 @@ export class AssistantFeedModel {
     const seen: string[] = [];
     this.taskCards.forEach((card: Record<string, Object>) => {
       const id = Wire.text(card, 'todo_id');
-      if (id && this.todo(id) && !seen.includes(id)) { rows.push(card); seen.push(id); }
+      if (id && Object.keys(this.todo(id)).length && !seen.includes(id)) { rows.push(card); seen.push(id); }
     });
     // Legacy servers may omit task_cards; feed refs and started plan todo ids still identify real tasks.
     this.items.forEach((item: Record<string, Object>) => {
       const kind = Wire.text(item, 'kind');
       if (['task', 'receipt', 'report', 'review'].includes(kind)) {
         const id = Wire.text(item, 'ref');
-        if (id && this.todo(id) && !seen.includes(id)) {
+        if (id && Object.keys(this.todo(id)).length && !seen.includes(id)) {
           rows.push(Wire.payload(['id', 'todo_id', 'state'], ['todo:' + id, id, 'unknown'])); seen.push(id);
         }
       }
@@ -1115,12 +1279,20 @@ export class AssistantFeedModel {
       const plan = Wire.record(this.plans[planId]);
       Wire.rows(plan, 'tasks').forEach((task: Record<string, Object>, index: number) => {
         const id = Wire.text(task, 'todo_id');
-        if (id && this.todo(id) && !seen.includes(id)) {
+        if (id && Object.keys(this.todo(id)).length && !seen.includes(id)) {
           rows.push(Wire.payload(['id', 'plan_id', 'index', 'todo_id', 'at', 'updated_at', 'state'],
             ['plan:' + planId + ':' + String(index), planId, index, id, Wire.text(plan, 'created_at'), Wire.text(plan, 'updated_at'), 'unknown']));
           seen.push(id);
         }
       });
+    });
+    // A task remains in its supervising conversation after its original feed entry is paged out.
+    this.todos.forEach((todo:Record<string,Object>) => {
+      const id=Wire.text(todo,'id');
+      if (id && !seen.includes(id) && Wire.text(todo,'origin')===this.conversationId && Wire.text(todo,'manager',this.owner)===this.owner) {
+        rows.push(Wire.payload(['id','todo_id','state','at'],['todo:'+id,id,'unknown',Wire.text(todo,'created_at')]));
+        seen.push(id);
+      }
     });
     return rows.sort((left: Record<string, Object>, right: Record<string, Object>) => timestamp(Wire.text(left, 'at')) - timestamp(Wire.text(right, 'at')));
   }

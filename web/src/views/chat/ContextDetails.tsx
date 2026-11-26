@@ -1,5 +1,5 @@
 // Context bodies (including selected-skill metadata) load only when the existing disclosure opens.
-import { useState } from "react";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { clickLink, linkHref } from "../../lib/links";
 import { useLinkManager } from "../../lib/manager-choice";
 import type { Context } from "../../lib/turns";
@@ -8,15 +8,38 @@ import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";
 import { contextLabel, CONTEXT_ICONS } from "./ContextGroup";
 
-export function ContextDetails({ contexts }: { contexts: Context[] }) {
+export type ContextLinkClick = (
+  event: ReactMouseEvent<HTMLAnchorElement>,
+  url: string,
+  title: string | undefined,
+  manager: string | undefined,
+) => void;
+
+export interface ContextLinkProps {
+  /** Explicit manager skips reading LinkManager/ItemManager contexts; null selects the default manager. */
+  linkManager?: string | null;
+  /** Builds a link address without calling the default link router. */
+  resolveLinkHref?: (url: string) => string;
+  /** Handles link activation without calling the default panel's clickLink helper. */
+  onLinkClick?: ContextLinkClick;
+}
+
+export interface ContextDetailsProps extends ContextLinkProps {
+  contexts: Context[];
+}
+
+export function ContextDetails({ contexts, linkManager, resolveLinkHref, onLinkClick }: ContextDetailsProps) {
+  const linkProps: ContextLinkProps = { linkManager, resolveLinkHref, onLinkClick };
   return (
     <div className="mt-1 flex flex-col overflow-hidden rounded-[10px] bg-inset shadow-hairline">
-      {contexts.length === 1 ? <ContextBody c={contexts[0]} /> : contexts.map((c, i) => <ContextRow key={i} c={c} first={i === 0} />)}
+      {contexts.length === 1
+        ? <ContextBody c={contexts[0]} {...linkProps} />
+        : contexts.map((c, i) => <ContextRow key={i} c={c} first={i === 0} {...linkProps} />)}
     </div>
   );
 }
 
-function ContextRow({ c, first }: { c: Context; first: boolean }) {
+function ContextRow({ c, first, linkManager, resolveLinkHref, onLinkClick }: { c: Context; first: boolean } & ContextLinkProps) {
   const [open, setOpen] = useState(false);
   return (
     <div className={cx(!first && "border-t border-line")}>
@@ -31,13 +54,46 @@ function ContextRow({ c, first }: { c: Context; first: boolean }) {
         {!c.text && <span className="shrink-0 text-[11.5px] text-ink-3">{t("chat-contextgroup.empty")}</span>}
         <Icon name="chevronRight" size={13} stroke={2.2} className="shrink-0 text-ink-3 transition-transform duration-200" style={{ transform: open ? "rotate(90deg)" : "none" }} />
       </button>
-      <Collapse open={open} lazy><ContextBody c={c} /></Collapse>
+      <Collapse open={open} lazy>
+        <ContextBody c={c} linkManager={linkManager} resolveLinkHref={resolveLinkHref} onLinkClick={onLinkClick} />
+      </Collapse>
     </div>
   );
 }
 
-function ContextBody({ c }: { c: Context }) {
+function ContextBody({ c, linkManager, resolveLinkHref, onLinkClick }: { c: Context } & ContextLinkProps) {
+  if (onLinkClick || linkManager !== undefined) {
+    return (
+      <ContextBodyView
+        c={c}
+        manager={linkManager || undefined}
+        resolveLinkHref={resolveLinkHref ?? linkHref}
+        onLinkClick={onLinkClick ?? clickLink}
+      />
+    );
+  }
+  return <DefaultContextBody c={c} resolveLinkHref={resolveLinkHref} />;
+}
+
+function DefaultContextBody({ c, resolveLinkHref }: { c: Context; resolveLinkHref?: (url: string) => string }) {
   const manager = useLinkManager();
+  return (
+    <ContextBodyView
+      c={c}
+      manager={manager}
+      resolveLinkHref={resolveLinkHref ?? linkHref}
+      onLinkClick={clickLink}
+    />
+  );
+}
+
+function ContextBodyView({ c, manager, resolveLinkHref, onLinkClick }: {
+  c: Context;
+  manager: string | undefined;
+  resolveLinkHref: (url: string) => string;
+  onLinkClick: ContextLinkClick;
+}) {
+  const url = c.url;
   return (
     <div className="flex flex-col gap-1.5 px-3 pb-2.5 pt-0.5">
       {c.text ? (
@@ -45,16 +101,16 @@ function ContextBody({ c }: { c: Context }) {
       ) : (
         <span className="text-[12px] text-ink-3">{t("chat-contextgroup.no_content")}</span>
       )}
-      {c.url && (
+      {url && (
         <a
-          href={linkHref(c.url)}
+          href={resolveLinkHref(url)}
           target="_blank"
           rel="noreferrer"
-          onClick={(e) => clickLink(e, c.url, c.title, manager)}
+          onClick={(e) => onLinkClick(e, url, c.title, manager)}
           className="flex w-fit max-w-full min-w-0 items-center gap-1 text-[12px] whitespace-nowrap text-accent hover:underline"
         >
           <Icon name="external" size={12} className="shrink-0" />
-          <span className="min-w-0 truncate">{t("chat-contextgroup.open_url", { url: c.url })}</span>
+          <span className="min-w-0 truncate">{t("chat-contextgroup.open_url", { url })}</span>
         </a>
       )}
     </div>

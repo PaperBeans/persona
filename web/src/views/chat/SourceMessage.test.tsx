@@ -27,7 +27,8 @@ describe("source messages in the actual transcript renderer", () => {
 
   it("shows each scheduled check as a compact, non-user bubble with a reversible preview", async () => {
     const prompt = "Check the build & deployment.\nThen read <example> literally.\nThe full instructions stay available.";
-    const scheduled = (seq: number) => ({ ...input(seq, prompt), source: { kind: "scheduled_task" } });
+    const raw = `${prompt}\n\n<!-- persona-inline-v1 [[8,8,"opaque-anchor"]] -->`;
+    const scheduled = (seq: number) => ({ ...input(seq, raw), source: { kind: "scheduled_task" } });
     const reply: Item = { id: "answer", seq: 2, role: "assistant", kind: "text", text: "心跳检查已完成，无新动态" };
     const host = render([scheduled(1), reply, scheduled(3)]);
     await act(async () => {});

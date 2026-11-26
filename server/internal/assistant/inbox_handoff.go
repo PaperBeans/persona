@@ -108,6 +108,19 @@ func (s *Service) handOff(ctx context.Context, id string, in handoffReq) (InboxI
 		b.mu.Unlock()
 		return InboxItem{}, SessionRef{}, errNoInboxItem
 	}
+	b.mu.Unlock()
+	allowed, err := s.inboxVisibilityModelAllowed(ctx, it)
+	if err != nil {
+		return InboxItem{}, SessionRef{}, err
+	}
+	if !allowed {
+		return InboxItem{}, SessionRef{}, errCannotReply
+	}
+	b.mu.Lock()
+	if b.items[id] != it {
+		b.mu.Unlock()
+		return InboxItem{}, SessionRef{}, errNoInboxItem
+	}
 	if in.ReusePending {
 		var to *SessionRef
 		if g := currentSuggestion(it); g != nil && g.SourceOf == suggestionReplyTarget(it) {
@@ -231,43 +244,62 @@ func (s *Service) recordHandoff(ctx context.Context, id string, in handoffReq) (
 // starts the main conversation with it when there is none.
 func (s *Service) sendHandoff(ctx context.Context, text, op string) (SessionRef, error) {
 	cfg := s.settings(ctx)
-	if cfg.Main == "" || cfg.MachineID == "" {
+	if cfg.Main == "" || cfg.mainRouteMachine() == "" {
 		sess, err := s.Start(ctx, StartParams{Text: s.withWorkspaces(ctx, text), Main: true}) // as SendParams does for the next messages
 		if err != nil {
 			return SessionRef{}, err
 		}
 		return SessionRef{MachineID: sess.MachineID, SessionID: sess.SessionID}, nil
 	}
-	to := SessionRef{MachineID: cfg.MachineID, SessionID: cfg.Main}
-	if s.isWorkMachine(to.MachineID) {
-		return SessionRef{}, errWorkAssistant
-	}
-	s.UserSpoke(ctx, to) // unarchived, and its title the user's to keep
-	params, err := s.SendParams(ctx, SendParams{MachineID: to.MachineID, SessionID: to.SessionID,
-		Params: map[string]any{"session_id": to.SessionID, "text": text, "client_msg_id": op}})
-	if err != nil {
-		return SessionRef{}, err
-	}
-	if err := s.sendOnce(ctx, to.MachineID, params); err != nil {
+	to := SessionRef{MachineID: cfg.mainRouteMachine(), SessionID: cfg.Main}
+	if err := s.sendHandoffTo(ctx, to, text, op); err != nil {
 		return SessionRef{}, err
 	}
 	return to, nil
 }
 
-// noteHandoff records that conversation to got the item (op: the request's client id), keeping the latest
+// sendHandoffTo sends text to an existing assistant conversation once per op (session.send_once).
+func (s *Service) sendHandoffTo(ctx context.Context, to SessionRef, text, op string) error {
+	if s.isWorkMachine(to.MachineID) {
+		return errWorkAssistant
+	}
+	s.UserSpoke(ctx, to) // unarchived, and its title the user's to keep
+	params, err := s.SendParams(ctx, SendParams{MachineID: to.MachineID, SessionID: to.SessionID,
+		Params: map[string]any{"session_id": to.SessionID, "text": text, "client_msg_id": op}})
+	if err != nil {
+		return err
+	}
+	return s.sendOnce(ctx, to.MachineID, params)
+}
+
+// noteHandoff records that the main conversation to got the item (op: the request's client id), keeping the latest
 // handoffsMax, and puts it on the chain once per conversation. Under b.mu.
 func (b *inboxBook) noteHandoff(it *InboxItem, to SessionRef, op string, now time.Time) {
-	it.Handoffs = append(it.Handoffs, InboxHandoff{MachineID: to.MachineID, SessionID: to.SessionID, At: now.UTC(), Op: op})
+	b.noteHandoffTarget(it, inboxHandoffTarget{MachineID: to.MachineID, SessionID: to.SessionID, Main: true}, op, now)
+}
+
+// noteHandoffTarget records that conversation target got the item (op: the request's client id), keeping the latest
+// handoffsMax, and puts it on the chain once per conversation. Under b.mu.
+func (b *inboxBook) noteHandoffTarget(it *InboxItem, target inboxHandoffTarget, op string, now time.Time) {
+	it.Handoffs = append(it.Handoffs, InboxHandoff{MachineID: target.MachineID, SessionID: target.SessionID, At: now.UTC(), Op: op})
 	if n := len(it.Handoffs); n > handoffsMax {
 		it.Handoffs = slices.Clone(it.Handoffs[n-handoffsMax:])
 	}
 	for _, e := range it.Chain {
-		if e.Kind == ChainHandling && e.Link != nil && e.Link.SessionID == to.SessionID {
+		if e.Kind == ChainHandling && e.Link != nil && e.Link.SessionID == target.SessionID {
 			return
 		}
 	}
-	b.chainAdd(it, InboxChainEntry{Kind: ChainHandling, At: now.UTC(), Text: i18n.T(b.userLang(), "assistant-inbox_chain.handed_main"),
-		Link: &InboxChainLink{Type: LinkSession, MachineID: to.MachineID, SessionID: to.SessionID}})
+	text := i18n.T(b.userLang(), "assistant-inbox_chain.handed_main")
+	if !target.Main {
+		if title := clip(oneLine(target.Title), 40); title != "" {
+			text = i18n.T(b.userLang(), "assistant-inbox_chain.handed_conversation", i18n.Args{"title": title})
+		} else {
+			text = i18n.T(b.userLang(), "assistant-inbox_chain.handed_conversation_generic")
+		}
+	}
+	b.chainAdd(it, InboxChainEntry{Kind: ChainHandling, At: now.UTC(), Text: text,
+		Link: &InboxChainLink{Type: LinkSession, MachineID: target.MachineID, SessionID: target.SessionID}})
 }
 
 // handoffOp is the item's hand-off made by request op; nil for none. Under b.mu.
@@ -359,6 +391,20 @@ func (s *Service) tellHandoff(ctx context.Context, id, title string, to SessionR
 		cctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		hello := s.hello(cctx)
+		b := &s.inbox
+		b.mu.Lock()
+		it := b.items[id]
+		b.mu.Unlock()
+		if it == nil {
+			return
+		}
+		allowed, err := s.inboxVisibilityModelAllowed(cctx, it)
+		if err != nil || !allowed {
+			if err != nil {
+				s.logf("inbox: tell %s about %s: fresh visibility: %v", short(to.SessionID), id, err)
+			}
+			return
+		}
 		text := renderHandoffNoteIn(n, inboxPromptOwner(hello), id, title, answerLanguage(hello.Locale))
 		params, err := s.sendParams(cctx, SendParams{MachineID: to.MachineID, SessionID: to.SessionID,
 			Params: map[string]any{"session_id": to.SessionID, "text": text}})
@@ -405,16 +451,22 @@ func (s *Service) actOnHandedSuggestion(ctx context.Context, it *InboxItem, g *I
 	edited := text != g.Text
 	to, title := *g.Conversation, clip(oneLine(it.Title), 80)
 	it.Suggestion = nil
+	if in.Action == suggestConfirm {
+		it.ReplyInstruction = nil
+	}
 	execute := in.Action == suggestConfirm && !g.Handback && g.Kind != SuggestConclusion
 	var note *inboxNote
 	closed := false
 	switch {
 	case in.Action == suggestReject:
+		it.ReplyInstruction = nil
 		b.chainAdd(it, rejectedEntry(l, g.Text, now))
 		note = &inboxNote{Name: prompts.NoteRejected, Text: g.Text}
 	case in.Action == suggestInstruct:
 		words := strings.TrimSpace(*in.Text)
 		b.chainAdd(it, instructedEntry(l, words, now))
+		instruction := it.Chain[len(it.Chain)-1]
+		it.ReplyInstruction = &instruction
 		note = &inboxNote{Name: prompts.NoteInstructed, Text: words}
 	case g.Handback:
 		b.chainAdd(it, confirmedEntry(l, text, edited, now))
@@ -488,9 +540,10 @@ func (s *Service) confirmHandedReply(ctx context.Context, it *InboxItem, g *Inbo
 // sub-session.
 func (s *Service) confirmHandedAgent(ctx context.Context, it *InboxItem, g *InboxSuggestion, text string, edited bool, to SessionRef,
 	title string) (InboxItem, error) {
+	hubMachine := s.settings(ctx).MachineID
 	machine := g.MachineID
 	if machine == "" {
-		machine = s.settings(ctx).MachineID
+		machine = hubMachine
 	}
 	cwd := g.Cwd
 	if cwd == "" {
@@ -498,8 +551,29 @@ func (s *Service) confirmHandedAgent(ctx context.Context, it *InboxItem, g *Inbo
 	}
 	args, _ := json.Marshal(map[string]string{"machine": machine, "cwd": cwd, "prompt": text})
 	hs := &handoffStart{item: it.ID}
-	_, err := s.runTool(ownerConfirmed(context.WithValue(ctx, handoffStartKey{}, hs)), s.settings(ctx).MachineID, to.SessionID, "agent_start", args)
+	freshCfg, err := s.inboxConfigFresh(ctx)
 	b := &s.inbox
+	if err != nil {
+		err = errReplyPolicyBlocked
+	} else {
+		b.mu.Lock()
+		var legacyErr error
+		if legacyReplyPolicyConfig(freshCfg.ReplyPolicy) {
+			legacyErr = replyPolicyActionGate(it, g, freshCfg.ReplyPolicy)
+		}
+		switch {
+		case inboxVisibilityWithMembersExcludedLocked(b, it, freshCfg.Visibility):
+			err = errCannotReply
+		case legacyErr != nil:
+			err = legacyErr
+		case verifyReplyPolicySuggestionLocked(it, g, nil, compileReplyPolicy(freshCfg.ReplyPolicy)) != nil:
+			err = errReplyPolicyBlocked
+		}
+		b.mu.Unlock()
+	}
+	if err == nil {
+		_, err = s.runTool(ownerConfirmed(context.WithValue(ctx, handoffStartKey{}, hs)), hubMachine, to.SessionID, "agent_start", args)
+	}
 	b.mu.Lock()
 	l, now := b.userLang(), time.Now().UTC()
 	switch {

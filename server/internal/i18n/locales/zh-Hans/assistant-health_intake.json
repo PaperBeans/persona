@@ -1,4 +1,5 @@
 {
+  "invalid_items": "未能保存健康项。请刷新健康页后重试。",
   "forbidden": "此设备无法访问这些健康记录。",
   "invalid_entry": "请检查记录编号、类别、数量、时间和备注后重试。",
   "invalid_settings": "请检查健康目标、杯量和提醒时间设置。",
@@ -54,6 +55,7 @@
   "status.done": "今天不再提醒，已达标。",
   "status.weekend": "周末不提醒，下个提醒日 {at} 开始。",
   "status.closed": "今天的提醒时间过了，下个提醒时段 {at} 开始。",
+  "status.add_water": "把喝水添加到健康后才会提醒。",
   "status.next": "下次提醒 {at}",
   "status.quiet": "低打扰模式开着：提醒会攒进简报，不会响。",
   "delivery.no_device": "暂时没有能收到通知的设备。",

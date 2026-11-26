@@ -9,5 +9,12 @@
   "too_many_pixels": "图片像素太多了，请换一张小一点的",
   "too_many": "已经上传了 {max} 个形象，请先删掉一个",
   "not_found": "这个形象已经不在 hub 上了",
-  "not_uploaded": "这里只能删除用上传的图片做的形象"
+  "not_uploaded": "这里只能修改或删除用上传的图片做的形象",
+  "bad_state": "不认识的形象状态",
+  "bad_color": "请使用自动配色或 #RRGGBB 颜色",
+  "bad_crop": "裁切区域必须是图片内每边至少 {px} 像素的正方形",
+  "bad_fields": "这次修改没有可更新的内容，或字段组合无效",
+  "mark_without_image": "先给这个状态选一张图片，再切换状态标记",
+  "animation_too_long": "动图太长了，请用不超过 {seconds} 秒的动图",
+  "too_many_frames": "动图帧数或总像素太多，请换一张更短或更小的动图"
 }

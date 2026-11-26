@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"math"
 	"net/http"
 	"slices"
@@ -100,14 +101,14 @@ func (s *Service) inSpaceRecording(ctx context.Context, rawID string) bool {
 // putSpaceRecordingRoute answers PUT /api/v1/recordings/{id} for upload u of a recording saved into a track, in the
 // shape of the knowledge base's answer: attending is always off (a track's recording is not attended), the
 // transcription the phone's own, and space names the track.
-func (s *Service) putSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u kb.RecordingUpload) {
-	status, slug, err := s.putSpaceRecording(r.Context(), r.PathValue("id"), u, time.Now())
+func (s *Service) putSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u recordingwire.RecordingUpload, clean recordingwire.UploadCleaner) {
+	status, slug, err := s.putSpaceRecording(r.Context(), r.PathValue("id"), u, time.Now(), clean)
 	if err != nil {
 		writeSpaceRecordingError(w, err)
 		return
 	}
 	id, _ := kb.RecordingID(r.PathValue("id"))
-	out := map[string]any{"id": id, "revision": u.Revision, "status": status, "attendance": kb.AttendanceOff, "space": slug}
+	out := map[string]any{"id": id, "revision": u.Revision, "status": status, "attendance": recordingwire.AttendanceOff, "space": slug}
 	if strings.EqualFold(strings.TrimSpace(u.Kind), kb.RecordingMeeting) {
 		out["transcription"] = kb.TranscriptionDevice
 	}
@@ -141,11 +142,11 @@ func spaceRecordingName(id string, started time.Time, loc *time.Location) string
 	return started.In(loc).Format("2006-01-02") + "-" + id + ".md"
 }
 
-// putSpaceRecording saves upload u of recording rawID into its track: kb.RecordingStored, RecordingStale (a higher
-// revision is there) or RecordingExpired (it started before recording_days); kb.ErrRecordingDeleted after a delete.
+// putSpaceRecording saves upload u of recording rawID into its track: recordingwire.RecordingStored, RecordingStale (a higher
+// revision is there) or RecordingExpired (it started before recording_text_days); kb.ErrRecordingDeleted after a delete.
 // A recording saved into a track stays in it: a later upload goes there whatever it names. The answer's slug is the
 // track it is in.
-func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u kb.RecordingUpload, now time.Time) (status, slug string, err error) {
+func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u recordingwire.RecordingUpload, now time.Time, clean recordingwire.UploadCleaner) (status, slug string, err error) {
 	id, ok := kb.RecordingID(rawID)
 	if !ok {
 		return "", "", fmt.Errorf("%w: id must be a UUID", kb.ErrBadRecording)
@@ -153,7 +154,7 @@ func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u kb.Reco
 	if strings.EqualFold(strings.TrimSpace(u.Kind), kb.RecordingDay) {
 		return "", "", errSpaceRecordingDay // an all-day recording has its own recap in the knowledge base
 	}
-	if err := u.Clean(); err != nil {
+	if err := clean(&u); err != nil {
 		return "", "", err
 	}
 	// One the knowledge base holds stays there (a later upload naming a track would make a second copy of it).
@@ -179,11 +180,11 @@ func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u kb.Reco
 		}
 		slug, name = row.Slug, row.FileName
 		if row.Revision > u.Revision {
-			return kb.RecordingStale, slug, nil
+			return recordingwire.RecordingStale, slug, nil
 		}
 	}
-	if u.StartedAt.Before(now.UTC().AddDate(0, 0, -s.recordingDaysNow())) {
-		return kb.RecordingExpired, slug, nil
+	if cut, ok := kb.RetentionCut(now, s.recordingTextDaysNow()); ok && u.StartedAt.Before(cut) {
+		return recordingwire.RecordingExpired, slug, nil
 	}
 	e, ok := s.spaceTrack(ctx, slug)
 	if !ok {
@@ -205,9 +206,9 @@ func (s *Service) putSpaceRecording(ctx context.Context, rawID string, u kb.Reco
 		return "", slug, errSpaceRecordingStore
 	}
 	if !wrote {
-		return kb.RecordingStale, slug, nil
+		return recordingwire.RecordingStale, slug, nil
 	}
-	return kb.RecordingStored, slug, nil
+	return recordingwire.RecordingStored, slug, nil
 }
 
 // deleteSpaceRecording deletes recording row (saved into a track): its tombstone now, its file removed on the
@@ -244,7 +245,7 @@ func (s *Service) removeSpaceRecordingFile(ctx context.Context, row db.SpaceReco
 
 // spaceRecordingStates are the recordings saved into a track as the phone's reconciliation lists them, and their
 // tombstones (GET /api/v1/recordings).
-func (s *Service) spaceRecordingStates(ctx context.Context) (kept []kb.RecordingState, deleted []string) {
+func (s *Service) spaceRecordingStates(ctx context.Context) (kept []recordingwire.RecordingState, deleted []string) {
 	st, ok := s.spaceRecordingStore()
 	if !ok {
 		return nil, nil
@@ -259,14 +260,15 @@ func (s *Service) spaceRecordingStates(ctx context.Context) (kept []kb.Recording
 			deleted = append(deleted, r.ID)
 			continue
 		}
-		kept = append(kept, kb.RecordingState{ID: r.ID, Revision: r.Revision, Complete: r.Complete, StartedAt: r.StartedAt, Space: r.Slug})
+		kept = append(kept, recordingwire.RecordingState{ID: r.ID, Revision: r.Revision, Complete: r.Complete, StartedAt: r.StartedAt, Space: r.Slug})
 	}
 	return kept, deleted
 }
 
-// spaceRecordingsSweep applies recording_days to the recordings saved into tracks: one that started before it is
-// deleted (its file removed, its tombstone kept), a deletion whose file is still there is tried again, and tombstones
-// past the window whose file is gone are forgotten. At most once a spaceRecordingSweepEvery.
+// spaceRecordingsSweep applies recording_text_days to the recordings saved into tracks (their file is text): one that
+// started before it is deleted (its file removed, its tombstone kept), a deletion whose file is still there is tried
+// again, and tombstones past the audio window (recording_audio_days, the phone's, as in the knowledge base) whose file
+// is gone are forgotten. At most once a spaceRecordingSweepEvery.
 func (s *Service) spaceRecordingsSweep(ctx context.Context) {
 	st, ok := s.spaceRecordingStore()
 	if !ok {
@@ -285,10 +287,10 @@ func (s *Service) spaceRecordingsSweep(ctx context.Context) {
 		s.logf("space recordings: list: %v", err)
 		return
 	}
-	cutoff := now.UTC().AddDate(0, 0, -s.recordingDaysNow())
+	cutoff, textExpires := kb.RetentionCut(now, s.recordingTextDaysNow())
 	for _, r := range rows {
 		switch {
-		case r.DeletedAt == nil && r.StartedAt.Before(cutoff):
+		case r.DeletedAt == nil && textExpires && r.StartedAt.Before(cutoff):
 			removed := s.removeSpaceRecordingFile(ctx, r) == nil
 			if _, err := st.DeleteSpaceRecording(ctx, r.ID, now.UTC(), removed); err != nil {
 				s.logf("space recordings: expire %s: %v", r.ID, err)
@@ -301,10 +303,14 @@ func (s *Service) spaceRecordingsSweep(ctx context.Context) {
 			}
 		}
 	}
-	if n, err := st.ForgetSpaceRecordings(ctx, cutoff); err != nil {
+	stoneCut, ok := kb.RetentionCut(now, s.recordingAudioDaysNow())
+	if !ok {
+		return
+	}
+	if n, err := st.ForgetSpaceRecordings(ctx, stoneCut); err != nil {
 		s.logf("space recordings: forget: %v", err)
 	} else if n > 0 {
-		s.logf("space recordings: forgot %d tombstone(s) past recording_days", n)
+		s.logf("space recordings: forgot %d tombstone(s) past recording_audio_days", n)
 	}
 }
 
@@ -336,7 +342,7 @@ func writeSpaceRecordingError(w http.ResponseWriter, err error) {
 // renderSpaceRecording is the transcript file of recording id saved into a track: a front matter with what the
 // recording is and the categories it carries (the track's), its title, then one line per sentence with its time from
 // the start. It is data the track's conversations read, not a prompt.
-func renderSpaceRecording(id string, u kb.RecordingUpload, categories []string, loc *time.Location) string {
+func renderSpaceRecording(id string, u recordingwire.RecordingUpload, categories []string, loc *time.Location) string {
 	var b strings.Builder
 	quote := func(v string) string {
 		out, _ := json.Marshal(v)

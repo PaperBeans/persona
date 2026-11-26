@@ -284,13 +284,25 @@ func (s *Service) channelTarget(ctx context.Context, id string) (resolvedTarget,
 	return s.resolveBotTarget(ctx, botTarget{Kind: targetMain})
 }
 
-// channelThreadKey is the thread m is in when channel id keeps a conversation per thread (capabilities.threads), ""
-// when m goes to the channel's target.
+// channelThreadKey is the routing key m uses when channel id keeps per-thread/group/topic conversations, ""
+// when m goes to the channel's target. While integrations_v2 is off, legacy capabilities.threads + m.Thread runs unchanged.
 func (s *Service) channelThreadKey(ctx context.Context, id string, m channel.Message) string {
-	if v, ok := s.pluginChannel(ctx, id); !ok || !v.Capabilities.Threads {
+	v, ok := s.pluginChannel(ctx, id)
+	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(m.Thread)
+	if !s.integrationsV2On(ctx) {
+		if !v.Capabilities.Threads {
+			return ""
+		}
+		return strings.TrimSpace(m.Thread)
+	}
+	c := &s.chans
+	c.mu.Lock()
+	s.loadChannelsLocked(ctx)
+	mode := s.channelPrefLocked(id).ThreadMode.Effective(v.Capabilities.Threads)
+	c.mu.Unlock()
+	return channelRouteKey(mode, m)
 }
 
 // channelRoute is where channel id's message m goes: its thread's conversation when the channel keeps one per thread
@@ -522,9 +534,10 @@ func (s *Service) textChannels(ctx context.Context) []channel.View {
 		return nil
 	}
 	var out []channel.View
+	v2 := s.integrationsV2On(ctx)
 	for _, v := range list {
 		if v.Source == channel.SourcePlugin && v.Kind == channel.KindIM && v.State == channel.StateConnected {
-			out = append(out, s.filledChannel(ctx, v))
+			out = append(out, s.filledChannel(ctx, v, v2))
 		}
 	}
 	return out

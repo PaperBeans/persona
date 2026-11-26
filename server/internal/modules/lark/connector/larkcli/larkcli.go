@@ -5,6 +5,7 @@ package larkcli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,6 +38,13 @@ type Connector struct {
 	inboxSeen     map[string]struct{}
 	inboxTopics   map[string]struct{}
 	inboxAllChats map[string]struct{}
+	// Private-chat visibility controls are opt-in and apply to collection, model tools and retained source things.
+	inboxExcludeChats       map[string]struct{}
+	inboxExcludeDirectChats bool
+	// The manager's central boundary is kept separate from the connector's own options so an options.set cannot clear it.
+	managedInboxExcludeChats       map[string]struct{}
+	managedInboxExcludeDirectChats bool
+	managedInboxVisibilityInvalid  bool
 	// triageRules are the user's triage rules for lark-cli's Inbox items, in their words (options.triage_rules): the
 	// Inbox's triage reads them instead of the global inbox.rules.
 	triageRules       string
@@ -105,7 +113,7 @@ func (c *Connector) Profile() string {
 }
 
 func (c *Connector) Manifest() connectorwire.Manifest {
-	return connectorwire.Manifest{Capabilities: []connectorwire.Capability{connectorwire.CapStatus, connectorwire.CapTools, connectorwire.CapEvents, connectorwire.CapInbox, connectorwire.CapOptions, connectorwire.CapLogin, connectorwire.CapThreads}, Kinds: []string{"dm", "bot", "mention", "group", "doc"}}
+	return connectorwire.Manifest{Capabilities: []connectorwire.Capability{connectorwire.CapStatus, connectorwire.CapTools, connectorwire.CapEvents, connectorwire.CapInbox, connectorwire.CapOptions, connectorwire.CapLogin, connectorwire.CapThreads, connectorwire.CapInboxVisibility}, Kinds: []string{"dm", "bot", "mention", "group", "doc"}}
 }
 
 func (c *Connector) Tools() []proto.Tool {
@@ -204,9 +212,19 @@ func (c *Connector) chats(ctx context.Context, args json.RawMessage) (string, er
 		// Open Platform has no unread state. The CLI's active-time list is the
 		// documented L2 fallback for both the old default and recent filter.
 		page, err := c.runner.ListChats(ctx, a.Limit)
+		if err == nil {
+			page = c.filterReplyChats(page)
+		}
 		return marshal(page, err)
 	case "at_me":
+		if c.replyVisibilityEnabled() {
+			// ListChatsAtMe is implemented by a body-returning message search, not a metadata chat-list endpoint.
+			return "", errReplyVisibilityDenied
+		}
 		page, err := c.runner.ListChatsAtMe(ctx, a.Limit)
+		if err == nil {
+			page = c.filterReplyChats(page)
+		}
 		return marshal(page, err)
 	default:
 		return "", fmt.Errorf("unknown chat filter %q", a.Filter)
@@ -227,6 +245,14 @@ func (c *Connector) messages(ctx context.Context, args json.RawMessage) (string,
 	if a.ChatID == "" && a.Thread == "" {
 		return "", fmt.Errorf("chat_id is required")
 	}
+	if a.Thread != "" && c.replyVisibilityEnabled() {
+		// The CLI reads a thread instead of chat_id whenever both are present. A chat_id therefore cannot authorize
+		// a mixed request, and the thread's own chat cannot be verified before its bodies are returned.
+		return "", errReplyVisibilityDenied
+	}
+	if err := c.checkReplyChat(ctx, a.ChatID); err != nil {
+		return "", err
+	}
 	page, err := c.runner.ListMessages(ctx, a.ChatID, a.Thread, a.Before, a.Limit)
 	return marshal(page, err)
 }
@@ -241,6 +267,9 @@ func (c *Connector) search(ctx context.Context, args json.RawMessage) (string, e
 	}
 	if strings.TrimSpace(a.Query) == "" {
 		return "", fmt.Errorf("query is required")
+	}
+	if c.replyVisibilityEnabled() && (a.Kind == "" || a.Kind == "messages" || a.Kind == "chats") {
+		return "", errors.New("lark-cli: global chat and message search is unavailable while private-chat visibility controls are enabled")
 	}
 	raw, err := c.runner.Search(ctx, a.Kind, a.Query)
 	if err != nil {

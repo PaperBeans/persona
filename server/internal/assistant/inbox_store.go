@@ -196,6 +196,7 @@ func (s *Service) saveInboxPrepared(ctx context.Context, changed []*InboxItem, p
 	b.mu.Lock()
 	b.forgetListed(changed)
 	rows := make([]db.InboxRow, 0, len(changed))
+	events := map[string][]assistantwire.ExternalInboxEvent{}
 	now := time.Now()
 	for i, it := range changed {
 		if current := b.items[it.ID]; current != it {
@@ -213,6 +214,9 @@ func (s *Service) saveInboxPrepared(ctx context.Context, changed []*InboxItem, p
 		if post {
 			row.arrived(now) // the staged post, never the previously committed row
 		}
+		if !it.externalChecking && len(it.externalMoves) != 0 {
+			events[it.ID] = slices.Clone(it.externalMoves)
+		}
 		raw, _ := json.Marshal(row)
 		rows = append(rows, db.InboxRow{ID: row.ID, Data: raw, UpdatedAt: row.UpdatedAt, DoneAt: row.DoneAt})
 		if i < 50 { // a first round's hundreds: the plugin reads the inbox if it wants them all
@@ -226,12 +230,21 @@ func (s *Service) saveInboxPrepared(ctx context.Context, changed []*InboxItem, p
 	}
 	var failed map[string]bool
 	if st := s.inboxDB(); st != nil {
-		failed = s.putInboxRows(ctx, st, rows)
+		failed = s.putInboxRows(ctx, st, rows, events, now)
 	}
-	if finish != nil {
+	if finish != nil || len(events) != 0 {
 		b.mu.Lock()
-		finish(failed)
-		b.forgetListed(changed)
+		if finish != nil {
+			finish(failed)
+			b.forgetListed(changed)
+		}
+		for _, it := range changed {
+			if sent := events[it.ID]; len(sent) > 0 && !failed[it.ID] {
+				it.externalMoves = slices.DeleteFunc(it.externalMoves, func(e assistantwire.ExternalInboxEvent) bool {
+					return slices.ContainsFunc(sent, func(saved assistantwire.ExternalInboxEvent) bool { return e.Key == saved.Key })
+				})
+			}
+		}
 		b.mu.Unlock()
 	}
 	b.saving.Unlock()
@@ -240,13 +253,19 @@ func (s *Service) saveInboxPrepared(ctx context.Context, changed []*InboxItem, p
 		told = slices.DeleteFunc(told, func(i assistantwire.InboxChangedItem) bool { return failed[i.ID] })
 	}
 	s.inboxChanged(ctx, told)
+	if len(events) > 0 {
+		select {
+		case b.externalWake <- struct{}{}:
+		default:
+		}
+	}
 	return failed
 }
 
 // putInboxRows writes rows in one go when the store can (a round's hundreds are one round trip, not hundreds); when
 // that fails, or the store can't, each row is written on its own so one that fails does not keep the others out. It
 // returns the ids that were not written anywhere.
-func (s *Service) putInboxRows(ctx context.Context, st inboxStore, rows []db.InboxRow) map[string]bool {
+func (s *Service) putInboxRows(ctx context.Context, st inboxStore, rows []db.InboxRow, events map[string][]assistantwire.ExternalInboxEvent, now time.Time) map[string]bool {
 	if source, post := ctx.Value(inboxPostConversation{}).([2]string); post {
 		if guarded, ok := st.(conversationInboxStore); ok {
 			if err := guarded.PutConversationInboxItems(ctx, source[0], source[1], rows); err != nil {
@@ -258,6 +277,27 @@ func (s *Service) putInboxRows(ctx context.Context, st inboxStore, rows []db.Inb
 				return failed // never retry a rejected post through the unguarded writer
 			}
 			return nil
+		}
+	}
+	if len(events) != 0 {
+		if routing, ok := st.(externalInboxStore); ok {
+			var all []assistantwire.ExternalInboxEvent
+			for _, row := range rows {
+				all = append(all, events[row.ID]...)
+			}
+			if err := routing.SaveExternalInboxItems(ctx, rows, all, now); err == nil {
+				return nil
+			} else {
+				s.logf("inbox: persist external routing receipts: %v (one by one)", err)
+			}
+			failed := map[string]bool{}
+			for _, row := range rows {
+				if err := routing.SaveExternalInboxItems(ctx, []db.InboxRow{row}, events[row.ID], now); err != nil {
+					s.logf("inbox: save %s with source receipts: %v", row.ID, err)
+					failed[row.ID] = true
+				}
+			}
+			return failed
 		}
 	}
 	if bs, ok := st.(inboxBatchStore); ok && len(rows) > 1 {

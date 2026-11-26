@@ -52,6 +52,9 @@ nonisolated enum LogWaterFlow {
         do {
             // Read the goal before writing: a failed progress read must never turn a successful write into a retry.
             let before = try await api.healthIntake()
+            guard before.contains(.water) else {
+                throw LogWaterFailure(message: String(localized: "First add Water in Health"))
+            }
             let change = try await api.recordHealthIntake(.init(kind: .water, amount: amount.map(Double.init)))
             guard let entry = change.entry else { throw LogWaterFailure(message: String(localized: "The hub returned no water record.")) }
             let logged = Int(entry.amount), today = Int(change.today.water), goal = before.water.goal

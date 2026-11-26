@@ -205,3 +205,23 @@ test('an in-flight latest page matching the replacement push can finish the open
   assert.equal(reads, 1);
   assert.deepEqual(snapshots.at(-1).items, replacement.items);
 });
+
+test('the activity reader loads history without publishing seen, replacing a chat subscription or writing its cache', async () => {
+  const requests = [], sent = [], writes = [], snapshots = [];
+  const latest = historyPage('quiet-history',[8,9],true);
+  const older = historyPage('quiet-history',[6,7],false);
+  const model = new TranscriptModel({machine:'mac', session:'main'},
+    {async call(path) { requests.push(path); return path.includes('before_seq=') ? older : latest; },
+      transport:{send(payload) { sent.push(payload); }}},
+    {async get(){return '';},async put(key){writes.push(key);}}, 'same-as-visible-chat',
+    (items,more)=>snapshots.push({ids:items.map(item=>item.id),more}),error=>assert.fail(error), false);
+  await model.open();
+  await model.older();
+  model.close();
+  assert.equal(requests.length,2);
+  assert.ok(requests.every(path=>path.startsWith('/api/v1/sessions/mac/main/items?')));
+  assert.ok(requests[1].includes('before_seq='));
+  assert.equal(snapshots.at(-1).ids.length,4);
+  assert.deepEqual(sent,[]);
+  assert.deepEqual(writes,[]);
+});

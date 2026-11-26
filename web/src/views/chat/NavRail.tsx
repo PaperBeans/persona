@@ -1,17 +1,35 @@
-// A transient user-input navigator at the chat's right edge. Only this small component updates while scrolling;
+// The chat's left-gutter user-input navigator. Only this small component updates while scrolling.
 // cached content offsets are rebuilt on transcript/layout changes, never once per tick on a scroll frame.
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { activeNavRailOffset, navRailMark, NAV_RAIL_MIN_HEIGHT, planNavRailTicks, type NavRailTick } from "../../lib/nav-rail";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { activeNavRailOffset, navRailMark, NAV_RAIL_MIN_HEIGHT, planNavRailTicks, withInputPreview, type NavRailTick } from "../../lib/nav-rail";
+import type { UserInputPosition } from "../../lib/user-input-index";
 import { useFinePointer } from "../../lib/viewport";
 import { NAV_RAIL_METRICS as M } from "../../ui/nav-rail-metrics";
 import { cx } from "../../ui/atoms";
 import { t } from "../../i18n";
+import type { QuestionMark, QuestionState } from "../../lib/question-states";
+import "./nav-rail.css";
+
+interface PreviewSelection { id: string; origin: "pointer" | "keyboard" | "drag" }
+interface RailDrag { pointer: number; ticks: NavRailTick[]; pitch: number; top: number; height: number; y: number }
+
+/** A question's state as its tick draws it (#13021): read keeps the plain rail's colors. */
+const STATE_TICK: Record<QuestionState, string> = {
+  pending: "bg-ink-3",
+  running: "bg-accent animate-pulse busy-motion", // a busy indicator: slower, not frozen, under reduced motion (lib/busy-motion.ts)
+  unread: "bg-ink",
+  read: "",
+};
+
+const stateWord = (state: QuestionState) => t(`chat-navrail.state_${state}`);
 
 /** Throttle observer-driven re-measurements so streaming DOM growth does not force full layout every frame. */
 export const NAV_RAIL_OBSERVER_MS = 250;
 
 function labelOf(tick: NavRailTick): string {
-  return tick.preview || (tick.attachmentsOnly ? t("chat-navrail.attachments", { count: tick.attachmentsOnly }) : tick.ordinal ? t("chat-navrail.input", { index: tick.ordinal }) : "");
+  if (tick.preview) return tick.preview;
+  if (tick.attachmentsOnly) return t("chat-navrail.attachments", { count: tick.attachmentsOnly });
+  return !tick.answerExcerpt && tick.ordinal ? t("chat-navrail.input", { index: tick.ordinal }) : "";
 }
 
 /** Where the chat's line wrappers (ChatLineView's `[data-line]` boxes) are: the content element's own children, or the
@@ -66,39 +84,45 @@ function isTailOnlyMutation(
   return true;
 }
 
-export function NavRail({ ticks, total, scroller, onJump, reset }: {
+export function NavRail({ ticks, total, scroller, onJump, onPreview, previewAt, reset, marks }: {
   ticks: NavRailTick[];
   total?: number;
   scroller: HTMLDivElement | null;
   onJump: (id: string) => void | Promise<void>;
+  onPreview?: (index: number) => void;
+  previewAt?: (index: number) => { excerpt?: UserInputPosition; loading: boolean } | undefined;
   reset: string;
+  /** Each question's state by line id in Persona chats. A follow-up's tick is shorter. These marks also allow touch
+   *  navigation when the gutter fits the rail. */
+  marks?: ReadonlyMap<string, QuestionMark>;
 }) {
-  const fine = useFinePointer();
-  const [height, setHeight] = useState(0);
-  const [right, setRight] = useState(0);
-  const [visible, setVisible] = useState(false);
+  const finePointer = useFinePointer();
+  /** A touch screen's rail: only with question states (the plain rail stays off without a precise pointer). */
+  const touch = !finePointer && Boolean(marks);
+  const enabled = finePointer || touch;
+  const markOf = (tick: NavRailTick | undefined) => (tick ? marks?.get(tick.lineId ?? tick.retainedLineId ?? tick.id) : undefined);
+  const [layout, setLayout] = useState<{ height: number; width: number; compact: boolean } | null>(null);
+  const [trackTop, setTrackTop] = useState(0);
   const [active, setActive] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [windowCenter, setWindowCenter] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState("");
-  const rail = useRef<HTMLElement>(null);
+  const [preview, setPreview] = useState<PreviewSelection | null>(null);
   const card = useRef<HTMLDivElement>(null);
+  const track = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
-  const idleTimer = useRef(0);
+  const dragFrame = useRef(0);
   const jumpRun = useRef(0);
   const hovered = useRef(false);
-  const focused = useRef(false);
-  const drag = useRef<{ pointer: number; ids: string[]; pitch: number; top: number } | null>(null);
-  const selected = useRef<string | null>(null);
-  const previewOrigin = useRef<"pointer" | "keyboard" | "drag" | null>(null);
+  const wheelUntil = useRef(0);
+  const drag = useRef<RailDrag | null>(null);
+  const selected = useRef<PreviewSelection | null>(null);
   const suppressClick = useRef(false);
+  const keepActiveVisible = useRef<(index: number | null) => void>(() => {});
   const list = useRef(ticks);
   list.current = ticks;
+  const anchorList = useRef<NavRailTick[]>([]);
   const dirty = useRef(true);
   const checkResize = useRef(false);
   const pendingObserver = useRef<"mutation" | "height" | null>(null);
-  const lastClearance = useRef<string | null>(null);
   const lastContentWidth = useRef<number | null>(null);
   const lastTick = useRef<{ id: string; line: HTMLElement; row: HTMLElement; top: number } | null>(null);
   const trackedIds = useRef<ReadonlySet<string>>(EMPTY_TRACKED);
@@ -107,22 +131,21 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
   const offsets = useRef<{ index: number; top: number }[]>([]);
   const previewId = useId();
 
-  const wake = useCallback(() => {
-    setVisible(true);
-    clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      idleTimer.current = 0;
-      if (hovered.current || focused.current || drag.current) return;
-      setVisible(false);
-      setPreview(null);
-      previewOrigin.current = null;
-      setWindowCenter(null);
-    }, M.idleMs);
+  const resetInteraction = useCallback(() => {
+    hovered.current = false;
+    wheelUntil.current = 0;
+    drag.current = null;
+    cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = 0;
+    selected.current = null;
+    suppressClick.current = false;
+    setPreview(null);
+    setTrackTop(0);
   }, []);
 
   const measure = useCallback(() => {
     frame.current = 0;
-    if (!scroller || !fine || !list.current.length) return;
+    if (!scroller || !enabled || !list.current.length) return;
     if (!dirty.current && checkResize.current) {
       checkResize.current = false;
       const tail = lastTick.current;
@@ -144,17 +167,23 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
         clearTimeout(observerTimer.current);
         observerTimer.current = 0;
       }
-      setHeight(Math.max(0, scroller.clientHeight - M.padding * 2));
-      setRight(Math.max(0, scroller.offsetWidth - scroller.clientWidth) + M.edgeGap);
       const content = lineParent(scroller);
-      lastContentWidth.current = content.clientWidth;
-      // Wide chats already have a margin. Add only the missing clearance, keeping that column centered.
-      const margin = Math.max(0, (scroller.clientWidth - content.clientWidth) / 2);
-      const clearance = `${Math.max(0, M.width + M.edgeGap + M.endInset - margin)}px`;
-      if (clearance !== lastClearance.current) {
-        lastClearance.current = clearance;
-        scroller.style.setProperty("--chat-nav-clearance", clearance);
+      const availableHeight = scroller.clientHeight - M.padding * 2;
+      // The centered column's outer margin is the available gutter. clientWidth excludes the right scrollbar.
+      const width = scroller.clientWidth;
+      const gutter = (width - content.clientWidth) / 2;
+      const wide = gutter >= M.edgeGap + M.width + M.contentGap;
+      const compact = !wide && width >= M.compactMinWidth && width <= M.compactMaxWidth && list.current.length >= M.compactMinTicks;
+      if ((!wide && !compact) || availableHeight < NAV_RAIL_MIN_HEIGHT) {
+        offsets.current = [];
+        lastTick.current = null;
+        trackedIds.current = EMPTY_TRACKED;
+        setLayout(null);
+        setActive(null);
+        resetInteraction();
+        return;
       }
+      setLayout((old) => old?.height === availableHeight && old.width === width && old.compact === compact ? old : { height: availableHeight, width, compact });
       const rows = new Map<string, { line: HTMLElement; row: HTMLElement }>();
       for (const el of content.children) {
         const child = el.firstElementChild;
@@ -179,22 +208,27 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
     }
     const index = activeNavRailOffset(offsets.current, scroller.scrollTop + M.activeOffset);
     setActive(index === null ? null : list.current[index]?.id ?? null);
-  }, [scroller, fine]);
+    keepActiveVisible.current(index);
+  }, [scroller, enabled, resetInteraction]);
 
   const schedule = useCallback(() => {
     if (!frame.current) frame.current = requestAnimationFrame(measure);
   }, [measure]);
 
   useLayoutEffect(() => {
+    const previous = anchorList.current;
+    anchorList.current = ticks;
+    // Streaming and indexed previews can update the text without moving any anchor.
+    if (previous.length === ticks.length && previous.every((tick, i) => tick.id === ticks[i].id && tick.lineId === ticks[i].lineId)) return;
     dirty.current = true;
     schedule();
-  }, [ticks, scroller, schedule]);
+  }, [ticks, schedule]);
 
   const hasTicks = ticks.length > 0;
   useEffect(() => {
-    if (!scroller || !fine || !hasTicks) return;
-    const content = scroller.querySelector<HTMLElement>("[data-chat-content]") ?? scroller.firstElementChild;
+    if (!scroller || !enabled || !hasTicks) return;
     const parent = lineParent(scroller);
+    const content = parent === scroller ? scroller.firstElementChild : parent;
     const runObserver = () => {
       const pending = pendingObserver.current;
       pendingObserver.current = null;
@@ -224,16 +258,12 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
     const onResize: ResizeObserverCallback = (entries) => {
       let structural = !entries.length;
       for (const entry of entries) {
-        if (entry.target === scroller) {
-          structural = true;
-          break;
-        }
+        if (entry.target === scroller) structural = true;
         if (entry.target === content) {
           const width = entry.contentRect?.width;
-          if (width === undefined || lastContentWidth.current === null || Math.abs(width - lastContentWidth.current) >= 0.5) {
-            structural = true;
-            break;
-          }
+          // Compare ResizeObserver content-box widths. clientWidth also includes the transcript's padding.
+          if (width === undefined || lastContentWidth.current === null || Math.abs(width - lastContentWidth.current) >= 0.5) structural = true;
+          lastContentWidth.current = width ?? null;
         }
       }
       if (structural) {
@@ -241,15 +271,18 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
         schedule();
         return;
       }
-      if (pendingObserver.current !== "mutation") pendingObserver.current = "height";
-      armObserver(false);
+      if (offsets.current.length) {
+        if (pendingObserver.current !== "mutation") pendingObserver.current = "height";
+        armObserver(false);
+      }
     };
     const onMutation: MutationCallback = (records) => {
+      if (!trackedIds.current.size) return;
       if (isTailOnlyMutation(records, parent, lastTick.current?.line ?? null, trackedIds.current)) return;
       pendingObserver.current = "mutation";
       armObserver(true);
     };
-    const scroll = () => { wake(); schedule(); };
+    const scroll = () => { if (offsets.current.length) schedule(); };
     scroller.addEventListener("scroll", scroll, { passive: true });
     const resize = new ResizeObserver(onResize);
     resize.observe(scroller);
@@ -257,10 +290,9 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
     // Disclosure and equal-height replacements can change anchors without changing the outer content height.
     const mutations = new MutationObserver(onMutation);
     if (content) mutations.observe(content, { childList: true, subtree: true });
+    schedule();
     return () => {
       scroller.removeEventListener("scroll", scroll);
-      scroller.style.removeProperty("--chat-nav-clearance");
-      lastClearance.current = null;
       lastContentWidth.current = null;
       lastTick.current = null;
       trackedIds.current = EMPTY_TRACKED;
@@ -273,229 +305,310 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
       if (frame.current) cancelAnimationFrame(frame.current);
       frame.current = 0;
     };
-  }, [scroller, fine, hasTicks, schedule, wake]);
+  }, [scroller, enabled, hasTicks, schedule]);
 
   useLayoutEffect(() => {
-    hovered.current = focused.current = false;
-    drag.current = null;
-    selected.current = null;
-    previewOrigin.current = null;
-    suppressClick.current = false;
-    clearTimeout(idleTimer.current);
+    resetInteraction();
     jumpRun.current++;
     setActive(null);
     setPending(null);
-    setPreview(null);
-    setWindowCenter(null);
-    setAnnouncement("");
-    setVisible(false);
-    setHeight(0);
+    setLayout(null);
     lastTick.current = null;
     trackedIds.current = EMPTY_TRACKED;
     checkResize.current = false;
     dirty.current = true;
     schedule();
-  }, [reset, fine, schedule]);
+  }, [reset, finePointer, schedule, resetInteraction]);
 
   useEffect(() => () => {
-    clearTimeout(idleTimer.current);
     clearTimeout(observerTimer.current);
     observerTimer.current = 0;
     jumpRun.current++;
     if (frame.current) cancelAnimationFrame(frame.current);
     frame.current = 0;
+    cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = 0;
   }, []);
 
-  const indexOf = (id: string | null) => id === null ? -1 : ticks.findIndex((tick) => tick.id === id);
-  const marked = pending ?? active;
-  const center = indexOf(windowCenter ?? marked);
-  const plan = planNavRailTicks(ticks.length, height, center < 0 ? ticks.length - 1 : center);
-  const shown = ticks.slice(plan.start, plan.start + plan.count);
-  const previewTick = ticks.find((tick) => tick.id === preview);
-  const currentIndex = indexOf(marked);
-  const focusedMark = preview ?? pending;
-  const previewIndex = indexOf(focusedMark);
+  const positions = useMemo(() => new Map(ticks.map((tick, i) => [tick.id, i])), [ticks]);
+  const display = drag.current?.ticks ?? ticks;
+  const displayPositions = useMemo(() => display === ticks ? positions : new Map(display.map((tick, i) => [tick.id, i])), [display, ticks, positions]);
+  const indexOf = (id: string | null | undefined) => id ? displayPositions.get(id) ?? -1 : -1;
+  const height = layout?.height ?? 0;
+  const plan = planNavRailTicks(display.length, height, trackTop);
+  const overflow = plan.content > plan.viewport;
+  const shown = display.slice(plan.start, plan.start + plan.count);
+  const railHeight = height + M.padding * 2;
+  const trackY = (railHeight - plan.viewport) / 2;
+  const edge = layout?.compact ? M.compactEdge : M.edgeGap;
+  const previewWidth = Math.min(M.previewWidth + M.previewGap, (layout?.width ?? 0) - edge - M.width - M.previewGap);
+  const previewIndex = indexOf(preview?.id);
+  const previewY = (previewIndex + 0.5) * plan.pitch - trackTop;
+  const previewBase = previewIndex >= 0 && previewY >= 0 && previewY <= plan.viewport ? display[previewIndex] : undefined;
+  const requestAt = previewBase ? positions.get(previewBase.id) ?? -1 : -1;
+  const previewRead = previewAt?.(requestAt);
+  const previewTick = previewBase && withInputPreview(previewBase, previewRead?.excerpt);
+  const currentIndex = indexOf(pending ?? active);
+  const focusedIndex = previewBase ? previewIndex : indexOf(pending);
+  const focusTarget = previewTick?.id ?? (shown.some((tick) => tick.id === active) ? active : shown.at(-1)?.id);
+  const previewMark = markOf(previewTick);
+  const previewTitle = previewTick && labelOf(previewTick);
+  const previewAnswer = previewTick?.answerExcerpt ?? "";
+  const announcement = preview?.origin === "keyboard" && previewTick ? t("chat-navrail.selection", {
+    index: previewTick.ordinal ?? previewIndex + 1, count: total ?? ticks.length,
+    preview: previewTitle || previewAnswer, answer: previewTitle ? previewAnswer : "",
+  }) : "";
+
+  const scrollTrack = (top: number) => {
+    const el = track.current;
+    if (!el) return;
+    const next = Math.max(0, Math.min(plan.content - plan.viewport, top));
+    if (el.scrollTop !== next) el.scrollTop = next;
+    setTrackTop(el.scrollTop);
+  };
+  const reveal = (index: number) => {
+    const el = track.current;
+    if (!el || !overflow || index < 0) return;
+    const top = index * plan.pitch;
+    const bottom = top + plan.pitch;
+    if (top < el.scrollTop) scrollTrack(top);
+    else if (bottom > el.scrollTop + plan.viewport) scrollTrack(bottom - plan.viewport);
+  };
+  keepActiveVisible.current = (index) => {
+    if (!hovered.current && !drag.current && selected.current?.origin !== "keyboard" && performance.now() >= wheelUntil.current) {
+      reveal(index ?? display.length - 1);
+    }
+  };
+  const revealSelection = useRef(reveal);
+  revealSelection.current = reveal;
+  const activeAt = displayPositions.get(active ?? "") ?? null;
+  useLayoutEffect(() => { keepActiveVisible.current(activeAt); }, [activeAt, plan.viewport, plan.pitch, display.length]);
+  useLayoutEffect(() => {
+    if (preview?.origin === "keyboard") revealSelection.current(previewIndex);
+  }, [preview, previewIndex, plan.viewport, plan.pitch]);
+
+  const compact = layout?.compact;
+  useLayoutEffect(() => {
+    if (!compact || !scroller) return;
+    scroller.setAttribute("data-nav-compact", "");
+    scroller.style.setProperty("--nav-compact-inset", `${M.compactEdge + M.width + M.previewGap}px`);
+    return () => {
+      scroller.removeAttribute("data-nav-compact");
+      scroller.style.removeProperty("--nav-compact-inset");
+    };
+  }, [compact, scroller]);
+
+  const requestPreview = useRef(onPreview);
+  requestPreview.current = onPreview;
+  useEffect(() => {
+    if (previewBase?.loadPreview && requestAt >= 0) requestPreview.current?.(requestAt);
+  }, [previewBase?.id, previewBase?.loadPreview, requestAt]);
 
   useLayoutEffect(() => {
-    if (!card.current || !rail.current || !previewTick) return;
-    const i = ticks.findIndex((tick) => tick.id === previewTick.id);
-    const y = M.padding + (height - plan.count * plan.pitch) / 2 + (i - plan.start + 0.5) * plan.pitch;
-    card.current.style.top = `${Math.max(0, Math.min(y - card.current.offsetHeight / 2, height + M.padding * 2 - card.current.offsetHeight))}px`;
-  }, [previewTick, ticks, height, plan.start, plan.count, plan.pitch]);
+    if (!card.current || !previewTick) return;
+    const cardHeight = card.current.offsetHeight;
+    card.current.style.top = `${Math.max(0, Math.min(trackY + previewY - cardHeight / 2, railHeight - cardHeight))}px`;
+  }, [previewTick, previewRead?.loading, previewMark, railHeight, trackY, previewY]);
 
   const dismissPreview = () => {
-    previewOrigin.current = null;
     selected.current = null;
     setPreview(null);
   };
-  const pick = (id: string, origin: "pointer" | "keyboard" | "drag" = "pointer") => {
-    previewOrigin.current = origin;
-    selected.current = id;
-    setPreview(id);
-    wake();
+  const pick = (id: string, origin: PreviewSelection["origin"] = "pointer") => {
+    if (selected.current?.id === id && selected.current.origin === origin) return;
+    selected.current = { id, origin };
+    setPreview(selected.current);
   };
   const jump = async (id: string) => {
-    if (!list.current.some((tick) => tick.id === id)) return;
+    if (!positions.has(id)) return;
     const run = ++jumpRun.current;
     setPending(id);
-    wake();
-    const result = onJump(id);
-    if (!result) {
-      setPending(null);
-      return;
-    }
     try {
-      await result;
+      const result = onJump(id);
+      if (result) await result;
     } finally {
       if (run === jumpRun.current) setPending(null);
     }
   };
-  const pickY = (y: number) => {
-    const bounds = drag.current;
-    if (!bounds?.ids.length) return;
-    const i = Math.max(0, Math.min(bounds.ids.length - 1, Math.floor((y - bounds.top) / bounds.pitch)));
-    const id = bounds.ids[i];
-    if (list.current.some((tick) => tick.id === id)) pick(id, "drag");
+  const pickInDrag = (scrub: RailDrag, el: HTMLElement) => {
+    const y = Math.max(0, Math.min(scrub.height - 1, scrub.y - scrub.top));
+    const i = Math.min(scrub.ticks.length - 1, Math.floor((y + el.scrollTop) / scrub.pitch));
+    const tick = scrub.ticks[i];
+    if (tick) pick(tick.id, "drag");
+  };
+  const glideDrag = () => {
+    dragFrame.current = 0;
+    const scrub = drag.current;
+    const el = track.current;
+    if (!scrub || !el) return;
+    const direction = scrub.y < scrub.top ? -1 : scrub.y >= scrub.top + scrub.height ? 1 : 0;
+    if (!direction) return;
+    const top = el.scrollTop;
+    scrollTrack(top + direction * scrub.pitch);
+    pickInDrag(scrub, el);
+    if (el.scrollTop !== top) dragFrame.current = requestAnimationFrame(glideDrag);
+  };
+  const stopDrag = () => {
+    const scrub = drag.current;
+    drag.current = null;
+    cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = 0;
+    if (scrub && track.current?.hasPointerCapture?.(scrub.pointer)) track.current.releasePointerCapture(scrub.pointer);
   };
 
-  if (!fine || !ticks.length || height < NAV_RAIL_MIN_HEIGHT) return null;
+  if (!enabled || !shown.length) return null;
 
   return (
     <nav
-      ref={rail}
       aria-label={t("chat-navrail.rail")}
       aria-description={t("chat-navrail.keys")}
       aria-describedby={previewTick ? previewId : undefined}
       data-nav-rail
       data-nav-total={total ?? ticks.length}
       data-nav-source={total === undefined ? "loaded" : "server"}
-      data-visible={visible}
       tabIndex={0}
-      className={cx("absolute inset-y-0 z-10 flex flex-col justify-center py-6 transition-opacity duration-200 motion-reduce:transition-none", visible || pending ? "opacity-100" : "opacity-0")}
-      style={{ right, width: M.width }}
-      onMouseEnter={() => {
-        hovered.current = true;
-        if (!drag.current) setWindowCenter(preview ?? active);
-        wake();
-      }}
+      data-nav-touch={touch || undefined}
+      data-nav-compact={compact || undefined}
+      className="group/nav pointer-events-none absolute inset-y-0 z-10 flex flex-col justify-center focus-visible:outline-none"
+      style={{ left: edge, width: M.width }}
+      onMouseEnter={() => { if (!touch) hovered.current = true; }}
       onMouseLeave={() => {
         hovered.current = false;
-        if (!drag.current) {
-          if (previewOrigin.current === "pointer") dismissPreview();
-          wake(); // Only the rail lingers; the hover card has already gone.
-        }
+        if (!drag.current && selected.current?.origin === "pointer") dismissPreview();
       }}
-      onFocus={() => {
-        focused.current = true;
-        if (preview === null && !drag.current) pick(active ?? ticks[0].id, "keyboard");
-        else wake();
+      onFocus={(e) => {
+        if (selected.current || drag.current) return;
+        const button = (e.target as HTMLElement).closest<HTMLElement>("[data-tick]");
+        const id = (button && display[Number(button.dataset.tick)]?.id) || active || display.at(-1)?.id;
+        if (id) pick(id, "keyboard");
       }}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          focused.current = false;
-          if (!drag.current) {
-            if (hovered.current) previewOrigin.current = "pointer";
-            else dismissPreview();
-          }
-          wake();
-        }
+        if (drag.current || e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        if (hovered.current && selected.current) pick(selected.current.id, "pointer");
+        else dismissPreview();
       }}
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
-        const old = indexOf(preview ?? active);
-        let next: number | null = null;
+        const old = indexOf(preview?.id ?? active);
+        let next: number | undefined;
         if (e.key === "ArrowDown" || e.key === "ArrowRight") next = Math.min(ticks.length - 1, Math.max(0, old + 1));
         if (e.key === "ArrowUp" || e.key === "ArrowLeft") next = Math.max(0, old - 1);
         if (e.key === "Home") next = 0;
         if (e.key === "End") next = ticks.length - 1;
-        if (next !== null) {
+        if (next !== undefined) {
           e.preventDefault();
           e.stopPropagation();
+          stopDrag();
           pick(ticks[next].id, "keyboard");
-          setWindowCenter(ticks[next].id);
-          setAnnouncement(t("chat-navrail.selection", { index: ticks[next].ordinal ?? next + 1, count: total ?? ticks.length, preview: labelOf(ticks[next]), answer: ticks[next].answerExcerpt ?? "" }));
         } else if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           e.stopPropagation();
-          const id = preview ?? active ?? ticks[0].id;
-          jump(id);
+          const id = preview?.id ?? active ?? shown.at(-1)?.id;
+          if (id) void jump(id);
         } else if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
-          drag.current = null;
+          stopDrag();
           dismissPreview();
-          wake();
-        }
-      }}
-      onPointerDown={(e) => {
-        if (e.button !== 0 || card.current?.contains(e.target as Node)) return;
-        e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        drag.current = { pointer: e.pointerId, ids: shown.map((tick) => tick.id), pitch: plan.pitch, top: rect.top + M.padding + (height - plan.count * plan.pitch) / 2 };
-        suppressClick.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        pickY(e.clientY);
-      }}
-      onPointerMove={(e) => { if (drag.current?.pointer === e.pointerId) pickY(e.clientY); }}
-      onPointerUp={(e) => {
-        if (drag.current?.pointer !== e.pointerId) return;
-        pickY(e.clientY);
-        drag.current = null;
-        e.currentTarget.releasePointerCapture(e.pointerId);
-        if (selected.current) jump(selected.current);
-        previewOrigin.current = "pointer";
-        if (!hovered.current) dismissPreview();
-      }}
-      onPointerCancel={() => { drag.current = null; suppressClick.current = false; dismissPreview(); wake(); }}
-      onLostPointerCapture={() => { if (drag.current) { drag.current = null; dismissPreview(); wake(); } }}
-      onWheel={(e) => {
-        if (plan.hidden) {
-          const i = Math.max(0, Math.min(ticks.length - 1, (center < 0 ? 0 : center) + Math.sign(e.deltaY) * plan.count));
-          setWindowCenter(ticks[i].id);
-          pick(ticks[i].id);
-        } else if (scroller) {
-          const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1;
-          scroller.scrollBy({ top: e.deltaY * unit, left: e.deltaX * unit });
         }
       }}
     >
       {pending && (
-        <span role="status" data-nav-loading className="pointer-events-none absolute right-full top-0 whitespace-nowrap rounded-nav-preview border border-line bg-surface px-2 py-1 text-sm text-ink shadow-nav-preview">
+        <span role="status" data-nav-loading className="pointer-events-none absolute left-full top-0 whitespace-nowrap rounded-nav-preview border border-line bg-surface px-2 py-1 text-sm text-ink shadow-nav-preview">
           {t("chat-navrail.loading_target")}
         </span>
       )}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</span>
-      {shown.map((tick, k) => {
-        const i = plan.start + k;
-        const isCurrent = tick.id === active;
-        const isPreview = tick.id === focusedMark;
-        const mark = navRailMark(i, ticks.length, currentIndex < 0 ? null : currentIndex, previewIndex < 0 ? null : previewIndex);
-        return (
-          <button
-            key={tick.id}
-            type="button"
-            data-tick={i}
-            tabIndex={-1}
-            aria-label={t("chat-navrail.jump", { index: tick.ordinal ?? i + 1, preview: labelOf(tick) })}
-            aria-current={isCurrent ? "true" : undefined}
-            aria-describedby={tick.id === preview ? previewId : undefined}
-            className="flex shrink-0 items-center justify-end"
-            style={{ height: plan.pitch, paddingRight: M.endInset }}
-            onMouseEnter={() => pick(tick.id)}
-            onClick={() => {
-              if (suppressClick.current) { suppressClick.current = false; return; }
-              jump(tick.id);
-            }}
-          >
-            <span
-              aria-hidden
-              data-nav-mark={mark.state}
-              className={cx("shrink-0 rounded-full transition-[width,height,background-color,opacity] duration-150 motion-reduce:transition-none", tick.id === marked ? "bg-ink" : isPreview ? "bg-ink-2" : "bg-ink-3")}
-              style={{ width: mark.width, height: mark.height, opacity: mark.opacity }}
-            />
-          </button>
-        );
-      })}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}{announcement && previewMark ? ` ${stateWord(previewMark.state)}` : ""}
+      </span>
+      <div ref={track} data-nav-track className="nav-rail-track pointer-events-auto"
+        style={{ height: plan.viewport, touchAction: touch ? "none" : undefined }}
+        onScroll={(e) => setTrackTop(e.currentTarget.scrollTop)}
+        onWheel={(e) => {
+          if (!e.deltaY && !e.deltaX) return;
+          if (overflow) {
+            wheelUntil.current = performance.now() + M.wheelHoldMs;
+            e.stopPropagation(); // the track's native wheel scroll owns this gesture
+          } else if (scroller) {
+            const unit = e.deltaMode === 1 ? M.tickPitch : e.deltaMode === 2 ? railHeight : 1;
+            scroller.scrollBy({ top: e.deltaY * unit, left: e.deltaX * unit });
+          }
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0 || drag.current) return;
+          e.preventDefault();
+          const el = e.currentTarget;
+          drag.current = { pointer: e.pointerId, ticks, pitch: plan.pitch, top: el.getBoundingClientRect().top, height: plan.viewport, y: e.clientY };
+          suppressClick.current = true;
+          el.setPointerCapture(e.pointerId);
+          pickInDrag(drag.current, el);
+        }}
+        onPointerMove={(e) => {
+          if (drag.current?.pointer !== e.pointerId) return;
+          drag.current.y = e.clientY;
+          pickInDrag(drag.current, e.currentTarget);
+          if (!dragFrame.current && overflow) dragFrame.current = requestAnimationFrame(glideDrag);
+        }}
+        onPointerUp={(e) => {
+          if (drag.current?.pointer !== e.pointerId) return;
+          drag.current.y = e.clientY;
+          pickInDrag(drag.current, e.currentTarget);
+          const id = selected.current?.id;
+          stopDrag();
+          if (id) void jump(id);
+          if (id && hovered.current) pick(id);
+          else dismissPreview();
+        }}
+        onPointerCancel={() => { stopDrag(); suppressClick.current = false; dismissPreview(); }}
+        onLostPointerCapture={() => { if (drag.current) { stopDrag(); dismissPreview(); } }}
+      >
+        <div style={{ height: plan.content, paddingTop: plan.start * plan.pitch }}>
+          {shown.map((base, k) => {
+            const i = plan.start + k;
+            const tick = withInputPreview(base, previewAt?.(positions.get(base.id) ?? -1)?.excerpt);
+            const isCurrent = tick.id === active;
+            const isPreview = i === focusedIndex;
+            const emphasized = isCurrent || tick.id === pending;
+            const mark = navRailMark(i, display.length, currentIndex < 0 ? null : currentIndex, focusedIndex < 0 ? null : focusedIndex);
+            const q = markOf(tick);
+            const label = t("chat-navrail.jump", { index: tick.ordinal ?? i + 1, preview: labelOf(tick) || tick.answerExcerpt || "" });
+            const stateTone = q && !emphasized && !isPreview ? STATE_TICK[q.state] : "";
+            return (
+              <button
+                key={tick.id}
+                type="button"
+                data-tick={i}
+                tabIndex={-1}
+                aria-label={q ? t(q.follows ? "chat-navrail.jump_follow_state" : "chat-navrail.jump_state", { label, state: stateWord(q.state) }) : label}
+                data-question-state={q?.state}
+                data-question-follow={q?.follows ? "" : undefined}
+                aria-current={isCurrent ? "true" : undefined}
+                aria-describedby={tick.id === previewTick?.id ? previewId : undefined}
+                className={cx("relative flex w-full items-center", tick.id === focusTarget && "rounded-control group-focus-visible/nav:outline group-focus-visible/nav:-outline-offset-1 group-focus-visible/nav:outline-accent")}
+                style={{ height: plan.pitch, paddingLeft: M.tickInset }}
+                onMouseEnter={() => { if (!touch && !drag.current) pick(tick.id); }}
+                onClick={(e) => {
+                  if (suppressClick.current && e.detail > 0) { suppressClick.current = false; return; }
+                  void jump(tick.id);
+                }}
+              >
+                <span
+                  aria-hidden
+                  data-nav-mark={mark.state}
+                  className={cx("shrink-0 rounded-full transition-[width,height,background-color,opacity] duration-150 motion-reduce:transition-none", stateTone || (emphasized ? "bg-ink" : isPreview ? "bg-ink-2" : "bg-ink-3"))}
+                  style={{
+                    // a follow-up's tick is shorter, under the question it follows
+                    width: q?.follows ? mark.width * M.followWidth : mark.width,
+                    height: mark.height,
+                    opacity: emphasized || isPreview ? 1 : q?.state === "pending" ? mark.opacity * M.pendingOpacity : q?.state === "running" || q?.state === "unread" ? Math.max(mark.opacity, M.stateOpacity) : mark.opacity,
+                  }}
+                />
+                {q?.state === "unread" && <span aria-hidden data-question-dot className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-red" style={{ width: M.dotSize, height: M.dotSize }} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       {previewTick && (
         <div
           ref={card}
@@ -504,11 +617,17 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
           data-nav-rail-preview
           className="pointer-events-auto absolute z-20"
           // Padding connects the card's hit box to the rail without a timer or an unhoverable gap.
-          style={{ right: M.width, width: M.previewWidth + M.previewGap, paddingRight: M.previewGap, maxWidth: `calc(100vw - ${M.width * 2}px)` }}
+          style={{ left: M.width, width: previewWidth, paddingLeft: M.previewGap }}
         >
-          <div data-nav-preview-surface className="rounded-nav-preview border border-line bg-surface shadow-nav-preview" style={{ padding: M.previewPadding }}>
-            <p data-nav-preview-title className="truncate text-sm font-semibold text-ink">{labelOf(previewTick)}</p>
-            {previewTick.answerExcerpt && <p data-nav-preview-excerpt className="line-clamp-2 text-sm leading-relaxed text-ink-2" style={{ marginTop: M.previewParagraphGap }}>{previewTick.answerExcerpt}</p>}
+          <div data-nav-preview-surface className="overflow-hidden rounded-nav-preview border border-line bg-surface shadow-nav-preview" style={{ maxHeight: railHeight, padding: M.previewPadding }}>
+            {(previewTitle || previewMark) && (
+              <div className="flex items-baseline gap-2">
+                {previewTitle && <p data-nav-preview-title className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{previewTitle}</p>}
+                {previewMark && <p data-nav-preview-state className="max-w-1/2 shrink-0 truncate text-xs text-ink-3">{previewMark.follows ? t("chat-navrail.follow_state", { state: stateWord(previewMark.state) }) : stateWord(previewMark.state)}</p>}
+              </div>
+            )}
+            {previewTick.answerExcerpt && <p data-nav-preview-excerpt className={cx("line-clamp-3 break-words text-sm leading-relaxed text-ink-2", (previewTitle || previewMark) && "mt-2")}>{previewTick.answerExcerpt}</p>}
+            {previewRead?.loading && <p data-nav-preview-loading role="status" className="mt-2 text-sm text-ink-3">{t("chat-navrail.loading_preview")}</p>}
           </div>
         </div>
       )}

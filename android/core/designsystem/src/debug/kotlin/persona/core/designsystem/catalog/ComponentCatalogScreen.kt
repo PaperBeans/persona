@@ -319,31 +319,6 @@ fun ComponentCatalogScreen(modifier: Modifier = Modifier, onBack: (() -> Unit)? 
             )
             QueueStrip("排队中 1 条 · Codex 忙完会依次处理", listOf("先别提交，等我看完 diff"), onItem = {}, busy = true)
         }
-        // Voice chat: the orb in each state, the status under it, captions and the controls (the voice module, :module:voice).
-        section("语音对话") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf(VoiceOrbMode.Connecting to "连接中", VoiceOrbMode.Listening to "在听", VoiceOrbMode.Speaking to "正在说",
-                    VoiceOrbMode.Muted to "已静音", VoiceOrbMode.Ended to "已结束").forEach { (mode, label) ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        VoiceOrb(mode, Modifier.size(64.dp), level = { 0.5f })
-                        Text(label, style = PersonaTheme.type.micro, color = palette.ink3)
-                    }
-                }
-            }
-            VoiceStatus("正在说，直接开口就能打断")
-            VoiceStatus("对话已结束", error = "连接断了（语音服务可能刚重启，或网络不稳），点下面的按钮重新开始")
-            VoiceCaption("今天下午有什么会？", fromUser = true, final = true)
-            VoiceCaption("下午有两个会：三点的周会，五点和设计组对一下图标", fromUser = false, final = false)
-            VoiceControlBar {
-                VoiceControl(PhIcons.Microphone, "静音", { feedback = "静音" })
-                VoiceControl(PhIcons.HandPalm, "打断", {}, enabled = false)
-                VoiceControl(PhIcons.PhoneDisconnect, "挂断", { feedback = "挂断" }, kind = VoiceControlKind.Danger)
-            }
-            VoiceControlBar {
-                VoiceControl(PhIcons.MicrophoneSlash, "取消静音", { feedback = "取消静音" }, kind = VoiceControlKind.Filled)
-                VoiceControl(PhIcons.ArrowClockwise, "重新开始", { feedback = "重新开始" }, kind = VoiceControlKind.Filled)
-            }
-        }
         // The divider between a list and its detail in a wide window (the shell's two panes).
         section("两栏分隔条") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

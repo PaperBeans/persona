@@ -92,14 +92,39 @@ func TestAgyPaneUserImagesAndCheckpoints(t *testing.T) {
 	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
 	seedAgents(t, node, herdr, agyTestAgent(agyTestPane, home, agyTestID))
 	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB9sAAAAASUVORK5CYII="
-	agyTestFile(t, node.agyDataRoot(), agyTestID, fmt.Sprintf(`{"step_index":0,"type":"USER_INPUT","content":"Look\n<attached_images>\nuser.png\n</attached_images>","media":[{"mime_type":"image/png","uri":"./user.png"},{"mime_type":"image/png","data":%q}]}
-{"step_index":1,"type":"PLANNER_RESPONSE","content":"Done"}
+	agyTestFile(t, node.agyDataRoot(), agyTestID, fmt.Sprintf(`{"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>\n<persona-context>snapshot</persona-context>\n> a quote\nLook\n<attached_images>\nuser.png\n</attached_images>\n</USER_REQUEST><ADDITIONAL_METADATA>hidden time</ADDITIONAL_METADATA>","media":[{"mime_type":"image/png","uri":"./user.png"},{"mime_type":"image/png","data":%q}]}
+{"step_index":1,"type":"PLANNER_RESPONSE","thinking":"Private thinking","content":"<!-- Private note -->\n**Done**."}
 {"step_index":2,"type":"USER_INPUT","client_msg_id":"photo-only","media":[{"mime_type":"image/png","data":%q},{"mime_type":"image/png","data":%q}]}
 {"step_index":3,"type":"CHECKPOINT"}
 `, png, png, png))
 	index := agyTestCall(t, node, "session.items", agyTestRow, map[string]any{"user_inputs": true}).(proto.UserInputIndex)
-	if index.Total != 2 || index.Inputs[0].Seq != 1 || index.Inputs[1].Seq != 3 {
+	if index.Total != 2 || index.Inputs[0].Seq != 1 || index.Inputs[0].Preview != "Look" || index.Inputs[0].Answer != "Done." ||
+		index.Inputs[0].Attachments != 0 || index.Inputs[1].Seq != 3 || index.Inputs[1].Attachments != 2 ||
+		index.Inputs[1].Preview != "" || index.Inputs[1].Answer != "" {
 		t.Fatalf("user inputs: %+v", index)
+	}
+	frozen := agyTestCall(t, node, "session.items", agyTestRow, map[string]any{"user_inputs": true, "before_seq": 2}).(proto.UserInputIndex)
+	wantFrozen := proto.UserInputPosition{ID: index.Inputs[0].ID, Seq: 1, Preview: "Look"}
+	if frozen.Total != 1 || frozen.Inputs[0] != wantFrozen || frozen.History != index.History {
+		t.Fatalf("frozen user inputs: %+v", frozen)
+	}
+	compact := agyTestCall(t, node, "session.items", agyTestRow, map[string]any{"user_inputs": true, "meta_only": true}).(proto.UserInputIndex)
+	if compact.Total != index.Total || compact.History != index.History || compact.Inputs[0] != index.Inputs[0].WithoutExcerpts() ||
+		compact.Inputs[1] != index.Inputs[1].WithoutExcerpts() {
+		t.Fatalf("compact user inputs: %+v", compact)
+	}
+	previews := agyTestCall(t, node, proto.MethodSessionInputPreviews, agyTestRow, map[string]any{
+		"positions": []proto.UserInputRef{index.Inputs[0].Ref(), index.Inputs[1].Ref()}, "before_seq": 2,
+	}).(proto.InputPreviews)
+	if len(previews.Inputs) != 1 || previews.Inputs[0] != wantFrozen || previews.History != index.History {
+		t.Fatalf("retired preview: %+v", previews)
+	}
+	window := agyTestCall(t, node, proto.MethodSessionItemsWindow, agyTestRow, map[string]any{
+		"from_seq": 3, "through_seq": 3, "history": index.History,
+	}).(proto.ItemsWindow)
+	if window.FromSeq != 2 || window.ToSeq != 3 || !window.HasMore || !window.MoreAfter ||
+		len(window.Items) != 2 || window.Items[0].Image == nil || window.Items[0].Image.Data != "" {
+		t.Fatalf("target window: %+v", window)
 	}
 	recent, page := agyTestItems(t, node, agyTestRow, map[string]any{"turns": 1})
 	if page["has_more"] != true || len(recent) != 3 || index.Inputs[1].ID != recent[0].ID {
@@ -119,7 +144,7 @@ func TestAgyPaneUserImagesAndCheckpoints(t *testing.T) {
 		t.Fatalf("checkpoint: %+v", notice)
 	}
 	older, page := agyTestItems(t, node, agyTestRow, map[string]any{"turns": 1, "before_seq": 3})
-	if page["has_more"] != false || len(older) != 3 || older[0].Kind != proto.KindText || older[1].Kind != proto.KindImage ||
+	if page["has_more"] != false || len(older) != 4 || older[0].Kind != proto.KindText || older[1].Kind != proto.KindImage ||
 		older[0].Seq != older[1].Seq || !strings.HasSuffix(older[1].ID, "#media1") {
 		t.Fatalf("earlier turn did not suppress the duplicate path: %+v", page)
 	}
@@ -826,6 +851,7 @@ func TestAgyPaneResumeAndTerminalControls(t *testing.T) {
 	const model = "test-model"
 	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model, "", "")
 	assertAgyResumeReport(t, f, 0, model, "", "")
+	stubAgyNativePrompt(t, n, f, agyTestPane, agyTestID)
 	agyTestCall(t, n, "session.send", agyTestRow, map[string]any{"text": "first\nsecond"})
 	agyTestCall(t, n, "session.interrupt", agyTestRow, nil)
 	assertTrace(t, f.trace("agent.prompt", "pane.send_keys", "pane.send_input"), []string{
@@ -1268,5 +1294,74 @@ func TestAgyPaneLegitimateConversationSwitches(t *testing.T) {
 	lastItem := hub.got()[len(hub.got())-1]
 	if lastSpan.fromSeq != 0 || lastSpan.history != agyStepsHistory(wakeID).token || lastItem.Text != "Handled background wake." {
 		t.Fatalf("switch to SYSTEM-sourced USER_INPUT conversation failed: span=%+v item=%+v", lastSpan, lastItem)
+	}
+}
+
+func TestAgySubagentColdBindResolvesParent(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const (
+		parentID     = agyTestID
+		childID      = "aaaaaaaa-4444-4444-8555-666666666661"
+		grandchildID = "aaaaaaaa-4444-4444-8555-666666666662"
+		cycleA       = "aaaaaaaa-4444-4444-8555-666666666663"
+		cycleB       = "aaaaaaaa-4444-4444-8555-666666666664"
+	)
+	root := n.agyDataRoot()
+	agyTestFile(t, root, parentID, ""+
+		`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Main task"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","content":"Running subagent"}`+"\n")
+	agyTestFile(t, root, childID, fmt.Sprintf(
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-25T04:11:13Z sender=%s priority=HIGH\n"}`+"\n",
+		parentID,
+	))
+	agyTestFile(t, root, grandchildID, fmt.Sprintf(
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"<SYSTEM_MESSAGE>\n[Message] sender=%s\n"}`+"\n",
+		childID,
+	))
+	agyTestFile(t, root, cycleA, fmt.Sprintf(
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"[Message] sender=%s"}`+"\n",
+		cycleB,
+	))
+	agyTestFile(t, root, cycleB, fmt.Sprintf(
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"[Message] sender=%s"}`+"\n",
+		cycleA,
+	))
+
+	// 1. Cold bind when herdr reports a subagent UUID resolves directly to its parent.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, childID))
+	items, page := agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 2 || items[0].Text != "Main task" || page["history"] != agyStepsHistory(parentID).token {
+		t.Fatalf("cold bind from subagent did not resolve parent: page=%+v items=%+v", page, items)
+	}
+
+	// 2. Nested grandchild subagent walks up the sender chain to the root normal parent.
+	n.mu.Lock()
+	delete(n.agyBound, agyTestPane)
+	n.mu.Unlock()
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, grandchildID))
+	items, page = agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 2 || items[0].Text != "Main task" || page["history"] != agyStepsHistory(parentID).token {
+		t.Fatalf("cold bind from grandchild subagent did not resolve parent: page=%+v items=%+v", page, items)
+	}
+
+	// 3. Sender cycle terminates cleanly without binding.
+	n.mu.Lock()
+	delete(n.agyBound, agyTestPane)
+	n.mu.Unlock()
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, cycleA))
+	items, _ = agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].Kind != "notice" {
+		t.Fatalf("sender cycle should stay unbound notice, got: %+v", items)
+	}
+
+	// 4. Cross-pane conflict: if another pane already claims parentID, cold bind refuses to steal it.
+	n.mu.Lock()
+	delete(n.agyBound, agyTestPane)
+	n.mu.Unlock()
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, childID), agyTestAgent("w1:p2", home, parentID))
+	items, _ = agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].Kind != "notice" {
+		t.Fatalf("cross-pane conflict should refuse stealing parent, got: %+v", items)
 	}
 }

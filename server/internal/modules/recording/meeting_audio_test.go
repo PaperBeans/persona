@@ -2,10 +2,9 @@ package recording
 
 import (
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"testing"
-
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // The upload's 200 says the mode in effect: hub when asked and ready, device with unavailable when the contribution
@@ -48,14 +47,14 @@ func TestTranscriptionModeOnUpload(t *testing.T) {
 	if tr, _ := out["transcription"].(map[string]any); tr["mode"] != "device" || out["revs"] != nil {
 		t.Fatalf("POST …/live: %v", out)
 	}
-	assertHubDetail := func() kb.TranscriptionView {
+	assertHubDetail := func() recordingwire.TranscriptionView {
 		t.Helper()
-		d, err := h.engine().Get(kb.KindRecording, meetingRec, 0)
+		d, err := h.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var meta struct {
-			Transcription *kb.TranscriptionView `json:"transcription"`
+			Transcription *recordingwire.TranscriptionView `json:"transcription"`
 		}
 		if err := json.Unmarshal(d.Meta, &meta); err != nil {
 			t.Fatalf("detail.meta: %s %v", d.Meta, err)

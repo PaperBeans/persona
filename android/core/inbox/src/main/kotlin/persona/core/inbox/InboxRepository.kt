@@ -45,7 +45,13 @@ interface InboxRepository : persona.core.contracts.api.InboxRepository {
         error("Persona entry is not connected")
     }
     suspend fun askPersona(request: InboxPersonaRequest) = askPersona(request.itemId, request.action)
-    suspend fun personaContext(itemId: String): String? = null
+
+    /**
+     * The item's `context` from `GET /api/v1/inbox/{id}` with the mail clipping claim beside it (#15995); null only
+     * when no text could be read or restored. Callers that feed the text to the persona use [PersonaContext.text];
+     * the stored-mail page also reads [PersonaContext.mailClipping].
+     */
+    suspend fun personaContext(itemId: String): PersonaContext? = null
 
     /**
      * A reply in the user's voice drafted by the hub (`POST /api/v1/inbox/{id}/draft`); [instruction] may be empty.
@@ -311,10 +317,15 @@ data class InboxAgent(
     val sessionId: String? = null,
 )
 
+/**
+ * Persisted in `InboxReplyJournal` (`replies.json`): keep the original `persona.feature.inbox` serial names from
+ * before #14075 moved `ReplyTarget` to `:core:inbox`, so existing outbox entries decode across upgrades.
+ */
 @Serializable
+@SerialName("persona.feature.inbox.ReplyTarget")
 sealed interface ReplyTarget {
-    @Serializable data class Inbox(val itemId: String) : ReplyTarget
-    @Serializable data class Lark(val feedId: String) : ReplyTarget
+    @Serializable @SerialName("persona.feature.inbox.ReplyTarget.Inbox") data class Inbox(val itemId: String) : ReplyTarget
+    @Serializable @SerialName("persona.feature.inbox.ReplyTarget.Lark") data class Lark(val feedId: String) : ReplyTarget
 }
 
 @Serializable

@@ -38,21 +38,28 @@ type composerDeletion struct {
 	dirtyState string
 	created    time.Time
 	dispatched bool
+	requester  string // device identity supplied by the authenticated hub on a Herdr preview
+	revoked    bool   // an undispatched token surrendered by that device
 }
 
 type workspaceDeletionInput struct {
-	Preview      bool   `json:"preview"`
-	Reconcile    bool   `json:"reconcile"`
-	Token        string `json:"preview_token"`
-	Force        bool   `json:"force"`
-	DeleteBranch bool   `json:"delete_branch"`
-	CloseOnly    bool   `json:"close_only"`
+	Preview       bool   `json:"preview"`
+	Reconcile     bool   `json:"reconcile"`
+	RevokePreview bool   `json:"revoke_preview"`
+	Requester     string `json:"preview_device"`
+	Token         string `json:"preview_token"`
+	Force         bool   `json:"force"`
+	DeleteBranch  bool   `json:"delete_branch"`
+	CloseOnly     bool   `json:"close_only"`
 }
 
 func (n *Node) worktreeDelete(ctx context.Context, kind, id string, raw json.RawMessage) (any, error) {
 	var in workspaceDeletionInput
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
+	}
+	if in.RevokePreview && (kind != "herdr" || !in.Reconcile || in.Preview || in.Token == "" || in.Force || in.DeleteBranch || in.CloseOnly) {
+		return nil, composerError(ctx, "preview_invalid")
 	}
 	if in.Preview && (in.Reconcile || in.Token != "" || in.Force || in.DeleteBranch) {
 		return nil, composerError(ctx, "preview_invalid")

@@ -88,7 +88,9 @@ type agyTranscriptUsage struct {
 	turns         int
 	compacted     bool
 	hasUsage      bool
-	first         string // the first message the user typed, as shown (agyUserText): an untitled pane's title (agytitle.go)
+	contextStats  transcript.ContextStats
+	first         string    // the first message the user typed, as shown (agyUserText): an untitled pane's title (agytitle.go)
+	modTime       time.Time // transcript file mtime in UTC, used as fallback UpdatedAt for herdr agy panes
 }
 
 type agyHistory struct {
@@ -234,8 +236,24 @@ func agyReadFile(brain *os.Root, path string) ([]byte, error) {
 // A same-step completion replaces its earlier record. A rewind invalidates the
 // abandoned tail and gives replacement steps a new identity.
 func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
-	var steps []agyStep
-	rev := agyRevision{length: len(raw), hash: sha256.Sum256(raw)}
+	f := agyFold{conversation: conversation}
+	f.add(raw)
+	return f.steps, f.revision(len(raw), sha256.Sum256(raw))
+}
+
+// agyFold is parseAgySteps' state after the complete lines it has read: the steps kept and the branch and native
+// revisions so far. Each line folds in on its own, so lines appended later go on from it (agyParse, agypane.go).
+type agyFold struct {
+	conversation   string
+	steps          []agyStep
+	branch, native string
+}
+
+// add folds raw's lines in, raw starting at a line.
+func (f *agyFold) add(raw []byte) {
+	steps, rev := f.steps, agyRevision{branch: f.branch, native: f.native}
+	conversation := f.conversation
+	defer func() { f.steps, f.branch, f.native = steps, rev.branch, rev.native }()
 	for line := range bytes.SplitSeq(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 || line[0] != '{' {
@@ -294,8 +312,12 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 		step.key = strconv.Itoa(step.seq) + "@" + agyDigest(conversation+"\n"+step.CreatedAt+"\n"+rev.branch)
 		steps = slices.Insert(steps, at, step)
 	}
-	rev.steps = make([]agyStepMemo, len(steps))
-	for i, s := range steps {
+}
+
+// revision is the fold's agyRevision for the length bytes it read, whose SHA-256 is hash.
+func (f *agyFold) revision(length int, hash [32]byte) agyRevision {
+	rev := agyRevision{length: length, hash: hash, branch: f.branch, native: f.native, steps: make([]agyStepMemo, len(f.steps))}
+	for i, s := range f.steps {
 		rev.steps[i] = agyStepMemo{
 			seq:      s.seq,
 			key:      s.key,
@@ -303,7 +325,7 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 			running:  isAgyStepRunning(s.Status),
 		}
 	}
-	return steps, rev
+	return rev
 }
 
 // Match the whitespace used by JavaScript's \s and String.trim in cleanUserText.
@@ -380,6 +402,9 @@ func agyUserText(text string) string {
 }
 
 func agyToolOutput(text string) string {
+	if stripped := transcript.StripToolResultTimestampHeaders(text); stripped != text {
+		return stripped
+	}
 	if strings.HasPrefix(text, "Created At:") {
 		if _, output, ok := strings.Cut(text, "\nOutput:\n"); ok {
 			return output
@@ -865,15 +890,21 @@ func agyNormalizeArgValue(v any, truncated, encoded bool) (any, bool) {
 			head, tail, omitted = agyArgPreview(v)
 		}
 		if encoded {
-			decoded, ok := agyDecodeArgString(head, omitted > 0)
-			if !ok {
-				return nil, false
+			if decoded, ok := agyDecodeArgString(head, omitted > 0); ok {
+				if omitted > 0 {
+					// The missing text and any retained suffix are counted in encoded bytes.
+					return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+				}
+				return decoded, true
 			}
-			if omitted > 0 {
-				// The missing text and any retained suffix are counted in encoded bytes.
-				return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+			// Compact exports also JSON-encode non-string values (e.g. "1", "true", "null", "[...]").
+			if omitted == 0 {
+				var value any
+				if err := json.Unmarshal([]byte(head), &value); err == nil {
+					return value, true
+				}
 			}
-			return decoded, true
+			return nil, false
 		}
 		if omitted > 0 {
 			return head + transcript.ClipNote(len(head)+omitted+len(tail)), true

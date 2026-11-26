@@ -1,6 +1,9 @@
 package node
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // The agents Persona reads as pi (pi.go): pi itself, and omp (Oh My Pi), a pi fork whose extension API, session files and
 // conversation model are pi's (docs/integrations/omp.md). A pane and its keys are the host's; the conversation and the
@@ -113,6 +116,31 @@ func (n *Node) resolveAlias(id string) string {
 	defer n.mu.Unlock()
 	if a, ok := n.idAlias[id]; ok {
 		return a.id
+	}
+	return id
+}
+
+// resolveSessionAlias extends resolveAlias for gone agy pane placeholder rows (agy-<workspace>-<pane>): once the pane
+// is no longer live in n.agents, reads/sends/watch/info resolve via n.agyShown to the companion's agy-<conversation>
+// row. Close/retire/stop stay on the gone pane id so they never archive the companion conversation by accident.
+func (n *Node) resolveSessionAlias(method, id string) string {
+	if resolved := n.resolveAlias(id); resolved != id {
+		return resolved
+	}
+	if !strings.HasPrefix(id, agyAgent+"-") {
+		return id
+	}
+	switch method {
+	case "session.close", "session.retire", "session.retire_guarded", "session.stop":
+		return id
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if _, live := n.agents[id]; live {
+		return id
+	}
+	if shown, ok := n.agyShown[id]; ok && shown.conversation != "" {
+		return agyAgent + "-" + shown.conversation
 	}
 	return id
 }

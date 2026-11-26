@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/preview"
@@ -69,7 +70,8 @@ const (
 
 // previewIn is a message from the web (docs/web/preview.md "Messages").
 type previewIn struct {
-	T string `json:"t"`
+	mouseSequence uint64 // local ordering, never part of the wire message
+	T             string `json:"t"`
 	// mouse: down | up | move; key: down | up
 	Type    string  `json:"type,omitempty"`
 	X       float64 `json:"x,omitempty"`
@@ -149,6 +151,9 @@ type previewTab struct {
 	loading  bool
 	picking  bool
 	lastPage string
+
+	mouseSequence    atomic.Uint64 // assigned by the panel reader
+	dropMouseThrough uint64        // queued pointer input cannot click the page if inspection fails
 }
 
 func (t *previewTab) post(it tabItem) {

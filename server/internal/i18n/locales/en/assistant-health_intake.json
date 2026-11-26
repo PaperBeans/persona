@@ -1,5 +1,6 @@
 {
   "forbidden": "This device cannot access these health records.",
+  "invalid_items": "Health items could not be saved. Refresh Health and try again.",
   "invalid_entry": "Check the record ID, kind, amount, time and note, then try again.",
   "invalid_settings": "Check the health goals, cup size and reminder schedule.",
   "invalid_query": "Choose 1–366 days, a nonnegative change number, or a limit of 1–1000 records.",
@@ -54,6 +55,7 @@
   "status.done": "Goal met. No more reminders today.",
   "status.weekend": "No weekend reminders. Next reminder day starts {at}.",
   "status.closed": "Today's reminder window has ended. Next window starts {at}.",
+  "status.add_water": "Add Water to Health to receive reminders.",
   "status.next": "Next reminder {at}",
   "status.quiet": "Low-distraction mode is on: reminders are kept for the briefing without an alert.",
   "delivery.no_device": "No device can receive reminders right now.",

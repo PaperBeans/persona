@@ -13,6 +13,14 @@
 - 2026-10-30 10:00 · lark-f1 · 定了周五灰度
 - 2026-10-30 11:00 · lark-f2 · 提前到周四
 
+# 方向メモリー（新しい順・出典レコード）
+## 結果
+- [todo-demo/machine-demo/session-demo/3/1] 周四灰度已完成 https://example.com/pr/42 · 2026-10-30T03:00:00Z · agent_reported · スーパーバイザー未承認
+## 有効な決定と理由（異なる ID は統合しない）
+- [todo-demo/machine-demo/session-demo/3/1/decision/1] 哪天灰度？ → 周四灰度；理由：周五有冻结；結果：周四灰度已完成；出典時刻：2026-10-30T03:00:00Z · agent_reported · スーパーバイザー未承認
+## 失敗からの教訓
+- 不要只看旧摘要 · 2026-10-30T03:00:00Z · agent_reported · スーパーバイザー未承認
+
 # 関連する会話
 
 ## lark-f1

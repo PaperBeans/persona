@@ -1,0 +1,5 @@
+CompileSwift normal arm64 /build/source/apple/Persona/BrokenRow.swift (in target 'Persona' from project 'Persona')
+/build/source/apple/Persona/BrokenRow.swift:7:13: warning: result of call to 'snoozed(until:at:)' is unused
+/build/source/apple/Persona/Other.swift:3:9: warning: result of call to 'reload()' is unused
+/build/source/apple/Persona/PlantedRow.swift:23:15: warning: result of call to 'parse(_:)' is unused
+/build/DerivedData/SourcePackages/checkouts/swift-thing/Sources/Thing/Thing.swift:3:9: warning: result of call to 'snoozed(until:at:)' is unused

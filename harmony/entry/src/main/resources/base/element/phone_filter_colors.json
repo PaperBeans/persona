@@ -1,0 +1,96 @@
+{
+  "color": [
+    {
+      "name": "phone_agent_section_ink",
+      "value": "#85858B"
+    },
+    {
+      "name": "phone_agent_count_fill",
+      "value": "#E9E9EE"
+    },
+    {
+      "name": "phone_agent_count_ink",
+      "value": "#0064C8"
+    },
+    {
+      "name": "phone_agent_quick_fill",
+      "value": "#F9F9FA"
+    },
+    {
+      "name": "phone_agent_quick_ink",
+      "value": "#007AFF"
+    },
+    {
+      "name": "phone_filter_fill",
+      "value": "#D5E4F8"
+    },
+    {
+      "name": "phone_filter_ink",
+      "value": "#0059C7"
+    },
+    {
+      "name": "phone_filter_count_fill",
+      "value": "#CDDBEF"
+    },
+    {
+      "name": "phone_filter_count_ink",
+      "value": "#0057B5"
+    },
+    {
+      "name": "phone_filter_segment_fill",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "phone_filter_segment_ink",
+      "value": "#000000"
+    },
+    {
+      "name": "phone_filter_mark_fill",
+      "value": "#006EED"
+    },
+    {
+      "name": "phone_filter_mark_ink",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "phone_filter_idle_count_fill",
+      "value": "#E9E9EE"
+    },
+    {
+      "name": "phone_filter_neutral_count",
+      "value": "#636366"
+    },
+    {
+      "name": "phone_prominent_rim",
+      "value": "#008BFC"
+    },
+    {
+      "name": "phone_agent_session_separator",
+      "value": "#E8E8E8"
+    },
+    {
+      "name": "phone_agent_allow_fill",
+      "value": "#0079FD"
+    },
+    {
+      "name": "phone_agent_allow_highlight",
+      "value": "#10AEFF"
+    },
+    {
+      "name": "phone_agent_quick_highlight",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "phone_agent_quick_edge",
+      "value": "#DFDFDF"
+    },
+    {
+      "name": "phone_agent_recommended_ink",
+      "value": "#5B4FD6"
+    },
+    {
+      "name": "phone_agent_recommended_fill",
+      "value": "#E7E5F6"
+    }
+  ]
+}

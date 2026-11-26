@@ -1,0 +1,7 @@
+# Every production .go file under server/ that refers to defect.Catch, with its reason (TestCatchOnlyAtListedSites, rule
+# catch-site; docs/server/architecture.md "Validated and sealed"). defect.Catch recovers a defect when it is deferred; a
+# defect is a programmer error, so it is recovered only where a request or a run can fail alone and the program goes on.
+# A permission list: a file that refers to defect.Catch and has no line fails, and so does a line whose file no longer
+# does. Register a module's routes through the kernel (kernel/seam) rather than adding a site. Paths are relative to
+# server/; the reason follows the path on the same line.
+internal/assistant/kernel/seam/dispatch.go the kernel is the defect boundary for module routes: a defect answers that request with 500 and the manager goes on

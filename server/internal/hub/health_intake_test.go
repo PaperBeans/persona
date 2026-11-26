@@ -44,17 +44,24 @@ func TestHealthIntakeNewRoutesAuthenticateBeforeForwarding(t *testing.T) {
 		}
 		return map[string]any{}, nil
 	})
-	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder", "/api/v1/assistant/health/intake/import"} {
-		if code, body := call(t, h.routes(), "POST", path, "", `{}`); code != 401 {
-			t.Fatalf("unauthenticated %s: %d %v", path, code, body)
+	routes := []struct{ method, path string }{
+		{"GET", "/api/v1/assistant/health/items"},
+		{"PUT", "/api/v1/assistant/health/items"},
+		{"POST", "/api/v1/assistant/health/intake/ui"},
+		{"POST", "/api/v1/assistant/health/water/reminder"},
+		{"POST", "/api/v1/assistant/health/intake/import"},
+	}
+	for _, route := range routes {
+		if code, body := call(t, h.routes(), route.method, route.path, "", `{}`); code != 401 {
+			t.Fatalf("unauthenticated %s %s: %d %v", route.method, route.path, code, body)
 		}
 	}
 	if strings.Contains(m.log(), assistantwire.MethodHTTP+" ") {
 		t.Fatal("unauthenticated request reached the manager")
 	}
-	for _, path := range []string{"/api/v1/assistant/health/intake/ui", "/api/v1/assistant/health/water/reminder", "/api/v1/assistant/health/intake/import"} {
-		if code, body := call(t, h.routes(), "POST", path+"?space=health", h.cfg.Token, `{}`); code != 200 {
-			t.Fatalf("full access %s: %d %v", path, code, body)
+	for _, route := range routes {
+		if code, body := call(t, h.routes(), route.method, route.path+"?space=health", h.cfg.Token, `{}`); code != 200 {
+			t.Fatalf("full access %s %s: %d %v", route.method, route.path, code, body)
 		}
 	}
 }
@@ -93,6 +100,8 @@ func TestHealthIntakeAnswerRoutesBeforeForwarding(t *testing.T) {
 		{"POST", "/api/v1/assistant/health/water/reminder"},
 		{"POST", "/api/v1/assistant/health/intake/import"},
 		{"PUT", "/api/v1/assistant/health/intake"},
+		{"GET", "/api/v1/assistant/health/items"},
+		{"PUT", "/api/v1/assistant/health/items"},
 	} {
 		if code, body := call(t, mux, route.method, route.path, token, `{}`); code != http.StatusForbidden {
 			t.Errorf("watch %s %s: %d %v", route.method, route.path, code, body)
@@ -123,6 +132,8 @@ func TestHealthIntakeExtensionsCannotReachRoutes(t *testing.T) {
 		return assistantwire.HTTPResponse{Status: 200, Body: []byte(`{}`)}, nil
 	})
 	for _, route := range []struct{ method, path string }{
+		{"GET", "/api/v1/assistant/health/items"},
+		{"PUT", "/api/v1/assistant/health/items"},
 		{"GET", "/api/v1/assistant/health/intake"},
 		{"POST", "/api/v1/assistant/health/intake"},
 		{"DELETE", "/api/v1/assistant/health/intake/00000000-0000-4000-8000-000000000001"},
@@ -141,6 +152,12 @@ func TestHealthIntakeExtensionsCannotReachRoutes(t *testing.T) {
 }
 
 func TestHealthIntakeFeatureFollowsDefaultManager(t *testing.T) {
+	for _, capability := range []string{assistantwire.CapabilityHealthIntake, assistantwire.CapabilityHealthItems, assistantwire.CapabilityHealthTell} {
+		t.Run(capability, func(t *testing.T) { healthFeatureFollowsDefaultManager(t, capability) })
+	}
+}
+
+func healthFeatureFollowsDefaultManager(t *testing.T, capability string) {
 	h, srv := healthIntakeHub(t)
 	answer := func(string, json.RawMessage) (any, error) { return map[string]any{}, nil }
 	a := connectGuardManager(t, h, srv.URL, assistantwire.AssistantID, answer)
@@ -149,13 +166,13 @@ func TestHealthIntakeFeatureFollowsDefaultManager(t *testing.T) {
 		t.Helper()
 		caps := []string{assistantwire.CapabilityConfigOwn}
 		if intake {
-			caps = append(caps, assistantwire.CapabilityHealthIntake)
+			caps = append(caps, capability)
 		}
 		if err := m.call(t, busHello, map[string]any{"id": m.id, "capabilities": caps}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	listed := func() bool { return slices.Contains(h.features(), assistantwire.CapabilityHealthIntake) }
+	listed := func() bool { return slices.Contains(h.features(), capability) }
 	if listed() {
 		t.Fatal("listed before the default manager named it")
 	}
@@ -168,7 +185,7 @@ func TestHealthIntakeFeatureFollowsDefaultManager(t *testing.T) {
 		t.Fatal("the default manager named intake, but the feature is absent")
 	}
 	hello(a, false)
-	if err := a.peer.Notify(extwire.EventReport, extwire.Report{Features: []string{assistantwire.CapabilityHealthIntake, "synthetic_feature"}}); err != nil {
+	if err := a.peer.Notify(extwire.EventReport, extwire.Report{Features: []string{capability, "synthetic_feature"}}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 5*time.Second, "extension report", func() bool { return slices.Contains(h.features(), "synthetic_feature") })
@@ -186,19 +203,29 @@ func TestHealthIntakeFeatureFollowsDefaultManager(t *testing.T) {
 }
 
 func TestHealthIntakeBroadcastRelayAndWidgetRevision(t *testing.T) {
+	for _, typ := range []string{"health_intake", "health_items"} {
+		t.Run(typ, func(t *testing.T) { healthBroadcastRelayAndWidgetRevision(t, typ) })
+	}
+}
+
+func healthBroadcastRelayAndWidgetRevision(t *testing.T, typ string) {
+	event, err := json.Marshal(map[string]any{"type": typ, "revision": 7})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := newTestHub(t)
 	app := wsApp(t, h)
 	fleetBefore, _ := json.Marshal(h.live.snapshot())
 	signalsBefore := len(h.live.signal)
-	if !managerMessageTypes["health_intake"] {
+	if !managerMessageTypes[typ] {
 		t.Fatal("intake is not a manager message")
 	}
-	if err := h.relayBroadcastFrom(assistantwire.AssistantID, json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+	if err := h.relayBroadcastFrom(assistantwire.AssistantID, event); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case raw := <-app.out:
-		if !strings.Contains(string(raw), `"type":"health_intake"`) {
+		if !strings.Contains(string(raw), `"type":"`+typ+`"`) {
 			t.Fatalf("relayed message: %s", raw)
 		}
 	case <-time.After(time.Second):
@@ -216,7 +243,7 @@ func TestHealthIntakeBroadcastRelayAndWidgetRevision(t *testing.T) {
 	default:
 		t.Fatal("no widget-only wake signal")
 	}
-	if err := h.relayBroadcastFrom("m-0d0d0d", json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+	if err := h.relayBroadcastFrom("m-0d0d0d", event); err != nil {
 		t.Fatal(err)
 	}
 	if h.live.widgets.intake.Load() != 1 {
@@ -230,13 +257,13 @@ func TestHealthIntakeBroadcastRelayAndWidgetRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.ownersChanged()
-	if err := h.relayBroadcastFrom("m-0d0d0d", json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+	if err := h.relayBroadcastFrom("m-0d0d0d", event); err != nil {
 		t.Fatal(err)
 	}
 	if h.live.widgets.intake.Load() != 2 {
 		t.Fatal("the selected default did not advance intake")
 	}
-	if err := h.relayBroadcastFrom(assistantwire.AssistantID, json.RawMessage(`{"type":"health_intake"}`)); err != nil {
+	if err := h.relayBroadcastFrom(assistantwire.AssistantID, event); err != nil {
 		t.Fatal(err)
 	}
 	if h.live.widgets.intake.Load() != 2 {

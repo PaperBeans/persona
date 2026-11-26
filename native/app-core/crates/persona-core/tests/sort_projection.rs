@@ -20,6 +20,32 @@ fn traecli_has_one_display_name_for_existing_identifiers() {
     }
 }
 
+#[test]
+fn quick_filter_counts_match_a_single_muted_session_without_changing_summary_counts() {
+    for (state, status) in [("working", "working"), ("unread", "done")] {
+        let mut input: Input = serde_json::from_value(serde_json::json!({
+            "sessions": [{"session_id":"one","machine_id":"node","state":state,"status":status}],
+            "machines": [], "pins": {}, "mutes": {"sessions":["node/one"]},
+            "settings": {"grouping":"state","quick":state,"inventory":true}
+        }))
+        .expect("one muted Agent");
+        let legacy = serde_json::to_value(persona_core::sort::project(&input)).unwrap();
+        assert_eq!(legacy["counts"][state], 1);
+        assert!(legacy.get("filter_counts").is_none());
+
+        input.settings.include_filter_counts = true;
+        let muted = serde_json::to_value(persona_core::sort::project(&input)).unwrap();
+        assert_eq!(muted["counts"], legacy["counts"]);
+        assert_eq!(muted["filter_counts"][state], 0);
+        assert_eq!(muted["filtered"], serde_json::json!([]));
+
+        input.mutes.sessions.clear();
+        let unmuted = serde_json::to_value(persona_core::sort::project(&input)).unwrap();
+        assert_eq!(unmuted["filter_counts"][state], 1);
+        assert_eq!(unmuted["filtered"], serde_json::json!(["node/one"]));
+    }
+}
+
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../spec/fixtures/sort")
 }

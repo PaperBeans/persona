@@ -635,3 +635,45 @@ func TestAPIConfigLeavesTierAliasForCLIRun(t *testing.T) {
 		t.Fatalf("run=%q model=%q, want the alias passed to the CLI as is", c.RunLauncher, c.Model)
 	}
 }
+
+func TestChatSaveMigratesTierAliasesAcrossMultiPointRollbacks(t *testing.T) {
+	s, _, st := chatAliasFixture(t)
+	ctx := context.Background()
+	profiles := modelProfiles{Revision: 4, Profiles: []ModelProfile{{ID: "one", Name: "One"}}}
+	older := modelProfileImage{
+		ID:        "1",
+		Profile:   "perf",
+		Purposes:  map[string]ModelBinding{"kb": {Provider: "launcher.chat", Model: "sonnet"}},
+		Launchers: map[string]LauncherModels{"chat": {Model: profileValue("haiku")}},
+	}
+	newer := modelProfileImage{
+		ID:        "2",
+		Profile:   "econ",
+		Purposes:  map[string]ModelBinding{"kb": {Provider: "launcher.chat", Model: "haiku"}},
+		Launchers: map[string]LauncherModels{"chat": {Model: profileValue("sonnet")}},
+	}
+	state := modelProfileState{Active: "one", NextRollbackID: 2}
+	state.setRollbacks([]modelProfileImage{older, newer})
+	if err := st.PutSettings(ctx, map[string]any{modelProfilesKey: profiles, modelProfileStateKey: state}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := clearChatAliasTiers(t, s); code != 200 {
+		t.Fatalf("save: %d %s", code, body)
+	}
+	gotState, err := s.readModelProfileState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotState.Rollbacks) != 2 {
+		t.Fatalf("rollbacks = %d, want 2", len(gotState.Rollbacks))
+	}
+	if gotState.Rollbacks[0].Purposes["kb"].Model != "gw/sonnet" || *gotState.Rollbacks[0].Launchers["chat"].Model != "gw/fast" {
+		t.Fatalf("older rollback not migrated: %+v", gotState.Rollbacks[0])
+	}
+	if gotState.Rollbacks[1].Purposes["kb"].Model != "gw/fast" || *gotState.Rollbacks[1].Launchers["chat"].Model != "gw/sonnet" {
+		t.Fatalf("newer rollback not migrated: %+v", gotState.Rollbacks[1])
+	}
+	if gotState.Previous == nil || gotState.Previous.Purposes["kb"].Model != "gw/fast" || *gotState.Previous.Launchers["chat"].Model != "gw/sonnet" {
+		t.Fatalf("Previous not synced with migrated top rollback: %+v", gotState.Previous)
+	}
+}

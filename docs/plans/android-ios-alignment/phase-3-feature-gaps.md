@@ -61,7 +61,7 @@ Each gets an iOS issue: answering questions and terminal choices from notificati
 | F5 | `apple/Persona/Views/Inbox/Lark/LarkComposer.swift` and its folder | Lark members, images, files, topics | text only | feature/inbox | M to L |
 | F6 | `apple/Persona/Views/Todos/TodoDetailView.swift` | `PATCH /api/v1/todos/{id}` | title and notes only | core/hub, feature/chat | M |
 | F7 | `apple/Persona/Views/Chats/NodeActions.swift` and the grouping code | worktree, git, workspaces | four groupings | core/domain, feature/agents | M to L |
-| F8 | `apple/Persona/Views/Voice/VoiceBar.swift` | voice protocol 2 | protocol 1, separate page | feature/voice, feature/chat, app | L |
+| F8 | `apple/Modules/Voice/VoiceBar.swift` | voice protocol 2 | protocol 1, separate page | feature/voice, feature/chat, app | L |
 
 ### F1. Fields on permission requests (S)
 

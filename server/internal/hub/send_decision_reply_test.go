@@ -18,15 +18,18 @@ import (
 // Waiting for a later turn-start hook leaves a pending decision's default free to run during startup.
 func TestAgentSendTellsManagerTheOwnerSpoke(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		who  *principal
-		text string
+		name     string
+		who      *principal
+		text     string
+		source   string
+		terminal bool
 	}{
-		{"owner app", &principal{ID: "device-1", Role: roleFull}, "B"},
-		{"hub token", &principal{Role: roleFull}, ""},
-		{"extension", &principal{ID: "extension-1", Role: roleExtension, Extension: "helper"}, ""},
-		{"link", &principal{ID: "link-1", Role: roleLink, Machine: "box"}, ""},
-		{"no credential", nil, ""},
+		{"owner app", &principal{ID: "device-1", Role: roleFull}, "B", assistantwire.OwnerInputApp, false},
+		{"owner terminal", &principal{ID: "device-2", Role: roleFull}, "B", assistantwire.OwnerInputTerminal, true},
+		{"hub token", &principal{Role: roleFull}, "", "", false},
+		{"extension", &principal{ID: "extension-1", Role: roleExtension, Extension: "helper"}, "", "", false},
+		{"link", &principal{ID: "link-1", Role: roleLink, Machine: "box"}, "", "", false},
+		{"no credential", nil, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newTestHub(t)
@@ -67,9 +70,16 @@ func TestAgentSendTellsManagerTheOwnerSpoke(t *testing.T) {
 			}
 			manager.mu.Unlock()
 			rec := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, sendPath, strings.NewReader(`{"text":"B","human":true,"client_msg_id":"decision-reply-1"}`))
+			body := `{"text":"B","human":true,"client_msg_id":"decision-reply-1"}`
+			if tc.terminal {
+				body = `{"text":"B","hold_when_away":false,"client_msg_id":"terminal-reply-1"}`
+			}
+			r := httptest.NewRequest(http.MethodPost, sendPath, strings.NewReader(body))
 			if tc.who != nil {
 				r = r.WithContext(context.WithValue(r.Context(), principalKey{}, *tc.who))
+			}
+			if tc.terminal {
+				r = r.WithContext(context.WithValue(r.Context(), terminalAgentSendKey{}, true))
 			}
 			r.SetPathValue("sid", "s1")
 			done := make(chan struct{})
@@ -87,8 +97,19 @@ func TestAgentSendTellsManagerTheOwnerSpoke(t *testing.T) {
 				if got.Text != tc.text {
 					t.Fatalf("owner text for %s: %q, want %q", tc.name, got.Text, tc.text)
 				}
-				if got.ClientMsgID != "decision-reply-1" {
-					t.Fatalf("the spoke does not name the send (#13041): %q", got.ClientMsgID)
+				if got.Source != tc.source || got.At.IsZero() {
+					t.Fatalf("owner provenance for %s: %+v, want source %q", tc.name, got, tc.source)
+				}
+				// The spoke names the send with its text (#13041), as the send's session.assistant_sent does.
+				want := ""
+				if tc.text != "" {
+					want = "decision-reply-1"
+					if tc.terminal {
+						want = "terminal-reply-1"
+					}
+				}
+				if got.ClientMsgID != want {
+					t.Fatalf("owner client_msg_id for %s (#13041): %+v, want %q", tc.name, got, want)
 				}
 			case <-timer.C:
 				t.Fatal("the Agent send did not tell the manager the owner spoke")
@@ -196,8 +217,9 @@ func TestAssistantConversationSendCarriesOwnerText(t *testing.T) {
 				if got.Text != tc.text {
 					t.Fatalf("assistant-conversation owner text for %s: %q, want %q", tc.name, got.Text, tc.text)
 				}
-				if got.ClientMsgID != "dir-reply-1" {
-					t.Fatalf("the spoke does not name the send (#13041): %q", got.ClientMsgID)
+				// The owner's text names its send (#13041); owner provenance (#15641) is for Agents only.
+				if want := map[bool]string{true: "dir-reply-1"}[tc.text != ""]; got.ClientMsgID != want || got.Source != "" || got.At.IsZero() {
+					t.Fatalf("assistant-conversation spoke for %s: %+v, want client_msg_id %q and no source", tc.name, got, want)
 				}
 			case <-timer.C:
 				t.Fatal("the assistant-conversation send did not tell the manager the owner spoke")

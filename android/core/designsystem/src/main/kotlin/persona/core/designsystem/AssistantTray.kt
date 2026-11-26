@@ -48,15 +48,17 @@ fun assistantTrayColor(tone: AssistantTrayTone): Color = when (tone) {
 @Composable
 fun AssistantTrayEntry(label: String, count: Int, tone: AssistantTrayTone, expanded: Boolean,
     description: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    if (PersonaTheme.style == AppStyle.Glass) {
-        GlassDockCapsule(label, count, tone, expanded, description, onClick, modifier, enabled)
-        return
+    CompactTouchLayout {
+        if (PersonaTheme.style == AppStyle.Glass) {
+            GlassDockCapsule(label, count, tone, expanded, description, onClick, modifier, enabled)
+            return@CompactTouchLayout
+        }
+        val active = tone != AssistantTrayTone.Pending || count > 0
+        JChip(label, modifier.semantics { stateDescription = description }, selected = expanded,
+            onClick = if (enabled) onClick else null, count = count.takeIf { it > 0 }, muted = !active,
+            dot = if (active) assistantTrayColor(tone) else PersonaTheme.palette.ink3, role = Role.Button,
+            trailingIcon = if (expanded) PhIcons.CaretDown else PhIcons.CaretUp)
     }
-    val active = tone != AssistantTrayTone.Pending || count > 0
-    JChip(label, modifier.semantics { stateDescription = description }, selected = expanded,
-        onClick = if (enabled) onClick else null, count = count.takeIf { it > 0 }, muted = !active,
-        dot = if (active) assistantTrayColor(tone) else PersonaTheme.palette.ink3, role = Role.Button,
-        trailingIcon = if (expanded) PhIcons.CaretDown else PhIcons.CaretUp)
 }
 
 @Composable

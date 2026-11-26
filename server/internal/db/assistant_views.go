@@ -34,6 +34,10 @@ type AssistantViewRow struct {
 // CreateAssistantView atomically stores a card and its original position in the conversation feed.
 // A conversation-scoped lock makes the limit hold across concurrent requests and hub processes.
 func (d *DB) CreateAssistantView(ctx context.Context, v AssistantViewRow, feed FeedRow) error {
+	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error { return createAssistantViewTx(ctx, tx, v, feed) })
+}
+
+func createAssistantViewTx(ctx context.Context, tx pgx.Tx, v AssistantViewRow, feed FeedRow) error {
 	if err := checkAssistantViewRow(v); err != nil {
 		return err
 	}
@@ -41,11 +45,6 @@ func (d *DB) CreateAssistantView(ctx context.Context, v AssistantViewRow, feed F
 		feed.Kind != "view" || feed.Ref != v.ID || !feed.At.Equal(v.CreatedAt) {
 		return errors.New("a new assistant view needs version 1 and a matching view feed item")
 	}
-	tx, err := d.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "assistant_views:"+v.Conversation); err != nil {
 		return err
 	}
@@ -68,7 +67,7 @@ func (d *DB) CreateAssistantView(ctx context.Context, v AssistantViewRow, feed F
 		VALUES ($1, $2, $3, $4, $5, $6)`, feed.ID, feed.Conversation, feed.At, feed.Kind, feed.Ref, []byte(body)); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func checkAssistantViewRow(v AssistantViewRow) error {
@@ -192,12 +191,25 @@ func (d *DB) UpdateAssistantView(ctx context.Context, conversation, id string, e
 	if expected < 1 || expected >= 9007199254740991 || at.IsZero() {
 		return nil, errors.New("assistant view update needs a safe positive version and a timestamp")
 	}
-	v, err := scanAssistantView(d.pool.QueryRow(ctx, `UPDATE assistant_views SET view = $4, version = version + 1, updated_at = $5
+	var result *AssistantViewRow
+	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		var err error
+		result, err = updateAssistantViewTx(ctx, tx, conversation, id, expected, view, at)
+		return err
+	})
+	return result, err
+}
+
+func updateAssistantViewTx(ctx context.Context, tx pgx.Tx, conversation, id string, expected int64, view json.RawMessage, at time.Time) (*AssistantViewRow, error) {
+	if err := checkAssistantViewJSON(view); err != nil {
+		return nil, err
+	}
+	v, err := scanAssistantView(tx.QueryRow(ctx, `UPDATE assistant_views SET view = $4, version = version + 1, updated_at = $5
 		WHERE conversation = $1 AND id = $2 AND version = $3 RETURNING `+assistantViewColumns, conversation, id, expected, []byte(view), at))
 	if !errors.Is(err, ErrAssistantViewNotFound) {
 		return v, err
 	}
-	if _, err := d.AssistantView(ctx, conversation, id); err != nil {
+	if _, err := scanAssistantView(tx.QueryRow(ctx, `SELECT `+assistantViewColumns+` FROM assistant_views WHERE conversation=$1 AND id=$2`, conversation, id)); err != nil {
 		return nil, err
 	}
 	return nil, ErrAssistantViewVersion

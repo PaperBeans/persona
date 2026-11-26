@@ -245,20 +245,26 @@ func (n *Node) codexAppLauncherModels(ctx context.Context, refresh bool) (proto.
 		launcherModelsCache.Unlock()
 		return res, nil
 	}
+	finish := func(res proto.LauncherModels) proto.LauncherModels {
+		if !codexDesktopBusAvailable(home) {
+			res.Locked = codexAppModelLocked
+		}
+		return res
+	}
 	if ok && !refresh {
 		switch age := time.Since(at); {
 		case age < launcherModelsTTL:
-			return cached, nil
+			return finish(cached), nil
 		case age < launcherModelsStale:
 			launcherModelsCache.flight.DoChan(key, ask)
-			return cached, nil
+			return finish(cached), nil
 		}
 	}
 	v, err, _ := launcherModelsCache.flight.Do(key, ask)
 	if err != nil {
 		return proto.LauncherModels{}, err
 	}
-	return v.(proto.LauncherModels), nil
+	return finish(v.(proto.LauncherModels)), nil
 }
 
 func queryCodexCLIModels(ctx context.Context, cli, home string) ([]proto.AgentModel, error) {

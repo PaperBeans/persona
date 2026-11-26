@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,21 @@ func statusHub(t *testing.T, publicURL string) (*Service, *fakeHub, *[]map[strin
 
 var statusAgent = botTarget{Kind: targetAgent, MachineID: "server", SessionID: "agent0001"}
 
+// statusPendingMax bounds a /status card's pending rows (the lark module's commands.go).
+const statusPendingMax = 5
+
+// statusSaid counts the /status messages the tests send, so each is a message of its own.
+var statusSaid atomic.Int64
+
+// statusCard is the card /status posts with the chat pointed at t, and its fallback.
+func statusCard(t *testing.T, s *Service, t2 botTarget) (card, fallback string) {
+	t.Helper()
+	s.larkModule().SetTarget(t2)
+	f := s.hub.(*fakeHub)
+	return botCommandCard(t, s, f, &FeishuFeatures{Main: true, Agents: true, Cards: true},
+		fmt.Sprintf("om_status_%d", statusSaid.Add(1)), "/status")
+}
+
 func putStatusPending(s *Service, id, kind, text string, at int64) {
 	ix := proto.Interaction{ID: id, MachineID: "server", SessionID: "agent0001", Kind: kind, Summary: text, CreatedAt: time.Unix(at, 0)}
 	if kind == proto.IxQuestion {
@@ -37,7 +53,7 @@ func putStatusPending(s *Service, id, kind, text string, at int64) {
 }
 
 func TestStatusCardStates(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct{ state, want string }{
 		{proto.StateWorking, "工作中"}, {proto.StateNeedsYou, "等你拍板"}, {proto.StateIdle, "空闲"},
 		{proto.StateUnread, "空闲"}, {proto.StateOffline, "离线 / 状态未知"},
@@ -46,8 +62,7 @@ func TestStatusCardStates(t *testing.T) {
 		s, f, _ := statusHub(t, "")
 		f.setSessions("server", proto.Session{SessionID: "agent0001", MachineID: "server", Agent: "claude",
 			State: c.state, LastText: strings.Repeat("忙", 120)})
-		card, fb := s.statusCard(ctx, statusAgent)
-		got := card.JSON()
+		got, fb := statusCard(t, s, statusAgent)
 		if !strings.Contains(got, c.want) || !strings.Contains(got, "没有待答问题") || strings.Count(got, "忙") != 90 ||
 			!strings.Contains(fb, c.want) || strings.ContainsAny(fb, "*_[`") {
 			t.Fatalf("state %q wrong: card=%s fallback=%q", c.state, got, fb)
@@ -56,12 +71,12 @@ func TestStatusCardStates(t *testing.T) {
 }
 
 func TestStatusCardGoal(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	for i, status := range []string{proto.GoalActive, "", proto.GoalComplete} {
 		s, f, _ := statusHub(t, "")
 		f.setSessions("server", proto.Session{SessionID: "agent0001", MachineID: "server", Agent: "claude",
 			State: proto.StateIdle, Goal: &proto.GoalInfo{Objective: "修完 5439", Status: status}})
-		if card, _ := s.statusCard(ctx, statusAgent); strings.Contains(card.JSON(), "修完 5439") != (i < 2) {
+		if card, _ := statusCard(t, s, statusAgent); strings.Contains(card, "修完 5439") != (i < 2) {
 			t.Fatalf("goal %q shown=%v", status, i < 2)
 		}
 	}
@@ -69,7 +84,7 @@ func TestStatusCardGoal(t *testing.T) {
 
 // Pending rows belong to the target session only, with a web link (none without a public URL) and the fallback.
 func TestStatusCardPending(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	setup := func(t *testing.T, url string) *Service {
 		t.Helper()
 		s, f, _ := statusHub(t, url)
@@ -84,8 +99,7 @@ func TestStatusCardPending(t *testing.T) {
 		s.fleet.mu.Unlock()
 		return s
 	}
-	card, fb := setup(t, "https://hub.example.com").statusCard(ctx, statusAgent)
-	got := card.JSON()
+	got, fb := statusCard(t, setup(t, "https://hub.example.com"), statusAgent)
 	for _, want := range []string{"**待答问题**", "要现在发版吗", "打开会话", "/s/server/agent0001", "<text_tag color='orange'>授权</text_tag>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q: %s", want, got)
@@ -99,22 +113,21 @@ func TestStatusCardPending(t *testing.T) {
 	if !strings.Contains(fb, "要现在发版吗") {
 		t.Fatalf("fallback missing the question: %q", fb)
 	}
-	noLink, _ := setup(t, "").statusCard(ctx, statusAgent)
-	if strings.Contains(noLink.JSON(), "打开会话") || strings.Contains(noLink.JSON(), "/s/") {
-		t.Fatalf("links rendered without a public URL: %s", noLink.JSON())
+	noLink, _ := statusCard(t, setup(t, ""), statusAgent)
+	if strings.Contains(noLink, "打开会话") || strings.Contains(noLink, "/s/") {
+		t.Fatalf("links rendered without a public URL: %s", noLink)
 	}
 }
 
 // More pending interactions than the cap are truncated with a "more" note, so a long queue can't overflow the card.
 func TestStatusCardPendingCap(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, _ := statusHub(t, "https://hub.example.com")
 	f.setSessions("server", proto.Session{SessionID: "agent0001", MachineID: "server", Agent: "claude", State: proto.StateNeedsYou})
 	for i := 0; i < statusPendingMax+3; i++ {
 		putStatusPending(s, fmt.Sprintf("ix%02d", i), proto.IxQuestion, fmt.Sprintf("问题 %02d", i), int64(i))
 	}
-	card, fb := s.statusCard(ctx, statusAgent)
-	got := card.JSON()
+	got, fb := statusCard(t, s, statusAgent)
 	if n := strings.Count(got, "问题 "); n != statusPendingMax || !strings.Contains(got, "还有 3 个") ||
 		len(got) >= listCardMaxBytes || !strings.Contains(fb, "还有 3 个") {
 		t.Fatalf("cap wrong: card=%s fallback=%q", got, fb)
@@ -123,16 +136,14 @@ func TestStatusCardPendingCap(t *testing.T) {
 
 // In a thread /status follows the thread's target, and the post carries the content as a non-empty fallback.
 func TestStatusCommandFollowsThreadTarget(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, posts := statusHub(t, "")
 	f.setSessions("server",
 		proto.Session{SessionID: "main0", MachineID: "server", Assistant: true, State: proto.StateIdle, LastText: "主对话最近一句"},
 		proto.Session{SessionID: "agent0001", MachineID: "server", Agent: "claude", State: proto.StateWorking, LastText: "正在跑测试"})
-	s.rememberBotThread("om_root", statusAgent, "agent work")
+	s.larkModule().RememberThread("om_root", statusAgent, "agent work")
 	feats := FeishuFeatures{Main: true, Agents: true, Cards: true}
-	if h, _ := s.botCommand(ctx, feats, "om", "/status", "om_root", ""); !h {
-		t.Fatal("/status not handled")
-	}
+	botSay(t, s, f, feats, "om", "/status", "om_root", "")
 	post := (*posts)[len(*posts)-1]
 	card, fallback := post["card"].(string), post["fallback"].(string)
 	if !strings.Contains(card, "正在跑测试") || strings.Contains(card, "主对话最近一句") || strings.TrimSpace(fallback) == "" {
@@ -141,6 +152,7 @@ func TestStatusCommandFollowsThreadTarget(t *testing.T) {
 }
 
 func TestStatusCardRunCount(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	ctx := context.Background()
 	st := &memStore{}
 	if err := st.PutSetting(ctx, channelsStateKey, channelsState{Runs: []*channel.Run{{ID: "fb_1", Channel: channel.Feishu, MachineID: "server", SessionID: "main0"}}}); err != nil {
@@ -150,15 +162,15 @@ func TestStatusCardRunCount(t *testing.T) {
 	s := newServiceOn(t, f, st)
 	setSettings(t, s, func(v *Settings) { v.MachineID = "server"; v.Main = "main0" })
 	f.setSessions("server", proto.Session{SessionID: "main0", MachineID: "server", Assistant: true, State: proto.StateIdle})
-	card, fb := s.statusCard(ctx, botTarget{Kind: targetMain})
-	if !strings.Contains(card.JSON(), "在等 1 个回答") || !strings.Contains(fb, "在等 1 个回答") {
-		t.Fatalf("card=%s fallback=%q", card.JSON(), fb)
+	card, fb := statusCard(t, s, botTarget{Kind: targetMain})
+	if !strings.Contains(card, "在等 1 个回答") || !strings.Contains(fb, "在等 1 个回答") {
+		t.Fatalf("card=%s fallback=%q", card, fb)
 	}
 }
 
 // Without a public URL there is no web app to send the reader to: the "more" note just counts (#5677).
 func TestStatusCardPendingCapWithoutWeb(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		url     string
 		web     bool
@@ -169,8 +181,7 @@ func TestStatusCardPendingCapWithoutWeb(t *testing.T) {
 		for i := 0; i < statusPendingMax+3; i++ {
 			putStatusPending(s, fmt.Sprintf("ix%02d", i), proto.IxQuestion, fmt.Sprintf("问题 %02d", i), int64(i))
 		}
-		card, fb := s.statusCard(ctx, statusAgent)
-		got := card.JSON()
+		got, fb := statusCard(t, s, statusAgent)
 		if !strings.Contains(got, c.message) || !strings.Contains(fb, c.message) ||
 			strings.Contains(got, "网页版") != c.web || strings.Contains(fb, "网页版") != c.web {
 			t.Fatalf("url %q: card=%s fallback=%q", c.url, got, fb)
@@ -181,11 +192,11 @@ func TestStatusCardPendingCapWithoutWeb(t *testing.T) {
 // The fallback is plain text: the last activity loses its Markdown like every other line, and no line is doubled
 // into a blank one (#5677).
 func TestStatusCardFallbackPlain(t *testing.T) {
-	ctx := context.Background()
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f, _ := statusHub(t, "")
 	f.setSessions("server", proto.Session{SessionID: "agent0001", MachineID: "server", Agent: "claude",
 		State: proto.StateIdle, LastText: "改好了 **foo_bar** 和 `x[1]`"})
-	_, fb := s.statusCard(ctx, statusAgent)
+	_, fb := statusCard(t, s, statusAgent)
 	if strings.ContainsAny(fb, "*_[]`") || !strings.Contains(fb, "改好了 foobar 和 x1") || strings.Contains(fb, "\n\n") {
 		t.Fatalf("fallback=%q", fb)
 	}

@@ -2078,9 +2078,7 @@ func TestPhotoDeleteDropsItsWordsFromTheSearchIndex(t *testing.T) {
 	if e.Store.search.purge.Load() {
 		t.Fatal("a purge is asked for before anything was deleted")
 	}
-	if ok, err := e.PhotoDelete(recID, 2); !ok || err != nil {
-		t.Fatalf("PhotoDelete: %v, %v", ok, err)
-	}
+	deletePhoto(t, e, recID, 2) // the recording module's delete: the photo's line goes, and it asks for the purge
 	if !e.Store.search.purge.Load() {
 		t.Fatal("deleting a photo did not ask for the purge")
 	}

@@ -1,0 +1,52 @@
+{
+  "string": [
+    {
+      "name": "phone_sources_graph",
+      "value": "来源关系图"
+    },
+    {
+      "name": "phone_sources_direct",
+      "value": "直接读"
+    },
+    {
+      "name": "phone_sources_all",
+      "value": "全部"
+    },
+    {
+      "name": "phone_sources_inbox",
+      "value": "进收件箱"
+    },
+    {
+      "name": "phone_sources_kb",
+      "value": "进知识库"
+    },
+    {
+      "name": "phone_sources_idle",
+      "value": "读不到"
+    },
+    {
+      "name": "phone_sources_empty",
+      "value": "还没有来源"
+    },
+    {
+      "name": "phone_sources_empty_hint",
+      "value": "还没有来源往收件箱或知识库里放东西。"
+    },
+    {
+      "name": "phone_sources_graph_hint",
+      "value": "每个来源从哪个扩展来、用什么读、进到哪里。点一个看它的整条路。"
+    },
+    {
+      "name": "phone_sources_open",
+      "value": "打开设置"
+    },
+    {
+      "name": "phone_sources_ask",
+      "value": "用助手配置"
+    },
+    {
+      "name": "phone_sources_duplicate",
+      "value": "可能和「{name}」重复。真重复了就关掉其中一个。"
+    }
+  ]
+}

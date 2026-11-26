@@ -3,7 +3,7 @@ import XCTest
 @testable import PersonaScreenCore
 
 /// The video wire's shared cases (spec/fixtures/screen-video, #6558): the browser's client
-/// (web/src/screen/video-wire.ts) frames every message as these do. The cases are written from the messages below:
+/// (web/src/modules/screen-share/video-wire.ts) frames every message as these do. The cases are written from the messages below:
 /// `PERSONA_WRITE_VIDEO_FIXTURES=1 swift test --filter ScreenVideoFixtureTests` writes the file; otherwise the committed
 /// file must be exactly what they write now (a change on this side fails until the file and the browser's side follow),
 /// and every case decodes back to its message.
@@ -79,7 +79,7 @@ final class ScreenVideoFixtureTests: XCTestCase {
         }
         let committed = try Data(contentsOf: Self.file)
         XCTAssertEqual(String(decoding: committed, as: UTF8.self), String(decoding: written, as: UTF8.self),
-                       "spec/fixtures/screen-video is out of date: run PERSONA_WRITE_VIDEO_FIXTURES=1 swift test --filter ScreenVideoFixtureTests, and bring web/src/screen/video-wire.ts along")
+                       "spec/fixtures/screen-video is out of date: run PERSONA_WRITE_VIDEO_FIXTURES=1 swift test --filter ScreenVideoFixtureTests, and bring web/src/modules/screen-share/video-wire.ts along")
         for sample in Self.samples {
             var parser = ScreenVideoParser()
             let raws = try parser.push(try Self.canonical(sample.message))

@@ -2,14 +2,91 @@ package assistant
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/kernel"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/modapi"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+const (
+	briefDayRunes   = 4000
+	briefDayReasons = 6
+	briefDayRanges  = 5
+	briefDayParts   = 5
+	briefDaySummary = 300
+	briefDayTitle   = 60
+	briefDayWhat    = 100
+)
+
+func (s *Service) briefModelText(f *briefFacts) string {
+	r, ok := s.briefingRunner()
+	if !ok {
+		return ""
+	}
+	return r.ModelText(f)
+}
+
+func (s *Service) briefBodyOf(f *briefFacts, title string) briefBody {
+	r, ok := s.briefingRunner()
+	if !ok {
+		return briefBody{}
+	}
+	return r.Body(f, title)
+}
+
+func (s *Service) briefSetSessionRun(session string, run *briefRun) {
+	if r, ok := s.briefingRunner(); ok {
+		r.SetSessionRun(session, run)
+	}
+}
+
+func (s *Service) briefSetTaskRun(taskID string, run *briefRun) {
+	if r, ok := s.briefingRunner(); ok {
+		r.SetTaskRun(taskID, run)
+	}
+}
+
+func (s *Service) briefTaskRunCount() int {
+	r, ok := s.briefingRunner()
+	if !ok {
+		return 0
+	}
+	return r.TaskRunCount()
+}
+
+func briefRunnerForTest(t *testing.T) modapi.ScheduleFactsRunner {
+	t.Helper()
+	needsBriefingModule(t)
+	k := kernel.NewWithPorts(kernel.Builtin(), nil, modapi.Ports{Prompts: briefPromptPort{}}, t.Logf)
+	f, ok := k.ScheduleFacts()
+	if !ok || f.Runner == nil {
+		t.Fatal("briefing module runner not registered")
+	}
+	return f.Runner
+}
+
+func briefFollowing(t *testing.T, items []InboxItem, now time.Time, loc *time.Location) (waiting, due []prompts.BriefFollow) {
+	t.Helper()
+	return briefRunnerForTest(t).Following(toBriefInboxSignals(items), now, loc)
+}
+
+func briefDayBound(t *testing.T, d *prompts.BriefDay) {
+	t.Helper()
+	briefRunnerForTest(t).BoundDay(d)
+}
+
+func briefFallbackID(run ScheduleRun) string {
+	sum := sha256.Sum256([]byte(run.RefID + "\x00" + run.Due.UTC().Format(time.RFC3339Nano)))
+	return hex.EncodeToString(sum[:16])
+}
 
 // The fixed part of the morning and evening routines (briefing.go): the facts are worked out once when the run starts,
 // from the same data as the standing board and the "Today" card. All ids are placeholders; the clock is fake.
@@ -18,6 +95,8 @@ import (
 type briefEnv struct{ *boardEnv }
 
 func newBriefEnv(t *testing.T) *briefEnv {
+	t.Helper()
+	needsBriefingModule(t)
 	e := &briefEnv{newBoardEnv(t)}
 	e.s.accept.loaded, e.s.accept.asks = true, map[string]*acceptAsk{}
 	return e
@@ -38,14 +117,13 @@ func (e *briefEnv) closed(id, title string, age time.Duration, startError string
 
 // nudge marks the bot as having nudged under the card of ix.
 func (e *briefEnv) nudge(ix proto.Interaction) {
-	e.s.fbot.mu.Lock()
-	e.s.keepBotCardLocked(ix.ID, &botCard{MessageID: "om_" + ix.ID, Ix: ix, At: ix.CreatedAt, NudgedAt: e.clk.Now()})
-	e.s.fbot.mu.Unlock()
+	keepChatCard(e.s, ix.ID, &botCard{MessageID: "om_" + ix.ID, Ix: ix, At: ix.CreatedAt, NudgedAt: e.clk.Now()})
 }
 
 // The two sections of what waits are the standing board's rows, in the board's order: the cards that hold an Agent up
 // first, the tasks to verify after them; a card the bot nudged under is marked as on the board.
 func TestBriefSectionsAreTheBoardsRows(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	e := newBriefEnv(t)
 	old := e.card("ix_old", "box", "ag1", "旧的问题", 90*time.Minute)
 	e.card("ix_new", "server", "asm", "新的问题", 5*time.Minute)
@@ -59,13 +137,13 @@ func TestBriefSectionsAreTheBoardsRows(t *testing.T) {
 	if len(board) != 4 {
 		t.Fatalf("the board has %d rows, want 4", len(board))
 	}
-	if got := append(append([]boardRow{}, f.Waiting...), f.Accept...); !reflect.DeepEqual(got, board) {
-		t.Fatalf("the briefing's rows are not the board's:\n got %+v\nwant %+v", got, board)
+	if got := append(append([]modapi.BriefBoardRow{}, f.Waiting...), f.Accept...); !reflect.DeepEqual(got, toBriefBoardRows(board)) {
+		t.Fatalf("the briefing's rows are not the board's:\n got %+v\nwant %+v", got, toBriefBoardRows(board))
 	}
-	if len(f.Waiting) != 2 || f.Waiting[0].id != "ix_old" || !f.Waiting[0].nudged || f.Waiting[1].nudged {
+	if len(f.Waiting) != 2 || f.Waiting[0].ID != "ix_old" || !f.Waiting[0].Nudged || f.Waiting[1].Nudged {
 		t.Fatalf("waiting: %+v (only the old card was nudged)", f.Waiting)
 	}
-	if len(f.Accept) != 2 || f.Accept[0].id != "todo_v1" || f.Accept[0].asked.IsZero() {
+	if len(f.Accept) != 2 || f.Accept[0].ID != "todo_v1" || f.Accept[0].Asked.IsZero() {
 		t.Fatalf("to verify: %+v (the longest waiting first, each with when it was asked)", f.Accept)
 	}
 }
@@ -123,14 +201,14 @@ func TestBriefSortsDoneFailedAndSkipped(t *testing.T) {
 	if len(f.Done) != 1 || f.Done[0].ID != "todo_done" || f.DoneTotal != 1 {
 		t.Errorf("done: %+v (%d)", f.Done, f.DoneTotal)
 	}
-	want := map[string]todayFailed{}
+	want := map[string]modapi.BriefFailure{}
 	for _, x := range f.Failed {
 		want[x.ID] = x
 	}
 	if len(f.Failed) != 3 || f.FailedTotal != 3 || want["todo_nostart"].Kind != "task" || want["r_failed"].Skipped || !want["r_skipped"].Skipped {
 		t.Errorf("failed: %+v", f.Failed)
 	}
-	if len(f.Accept) != 1 || f.Accept[0].id != "todo_verify" {
+	if len(f.Accept) != 1 || f.Accept[0].ID != "todo_verify" {
 		t.Errorf("to verify: %+v", f.Accept)
 	}
 }
@@ -162,7 +240,7 @@ func TestBriefDoesNotSayNothingWaitsBeforeTheCardsAreRead(t *testing.T) {
 	e := newBriefEnv(t)
 	e.card("ix_old", "box", "ag1", "旧的问题", 90*time.Minute)
 	e.verify("todo_v1", "修登录崩溃", 30*time.Hour)
-	e.s.standing.fleetUp.Store(false)
+	e.s.fleetUp.Store(false)
 
 	f := e.s.briefFactsAt(context.Background(), e.clk.Now(), "")
 	if !f.WaitingUnknown || len(f.Waiting) != 0 || len(f.Accept) != 1 {
@@ -173,10 +251,11 @@ func TestBriefDoesNotSayNothingWaitsBeforeTheCardsAreRead(t *testing.T) {
 	if !strings.Contains(js, "还没读到等你处理的卡片") || strings.Contains(js, "等你处理（") {
 		t.Errorf("the card:\n%s", js)
 	}
-	if strings.Contains(f.countsText(), "等你") || !strings.Contains(f.countsText(), "待验收 1") {
-		t.Errorf("counts: %q", f.countsText())
+	counts := briefCountsIn(f, e.s.botLang(context.Background()))
+	if strings.Contains(counts, "等你") || !strings.Contains(counts, "待验收 1") {
+		t.Errorf("counts: %q", counts)
 	}
-	if text := f.modelText(); !strings.Contains(text, "还没读到，不要说「没有」") {
+	if text := e.s.briefModelText(f); !strings.Contains(text, "还没读到，不要说「没有」") {
 		t.Errorf("the model is told: %s", text)
 	}
 }

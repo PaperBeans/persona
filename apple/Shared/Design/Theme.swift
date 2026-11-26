@@ -310,6 +310,20 @@ nonisolated enum Theme {
         static var edge: Color { Theme.accent.opacity(0.45) }
         static let dash: [CGFloat] = [Theme.Space.xs, Theme.Space.xs]
     }
+
+    /// The avatar sheet's Theme Color, Pictures for Each State and image drop highlight (#15449, #15612, `AvatarStatesPages`).
+    enum AvatarSheet {
+        /// A theme color's swatch, round, beside its name.
+        static let swatch = Size.iconS
+        /// The edge around a swatch, so a white or a black one still reads on the row.
+        static let swatchEdge = Color.primary.opacity(0.15)
+        /// A state's picture in its row, as it will move: the size of the top bar's dot.
+        static let preview = Size.avatarL
+        /// The accent border and tint drawn over a picture slot or avatar card while an image is dragged over it (#15612).
+        static var dropStroke: Color { Theme.accent }
+        static let dropStrokeWidth = Size.rule
+        static var dropTint: Color { Theme.accentTint }
+    }
     #endif
 
     /// The image viewer's backdrop (`ImageViewer`), as Photos has it: the page's own color while its bars show (white
@@ -525,6 +539,10 @@ nonisolated enum Theme {
         static let workflowShare: CGFloat = 0.38
         /// The smallest thing a finger should hit.
         static let tapTarget: CGFloat = 44
+        /// The widest a To-dos row's "OK: ‹option›" is drawn (#10465; DESIGN_SYSTEM 2.5): past it, at the text size in use,
+        /// it says "OK" alone, since line 2 already names the recommendation and a button's words are never cut. Not
+        /// scaled: the label's length and the text size decide (`TodoRowAnswers.okTitle`).
+        static let todoAnswerMax: CGFloat = 260
         /// A search field's band under a navigation bar, as the system's drawer draws it (`AgentsHeader`).
         static let searchBand: CGFloat = 54
         /// The field in it, at its top.
@@ -643,13 +661,24 @@ nonisolated enum Theme {
         static let scenePinCharWidth: CGFloat = 9
         static let scenePinBaseWidth: CGFloat = 40
         static let scenePinHeight: CGFloat = 32
-        // A pin pill's estimated width, for keeping pins apart: its icon, the gap before its state, the widest its
+        // A pin pill's estimated width, for keeping pins apart: the gap before its state, the widest its
         // text may grow, and the width of one wide (CJK) character.
-        static let scenePinIconWidth: CGFloat = 18
         static let scenePinStateGap: CGFloat = 6
         static let scenePinTextMaxWidth: CGFloat = 180
         static let scenePinWideCharWidth: CGFloat = 13.5
         static let sceneLabelHeight: CGFloat = 22
+        // An extension's interactive map (UI version 12): page share, compact preview, inline chat tool-view height,
+        // companion list cap, route strokes and pin sizes.
+        static let mapPageShare: CGFloat = 0.56
+        static let mapPageMinHeight: CGFloat = 260
+        static let mapPageMaxHeight: CGFloat = 520
+        static let mapPreviewHeight: CGFloat = 200
+        static let mapToolHeight: CGFloat = 220
+        static let mapListMaxHeight: CGFloat = 220
+        static let mapRouteStroke: CGFloat = 5
+        static let mapRouteDimStroke: CGFloat = 3.5
+        static let mapOriginDot: CGFloat = 12
+        static let mapPinSize: CGFloat = 28
     }
 
     /// UI version 11's 3D `scene` component (#12544): calm architectural material defaults when a shape omits `color`,
@@ -663,6 +692,11 @@ nonisolated enum Theme {
         static let maxPitch: Double = 90
         static let minZoom: Double = 0.5
         static let maxZoom: Double = 4.0
+        /// A full-screen view taller than it is wide (an upright iPhone) opens at least this steep (#14335): a wide home
+        /// fills the width either way, and looking down more lets the floor plan take more of the height.
+        static let tallViewPitch: Double = 60
+        /// A pin whose spot is on screen keeps its pill at least this far inside the viewport's edges (#14335).
+        static let pinEdgeInset: CGFloat = 4
         /// The cutaway (#13036): the outer walls between the camera and the rooms are drawn this high (metres above
         /// their bottom); a wall counts as facing the camera from this cosine on, and as an outer wall when the ground
         /// this far past its camera-side face is not a floor (a prism no higher than the floor top); a shape within
@@ -703,6 +737,19 @@ nonisolated enum Theme {
         static let lampAttenuationEnd: CGFloat = 2.4
         static let maxOmniLights: Int = 8
         static let glassOpacity: CGFloat = 0.42
+        static var ground: Color { StyleSpec.current.usesGlass ? Theme.groupedCard : Theme.card }
+    }
+
+    /// UI version 12's declarative `map` component: region fitting padding, minimum span so single-point views keep
+    /// street context, unselected route dimming, and adaptive card/sheet ground.
+    enum Map {
+        static let fitPadding: Double = 1.35
+        static let minSpanDegrees: Double = 0.008
+        static let minSpanMeters: Double = 700
+        static let unselectedOpacity: Double = 0.42
+        static let gridStepFraction: CGFloat = 0.25
+        static let gridLineOpacity: Double = 0.08
+        static let vectorRouteOpacity: Double = 0.92
         static var ground: Color { StyleSpec.current.usesGlass ? Theme.groupedCard : Theme.card }
     }
 

@@ -37,6 +37,8 @@ func fleetOf300(logf func(string, ...any)) *Service {
 // The fleet of 300 sessions reads them where the machine's decorated list has them and writes out only the three
 // items it shows: 56 allocations and 502 KB measured (3,066 and 3.06 MB in BenchmarkFleetSnapshot when each agent was
 // a copy of its session and every one got its item). Most of what is left is the decorated copy of the list itself.
+// The counting core's own copy of the agents (fleetcount.NewAgents, surfaceCopies) is one allocation more and its
+// bytes on top.
 func TestFleetSnapshotAllocations(t *testing.T) {
 	if raceEnabled {
 		t.Skip("race instrumentation allocates")
@@ -59,8 +61,10 @@ func TestFleetSnapshotAllocations(t *testing.T) {
 		s.fleetSnapshot()
 	}
 	runtime.ReadMemStats(&after)
-	if per := (after.TotalAlloc - before.TotalAlloc) / runs; per > 517000 {
-		t.Errorf("a fleet of 300 sessions allocated %d bytes, want at most 517000", per)
+	agents, ixs, _ := s.fleetInputs()
+	copies := surfaceCopies(t, agents, ixs)
+	if per := (after.TotalAlloc - before.TotalAlloc) / runs; per > 517000+copies {
+		t.Errorf("a fleet of 300 sessions allocated %d bytes, want at most 517000 and the core's %d", per, copies)
 	}
 }
 

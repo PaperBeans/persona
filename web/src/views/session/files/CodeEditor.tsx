@@ -1,5 +1,5 @@
 // The web's text editor (#5829, iOS CodeEditor): CodeMirror 6, loaded only when Edit opens (files/FileEdit.tsx imports it
-// with import(); nothing here is on the first screen). Colored by the viewer's lexer (lib/files.ts lexLine) with the
+// with import(); nothing here is on the first screen). Colored by the viewer's lexer (lib/files-syntax.ts lexLine) with the
 // viewer's classes, line numbers, the active line, find and replace (⌘F / ⌥⌘F, in the app's words), undo / redo, Tab
 // indents, ⌘S saves.
 import { EditorState, RangeSetBuilder } from "@codemirror/state";
@@ -8,7 +8,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { useEffect, useRef } from "react";
 import { t } from "../../../i18n";
-import { lexLine, type Lang, type LexState, type TokenKind } from "../../../lib/files";
+import { lexLine, type Lang, type LexState, type TokenKind } from "../../../lib/files-syntax";
 import { TOKEN_CLASS } from "./file-data";
 
 const marks = Object.fromEntries(Object.entries(TOKEN_CLASS).map(([kind, cls]) => [kind, Decoration.mark({ class: cls })])) as Record<TokenKind, Decoration>;

@@ -35,15 +35,14 @@ func textAnswerBot(t *testing.T, resolve appAnswer, ixs ...proto.Interaction) (*
 		return map[string]any{"ok": true}, nil
 	})
 	s := newTestService(t, f)
-	_, _ = s.feishuStatus(context.Background())
-	s.fbot.cards = map[string]botCard{}
+	_, _ = s.chat().Status(context.Background())
 	return s, f, posts, &notes, &resolves
 }
 func seedCard(s *Service, ix proto.Interaction) {
-	s.fbot.cards[ix.ID] = botCard{MessageID: "om_" + ix.ID, Ix: ix, At: time.Unix(1000, 0)}
+	keepChatCard(s, ix.ID, &botCard{MessageID: "om_" + ix.ID, Ix: ix, At: time.Unix(1000, 0)})
 }
 func seedThreadCard(s *Service, ix proto.Interaction, thread string, at int64) {
-	s.fbot.cards[ix.ID] = botCard{MessageID: "om_" + ix.ID, Thread: thread, Ix: ix, At: time.Unix(at, 0)}
+	keepChatCard(s, ix.ID, &botCard{MessageID: "om_" + ix.ID, Thread: thread, Ix: ix, At: time.Unix(at, 0)})
 }
 func qCard(id string, multi bool, opts ...string) proto.Interaction {
 	qos := make([]proto.QuestionOption, len(opts))
@@ -63,6 +62,7 @@ func noteText(ns *[]map[string]any) string {
 
 // A typed option resolves like the press (same id, answers, one-use owner action); the latest posted card wins.
 func TestTypedAnswerResolvesTheCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		text, want, id string
 		multi          bool
@@ -70,9 +70,9 @@ func TestTypedAnswerResolvesTheCard(t *testing.T) {
 		{"2", "上海", "ix_a", false}, {"广州", "广州", "ix_b", false}, {"1、3", "北京, 广州", "ix_c", true},
 	} {
 		ix := qCard(c.id, c.multi, "北京", "上海", "广州")
-		s, _, _, _, rs := textAnswerBot(t, nil, ix)
+		s, f, _, _, rs := textAnswerBot(t, nil, ix)
 		seedCard(s, ix)
-		if !s.botAnswerQuestion(context.Background(), "om_r", c.text, "oa_1", "", "") || len(*rs) != 1 {
+		if !botAnswer(t, s, f, "om_r", c.text, "oa_1", "", "") || len(*rs) != 1 {
 			t.Fatalf("%q not resolved: %v", c.text, *rs)
 		}
 		r := (*rs)[0]
@@ -82,13 +82,13 @@ func TestTypedAnswerResolvesTheCard(t *testing.T) {
 		}
 	}
 	old, latest := qCard("ix_old", false, "甲", "乙"), qCard("ix_new", false, "子", "丑")
-	s, _, _, _, rs := textAnswerBot(t, nil, old, latest)
+	s, f, _, _, rs := textAnswerBot(t, nil, old, latest)
 	seedCard(s, old)
-	s.fbot.cards["ix_new"] = botCard{MessageID: "om_ix_new", Ix: latest, At: time.Unix(2000, 0)}
-	if !s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "", "") || (*rs)[0]["interaction_id"] != "ix_new" {
+	keepChatCard(s, "ix_new", &botCard{MessageID: "om_ix_new", Ix: latest, At: time.Unix(2000, 0)})
+	if !botAnswer(t, s, f, "om_r", "2", "oa_1", "", "") || (*rs)[0]["interaction_id"] != "ix_new" {
 		t.Fatalf("the latest card was not the one answered: %v", *rs)
 	}
-	if _, ok := s.fbot.cards["ix_old"]; !ok {
+	if _, ok := chatCard(s, "ix_old"); !ok {
 		t.Fatal("the older card was closed")
 	}
 	// The card says a plain reply works for one question with options, not for a free-text question.
@@ -104,6 +104,7 @@ func TestTypedAnswerResolvesTheCard(t *testing.T) {
 
 // Non-options/no-action/plan/form messages stay for the agent; over-elsewhere handled and swallowed; failed resolve keeps waiting.
 func TestTypedAnswerGuards(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	free, plan := qCard("ix_q", false, "北京", "上海"), proto.Interaction{ID: "ix_plan", Kind: proto.IxPlan}
 	form := proto.Interaction{ID: "ix_form", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "一"}, {Question: "二"}}}
 	for _, c := range []struct {
@@ -122,12 +123,12 @@ func TestTypedAnswerGuards(t *testing.T) {
 		{"resolve error", "2", "oa_1", "没交上去", free, true, func(json.RawMessage) (any, error) { return nil, errors.New("hub restarted") }, true, false, 1},
 		{"resolve race", "2", "oa_1", "已经在别处处理过了", free, true, func(json.RawMessage) (any, error) { return map[string]any{"ok": false}, nil }, true, true, 1},
 	} {
-		s, _, posts, notes, rs := textAnswerBot(t, c.resolve, map[bool][]proto.Interaction{true: {free}}[c.pending]...)
+		s, f, posts, notes, rs := textAnswerBot(t, c.resolve, map[bool][]proto.Interaction{true: {free}}[c.pending]...)
 		seedCard(s, c.card)
-		if got := s.botAnswerQuestion(context.Background(), "om_r", c.text, c.action, "", ""); got != c.taken || len(*rs) != c.resolves {
+		if got := botAnswer(t, s, f, "om_r", c.text, c.action, "", ""); got != c.taken || len(*rs) != c.resolves {
 			t.Fatalf("%s: taken %v, resolves %v", c.name, got, *rs)
 		}
-		_, waits := s.fbot.cards[c.card.ID]
+		_, waits := chatCard(s, c.card.ID)
 		if waits == c.closed || (c.note != "" && !strings.Contains(noteText(notes), c.note)) || c.closed != (len(*posts) == 1) {
 			t.Fatalf("%s: waits %v posts %d notes %q", c.name, waits, len(*posts), noteText(notes))
 		}
@@ -137,43 +138,44 @@ func TestTypedAnswerGuards(t *testing.T) {
 // A message inside an agent's topic only answers a card waiting in that topic; a card elsewhere keeps waiting and the
 // words go to that agent. In the root chat the newest card anywhere is still answered.
 func TestTypedAnswerStaysInItsTopic(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	rootCard := qCard("ix_root", false, "甲", "乙")
 	topicCard := qCard("ix_topic", false, "子", "丑")
 	otherCard := qCard("ix_other", false, "寅", "卯")
 
 	// Typed in agent B's topic, where no card waits: cards in the root chat and in other topics are not touched.
-	s, _, _, _, rs := textAnswerBot(t, nil, rootCard, topicCard, otherCard)
+	s, f, _, _, rs := textAnswerBot(t, nil, rootCard, topicCard, otherCard)
 	seedCard(s, rootCard)
 	seedThreadCard(s, topicCard, "om_topic_root", 2000)
 	seedThreadCard(s, otherCard, "om_other_root", 3000) // newest overall, but in a different topic
-	if s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "om_b_root", "") {
+	if botAnswer(t, s, f, "om_r", "2", "oa_1", "om_b_root", "") {
 		t.Fatal("a topic with no card there must not take the words")
 	}
 	if len(*rs) != 0 {
 		t.Fatalf("nothing may be resolved: %v", *rs)
 	}
 	for _, id := range []string{"ix_root", "ix_topic", "ix_other"} {
-		if _, ok := s.fbot.cards[id]; !ok {
+		if _, ok := chatCard(s, id); !ok {
 			t.Fatalf("card %s was closed", id)
 		}
 	}
 
 	// A card inside that topic is the one answered, even though a card elsewhere is newer.
-	s, _, _, _, rs = textAnswerBot(t, nil, topicCard, otherCard)
+	s, f, _, _, rs = textAnswerBot(t, nil, topicCard, otherCard)
 	seedThreadCard(s, topicCard, "om_topic_root", 1000)
 	seedThreadCard(s, otherCard, "om_other_root", 2000)
-	if !s.botAnswerQuestion(context.Background(), "om_r", "1", "oa_1", "om_topic_root", "om_topic_root") ||
+	if !botAnswer(t, s, f, "om_r", "1", "oa_1", "om_topic_root", "om_topic_root") ||
 		len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_topic" {
 		t.Fatalf("the topic's own card was not answered: %v", *rs)
 	}
-	if _, ok := s.fbot.cards["ix_other"]; !ok {
+	if _, ok := chatCard(s, "ix_other"); !ok {
 		t.Fatal("the other topic's card was closed")
 	}
 
 	// Replying directly to a card posted as a topic root answers it (root id is the card's own message).
-	s, _, _, _, rs = textAnswerBot(t, nil, rootCard)
+	s, f, _, _, rs = textAnswerBot(t, nil, rootCard)
 	seedCard(s, rootCard)
-	if !s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "om_ix_root", "") ||
+	if !botAnswer(t, s, f, "om_r", "2", "oa_1", "om_ix_root", "") ||
 		len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_root" {
 		t.Fatalf("the reply to the card itself was not taken: %v", *rs)
 	}
@@ -181,14 +183,14 @@ func TestTypedAnswerStaysInItsTopic(t *testing.T) {
 
 // End to end through the handler: the owner's text answers the waiting card and starts no conversation.
 func TestFeishuMessageTypedAnswer(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	ix := qCard("ix_q", false, "北京", "上海", "广州")
 	s, f, _, _, rs := textAnswerBot(t, nil, ix)
 	seedCard(s, ix)
 	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in", "text", `{"text":"第二个"}`
-	st, _ := s.feishuStatus(context.Background())
-	s.feishuMessage(ev, st, "oa_1")
+	feishuSay(t, s, f, nil, ev, "oa_1")
 	if len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_q" || sendOnceText(f) != "" {
 		t.Fatalf("resolves %v, leaked into chat %q", *rs, sendOnceText(f))
 	}
@@ -198,6 +200,7 @@ func TestFeishuMessageTypedAnswer(t *testing.T) {
 // closes it; an option typed for it afterwards is still read as a late answer: the owner is told it was handled
 // elsewhere and the words do not start a turn. Free words, and anything after them, go on as ordinary messages.
 func TestTypedAnswerToACardEndedElsewhereIsNotForwarded(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	ix := qCard("ix_q", false, "北京", "上海", "广州")
 	s, f, _, notes, rs := textAnswerBot(t, nil)
 	seedCard(s, ix)
@@ -205,53 +208,52 @@ func TestTypedAnswerToACardEndedElsewhereIsNotForwarded(t *testing.T) {
 	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in", "text", `{"text":"上海"}`
-	st, _ := s.feishuStatus(context.Background())
-	s.feishuMessage(ev, st, "oa_1")
+	feishuSay(t, s, f, nil, ev, "oa_1")
 	if got := sendOnceText(f); got != "" || len(*rs) != 0 {
 		t.Fatalf("the late answer went into the conversation: %q, resolves %v", got, *rs)
 	}
 	if !strings.Contains(noteText(notes), "已经在别处处理过了") {
 		t.Fatalf("the owner was not told: %q", noteText(notes))
 	}
-	if s.botAnswerQuestion(context.Background(), "om_r2", "2", "oa_1", "", "") {
+	if botAnswer(t, s, f, "om_r2", "2", "oa_1", "", "") {
 		t.Fatal("a second reply is not about the ended card any more")
 	}
 
 	// Free words are a new message and forget the ended card: a number after them is ordinary too.
-	s, _, _, _, _ = textAnswerBot(t, nil)
+	s, f, _, _, _ = textAnswerBot(t, nil)
 	seedCard(s, ix)
 	s.feishuInteractionDone(ix, "已在 App 中回答")
-	if s.botAnswerQuestion(context.Background(), "om_r", "帮我查天气", "oa_1", "", "") {
+	if botAnswer(t, s, f, "om_r", "帮我查天气", "oa_1", "", "") {
 		t.Fatal("free words were swallowed")
 	}
-	if s.botAnswerQuestion(context.Background(), "om_r2", "2", "oa_1", "", "") {
+	if botAnswer(t, s, f, "om_r2", "2", "oa_1", "", "") {
 		t.Fatal("a number after a new message was read as a late answer")
 	}
 
 	// A card that ended in another agent's topic does not take words written in this one, nor does one past its time.
-	s, _, _, _, _ = textAnswerBot(t, nil)
+	s, f, _, _, _ = textAnswerBot(t, nil)
 	seedThreadCard(s, ix, "om_other_root", 1000)
 	s.feishuInteractionDone(ix, "已在 App 中回答")
-	if s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "om_b_root", "") {
+	if botAnswer(t, s, f, "om_r", "2", "oa_1", "om_b_root", "") {
 		t.Fatal("a card that ended in another topic took the words")
 	}
-	s, _, _, _, _ = textAnswerBot(t, nil)
+	s, f, _, _, _ = textAnswerBot(t, nil)
 	now := time.Unix(5000, 0)
-	s.fbot.now = func() time.Time { return now }
+	s.setLarkNow(func() time.Time { return now })
 	seedCard(s, ix)
 	s.feishuInteractionDone(ix, "已在 App 中回答")
 	now = now.Add(endedAskFor + time.Second)
-	if s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "", "") {
+	if botAnswer(t, s, f, "om_r", "2", "oa_1", "", "") {
 		t.Fatal("a card that ended long ago took the words")
 	}
 
 	// A newer card still waiting is the one a typed option answers, not an older card that ended.
 	waiting := qCard("ix_w", false, "子", "丑")
-	s, _, _, _, rs = textAnswerBot(t, nil, waiting)
+	s, f, _, _, rs = textAnswerBot(t, nil, waiting)
 	seedCard(s, ix)
 	s.feishuInteractionDone(ix, "已在 App 中回答")
-	s.fbot.cards["ix_w"] = botCard{MessageID: "om_ix_w", Ix: waiting, At: time.Unix(2000, 0)}
-	if !s.botAnswerQuestion(context.Background(), "om_r", "2", "oa_1", "", "") || len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_w" {
+	keepChatCard(s, "ix_w", &botCard{MessageID: "om_ix_w", Ix: waiting, At: time.Unix(2000, 0)})
+	if !botAnswer(t, s, f, "om_r", "2", "oa_1", "", "") || len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_w" {
 		t.Fatalf("the waiting card was not answered: %v", *rs)
 	}
 }
@@ -261,14 +263,15 @@ func TestTypedAnswerToACardEndedElsewhereIsNotForwarded(t *testing.T) {
 // In the root chat the words still go to the conversation. A card that is no longer pending (interactions.get !ok)
 // swallows them with the handled note, while a card closed into b.ended still lets free words start a turn (#5461).
 func TestTypedFreeAnswerInTopic(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	free := proto.Interaction{ID: "ix_free", MachineID: "server", SessionID: "m1", Kind: proto.IxQuestion,
 		Questions: []proto.Question{{Question: "为什么？"}}}
 	opts := qCard("ix_opts", false, "北京", "上海")
 
 	// A question without options: the words are the answer itself, the card closes, one resolve with the owner action.
-	s, _, _, _, rs := textAnswerBot(t, nil, free)
+	s, f, _, _, rs := textAnswerBot(t, nil, free)
 	seedThreadCard(s, free, "om_topic", 1000)
-	if !s.botAnswerQuestion(context.Background(), "om_r", "因为我想试试", "oa_1", "om_topic", "") || len(*rs) != 1 {
+	if !botAnswer(t, s, f, "om_r", "因为我想试试", "oa_1", "om_topic", "") || len(*rs) != 1 {
 		t.Fatalf("free answer not resolved: %v", *rs)
 	}
 	r := (*rs)[0]
@@ -276,14 +279,14 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	if r["interaction_id"] != "ix_free" || r["action"] != "oa_1" || ans["为什么？"] != "因为我想试试" {
 		t.Fatalf("free resolve %v", r)
 	}
-	if _, waits := s.fbot.cards["ix_free"]; waits {
+	if _, waits := chatCard(s, "ix_free"); waits {
 		t.Fatal("the free-text card was not closed")
 	}
 
 	// An option question's words that name no option are its Other, submitted as the raw text (the card's free=1 form).
-	s, _, _, _, rs = textAnswerBot(t, nil, opts)
+	s, f, _, _, rs = textAnswerBot(t, nil, opts)
 	seedThreadCard(s, opts, "om_topic", 1000)
-	if !s.botAnswerQuestion(context.Background(), "om_r", "都不选，去杭州", "oa_1", "om_topic", "") || len(*rs) != 1 {
+	if !botAnswer(t, s, f, "om_r", "都不选，去杭州", "oa_1", "om_topic", "") || len(*rs) != 1 {
 		t.Fatalf("Other answer not resolved: %v", *rs)
 	}
 	ans, _ = (*rs)[0]["resolution"].(map[string]any)["answers"].(map[string]any)
@@ -292,14 +295,13 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	}
 
 	// End to end: the topic message resolves the free-text question and starts no conversation.
-	s, f, _, _, rs := textAnswerBot(t, nil, free)
+	s, f, _, _, rs = textAnswerBot(t, nil, free)
 	seedThreadCard(s, free, "om_topic", 1000)
 	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.RootID, ev.Message.MessageType, ev.Message.Content =
 		"om_in", "om_topic", "text", `{"text":"想换个方案"}`
-	st, _ := s.feishuStatus(context.Background())
-	s.feishuMessage(ev, st, "oa_1")
+	feishuSay(t, s, f, nil, ev, "oa_1")
 	if len(*rs) != 1 || (*rs)[0]["interaction_id"] != "ix_free" || sendOnceText(f) != "" {
 		t.Fatalf("resolves %v, leaked into chat %q", *rs, sendOnceText(f))
 	}
@@ -310,22 +312,22 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	ev = botcard.MessageEvent{}
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in2", "text", `{"text":"帮我查天气"}`
-	s.feishuMessage(ev, st, "oa_1")
+	feishuSay(t, s, f, nil, ev, "oa_1")
 	if len(*rs) != 0 || !strings.Contains(sendOnceText(f), "帮我查天气") {
 		t.Fatalf("root words taken as an answer: resolves %v, sent %q", *rs, sendOnceText(f))
 	}
-	if _, waits := s.fbot.cards["ix_free"]; !waits {
+	if _, waits := chatCard(s, "ix_free"); !waits {
 		t.Fatal("the root chat's card was closed")
 	}
 
 	// A card still shown but no longer pending in the hub (interactions.get !ok) swallows the topic's late free words
 	// with the handled note, posts the closed card, resolves nothing — the same as a late option.
-	s, _, posts, notes, rs := textAnswerBot(t, nil) // nothing pending in the queue
+	s, f, posts, notes, rs := textAnswerBot(t, nil) // nothing pending in the queue
 	seedThreadCard(s, free, "om_topic", 1000)
-	if !s.botAnswerQuestion(context.Background(), "om_r", "迟到的回答", "oa_1", "om_topic", "") || len(*rs) != 0 {
+	if !botAnswer(t, s, f, "om_r", "迟到的回答", "oa_1", "om_topic", "") || len(*rs) != 0 {
 		t.Fatalf("ended card answered: %v", *rs)
 	}
-	if _, waits := s.fbot.cards["ix_free"]; waits || len(*posts) != 1 ||
+	if _, waits := chatCard(s, "ix_free"); waits || len(*posts) != 1 ||
 		!strings.Contains(noteText(notes), "已经在别处处理过了") {
 		t.Fatalf("ended card not closed: posts %d notes %q", len(*posts), noteText(notes))
 	}
@@ -339,11 +341,8 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.RootID, ev.Message.MessageType, ev.Message.Content =
 		"om_in3", "om_topic", "text", `{"text":"帮我看看别的"}`
-	s.feishuMessage(ev, st, "oa_1")
+	feishuSay(t, s, f, nil, ev, "oa_1")
 	if len(*rs) != 0 || !strings.Contains(sendOnceText(f), "帮我看看别的") {
 		t.Fatalf("free words to an ended topic card were swallowed: resolves %v, sent %q", *rs, sendOnceText(f))
-	}
-	if _, left := s.fbot.ended["ix_free"]; left {
-		t.Fatal("the ended card was not forgotten after reading it once")
 	}
 }

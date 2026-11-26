@@ -1,3 +1,4 @@
+import { healthIntakePageId, inboxSourcesLink, subscriptionsPageId, subscriptionsPageUI } from '../core/WireCompatibility';
 import type { ExtensionUIStreamSnapshot, ExtensionViewRecord } from '../core/ExtensionViewTree';
 import { url, util } from '@kit.ArkTS';
 import { ClientModel } from './ClientModel';
@@ -149,6 +150,8 @@ export class ExtensionUIModel implements ExtensionPresentation {
 
   private client: ClientModel | undefined;
   private extensionId: string = '';
+  private subscriptionsPage: boolean = false;
+  private healthIntakePage: boolean = false;
   private rootUI: string = '';
   private compact: boolean = false;
   private baseContext: ExtensionViewRecord = {};
@@ -184,8 +187,10 @@ export class ExtensionUIModel implements ExtensionPresentation {
   private lineResultPath: string = '';
 
   bind(client: ClientModel, extensionId: string, uiId: string, context: ExtensionViewRecord = {}, initialView?: ExtensionViewRecord,
-    compact: boolean = false, onLink: (address: string) => void = (_address: string): void => {}, visible: boolean = true, initialState: string = ''): void {
-    if (this.client === client && this.extensionId === extensionId && this.rootUI === uiId && this.profileId === client.profile.id && this.managerId === client.profile.manager) {
+    compact: boolean = false, onLink: (address: string) => void = (_address: string): void => {}, visible: boolean = true, initialState: string = '', inboxSources: boolean = false, healthIntake: boolean = false): void {
+    const reserved = inboxSources && extensionId === subscriptionsPageId && uiId === subscriptionsPageUI;
+    const health = healthIntake && extensionId === healthIntakePageId && uiId === 'pages';
+    if (this.subscriptionsPage === reserved && this.healthIntakePage === health && this.client === client && this.extensionId === extensionId && this.rootUI === uiId && this.profileId === client.profile.id && this.managerId === client.profile.manager) {
       this.callbackLink = onLink;
       const nextContext = cloneRecord(context);
       if (JSON.stringify(nextContext) !== JSON.stringify(this.baseContext) || this.initialRouteState !== initialState) {
@@ -207,7 +212,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
       return;
     }
     this.dispose();
-    this.client = client; this.extensionId = extensionId; this.rootUI = uiId; this.compact = compact;
+    this.client = client; this.subscriptionsPage = reserved; this.healthIntakePage = health; this.extensionId = extensionId; this.rootUI = uiId; this.compact = compact;
     this.baseContext = cloneRecord(context); this.initialRouteState = initialState; this.callbackLink = onLink; this.profileId = client.profile.id; this.managerId = client.profile.manager;
     this.generation = client.connectionGeneration(); this.scope = client.scope(); this.active = visible; this.disposed = false;
     this.stack = [new ExtensionUIPageState(uiId, initialState)]; this.eventsOff = client.observeEvents((raw: string): void => this.receive(raw));
@@ -254,7 +259,14 @@ export class ExtensionUIModel implements ExtensionPresentation {
     context['ui_version'] = 6;
     return context;
   }
-  private apiPath(ui: string): string { return '/api/v1/extensions/' + segment(this.extensionId) + '/-/ui/' + segment(ui); }
+  private apiPath(ui: string): string {
+    if (this.healthIntakePage) return '/api/v1/assistant/health/intake/ui?space=health';
+    if (this.subscriptionsPage) return '/api/v1/subscriptions/-/ui' + (this.managerId ? '?manager=' + segment(this.managerId) : '');
+    return '/api/v1/extensions/' + segment(this.extensionId) + '/-/ui/' + segment(ui);
+  }
+  private openPageLink(address: string): void {
+    if (secureWebURL(address) || (this.subscriptionsPage && inboxSourcesLink(address))) this.callbackLink(address);
+  }
   private async renderPage(page: ExtensionUIPageState, keep: boolean = false): Promise<void> {
     const client = this.client, generation = this.generation, scope = this.scope;
     if (!client || !this.active || !this.ownerCurrent() || !client.connected) { this.error = 'extension_ui_offline'; return; }
@@ -317,7 +329,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
     if (!page || !client || this.disposed || !this.active) return;
     if (!client.connected) { this.phase = 'disconnected'; this.error = 'extension_ui_offline'; return; }
     if (!this.ownerCurrent()) { this.error = 'request_updated'; return; }
-    if (this.compact || page.preferLegacy || !client.features.includes(STREAM_FEATURE)) {
+    if (this.healthIntakePage || this.compact || page.preferLegacy || !client.features.includes(STREAM_FEATURE)) {
       page.stream = false; this.phase = 'opening'; await this.renderPage(page, page.dirty); return;
     }
     page.stream = true; this.phase = 'opening'; this.loading = true; this.error = '';
@@ -385,6 +397,22 @@ export class ExtensionUIModel implements ExtensionPresentation {
 
   /** Called by the authenticated ClientModel event fan-out; all writes stay on its existing socket. */
   receive(raw: string): void {
+    if (this.healthIntakePage && this.ownerCurrent() && raw.includes('"health_intake"')) {
+      const notice=Wire.parse(raw);
+      if (Wire.text(notice,'type')==='health_intake' && (!Wire.has(notice,'manager') || Wire.text(notice,'manager')===this.managerId)) {
+        this.receiveInvalidation({type:'extension_ui',extension:healthIntakePageId,invalidate:true}); return;
+      }
+    }
+    if (this.subscriptionsPage && this.ownerCurrent() && raw.includes('"subscription"')) {
+      let notice: ExtensionViewRecord;
+      try { notice = Wire.parse(raw); } catch (_) { return; }
+      if (Wire.text(notice, 'type') === 'subscription') {
+        if (!Wire.has(notice, 'manager') || Wire.text(notice, 'manager') === this.managerId) {
+          this.receiveInvalidation({type:'extension_ui',extension:subscriptionsPageId,invalidate:true});
+        }
+        return;
+      }
+    }
     let frame: ExtensionViewRecord;
     try { frame = parseExtensionUIEvent(raw); } catch (_) { this.receiveHostInteractions(raw); return; }
     if (Wire.text(frame, 'type') === 'extension_ui') { this.receiveInvalidation(frame); return; }
@@ -707,7 +735,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
   }
   private applyActionResult(page: ExtensionUIPageState, result: ExtensionViewRecord, event: ExtensionUIEvent): void {
     const toast = Wire.text(result, 'toast'); if (toast) this.notice = toast;
-    const address = Wire.text(result, 'open_url'); if (address && secureWebURL(address)) this.callbackLink(address);
+    this.openPageLink(Wire.text(result, 'open_url'));
     const push = Wire.object(result, 'push');
     if (Object.keys(push).length) this.pushPage(Wire.text(push, 'ui', page.ui), Wire.text(push, 'state'), Wire.text(push, 'title'));
     else if (Wire.bool(result, 'pop')) this.popPage(true);
@@ -796,7 +824,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
       const request = this.makeLifecycle('snapshot', page);
       this.phase = 'recovering'; this.loading = true; this.error = '';
       if (request && !this.sendLifecycle(request, 'snapshot', page.key)) { this.phase = 'disconnected'; this.loading = false; }
-    } else if (!this.compact && !page.preferLegacy && this.client?.features.includes(STREAM_FEATURE)) {
+    } else if (!this.healthIntakePage && !this.compact && !page.preferLegacy && this.client?.features.includes(STREAM_FEATURE)) {
       // A restored route can open before hello advertises stream support. Retire that older HTTP read.
       this.operationSequence++; this.clearLegacyRefresh(); this.open();
     } else this.renderPage(page, true).catch((error: Error) => this.error = this.safeError(error));
@@ -1032,7 +1060,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
   private handleLegacyResult(page: ExtensionUIPageState, result: ExtensionViewRecord, actionKey: string, values: ExtensionViewRecord): void {
     this.storeLineResult(page, actionKey, Wire.text(values, 'path'), Wire.text(values, 'side'), Wire.object(result, 'lines'));
     const toast = Wire.text(result, 'toast'); if (toast) this.notice = toast;
-    const address = Wire.text(result, 'open_url'); if (address && secureWebURL(address)) this.callbackLink(address);
+    this.openPageLink(Wire.text(result, 'open_url'));
     const push = Wire.object(result, 'push');
     if (Object.keys(push).length) this.pushPage(Wire.text(push, 'ui', page.ui), Wire.text(push, 'state'), Wire.text(push, 'title'));
     else if (Wire.bool(result, 'pop')) this.popPage(true);
@@ -1118,7 +1146,7 @@ export class ExtensionUIModel implements ExtensionPresentation {
     if (current?.stream && current.snapshot) {
       const request = this.makeLifecycle('suspend', current); if (request) this.sendLifecycle(request, 'suspend', current.key);
     }
-    const page = new ExtensionUIPageState(ui, state, title); page.stream = !!this.client?.features.includes(STREAM_FEATURE) && !this.compact;
+    const page = new ExtensionUIPageState(ui, state, title); page.stream = !!this.client?.features.includes(STREAM_FEATURE) && !this.compact && !this.healthIntakePage;
     this.stack.push(page); this.streamStackDepth = this.stack.length; this.pageTitle = title || ui;
     this.view = { sections: [] }; this.viewVersion = 0; this.revision++; this.loading = true;
     if (page.stream) this.openCurrent().catch((error: Error) => this.error = this.safeError(error)); else this.renderPage(page).catch((error: Error) => this.error = this.safeError(error));

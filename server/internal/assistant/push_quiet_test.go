@@ -326,6 +326,7 @@ func TestQuietOffPermissionCardGoesBackToItsSupervisor(t *testing.T) {
 // acceptance are P1, which with the switch on go to the apps and the hub's held list only (no Feishu card, no
 // channel), and with it off ring as before.
 func TestEscalateLevelByWhyOwner(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name     string
 		quiet    bool

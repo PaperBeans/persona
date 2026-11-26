@@ -197,7 +197,10 @@ func TestCardlessClaimRecoveredPendingDeliversOnce(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			store.mu.Lock()
-			store.failMarker = strings.Contains(mode, "marker_failure")
+			// The ambiguous mode's first marker write commits and loses its reply; every later one fails. Both are armed
+			// before the watch: its claim is immediate, so the live digest timer can retry the marker as soon as the
+			// watch releases writeMu, before a failure armed after the watch would apply (#16013).
+			store.failMarker = strings.Contains(mode, "marker_failure") || mode == "legacy_ambiguous_marker_write"
 			store.commitMarkerError = mode == "legacy_ambiguous_marker_write"
 			if mode == "cancelled_after_outbox" {
 				store.afterOutbox = cancel
@@ -205,9 +208,6 @@ func TestCardlessClaimRecoveredPendingDeliversOnce(t *testing.T) {
 			store.mu.Unlock()
 			s.superviseWatch(ctx, time.Now().Add(cardlessSettle+time.Minute))
 			if mode == "legacy_ambiguous_marker_write" {
-				store.mu.Lock()
-				store.failMarker = true
-				store.mu.Unlock()
 				s.superviseWatch(ctx, time.Now().Add(cardlessSettle+2*time.Minute))
 			}
 			if mode != "legacy_claim" && todoNow(s, todo.ID).Supervision.CardlessToldAt != nil {
@@ -278,7 +278,8 @@ func TestCardlessClaimRecoveryRechecksRoundUnderWriteLock(t *testing.T) {
 	store.mu.Lock()
 	store.failMarker = false
 	store.mu.Unlock()
-	again, _ := restartCardlessClaim(t, store)
+	// Start the recovery attempt below after this test holds the write lock.
+	again, _ := restartCardlessClaimWithManualDigest(t, store)
 	again.supervise.writeMu.Lock()
 	done := make(chan [2]bool, 1)
 	go func() {
@@ -503,14 +504,14 @@ func (s *cardlessClaimStore) PutTodoSupervision(ctx context.Context, row db.Todo
 		s.commitMarkerError = false
 	}
 	s.mu.Unlock()
-	if fail && row.CardlessToldAt != nil {
-		return errors.New("injected cardless marker failure")
-	}
-	if ambiguous {
+	if ambiguous { // the one lost reply comes before a standing failMarker
 		if err := s.DB.PutTodoSupervision(ctx, row); err != nil {
 			return err
 		}
 		return errors.New("injected lost reply after marker commit")
+	}
+	if fail && row.CardlessToldAt != nil {
+		return errors.New("injected cardless marker failure")
 	}
 	return s.DB.PutTodoSupervision(ctx, row)
 }
@@ -569,5 +570,17 @@ func TestCardlessClaimMarkerFailureKeepsRecoveryRecord(t *testing.T) {
 	again, _ := restartCardlessClaimWithManualDigest(t, store)
 	if !slices.Contains(pendingKinds(again, todo.ID), sigCardlessWait) {
 		t.Fatal("the failed marker write left no durable claim for restart to recover")
+	}
+	if _, ok := storedSupervisePending(t, again)[todo.ID+"|"+sigCardlessWait]; !ok || cardlessNotices(f) != 0 {
+		t.Fatal("recovery requires a durable claim with no earlier hand-back")
+	}
+	// This fresh claim is still inside the production gather window. Let the manual digest deliver it now.
+	setSuperviseTimings(again, shortSuperviseTimings)
+	flushCardlessClaim(again)
+	if got := cardlessNotices(again.hub.(*fakeHub)); got != 1 || todoNow(again, todo.ID).Supervision.CardlessToldAt == nil {
+		t.Fatalf("restored claim produced %d notices, want one notice with a persisted marker", got)
+	}
+	if _, ok := storedSupervisePending(t, again)[todo.ID+"|"+sigCardlessWait]; ok {
+		t.Fatal("the delivered claim remained in the durable outbox")
 	}
 }

@@ -19,6 +19,12 @@ func WithTaskExecutionWait(ctx context.Context) context.Context {
 	return context.WithValue(ctx, taskExecutionWaitKey{}, true)
 }
 
+// WithoutTaskExecutionWait clears WithTaskExecutionWait for a call within a scheduled dispatch that must not hold it
+// for a node update: an optional step whose refusal its caller handles at once.
+func WithoutTaskExecutionWait(ctx context.Context) context.Context {
+	return context.WithValue(ctx, taskExecutionWaitKey{}, false)
+}
+
 func TaskExecutionWaitEnabled(ctx context.Context) bool {
 	enabled, _ := ctx.Value(taskExecutionWaitKey{}).(bool)
 	return enabled

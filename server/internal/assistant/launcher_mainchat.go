@@ -3,6 +3,7 @@ package assistant
 import (
 	"cmp"
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -227,9 +228,9 @@ func (s *Service) finishMainChatModel(ctx context.Context, machine, purpose stri
 	if recovered {
 		s.logf("[%s] resolved assistant launcher %s is missing; refreshing discovery for up to %s", machine, name, wait)
 		r = s.waitMainChatLauncher(ctx, machine, name, wait)
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if r.fit == mainChatFits {
 		return "", nil
@@ -252,23 +253,27 @@ func (s *Service) finishMainChatModel(ctx context.Context, machine, purpose stri
 	d, _ := s.device(ctx, machine)
 	where := firstNonEmpty(d.Name, machine)
 	to := s.mainChatInstead(ctx, d, name, kind, launchers, fallbacks)
+	model, _ := params["model"].(string)
+	// An unreadable catalog normally keeps the requested model. A canceled request must never authorize a fallback.
+	kept := to != "" && model != "" && s.launcherHasModel(withLauncherPurpose(ctx, "assistant"), machine, to, model)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if to == "" {
 		if r.refusal != nil {
 			return "", r.refusal
 		}
 		return "", i18n.Err("assistant-start.launcher_no_substitute", i18n.Args{"launcher": name, "machine": where})
 	}
-	model, _ := params["model"].(string)
-	kept := model != "" && s.launcherHasModel(withLauncherPurpose(ctx, "assistant"), machine, to, model) // a list it can't read counts as having it
-	s.logf("[%s] resolved assistant launcher %s can't run it, using %s (model kept: %v)", machine, name, to, kept)
-	params["launcher"] = to
+	next := maps.Clone(params)
+	next["launcher"] = to
 	if !kept {
-		delete(params, "model")
+		delete(next, "model")
 	}
 	if picked {
-		err = s.applyPickedModel(ctx, params)
+		err = s.applyPickedModel(ctx, next)
 	} else {
-		err = s.applyModel(ctx, purpose, params)
+		err = s.applyModel(ctx, purpose, next)
 	}
 	if err != nil {
 		return "", err
@@ -279,6 +284,12 @@ func (s *Service) finishMainChatModel(ctx context.Context, machine, purpose stri
 		key = "assistant-start.launcher_swapped_model"
 	}
 	note = i18n.T(s.lang(ctx), key, args)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	clear(params)
+	maps.Copy(params, next)
+	s.logf("[%s] resolved assistant launcher %s can't run it, using %s (model kept: %v)", machine, name, to, kept)
 	leaveLauncherNote(ctx, note)
 	return note, nil
 }
@@ -383,8 +394,9 @@ func launcherLabel(l ConfiguredLauncher) string { return cmp.Or(l.DisplayName, l
 // Why a launcher or provider is in the main chat picker's unavailable list (GET /api/v1/machines/{mid}/launchers?purpose=
 // assistant, #5033), besides proto.CodeLauncherOutOfScope and proto.CodeLauncherOwnService.
 const (
-	unavailableAPIProtocol = "api_protocol"  // a direct API provider speaking Responses or Chat Completions, not Messages
-	unavailableNotMainChat = "not_main_chat" // its agent or engine can't run the assistant (a Paseo provider, managed Codex…)
+	unavailableAPIProtocol = "api_protocol"       // a direct API provider speaking Responses or Chat Completions, not Messages
+	unavailableNotMainChat = "not_main_chat"      // its agent or engine can't run the assistant (a Paseo provider, managed Codex…)
+	unavailableUnhealthy   = "launcher_unhealthy" // its latest health check on the computer failed (withHealth, #14535)
 )
 
 // unavailableLauncher is one launcher or provider the main chat can't run on a machine, and why in the user's words.

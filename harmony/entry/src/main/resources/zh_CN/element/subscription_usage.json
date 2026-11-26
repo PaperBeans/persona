@@ -1,0 +1,148 @@
+{
+  "string": [
+    {
+      "name": "sub_usage_heading",
+      "value": "订阅额度"
+    },
+    {
+      "name": "sub_usage_filter",
+      "value": "显示的账号类型"
+    },
+    {
+      "name": "sub_usage_other",
+      "value": "其他"
+    },
+    {
+      "name": "sub_usage_account_count",
+      "value": "{1} 个账户"
+    },
+    {
+      "name": "sub_usage_outdated",
+      "value": "已过期"
+    },
+    {
+      "name": "sub_usage_outdated_age",
+      "value": "已过期 · {1}"
+    },
+    {
+      "name": "sub_usage_seconds_ago",
+      "value": "{1} 秒前"
+    },
+    {
+      "name": "sub_usage_minutes_ago",
+      "value": "{1} 分钟前"
+    },
+    {
+      "name": "sub_usage_hours_ago",
+      "value": "{1} 小时前"
+    },
+    {
+      "name": "sub_usage_days_ago",
+      "value": "{1} 天前"
+    },
+    {
+      "name": "sub_usage_soon",
+      "value": "即将重置"
+    },
+    {
+      "name": "sub_usage_reset_mins",
+      "value": "{1}m 后重置"
+    },
+    {
+      "name": "sub_usage_reset_clock",
+      "value": "{1} 重置"
+    },
+    {
+      "name": "sub_usage_reset_days",
+      "value": "{1}d {2}h 后重置"
+    },
+    {
+      "name": "sub_usage_reset_hours",
+      "value": "{1}h 后重置"
+    },
+    {
+      "name": "sub_usage_over",
+      "value": "用得偏快"
+    },
+    {
+      "name": "sub_usage_under",
+      "value": "用得偏慢"
+    },
+    {
+      "name": "sub_usage_used",
+      "value": "已用 {1}"
+    },
+    {
+      "name": "sub_usage_protect",
+      "value": "保护 {1}%"
+    },
+    {
+      "name": "sub_usage_source_local",
+      "value": "电脑"
+    },
+    {
+      "name": "sub_usage_source_named",
+      "value": "来源：{1}"
+    },
+    {
+      "name": "sub_usage_source_plan",
+      "value": "{1}，来源：{2}"
+    },
+    {
+      "name": "sub_usage_rejected",
+      "value": "网关不认这把 Key，请到管理界面 → 用量来源更新。显示的是上次的数字"
+    },
+    {
+      "name": "sub_usage_unreachable",
+      "value": "网关暂时读不到，显示的是上次的数字"
+    },
+    {
+      "name": "sub_usage_failed",
+      "value": "读网关出错，显示的是上次的数字"
+    },
+    {
+      "name": "sub_usage_error",
+      "value": "网关读这个账号失败，显示的是它存着的数字"
+    },
+    {
+      "name": "sub_usage_timeline",
+      "value": "重置时间线"
+    },
+    {
+      "name": "sub_usage_legend_short",
+      "value": "5h 窗口恢复"
+    },
+    {
+      "name": "sub_usage_legend_week",
+      "value": "7d 窗口恢复"
+    },
+    {
+      "name": "sub_usage_now",
+      "value": "现在"
+    },
+    {
+      "name": "sub_usage_axis_hours",
+      "value": "{1}h"
+    },
+    {
+      "name": "sub_usage_axis_days",
+      "value": "{1}d"
+    },
+    {
+      "name": "sub_usage_mins",
+      "value": "{1}分"
+    },
+    {
+      "name": "sub_usage_hours",
+      "value": "{1}小时"
+    },
+    {
+      "name": "sub_usage_days",
+      "value": "{1}天"
+    },
+    {
+      "name": "sub_usage_days_hours",
+      "value": "{1}天{2}时"
+    }
+  ]
+}

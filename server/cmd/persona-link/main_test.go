@@ -46,6 +46,9 @@ type fakeEnv struct {
 	systemd   bool // /run/systemd/system
 	linger    bool
 	onCommand func(args string) (string, error)
+	// trayCalls is what was done to the Windows tray; trayUp and trayAuto are whether it runs and starts at sign-in.
+	trayCalls        []string
+	trayUp, trayAuto bool
 }
 
 func newFakeEnv(t *testing.T) *fakeEnv {
@@ -86,6 +89,28 @@ func newFakeEnv(t *testing.T) *fakeEnv {
 	f.passthrough = func(name string, args ...string) error {
 		f.calls = append(f.calls, name+" "+strings.Join(args, " "))
 		return nil
+	}
+	f.tray = trayControl{
+		setAutostart: func(exe string, on bool) error {
+			f.trayAuto = on
+			if !on {
+				f.trayCalls = append(f.trayCalls, "autostart off")
+				return nil
+			}
+			f.trayCalls = append(f.trayCalls, "autostart "+exe)
+			return nil
+		},
+		autostart:       func() bool { return f.trayAuto },
+		registerLinks:   func(exe string) error { f.trayCalls = append(f.trayCalls, "links "+exe); return nil },
+		unregisterLinks: func() { f.trayCalls = append(f.trayCalls, "unlinks") },
+		removeData:      func() error { f.trayCalls = append(f.trayCalls, "data"); return nil },
+		start:           func(exe string) error { f.trayCalls = append(f.trayCalls, "start "+exe); f.trayUp = true; return nil },
+		quit: func(string, time.Duration) bool {
+			f.trayCalls = append(f.trayCalls, "quit")
+			f.trayUp = false
+			return true
+		},
+		running: func(string) bool { return f.trayUp },
 	}
 	return f
 }

@@ -55,6 +55,8 @@ export function latestWorkflowRun(s: Session | undefined, now = Date.now()): str
 export interface BackgroundChat {
   stopLoop: () => void;
   jumpToCall?: (call: string) => void;
+  /** Whether the parent chat currently holds a launching tool call or placed child card for `call`. */
+  hasCall?: (call: string) => boolean;
 }
 
 const chats = new Map<string, BackgroundChat[]>();

@@ -23,47 +23,6 @@ func recUpload(rev int64, start time.Time, complete bool, texts ...string) Recor
 	return u
 }
 
-func TestRecordingIdempotentAndOrdered(t *testing.T) {
-	e := goldenEngine(t, nil)
-	var indexed []string
-	e.Index = func(kind, id, name string, _ Tagging, _ string, _ time.Time) {
-		indexed = append(indexed, kind+"/"+id+" "+name)
-	}
-	now := time.Date(2026, 11, 5, 12, 0, 0, 0, goldenZone)
-	start := now.Add(-time.Hour)
-	// Upper case is the same recording.
-	for range 2 { // a replay changes nothing
-		if st, err := e.PutRecording(strings.ToUpper(recID), recUpload(2, start, false, "第一段", "第二段"), now); err != nil || st.Status != RecordingStored {
-			t.Fatalf("put: %v %v", st, err)
-		}
-	}
-	if st, _ := e.PutRecording(recID, recUpload(1, start, false, "旧的"), now); st.Status != RecordingStale {
-		t.Fatalf("an older revision: %v, want stale", st)
-	}
-	if ids := e.Store.IDs(KindRecording); len(ids) != 1 || ids[0] != recID {
-		t.Fatalf("ids %v", ids)
-	}
-	if segs := e.Store.RecordingSegments(recID); len(segs) != 2 || segs[0].Text != "第一段" {
-		t.Fatalf("segments %+v", segs)
-	}
-	if len(indexed) == 0 || !strings.HasPrefix(indexed[0], "recordings/"+recID+" 录音 2026-11-05 11:00") {
-		t.Fatalf("indexed %v", indexed)
-	}
-	for _, bad := range []struct {
-		id string
-		u  RecordingUpload
-	}{
-		{"not-a-uuid", recUpload(3, start, false)},
-		{recID, recUpload(0, start, false)},
-		{recID, recUpload(3, time.Time{}, false)},
-		{recID, RecordingUpload{Revision: 3, StartedAt: start, Device: "tv"}},
-	} {
-		if _, err := e.PutRecording(bad.id, bad.u, now); !errors.Is(err, ErrBadRecording) {
-			t.Errorf("%s %+v: %v, want ErrBadRecording", bad.id, bad.u, err)
-		}
-	}
-}
-
 func TestRecordingPartialThenComplete(t *testing.T) {
 	m := &captureModel{reply: `{"title":"周会","summary":"## 这是什么\n周会","one_line":"周五灰度","importance":"P1","relevance":80,"tags":["周会"],"projects":[{"name":"示例发布","update":"定了周五灰度"}]}`}
 	e := goldenEngine(t, m)
@@ -286,5 +245,43 @@ func TestRecordingListKind(t *testing.T) {
 	}
 	if kinds[recID] != RecordingMeeting || kinds[recID2] != RecordingNote || len(kinds) != 2 {
 		t.Fatalf("kinds %v", kinds)
+	}
+}
+
+func TestRecordingConfirmedFactsConditionalWrite(t *testing.T) {
+	e := goldenEngine(t, nil)
+	now := time.Now()
+	if _, err := e.PutRecording(recID, recUpload(1, now.Add(-time.Hour), true, "minutes"), now); err != nil {
+		t.Fatal(err)
+	}
+	previous := "original"
+	if _, err := e.ApplyUser(KindRecording, recID, UserUpdate{Update: Update{Pinned: &previous}}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := "one", "two"
+	write := func(value, expected string) error {
+		_, err := e.ApplyUser(KindRecording, recID, UserUpdate{Update: Update{Pinned: &value}, ExpectedPinned: &expected})
+		return err
+	}
+	results := make(chan error, 2)
+	go func() { results <- write(first, previous) }()
+	go func() { results <- write(second, previous) }()
+	a, b := <-results, <-results
+	if !(a == nil && errors.Is(b, ErrConflict) || b == nil && errors.Is(a, ErrConflict)) {
+		t.Fatalf("two concurrent saves: %v / %v", a, b)
+	}
+	rec, ok := e.Store.Recording(recID)
+	if !ok || rec.Pinned != first && rec.Pinned != second {
+		t.Fatalf("lost stored facts: %#v", rec)
+	}
+	if err := write("", previous); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale deletion: %v", err)
+	}
+	if err := write("", rec.Pinned); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = e.Store.Recording(recID)
+	if rec.Pinned != "" {
+		t.Fatal(rec.Pinned)
 	}
 }

@@ -14,5 +14,15 @@
   "nudge_save_failed": "リマインダーの設定を保存できませんでした。もう一度お試しください。",
   "nudge_after_range": "リマインドまでの時間は 0（オフ）から {max} 分の間で指定してください",
   "source_report_delay_range": "元のグループに返信するまでの時間は 0 から {max} 分までの整数で指定してください",
-  "settings_save_failed": "ボットの設定を保存できませんでした。もう一度お試しください。"
+  "settings_save_failed": "ボットの設定を保存できませんでした。もう一度お試しください。",
+  "handoff_chat_bad": "チャット ID が空、空白を含む、または重複しています",
+  "handoff_chats_many": "リストできるチャットは最大 {n} 件です",
+  "handoff_needs_owner": "先にボットをペアリングしてください。返信の方針はオーナーのものです",
+  "handoff_launcher_bad": "ランチャー名が空、空白を含む、または長すぎます",
+  "handoff_conflict": "この参照は別の引き渡しに使われています",
+  "handoff_off": "代理返信はオフです",
+  "handoff_chat_blocked": "このチャットは代理返信が禁止されています",
+  "handoff_invalid": "引き渡しの {field} がないか、正しくありません",
+  "handoff_rate_limited": "代理返信が多すぎます。しばらくしてからもう一度。",
+  "handoff_assistant_away": "アシスタントがこの引き渡しを受け取れませんでした。しばらくしてからもう一度。"
 }

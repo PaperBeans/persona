@@ -105,7 +105,7 @@ func (s *Service) toolSecretStore(ctx context.Context, machine, session string, 
 		cardRaw, _ := json.Marshal(input)
 		now := time.Now().UTC()
 		ix := proto.Interaction{ID: "ix_" + randomHex(12), MachineID: machine, SessionID: session, SessionTitle: row.Title, Kind: proto.IxPermission, ToolName: proto.SecretHandoffTool, ToolTitle: i18n.T(l, "assistant-secret_store.title"), ToolInput: cardRaw,
-			Summary: i18n.T(l, "assistant-secret_store.summary", i18n.Args{"agent": agent, "machine": s.machineName(machine), "operation": operation, "item": itemLabel, "vault": vaultLabel, "count": len(in.Target.Fields)}), CreatedAt: now, ExpiresAt: now.Add(handoffCardWait)}
+			Summary: i18n.T(l, "assistant-secret_store.summary", i18n.Args{"agent": agent, "machine": s.machineName(machine), "operation": operation, "item": itemLabel, "vault": vaultLabel, "count": len(in.Target.Fields)}), CreatedAt: now, ExpiresAt: now.Add(ownerCardMaxWait), SeenTTLSeconds: secondsCeil(handoffCardWait)}
 		r, err := s.ask(withCard(ctx, cardSecretForm), ix)
 		claim, vouched := s.takeHandoffClaim(ix.ID)
 		if err != nil {

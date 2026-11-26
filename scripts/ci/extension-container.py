@@ -2,6 +2,7 @@
 """Run real extension isolation in the hub runtime stage, without a hub or real state."""
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -29,17 +30,26 @@ def main():
             run(["docker", "build", "--target", "sandbox-runtime", "--iidfile", str(directory / "image"), "."],
                 120, cwd=ROOT)
             image = (directory / "image").read_text().strip()
-            # Parse the optional host policy in a disposable userspace; never load host LSM policy.
-            policy = directory / "persona-hub.apparmor"
-            policy.write_text((ROOT / "deploy/docker/persona-hub.apparmor").read_text())
-            run(["docker", "run", "--rm", "--name", container + "-policy",
-                 "--mount", "type=bind,src=" + str(directory) + ",dst=/probe,readonly", "ubuntu:24.04",
-                 "/bin/sh", "-ec", "apt-get update -qq && DEBIAN_FRONTEND=noninteractive "
-                 "apt-get install -y -qq --no-install-recommends apparmor && "
-                 "apparmor_parser -Q -K /probe/persona-hub.apparmor"], 180)
             security = run(["docker", "info", "--format", "{{json .SecurityOptions}}"], 15,
                            capture_output=True, text=True)
             apparmor = ["--security-opt=apparmor=persona-hub"] if "apparmor" in security.stdout.lower() else []
+            # The hosted AppArmor step installs and loads the checked-in profile.
+            # Its parser can check syntax offline as an ordinary user.
+            policy = directory / "persona-hub.apparmor"
+            policy.write_text((ROOT / "deploy/docker/persona-hub.apparmor").read_text())
+            hosted_parser = (
+                apparmor
+                and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+                and shutil.which("apparmor_parser")
+            )
+            if hosted_parser or os.environ.get("PERSONA_CI_HOST_APPARMOR_PARSER") == "1":
+                run(["apparmor_parser", "-Q", "-K", str(policy)], 30)
+            else:
+                run(["docker", "run", "--rm", "--name", container + "-policy",
+                     "--mount", "type=bind,src=" + str(directory) + ",dst=/probe,readonly", "ubuntu:24.04",
+                     "/bin/sh", "-ec", "apt-get update -qq && DEBIAN_FRONTEND=noninteractive "
+                     "apt-get install -y -qq --no-install-recommends apparmor && "
+                     "apparmor_parser -Q -K /probe/persona-hub.apparmor"], 180)
             print("AppArmor: named host profile required" if apparmor else "AppArmor: disabled on this test host; profile syntax checked", flush=True)
             checks = {
                 "sandbox": ["TestLinuxSandboxForReal"],

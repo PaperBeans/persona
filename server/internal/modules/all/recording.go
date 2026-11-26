@@ -10,5 +10,5 @@ import (
 // The recording module: its layer, which the assistant reaches through internal/recordinghost.
 func init() {
 	modules = append(modules, recording.Module{})
-	recordinghost.Provide(func(h recordinghost.Host) recordinghost.Layer { return recording.New(h) })
+	recordinghost.Provide(recording.Module{}.Info().ID, func(h recordinghost.Host) recordinghost.Layer { return recording.New(h) })
 }

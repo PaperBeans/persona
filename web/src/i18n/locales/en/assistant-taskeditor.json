@@ -110,7 +110,7 @@
   "cron_checking": "Checking…",
   "cron_next": "Next runs ({zone})",
   "cron_examples": "Examples",
-  "execution_options": "Execution options",
+  "execution_options": "Advanced",
   "execution_inheritance": "Empty choices follow Main chat. Choosing another agent uses that agent’s model and thinking defaults. These choices apply only to this task.",
   "execution_computer": "Computer",
   "computer_default": "Follow Assistant · {name}",

@@ -39,6 +39,12 @@ export const PERSONA_STATES: { id: PersonaState; title: string }[] = [
   { id: "offline", title: t("lib-persona.state_offline") },
 ];
 
+/** Per-state upload metadata recorded in manifest.source.states for editing (#15449). */
+export interface UploadStateSource {
+  mark?: boolean;
+  own?: boolean;
+}
+
 /** persona.json, format 1. */
 export interface PersonaManifest {
   format: number;
@@ -54,7 +60,15 @@ export interface PersonaManifest {
   avatar: { sizes: Record<string, string>; safe?: number; svg?: string; dark?: { sizes?: Record<string, string>; svg?: string } };
   /** The built-in look whose icon stands for this one where only the app's own icons can be shown. */
   app_icon_fallback?: string;
-  source?: { kind: string; extension?: string; extension_name?: string };
+  source?: {
+    kind: string;
+    extension?: string;
+    extension_name?: string;
+    uploaded_at?: string;
+    color?: string | { auto?: boolean; seed?: string; mode?: string };
+    color_auto?: boolean;
+    states?: Partial<Record<PersonaState, UploadStateSource | boolean>>;
+  };
   dot: { size?: number; states: Record<string, { file: string; fps?: number; frames?: number }> };
   colors?: { light?: Record<string, string>; dark?: Record<string, string> };
 }

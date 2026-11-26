@@ -93,4 +93,33 @@ class ChatListTest {
         assertEquals(-572, lastLineScrollOffset(700, 28, topPadding = 100))
         assertEquals(0, lastLineScrollOffset(120, 28, topPadding = 100))
     }
+
+    @Test fun bottomThresholdsRejectOverscrollAndTolerateSmallSettleJitter() {
+        val leavePx = 32
+        val returnPx = 8
+
+        // At the newest edge or overscrolling downward (cannot scroll backward): never leaves bottom.
+        assertFalse(hasLeftBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0, canScrollBackward = false, leaveThresholdPx = leavePx))
+        assertFalse(hasLeftBottom(firstVisibleItemIndex = 1, firstVisibleItemScrollOffset = 100, canScrollBackward = false, leaveThresholdPx = leavePx))
+        // Small micro-wiggle within leave threshold does not exit followsEnd.
+        assertFalse(hasLeftBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 10, canScrollBackward = true, leaveThresholdPx = leavePx))
+        assertFalse(hasLeftBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = leavePx, canScrollBackward = true, leaveThresholdPx = leavePx))
+        // Crossing threshold or scrolling to an older item exits followsEnd.
+        assertTrue(hasLeftBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = leavePx + 1, canScrollBackward = true, leaveThresholdPx = leavePx))
+        assertTrue(hasLeftBottom(firstVisibleItemIndex = 1, firstVisibleItemScrollOffset = 0, canScrollBackward = true, leaveThresholdPx = leavePx))
+
+        // Direction check relative to resting/insertion anchor.
+        assertFalse(movedAwayFromBottom(0, 0, anchorIndex = 0, anchorOffset = 0))
+        assertFalse(movedAwayFromBottom(0, 4, anchorIndex = 0, anchorOffset = 10))
+        assertFalse(movedAwayFromBottom(0, 100, anchorIndex = 1, anchorOffset = 0))
+        assertTrue(movedAwayFromBottom(0, 33, anchorIndex = 0, anchorOffset = 0))
+        assertTrue(movedAwayFromBottom(1, 0, anchorIndex = 0, anchorOffset = 0))
+
+        // Auto-return accepts !canScrollBackward or small settle offset at index 0.
+        assertTrue(isAtBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0, canScrollBackward = false, returnTolerancePx = returnPx))
+        assertTrue(isAtBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 2, canScrollBackward = true, returnTolerancePx = returnPx))
+        assertTrue(isAtBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = returnPx, canScrollBackward = true, returnTolerancePx = returnPx))
+        assertFalse(isAtBottom(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = returnPx + 1, canScrollBackward = true, returnTolerancePx = returnPx))
+        assertFalse(isAtBottom(firstVisibleItemIndex = 1, firstVisibleItemScrollOffset = 0, canScrollBackward = true, returnTolerancePx = returnPx))
+    }
 }

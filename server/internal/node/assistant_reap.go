@@ -109,40 +109,100 @@ func (n *Node) takeAssistant(id string) *assistantProc {
 	return p
 }
 
-// stopAtConnectionEnd ends the conversations ids and the warm spare of a node without a resident keeper, whose
-// process exits once its connection has (`node --stdio`), and returns when they have exited (stopAndWait). Each
-// process leads its own group, so nothing else takes them down with the node: a node the manager killed left them
-// running beside the processes the next node started for the same conversations, the old ones refused the
-// assistant's tools by that node (mcpSession) and their background tasks reported lost while still running (#4259).
-// What they were running is still remembered (rememberTasks), so the next node tells each conversation.
+// stopAtConnectionEnd ends the conversations ids, the warm spare, and any already-retired assistant process owned by
+// a node without a resident keeper, whose process exits once its connection has (`node --stdio`), and returns when
+// they have exited (stopAndWait). Each process leads its own group, so nothing else takes them down with the node: a
+// node the manager killed left them running beside the processes the next node started for the same conversations, the
+// old ones refused the assistant's tools by that node (mcpSession) and their background tasks reported lost while
+// still running (#4259). What they were running is still remembered (rememberTasks), so the next node tells each
+// conversation.
 func (n *Node) stopAtConnectionEnd(ids []string, spare *assistantProc) {
+	seen := map[*assistantProc]bool{}
 	var procs []*assistantProc
+	add := func(p *assistantProc) {
+		if p == nil || seen[p] {
+			return
+		}
+		seen[p] = true
+		procs = append(procs, p)
+	}
 	for _, id := range ids {
 		n.cancelAssistantRecovery(id)
-		if p := n.takeAssistant(id); p != nil {
-			procs = append(procs, p)
+		add(n.takeAssistant(id))
+	}
+	add(spare)
+	// Retired processes (timed-out startup attempts, interrupted turns, replaced spares) have already been removed
+	// from n.procs / n.spare, but remain in liveAssistants until their process group has exited and been swept.
+	liveAssistants.Range(func(k, _ any) bool {
+		if p := k.(*assistantProc); p.owner.Load() == n {
+			add(p)
 		}
-	}
-	if spare != nil {
-		procs = append(procs, spare)
-	}
+		return true
+	})
 	if left := stopAndWait(procs); left > 0 {
 		n.logger.Printf("assistant: %d conversations still running after SIGKILL as the connection ended", left)
 	}
+}
+
+// stopAllAssistants stops every conversation, warm spare, and retired assistant process owned by n, waiting until all
+// have exited.
+func (n *Node) stopAllAssistants() {
+	n.mu.Lock()
+	ids := make([]string, 0, len(n.procs))
+	for id := range n.procs {
+		ids = append(ids, id)
+	}
+	spare := n.spare
+	n.spare = nil
+	n.mu.Unlock()
+	n.stopAtConnectionEnd(ids, spare)
 }
 
 // reaperStopWait bounds how long Serve waits for reapAssistants to stop the conversations as the connection ends:
 // stopAndWait's own bounds, and a margin.
 func reaperStopWait() time.Duration { return keeperStopGrace + keeperKillWait + time.Second }
 
+// inShellInit: this process was launched through an interactive shell (zsh -ic / bash -ic) that has not finished
+// sourcing its rc files yet (no assistantShellReady line and no assistant JSON output). Interactive shells ignore
+// SIGTERM, so sending SIGTERM to the group kills the current rc-file child and lets the shell continue into launching
+// claude after stop() was called; there is no claude process yet to shut down gracefully.
+func (p *assistantProc) inShellInit() bool {
+	if p.agent != "claude" || p.ready == nil || p.tui || proto.IsExternalLauncher(p.launcher) {
+		return false
+	}
+	if p.hasStarted() {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.shellReadyAt.IsZero()
+}
+
 func (p *assistantProc) stop() {
-	_ = p.stdin.Close()
-	if p.cmd.Process != nil {
-		_ = osproc.StopGroup(p.cmd.Process.Pid, false)
+	if p.stopped.Swap(true) {
+		return
+	}
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	if p.cmd == nil || p.cmd.Process == nil {
+		return
+	}
+	if p.exited != nil && !p.alive() {
+		return
+	}
+	if p.inShellInit() {
+		_ = osproc.StopGroup(p.cmd.Process.Pid, true)
+		return
+	}
+	_ = osproc.StopGroup(p.cmd.Process.Pid, false)
+	if p.exited != nil {
 		go func() {
+			t := time.NewTimer(5 * time.Second)
+			defer t.Stop()
 			select {
 			case <-p.exited:
-			case <-time.After(5 * time.Second):
+			case <-t.C:
 				_ = osproc.StopGroup(p.cmd.Process.Pid, true)
 			}
 		}()
@@ -183,9 +243,12 @@ func (p *assistantProc) idleCompactable() bool {
 	return p.agent == "claude" && !p.round && !p.compacting && !p.compacted && p.context >= threshold
 }
 
-// compactIdle sends /compact to an idle process. It is not a turn: the conversation stays as it was in the app (the
-// transcript shows a notice), and the process is let go when idle again.
+// compactIdle sends /compact to an idle process before releasing it. Main chat
+// compactions report their result using the session's existing status.
 func (n *Node) compactIdle(p *assistantProc) {
+	if n.reload.Preparing() {
+		return
+	}
 	// Not while a send, a restore or the user's compaction has this conversation (assistantLife), and only on the same
 	// process, still idle: the next sweep tries again.
 	unlock, ok := n.assistantLife.tryLock(p.id)
@@ -205,13 +268,37 @@ func (n *Node) compactIdle(p *assistantProc) {
 	}
 	n.forgetCacheWarm(p.id)
 	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": n.assistantCompactCommand(p.id)}})
+	if n.reload.Preparing() {
+		return
+	}
 	p.mu.Lock()
+	if !p.alive() || p.busy || p.compacting || p.manual {
+		p.mu.Unlock()
+		return
+	}
 	tokens := p.context
+	startedAt := time.Now().UTC()
 	p.compacting, p.compacted = true, true
-	p.lastActive = time.Now()
+	p.releaseCompaction = state.IsMain
+	p.lastActive = startedAt
 	p.mu.Unlock()
+	if state.IsMain {
+		n.state.update(p.id, func(st *sessionState) bool {
+			st.Compaction = &proto.Compaction{State: proto.CompactionRunning, StartedAt: startedAt}
+			if st.IdleCompaction != nil && !st.IdleCompaction.Attempted {
+				a := *st.IdleCompaction
+				a.recordAttempt(startedAt)
+				st.IdleCompaction = &a
+			}
+			return true
+		})
+		n.notifySessions()
+	}
 	if err := p.write(line); err != nil {
 		n.logger.Printf("assistant %s: compact: %v", p.id[:8], err)
+		if state.IsMain {
+			n.compactionEnded(p.id, "没能开始压缩："+err.Error())
+		}
 		n.stopAssistant(p.id)
 		return
 	}
@@ -262,6 +349,7 @@ func (n *Node) sweepAssistants() {
 	}
 	n.mu.Unlock()
 	release := n.assistantReleases(ids)
+	reloading := n.reload.Preparing()
 	n.mu.Lock()
 	var stale *assistantProc
 	if n.spare != nil && time.Since(n.spare.born) > assistantSpareMaxAge {
@@ -278,7 +366,11 @@ func (n *Node) sweepAssistants() {
 			timedOut = append(timedOut, id)
 		}
 		if p.reapable(time.Now()) {
-			if p.idleCompactable() {
+			if p.releaseCompaction {
+				p.releaseCompaction = false
+				timedOut = append(timedOut, id)
+			}
+			if !reloading && p.idleCompactable() {
 				compact = append(compact, p)
 			} else {
 				idle = append(idle, id)

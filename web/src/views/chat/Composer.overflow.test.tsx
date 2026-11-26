@@ -70,14 +70,15 @@ it("keeps the original attachment recoverable when a failed send overflows the n
 
   await pick([new File(["first"], "original.txt", { type: "text/plain" })]);
   await resolveUpload(0, "/u/original.txt");
+  await until(() => expect(host.querySelectorAll("[data-composer-attachments] > [data-state]")).toHaveLength(1));
   act(() => host.querySelector<HTMLButtonElement>('button[data-testid="composer-send"]')!.click());
   expect(onSend).toHaveBeenCalledTimes(1);
-  expect(host.querySelectorAll("[data-testid=composer-files] > span")).toHaveLength(0);
+  expect(host.querySelectorAll("[data-composer-attachments] > [data-state]")).toHaveLength(0);
 
   await fillNextDraft(key);
   await act(async () => finishFirst(false));
 
-  expect(host.querySelectorAll("[data-testid=composer-files] > span")).toHaveLength(10);
+  expect(host.querySelectorAll("[data-composer-attachments] > [data-state]")).toHaveLength(10);
   const draftText = host.querySelector<HTMLTextAreaElement>("textarea")!.value;
   const recoverablePaths = [...getComposerFiles(key).map((file) => file.file?.path ?? ""), draftText];
   expect(recoverablePaths.join("\n")).toContain("/u/original.txt");

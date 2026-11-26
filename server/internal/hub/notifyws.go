@@ -65,19 +65,42 @@ func (o pushOutcome) reason() string {
 // where the push went, with the ln-mode reason it was held, so the assistant can tell the model whether a notify_user
 // notice reached a device, the briefing or nothing.
 func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title, text string, wants pushWants, collapseID, recordingID string, policy pushPolicy) pushOutcome {
+	todoPushID := ""
+	if policy.cardID == "" {
+		if id, _, ok := assistantwire.TodoPushKeyParts(policy.relatedKey); ok {
+			todoPushID = id
+		}
+	}
 	build := func(l i18n.Lang) map[string]any {
 		p := donePayloadIn(l, machineID, machine, sessionID, title, text)
 		if recordingID != "" {
 			p["recording_id"] = recordingID
 		}
 		if policy.cardID != "" {
-			p["interaction_id"] = policy.cardID
+			// card_id: the app keeps the push until the hub's withdrawal names it (an app from before reads only
+			// interaction_id, and clears it when its card list next comes without it).
+			p["card_id"], p["interaction_id"] = policy.cardID, policy.cardID
+		} else if todoPushID != "" {
+			// Needs-user / to-do owner pushes carry card_id and todo_id (never interaction_id) so iOS recalls them on
+			// todo-ask:<id> without NotificationWithdrawal.stale sweeping unanswered ones (#13916, #14388).
+			p["card_id"], p["todo_id"] = assistantwire.TodoAskCardID(todoPushID), todoPushID
 		}
 		return p
 	}
 	var sent func(Device)
 	if policy.cardID != "" {
-		sent = func(d Device) { h.push.cardPushedTo(policy.cardID, d.DeviceID) }
+		sent = func(d Device) {
+			if hasFeature(d, featureWithdraw) {
+				h.push.ownerCardPushedTo(policy.cardID, d.DeviceID)
+			}
+		}
+	} else if todoPushID != "" {
+		cardID := assistantwire.TodoAskCardID(todoPushID)
+		sent = func(d Device) {
+			if hasFeature(d, featureWithdraw) {
+				h.push.ownerCardPushedTo(cardID, d.DeviceID)
+			}
+		}
 	}
 	if !h.sessionHiddenFromExtensions(machineID, sessionID) { // only of a session the extensions are shown (extension_private.go)
 		h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
@@ -124,7 +147,7 @@ func (h *Hub) notifyReply(owner, machineID, machine, sessionID, title, text stri
 func (h *Hub) notifyReplyKeyed(owner, machineID, machine, sessionID, title, text, key string) {
 	build := func(l i18n.Lang) map[string]any { return donePayloadIn(l, machineID, machine, sessionID, title, text) }
 	wants := pushWants{Kind: "input"}
-	policy := pushPolicy{level: assistantwire.LevelP0, relatedKey: replyKey(sessionID, text, key), title: title, body: text}
+	policy := pushPolicy{kind: assistantwire.NotifyReply, level: assistantwire.LevelP0, relatedKey: replyKey(sessionID, text, key), title: title, body: text}
 	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "", wants.fn(), wants.quiet(), nil, nil); heldReason == "" {
 		h.notifyWSFrom(owner, "reply", build, wants.fn(), wants.quiet())
 	}
@@ -153,8 +176,9 @@ func (h *Hub) notifyDecide(owner, machineID, machine, sessionID, title, text str
 // notifyDecideKeyed is notifyDecide with the manager's related key (assistantwire.Notification). A key of the to-do
 // and a reason ("todo:<id>:decide", assistantwire.TodoPushKey) rings once while the to-do still waits on the owner for
 // it (push_todo_dedup.go); without one (an older manager) the key is the round, and each round rings as before. The
-// payload is as before either way. It never carries an interaction_id: the iOS app clears a delivered push whose
-// interaction_id is not in its card list as stale, and a decision is never in that list.
+// payload carries todo_id (never interaction_id: the iOS app clears a delivered push whose interaction_id is not in its
+// card list as stale, and a decision is never in that list) and records withdraw-capable devices under TodoAskCardID so
+// EventFleetResolved(todo-ask:<id>) recalls it (#13916).
 func (h *Hub) notifyDecideKeyed(owner, machineID, machine, sessionID, title, text string, todo assistantwire.NotifyTodo, relatedKey string) {
 	key := strings.TrimSpace(relatedKey)
 	if id, _, ok := assistantwire.TodoPushKeyParts(key); !ok || id != todo.ID {
@@ -164,13 +188,33 @@ func (h *Hub) notifyDecideKeyed(owner, machineID, machine, sessionID, title, tex
 	if !h.push.claimTodoPush(key) {
 		return // the same to-do's decision rang and still waits on the owner
 	}
+	// The decision's card (TodoAskCardID): once the to-do no longer waits on the owner, the manager names it
+	// (EventFleetResolved) and the push leaves the devices it went to. card_id and todo_id only, never interaction_id:
+	// an app from before would clear a delivered push whose interaction_id its card list lacks, and a decision is never
+	// in it (#13916, #14388).
+	card := ""
+	if todo.ID != "" {
+		card = assistantwire.TodoAskCardID(todo.ID)
+	}
 	build := func(i18n.Lang) map[string]any {
-		return decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
+		p := decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
+		if card != "" {
+			p["card_id"] = card
+		}
+		return p
+	}
+	var sent func(Device)
+	if card != "" {
+		sent = func(d Device) {
+			if hasFeature(d, featureWithdraw) {
+				h.push.ownerCardPushedTo(card, d.DeviceID)
+			}
+		}
 	}
 	wants := pushWants{Kind: "input"}
 	sum := sha256.Sum256([]byte("todo_decide\x00" + todo.ID))
-	policy := pushPolicy{level: assistantwire.LevelP0, relatedKey: key, title: title, body: text}
-	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "td_"+hex.EncodeToString(sum[:12]), wants.fn(), wants.quiet(), nil, nil); heldReason == "" {
+	policy := pushPolicy{kind: assistantwire.NotifyDecide, level: assistantwire.LevelP0, relatedKey: key, title: title, body: text}
+	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "td_"+hex.EncodeToString(sum[:12]), wants.fn(), wants.quiet(), nil, sent); heldReason == "" {
 		h.notifyWSFrom(owner, "assistant", build, wants.fn(), wants.quiet())
 	}
 }
@@ -212,7 +256,7 @@ func (h *Hub) notifyInteractionHinted(owner string, ix proto.Interaction, machin
 	if ix.Kind == proto.IxElicitation {
 		// Only what can show an MCP form or link: the phones that registered for one (#2433; a tap opens the card,
 		// the push has no buttons) and the connections that declared it.
-		policy := pushPolicy{level: level, relatedKey: key, title: summary, depth: depth, track: track}
+		policy := pushPolicy{kind: assistantwire.NotifyInput, level: level, relatedKey: key, title: summary, depth: depth, track: track}
 		if heldReason := h.push.sendCard(owner, policy, build, ix.ID, wants.fn(), wants.quiet(), takesElicitation); heldReason == "" {
 			h.notifyWSFrom(owner, "interaction", build, wants.fn(), wants.quiet(), "elicitation")
 		}
@@ -221,7 +265,7 @@ func (h *Hub) notifyInteractionHinted(owner string, ix proto.Interaction, machin
 		// desktops is there too (desktops.go); which cards those are is owner's to say. The desktop app's online check
 		// follows in sendCard and notifyWSFrom.
 		fn := alertWanted(wants.fn(), linkCovered && h.linkDesktopOnline(owner))
-		policy := pushPolicy{level: level, relatedKey: key, title: summary, depth: depth, track: track}
+		policy := pushPolicy{kind: assistantwire.NotifyInput, level: level, relatedKey: key, title: summary, depth: depth, track: track}
 		if heldReason := h.push.sendCard(owner, policy, build, ix.ID, fn, wants.quiet(), nil); heldReason == "" {
 			h.notifyWSFrom(owner, "interaction", build, fn, wants.quiet())
 		}
@@ -298,7 +342,7 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 	defer h.mu.Unlock()
 	live := map[string]bool{} // devices whose ws_notify socket accepted this event
 	for c := range h.clients {
-		if !c.has("ws_notify") {
+		if c.role == roleReadOnly || c.role == roleScoped || !c.has("ws_notify") {
 			continue
 		}
 		if len(required) > 0 && !c.has(required[0]) {
@@ -347,6 +391,9 @@ func notifyMessage(kind string, payload map[string]any) map[string]any {
 	}
 	if td, ok := payload["todo"]; ok { // a decision's push (decidePayloadIn)
 		msg["todo"] = td
+	}
+	if id, ok := payload["todo_id"]; ok { // a to-do decision or needs-user push (#13916)
+		msg["todo_id"] = id
 	}
 	if health, ok := payload["health"]; ok {
 		msg["health"] = health

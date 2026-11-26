@@ -66,7 +66,7 @@ func TestRelayFailureClassification(t *testing.T) {
 	}
 	for _, code := range []string{proto.CodeClaudeMissing, proto.CodeLauncherMissing, proto.CodeNodeOutdated, "no_device",
 		"adapter_credentials_missing", "adapter_disabled", "adapter_config_conflict", "launcher_out_of_scope", "launcher_own_service",
-		"launcher_other_kind", "assistant_launcher_profile_switch"} {
+		"launcher_other_kind", "assistant_launcher_profile_switch", "assistant_model_unresolved"} {
 		cases = append(cases, row{code, coded(code), relayFailedSetup})
 	}
 	for _, code := range relayBusyCodes {
@@ -347,6 +347,7 @@ func TestQueuedRefusalForGoodEndsByKind(t *testing.T) {
 			relayRetryGap = 0 // a message that stays is tried on every drain
 			t.Cleanup(func() { relayRetryGap = gap })
 			s, f, tries := relayRefusalEnv(t, &rpc.Error{Code: "unheard_of", Message: "this conversation will not take it"})
+			setSettings(t, s, func(v *Settings) { on := true; v.ChatReplyRelay = &on }) // a chat_reply is only delivered while the relay is on
 			fromConversation := tc.msg.Tool == "conversation_send" || tc.msg.Tool == "conversation_new"
 			s.queueRelay("side1", tc.msg)
 

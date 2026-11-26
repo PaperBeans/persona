@@ -28,6 +28,13 @@ export function useSidePanelBack(): (() => void) | undefined {
   return useContext(SidePanelBackContext);
 }
 
+/** Forces machine-file links and cards inside a read-only archive view to open read-only file panels. */
+export const ReadOnlyFileContext = createContext(false);
+
+export function useReadOnlyFile(): boolean {
+  return useContext(ReadOnlyFileContext);
+}
+
 /** A diff opened straight at a line (a comment's card, lib/comments.ts): which diff, which file, which line. */
 export interface GitSpot {
   /** The repository-relative path git reports. */
@@ -61,8 +68,9 @@ export type Panel =
   | { kind: "review"; mid: string; sid: string; cwd: string; scope?: "uncommitted" | "branch" | "commit"; at?: ReviewSpot }
   /** The transcript's own edits, by exchange or session: `turn` scopes the exchange and `at` selects a file / call. */
   | { kind: "changes"; mid: string; sid: string; turn?: string; at?: { path: string; call?: string } }
-  /** `sid`: the session whose message box takes the comments made in it (else the one last used). */
-  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string }
+  /** `sid`: the session whose message box takes the comments made in it (else the one last used). `readOnly`: suppress
+   *  edit and Show-in-Files write entries (for read-only archive views such as disabled Health data). */
+  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string; readOnly?: boolean }
   /** `manager`: the chat's it was opened from, which reads it (none: the default's). */
   | { kind: "link"; url: string; title?: string; manager?: string }
   /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its
@@ -83,6 +91,11 @@ export type Panel =
    *  and workflow runs. `run`: a workflow run's task_id; `task`: a background command's id; `from`: Session overview when
    *  that view opened the detail. */
   | { kind: "background"; mid: string; sid: string; run?: string; task?: string; from?: "overview" }
+  /** A subagent's full conversation opened from Session overview, an expanded TaskCard, or a deep link (#14323):
+   *  renders embedded ChatView in the right panel (full-screen overlay on narrow viewports) while keeping the parent chat
+   *  in place. `mid`/`sid` name the subagent (including `<parent>@<agent>` or cross-machine child); `parentMid`/`parentSid`
+   *  name the parent session; `call` is the parent transcript's launching call ID when known. */
+  | { kind: "subagent"; mid: string; sid: string; parentMid?: string; parentSid?: string; call?: string; from?: "overview" | "card" | "link" }
   /** The session's dev server in a headless browser on its computer (docs/web/preview.md); `port` / `path`: the one to
    *  show (a localhost link of a reply), else the one shown last or the first running one. */
   | { kind: "preview"; mid: string; sid: string; cwd: string; port?: number; path?: string };
@@ -144,9 +157,10 @@ function panelTargetKey(p: Panel): string {
     case "team":
     case "sides":
     case "background":
+    case "subagent":
       return `${p.kind}:${p.mid}/${p.sid}`;
     case "file":
-      return `file:${p.mid}:${p.path}`;
+      return `file:${p.mid}:${p.path}${p.readOnly ? ":ro" : ""}`;
     case "link":
       return `link:${p.manager ?? ""}:${p.url}`;
     case "task":
@@ -168,7 +182,7 @@ export function openPanel(p: Panel | null, options?: OpenPanelOptions) {
   // what had the focus when the panel opened (its header button): closing gives the focus back to it (#5155). Called
   // from the click, before the panel renders, so it is never something inside the panel; a panel replacing another keeps
   // the first one's, except an overview detail, which returns to the overview row that opened it.
-  if (p && (!current || (p.kind === "background" && p.from === "overview")))
+  if (p && (!current || ((p.kind === "background" || p.kind === "subagent") && p.from === "overview")))
     opener = typeof document === "undefined" ? null : document.activeElement;
   if (!p) {
     history = [];

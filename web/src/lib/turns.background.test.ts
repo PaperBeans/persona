@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { needsYouBySupervisor, type NeedsYouItem } from "./assistant-entries";
-import { foldsBackgroundRounds } from "./background-fold";
+import { foldsBackgroundRounds, relayNeedsAttention } from "./background-fold";
 import { chatLines, type ChatLine } from "./turns";
 import type { Todo } from "./todos";
-import type { Item } from "./types";
+import type { Item, Session } from "./types";
 
 // Background rounds in the main conversation (#4314, docs/assistant/assistant.md "Background rounds").
 
@@ -22,7 +22,7 @@ const narration = (seq: number): Item => ({ ...answer(seq, "Checking."), narrati
 const call = (seq: number, name: string, tool_input: Record<string, unknown> = {}): Item => ({ id: `t${seq}#0`, seq, role: "assistant", kind: "tool_use", tool_use_id: `call${seq}`, tool_name: name, tool_input });
 const result = (seq: number, use: Item, text = "ok", is_error = false): Item => ({ id: `r${seq}#0`, seq, role: "user", kind: "tool_result", tool_use_id: use.tool_use_id, text, is_error });
 
-const on = { background: true, main: true };
+const on = { background: true, foldRoutineRelayReplies: true };
 const kinds = (lines: ChatLine[]) => lines.map((l) => l.kind);
 const users = (lines: ChatLine[]) => lines.flatMap((l) => l.kind === "segment" ? [l.seg.user] : l.kind === "supervision" ? l.lines.flatMap((c) => c.kind === "segment" ? [c.seg.user] : []) : []);
 
@@ -79,6 +79,53 @@ describe("background rounds in the main conversation", () => {
     }
   });
 
+  it.each([undefined, false, true])("uses only an explicit opt-in for a nonempty relay reply (%s)", (preference) => {
+    const reply = answer(2, "The delegated check finished.");
+    const items = [relayed(1), reply];
+    const [line] = chatLines(items, { background: true, foldRoutineRelayReplies: preference });
+    expect(line.kind).toBe(preference === true ? "supervision" : "segment");
+    expect(kinds(chatLines(items, { background: false, foldRoutineRelayReplies: preference }))).toEqual(["segment"]);
+    const direct = answer(4, "Here is your requested result.");
+    const withPendingRelay = chatLines([...items, mine(3), direct, relayed(5)], { background: true, foldRoutineRelayReplies: preference });
+    expect(withPendingRelay.some((l) => l.kind === "segment" && l.seg.answer === direct)).toBe(true);
+  });
+
+  it("keeps the latest failed or blocked reply visible without opening older routine replies", () => {
+    const completed = [relayed(1), answer(2, "First result"), relayed(3), answer(4, "Second result")];
+    const lines = chatLines([...completed, relayed(5)], { ...on, latestReplyNeedsAttention: true });
+    expect(kinds(lines)).toEqual(["supervision", "segment", "supervision"]);
+    expect(lines[1].kind === "segment" && lines[1].seg.answer?.id).toBe(completed[3].id);
+  });
+
+  it.each([{ awaits_reply: true }, { turn_error_kind: "model_refusal" }, { status: "blocked" }, { status: "interrupted" }])(
+    "keeps a reported question or failure outside the quiet relay %#", (fields) => {
+      const reply = answer(2, "Please choose the next step.");
+      const session = { status: "done", ...fields } as Session;
+      const lines = chatLines([relayed(1), reply], { ...on, latestReplyNeedsAttention: relayNeedsAttention(session) });
+      expect(lines.some((line) => line.kind === "segment" && line.seg.answer?.id === reply.id)).toBe(true);
+    },
+  );
+
+
+  it("keeps a host-failed relay on main even with a successful silent receipt", () => {
+    const finish = call(2, "mcp__persona__supervision_finish");
+    const receipt = result(3, finish, '{"visibility":"silent"}');
+    const reply = answer(4, "The host reported a failure after this reply.");
+    const items = [relayed(1), finish, receipt, reply];
+    const session = { status: "done", failure_reason: "The host stopped the turn on an error." } as Session;
+    const visible = chatLines(items, { ...on, main: true, latestReplyNeedsAttention: Boolean(session.failure_reason || relayNeedsAttention(session)) });
+    expect(kinds(visible)).toEqual(["segment"]);
+    expect(visible[0]).not.toMatchObject({ completedSilent: true });
+
+    // Without an attention signal, the same canonical silent round still belongs in Background activity.
+    const ordinary = chatLines(items, { ...on, main: true });
+    expect(ordinary[0]).toMatchObject({ kind: "supervision", completedSilent: true });
+  });
+
+  it("shows a cut-off API error as its usual error card even with routine folding enabled", () => {
+    expect(kinds(chatLines([relayed(1), answer(2, "API Error: 529 overloaded")], on))).toContain("apiError");
+  });
+
   it("keeps a routine main-conversation relay reply folded and replayable", () => {
     const reply = answer(2, "The delegated check finished.");
     const [line] = chatLines([relayed(1), reply], on);
@@ -87,6 +134,33 @@ describe("background rounds in the main conversation", () => {
     // The same round in a leader conversation keeps the existing visible-reply behavior.
     const [leader] = chatLines([relayed(1), reply], { background: true });
     expect(leader.kind).toBe("segment");
+  });
+
+  it("marks only an explicitly promoted main relay input for full source folding", () => {
+    const ask = call(2, "mcp__persona__ask_user", { question: "Send the brief?" });
+    const items = [relayed(1), ask, result(3, ask, "Yes"), answer(4)];
+    const [promoted] = chatLines(items, { ...on, main: true });
+    expect(promoted.kind).toBe("segment");
+    expect(users([promoted])[0]?.promotedRelay).toBe(true);
+    expect(promoted.kind === "segment" && promoted.seg.answer).toEqual(items[3]);
+    expect(promoted.kind === "segment" && promoted.seg.steps.some((step) => step.kind === "tool" && step.use === ask)).toBe(true);
+
+    const [pending] = chatLines([relayed(1), ask], { ...on, main: true, live: true });
+    expect(pending.kind).toBe("segment");
+    expect(users([pending])[0]?.promotedRelay).toBe(true);
+
+    // Ordinary visible replies, leader and switch-off rounds, quiet rounds, and owner input keep their existing rules.
+    const [ordinary] = chatLines([relayed(1), answer(2)], { background: true, main: true });
+    expect(users([ordinary])[0]?.promotedRelay).toBeUndefined();
+    const [leader] = chatLines(items, { background: true });
+    expect(users([leader])[0]?.promotedRelay).toBeUndefined();
+    const [off] = chatLines(items, { main: true });
+    expect(users([off])[0]?.promotedRelay).toBeUndefined();
+    const [quiet] = chatLines([relayed(1)], { ...on, main: true });
+    expect(quiet.kind).toBe("supervision");
+    expect(users([quiet])[0]?.promotedRelay).toBeUndefined();
+    const [own] = chatLines([mine(1), answer(2)], { ...on, main: true });
+    expect(users([own])[0]?.promotedRelay).toBeUndefined();
   });
 
   it("keeps a round that asked the user (ask_user) shown, its prompt still hidden", () => {

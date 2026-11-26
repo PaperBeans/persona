@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.serialization.json.JsonObject
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -278,22 +280,54 @@ class ChatBottomChromeCompactTest {
                 settle()
             }
             val trayBar = rule.onNodeWithTag("assistant-tray-bar").getUnclippedBoundsInRoot()
+            val trayEntry = rule.onNodeWithTag("assistant-entry-needs").getUnclippedBoundsInRoot()
+            val trayEntryTouch = rule.onNodeWithTag("assistant-entry-needs").fetchSemanticsNode().touchBoundsInRoot
             val queueItem = rule.onNodeWithContentDescription("Item 1: Check the release checklist and regression results").getUnclippedBoundsInRoot()
             val field = rule.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()
-            val add = rule.onNodeWithContentDescription("Add attachments and quick messages").getUnclippedBoundsInRoot()
+            val addNode = rule.onNodeWithContentDescription("Add attachments and quick messages")
+            val add = addNode.getUnclippedBoundsInRoot()
+            val addTouch = addNode.fetchSemanticsNode().touchBoundsInRoot
             val root = rule.onNodeWithTag("bottom-chrome-shot").getUnclippedBoundsInRoot()
+            val minTouchPx = with(rule.density) { Tokens.MinTouch.android.toPx() }
+
+            // Tray bar height matches the visible entry pill (no +6/+9dp minimumInteractiveComponentSize layout bloat).
+            assertEquals("$s dark=$isDark: tray bar matches visible entry height", trayEntry.height.value, trayBar.height.value, 0.5f)
+            assertTrue("$s dark=$isDark: tray bar height (${trayBar.height}) < 48dp", trayBar.height < Tokens.MinTouch.android)
+            assertTrue("$s dark=$isDark: tray entry keeps 48dp touch height", trayEntryTouch.height >= minTouchPx - 0.5f)
 
             assertTrue("$s dark=$isDark: tray bar above queue row", trayBar.bottom <= queueItem.top)
             assertTrue("$s dark=$isDark: queue row above input field", queueItem.bottom <= field.top)
             assertTrue("$s dark=$isDark: input field above bottom toolbar", field.bottom <= add.top)
-            assertTrue("$s dark=$isDark: add button touch height >= 48dp", add.height >= Tokens.MinTouch.android)
+            assertTrue("$s dark=$isDark: add button touch width >= 48dp", addTouch.width >= minTouchPx - 0.5f)
+            assertTrue("$s dark=$isDark: add button touch height >= 48dp", addTouch.height >= minTouchPx - 0.5f)
+            if (s != AppStyle.Glass) {
+                val launcherChip = rule.onNodeWithText("Default: agy").getUnclippedBoundsInRoot()
+                val launcherTouch = rule.onNodeWithText("Default: agy").fetchSemanticsNode().touchBoundsInRoot
+                val modeChip = rule.onNodeWithTag("chat-composer-mode-hint").getUnclippedBoundsInRoot()
+                val queueToLauncher = launcherChip.top - queueItem.bottom
+                val chipRowToFieldText = field.top - launcherChip.bottom
+                assertEquals("$s dark=$isDark: launcher chip keeps 36dp visual height", JChipTokens.height.value, launcherChip.height.value, 0.5f)
+                assertEquals("$s dark=$isDark: mode hint chip matches launcher 36dp visual height", launcherChip.height.value, modeChip.height.value, 0.5f)
+                assertTrue("$s dark=$isDark: launcher chip keeps 48dp touch height", launcherTouch.height >= minTouchPx - 0.5f)
+                // Queue row bottom includes 2dp card bottom + 2dp strip bottom + 4dp composer top = 8dp (down from 14-16dp).
+                assertTrue("$s dark=$isDark: queue-to-launcher gap ($queueToLauncher) in 4..9dp", queueToLauncher in 4.dp..9.dp)
+                // Launcher and mode chips share one flush row with matching top/bottom visual bounds (#13661) and no 48dp box bloat.
+                assertEquals("$s dark=$isDark: launcher and mode chips align on top edge", launcherChip.top.value, modeChip.top.value, 0.5f)
+                assertEquals("$s dark=$isDark: launcher and mode chips align on bottom edge", launcherChip.bottom.value, modeChip.bottom.value, 0.5f)
+                assertTrue("$s dark=$isDark: mode chip sits beside launcher without overlap", modeChip.left >= launcherChip.right + Tokens.Space.s - 0.5.dp)
+                assertTrue("$s dark=$isDark: chip row sits tight above input field ($chipRowToFieldText)", chipRowToFieldText in 4.dp..20.dp)
+                // Expanded toolbar uses 36dp vertical layout box with 4dp top/bottom breathing room and 48dp width.
+                assertEquals("$s dark=$isDark: toolbar button height is balanced 36dp", JChipTokens.height.value, add.height.value, 0.5f)
+                assertEquals("$s dark=$isDark: toolbar button width stays 48dp", Tokens.MinTouch.android.value, add.width.value, 0.5f)
+                assertTrue("$s dark=$isDark: toolbar keeps >= 4dp bottom breathing room above keyboard", root.bottom - add.bottom >= Tokens.Space.xs - 0.5.dp)
+            }
             val minQueueRow = if (s == AppStyle.Glass) JChipTokens.height else Tokens.Size.slimBar
             assertTrue("$s dark=$isDark: queue row height >= $minQueueRow", queueItem.height >= minQueueRow)
             assertTrue("$s dark=$isDark: toolbar stays inside viewport", add.bottom <= root.bottom)
 
-            // Total bottom chrome height stays well below 45% of 760dp (342dp), even with expanded toolbar + chips + queue.
+            // Total bottom chrome height drops further once 48dp layout-box bloat is removed.
             val totalChrome = root.bottom - trayBar.top
-            val maxAllowed = if (s == AppStyle.Glass) 295.dp else 335.dp
+            val maxAllowed = if (s == AppStyle.Glass) 275.dp else 285.dp
             assertTrue("$s dark=$isDark: total bottom chrome ($totalChrome) <= $maxAllowed", totalChrome <= maxAllowed)
 
             // Transcript remains clearly visible above the bottom stack.
@@ -342,6 +376,87 @@ class ChatBottomChromeCompactTest {
             assertTrue("$s IME: bottom toolbar stays inside viewport", add.bottom <= root.bottom)
             rule.onNodeWithContentDescription("Add attachments and quick messages").assertIsDisplayed()
             saveShot("stacked-ime-${s.name.lowercase()}-dark")
+        }
+    }
+
+    @Test
+    fun noQueueBottomChromeMaintainsTightSurfaceGapsAcrossStyles() {
+        val idlePersona = JsonCodec.decodeFromString<Session>(
+            """{"machine_id":"computer-a","session_id":"main","title":"Persona","assistant":true,"agent":"claude",
+                "launcher":"agy","permission_mode":"default","status":"idle","state":"idle"}""",
+        )
+        val noQueueSessions = object : SessionsRepository {
+            override val sessions = MutableStateFlow(listOf(idlePersona, running, blocked))
+            override val machines = MutableStateFlow(listOf(Machine("computer-a", "Computer A", online = true)))
+            override suspend fun refresh() = Unit
+        }
+        val tasks = TasksStore(api, connection, scope).also { it.reloadTodos() }
+        var style by mutableStateOf(AppStyle.Brief)
+        val composer = ChatComposerState().apply {
+            focused = true
+            value = TextFieldValue("")
+        }
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            PersonaTheme(darkTheme = true, reduceMotion = true, style = style) {
+                Box(
+                    Modifier.width(400.dp).height(760.dp)
+                        .background(PersonaTheme.palette.background)
+                        .testTag("bottom-chrome-shot"),
+                ) {
+                    key(style) {
+                        ChatScreen(
+                            main, chats, sender, interactions, noQueueSessions, {},
+                            chrome = ChatChromeBindings(
+                                actions = actions,
+                                connection = connection,
+                                tasks = tasks,
+                                assistantManagement = management,
+                                onOpenSession = {},
+                            ),
+                            renderStyle = ChatRenderStyle.Assistant,
+                            embedded = true,
+                            showTopBar = false,
+                            composerState = composer,
+                        )
+                    }
+                }
+            }
+        }
+        settle()
+        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+
+        val minTouchPx = with(rule.density) { Tokens.MinTouch.android.toPx() }
+        for (s in AppStyle.entries) {
+            style = s
+            settle()
+            rule.onNode(hasSetTextAction()).performClick()
+            settle()
+            val trayEntry = rule.onNodeWithTag("assistant-entry-needs").getUnclippedBoundsInRoot()
+            val field = rule.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()
+            val addNode = rule.onNodeWithContentDescription("Add attachments and quick messages")
+            val add = addNode.getUnclippedBoundsInRoot()
+            val addTouch = addNode.fetchSemanticsNode().touchBoundsInRoot
+
+            assertTrue("$s no-queue: add button keeps 48dp touch height", addTouch.height >= minTouchPx - 0.5f)
+            assertTrue("$s no-queue: input sits above toolbar without overlap", field.bottom <= add.top)
+
+            if (s != AppStyle.Glass) {
+                val launcher = rule.onNodeWithText("Default: agy").getUnclippedBoundsInRoot()
+                val trayToLauncher = launcher.top - trayEntry.bottom
+                // Exact surface gap: AssistantTrays bottom (2dp) + ComposerFrame top (4dp) = 6dp (down from 16dp).
+                assertTrue("$s no-queue: tray-to-launcher visible gap ($trayToLauncher) in 4..6.5dp", trayToLauncher in 4.dp..6.5.dp)
+                // Launcher chip sits directly above input (no modeHint): gap from chip bottom to field text top stays tight
+                // (4dp accessory bottom + input box vertical centering ~12-14dp = <= 20dp, down from ~26dp).
+                val launcherToFieldText = field.top - launcher.bottom
+                assertTrue("$s no-queue: launcher-to-field gap ($launcherToFieldText) <= 20dp", launcherToFieldText in 4.dp..20.dp)
+            } else {
+                // Glass has no accessory chip: tray capsule sits 6dp above the composer card, keeping tray-to-field-text <= 26dp
+                // (down from ~33dp before removing the capsule's +9dp touch-box padding) while preserving 44dp field / 4dp fieldBottom.
+                val trayToFieldText = field.top - trayEntry.bottom
+                assertTrue("$s no-queue: tray-to-field gap ($trayToFieldText) in 6..26dp", trayToFieldText in 6.dp..26.dp)
+            }
+            saveShot("no-queue-open-${s.name.lowercase()}-dark")
         }
     }
 }

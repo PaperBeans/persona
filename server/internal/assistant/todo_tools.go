@@ -15,12 +15,12 @@ import (
 )
 
 // The assistant's tools on Persona's todos (#1683, docs/assistant/todos.md "The assistant's todo tools"): list, read,
-// create, change, complete, reopen and delete them, as the apps do through /api/v1/todos. The user's own todos (no agent,
-// not a task) are created, changed, completed and reopened at once; deleting one is confirmed on the phone every time,
-// and so is completing or reopening a task or a todo agents work on (completing it closes its agents, tasks_close.go). A
-// health conversation asks before anything leaves its space (confirmOutbound). Plain todos only: work for an agent
-// still goes through task_plan. With manager.json's assistant.complete_agentless_todos enabled, a conversation can
-// complete its own agentless memo without the extra card; every other boundary stays the same (#11371).
+// create, change, complete, reopen and delete them, as the apps do through /api/v1/todos. Deleting a to-do is confirmed
+// on the phone every time, and reopening a task or a to-do with Agents is confirmed too. Completing a to-do asks on the
+// phone only when it has a real side effect: crossing conversation/supervisor ownership or stopping/closing a live or
+// hanging linked Agent (tasks_close.go). Plain to-dos and same-session to-dos with no active Agents complete directly.
+// A health conversation still asks before anything leaves its space (confirmOutbound). Plain todos only: work for an
+// agent still goes through task_plan.
 
 // The tools' descriptions and arguments are in prompts/mcp/todo (todo_list … todo_delete; tools.go lists them).
 
@@ -41,6 +41,10 @@ func (s *Service) toolTodo(ctx context.Context, machine, self, name string, args
 		return s.toolTodoDone(ctx, machine, self, name, args)
 	case "todo_delete":
 		return s.toolTodoDelete(ctx, machine, self, args)
+	case "todo_split":
+		return s.toolTodoSplit(ctx, args)
+	case "todo_merge":
+		return s.toolTodoMerge(ctx, args)
 	}
 	return "", fmt.Errorf("unknown tool %s", name)
 }
@@ -236,6 +240,18 @@ func (s *Service) toolTodoGet(ctx context.Context, machine, self string, args js
 			fmt.Fprintf(&b, "- %s/%s %q %s\n", ag.MachineID, ag.SessionID, clip(oneLine(ag.Title), 80), state)
 		}
 	}
+	if a, ok := s.askCopy(t.ID); ok && decisionOpen(&a, t) && !acceptAskEnded(&a, t) &&
+		a.RecheckAt.IsZero() && !ownerDecisionReturned(t.Supervision) {
+		if dismissed, err := s.decisionDismissed(ctx, t); err == nil && !dismissed {
+			fmt.Fprintf(&b, "pending user decision (needs_user, asked_at: %s): %s\n", a.AskedAt.UTC().Format(time.RFC3339Nano), a.Reason)
+			if a.Recommend != "" {
+				fmt.Fprintf(&b, "  recommended: %s\n", a.Recommend)
+			}
+			for _, o := range a.Options {
+				fmt.Fprintf(&b, "  - %s: %s\n", o.Label, o.LeadsTo)
+			}
+		}
+	}
 	if st := s.todoDB(); st != nil {
 		if ds, err := st.ListTodoDecisions(ctx, t.ID, false); err == nil && len(ds) > 0 {
 			b.WriteString("decisions in force:\n")
@@ -281,8 +297,14 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		Priority           string          `json:"priority"`
 		Project            string          `json:"project"`
 		Kind               string          `json:"kind"`
+		Audience           string          `json:"audience"`
+		DirectionID        string          `json:"direction_id"`
+		ItemType           string          `json:"item_type"`
 		PartOf             json.RawMessage `json:"part_of"`
 		After              json.RawMessage `json:"after"`
+		BlockedByPR        []string        `json:"blocked_by_pr"`
+		UnlockStage        string          `json:"unlock_stage"`
+		UnlockContracts    []string        `json:"unlock_contracts"`
 		RepositoryBindings json.RawMessage `json:"repository_bindings"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -319,6 +341,38 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		return "", err
 	}
 	plan.Priority = &pr
+	aud, err := todoAudience(a.Audience)
+	if err != nil {
+		return "", err
+	}
+	plan.Audience = &aud
+	if dir := strings.TrimSpace(a.DirectionID); dir != "" {
+		plan.DirectionID = &dir
+	}
+	var blockedByPR []string
+	var unlockStage string
+	var unlockContracts []string
+	if s.settings(ctx).todosV2On() {
+		if len(a.BlockedByPR) > 0 {
+			var prErr error
+			blockedByPR, prErr = parseBlockedByPRURLs(a.BlockedByPR)
+			if prErr != nil {
+				return "", prErr
+			}
+		}
+		var unlockErr error
+		unlockStage, unlockContracts, unlockErr = parseUnlockStageRule(a.UnlockStage, a.UnlockContracts)
+		if unlockErr != nil {
+			return "", unlockErr
+		}
+	}
+	if s.settings(ctx).todosV2On() && strings.TrimSpace(a.ItemType) != "" {
+		it, err := todoItemType(a.ItemType)
+		if err != nil {
+			return "", err
+		}
+		plan.ItemType = &it
+	}
 	if err := s.setTodoProject(ctx, &a.Project, &plan); err != nil {
 		return "", err
 	}
@@ -355,6 +409,12 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		if err != nil {
 			return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
 		}
+		if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+			s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+		}
+		if len(t.After) > 0 {
+			s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
+		}
 		return "Created under your direction (you supervise it; to have an Agent do it, use task_plan with todo_id " + t.ID +
 			"): " + todoLine(t, now, loc), nil
 	}
@@ -364,6 +424,12 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 		if err != nil {
 			return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
 		}
+		if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+			s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+		}
+		if len(t.After) > 0 {
+			s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
+		}
 		return "Created as a piece of " + t.PartOf + " (to have an Agent do it when its turn comes, use task_plan with todo_id " + t.ID +
 			"): " + todoLine(t, now, loc), nil
 	}
@@ -371,20 +437,29 @@ func (s *Service) toolTodoCreate(ctx context.Context, machine, self string, args
 	if err != nil {
 		return "", fmt.Errorf("the to-do could not be saved, nothing changed: %w", err)
 	}
+	if err := s.persistExternalPRBlockers(ctx, t.ID, blockedByPR); err != nil {
+		s.logf("todo %s: persist external_pr blockers: %v", t.ID, err)
+	}
+	if len(t.After) > 0 {
+		s.syncAfterBlockers(ctx, t.ID, t.After, unlockStage, unlockContracts)
+	}
 	return "Created: " + todoLine(t, now, loc), nil
 }
 
 func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args json.RawMessage) (string, error) {
 	var a struct {
-		ID       string          `json:"id"`
-		Title    json.RawMessage `json:"title"`
-		Notes    json.RawMessage `json:"notes"`
-		Due      json.RawMessage `json:"due"`
-		Remind   json.RawMessage `json:"remind"`
-		Priority json.RawMessage `json:"priority"`
-		Project  json.RawMessage `json:"project"`
-		PartOf   json.RawMessage `json:"part_of"`
-		After    json.RawMessage `json:"after"`
+		ID          string          `json:"id"`
+		Title       json.RawMessage `json:"title"`
+		Notes       json.RawMessage `json:"notes"`
+		Due         json.RawMessage `json:"due"`
+		Remind      json.RawMessage `json:"remind"`
+		Priority    json.RawMessage `json:"priority"`
+		Project     json.RawMessage `json:"project"`
+		Audience    json.RawMessage `json:"audience"`
+		DirectionID json.RawMessage `json:"direction_id"`
+		ItemType    json.RawMessage `json:"item_type"`
+		PartOf      json.RawMessage `json:"part_of"`
+		After       json.RawMessage `json:"after"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %w", err)
@@ -418,6 +493,16 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 			return err
 		}},
 		{"project", a.Project, func(v string) error { return s.setTodoProject(ctx, &v, &e) }},
+		{"audience", a.Audience, func(v string) error {
+			aud, err := todoAudience(v)
+			e.Audience = &aud
+			return err
+		}},
+		{"direction_id", a.DirectionID, func(v string) error {
+			dir := strings.TrimSpace(v)
+			e.DirectionID = &dir
+			return nil
+		}},
 	} {
 		v, set, err := optionalText(f.raw, f.name)
 		if err == nil && set {
@@ -427,6 +512,20 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 			return "", err
 		}
 		changed = changed || set
+	}
+	if s.settings(ctx).todosV2On() && a.ItemType != nil {
+		v, set, err := optionalText(a.ItemType, "item_type")
+		if err != nil {
+			return "", err
+		}
+		if set {
+			it, err := todoItemType(v)
+			if err != nil {
+				return "", err
+			}
+			e.ItemType = &it
+			changed = true
+		}
 	}
 	pieces, err := pieceArgs(a.PartOf, a.After)
 	if err != nil {
@@ -442,7 +541,7 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 	e.PartOf, e.After = links.PartOf, links.After
 	changed = changed || !pieces.empty()
 	if !changed {
-		return "", errors.New("nothing to change: give title, notes, due, remind, priority, project, part_of or after")
+		return "", errors.New("nothing to change: give title, notes, due, remind, priority, project, audience, direction_id, part_of or after")
 	}
 	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_update", "", t.Title, args); err != nil || !ok {
 		return todoNotAllowed(outcome, err)
@@ -450,6 +549,9 @@ func (s *Service) toolTodoUpdate(ctx context.Context, machine, self string, args
 	out, err := s.editTodo(ctx, t.ID, e)
 	if err != nil {
 		return "", fmt.Errorf("the change could not be saved, nothing changed: %w", err)
+	}
+	if e.After != nil {
+		s.syncAfterBlockers(ctx, out.ID, out.After, "", nil)
 	}
 	return "Updated: " + todoLine(out, now, loc), nil
 }
@@ -467,10 +569,11 @@ func (s *Service) toolTodoDone(ctx context.Context, machine, self, name string, 
 	if complete && t.isConcern() {
 		return "", fmt.Errorf("%s is a concern: it closes only when you report its outcome to the user with concern_report", t.ID)
 	}
-	supervisor := supervisorOf(t)
-	direct := complete && self != "" && t.PlanID == "" && s.hello(ctx).Assistant.CompleteAgentlessTodos && !todoHasAgents(t) &&
-		(supervisor == self || supervisor == "" && t.Origin == self)
-	if todoHasWork(t) && !direct {
+	needsConfirm := todoHasWork(t)
+	if complete {
+		needsConfirm = s.todoCompleteNeedsConfirm(ctx, t, self)
+	}
+	if needsConfirm {
 		key := "assistant-todos.reopen_card"
 		if complete {
 			key = "assistant-todos.complete_card"
@@ -485,6 +588,14 @@ func (s *Service) toolTodoDone(ctx context.Context, machine, self, name string, 
 	out, err := s.editTodo(ctx, t.ID, db.TodoEdit{Done: &complete})
 	if err != nil {
 		return "", fmt.Errorf("the change could not be saved, nothing changed: %w", err)
+	}
+	if complete && s.settings(ctx).todosV2On() {
+		if recErr := s.ResetSupervisedTaskRecovery(ctx, t.ID); recErr != nil {
+			s.logf("todo %s: reset todos_v2 restart recovery: %v", t.ID, recErr)
+		}
+		if _, blkErr := s.ReconcileTodoBlockers(ctx, t.ID); blkErr != nil {
+			s.logf("todo %s: reconcile todos_v2 blockers: %v", t.ID, blkErr)
+		}
 	}
 	if complete {
 		return "Completed: " + todoLine(out, now, loc), nil
@@ -583,9 +694,32 @@ func todoHasAgents(t Todo) bool {
 	return slices.ContainsFunc(t.Agents, func(a TodoAgent) bool { return a.DismissedAt == nil })
 }
 
-// todoHasWork: t is a task or agents work on it, so completing it closes them (tasks_close.go).
+// todoHasWork: t is a task or agents work on it, so reopening it still confirms.
 func todoHasWork(t Todo) bool {
 	return t.Origin != "" || t.Supervision != nil || todoHasAgents(t)
+}
+
+// todoCompleteCrossSession reports whether caller session self is completing a to-do owned or supervised
+// by another conversation (or by an unknown caller when the to-do has an owner or supervisor).
+func todoCompleteCrossSession(t Todo, self string) bool {
+	if sup := strings.TrimSpace(supervisorOf(t)); sup != "" {
+		return self == "" || self != sup
+	}
+	if origin := strings.TrimSpace(t.Origin); origin != "" {
+		return self == "" || self != origin
+	}
+	return false
+}
+
+// todoCompleteNeedsConfirm reports whether completing t from session self has a real side effect
+// requiring owner confirmation: crossing conversation ownership or stopping/closing a live or hanging
+// linked Agent. Plain to-dos and same-session to-dos with no active Agents complete directly
+// (health-space outbound confirmation still runs via confirmOutbound).
+func (s *Service) todoCompleteNeedsConfirm(ctx context.Context, t Todo, self string) bool {
+	if todoCompleteCrossSession(t, self) {
+		return true
+	}
+	return s.todoHasActiveAgents(ctx, t)
 }
 
 // sortTodosByDue orders todos as the tools list them: open first, then by due moment (none last), priority, newest.

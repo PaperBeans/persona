@@ -50,7 +50,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
       machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined,
       desktop_project_id: launch.desktopProjectId || undefined,
       launcher: launch.launcher || undefined, agent_type: launch.agentType, work_session: launch.workSession,
-      model: launch.model || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
+      model: launch.model || undefined, effort: launch.effort || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
       launcher_default_effort: launch.launcherDefaultEffort,
       permission_mode: launch.permissionMode || undefined,
     };
@@ -59,7 +59,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
       // delivering the first message: the node validates it and never seeds another conversation or sends a model turn.
       update({ phase: "creating" });
       const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
-        ...target, effort: launch.effort || undefined, resume_session_id: launch.session.session_id, prompt: "", async: false,
+        ...target, resume_session_id: launch.session.session_id, prompt: "", async: false,
       });
       update({ session: r.session, desktopSetupIncomplete: false });
       upsertSession(r.session);
@@ -85,7 +85,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
       } else {
         try {
           const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
-            ...target, effort: launch.effort || undefined,
+            ...target,
             ultracode: launch.ultracode === true ? true : undefined, async: launch.launcher !== "claude-desktop" && launch.launcher !== "codex-app", name_hint: launch.nameHint ?? (launch.text || undefined),
           });
           session = r.session;

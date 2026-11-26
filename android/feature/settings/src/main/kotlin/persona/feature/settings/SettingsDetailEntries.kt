@@ -23,7 +23,7 @@ import persona.core.navigation.ExtensionUiRoute
 
 /**
  * Settings pages opened by key rather than from the settings list: a machine's engine (from its page in Agents) and
- * one AI use of "Model configuration" (from that list, or from the voice page for its extension's model), one extension of "Extensions" and the
+ * one AI use of "Model configuration" (from that list, or from a module's page for its extension's model), one extension of "Extensions" and the
  * pages it draws, "Extension market" with its extensions and markets, a launcher of a machine (from the machine's page), and one channel
  * of "Channels".
  */
@@ -64,7 +64,8 @@ fun EntryProviderScope<NavKey>.settingsDetailEntries(navigator: Navigator, servi
             shown = LocalExtensionPageVisible.current && (persona.core.navigation.LocalDetailKey.current == null || persona.core.navigation.LocalDetailKey.current == route),
             onPush = { navigator.navigate(it.copy(manager = it.manager ?: route.manager)) }, manager = route.manager,
             notificationActionToken = route.notificationActionToken,
-            onAsk = if (route.extensionId == persona.core.contracts.api.SUBSCRIPTIONS_UI) askPersona?.let { ask -> { text -> ask(navigator, text) } } else null)
+            onAsk = if (route.extensionId == persona.core.contracts.api.SUBSCRIPTIONS_UI) askPersona?.let { ask -> { text -> ask(navigator, text) } } else null,
+            onConversation = { machine, session -> navigator.navigate(persona.core.navigation.ChatRoute(machine, session)) })
     }
     // The market of the current assistant's Extensions (docs/assistant/managers.md "Clients"): what it installs is that one's.
     entry<ExtensionMarketRoute> {
@@ -88,7 +89,8 @@ fun EntryProviderScope<NavKey>.settingsDetailEntries(navigator: Navigator, servi
     }
     // One of the current assistant's channels and model providers (its Settings, docs/assistant/managers.md "Clients").
     entry<ChannelRoute> { route ->
-        ChannelPage(services.forCurrentAssistant().channels.takeUnless { demo }, route.channelId, onBack = navigator::back, onOpen = navigator::navigate)
+        ChannelPage(services.forCurrentAssistant().channels.takeUnless { demo }, route.channelId, onBack = navigator::back, onOpen = navigator::navigate,
+            larkBot = rememberLarkBotEntry())
     }
     entry<persona.core.navigation.ModelProviderRoute> { route ->
         val machines by services.sessions.machines.collectAsState()

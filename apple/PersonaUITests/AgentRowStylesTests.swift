@@ -2,13 +2,13 @@ import XCTest
 
 /// The Agents list's row styles (#2530): A avatar, B two lines, C state cards, chosen in Settings › Appearance › Layout,
 /// each drawing the list's agents with no ⋯ at their end (their actions are in the long-press menu). Against
-/// scripts/mock/mock_hub.py (PERSONA_MOCK_HUB), By Project. TEST_RUNNER_PERSONA_SHOTS=<dir> keeps each screen.
+/// scripts/mock/mock_hub.py with MOCK_AGENTS=1 MOCK_MANAGERS=1 (PERSONA_MOCK_HUB), By Project. TEST_RUNNER_PERSONA_SHOTS=<dir> keeps each screen.
 final class AgentRowStylesTests: XCTestCase {
     private var hub: String!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else { throw XCTSkip("needs scripts/mock/mock_hub.py (PERSONA_MOCK_HUB)") }
+        guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else { throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AGENTS=1 MOCK_MANAGERS=1 (PERSONA_MOCK_HUB)") }
         self.hub = hub
         _ = try? Data(contentsOf: URL(string: hub + "/mock/reset")!)
     }
@@ -67,10 +67,10 @@ final class AgentRowStylesTests: XCTestCase {
     }
 
     /// State Cards' quiet spaces (Idle Spaces): a card each with its chevron, its agents' cards under it when opened.
-    /// Against the mock with many agents (MOCK_AGENTS=1, PERSONA_AGENTS_HUB): the standard one has no idle space.
+    /// Against the mock with many agents (MOCK_AGENTS=1 MOCK_MANAGERS=1, PERSONA_AGENTS_HUB): the standard one has no idle space.
     @MainActor func testStateCardsOpenAQuietSpace() throws {
         guard let many = ProcessInfo.processInfo.environment["PERSONA_AGENTS_HUB"] else {
-            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AGENTS=1 (PERSONA_AGENTS_HUB)")
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AGENTS=1 MOCK_MANAGERS=1 (PERSONA_AGENTS_HUB)")
         }
         let app = launch(Self.agents + ["-agents.rowStyle", "cards"], hub: many)
         XCTAssertTrue(app.buttons["agents.filter.working"].waitForExistence(timeout: 20), "no Agents list")

@@ -25,6 +25,7 @@ export function SidebarResize({ column }: { column: string }) {
     addEventListener("resize", resized);
     return () => removeEventListener("resize", resized);
   }, []);
+  // Reserve the outer right inset (PANEL_GAP), plus the inter-card gap and minimum width when a side panel is open.
   const room = windowWidth - CHAT_MIN - PANEL_GAP - (panel ? PANEL_MIN + PANEL_GAP : 0);
   const shown = sidebarWidth(want, room);
   const draw = (w: number) => document.getElementById(column)?.style.setProperty(SIDEBAR_VAR, `${w}px`);
@@ -45,7 +46,7 @@ export function SidebarResize({ column }: { column: string }) {
       label={t("sidebar.resize_label")}
       title={t("sidebar.resize_title")}
       controls={column}
-      className="hidden lg:block"
+      className="hidden lg:flex"
     />
   );
 }

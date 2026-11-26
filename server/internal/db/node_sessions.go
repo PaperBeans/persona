@@ -3,10 +3,30 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+const maxNodeSegmentInputs = 64
+
+func normalizeSegmentInputs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	var out []string
+	for _, id := range ids {
+		if id == "" || slices.Contains(out, id) {
+			continue
+		}
+		out = append(out, id)
+	}
+	if len(out) > maxNodeSegmentInputs {
+		out = out[len(out)-maxNodeSegmentInputs:]
+	}
+	return out
+}
 
 // ---- node sessions ----
 
@@ -70,6 +90,13 @@ type NodeSession struct {
 	// the model: after a node restart too, an extension's resume of such an Agent its computer no longer lists is
 	// checked against the record's directory (#10941).
 	EngineRuntime string `json:"engine_runtime,omitempty"`
+	// StartOpID is the X-Persona-Op-Id that started this session, persisted so reconnect reconciliation after a
+	// mid-flight disconnect or node restart can prove the start already ran (#10674).
+	StartOpID string `json:"start_op_id,omitempty"`
+	// RemoteAgent latches true once a session belongs to a remote assistant runtime (node/session_state.go).
+	RemoteAgent bool `json:"remote_agent,omitempty"`
+	// SegmentInputs holds bounded accepted logical client_msg_id receipts for assistant.segment.input reconciliation.
+	SegmentInputs []string `json:"segment_inputs,omitempty"`
 }
 
 func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSession) error {
@@ -91,6 +118,13 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 	// SQL NULL for none: the key holds a JSON null.
 	pendingSwitch, engineHistory, pendingHandoff := jsonOrNil(s.PendingSwitch), jsonOrNil(s.EngineHistory), jsonOrNil(s.PendingHandoff)
 	modelRecovery := jsonOrNil(s.ModelRecovery)
+	var segmentInputs json.RawMessage
+	if norm := normalizeSegmentInputs(s.SegmentInputs); len(norm) > 0 {
+		segmentInputs, err = json.Marshal(norm)
+		if err != nil {
+			return err
+		}
+	}
 	_, err = d.pool.Exec(ctx, `WITH saved AS (
 		INSERT INTO node_sessions (machine_id, session_id, pane, launcher, cwd, started_at, tasks, updated_at, creation_id, incarnation)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $15, $16)
@@ -109,7 +143,8 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb, 'origin', $29::text,
 			'origin_known', $30::boolean, 'engine_runtime', $31::text, 'model_source', $32::jsonb,
 			'desktop_pending_model', $33::text, 'desktop_pending_effort', $34::text,
-			'app_mode_explicit', $35::boolean, 'ran_at', $36::bigint), now() FROM saved
+			'app_mode_explicit', $35::boolean, 'ran_at', $36::bigint, 'start_op_id', $37::text, 'remote_agent', $38::boolean,
+			'segment_inputs', $39::jsonb), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = (CASE
 			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
 				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
@@ -117,13 +152,43 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			THEN EXCLUDED.value || jsonb_build_object('stop_cause', settings.value->'stop_cause',
 				'stop_cause_at', settings.value->'stop_cause_at')
 			ELSE EXCLUDED.value END)
-			-- ran_at only moves forward: a put that carries none (or an older one) keeps the last sighting.
-			|| jsonb_build_object('ran_at', GREATEST(COALESCE((settings.value->>'ran_at')::bigint, 0), $36::bigint)),
+			-- ran_at only moves forward; remote_agent is latch-only and never clears once set.
+			|| jsonb_build_object('ran_at', GREATEST(COALESCE((settings.value->>'ran_at')::bigint, 0), $36::bigint),
+				'remote_agent', COALESCE((settings.value->>'remote_agent')::boolean, false) OR $38::boolean)
+			-- start_op_id is immutable once recorded: a later update carrying "" keeps the original op id.
+			|| CASE WHEN COALESCE(settings.value->>'start_op_id', '') <> '' AND $37::text = ''
+				THEN jsonb_build_object('start_op_id', settings.value->'start_op_id')
+				ELSE '{}'::jsonb END
+			-- segment_inputs are bounded accepted receipts (last 64 kept): merge existing and incoming
+			-- so pre-load or partial puts never wipe persisted receipts.
+			|| CASE WHEN jsonb_typeof(settings.value->'segment_inputs') = 'array'
+				AND jsonb_array_length(settings.value->'segment_inputs') > 0
+				THEN jsonb_build_object('segment_inputs', (
+					SELECT COALESCE(jsonb_agg(val ORDER BY ord), '[]'::jsonb) FROM (
+						SELECT val, ord FROM (
+							SELECT val, MAX(ord) AS ord FROM (
+								SELECT elem AS val, idx AS ord
+								FROM jsonb_array_elements_text(settings.value->'segment_inputs') WITH ORDINALITY AS a(elem, idx)
+								UNION ALL
+								SELECT elem AS val, 1000000 + idx AS ord
+								FROM jsonb_array_elements_text(
+									CASE WHEN jsonb_typeof($39::jsonb) = 'array' THEN $39::jsonb ELSE '[]'::jsonb END
+								) WITH ORDINALITY AS b(elem, idx)
+							) u
+							WHERE val <> ''
+							GROUP BY val
+							ORDER BY ord DESC
+							LIMIT 64
+						) latest
+					) kept
+				))
+				ELSE '{}'::jsonb END,
 			updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
 		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction), s.Origin, s.OriginKnown,
-		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort, s.AppModeExplicit, s.RanAt)
+		s.EngineRuntime, jsonOrNil(s.ModelSource), s.DesktopPendingModel, s.DesktopPendingEffort, s.AppModeExplicit, s.RanAt, s.StartOpID, s.RemoteAgent,
+		jsonOrNil(segmentInputs))
 	return err
 }
 
@@ -171,7 +236,10 @@ type nodeModel struct {
 	AwaitingFirstMessage bool `json:"awaiting_first_message"`
 	// EngineRuntime: the engine runtime whose start wrote the record ("" for a terminal's, and for a row written before
 	// it was kept).
-	EngineRuntime string `json:"engine_runtime"`
+	EngineRuntime string   `json:"engine_runtime"`
+	StartOpID     string   `json:"start_op_id"`
+	RemoteAgent   bool     `json:"remote_agent"`
+	SegmentInputs []string `json:"segment_inputs"`
 }
 
 // jsonOrNil is raw, or nil when it holds nothing (empty, or a JSON null).
@@ -212,6 +280,9 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.FollowsSetting = m.FollowsSetting
 		s.AwaitingFirstMessage = m.AwaitingFirstMessage
 		s.EngineRuntime = m.EngineRuntime
+		s.StartOpID = m.StartOpID
+		s.RemoteAgent = m.RemoteAgent
+		s.SegmentInputs = m.SegmentInputs
 		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
 		s.RanAt = m.RanAt
 		if m.StartedAtUnknown {

@@ -8,4 +8,4 @@ import (
 )
 
 // The iMessage module on a Mac's node: it answers the hub's connector.* RPCs from this Mac's Messages.
-func init() { imessageport.Provide(imessage.ServeLocal) }
+func init() { imessageport.Provide(imessage.Module{}.Info().ID, imessage.ServeLocal) }

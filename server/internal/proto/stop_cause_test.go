@@ -23,6 +23,7 @@ func TestStopCauseJSONAndResumeEligibility(t *testing.T) {
 		{name: "compact failed", cause: StopCompactFailed, eligible: true, supervisor: true},
 		{name: "gateway quota", cause: StopUsageLimit, eligible: true, supervisor: true},
 		{name: "gateway capacity", cause: StopTransientError, eligible: true, supervisor: true},
+		{name: "timeout", cause: StopTimeout, eligible: true, supervisor: true},
 		{name: "exit", cause: StopExit, user: true},
 		{name: "future", cause: StopCause("future_cause")},
 	}

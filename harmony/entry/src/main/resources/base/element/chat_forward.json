@@ -1,0 +1,156 @@
+{
+  "string": [
+    {
+      "name": "chat_forward_action",
+      "value": "Forward"
+    },
+    {
+      "name": "chat_forward_to",
+      "value": "Forward To"
+    },
+    {
+      "name": "chat_forward_count",
+      "value": "{1} Selected"
+    },
+    {
+      "name": "chat_forward_questions",
+      "value": "Include Questions"
+    },
+    {
+      "name": "chat_forward_export",
+      "value": "Export Image"
+    },
+    {
+      "name": "chat_forward_share",
+      "value": "Share as Image…"
+    },
+    {
+      "name": "chat_forward_select",
+      "value": "Select Messages…"
+    },
+    {
+      "name": "chat_forward_recent",
+      "value": "Recent"
+    },
+    {
+      "name": "chat_forward_new",
+      "value": "New Agent…"
+    },
+    {
+      "name": "chat_forward_new_detail",
+      "value": "Pick a computer, folder and model"
+    },
+    {
+      "name": "chat_forward_search",
+      "value": "Search chats, computers or projects"
+    },
+    {
+      "name": "chat_forward_no_matches",
+      "value": "No matching chats"
+    },
+    {
+      "name": "chat_forward_from",
+      "value": "Forwarded from {1}"
+    },
+    {
+      "name": "chat_forward_many",
+      "value": "{1} Forwarded Messages"
+    },
+    {
+      "name": "chat_forward_me",
+      "value": "Me"
+    },
+    {
+      "name": "chat_forward_single_note",
+      "value": "Please look at the forwarded message above."
+    },
+    {
+      "name": "chat_forward_several_note",
+      "value": "Please look at the forwarded messages above."
+    },
+    {
+      "name": "chat_forward_cut",
+      "value": "(The original is longer and was cut here.)"
+    },
+    {
+      "name": "chat_forward_computer_file",
+      "value": "(File on {1}: {2})"
+    },
+    {
+      "name": "chat_forward_file",
+      "value": "(File: {1})"
+    },
+    {
+      "name": "chat_forward_limit",
+      "value": "Select up to 30 messages."
+    },
+    {
+      "name": "chat_forward_byline",
+      "value": ":"
+    },
+    {
+      "name": "chat_forward_source_conversation",
+      "value": "Conversation"
+    },
+    {
+      "name": "chat_forward_source_patrol",
+      "value": "Patrol"
+    },
+    {
+      "name": "chat_forward_source_followup",
+      "value": "Follow-up"
+    },
+    {
+      "name": "chat_forward_source_scheduled_task",
+      "value": "Sent by a scheduled task"
+    },
+    {
+      "name": "chat_forward_source_supervision",
+      "value": "Supervision"
+    },
+    {
+      "name": "chat_forward_source_meeting",
+      "value": "Meeting"
+    },
+    {
+      "name": "chat_forward_source_system",
+      "value": "System"
+    },
+    {
+      "name": "chat_forward_route_from_persona",
+      "value": "From {1} · to Persona"
+    },
+    {
+      "name": "chat_forward_route_persona",
+      "value": "To Persona"
+    },
+    {
+      "name": "chat_forward_route_agent",
+      "value": "To {1}"
+    },
+    {
+      "name": "chat_forward_route_cross",
+      "value": "From {1} · to {2} on {3}"
+    },
+    {
+      "name": "chat_forward_route_on",
+      "value": "To {1} on {2}"
+    },
+    {
+      "name": "chat_forward_remove",
+      "value": "Remove Forward"
+    },
+    {
+      "name": "chat_context_only_note",
+      "value": "参考上面的内容。"
+    },
+    {
+      "name": "chat_context_image_note",
+      "value": "请看图片"
+    },
+    {
+      "name": "chat_context_files_note",
+      "value": "请看附件"
+    }
+  ]
+}

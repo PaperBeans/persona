@@ -37,21 +37,23 @@ export class ExtensionNavigation {
     if (this.client === client && this.owner === owner) return;
     this.dispose(); this.client = client; this.owner = owner; this.entries = []; this.error = ''; this.visible = false;
     if (client.connected && client.features.length) { this.featureGeneration = client.connectionGeneration(); this.negotiatedFeatures = client.features.slice(); }
-    this.eventsOff = client.observeEvents((payload: string): void => {
-      const data = Wire.parse(payload), kind = Wire.text(data, 'type'), manager = Wire.text(data, 'manager');
+    this.eventsOff = client.observeEvents((payload: string, kind: string): void => {
+      const uiEvent = extensionUIEvent(kind), catalogueEvent = extensionCatalogueEvent(kind);
+      if (kind !== 'hello' && !uiEvent && !catalogueEvent && kind !== 'extension_ui_stream') return;
+      const data = Wire.parse(payload), manager = Wire.text(data, 'manager');
       // The built-in manager omits this field; other managers always carry it, independently of the chosen default.
       if (kind !== 'hello' && client.profile.manager && (manager || 'assistant') !== client.profile.manager) return;
       if (kind === 'hello' && Array.isArray(data['features'])) {
         this.featureGeneration = client.connectionGeneration(); this.negotiatedFeatures = Wire.strings(data, 'features');
       }
-      const uiEvent = extensionUIEvent(kind), invalidated = uiEvent && Wire.bool(data, 'invalidate');
+      const invalidated = uiEvent && Wire.bool(data, 'invalidate');
       const retired = kind === 'extension_ui_stream' && Wire.text(data, 'kind') === 'closed' && !Wire.text(data, 'request_id');
       if (uiEvent && !invalidated && Wire.has(data, 'badge')) {
         const entry = this.entries.find((item: ExtensionNavigationEntry): boolean => item.extensionId === extensionIdentity(data) && item.uiId === Wire.text(data, 'id'));
         if (entry && this.accepts(entry)) entry.badge = Wire.text(Wire.object(data, 'badge'), 'text').slice(0, 8);
         return;
       }
-      if (kind === 'hello' || extensionCatalogueEvent(kind) || invalidated || retired) {
+      if (kind === 'hello' || catalogueEvent || invalidated || retired) {
         // A UI content invalidation is not a permission change. Keep its mounted input until the read says otherwise.
         if (!invalidated) this.invalidate();
         if (this.timer !== -1) clearTimeout(this.timer);

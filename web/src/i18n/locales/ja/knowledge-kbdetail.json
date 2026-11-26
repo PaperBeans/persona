@@ -30,5 +30,10 @@
   "agents": "このプロジェクトのエージェント",
   "code_dirs": "コードのフォルダー",
   "copy_path": "パスをコピー",
-  "message_line": "{sender}：{text}"
+  "message_line": "{sender}：{text}",
+  "recording_minutes": "議事録",
+  "recording_day_recap": "1日の振り返り",
+  "recording_transcript": "文字起こし",
+  "recording_photos": "写真",
+  "recording_photo_label": "写真{n}"
 }

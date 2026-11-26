@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "assistant.schema.json",
   "title": "Assistant conversations and unified entries",
-  "description": "Reading the user's conversations with the Persona assistant (docs/extensions/extensions.md \"Assistant conversations\", #1288): assistant.conversations and assistant.messages, with the permission assistant.read in the manifest's permissions.hub, checked against what the user granted (as kb.read is). Read-only. Only the assistant's own space: health-space and guest conversations are never listed or read. Only words: the user's messages and the assistant's replies, without tools, thinking, notices, images, the messages Persona typed in for the model, other sessions' messages and slash commands, and with context blocks stripped from the user's text. Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it. The unified ledger is separate: assistant.entries.list and event.assistant.entries.changed require assistant.entries.read; an explicitly approved extension can read personal entries across all source spaces. origin_space and category are metadata for later labeling and context-dependent use policy.",
+  "description": "Reading the user's conversations with the Persona assistant (docs/extensions/extensions.md \"Assistant conversations\", #1288): assistant.conversations and assistant.messages, with the permission assistant.read in the manifest's permissions.hub, checked against what the user granted (as kb.read is). Read-only. Only the assistant's own space: health-space and guest conversations are never listed or read. Only words: the user's messages and the assistant's replies, without tools, thinking, notices, images, the messages Persona typed in for the model, other sessions' messages and slash commands, and with context blocks stripped from the user's text. And telling it something: assistant.event puts one structured event into the existing main conversation (docs/extensions/extensions.md \"Assistant events\"), with the permission assistant.events. Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it. The unified ledger is separate: assistant.entries.list and event.assistant.entries.changed require assistant.entries.read; an explicitly approved extension can read personal entries across all source spaces. origin_space and category are metadata for later labeling and context-dependent use policy.",
   "x-side": "plugin",
   "x-methods": {
     "assistant.conversations": {
@@ -24,17 +24,25 @@
       "from": "program",
       "params": "AssistantEntriesParams",
       "result": "AssistantEntriesResult"
+    },
+    "assistant.event": {
+      "from": "program",
+      "params": "AssistantEventParams",
+      "result": "AssistantEventResult"
     }
   },
   "$defs": {
     "AssistantErrorCode": {
-      "description": "error.code of the assistant calls besides permission_denied (data {scope: \"assistant.read\"}, or \"assistant.memory.read\" for assistant.memory, or \"assistant.entries.read\" for assistant.entries.list): invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or not set up: try again).",
+      "description": "error.code of the assistant calls besides permission_denied (data {scope: \"assistant.read\"}, or \"assistant.memory.read\" for assistant.memory, or \"assistant.entries.read\" for assistant.entries.list, or \"assistant.events\" for assistant.event): invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or not set up: try again); assistant.event only: no_main_conversation (the user has no main conversation: nothing was started or changed, do not retry until they have one); rate_limited (data {retry_after} in seconds: too many events from this extension); queue_full (this extension already has the most events waiting behind a running turn: try again later).",
       "type": "string",
       "enum": [
         "invalid_params",
         "not_found",
         "assistant_offline",
-        "machine_offline"
+        "machine_offline",
+        "no_main_conversation",
+        "rate_limited",
+        "queue_full"
       ]
     },
     "AssistantConversationsParams": {
@@ -657,6 +665,92 @@
         "status"
       ],
       "additionalProperties": false
+    },
+    "AssistantEventSeverity": {
+      "description": "How much the user should care. info: tell them only if it matters to what they are doing; warning: they should hear about it; critical: they need to know now.",
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critical"
+      ]
+    },
+    "AssistantEventState": {
+      "description": "Where the thing an event's key names is now, in the extension's own words (firing, resolved, ...): a label each extension chooses.",
+      "type": "string",
+      "x-text": "AssistantEventState"
+    },
+    "AssistantEventReplace": {
+      "description": "Whether an event takes the place of one of the extension's with the same key still waiting behind a running turn: absent and true replace, false keeps the earlier one as its own message.",
+      "type": "boolean",
+      "x-tristate": "AssistantEventReplace"
+    },
+    "AssistantEventParams": {
+      "description": "assistant.event (assistant.events): one event for the assistant's main conversation. The assistant gets it as something an extension observed, never as the user's words, and decides what to tell the user. An event with the same key as one of this extension's still waiting behind a running turn replaces it, unless replace is false. Lengths are in characters.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "What the event is about (one monitored thing). The same extension and key replace an event not yet delivered."
+        },
+        "severity": {
+          "$ref": "#/$defs/AssistantEventSeverity"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "One line saying what happened."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "The details."
+        },
+        "action_hint": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "What the extension suggests be done about it: a suggestion for the assistant to weigh, not an order."
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 64,
+          "x-text": "AssistantEventState",
+          "description": "Where the thing the key names is now, in the extension's words (firing, resolved, ...)."
+        },
+        "replace": {
+          "type": "boolean",
+          "x-tristate": "AssistantEventReplace",
+          "description": "false keeps an earlier event with the same key as its own message instead of replacing it. Absent is true."
+        }
+      },
+      "required": [
+        "key",
+        "title"
+      ]
+    },
+    "AssistantEventDelivery": {
+      "description": "What happened to the event. delivered: sent into the idle main conversation now. queued: the conversation is running (or not reachable just now), so it goes in when its turn ends. replaced: it took the place of an earlier event with the same key that was still queued.",
+      "type": "string",
+      "enum": [
+        "delivered",
+        "queued",
+        "replaced"
+      ]
+    },
+    "AssistantEventResult": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/AssistantEventDelivery"
+        }
+      },
+      "required": [
+        "delivery"
+      ]
     }
   },
   "x-events": {

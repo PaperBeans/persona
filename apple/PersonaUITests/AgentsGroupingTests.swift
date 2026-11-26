@@ -1,7 +1,7 @@
 import XCTest
 
 /// The grouping menu beside the quick filters and the cap on long runs (#5766), against the long mock list:
-/// `PORT=<port> MOCK_AGENTS=1 python3 scripts/mock/mock_hub.py`, TEST_RUNNER_PERSONA_GROUPING_HUB=<mock URL>.
+/// `PORT=<port> MOCK_AGENTS=1 MOCK_MANAGERS=1 python3 scripts/mock/mock_hub.py`, TEST_RUNNER_PERSONA_GROUPING_HUB=<mock URL>.
 /// TEST_RUNNER_PERSONA_SHOTS=<dir> saves each grouping's screenshot (TEST_RUNNER_PERSONA_STYLE names them, e.g. light / dark;
 /// TEST_RUNNER_PERSONA_SCHEME=light|dark draws in it).
 final class AgentsGroupingTests: XCTestCase {
@@ -21,7 +21,7 @@ final class AgentsGroupingTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard let url = ProcessInfo.processInfo.environment["PERSONA_GROUPING_HUB"] else {
-            throw XCTSkip("needs the long mock list (PERSONA_GROUPING_HUB, MOCK_AGENTS=1)")
+            throw XCTSkip("needs the long mock list (PERSONA_GROUPING_HUB, MOCK_AGENTS=1 MOCK_MANAGERS=1)")
         }
         hub = url
     }

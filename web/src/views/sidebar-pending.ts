@@ -1,5 +1,5 @@
 import { requestRoute } from "../lib/card-focus";
-import { requestHome } from "../lib/child-sessions";
+import { requestHome, requestHomeMachine } from "../lib/child-sessions";
 import { stateOf } from "../lib/format";
 import { orderPending } from "../lib/pending-order";
 import { withWorkView, type Route } from "../lib/router";
@@ -27,7 +27,8 @@ export function sidebarPending(sessions: Session[], interactions: Interaction[],
   const held = supervisorHeldOnly(interactions);
   for (const ix of cards.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "") || a.id.localeCompare(b.id))) {
     // a child session's card is its parent's (#5120): one row per parent, opening the parent
-    const key = ix.session_id ? sessionKey(ix.machine_id, requestHome(ix)) : `request:${ix.id}`;
+    const homeMid = requestHomeMachine(ix);
+    const key = ix.session_id ? sessionKey(homeMid, requestHome(ix)) : `request:${ix.id}`;
     const existing = rows.get(key);
     if (existing) {
       existing.cards.push(ix);
@@ -35,15 +36,16 @@ export function sidebarPending(sessions: Session[], interactions: Interaction[],
     }
     const to = requestRoute(ix);
     // A remembered terminal view cannot answer a card; the conversation can.
-    rows.set(key, { key, machineId: ix.machine_id, session: bySession.get(key), cards: [ix], to: to.name === "session" ? withWorkView({ ...to, view: "chat" }, true) : to });
+    rows.set(key, { key, machineId: homeMid, session: bySession.get(key), cards: [ix], to: to.name === "session" ? withWorkView({ ...to, view: "chat" }, true) : to });
   }
   const waiting = answeredSessions(sessions, cards, answered)
     .filter((s) => stateOf(s) === "needs_you");
   for (const s of waiting) {
+    const homeMid = requestHomeMachine(s);
     const home = requestHome(s);
-    const key = sessionKey(s.machine_id, home);
-    if (held.has(`${s.machine_id}/${home}`)) continue;
-    if (!rows.has(key)) rows.set(key, { key, machineId: s.machine_id, session: bySession.get(key) ?? s, cards: [], to: { name: "session", mid: s.machine_id, sid: home, view: "chat", work: true } });
+    const key = sessionKey(homeMid, home);
+    if (held.has(`${homeMid}/${home}`)) continue;
+    if (!rows.has(key)) rows.set(key, { key, machineId: homeMid, session: bySession.get(key) ?? s, cards: [], to: { name: "session", mid: homeMid, sid: home, view: "chat", work: true } });
   }
   // Urgency class first, then the longest wait within it (#8167); the row set above is unchanged by the ordering.
   return orderPending([...rows.values()]);

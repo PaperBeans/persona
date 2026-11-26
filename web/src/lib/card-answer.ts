@@ -9,7 +9,7 @@ import { fields } from "./elicitation";
 import { interactionCanAnswer } from "./format";
 import { apiOp } from "./ops";
 import { endInteraction, getSession, keepDelegated, useStore } from "./store";
-import { isSecretHandoff, isSecretRun } from "./tool-detail";
+import { isSecretHandoff, isSecretRun, secretRunInput } from "./tool-detail";
 import { isSessionReview } from "./types";
 import { supervisorHeld } from "./supervisor-held";
 import type { Interaction } from "./types";
@@ -29,6 +29,7 @@ function isSecretRunAnswer(body: Resolution): boolean {
 /** What a hand-off card's own approval says on its request, and only there: the hub lets an approval of a hand-off
  *  card through only from a request that declares it (docs/protocol/protocol.md "Secret hand-off cards"). */
 const HANDOFF_HEADERS = { "X-Persona-Features": "secret_handoff" };
+const ENV_HEADERS = { "X-Persona-Features": "secret_run_env" };
 
 /** Where an answer comes from: the hand-off card's own buttons say so; every other path (Overview, a notification) is
  *  not that card. */
@@ -111,15 +112,18 @@ export function answerCard(ix: Interaction, body: Resolution, from: AnswerFrom =
     return Promise.resolve({ ok: false, error: t("chat-interactions.approve_not_allowed") });
   }
   if (isSecretRun(ix) && !isSecretRunAnswer(body)) return Promise.resolve({ ok: false, error: t("chat-interactions.secret_run_card_only") });
-  // a hand-off is approved on its card alone; a no goes from anywhere
+  // a hand-off is approved on its card alone; a no goes from anywhere. Explicit env delivery has the same source rule:
+  // older specialized clients show no warning and cannot borrow its feature from a quick path.
   const handoff = isSecretHandoff(ix) && body.allow === true;
   if (handoff && !from.handoffCard) return Promise.resolve({ ok: false, error: t("chat-interactions.secret_handoff_card_only") });
+  const env = isSecretRun(ix) && secretRunInput(ix.tool_input).delivery === "env" && body.allow === true;
+  if (env && !from.handoffCard) return Promise.resolve({ ok: false, error: t("chat-interactions.secret_run_card_only") });
   const cur = pending.get(ix.id);
   if (cur) return sameAnswer(cur.body, body) ? cur.done : Promise.resolve({ ok: false, error: t("chat-interactions.answer_pending") });
   const entry: Pending = {
     body,
     shown: redacted(ix, body),
-    done: send(ix, body, handoff ? HANDOFF_HEADERS : undefined).finally(() => {
+    done: send(ix, body, handoff ? HANDOFF_HEADERS : env ? ENV_HEADERS : undefined).finally(() => {
       if (pending.get(ix.id) !== entry) return;
       pending.delete(ix.id);
       changed();

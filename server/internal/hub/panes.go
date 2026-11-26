@@ -143,6 +143,18 @@ func (h *Hub) nodeAction(a nodeAction) http.HandlerFunc {
 				}
 			}
 		}
+		if params["revoke_preview"] == true && (params["kind"] != "herdr" || params["reconcile"] != true || params["preview_token"] == nil ||
+			params["preview"] == true || params["force"] == true || params["delete_branch"] == true || params["close_only"] == true) {
+			// Earlier nodes ignore revoke_preview. Only forward a request they will interpret as a read-only check.
+			writeErr(w, http.StatusBadRequest, i18n.Err("worktree-composer.mode_invalid"))
+			return
+		}
+		if a.method == "worktree.delete" && params["kind"] == "herdr" && params["close_only"] != true {
+			// The phone cannot assert another device's identity in the request body.
+			if p := principalOf(r.Context()); p.registeredDevice && p.Role == roleFull && p.ID != "" {
+				params["preview_device"] = p.ID
+			}
+		}
 		out, ok := h.callNode(w, r, m, a.method, params, a.timeout, "", nil)
 		if !ok {
 			return
@@ -183,7 +195,7 @@ var nodeActions = map[string]nodeAction{
 		requiredUnless: map[string][]string{"auto_name": {"branch", "path"}}},
 	"worktree/source": {method: "worktree.source", timeout: 35 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"query", "locale"}},
 	"worktree/preset": {method: "worktree.preset", timeout: 30 * time.Second, required: []string{"workspace_id", "kind", "name", "directories"}, optional: []string{"locale"}},
-	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}, strictFlags: []string{"preview", "reconcile", "force", "delete_branch", "close_only"}},
+	"worktree/delete": {method: "worktree.delete", timeout: 150 * time.Second, required: []string{"workspace_id", "kind"}, optional: []string{"preview_token", "locale"}, flags: []string{"preview", "reconcile", "revoke_preview", "force", "delete_branch", "close_only"}, strictFlags: []string{"preview", "reconcile", "revoke_preview", "force", "delete_branch", "close_only"}},
 	// #6115 a new agent in a worktree of its own: made from its folder, told apart, removed when it is closed and the
 	// user says so (the node refuses uncommitted work and unmerged branches unless force, which the user confirms).
 	"worktree/add":    {method: "worktree.add", timeout: 150 * time.Second, required: []string{"cwd"}, optional: []string{"branch", "name_hint", "kind", "locale"}},

@@ -35,6 +35,9 @@ type Runner struct {
 
 	mu   sync.Mutex
 	path string
+
+	clock func() time.Time
+	cache statusCache
 }
 
 // New creates a runner. An empty Bin means lark-cli on PATH (or in the login
@@ -92,19 +95,6 @@ func (r *Runner) now() time.Time {
 	return time.Now()
 }
 
-// Version returns the executable's semantic version as printed by --version.
-func (r *Runner) Version(ctx context.Context) (string, error) {
-	out, err := r.execute(ctx, []string{"--version"}, outputVersion)
-	if err != nil {
-		return "", err
-	}
-	version := parseVersion(string(out))
-	if version == "" {
-		return "", cliError(KindOther, errors.New("invalid version output"))
-	}
-	return version, nil
-}
-
 // CheckVersion rejects versions older than the pinned minimum.
 func (r *Runner) CheckVersion(ctx context.Context) error {
 	got, err := r.Version(ctx)
@@ -115,20 +105,6 @@ func (r *Runner) CheckVersion(ctx context.Context) error {
 		return &Error{Kind: KindUnsupportedVersion, Version: got, Minimum: MinimumVersion}
 	}
 	return nil
-}
-
-// AuthStatus reads the user identity without touching credentials or changing
-// lark-cli configuration.
-func (r *Runner) AuthStatus(ctx context.Context) (AuthStatus, error) {
-	out, err := r.execute(ctx, []string{"auth", "status"}, outputAuth)
-	if err != nil {
-		return AuthStatus{}, err
-	}
-	var raw authStatusWire
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return AuthStatus{}, cliError(KindOther, errors.New("invalid auth status JSON"))
-	}
-	return raw.result(r.now()), nil
 }
 
 // ConfigShow reads the selected profile's app binding. It never returns the
@@ -149,6 +125,7 @@ func (r *Runner) InitProfile(ctx context.Context, name, appID, secret, brand str
 	}
 	args := []string{"config", "init", "--name", name, "--app-id", appID, "--app-secret-stdin", "--brand", brand}
 	_, err := r.executeInput(ctx, args, outputRaw, "", []byte(secret))
+	r.invalidateAuth()
 	return err
 }
 
@@ -156,6 +133,7 @@ func (r *Runner) InitProfile(ctx context.Context, name, appID, secret, brand str
 // store; this method only asks it to remove the login.
 func (r *Runner) AuthLogout(ctx context.Context) error {
 	_, err := r.execute(ctx, []string{"auth", "logout"}, outputRaw)
+	r.invalidateAuth()
 	return err
 }
 
@@ -191,6 +169,7 @@ func (r *Runner) StartLogin(ctx context.Context) (*LoginProcess, error) {
 	if err != nil {
 		return nil, err
 	}
+	r.invalidateAuth()
 	loginCtx, cancel := context.WithTimeout(context.Background(), loginTimeout)
 	p := &LoginProcess{ready: make(chan struct{}), done: make(chan struct{}), cancel: cancel}
 	argv := profileArgs(profile, []string{"auth", "login", "--scope", strings.Join(ReadAsMeScopes, " ")})
@@ -253,6 +232,7 @@ func (r *Runner) StartLogin(ctx context.Context) (*LoginProcess, error) {
 		p.mu.Unlock()
 		close(finished)
 		cancel()
+		r.invalidateAuth()
 		close(p.done)
 	}()
 	// The URL is normally printed immediately. A short independent wait keeps
@@ -1059,6 +1039,9 @@ func (r *Runner) executeInputProfile(ctx context.Context, args []string, mode ou
 	}
 	if err != nil {
 		if classified := classifyFailure(result); classified != nil {
+			if mode != outputAuth && signedOut(classified.Kind) {
+				r.invalidateAuth()
+			}
 			return nil, classified
 		}
 		return nil, cliError(KindOther, err)

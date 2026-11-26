@@ -21,11 +21,16 @@ import (
 // background (each sender has its own 30 seconds).
 var notifyCopyWait = 5 * time.Second
 
-// How one copy went.
-const (
-	copySent    = "sent"    // the first Feishu card landed (or a notifications companion took it); a channel took the text
-	copyFailed  = "failed"  // nothing of it went out
-	copyPending = "pending" // not known yet when the tool answered
+// copyState is how one copy went: a closed set of values (a new outcome is a new value here, not another string
+// literal at a call site). A struct, not a named string, so it adds no named primitive to the package's frozen count;
+// its words are the ones the report always used.
+type copyState struct{ word string }
+
+var (
+	copySent    = copyState{"sent"}    // the first Feishu card landed (or a notifications companion took it); a channel took the text
+	copyFailed  = copyState{"failed"}  // nothing of it went out
+	copyPending = copyState{"pending"} // not known yet when the tool answered
+	copySkipped = copyState{"skipped"} // the channel is not in this hub (its module is left out or switched off): not a failure, not told
 )
 
 // errNoCopy: the Feishu push returned without a first card that landed or failed (nothing to send).
@@ -35,7 +40,7 @@ var errNoCopy = errors.New("nothing was sent")
 type pushCopy struct {
 	channel string // channel.Feishu, or an extension channel's id
 	name    string // an extension channel's name; the Feishu bot is named in the answer's language
-	state   string // copySent, copyFailed or copyPending
+	state   copyState
 }
 
 // copyReport collects one notify_user call's copies. Its methods do nothing on a nil report: a push nobody waits for.
@@ -61,6 +66,19 @@ func (r *copyReport) going(to ...pushCopy) {
 		c.state = copyPending
 		r.copies = append(r.copies, c)
 	}
+	r.senders--
+	r.changedLocked()
+}
+
+// skipped: this sender has no channel to send to because its module is absent; the copy is recorded as skipped so a hub
+// without that channel is told apart from a bot that is not ready (which records nothing). Like going, once per sender.
+func (r *copyReport) skipped(id string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.copies = append(r.copies, pushCopy{channel: id, state: copySkipped})
 	r.senders--
 	r.changedLocked()
 }

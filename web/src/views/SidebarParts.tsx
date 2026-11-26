@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { t } from "../i18n";
 import { resolveTab } from "../lib/herdr-tree";
 import { useInboxBadge } from "../lib/inbox";
-import { useLarkHome } from "../lib/lark-chats";
+import { useHasUnseenLabs } from "../lib/labs-seen";
 import { agentKey } from "../lib/pins";
 import { enabledNavItems, useModuleStates } from "../core/module-host";
 import { NAV_PAGES, extensionNavKey, sidebarActiveKey, sidebarRoute } from "../lib/persona-nav";
@@ -21,7 +21,7 @@ import { href, inWorkView, navigate, parse, type Route } from "../lib/router";
 import { useAgentSessions } from "../lib/sessions";
 import { scoped, useScope, useScopedCounts } from "../lib/current-assistant";
 import { useOwnerNeeds } from "../lib/todo-owner-needs";
-import { useLarkOn, useStore } from "../lib/store";
+import { useStore } from "../lib/store";
 import { connPhase } from "../lib/connection";
 import { useStarredCount } from "../lib/starred-summary";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
@@ -78,7 +78,7 @@ export function useGo(onNavigate?: () => void): GoFn {
 /** One entry of the pages under Persona ("Overview", "Inbox" … "Settings", and the extensions' pages). `badgeLabel`:
  *  what a screen reader hears for the badge in place of its digits, when the number alone does not say what it counts.
  *  `color`: its icon's, only with Settings › Appearance › Sidebar icons on Colored (#10822, lib/sidebar-icons.ts). */
-export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; badgeLabel?: string; hint?: string; title?: string; group?: { id: string; title: string }; color?: UIColor };
+export type NavPage = { k: string; to: Route; icon: IconName; label: string; short?: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; badgeLabel?: string; notice?: string; hint?: string; title?: string; group?: { id: string; title: string }; color?: UIColor };
 
 /** A page's icon in its color (#10822), unless it is the open page, whose icon keeps the open row's ink; none without a
  *  color, so Monochrome draws what it always drew. */
@@ -87,6 +87,7 @@ export const pageIconStyle = (color: UIColor | undefined, active: boolean) => (c
 /** A page's spoken name with its badge ("Inbox 3", "To-dos 2 to-dos need you"): the phone's grid, the rail and the folded
  *  titles say what the list's row says. */
 export function pageLabel(p: NavPage): string {
+  if (p.notice) return `${p.label}, ${p.notice}`;
   return p.badge === undefined ? p.label : `${p.label} ${p.badgeLabel ?? p.badge}`;
 }
 
@@ -108,10 +109,7 @@ export function useNavPages() {
   const todosBadgeLabel = todosBadge ? t("sidebar.todos_badge_title", { count: todosBadge }) : undefined;
   const counts = useScopedCounts();
   const inbox = useInboxBadge();
-  const larkSwitch = useLarkHome();
-  const lark = useLarkOn();
-  // "Messages" needs the hub to read Feishu (feature `lark`) as well as this browser's switch
-  const larkHome = larkSwitch && lark;
+  const labsUnseen = useHasUnseenLabs();
   const extensionPages = useExtensionSlot("nav_page");
   // Colored sidebar icons (#10822): a built-in page's color, an extension's page the one its manifest names; none otherwise
   const colored = useSidebarIconMode() === "colored";
@@ -125,7 +123,6 @@ export function useNavPages() {
   const page: Record<(typeof NAV_PAGES)[number], NavPage | false> = {
     home: { k: "home", to: { name: "home" }, icon: "home", label: t("sidebar.nav_home"), short: t("sidebar.nav_home_short"), badge: counts.badge || undefined, badgeTone: "attention" },
     inbox: { k: "inbox", to: { name: "inbox" }, icon: "inbox", label: t("sidebar.nav_inbox"), short: t("sidebar.nav_inbox_short"), badge: inbox || undefined, badgeTone: "attention", title: inbox ? t("sidebar.inbox_badge_title", { count: inbox }) : undefined },
-    messages: larkHome && { k: "messages", to: { name: "messages" }, icon: "chat", label: t("sidebar.nav_messages") },
     starred: stars != null && { k: "starred", to: { name: "starred" }, icon: "star", label: t("starred.title"), badge: stars || undefined, badgeLabel: t("starred.count", { count: stars }) },
     "workspace-board": boardOn && { k: "workspace-board", to: { name: "workspace-board" }, icon: "layers", label: t("sidebar.nav_board"), short: t("sidebar.nav_board_short") },
     todos: todosSupported !== false && { k: "todos", to: { name: "todos" }, icon: "todo", label: t("sidebar.nav_todos"), badge: todosBadge || undefined, badgeLabel: todosBadgeLabel, title: todosBadgeLabel },
@@ -133,7 +130,7 @@ export function useNavPages() {
     kb: { k: "kb", to: { name: "kb" }, icon: "book", label: t("sidebar.nav_kb"), short: t("sidebar.nav_kb_short") },
     machines: { k: "machines", to: { name: "machines" }, icon: "machine", label: t("sidebar.nav_machines"), short: t("sidebar.nav_machines_short"), hint: total ? `${online}/${total}` : undefined },
     terminal: false, // History belongs to Agents, not the general Pages grid (#10240).
-    settings: { k: "settings", to: { name: "settings" }, icon: "gear", label: t("sidebar.nav_settings") },
+    settings: { k: "settings", to: { name: "settings" }, icon: "gear", label: t("sidebar.nav_settings"), notice: labsUnseen ? t("sidebar.labs_unseen") : undefined },
   };
   // the enabled feature modules' pages (core/module-host.ts), each right after the page it names (one this version does
   // not have: with the last of the built-in pages, before the extensions' and Settings)

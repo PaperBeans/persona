@@ -35,6 +35,7 @@ func feishuPushHub(t *testing.T, fail error) (s *Service, entered, release chan 
 // notify_user marks the conversation "pushed" only once the first Feishu card lands: never while it is in flight,
 // never when it fails (#4448).
 func TestFeishuPushMarksNotifiedOnlyAfterFirstCard(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	synctest.Test(t, func(t *testing.T) {
 		s, entered, release := feishuPushHub(t, nil)
 		s.channelsPushed("server", "s1", "Reminder", "Details")
@@ -53,6 +54,7 @@ func TestFeishuPushMarksNotifiedOnlyAfterFirstCard(t *testing.T) {
 // A first card that fails leaves no "pushed" mark, so the turn-end mirror still delivers the turn (#4448). It drives
 // the public channelsPushed path, so the old code that marked synchronously before sending fails this test too.
 func TestFeishuPushFailureLeavesNotifiedUnmarked(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	synctest.Test(t, func(t *testing.T) {
 		s, entered, release := feishuPushHub(t, errors.New("feishu down"))
 		s.channelsPushed("server", "s2", "Reminder", "Details")

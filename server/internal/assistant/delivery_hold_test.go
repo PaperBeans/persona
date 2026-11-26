@@ -88,8 +88,8 @@ func TestDeliveryHoldGoesToItsSupervisorOnce(t *testing.T) {
 		t.Fatal("not kept on the hold")
 	}
 	var stages map[string]todoStage
-	if raw, ok := st.vals[reportStagesKey]; !ok || json.Unmarshal(raw, &stages) != nil || stages[todo.ID].Delivery.SupervisorTold.IsZero() {
-		t.Fatalf("not stored: %s", st.vals[reportStagesKey])
+	if raw, ok := st.rawSetting(reportStagesKey); !ok || json.Unmarshal(raw, &stages) != nil || stages[todo.ID].Delivery.SupervisorTold.IsZero() {
+		t.Fatalf("not stored: %s", raw)
 	}
 	forgetSignals(t, s)
 	s.superviseWatch(ctx, time.Now().Add(time.Hour))

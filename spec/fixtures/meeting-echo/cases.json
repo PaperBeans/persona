@@ -85,7 +85,7 @@
     {
       "name": "containment_exactly_at_threshold",
       "description": "这一句 5 个不同的字符二元组里有 3 个在答案里，正好 0.6，算回声（阈值含等号）。",
-      "source": "server/internal/kb/echo.go echoMatches",
+      "source": "server/internal/modules/recording/writers/echo.go echoMatches",
       "derived": true,
       "input": {
         "line": {"start": 11, "end": 12, "text": "Friday"},
@@ -96,7 +96,7 @@
     {
       "name": "containment_below_threshold",
       "description": "5 个字符二元组只有 2 个在答案里（0.4），不是回声。",
-      "source": "server/internal/kb/echo.go echoMatches",
+      "source": "server/internal/modules/recording/writers/echo.go echoMatches",
       "derived": true,
       "input": {
         "line": {"start": 11, "end": 12, "text": "Friday"},

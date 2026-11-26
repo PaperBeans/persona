@@ -171,3 +171,30 @@ test('unknown-count framebuffer updates cannot exceed the actual rectangle budge
   h.client.receive(new Uint8Array(bytes));
   await waitFor(()=>h.state.some(([phase,code])=>phase==='failed'&&code==='unsupported')); await h.work;
 });
+
+test('two-finger wheel events use the existing owner lease and always release each notch',async()=>{
+  const h=clientHarness(false);h.client.receive(serverHandshake(640,480));
+  await waitFor(()=>h.state.some(([phase])=>phase==='live'));
+  const before=h.transport.sent.length;
+  assert.equal(h.client.wheel(28,30,2),false);assert.equal(h.transport.sent.length,before);
+  h.setControl(true);assert.equal(h.client.wheel(28,30,2),true);
+  assert.deepEqual(h.transport.sent.at(-1),[5,8,0,28,0,30,5,0,0,28,0,30,5,8,0,28,0,30,5,0,0,28,0,30]);
+  assert.equal(h.client.wheel(640,480,-1),true);
+  assert.deepEqual(h.transport.sent.at(-1),[5,16,2,127,1,223,5,0,2,127,1,223]);
+  assert.equal(h.client.wheel(0,0,201),false);h.setControl(false);assert.equal(h.client.wheel(0,0,1),false);
+  h.client.close();await h.work;
+});
+
+test('scroll speed scales an unaccelerated two-finger drag, a pinch is ignored, a new touch ends coasting',async()=>{
+ const {ScreenWheel,ScreenTwoFingers,screenScrollFactor}=await import('../entry/src/main/ets/core/ScreenWheel.ts');
+ const gesture=new ScreenTwoFingers();gesture.begin(100,100,40);assert.equal(gesture.moved(100,102,56),'pinch');
+ gesture.begin(100,100,40);assert.equal(gesture.moved(100,106,42),'scroll');
+ const wheel=new ScreenWheel();
+ function count(choice){
+   wheel.begin();wheel.move(20,100,screenScrollFactor(choice));
+   let total=0;for(let i=0;i<60 && wheel.busy;i++)total+=wheel.frame(1/60);return total;
+ }
+ assert.deepEqual(['slower','default','faster'].map(count),[12,20,32]);
+ wheel.begin();wheel.move(-20,-1800,1.6);wheel.release(-1800,1.6);
+ assert.ok(wheel.frame(1/60)<0);assert.ok(wheel.busy);wheel.stop();assert.equal(wheel.busy,false);
+});

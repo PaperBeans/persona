@@ -14,11 +14,13 @@ import { Button, cx, Dialog, IconButton, Loading, Spinner } from "../../ui/atoms
 import { Icon } from "../../ui/icons";
 import { LarkAvatar } from "./InboxParts";
 
-export function LarkPinsDialog({ feed, topic, account, onClose, onOpen }: {
+export function LarkPinsDialog({ feed, topic, account, readOnly = false, onClose, onOpen }: {
   feed: string;
   topic: boolean;
   /** The Feishu account the chat is in (`ol_account`); undefined: the hub's own. */
   account?: number;
+  /** The lark module is off: Pins stay readable, but no add / remove control is drawn. */
+  readOnly?: boolean;
   /** checked: the list was read cleanly, so an earlier unknown write is settled. */
   onClose: (checked: boolean) => void;
   onOpen: (target: ChatPinTarget) => void;
@@ -104,8 +106,8 @@ export function LarkPinsDialog({ feed, topic, account, onClose, onOpen }: {
                     pin={p}
                     locating={s.locating === p.id}
                     disabled={busy || s.blocked}
-                    removable={canRemovePin(p) && !s.requiresRecheck}
-                    confirming={removing === p.id}
+                    removable={!readOnly && canRemovePin(p) && !s.requiresRecheck}
+                    confirming={!readOnly && removing === p.id}
                     onOpen={() => void open(p)}
                     onRemove={() => setRemoving(p.id)}
                     onCancel={() => setRemoving(null)}

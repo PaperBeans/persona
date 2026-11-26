@@ -4,6 +4,8 @@ import {
   type KeyLike, type SentEntry,
 } from "./send-history";
 import { moveActive, readAllHistory, searchAction, searchSent } from "./send-history-search";
+import { writeInlineDraft } from "./inline-mentions";
+import { skillDraft } from "./skill-mentions";
 
 function memory() {
   const m = new Map<string, string>();
@@ -89,6 +91,76 @@ describe("searching sent messages", () => {
     const many = Array.from({ length: 250 }, (_, i): SentEntry => ({ text: `item ${i}`, at: 250 - i }));
     expect(searchSent(many, "item")).toHaveLength(100);
     expect(searchSent(many, "item", 5)).toEqual(["item 0", "item 1", "item 2", "item 3", "item 4"]);
+  });
+
+  it("matches visible inline mention and skill labels instead of raw JSON or XML metadata (#15797)", () => {
+    const filePrompt = writeInlineDraft([
+      "Check ",
+      {
+        id: "file:src/App.tsx",
+        kind: "file",
+        title: "App.tsx",
+        url: "",
+        text: "src/App.tsx",
+        attrs: { path: "src/App.tsx", machine: "box-1", cwd: "/example/repo" },
+      },
+    ]);
+    const skillPrompt = skillDraft(
+      [{ id: "skill:rev", kind: "skill", title: "Code Audit", url: "", text: "Inspect diff\nsecond line detail", attrs: { ref: "opaque-audit-id" } }],
+      "Ship cleanly",
+    );
+    const entries: SentEntry[] = [
+      { text: filePrompt, at: 20 },
+      { text: skillPrompt, at: 10 },
+    ];
+
+    // Literal visible @path matches and returns the original rich serialized entry for recall.
+    expect(searchSent(entries, "@src/App")).toEqual([filePrompt]);
+    expect(searchSent(entries, "check @src/app.tsx")).toEqual([filePrompt]);
+    expect(searchSent(entries, "code audit ship")).toEqual([skillPrompt]);
+    expect(searchSent(entries, "inspect diff")).toEqual([skillPrompt]);
+
+    // Wire-format keys and unshown XML/JSON attributes must not produce false positives.
+    for (const noise of ["persona-inline-v1", "attrs", "kind", "machine", "box-1", "cwd", "persona-context", "opaque-audit-id", "second line detail"]) {
+      expect(searchSent(entries, noise), `unexpected match for ${noise}`).toEqual([]);
+    }
+  });
+
+  it("deduplicates repeated inline-ref sends differing only by random ref id while keeping distinct targets (#15797)", () => {
+    const first = writeInlineDraft([
+      "Summarize ",
+      { id: "uuid-new", kind: "workspace", title: "Release workspace", url: "/m1/w1", text: "summary" },
+    ]);
+    const duplicate = writeInlineDraft([
+      "Summarize ",
+      { id: "uuid-old", kind: "workspace", title: "Release workspace", url: "/m1/w1", text: "summary" },
+    ]);
+    const distinctTarget = writeInlineDraft([
+      "Summarize ",
+      { id: "uuid-other", kind: "workspace", title: "Release workspace", url: "/m1/w2", text: "summary" },
+    ]);
+    const entries: SentEntry[] = [
+      { text: first, at: 30 },
+      { text: duplicate, at: 20 },
+      { text: distinctTarget, at: 10 },
+    ];
+
+    expect(searchSent(entries, "release workspace")).toEqual([first, distinctTarget]);
+
+    // Plain text containing an embedded inline-draft marker retains its leading prefix in search.
+    const embedded = `prefix: \0persona-inline-v1\n["hi"]`;
+    expect(searchSent([{ text: embedded, at: 5 }], "prefix")).toEqual([embedded]);
+
+    // Skill metadata differences on the same skill id are not collapsed by dedup.
+    const skillV1 = skillDraft(
+      [{ id: "skill:rev", kind: "skill", title: "Audit v1", url: "", text: "Old desc", attrs: { ref: "rev" } }],
+      first,
+    );
+    const skillV2 = skillDraft(
+      [{ id: "skill:rev", kind: "skill", title: "Audit v2", url: "", text: "New desc", attrs: { ref: "rev" } }],
+      duplicate,
+    );
+    expect(searchSent([{ text: skillV2, at: 2 }, { text: skillV1, at: 1 }], "")).toEqual([skillV2, skillV1]);
   });
 });
 

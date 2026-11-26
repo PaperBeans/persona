@@ -37,8 +37,14 @@ internal fun SpaceScreen(
     loaded: Boolean = true,
     /** Opens a computer's projects (iOS `MachineSpacesView`), from the computer at the top of the cards. */
     onMachine: ((String) -> Unit)? = null,
+    /** All raw sessions on this hub, so parent rows can name unread folded side sessions (#13524). */
+    sessions: List<Session> = emptyList(),
+    /** Opens an unread folded side session directly in one tap (#13524). */
+    onOpenSide: ((AgentSession, SessionKey) -> Unit)? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
+    val visibleSessions = remember(sessions, preferences) { sessions.map { it.listSession(preferences).session } }
+    val visibleSessionsByKey = remember(visibleSessions) { visibleSessions.associateBy { it.key } }
     val grid = AgentSpaceLayout.cards
     val machine = machines.firstOrNull { it.id == space?.machineId }
     Box(Modifier.fillMaxSize()) {
@@ -64,6 +70,7 @@ internal fun SpaceScreen(
                     val card = cards[row.session.key]
                     val tab = row.session.tabKey?.let(tabs::get)
                     val branch = tab?.isBranch(row) == true
+                    val sideUnread = unreadSideSummary(row.session, visibleSessionsByKey[row.session.key], visibleSessions)
                     SlotRow(row, machines.firstOrNull { it.id == row.session.machineId }?.displayName,
                         AgentRowMetadata(), now, false, row.id in preferences.pins.sessions, preferences.mutes.mutes(row),
                         depth = if (branch) 1 else 0, position = GroupPosition.of(index, space.members.size), located = false,
@@ -72,7 +79,9 @@ internal fun SpaceScreen(
                         slotLabel = row.session.slotName?.takeIf { it.isNotBlank() && it != row.session.displayTitle }
                             // herdr's default tab names are numbers; a bare "1" reads as a count, so say #1.
                             ?.let { if (it.all(Char::isDigit)) "#$it" else it }
-                            ?: stringResource(R.string.agents_space_tab, row.session.slotIndex ?: 0), requestCount = requests, onClose = onClose(row), card = card)
+                            ?: stringResource(R.string.agents_space_tab, row.session.slotIndex ?: 0), requestCount = requests, onClose = onClose(row), card = card,
+                        sideUnread = sideUnread, onOpenSide = onOpenSide?.let { cb -> { side -> cb(row, side) } },
+                        preferHerdrTabName = preferences.prefersHerdrTabName(row.session))
                 }
                 if (canStart) item("new-tab") {
                     JButton(stringResource(R.string.agents_space_new_tab), { onNewTab(space) }, Modifier.fillMaxWidth().padding(top = 16.dp.dense), enabled = !busy, icon = PhIcons.Plus)
@@ -108,7 +117,8 @@ private fun LazyListScope.spaceCards(
             val cell: @Composable (AgentSession?) -> Unit = { row ->
                 if (row == null) AgentNewTabCard(stringResource(R.string.agents_space_new_tab_card), { onNewTab(space) }, Modifier.fillMaxHeight(), enabled = !busy)
                 else SpaceCard(row, row.session.tabKey?.let(tabs::get), pending.count { it.sessionKey == row.session.key }, cards[row.session.key],
-                    preferences.mutes.mutes(row), now, { onOpen(row) }, sessionMenu)
+                    preferences.mutes.mutes(row), now, { onOpen(row) }, sessionMenu,
+                    preferHerdrTabName = preferences.prefersHerdrTabName(row.session))
             }
             AgentCardRow(Modifier.padding(top = if (index == 0) Tokens.Space.l else Tokens.Space.m),
                 end = { if (pair.size > 1) cell(pair[1]) }) { cell(pair[0]) }
@@ -121,14 +131,18 @@ private fun LazyListScope.spaceCards(
 private fun SpaceCard(
     row: AgentSession, tab: AgentTab?, requests: Int, card: Interaction?, muted: Boolean, now: Instant,
     onOpen: () -> Unit, sessionMenu: @Composable (AgentSession) -> List<JAction>,
+    preferHerdrTabName: Boolean = false,
 ) {
     var menu by remember { mutableStateOf(false) }
     val session = row.session
+    val primaryTab = session.displayTabName(preferHerdrTabName)
+    val title = session.displayTitle(preferHerdrTabName)
     // iOS `stateLabel(muted:)`: Awaiting reply, Waiting in the background and Working (Background) included.
     val state = row.stateWord(muted).text()
-    AgentSlotCard(session.displayTitle, row.state.designStatus, state, onOpen, Modifier.fillMaxHeight(),
-        stateTone = row.rowStatus(muted), tab = session.slotLabel, pane = tab?.paneName(row), agent = session.agentLabel,
+    AgentSlotCard(title, row.state.designStatus, state, onOpen, Modifier.fillMaxHeight(),
+        stateTone = row.rowStatus(muted), tab = if (primaryTab != null) session.displayTitleDetail(preferHerdrTabName) else session.slotLabel,
+        pane = tab?.paneName(row), agent = session.agentLabel,
         starter = tab?.launcher?.id == row.id, pending = requests, preview = session.rowLine(card, now, muted)?.text(),
         model = modelShortName(session.model).ifEmpty { null }, waiting = row.waitsInBackground, onLongClick = { menu = true })
-    if (menu) JActionSheet(sessionMenu(row), { menu = false }, title = session.displayTitle)
+    if (menu) JActionSheet(sessionMenu(row), { menu = false }, title = title)
 }

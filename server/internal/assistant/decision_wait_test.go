@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -169,7 +170,7 @@ func TestDecisionThatCannotBeKeptAsHeldIsPushed(t *testing.T) {
 	if err := st.memStore.PutSetting(context.Background(), settingsKey, s.settings(context.Background())); err != nil {
 		t.Fatal(err)
 	}
-	s.store = func() Store { return st }
+	s.setStore(func() Store { return st })
 	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	res := reviewTask(t, s, todo.ID, waitingDecision())
 	if strings.Contains(res, "can wait (can_wait)") || !strings.Contains(res, "can_wait was ignored ("+waitNotKept+")") ||
@@ -196,21 +197,22 @@ func TestCanWaitIsForDecisionsOnly(t *testing.T) {
 
 // The briefing lists a held decision with its recommendation; once one reached the owner with it, it is not pushed later.
 func TestBriefingListsADecisionThatWaited(t *testing.T) {
+	needsBriefingModule(t)
 	s, f, todo, _, _ := conclusionService(t, false)
 	briefingOn(s, true)
 	waitsForReview(t, s, f, todo.ID, "两种走法。")
 	reviewTask(t, s, todo.ID, waitingDecision())
 	now := time.Now()
 	facts := s.briefFactsAt(context.Background(), now, "morning")
-	if len(facts.Accept) != 1 || facts.Accept[0].id != todo.ID {
+	if len(facts.Accept) != 1 || facts.Accept[0].ID != todo.ID {
 		t.Fatalf("the briefing's rows: %+v", facts.Accept)
 	}
-	if row := facts.body(s, "morning").Accept[0]; row.Outcome != outcomeDecide || row.Recommend != "先灰度 10%" || row.AskedAt.IsZero() {
+	if row := s.briefBodyOf(facts, "morning").Accept[0]; row.Outcome != outcomeDecide || row.Recommend != "先灰度 10%" || row.AskedAt.IsZero() {
 		t.Fatalf("the brief item's row: %+v", row)
 	}
 	// A run whose facts were made for another round changes nothing.
 	old := *facts
-	old.Accept = []boardRow{{id: todo.ID, asked: now.Add(-time.Hour)}}
+	old.Accept = []modapi.BriefBoardRow{{ID: todo.ID, Asked: now.Add(-time.Hour)}}
 	s.briefListed(&old)
 	if !askOf(s, todo.ID).ForBriefing {
 		t.Fatal("another round's row ended the wait")
@@ -474,15 +476,14 @@ func TestWaitOver(t *testing.T) {
 // is pushed after all. The run's finished push (with the `brief` item listing every row) ends it, and so does the
 // briefing's Lark card for the rows it shows.
 func TestOnlyABriefingThatReachedTheOwnerEndsTheWait(t *testing.T) {
+	needsBriefingModule(t)
 	start := func(t *testing.T) (*Service, *fakeHub, Todo, *briefRun) {
 		s, f, todo, _, _ := conclusionService(t, false)
 		briefingOn(s, true)
 		waitsForReview(t, s, f, todo.ID, "两种走法。")
 		reviewTask(t, s, todo.ID, waitingDecision())
-		run := &briefRun{facts: s.briefFactsAt(context.Background(), time.Now(), "morning"), label: "morning"}
-		s.brief.mu.Lock()
-		s.brief.byTask = map[string]*briefRun{"morning": run}
-		s.brief.mu.Unlock()
+		run := &briefRun{Facts: s.briefFactsAt(context.Background(), time.Now(), "morning"), Label: "morning"}
+		s.briefSetTaskRun("morning", run)
 		s.briefSent("morning", "conv-briefing", true)
 		if a := askOf(s, todo.ID); !a.ForBriefing {
 			t.Fatalf("sending the run ended the wait: %+v", a)
@@ -517,12 +518,12 @@ func TestOnlyABriefingThatReachedTheOwnerEndsTheWait(t *testing.T) {
 	})
 	t.Run("the card", func(t *testing.T) {
 		s, _, todo, run := start(t)
-		s.briefAsked(run.facts, nil) // the card had no room for its row
+		s.briefAsked(run.Facts, nil) // the card had no room for its row
 		if !askOf(s, todo.ID).ForBriefing {
 			t.Fatal("a card that did not show it ended the wait")
 		}
-		_, _, shown := s.briefCard(run.facts, run.label, "早上好")
-		s.briefAsked(run.facts, shown)
+		_, _, shown := s.briefCard(run.Facts, run.Label, "早上好")
+		s.briefAsked(run.Facts, shown)
 		if a := askOf(s, todo.ID); a.ForBriefing || !a.AcceptedAt.IsZero() {
 			t.Fatalf("after the card: shown %q, ask %+v", shown, a)
 		}

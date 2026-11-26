@@ -51,14 +51,18 @@ export type ArchiveOffer = "ok" | "busy" | "no";
  *  Archive: any agent but the assistant's conversations (those archive in All chats), on a hub that has archives.
  *  Archive and close: an agent running in a terminal tab that the node can bring back after closing it, as session.retire
  *  decides (node retire.go): Claude Code, and Codex or a compatible CLI that Persona started (its launcher is known);
- *  not a runtime's or a desktop app's session (their tool keeps them), and not one already closed. */
+ *  not a runtime's or a desktop app's session (their tool keeps them), and not one already closed. An Antigravity CLI
+ *  conversation is closed so too (#14520), from its pane's row (session.retire) or from its own row, the companion's
+ *  (its close), and a message continues it in the companion after either; Antigravity keeps no archive of its own, so
+ *  Persona's is what takes it out of the list, as Close does for a Claude Code agent. */
 export function archiveOffers(s: Session, features: readonly string[]): { archive: ArchiveOffer; close: ArchiveOffer } {
   if (s.assistant || s.archived || !features.includes(AGENT_ARCHIVES_FEATURE)) return { archive: "no", close: "no" };
   const archive: ArchiveOffer = archiveBusy(s) ? "busy" : "ok";
   const agent = s.agent ?? "";
   const resumable = agent === "" || agent === "claude" || ((agent === "codex" || agent === "traex") && Boolean(s.started_by_persona));
+  const agy = agent === "agy" && (!s.source_kind || (s.source_kind === "runtime" && s.capabilities?.close === true));
   const open = stateOf(s) !== "offline" && s.status !== "offline" && !s.start_error;
-  const closable = features.includes(AGENT_ARCHIVE_CLOSE_FEATURE) && !s.source_kind && resumable && open;
+  const closable = features.includes(AGENT_ARCHIVE_CLOSE_FEATURE) && (agy || (!s.source_kind && resumable)) && open;
   return { archive, close: !closable ? "no" : closeBusy(s) ? "busy" : "ok" };
 }
 

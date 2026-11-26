@@ -136,13 +136,14 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	}
 	cmd := n.codexAssistantCommand(shell, launcher, args)
 	cmd.Dir = root
-	cmd.Env = identity.Environment(os.Environ(), "PERSONA_ASSISTANT=1")
+	cmd.Env = identity.Environment(withoutEnv(os.Environ(), []string{categoriesEnv}), "PERSONA_ASSISTANT=1")
 	if provider, ok := n.managedLauncher(launcher); ok && provider.AgentType() == "codex" {
 		// Use the same managed environment and header bindings as personad launch,
 		// without passing secrets as shell code or command-line arguments.
 		cmd.Env = identity.Environment(withoutEnv(cmd.Env, envClearFor(provider)), managedEnv(provider)...)
 	}
 	gateEnv, releaseGates, nameGates := n.assistantLarkEnvNamed(cwd, id) // its addresses at the gate proxy go with the process
+	categories := categoriesFromEnv(gateEnv)
 	started := false
 	defer func() {
 		if !started {
@@ -172,7 +173,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	started = true
 	p := &assistantProc{id: id, agent: "codex", launcher: launcher, cwd: cwd, cmd: cmd, stdin: stdin, exited: make(chan struct{}),
 		born: time.Now(), lastActive: time.Now(), model: execution, fingerprint: n.executionFingerprint(launcher, execution),
-		instructions: instructions, personaMCPOnly: personaMCPOnly, origin: execution.Origin}
+		instructions: instructions, personaMCPOnly: personaMCPOnly, categories: categories, origin: execution.Origin}
 	c := &codexConn{n: n, p: p, key: key, memDir: memDir, pending: map[int64]chan codexReply{}, asks: map[string]context.CancelFunc{}, files: map[string][]string{},
 		nameGates: nameGates}
 	p.cx = c
@@ -184,10 +185,14 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 			n.logger.Printf("assistant codex %s: %s", key, l)
 		}
 	})
+	p.owner.Store(n)
 	liveAssistants.Store(p, struct{}{})
 	go c.read(stdout)
 	go func() {
 		_ = cmd.Wait()
+		if p.stopped.Load() {
+			osproc.SweepGroup(cmd.Process.Pid, assistantGroupSweep)
+		}
 		releaseGates()
 		c.mu.Lock()
 		c.closed = true

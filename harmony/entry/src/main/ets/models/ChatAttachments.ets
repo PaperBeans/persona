@@ -888,15 +888,22 @@ export class ChatAttachments {
     return result;
   }
 
-  private async encodeImage(item: ChatAttachment, byteBudget: number): Promise<EncodedAttachmentImage> {
-    let source: image.ImageSource | undefined;
+  /** The same native decoder, size ceiling and JPEG/PNG packing used for newly picked pictures. */
+  static async forwardImage(bytes:ArrayBuffer):Promise<ChatImagePayload> {
+    const encoded=await ChatAttachments.encodeSource(image.createImageSource(bytes),'',Math.floor((REQUEST_LIMIT-200000)*0.70/MAX_IMAGES));
+    return new ChatImagePayload(encoded.mime,new util.Base64Helper().encodeToStringSync(new Uint8Array(encoded.data)));
+  }
+  private async encodeImage(item:ChatAttachment,byteBudget:number):Promise<EncodedAttachmentImage> {
+    return ChatAttachments.encodeSource(image.createImageSource(item.localPath),item.mime,byteBudget);
+  }
+  private static async encodeSource(source:image.ImageSource,expectedMime:string,byteBudget:number):Promise<EncodedAttachmentImage> {
     let packer: image.ImagePacker | undefined;
     let pixels: image.PixelMap | undefined;
     try {
-      source = image.createImageSource(item.localPath);
       const info = await source.getImageInfo();
-      if (info.mimeType !== 'image/jpeg' && info.mimeType !== 'image/png') throw new Error('chat_attachment_image_unsupported');
-      if (info.mimeType !== item.mime || info.size.width <= 0 || info.size.height <= 0 || info.size.width * info.size.height > MAX_IMAGE_PIXELS)
+      if (expectedMime && (expectedMime!=='image/jpeg' && expectedMime!=='image/png' || info.mimeType!==expectedMime)) throw new Error('chat_attachment_image_unsupported');
+      const outputMime=info.mimeType==='image/png' ? 'image/png' : 'image/jpeg';
+      if (info.size.width <= 0 || info.size.height <= 0 || info.size.width * info.size.height > MAX_IMAGE_PIXELS)
         throw new Error('chat_attachment_image_unsupported');
       const maxDimension = Math.max(info.size.width, info.size.height);
       let edge = Math.min(MAX_IMAGE_EDGE, maxDimension);
@@ -909,10 +916,10 @@ export class ChatAttachments {
           height: Math.max(1, Math.round(info.size.height * scale))
         };
         pixels = await source.createPixelMap({ desiredSize: desired });
-        const data = await packer.packToData(pixels, { format: info.mimeType, quality: quality });
+        const data = await packer.packToData(pixels, { format: outputMime, quality: quality });
         await pixels.release(); pixels = undefined;
-        if (data.byteLength > 0 && data.byteLength <= byteBudget) return { mime: info.mimeType, data: data };
-        if (info.mimeType === 'image/jpeg' && quality > 45) quality -= 10;
+        if (data.byteLength > 0 && data.byteLength <= byteBudget) return { mime: outputMime, data: data };
+        if (outputMime === 'image/jpeg' && quality > 45) quality -= 10;
         else { edge = Math.max(96, Math.floor(edge * 0.75)); quality = 75; }
       }
       throw new Error('chat_attachment_request_too_large');

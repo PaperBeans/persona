@@ -76,6 +76,20 @@ func light(it proto.Item, keepImage bool) (_ proto.Item, cut bool) {
 		it.Text = it.Text[:end] + fmt.Sprintf(note, len(it.Text))
 		cut = true
 	}
+	// Quoted questions have their own budget. For a multi-answer reply the plain Text
+	// remains a readable preview even if the complete list needs the full-item endpoint.
+	quoteBytes := 0
+	for _, reply := range it.QuestionReplies {
+		quoteBytes += len(reply.Question) + len(reply.Answer)
+	}
+	if quoteBytes > pageTextLen {
+		if len(it.QuestionReplies) == 1 {
+			it.QuestionReplies = []proto.QuestionReply{{Question: clipTo(it.QuestionReplies[0].Question, pageTextLen)}}
+		} else {
+			it.QuestionReplies = nil
+		}
+		it.QuestionRepliesCut, cut = true, true
+	}
 	if it.Image != nil && it.Image.Data != "" && !keepImage {
 		it.Image = it.Image.Placeholder()
 		cut = true

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 )
 
 func TestFeishuModelCommands(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	ctx := context.Background()
 	s, f := pickFixture(t)
 	f.agentModels = map[string][]proto.AgentModel{"gw": {{ID: "m1"}, {ID: "m2"}}}
@@ -22,12 +24,16 @@ func TestFeishuModelCommands(t *testing.T) {
 		note = p.Text
 		return map[string]any{}, nil
 	})
-	s.setBotCurrent(botTarget{Kind: targetMain})
+	s.larkModule().SetTarget(botTarget{Kind: targetMain})
+	said := 0
 	command := func(text string) {
 		t.Helper()
 		note = ""
-		if handled, rest := s.botCommand(ctx, FeishuFeatures{Main: true}, "om", text, "", ""); !handled || rest != "" {
-			t.Fatalf("%s: handled=%v rest=%q", text, handled, rest)
+		before := len(sendOnces(f))
+		said++
+		botSay(t, s, f, FeishuFeatures{Main: true}, fmt.Sprintf("om_%d", said), text, "", "")
+		if sent := len(sendOnces(f)) - before; sent != 0 || note == "" { // handled: answered with a note, nothing sent on
+			t.Fatalf("%s: sent %d, note %q", text, sent, note)
 		}
 	}
 	command("/modellist")
@@ -47,13 +53,13 @@ func TestFeishuModelCommands(t *testing.T) {
 	if err != nil || p["model"] != "m2" {
 		t.Fatalf("next message: %v %v", p, err)
 	}
-	s.setBotCurrent(botTarget{Kind: targetAgent, MachineID: "server", SessionID: "agent"})
+	s.larkModule().SetTarget(botTarget{Kind: targetAgent, MachineID: "server", SessionID: "agent"})
 	command("/modelchange m1")
 	pick, _ = s.modelPickOf(ctx, "server", "main")
 	if pick.Model != "m2" {
 		t.Fatalf("agent target changed main: %+v", pick)
 	}
-	s.setBotCurrent(botTarget{Kind: targetPersona, MachineID: "server", SessionID: "side"})
+	s.larkModule().SetTarget(botTarget{Kind: targetPersona, MachineID: "server", SessionID: "side"})
 	command("/modelchange m1")
 	pick, _ = s.modelPickOf(ctx, "server", "main")
 	if pick.Model != "m2" {

@@ -92,13 +92,19 @@ func (s *Service) toolEntries(ctx context.Context, machine, session, name string
 		// stays the ledger's (memory_extension_source.go). Filters the extension's entries have no field for (who wrote
 		// one, how far it is trusted, a status other than active) leave them out.
 		var memory []recalledMemory
-		if personal && p.After == "" && p.By == "" && p.Trust == "" && (p.Status == "" || p.Status == "active") {
-			memory = s.recallExtensionMemory(ctx, session, p.Tag)
+		var memoryOmitted string
+		if personal && p.After == "" {
+			if p.By != "" || p.Trust != "" || (p.Status != "" && p.Status != "active") {
+				memoryOmitted = "ledger_filters"
+			} else {
+				memory = s.recallExtensionMemory(ctx, session, p.Tag)
+			}
 		}
 		b, err := json.Marshal(struct {
 			proto.AssistantEntriesResult
-			Memory []recalledMemory `json:"memory,omitempty"`
-		}{out, memory})
+			Memory        []recalledMemory `json:"memory,omitempty"`
+			MemoryOmitted string           `json:"memory_omitted,omitempty"`
+		}{out, memory, memoryOmitted})
 		return string(b), err
 	}
 	var in struct {

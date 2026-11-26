@@ -1,0 +1,750 @@
+{
+  "schema_version": 1,
+  "operation": "agents_list",
+  "cases": [
+    {
+      "name": "held_set_rows_keep_unread_section_by_status",
+      "description": "Two rows read during this visit stay in Unread under By status, in their time order between the unread ones; the section counts only the row still unread, and a row this visit never held folds into Seen.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListOrder.swift: heldPlace(_:), rank(_:) and isHeldSeen(_:) with heldSeen",
+        "apple/Persona/Views/Chats/ChatsView.swift: stateSections(_:) counts rows that are not isHeldSeen and offers Clear Seen for those that are",
+        "apple/PersonaTests/AgentListOrderTests.swift: severalRowsReadDuringAVisitKeepTheUnreadPlace"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "read-one",
+            "title": "Read first",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:50Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "read-two",
+            "title": "Read second",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:30Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "still-unread",
+            "title": "Not read yet",
+            "cwd": "/home/user/project",
+            "status": "done",
+            "state": "unread",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:40Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "working",
+            "title": "Working example",
+            "cwd": "/home/user/project",
+            "status": "working",
+            "state": "working",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:10Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "seen-before",
+            "title": "Seen before the visit",
+            "cwd": "/home/user/other",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-b",
+            "space_name": "Other project",
+            "updated_at": "2026-01-01T00:01:00Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "state",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/read-one": "unread",
+            "machine-a/read-two": "unread",
+            "machine-a/still-unread": "unread"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 1,
+          "working": 1,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "state/unread",
+            "title": "完成未看",
+            "rows": [
+              "machine-a/read-one",
+              "machine-a/still-unread",
+              "machine-a/read-two"
+            ],
+            "visible_rows": [
+              "machine-a/read-one",
+              "machine-a/still-unread",
+              "machine-a/read-two"
+            ],
+            "folded": false,
+            "held_seen": [
+              "machine-a/read-one",
+              "machine-a/read-two"
+            ]
+          },
+          {
+            "id": "state/working",
+            "title": "工作中",
+            "rows": [
+              "machine-a/working"
+            ],
+            "visible_rows": [
+              "machine-a/working"
+            ],
+            "folded": false,
+            "held_seen": []
+          },
+          {
+            "id": "state/idle",
+            "title": "已看",
+            "rows": [
+              "machine-a/seen-before"
+            ],
+            "visible_rows": [],
+            "folded": true,
+            "held_seen": []
+          }
+        ],
+        "unread_shown": [
+          "machine-a/still-unread"
+        ]
+      },
+      "derived": true
+    },
+    {
+      "name": "held_set_just_finished_keeps_its_section",
+      "description": "A row read from Just finished stays in that section after its flag clears, beside one still flagged; a plain seen row folds into Seen.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListOrder.swift: justFinished(_:) with a heldSeen place of justFinished",
+        "apple/Persona/App/AppModel.swift: markSeen(_:) holds a Just finished row as justFinished",
+        "apple/PersonaTests/AgentListOrderTests.swift: aRowReadFromJustFinishedKeepsThatPlace"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "finished-read",
+            "title": "Finished and read",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:20Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "finished-new",
+            "title": "Finished, not read",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:30Z",
+            "work": {
+              "phase": "done",
+              "just_finished": true
+            }
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "plain-seen",
+            "title": "Seen long ago",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:40Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "state",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/finished-read": "just_finished",
+            "machine-a/finished-new": "just_finished"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 0,
+          "working": 0,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "state/just_finished",
+            "title": "刚做完待看",
+            "rows": [
+              "machine-a/finished-new",
+              "machine-a/finished-read"
+            ],
+            "visible_rows": [
+              "machine-a/finished-new",
+              "machine-a/finished-read"
+            ],
+            "folded": false,
+            "held_seen": [
+              "machine-a/finished-read"
+            ]
+          },
+          {
+            "id": "state/idle",
+            "title": "已看",
+            "rows": [
+              "machine-a/plain-seen"
+            ],
+            "visible_rows": [],
+            "folded": true,
+            "held_seen": []
+          }
+        ],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "held_set_quiet_space_stays_active",
+      "description": "Under By project a read row keeps its otherwise idle space among the active ones and stays out of the idle rows' fold; a space with no held row folds into the idle spaces.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListOrder.swift: stays(_:) and isQuiet(_:) with heldSeen",
+        "apple/Persona/Views/Chats/AgentListProjection.swift: build(_:now:) partitions rows with stays(_:)"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "read",
+            "title": "Read during the visit",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "slot_index": 0,
+            "updated_at": "2026-01-01T00:00:20Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "idle-peer",
+            "title": "Idle peer",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "slot_index": 1,
+            "updated_at": "2026-01-01T00:00:30Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "other",
+            "title": "Quiet space",
+            "cwd": "/home/user/other",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-b",
+            "space_name": "Other project",
+            "slot_index": 0,
+            "updated_at": "2026-01-01T00:00:10Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "space",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/read": "unread"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 0,
+          "working": 0,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "machine-a/space-a",
+            "title": "Example project",
+            "rows": [
+              "machine-a/read",
+              "machine-a/idle-peer"
+            ],
+            "visible_rows": [
+              "machine-a/read"
+            ],
+            "folded": false,
+            "state_counts": {
+              "needs_you": 0,
+              "working": 0,
+              "unread": 0,
+              "idle": 2,
+              "unknown": 0
+            },
+            "spoken": "2 个空闲",
+            "held_seen": [
+              "machine-a/read"
+            ]
+          },
+          {
+            "id": "machine-a/space-b",
+            "title": "Other project",
+            "rows": [
+              "machine-a/other"
+            ],
+            "visible_rows": [],
+            "folded": true,
+            "parent": "quiet",
+            "state_counts": {
+              "needs_you": 0,
+              "working": 0,
+              "unread": 0,
+              "idle": 1,
+              "unknown": 0
+            },
+            "spoken": "1 个空闲",
+            "held_seen": []
+          }
+        ],
+        "unread_shown": [],
+        "quiet_title": "空闲的空间"
+      },
+      "derived": true
+    },
+    {
+      "name": "held_set_unread_filter_by_status",
+      "description": "Under the Unread quick filter and By status, a row the filter kept and this visit read stays in Unread instead of the folded Seen section; rows the filter never showed stay out.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift: build(_:now:) keeps settings.kept under a quick filter",
+        "apple/Persona/Views/Chats/AgentListOrder.swift: rank(_:) with heldSeen"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "a",
+            "title": "Read from the filter",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:50Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "b",
+            "title": "Still unread",
+            "cwd": "/home/user/project",
+            "status": "done",
+            "state": "unread",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:40Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "c",
+            "title": "Seen before the filter",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:01:00Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "d",
+            "title": "Working",
+            "cwd": "/home/user/project",
+            "status": "working",
+            "state": "working",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:10Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "state",
+          "quick": "unread",
+          "query": "",
+          "machine_filter": "",
+          "kept": [
+            "machine-a/a",
+            "machine-a/b"
+          ],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/a": "unread",
+            "machine-a/b": "unread"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 1,
+          "working": 1,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "state/unread",
+            "title": "完成未看",
+            "rows": [
+              "machine-a/a",
+              "machine-a/b"
+            ],
+            "visible_rows": [
+              "machine-a/a",
+              "machine-a/b"
+            ],
+            "folded": false,
+            "held_seen": [
+              "machine-a/a"
+            ]
+          }
+        ],
+        "unread_shown": [
+          "machine-a/b"
+        ]
+      },
+      "derived": true
+    },
+    {
+      "name": "held_set_rows_that_move_on",
+      "description": "Held rows follow what they do next: one working again is in Working, one with a new unseen turn is Unread and counted again, and only the one still seen is held.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListOrder.swift: rank(_:) holds only quiet rows; isHeldSeen(_:) needs a seen row",
+        "apple/PersonaTests/AgentListOrderTests.swift: aHeldRowThatMovesOnIsNoLongerHeldSeen"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "again-working",
+            "title": "Working again",
+            "cwd": "/home/user/project",
+            "status": "working",
+            "state": "working",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:30Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "again-unread",
+            "title": "Finished again",
+            "cwd": "/home/user/project",
+            "status": "done",
+            "state": "unread",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:20Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "read",
+            "title": "Read",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:10Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "state",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/again-working": "unread",
+            "machine-a/again-unread": "unread",
+            "machine-a/read": "unread"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 1,
+          "working": 1,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "state/unread",
+            "title": "完成未看",
+            "rows": [
+              "machine-a/again-unread",
+              "machine-a/read"
+            ],
+            "visible_rows": [
+              "machine-a/again-unread",
+              "machine-a/read"
+            ],
+            "folded": false,
+            "held_seen": [
+              "machine-a/read"
+            ]
+          },
+          {
+            "id": "state/working",
+            "title": "工作中",
+            "rows": [
+              "machine-a/again-working"
+            ],
+            "visible_rows": [
+              "machine-a/again-working"
+            ],
+            "folded": false,
+            "held_seen": []
+          }
+        ],
+        "unread_shown": [
+          "machine-a/again-unread"
+        ]
+      },
+      "derived": true
+    },
+    {
+      "name": "held_set_machine_section_shows_read_rows",
+      "description": "Under By computer a read row is shown with the busy rows instead of folding behind the idle rows, which stay folded.",
+      "source": [
+        "apple/Persona/Views/Chats/ChatsView.swift: machineSections(_:) shows rows that stays(_:)",
+        "apple/Persona/Views/Chats/AgentListOrder.swift: stays(_:) with heldSeen"
+      ],
+      "input": {
+        "sessions": [
+          {
+            "machine_id": "machine-a",
+            "session_id": "read",
+            "title": "Read during the visit",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:20Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "idle",
+            "title": "Idle",
+            "cwd": "/home/user/project",
+            "status": "idle",
+            "state": "idle",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:30Z"
+          },
+          {
+            "machine_id": "machine-a",
+            "session_id": "work",
+            "title": "Working",
+            "cwd": "/home/user/project",
+            "status": "working",
+            "state": "working",
+            "space_id": "space-a",
+            "space_name": "Example project",
+            "updated_at": "2026-01-01T00:00:10Z"
+          }
+        ],
+        "machines": [
+          {
+            "id": "machine-a",
+            "name": "Example computer"
+          }
+        ],
+        "pins": {
+          "spaces": [],
+          "sessions": []
+        },
+        "mutes": {
+          "spaces": [],
+          "sessions": [],
+          "allowed": []
+        },
+        "settings": {
+          "grouping": "machine",
+          "quick": "all",
+          "query": "",
+          "machine_filter": "",
+          "kept": [],
+          "folded": [],
+          "expanded_idle": [],
+          "expanded_quiet": [],
+          "compact": false,
+          "held_seen": {
+            "machine-a/read": "unread"
+          }
+        }
+      },
+      "expected": {
+        "counts": {
+          "needsYou": 0,
+          "unread": 0,
+          "working": 1,
+          "backgroundWaiting": 0
+        },
+        "groups": [
+          {
+            "id": "machine/machine-a",
+            "title": "Example computer",
+            "rows": [
+              "machine-a/read",
+              "machine-a/work",
+              "machine-a/idle"
+            ],
+            "visible_rows": [
+              "machine-a/read",
+              "machine-a/work"
+            ],
+            "folded": false,
+            "held_seen": [
+              "machine-a/read"
+            ]
+          }
+        ],
+        "unread_shown": []
+      },
+      "derived": true
+    }
+  ]
+}

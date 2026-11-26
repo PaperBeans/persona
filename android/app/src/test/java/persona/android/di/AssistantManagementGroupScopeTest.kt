@@ -40,6 +40,13 @@ class AssistantManagementGroupScopeTest {
             return StandingAuthorizationList(1, listOf(StandingAuthorization(id = "sa", machineId = "pro"), StandingAuthorization(id = "blank")))
         }
         override suspend fun revokeStandingAuthorization(id: String) { calls += "$manager revoke $id" }
+        override suspend fun conversationSwitchState(session: SessionKey): ConversationSwitchState {
+            calls += "$manager segments ${session.machineId}/${session.sessionId}"
+            return ConversationSwitchState(enabled = true, epoch = 7, supervisionRequired = true)
+        }
+        override suspend fun submitConversationSwitch(session: SessionKey, request: ConversationSwitchRequest) {
+            calls += "$manager switch ${session.machineId}/${session.sessionId} ${request.sourceMachineId}->${request.machineId} ${request.launcher}"
+        }
     }
 
     @Test fun bindingManagerPreservesGroupInputAndOutputTranslationAndLeavesOriginalUnbound() = runBlocking {
@@ -108,5 +115,23 @@ class AssistantManagementGroupScopeTest {
         val routed = Class.forName("persona.android.di.RoutedAssistantManagement")
         assertTrue(routed.declaredMethods.any { it.name == "standingAuthorizations" })
         assertTrue(routed.declaredMethods.any { it.name == "revokeStandingAuthorization" })
+    }
+
+    @Test fun conversationSwitchTranslatesGroupMachinesAndRoutedManagementForwardsIt() = runBlocking {
+        val calls = mutableListOf<String>()
+        val work = Management(calls).inGroup(GroupNames("g0a1b2c3d")).forManager("work")
+        val state = work.conversationSwitchState(SessionKey("pro~g0a1b2c3d", "main"))
+        assertEquals(ConversationSwitchState(enabled = true, epoch = 7, supervisionRequired = true), state)
+        work.submitConversationSwitch(
+            SessionKey("pro~g0a1b2c3d", "main"),
+            ConversationSwitchRequest("op-1", 7, "pro~g0a1b2c3d", "pro~g0a1b2c3d", "agy"),
+        )
+        assertEquals(
+            listOf("work segments pro/main", "work switch pro/main pro->pro agy"),
+            calls,
+        )
+        val routed = Class.forName("persona.android.di.RoutedAssistantManagement")
+        assertTrue(routed.declaredMethods.any { it.name == "conversationSwitchState" })
+        assertTrue(routed.declaredMethods.any { it.name == "submitConversationSwitch" })
     }
 }

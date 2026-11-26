@@ -8,9 +8,10 @@ import { storedValue, storeValue } from "../../lib/compatibility";
 // (lib/fs-live.ts). Both views change files too (files/FileOps.tsx, #4883): files dropped or chosen upload into the
 // folder, and a row's menu (right click, its ⋯) downloads, renames, moves or moves it to the trash; "Select" picks several
 // for one of those. Folders outside the home are read-only.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, enc, errorText, isAbort } from "../../lib/api";
 import { t } from "../../i18n";
+import { FILES_TREE_WIDTH_KEY, TREE_PANE_DEFAULT, TREE_PANE_MAX, TREE_PANE_MIN, TREE_PANE_VIEWER_MIN } from "../../lib/layout";
 import { entryPayload, ENTRY_DRAG_TYPE } from "../../lib/entry-drag";
 import { aheadBehind, dirName, fileName, gitMark, joinPath, type FsEntry, type FsListing, type GitStatus } from "../../lib/files";
 import { historyBack, historyForward, historyGo, parentPath, pathSegments, writableHere, type FilesHistory } from "../../lib/files-nav";
@@ -32,6 +33,7 @@ import { Icon } from "../../ui/icons";
 import { SearchField } from "../../ui/SearchField";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { PanelHeader } from "../../ui/PanelHeader";
+import { TreePaneSplitter, useResizableTreeWidth } from "../../ui/TreePaneSplitter";
 import { FileInfoDialog } from "./files/FileInfo";
 import { FILE_CHMOD_FEATURE, PermissionsDialog } from "./files/Permissions";
 import { NewItemDialog, type NewKind } from "./files/NewItem";
@@ -42,13 +44,13 @@ import { Empty, FileGlyph, GitDot, GitBadge, useStoredFlag } from "./files/parts
 
 type Listed = { at: string; listing?: FsListing; error?: string };
 
-export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClose }: { mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string; onClose: () => void }) {
+export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClose, onBrowse }: { mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string; onClose: () => void; onBrowse?: (path: string) => void }) {
   // Where it starts: `path` (a folder to open at) or the session's folder; Back / Forward walk what was shown since.
   const startDir = path || cwd;
   const [history, setHistory] = useState<FilesHistory>({ current: startDir, back: [], forward: [] });
   useEffect(() => setHistory({ current: startDir, back: [], forward: [] }), [startDir]);
   const dir = history.current;
-  const go = useCallback((p: string) => setHistory((h) => historyGo(h, p)), []);
+  const go = useCallback((p: string) => onBrowse ? onBrowse(p) : setHistory((h) => historyGo(h, p)), [onBrowse]);
   const machine = useStore((s) => s.machines.find((m) => m.id === mid));
   const home = machine?.home;
   const [highlight, setHighlight] = useState(marked);
@@ -195,13 +197,33 @@ export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClo
   const changes = git?.is_repo ? git.files.length : 0;
   const sync = aheadBehind(git);
   const viewing = open[open.length - 1];
+  const splitWorkbench = Boolean(viewing && tree && !narrow);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const treePaneId = useId();
+  const treePane = useResizableTreeWidth({
+    storageKey: FILES_TREE_WIDTH_KEY,
+    defaultWidth: TREE_PANE_DEFAULT,
+    minWidth: TREE_PANE_MIN,
+    maxWidth: TREE_PANE_MAX,
+    minViewerWidth: TREE_PANE_VIEWER_MIN,
+    containerRef: splitContainerRef,
+    observeKey: splitWorkbench,
+  });
   // where an upload goes when no folder row is meant: the folder shown (the tree's root)
   const here_dir = writable ? dir : "";
   const finding = query.trim() !== "";
 
   return (
-    <>
-      <div className={cx("flex min-h-0 flex-1 flex-col", viewing && "hidden")}>
+    <div ref={splitContainerRef} data-files-panel className={cx("flex min-h-0 flex-1", splitWorkbench ? "flex-row" : "flex-col")}>
+      <div
+        id={treePaneId}
+        className={cx(
+          "flex min-h-0 flex-col",
+          splitWorkbench ? "shrink-0 w-(--files-tree-w)" : "flex-1",
+          viewing && !splitWorkbench && "hidden",
+        )}
+        style={splitWorkbench ? ({ "--files-tree-w": `${treePane.width}px` } as React.CSSProperties) : undefined}
+      >
         <PanelHeader
           icon="folder"
           title={t("session-filespanel.title")}
@@ -378,20 +400,35 @@ export function FilesPanel({ mid, sid, cwd, path, file, highlight: marked, onClo
         />
       )}
       {perm && <PermissionsDialog mid={mid} cwd={cwd} path={perm.path} mode={perm.mode} onClose={() => setPerm(null)} onChanged={() => setReloads((n) => n + 1)} />}
-      {viewing && (
-        <FileView
-          key={viewing}
-          mid={mid}
-          sid={sid}
-          path={viewing}
-          cwd={cwd}
-          onBack={() => setOpen((o) => o.slice(0, -1))}
-          onClose={onClose}
-          onOpenPath={openPath}
-          onShowInFolder={showInFolder}
+      {splitWorkbench && (
+        <TreePaneSplitter
+          value={treePane.width}
+          min={treePane.min}
+          max={treePane.max}
+          onResize={treePane.setWidth}
+          onCommit={treePane.commitWidth}
+          onReset={treePane.resetWidth}
+          label={t("session-filespanel.resize_label")}
+          title={t("session-filespanel.resize_title")}
+          controls={treePaneId}
         />
       )}
-    </>
+      {viewing && (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <FileView
+            key={viewing}
+            mid={mid}
+            sid={sid}
+            path={viewing}
+            cwd={cwd}
+            onBack={() => setOpen((o) => o.slice(0, -1))}
+            onClose={onClose}
+            onOpenPath={openPath}
+            onShowInFolder={showInFolder}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

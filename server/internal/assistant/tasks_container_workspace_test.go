@@ -296,7 +296,7 @@ func (m *containerWorkspaceMemStore) BeginTaskWorkspace(ctx context.Context, tod
 	if !ok || plan.Source.TodoID != todo {
 		return nil, taskworkspace.Failure("not_found", "manager", op, "", "")
 	}
-	if plan.Source.Manager != manager || len(plan.Repositories) == 0 {
+	if plan.Source.Manager != manager {
 		return nil, taskworkspace.Failure("invalid_input", "manager", op, "", "")
 	}
 	ids := make([]string, 0, len(plan.Source.Repositories.Repositories))
@@ -418,25 +418,36 @@ func seedContainerCatalog(t *testing.T, st Store, repos ...struct{ id, url strin
 type containerTestHarness struct {
 	s            *Service
 	f            *fakeHub
-	st           *containerWorkspaceMemStore
+	st           workspaceFixtureStore
 	mu           sync.Mutex
 	prepareCalls int
 	resolveCalls int
 	startCalls   int
 	lastPrepare  taskworkspace.Request
 	lastStart    struct {
-		cwd       string
-		host      string
-		prompt    string
-		workspace taskworkspace.Request
+		cwd         string
+		host        string
+		prompt      string
+		workspace   taskworkspace.Request
+		workspaceID string
 	}
 	physical map[string]*taskworkspace.Record
 	failNext error
 }
 
+type workspaceFixtureStore interface {
+	Store
+	workspaceNamingStore
+	todoRepositoryStore
+}
+
 func newContainerTestHarness(t *testing.T) *containerTestHarness {
 	t.Helper()
-	st := newContainerWorkspaceMemStore()
+	return newWorkspaceTestHarness(t, newContainerWorkspaceMemStore())
+}
+
+func newWorkspaceTestHarness(t *testing.T, st workspaceFixtureStore) *containerTestHarness {
+	t.Helper()
 	seedContainerCatalog(t, st,
 		struct{ id, url string }{"repo_web", "https://github.com/example/web"},
 		struct{ id, url string }{"repo_api", "https://github.com/example/api"},
@@ -491,12 +502,17 @@ func newContainerTestHarness(t *testing.T) *containerTestHarness {
 			}
 			for i, p := range req.Plan.Repositories {
 				commit := strings.Repeat(fmt.Sprintf("%x", i+1), 40)
+				input := req.Plan.Source.Repositories.Repositories[i]
+				common := "/home/example/.persona/task-workspaces/" + p.RepoID + ".git"
+				if input.Local != nil {
+					commit, common = input.Local.Commit, input.Local.CommonDir
+				}
 				r.Repositories = append(r.Repositories, taskworkspace.Instance{
 					RepoID:         p.RepoID,
-					Input:          req.Plan.Source.Repositories.Repositories[i],
+					Input:          input,
 					RelativePath:   p.RelativePath,
 					Path:           p.AbsolutePath,
-					CommonDir:      "/home/example/.persona/task-workspaces/" + p.RepoID + ".git",
+					CommonDir:      common,
 					TaskBranch:     p.TaskBranch,
 					ResolvedRef:    "refs/heads/main",
 					ResolvedCommit: commit,
@@ -540,10 +556,11 @@ func newContainerTestHarness(t *testing.T) *containerTestHarness {
 		},
 		devicewire.MethodStartBackendSession: func(machine string, raw json.RawMessage) (any, error) {
 			var in struct {
-				Cwd       string                `json:"cwd"`
-				Host      string                `json:"host"`
-				Prompt    string                `json:"prompt"`
-				Workspace taskworkspace.Request `json:"backend_workspace"`
+				Cwd         string                `json:"cwd"`
+				Host        string                `json:"host"`
+				Prompt      string                `json:"prompt"`
+				WorkspaceID string                `json:"workspace_id"`
+				Workspace   taskworkspace.Request `json:"backend_workspace"`
 			}
 			if err := json.Unmarshal(raw, &in); err != nil {
 				return nil, err
@@ -554,6 +571,7 @@ func newContainerTestHarness(t *testing.T) *containerTestHarness {
 			h.lastStart.host = in.Host
 			h.lastStart.prompt = in.Prompt
 			h.lastStart.workspace = in.Workspace
+			h.lastStart.workspaceID = in.WorkspaceID
 			fail := h.failNext
 			h.failNext = nil
 			sid := fmt.Sprintf("sess_container_%d", h.startCalls)

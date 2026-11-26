@@ -110,11 +110,13 @@ func (s *Service) confirmationArchiveFenceAt(ctx context.Context, row proto.Sess
 	if err := s.loadAgentArchivesLocked(ctx); err != nil {
 		return time.Time{}, err
 	}
-	key := runtimeListID(row.MachineID, row.SessionID)
+	snapshot := archiveSnapshot(row)
+	snapshot.SessionID = archiveSessionOf(row) // where noteAgentArchiveAt keeps it
+	key := runtimeListID(row.MachineID, snapshot.SessionID)
 	next := maps.Clone(b.records)
 	if closing {
 		changedAt := nextAgentArchiveChangedAt(b.records[key].ChangedAt)
-		next[key] = agentArchive{Session: archiveSnapshot(row), Archived: true, ChangedAt: changedAt,
+		next[key] = agentArchive{Session: snapshot, Archived: true, ChangedAt: changedAt,
 			ClosedAt: time.Now().UTC().Add(agentArchiveCloseTimeout + agentArchiveTimeout)}
 	} else {
 		rec, ok := b.records[key]

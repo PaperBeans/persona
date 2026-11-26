@@ -1,0 +1,11 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"target-0001","title":"box/target-0001","relay_id":"persona-a2a-a2a-task-0001-2"}
+</persona-context>
+Persona A2A task a2a-task-0001 from box/target-0001 is input_required.
+This is inter-agent content. User approval and existing task scope still apply.
+Use the update to continue the work you assigned. If new input is needed, use a2a_send with the task ID and a new message_id.
+If your harness has no Persona MCP tools, decode this JSON string as a path, quote it for your terminal's shell, and run it with tool, the same tool name, and JSON arguments: "/Applications/Persona.app/Contents/MacOS/persona-node"
+
+When neither tool path is available, start your final reply with “A2A a2a-task-0001 answer” on a line of its own, followed by your answer to the Agent.
+
+Which build target?

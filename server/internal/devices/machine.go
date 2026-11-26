@@ -173,6 +173,8 @@ type Machine struct {
 	claudeDirsMu sync.Mutex
 	// hiddenDirs is the machine's hidden Agent folders, cached (agentdirs.go).
 	hiddenDirs hiddenDirsCache
+	// herdrSessionsBlocked is the machine's blocked named herdr sessions, cached (herdrsessions.go).
+	herdrSessionsBlocked herdrSessionsCache
 	// nodeCmd replaces the node command (tests).
 	nodeCmd func(context.Context) *exec.Cmd
 	// localNote is why the last start of a local node passed a program beside it over (localNode), said once until it
@@ -725,9 +727,22 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 		// The same for an API purpose that runs on a launcher there.
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_model_run")}
 	}
-	if method == proto.MethodSecretRun && !nodeHas(info, nodeproto.SecretRun) {
-		// An older node would answer "unknown method"; this says what to do about it before the user types anything.
-		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_secret_run")}
+	if method == proto.MethodSecretRun {
+		if !nodeHas(info, nodeproto.SecretRun) {
+			// An older node would answer "unknown method"; this says what to do about it before the user types anything.
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_secret_run")}
+		}
+		if !nodeHas(info, nodeproto.SecretRunEnv) {
+			raw, _ := json.Marshal(params)
+			var fields struct {
+				Delivery string `json:"delivery"`
+			}
+			_ = json.Unmarshal(raw, &fields)
+			if fields.Delivery == proto.SecretRunDeliveryEnv {
+				// An older node would ignore delivery and run without the secret the card promised (#11945).
+				return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_secret_run")}
+			}
+		}
 	}
 	if ctx.Err() != nil {
 		return rpc.NotSent(ctx.Err()) // waited for the connection or the resident handover: nothing went out
@@ -977,7 +992,8 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 		defer m.sessionsEventMu.Unlock() // held through OnEvent and forward below
 		if list, ok := m.decodeSessions(params); ok {
 			m.setSessions(list)
-			m.d.heldWake(m.cfg.ID) // a message held for a session listed now goes (held.go)
+			m.d.heldWake(m.cfg.ID)      // a message held for a session listed now goes (held.go)
+			m.d.heldStartWake(m.cfg.ID) // held new-Agent starts for this computer go now (held_starts.go)
 		}
 	case "sessions.revs":
 		var p struct {

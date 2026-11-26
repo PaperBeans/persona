@@ -15,6 +15,96 @@ import PersonaWire
                          fetch: fetch, counts: { _ in counts() })
     }
 
+    private struct PagedSeenFixture {
+        let folder: URL
+        let model: AppModel
+        let list: SessionListModel<Session>
+        let hub: FakeHub
+        let group: String
+        let opened: SessionKey
+        let finished: SessionKey
+    }
+
+    private var embeddedCountsJSON: String {
+        #"{"total":4,"machine":{"m":4},"project":{},"group":{},"state":{"unread":2,"idle":2},"just_finished":1,"revision":"page-r0"}"#
+    }
+    private var standaloneCountsJSON: String {
+        #"{"total":4,"machine":{"m":4},"project":{},"group":{},"state":{"unread":2,"idle":2},"just_finished":1,"revision":"standalone-r0"}"#
+    }
+    private var filteredEmbeddedCountsJSON: String {
+        #"{"total":2,"machine":{"m":2},"project":{},"group":{},"state":{"unread":2},"just_finished":0,"revision":"filtered-r0"}"#
+    }
+    private func staleSeenPageJSON(withCounts: Bool, malformedCounts: Bool = false, countsJSON: String? = nil) -> String {
+        let first = #"{"machine_id":"m","session_id":"s1","status":"done","state":"unread","seen_at":"1970-01-01T00:00:00Z","updated_at":"2026-03-01T00:00:00Z"}"#
+        let second = #"{"machine_id":"m","session_id":"s2","status":"done","state":"unread","seen_at":"1970-01-01T00:00:00Z","updated_at":"2026-03-01T00:00:00Z"}"#
+        let finished = #"{"machine_id":"m","session_id":"s3","status":"done","state":"idle","seen_at":"1970-01-01T00:00:00Z","updated_at":"2026-03-01T00:00:00Z","work":{"phase":"done","line":"Merged","just_finished":true}}"#
+        let seen = #"{"machine_id":"m","session_id":"s4","status":"done","state":"idle","seen_at":"2026-03-01T00:00:00Z","updated_at":"2026-03-01T00:00:00Z"}"#
+        let embedded: String
+        if malformedCounts { embedded = #","counts":"invalid""# }
+        else { embedded = withCounts ? #","counts":\#(countsJSON ?? embeddedCountsJSON)"# : "" }
+        return #"{"sessions":[\#(first),\#(second),\#(finished),\#(seen)],"remove":[],"has_more":true,"next_cursor":"next","revision":"r0","total":4\#(embedded)}"#
+    }
+
+    private var emptyNextPageJSON: String {
+        #"{"sessions":[],"remove":[],"has_more":false,"revision":"r0","total":4}"#
+    }
+
+    private func pagedSeenFixture(pageCounts: Bool, embeddedCounts: Bool, malformedCounts: Bool = false) async throws -> PagedSeenFixture {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/sessions") { request in
+            if request.query["counts"] == "1" { return Data(self.standaloneCountsJSON.utf8) }
+            if request.query["cursor"] == "next" { return Data(self.emptyNextPageJSON.utf8) }
+            let counts = request.query["state"] == "unread" ? self.filteredEmbeddedCountsJSON : nil
+            let withCounts = embeddedCounts && request.query["with_counts"] == "1"
+            return Data(self.staleSeenPageJSON(withCounts: withCounts, malformedCounts: malformedCounts, countsJSON: counts).utf8)
+        }
+        hub.on("POST", "/api/v1/sessions/m/s1/seen", json: "{}")
+        hub.on("POST", "/api/v1/sessions/m/s3/seen", json: "{}")
+        let group = "seen-counts-" + UUID().uuidString
+        let model = AppModel(stateFolder: folder)
+        model.registry = HubRegistry(hubs: [PairedHub(config: hub.client.config, group: group)])
+        model.buildLinks()
+        let link = try #require(model.link(group))
+        link.transportForTests = hub.client.transport
+        var features = ["sessions_list", "sessions_just_finished"]
+        if pageCounts { features.append("sessions_page_counts") }
+        link.received(HubHello(features: features))
+        let list = model.sessionLists.list(link, model: model)
+        await list.load()
+        try #require(list.paged)
+        #expect(list.rows.map { $0.needsSeen() } == [true, true, true, false])
+        return PagedSeenFixture(folder: folder, model: model, list: list, hub: hub, group: group,
+                                opened: SessionKey(group: group, machineID: "m", sessionID: "s1"),
+                                finished: SessionKey(group: group, machineID: "m", sessionID: "s3"))
+    }
+
+    private func openAndConfirm(_ fixture: PagedSeenFixture) throws {
+        fixture.model.visibleSession = fixture.opened
+        fixture.model.markSeen(fixture.opened)
+        fixture.model.markSeen(fixture.finished)
+        var opened = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"m","session_id":"s1","status":"done","state":"idle","seen_at":"2026-03-01T00:00:01Z","updated_at":"2026-03-01T00:00:00Z"}"#.utf8))
+        var finished = try JSON.decoder.decode(Session.self, from: Data(#"{"machine_id":"m","session_id":"s3","status":"done","state":"idle","seen_at":"2026-03-01T00:00:01Z","updated_at":"2026-03-01T00:00:00Z"}"#.utf8))
+        opened.group = fixture.group
+        finished.group = fixture.group
+        // An independent answer records both marks before the paged list reads its pre-open rows again.
+        fixture.model.applySessions([opened.machineRef: [opened, finished]], complete: false)
+    }
+
+    /// Source-compatible access to the additive wire count. Missing decoding is -1; an omitted legitimate zero is 0.
+    private func justFinishedCount(_ counts: SessionListCounts?) -> Int {
+        guard let counts, let field = Mirror(reflecting: counts).children.first(where: { $0.label == "justFinished" }) else { return -1 }
+        let mirror = Mirror(reflecting: field.value)
+        guard mirror.displayStyle == .optional else { return field.value as? Int ?? -1 }
+        guard let value = mirror.children.first?.value else { return 0 }
+        return value as? Int ?? -1
+    }
+    private func seenCount(_ counts: SessionListCounts?) -> Int {
+        guard let idle = counts?.state["idle"] else { return -1 }
+        let finished = justFinishedCount(counts)
+        return finished < 0 ? -1 : idle - finished
+    }
+
     @Test(arguments: [false, true]) func markingOfflineUpdatesTheVisibleAgentsList(complete: Bool) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -73,6 +163,91 @@ import PersonaWire
             await page.next()
             #expect(hub.sent("GET", "/api/v1/sessions").contains { $0.query["cursor"] == "frozen" })
         }
+    }
+
+    @Test func heldRowsAndTheirEmbeddedCountsChangeTogether() async throws {
+        let fixture = try await pagedSeenFixture(pageCounts: true, embeddedCounts: true)
+        defer { try? FileManager.default.removeItem(at: fixture.folder) }
+        try openAndConfirm(fixture)
+        await fixture.list.reload() // the same pre-open rows and the counts from that one answer
+
+        #expect(fixture.list.rows.map { $0.needsSeen() } == [false, true, false, false])
+        #expect(fixture.list.counts?.revision == "page-r0")
+        #expect(fixture.list.counts?.state["unread"] == 1)
+        #expect(fixture.list.counts?.state["idle"] == 3)
+        #expect(justFinishedCount(fixture.list.counts) == 0)
+        #expect(seenCount(fixture.list.counts) == 3)
+        #expect(fixture.list.counts?.total == 4 && fixture.list.total == 4)
+        #expect(fixture.model.sessionLists.stateCounts?[.unread] == 1)
+        #expect(fixture.model.sessionLists.stateCounts?[.all] == 4)
+        let requests = fixture.hub.sent("GET", "/api/v1/sessions")
+        let rowReads = requests.filter { $0.query["counts"] == nil }
+        #expect(rowReads.count == 2 && rowReads.allSatisfy { $0.query["with_counts"] == "1" })
+        #expect(requests.allSatisfy { $0.query["counts"] == nil }, "coupled counts never need a separate answer")
+
+        await fixture.list.next() // cursor continuations carry rows only; the first answer's counts stay coupled
+        #expect(fixture.list.counts?.revision == "page-r0")
+        #expect(fixture.list.counts?.state["unread"] == 1)
+        #expect(fixture.list.counts?.state["idle"] == 3)
+        let continued = fixture.hub.sent("GET", "/api/v1/sessions")
+        #expect(continued.count == 3 && continued.allSatisfy { $0.query["counts"] == nil })
+        #expect(continued.last?.query["cursor"] == "next")
+        #expect(continued.last?.query["with_counts"] == nil)
+    }
+
+    @Test(arguments: [false, true]) func standaloneCountsStayUnadjustedWithoutCountsInTheRowAnswer(pageCounts: Bool) async throws {
+        let fixture = try await pagedSeenFixture(pageCounts: pageCounts, embeddedCounts: false)
+        defer { try? FileManager.default.removeItem(at: fixture.folder) }
+        try openAndConfirm(fixture)
+        await fixture.list.reload()
+
+        #expect(fixture.list.rows.map { $0.needsSeen() } == [false, true, false, false])
+        // These counts came from another answer: keep every hub value, rather than pairing them with the held rows.
+        #expect(fixture.list.counts?.revision == "standalone-r0")
+        #expect(fixture.list.revision == "r0")
+        #expect(fixture.list.counts?.state["unread"] == 2)
+        #expect(fixture.list.counts?.state["idle"] == 2)
+        #expect(justFinishedCount(fixture.list.counts) == 1)
+        #expect(seenCount(fixture.list.counts) == 1)
+        #expect(fixture.list.counts?.total == 4 && fixture.list.total == 4)
+        let requests = fixture.hub.sent("GET", "/api/v1/sessions")
+        #expect(requests.filter { $0.query["counts"] == "1" }.count == 2)
+        let rowReads = requests.filter { $0.query["counts"] == nil }
+        #expect(rowReads.allSatisfy { ($0.query["with_counts"] == "1") == pageCounts })
+    }
+
+    @Test func filteredRootKeepsStandaloneCountScope() async throws {
+        let fixture = try await pagedSeenFixture(pageCounts: true, embeddedCounts: true)
+        defer { try? FileManager.default.removeItem(at: fixture.folder) }
+        await fixture.list.select(SessionListQuery(state: "unread"))
+
+        #expect(fixture.list.query.state == "unread")
+        #expect(fixture.list.counts?.revision == "standalone-r0")
+        #expect(fixture.list.counts?.total == 4)
+        #expect(fixture.model.sessionLists.stateCounts?[.all] == 4)
+        #expect(fixture.model.sessionLists.stateCounts?[.unread] == 2)
+        let requests = fixture.hub.sent("GET", "/api/v1/sessions")
+        let filteredRows = requests.filter { $0.query["state"] == "unread" && $0.query["counts"] == nil }
+        #expect(filteredRows.count == 1 && filteredRows[0].query["with_counts"] == nil)
+        let counts = requests.filter { $0.query["counts"] == "1" }
+        #expect(counts.count == 1 && counts[0].query["state"] == nil)
+    }
+
+    @Test func invalidEmbeddedCountsFallBackToStandalone() async throws {
+        let fixture = try await pagedSeenFixture(pageCounts: true, embeddedCounts: true, malformedCounts: true)
+        defer { try? FileManager.default.removeItem(at: fixture.folder) }
+        try openAndConfirm(fixture)
+        await fixture.list.reload()
+
+        #expect(fixture.list.rows.map { $0.needsSeen() } == [false, true, false, false])
+        #expect(fixture.list.error == nil)
+        #expect(fixture.list.counts?.revision == "standalone-r0")
+        #expect(fixture.list.counts?.state["unread"] == 2)
+        #expect(fixture.list.counts?.state["idle"] == 2)
+        #expect(justFinishedCount(fixture.list.counts) == 1)
+        let requests = fixture.hub.sent("GET", "/api/v1/sessions")
+        #expect(requests.filter { $0.query["counts"] == "1" }.count == 2)
+        #expect(requests.filter { $0.query["counts"] == nil }.allSatisfy { $0.query["with_counts"] == "1" })
     }
 
     @Test func fetchedPagesDoNotBecomeUrgentOnlyInsertions() throws {

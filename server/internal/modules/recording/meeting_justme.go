@@ -3,13 +3,13 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -194,7 +194,7 @@ func (s *Recordings) justMeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
-	case rec.Kind != kb.RecordingMeeting:
+	case rec.Kind != recordingwire.RecordingMeeting:
 		apierr.WriteCode(w, http.StatusConflict, codeNotMeeting, i18n.Err("assistant-meeting.not_meeting"))
 		return
 	case rec.EndedAt != nil:

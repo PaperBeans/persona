@@ -79,6 +79,7 @@ type pageSession struct {
 	manifest                           *extension.Manifest
 	item                               extension.UIItem
 	components                         map[string]bool
+	unsupported                        []string
 	slot                               extension.UISlot
 	tree                               *uistream.Tree
 	fit                                pageFitMemo // FitNative's last answer for this session's renders
@@ -489,7 +490,7 @@ func streamEventKey(native json.RawMessage, event wire.UIStreamEvent) string {
 	for i := range view.Sections {
 		for j := range view.Sections[i].Items {
 			e := &view.Sections[i].Items[j]
-			if e.Type != wire.ComponentGraph && e.Type != wire.ComponentScene {
+			if e.Type != wire.ComponentGraph && e.Type != wire.ComponentScene && e.Type != wire.ComponentMap {
 				continue
 			}
 			for k := range e.Nodes {
@@ -499,6 +500,11 @@ func streamEventKey(native json.RawMessage, event wire.UIStreamEvent) string {
 			}
 			for k := range e.Pins {
 				if a := e.Pins[k].Action; a != nil && a.ID == event.Action {
+					return e.Key
+				}
+			}
+			for k := range e.Markers {
+				if a := e.Markers[k].Action; a != nil && a.ID == event.Action {
 					return e.Key
 				}
 			}

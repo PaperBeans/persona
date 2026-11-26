@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"maps"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -122,6 +124,8 @@ func newServiceOn(t testing.TB, f *fakeHub, st *memStore) *Service {
 	f.mu.Unlock()
 	s.Recordings = New(s)
 	s.Recordings.Routes(s.engineFor)
+	// The production Core owns the read-only list beside these module routes; stand it in for the module's HTTP tests.
+	s.mux.HandleFunc("GET /api/v1/recordings/{id}/photos", s.corePhotoList)
 	t.Cleanup(func() {
 		wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -131,6 +135,23 @@ func newServiceOn(t testing.TB, f *fakeHub, st *memStore) *Service {
 		stop()
 	})
 	return s
+}
+
+// corePhotoList is the fake Core's photo list, with the production route's authorization, errors and response.
+func (s *Service) corePhotoList(w http.ResponseWriter, r *http.Request) {
+	if !meetingCaller(w, r) {
+		return
+	}
+	e := s.meetingEngine(w, r)
+	if e == nil {
+		return
+	}
+	photos, _, err := e.PhotosRead(r.PathValue("id"))
+	if err != nil {
+		writeMeetingError(w, err)
+		return
+	}
+	apierr.WriteJSON(w, map[string]any{"photos": photos})
 }
 
 // ServeHTTP serves the module's routes, as the assistant's mux does.
@@ -283,8 +304,8 @@ func (s *Service) KB(context.Context) (*kb.Engine, error) {
 		return nil, err
 	}
 	e := &kb.Engine{Store: st, Logf: func(string, ...any) {}, TranscriptionReady: s.transcriptionReady,
-		ModelFor: func(string) kb.Model { return s.Model(kb.PurposeMeetingMinutes) }}
-	s.Recordings.Hook(e)
+		ModelFor: func(string) kb.Model { return s.Model(recordingwire.PurposeMeetingMinutes) }}
+	s.Recordings.Hook(e, kb.RecordingCore(e))
 	e.ObserveChanges()
 	s.eng = e
 	return e, nil
@@ -341,8 +362,8 @@ func (s *Service) ChannelPushTo(context.Context, string, string, string, string,
 }
 
 // ActionTodos makes a plain to-do of each action named (ids as the core makes them).
-func (s *Service) ActionTodos(_ context.Context, list []kb.MinutesAction, actions []string, kind, recording string, version int,
-	note func(kb.MinutesAction) string) ([]any, map[string]string, map[string]string, error) {
+func (s *Service) ActionTodos(_ context.Context, list []recordingwire.MinutesAction, actions []string, kind, recording string, version int,
+	note func(recordingwire.MinutesAction) string) ([]any, map[string]string, map[string]string, error) {
 	made, byTask := map[string]string{}, map[string]string{}
 	var out []any
 	for _, aid := range actions {
@@ -354,7 +375,7 @@ func (s *Service) ActionTodos(_ context.Context, list []kb.MinutesAction, action
 			s.mu.Lock()
 			s.todos[id] = a.What
 			s.mu.Unlock()
-			out, made[aid], byTask[kb.MinutesTaskKey(a)] = append(out, map[string]any{"id": id, "title": a.What}), id, id
+			out, made[aid], byTask[recordingwire.MinutesTaskKey(a)] = append(out, map[string]any{"id": id, "title": a.What}), id, id
 		}
 	}
 	return out, made, byTask, nil
@@ -658,11 +679,11 @@ func (s *Service) transcriptionReady() bool {
 func (s *Service) TranscriptionReadyAwait() bool { return s.transcriptionReady() }
 
 func (s *Service) InSpaceRecording(context.Context, string) bool { return false }
-func (s *Service) PutSpaceRecordingRoute(w http.ResponseWriter, _ *http.Request, _ kb.RecordingUpload) {
+func (s *Service) PutSpaceRecordingRoute(w http.ResponseWriter, _ *http.Request, _ recordingwire.RecordingUpload, _ recordingwire.UploadCleaner) {
 	http.Error(w, "no tracks in the module's tests", http.StatusBadRequest)
 }
 func (s *Service) DeleteSpaceRecording(http.ResponseWriter, *http.Request, string) bool { return false }
-func (s *Service) SpaceRecordingStates(context.Context) ([]kb.RecordingState, []string) {
+func (s *Service) SpaceRecordingStates(context.Context) ([]recordingwire.RecordingState, []string) {
 	return nil, nil
 }
 func (s *Service) DecodeLargeBody(w http.ResponseWriter, r *http.Request, v any, limit int64) error {

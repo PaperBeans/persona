@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-LANES = ["server-build", "server-managers", "server-node", "server-other", "web", "scripts"]
+LANES = ["server-build", "server-managers", "server-node", "server-other", "server-core-node", "server-core-managers", "server-core-other", "web", "scripts"]
 # Each stub notes its lane, start and end in ran.log; server.sh node fails with 3.
 STUB = """#!/bin/bash
 lane="$(basename "$0" .sh)${1:+-$1}"

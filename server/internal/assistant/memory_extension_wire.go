@@ -16,20 +16,19 @@ import (
 // (memoryExtensionBatch, memory_assemble_entry.go). Pure: the extensions' manager calls the extension
 // (extmgr/memory_sources.go) and memory_extension_source.go maps what it answered with memoryExtensionBatchOf.
 
-// The bounds of reading one memory_sources contribution for an assembly.
+// The bounds of reading one complete memory_sources contribution into the shared cache.
 const (
 	// memoryExtensionPageLimit is the limit each memory.entries call asks for.
 	memoryExtensionPageLimit = 200
-	// memoryExtensionPages is how many pages an assembly reads at most: past them only less important entries are
-	// left, which no budget would take before the ones read.
-	memoryExtensionPages = 5
+	// A source is cached only after pagination completes. Time and byte limits fail the read rather than caching
+	// a prefix that would permanently hide later entries from targeted recall.
+	memoryExtensionReadTimeout = 2 * time.Minute
+	memoryExtensionTotalMost   = 128 << 20
 	// memoryExtensionCallTimeout bounds one memory.entries call; a call that runs past it counts as failed.
 	memoryExtensionCallTimeout = 5 * time.Second
 	// memoryExtensionAnswerMost is the most bytes one answer may hold; a longer one counts as failed. limit only caps
 	// the entries on a page: the extension ends a page early (has_more, after) to stay within it.
 	memoryExtensionAnswerMost = 1 << 20
-	// memoryExtensionMost is the most entries an assembly takes from one contribution, over all its pages.
-	memoryExtensionMost = memoryExtensionPageLimit * memoryExtensionPages
 )
 
 // The bounds of one MemoryEntry, as memory.schema.json states them.
@@ -53,18 +52,19 @@ var (
 //     and categories makes every entry's missing field mean nothing is known.
 //   - Only active entries, each holding to the schema's rules (an id, a text of 1 to 4096 characters, a space slug, at
 //     most 8 categories, a rank of 0 to 1000); one that breaks a rule is dropped, never repaired. An id seen before
-//     is dropped too (the first one counts), and past memoryExtensionMost entries the rest are.
+//     is dropped too (the first one counts).
 //   - Categories go through as the extension wrote them: one the manager does not know makes the entry not known
 //     (memoryExtensionUses), which is stricter than dropping it.
 //   - Subjects become the entry's tags, so a task's or a message's words that name them bring it in (entryRelevant);
 //     each on one line, empty ones and those over 80 characters dropped, at most 16.
 //   - Standing goes through on the entry (memoryExtensionEntry.Standing): only a standing entry is meant for a
 //     standing channel, the others come in by relevance; the order alone does not keep them apart.
+//   - StandingBytes is the largest standing_bytes a page states (the assembler caps it: standingBudget).
 //   - Order: the assembler takes entries oldest first and spends a budget newest first, so the most important go
 //     last: the extension's own order (most important first) is kept among entries alike, standing ones and then
 //     higher ranks put first, and the whole reversed.
 //
-// Facet is the extension's own grouping and is not carried: usage never reads it.
+// Facet is retained for explicit recall filtering; categories still go through the hub's visibility checks.
 func memoryExtensionBatchOf(pages []wire.MemoryEntriesResult) memoryExtensionBatch {
 	b := memoryExtensionBatch{Tagged: len(pages) > 0}
 	type ranked struct {
@@ -76,10 +76,8 @@ func memoryExtensionBatchOf(pages []wire.MemoryEntriesResult) memoryExtensionBat
 	seen := map[string]bool{}
 	for _, p := range pages {
 		b.Tagged = b.Tagged && p.Tagged
+		b.StandingBytes = max(b.StandingBytes, p.StandingBytes)
 		for _, w := range p.Entries {
-			if len(keep) >= memoryExtensionMost {
-				break
-			}
 			e, ok := memoryExtensionEntryOf(w)
 			if !ok || seen[e.ID] {
 				continue
@@ -125,5 +123,5 @@ func memoryExtensionEntryOf(w wire.MemoryEntry) (memoryExtensionEntry, bool) {
 		}
 	}
 	return memoryExtensionEntry{ID: w.ID, Text: text, OriginSpace: w.OriginSpace, Categories: slices.Clone(w.Categories),
-		Tags: tags, Standing: w.Standing}, true
+		Tags: tags, Facet: w.Facet, Standing: w.Standing}, true
 }

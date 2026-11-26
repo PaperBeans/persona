@@ -69,7 +69,7 @@ func sealedJSONFields(typ reflect.Type) []string {
 func TestPlacesThatSealAreKnown(t *testing.T) {
 	want := map[string]int{
 		// the manager's secret.key
-		"internal/assistant/service.go":                1, // its box
+		"internal/assistant/service.go":                2, // its box; and reg.Seal(), which closes the kernel's registry and holds no key
 		"internal/assistant/models_launchers.go":       2, // sealKey: launchers.managed
 		"internal/assistant/models_launchers_save.go":  3, // its calls: launchers.managed
 		"internal/assistant/models_import.go":          1, // launchers.managed: key, headers and env
@@ -80,6 +80,7 @@ func TestPlacesThatSealAreKnown(t *testing.T) {
 		"internal/extmgr/extensions.go":                1, // hubSealer: the registry's plugin_secrets
 		"internal/extmgr/bots.go":                      1, // bots.feishu
 		"internal/extmgr/bots_register.go":             2, // bots.feishu: the registration's device code and app secret
+		"internal/extmgr/larksync.go":                  1, // larkSyncSeal: bots.feishu.sync, .sync.bots and .sync.bindings (user tokens)
 		"internal/extmgr/connectors.go":                1, // connector_secrets
 		"internal/extmgr/extension_market_edit.go":     1, // plugin_markets.token_sealed
 		"internal/extmgr/extension_market_routes.go":   1, // plugin_markets.token_sealed

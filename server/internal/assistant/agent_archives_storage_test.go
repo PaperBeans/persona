@@ -33,7 +33,7 @@ func TestAgentSessionArchiveStorageFailure(t *testing.T) {
 	h := ft.s
 	mid := "mac"
 	store := &archiveFailStore{fleetMem: ft.st, failRead: true}
-	h.store = func() Store { return store }
+	h.setStore(func() Store { return store })
 	if w := archiveRequest(h, mid, "codex-session", roleFull, true); w.Code != 500 {
 		t.Fatalf("read failure: %d", w.Code)
 	}
@@ -107,7 +107,7 @@ func TestAgentSessionArchiveBoundedStorageAndLock(t *testing.T) {
 				h.decorated(mid)
 			}
 			store := &archiveBlockingStore{fleetMem: ft.st, read: read, entered: make(chan struct{})}
-			h.store = func() Store { return store }
+			h.setStore(func() Store { return store })
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			done := make(chan error, 1)
@@ -168,7 +168,7 @@ func TestAgentSessionArchiveHTTPStorageDeadline(t *testing.T) {
 		h := ft.s
 		mid := "mac"
 		store := &archiveDeadlineStore{fleetMem: ft.st, read: read}
-		h.store = func() Store { return store }
+		h.setStore(func() Store { return store })
 		var w *httptest.ResponseRecorder
 		if read {
 			w = httptest.NewRecorder()
@@ -189,7 +189,7 @@ func TestAgentSessionArchiveStoreBecomesReady(t *testing.T) {
 	if err := ft.st.PutSetting(t.Context(), agentArchivesKey, persisted); err != nil {
 		t.Fatal(err)
 	}
-	ft.s.store = func() Store { return nil }
+	ft.s.setStore(func() Store { return nil })
 	if got := ft.s.decorated("mac"); len(got) != len(rows) {
 		t.Fatalf("unready store broke normal inventory: %+v", got)
 	}
@@ -201,7 +201,7 @@ func TestAgentSessionArchiveStoreBecomesReady(t *testing.T) {
 	if ft.s.agentArchives.loaded || ft.s.agentArchives.snapshot.Load() != nil {
 		t.Fatal("unready store cached an empty archive")
 	}
-	ft.s.store = func() Store { return ft.st }
+	ft.s.setStore(func() Store { return ft.st })
 	if got := archiveRows(t, ft.s); len(got) != 1 || got[0].SessionID != rows[0].SessionID {
 		t.Fatalf("late store lost persisted archives: %+v", got)
 	}

@@ -236,7 +236,7 @@ final class HomeWidgetWriter {
             .todos: data(s.todos),
             .usage: data(s.usage),
             .computers: data(s.machines),
-            .record: data(s.recording) + data(s.today),
+            .record: data(s.recording) + data(s.today) + data(s.recordingModule),
             .health: data(s.health),
             .water: intakePart(water: true),
             .protein: intakePart(water: false),
@@ -346,6 +346,8 @@ extension AppModel {
         s.health = data.health
         s.intake = data.intake
         s.activity = data.activity
+        // Only said when off, so the file is what it was with the module on (#15214).
+        if RecordingModule.allowance == .off { s.recordingModule = .off }
         return s
     }
 }

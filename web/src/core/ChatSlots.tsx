@@ -33,32 +33,18 @@ export function useChatSlot<S extends ChatSlot>(slot: S): { id: string; Componen
   return useMemo(() => fillers.filter((f): f is { id: string; Component: NonNullable<ChatSlotComponents[S]> } => Boolean(f.Component)), [fillers]);
 }
 
+function renderFillers<C>(fillers: { id: string; Component: C }[], draw: (Part: C, id: string) => ReactNode) {
+  return fillers.map(({ id, Component }) => <SlotBoundary key={id} id={id}>{draw(Component, id)}</SlotBoundary>);
+}
+
 /** `chat.tail`: what the modules draw at the end of the thread. */
 export function ChatTail(props: ChatPageProps) {
-  const fillers = useChatSlot("chat.tail");
-  return (
-    <>
-      {fillers.map(({ id, Component: Part }) => (
-        <SlotBoundary key={id} id={id}>
-          <Part {...props} />
-        </SlotBoundary>
-      ))}
-    </>
-  );
+  return <>{renderFillers(useChatSlot("chat.tail"), (Part) => <Part {...props} />)}</>;
 }
 
 /** `interaction.asked`: the modules' marks in a pending card's kicker row. */
 export function InteractionMarks({ interaction }: { interaction: Interaction }) {
-  const fillers = useChatSlot("interaction.asked");
-  return (
-    <>
-      {fillers.map(({ id, Component: Part }) => (
-        <SlotBoundary key={id} id={id}>
-          <Part interaction={interaction} />
-        </SlotBoundary>
-      ))}
-    </>
-  );
+  return <>{renderFillers(useChatSlot("interaction.asked"), (Part) => <Part interaction={interaction} />)}</>;
 }
 
 /** A per-module callback that keeps one value for each module, stable across renders. */
@@ -82,11 +68,7 @@ export function useComposerAction(page: ChatPageProps): { action: ComposerAction
   const fillers = useChatSlot("composer.trailingAction");
   const { values, reportFor } = useReports<ComposerAction>();
   const action = fillers.map((f) => values[f.id]).find(Boolean);
-  const slot = fillers.map(({ id, Component: Part }) => (
-    <SlotBoundary key={id} id={id}>
-      <Part {...page} offer={reportFor(id)} />
-    </SlotBoundary>
-  ));
+  const slot = renderFillers(fillers, (Part, id) => <Part {...page} offer={reportFor(id)} />);
   return { action, slot };
 }
 
@@ -96,10 +78,8 @@ export function useChatBar(page: ChatPageProps): { taken: boolean; bar: (place: 
   const { values, reportFor } = useReports<boolean>();
   const taken = fillers.some((f) => values[`${f.id}/dock`] || values[`${f.id}/composer`]);
   const bar = (place: ChatBarPlace) =>
-    fillers.map(({ id, Component: Part }) => (
-      <SlotBoundary key={id} id={id}>
-        <TakeReporter report={reportFor(`${id}/${place}`)}>{(take) => <Part {...page} place={place} take={take} />}</TakeReporter>
-      </SlotBoundary>
+    renderFillers(fillers, (Part, id) => (
+      <TakeReporter report={reportFor(`${id}/${place}`)}>{(take) => <Part {...page} place={place} take={take} />}</TakeReporter>
     ));
   return { taken, bar };
 }

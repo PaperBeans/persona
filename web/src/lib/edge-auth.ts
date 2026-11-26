@@ -39,22 +39,53 @@ function safeStorage(): Storage | undefined {
   }
 }
 
-let probing = false;
+async function readProbeError(r: Response): Promise<string> {
+  try {
+    const ct = (r.headers?.get("Content-Type") ?? "").toLowerCase();
+    if (ct.includes("application/json")) {
+      const body = (await r.json()) as { error?: unknown; message?: unknown };
+      const msg = typeof body?.error === "string" ? body.error : typeof body?.message === "string" ? body.message : "";
+      if (msg.trim()) return msg.trim();
+    }
+  } catch {
+    /* fall through to HTTP status */
+  }
+  return r.statusText ? `HTTP ${r.status} ${r.statusText}` : `HTTP ${r.status}`;
+}
+
+let activeProbe: { signal?: AbortSignal; isCurrent?: () => boolean } | null = null;
 /** After the live socket failed: one request to the hub that follows no redirect. An interception reloads the page;
  *  a network failure changes nothing. When the hub itself answered (anything below 500: a proxy's 502/503/504 for a
  *  hub that is down is not the hub), it refused the socket rather than being out of reach, and `answered` runs
- *  (store.ts asks whether this browser's credential still works); its promise is awaited. */
-export async function probeEdge(fetcher: typeof fetch = fetch, answered?: () => Promise<unknown>): Promise<boolean> {
-  if (probing) return false;
-  probing = true;
+ *  (store.ts asks whether this browser's credential still works); its promise is awaited. When a 5xx response carries
+ *  an error detail, `onServerError` surfaces it so the connection pill shows why the upgrade failed. Passing `signal`
+ *  or `isCurrent` fences stale probes (on WS hello, disconnect, or credential switch) so late responses never trigger
+ *  `reloadForSignIn`, `answered`, or `onServerError`, and never block a subsequent disconnect episode from probing. */
+export async function probeEdge(
+  fetcher: typeof fetch = fetch,
+  answered?: () => Promise<unknown>,
+  onServerError?: (reason: string) => void,
+  signal?: AbortSignal,
+  isCurrent?: () => boolean,
+): Promise<boolean> {
+  const stale = () => Boolean(signal?.aborted) || isCurrent?.() === false;
+  if (stale()) return false;
+  if (activeProbe && !activeProbe.signal?.aborted && activeProbe.isCurrent?.() !== false) return false;
+  const entry = { signal, isCurrent };
+  activeProbe = entry;
   try {
-    const r = await fetcher(`${BASE}/api/v1/health`, { redirect: "manual", cache: "no-store" });
+    const r = await fetcher(`${BASE}/api/v1/health`, { redirect: "manual", cache: "no-store", ...(signal ? { signal } : {}) });
+    if (stale()) return false;
     if (intercepted(r)) return reloadForSignIn();
     if (r.status < 500) await answered?.();
+    else {
+      const reason = await readProbeError(r);
+      if (!stale()) onServerError?.(reason);
+    }
     return false;
   } catch {
     return false;
   } finally {
-    probing = false;
+    if (activeProbe === entry) activeProbe = null;
   }
 }

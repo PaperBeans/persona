@@ -6,7 +6,7 @@ import { detectNewCards, detectTransitions, heldOnlyNeeds } from "./attention";
 import { waitingCard } from "./notify";
 import { quickAnswers } from "./quick-answers";
 import { boundedCounts, stateCounts } from "./sessions";
-import { heldAsWorking, supervisorHeld, supervisorHeldOnly, userCards } from "./supervisor-held";
+import { heldAsWorking, rowCards, supervisorHeld, supervisorHeldOnly, userCards } from "./supervisor-held";
 import type { AgentMutes } from "./agent-groups";
 import type { ListCounts } from "./session-list";
 import type { AgentState, Interaction, Session } from "./types";
@@ -45,6 +45,26 @@ describe("supervisorHeld", () => {
       screen("c", "child", { delegating: true, folded_under: "parent" }),
     ]);
     expect([...held].sort()).toEqual(["m/only", "m/parent"]);
+  });
+
+  it("rowCards summarizes own/child user cards, own held count, and held-only state for one row", () => {
+    const cards = [
+      screen("h1", "only", { delegating: true }),
+      screen("h2", "mixed", { delegating: true }),
+      card("p", "mixed", "permission"),
+      card("q", "asking", "question", { delegating: true }),
+      screen("c", "child", { delegating: true, folded_under: "parent" }),
+      screen("h3", "parent-mixed", { delegating: true, folded_under: "parent-mixed-root" }),
+      card("p2", "parent-mixed-root", "permission"),
+    ];
+    expect(rowCards(cards, "m", "only")).toEqual({ ix: undefined, kidCount: 0, ownHeld: 1, heldOnly: true });
+    expect(rowCards(cards, "m", "parent")).toEqual({ ix: undefined, kidCount: 0, ownHeld: 0, heldOnly: true });
+    expect(rowCards(cards, "m", "mixed")).toEqual({ ix: cards[2], kidCount: 0, ownHeld: 1, heldOnly: false });
+    expect(rowCards([...cards].reverse(), "m", "mixed")).toEqual({ ix: cards[2], kidCount: 0, ownHeld: 1, heldOnly: false });
+    expect(rowCards(cards, "m", "parent-mixed-root")).toEqual({ ix: cards[6], kidCount: 0, ownHeld: 0, heldOnly: false });
+    expect(rowCards(cards, "m", "asking")).toEqual({ ix: cards[3], kidCount: 0, ownHeld: 0, heldOnly: false });
+    expect(rowCards(cards, "m", "bare")).toEqual({ ix: undefined, kidCount: 0, ownHeld: 0, heldOnly: false });
+    expect(rowCards([], "m", "only")).toEqual({ ix: undefined, kidCount: 0, ownHeld: 0, heldOnly: false });
   });
 
   it("heldAsWorking lists an agent waiting only on held cards as Working, and leaves the rest as they are", () => {

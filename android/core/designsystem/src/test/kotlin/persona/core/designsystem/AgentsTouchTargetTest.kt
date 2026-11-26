@@ -68,6 +68,35 @@ class AgentsTouchTargetTest {
         }
     }
 
+    @Test fun unreadSideLineHasIndependentTouchTargetAndDoesNotTriggerParentRow() {
+        var rowParent = 0
+        var sideOpened = 0
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                AgentRow(
+                    "Review PR",
+                    Status.Unread,
+                    onClick = { rowParent++ },
+                    sideUnread = RowSideUnread(
+                        label = "New side reply: Side chat",
+                        more = "+1",
+                        spoken = "Side session “Side chat” has a new reply",
+                        clickLabel = "Open side session “Side chat”",
+                        onClick = { sideOpened++ },
+                    ),
+                )
+            }
+        }
+
+        val sideNode = rule.onNodeWithContentDescription("Side session “Side chat” has a new reply")
+        sideNode.assertMinimumTouchTarget()
+        sideNode.performClick()
+        rule.runOnIdle {
+            assertEquals(1, sideOpened)
+            assertEquals(0, rowParent)
+        }
+    }
+
     private fun SemanticsNodeInteraction.assertMinimumTouchTarget() {
         val bounds = fetchSemanticsNode().touchBoundsInRoot
         val minimum = with(rule.density) { Tokens.MinTouch.android.toPx() }

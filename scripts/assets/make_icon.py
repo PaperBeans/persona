@@ -7,6 +7,7 @@ the Mac sizes, the desktop app's icons (write_desktop) and a temporary icon prev
   python3 scripts/assets/make_icon.py mac      # only the Mac sizes
   python3 scripts/assets/make_icon.py vision   # only Apple Vision Pro's icon
   python3 scripts/assets/make_icon.py desktop  # only the desktop app's icons
+  python3 scripts/assets/make_icon.py link     # only Persona Link's tray and menu bar icons
 
 The Mac icon is the same picture on macOS's icon grid: the system does not mask a Mac icon, so it carries its own
 rounded square (824 of 1024, centered) and shadow, at every size the Mac App Store asks for (16 to 512, 1x and 2x).
@@ -191,6 +192,26 @@ def write_desktop(picture):
     colour.resize((32, 32), Image.LANCZOS).save(os.path.join(assets, "tray.png"))
 
 
+def write_link(picture):
+    """Persona Link's own icons (docs/operations/link.md "Tray and menu bar App"), the same helper as the desktop
+    app's tray: the Windows tray's colour helper at each notification area size (16 at 100 % to 48 at 300 %; the
+    tray adds its state badge, server/internal/linktray/icons.go), and the Mac menu bar App's: its template image at 1x
+    and 2x (black and alpha; the menu bar colours it, the App adds the state, apple/PersonaLink/App MenuBarIcon), the
+    colour helper for its panel's header at 1x and 2x, and its own icon for Finder (mac-link.sh makes the .icns)."""
+    art = os.path.join(ROOT, "server/internal/linktray/art")
+    mac = os.path.join(ROOT, "apple/PersonaLink/App/Sources/PersonaLink/Resources")
+    os.makedirs(art, exist_ok=True)
+    os.makedirs(mac, exist_ok=True)
+    colour, mark = tray_marks(picture)
+    for s in (16, 20, 24, 32, 40, 48):
+        colour.resize((s, s), Image.LANCZOS).save(os.path.join(art, f"helper-{s}.png"), optimize=True)
+    mark.resize((18, 18), Image.LANCZOS).save(os.path.join(mac, "MenuBarIcon.png"), optimize=True)
+    mark.resize((36, 36), Image.LANCZOS).save(os.path.join(mac, "MenuBarIcon@2x.png"), optimize=True)
+    colour.resize((20, 20), Image.LANCZOS).save(os.path.join(mac, "HeaderIcon.png"), optimize=True)
+    colour.resize((40, 40), Image.LANCZOS).save(os.path.join(mac, "HeaderIcon@2x.png"), optimize=True)
+    mac_icon(picture).resize((512, 512), Image.LANCZOS).save(os.path.join(ROOT, "apple/PersonaLink/App/AppIcon.png"), optimize=True)
+
+
 def main():
     light = Image.open(os.path.join(IOS, "icon.png")).convert("RGB")
     dark = Image.open(os.path.join(IOS, "icon-dark.png")).convert("RGB")
@@ -208,6 +229,7 @@ def main():
     write_mac(light)
     write_vision(light)
     write_desktop(light)
+    write_link(light)
     write_set(WATCH, {"icon.png": light}, {
         "images": [{"filename": "icon.png", "idiom": "universal", "platform": "watchos", "size": "1024x1024"}],
         "info": {"author": "xcode", "version": 1},
@@ -231,5 +253,8 @@ if __name__ == "__main__":
     elif sys.argv[1:] == ["desktop"]:
         write_desktop(Image.open(os.path.join(IOS, "icon.png")).convert("RGB"))
         print("desktop icons written")
+    elif sys.argv[1:] == ["link"]:
+        write_link(Image.open(os.path.join(IOS, "icon.png")).convert("RGB"))
+        print("link icons written")
     else:
         main()

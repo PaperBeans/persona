@@ -108,4 +108,31 @@ describe("the recent targets", () => {
     store.setItem("forward.recentTargets", "{not json");
     expect(forwardTargets(store)).toEqual([]);
   });
+
+  it("does not throw when storage operations or localStorage access are blocked", () => {
+    const blocked = {
+      getItem() { throw new DOMException("blocked", "SecurityError"); },
+      setItem() { throw new DOMException("blocked", "SecurityError"); },
+      removeItem() { throw new DOMException("blocked", "SecurityError"); },
+    } as unknown as Storage;
+    expect(forwardTargets(blocked)).toEqual([]);
+    expect(forwardSessions(blocked)).toEqual([]);
+    expect(() => rememberForward(PERSONA_TARGET, blocked)).not.toThrow();
+    expect(() => forgetForwards(blocked)).not.toThrow();
+
+    const prevDesc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("Storage disabled", "SecurityError"); },
+    });
+    try {
+      expect(forwardTargets()).toEqual([]);
+      expect(forwardSessions()).toEqual([]);
+      expect(() => rememberForward(PERSONA_TARGET)).not.toThrow();
+      expect(() => forgetForwards()).not.toThrow();
+    } finally {
+      if (prevDesc) Object.defineProperty(globalThis, "localStorage", prevDesc);
+      else delete (globalThis as Record<string, unknown>).localStorage;
+    }
+  });
 });

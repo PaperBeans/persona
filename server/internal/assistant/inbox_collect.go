@@ -67,7 +67,9 @@ func (s *Service) InboxCollected(ctx context.Context, r assistantwire.InboxRound
 		}
 	}
 	b.srcMu.Unlock()
+	captureExternal := s.externalInboxDB() != nil
 	b.mu.Lock()
+	b.externalCapture = captureExternal
 	b.larkAccount = cfg.LarkAccount
 	b.batch = newInboxBatch()
 	b.mu.Unlock()
@@ -102,6 +104,9 @@ func (s *Service) InboxCollected(ctx context.Context, r assistantwire.InboxRound
 	}
 	changed = append(changed, b.roundMuted(b.applyMutes(now))...)
 	changed = b.followMerged(append(changed, b.releaseMembers()...), now)
+	b.mu.Unlock()
+	s.prepareExternalInbox(ctx, changed)
+	b.mu.Lock()
 	changed, todo := b.sortBatch(batch, changed, now)
 	b.applyRuledPolicies(changed)
 	b.settleRound()

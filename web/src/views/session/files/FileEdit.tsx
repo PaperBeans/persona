@@ -6,7 +6,8 @@ import { lazy, Suspense, useRef, useState } from "react";
 import { t } from "../../../i18n";
 import { ApiError } from "../../../lib/api";
 import { opErrorText, writeTextFile } from "../../../lib/file-ops";
-import { dirName, fileName, joinPath, languageOf, type FileContent } from "../../../lib/files";
+import { dirName, fileName, joinPath, type FileContent } from "../../../lib/files";
+import { languageOf } from "../../../lib/files-syntax";
 import { Button, Dialog, Loading, toast } from "../../../ui/atoms";
 
 const CodeEditor = lazy(() => import("./CodeEditor"));

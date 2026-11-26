@@ -1,4 +1,6 @@
 // Package conversationlog describes the manager's durable, runtime-neutral assistant history.
+//
+//persona:layer core
 package conversationlog
 
 import (

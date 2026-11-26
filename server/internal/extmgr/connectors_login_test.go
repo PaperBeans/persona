@@ -111,6 +111,19 @@ func (c *signInConnector) Logout(ctx context.Context) error {
 	return c.secrets.Delete(ctx)
 }
 
+// requireSealedSession rejects the actual plaintext, not arbitrary short substrings: sealed base64 can legitimately
+// contain fragments such as "555" (and the existing Load below proves the exact round trip).
+func requireSealedSession(t *testing.T, sealed string) {
+	t.Helper()
+	if sealed == "" || strings.Contains(sealed, "session for +1 555 0100") {
+		t.Fatalf("the stored session is not sealed: %q", sealed)
+	}
+}
+
+func TestSealedSessionCheckAllowsCiphertextFragments(t *testing.T) {
+	requireSealedSession(t, "VycAbX555V1wQRDrN4Vabg0mj7ovCk9Su9cJHnnlCaPgMArKHzp47hbXSnBHHN/iJ/mU")
+}
+
 // Signing in goes a step at a time through the hub: each answer is the next Prompt, a wrong code asks again with
 // a reason; the session ends up sealed in the hub's store, and signing out removes it.
 func TestConnectorLoginSteps(t *testing.T) {
@@ -149,9 +162,7 @@ func TestConnectorLoginSteps(t *testing.T) {
 		t.Fatalf("signed in %v", out)
 	}
 	sealed := st.secrets["example"]
-	if sealed == "" || strings.Contains(sealed, "session") || strings.Contains(sealed, "555") {
-		t.Fatalf("the stored session is not sealed: %q", sealed)
-	}
+	requireSealedSession(t, sealed)
 	if got, _ := h.secretsFor("example").Load(context.Background()); string(got) != "session for +1 555 0100" {
 		t.Fatalf("load %q", got)
 	}

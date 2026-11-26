@@ -25,8 +25,10 @@ import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
 import { supervisorHeld } from "./supervisor-held";
 import { inFolderFilter } from "./inbox-folders";
-import { actedText, actOnSuggestion, statusOf, type ChainEntry, type InboxHandling, type InboxRelated, type InboxStatus, type InboxSuggestion, type InboxSuggestionAttempt, type SuggestionAction } from "./inbox-events";
-import type { MailAccount } from "./mail";
+import type { ChainEntry, InboxHandling, InboxRelated, InboxStatus, InboxSuggestion, InboxSuggestionAttempt, SuggestionAction } from "./inbox-events";
+import { actedText, actOnSuggestion, statusOf } from "./inbox-suggestion"; // not inbox-events.ts: that one is the Inbox page's
+import type { MailAccount } from "./agent-settings";
+import type { ExternalRef } from "../features/external-sources/api";
 
 // Not the Inbox's: re-exported from their own modules until their importers import them from there (#11538).
 export { withToken } from "./media-url";
@@ -141,8 +143,13 @@ export interface InboxItem {
   moment?: { post_id: string; notice?: string; reply_to?: string; my_post?: boolean; post_text?: string };
   /** A connector's thread (GitHub…): `source` is the connector's id, `account_name` its name. */
   connector?: InboxConnector;
+  /** The hub's normalized source followed by its ancestors in lookup order. */
+  external_path?: ExternalRef[];
   /** Only in GET /inbox/{id}: the conversation as text. */
   context?: string;
+  /** Only in GET /inbox/{id}, for a mail: whether the hub clipped the newest mail's text when it stored `context`.
+   *  Absent: the hub does not know (or is from before it sent this). Read it through storedMailClipping (lib/mail-stored.ts). */
+  mail_body_truncated?: boolean;
   agent?: InboxAgent;
   /** Deterministic PR/Issue auto-forward status and linked to-do metadata (#12492). */
   todo_forward?: InboxTodoForward;
@@ -488,7 +495,7 @@ export function mailAccounts(accounts: MailAccount[], items: InboxItem[]): MailA
  *  card goes by its parent's (#5120): the child has no row of its own to mute it from, and the switcher's count
  *  (lib/manager-attention.ts) mutes it the same way. */
 export function interactionMuted(ix: Interaction, sessions: Record<string, Session[]>, mutes: AgentMutes): boolean {
-  if (ix.folded_under) return interactionMuted({ ...ix, session_id: ix.folded_under, folded_under: undefined }, sessions, mutes);
+  if (ix.folded_under) return interactionMuted({ ...ix, machine_id: ix.folded_under_machine_id || ix.machine_id, session_id: ix.folded_under, folded_under: undefined, folded_under_machine_id: undefined }, sessions, mutes);
   const key = `${ix.machine_id}/${ix.session_id}`;
   if (mutes.sessions.includes(key)) return true;
   if (mutes.allowed?.includes(key)) return false;

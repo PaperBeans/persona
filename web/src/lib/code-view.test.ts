@@ -112,9 +112,16 @@ describe("高亮", () => {
   });
 });
 
-it("wants a wide page for split and columns views, code and diffs", () => {
+it("wants a wide page for split and columns views, code, diffs, and canvas components", () => {
+  expect(wideView(null)).toBe(false);
+  expect(wideView(undefined)).toBe(false);
   expect(wideView({ layout: "split", sections: [] })).toBe(true);
   expect(wideView({ layout: "columns", sections: [] })).toBe(true);
   expect(wideView({ sections: [{ items: [{ type: "diff" }] }] })).toBe(true);
-  expect(wideView({ sections: [{ items: [{ type: "row" }] }] })).toBe(false);
+  expect(wideView({ sections: [{ items: [{ type: "code" }] }] })).toBe(true);
+  expect(wideView({ sections: [{ items: [{ type: "graph" }] }] })).toBe(true);
+  expect(wideView({ sections: [{ items: [{ type: "scene" }] }] })).toBe(true);
+  expect(wideView({ sections: [{ items: [{ type: "map" }] }] })).toBe(true);
+  expect(wideView({ sections: [{ items: [{ type: "row" }] }, { items: [{ type: "graph" }] }] })).toBe(true);
+  expect(wideView({ sections: [{ items: [{ type: "row" }, { type: "text" }, { type: "chart" }, { type: "table" }] }] })).toBe(false);
 });

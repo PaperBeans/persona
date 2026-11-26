@@ -82,6 +82,12 @@ archive **and** export, then entitlements, and keep TestFlight processing as a s
   for this platform was found in PersonaCoreC.xcframework", which reads like a broken build. Every way the builder leaves
   a simulator-only framework now says to run it with no flag first, and the docs that send people to Xcode say the same.
 
+## One recorded seen does not mean every paged list has read it (#12770)
+
+The open chat's exact read can prove a seen mark before the Agents window reads again. Dropping the mark there lets the window's older row flash Unread. Keep the recorded mark for 15 seconds, hold only rows with the pre-open `seen_at`, and end it at once on new activity. Retry filters are not enough: the ordinary chat-visibility path also sends, so it must skip a recorded mark while preserving the direct send of an already-seen chat with no settling mark.
+
+Page-carried counts need the same boundary. Publish `SessionListPage.counts` with the IDs of the rows in that answer, adjust Unread / Just finished only for held rows in that set, and leave standalone counts alone. Ask `with_counts` only on first / initial `since` reads; a cursor continuation keeps the first answer's counts. A filtered root cannot adopt the page's state-filtered counts without shrinking the other quick filters, so it keeps the separate all-state count read; filtered sections use their coupled counts. Invalid optional counts must fall back to that separate read without discarding valid rows.
+
 ## A machine's heartbeat used to tell every reader of `machines` (2026-11-18, #10231)
 
 A busy hub pushes the machines with a new `lastSeen` all the time. `AppModel.machines` was replaced on each push, so

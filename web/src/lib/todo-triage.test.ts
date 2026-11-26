@@ -43,6 +43,7 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     session("ask", "needs_you"),
     session("run", "working"),
     session("unseen", "unread"),
+    session("background", "idle", 1, { background_working: true, background_tasks_count: 1 }),
     session("idle", "idle", 2),
     session("old", "idle", 100),
   ]);
@@ -116,6 +117,41 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     expect(at(todo("old", { supervision, updated_at: hoursAgo(100), seen_at: hoursAgo(0) })).section).toBe("parked");
   });
 
+  it("keeps a timed recheck with another agent still working in Working", () => {
+    const td = todo("recheck", {
+      agents: [agent("unseen"), agent("run")],
+      supervision: {
+        supervisor: "conv", state: "parked",
+        parked: { reason: "Check background work", waiting_on: "date", until: hoursAgo(-1), count: 1 },
+      },
+    });
+    expect(at(td)).toMatchObject({ section: "working", rule: "agent_running" });
+  });
+
+  it("keeps background work in Working without releasing a quiet date wait", () => {
+    const supervision: Supervision = {
+      supervisor: "conv", state: "parked",
+      parked: { reason: "Check background work", waiting_on: "date", until: hoursAgo(-1), count: 1 },
+    };
+    expect(at(todo("background", { supervision, agents: [agent("background")] }))).toMatchObject({ section: "working", rule: "agent_running" });
+    expect(at(todo("quiet", { supervision, agents: [agent("idle")] }))).toMatchObject({ section: "parked", rule: "parked" });
+    const pr_url = "https://example.com/pull/7";
+    const pr_status = { url: pr_url, state: "open" as const, draft: false, review: "pending" as const, checks: "pending" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
+    expect(at(todo("background-pr", { supervision, agents: [agent("background")], pr_url, pr_status }))).toMatchObject({ section: "working", rule: "agent_running" });
+  });
+
+  it("does not count a failed agent binding as active work", () => {
+    const failed = { ...agent("run"), start_error: "The process did not start" };
+    const td = todo("failed-binding", {
+      agents: [failed],
+      supervision: {
+        supervisor: "conv", state: "parked",
+        parked: { reason: "Check background work", waiting_on: "date", until: hoursAgo(-1), count: 1 },
+      },
+    });
+    expect(at(td)).toMatchObject({ section: "parked", rule: "parked" });
+  });
+
   it("a deployed to-do's Please verify, or a done conclusion, is Just finished: the supervisor accepts it, not the owner", () => {
     const idle = { agents: [agent("idle")] };
     expect(at(todo("t", { ...idle, ask: { verdict: "done, deployed: verify below", asked_at: hoursAgo(1) } }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
@@ -129,6 +165,11 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
   it("a closed to-do is immediately Done", () => {
     expect(at(todo("t", { done_at: hoursAgo(3) })).section).toBe("done");
     expect(at(todo("t", { done_at: hoursAgo(30), updated_at: hoursAgo(30) })).section).toBe("done");
+  });
+
+  it("keeps an ordinarily closed to-do Done while its linked session has background work", () => {
+    const td = todo("closed-background", { done_at: hoursAgo(3), agents: [agent("background")] });
+    expect(at(td)).toMatchObject({ section: "done", rule: "closed" });
   });
 
   it("an accepted task reopened by more work is finished, not Follow up", () => {
@@ -175,6 +216,13 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
 
   it("an accepted task whose agent runs again is Working", () => {
     expect(at(todo("t", { agents: [agent("run")], supervision: acceptedReopened() })).section).toBe("working");
+  });
+
+  it("keeps accepted and deployed tasks settled when only the new active signals are present", () => {
+    expect(at(todo("accepted-background", { agents: [agent("background")], supervision: acceptedReopened() }))).toMatchObject({ section: "done", rule: "accepted" });
+    const deployed = todo("deployed-background", { agents: [agent("background")], delivery: { state: "live", at: hoursAgo(2) } });
+    expect(at(deployed)).toMatchObject({ section: "just_done", rule: "finished_unseen" });
+    expect(todoBucket(deployed, lookup, NOW)).toBe("open");
   });
 
   it("a live delivery stays awaiting review until accepted", () => {

@@ -142,8 +142,11 @@ type conversation struct {
 	silent      []string
 	// replying: a reply is under way (evReply until evTurnEnd). A response.create sent then is refused
 	// (conversation_already_has_active_response, realtime dialect): sendUp holds it back as createOwed and sends it once
-	// the reply is over.
+	// the reply is over. replyOpen tracks whether a protocol 2 reply{start} has been sent without its matching end;
+	// replyAudio measures each reply's upstream audio arrival for the call log (reply_audio.go, #14932).
 	replying, createOwed bool
+	replyOpen            bool
+	replyAudio           replyAudio
 	// sus is the call's pausing of its upstream while its conversation works (suspend.go, protocol 2).
 	sus suspension
 	// log is what the call's log counts, and its id (calllog.go).
@@ -504,6 +507,7 @@ func (c *conversation) shutdown() {
 		return
 	}
 	c.closed = true
+	c.finishReplyAudio(true)
 	up, w := c.up, c.w
 	lines := callLines{user: c.userSeq, model: c.asstSeq, pauses: c.sus.pauses, holds: c.sus.holds, meeting: c.meeting.meetingLog()}
 	for id, t := range c.pending {

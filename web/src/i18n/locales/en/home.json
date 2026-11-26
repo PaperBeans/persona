@@ -30,6 +30,7 @@
   "open_machines": "Open machines",
   "computers": "Computers",
   "monitor": "Monitoring ›",
+  "view_rows": "Rows",
   "machine_agents_one": "{count} agent",
   "machine_agents_other": "{count} agents",
   "offline": "Offline",

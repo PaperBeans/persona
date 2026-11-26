@@ -3,6 +3,8 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +43,7 @@ func (ft *feedTest) look() time.Time { return ft.s.attendLook(context.Background
 // positions are never fed.
 func TestMeetingFeedBatchOf(t *testing.T) {
 	long := strings.Repeat("a", feedBatchRunes/2)
-	l := kb.Live{Segments: []kb.LiveSegment{{Text: "first"}, {Text: long}, {Text: ""}, {Text: long}, {Text: "last"}}, Fed: 1}
+	l := recordingwire.Live{Segments: []recordingwire.LiveSegment{{Text: "first"}, {Text: long}, {Text: ""}, {Text: long}, {Text: "last"}}, Fed: 1}
 	b := feedBatchOf(l, false, false)
 	if b.upto != 5 || b.leftOut != 1 || len(b.lines) != 2 || b.lines[0].Text != long || b.lines[1].Text != "last" {
 		t.Fatalf("batch %+v", b)
@@ -49,7 +51,7 @@ func TestMeetingFeedBatchOf(t *testing.T) {
 	if b := feedBatchOf(l, true, false); b.leftOut != 2 || !b.soFar {
 		t.Fatalf("so far %+v", b)
 	}
-	if b := feedBatchOf(kb.Live{Segments: []kb.LiveSegment{{Text: ""}}}, false, false); !b.empty() || b.upto != 1 {
+	if b := feedBatchOf(recordingwire.Live{Segments: []recordingwire.LiveSegment{{Text: ""}}}, false, false); !b.empty() || b.upto != 1 {
 		t.Fatalf("only an empty position: %+v", b)
 	}
 }
@@ -57,7 +59,7 @@ func TestMeetingFeedBatchOf(t *testing.T) {
 // After a restart the meetings still attended are picked up; a kick is looked at once, and the look asks for the next.
 func TestMeetingFeedSchedules(t *testing.T) {
 	ft := newFeedTest(t)
-	ft.upload(kb.AttendanceListener, nil, false, false)
+	ft.upload(recordingwire.AttendanceListener, nil, false, false)
 	ft.timed = nil
 	ft.s.attend.feed.mu.Lock()
 	ft.s.attend.feed.timers = nil
@@ -95,16 +97,16 @@ type feedTest struct {
 }
 
 // upload stores the phone's whole state of feedRec: a meeting attended in role by session (nil: the main chat).
-func (ft *feedTest) upload(role string, session *kb.SessionRef, ended, complete bool) {
+func (ft *feedTest) upload(role string, session *recordingwire.SessionRef, ended, complete bool) {
 	ft.t.Helper()
 	ft.rev++
-	u := kb.RecordingUpload{Revision: ft.rev, StartedAt: ft.start, Device: "phone", Title: "Design review", Kind: kb.RecordingMeeting,
-		Attendance: role, AttendingSession: session, Complete: complete, Segments: []kb.RecordingSegment{}}
+	u := recordingwire.RecordingUpload{Revision: ft.rev, StartedAt: ft.start, Device: "phone", Title: "Design review", Kind: recordingwire.RecordingMeeting,
+		Attendance: role, AttendingSession: session, Complete: complete, Segments: []kbwire.RecordingSegment{}}
 	if ended {
 		at := ft.now
 		u.EndedAt = &at
 	}
-	if _, err := ft.e.PutRecording(feedRec, u, ft.now); err != nil {
+	if _, err := writersOf(ft.e).PutRecording(feedRec, u, ft.now); err != nil {
 		ft.t.Fatal(err)
 	}
 }
@@ -112,18 +114,18 @@ func (ft *feedTest) upload(role string, session *kb.SessionRef, ended, complete 
 // say appends live lines from position from.
 func (ft *feedTest) say(from int, texts ...string) {
 	ft.t.Helper()
-	var segs []kb.LiveSegment
+	var segs []recordingwire.LiveSegment
 	for i, text := range texts {
-		segs = append(segs, kb.LiveSegment{Start: float64(60 * (from + i)), End: float64(60*(from+i) + 5), Text: text})
+		segs = append(segs, recordingwire.LiveSegment{Start: float64(60 * (from + i)), End: float64(60*(from+i) + 5), Text: text})
 	}
-	if _, _, err := ft.e.LiveAppend(feedRec, from, segs); err != nil {
+	if _, _, err := writersOf(ft.e).LiveAppend(feedRec, from, segs); err != nil {
 		ft.t.Fatal(err)
 	}
 }
 
-func (ft *feedTest) live() kb.Live {
+func (ft *feedTest) live() recordingwire.Live {
 	ft.t.Helper()
-	l, _, err := ft.e.LiveRead(feedRec)
+	l, _, err := writersOf(ft.e).LiveRead(feedRec)
 	if err != nil {
 		ft.t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func (ft *feedTest) setSession(id string, fn func(*proto.Session)) {
 // (resumed when it stopped); nothing more within the minute; then only the new lines, with the answers since.
 func TestMeetingFeedBatches(t *testing.T) {
 	ft := newFeedTest(t)
-	ft.upload(kb.AttendanceParticipant, nil, false, false)
+	ft.upload(recordingwire.AttendanceParticipant, nil, false, false)
 	if next := ft.look(); !next.IsZero() {
 		t.Fatalf("nothing said yet: look again at %v", next)
 	}
@@ -178,7 +180,7 @@ func TestMeetingFeedBatches(t *testing.T) {
 		t.Fatalf("first batch %+v", first)
 	}
 	l := ft.live()
-	if l.Fed != 2 || l.FedTo == nil || *l.FedTo != (kb.SessionRef{MachineID: "server", SessionID: "main1"}) || !l.FedAt.Equal(ft.now) || l.Problem != "" {
+	if l.Fed != 2 || l.FedTo == nil || *l.FedTo != (recordingwire.SessionRef{MachineID: "server", SessionID: "main1"}) || !l.FedAt.Equal(ft.now) || l.Problem != "" {
 		t.Fatalf("live log after the first batch %+v", l)
 	}
 	if on, _ := ft.s.meetingTurnRunning(context.Background(), "server", "main1"); !on {
@@ -197,9 +199,9 @@ func TestMeetingFeedBatches(t *testing.T) {
 		t.Fatalf("busy: next %v", next)
 	}
 	ft.turnDone("main1")
-	_, _ = ft.e.LiveUpdate(feedRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: "q1", Question: "What did we decide last time?", State: feedAskAnswered, Answer: "You kept the 4 MB cap."},
-			kb.LiveAsk{ID: "q2", Question: "Who owns it?", State: "pending"})
+	_, _ = writersOf(ft.e).LiveUpdate(feedRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: "q1", Question: "What did we decide last time?", State: feedAskAnswered, Answer: "You kept the 4 MB cap."},
+			recordingwire.LiveAsk{ID: "q2", Question: "Who owns it?", State: "pending"})
 		return nil
 	})
 	ft.look()
@@ -218,7 +220,7 @@ func TestMeetingFeedBatches(t *testing.T) {
 // dialog or a draft at the computer keeps the batch, nothing pressed.
 func TestMeetingFeedProblems(t *testing.T) {
 	ft := newFeedTest(t)
-	ft.upload(kb.AttendanceListener, nil, false, false)
+	ft.upload(recordingwire.AttendanceListener, nil, false, false)
 	ft.say(0, "Ada: hello.")
 
 	ft.setSession("main1", func(s *proto.Session) { s.Status, s.State = proto.StatusWorking, proto.StateWorking })
@@ -234,8 +236,8 @@ func TestMeetingFeedProblems(t *testing.T) {
 	ft.setSession("main1", func(s *proto.Session) { s.PermissionMode = "default" })
 
 	// Another session named: an Agent, closed.
-	agent := &kb.SessionRef{MachineID: "server", SessionID: "agent1"}
-	ft.upload(kb.AttendanceListener, agent, false, false)
+	agent := &recordingwire.SessionRef{MachineID: "server", SessionID: "agent1"}
+	ft.upload(recordingwire.AttendanceListener, agent, false, false)
 	ft.setSession("agent1", func(s *proto.Session) { s.Status, s.State = proto.StatusOffline, proto.StateOffline })
 	ft.look()
 	if p := ft.live().Problem; p != attendeeUnavailable {
@@ -268,7 +270,7 @@ func TestMeetingFeedProblems(t *testing.T) {
 	}
 
 	// No main chat: unavailable.
-	ft.upload(kb.AttendanceListener, nil, false, false)
+	ft.upload(recordingwire.AttendanceListener, nil, false, false)
 	setSettings(t, ft.s, func(v *Settings) { v.Main = "" })
 	ft.now = ft.now.Add(feedBatchEvery)
 	ft.look()
@@ -281,12 +283,12 @@ func TestMeetingFeedProblems(t *testing.T) {
 // meeting so far; turned off, nothing is fed and the live lines stay.
 func TestMeetingFeedSessionChanges(t *testing.T) {
 	ft := newFeedTest(t)
-	ft.upload(kb.AttendanceListener, &kb.SessionRef{MachineID: "server", SessionID: "agent1"}, false, false)
+	ft.upload(recordingwire.AttendanceListener, &recordingwire.SessionRef{MachineID: "server", SessionID: "agent1"}, false, false)
 	ft.say(0, "Ada: one.")
 	ft.look()
 	ft.turnDone("agent1")
 	ft.say(1, "Bo: two.")
-	ft.upload(kb.AttendanceListener, nil, false, false) // the main chat now
+	ft.upload(recordingwire.AttendanceListener, nil, false, false) // the main chat now
 	ft.now = ft.now.Add(feedBatchEvery)
 	ft.look()
 	chats, agents := ft.sent()
@@ -298,15 +300,15 @@ func TestMeetingFeedSessionChanges(t *testing.T) {
 	}
 	ft.turnDone("main1")
 
-	ft.upload(kb.AttendanceOff, nil, false, false)
-	if _, _, err := ft.e.LiveAppend(feedRec, 2, []kb.LiveSegment{{Text: "Ada: three."}}); !errors.Is(err, kb.ErrNotAttending) {
+	ft.upload(recordingwire.AttendanceOff, nil, false, false)
+	if _, _, err := writersOf(ft.e).LiveAppend(feedRec, 2, []recordingwire.LiveSegment{{Text: "Ada: three."}}); !errors.Is(err, recordingwire.ErrNotAttending) {
 		t.Fatalf("a line while off: %v", err)
 	}
 	ft.now = ft.now.Add(feedBatchEvery)
 	if next := ft.look(); !next.IsZero() || ft.live().FedTo != nil || len(ft.live().Segments) != 2 {
 		t.Fatalf("off: next %v, %+v", next, ft.live())
 	}
-	ft.upload(kb.AttendanceListener, nil, false, false)
+	ft.upload(recordingwire.AttendanceListener, nil, false, false)
 	ft.say(2, "Ada: three.")
 	ft.look()
 	chats, _ = ft.sent()
@@ -319,12 +321,12 @@ func TestMeetingFeedSessionChanges(t *testing.T) {
 // ended_at; nothing is fed after it.
 func TestMeetingFeedEnd(t *testing.T) {
 	ft := newFeedTest(t)
-	ft.upload(kb.AttendanceParticipant, nil, false, false)
+	ft.upload(recordingwire.AttendanceParticipant, nil, false, false)
 	ft.say(0, "Ada: one.")
 	ft.look()
 	ft.turnDone("main1")
 	ended := ft.now
-	ft.upload(kb.AttendanceParticipant, nil, true, false)
+	ft.upload(recordingwire.AttendanceParticipant, nil, true, false)
 	ft.say(1, "Bo: last words.")
 	ft.now = ft.now.Add(feedBatchEvery)
 	if next := ft.look(); !next.Equal(ft.now.Add(feedBatchEvery)) {
@@ -347,7 +349,7 @@ func TestMeetingFeedEnd(t *testing.T) {
 		t.Fatal("the end batch is not noted")
 	}
 	ft.turnDone("main1")
-	ft.upload(kb.AttendanceParticipant, &kb.SessionRef{MachineID: "server", SessionID: "agent1"}, true, true)
+	ft.upload(recordingwire.AttendanceParticipant, &recordingwire.SessionRef{MachineID: "server", SessionID: "agent1"}, true, true)
 	ft.now = ft.now.Add(time.Hour)
 	if next := ft.look(); !next.IsZero() {
 		t.Fatalf("after the end: next %v", next)
@@ -359,7 +361,7 @@ func TestMeetingFeedEnd(t *testing.T) {
 	// A meeting whose session never became free is not asked about forever: once nothing came of it for half a day,
 	// only a change looks at it again.
 	st := newFeedTest(t)
-	st.upload(kb.AttendanceListener, nil, true, false)
+	st.upload(recordingwire.AttendanceListener, nil, true, false)
 	st.say(0, "Ada: one.")
 	st.setSession("main1", func(s *proto.Session) { s.Status, s.State = proto.StatusWorking, proto.StateWorking })
 	if next := st.look(); next.IsZero() {
@@ -372,13 +374,13 @@ func TestMeetingFeedEnd(t *testing.T) {
 
 	// Ended and complete at once: the end batch, with what is left, does not wait for the minute or the deadline.
 	at := newFeedTest(t)
-	at.upload(kb.AttendanceListener, nil, false, false)
+	at.upload(recordingwire.AttendanceListener, nil, false, false)
 	at.say(0, "Ada: one.")
 	at.look()
 	at.turnDone("main1")
 	at.say(1, "Bo: two.")
 	at.now = at.now.Add(5 * time.Second)
-	at.upload(kb.AttendanceListener, nil, true, true)
+	at.upload(recordingwire.AttendanceListener, nil, true, true)
 	if next := at.look(); !next.IsZero() {
 		t.Fatalf("complete: next %v", next)
 	}

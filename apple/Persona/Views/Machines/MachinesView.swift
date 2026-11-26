@@ -76,6 +76,8 @@ struct MachinesView: View {
     private var unmonitoredGroups: Set<String> { metricsLoader.unmonitoredGroups }
     /// Add Computer is up.
     @State private var adding: AddComputerRequest?
+    /// The disk usage map a card's Disk almost full chip opened (pushed from here: the chip sits inside the card's link).
+    @State private var usageMap: MachineUsageMapRoute?
     private var unmonitored: Bool { !unmonitoredGroups.isEmpty && unmonitoredGroups.count >= model.groupIDs.count }
 
     var body: some View {
@@ -122,14 +124,24 @@ struct MachinesView: View {
                     // A hub without machines_add: computers are added in its admin page, as before.
                     EmptyStateView(symbol: Theme.Icon.machines, title: String(localized: "No machines yet"), message: String(localized: "Once the hub is connected, the hub machine and the computers it connects to appear here."))
                 } else if !unmonitored {
-                    Text("CPU, memory and network update every 10 seconds. Charts show the last hour.")
-                        .font(Theme.Font.label).foregroundStyle(.secondary)
-                        .padding(.horizontal, Theme.Space.xs)
+                    // What load counts, under the cards that show it (#12519): the number alone read as a wrong one.
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("CPU, memory and network update every 10 seconds. Charts show the last hour.")
+                        Text(MachineCard.loadDefinition)
+                    }
+                    .font(Theme.Font.label).foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.xs)
+                    .accessibilityIdentifier("machines.footnote")
                 }
             }
             .padding(Theme.Space.l)
         }
+        #if DEBUG
+        // `-openMachinesFootnote YES`: the page opens at its foot, where it says what load counts (screenshots, #12519).
+        .defaultScrollAnchor(UserDefaults.standard.bool(forKey: "openMachinesFootnote") ? .bottom : nil)
+        #endif
         .themedGroupedPage()
+        .navigationDestination(item: $usageMap) { UsageMapView(route: $0) }
         .navigationTitle("Machines")
         // Large wherever it is pushed (the Agents list's stack would make it inline, and the principal item below would
         // then hide the title); the bar's middle is only for Connecting… and the like.
@@ -194,7 +206,7 @@ struct MachinesView: View {
             ForEach(ordered, id: \.ref) { m in
                 NavigationLink(value: MachineDetailRoute(m.ref)) {
                     MachineCard(machine: m, tally: tallies[m.ref], metrics: metrics[m.ref], showsMetrics: !unmonitoredGroups.contains(m.group),
-                                fillsRow: true)
+                                fillsRow: true, onUsageMap: { usageMap = $0 })
                 }
                 .buttonStyle(.plain)
             }
@@ -231,6 +243,7 @@ struct MachinesView: View {
             if let worst = alerts.max() {
                 HStack(spacing: Theme.Space.xs) {
                     ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(MetricColor.level(worst))
+                    // Machines with any alert, CPU, memory, disk or load, so it says "high readings", never "load" (#12519).
                     Text("\(alerts.count) machines running high")
                 }
             }
@@ -285,6 +298,8 @@ struct MachineCard: View {
     /// In Machines' grid: as tall as the row, an online card's counts and charts at the bottom so they line up across it
     /// (an offline card keeps its words at the top). At the top of a machine's page it is as tall as its content.
     var fillsRow = false
+    /// Opens the disk usage map from the Disk almost full chip when the card itself is a link (Machines' grid).
+    var onUsageMap: ((MachineUsageMapRoute) -> Void)?
 
     var body: some View {
         let system = machine.system ?? metrics?.system
@@ -309,7 +324,17 @@ struct MachineCard: View {
                 }
                 if !alerts.isEmpty {
                     FlowLayoutRow {
-                        ForEach(alerts, id: \.label) { a in AlertChip(alert: a) }
+                        ForEach(alerts, id: \.label) { a in
+                            if a.kind == .disk, machine.online {
+                                // Disk almost full opens what is using the space (#14576), the biggest reclaimable marked.
+                                MachineUsageMapLink(route: MachineUsageMapRoute(ref: machine.ref, reclaim: true), open: onUsageMap) { AlertChip(alert: a) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityHint(String(localized: "Shows what's using the space"))
+                                    .accessibilityIdentifier("machine.alert.disk.\(machine.id)")
+                            } else {
+                                AlertChip(alert: a)
+                            }
+                        }
                     }
                 }
             }
@@ -354,6 +379,30 @@ struct MachineCard: View {
             }
         }
         .contentShape(.rect)
+        // VoiceOver reads the card as one link, so the Disk almost full chip inside it is also an action of the card.
+        .accessibilityActions {
+            if let onUsageMap, machine.online, alerts.contains(where: { $0.kind == .disk }) {
+                Button(String(localized: "See What's Using Space")) {
+                    onUsageMap(MachineUsageMapRoute(ref: machine.ref, reclaim: true))
+                }
+            }
+        }
+    }
+
+    /// What load counts, in one sentence wherever load is shown: the footnote of Machines and of a machine's charts
+    /// (docs/server/machines.md, "What load counts"; the web's `lib-machine-alerts.load_definition`).
+    static var loadDefinition: String {
+        String(localized: "Load is the number of threads running or waiting for a CPU, averaged over a minute (Linux also counts threads waiting for the disk). It isn't a percentage: above 1 per core, some threads are waiting. On a Mac, work at background priority may run on only some of the cores, so threads can wait while CPU stays low.")
+    }
+
+    /// The line under CPU: load per core ("Load 1.4 per core"), the figure the alerts go by; the raw load average
+    /// ("Load 25.4") only while the core count is unknown.
+    static func loadLine(_ s: MetricSample?, cores: Int?) -> String? {
+        guard let load = s?.load else { return nil }
+        if let perCore = MetricFormat.loadPerCore(load, cores: cores) {
+            return String(localized: "Load \(MetricFormat.perCore(perCore)) per core")
+        }
+        return String(localized: "Load \(MetricFormat.load(load))")
     }
 
     /// "Ubuntu 24.04.1 LTS · 16 cores · 64.0 GB"; the host name when the machine never said what it runs.
@@ -398,7 +447,7 @@ struct MachineCard: View {
         let points = metrics?.points ?? []
         let end = Date.now
         let domain = end.addingTimeInterval(-3600)...end
-        MetricCell(title: "CPU", value: MetricFormat.percent(s?.cpu), detail: s?.load.map { String(localized: "Load \(MetricFormat.load($0))") },
+        MetricCell(title: "CPU", value: MetricFormat.percent(s?.cpu), detail: Self.loadLine(s, cores: (machine.system ?? metrics?.system)?.cores),
                    level: MetricLevel.of(s?.cpu, warn: 75, crit: 90)) {
             Sparkline(points: points, series: [ChartSeries(name: "CPU", color: MetricColor.cpu) { $0.cpu }], domain: domain, yMax: 100)
         }

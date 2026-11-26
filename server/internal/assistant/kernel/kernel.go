@@ -6,7 +6,6 @@ package kernel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -92,18 +91,21 @@ type LoadOptions struct {
 	// Check validates and reserves one module's route and tool names against the host's core and previously accepted
 	// modules. It runs in load order after every kernel check; a nil result commits the module without further errors.
 	Check func(routes, tools []string) error
+	// Ports are the narrow runtime core ports served through modapi.Host.
+	Ports modapi.Ports
 }
 
-// New loads mods, leaving out those off says are switched off (off may be nil), those written for another API or
-// not built in, those that declare a slot this host does not serve, those whose needs do not load (whatever their
-// place in the list; a cycle of needs loads none of them), and those whose Register fails. A module registers after
-// the modules it needs, and after those it wants that load; otherwise list order holds. An id listed again is
-// ignored after its first entry. logf may be nil.
+// New loads mods without runtime core ports (registration-only tests).
 func New(mods []modapi.Module, off func(id string) bool, logf func(format string, args ...any)) *Kernel {
 	return NewWithOptions(mods, LoadOptions{Off: off, Logf: logf})
 }
 
-// NewWithOptions is New with the host's core-namespace checks.
+// NewWithPorts loads mods with the narrow core ports in ports.
+func NewWithPorts(mods []modapi.Module, off func(id string) bool, ports modapi.Ports, logf func(format string, args ...any)) *Kernel {
+	return NewWithOptions(mods, LoadOptions{Off: off, Ports: ports, Logf: logf})
+}
+
+// NewWithOptions is New with the host's core-namespace checks and runtime ports.
 func NewWithOptions(mods []modapi.Module, o LoadOptions) *Kernel {
 	off, logf := o.Off, o.Logf
 	if logf == nil {
@@ -180,7 +182,7 @@ func NewWithOptions(mods []modapi.Module, o LoadOptions) *Kernel {
 		}
 		c := pending[next]
 		pending = slices.Delete(pending, next, next+1)
-		h := &host{info: c.info, settings: map[string]modapi.Setting{}, routes: map[string]http.HandlerFunc{}, tools: map[string]modapi.MCPTool{}, jobs: map[string]modapi.BackgroundJob{}, logf: logf}
+		h := &host{info: c.info, settings: map[string]modapi.Setting{}, routes: map[string]http.HandlerFunc{}, tools: map[string]modapi.MCPTool{}, jobs: map[string]modapi.BackgroundJob{}, ports: o.Ports, logf: logf}
 		if err := c.m.Register(h); err != nil {
 			skip(c.info.ID, "register: "+err.Error())
 			continue
@@ -344,10 +346,20 @@ type host struct {
 	toolOrder  []string
 	jobs       map[string]modapi.BackgroundJob
 	jobOrder   []string
+	ports      modapi.Ports
 	logf       func(format string, args ...any)
 }
 
 func (h *host) Logf(format string, args ...any) { h.logf(h.info.ID+": "+format, args...) }
+func (h *host) Tasks() modapi.TaskPort          { return h.ports.Tasks }
+func (h *host) Todos() modapi.TodoPort          { return h.ports.Todos }
+func (h *host) Inbox() modapi.InboxPort         { return h.ports.Inbox }
+func (h *host) Later() modapi.LaterPort         { return h.ports.Later }
+func (h *host) Schedule() modapi.SchedulePort   { return h.ports.Schedule }
+func (h *host) Feed() modapi.FeedPort           { return h.ports.Feed }
+func (h *host) Delivery() modapi.DeliveryPort   { return h.ports.Delivery }
+func (h *host) DayRecap() modapi.DayRecapPort   { return h.ports.DayRecap }
+func (h *host) Prompts() modapi.PromptPort      { return h.ports.Prompts }
 
 func (h *host) AddSetting(s modapi.Setting) error {
 	switch {
@@ -393,17 +405,19 @@ func (h *host) AddHubRoute(pattern string, handler http.HandlerFunc) error {
 	return nil
 }
 
-func (h *host) AddMCPTool(name, description string, schema json.RawMessage, run func(context.Context, string, string, json.RawMessage) (string, error)) error {
+func (h *host) AddMCPTool(tool modapi.MCPTool) error {
+	name := tool.Name
 	switch {
 	case !slices.Contains(h.info.MCPTools, name):
 		return fmt.Errorf("tool %q is not in the manifest's mcp_tools", name)
-	case run == nil:
+	case tool.Run == nil:
 		return fmt.Errorf("tool %q needs a handler", name)
 	}
 	if _, ok := h.tools[name]; ok {
 		return fmt.Errorf("tool %q added twice", name)
 	}
-	h.tools[name] = modapi.MCPTool{Name: name, Description: description, InputSchema: slices.Clone(schema), Run: run}
+	tool.InputSchema = slices.Clone(tool.InputSchema)
+	h.tools[name] = tool
 	h.toolOrder = append(h.toolOrder, name)
 	return nil
 }

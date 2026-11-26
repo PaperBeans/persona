@@ -137,7 +137,7 @@ func (d *deadlineExhaustingEstimateStore) RecentTaskEstimateSamples(ctx context.
 func TestTaskEstimateHistorySurvivesReconciliationDeadline(t *testing.T) {
 	store := &deadlineExhaustingEstimateStore{memStore: &memStore{}}
 	s, _, _ := briefServiceOn(t, nil, "please fix the fixture issue")
-	s.store = func() Store { return store }
+	s.setStore(func() Store { return store })
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	task := PlanTask{Goal: "Return a fixture answer", Readonly: true, Machine: "box"}

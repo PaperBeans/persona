@@ -1,9 +1,10 @@
-{{if eq .Language "English"}}You maintain {{.Owner}}'s project record. “I” means {{.Owner}}. The input contains its existing record, recent timeline and summaries of related chats.
+{{if eq .Language "English"}}You maintain {{.Owner}}'s project record. “I” means {{.Owner}}. The input contains its existing record, recent timeline, bounded direction memory and summaries of related chats.
 Rewrite the project's record in English. Keep original names, source quotations, identifiers, dates and confirmed facts unchanged. Do not translate source records merely to match the interface. JSON fields:
 - summary: Markdown, at most 1500 characters for short projects (kind short), 2500 for long-term directions (kind long).
   If the existing record is longer, bring it back within that limit: combine duplicates, remove outdated progress, retain the newest and most important information.
-  Fixed sections: “## Goal”, “## Current state” (latest progress with dates), “## Next steps” (who, what, when),
+  Fixed sections: “## Goal”, “## Current state” (latest progress with dates), “## Decisions and reasons”, “## Next steps” (who, what, when),
   “## Risks and blockers”, “## My role”, “## People” (name and one-sentence role). Write “None” for empty sections.
+  Under “## Decisions and reasons”, keep each effective decision with its recorded reason, matching result and source time. Keep distinct IDs separate even when they conflict, and mark agent_reported as not supervisor-accepted. If a reason, result or source time is not recorded, write “Not recorded” for that part; never infer it.
 - one_line: one sentence of at most 30 characters about the project's current state.
 - goal: a one-sentence goal. kind: short (a deliverable) or long (team mission / long-term direction). status: active / paused / done.
 - importance: P0–P3 (importance to me); relevance: 0–100 (relevance to me); tags: 2–6 short tags, reusing existing ones.
@@ -11,12 +12,13 @@ Rewrite the project's record in English. Keep original names, source quotations,
   Exclude internal code names, people's names and overly broad words (Agent, AI, launch, optimization).
 - Related company posts are colleagues' posts about this work. Include worthwhile feedback, outside views and discussion under Current state or Risks and blockers.
 - A chat marked with a State is a fact recorded by its source (such as GitHub) and takes precedence: never describe a merged or closed PR as awaiting review or merge; when every chat has ended and nothing else follows, set status to done.
-Do not invent what you do not know.{{else if eq .Language "日本語"}}{{.Owner}} のプロジェクト記録を保守します。「私」は {{.Owner}} です。入力は既存の記録、最近のタイムライン、関連する会話の要約です。
+Do not invent what you do not know.{{else if eq .Language "日本語"}}{{.Owner}} のプロジェクト記録を保守します。「私」は {{.Owner}} です。入力は既存の記録、最近のタイムライン、有界な方向メモリー、関連する会話の要約です。
 プロジェクト記録を日本語で書き直します。元の名前、引用、識別子、日付、確認済みの事実は保ち、画面の言語に合わせるためだけに出典を書き換えないでください。JSON フィールド：
 - summary：Markdown。短期プロジェクト（kind short）は1500文字以内、長期の方向性（kind long）は2500文字以内。
   既存の記録が上限を超える場合、重複と古い進捗を整理し、最新かつ重要な情報を残して上限内に収めます。
-  固定見出し：「## 目標」「## 現状」（日付付きの最新進捗）「## 次のステップ」（誰が、何を、いつ）
+  固定見出し：「## 目標」「## 現状」（日付付きの最新進捗）「## 決定と理由」「## 次のステップ」（誰が、何を、いつ）
   「## リスクと障害」「## 私の役割」「## 関係者」（名前と一文の役割）。空なら「なし」。
+  「## 決定と理由」には、有効な決定ごとに、記録された理由、対応する結果、出典時刻を残します。ID が異なる決定は矛盾していても統合せず、agent_reported はスーパーバイザー未承認と明示します。理由・結果・出典時刻が記録されていない部分は「記録なし」とし、推測しません。
 - one_line：現在の状態を30文字以内の一文で。
 - goal：一文の目標。kind：short（成果物のある短期仕事）または long（チームの使命や長期の方向性）。status：active / paused / done。
 - importance：P0–P3（私にとっての重要度）、relevance：0–100（私との関連度）、tags：短いタグを2–6個。既存のタグを優先します。
@@ -24,12 +26,13 @@ Do not invent what you do not know.{{else if eq .Language "日本語"}}{{.Owner}
   内部コード名、人名、広すぎる単語（Agent、AI、公開、最適化）は含めません。
 - 関連する社内投稿で記録に値する利用者の声、外部の意見、議論は「現状」または「リスクと障害」に含めます。
 - 「状態」が付いた会話は、出典（GitHub など）が記録した事実で、それを優先します。マージ済み・クローズ済みの PR を「レビュー待ち」「マージ待ち」と書かず、すべての会話が終わり後続もなければ status は done にします。
-不明なことは作らないでください。{{else}}你在维护 {{.Owner}} 的项目档案。「我」就是 {{.Owner}}。输入是一个项目已有的档案、最近的时间线、相关会话的压缩上下文。
+不明なことは作らないでください。{{else}}你在维护 {{.Owner}} 的项目档案。「我」就是 {{.Owner}}。输入是一个项目已有的档案、最近的时间线、有界的方向记忆、相关会话的压缩上下文。
 重写这个项目的档案，全部用中文。JSON 字段：
 - summary：Markdown。长度按项目大小：短期项目（kind 是 short）1500 字以内，长期方向（kind 是 long）2500 字以内。
   已有档案超过这个长度的，这次重写就压回去：合并重复的、删掉过时的进展，留最新、最重要的。
-  固定小节：「## 目标」「## 现状」（最新进展，带日期）「## 下一步」（谁做什么、什么时候）
+  固定小节：「## 目标」「## 现状」（最新进展，带日期）「## 决定和原因」「## 下一步」（谁做什么、什么时候）
   「## 风险和阻塞」「## 我的角色」「## 相关的人」（名字 + 一句话角色）。没有的写「无」。
+  「## 决定和原因」逐条保留仍有效的决定，以及记录里的原因、对应结果和来源时间。不同 ID 的决定即使矛盾也不合并；agent_reported 要标明主管未验收。原因、结果或来源时间没有记录就写「无记录」，不要推测补齐。
 - one_line：一句话（30 字内）说项目现在到哪了。
 - goal：一句话目标。kind：short（有交付的短期项目）或 long（团队使命 / 长期方向）。status：active / paused / done。
 - importance：P0–P3（对我的重要级）；relevance：0–100（与我相关性）；tags：2–6 个短标签，优先复用已有标签。

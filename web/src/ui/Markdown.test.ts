@@ -402,7 +402,7 @@ describe("Markdown cache (#2465)", () => {
     const { Markdown } = await import("./Markdown");
     const { markdownCache, forgetMarkdown } = await import("./markdown-cache");
     vi.stubGlobal("localStorage", { getItem: () => "test-token" });
-    const html = (props: { text: string; mid?: string; cwd?: string }, cached = true) => {
+    const html = (props: { text: string; mid?: string; cwd?: string; readOnly?: boolean }, cached = true) => {
       markdownCache.on = cached;
       try {
         return renderToStaticMarkup(createElement(Markdown, props));
@@ -475,5 +475,70 @@ describe("Markdown cache (#2465)", () => {
     expect(variants.map((v) => html(v))).toEqual(drawn);
     expect(new Set([before, ...drawn]).size).toBe(variants.length + 1); // each of them changes what is drawn
     forget();
+  });
+
+  it("caches readOnly and default Markdown blocks separately while reusing each mode's own cached tree", async () => {
+    const { html, forgetMarkdown } = await draw();
+    forgetMarkdown();
+    const text = "[Notes](/home/me/Documents/Health/sleep-diary.md)";
+    const before = parses.n;
+    const writable = html({ text, mid: "mac", cwd: "/repo" });
+    expect(parses.n - before).toBe(1);
+    expect(html({ text, mid: "mac", cwd: "/repo" })).toBe(writable);
+    expect(parses.n - before).toBe(1);
+    const readOnly = html({ text, mid: "mac", cwd: "/repo", readOnly: true });
+    expect(parses.n - before).toBe(2);
+    expect(html({ text, mid: "mac", cwd: "/repo", readOnly: true })).toBe(readOnly);
+    expect(parses.n - before).toBe(2);
+  });
+});
+
+describe("CodeBlock header and inline code copy", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders language label, wrap toggle, and copy button on fenced code blocks", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const { Markdown } = await import("./Markdown");
+
+    const tsHtml = renderToStaticMarkup(createElement(Markdown, { text: "```typescript\nconst x = 1\n```" }));
+    expect(tsHtml).toContain("data-code-block=");
+    expect(tsHtml).not.toContain('data-wrap="true"');
+    expect(tsHtml).toContain(">typescript</span>");
+    expect(tsHtml).toContain('title="切换自动换行"');
+    expect(tsHtml).toContain('aria-pressed="false"');
+    expect(tsHtml).toContain('title="复制代码"');
+    expect(tsHtml).toContain("whitespace-nowrap");
+
+    const plainHtml = renderToStaticMarkup(createElement(Markdown, { text: "```\nhello\n```" }));
+    expect(plainHtml).toContain("data-code-bar");
+    expect(plainHtml).toContain('title="切换自动换行"');
+  });
+
+  it("copies inline code on click when selection is collapsed, and skips pre/link or active selection", async () => {
+    const { markdownComponents } = await import("./Markdown");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    let isCollapsed = true;
+    vi.stubGlobal("window", { getSelection: () => ({ isCollapsed }) });
+
+    const codeFn = markdownComponents.code as (props: { children: string; className?: string }) => { props: { onClick?: (e: unknown) => void } };
+    const el = codeFn({ children: "npm test" });
+    const onClick = el.props.onClick!;
+
+    // Inline code with collapsed selection copies text.
+    onClick({ currentTarget: { closest: () => null, textContent: "npm test" } });
+    expect(writeText).toHaveBeenCalledWith("npm test");
+
+    // Non-collapsed text selection does not trigger copy.
+    writeText.mockClear();
+    isCollapsed = false;
+    onClick({ currentTarget: { closest: () => null, textContent: "npm test" } });
+    expect(writeText).not.toHaveBeenCalled();
+
+    // Code inside <pre> or <a> does not trigger inline copy.
+    isCollapsed = true;
+    onClick({ currentTarget: { closest: () => ({}), textContent: "npm test" } });
+    expect(writeText).not.toHaveBeenCalled();
   });
 });

@@ -6,12 +6,19 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class AgentsDisplaySettings(@SerialName("show_botmux") val showBotmux: Boolean, val configured: Boolean)
+data class AgentsDisplaySettings(
+    @SerialName("show_botmux") val showBotmux: Boolean,
+    val configured: Boolean,
+    @SerialName("use_herdr_tab_name") val useHerdrTabName: Boolean? = null,
+)
 
 interface AgentDisplayApi {
     suspend fun read(): AgentsDisplaySettings
     /** The server returns the winning value even when another client configured it first. */
     suspend fun migrateHidden(): AgentsDisplaySettings
+    /** Persists the hub-wide "Use the herdr tab name as the session name" preference (#13899). */
+    suspend fun setUseHerdrTabName(enabled: Boolean): AgentsDisplaySettings =
+        throw UnsupportedOperationException("Updating use_herdr_tab_name is unsupported")
 }
 
 /** Stable pairing identity for the cache; namespace is only the row's identifier in the merged list. */

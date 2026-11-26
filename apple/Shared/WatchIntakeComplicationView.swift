@@ -20,7 +20,10 @@ struct WatchIntakeComplicationView: View {
     private var unit: String {
         kind == .water ? interfaceText("ml") : interfaceText("g") // perf-ok: bounded complication entry rendering
     }
-    private var message: LocalizedStringKey? {
+    var message: LocalizedStringKey? {
+        if entry.reading?.contains(kind) == false {
+            return kind == .water ? "Add Water in Health" : "Add Protein in Health"
+        }
         if entry.needsHubUpdate { return "Update the hub [Home Widgets]" }
         if !entry.paired { return "Open Persona on iPhone to connect [Watch Widgets]" }
         if portion == nil { return "Can't load intake [Watch Widgets]" }

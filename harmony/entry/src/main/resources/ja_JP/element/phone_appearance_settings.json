@@ -1,0 +1,260 @@
+{
+  "string": [
+    {
+      "name": "phone_look_color",
+      "value": "テーマカラー"
+    },
+    {
+      "name": "phone_look_style",
+      "value": "UIスタイル"
+    },
+    {
+      "name": "phone_look_navigation",
+      "value": "サイドバー"
+    },
+    {
+      "name": "phone_look_layout",
+      "value": "Agents 一覧のレイアウト"
+    },
+    {
+      "name": "phone_look_scheme",
+      "value": "ライト/ダーク"
+    },
+    {
+      "name": "phone_look_avatar",
+      "value": "アバター"
+    },
+    {
+      "name": "phone_look_avatar_alias",
+      "value": "アバター 顔 Persona アイコン 名前 共有"
+    },
+    {
+      "name": "phone_look_color_alias",
+      "value": "テーマ 色 パレット"
+    },
+    {
+      "name": "phone_look_style_alias",
+      "value": "インターフェース スタイル フォント 文字サイズ"
+    },
+    {
+      "name": "phone_look_scheme_alias",
+      "value": "ライト ダーク システム 外観"
+    },
+    {
+      "name": "phone_look_layout_header",
+      "value": "エージェント一覧"
+    },
+    {
+      "name": "phone_look_sample_ask",
+      "value": "明日は傘が必要？"
+    },
+    {
+      "name": "phone_look_sample_reply",
+      "value": "午前中に小雨が降ります。折りたたみ傘を持っていきましょう。"
+    },
+    {
+      "name": "phone_look_sample_link",
+      "value": "1時間ごとの天気を見る"
+    },
+    {
+      "name": "phone_look_sample_add",
+      "value": "リマインダーに追加"
+    },
+    {
+      "name": "phone_look_sample_skip",
+      "value": "結構です"
+    },
+    {
+      "name": "phone_look_navigation_merged",
+      "value": "まとめる"
+    },
+    {
+      "name": "phone_look_navigation_separate",
+      "value": "分ける"
+    },
+    {
+      "name": "phone_look_layout_avatar",
+      "value": "アバター"
+    },
+    {
+      "name": "phone_look_layout_compact",
+      "value": "2 行"
+    },
+    {
+      "name": "phone_look_layout_cards",
+      "value": "状態カード"
+    },
+    {
+      "name": "phone_look_layout_list",
+      "value": "コンパクトリスト"
+    },
+    {
+      "name": "phone_look_example_review",
+      "value": "ネットワーク層のテストを追加"
+    },
+    {
+      "name": "phone_look_example_review_note",
+      "value": "どのテストフレームワークを使いますか？Swift Testing をおすすめします。"
+    },
+    {
+      "name": "phone_look_example_build",
+      "value": "天気アプリにホーム画面ウィジェットを追加"
+    },
+    {
+      "name": "phone_look_example_build_note",
+      "value": "テスト実行中：これまでに 160 件中 128 件が成功。"
+    },
+    {
+      "name": "phone_look_style_glass",
+      "value": "Liquid Glass"
+    },
+    {
+      "name": "phone_look_style_clay",
+      "value": "クレイ"
+    },
+    {
+      "name": "phone_look_style_island",
+      "value": "Island"
+    },
+    {
+      "name": "phone_look_style_lark",
+      "value": "Lark"
+    },
+    {
+      "name": "phone_look_style_beautiful",
+      "value": "BeautifulUI"
+    },
+    {
+      "name": "phone_look_style_glass_note",
+      "value": "システム標準の外観"
+    },
+    {
+      "name": "phone_look_style_clay_note",
+      "value": "やわらかく丸みのある"
+    },
+    {
+      "name": "phone_look_style_island_note",
+      "value": "浮かぶカード"
+    },
+    {
+      "name": "phone_look_style_lark_note",
+      "value": "Larkと同じ"
+    },
+    {
+      "name": "phone_look_style_footer",
+      "value": "シート、カード、ボタン、フォント、チャット内のコンポーネントの見た目がアプリ全体で変わります。受信トレイのLarkページも含みます。"
+    },
+    {
+      "name": "phone_look_style_beautiful_note",
+      "value": "BeautifulUIのカード、ツールカード、入力欄"
+    },
+    {
+      "name": "phone_look_layout_avatar_note",
+      "value": "アバター、タイトルと時刻、最新の発言 2 行、実行場所。"
+    },
+    {
+      "name": "phone_look_layout_compact_note",
+      "value": "エージェントごとに 2 行：タイトルと時刻、最新の発言 1 行。"
+    },
+    {
+      "name": "phone_look_layout_cards_note",
+      "value": "エージェントごとに 1 枚のカード。左端に状態の色があり、あなたを待つカードは色付きです。"
+    },
+    {
+      "name": "phone_look_layout_list_note",
+      "value": "エージェントごとに 1 行：状態、タイトル、時刻。"
+    },
+    {
+      "name": "phone_look_scheme_system",
+      "value": "システムと同じ"
+    },
+    {
+      "name": "phone_look_scheme_light",
+      "value": "ライト"
+    },
+    {
+      "name": "phone_look_scheme_dark",
+      "value": "ダーク"
+    },
+    {
+      "name": "phone_look_navigation_separate_note",
+      "value": "Persona と Agents を別々のページに表示します。画面上部で切り替えます。"
+    },
+    {
+      "name": "phone_look_navigation_merged_note",
+      "value": "メインのチャット、ページ、Persona の会話と Agents をひとつのサイドバーにまとめます。左端からスワイプして開きます。"
+    },
+    {
+      "name": "phone_look_text_size",
+      "value": "文字サイズ"
+    },
+    {
+      "name": "phone_look_text_small",
+      "value": "小"
+    },
+    {
+      "name": "phone_look_text_standard",
+      "value": "標準"
+    },
+    {
+      "name": "phone_look_text_large",
+      "value": "大"
+    },
+    {
+      "name": "phone_look_text_footer",
+      "value": "システムの「テキストサイズ」より1段階小さく、または大きくします。"
+    },
+    {
+      "name": "phone_look_section",
+      "value": "外観"
+    },
+    {
+      "name": "phone_look_color_blue",
+      "value": "システムブルー"
+    },
+    {
+      "name": "phone_look_color_coral",
+      "value": "コーラル"
+    },
+    {
+      "name": "phone_look_color_lavender",
+      "value": "ラベンダー"
+    },
+    {
+      "name": "phone_look_color_teal",
+      "value": "ティール"
+    },
+    {
+      "name": "phone_look_color_lark",
+      "value": "Larkブルー"
+    },
+    {
+      "name": "phone_look_scheme_footer",
+      "value": "システムに合わせると、デバイスの外観に従います。ライトまたはダークを選ぶと、Persona の外観が固定されます。"
+    },
+    {
+      "name": "phone_look_color_footer",
+      "value": "ボタン、リンク、選択状態、自分の吹き出しにテーマカラーが使われ、クレイとIslandの背景はその淡い色調になります。「UIスタイルに合わせる」では各スタイル本来の色を使います。"
+    },
+    {
+      "name": "phone_look_navigation_footer",
+      "value": "このデバイスにのみ適用され、選択するとすぐに切り替わります。"
+    },
+    {
+      "name": "phone_look_glow",
+      "value": "返信中に光らせる"
+    },
+    {
+      "name": "phone_look_glow_note",
+      "value": "Persona が返信を書いている間、入力欄を光らせます"
+    },
+    {
+      "name": "phone_look_return",
+      "value": "Returnキーで送信"
+    },
+    {
+      "name": "phone_look_return_note",
+      "value": "Returnで送信、Shift + Returnで改行"
+    }
+  ]
+}

@@ -8,6 +8,7 @@
   "no_match": "No matching items",
   "used_files": "Used in this session",
   "folder": "Folder",
+  "browse_folder": "Browse folder",
   "session_dir": "Session folder",
   "reading_folder": "Reading folder…",
   "no_match_in_folder": "Nothing matches in this folder",

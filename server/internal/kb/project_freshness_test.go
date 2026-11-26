@@ -85,7 +85,7 @@ func TestProjectCoverageAfterLockedAndPartialRefresh(t *testing.T) {
 	fieldReview(t, summary, "new_evidence", 1)
 	fieldReview(t, one, "", 0)
 	p, _ := e.Store.Project("example")
-	if after.Summary != first.Summary || row.OneLine != "Delivered" || p.Dirty || !p.fieldLocked("summary") ||
+	if after.Summary != first.Summary || row.OneLine != "Delivered" || p.Dirty || !taggingFieldLocked(&p.Tagging, "summary") ||
 		!reflect.DeepEqual(summary.Cutoff, firstSummary.Cutoff) || summary.LockReason != "field_locked" || summary.ReviewBy != "user" ||
 		one.Cutoff.TimelineThrough <= summary.Cutoff.TimelineThrough || row.Updated.Before(firstRow.Updated) {
 		t.Fatalf("locked summary changed or gap lost: %+v / %+v / %+v", p, summary, one)
@@ -255,7 +255,7 @@ func TestProjectReferenceOnlyEnforcesWritesAfterReopen(t *testing.T) {
 	row, after := projectViews(t, e, "example")
 	current, _ := store.Project("example")
 	if row.ProjectMode != ref || row.OneLine != "" || after.Summary != "Old summary\n" || len(after.Log) != 1 ||
-		!strings.Contains(after.Log[0], "Old detail") || current.Goal != "Old goal" || !current.fieldLocked("summary") ||
+		!strings.Contains(after.Log[0], "Old detail") || current.Goal != "Old goal" || !taggingFieldLocked(&current.Tagging, "summary") ||
 		!slices.Equal(current.Aliases, []string{"Guide"}) || !slices.Equal(current.Chats, []string{c.ID}) {
 		t.Fatalf("reference-only history or routing changed: %+v / %+v", current, after)
 	}
@@ -387,4 +387,70 @@ func TestProjectRefreshCommitsWhenSourceURLIsRecorded(t *testing.T) {
 	}
 	fieldReview(t, detail.Freshness.Fields["summary"], "", 0)
 	fieldReview(t, detail.Freshness.Fields["one_line"], "", 0)
+}
+
+// A rewrite reads the linked chats summarized most recently, not the first linked (#15308); a message that arrives in a
+// linked chat while the model works neither reorders the input nor voids the rewrite.
+func TestProjectRewriteReadsTheMostRecentlySummarizedChats(t *testing.T) {
+	e := projectMemoryEngine(t, t.TempDir())
+	var ids []string
+	for i := range 10 {
+		id := fmt.Sprintf("lark-c%d", i)
+		ids = append(ids, id)
+		// Linked oldest first: c0 was summarized on day 0, c9 on day 9; c1 has the newest message but an old summary.
+		c := &Chat{ID: id, Source: "lark", SourceID: id, Kind: "group", Name: id, Projects: []string{"p"},
+			CompressedAt: projectEvidenceTime.AddDate(0, 0, i), CoveredUntil: projectEvidenceTime.AddDate(0, 0, i), LastAt: projectEvidenceTime.AddDate(0, 0, i)}
+		if i == 1 {
+			c.LastAt = projectEvidenceTime.AddDate(0, 0, 30)
+		}
+		if err := e.Store.PutChat(c); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Store.PutSummary(KindChat, id, "summary of "+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Never summarized: no summary and no CompressedAt, so it goes last.
+	if err := e.Store.PutChat(&Chat{ID: "lark-new", Source: "lark", SourceID: "new", Kind: "group", Name: "new", Projects: []string{"p"},
+		LastAt: projectEvidenceTime.AddDate(0, 0, 40)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.PutProject(&Project{Slug: "p", Name: "P", Status: "active", Chats: append([]string{"lark-new"}, ids...)}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := e.Store.Project("p")
+	in := e.projectInput(p)
+	var got []string
+	for _, c := range in.Chats {
+		got = append(got, c.ID)
+	}
+	want := []string{"lark-c9", "lark-c8", "lark-c7", "lark-c6", "lark-c5", "lark-c4", "lark-c3", "lark-c2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("chats read = %v, want %v", got, want)
+	}
+
+	// A new message in a read chat and in an unread one: same input, so a rewrite started before still commits.
+	before := summaryInputPrompt(e, p)
+	for _, id := range []string{"lark-c9", "lark-c0"} {
+		c, _ := e.Store.Chat(id)
+		c.LastAt = projectEvidenceTime.AddDate(0, 0, 50)
+		c.CoveredUntil = projectEvidenceTime.AddDate(0, 0, -1) // a late backfilled message moves the coverage back
+		c.Pending++
+		if err := e.Store.PutChat(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := summaryInputPrompt(e, p); after != before {
+		t.Fatalf("a new message changed the rewrite's input:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+
+	// The oldest-linked chat summarized anew moves into what is read.
+	c0, _ := e.Store.Chat("lark-c0")
+	c0.CompressedAt = projectEvidenceTime.AddDate(0, 0, 50)
+	if err := e.Store.PutChat(c0); err != nil {
+		t.Fatal(err)
+	}
+	if in := e.projectInput(p); in.Chats[0].ID != "lark-c0" || len(in.Chats) != projectPromptChatsMost {
+		t.Fatalf("after c0's new summary: first %s, %d chats", in.Chats[0].ID, len(in.Chats))
+	}
 }

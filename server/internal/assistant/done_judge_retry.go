@@ -38,7 +38,7 @@ func (s *Service) deferTaskDoneJudgment(ctx context.Context, t Todo, work time.T
 	b.doc.Turns[t.ID] = e
 	saveErr := s.saveTurnsLocked(ctx)
 	if e.JudgeFailures > taskDoneDeferredRetries {
-		return false, fmt.Errorf("%w after %d deferred retries: %v", errTaskDoneJudgeExhausted, taskDoneDeferredRetries, judgeErr)
+		return false, fmt.Errorf("%w after %d deferred retries: %w", errTaskDoneJudgeExhausted, taskDoneDeferredRetries, judgeErr)
 	}
 	if saveErr != nil {
 		// The turn was already read from the durable ledger. Keep this pass's count in memory rather than wake the

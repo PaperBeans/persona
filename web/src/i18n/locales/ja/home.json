@@ -28,6 +28,7 @@
   "open_machines": "マシンを開く",
   "computers": "コンピューター",
   "monitor": "モニタリング ›",
+  "view_rows": "行",
   "machine_agents_other": "エージェント{count}件",
   "offline": "オフライン",
   "online": "オンライン",

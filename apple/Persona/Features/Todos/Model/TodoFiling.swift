@@ -5,8 +5,9 @@ import PersonaWire
 nonisolated struct TodoFiled: Equatable, Sendable {
     var id: String
     var manager: String?
-    /// One of `TodoListSection.all`.
-    var section: String
+    /// One of `TodoListSection.all`, never `.unknown`: a view with a section this build does not know is filed by the
+    /// app's own rules.
+    var section: TodoListSection
     /// Closed: the view's phase is done (a failed start still waiting on the owner is open).
     var closed: Bool
     /// Its place in its section, 0 first: the view's rank, or for a row filed by the app's own rules its place by when it
@@ -29,20 +30,20 @@ nonisolated struct TodoFiled: Equatable, Sendable {
 /// knows, else by the app's own rules (`TodoTriageLogic`, the frozen fallback for rows from older managers) mapped
 /// onto the V1 sections. The only new reader of `TodoTriageLogic` (proposal 7.7). Pure: no store, no clock of its own.
 nonisolated enum TodoFiling {
-    /// Whether this build can file a row by `view`: its section is one it knows (the hub's enums are open strings).
+    /// Whether this build can file a row by `view`: its section is one it knows (a newer hub's decodes to `.unknown`).
     static func knows(_ view: TodoSummary) -> Bool { TodoListSection.all.contains(view.section) }
 
     /// The V1 section of a section of the app's own rules: an open pull request waits on someone else; Other open is To
     /// do; Shelved is To do with the Inactive mark.
-    static func section(legacy: TodoSection) -> (section: String, inactive: Bool) {
+    static func section(legacy: TodoSection) -> (section: TodoListSection, inactive: Bool) {
         switch legacy {
-        case .waiting: (TodoListSection.needsYou, false)
-        case .working: (TodoListSection.working, false)
-        case .pr: (TodoListSection.waiting, false)
-        case .other: (TodoListSection.todo, false)
-        case .justDone: (TodoListSection.justFinished, false)
-        case .shelved: (TodoListSection.todo, true)
-        case .done, .cancelled: (TodoListSection.done, false)
+        case .waiting: (.needsYou, false)
+        case .working: (.working, false)
+        case .pr: (.waiting, false)
+        case .other: (.todo, false)
+        case .justDone: (.justFinished, false)
+        case .shelved: (.todo, true)
+        case .done, .cancelled: (.done, false)
         }
     }
 
@@ -82,7 +83,7 @@ nonisolated enum TodoFiling {
         }
         // Rows the app's rules filed have no rank: by when they last moved, newest first, within each manager's section,
         // so a merged list orders them with the hub's ranks as it orders two managers' rows.
-        let groups = Dictionary(grouping: legacy) { "\(out[$0.index].manager ?? "")\n\(out[$0.index].section)" }
+        let groups = Dictionary(grouping: legacy) { "\(out[$0.index].manager ?? "")\n\(out[$0.index].section.rawValue)" }
         for group in groups.values {
             let sorted = group.sorted { $0.last != $1.last ? $0.last > $1.last : out[$0.index].id < out[$1.index].id }
             for (rank, entry) in sorted.enumerated() { out[entry.index].rank = rank }

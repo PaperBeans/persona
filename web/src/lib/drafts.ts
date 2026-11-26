@@ -11,6 +11,8 @@ import { useSyncExternalStore } from "react";
 import { clampComment, commentBlock, isCommentHead, parseCommentBlock, type QuoteComment } from "./comments";
 import { uuid } from "./format";
 import type { EditedImage } from "./image-edit";
+import { draftText, joinInline, readInlineDraft, writeInlineDraft } from "./inline-mentions";
+import { skillDraft, splitSkillDraft } from "./skill-mentions";
 
 export interface DraftImage {
   name: string;
@@ -237,14 +239,19 @@ export function cancelNote(key: string, id: string, previous: string) {
 
 /** A pulled-back queued message goes under what is typed, on its own line (AppModel.editQueued). */
 export function withAppended(draft: string, text: string): string {
-  return draft ? `${draft}\n${text}` : text;
+  if (!draft) return text;
+  if (draftText(draft) !== draft || draftText(text) !== text) {
+    const first = splitSkillDraft(draft), second = splitSkillDraft(text);
+    return skillDraft([...first.skills, ...second.skills], writeInlineDraft(joinInline(readInlineDraft(first.text), ["\n"], readInlineDraft(second.text))));
+  }
+  return `${draft}\n${text}`;
 }
 
 /** The draft after a send failed: the composer emptied itself when the message went out, so the text comes back;
  * what was typed while it was on its way stays, under it on its own line. */
 export function withUnsent(draft: string, unsent: string): string {
   if (!unsent) return draft;
-  return draft ? `${unsent}\n${draft}` : unsent;
+  return draft ? withAppended(unsent, draft) : unsent;
 }
 
 /** The draft after a text event (an image changes the attachments and a quote the bar above, not the text). */
@@ -437,7 +444,7 @@ export function storePageDraft(key: string, text: string) {
  *  bar. Nothing while its box is mounted (you are in it; typing there does not re-render the list), or for `null`. */
 export function useLeftDraft(key: string | null): { text: string; quoted: boolean } {
   const away = () => key !== null && !listeners.get(key)?.size;
-  const read = () => (away() ? (storedValue(`draft:${key}`) ?? "") : "");
+  const read = () => (away() ? draftText(storedValue(`draft:${key}`) ?? "") : "");
   const hasQuotes = () => away() && getQuotes(key!).list.length > 0;
   const text = useSyncExternalStore(subscribeRows, read, read);
   const quoted = useSyncExternalStore(subscribeRows, hasQuotes, hasQuotes);

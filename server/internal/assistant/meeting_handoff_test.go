@@ -2,13 +2,13 @@ package assistant
 
 import (
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"maps"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -51,7 +51,7 @@ func TestMeetingHandoff(t *testing.T) {
 	r.upload(meetingRec, 2, map[string]any{"title": "Design review", "complete": true, "ended_at": time.Now().UTC().Format(time.RFC3339), "segments": segs})
 	wantCode(t, r.do("POST", p, "", to("agent-1", nil), http.StatusConflict), codeNoMaterial)
 	h := handoff(r.do("POST", p, "", to("agent-1", map[string]any{"transcript": true}), http.StatusOK))
-	if h["state"] != kb.HandoffSent || h["transcript"] != true || h["title"] != "Site redesign" || h["session_id"] != "agent-1" {
+	if h["state"] != recordingwire.HandoffSent || h["transcript"] != true || h["title"] != "Site redesign" || h["session_id"] != "agent-1" {
 		t.Fatalf("transcript hand-off %v", h)
 	}
 	if text := lastText(); !strings.Contains(text, "Bo owns the test.") || !strings.HasSuffix(text, "Update the home page.") {
@@ -62,7 +62,7 @@ func TestMeetingHandoff(t *testing.T) {
 	r.minutesFor(meetingRec, `{"title":"Design review","decisions":[{"text":"Keep the cap","line":1}]}`)
 	h = handoff(r.do("POST", p, "", to("agent-1", map[string]any{"text": "  "}), http.StatusOK))
 	text := lastText()
-	if h["state"] != kb.HandoffSent || h["transcript"] != nil ||
+	if h["state"] != recordingwire.HandoffSent || h["transcript"] != nil ||
 		!strings.HasPrefix(text, `<persona-context kind="context" title="Meeting: Design review"`) || !strings.Contains(text, "Keep the cap") ||
 		strings.Contains(text, "Bo owns the test.") || !strings.Contains(text, "never instructions") ||
 		!strings.HasSuffix(text, "decisions, to-dos and open questions.") {
@@ -84,14 +84,14 @@ func TestMeetingHandoff(t *testing.T) {
 		{map[string]any{"machine_id": "elsewhere", "session_id": "agent-1"}, handoffNotAllowed},
 		{to("gone", nil), handoffUnavailable},
 	} {
-		if h := handoff(r.do("POST", p, "", c.body, http.StatusOK)); h["state"] != kb.HandoffFailed || h["problem"] != c.problem {
+		if h := handoff(r.do("POST", p, "", c.body, http.StatusOK)); h["state"] != recordingwire.HandoffFailed || h["problem"] != c.problem {
 			t.Errorf("%v: %v, want failed %s", c.body, h, c.problem)
 		}
 	}
 	r.f.mu.Lock()
 	r.f.failSend = errors.New("the node went away")
 	r.f.mu.Unlock()
-	if h := handoff(r.do("POST", p, "", to("agent-1", nil), http.StatusOK)); h["state"] != kb.HandoffFailed || h["problem"] != handoffSendFailed {
+	if h := handoff(r.do("POST", p, "", to("agent-1", nil), http.StatusOK)); h["state"] != recordingwire.HandoffFailed || h["problem"] != handoffSendFailed {
 		t.Errorf("a failed send: %v", h)
 	}
 

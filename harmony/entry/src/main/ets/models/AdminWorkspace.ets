@@ -144,7 +144,8 @@ export class AdminWorkspace {
   async open(model: ClientModel, page: string, active: boolean, row?: ResourceRow): Promise<void> {
     if (!active) { this.hide(); return; }
     const generationChanged = this.root === model && this.rootGeneration !== model.connectionGeneration();
-    const sameOwner = this.rootProfile === model.profile.id && this.rootScope === model.scope() && this.rootManager === model.profile.manager;
+    const sameOwner = (!this.root || this.root === model) && this.rootProfile === model.profile.id &&
+      this.rootScope === model.scope() && this.rootManager === model.profile.manager;
     const sameRoute = sameOwner && this.page === page;
     if (!sameRoute || generationChanged) this.resetBusy();
     this.visible = true; this.root = model; this.routeMachine = row;
@@ -165,7 +166,7 @@ export class AdminWorkspace {
       this.selectedEngineHosts = []; this.selectedEngineDefault = ''; this.selectedMoveMachine = ''; this.selectedMoveDestination = '';
       this.draftJson = '{}'; this.draftDirty = false; this.draftRevision++;
       this.memoryDraftRevision++;
-      await this.restoreLocalDraft(model, page, this.revision);
+      if (page !== 'conversation_options') await this.restoreLocalDraft(model, page, this.revision);
     } else {
       this.machineRows = this.buildMachineRows(model, row);
       if (row?.id && row.id !== this.selectedMachine) {
@@ -173,6 +174,7 @@ export class AdminWorkspace {
       }
     }
     if (!this.isCurrentRoot()) return;
+    if (page === 'conversation_options') this.assistantData = {};
     if (!this.selectedMachine) this.selectedMachine = this.machineChoices()[0]?.id || '';
     await this.refresh();
   }
@@ -210,6 +212,10 @@ export class AdminWorkspace {
     return this.visible && !!model && model.profile.id === this.rootProfile && model.scope() === this.rootScope &&
       model.profile.manager === this.rootManager && model.connectionGeneration() === this.rootGeneration &&
       model.owns(this.rootGeneration, this.rootScope);
+  }
+
+  showsConversationOptions(model: ClientModel): boolean {
+    return this.page === 'conversation_options' && this.root === model && this.isCurrentRoot();
   }
 
   private selectionKey(): string {
@@ -415,7 +421,7 @@ export class AdminWorkspace {
     const snapshot = this.capture(), busyOwner = ++this.busySequence; this.loadingOwner = busyOwner;
     this.loading = true; this.error = ''; this.unsupported = false; this.refreshFailed = false;
     try {
-      if (this.page === 'assistant') await this.refreshAssistant(snapshot);
+      if (this.page === 'assistant' || this.page === 'conversation_options') await this.refreshAssistant(snapshot);
       else if (this.page === 'memory') await this.refreshMemory(snapshot);
       else if (this.page === 'managers') await this.refreshManagers(snapshot);
       else if (this.page === 'launchers') await this.refreshLaunchers(snapshot);
@@ -428,6 +434,7 @@ export class AdminWorkspace {
   private async refreshAssistant(snapshot: AdminSnapshot): Promise<void> {
     const result = await this.read(snapshot, '/api/v1/assistant'); if (!result || !this.admits(snapshot)) return;
     this.assistantData = result;
+    if (this.page === 'conversation_options') return;
     this.setRemoteForm(Wire.payload(['machine_id', 'launcher', 'timezone', 'notes', 'main_tasks_quiet', 'agent_tasks', 'inbox_signals',
       'interject_background', 'kb_topics', 'idle_close_hours', 'archive_closed_days', 'recording_days', 'minutes_days'], [
       Wire.text(result, 'machine_id'), Wire.text(result, 'launcher'), Wire.text(result, 'timezone'), Wire.text(result, 'notes'),
@@ -551,6 +558,27 @@ export class AdminWorkspace {
       const title = Wire.text(item, 'title');
       return title ? machine + ' · ' + title : machine;
     }).filter((value: string) => !!value);
+  }
+
+  async setRecentTaskChats(snapshot: AdminSnapshot, enabled: boolean): Promise<boolean> {
+    const path = '/api/v1/assistant', owner = this.root, previous = this.assistantData;
+    if (!owner || !owner.connected || owner.demo || (this.page !== 'assistant' && this.page !== 'conversation_options') ||
+      this.saving || !this.admits(snapshot,path) || typeof previous['recent_task_chats'] !== 'boolean') return false;
+    if (Wire.bool(previous,'recent_task_chats') === enabled) return true;
+    const pending = Wire.parse(JSON.stringify(previous));
+    pending['recent_task_chats'] = enabled;
+    this.assistantData = pending;
+    const result = await this.write(snapshot,path,'PUT',Wire.payload(['recent_task_chats'],[enabled]));
+    const accepted = !!result && result['recent_task_chats'] === enabled;
+    if (this.admits(snapshot,path)) {
+      this.assistantData = accepted && result ? result : previous;
+      if (result && !accepted) { this.error = 'request_updated'; this.writeState = 'failed'; }
+    }
+    // Closing the menu's sheet while the Hub acknowledges the write still updates this assistant's drawer.
+    if (accepted && result && owner.owns(snapshot.generation,snapshot.scope) && owner.profile.id === snapshot.profile) {
+      owner.acceptSidebarConfig(result,true);
+    }
+    return accepted;
   }
 
   async saveAssistant(snapshot: AdminSnapshot): Promise<boolean> {

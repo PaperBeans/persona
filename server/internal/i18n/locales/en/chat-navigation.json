@@ -1,0 +1,7 @@
+{
+  "invalid": "The conversation navigation request is invalid.",
+  "history_changed": "This conversation changed. Refresh its question list and try again.",
+  "target_missing": "This spot is no longer in the conversation.",
+  "unavailable": "This conversation does not support opening that spot directly.",
+  "node_outdated": "Update Persona on this computer to open conversation previews and earlier questions directly."
+}

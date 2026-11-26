@@ -47,6 +47,17 @@ type inspectionReport struct {
 	DatabaseRestoreVerified bool                `json:"database_restore_verified"`
 }
 
+// InspectionReport is the shareable, aggregate result of an offline integrity
+// check. It contains no paths, database names, configuration, keys or hashes.
+type InspectionReport = inspectionReport
+
+// InspectBundle checks a bundle without an install, PostgreSQL clients, a live
+// database or extraction space. Callers must still choose the bundle path from
+// an authorized inventory; this function deliberately accepts no HTTP input.
+func InspectBundle(ctx context.Context, bundle string) (InspectionReport, error) {
+	return inspectBundle(ctx, bundle)
+}
+
 func runInspect(ctx context.Context, args []string, stdout io.Writer) error {
 	lang := i18n.Terminal()
 	usage := i18n.T(lang, "backup-inspect.usage", i18n.Args{"command": clitext.Named("personad backup inspect")})

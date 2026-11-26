@@ -102,7 +102,7 @@
       "required": ["ok"]
     },
     "HubRole": {"type": "string", "enum": ["center", "member"]},
-    "HubCapability": {"type": "string", "enum": ["inbox_group", "inbox_group_state", "tool_images"]},
+    "HubCapability": {"type": "string", "enum": ["inbox_group", "inbox_group_state", "tool_images", "tool_views"]},
     "InitializeParams": {
       "description": "What the hub sends first. The extension is under extension; hubs before the rename (#1844) send it as plugin, newer hubs send both.",
       "type": "object",
@@ -112,6 +112,7 @@
         "extension": {"$ref": "#/$defs/ExtensionInfo"},
         "plugin": {"$ref": "#/$defs/ExtensionInfo"},
         "config": {"description": "The configuration with the schema's defaults filled in."},
+        "inbox_visibility": {"description": "The manager's source-privacy boundary, sent only to an extension contributing a selected connector. Runtime authorization input, not extension settings persisted in the extension registry."},
         "secrets": {"type": "object", "additionalProperties": {"type": "string"}},
         "granted": {"$ref": "manifest.schema.json#/$defs/Permissions"},
         "active": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}},
@@ -268,6 +269,12 @@
         "locale": {"type": "string"},
         "platform": {"$ref": "view.schema.json#/$defs/Platform"},
         "ui_version": {"type": "integer"},
+        "unsupported": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64},
+          "description": "Component types this client cannot draw even within ui_version (such as [\"scene\"] while rendering v12 \"map\"). The hub downgrades each listed type in place."
+        },
         "stream": {"$ref": "stream.schema.json#/$defs/UIStreamCapability",
           "description": "Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current client or hub advertises it."}
       }

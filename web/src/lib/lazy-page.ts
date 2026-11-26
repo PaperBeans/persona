@@ -93,9 +93,14 @@ export function lazyPage<P extends object>(load: () => Promise<ComponentType<P>>
   return Object.assign(LazyPage, { preload: once, ready: () => page !== null });
 }
 
-/** Loads every lazy page's chunk now, for a test that draws without waiting (renderToStaticMarkup). */
-export function loadPages(): Promise<unknown> {
-  return Promise.all(loaders.map((l) => l()));
+/** Loads every lazy page's chunk now (including nested lazy pages they register), for tests that draw without waiting. */
+export async function loadPages(): Promise<void> {
+  let done = 0;
+  while (done < loaders.length) {
+    const batch = loaders.slice(done);
+    done = loaders.length;
+    await Promise.all(batch.map((l) => l()));
+  }
 }
 
 interface IntentTarget {

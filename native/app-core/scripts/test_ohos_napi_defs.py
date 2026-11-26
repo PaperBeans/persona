@@ -15,13 +15,13 @@ GENERATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GENERATOR)
 
 RECORDS = [
-    "function coreCreate(config: Buffer, changed: ((arg: number) => void), effects: ((arg: Buffer) => void)): number",
-    "function coreCreateWithChat(config: Buffer, changed: ((arg: number) => void), changedChat: ((arg0: string, arg1: number) => void), effects: ((arg: Buffer) => void)): number",
-    "function coreDispatch(handle: number, action: Buffer): boolean",
-    "function coreDrain(handle: number, chat: string): Buffer",
+    "function coreCreate(config: Uint8Array, changed: ((arg: number) => void), effects: ((arg: Uint8Array) => void)): number",
+    "function coreCreateWithChat(config: Uint8Array, changed: ((arg: number) => void), changedChat: ((arg0: string, arg1: number) => void), effects: ((arg: Uint8Array) => void)): number",
+    "function coreDispatch(handle: number, action: Uint8Array): boolean",
+    "function coreDrain(handle: number, chat: string): Uint8Array",
     "function coreFlush(handle: number, timeoutMillis: number): boolean",
     "function coreClose(handle: number): void",
-    "function coreConfig(): Buffer",
+    "function coreConfig(): Uint8Array",
     "function coreProjectSort(input: string): string",
     "function coreProjectAnswer(input: string): string",
     "function coreDisplayAnswer(label: string): string",
@@ -44,6 +44,15 @@ def records():
 
 
 class OhosNapiDefinitionsTests(unittest.TestCase):
+    def test_rejects_node_buffer_at_every_binary_boundary(self):
+        for index, old in [(0, "config: Uint8Array"), (1, "arg: Uint8Array"), (2, "action: Uint8Array"),
+                           (3, "): Uint8Array"), (6, "): Uint8Array")]:
+            with self.subTest(definition=index, boundary=old):
+                changed = records()
+                changed[index]["def"] = changed[index]["def"].replace(old, old.replace("Uint8Array", "Buffer"))
+                with self.assertRaises(GENERATOR.DefinitionError):
+                    GENERATOR.generate(changed)
+
     def test_real_generator_shape_matches_committed_declaration(self):
         declaration = CORE.parent.parent / "harmony/entry/src/main/cpp/types/libpersona_core/index.d.ts"
         self.assertEqual(GENERATOR.generate(records()), declaration.read_text(encoding="utf-8"))
@@ -51,8 +60,8 @@ class OhosNapiDefinitionsTests(unittest.TestCase):
     def test_rejects_error_first_or_numeric_array_callbacks(self):
         for old, new in [
             ("changed: ((arg: number) => void)", "changed: ((err: Error | null, arg: number) => void)"),
-            ("effects: ((arg: Buffer) => void)", "effects: ((arg: Array<number>) => void)"),
-            ("effects: ((arg: Buffer) => void)", "effects: ((err: Error | null, arg: Buffer) => void)"),
+            ("effects: ((arg: Uint8Array) => void)", "effects: ((arg: Array<number>) => void)"),
+            ("effects: ((arg: Uint8Array) => void)", "effects: ((err: Error | null, arg: Uint8Array) => void)"),
         ]:
             with self.subTest(new=new):
                 changed = records()

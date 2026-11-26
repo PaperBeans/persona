@@ -101,17 +101,21 @@ nonisolated struct ExtensionSurfaceClient: Sendable {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    /// Read capabilities without refreshing or revoking unrelated extension catalogs.
+    func features() async throws -> Set<String> {
+        let capabilities: ExtensionSurfaceCapabilities = try await request("/api/v1/health")
+        if let advertised = capabilities.features { return Set(advertised) }
+        if credential.isAnswerOnly {
+            guard let forwarded = credential.capabilities else { throw ExtensionSurfaceCapabilitiesUnknown() }
+            return Set(forwarded)
+        }
+        return try await helloFeatures()
+    }
+
     @discardableResult
     func refreshCatalog(group: String, expected: ExtensionSurfaceGroup, store: ExtensionSurfaceStore = .shared) async throws -> Set<String> {
         do {
-            let capabilities: ExtensionSurfaceCapabilities = try await request("/api/v1/health")
-            // Public health intentionally omits features, even with Authorization. That is unknown, not an old hub.
-            let features: Set<String>
-            if let advertised = capabilities.features { features = Set(advertised) }
-            else if credential.isAnswerOnly {
-                guard let forwarded = credential.capabilities else { throw ExtensionSurfaceCapabilitiesUnknown() }
-                features = Set(forwarded)
-            } else { features = try await helloFeatures() }
+            let features = try await features()
             async let widgets = widgetCatalog(enabled: features.contains("extension_widgets"))
             async let shortcuts = shortcutCatalog(enabled: features.contains("extension_shortcuts"))
             let (w, s) = try await (widgets, shortcuts)

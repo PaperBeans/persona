@@ -22,6 +22,9 @@ struct HomeIntakeValue {
         return max(0, min(1, portion.today / portion.goal))
     }
     var message: LocalizedStringKey? {
+        if let items = c.intake?.items, !items.contains(kind == .water ? "water" : "protein") {
+            return kind == .water ? "Add Water in Health" : "Add Protein in Health"
+        }
         if c.intake?.supported == false { return "Update the hub [Home Widgets]" }
         if c.intake == nil { return "Open Persona to refresh [Home Widgets]" }
         return nil

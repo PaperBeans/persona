@@ -7,6 +7,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"maps"
 	"net/http"
 	"strconv"
@@ -346,8 +347,8 @@ func (h recordingHost) TranscriptionReadyAwait() bool { return h.s.transcription
 func (h recordingHost) InSpaceRecording(ctx context.Context, rawID string) bool {
 	return h.s.inSpaceRecording(ctx, rawID)
 }
-func (h recordingHost) PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u kb.RecordingUpload) {
-	h.s.putSpaceRecordingRoute(w, r, u)
+func (h recordingHost) PutSpaceRecordingRoute(w http.ResponseWriter, r *http.Request, u recordingwire.RecordingUpload, clean recordingwire.UploadCleaner) {
+	h.s.putSpaceRecordingRoute(w, r, u, clean)
 }
 
 // DeleteSpaceRecording answers DELETE /api/v1/recordings/{id} for recording id when it was saved into a track
@@ -365,7 +366,7 @@ func (h recordingHost) DeleteSpaceRecording(w http.ResponseWriter, r *http.Reque
 	apierr.WriteJSON(w, map[string]any{"deleted": deleted})
 	return true
 }
-func (h recordingHost) SpaceRecordingStates(ctx context.Context) (kept []kb.RecordingState, deleted []string) {
+func (h recordingHost) SpaceRecordingStates(ctx context.Context) (kept []recordingwire.RecordingState, deleted []string) {
 	return h.s.spaceRecordingStates(ctx)
 }
 

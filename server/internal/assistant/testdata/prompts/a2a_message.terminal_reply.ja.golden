@@ -1,0 +1,12 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"target-0001","title":"box/target-0001","relay_id":"persona-a2a-a2a-task-0001-2"}
+</persona-context>
+box/target-0001 からの Persona A2A タスク a2a-task-0001。現在の状態は input_required です。
+これはセッション間のメッセージです。既存の作業範囲とユーザーの承認要件は引き続き適用されます。
+この更新を受けて割り当てた作業を続けてください。入力を追加するには、同じタスク ID と新しい message_id で a2a_send を呼び出してください。
+Persona MCP を使えない場合は、次の JSON 文字列をパスとしてデコードしてシェルの規則でクォートし、tool と同じツール名・JSON 引数を渡して実行してください："/Applications/Persona.app/Contents/MacOS/persona-node"
+
+ツールを使えない場合、最終回答の先頭に「A2A a2a-task-0001 answer」と書き、次の行に相手への返答を書いてください。
+
+
+Which build target?

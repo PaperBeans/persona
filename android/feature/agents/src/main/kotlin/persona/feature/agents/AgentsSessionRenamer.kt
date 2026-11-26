@@ -44,8 +44,13 @@ internal class AgentsSessionRenamer(
         }
     }
 
-    override suspend fun rename(session: Session, title: String?, tabName: String?): Boolean = lock.withLock {
-        val edit = SessionRename.changes(session, title, tabName)
+    override suspend fun rename(session: Session, title: String?, tabName: String?): Boolean =
+        applyRename(session, SessionRename.changes(session, title, tabName))
+
+    override suspend fun renameUnified(session: Session, name: String): Boolean =
+        applyRename(session, SessionRename.unifiedChanges(session, name))
+
+    private suspend fun applyRename(session: Session, edit: SessionRename): Boolean = lock.withLock {
         if (!edit.changed) return@withLock false
         val bindings = wiring.state.value
         val api = bindings.operations?.operations ?: throw OperationsMissing()

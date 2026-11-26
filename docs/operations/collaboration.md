@@ -14,6 +14,8 @@ Several people work in this repository, each alongside their own Agents. Two peo
 6. **A PR with no substantive progress for more than seven days is marked and closed**: the watcher adds `stale`, leaves an English comment explaining the inactivity, then closes it without merging. A new commit, review, contributor comment, newly published failure or automatic repair counts as progress; polling and retrying the same failure do not. Drafts and PRs with a published continuation are not closed. The label and notice must succeed before closing. Work may continue by reopening the PR with an update; this never reuses an old semantic or verification approval. The separate 24-hour issue-claim rule below still applies to ownership, not to closing PRs.
 7. **Old issue numbers**: `#N` in lines written up to 2026-11-07 (check `git blame`) refers to the previous tracker. Here the same numbers belong to unrelated issues, and issues carried over from it have new numbers. Leave those references as they are; new text cites current numbers.
 
+8. **A PR that changes Persona Core says why**: it carries the label `core-change` and a `## Why this must change the core` section in its description; `scripts/hooks/merge-pr.sh` refuses it otherwise. The list of core paths, what is exempt (tests-only changes) and the owners' review: `CONTRIBUTING.md`, "Changing Persona Core".
+
 Don't use GitHub's assign (many people don't have triage permission, and it isn't needed), don't use commands like `/claim`, and expiry isn't handled automatically: the comments in the issue are the only source of truth.
 
 ## Who is working on it: the comment and its GitHub account decide

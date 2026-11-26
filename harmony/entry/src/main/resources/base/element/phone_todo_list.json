@@ -1,0 +1,104 @@
+{
+  "string": [
+    {
+      "name": "phone_todo_new",
+      "value": "New To-Do"
+    },
+    {
+      "name": "phone_todo_list_hidden",
+      "value": "{count} more waiting on you, not in {filter}"
+    },
+    {
+      "name": "phone_todo_show_all",
+      "value": "Show All"
+    },
+    {
+      "name": "phone_todo_was_due",
+      "value": "Was due {date}"
+    },
+    {
+      "name": "phone_todo_due_on",
+      "value": "Due {date}"
+    },
+    {
+      "name": "phone_todo_high_priority",
+      "value": "High priority"
+    },
+    {
+      "name": "phone_todo_remind_at",
+      "value": "Reminder at {date}"
+    },
+    {
+      "name": "phone_todo_related_count",
+      "value": "{count} related"
+    },
+    {
+      "name": "phone_todo_clear_filter",
+      "value": "Clear the {filter} filter"
+    },
+    {
+      "name": "phone_todo_filter_sort",
+      "value": "Filter and sort"
+    },
+    {
+      "name": "phone_todo_filter_count",
+      "value": "{count} to-dos"
+    },
+    {
+      "name": "phone_todo_show",
+      "value": "Show"
+    },
+    {
+      "name": "phone_todo_sort_by",
+      "value": "Sort By"
+    },
+    {
+      "name": "phone_todo_got_it",
+      "value": "Got It"
+    },
+    {
+      "name": "phone_todo_seen_done_a11y",
+      "value": "Got It: move {title} to Done"
+    },
+    {
+      "name": "phone_todo_seen_open_a11y",
+      "value": "Got It: move {title} to Other open"
+    },
+    {
+      "name": "phone_todo_seen_done",
+      "value": "Moved to Done"
+    },
+    {
+      "name": "phone_todo_seen_open",
+      "value": "Moved to Other open"
+    },
+    {
+      "name": "phone_todo_row_cancelled",
+      "value": "Canceled"
+    },
+    {
+      "name": "phone_todo_row_accepted",
+      "value": "Accepted"
+    },
+    {
+      "name": "phone_todo_row_auto_done",
+      "value": "Auto-completed"
+    },
+    {
+      "name": "phone_todo_review_user_check",
+      "value": "Awaiting your verification"
+    },
+    {
+      "name": "phone_todo_review_rework",
+      "value": "Rework round {round}"
+    },
+    {
+      "name": "phone_todo_review_needs_user",
+      "value": "Needs your call"
+    },
+    {
+      "name": "phone_todo_review_ongoing",
+      "value": "Supervised"
+    }
+  ]
+}

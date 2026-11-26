@@ -104,4 +104,17 @@ describe("the sidebar's resize handle", () => {
     expect(drawn()).toBe(`${SIDEBAR_DEFAULT}px`);
     expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBeNull();
   });
+
+  it("reserves the outer right inset when no side panel is open and supports keyboard resize", () => {
+    setSidebarWidth(480);
+    setWindow(900);
+    act(() => root.render(<Column />));
+    expect(drawn()).toBe(`${Math.max(SIDEBAR_DEFAULT, 900 - CHAT_MIN - PANEL_GAP)}px`);
+    setWindow(1440);
+    expect(drawn()).toBe("480px");
+    act(() => void handle().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true })));
+    expect(drawn()).toBe("464px");
+    act(() => void handle().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    expect(drawn()).toBe(`${SIDEBAR_DEFAULT}px`);
+  });
 });

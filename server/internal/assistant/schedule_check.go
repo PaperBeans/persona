@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -16,6 +17,97 @@ import (
 type routineCheck struct {
 	proto.RoutineCheckParams
 	OnError string `json:"on_error,omitempty"`
+}
+
+// routineCheckApprovalKey scopes one shared owner decision to the exact
+// normalized command, not just to the conversation that requested it.
+type routineCheckApprovalKey struct {
+	machine string
+	session string
+	check   string
+}
+
+type routineCheckApproval struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	allowed bool
+	err     error
+}
+
+type routineCheckApprovalBook struct {
+	mu    sync.Mutex
+	calls map[routineCheckApprovalKey]*routineCheckApproval
+}
+
+func canonicalRoutineCheck(check *routineCheck) ([]byte, error) {
+	// Marshaling the complete struct includes every execution-affecting field.
+	// A nil check stays "null" and can never compare equal to a non-nil one.
+	return json.Marshal(check)
+}
+
+func sameRoutineCheck(a, b *routineCheck) bool {
+	aKey, aErr := canonicalRoutineCheck(a)
+	bKey, bErr := canonicalRoutineCheck(b)
+	return aErr == nil && bErr == nil && bytes.Equal(aKey, bKey)
+}
+
+// wait shares an approval only while its owner request is still in flight. The
+// shared context retains the first caller's values but not its cancellation;
+// the last cancelled waiter withdraws the request for everyone.
+func (b *routineCheckApprovalBook) wait(ctx context.Context, key routineCheckApprovalKey, ask func(context.Context) (bool, error)) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	b.mu.Lock()
+	if b.calls == nil {
+		b.calls = map[routineCheckApprovalKey]*routineCheckApproval{}
+	}
+	call := b.calls[key]
+	if call == nil {
+		sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settingCardWait)
+		call = &routineCheckApproval{done: make(chan struct{}), cancel: cancel}
+		b.calls[key] = call
+		go b.run(key, call, sharedCtx, ask)
+	}
+	call.waiters++
+	b.mu.Unlock()
+
+	select {
+	case <-call.done:
+		return call.allowed, call.err
+	case <-ctx.Done():
+		b.leave(key, call)
+		return false, ctx.Err()
+	}
+}
+
+func (b *routineCheckApprovalBook) run(key routineCheckApprovalKey, call *routineCheckApproval, ctx context.Context, ask func(context.Context) (bool, error)) {
+	defer call.cancel()
+	allowed, err := ask(ctx)
+	b.mu.Lock()
+	if b.calls[key] == call {
+		delete(b.calls, key)
+	}
+	call.allowed, call.err = allowed, err
+	close(call.done)
+	b.mu.Unlock()
+}
+
+func (b *routineCheckApprovalBook) leave(key routineCheckApprovalKey, call *routineCheckApproval) {
+	var cancel context.CancelFunc
+	b.mu.Lock()
+	if b.calls[key] == call {
+		call.waiters--
+		if call.waiters == 0 {
+			delete(b.calls, key)
+			cancel = call.cancel
+		}
+	}
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func parseRoutineCheck(raw json.RawMessage) (*routineCheck, error) {
@@ -42,20 +134,21 @@ func parseRoutineCheck(raw json.RawMessage) (*routineCheck, error) {
 }
 
 func (s *Service) approveRoutineCheck(ctx context.Context, machine, self string, check *routineCheck) (bool, error) {
-	now := time.Now().UTC()
-	input, err := json.Marshal(check)
+	input, err := canonicalRoutineCheck(check)
 	if err != nil {
 		return false, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, settingCardWait)
-	defer cancel()
-	reply, err := s.ask(ctx, proto.Interaction{
-		ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, Kind: proto.IxPermission,
-		ToolName: "schedule_routine", ToolInput: input, SessionTitle: "Persona",
-		Summary:   i18n.T(s.lang(ctx), "assistant-schedule.run_if_approval"),
-		CreatedAt: now, ExpiresAt: now.Add(settingCardWait),
+	key := routineCheckApprovalKey{machine: machine, session: self, check: string(input)}
+	return s.routineChecks.wait(ctx, key, func(ctx context.Context) (bool, error) {
+		now := time.Now().UTC()
+		reply, err := s.ask(ctx, proto.Interaction{
+			ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, Kind: proto.IxPermission,
+			ToolName: "schedule_routine", ToolInput: input, SessionTitle: "Persona",
+			Summary:   i18n.T(s.lang(ctx), "assistant-schedule.run_if_approval"),
+			CreatedAt: now, ExpiresAt: now.Add(settingCardWait),
+		})
+		return reply.UserAllowed(), err
 	})
-	return reply.UserAllowed(), err
 }
 
 // checkRoutine returns the log entry and whether the scheduled run should be skipped.

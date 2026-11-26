@@ -12,7 +12,6 @@ Prints, for each ref:
 Each ref is read with git archive into a temporary directory: the checkout and its worktrees are not touched.
 """
 import argparse
-import io
 import json
 import os
 import subprocess
@@ -32,23 +31,28 @@ def lines(data):
 
 def count(ref):
     """Core and per-module line counts at ref, straight from git's objects."""
-    archive = subprocess.run(["git", "-C", str(ROOT), "archive", "--format=tar", ref, "server"], check=True,
-                             capture_output=True).stdout
+    command = ["git", "-C", str(ROOT), "archive", "--format=tar", ref, "server"]
     core, core_test, modules = 0, 0, {}
-    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-        for m in tar:
-            if not m.isfile() or not m.name.endswith(".go"):
-                continue
-            n = lines(tar.extractfile(m).read())
-            test = m.name.endswith("_test.go")
-            if m.name.startswith(MODULES):
-                mid = m.name[len(MODULES):].split("/", 1)[0]
-                row = modules.setdefault(mid, {"lines": 0, "test_lines": 0})
-                row["test_lines" if test else "lines"] += n
-            elif test:
-                core_test += n
-            else:
-                core += n
+    with subprocess.Popen(command, stdout=subprocess.PIPE) as archive:
+        with tarfile.open(fileobj=archive.stdout, mode="r|") as tar:
+            for m in tar:
+                if not m.isfile() or not m.name.endswith(".go"):
+                    continue
+                n = lines(tar.extractfile(m).read())
+                test = m.name.endswith("_test.go")
+                if m.name.startswith(MODULES):
+                    mid = m.name[len(MODULES):].split("/", 1)[0]
+                    row = modules.setdefault(mid, {"lines": 0, "test_lines": 0})
+                    row["test_lines" if test else "lines"] += n
+                elif test:
+                    core_test += n
+                else:
+                    core += n
+        # Tar stops at its end marker. Read any remaining padding before waiting for Git.
+        while archive.stdout.read(tarfile.RECORDSIZE):
+            pass
+    if archive.returncode:
+        raise subprocess.CalledProcessError(archive.returncode, command)
     return {"core_lines": core, "core_test_lines": core_test, "modules": dict(sorted(modules.items()))}
 
 

@@ -125,20 +125,25 @@ a delegated agent has finished, pinning active rows, and protecting worktree del
 foreground `status`. The real Codex regression uses a file-watching process and a fixture-controlled exit, proving that
 the task remains listed after the answer and disappears after exit without opening the chat or using a real model.
 
-## Creation needs project identity, not only a path (#9726)
+## Creation needs project identity, not only a path (#9726, #14844)
 
 Git resolves a symlink spelling to its physical checkout. Paseo 0.16's project registry matches root paths by spelling,
-so handing it only that checkout can allocate a second project. An explicit workspace supplies the project; folder-only
-creation requires a fresh project list and a unique physical-path match. An unavailable list is not an empty list, and
-list order does not identify the intended owner when duplicates already exist. Use checkout roots rather than remotes
-so independent clones remain independent. Read symlinks afresh for writes, outside the display cache.
+so handing it only that checkout can allocate a second project. An explicit workspace supplies the project without folder
+resolution; folder-only creation requires a fresh project list. A main-checkout project takes priority over legacy records
+rooted at a linked worktree or its subdirectories. At the selected physical root, duplicate records use the lowest project
+ID rather than registry order. Different matching non-main roots remain ambiguous for new creation. An unavailable list is not
+an empty list. Use checkout roots rather than remotes so independent clones remain independent. Read symlinks afresh for writes,
+outside the display cache. Main-project preference must not make an existing worktree workspace depend on that fresh read: on
+failure or ambiguity, an implicit start falls back to the old owner-less lookup and rethrows only when no workspace matches.
 
-The direct Agent route reaches `findOrCreateProjectForDirectory` too. Its request has no project ID field: create a
-keyed directory workspace with the resolved project first, then pass its workspace ID to Agent creation. Keep the new
-step inside the existing pending-start flow so a slow creation remains visible. A later Agent failure leaves that
-workspace available; never remove a project or move existing sessions as part of alias repair.
+The direct Agent route reaches `findOrCreateProjectForDirectory` too. Its request has no project ID field: resolve ownership
+before choosing an implicit worktree workspace, reuse an exact directory workspace owned by that project, or create a keyed
+directory workspace first and pass its workspace ID to Agent creation. Keep the new step inside the existing pending-start
+flow so a slow creation remains visible. A later Agent failure leaves that workspace available; never remove a project or
+move existing sessions as part of alias repair.
 
-The real Codex E2E registers the alias project without a workspace, then calls the real node with the alias. This
-forces Git's physical-root handoff; an existing source workspace can hide the original defect in Paseo's own fallback.
-It also explicitly creates duplicate fixture projects to prove ambiguity is refused and selected workspace ownership
-still wins. All of these resources belong to the isolated daemon.
+The real Codex E2E registers the alias project without a workspace, then calls the real node with the alias. This forces
+Git's physical-root handoff; an existing source workspace can hide the original defect in Paseo's own fallback. It explicitly
+creates duplicate records at one physical root to prove stable path-only and direct-Agent ownership, while selected workspace
+ownership still wins. The bridge tests use a real linked worktree for main-project priority and keep different non-main roots
+as a refusing control. All of these resources belong to isolated fixtures.

@@ -1,0 +1,9 @@
+{
+  "manifest_version": 1,
+  "id": "example-cloud",
+  "name": "Example Cloud",
+  "version": "1.0.0",
+  "engines": {"extension_protocol": 1},
+  "runtime": {"command": {"linux-amd64": "bin/example-cloud"}},
+  "contributes": {"disk_offload": [{"id": "cloud", "name": "Example Cloud", "kinds": ["file", "photos"]}]}
+}

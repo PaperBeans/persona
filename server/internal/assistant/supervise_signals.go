@@ -33,6 +33,7 @@ const (
 	sigReport        = "report"         // its agent reported to the supervisor (report_to_supervisor, agent_control.go)
 	sigEscalated     = "escalated"      // its leader conversation judged it needs the user (supervise_leader.go): told the main one
 	sigOrphaned      = "orphaned"       // nobody works on it: its agents are closed or offline and nothing brings one back (tasks_orphan.go)
+	sigRecovered     = "recovered"      // a node reconnected after an outage or reboot and left affected work unresumable (node_recovery.go, #14781)
 	sigAsk           = "ask"            // its agent's card came to the supervisor before the user (ask_route.go)
 	sigDecide        = "decide"         // a task leader's worker needs a decision its leader cannot make: told the conversation above the leader (task_leader.go)
 	sigDecisionReply = "decision_reply" // the owner wrote in a task's Agent chat; its pending decision needs confirmation
@@ -49,6 +50,9 @@ const (
 	sigPRMerged = "pr_merged"
 	// sigParentCloseout: an open parent to-do with no active Agent has all part_of children done (todo_parent_closeout.go, #13100).
 	sigParentCloseout = "parent_closeout"
+	// sigOutageRecovery: coalesced per-task recovery digest emitted once a provider-wide outage recovers after holding
+	// outage-caused interrupted and unjudged signals (supervise_outage.go, #13158).
+	sigOutageRecovery = "outage_recovery"
 )
 
 // sigCheck's kinds of news (superviseSignal.Report).
@@ -77,7 +81,7 @@ var (
 	superviseSilentMin = 2 * time.Hour
 	// superviseTick is how often the tasks are looked at.
 	superviseTick = 30 * time.Second
-	// superviseHoldMax bounds how long the main conversation's turns stay unpushed after a supervision message went in.
+	// superviseHoldMax bounds how long a supervision message can hold a conversation's pushes.
 	superviseHoldMax = 2 * time.Hour
 )
 
@@ -92,8 +96,9 @@ type superviseSignal struct {
 	// An ACK removes exactly its own Key; a still-present predecessor's dedup reservation is not delivery proof.
 	PendingPredecessors []string
 	PRURL               string // draft_pr: the current or earlier followed PR, revalidated before delivery
-	// Unreachable: this decision exists because the task leader's agent could not be reached, not because the worker
-	// waits for the user. It stays a decision even though the worker's ledger is not needs_user (task_leader.go).
+	// Unreachable: this decision exists because its assigned task leader Agent or Assistant supervisor could not be
+	// reached, not because the worker waits for the user. It stays a decision even when the worker is not needs_user.
+	// Recipient distinguishes an unreachable Assistant supervisor from the existing task-leader-Agent escalation.
 	Unreachable      bool
 	At               time.Time
 	Machine, Session string
@@ -144,6 +149,8 @@ type superviseSignal struct {
 	BreakerNote string `json:"breaker_note,omitempty"`
 	// ExternalSource names the source of external information arriving during reviewNeedsUser (#13112).
 	ExternalSource string `json:"external_source,omitempty"`
+	// Outage carries coalesced provider-outage hold state for sigOutageRecovery (#13158).
+	Outage *superviseOutage `json:"outage,omitempty"`
 	// JudgeDown: an unjudged stop because the judge itself failed (no model set up, or the service kept failing), not
 	// because it read the turn and could not tell. It is not urgent (urgent): such stops are told together.
 	JudgeDown bool `json:"judge_down,omitempty"`
@@ -180,6 +187,26 @@ func (g superviseSignal) level() string {
 		return supervisionInfo
 	}
 	return supervisionTriage
+}
+
+// userLevel reports whether a supervision signal in a side conversation needs user attention (a decision, a review to
+// accept, or an agent waiting for an answer) rather than info-level or routine monitoring updates.
+func (g superviseSignal) userLevel() bool {
+	if g.level() == supervisionInfo {
+		return false
+	}
+	switch g.Kind {
+	case sigReview, sigHandoffResult, sigCardlessWait, sigPRMerged, sigParentCloseout,
+		sigNeedsYou, sigAsk, sigDecide, sigEscalated, sigDecisionReply, sigRecheck,
+		sigUndecidable, sigDeliveryHold, sigOwnerCannot, sigNeedsUserExternalInfo,
+		sigParkDecided, sigParkedDue, sigFailed, sigInterrupted, sigOrphaned, sigTimedOut, sigAllStopped:
+		return true
+	case sigReport:
+		return g.Report == upReportQuestion || g.Report == upReportBlocked || g.Report == upReportDone
+	case sigCheck:
+		return g.Report == checkDecidedReport
+	}
+	return false
 }
 
 // id names what a newer signal replaces while it waits: the task's signal of that kind (a report: of that kind of
@@ -223,9 +250,9 @@ func (g superviseSignal) urgent() bool {
 		// that needs the supervisor soon: every stopped task says the same until the model is back, and each used to
 		// wake the main conversation on its own. They go out together, on the ordinary schedule.
 		return !g.JudgeDown
-	case sigNeedsYou, sigIdle, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigPREvent, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
+	case sigNeedsYou, sigIdle, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigPREvent, sigEscalated, sigAsk, sigOrphaned, sigRecovered, sigDecide, // started: the user waits to hear it
 		sigRecheck, sigUndecidable, sigDeliveryHold, sigOwnerCannot, sigEstimateDue, sigTimedOut, // the owner, an automatic deadline or a stopped task waits
-		sigParkedDue, sigParkDecided, sigDecisionReply, sigHandoffResult, sigCardlessWait, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo:
+		sigParkedDue, sigParkDecided, sigDecisionReply, sigHandoffResult, sigCardlessWait, sigTodoReady, sigPRMerged, sigParentCloseout, sigNeedsUserExternalInfo, sigOutageRecovery, sigOwnerPresent:
 		return true
 	case sigReport:
 		return g.Report != upReportProgress
@@ -267,14 +294,20 @@ type superviseBook struct {
 	told             map[string]time.Time // conversation → last accepted supervision message
 	timer            *time.Timer
 	timerAt          time.Time
+	lastOutageSince  time.Time      // monotonic outage-episode anchor for distinct recovery digest keys (#13158)
+	stopped          bool           // set by stopSuperviseTimers under mu; stops timer callbacks and prevents re-arming
+	off              supervisionOff // the automatic-supervision switch's memory (supervise_switch.go)
 
 	resuming map[[2]string]struct{} // fingerprints of offline leader sends in flight, under dedupMu
 
 	// noMainSince is when digests started leaving signals waiting for a main conversation (zero: the last one left none
 	// waiting), noMainLogged when that was last logged (sendDigest).
-	noMainSince, noMainLogged time.Time
-	hold                      map[string]time.Time // conversation → when a supervision message went in: its turn's finish is not pushed
-	visible                   map[string]bool      // an explicit user action makes the current triage turn visible
+	noMainSince, noMainLogged               time.Time
+	holds                                   map[string]supervisionHold
+	holdsLoaded, holdsDirty                 bool
+	stallsHandled                           map[string]handledStall
+	stallsHandledLoaded, stallsHandledDirty bool
+	sideLinks                               map[string][]string // side conversation → task/conversation links to attach to its user-level supervision push
 	// failSeen: tasks whose failed start a supervision message carried, when, and for which conversation
 	// (start_remedy.go remedyTurnEnded)
 	failSeen map[string]failSeen
@@ -286,9 +319,12 @@ type superviseBook struct {
 
 func (b *superviseBook) init() {
 	if b.pending == nil {
-		b.pending, b.sent, b.asks, b.hold = map[string]superviseSignal{}, map[string]string{}, map[string]string{}, map[string]time.Time{}
-		b.visible = map[string]bool{}
+		b.pending, b.sent, b.asks = map[string]superviseSignal{}, map[string]string{}, map[string]string{}
+		b.sideLinks = map[string][]string{}
 		b.legacyBackground = map[string]bool{}
+	}
+	if b.sideLinks == nil {
+		b.sideLinks = map[string][]string{}
 	}
 	if b.failSeen == nil {
 		b.failSeen = map[string]failSeen{}
@@ -907,6 +943,9 @@ func (s *Service) signal(g superviseSignal) {
 
 // signalReplacing records g and, when old is still pending, atomically replaces that older stretch in the outbox.
 func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
+	if !s.autoSupervisionOn(context.Background()) {
+		return // automatic supervision messages are off: nothing is gathered, scheduled or told (supervise_switch.go)
+	}
 	if g.Todo != "" {
 		if t, ok := s.todoNow(g.Todo); ok && s.reporterStopped(context.Background(), t.Origin) {
 			return // /stop silences the reporting task's notices on every route until the user speaks again (#3308)
@@ -971,8 +1010,17 @@ func (s *Service) releaseReportsLocked(g superviseSignal) []string {
 
 // queueSignalReplacing also removes the older stretch it supersedes from the durable outbox.
 func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) {
+	if !s.autoSupervisionOn(context.Background()) {
+		return // the same for a signal that skipped signal (supervise_switch.go)
+	}
 	if g.Kind != sigAsk {
 		g = s.currentSupervisorSignal(g)
+	}
+	currentSupervisor := ""
+	if g.Kind == sigReview && g.Recipient == "" {
+		if t, ok := s.todoNow(g.Todo); ok && t.Supervision != nil {
+			currentSupervisor = t.Supervision.Supervisor
+		}
 	}
 	if g.At.IsZero() {
 		g.At = time.Now()
@@ -983,12 +1031,15 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 	// This early cache is not an unhandled source's delivery receipt: an owner wait
 	// can discard the entry before dispatch. Its durable fingerprint deduplicates delivery.
 	unhandled := g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled"
-	if b.sent[g.id()] == g.Key && !unhandled {
+	if b.sent[g.id()] == g.Key && !unhandled && g.Key != "" {
 		b.mu.Unlock()
 		return
 	}
+	var absorbedIDs []string
 	if cur, ok := b.pending[g.id()]; ok {
-		if g.Kind == sigFailed {
+		if g.Kind == sigOutageRecovery && g.Outage != nil {
+			g = joinOutageRecovery(cur, g)
+		} else if g.Kind == sigFailed {
 			if cur.Key != g.Key && newerFailedSignal(cur, g) {
 				b.mu.Unlock()
 				return // a restored or delayed old attempt cannot replace the newer pending one
@@ -1011,6 +1062,12 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 		if g.Detail == "" && cur.Key == g.Key {
 			g.Detail = cur.Detail // the watch's sight of what an event told already
 		}
+		if g.Recipient == "" && cur.Recipient != "" && cur.Key == g.Key &&
+			(g.To == "" || g.To == cur.Recipient) &&
+			(cur.To == "" || g.To == "" || cur.To == g.To) &&
+			(currentSupervisor == "" || currentSupervisor == cur.Recipient) {
+			g.Recipient = cur.Recipient
+		}
 		g = preserveIdleHandoff(cur, g)
 		if g.Kind == sigReport && cur.Key != g.Key {
 			g = joinReports(cur, g) // two questions before the message went: both are asked
@@ -1026,6 +1083,22 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 			g.NotBefore = cur.NotBefore // a second report does not hold the first one longer (reportStopHold)
 		}
 		g.batchTo, g.batchUntil = cur.batchTo, cur.batchUntil
+	} else if g.Kind == sigOutageRecovery && g.Outage != nil {
+		meta := g.Outage.clone()
+		since := meta.Since
+		if since.IsZero() {
+			since = g.At.UTC()
+		}
+		if !since.After(b.lastOutageSince) {
+			since = b.lastOutageSince.Add(time.Nanosecond)
+		}
+		b.lastOutageSince = since
+		meta.Since = since
+		g.Outage = meta
+		if g.Key == "" {
+			g.Key = outageSignalKey(meta.Provider, since)
+		}
+		g, absorbedIDs = absorbPendingOutageSiblingLocked(b, g)
 	}
 	held := s.releaseReportsLocked(g)
 	s.updateSupervisePending(func(pending map[string]superviseSignal) {
@@ -1048,6 +1121,9 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 				delete(pending, old.id())
 			}
 		}
+		for _, id := range absorbedIDs {
+			delete(pending, id)
+		}
 		pending[g.id()] = g
 	})
 	b.pending[g.id()] = g
@@ -1057,10 +1133,10 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 
 // scheduleDigestLocked sets the timer for when the pending signals are due; s.supervise.mu is held.
 func (s *Service) scheduleDigestLocked(now time.Time) {
-	if s.runCtx().Err() != nil {
-		return
-	}
 	b := &s.supervise
+	if b.stopped || s.runCtx().Err() != nil || !s.autoSupervisionOn(context.Background()) {
+		return // stopping, or automatic supervision messages are off: no digest is scheduled
+	}
 	batch := s.supervisionBatchInterval(context.Background())
 	b.syncBatchInterval(batch)
 	list := make([]superviseSignal, 0, len(b.pending))
@@ -1079,15 +1155,15 @@ func (s *Service) scheduleDigestLocked(now time.Time) {
 		b.timer.Stop()
 	}
 	b.timerAt = at
-	b.timer = time.AfterFunc(wait, func() { s.sendDigest(s.runCtx()) })
+	b.timer = time.AfterFunc(wait, s.runDigestTimer)
 }
 
 // retryDigestLocked tries the digest again in d, unless one is due sooner (b.mu held).
 func (s *Service) retryDigestLocked(d time.Duration) {
-	if s.runCtx().Err() != nil {
+	b := &s.supervise
+	if b.stopped || s.runCtx().Err() != nil || !s.autoSupervisionOn(context.Background()) {
 		return
 	}
-	b := &s.supervise
 	at := time.Now().Add(d)
 	if b.timer != nil && !b.timerAt.After(at) {
 		return
@@ -1096,7 +1172,43 @@ func (s *Service) retryDigestLocked(d time.Duration) {
 		b.timer.Stop()
 	}
 	b.timerAt = at
-	b.timer = time.AfterFunc(d, func() { s.sendDigest(s.runCtx()) })
+	b.timer = time.AfterFunc(d, s.runDigestTimer)
+}
+
+// runDigestTimer runs a timer-scheduled digest while supervision timers remain active. Checking b.stopped under
+// b.digestMu closes the window where a timer fired just before stopSuperviseTimers and would otherwise run after it returns.
+func (s *Service) runDigestTimer() {
+	b := &s.supervise
+	b.digestMu.Lock()
+	defer b.digestMu.Unlock()
+	b.mu.Lock()
+	stopped := b.stopped
+	b.mu.Unlock()
+	if stopped {
+		return
+	}
+	s.sendDigestLocked(s.runCtx())
+}
+
+// stopSuperviseTimers prevents new digest timers from arming, disarms any pending timer, and waits for any in-flight
+// digest callback to finish. Explicit sendDigest calls with a live context still run.
+func (s *Service) stopSuperviseTimers() {
+	b := &s.supervise
+	b.mu.Lock()
+	b.stopped = true
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer, b.timerAt = nil, time.Time{}
+	}
+	b.mu.Unlock()
+	b.digestMu.Lock()
+	b.mu.Lock()
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer, b.timerAt = nil, time.Time{}
+	}
+	b.mu.Unlock()
+	b.digestMu.Unlock()
 }
 
 // watchSignals are what t and its agents show now that the supervisor should hear of, by their state alone: a task
@@ -1156,10 +1268,10 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...super
 		case c.Assistant && c.State != proto.StateWorking:
 			// An assistant conversation (a task leader) waits on its workers, each told of on its own; a message always reaches it.
 		default:
-			moved := c.UpdatedAt
-			if c.ActivityAt != nil && c.ActivityAt.After(moved) {
-				moved = *c.ActivityAt
+			if aliveBackgroundWork(c, now) {
+				continue
 			}
+			moved := stalledSessionMoved(c)
 			// Working: stuck past stallAfter. Any other state (waiting on background work, a wake, stopped or gone)
 			// is told past silentAfter, so a state that should end by itself and never does is still heard of (#5124).
 			after := silentAfter(v.ExpectMinutes)
@@ -1168,7 +1280,7 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...super
 			}
 			if still := v.activeTimeSince(moved, now); !moved.IsZero() && still >= after {
 				g := base
-				g.Kind, g.Key, g.Minutes = sigStalled, c.SessionID+"@"+moved.UTC().Format(time.RFC3339), int(still.Minutes())
+				g.Kind, g.Key, g.Minutes = sigStalled, stalledSignalKey(c.SessionID, moved), int(still.Minutes())
 				g.Detail = strings.TrimSpace(c.Activity)
 				out = append(out, g)
 			}
@@ -1177,12 +1289,25 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...super
 	return out
 }
 
-// reviewKey names one review a task waits for: when it began to wait.
+func stalledSignalKey(session string, moved time.Time) string {
+	return session + "@" + moved.UTC().Format(time.RFC3339)
+}
+
+// reviewKey names one review a task waits for: when it began to wait. The time is cut to the microsecond the database
+// keeps: a manager that loaded the task again (a restart) reads UpdatedAt back at that precision, and a key of the
+// nanosecond one would name the same review differently than the pending copy the manager before it left in the
+// outbox, so both would be told.
 func reviewKey(v *Supervision) string {
 	if r := v.externalPRWake(); r != nil {
 		return externalPRReviewPrefix + r.At.UTC().Format(time.RFC3339Nano)
 	}
-	return "review@" + v.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	return ordinaryReviewKey(v.UpdatedAt)
+}
+
+// updated_at is a PostgreSQL timestamptz. A review raised before restarting must have the same
+// identity as the watch obtains after reading that timestamp back at microsecond precision.
+func ordinaryReviewKey(at time.Time) string {
+	return "review@" + at.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 }
 
 // stallAfter is how long without progress counts as stuck for a task that should take expect minutes.
@@ -1219,8 +1344,10 @@ func (s *Service) superviseLoop(ctx context.Context) {
 // conversation left waiting to the main conversation's follow-up (handOverUnreviewed), and lets go of a hold on the
 // main conversation's pushes that outlived superviseHoldMax.
 func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
+	s.syncAutoSupervision(ctx) // a switch left off, also across a restart, empties what automatic supervision holds
 	s.autoReviewTick(ctx, now)
 	s.sessionReviewTick(ctx, now)
+	s.recheckOutageHolds(ctx, now)
 	s.askTick(now)                 // cards held past their time go up a rung (ask_route.go)
 	s.handOverUnreviewed(ctx, now) // a review a side conversation left waiting goes to the main one's follow-up (side_handover.go)
 	routed := s.routedSessions()
@@ -1228,6 +1355,10 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.recoverTaskInboxEvents(ctx)
 	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
 	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
+	openIDs := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		openIDs[t.ID] = true
+	}
 	s.recoverOutsideDirectionDigests(ctx)
 	s.pruneAllStoppedDedup(ctx)
 	s.prunePRMergeWakes(ctx)
@@ -1237,6 +1368,10 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	history := s.planHistoryOnce() // and the plans read once, when a task's start needs them (start_remedy.go)
 	s.backfillBriefs(ctx, tasks)   // tasks from before briefs get one from what they still have (task_brief.go)
 	groups := allStoppedTaskGroups(tasks)
+	todosV2 := s.settings(ctx).todosV2On()
+	if todosV2 {
+		s.maybeRunStartupRestartRecovery(ctx, lists)
+	}
 	backfilled := 0
 	for _, t := range tasks {
 		if t.Supervision == nil && t.DoneAt == nil {
@@ -1267,6 +1402,24 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		s.remedyWatch(ctx, t, now, history) // a failed start's kept tab expired (start_remedy.go)
 		t = s.checkTaskHandoff(ctx, t, now)
 		agents := s.taskAgentsIn(ctx, t, lists)
+		for _, c := range agents {
+			if c.State == proto.StateWorking {
+				s.observeProgress(c, now)
+			}
+			if todosV2 && (c.State == proto.StateWorking || strings.EqualFold(strings.TrimSpace(c.Status), proto.StatusWorking)) {
+				if err := s.RecordSupervisedTaskActive(ctx, t.ID, c.MachineID, c.SessionID, s.runtimeBootEpoch()); err != nil {
+					s.logf("todos_v2 restart recovery checkpoint %s: %v", t.ID, err)
+				}
+			}
+		}
+		if todosV2 {
+			s.refreshTodoRuntimeChangedFiles(ctx, t, agents)
+		}
+		if todosV2 && ((t.Check != nil && t.Check.Verdict == verdictDone) || (t.Supervision != nil && t.Supervision.Progress != nil && t.Supervision.Progress.Kind == "done")) {
+			if err := s.ResetSupervisedTaskRecovery(ctx, t.ID); err != nil {
+				s.logf("todos_v2 restart recovery reset %s: %v", t.ID, err)
+			}
+		}
 		s.closeStalledTask(ctx, t, agents, now)
 		if current, ok := s.todoNow(t.ID); ok {
 			t = current
@@ -1286,6 +1439,11 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		for _, g := range watchSignals(t, agents, now, group) {
 			allStopped = allStopped || g.Kind == sigAllStopped
 			stalled[g.Session] = stalled[g.Session] || g.Kind == sigStalled
+			if g.Kind == sigStalled {
+				if handled, known := s.stalledHandled(ctx, g.Todo, sigStalled, g.Session, g.Key); known && handled {
+					continue
+				}
+			}
 			if g.Kind == sigNeedsYou && routed[[2]string{g.Machine, g.Session}] {
 				continue // its card is with the supervisor as an ask already
 			}
@@ -1294,6 +1452,9 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		if !allStopped && t.Supervision.state(t) == "" { // going on: neither parked nor with the owner nor waiting for review
 			for _, c := range currentTaskAgents(agents, supersededAgents(t, agents)) {
 				if g, ok := s.noProgressSignal(t, c, now); ok && !stalled[c.SessionID] {
+					if handled, known := s.stalledHandled(ctx, g.Todo, sigNoProgress, g.Session, g.Key); known && handled {
+						continue
+					}
 					s.signal(g)
 				}
 			}
@@ -1314,6 +1475,9 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 				s.signal(g)
 			}
 			s.signalCardlessWait(ctx, t, agents, lists, now) // a review the owner cannot answer (#12648)
+			if todosV2 {
+				s.signalPendingReviewNudge(ctx, t, agents, lists, now) // todos_v2 >2h lightweight supervisor nudge (#14620)
+			}
 		}
 		if g, ok := s.deliveryHoldSignal(ctx, t, now); ok { // an owner hold with no card goes to its supervisor first
 			s.signal(g)
@@ -1321,19 +1485,16 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		s.briefClock(ctx, t, now)   // past its brief's clock with no end (task_brief_scope.go)
 		s.watchTurn(ctx, t, agents) // a turn that ended with no working heard, or was left half handled (task_turns.go)
 	}
-	b := &s.supervise
-	b.mu.Lock()
-	changed := false
-	for id, at := range b.hold {
-		if now.Sub(at) > superviseHoldMax {
-			delete(b.hold, id)
-			delete(b.visible, id)
-			changed = true
-		}
-	}
-	b.mu.Unlock()
-	if changed {
+	if s.expireSupervisionHolds(ctx, now) {
 		s.publish(ctx)
+	}
+	if s.todosLoaded() {
+		s.pruneHandledStalls(ctx, openIDs)
+	}
+	if todosV2 {
+		if _, err := s.ReconcileTodoBlockers(ctx, ""); err != nil {
+			s.logf("todos_v2 blocker reconcile sweep: %v", err)
+		}
 	}
 }
 

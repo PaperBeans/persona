@@ -23,6 +23,7 @@ func withWebBot(f *fakeHub, publicURL string) {
 // A resolved interaction card carries the conversation's web link: /persona/<id> for a Persona conversation and
 // /s/<machine>/<id> for a coding agent's; without a public URL it carries no link at all (#4073).
 func TestAnsweredCardOpenButton(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, tc := range []struct {
 		name    string
 		web     string
@@ -77,6 +78,7 @@ func answerCardsIn(posts *[]map[string]any) []string {
 // A long answer split over several cards carries the web link on its last card only; a one-card answer carries it on
 // that one. Without a public URL no card has a link.
 func TestFeishuAnswerOpenButtonOnLastPiece(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name   string
 		web    string
@@ -118,6 +120,7 @@ func TestFeishuAnswerOpenButtonOnLastPiece(t *testing.T) {
 // /list gives every conversation a link to its own page; without a public URL it only keeps the switch buttons, and
 // more than eight conversations still leave the first eight whole and the card within its size budget.
 func TestConversationsCardOpenButtons(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	t.Run("links per conversation", func(t *testing.T) {
 		f, _ := feishuHub("ou_a", time.Unix(100, 0))
 		withWebBot(f, "https://hub.example.com")
@@ -127,8 +130,7 @@ func TestConversationsCardOpenButtons(t *testing.T) {
 		f.setSessions("server",
 			proto.Session{SessionID: "main0", MachineID: "server", Assistant: true, Title: "主对话", UpdatedAt: now},
 			proto.Session{SessionID: "c1", MachineID: "server", Assistant: true, Title: "修登录", UpdatedAt: now.Add(-time.Minute)})
-		card, fallback := s.conversationsCard(context.Background())
-		got := card.JSON()
+		got, fallback := botCommandCard(t, s, f, &FeishuFeatures{Main: true}, "om_list", "/list")
 		if n := strings.Count(got, "open_url"); n != 2 {
 			t.Fatalf("open_url count=%d, want one button per row: %s", n, got)
 		}
@@ -147,8 +149,7 @@ func TestConversationsCardOpenButtons(t *testing.T) {
 		s := newTestService(t, f)
 		setSettings(t, s, func(v *Settings) { v.MachineID = "server"; v.Main = "main0" })
 		f.setSessions("server", proto.Session{SessionID: "main0", MachineID: "server", Assistant: true, Title: "主对话"})
-		card, _ := s.conversationsCard(context.Background())
-		got := card.JSON()
+		got, _ := botCommandCard(t, s, f, &FeishuFeatures{Main: true}, "om_list", "/list")
 		if strings.Contains(got, "open_url") || strings.Contains(got, `"default_url":""`) {
 			t.Fatalf("a link without a web address: %s", got)
 		}
@@ -169,8 +170,7 @@ func TestConversationsCardOpenButtons(t *testing.T) {
 				Title: longListName(i), LastText: strings.Repeat("很长的最近消息。", 30), UpdatedAt: now.Add(-time.Duration(i) * time.Minute)})
 		}
 		f.setSessions("server", cs...)
-		card, _ := s.conversationsCard(context.Background())
-		got := card.JSON()
+		got, _ := botCommandCard(t, s, f, &FeishuFeatures{Main: true}, "om_list", "/list")
 		if n := strings.Count(got, "open_url"); n != 8 {
 			t.Fatalf("open_url count=%d, want exactly the eight rows kept", n)
 		}

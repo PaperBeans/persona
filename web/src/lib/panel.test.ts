@@ -242,6 +242,14 @@ describe("side panel navigation stack", () => {
     // Jumping to another line in the same file replaces in place.
     openPanel({ kind: "file", mid: "m1", path: "/work/report.ts", line: 42 }, { push: true });
     expect(getPanel()).toEqual({ kind: "file", mid: "m1", path: "/work/report.ts", line: 42 });
+    expect(getPanelHistory()).toHaveLength(1);
+
+    // Switching the same path between writable and readOnly uses distinct target keys without disturbing default opens.
+    openPanel({ kind: "file", mid: "m1", path: "/work/report.ts", readOnly: true }, { push: true });
+    expect(getPanel()).toEqual({ kind: "file", mid: "m1", path: "/work/report.ts", readOnly: true });
+    expect(getPanelHistory()).toEqual([taskA, { kind: "file", mid: "m1", path: "/work/report.ts", line: 42 }]);
+    popPanel();
+    expect(getPanel()).toEqual({ kind: "file", mid: "m1", path: "/work/report.ts", line: 42 });
     expect(getPanelHistory()).toEqual([taskA]);
 
     // Updating turn/file selection on the same Changes panel replaces in place.

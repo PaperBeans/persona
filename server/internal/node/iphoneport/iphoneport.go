@@ -2,13 +2,16 @@
 // modules"): the built-in program iphone (docs/extensions/iphone-bridge.md), this computer's paired iPhones over the
 // bridge, which the hub asks over plugin.node.call. The node's composition root (internal/modules/all/node) provides
 // the module's bridge; a build without the module (persona_without_phone_extra, persona_core_only) provides none, and
-// the node lists no iphone program in node.info, so the hub offers no phone control on this computer. It is its own
+// the node lists no iphone program in node.info, so the hub offers no phone control on this computer; so does a node
+// whose hub announced the module switched off (moduleswitch.FromFeatures). It is its own
 // package so that the composition root need not import internal/node.
 package iphoneport
 
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -27,10 +30,13 @@ type Bridge interface {
 	Cancel()
 }
 
-var bridge Bridge
+var port = moduleswitch.NewPort[Bridge]("node/iphoneport")
 
-// Provide sets the phone-extra module's bridge; the node's composition root calls it from init.
-func Provide(b Bridge) { bridge = b }
+// Provide sets the phone-extra module's bridge under its module id; the node's composition root calls it from init.
+func Provide(module string, b Bridge) { port.Provide(module, b) }
 
-// Get is the module's bridge, nil when this build has no phone-extra module.
-func Get() Bridge { return bridge }
+// Get is the module's bridge, nil when this build has no phone-extra module or s switched it off.
+func Get(s moduleswitch.Set) Bridge {
+	b, _ := port.Get(s)
+	return b
+}

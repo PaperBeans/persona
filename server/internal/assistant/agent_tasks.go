@@ -23,14 +23,44 @@ func (s *Service) agentTasks(ctx context.Context) bool {
 	return v != nil && *v
 }
 
+// liveSideSupervisor reports whether id is a live, unarchived main-space assistant side conversation that can
+// supervise the work it dispatches (not main, a leader, the background supervisor, a task-leader agent ref, a
+// reporting conversation, a guest, or a runtime without supervision_policy).
+func (s *Service) liveSideSupervisor(ctx context.Context, id string) bool {
+	if id == "" || s.isMain(ctx, id) || s.isLeader(ctx, id) || s.isBackground(ctx, id) || s.isLeaderRef(id) {
+		return false
+	}
+	if _, reports := s.reporterOf(ctx, id); reports {
+		return false
+	}
+	if s.isArchived(id) {
+		return false
+	}
+	cfg := s.settings(ctx)
+	if cfg.MachineID == "" {
+		return false
+	}
+	c, ok := s.session(ctx, cfg.MachineID, id)
+	if !ok || !c.Assistant || c.IsDeleted() || c.Archived || c.Space != "" {
+		return false
+	}
+	if runtimeSessionLacksSupervisionPolicy(c) {
+		return false
+	}
+	if _, guest, err := s.guestOf(ctx, cfg.MachineID, id); err != nil || guest {
+		return false
+	}
+	return true
+}
+
 // agentTaskSupervisor is the conversation that supervises the task of an agent conversation started ("" for an app's
-// start or the user's own todo): conversation itself when it supervises, else the main conversation. false while
-// assistant.agent_tasks is off or there is no main conversation to fall back to.
+// start or the user's own todo): conversation itself when it supervises or is a live assistant side conversation, else
+// the main conversation. false while assistant.agent_tasks is off or there is no main conversation to fall back to.
 func (s *Service) agentTaskSupervisor(ctx context.Context, conversation string) (string, bool) {
 	if !s.agentTasks(ctx) {
 		return "", false
 	}
-	if s.supervises(ctx, conversation) {
+	if s.supervises(ctx, conversation) || s.liveSideSupervisor(ctx, conversation) {
 		return conversation, true
 	}
 	main := s.settings(ctx).Main

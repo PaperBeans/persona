@@ -208,10 +208,10 @@ struct ExtensionColumnsTests {
 
     // MARK: Versions
 
-    @Test func pagesAndCardsSay11WhileTheStreamStaysAt8() {
-        #expect(ExtensionUIContext.pageVersion == 11 && ExtensionUIContext.cardVersion == 11)
-        #expect(ExtensionUIContext.here().forPage().uiVersion == 11)
-        #expect(ExtensionUIContext.here(size: "compact").drawnByApp().uiVersion == 11)
+    @Test func pagesAndCardsSay12WhileTheStreamStaysAt8() {
+        #expect(ExtensionUIContext.pageVersion == 12 && ExtensionUIContext.cardVersion == 12)
+        #expect(ExtensionUIContext.here().forPage().uiVersion == 12)
+        #expect(ExtensionUIContext.here(size: "compact").drawnByApp().uiVersion == 12)
         #expect(ExtensionPageStream.uiVersion == 8)
         // Widgets, the watch and the system extensions draw none of it.
         #expect(ExtensionUIContext.here().uiVersion == 3)

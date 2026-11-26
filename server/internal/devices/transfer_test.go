@@ -142,10 +142,17 @@ func (f *targetNode) state() (calls []string, data []byte, aborted bool) {
 // itself); the returned func cuts the connection for good (the machine cannot dial it again).
 func fakeMachine(t *testing.T, d *Devices, id, name string, handle func(context.Context, string, json.RawMessage) (any, error)) (*Machine, func()) {
 	t.Helper()
+	return fakeMachineWith(t, d, MachineConfig{ID: id, Name: name, Kind: "ssh"}, handle)
+}
+
+// fakeMachineWith is fakeMachine with the machine's whole entry (its trust, its receive folder).
+func fakeMachineWith(t *testing.T, d *Devices, cfg MachineConfig, handle func(context.Context, string, json.RawMessage) (any, error)) (*Machine, func()) {
+	t.Helper()
+	id := cfg.ID
 	var mu sync.Mutex
 	var conns []net.Conn
 	gone := false
-	m := newMachine(d, MachineConfig{ID: id, Name: name, Kind: "ssh"})
+	m := newMachine(d, cfg)
 	m.dialNode = func(context.Context) (net.Conn, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -211,6 +218,17 @@ func postTransfer(t *testing.T, mux http.Handler, body string) *httptest.Respons
 }
 
 const transferBody = `{"from":{"machine":"a","path":"Movies/movie.mov","cwd":"/home/me"},"to":{"machine":"b","dest":"inbox"}}`
+
+// The accepted start response is the initial running snapshot even when a tiny transfer finishes before the caller
+// reads the response. The transfer still completes normally; the slot is not held by the start path.
+func TestTransferStartAnswersTheInitialRunningSnapshot(t *testing.T) {
+	d, _, _, _, mux := transferDevices(t, &sourceNode{data: []byte("hello")}, &targetNode{})
+	rec := postTransfer(t, mux, transferBody)
+	got := started(t, rec)
+	if end := waitTransfer(t, d, mux, got.ID); end.State != proto.TransferDone {
+		t.Fatalf("end %+v", end)
+	}
+}
 
 // waitTransfer waits for the transfer to end and answers it as GET does.
 func waitTransfer(t *testing.T, d *Devices, mux http.Handler, id string) proto.FileTransfer {
@@ -638,5 +656,18 @@ func TestTransferConcurrentStartsReserveSlots(t *testing.T) {
 	last := started(t, postTransfer(t, mux, bodies[0]))
 	if end := waitTransfer(t, d, mux, last.ID); end.State != proto.TransferDone {
 		t.Fatalf("after the slots were reused: %+v", end)
+	}
+}
+
+// startTransfer must return the initial running snapshot even if runTransfer finishes before startTransfer returns.
+func TestTransferStartReturnsRunningSnapshotWhenRunFinishesFirst(t *testing.T) {
+	src := &sourceNode{data: []byte("hello")}
+	dst := &targetNode{}
+	d, _, _, _, mux := transferDevices(t, src, dst)
+	d.transfers.afterLaunch = func(tr *transfer) { <-tr.done }
+
+	tr := started(t, postTransfer(t, mux, transferBody))
+	if end := waitTransfer(t, d, mux, tr.ID); end.State != proto.TransferDone {
+		t.Fatalf("end %+v", end)
 	}
 }

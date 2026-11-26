@@ -1,0 +1,260 @@
+{
+  "string": [
+    {
+      "name": "phone_look_color",
+      "value": "Theme Color"
+    },
+    {
+      "name": "phone_look_style",
+      "value": "Interface Style"
+    },
+    {
+      "name": "phone_look_navigation",
+      "value": "Sidebar"
+    },
+    {
+      "name": "phone_look_layout",
+      "value": "Agents List Layout"
+    },
+    {
+      "name": "phone_look_scheme",
+      "value": "Light & Dark"
+    },
+    {
+      "name": "phone_look_avatar",
+      "value": "Avatar"
+    },
+    {
+      "name": "phone_look_avatar_alias",
+      "value": "avatar face persona shared icon name"
+    },
+    {
+      "name": "phone_look_color_alias",
+      "value": "theme color palette accent"
+    },
+    {
+      "name": "phone_look_style_alias",
+      "value": "interface style fonts text size"
+    },
+    {
+      "name": "phone_look_scheme_alias",
+      "value": "light dark system appearance"
+    },
+    {
+      "name": "phone_look_layout_header",
+      "value": "Agents List"
+    },
+    {
+      "name": "phone_look_sample_ask",
+      "value": "Do I need an umbrella tomorrow?"
+    },
+    {
+      "name": "phone_look_sample_reply",
+      "value": "Light rain in the morning. Bring a folding umbrella."
+    },
+    {
+      "name": "phone_look_sample_link",
+      "value": "See Hourly Forecast"
+    },
+    {
+      "name": "phone_look_sample_add",
+      "value": "Add to Reminders"
+    },
+    {
+      "name": "phone_look_sample_skip",
+      "value": "No Thanks"
+    },
+    {
+      "name": "phone_look_navigation_merged",
+      "value": "Merged"
+    },
+    {
+      "name": "phone_look_navigation_separate",
+      "value": "Separate"
+    },
+    {
+      "name": "phone_look_layout_avatar",
+      "value": "Avatar"
+    },
+    {
+      "name": "phone_look_layout_compact",
+      "value": "Two Lines"
+    },
+    {
+      "name": "phone_look_layout_cards",
+      "value": "State Cards"
+    },
+    {
+      "name": "phone_look_layout_list",
+      "value": "Compact List"
+    },
+    {
+      "name": "phone_look_example_review",
+      "value": "Add tests for the network layer"
+    },
+    {
+      "name": "phone_look_example_review_note",
+      "value": "Which test framework should it use? I'd go with Swift Testing."
+    },
+    {
+      "name": "phone_look_example_build",
+      "value": "Add the weather widget to the home screen"
+    },
+    {
+      "name": "phone_look_example_build_note",
+      "value": "Running the tests: 128 of 160 pass so far."
+    },
+    {
+      "name": "phone_look_style_glass",
+      "value": "Liquid Glass"
+    },
+    {
+      "name": "phone_look_style_clay",
+      "value": "Clay"
+    },
+    {
+      "name": "phone_look_style_island",
+      "value": "Island"
+    },
+    {
+      "name": "phone_look_style_lark",
+      "value": "Lark"
+    },
+    {
+      "name": "phone_look_style_beautiful",
+      "value": "BeautifulUI"
+    },
+    {
+      "name": "phone_look_style_glass_note",
+      "value": "Native system surfaces"
+    },
+    {
+      "name": "phone_look_style_clay_note",
+      "value": "Soft and rounded"
+    },
+    {
+      "name": "phone_look_style_island_note",
+      "value": "Floating cards"
+    },
+    {
+      "name": "phone_look_style_lark_note",
+      "value": "Like Lark"
+    },
+    {
+      "name": "phone_look_style_footer",
+      "value": "Changes how sheets, cards, buttons, fonts and chat components look across the whole app, including Lark pages in the Inbox."
+    },
+    {
+      "name": "phone_look_style_beautiful_note",
+      "value": "BeautifulUI's cards, tool cards and composer"
+    },
+    {
+      "name": "phone_look_layout_avatar_note",
+      "value": "The agent's avatar, its title and time, two lines of what it last said, and where it runs."
+    },
+    {
+      "name": "phone_look_layout_compact_note",
+      "value": "Two lines per agent: its title and time, then one line of what it last said."
+    },
+    {
+      "name": "phone_look_layout_cards_note",
+      "value": "A card per agent, its state's color down the side; the one waiting for you is tinted."
+    },
+    {
+      "name": "phone_look_layout_list_note",
+      "value": "One line per agent: its state, title and time."
+    },
+    {
+      "name": "phone_look_scheme_system",
+      "value": "Match System"
+    },
+    {
+      "name": "phone_look_scheme_light",
+      "value": "Light"
+    },
+    {
+      "name": "phone_look_scheme_dark",
+      "value": "Dark"
+    },
+    {
+      "name": "phone_look_navigation_separate_note",
+      "value": "Persona and Agents each have a page. Switch between them at the top of the screen."
+    },
+    {
+      "name": "phone_look_navigation_merged_note",
+      "value": "The main chat, pages, Persona chats and Agents share one sidebar. Swipe in from the left to open it."
+    },
+    {
+      "name": "phone_look_text_size",
+      "value": "Text Size"
+    },
+    {
+      "name": "phone_look_text_small",
+      "value": "Small"
+    },
+    {
+      "name": "phone_look_text_standard",
+      "value": "Standard"
+    },
+    {
+      "name": "phone_look_text_large",
+      "value": "Large"
+    },
+    {
+      "name": "phone_look_text_footer",
+      "value": "One step smaller or larger than the system's Text Size."
+    },
+    {
+      "name": "phone_look_section",
+      "value": "Appearance"
+    },
+    {
+      "name": "phone_look_color_blue",
+      "value": "System Blue"
+    },
+    {
+      "name": "phone_look_color_coral",
+      "value": "Coral"
+    },
+    {
+      "name": "phone_look_color_lavender",
+      "value": "Lavender"
+    },
+    {
+      "name": "phone_look_color_teal",
+      "value": "Teal"
+    },
+    {
+      "name": "phone_look_color_lark",
+      "value": "Lark Blue"
+    },
+    {
+      "name": "phone_look_scheme_footer",
+      "value": "Match System follows your device. Choose Light or Dark to keep one appearance in Persona."
+    },
+    {
+      "name": "phone_look_color_footer",
+      "value": "Buttons, links, selections and your own bubbles use the theme color; Clay and Island use a light tint of it for the background. “Match Interface Style” uses each style's own colors."
+    },
+    {
+      "name": "phone_look_navigation_footer",
+      "value": "This choice applies immediately on this device."
+    },
+    {
+      "name": "phone_look_glow",
+      "value": "Glow While Replying"
+    },
+    {
+      "name": "phone_look_glow_note",
+      "value": "Light up the input box while Persona writes a reply"
+    },
+    {
+      "name": "phone_look_return",
+      "value": "Return Key Sends"
+    },
+    {
+      "name": "phone_look_return_note",
+      "value": "Send with Return; Shift-Return starts a new line"
+    }
+  ]
+}

@@ -126,7 +126,7 @@ func newCallTest(t *testing.T, on bool, edit func(*urgentCallSettings)) *callTes
 	t.Helper()
 	ft := newFleetTest(t)
 	st := &callStore{fleetMem: ft.st, calls: map[string]db.UrgentCall{}}
-	ft.s.store = func() Store { return st }
+	ft.s.setStore(func() Store { return st })
 	h := &ringHub{fakeHub: ft.f, phones: 1}
 	setHub(ft.s, h)
 	set := defaultUrgentCallSettings()

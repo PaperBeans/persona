@@ -3,5 +3,7 @@
   "copy": "コピー",
   "copy_table": "表をコピー",
   "quote_more": "すべて表示",
-  "quote_less": "折りたたむ"
+  "quote_less": "折りたたむ",
+  "toggle_wrap": "折り返しを切り替え",
+  "wrap": "折り返し"
 }

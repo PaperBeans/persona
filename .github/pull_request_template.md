@@ -4,10 +4,17 @@
 
 
 
+## Why this must change the core
+
+<!-- Only when the PR changes a path in schema/core-paths.txt (tests-only changes excepted): add the label `core-change` and say in a line or two why a module or an extension point cannot do it. Otherwise delete this section. -->
+
+
+
 ## Verification
 
 <!-- Commands you ran and their results; screenshots for UI changes (light and dark), shown here and not committed. Say what was not run. -->
 
+Domain model: a new server package declares its layer; each declared package it changes passes `go test ./<pkg>/...` (its domain rules); no getter, exported field, primitive or untyped seam added; or N/A.
 
 
 ## Apple performance

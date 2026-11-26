@@ -44,8 +44,13 @@ private fun feishuBotStatus(status: FeishuBotStatus?): Status = when {
  * Pairing, its features and a test message are on its channel's page (Settings › Channels › Lark bot), which links here.
  */
 @Composable
-internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
+internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit, larkBot: LarkBotEntry = LarkBotEntry.Offered) {
     val res = LocalResources.current
+    // The hub's Lark module is off (#15995): nothing here can work, so nothing is asked of the hub and no control shows.
+    if (larkBot == LarkBotEntry.ModuleOff) {
+        LarkBotOffPage(stringResource(R.string.settings_feishu_bot_title), onBack)
+        return
+    }
     if (api == null) {
         JListPage(title = stringResource(R.string.settings_feishu_bot_title), onBack = onBack) {
             item { JNotice(stringResource(R.string.settings_src_channels_demo)) }
@@ -58,8 +63,13 @@ internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
     val feedback = LocalAppFeedback.current
     LaunchedEffect(model) { model.load() }
     val status = state.status
+    // The daily sync into the knowledge base (#15392): read again with the bot, so a new chat bot shows there too.
+    val sync = remember(api) { api.sync?.let { LarkSyncModel(it, scope) } }
+    val syncState = sync?.state?.collectAsState()?.value
+    LaunchedEffect(sync, status?.appId) { sync?.load() }
+    if (sync != null && syncState != null) LarkSyncEffects(sync, syncState)
     JListPage(title = stringResource(R.string.settings_feishu_bot_title), onBack = onBack, largeTitle = false,
-        refreshing = state.loading && status != null, onRefresh = { scope.launch { model.load() } }) {
+        refreshing = state.loading && status != null, onRefresh = { scope.launch { model.load(); sync?.load() } }) {
         item("status") {
             Column {
                 JGroupItem(GroupPosition(first = true, last = false), Modifier.padding(top = Tokens.Space.s)) {
@@ -117,11 +127,12 @@ internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
                 }
             }
         }
+        if (sync != null && syncState != null) larkSyncItems(sync, syncState, scope)
         item("howto") {
             Column(Modifier.padding(top = Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 JSectionHeader(stringResource(R.string.settings_feishu_bot_howto))
                 listOf(R.string.settings_feishu_bot_step_create_app, R.string.settings_feishu_bot_step_permissions,
-                    R.string.settings_feishu_bot_step_events, R.string.settings_feishu_bot_step_publish).forEachIndexed { i, step ->
+                    R.string.settings_feishu_bot_step_sync_permissions, R.string.settings_feishu_bot_step_events, R.string.settings_feishu_bot_step_publish).forEachIndexed { i, step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                         Text("${i + 1}", style = PersonaTheme.type.caption, color = PersonaTheme.palette.accent, maxLines = 1)
                         Text(stringResource(step), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)

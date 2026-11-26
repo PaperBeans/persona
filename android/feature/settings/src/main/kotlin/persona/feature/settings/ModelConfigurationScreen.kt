@@ -67,43 +67,64 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
     var advanced by rememberSaveable { mutableStateOf(false) }
     var selectedProfileId by rememberSaveable(owner) { mutableStateOf<String?>(null) }
     var editingProfile by rememberSaveable(owner) { mutableStateOf(false) }
+    var confirmingApply by rememberSaveable(owner) { mutableStateOf(false) }
     var editRevision by rememberSaveable(owner) { mutableLongStateOf(0L) }
+    var editSyncKey by rememberSaveable(owner) { mutableIntStateOf(0) }
     // "New model provider" opens over this page (`debug.newProvider` opens it for captures).
     var adding by remember { mutableStateOf<String?>(if (providers != null) NewProviderPreview.take() else null) }
     LaunchedEffect(model, profilesModel) {
-        launch { model.load() }
-        launch { profilesModel.load() }
+        val _ = launch { model.load() }
+        val _ = launch { val _ = profilesModel.load() }
     }
     if (adding != null && providers != null) {
-        NewProviderPage(providers, onBack = { adding = null }, onSaved = { adding = null; scope.launch { model.load() } },
+        NewProviderPage(providers, onBack = { adding = null }, onSaved = { adding = null; val _ = scope.launch { model.load() } },
             preferPreset = adding == "preset", manager = owner, machines = machines)
         return
     }
-    val selectedProfile = selectedProfileId?.let { id -> profilesState.view?.profiles?.firstOrNull { it.id == id } }
+    val profilesView = profilesState.view
+    val selectedProfile = selectedProfileId?.let { id -> profilesView?.profiles?.firstOrNull { it.id == id } }
+    val activeProfile = profilesView?.active?.takeIf(String::isNotBlank)?.let { activeId ->
+        profilesView.profiles.firstOrNull { it.id == activeId }
+    }
     if (selectedProfile != null) {
         if (editingProfile) {
             ModelProfileEditorPage(
                 profile = selectedProfile,
                 revision = editRevision,
+                syncKey = editSyncKey,
                 catalog = state.catalog,
-                busy = profilesState.busy,
+                busyAction = profilesState.busyAction,
                 error = profilesState.actionError ?: profilesState.error,
                 conflict = profilesState.conflict,
                 onSave = { input ->
-                    scope.launch {
+                    val _ = scope.launch {
                         if (profilesModel.save(selectedProfile.id, input)) {
                             editRevision = profilesModel.state.value.view?.revision ?: editRevision
+                            editSyncKey++
                             editingProfile = false
                             feedback?.notice(res.getString(R.string.settings_model_profiles_saved))
                             model.load()
                         }
                     }
                 },
+                onCapture = {
+                    val _ = scope.launch {
+                        if (profilesModel.capture(selectedProfile, revision = editRevision)) {
+                            editRevision = profilesModel.state.value.view?.revision ?: editRevision
+                            editSyncKey++
+                            feedback?.notice(res.getString(R.string.settings_model_profiles_captured))
+                            model.load()
+                        }
+                    }
+                },
                 onReload = {
-                    scope.launch {
+                    val _ = scope.launch {
                         profilesModel.clearErrors()
                         val fresh = profilesModel.load()
-                        if (fresh != null) editRevision = fresh.revision
+                        if (fresh != null) {
+                            editRevision = fresh.revision
+                            editSyncKey++
+                        }
                     }
                 },
                 onBack = {
@@ -113,32 +134,122 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
                     }
                 },
             )
-        } else {
-            ModelProfileDetailPage(
+        } else if (confirmingApply) {
+            ModelProfileApplyConfirmPage(
                 profile = selectedProfile,
+                activeProfile = activeProfile,
                 catalog = state.catalog,
-                busy = profilesState.busy,
+                busyAction = profilesState.busyAction,
                 error = profilesState.actionError ?: profilesState.error,
-                onBack = {
-                    if (!profilesState.busy) {
-                        selectedProfileId = null
-                        editingProfile = false
-                        profilesModel.clearErrors()
+                conflict = profilesState.conflict,
+                onCaptureActiveAndApply = {
+                    val activeTarget = activeProfile
+                    if (activeTarget != null) {
+                        val _ = scope.launch {
+                            when (profilesModel.captureActiveAndApply(activeTarget, selectedProfile)) {
+                                CaptureAndApplyResult.Applied -> {
+                                    confirmingApply = false
+                                    selectedProfileId = null
+                                    editingProfile = false
+                                    feedback?.notice(
+                                        res.getString(
+                                            R.string.settings_model_profiles_captured_and_applied,
+                                            activeTarget.displayName,
+                                            selectedProfile.displayName,
+                                        ),
+                                    )
+                                    model.load()
+                                }
+                                CaptureAndApplyResult.ApplyFailedAfterCapture -> model.load()
+                                CaptureAndApplyResult.CaptureFailed -> Unit
+                            }
+                        }
                     }
                 },
-                onEdit = {
-                    profilesModel.clearErrors()
-                    editRevision = profilesState.view?.revision ?: 0L
-                    editingProfile = true
-                },
-                onApply = {
-                    scope.launch {
+                onApplyDirect = {
+                    val _ = scope.launch {
                         if (profilesModel.apply(selectedProfile.id)) {
+                            confirmingApply = false
                             selectedProfileId = null
                             editingProfile = false
                             feedback?.notice(res.getString(R.string.settings_model_profiles_applied, selectedProfile.displayName))
                             model.load()
                         }
+                    }
+                },
+                onCaptureCurrent = {
+                    val _ = scope.launch {
+                        if (profilesModel.capture(selectedProfile)) {
+                            confirmingApply = false
+                            feedback?.notice(res.getString(R.string.settings_model_profiles_captured))
+                            model.load()
+                        }
+                    }
+                },
+                onReload = {
+                    val _ = scope.launch {
+                        profilesModel.clearErrors()
+                        val _ = profilesModel.load()
+                    }
+                },
+                onCancel = {
+                    if (!profilesState.busy) {
+                        confirmingApply = false
+                        profilesModel.clearErrors()
+                    }
+                },
+            )
+        } else {
+            ModelProfileDetailPage(
+                profile = selectedProfile,
+                catalog = state.catalog,
+                busyAction = profilesState.busyAction,
+                error = profilesState.actionError ?: profilesState.error,
+                conflict = profilesState.conflict,
+                onBack = {
+                    if (!profilesState.busy) {
+                        selectedProfileId = null
+                        editingProfile = false
+                        confirmingApply = false
+                        profilesModel.clearErrors()
+                    }
+                },
+                onEdit = {
+                    profilesModel.clearErrors()
+                    confirmingApply = false
+                    editRevision = profilesState.view?.revision ?: 0L
+                    editSyncKey++
+                    editingProfile = true
+                },
+                onApply = {
+                    val drift = profileApplyDrift(selectedProfile, activeProfile)
+                    if (drift.hasDrift) {
+                        profilesModel.clearErrors()
+                        confirmingApply = true
+                    } else {
+                        val _ = scope.launch {
+                            if (profilesModel.apply(selectedProfile.id)) {
+                                selectedProfileId = null
+                                editingProfile = false
+                                confirmingApply = false
+                                feedback?.notice(res.getString(R.string.settings_model_profiles_applied, selectedProfile.displayName))
+                                model.load()
+                            }
+                        }
+                    }
+                },
+                onCapture = {
+                    val _ = scope.launch {
+                        if (profilesModel.capture(selectedProfile)) {
+                            feedback?.notice(res.getString(R.string.settings_model_profiles_captured))
+                            model.load()
+                        }
+                    }
+                },
+                onReload = {
+                    val _ = scope.launch {
+                        profilesModel.clearErrors()
+                        val _ = profilesModel.load()
                     }
                 },
             )
@@ -171,6 +282,7 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
                 profilesModel.clearErrors()
                 selectedProfileId = profile.id
                 editingProfile = false
+                confirmingApply = false
             },
             onRollback = {
                 scope.launch {

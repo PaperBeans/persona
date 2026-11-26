@@ -1,0 +1,116 @@
+{
+  "view": {
+    "title": "力量训练",
+    "sections": [
+      {
+        "title": "最近一次训练",
+        "items": [
+          {
+            "type": "text",
+            "text": "2026-11-24 · 3 个动作 · 9 组"
+          },
+          {
+            "type": "row",
+            "value": "4 组",
+            "title": "Bench press"
+          },
+          {
+            "type": "row",
+            "value": "2 组",
+            "title": "Dumbbell shoulder press"
+          },
+          {
+            "type": "row",
+            "value": "3 组",
+            "title": "坐姿推胸"
+          }
+        ]
+      },
+      {
+        "title": "最近 7 天",
+        "items": [
+          {
+            "type": "chart",
+            "title": "正式组",
+            "kind": "bar",
+            "series": [
+              {
+                "name": "正式组",
+                "points": [
+                  {
+                    "label": "11-19",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-20",
+                    "value": 8
+                  },
+                  {
+                    "label": "11-21",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-22",
+                    "value": 6
+                  },
+                  {
+                    "label": "11-23",
+                    "value": 0
+                  },
+                  {
+                    "label": "11-24",
+                    "value": 8
+                  },
+                  {
+                    "label": "11-25",
+                    "value": 0
+                  }
+                ]
+              }
+            ],
+            "unit": "组"
+          }
+        ]
+      },
+      {
+        "title": "最近的新纪录",
+        "items": [
+          {
+            "type": "row",
+            "value": "55 kg × 10",
+            "title": "Lat pulldown",
+            "subtitle": "2026-11-22"
+          },
+          {
+            "type": "row",
+            "value": "80 kg × 6",
+            "title": "深蹲",
+            "subtitle": "2026-11-22"
+          },
+          {
+            "type": "row",
+            "value": "60 kg × 8",
+            "title": "Bench press",
+            "subtitle": "2026-11-20"
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "type": "button",
+            "title": "查看",
+            "action": {
+              "id": "overview",
+              "push": {
+                "state": "{\"page\":\"strength.overview\"}",
+                "title": "力量训练"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.home\",\"metric\":\"weight\",\"days\":30}"
+  }
+}

@@ -264,7 +264,7 @@ func TestSecretRunCommandAfterTheDeadlineDoesNotRun(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "late")
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now())
 	defer cancel()
-	if r, inTime := runSecretCommand(ctx, t.TempDir(), "touch "+marker, []byte(testSecret)); inTime {
+	if r, inTime := runSecretCommand(ctx, t.TempDir(), "touch "+marker, []byte(testSecret), proto.SecretRunDeliveryStdin); inTime {
 		t.Fatalf("result %+v, want none: the run's time was used up", r)
 	}
 	if fileExists(marker) {

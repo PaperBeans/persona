@@ -3,12 +3,15 @@ package hub
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+var errReadOnlyDisabled = errors.New("read-only sessions disabled")
 
 // wsUpgrade captures the transport without depending on websocket's private connection fields.
 type wsUpgrade struct {
@@ -78,6 +81,18 @@ func (c *client) writeWS(ctx context.Context, conn wsWriter, keepAlive func(hear
 				if b == nil {
 					continue
 				}
+			} else if c.role == roleReadOnly {
+				if c.hub != nil && !c.hub.readOnlySessionsAllowed() {
+					if c.conn != nil {
+						_ = c.conn.Close(wsCloseReadOnlyExpired, "read-only sessions disabled")
+					}
+					go c.hub.disconnectReadOnlyClients()
+					return errReadOnlyDisabled
+				}
+				b = c.readOnlySocketFrame(b)
+				if b == nil {
+					continue
+				}
 			}
 			if c.dropped.Load() {
 				// queue lost a message and dropSlow is closing the client: writing what was queued after it would move
@@ -93,6 +108,13 @@ func (c *client) writeWS(ctx context.Context, conn wsWriter, keepAlive func(hear
 			}
 			c.recordSocketTraffic("websocket_frame", "written", int64(len(b)), 0)
 		case <-ping.C:
+			if c.role == roleReadOnly && c.hub != nil && !c.hub.readOnlySessionsAllowed() {
+				if c.conn != nil {
+					_ = c.conn.Close(wsCloseReadOnlyExpired, "read-only sessions disabled")
+				}
+				go c.hub.disconnectReadOnlyClients()
+				return errReadOnlyDisabled
+			}
 			if pongDeadline != nil {
 				continue // Only one protocol ping may be outstanding.
 			}

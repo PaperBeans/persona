@@ -46,6 +46,7 @@ func taskInboxArgs(items ...string) json.RawMessage {
 func TestTaskPlanInboxUsesTheActualHandoff(t *testing.T) {
 	ctx := context.Background()
 	s, f := newTaskService(t)
+	f.inbox = newFakeInbox()
 	f.mu.Lock()
 	f.hello.Assistant.MachineID = "box"
 	f.mu.Unlock()
@@ -446,7 +447,8 @@ func TestTaskPlanInboxReuseCannotReplaceAnotherSource(t *testing.T) {
 
 func TestTaskPlanInboxExplicitLinkSurvivesURLRecheck(t *testing.T) {
 	ctx := context.Background()
-	s, _ := newTaskService(t)
+	s, f := newTaskService(t)
+	f.inbox = newFakeInbox()
 	it := taskInboxItem(t, s, "example:source", "box", "c1x1x1")
 	gh := githubItem(it.ID, "issues", "10")
 	s.inbox.mu.Lock()

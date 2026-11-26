@@ -246,12 +246,13 @@ func (n *Node) useEngineChoice(ctx context.Context, c proto.EngineChoice) error 
 	engine := proto.LegacyEngine(c)
 	n.eng.mu.Lock()
 	n.hosts.Set(nodeHostsFor(c, n.eng.botmux != nil && *n.eng.botmux, n.logf)...)
+	n.syncHerdrHostBlocked()
 	n.resetSignals()
 	n.eng.name, n.eng.set = engine, &c
 	n.mu.Lock()
 	n.engEpoch++
 	epoch := n.engEpoch
-	n.hostAgents, n.layouts, n.agents, n.panePIDs, n.lastList = nil, nil, map[string]host.Agent{}, map[string]panePID{}, ""
+	n.hostAgents, n.layouts, n.agents, n.panePIDs, n.codexPanePIDs, n.lastList = nil, nil, map[string]host.Agent{}, map[string]panePID{}, nil, ""
 	n.lastPanes, n.onAgentsList, n.agyBound, n.agyReports = nil, nil, nil, nil
 	n.mu.Unlock()
 	n.sent.forget() // the new engine's list goes once even when the old one's was the same (sessions_sent.go)

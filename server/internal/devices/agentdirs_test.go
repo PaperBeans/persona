@@ -246,3 +246,54 @@ func TestHiddenAgentDirsPutWithoutActionKeepsBlocks(t *testing.T) {
 		t.Fatalf("an explicit action: %+v %v", stored, err)
 	}
 }
+
+func TestHiddenAgentDirsConditionalReplacement(t *testing.T) {
+	_, _, _, mux, _ := hiddenDirsHub(t)
+	const path = "/api/v1/machines/m1/agent-dirs/hidden"
+	read := func() proto.HiddenAgentDirs {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		var state proto.HiddenAgentDirs
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &state) != nil {
+			t.Fatalf("read: %d %s", rec.Code, rec.Body)
+		}
+		return state
+	}
+	write := func(expected, next []proto.HiddenAgentDir) int {
+		body, _ := json.Marshal(map[string]any{"expected_rules": expected, "rules": next})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("PUT", path, strings.NewReader(string(body))))
+		return rec.Code
+	}
+	initial := read()
+	if !initial.SupportsExpectedRules || initial.Rules == nil {
+		t.Fatal(initial)
+	}
+	first := proto.HiddenAgentDir{Pattern: "~/one", Enabled: true, Action: proto.AgentDirHide}
+	second := proto.HiddenAgentDir{Pattern: "~/two", Enabled: true, Action: proto.AgentDirHide}
+	ch := make(chan int, 2)
+	for _, r := range []proto.HiddenAgentDir{first, second} {
+		go func(rule proto.HiddenAgentDir) { ch <- write(initial.Rules, []proto.HiddenAgentDir{rule}) }(r)
+	}
+	status := []int{<-ch, <-ch}
+	slices.Sort(status)
+	if !slices.Equal(status, []int{200, 409}) {
+		t.Fatalf("two concurrent replacements: %v", status)
+	}
+	latest := read()
+	if len(latest.Rules) != 1 {
+		t.Fatal(latest)
+	}
+	missing := first
+	if latest.Rules[0] == first {
+		missing = second
+	}
+	if code := write(latest.Rules, append(slices.Clone(latest.Rules), missing)); code != 200 {
+		t.Fatal(code)
+	}
+	final := read()
+	if len(final.Rules) != 2 || !slices.Contains(final.Rules, first) || !slices.Contains(final.Rules, second) {
+		t.Fatal(final)
+	}
+}

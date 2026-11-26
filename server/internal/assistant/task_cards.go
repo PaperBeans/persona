@@ -155,9 +155,9 @@ func (s *Service) taskCards(ctx context.Context, items []FeedItem, feedPlans map
 			if task.Queue != nil && card.State != "cancelled" && card.State != "done" && card.State != "accepted" {
 				card.State = "waiting"
 				card.Reason = i18n.T(s.lang(ctx), "assistant-tasks.admission_queued", i18n.Args{
-					"reason": task.Queue.Reason})
-				if task.Queue.Claimed || task.Queue.Key == requestGateKey || task.Queue.Key == workspaceQueueKey {
-					card.Reason = task.Queue.Reason
+					"reason": task.queueReason()})
+				if task.Queue.Claimed || task.Queue.Key == requestGateKey || task.Queue.Key == workspaceQueueKey || task.Queue.Key == pendingPlacementQueueKey || task.Queue.Key == blockerWaitQueueKey {
+					card.Reason = task.queueReason()
 				}
 				card.UpdatedAt = task.Queue.NextAt
 			}

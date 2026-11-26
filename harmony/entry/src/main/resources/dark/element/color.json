@@ -1,16 +1,76 @@
 {
   "color": [
     {
+      "name": "persona_inline_code_ink",
+      "value": "#C7C7CC"
+    },
+    {
+      "name": "persona_switcher_surface",
+      "value": "#2C2C2E"
+    },
+    {
+      "name": "persona_switcher_ink",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "persona_switcher_avatar",
+      "value": "#9C94FF"
+    },
+    {
+      "name": "persona_switcher_online",
+      "value": "#30D158"
+    },
+    {
+      "name": "project_card_secondary",
+      "value": "#99EBEBF5"
+    },
+    {
+      "name": "project_card_tertiary",
+      "value": "#4CEBEBF5"
+    },
+    {
+      "name": "project_card_needs_border",
+      "value": "#8086B6FF"
+    },
+    {
       "name": "start_window_background",
       "value": "#000000"
     },
     {
+      "name": "persona_code_canvas",
+      "value": "#1C1D21"
+    },
+    {
+      "name": "persona_code_hunk",
+      "value": "#2C2D32"
+    },
+    {
+      "name": "persona_diff_added",
+      "value": "#4CC38A"
+    },
+    {
+      "name": "persona_diff_removed",
+      "value": "#FF6369"
+    },
+    {
+      "name": "persona_diff_modified",
+      "value": "#E3B341"
+    },
+    {
+      "name": "persona_code_added_fill",
+      "value": "#214CC38A"
+    },
+    {
+      "name": "persona_code_removed_fill",
+      "value": "#1FFF6369"
+    },
+    {
       "name": "persona_canvas",
-      "value": "#121416"
+      "value": "#101012"
     },
     {
       "name": "persona_surface",
-      "value": "#000000"
+      "value": "#1C1C1E"
     },
     {
       "name": "persona_brand",
@@ -34,19 +94,27 @@
     },
     {
       "name": "persona_grouped",
-      "value": "#181B20"
+      "value": "#000000"
     },
     {
       "name": "persona_ink",
-      "value": "#F1F4F8"
+      "value": "#F5F5F7"
     },
     {
       "name": "persona_secondary",
-      "value": "#A8AFBA"
+      "value": "#ACACB3"
+    },
+    {
+      "name": "persona_phone_drawer_surface",
+      "value": "#171717"
+    },
+    {
+      "name": "persona_phone_drawer_selection",
+      "value": "#28282A"
     },
     {
       "name": "persona_control",
-      "value": "#343B45"
+      "value": "#2C2C2E"
     },
     {
       "name": "persona_selection",
@@ -69,12 +137,44 @@
       "value": "#4CC38A"
     },
     {
+      "name": "persona_needs_mark",
+      "value": "#0A84FF"
+    },
+    {
+      "name": "persona_working_mark",
+      "value": "#FFB224"
+    },
+    {
+      "name": "persona_unread_mark",
+      "value": "#4CC38A"
+    },
+    {
       "name": "persona_positive",
       "value": "#30D158"
     },
     {
       "name": "persona_divider",
-      "value": "#3A414C"
+      "value": "#39393D"
+    },
+    {
+      "name": "phone_settings_separator",
+      "value": "#1BEBEBF5"
+    },
+    {
+      "name": "phone_health_row_separator",
+      "value": "#38383B"
+    },
+    {
+      "name": "machine_session_avatar_fill",
+      "value": "#3D767680"
+    },
+    {
+      "name": "machine_count_surface",
+      "value": "#0AFFFFFF"
+    },
+    {
+      "name": "phone_inbox_request_well",
+      "value": "#1C1C1F"
     },
     {
       "name": "persona_subtle",
@@ -87,6 +187,86 @@
     {
       "name": "persona_teal",
       "value": "#63D3DF"
+    },
+    {
+      "name": "persona_dock_warning",
+      "value": "#FF9F0A"
+    },
+    {
+      "name": "persona_dock_secondary_surface",
+      "value": "#3E3F40"
+    },
+    {
+      "name": "persona_sheet_background",
+      "value": "#1C1C1E"
+    },
+    {
+      "name": "task_failure_secondary",
+      "value": "#62FFFFFF"
+    },
+    {
+      "name": "phone_readiness_surface",
+      "value": "#38383B"
+    },
+    {
+      "name": "phone_readiness_pill",
+      "value": "#505054"
+    },
+    {
+      "name": "phone_readiness_edge",
+      "value": "#49494D"
+    },
+    {
+      "name": "persona_sheet_card",
+      "value": "#2C2C2E"
+    },
+    {
+      "name": "persona_sheet_control",
+      "value": "#3A3A3C"
+    },
+    {
+      "name": "phone_project_search_field",
+      "value": "#202020"
+    },
+    {
+      "name": "persona_list_background",
+      "value": "#000000"
+    },
+    {
+      "name": "settings_search_highlight",
+      "value": "#717173"
+    },
+    {
+      "name": "settings_search_center",
+      "value": "#3B3B3D"
+    },
+    {
+      "name": "settings_search_lower_rim",
+      "value": "#535357"
+    },
+    {
+      "name": "settings_search_outline",
+      "value": "#0E0E0F"
+    },
+    {
+      "name": "decision_header_title",
+      "value": "#409CFF"
+    },
+    {
+      "name": "decision_header_secondary",
+      "value": "#78FFFFFF"
+    },
+    {
+      "name": "decision_header_chip",
+      "value": "#1CFFFFFF"
+    },
+    {
+      "name": "decision_pager_disabled",
+      "value": "#737378"
+    },
+    {
+      "name": "settings_search_shadow",
+      "value": "#00000000"
     }
   ]
 }

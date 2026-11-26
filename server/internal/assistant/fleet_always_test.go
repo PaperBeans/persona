@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -98,6 +99,322 @@ func TestAssistantAlwaysAnswersWaitingCards(t *testing.T) {
 	if p := ft.waitPending(1); p[0].ID != "ix_c" {
 		t.Fatalf("pending %+v", p)
 	}
+}
+
+func TestInboxWholeBashAlwaysNeverHonoredOrKept(t *testing.T) {
+	ft := newFleetTest(t)
+	s := ft.s
+	ctx := context.Background()
+	s.originSet(ctx, "mac", "inbox-conv", OriginInbox, "item-1", "")
+
+	// Case 1: an older node still sending whole-tool ["tool:Bash"] on an Inbox conversation must have
+	// AlwaysKeys stripped and AlwaysHonored set to false; even if an older client answers Always:true,
+	// honest() clears it and no session-wide Bash grant is kept.
+	yes := true
+	firstDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_1", "inbox-conv", "tool:Bash"))
+		firstDone <- r
+	}()
+	pending := ft.waitPending(1)
+	if pending[0].AlwaysHonored == nil || *pending[0].AlwaysHonored {
+		t.Fatalf("inbox whole-tool Bash card honored=%v, want false", pending[0].AlwaysHonored)
+	}
+	if len(pending[0].AlwaysKeys) != 0 {
+		t.Fatalf("inbox whole-tool Bash card retained AlwaysKeys=%q, want none", pending[0].AlwaysKeys)
+	}
+	if err := s.resolve("ix_inbox_1", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	res := <-firstDone
+	if res.Always {
+		t.Fatalf("honest() did not clear Always on inbox whole-tool Bash: %+v", res)
+	}
+	ft.waitPending(0)
+
+	// A follow-up Bash call (e.g. destructive command) must still ask instead of being auto-allowed.
+	secondDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_2", "inbox-conv", "tool:Bash"))
+		secondDone <- r
+	}()
+	ft.waitPending(1)
+	if err := s.resolve("ix_inbox_2", proto.Resolution{Allow: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-secondDone; r.Remembered {
+		t.Fatalf("second inbox Bash call was auto-allowed: %+v", r)
+	}
+
+	// Case 2: even a stale pre-existing tool:Bash grant in the store must never match for OriginInbox.
+	if err := s.fleetStore().AllowAlways(ctx, "inbox-conv", "Bash", []string{"tool:Bash"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.alwaysAllowed(ctx, alwaysIx("ix_inbox_stale", "inbox-conv", "tool:Bash")); ok {
+		t.Fatal("stale tool:Bash grant matched on OriginInbox conversation")
+	}
+	staleDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_stale_card", "inbox-conv", "tool:Bash"))
+		staleDone <- r
+	}()
+	ft.waitPending(1)
+	if err := s.resolve("ix_inbox_stale_card", proto.Resolution{Allow: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-staleDone; r.Remembered {
+		t.Fatalf("stale tool:Bash grant bypassed card on OriginInbox: %+v", r)
+	}
+
+	// Case 3: a new node omitting AlwaysKeys on an Inbox Bash card must still receive AlwaysHonored=false.
+	newDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_new", "inbox-conv"))
+		newDone <- r
+	}()
+	pendingNew := ft.waitPending(1)
+	if pendingNew[0].AlwaysHonored == nil || *pendingNew[0].AlwaysHonored {
+		t.Fatalf("new-node inbox Bash card honored=%v, want false", pendingNew[0].AlwaysHonored)
+	}
+	if err := s.resolve("ix_inbox_new", proto.Resolution{Allow: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	<-newDone
+
+	// Case 4: narrow exact-command (Codex) and directory-scoped file keys on OriginInbox remain honored.
+	narrowIx := alwaysIx("ix_inbox_codex", "inbox-conv", "codex-command:ls /tmp")
+	narrowDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, narrowIx)
+		narrowDone <- r
+	}()
+	pendingNarrow := ft.waitPending(1)
+	if pendingNarrow[0].AlwaysHonored == nil || !*pendingNarrow[0].AlwaysHonored {
+		t.Fatalf("narrow codex-command key on inbox honored=%v, want true", pendingNarrow[0].AlwaysHonored)
+	}
+	if err := s.resolve("ix_inbox_codex", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	<-narrowDone
+	if got := ask(t, s, alwaysIx("ix_inbox_codex_2", "inbox-conv", "codex-command:ls /tmp"), nil); !got.Remembered {
+		t.Fatalf("narrow codex-command grant was not reused: %+v", got)
+	}
+	if _, ok := s.alwaysAllowed(ctx, alwaysIx("ix_inbox_codex_other", "inbox-conv", "codex-command:rm -rf /tmp/x")); ok {
+		t.Fatal("different codex command unexpectedly matched narrow grant")
+	}
+
+	// Case 5: ordinary (non-Inbox) assistant sessions retain whole-tool Bash behavior unchanged.
+	ask(t, s, alwaysIx("ix_ord_1", "ordinary-conv", "tool:Bash"), &proto.Resolution{Allow: &yes, Always: true})
+	if got := ask(t, s, alwaysIx("ix_ord_2", "ordinary-conv", "tool:Bash"), nil); !got.Remembered {
+		t.Fatalf("ordinary assistant tool:Bash grant was not reused: %+v", got)
+	}
+
+	// Case 6: mixed AlwaysKeys containing tool:Bash on OriginInbox fail closed (stripped, never honored/kept).
+	mixedDone := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_mixed", "inbox-conv", "tool:Bash", "lark:GET /foo"))
+		mixedDone <- r
+	}()
+	pendingMixed := ft.waitPending(1)
+	if pendingMixed[0].AlwaysHonored == nil || *pendingMixed[0].AlwaysHonored || len(pendingMixed[0].AlwaysKeys) != 0 {
+		t.Fatalf("mixed tool:Bash inbox card honored=%v keys=%q, want false/none", pendingMixed[0].AlwaysHonored, pendingMixed[0].AlwaysKeys)
+	}
+	if err := s.resolve("ix_inbox_mixed", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-mixedDone; r.Always {
+		t.Fatalf("mixed tool:Bash inbox card kept Always=true: %+v", r)
+	}
+	if _, ok := s.alwaysAllowed(ctx, alwaysIx("ix_inbox_mixed_check", "inbox-conv", "lark:GET /foo")); ok {
+		t.Fatal("mixed tool:Bash inbox card unexpectedly stored sibling key")
+	}
+
+	// Case 7: approving a non-Bash key with Always on Inbox must NOT wake a waiting card carrying tool:Bash
+	// even if a stale tool:Bash row exists in the store.
+	if err := s.fleetStore().AllowAlways(ctx, "inbox-conv", "Bash", []string{"tool:Bash"}); err != nil {
+		t.Fatal(err)
+	}
+	waitBash := make(chan proto.Resolution, 1)
+	go func() {
+		r, _ := s.nodeInteraction(ctx, alwaysIx("ix_inbox_wait_bash", "inbox-conv", "tool:Bash"))
+		waitBash <- r
+	}()
+	ft.waitPending(1)
+	editIx := alwaysIx("ix_inbox_edit_wake", "inbox-conv", "tool:Edit(//tmp/**)")
+	editIx.ToolName = "Edit"
+	ask(t, s, editIx, &proto.Resolution{Allow: &yes, Always: true})
+	select {
+	case r := <-waitBash:
+		t.Fatalf("approving Edit woke waiting inbox Bash card: %+v", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := s.resolve("ix_inbox_wait_bash", proto.Resolution{Allow: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	<-waitBash
+	ft.waitPending(0)
+}
+
+func TestInboxWholeBashHardeningEdgeCases(t *testing.T) {
+	ctx := context.Background()
+	yes := true
+
+	t.Run("first-turn interaction.create origin hint before originSet and before inAssistant", func(t *testing.T) {
+		ft := newFleetTest(t)
+		s := ft.s
+		// Do NOT call originSet and do NOT populate machine Home / sessions: simulates first-turn race
+		// where ixInAssistant is false and s.origins has not recorded the new Inbox session yet.
+		for _, tc := range []struct {
+			name string
+			ix   proto.Interaction
+		}{
+			{"old node with tool:Bash", alwaysIx("ix_race_old", "race-inbox-1", "tool:Bash")},
+			{"new node omitting AlwaysKeys", alwaysIx("ix_race_new", "race-inbox-2")},
+		} {
+			params, _ := json.Marshal(map[string]any{"interaction": tc.ix, "origin": OriginInbox})
+			done := make(chan proto.Resolution, 1)
+			go func() {
+				out, handled, err := s.NodeRequest(ctx, "mac", "interaction.create", params)
+				if err != nil || !handled {
+					t.Errorf("%s: NodeRequest handled=%v err=%v", tc.name, handled, err)
+					done <- proto.Resolution{}
+					return
+				}
+				done <- out.(proto.Resolution)
+			}()
+			pending := ft.waitPending(1)
+			if pending[0].AlwaysHonored == nil || *pending[0].AlwaysHonored {
+				t.Fatalf("%s: AlwaysHonored=%v, want false", tc.name, pending[0].AlwaysHonored)
+			}
+			if len(pending[0].AlwaysKeys) != 0 {
+				t.Fatalf("%s: AlwaysKeys=%q, want none", tc.name, pending[0].AlwaysKeys)
+			}
+			if err := s.resolve(tc.ix.ID, proto.Resolution{Allow: &yes, Always: true}); err != nil {
+				t.Fatal(err)
+			}
+			if r := <-done; r.Always {
+				t.Fatalf("%s: honest() left Always=true: %+v", tc.name, r)
+			}
+			ft.waitPending(0)
+		}
+	})
+
+	t.Run("origins store error fails closed on tool:Bash without breaking non-assistant Bash", func(t *testing.T) {
+		ft := newFleetTest(t)
+		s := ft.s
+		if err := s.fleetStore().AllowAlways(ctx, "inbox-err", "Bash", []string{"tool:Bash"}); err != nil {
+			t.Fatal(err)
+		}
+		// Force unloaded origins + read error for originsKey (simulates transient DB failure on manager restart).
+		ft.st.failKey(originsKey, errors.New("origins db down"))
+		s.origins.mu.Lock()
+		s.origins.loaded = false
+		s.origins.mu.Unlock()
+
+		if _, ok := s.alwaysAllowed(ctx, alwaysIx("ix_err_stale", "inbox-err", "tool:Bash")); ok {
+			t.Fatal("stale tool:Bash grant matched when origins store failed")
+		}
+		done := make(chan proto.Resolution, 1)
+		go func() {
+			r, _ := s.nodeInteraction(ctx, alwaysIx("ix_err_card", "inbox-err", "tool:Bash"))
+			done <- r
+		}()
+		pending := ft.waitPending(1)
+		if pending[0].AlwaysHonored == nil || *pending[0].AlwaysHonored || len(pending[0].AlwaysKeys) != 0 {
+			t.Fatalf("origins error card honored=%v keys=%q, want false/none", pending[0].AlwaysHonored, pending[0].AlwaysKeys)
+		}
+		if err := s.resolve("ix_err_card", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		ft.waitPending(0)
+
+		// Terminal Agent (non-assistant, empty AlwaysKeys) must still get AlwaysHonored=nil on origins error.
+		agentDone := make(chan proto.Resolution, 1)
+		go func() {
+			r, _ := s.nodeInteraction(ctx, alwaysIx("ix_err_agent", "terminal-agent"))
+			agentDone <- r
+		}()
+		pendingAgent := ft.waitPending(1)
+		if pendingAgent[0].AlwaysHonored != nil {
+			t.Fatalf("terminal agent Bash card got AlwaysHonored=%v on origins error, want nil", *pendingAgent[0].AlwaysHonored)
+		}
+		if err := s.resolve("ix_err_agent", proto.Resolution{Allow: &yes}); err != nil {
+			t.Fatal(err)
+		}
+		<-agentDone
+		ft.waitPending(0)
+	})
+
+	t.Run("restoreInteractions and resumable reconnect sanitize pre-upgrade inbox tool:Bash cards", func(t *testing.T) {
+		f := newFakeHub()
+		d := newFleetDevs()
+		d.add("mac", "Mac")
+		base := newFleetMem()
+		st := &restoreMem{base}
+		s := New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t), Devices: d})
+		ft := &fleetTest{t: t, s: s, d: d, f: f, st: base}
+		s.originSet(ctx, "mac", "inbox-upgrade", OriginInbox, "item-up", "")
+
+		// Seed a pre-upgrade pending resumable Inbox Bash card with AlwaysKeys=["tool:Bash"] and AlwaysHonored=true.
+		oldHonored := true
+		preUpgrade := alwaysIx("ix_pre_upgrade", "inbox-upgrade", "tool:Bash")
+		preUpgrade.AlwaysHonored = &oldHonored
+		_ = st.InsertInteraction(ctx, preUpgrade)
+
+		s.restoreInteractions(ctx)
+		pending := ft.waitPending(1)
+		if pending[0].AlwaysHonored == nil || *pending[0].AlwaysHonored {
+			t.Fatalf("restored pre-upgrade inbox Bash card honored=%v, want false", pending[0].AlwaysHonored)
+		}
+		if len(pending[0].AlwaysKeys) != 0 {
+			t.Fatalf("restored pre-upgrade inbox Bash card retained AlwaysKeys=%q, want none", pending[0].AlwaysKeys)
+		}
+		if err := s.resolve("ix_pre_upgrade", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+			t.Fatal(err)
+		}
+		ft.waitPending(0)
+		if ok, _ := st.AlwaysAllowed(ctx, "inbox-upgrade", []string{"tool:Bash"}); ok {
+			t.Fatal("resolving restored pre-upgrade inbox Bash card with Always=true persisted tool:Bash")
+		}
+
+		// Also verify resumable reconnect in waitInteractionReady sanitizes a live card created before originSet.
+		firstDone := make(chan proto.Resolution, 1)
+		go func() {
+			r, _ := s.nodeInteraction(ctx, alwaysIx("ix_reconnect_upgrade", "inbox-reconnect", "tool:Bash"))
+			firstDone <- r
+		}()
+		before := ft.waitPending(1)
+		if before[0].AlwaysHonored == nil || !*before[0].AlwaysHonored {
+			t.Fatalf("setup expected pre-originSet card AlwaysHonored=true, got %v", before[0].AlwaysHonored)
+		}
+		s.originSet(ctx, "mac", "inbox-reconnect", OriginInbox, "item-rc", "")
+		reconnectDone := make(chan proto.Resolution, 1)
+		go func() {
+			r, _ := s.nodeInteraction(ctx, alwaysIx("ix_reconnect_upgrade", "inbox-reconnect", "tool:Bash"))
+			reconnectDone <- r
+		}()
+		deadline := time.Now().Add(2 * time.Second)
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			cur := s.pendingInteractions()
+			if len(cur) == 1 && cur[0].AlwaysHonored != nil && !*cur[0].AlwaysHonored && len(cur[0].AlwaysKeys) == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("resumable reconnect did not sanitize pending card: %+v", cur)
+			}
+			<-tick.C
+		}
+		if err := s.resolve("ix_reconnect_upgrade", proto.Resolution{Allow: &yes, Always: true}); err != nil {
+			t.Fatal(err)
+		}
+		if r := <-reconnectDone; r.Always {
+			t.Fatalf("reconnected inbox Bash card left Always=true: %+v", r)
+		}
+		<-firstDone
+	})
 }
 
 // The same completion must not push twice: a Stop whose reply was already pushed for, with no prompt since, is the same

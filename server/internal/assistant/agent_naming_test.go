@@ -165,7 +165,7 @@ func TestAgentNameLedgerWriteFailureDoesNotPublish(t *testing.T) {
 	s, f, calls := namingFixture(t, func(w http.ResponseWriter, r *http.Request) { namingReply(w, "Fix export") })
 	// Admission must fail before model dispatch when the durable lease cannot be saved.
 	base := s.store()
-	s.store = func() Store { return failingAgentNameStore{base} }
+	s.setStore(func() Store { return failingAgentNameStore{base} })
 	c := f.sessions["server"][0]
 	if s.tryAgentName(context.Background(), "server", c, time.Now()) || calls.Load() != 0 || s.agentDisplayName("server", c) != "" {
 		t.Fatal("failed lease was dispatched or published")

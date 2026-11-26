@@ -11,12 +11,25 @@ export function countsText(c: SubscriptionCounts): string {
   return c.on > 0 ? t("subscriptions.counts_on", { on: c.on }) : t("subscriptions.counts_none");
 }
 
-export function SubscriptionsEntry({ pick, scope }: { pick: (l: SubscriptionSummaryLine) => boolean; scope: SubscriptionsScope }) {
+export function SubscriptionsEntry({
+  pick,
+  scope,
+  onOpen,
+}: {
+  pick: (l: SubscriptionSummaryLine) => boolean;
+  scope: SubscriptionsScope;
+  onOpen?: (state?: string) => void;
+}) {
   const counts = countsOf(useSubscriptionSummary(), pick);
   if (!counts) return null;
   return (
     <Group>
-      <Row icon="loop" label={t("subscriptions.row")} hint={countsText(counts)} onClick={() => navigate(subscriptionsHref(scope))} />
+      <Row
+        icon="loop"
+        label={t("subscriptions.row")}
+        hint={countsText(counts)}
+        onClick={() => (onOpen ? onOpen(scope ? JSON.stringify(scope) : undefined) : navigate(subscriptionsHref(scope)))}
+      />
     </Group>
   );
 }

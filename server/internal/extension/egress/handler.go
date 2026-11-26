@@ -109,8 +109,10 @@ func (p *Proxy) handler(fixed string) http.Handler {
 				http.Error(w, fmt.Sprintf("persona: %s:%s is this proxy", host, port), http.StatusForbidden)
 				return
 			}
-			p.logf("extension %s: refused %s (not in its permissions.network)", ext, host)
-			http.Error(w, fmt.Sprintf("persona: %s is not in this extension's permissions.network", host), http.StatusForbidden)
+			// Say it is the sandbox's egress rule, with the port, in the log and in what the program reads: a connector
+			// that only reports "unreachable" is then traced to the missing grant (#15707).
+			p.logf("extension %s: sandbox egress refused %s:%s (not in its permissions.network, its settings addresses or the hosts its owner allowed)", ext, host, port)
+			http.Error(w, fmt.Sprintf("persona sandbox egress: %s:%s is not in this extension's permissions.network, its settings addresses or the hosts its owner allowed", host, port), http.StatusForbidden)
 			return
 		}
 		dial := func() (net.Conn, error) {

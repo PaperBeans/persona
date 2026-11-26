@@ -260,6 +260,7 @@ func (b *inboxBook) applyMigrated(id string, things []connector.InboxThing, now 
 				b.roundWrite(open)
 				wrote = true
 				fillMigrated(open, t)
+				b.setConnectorExternalPath(open, t)
 				b.noteReceived(open, prev, nil)
 				if t.Tier != "" {
 					b.noteTriaged(open)
@@ -315,6 +316,7 @@ func (b *inboxBook) applyMigrated(id string, things []connector.InboxThing, now 
 			it.StartedAt = t.At
 		}
 		fillMigrated(it, t)
+		b.setConnectorExternalPath(it, t)
 		b.noteReceived(it, inboxSeen{}, nil)
 		if t.Tier != "" {
 			b.noteTriaged(it)

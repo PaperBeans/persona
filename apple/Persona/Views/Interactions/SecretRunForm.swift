@@ -27,6 +27,13 @@ struct SecretRunForm: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 commands(request.commands)
+                if request.delivery == "env" {
+                    NoticeBanner(text: String(localized: "Warning: the typed password goes directly to every command listed above via PERSONA_SECRET. Encoded output may evade redaction."),
+                                 tone: .caution, lineLimit: nil)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text("Warning: the typed password goes directly to every command listed above via PERSONA_SECRET. Encoded output may evade redaction."))
+                        .accessibilityIdentifier("secret-run.env-warning")
+                }
             } else {
                 codeBox(Text(interaction.summary ?? ""))
             }
@@ -102,7 +109,7 @@ struct SecretRunForm: View {
         Keyboard.dismiss()
         password = ""
         Task {
-            await model.resolve(interaction, resolution)
+            await model.resolve(interaction, resolution, handoffCard: true)
             sending = false
         }
     }

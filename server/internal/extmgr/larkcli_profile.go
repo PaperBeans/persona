@@ -297,6 +297,11 @@ func (h *Manager) newLarkCLIConnector(profile string) cliport.Connector {
 			}
 			return current, nil
 		}})
+	if visibility := h.cfg.Inbox.Visibility; visibility.AppliesTo(cliwire.ConnectorID) {
+		if err := lc.SetManagedInboxVisibility(visibility.Chats, visibility.DirectChats); err != nil {
+			h.logf("lark-cli: invalid central inbox visibility; source reads fail closed: %v", err)
+		}
+	}
 	lc.SetStateStore(h.store)
 	lc.SetInboxSource(h.cfg.Lark.Prefer, func(ctx context.Context) bool {
 		gateway := h.connectors.Get(connector.Lark)

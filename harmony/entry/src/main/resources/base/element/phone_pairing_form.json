@@ -1,0 +1,108 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_title",
+      "value": "连接 hub"
+    },
+    {
+      "name": "phone_pair_method",
+      "value": "连接方式"
+    },
+    {
+      "name": "phone_pair_password",
+      "value": "密码登录"
+    },
+    {
+      "name": "phone_pair_token",
+      "value": "扫码或其他配对方式"
+    },
+    {
+      "name": "phone_pair_https",
+      "value": "HTTPS hub 地址"
+    },
+    {
+      "name": "phone_pair_address",
+      "value": "服务器地址"
+    },
+    {
+      "name": "phone_pair_code",
+      "value": "配对码"
+    },
+    {
+      "name": "phone_pair_photo",
+      "value": "从照片选取"
+    },
+    {
+      "name": "phone_pair_manual",
+      "value": "手动输入"
+    },
+    {
+      "name": "phone_pair_command",
+      "value": "命令行"
+    },
+    {
+      "name": "phone_pair_other_info",
+      "value": "手动输入地址、经 SSH 隧道连接，或者在 hub 所在的机器上用命令出码。"
+    },
+    {
+      "name": "phone_pair_command_info",
+      "value": "会用 hub 所在机器的终端的话：在那台机器上运行这一行，它会打印二维码和配对链接。"
+    },
+    {
+      "name": "phone_pair_password_info",
+      "value": "在系统登录窗口输入管理员设置的连接密码。自签名证书请使用扫码配对。"
+    },
+    {
+      "name": "phone_password_address",
+      "value": "请输入有效的 HTTPS hub 地址。"
+    },
+    {
+      "name": "phone_password_expired",
+      "value": "登录授权已过期，请重新登录。"
+    },
+    {
+      "name": "phone_password_browser",
+      "value": "无法打开系统登录窗口。"
+    },
+    {
+      "name": "phone_pair_photo_invalid",
+      "value": "请选择含有一个 hub 配对二维码的照片。"
+    },
+    {
+      "name": "phone_pair_access",
+      "value": "Cloudflare Access"
+    },
+    {
+      "name": "phone_pair_access_info",
+      "value": "仅用于通过 Cloudflare Access 发布的 hub：填写服务令牌的 Client ID 和 Client Secret，它们随这台 hub 的配对安全保存在本机。"
+    },
+    {
+      "name": "phone_pair_ssh",
+      "value": "经 SSH 隧道连接"
+    },
+    {
+      "name": "phone_pair_ssh_info",
+      "value": "这台设备访问不到 hub 的地址时（不在同一个网络、没开 VPN），可以经一台能访问 hub 的 SSH 服务器转过去。"
+    },
+    {
+      "name": "phone_pair_access_id",
+      "value": "Client ID"
+    },
+    {
+      "name": "phone_pair_access_secret",
+      "value": "Client Secret"
+    },
+    {
+      "name": "phone_pair_ssh_configured",
+      "value": "通过此 SSH 隧道连接这台 hub。"
+    },
+    {
+      "name": "phone_pair_camera_reason",
+      "value": "仅在连接 hub 时使用相机识别配对二维码。"
+    },
+    {
+      "name": "phone_pair_scan_info",
+      "value": "扫描设置 hub 时显示的二维码，或扫描已连接设备「设置 › 设备 › 连接新设备」中的二维码。"
+    }
+  ]
+}

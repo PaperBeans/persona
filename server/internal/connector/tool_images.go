@@ -21,6 +21,7 @@ import (
 
 	_ "golang.org/x/image/webp"
 
+	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -32,10 +33,11 @@ type ToolImage struct {
 	Caption string `json:"caption,omitempty"`
 }
 
-// ToolAnswer is a read tool's answer with its pictures (ImageTools).
+// ToolAnswer is a read tool's answer with its pictures and out-of-band views (ImageTools).
 type ToolAnswer struct {
 	Text   string
 	Images []ToolImage
+	Views  []wire.View
 }
 
 // ImageTools are ReadTools whose answers can carry pictures for the model: a connector program's (proc), or an
@@ -80,8 +82,11 @@ var toolImageTypes = []string{"image/jpeg", "image/png", "image/webp"}
 // before each ("[image 1 of 2] its caption"). A picture over a limit is left out, and a line after the text says how
 // many and why. Without pictures it is the text alone, as before.
 func ToolResult(a ToolAnswer) proto.ToolResult {
+	views := SanitizeToolViews(a.Views)
 	if len(a.Images) == 0 {
-		return proto.TextResult(a.Text, false)
+		out := proto.TextResult(a.Text, false)
+		out.ToolViews = views
+		return out
 	}
 	type kept struct {
 		data    []byte
@@ -129,6 +134,7 @@ func ToolResult(a ToolAnswer) proto.ToolResult {
 		out.Content = append(out.Content, proto.Content{Type: "text", Text: line},
 			proto.Content{Type: "image", Data: base64.StdEncoding.EncodeToString(k.data), MimeType: k.mime})
 	}
+	out.ToolViews = views
 	return out
 }
 

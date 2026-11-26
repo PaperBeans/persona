@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"slices"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 // Asking the room (docs/assistant/meeting-minutes.md "Asking the room"): in a room meeting POST …/ask is answered by
 // the room conversation. A typed or spoken question goes to the room as the owner's own message, the question's text
 // only; a heard one as a message with source meeting, the lines before the tap in a context block. Each attempt's
-// message has client_msg_id ask-<id>-<k> and is kept with the ask (kb.AskAttempt), so a restart looks for it and its
+// message has client_msg_id ask-<id>-<k> and is kept with the ask (recordingwire.AskAttempt), so a restart looks for it and its
 // turn in the room before it decides anything, and asking a failed ask again reaches the room again. The answer is the
 // room's reply to that message, Markdown removed and cut at a sentence end. Which way an ask goes (via) is fixed when
 // its first attempt goes out: the room while it is ready; meeting.answer while it is unavailable or once it ended;
@@ -39,20 +40,20 @@ func askMsgID(id string, k int) string { return fmt.Sprintf("ask-%s-%d", id, k) 
 // answerInRoom answers ask a of recording id, a room meeting: it waits for a starting room, fixes its way (via) at
 // its first attempt and answers in the room, or from meeting material. resumed: a restart left it pending (its
 // attempt, if it has one, may be in the room already).
-func (s *Recordings) answerInRoom(ctx context.Context, e *kb.Engine, id string, a kb.LiveAsk) kb.LiveAsk {
+func (s *Recordings) answerInRoom(ctx context.Context, e *kb.Engine, id string, a recordingwire.LiveAsk) recordingwire.LiveAsk {
 	if a.Via == "" {
 		via, ok := s.roomVia(ctx, e, id)
 		if !ok {
 			return failAsk(a, askInterrupted) // the service is stopping: asked again after the restart
 		}
-		if via == kb.AskViaMaterial {
+		if via == recordingwire.AskViaMaterial {
 			a.Via = via
-			s.askNote(e, id, a.ID, func(x *kb.LiveAsk) { x.Via = via })
+			s.askNote(e, id, a.ID, func(x *recordingwire.LiveAsk) { x.Via = via })
 			return s.answerMaterial(ctx, e, id, a)
 		}
 		a.Via = via
 	}
-	if a.Via == kb.AskViaMaterial {
+	if a.Via == recordingwire.AskViaMaterial {
 		return s.answerMaterial(ctx, e, id, a)
 	}
 	return s.answerRoomTurn(ctx, e, id, a)
@@ -63,18 +64,18 @@ func (s *Recordings) answerInRoom(ctx context.Context, e *kb.Engine, id string, 
 func (s *Recordings) roomVia(ctx context.Context, e *kb.Engine, id string) (string, bool) {
 	for {
 		changed := s.room.wait(id)
-		m, r, err := e.MeetingRead(id)
+		m, r, err := writersOf(e).MeetingRead(id)
 		if err != nil || m.Room == nil {
-			return kb.AskViaMaterial, true
+			return recordingwire.AskViaMaterial, true
 		}
 		switch m.Room.State {
-		case kb.RoomReady:
-			return kb.AskViaRoom, true
-		case kb.RoomUnavailable, kb.RoomEnded, kb.RoomDeleted:
-			return kb.AskViaMaterial, true
-		case "", kb.RoomNone:
+		case recordingwire.RoomReady:
+			return recordingwire.AskViaRoom, true
+		case recordingwire.RoomUnavailable, recordingwire.RoomEnded, recordingwire.RoomDeleted:
+			return recordingwire.AskViaMaterial, true
+		case "", recordingwire.RoomNone:
 			if !r.Attending() {
-				return kb.AskViaMaterial, true
+				return recordingwire.AskViaMaterial, true
 			}
 			s.meetingKick(id) // its room is about to start
 		}
@@ -91,18 +92,18 @@ func (s *Recordings) roomVia(ctx context.Context, e *kb.Engine, id string) (stri
 }
 
 // answerMaterial is a's answer from meeting material (meeting.answer, as in #2981), within askTimeout.
-func (s *Recordings) answerMaterial(ctx context.Context, e *kb.Engine, id string, a kb.LiveAsk) kb.LiveAsk {
+func (s *Recordings) answerMaterial(ctx context.Context, e *kb.Engine, id string, a recordingwire.LiveAsk) recordingwire.LiveAsk {
 	ctx, cancel := context.WithTimeout(ctx, s.tm().askTimeout)
 	defer cancel()
 	out := s.answerMeetingAsk(ctx, e, id, a)
-	out.Via = kb.AskViaMaterial
+	out.Via = recordingwire.AskViaMaterial
 	return out
 }
 
 // askNote changes ask askID of recording id's live log with fn.
-func (s *Recordings) askNote(e *kb.Engine, id, askID string, fn func(a *kb.LiveAsk)) {
-	if _, err := e.LiveUpdate(id, func(l *kb.Live, _ kb.Recording) error {
-		i := slices.IndexFunc(l.Asks, func(x kb.LiveAsk) bool { return x.ID == askID })
+func (s *Recordings) askNote(e *kb.Engine, id, askID string, fn func(a *recordingwire.LiveAsk)) {
+	if _, err := writersOf(e).LiveUpdate(id, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		i := slices.IndexFunc(l.Asks, func(x recordingwire.LiveAsk) bool { return x.ID == askID })
 		if i < 0 || l.Asks[i].State != askPending {
 			return errAskGone
 		}
@@ -115,7 +116,7 @@ func (s *Recordings) askNote(e *kb.Engine, id, askID string, fn func(a *kb.LiveA
 
 // answerRoomTurn answers a in recording id's room: one ask at a time per room, after a batch turn running there;
 // its latest attempt is sent (again, under the same id, when the room does not have it) and its turn read.
-func (s *Recordings) answerRoomTurn(ctx context.Context, e *kb.Engine, id string, a kb.LiveAsk) kb.LiveAsk {
+func (s *Recordings) answerRoomTurn(ctx context.Context, e *kb.Engine, id string, a recordingwire.LiveAsk) recordingwire.LiveAsk {
 	var release func()
 	for {
 		rel, busy, ok := s.room.take(id)
@@ -130,22 +131,22 @@ func (s *Recordings) answerRoomTurn(ctx context.Context, e *kb.Engine, id string
 		}
 	}
 	defer release()
-	m, r, err := e.MeetingRead(id)
+	m, r, err := writersOf(e).MeetingRead(id)
 	if err != nil || m.Room == nil || m.Room.SessionID == "" {
 		return failAsk(a, askRoomUnavailble)
 	}
 	machine, session := m.Room.MachineID, m.Room.SessionID
-	if m.Room.State != kb.RoomReady && len(a.Attempts) == 0 {
+	if m.Room.State != recordingwire.RoomReady && len(a.Attempts) == 0 {
 		return failAsk(a, askRoomUnavailble)
 	}
-	var attempt kb.AskAttempt
+	var attempt recordingwire.AskAttempt
 	if n := len(a.Attempts); n > 0 {
 		attempt = a.Attempts[n-1]
 	}
 	transcript := busTranscript{s: s, machine: machine, session: session}
 	if attempt.K == 0 || attempt.SentAt.IsZero() {
 		if attempt.K == 0 {
-			attempt = kb.AskAttempt{K: 1, MsgID: askMsgID(a.ID, 1)}
+			attempt = recordingwire.AskAttempt{K: 1, MsgID: askMsgID(a.ID, 1)}
 		}
 		if !s.roomWaitFree(ctx, e, id, machine, session) {
 			return failAsk(a, askInterrupted)
@@ -156,9 +157,9 @@ func (s *Recordings) answerRoomTurn(ctx context.Context, e *kb.Engine, id string
 			return failAsk(a, failed)
 		}
 		attempt.SentAt = time.Now().UTC()
-		s.askNote(e, id, a.ID, func(x *kb.LiveAsk) {
-			x.Via, x.Heard, x.Question = kb.AskViaRoom, a.Heard, a.Question
-			x.Attempts = append(slices.DeleteFunc(x.Attempts, func(y kb.AskAttempt) bool { return y.K == attempt.K }), attempt)
+		s.askNote(e, id, a.ID, func(x *recordingwire.LiveAsk) {
+			x.Via, x.Heard, x.Question = recordingwire.AskViaRoom, a.Heard, a.Question
+			x.Attempts = append(slices.DeleteFunc(x.Attempts, func(y recordingwire.AskAttempt) bool { return y.K == attempt.K }), attempt)
 		})
 		if err := s.roomSendAsk(ctx, machine, session, attempt.MsgID, text, src); err != nil {
 			s.logf("recording %s: question %s to its room: %v", short(id), a.ID, err)
@@ -235,9 +236,9 @@ func roomTurnError(row proto.Session, found bool, sentAt time.Time, answer strin
 // is started again after roomRetry.
 func (s *Recordings) roomCannotAnswer(e *kb.Engine, id string) {
 	now := time.Now().UTC()
-	s.roomSet(e, id, func(rm *kb.MeetingRoom) {
-		if rm.State == kb.RoomReady {
-			rm.State, rm.Problem, rm.RetryAt = kb.RoomUnavailable, kb.RoomStartFailed, now.Add(roomRetry)
+	s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+		if rm.State == recordingwire.RoomReady {
+			rm.State, rm.Problem, rm.RetryAt = recordingwire.RoomUnavailable, recordingwire.RoomStartFailed, now.Add(roomRetry)
 		}
 	})
 	s.roomAsksFallBack(id)
@@ -252,9 +253,9 @@ func (s *Recordings) roomWaitFree(ctx context.Context, e *kb.Engine, id, machine
 	lean := false
 	for first := true; ; first = false {
 		row, found, err := s.attendeeRow(ctx, machine, session)
-		var ln kb.MeetingRoomLean
+		var ln recordingwire.MeetingRoomLean
 		if first || lean { // an older room's record is not read again
-			if m, _, merr := e.MeetingRead(id); merr == nil && m.Room != nil && m.Room.Batching >= kb.RoomBatchingLean {
+			if m, _, merr := writersOf(e).MeetingRead(id); merr == nil && m.Room != nil && m.Room.Batching >= recordingwire.RoomBatchingLean {
 				lean, ln = true, m.Room.Lean
 			}
 		}
@@ -281,7 +282,7 @@ func (s *Recordings) roomWaitFree(ctx context.Context, e *kb.Engine, id, machine
 // roomAskMessage is the message ask a sends recording r's room: a typed or spoken question as it is (the owner's
 // own, no message source), a heard one the lines before the tap (message source meeting); a.Heard is set for it. A
 // failure (nothing_heard, model_error) when there is nothing to send.
-func (s *Recordings) roomAskMessage(ctx context.Context, e *kb.Engine, id string, r kb.Recording, a *kb.LiveAsk) (string, *proto.MessageSource, string) {
+func (s *Recordings) roomAskMessage(ctx context.Context, e *kb.Engine, id string, r recordingwire.Recording, a *recordingwire.LiveAsk) (string, *proto.MessageSource, string) {
 	if a.QuestionSource != askHeard {
 		return a.Question, nil, ""
 	}
@@ -315,16 +316,16 @@ func (s *Recordings) roomSendAsk(ctx context.Context, machine, session, msgID, t
 }
 
 // roomAnswered is a, answered with the room's reply: Markdown removed, cut at a sentence end to maxAnswerRunes.
-func roomAnswered(a kb.LiveAsk, reply string, sources []kb.AskSource) kb.LiveAsk {
+func roomAnswered(a recordingwire.LiveAsk, reply string, sources []recordingwire.AskSource) recordingwire.LiveAsk {
 	answer := plainAnswer(stripMarkdown(reply))
 	if answer == "" {
 		return failAsk(a, askNoAnswer)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if sources == nil {
-		sources = []kb.AskSource{}
+		sources = []recordingwire.AskSource{}
 	}
-	a.State, a.Answer, a.Error, a.Sources, a.AnsweredAt, a.Via = askAnswered, answer, "", sources, &now, kb.AskViaRoom
+	a.State, a.Answer, a.Error, a.Sources, a.AnsweredAt, a.Via = askAnswered, answer, "", sources, &now, recordingwire.AskViaRoom
 	return a
 }
 

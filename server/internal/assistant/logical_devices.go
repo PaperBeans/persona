@@ -12,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/devices"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 type logicalConversationStore interface {
@@ -23,7 +24,6 @@ type logicalConversationStore interface {
 	BeginConversationSwitch(context.Context, string, string, db.ConversationSwitch) error
 	PrepareConversationSegment(context.Context, string, string, string, conversationlog.Segment, int) error
 	ActivateConversationSegment(context.Context, string, string, string, int64) error
-	ResolveConversationSwitch(context.Context, string, string, string, string, string) error
 	ConversationSwitch(context.Context, string, string, string) (*db.ConversationSwitch, error)
 	ObserveConversationSource(context.Context, string, string, string) error
 	ObserveConversationRevision(context.Context, string, string, int64) error
@@ -43,10 +43,15 @@ type logicalSwitchStore interface {
 	logicalConversationStore
 	PutConversationHandoff(context.Context, string, string, string, json.RawMessage) error
 	ConversationPreparation(context.Context, string, string, string) (json.RawMessage, bool, error)
+	ConversationPendingHandoff(context.Context, string, string, string) (json.RawMessage, error)
 	ClaimConversationPreparation(context.Context, string, string, string) (bool, error)
+	ConversationPreparedSession(context.Context, string, string, string, string, int64) (string, error)
+	ResolveConversationPreparation(context.Context, string, string, string, string, string) error
 	ConversationUnresolvedInput(context.Context, string, string) (*db.ConversationInput, error)
 	ConversationInputPending(context.Context, string, string) (bool, error)
 	AcceptIdleConversationSwitch(context.Context, string, string, string, int64) (bool, error)
+	CancelConversationSwitch(context.Context, string, string, string, int64, string) (bool, error)
+	NoteConversationSwitchError(context.Context, string, string, string, string) error
 	ConversationClosures(context.Context) ([][2]string, error)
 	ConversationClosureDone(context.Context, string, string) error
 }
@@ -58,12 +63,13 @@ type logicalSourceKey struct{}
 type logicalHistoryOnlyKey struct{}
 
 type logicalDeviceState struct {
-	mu      sync.Mutex
-	at      time.Time
-	rows    []db.LogicalConversation
-	index   map[[2]string]*db.LogicalConversation
-	running map[[2]string]bool
-	watches map[[2]string]json.RawMessage
+	mu         sync.Mutex
+	at         time.Time
+	rows       []db.LogicalConversation
+	index      map[[2]string]*db.LogicalConversation
+	running    map[[2]string]bool
+	sweepAfter [2]string
+	watches    map[[2]string]json.RawMessage
 }
 
 // Reads may use a short-lived projection index. Authority and execution never do:
@@ -243,6 +249,139 @@ func (d *logicalDevices) ConnectedAt(machine string) time.Time {
 	return time.Time{}
 }
 
+// logicalConversationSpace recovers the authoritative space of logical conversation c from the
+// conversation-space registry across its logical root and segments. Returns known=false when no space
+// has been recorded or the store cannot be read so callers fail closed instead of treating an unknown
+// space as the default empty space.
+func (s *Service) logicalConversationSpace(ctx context.Context, c *db.LogicalConversation) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	ids := make([]string, 0, 1+len(c.Segments))
+	seen := make(map[string]struct{}, 1+len(c.Segments))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	add(c.SessionID)
+	for _, seg := range c.Segments {
+		add(seg.SessionID)
+	}
+	return s.notedSpaceForIDs(ctx, ids, "")
+}
+
+// logicalRowSpace recovers the authoritative space of a LogicalPlaceholder row, consulting both the
+// logical conversation's segment ids (when present in the logical index) and any explicit non-empty Space
+// already carried on the row. Returns known=false when the space cannot be determined or the store fails.
+func (s *Service) logicalRowSpace(ctx context.Context, row proto.Session) (string, bool) {
+	ids := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	add(row.SessionID)
+	_, index, err := s.logicalIndex()
+	if err != nil {
+		return "", false
+	}
+	if index != nil && row.SessionID != "" {
+		if c := index[[2]string{row.MachineID, row.SessionID}]; c != nil {
+			add(c.SessionID)
+			for _, seg := range c.Segments {
+				add(seg.SessionID)
+			}
+		}
+	}
+	return s.notedSpaceForIDs(ctx, ids, row.Space)
+}
+
+// isLogicalOfflineRow reports whether row represents an offline logical placeholder with no physical Cwd/Space,
+// either in-process (LogicalPlaceholder) or after JSON decoding (where LogicalPlaceholder's json:"-" tag is
+// stripped but the row still matches a logical conversation with empty Cwd and Space).
+func (s *Service) isLogicalOfflineRow(row proto.Session) bool {
+	if row.LogicalPlaceholder {
+		return true
+	}
+	if !row.Assistant || row.Cwd != "" || row.Space != "" || row.SessionID == "" {
+		return false
+	}
+	_, index, err := s.logicalIndex()
+	if err != nil {
+		return true
+	}
+	if index == nil {
+		return false
+	}
+	return index[[2]string{row.MachineID, row.SessionID}] != nil
+}
+
+// conversationRowSpace returns row's authoritative space and whether it is known. Physical rows keep
+// spaceOf(row); offline logical placeholders never equate an empty Cwd/Space to the default space unless
+// their space is affirmatively known.
+func (s *Service) conversationRowSpace(ctx context.Context, row proto.Session) (string, bool) {
+	if !s.isLogicalOfflineRow(row) {
+		return spaceOf(row), true
+	}
+	return s.logicalRowSpace(ctx, row)
+}
+
+func (s *Service) notedSpaceForIDs(ctx context.Context, ids []string, existingSpace string) (string, bool) {
+	if len(ids) == 0 && existingSpace == "" {
+		return "", false
+	}
+	lookupCtx := ctx
+	var cancel context.CancelFunc
+	if lookupCtx == nil {
+		lookupCtx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+	} else if _, hasDeadline := lookupCtx.Deadline(); !hasDeadline {
+		lookupCtx, cancel = context.WithTimeout(lookupCtx, 2*time.Second)
+		defer cancel()
+	}
+	var noted map[string]string
+	if len(ids) > 0 {
+		var err error
+		noted, err = s.readNotedSpaces(lookupCtx, ids)
+		if err != nil {
+			return "", false
+		}
+	}
+	found := false
+	best := ""
+	bestRank := -1
+	consider := func(sp string) {
+		rank := 0
+		if sp != "" {
+			rank = 1 + s.trackPolicy(lookupCtx, sp).strictness()
+		}
+		if !found || rank > bestRank || (rank == bestRank && sp < best) {
+			found, best, bestRank = true, sp, rank
+		}
+	}
+	for _, id := range ids {
+		if sp, ok := noted[id]; ok {
+			consider(sp)
+		}
+	}
+	if existingSpace != "" {
+		consider(existingSpace)
+	}
+	return best, found
+}
+
 func (d *logicalDevices) Session(machine, session string) (proto.Session, bool) {
 	_, index, err := d.s.logicalIndex()
 	if err != nil {
@@ -259,11 +398,16 @@ func (d *logicalDevices) Session(machine, session string) (proto.Session, bool) 
 		if a, ok := c.Active(); ok {
 			row, found := d.Devices.Session(a.MachineID, a.SessionID)
 			if !found {
-				row = proto.Session{Status: proto.StatusOffline, Assistant: true}
+				row = proto.Session{Status: proto.StatusOffline, Assistant: true, LogicalPlaceholder: true}
 			}
 			row.MachineID, row.SessionID = c.MachineID, c.SessionID
 			if c.Epoch > 1 {
 				row.Rev = c.Revision
+			}
+			if row.LogicalPlaceholder {
+				if sp, known := d.s.logicalConversationSpace(context.Background(), c); known && sp != "" {
+					row.Space = sp
+				}
 			}
 			return row, true
 		}
@@ -436,4 +580,127 @@ func (d *logicalDevices) liveTarget(machine string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+type logicalSegmentInputStore interface {
+	ConversationSegmentDispatched(context.Context, string, string, string) (bool, error)
+	MarkConversationSegmentDispatched(context.Context, string, string, string) error
+}
+
+type currentConnectionListState interface {
+	CurrentConnectionListed(string) bool
+}
+
+func isMissingTranscriptErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *rpc.Error
+	if errors.As(err, &re) && re.Code == codeSessionNotFound {
+		return true
+	}
+	code, coded := relayErrCode(err)
+	return coded && code == codeSessionNotFound
+}
+
+// isZeroTurnPreparedSegment reports whether seg is an active pre-created segment
+// (Ordinal > 1) with no observed generation, no file growth revision, no durable
+// history row, and no dispatched or accepted input since activation. Any segment
+// with real history evidence fails closed and keeps data-loss protection.
+func (s *Service) isZeroTurnPreparedSegment(ctx context.Context, c *db.LogicalConversation, seg conversationlog.Segment) bool {
+	if c == nil || seg.Ordinal <= 1 || seg.State != "active" || seg.FrozenEnd != nil {
+		return false
+	}
+	if seg.SourceHistory != "" || seg.SourceRevision != 0 {
+		return false
+	}
+	hs, ok := s.store().(conversationHistoryStore)
+	if !ok {
+		return false
+	}
+	h, err := hs.ConversationHistory(ctx, seg.MachineID, seg.SessionID)
+	if err != nil || h != nil {
+		return false
+	}
+	inputs, ok := s.store().(logicalSegmentInputStore)
+	if !ok {
+		return false
+	}
+	dispatched, err := inputs.ConversationSegmentDispatched(ctx, c.MachineID, c.SessionID, seg.ID)
+	return err == nil && !dispatched
+}
+
+func (s *Service) physicalSegmentMissing(ctx context.Context, seg conversationlog.Segment) bool {
+	physical := s.physicalDevices()
+	if physical != nil {
+		if _, found := physical.Session(seg.MachineID, seg.SessionID); found {
+			return false
+		}
+		if live, ok := physical.(currentConnectionListState); ok {
+			if !live.CurrentConnectionListed(seg.MachineID) {
+				return false
+			}
+		} else {
+			sum, known := physical.Summary(seg.MachineID)
+			if !known || !sum.Online {
+				return false
+			}
+			if shown, ok := physical.Shown(seg.MachineID); !ok || !shown.Listed || !shown.Until.IsZero() {
+				return false
+			}
+		}
+	}
+	// Never decide absence from the display cache alone: Shown.Listed can hold a
+	// retained pre-reconnect snapshot or lag behind a slow >3s list push after
+	// segment prepare. Probe the live node authoritatively with a bounded timeout;
+	// offline, grace, unready, malformed, or timed-out probes stay uncertain.
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var raw json.RawMessage
+	var err error
+	if physical != nil {
+		raw, err = physical.CallNode(probeCtx, seg.MachineID, DeviceSessionsList, json.RawMessage(`{}`))
+	} else {
+		err = s.call(context.WithValue(probeCtx, logicalSourceKey{}, true), seg.MachineID, DeviceSessionsList, map[string]any{}, &raw)
+	}
+	if err != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false
+	}
+	rawSessions, ok := fields["sessions"]
+	if !ok {
+		return false
+	}
+	var sessions []proto.Session
+	if len(rawSessions) > 0 && string(rawSessions) != "null" {
+		if err := json.Unmarshal(rawSessions, &sessions); err != nil {
+			return false
+		}
+	}
+	for _, row := range sessions {
+		if row.SessionID == seg.SessionID {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) isVanishedZeroTurnSegment(ctx context.Context, c *db.LogicalConversation, seg conversationlog.Segment) bool {
+	return s.isZeroTurnPreparedSegment(ctx, c, seg) && s.physicalSegmentMissing(ctx, seg)
+}
+
+func (s *Service) isZeroTurnPlaceholderConversation(ctx context.Context, machine, session string) bool {
+	st, ok := s.store().(logicalConversationStore)
+	if !ok {
+		return false
+	}
+	c, err := s.physicalLogicalConversation(ctx, st, machine, session)
+	if err != nil || c == nil || c.Deleted || c.MachineID != machine || c.SessionID != session {
+		return false
+	}
+	a, ok := c.Active()
+	return ok && s.isZeroTurnPreparedSegment(ctx, c, a)
 }

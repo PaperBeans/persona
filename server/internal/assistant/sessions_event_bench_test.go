@@ -38,7 +38,9 @@ func sessionsChangedOf() (*Service, []byte) {
 }
 
 // The manager keeps of each list only what it reads again (#2472): about 995 KB an event measured, where copies of the
-// previous list, the reply reminders' rows and the herdr marks' list made it 1.92 MB.
+// previous list, the reply reminders' rows and the herdr marks' list made it 1.92 MB. Each row's view (Session.view,
+// #15397) adds about 57 KB: its bytes in the list told (about 60 a row) and the Agents list it is decided over;
+// 1,052 KB measured.
 func TestSessionsChangedEventKeepsLittle(t *testing.T) {
 	if raceEnabled {
 		t.Skip("race instrumentation allocates")
@@ -47,7 +49,16 @@ func TestSessionsChangedEventKeepsLittle(t *testing.T) {
 		return
 	}
 	s, params := sessionsChangedOf()
+	// NodeEvent queues SessionsChanged. Reuse the same marker so both samples include
+	// all preceding callbacks without allocating a barrier inside the measured window.
+	done := make(chan struct{})
+	mark := func() { done <- struct{}{} }
+	drain := func() {
+		s.inOrder(mark)
+		<-done
+	}
 	s.NodeEvent("mac", "sessions.changed", params)
+	drain()
 	const runs = 200
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -55,10 +66,11 @@ func TestSessionsChangedEventKeepsLittle(t *testing.T) {
 	for range runs {
 		s.NodeEvent("mac", "sessions.changed", params)
 	}
+	drain()
 	runtime.ReadMemStats(&after)
 	per := (after.TotalAlloc - before.TotalAlloc) / runs
-	if per > 1025000 {
-		t.Fatalf("one sessions.changed allocated %d bytes, want at most 1025000", per)
+	if per > 1085000 {
+		t.Fatalf("one sessions.changed allocated %d bytes, want at most 1085000", per)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 
 // CardKit (open.feishu.cn "Card entity"): a card made first and sent by its id (CardEntityContent as an interactive
 // message's content), which can then be written into without sending the message again: the progress card's live text
-// is streamed into it and comes in letter by letter (the assistant's feishu_stream.go). Every write carries a sequence
+// is streamed into it and comes in letter by letter (the module's stream.go). Every write carries a sequence
 // that must grow for the card and a uuid; a message sent with an entity is still updated whole by UpdateCard (PATCH on
 // the message), which replaces the entity's content too. Needs the app's cardkit:card:write.
 

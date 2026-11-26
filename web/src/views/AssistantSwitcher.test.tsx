@@ -483,4 +483,33 @@ describe("the sidebar's assistant switcher", () => {
     expect(head().querySelector("[data-avatar-status]")).toBeNull();
     expectDescribedStatus("连不上 hub");
   });
+
+  it("keeps the default Persona face, subtitle, and mounted switcher node while the roster reloads", async () => {
+    setRoster(ROSTER);
+    resetRoster(); // simulate reload before /managers responds
+    hub.roster = new Promise(() => {});
+    await render();
+    const initialHead = head();
+    // Default assistant must never flash the green first-letter monogram circle while roster is null.
+    expect(initialHead.querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(initialHead.textContent).toContain("助手");
+    expect(initialHead.textContent).toContain("在线");
+    expect(initialHead.textContent).not.toContain("2 / 3 台电脑在线");
+
+    // When the multi-manager roster arrives, SwitcherRow stays mounted in place without resetting the button node.
+    act(() => setRoster(ROSTER));
+    await flush();
+    expect(head()).toBe(initialHead);
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+  });
+
+  it("treats a legacy remembered identity without isDefault as the default face when no non-default manager was chosen", async () => {
+    resetRoster();
+    resetManagerChoice();
+    noteShownIdentity({ id: "assistant", name: "助手" });
+    hub.roster = new Promise(() => {});
+    await render();
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    expect(head().textContent).toContain("助手");
+  });
 });

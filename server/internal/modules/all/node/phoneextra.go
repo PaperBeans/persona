@@ -17,7 +17,7 @@ import (
 // The phone-extra module on the node: the built-in program iphone (this computer's paired iPhones for phone control,
 // docs/extensions/iphone.md) and `personad iphone …`, which pairs them (docs/extensions/iphone-pairing.md).
 func init() {
-	iphoneport.Provide(iphoneBridge{})
+	iphoneport.Provide("phone-extra", iphoneBridge{})
 	commandport.AddCommand("iphone", iphone.Usage, func(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
 		return iphone.Command(ctx, args, stdout, stderr)
 	})

@@ -37,6 +37,15 @@ func (s *Service) InboxTriagePreview(ctx context.Context, p assistantwire.InboxT
 	for i, t := range things {
 		it := &InboxItem{ID: "preview", Source: source}
 		fillConnectorItem(it, t)
+		allowed, err := s.inboxVisibilityModelAllowed(ctx, it)
+		if err != nil || !allowed {
+			why := "This chat is excluded from AI reads."
+			if err != nil {
+				why = "Chat visibility could not be verified."
+			}
+			out[i] = assistantwire.InboxTriageVerdict{State: "error", Why: why}
+			continue
+		}
 		b.mu.Lock()
 		item := b.triagePromptItem(it, language)
 		b.mu.Unlock()

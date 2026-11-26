@@ -31,6 +31,7 @@ type fleetDevs struct {
 	order        []string
 	usage        assistantwire.UsageSummary
 	capacity     proto.CapacitySnapshot // what CapacitySnapshot answers (capacity_test.go)
+	accounts     []proto.UsageAccount   // what UsageAccounts answers (candidate_headroom_test.go)
 	gatewayRetry func(source, provider string, now time.Time) time.Time
 	// attention is every Persona Link summary handed over (SetAttention), in order.
 	attention []link.Attention
@@ -49,11 +50,15 @@ type fleetDevs struct {
 	heldLang  map[string]i18n.Lang
 	heldActs  []string
 	heldErr   error
+	// transfers: every AgentTransfer asked for, in order; transfer answers them (nil: done, with the paths asked).
+	transfers []devices.AgentTransfer
+	transfer  func(devices.AgentTransfer) (devices.AgentTransferResult, error)
 }
 
 type fleetNode struct {
 	name, home, trust string
 	homeReal          string // home with its links followed, when the node says it is another path
+	executable        string // the file its node said it runs from when its connection began ("": it did not say)
 	sessions          []proto.Session
 	lists             int // how many times its whole list was read (Sessions)
 	connected         time.Time
@@ -147,7 +152,8 @@ func (d *fleetDevs) List() []devices.Summary {
 	var out []devices.Summary
 	for _, id := range d.order {
 		n := d.machines[id]
-		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Trust: n.trust, Online: !n.away, Reachable: !n.away})
+		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Executable: n.executable, Trust: n.trust,
+			Online: !n.away, Reachable: !n.away})
 	}
 	return out
 }
@@ -166,7 +172,8 @@ func (d *fleetDevs) Summary(id string) (devices.Summary, bool) {
 	if n == nil || !slices.Contains(d.order, id) {
 		return devices.Summary{}, false
 	}
-	return devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Trust: n.trust, Online: !n.away, Reachable: !n.away}, true
+	return devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Executable: n.executable, Trust: n.trust,
+		Online: !n.away, Reachable: !n.away}, true
 }
 
 // Shown is the node's shownUntil and unlisted, as the devices say them.
@@ -261,6 +268,12 @@ func (d *fleetDevs) CapacitySnapshot(context.Context) proto.CapacitySnapshot {
 	return d.capacity
 }
 
+func (d *fleetDevs) UsageAccounts(context.Context) []proto.UsageAccount {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]proto.UsageAccount(nil), d.accounts...)
+}
+
 func (d *fleetDevs) GatewayRetryAt(source, provider string, now time.Time) time.Time {
 	if d.gatewayRetry != nil {
 		return d.gatewayRetry(source, provider, now)
@@ -332,6 +345,7 @@ type fleetMem struct {
 	resolvedInsertGate    chan struct{}
 	resolvedInsertStarted chan struct{}
 	resolvedOutcomeErr    error
+	deadlineErr           error
 }
 
 func newFleetMem() *fleetMem {
@@ -354,6 +368,24 @@ func (m *fleetMem) InsertInteraction(ctx context.Context, ix proto.Interaction) 
 		m.recs = append(m.recs, db.InteractionRecord{Interaction: ix, Status: "pending"})
 	}
 	return nil
+}
+
+func (m *fleetMem) UpdateInteractionDeadline(_ context.Context, id string, created, expires time.Time) error {
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	if m.deadlineErr != nil {
+		return m.deadlineErr
+	}
+	if m.status[id] != "pending" {
+		return errors.New("interaction deadline was not recorded")
+	}
+	for i := range m.recs {
+		if m.recs[i].Interaction.ID == id && m.recs[i].Interaction.CreatedAt.Equal(created) {
+			m.recs[i].Interaction.ExpiresAt = expires
+			return nil
+		}
+	}
+	return errors.New("interaction deadline was not recorded")
 }
 
 func (m *fleetMem) InsertResolvedInteraction(ctx context.Context, ix proto.Interaction, res *proto.Resolution) error {
@@ -529,6 +561,29 @@ func (m *fleetMem) AlwaysAllowed(_ context.Context, session string, keys []strin
 		}
 	}
 	return len(keys) > 0, nil
+}
+
+func (m *fleetMem) CopyAlways(_ context.Context, fromSession, toSession string) (int, error) {
+	if fromSession == "" || toSession == "" || fromSession == toSession {
+		return 0, nil
+	}
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	src := m.always[fromSession]
+	if len(src) == 0 {
+		return 0, nil
+	}
+	if m.always[toSession] == nil {
+		m.always[toSession] = map[string]bool{}
+	}
+	copied := 0
+	for k := range src {
+		if !m.always[toSession][k] {
+			m.always[toSession][k] = true
+			copied++
+		}
+	}
+	return copied, nil
 }
 
 func (m *fleetMem) MarkSeen(_ context.Context, machine, session string, at time.Time) error {
@@ -712,6 +767,19 @@ func (d *fleetDevs) HeldRetry(_ context.Context, sid, msg string) (bool, error) 
 
 func (d *fleetDevs) HeldDelete(_ context.Context, sid, msg string) (bool, error) {
 	return d.heldAct("delete", sid, msg)
+}
+
+// AgentTransfer notes t and answers it with transfer (a done file at the path asked when that is nil).
+func (d *fleetDevs) AgentTransfer(_ context.Context, t devices.AgentTransfer) (devices.AgentTransferResult, error) {
+	d.mu.Lock()
+	d.transfers = append(d.transfers, t)
+	answer := d.transfer
+	d.mu.Unlock()
+	if answer != nil {
+		return answer(t)
+	}
+	return devices.AgentTransferResult{ID: "t1", Kind: proto.FilePackFile, Name: "report.pdf", Source: t.Path,
+		ResultPath: "/home/me/Downloads/Persona/report.pdf", Size: 2048, SHA256: "abababababababababababababababababababababababababababababababab"}, nil
 }
 
 // heldAct notes Retry or Delete (what) on held message msg of session sid, found on any machine or not; one found is

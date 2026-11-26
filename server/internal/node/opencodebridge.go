@@ -185,12 +185,12 @@ var opencodeBridgeCommand = func(ctx context.Context, rh *RuntimeHost, opencodeB
 		return nil, err
 	}
 	args := []string{filepath.Join(dir, "opencode", "companion.mjs"),
-		"--socket", rh.path, "--bin", opencodeBin, "--no-update", "--parent-stdin"}
+		"--socket", rh.dialPath(), "--bin", opencodeBin, "--no-update", "--parent-stdin"}
 	if instance != "" {
 		args = append(args, "--instance", instance)
 	}
 	cmd := exec.Command(js.Path, args...)
-	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path))
+	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.dialPath()))
 	cmd.Dir = dir
 	return cmd, nil
 }

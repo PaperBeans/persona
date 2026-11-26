@@ -22,22 +22,35 @@ var plainParser = goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
 // What a clip can leave behind with nothing to pair with: emphasis and strike-through runs, backticks.
 var danglingMarks = lazyre.New("\\*{2,}|_{2,}|~{2,}|`+")
 
+type plainOptions struct {
+	dropDangling bool
+	htmlWords    bool
+	proseOnly    bool
+}
+
 // PlainMarkdown is md without its markup, for places that show text as it is (a push, a one-line preview): a line per
 // block, emphasis and code without their marks, a link as its text. Marks a clip left unpaired are dropped too.
-func PlainMarkdown(md string) string { return plain(md, true, false) }
+func PlainMarkdown(md string) string { return plain(md, plainOptions{dropDangling: true}) }
+
+// MarkdownProse keeps the prose and inline code of a reply for navigation excerpts. It skips code blocks and images.
+func MarkdownProse(md string) string {
+	return plain(md, plainOptions{dropDangling: true, proseOnly: true})
+}
 
 // SearchMarkdown keeps visible words inside HTML folds (such as details) as
 // well as ordinary Markdown. Unlike PushText it does not reinterpret flattened
 // tables. Scripts, styles, attributes and comments are not searchable prose.
 // PlainMarkdown's existing preview/title behavior remains unchanged.
-func SearchMarkdown(md string) string { return plain(md, true, true) }
+func SearchMarkdown(md string) string {
+	return plain(md, plainOptions{dropDangling: true, htmlWords: true})
+}
 
 // PushText is PlainMarkdown for a finished turn's push, whose text node already flattened to one line (snippet): a
 // table run into one line says its cells ("item · status · build · passed"), and an answer folded in an HTML block
 // (<details>) says its words, not nothing (#4462). Only the push reads text this way: a plan's title (PlanTitle) and
 // other one-line views keep PlainMarkdown's.
 func PushText(md string) string {
-	lines := strings.Split(plain(oneLineTables(md), true, true), "\n")
+	lines := strings.Split(SearchMarkdown(oneLineTables(md)), "\n")
 	for i, l := range lines {
 		lines[i] = strings.Trim(l, " ·") // a table's cell next to an HTML block's tag leaves a separator at an end
 	}
@@ -136,8 +149,10 @@ func htmlText(block string, hidden *string) string {
 
 // plain is md as plain text; dropDangling also drops emphasis marks and backticks left over after the parse, which a
 // clip leaves unpaired but which in an uncut text are its content (__init__.py, a**b).
-func plain(md string, dropDangling, htmlWords bool) string {
-	md = wire.AssistantCardText(md)
+func plain(md string, opts plainOptions) string {
+	if !opts.proseOnly {
+		md = wire.AssistantCardText(md)
+	}
 	src := []byte(md)
 	var b strings.Builder
 	hidden := ""
@@ -164,15 +179,19 @@ func plain(md string, dropDangling, htmlWords bool) string {
 			}
 			return ast.WalkSkipChildren, nil
 		case *ast.FencedCodeBlock, *ast.CodeBlock:
-			if entering && hidden == "" {
+			if entering && hidden == "" && !opts.proseOnly {
 				lines := n.Lines()
 				for i := 0; i < lines.Len(); i++ {
 					seg := lines.At(i)
 					b.Write(seg.Value(src))
 				}
 			}
+		case *ast.Image:
+			if opts.proseOnly {
+				return ast.WalkSkipChildren, nil
+			}
 		case *ast.HTMLBlock:
-			if entering && htmlWords {
+			if entering && opts.htmlWords {
 				var raw strings.Builder
 				lines := n.Lines()
 				for i := 0; i < lines.Len(); i++ {
@@ -187,7 +206,7 @@ func plain(md string, dropDangling, htmlWords bool) string {
 			}
 			return ast.WalkSkipChildren, nil
 		case *ast.RawHTML:
-			if entering && htmlWords {
+			if entering && (opts.htmlWords || opts.proseOnly) {
 				wasHidden := hidden != ""
 				visible := htmlText(string(n.Segments.Value(src)), &hidden)
 				if wasHidden && hidden == "" && strings.TrimSpace(visible) != "" {
@@ -203,7 +222,7 @@ func plain(md string, dropDangling, htmlWords bool) string {
 	})
 	var lines []string
 	for _, l := range strings.Split(b.String(), "\n") {
-		if dropDangling {
+		if opts.dropDangling {
 			l = danglingMarks.ReplaceAllString(l, "")
 		}
 		if l = OneLine(l); l != "" {
@@ -278,7 +297,7 @@ func characterReference(s []byte) (int, string) {
 // checkbox, code spans, a link's target) that would show as they are.
 func PlanTitle(plan string) string {
 	for _, l := range strings.Split(plan, "\n") {
-		if l = plain(l, false, false); l != "" { // a plan is not clipped: what is left of its marks is its text
+		if l = plain(l, plainOptions{}); l != "" { // a plan is not clipped: what is left of its marks is its text
 			return l
 		}
 	}

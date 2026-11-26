@@ -10,6 +10,14 @@ export class InteractionChoice {
   recommended: boolean = false;
 }
 
+export function interactionPlanTitle(plan: string, fallback: string): string {
+  for (const line of plan.split('\n')) {
+    const title = line.trim().replace(/^[#* ]+|[#* ]+$/g, '');
+    if (title) return title;
+  }
+  return fallback;
+}
+
 /** One field in the deliberately bounded MCP elicitation JSON Schema subset. */
 export class InteractionSchemaField {
   key: string = '';
@@ -43,11 +51,103 @@ function rawInteraction(request: Decision): Record<string, Object> {
   return Object.keys(nested).length > 0 ? nested : root;
 }
 
+export function interactionIsDelegated(request: Decision): boolean { return Wire.bool(rawInteraction(request),'delegating'); }
+
+/** A delegated question may still be answered by its owner. Other routed cards stay with the task supervisor until escalation. */
+export function supervisorHoldsCard(kind:string, delegating:boolean):boolean {
+  return delegating && kind !== 'question';
+}
+export function interactionSupervisorHeld(request: Decision): boolean {
+  return supervisorHoldsCard(request.kind,interactionIsDelegated(request));
+}
+
+/** Main's attention tray contains questions and owner proposals that actually await the person. */
+export function directUserRequest(request: Decision): boolean {
+  const data = rawInteraction(request);
+  if (Wire.bool(data,'delegating')) return false;
+  if (request.kind === 'question') return true;
+  return request.kind === 'elicitation' || request.kind === 'permission' && Wire.bool(data, 'owner_proposal');
+}
+
 function rawRecord(request: Decision): Record<string, Object> { return Wire.parse(request.raw); }
+
+/** Permission prompts hold a tool call open. Other pending cards follow in reverse creation order. */
+export function agentPendingCards(requests: Decision[], fallback?: Decision): Decision[] {
+  const visible = (requests.length ? requests : fallback ? [fallback] : [])
+    .filter((r: Decision) => !['resolved', 'closed', 'dismissed', 'expired', 'cancelled', 'ended'].includes(r.status));
+  const dates = new Map<Decision, number>();
+  for (const r of visible) {
+    const outer = rawRecord(r), inner = Wire.object(outer, 'interaction');
+    const time = Wire.text(inner, 'created_at', Wire.text(outer, 'created_at'));
+    const stamp = Date.parse(time), fraction = time.match(/:\d{2}\.\d{3}(\d+)/);
+    dates.set(r, Number.isFinite(stamp) ? stamp + (fraction ? Number('0.' + fraction[1]) : 0) : Number.NEGATIVE_INFINITY);
+  }
+  // Stable sorting after reversal puts the later entry first when dates are absent or identical.
+  return visible.reverse().sort((a: Decision, b: Decision): number => {
+    if ((a.kind === 'permission') !== (b.kind === 'permission')) return a.kind === 'permission' ? -1 : 1;
+    const left = dates.get(a)!, right = dates.get(b)!;
+    return left === right ? 0 : right > left ? 1 : -1;
+  });
+}
 
 /** The exact tool name is protocol data; it does not use the localized card title. */
 export function interactionToolName(request: Decision): string {
   return Wire.text(rawInteraction(request), 'tool_name');
+}
+
+export function interactionQuestionHeader(request:Decision, key:string):string {
+  const question=Wire.rows(rawInteraction(request),'questions').find((item:Record<string,Object>) => Wire.text(item,'question')===key);
+  return question ? Wire.text(question,'header') : '';
+}
+
+export function interactionCardAgent(request:Decision, session:Record<string,Object>):string {
+  const data=rawInteraction(request), agent=Wire.text(data,'agent'), label=Wire.text(data,'agent_label');
+  if (Wire.text(data,'tool_name')==='ask_user') return 'Persona';
+  if (!agent || agent==='claude') return 'Claude';
+  if (agent==='codex') return 'Codex';
+  if (agent==='paseo' && (!label || label.toLowerCase()==='paseo')) return Wire.text(session,'agent_label') || Wire.text(session,'launcher') || label || agent;
+  return label || agent;
+}
+
+export function interactionPermissionTool(request:Decision):string {
+  const data=rawInteraction(request);
+  return Wire.text(data,'tool_title') || Wire.text(data,'tool_name');
+}
+
+export function interactionPermissionSubject(request:Decision):string {
+  const data=rawInteraction(request), input=Wire.object(data,'tool_input'), summary=Wire.text(data,'summary').trim();
+  if (summary) return summary;
+  const tool=Wire.text(data,'tool_name');
+  if (['secret_run','secret_handoff'].includes(tool)) return '';
+  const hidden=request.fields.filter((field:DecisionField) => field.kind==='secret').map((field:DecisionField) => field.key);
+  const first=tool==='Bash' ? ['command'] : ['Read','Edit','Write','MultiEdit','NotebookEdit'].includes(tool) ? ['file_path','notebook_path'] :
+    tool==='WebFetch' ? ['url'] : tool==='WebSearch' ? ['query'] : [];
+  for (const field of first.concat(['description','command','path','url','query','prompt'])) {
+    const value=hidden.includes(field) ? '' : Wire.text(input,field);
+    if (value.trim()) return value;
+  }
+  return Object.keys(input).filter((key:string) => !hidden.includes(key)).sort().map((key:string) => key+': '+(typeof input[key]==='string' ? String(input[key]) : JSON.stringify(input[key]))).join('\n');
+}
+
+export function interactionSessionAllowance(request:Decision):boolean {
+  const data=rawInteraction(request), agent=Wire.text(data,'agent');
+  if (request.kind!=='permission' || ['secret_run','secret_handoff'].includes(Wire.text(data,'tool_name'))) return false;
+  if (Wire.has(data,'always_honored')) return Wire.bool(data,'always_honored');
+  if (agent && agent!=='claude') return !!Wire.text(data,'always_label').trim();
+  return !!request.session;
+}
+
+// A host-provided scope is literal text. Built-in scopes use the same descriptions as the iPhone.
+export function interactionAllowanceScope(request:Decision):string {
+  const data=rawInteraction(request), label=Wire.text(data,'always_label').trim();
+  if (label) return label;
+  const agent=Wire.text(data,'agent');
+  if (agent && agent!=='claude') return '';
+  const keys=Wire.strings(data,'always_keys'), tool=Wire.text(data,'tool_name');
+  if (keys.length && keys.every((v:string) => v.startsWith('tool:Read(') && v.endsWith('/**)'))) return 'decision_scope_reads';
+  if (keys.length && keys.every((v:string) => v.startsWith('tool:Edit(') && v.endsWith('/**)'))) return 'decision_scope_edits';
+  if (!keys.length || keys.every((v:string) => v==='tool:'+tool)) return tool==='Bash' ? 'decision_scope_commands' : 'decision_scope_tool';
+  return 'decision_scope_custom';
 }
 
 /** Only the assistant's own ask_user question is non-blocking in a Persona conversation. */
@@ -66,8 +166,12 @@ export function firstBlockingDecision(requests: Decision[], selectedKind: string
     !isPersonaAskUserQuestion(request, selectedKind) && !['resolved', 'closed', 'dismissed', 'expired', 'cancelled', 'ended'].includes(request.status));
 }
 
-function recommendedLabel(value: string): boolean {
-  return value.endsWith('(Recommended)') || value.endsWith('（推荐）') || value.endsWith('(推荐)');
+/** Display only. The original label is the answer sent to the asking agent. */
+export function recommendedOptionTitle(value: string): string | undefined {
+  for (const suffix of ['(Recommended)', '（推荐）', '(推荐)']) {
+    if (value.endsWith(suffix)) return value.slice(0, value.length - suffix.length).trim();
+  }
+  return undefined;
 }
 
 function decisionField(key: string, title: string, required: boolean, kind: string, choices: string[] = []): DecisionField {
@@ -177,7 +281,7 @@ function optionFrom(data: Record<string, Object>): InteractionChoice {
   choice.detail = Wire.text(data, 'detail', Wire.text(data, 'description'));
   choice.kind = screenOptionKind(choice.label, Wire.text(data, 'kind'));
   choice.checked = Wire.bool(data, 'checked');
-  choice.recommended = recommendedLabel(choice.label);
+  choice.recommended = recommendedOptionTitle(choice.label) !== undefined;
   return choice;
 }
 
@@ -189,7 +293,7 @@ function fallbackScreenOptions(request: Decision): InteractionChoice[] {
     if (match) {
       const row = new InteractionChoice();
       row.key = match[1]; row.label = match[2].trim(); row.kind = screenOptionKind(row.label, '');
-      row.recommended = recommendedLabel(row.label); rows.push(row);
+      row.recommended = recommendedOptionTitle(row.label) !== undefined; rows.push(row);
     }
   });
   let start = -1;
@@ -341,6 +445,15 @@ export function interactionScreenOptions(request: Decision): InteractionChoice[]
 export function interactionScreenMulti(request: Decision): boolean { return Wire.bool(screenDialog(request), 'multi'); }
 export function interactionScreenSubmitLabel(request: Decision): string { return Wire.text(screenDialog(request), 'submit', 'submit'); }
 export function interactionScreenQuestion(request: Decision): string { return Wire.text(screenDialog(request), 'question', request.prompt); }
+export function interactionSkipReason(request: Decision): string {
+  if (Wire.bool(rawInteraction(request), 'can_cancel')) return '';
+  if (request.kind === 'plan') return 'decision_skip_plan';
+  if (request.kind === 'permission') return 'decision_skip_permission';
+  if (request.kind === 'screen') {
+    return Object.keys(Wire.object(screenDialog(request), 'command_ask')).length ? 'decision_skip_permission' : 'decision_skip_terminal';
+  }
+  return '';
+}
 export function interactionScreenCanCancel(request: Decision): boolean { return request.kind === 'question' && Wire.bool(rawInteraction(request), 'can_cancel'); }
 
 export function interactionSchemaFields(request: Decision): InteractionSchemaField[] { return schemaFields(request); }
@@ -403,14 +516,27 @@ export function interactionElicitationUrl(request: Decision): string {
   return hostname ? raw : '';
 }
 
+export function recordedPlanMode(request:Decision):string {
+  const mode=Wire.text(rawInteraction(request),'plan_then');
+  return ['default','acceptEdits','auto','bypassPermissions'].includes(mode) ? mode : '';
+}
+
+export function interactionIsOpen(request: Decision): boolean {
+  return !!request.id && request.status === 'open' && requestStatus(request) === 'open';
+}
+
 export function interactionCanSubmit(request: Decision, readOnly: boolean = false): boolean {
-  return !readOnly && !!request.id && request.status === 'open' && requestStatus(request) === 'open';
+  return !readOnly && interactionIsOpen(request) && !interactionSupervisorHeld(request);
 }
 
 /** Build the documented proto.Resolution JSON body. Screen labels are resolved to keys before the request is sent. */
 export function interactionResolution(request: Decision, action: string, values: Record<string, Object>, expectedRevision: string = request.revision): Record<string, Object> {
   if (!interactionCanSubmit(request)) throw new Error('not_pending');
   const data = rawInteraction(request);
+  if (action === 'dismiss') {
+    if (interactionToolName(request) === 'ask_user') throw new Error('unsupported');
+    return Wire.payload(['dismiss'], [true]);
+  }
   if (request.kind === 'question') {
     if (action === 'cancel') {
       if (!Wire.bool(data, 'can_cancel')) throw new Error('unsupported');
@@ -430,13 +556,21 @@ export function interactionResolution(request: Decision, action: string, values:
     if (action !== 'approve' && action !== 'deny' && action !== 'reject') throw new Error('unsupported');
     const approved = action === 'approve';
     const body = Wire.payload(['approve'], [approved]);
+    const mode=Wire.text(values,'mode'), recorded=recordedPlanMode(request);
+    if (approved && mode) {
+      if (recorded ? mode!==recorded : !['bypassPermissions','acceptEdits'].includes(mode)) throw new Error('request_updated');
+      body['mode']=mode;
+    }
     if (!approved) body['feedback'] = Wire.text(values, 'feedback');
     return body;
   }
   if (request.kind === 'permission') {
-    if (action !== 'allow' && action !== 'approve' && action !== 'deny') throw new Error('unsupported');
-    const allowed = action === 'allow' || action === 'approve';
+    const sessionAllowance=action==='allow_session';
+    if (sessionAllowance && !interactionSessionAllowance(request)) throw new Error('unsupported');
+    if (!sessionAllowance && action !== 'allow' && action !== 'approve' && action !== 'deny') throw new Error('unsupported');
+    const allowed = sessionAllowance || action === 'allow' || action === 'approve';
     const body = Wire.payload(['allow'], [allowed]);
+    if (sessionAllowance) body['always']=true;
     if (allowed) {
       const fields = Wire.rows(data, 'fields'), filled = Wire.payload([], []);
       fields.forEach((field: Record<string, Object>) => {

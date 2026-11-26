@@ -101,8 +101,13 @@ class PersonaMigrationEdgesTests(unittest.TestCase):
         go, directives = fixture_toolchain(
             self.go, ROOT / "server", self.clean_env())
         (source / "go.mod").write_text(
-            "module github.com/nwverse/persona/server\n\n" + directives)
-        for package in ("compat", "nodeproto", "proto", "dialogwire", "aiwire"):
+            "module github.com/nwverse/persona/server\n\n"
+            + directives
+            + "\nrequire github.com/nwverse/persona/sdk/go v0.0.0\n"
+            + "replace github.com/nwverse/persona/sdk/go => ./sdk/go\n")
+        shutil.copytree(ROOT / "sdk/go", source / "sdk/go",
+                        ignore=shutil.ignore_patterns("*_test.go"), dirs_exist_ok=True)
+        for package in ("compat", "nodeproto", "proto", "dialogwire", "aiwire", "agentviewwire"):
             shutil.copytree(ROOT / "server/internal" / package, source / "internal" / package,
                             ignore=shutil.ignore_patterns("*_test.go"), dirs_exist_ok=True)
         for name in ('paths.go', 'env.go'):

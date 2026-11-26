@@ -121,6 +121,23 @@ func waitAdmissionDrained(t *testing.T, s *Service) {
 	waitUntil(t, func() bool { s.chans.mu.Lock(); defer s.chans.mu.Unlock(); return len(s.chans.receiving) == 0 })
 }
 
+func TestChannelOrdinaryReceiptsReserveTheSameOrderedRoute(t *testing.T) {
+	s, _, _ := admissionChannelService(t, true, nil)
+	ctx := context.Background()
+	first, err := s.admitChannelMessage(ctx, "examplechat", channel.Message{ID: "first"})
+	if err != nil || first == nil {
+		t.Fatalf("first ordinary receipt: %v %v", first, err)
+	}
+	second, err := s.admitChannelMessage(ctx, "examplechat", channel.Message{ID: "second", Thread: " "})
+	if err != nil || second == nil || first.done == nil || second.prev != first.done {
+		t.Fatalf("the second ordinary receipt did not follow the first: %v %v", second, err)
+	}
+	topic, err := s.admitChannelMessage(ctx, "examplechat", channel.Message{ID: "topic", Thread: "independent"})
+	if err != nil || topic == nil || topic.prev != nil {
+		t.Fatalf("an independent topic waited on the ordinary route: %v %v", topic, err)
+	}
+}
+
 func TestChannelReceiveThreadNewFollowsInFlightStart(t *testing.T) {
 	s, f, h := admissionChannelService(t, true, nil)
 	var release sync.Once

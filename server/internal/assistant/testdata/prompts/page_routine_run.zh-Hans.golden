@@ -1,0 +1,25 @@
+[number]
+这是仪表盘「Cloud Spend」（ID：`pg_0123456789abcdef`）的定时刷新。
+- 检查问题：Monthly cloud spend
+- 展示形式：number（单位：USD）
+- 请用 `page` 工具的 `action: "patch"`（`id: "pg_0123456789abcdef"`）写入 `reading`：`{"value": <数字>}`。如需更新现有组件数据，可同时传 `items`。可选传 `alert_text`（最多 120 字，触发提醒时附带）和 `note`。
+- 如需查看当前页面，调用 `page` 的 `action: "get"`（`id: "pg_0123456789abcdef"`）。提醒由 Persona 按规则决定，不要推送通知或发进收件箱。
+---
+[status]
+这是仪表盘「CI Status」（ID：`pg_0123456789abcdef`）的定时刷新。
+- 检查问题：Is main green?
+- 展示形式：status
+- 请用 `page` 工具的 `action: "patch"`（`id: "pg_0123456789abcdef"`）写入 `reading`：`{"status": "ok"|"warning"|"problem", "text": "<可选简短说明>"}`。可选传 `alert_text`（最多 120 字，触发提醒时附带）和 `note`。
+- 如需查看当前页面，调用 `page` 的 `action: "get"`（`id: "pg_0123456789abcdef"`）。提醒由 Persona 按规则决定，不要推送通知或发进收件箱。
+---
+[table]
+这是仪表盘「Open PRs」（ID：`pg_0123456789abcdef`）的定时刷新。
+- 检查问题：PRs waiting for review
+- 展示形式：table（列：PR、Author、Age）
+- 请用 `page` 工具的 `action: "patch"`（`id: "pg_0123456789abcdef"`）写入 `reading`：`{"rows": [[<单元格>, ...], ...]}`（0–20 行，每行 3 列）。可选传 `alert_text`（最多 120 字，触发提醒时附带）和 `note`。
+- 如需查看当前页面，调用 `page` 的 `action: "get"`（`id: "pg_0123456789abcdef"`）。提醒由 Persona 按规则决定，不要推送通知或发进收件箱。
+---
+[view_only]
+这是仪表盘「Sprint Board」（ID：`pg_0123456789abcdef`）的定时刷新。
+- 查看当前页面请用 `page` 的 `action: "get"`（`id: "pg_0123456789abcdef"`），更新已有组件数据请用 `action: "patch"`（`id: "pg_0123456789abcdef"`，`items`）。
+- 不要推送通知或发进收件箱。

@@ -4,10 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDate, t } from "../../i18n";
 import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
+import { chooseManager, resetManagerChoice } from "../../lib/manager-choice";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { loadPages } from "../../lib/lazy-page";
 import { getState, putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
+import { interactionID } from "../../lib/ids-wire";
 import type { Todo } from "../../lib/todos";
 import { stateName } from "../../lib/state-labels";
 import { usageLimitLabel } from "../../lib/usage-limit";
@@ -77,15 +79,6 @@ afterEach(() => {
   delete getFeedState().taskCards[conversation];
   vi.unstubAllGlobals();
 });
-const settleHeldPushRead = async () => {
-  await act(async () => {
-    vi.advanceTimersByTime(0);
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  const fetchMock = vi.mocked(fetch);
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/push/ln-mode"))).toBe(true);
-};
 
 const entries = () => [...host.querySelectorAll<HTMLButtonElement>("[data-assistant-actionbar] [data-tray-entry]")];
 const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assistant-actionbar] [data-tray-entry="${key}"]`)!;
@@ -99,6 +92,106 @@ const opened = () => location.pathname + location.search;
 const trays = () => host.querySelector("[data-assistant-actionbar]")!.textContent;
 
 describe("Assistant Needs you / In progress trays", () => {
+  it.each([false, true])("puts a quiet verification with Pass in its current supervisor's Needs you (main=%s)", async (main) => {
+    const title = "Check the new layout";
+    const verification: Todo = {
+      id: "verify-task", title, quiet: true, origin: "previous-supervisor", created_at: at, updated_at: at,
+      supervision: { state: "user_check", supervisor: conversation },
+      ask: { verdict: "Please verify the result", asked_at: at },
+      view: { phase: "needs_you", section: "needs_you", reason: "verify", rank: 0 },
+    };
+    moreTodos = [verification, { ...verification, id: "other-verify", supervision: { state: "user_check", supervisor: "another-supervisor" } }];
+    mainChat = main ? conversation : undefined;
+    await act(async () => refresh());
+    expect(entry("needs")).not.toBeNull();
+    await act(async () => entry("needs").click());
+    await openRows("task:verify-task");
+    const row = host.querySelector('[data-needs-row="task:verify-task"][data-needs-open]');
+    expect(row).not.toBeNull();
+    await expect.poll(() => row?.textContent).toContain("Please verify the result");
+    const other = host.querySelector('[data-needs-row="task:other-verify"]');
+    if (main) {
+      expect(other).not.toBeNull();
+      expect(other?.closest("[data-needs-supervisor]")).toBeNull();
+    } else {
+      expect(other).toBeNull();
+    }
+    const pass = row?.querySelector<HTMLButtonElement>(`button[title="${t("assistant-brief.accept_row", { title })}"]`);
+    expect(pass).toBeDefined();
+    await act(async () => pass!.click());
+    expect(writes).toContain("/api/v1/todos/verify-task/accept");
+  });
+
+  it.each([false, true])("opens a quiet verification whose Pass round has not arrived (main=%s)", async (main) => {
+    const verification: Todo = {
+      id: "verify-without-pass", title: "Inspect the finished work", quiet: true, origin: "dispatch-chat", created_at: at, updated_at: at,
+      supervision: { state: "user_check", supervisor: main ? "direction-lead" : conversation },
+      view: { phase: "needs_you", section: "needs_you", reason: "verify", rank: 0 },
+    };
+    moreTodos = [verification];
+    mainChat = main ? conversation : "main-chat";
+    await act(async () => refresh());
+    expect(entry("needs")).not.toBeNull();
+    await act(async () => entry("needs").click());
+    const row = host.querySelector<HTMLButtonElement>('button[data-needs-row="task:verify-without-pass"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain(t("assistant-tasks.review_user_check"));
+    expect(row?.closest("[data-needs-supervisor]")).toBeNull();
+    await act(async () => row!.click());
+    expect(getPanel()).toEqual({ kind: "task", todo: verification.id });
+    expect(writes.filter((path) => path.endsWith("/accept"))).toEqual([]);
+  });
+
+  it.each([
+    { main: conversation, supervisor: conversation },
+    { main: conversation, supervisor: "direction-lead" },
+    { main: "main-chat", supervisor: conversation },
+  ])("shows a quiet task review decision in Needs you ($main, $supervisor)", async ({ main, supervisor }) => {
+    const release: Todo = {
+      id: "release-review", title: "Release review", origin: "dispatch-chat", quiet: true, created_at: at, updated_at: at,
+      supervision: { state: "needs_user", supervisor },
+      ask: { outcome: "decide", asked_at: at, verdict: "Needs your decision", question: "How should the fix be released?",
+        recommend: "Release and verify", options: [{ label: "Release and verify" }, { label: "Release only" }, { label: "Wait" }] },
+      view: { phase: "needs_you", section: "needs_you", reason: "owner_decides", rank: 0 },
+    };
+    moreTodos = [release, { ...release, id: "dismissed-review", decision_review: { review_at: at, dismissal_id: "dismissed" } },
+      { ...release, id: "held-review", ask: { ...release.ask!, for_briefing: true }, view: { ...release.view!, section: "can_wait", reason: "can_wait" } }];
+    mainChat = main;
+    await act(async () => refresh());
+    expect(entry("needs")).not.toBeNull();
+    await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
+    await openRows("task:release-review");
+    const opened = () => host.querySelector('[data-needs-row="task:release-review"][data-needs-open]');
+    await expect.poll(() => opened()?.querySelector("[data-decision-question]")?.textContent).toBe(release.ask?.question);
+    const row = opened()!;
+    expect(row.closest("[data-needs-supervisor]")?.getAttribute("data-needs-supervisor")).toBe(supervisor === conversation ? undefined : supervisor);
+    expect(host.querySelector('[data-needs-row="task:dismissed-review"]')).toBeNull();
+    expect(host.querySelector('[data-needs-row="task:held-review"]')).toBeNull();
+    const option = [...row.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Release only");
+    expect(option).toBeDefined();
+    await act(async () => option!.click());
+    const sends = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith("/todos/release-review/accept") && init?.method === "POST");
+    expect(sends).toHaveLength(1);
+    expect(JSON.parse(String(sends[0][1]?.body))).toEqual({ asked_at: at, option: "Release only" });
+  });
+
+  it("renders the projected PR and blockers in the waiting tray ahead of conflicting park evidence", async () => {
+    moreTodos = [{
+      id: "held", title: "Review the export", origin: conversation, created_at: at, updated_at: at,
+      supervision: { supervisor: conversation, state: "parked", parked: {
+        waiting_on: "date", reason: "Earlier plan", until: at, count: 1,
+      } },
+      wait: { kind: "pr_merge", waiting_on: "PR #77", pr_blockers: ["checks_failing"] },
+    }];
+    await act(async () => refreshTodos());
+    await act(async () => entry("parked").click());
+    const row = host.querySelector('[data-parked-task-row="held"]')!;
+    expect(row.querySelector("[data-wait-target]")?.textContent).toContain("PR #77");
+    await act(async () => row.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
+    expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_checks_failed"));
+    expect(row.textContent).not.toContain("Earlier plan");
+  });
+
   it("Parked grouping: shows explicit waits and multi-PR waits once, outside active work, including on All", async () => {
     const pr = "https://github.com/example/demo/pull/52";
     const checked_at = new Date(now.getTime() - 60_000).toISOString();
@@ -124,6 +217,8 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(rows.every((row) => row.dataset.countsOpen === "true")).toBe(true);
     expect(rows.some((row) => row.querySelector(".text-green"))).toBe(false);
     expect(host.querySelectorAll("[data-pr-waiting-row]")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-parked-task-row] [data-wait-collapsed="true"]')).toHaveLength(2);
+    act(() => host.querySelector<HTMLButtonElement>("[data-pr-waiting-row] [data-wait-toggle]")!.click());
     expect([...host.querySelectorAll<HTMLAnchorElement>("[data-pr-waiting-row] a")].map((a) => a.href)).toEqual([pr, "https://github.com/example/demo/pull/51"]);
     act(() => entry("running").click());
     expect(host.querySelectorAll("[data-task-slot]")).toHaveLength(1);
@@ -136,7 +231,9 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(section).toBeDefined();
     expect(section!.textContent).toContain(held.title);
     expect(section!.textContent).toContain(merging.title);
-    expect(section!.querySelectorAll("button")).toHaveLength(4); // Each task's open and existing remove actions.
+    expect(section!.querySelectorAll('[data-wait-collapsed="true"]')).toHaveLength(2);
+    expect(section!.querySelectorAll("button:not([data-wait-toggle])")).toHaveLength(4); // Each task's open and existing remove actions.
+    expect(section!.querySelectorAll("[data-wait-toggle]")).toHaveLength(2);
     expect(section!.querySelector(".text-green")).toBeNull();
   });
 
@@ -170,6 +267,8 @@ describe("Assistant Needs you / In progress trays", () => {
     act(() => entry("parked").click());
     const row = host.querySelector<HTMLElement>("[data-pr-waiting-row='tray-task']")!;
     expect(row.textContent).toContain("Demo task");
+    expect(row.querySelector('[data-wait-collapsed="true"]')).not.toBeNull();
+    act(() => row.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     expect(row.querySelector("a")?.getAttribute("href")).toBe(pr);
     expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_changes_requested"));
     expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_checks_pending"));
@@ -188,6 +287,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(entry("parked").textContent).toContain("1");
     act(() => entry("parked").click());
     const row = host.querySelector<HTMLElement>("[data-pr-waiting-row='tray-task']")!;
+    act(() => row.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
     expect([...row.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([open]);
     expect(row.textContent).toContain(t("assistant-tasks.pr_blocker_review_required"));
   });
@@ -232,6 +332,28 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(row().textContent).toContain(usageLimitLabel(limited, now.getTime())!);
     act(() => upsertSession({ ...limited, turn_error: undefined, turn_error_kind: undefined, turn_error_resets_at: undefined, state: "working", status: "working" }));
     expect(status().className).toContain("text-ink-2");
+  });
+
+  it("presents a mixed usage-limit and foreground-working recheck as active, not Parked", () => {
+    const until = new Date(now.getTime() + 4 * 3_600_000).toISOString();
+    const limited: Session = { machine_id: "demo", session_id: "limited-worker", title: "Limited agent", cwd: "/demo", status: "idle", state: "idle", updated_at: at,
+      turn_error: "You've hit your usage limit.", turn_error_kind: "usage_limit", turn_error_resets_at: until };
+    act(() => {
+      upsertSession(limited);
+      putTodo({ ...todo,
+        agents: [...todo.agents!, { machine_id: "demo", session_id: limited.session_id, linked_at: at }],
+        supervision: { ...todo.supervision!, state: "parked", parked: { reason: "Check the active work", until, waiting_on: "date", count: 1 } },
+      });
+    });
+    act(() => entry("running").click());
+    const row = host.querySelector("[data-task-slot]")!;
+    expect(row.querySelector("[data-task-status]")!.getAttribute("data-task-status")).toBe("usage_limit");
+    expect(row.querySelector("[data-task-todo-state]")).toBeNull();
+    expect(row.textContent).toContain(t("task-wait.recheck", { time: formatDate(until, { dateStyle: "medium", timeStyle: "short" }) }));
+    // Once the foreground turn ends, the quiet usage-limited Agent alone does not keep the task active.
+    act(() => upsertSession({ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", status: "idle", state: "idle", updated_at: at }));
+    expect(entry("running").textContent).toBe(label.running);
+    expect(entry("parked").textContent).toBe(`${label.parked}1`);
   });
 
   it("names what a waiting task waits on in its status column, in the neutral color (#11090)", () => {
@@ -446,6 +568,8 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.textContent).not.toContain("Waiting on another team");
     act(() => entry("parked").click());
     // Its parked line and the shared open count survive the inactivity window.
+    expect(host.querySelector('[data-parked-task-row="tray-parked"] [data-wait-collapsed="true"]')).not.toBeNull();
+    act(() => host.querySelector<HTMLButtonElement>('[data-parked-task-row="tray-parked"] [data-wait-toggle]')!.click());
     expect(host.textContent).toContain("Waiting on another team");
     expect(host.querySelector('[data-parked-task-row="tray-parked"] .text-green')).toBeNull();
   });
@@ -471,10 +595,14 @@ describe("Assistant Needs you / In progress trays", () => {
     expect([...host.querySelectorAll("[data-parked-task-row]")].map((row) => row.getAttribute("data-parked-task-row")))
       .toEqual(["tray-wait-evidence", "tray-wait-newer"]);
     const info = host.querySelector('[data-task-wait-info="tray-wait-evidence"]');
+    expect(info?.getAttribute("data-wait-collapsed")).toBe("true");
     expect(info?.querySelector("[data-wait-target]")?.textContent).toContain("Schedule owner");
+    expect(info?.querySelector("[data-wait-age]")?.textContent).not.toContain(t("task-wait.age_unknown"));
+    expect(info?.querySelector("[data-wait-contact]")).toBeNull();
+    await act(async () => info?.querySelector<HTMLButtonElement>("[data-wait-toggle]")!.click());
+    expect(info?.getAttribute("data-wait-collapsed")).toBe("false");
     expect(info?.querySelector("[data-wait-contact]")?.textContent).toContain("Example sender");
     expect(info?.querySelector("[data-wait-contact]")?.getAttribute("href")).toBe(evidence.contact.url);
-    expect(info?.querySelector("[data-wait-age]")?.textContent).not.toContain(t("task-wait.age_unknown"));
     expect(info?.textContent).not.toContain("recording-conversation");
   });
 
@@ -717,7 +845,9 @@ describe("Assistant Needs you / In progress trays", () => {
   it("puts a task waiting on the user and a draft in Needs you only, without sending anything", async () => {
     const draft: FeedItem = { id: "tray-draft", conversation, at, kind: "message", ref: "draft-ref", body: { draft: "Demo reply", text: "Demo message" } };
     getFeedState().feeds[conversation] = [...feed, draft];
-    act(() => putTodo({ ...todo, supervision: { ...todo.supervision!, state: "needs_user" } }));
+    // Keep the mocked hub in the same state: putTodo's lazy push setup may refresh it.
+    todo = { ...todo, supervision: { ...todo.supervision!, state: "needs_user" } };
+    act(() => putTodo(todo));
     expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}2`, label.running]);
     await act(async () => {
       entry("needs").click();
@@ -727,6 +857,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(host.querySelector('[data-testid="message-card"]')).toBeNull(); // folded until opened
     await openRows();
     await expect.poll(() => host.querySelector('[data-testid="message-card"]')).not.toBeNull();
+    await expect.poll(() => host.textContent).toContain(t("assistant-tasks.review_needs_user"));
     expect(host.textContent).toContain(t("assistant-tasks.review_needs_user"));
     const draftCard = host.querySelector('[data-testid="message-card"]')!;
     const actions = [...draftCard.querySelectorAll("button")];
@@ -860,7 +991,6 @@ describe("Assistant Needs you / In progress trays", () => {
       await refresh();
       for (const s of moreSessions) upsertSession(s);
     });
-    await settleHeldPushRead();
     expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}1`, `${label.running}2`]);
     act(() => entry("needs").click());
     expect(host.querySelector('[data-needs-row="agent:demo/by-hand-asks"]')?.textContent).toContain("Keep the old file?");
@@ -884,7 +1014,6 @@ describe("Assistant Needs you / In progress trays", () => {
       await refresh();
       upsertSession(moreSessions[0]);
     });
-    await settleHeldPushRead();
     act(() => entry("needs").click());
     await openRows();
     const row = host.querySelector<HTMLElement>(`[data-needs-row="${kind === "task" ? "task:tray-task" : "agent:demo/by-hand-asks"}"]`)!;
@@ -1169,7 +1298,11 @@ describe("Assistant Needs you / In progress trays", () => {
       const group = host.querySelector('[data-needs-supervisor="another-chat"]')!;
       expect(group).not.toBeNull();
       expect(group.getAttribute("aria-label")).toBe(t("assistant-tasks.needs_group_another"));
-      expect(group.querySelector("[data-open-task=held-elsewhere]")).not.toBeNull();
+      // WaitingTaskRow is a lazy chunk: its supervisor group can commit before its action buttons do.
+      await vi.waitFor(async () => {
+        await act(async () => {});
+        expect(group.querySelector("[data-open-task=held-elsewhere]")).not.toBeNull();
+      });
       const close = group.querySelector<HTMLButtonElement>("[data-close-task=held-elsewhere]")!;
       expect(close).not.toBeNull();
       act(() => close.click());
@@ -1190,6 +1323,196 @@ describe("Assistant Needs you / In progress trays", () => {
     } finally {
       act(() => toastsRoot.unmount());
       toastsHost.remove();
+    }
+  });
+
+  it("shows an escalated terminal confirmation (screen) card in main chat Needs you and sends the chosen option, while keeping delegating cards hidden", async () => {
+    mainChat = conversation;
+    const screenID = "scr_demo_worker_rev1";
+    const command = "rm -rf dist && npm run build";
+    const baseScreen: Interaction = {
+      id: screenID,
+      machine_id: "demo",
+      session_id: "worker",
+      kind: "screen",
+      created_at: at,
+      dialog: {
+        question: "Do you want to proceed?",
+        command,
+        description: "Clean and rebuild the output directory",
+        options: [{ key: "1", label: "Yes" }, { key: "2", label: "No" }],
+        rev: "rev1",
+      },
+    };
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session];
+
+    // Held by supervisor (`delegating: true`): stays in In progress and out of main chat Needs you.
+    todo = { ...todo, quiet: true, view: { phase: "working", section: "working", reason: "persona_working", rank: 0 } };
+    moreInteractions = [{ ...baseScreen, delegating: true }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      upsertSession(moreSessions[0]);
+    });
+    expect(entry("needs").textContent).toBe(label.needs);
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="task:tray-task"]')).toBeNull();
+    act(() => entry("needs").click());
+
+    // Plain unescalated screen card on a quiet task (even with view needs_you / agent_asks): stays out of main chat
+    // Needs you per D19 until explicitly escalated via ask_escalate.
+    todo = { ...todo, quiet: true, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0, asks: [{ id: "run:demo/worker", kind: "question", home: "run", interaction: interactionID(screenID) }] } };
+    moreInteractions = [{ ...baseScreen, delegating: false }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+    });
+    expect(entry("needs").textContent).toBe(label.needs);
+
+    // Escalated via ask_escalate (`!delegating`, `delegate` set, hub view `needs_you` / `agent_asks`):
+    // visible, counted, renders CommandScreenCard, and Allow resolves the exact screen card.
+    moreInteractions = [{ ...baseScreen, delegating: false, delegate: { reason: "Deleting build output needs owner approval", recommend: "Allow" } }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+    });
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    act(() => entry("needs").click());
+    const folded = host.querySelector<HTMLButtonElement>('button[data-needs-row="task:tray-task"]')!;
+    expect(folded).not.toBeNull();
+    expect(folded.textContent).toContain("Demo task");
+    expect(folded.textContent).toContain("Do you want to proceed?");
+    await openRows("task:tray-task");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+    });
+    const card = host.querySelector<HTMLElement>(`[data-card="${screenID}"]`)!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector("[data-screen-command]")?.textContent).toBe(command);
+    const allow = [...card.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("chat-interactions.allow"))!;
+    expect(allow).toBeDefined();
+    const before = writes.length;
+    await act(async () => {
+      allow.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(before)).toEqual([`/api/v1/interactions/${screenID}/resolve`]);
+    const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${screenID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ option: "1" });
+  });
+
+  it("shows an escalated ordinary permission card in main chat Needs you and allows approving it in place, while keeping unescalated standalone permissions out", async () => {
+    mainChat = conversation;
+    const permID = "ix_perm_escalated";
+    const escalatedPerm: Interaction = {
+      id: permID,
+      machine_id: "demo",
+      session_id: "worker",
+      kind: "permission",
+      tool_name: "Bash",
+      tool_input: { command: "gh pr comment 12 --body done" },
+      created_at: at,
+      delegate: { reason: "Commenting on the PR acts in your name", recommend: "Allow" },
+    };
+    const routinePerm: Interaction = {
+      id: "ix_perm_standalone_noise",
+      machine_id: "demo",
+      session_id: "by-hand-perm",
+      kind: "permission",
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+      created_at: at,
+    };
+    moreSessions = [
+      { machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session,
+      { machine_id: "demo", session_id: "by-hand-perm", title: "Standalone agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session,
+    ];
+    moreInteractions = [escalatedPerm, routinePerm];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      for (const s of moreSessions) upsertSession(s);
+    });
+
+    // Only the escalated task permission counts; the unescalated standalone Agent permission stays out of main chat Needs you.
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    // Held pushes stay out of the primary main chat composer bar (surfaced in secondary views instead).
+    expect(host.querySelector("[data-held-pushes-entry]")).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/push/intercepts") || String(url).includes("/push/ln-mode"))).toBe(false);
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="agent:demo/by-hand-perm"]')).toBeNull();
+    await openRows("task:tray-task");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+    });
+    const card = host.querySelector<HTMLElement>(`[data-card="${permID}"]`)!;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("gh pr comment 12 --body done");
+    const allow = [...card.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("chat-interactions.allow"))!;
+    expect(allow).toBeDefined();
+    const before = writes.length;
+    await act(async () => {
+      allow.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(before)).toEqual([`/api/v1/interactions/${permID}/resolve`]);
+    const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${permID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ allow: true });
+  });
+
+  it("excludes another manager's tasks and standalone agents from ActionBar trays and TaskDock (#15645)", async () => {
+    mainChat = conversation;
+    todo = { ...todo, manager: "assistant" };
+    const secondTodo: Todo = {
+      id: "second-task",
+      manager: "m-second",
+      title: "Second assistant task",
+      origin: conversation,
+      created_at: at,
+      updated_at: at,
+      agents: [{ machine_id: "box-second", session_id: "sec-worker", linked_at: at }],
+    };
+    const defaultDecision: Todo = {
+      id: "default-decision",
+      manager: "assistant",
+      title: "Default assistant decision",
+      origin: "default-main",
+      created_at: at,
+      updated_at: at,
+      supervision: { supervisor: "default-main", state: "needs_user", reviews: [], updated_at: at },
+    };
+    moreTodos = [secondTodo, defaultDecision];
+    moreSessions = [
+      { machine_id: "demo", session_id: "default-solo", manager: "assistant", title: "Default solo agent", cwd: "/demo", state: "working", status: "working", updated_at: at } as Session,
+      { machine_id: "box-second", session_id: "sec-worker", manager: "m-second", title: "Second task agent", cwd: "/sec", state: "working", status: "working", updated_at: at } as Session,
+      { machine_id: "box-second", session_id: "sec-solo", manager: "m-second", title: "Second solo agent", cwd: "/sec", state: "working", status: "working", updated_at: at } as Session,
+    ];
+    const dockHost = document.createElement("div");
+    document.body.append(dockHost);
+    const dockRoot = createRoot(dockHost);
+    try {
+      act(() => chooseManager("m-second"));
+      await act(async () => {
+        await refresh();
+        await refreshTodos();
+        for (const s of moreSessions) upsertSession(s);
+      });
+      act(() => dockRoot.render(<StrictMode><TaskDock conversation={conversation} /></StrictMode>));
+      // Only m-second's task and standalone agent count; assistant's task, decision, and solo agent stay out.
+      expect(entry("needs").textContent).toBe(label.needs);
+      expect(entry("running").textContent).toBe(`${label.running}2`);
+      expect(dockHost.textContent).toContain("Second assistant task");
+      expect(dockHost.textContent).toContain("Second solo agent");
+      expect(dockHost.textContent).not.toContain("Default solo agent");
+      expect(dockHost.textContent).not.toContain("Demo task");
+    } finally {
+      act(() => dockRoot.unmount());
+      dockHost.remove();
+      act(() => resetManagerChoice());
     }
   });
 });

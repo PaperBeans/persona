@@ -1,0 +1,14 @@
+{
+  "sections": [
+    {
+      "items": [
+        {
+          "type": "map",
+          "alt": "Route with HTTP link",
+          "markers": [{"id": "p1", "lat": 39.9, "lon": 116.3, "label": "Home"}],
+          "links": [{"title": "Open", "url": "http://maps.example.com"}]
+        }
+      ]
+    }
+  ]
+}

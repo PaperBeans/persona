@@ -388,6 +388,10 @@ func (n *Node) ccPluginPermission(ctx context.Context, pid int, claude claudePro
 	if !n.ccPluginServesPermissions(claude) || n.peer == nil {
 		return http.StatusOK, map[string]any{"action": "passthrough"}
 	}
+	if sess := n.claudeProcHerdrSession(claude); n.herdrSessionBlocked(sess) && !n.isAssistantSession(req.SessionID) && !n.keptSessions()[req.SessionID] {
+		n.noteHerdrSessionID(req.SessionID, sess)
+		return http.StatusOK, map[string]any{"action": "passthrough"}
+	}
 	cwd := cmp.Or(req.Cwd, claude.Cwd)
 	if n.sessionBlocked(req.SessionID, cwd) {
 		return http.StatusOK, map[string]any{"action": "passthrough"}

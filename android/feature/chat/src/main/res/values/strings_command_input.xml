@@ -1,0 +1,8 @@
+<resources>
+    <string name="chat_command_input_kicker">Command input</string>
+    <string name="chat_command_input_waiting">Waiting for your input</string>
+    <string name="chat_command_input_line">Input</string>
+    <string name="chat_command_input_show">Show</string>
+    <string name="chat_command_input_hide">Hide</string>
+    <string name="chat_command_input_not_now">Not now</string>
+</resources>

@@ -17,7 +17,7 @@ export function LiveThinking() {
       <span className="inline-flex h-[1lh] shrink-0 items-center text-tool-ink">
         <Icon name="spark" size={14} />
       </span>
-      <span className="translate-y-[1px] text-[length:var(--chat-secondary)] text-tool-ink">{t("chat-thinkingcard.thinking")}</span>
+      <span className="chat-shimmer translate-y-[1px] text-[length:var(--chat-secondary)] text-tool-ink">{t("chat-thinkingcard.thinking")}</span>
       <span aria-hidden className="flex translate-y-[2px] items-center gap-[3px]">
         {[0, 200, 400].map((d) => (
           <span key={d} className="size-1 rounded-full bg-tool-ink animate-[breathe_1.2s_ease-in-out_infinite] busy-motion" style={{ animationDelay: `${d}ms` }} />

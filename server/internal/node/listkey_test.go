@@ -18,6 +18,9 @@ func listKeyFmt(list []proto.Session) string {
 		if h := s.Hierarchy; h != nil {
 			fmt.Fprintf(&b, "lineage:%q/%d\n", h.AskingParentSessionID, unixOf(&h.StartedAt))
 		}
+		if a := s.Aliases(); len(a) > 0 {
+			fmt.Fprintf(&b, "aliases:%q\n", a)
+		}
 		if s.Activity != "" {
 			fmt.Fprintf(&b, "activity:%s/%d\n", s.Activity, unixOf(s.ActivityAt))
 		}
@@ -204,6 +207,7 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"space_kind":        func(s *proto.Session) { s.SpaceKind = "codex_app" },
 		"asking_parent":     func(s *proto.Session) { s.SetAskingParentSessionID("parent-public") },
 		"started_at":        func(s *proto.Session) { s.SetStartedAt(at.Add(-time.Hour)) },
+		"aliases":           func(s *proto.Session) { s.SetAliases([]string{"agy-w1-p1"}) }, // #14395
 
 		"session_id":              func(s *proto.Session) { s.SessionID = "s2" },
 		"status":                  func(s *proto.Session) { s.Status = proto.StatusDone },

@@ -4,13 +4,18 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/screen"
 )
 
 // Work agents (docs/integrations/launchers.md "Work agents"): pi, the Cursor CLI (cursor-agent) and the Antigravity
@@ -80,6 +85,39 @@ func workAgentCommand(launcher, program, model, effort, mode string) string {
 	return cmd
 }
 
+// A suffixed model is a concrete native variant. Select the sibling variant
+// for an explicit effort so the two CLI options agree, including on restore.
+func agyEffortModel(model, effort string) string {
+	if effort != "" {
+		for _, level := range proto.EffortLevels {
+			if base, ok := strings.CutSuffix(model, "-"+level); ok {
+				return base + "-" + effort
+			}
+		}
+	}
+	return model
+}
+
+func (n *Node) agyPaneStartModel(ctx context.Context, launcher, model, effort string) (string, error) {
+	if model == "" && effort != "" && !shellLauncherNames()[launcher] {
+		if managed, ok := n.managedLauncher(launcher); ok {
+			model = managed.Model
+		}
+	}
+	variant := agyEffortModel(model, effort)
+	if variant == model {
+		return model, nil
+	}
+	catalog, err := n.launcherModels(ctx, launcher, agyAgent, false)
+	if err != nil {
+		return "", fmt.Errorf("verify Antigravity model %q at effort %q: %w", model, effort, err)
+	}
+	if !slices.ContainsFunc(catalog.Models, func(m proto.AgentModel) bool { return m.ID == variant }) {
+		return "", fmt.Errorf("Antigravity model %q does not offer effort %q (model %q is unavailable)", model, effort, variant)
+	}
+	return variant, nil
+}
+
 // agyStartMode is the permission mode an agy start runs in: the one it names, else Allow all, as Persona starts Claude
 // Code. plan never gets here: a read-only start on a work agent is refused (control.go).
 func agyStartMode(mode string) string { return cmp.Or(mode, proto.ModeBypass) }
@@ -116,11 +154,22 @@ func workAgentResume(kind, cmd, id string) string {
 // reports the agent, checked until the agent takes it (workAgentFirst). A pi whose extension never lists the session is
 // quit; its tab stays at the shell, and typing the message into pi is refused.
 func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName string) (*proto.Session, error) {
+	return n.startWorkAgentWithResume(ctx, launch, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName, "")
+}
+
+// startWorkAgentWithResume is startWorkAgent with an optional native Antigravity conversation UUID to resume
+// (`agy --conversation <uuid>`), used when switching back to a parked Antigravity stretch (engine_switch.go).
+func (n *Node) startWorkAgentWithResume(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, effort, mode, prompt, ws, tabName, resumeConv string) (*proto.Session, error) {
 	herdrName, program, ok := workAgent(kind)
 	if !ok {
 		return nil, fmt.Errorf("unsupported agent type %q", kind)
 	}
 	if kind == agyAgent {
+		var err error
+		model, err = n.agyPaneStartModel(ctx, launcher, model, effort)
+		if err != nil {
+			return nil, err
+		}
 		mode = agyStartMode(mode)
 		n.ensureAgyHooksForLaunch() // agyhooks.go (#13950): ensure hooks exist before agy starts
 	} else {
@@ -157,37 +206,50 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 	if kind == agyAgent {
 		command = n.launcherCommand(launcher)
 	}
-	cmd := withHerdrAgent(typedHerdrAgent(launch, herdrName, shells...), workAgentCommand(command, program, model, effort, mode))
+	rawCmd := workAgentCommand(command, program, model, effort, mode)
+	if kind == agyAgent && uuidRe.MatchString(resumeConv) {
+		rawCmd = workAgentResume(agyAgent, rawCmd, resumeConv)
+	}
+	cmd := withHerdrAgent(typedHerdrAgent(launch, herdrName, shells...), rawCmd)
+	cmd = n.agentStartCommand(cmd, shellQuote, shells...)
+	if cdFirst(ctx) {
+		cmd = cdThen(cwd, cmd, shells...)
+	}
 	// The command goes through the start file, so a line break in it cannot meet a shell that runs each line on its
 	// own (typedstart.go).
-	done, err := n.runWorkAgentCommand(ctx, launch, created, ws, "", n.agentStartCommand(cmd, shellQuote, shells...), shells...)
+	typed, err := n.typeStartMode(ctx, launch, created, ws, "", cmd, false, shells...)
 	if err != nil {
-		if done == nil {
+		if typed == nil {
 			return nil, err
 		}
-		done()
+		typed.done()
 		return nil, n.abandonStart(ctx, created, kind, err)
 	}
+	done := typed.done
 	defer done()
 	if kind == piAgent {
 		return n.finishPiStart(ctx, launch, created, cwd, launcher, model, prompt, done)
 	}
-	id, agent, err := n.waitWorkAgent(ctx, pane, herdrName)
+	exited := &paneStartExit{file: typed.path}
+	id, agent, err := n.waitWorkAgent(ctx, pane, herdrName, exited)
 	if err != nil {
 		done()
 		return nil, n.abandonStart(ctx, created, kind, err)
 	}
 	if kind == agyAgent {
 		// In a folder agy has not trusted (a new worktree), its trust dialog holds the input box (agytrust.go, #11424).
-		if err := n.agyTrustFolder(ctx, pane); err != nil {
+		if err := n.agyTrustFolder(ctx, pane, exited); err != nil {
 			done()
 			return nil, n.abandonStart(ctx, created, kind, err)
 		}
 	}
-	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model, effort, mode)
+	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model, effort, mode, promptTitle(prompt))
 	if prompt != "" {
 		// Typed once, then checked in the background until the agent is seen taking it (workagent_first.go, #11345).
 		if err := n.workAgentFirst(ctx, pane, id, herdrName, prompt); err != nil {
+			if _, ok := engineHistoryOf(ctx); ok && !maybeDelivered(err) {
+				n.state.setEngineHistory(id, nil)
+			}
 			return nil, fmt.Errorf("send first message: %w", err)
 		}
 	}
@@ -236,8 +298,16 @@ func (n *Node) finishPiStart(ctx context.Context, launch host.Launcher, created 
 
 // noteWorkAgent records the session as Persona's, bound to its pane, so herdr resumes it the way it was started. An agy's
 // mode is its row's permission_mode (AppMode, modes.go currentModes): the mode its flags started it in.
-func (n *Node) noteWorkAgent(ctx context.Context, launch host.Launcher, pane, id, cwd, launcher, kind, model, effort, mode string) {
-	n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, AppMode: mode, StartedAt: time.Now().UTC()})
+func (n *Node) noteWorkAgent(ctx context.Context, launch host.Launcher, pane, id, cwd, launcher, kind, model, effort, mode string, startTitle ...string) {
+	title := ""
+	if len(startTitle) > 0 {
+		title = startTitle[0]
+	}
+	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, AppMode: mode, StartTitle: title, StartedAt: time.Now().UTC()}
+	if legs, ok := engineHistoryOf(ctx); ok {
+		st.EngineHistory = legs
+	}
+	n.putAgentState(ctx, launch, id, st)
 	n.bindPane(pane, id)
 	n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, Model: model, Effort: effort, Mode: mode, ID: id})
 }
@@ -259,7 +329,7 @@ func (n *Node) sendToPi(ctx context.Context, id, text string) error {
 
 // waitWorkAgent waits until herdr reports an agent of herdrName in pane, and answers its session id (its own when it
 // names one, else the pane's terminal row).
-func (n *Node) waitWorkAgent(ctx context.Context, pane, herdrName string) (string, host.Agent, error) {
+func (n *Node) waitWorkAgent(ctx context.Context, pane, herdrName string, exited *paneStartExit) (string, host.Agent, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -268,6 +338,12 @@ func (n *Node) waitWorkAgent(ctx context.Context, pane, herdrName string) (strin
 			screen, _ := n.readPane(context.Background(), pane, "recent-unwrapped", 30)
 			return "", host.Agent{}, fmt.Errorf("wait for %s: %w\n%s", herdrName, ctx.Err(), lastLines(screen, 12))
 		case <-ticker.C:
+		}
+		if herdrName == agyAgent {
+			shown, _ := n.readPane(ctx, pane, "visible", 40)
+			if err := n.agyStartupFailure(ctx, pane, shown, exited); err != nil {
+				return "", host.Agent{}, err
+			}
 		}
 		if err := n.refreshHosts(ctx); err != nil {
 			continue
@@ -398,11 +474,17 @@ func (n *Node) reportedWorkAgent(pane, kind string) (id string, ambiguous bool) 
 	return id, false
 }
 
+// paneMessage is the message content already decoded by the node's request dispatcher.
+type paneMessage struct {
+	Text   string
+	Images []proto.Image
+}
+
 // workAgentCalls serves a hub call for a Cursor or agy session herdr runs. A message goes through herdr's
 // agent.prompt (never typed blind), and Persona interrupts by sending Esc through herdr. Agy reads the
 // verified pane conversation when available. A page for Cursor is a terminal notice. The pane's own calls
 // (keys, screen, close) fall through to the node.
-func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Agent, params json.RawMessage) (any, error, bool) {
+func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Agent, params json.RawMessage, msg paneMessage) (any, error, bool) {
 	if a.Agent == agyAgent {
 		if res, err, handled := n.agyPaneCall(ctx, method, id, a.PaneID, params); handled {
 			return res, err, true
@@ -414,22 +496,60 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 		return map[string]any{"items": []proto.Item{{ID: a.Agent + "#0", Seq: 1, Role: "system", Kind: "notice", Text: notice,
 			TS: time.Now().UTC()}}, "has_more": false, "history": a.Agent + "-pane:" + id, "to_seq": 1}, nil, true
 	case "session.item", "session.image", "session.visualization":
-		return nil, fmt.Errorf("no item"), true
+		return nil, &rpc.Error{Code: codeNotFound, Message: "no item"}, true // 404, not a gateway failure (#13470)
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true
 	case "session.send":
-		var p struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, err, true
-		}
 		// After the check of a start's first message (workAgentFirst): a message typed meanwhile could meet the first
 		// one typed again.
 		unlock := n.typing.lock(id)
 		defer unlock()
-		if err := n.hostPrompt(ctx, a.PaneID, p.Text); err != nil {
+		if a.Agent == agyAgent {
+			var opts sendOpts
+			_ = json.Unmarshal(params, &opts)
+			if opts.ApplySwitch {
+				_ = n.state.loaded(ctx)
+				if ps := n.pendingSwitch(id); ps != nil && ps.Agent != "" {
+					if handled, err := n.applyEngineSwitch(ctx, id, a.PaneID, agyAgent, *ps, msg.Text, msg.Images, opts); handled {
+						return okResult(nil), err, true
+					}
+				}
+			}
+		}
+		if len(msg.Images) > 0 {
+			paths, err := n.saveImages(msg.Images)
+			if err != nil {
+				return nil, err, true
+			}
+			msg.Text = strings.TrimSpace(attachImages(msg.Text, paths))
+		}
+		typedAt := time.Now()
+		var delivery *agySendWatch
+		beforeQueued := -1
+		var beforeScreen string
+		if a.Agent == agyAgent {
+			delivery = n.watchAgySend(id, a.PaneID, msg.Text, typedAt)
+			if a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked || n.workSent.recent(a.PaneID, typedAt) {
+				if screen, err := n.readPane(ctx, a.PaneID, "visible", 80); err == nil {
+					beforeScreen = screen
+					beforeQueued = len(parseAgyQueuedLines(screen))
+				}
+			}
+		}
+		if err := n.hostPrompt(ctx, a.PaneID, msg.Text); err != nil {
+			if r := deliveryRefusal(err); r != nil {
+				if (errors.Is(err, host.ErrDialogOpen) || errors.Is(err, host.ErrAgentBlocked)) && beforeScreen != "" && screen.Choosing(beforeScreen) {
+					r = dialogRefusalOf(beforeScreen, false)
+				}
+				log.Printf("send %s: the host refused it, nothing typed: %v", id, err)
+				return nil, r, true
+			}
 			return nil, fmt.Errorf("send: %w", err), true
+		}
+		if a.Agent == agyAgent {
+			if err := n.confirmAgySend(ctx, id, a.PaneID, msg.Text, typedAt, delivery, beforeQueued); err != nil {
+				return nil, err, true
+			}
 		}
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
 		// Working until herdr shows the turn, so an interrupt right after the send stops it (worksent.go, #11437).

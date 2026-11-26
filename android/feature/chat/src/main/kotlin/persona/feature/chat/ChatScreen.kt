@@ -21,9 +21,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -59,6 +65,7 @@ import persona.core.domain.sort.TerminalResume
 import persona.core.domain.sort.terminalResume
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.canTypeClaudeCommands
+import persona.core.domain.sort.displayTitle
 import persona.core.domain.sort.shownCloseout
 import persona.feature.chat.media.ChatImageViewer
 import persona.core.domain.rewind.Rewind
@@ -451,7 +458,9 @@ private fun ChatPage(
     }).collectAsStateWithLifecycle()
     // The chat jumps to a task's notice through the task host's navigation.
     // The message a hub link named (`?at=`, #2194) while it is being landed on: like a search hit, its drawer opens.
-    val childCards = rememberChatChildren(key, session, sessionList, chrome, repository)
+    var overviewOpen by remember(key) { mutableStateOf(false) }
+    var openSubagentsPending by rememberSaveable(key.path, chrome.openSubagents) { mutableStateOf(chrome.openSubagents) }
+    val childCards = rememberChatChildren(key, session, sessionList, chrome, repository, forceRead = overviewOpen)
     val modeChangeStore = remember(key, repository, scope) { ModeChangeStore(scope) { repository.modeChanges(it) } }
     DisposableEffect(modeChangeStore) { onDispose(modeChangeStore::close) }
     LaunchedEffect(key, repository, renderStyle, session != null, session?.permissionMode, session?.bypassPending) {
@@ -459,7 +468,7 @@ private fun ChatPage(
     }
     val modeChangesUntil = remember(timelineVersion, projection) { modeChangesCutoff(timeline.isFrozen(), projection.lines) }
     val pageLines = rememberChatPageLines(key, renderStyle, snapshot, session, foldsBackground, supervisingConversation, tasks, taskTodos, search,
-        openWork, projection, feed, taskPlans, taskCardProjection, childCards.rows.values.toList(), modeChanges = modeChangeStore.changes,
+        openWork, projection, feed, taskPlans, taskCardProjection, childCards.list, modeChanges = modeChangeStore.changes,
         modeChangesUntil = modeChangesUntil)
     var jumpItem by pageLines.jumpItem
     val assistantPresentation = pageLines.assistantPresentation
@@ -517,7 +526,8 @@ private fun ChatPage(
     var reportedSeen by pageReader.reportedSeen
     val readThrough = pageReader.readThrough
     val context = pageReader.context
-    LaunchedEffect(placedForwards, readOnly, canSend) {
+    val imageLimits = rememberSessionImageLimits(chrome.connection, session?.agent)
+    LaunchedEffect(placedForwards, readOnly, canSend, imageLimits) {
         if (placedForwards == null || readOnly || !canSend) return@LaunchedEffect
         val fresh = mutableListOf<ForwardPlacement>()
         val duplicates = mutableListOf<RestoredPhotos>()
@@ -529,14 +539,20 @@ private fun ChatPage(
                 fresh += placement
             }
         }
-        duplicates.forEach { discardForwardedPhotos(context, it) }
-        val rejected = attachForwardedPhotos(context, composer, fresh.map(ForwardPlacement::photos))
-        val lost = fresh.sumOf { it.photos.lost } + rejected.size
-        if (lost > 0) {
-            val message = forwardedPhotoNotice(res, lost)
-            if (feedback?.notice(message) != true) notice = message
+        // `take(key)` clears `placedForwards`, which cancels this LaunchedEffect on recomposition; finish the
+        // taken handoff on the page scope so IO measurement and cleanup are not aborted mid-flight.
+        scope.launch {
+            duplicates.forEach { discardForwardedPhotos(context, it) }
+            val rejected = attachForwardedPhotos(context, composer, fresh.map(ForwardPlacement::photos),
+                limits = imageLimits, canSpill = composerService != null,
+                onNotice = { message -> if (feedback?.notice(message) != true) notice = message })
+            val lost = fresh.sumOf { it.photos.lost } + rejected.size
+            if (lost > 0) {
+                val message = forwardedPhotoNotice(res, lost)
+                if (feedback?.notice(message) != true) notice = message
+            }
+            composer.focusRequest++
         }
-        composer.focusRequest++
     }
     val pairingLoader = pageReader.pairingLoader
     val loader = pageReader.loader
@@ -812,7 +828,10 @@ private fun ChatPage(
     }
     val turnModelActions = if (turnFix != TurnErrorFix.ModelRoute) null else when {
         ownModelPicker -> TurnErrorModelActions(openPicker = { openModelRoutePicker = true }, clearPick = clearModelAction,
-            clearLabel = if (session?.sessionId == chrome.mainConversation) R.string.chat_modelpill_follow_default else R.string.chat_modelpill_undo_pick)
+            clearLabel = if (session != null && (session.sessionId == chrome.mainConversation ||
+                session.sessionId in chrome.leaderConversations || session.origin == "task")) {
+                R.string.chat_modelpill_follow_default
+            } else R.string.chat_modelpill_undo_pick)
         fixModel != null -> TurnErrorModelActions(
             openPicker = { fixModel(persona.core.designsystem.ReadinessActionId.PickModel) }, clearPick = clearModelAction)
         else -> null
@@ -928,9 +947,35 @@ private fun ChatPage(
             }, onVisibilityChanged = { linkVisible = it; if (it) { fullText = null; statusSheet = false } }, manager = linkManager) { linkInset ->
             val windowHeightPx = LocalWindowInfo.current.containerSize.height
             val pageDensity = LocalDensity.current
+            val footerChrome = LocalChromeInsets.current
+            val navigationInsets = WindowInsets.navigationBars
+            val imeInsets = WindowInsets.ime
+            val trayFooterBudget = remember { AssistantTrayFooterBudget() }
             // Until the page is measured (its first frame) the window's height stands in.
             val pageHeight: () -> Dp = { with(pageDensity) { (if (pageHeightPx >= 0) pageHeightPx else windowHeightPx).toDp() } }
-            val trayMax: () -> Dp = { pageHeight() * AssistantTrayTokens.maximumHeightFraction }
+            val trayMaxForChrome: (Dp) -> Dp = { trayChromeHeight ->
+                with(pageDensity) {
+                    val measuredPagePx = pageHeightPx
+                    val page = (if (trayFooterBudget.pageHeightPx >= 0) trayFooterBudget.pageHeightPx
+                        else if (measuredPagePx >= 0) measuredPagePx
+                        else windowHeightPx).toDp()
+                    val header = footerChrome.top + topBarHeight.toDp()
+                    val bottomInset = if (footerChrome.handlesNavigationBar) footerChrome.bottom
+                        else (navigationInsets.getBottom(pageDensity) - imeInsets.getBottom(pageDensity)).coerceAtLeast(0).toDp()
+                    val keyboardOpen = imeInsets.getBottom(pageDensity) > 0
+                    val hasPending = trayFooterBudget.pendingSlots > 0
+                    val floor = if (keyboardOpen && !hasPending) Tokens.Space.flush else Tokens.Space.xl
+                    val pendingReserve = Tokens.MinTouch.android * trayFooterBudget.pendingSlots
+                    assistantTrayMaxHeight(
+                        page = page,
+                        header = header,
+                        occupied = trayFooterBudget.fixedHeightPx.toDp() + pendingReserve + trayChromeHeight,
+                        bottomInset = bottomInset,
+                        floor = floor,
+                    )
+                }
+            }
+            val trayMax: () -> Dp = { trayMaxForChrome(Tokens.Space.flush) }
             Box(Modifier.fillMaxSize().padding(bottom = linkInset).onSizeChanged { pageHeightPx = it.height }
                 // The chat under a page a wide window pushed into this column: drawn as it was, and out of screen readers' way.
                 .then(if (pushedDetail != null) Modifier.clearAndSetSemantics {} else Modifier)) {
@@ -983,16 +1028,19 @@ private fun ChatPage(
                         }
                     }
                     // In a box of its own: with no cards it is nothing, and its height reads 0 again.
-                    Box(Modifier.onSizeChanged { if (task) taskHeight = it.height else stackHeight = it.height }) {
+                    Box(Modifier
+                        .then(if (cards.isNotEmpty()) Modifier.layoutId(PendingCardsFooterSlot) else Modifier)
+                        .onSizeChanged { if (task) taskHeight = it.height else stackHeight = it.height }) {
                         InteractionPanel(cards, machine, cap, taps.busyId, taps.uncertain, { interaction, resolution ->
                             interactionController.answer(interaction, resolution)
                         }, terminal, { if (task) taskOverlay = it else stackOverlay = it }, linkVisible = linkVisible,
                             folds = requestFolds,
                             blockedReason = if (canApprove) null else approvalBlockedReason(res, session),
+                            answerSession = session,
                             terminalHelp = canTerminal, onDiscardLocal = interactionController::discard, keyboard = keyboard,
                             labels = if (task) taskAsk?.let { mapOf(it.card.id to it.label) }.orEmpty() else emptyMap(),
                             first = if (task) null else chrome.requestId, counted = !task, suggestion = ruleLine,
-                            resize = resize)
+                            resize = resize, commandInputErrors = interactionController.commandInputErrors)
                     }
                 }
                 val onOpenSibling = chrome.onOpenSession
@@ -1005,8 +1053,9 @@ private fun ChatPage(
                     if (activityInHeader && openBackgroundList != null && backgroundOwner != null && ChatActivity.shown(backgroundOwner))
                         ({ ChatActivityPill(backgroundOwner, openBackgroundList) }) else null
                 val tabs = session != null && onOpenSibling != null && siblingSessions.size > 1
+                val preferHerdrTabName = renderStyle != ChatRenderStyle.Assistant && chrome.preferHerdrTabName
                 JPage(
-                    title = session?.displayTitle ?: stringResource(R.string.chat_screen_untitled),
+                    title = session?.displayTitle(preferHerdrTabName) ?: stringResource(R.string.chat_screen_untitled),
                     scrollEdgeStyle = ScrollEdgeStyle.Gradient,
                     topScrollEdgeStyle = if (tabs || activityPill != null) TabbedChatScrollEdgeStyle else ScrollEdgeStyle.Gradient,
                     topBar = {
@@ -1027,7 +1076,18 @@ private fun ChatPage(
                                         onForkSession = if (onFork != null && session?.canFork == true) ({ onFork("") }) else null,
                                         forking = forking,
                                         takeover = pageTakeover,
-                                        menuOpen = headerMenuOpen)
+                                        menuOpen = headerMenuOpen,
+                                        preferHerdrTabName = preferHerdrTabName,
+                                        machines = machines,
+                                        childRows = childCards.list,
+                                        onOpenSubagent = chrome.onOpenSubagent ?: chrome.onOpenSession,
+                                        onOpenBackgroundDestination = openBackground,
+                                        onStopLoop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),
+                                        overviewActions = chrome.actions,
+                                        overviewConnection = chrome.connection,
+                                        openSubagentsRequested = openSubagentsPending,
+                                        onOpenSubagentsHandled = { openSubagentsPending = false },
+                                        onOverviewVisible = { overviewOpen = it })
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {
                                         ChatSiblingTabs(session, siblingSessions, onOpenSibling, trailing = activityPill)
@@ -1042,6 +1102,7 @@ private fun ChatPage(
                                 full = header, compact = {
                                     ChatSlimHeader(session, status, connection, onBack,
                                         onMore = if (compactGlassAgent) ({ headerMenuOpen.value = true }) else null,
+                                        preferHerdrTabName = preferHerdrTabName,
                                         onOpen = headerFold::open)
                                 })
                             else header()
@@ -1060,7 +1121,7 @@ private fun ChatPage(
                             ForwardPickFooter(messageMenu.forwardPick, snapshot.items, Modifier.onSizeChanged { footerHeight = it.height })
                             return@footer
                         }
-                        Column(Modifier.onSizeChanged { footerHeight = it.height }) {
+                        ChatFooterColumn(trayFooterBudget, Modifier.onSizeChanged { footerHeight = it.height }) {
                             if (renderStyle == ChatRenderStyle.Assistant && (status.submitting || status.processing ||
                                     (status.unconfirmed && sendReceipts.isNotEmpty()))) StatusLine(status)
                             if (renderStyle != ChatRenderStyle.Assistant) ChatSessionStatusLine(status, session, snapshot.turnDurationSeconds, projection.turns.lastOrNull()?.toolCount ?: 0,
@@ -1130,7 +1191,7 @@ private fun ChatPage(
                                 // Not while a "/" quick message is being picked: the list opens above the field, and with the
                                 // keyboard up the queue, the list and the status line together climbed over the top bar.
                                 if (renderStyle != ChatRenderStyle.Assistant && SlashCommand.suggestions(composer.value.text, clear = true).isEmpty())
-                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
+                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh, imageLimits = imageLimits)
                                 // A source that only lets the phone read says so where the typing would be.
                                 if (!canSend && session != null) ChatSourceNote(session)
                                 if (assistantChat) taskHost?.let { host ->
@@ -1168,8 +1229,10 @@ private fun ChatPage(
                                                 ?.let { todo -> openTask(host, todo) } ?: run { host.sheet.value = TaskSheet.Agent(raw) }
                                         }, onSend = ::sendTray, onSchedule = { pageTrays.traySchedule.value = it }, onPlan = { pageTrays.trayPlan.value = it },
                                         backgroundRecords = host.backgroundRecords.isNotEmpty(), onBackground = host.onOpenBackground,
-                                        under = computerPill?.let { pill -> { pill(Modifier) } },
-                                        groupByOrigin = foldsBackground)
+                                        groupByOrigin = foldsBackground,
+                                        modifier = Modifier.layoutId(AssistantTrayFooterSlot),
+                                        maximumHeightForChrome = trayMaxForChrome,
+                                        under = computerPill?.let { pill -> { pill(Modifier) } })
                                     // Where the next message goes, never only inside the In progress tray (iOS RouteChip, #4339 C15).
                                     TaskRouteChip(host)
                                 }
@@ -1186,7 +1249,7 @@ private fun ChatPage(
                                 if (renderStyle == ChatRenderStyle.Assistant && SlashCommand.mainSuggestions(composer.value.text,
                                         clear = canSend && LocalMainChatClear.current != null,
                                         permissions = SessionModes.offersPermissions(session, glass, modeSheet), resources = res).isEmpty())
-                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh)
+                                    ChatQueueStrip(session, chrome.actions, composer, { notice = it }, sessions::refresh, imageLimits = imageLimits)
                                 if (embedded && assistantChat) LocalMainChatGuidance.current?.invoke()
                                 val offlineHint = if (agentChat) offlineAgentPlaceholder(session, machine, heldActions != null) else null
                                 LargeWindowComposer(key, composer, session?.status == "working" && !(agentChat && machine?.online == false),
@@ -1225,6 +1288,16 @@ private fun ChatPage(
                                         else -> null
                                     },
                                     modeHint = if (glass) null else chatModeHint(session, includeModes = modeSheet),
+                                    // Brief and Board share one wrapping row for the launcher and mode chips; Glass's pill does its work (#5055).
+                                    hintChips = if (!glass && renderStyle == ChatRenderStyle.Assistant && chrome.assistantManagement != null &&
+                                        !readOnly && (canSend || turnFix == TurnErrorFix.ModelRoute)) ({
+                                        ConversationLauncherChip(chrome.assistantManagement, key.machineId, key.sessionId, session?.launcher,
+                                            conversationLauncher, conversationModel, openRequested = openModes || openModelRoutePicker,
+                                            onOpenHandled = { openModes = false; openModelRoutePicker = false }) { launcher, model ->
+                                            conversationLauncher = launcher
+                                            conversationModel = model
+                                        }
+                                    }) else null,
                                     // The model pill (#5055, the web's ModelPill): Glass's, in an Agent's chat and a Persona chat.
                                     modelPill = if (!glass || switchSession == null) null else ({ width ->
                                         val online = connection == null || connection == ConnectionState.Online
@@ -1249,19 +1322,17 @@ private fun ChatPage(
                                             onEffort = { effort -> controls.run(switchSession, ChatAction.Modes(effort = effort)) },
                                             openRequested = openModes || openModelRoutePicker,
                                             onOpenHandled = { openModes = false; openModelRoutePicker = false },
-                                            clearRequested = clearModelPick, onClearHandled = { clearModelPick = false })
+                                            clearRequested = clearModelPick, onClearHandled = { clearModelPick = false },
+                                            leaderConversations = chrome.leaderConversations,
+                                            onSwitched = {
+                                                scope.launch {
+                                                    try { sessions.refresh() }
+                                                    catch (cancelled: CancellationException) { throw cancelled }
+                                                    catch (_: Exception) { }
+                                                }
+                                            })
                                     }),
                                     accessory = {
-                                        // Brief and Board keep the launcher chip; Glass's pill does its work (#5055).
-                                        if (!glass && renderStyle == ChatRenderStyle.Assistant && chrome.assistantManagement != null &&
-                                            !readOnly && (canSend || turnFix == TurnErrorFix.ModelRoute)) {
-                                            ConversationLauncherChip(chrome.assistantManagement, key.machineId, key.sessionId, session?.launcher,
-                                                conversationLauncher, conversationModel, openRequested = openModes || openModelRoutePicker,
-                                                onOpenHandled = { openModes = false; openModelRoutePicker = false }) { launcher, model ->
-                                                conversationLauncher = launcher
-                                                conversationModel = model
-                                            }
-                                        }
                                         if (linkContexts.isEmpty()) ComposerSuggestion(session, composer, onSend = { text -> send(text) })
                                         // One line each while the link card peeks: the whole cards left no room for the composer.
                                         if (linkContexts.isNotEmpty()) ComposerContextCards(linkContexts, compact = linkInset.value > 0f) { removed ->
@@ -1277,7 +1348,8 @@ private fun ChatPage(
                                     // web's `canPickPermissions`: Claude's sessions and Persona's while they can change it (#6513)
                                     onPermissions = if (SessionModes.offersPermissions(session, glass, modeSheet)) ({ openPermissions = true }) else null,
                                     // (on Glass /model opens the pill's panel, where the model is picked)
-                                    loop = claudeCommands)
+                                    loop = claudeCommands,
+                                    imageLimits = imageLimits)
                             }
                         }
                     },
@@ -1314,16 +1386,104 @@ private fun ChatPage(
                 terminal, snapshot.turnDurationSeconds, notice ?: snapshot.error, recovery, machine,
                 statusBindings.draftSaveError, fullTextState, sheetPlanState, planSheetState, renderStyle, composer,
                 messageMenu, quoteTarget,
-                onContext = { text -> linkContexts = linkContexts + messageContext(session?.displayTitle ?: res.getString(R.string.chat_screen_untitled), text, context.resources)
+                onContext = { text -> linkContexts = linkContexts + messageContext(session?.displayTitle(renderStyle != ChatRenderStyle.Assistant && chrome.preferHerdrTabName) ?: res.getString(R.string.chat_screen_untitled), text, context.resources)
                     notice = res.getString(R.string.chat_screen_added_context) },
                 onNotice = { notice = it }, onFork = onFork, rewindMenu = rewindMenu,
                 onDelete = { target -> messages.firstOrNull { it.clientMessageId == target.id }?.let { message ->
                     deliveryAction(message, if (message.state.allows(DeliveryAction.Cancel)) DeliveryAction.Cancel else DeliveryAction.Delete)
                 } }, viewerState, chatList, backgroundActions = chrome.actions,
-                backgroundConnection = chrome.connection, backgroundFiles = chrome.files)
+                backgroundConnection = chrome.connection, backgroundFiles = chrome.files,
+                imageLimits = imageLimits, canUploadPhotos = composerService != null)
             pageTakeover?.let { CodexTakeoverDialogs(it) }
         }
     }
+}
+
+private object AssistantTrayFooterSlot
+private object PendingCardsFooterSlot
+
+private class AssistantTrayFooterBudget {
+    var fixedHeightPx: Int = 0
+    var pageHeightPx: Int = -1
+    var pendingSlots: Int = 0
+}
+
+private fun chatFooterMeasurePolicy(budget: AssistantTrayFooterBudget) = MeasurePolicy { measurables, constraints ->
+    val loose = constraints.copy(minWidth = 0, minHeight = 0)
+    val placeables = arrayOfNulls<Placeable>(measurables.size)
+    var trayIndex = -1
+    val pendingIndices = ArrayList<Int>(2)
+    var fixedHeight = 0
+    // 1. Measure non-tray, non-pending children bottom-up first so the composer, route chip, and queue strip
+    //    always claim their full natural height before expandable cards/trays take what remains.
+    for (index in measurables.lastIndex downTo 0) {
+        val measurable = measurables[index]
+        when (measurable.layoutId) {
+            AssistantTrayFooterSlot -> { trayIndex = index; continue }
+            PendingCardsFooterSlot -> { pendingIndices.add(index); continue }
+        }
+        val childMaxHeight = if (constraints.hasBoundedHeight) {
+            (constraints.maxHeight - fixedHeight).coerceAtLeast(0)
+        } else {
+            constraints.maxHeight
+        }
+        val placeable = measurable.measure(loose.copy(maxHeight = childMaxHeight))
+        placeables[index] = placeable
+        fixedHeight += placeable.height
+    }
+    budget.fixedHeightPx = fixedHeight
+    budget.pageHeightPx = if (constraints.hasBoundedHeight) constraints.maxHeight else -1
+    budget.pendingSlots = pendingIndices.size
+    var usedHeight = fixedHeight
+    // 2. Measure AssistantTrays next (reserving each active pending-card slot's minimum touch floor in trayMax)
+    //    so an open tray takes its room before pending cards yield via PendingStack.cap.
+    if (trayIndex >= 0) {
+        val pendingReservePx = Tokens.MinTouch.android.roundToPx() * pendingIndices.size
+        val trayMaxHeight = if (constraints.hasBoundedHeight) {
+            (constraints.maxHeight - usedHeight - pendingReservePx).coerceAtLeast(0)
+        } else {
+            constraints.maxHeight
+        }
+        val placeable = measurables[trayIndex].measure(loose.copy(maxHeight = trayMaxHeight))
+        placeables[trayIndex] = placeable
+        usedHeight += placeable.height
+    }
+    // 3. Measure active pending-card slots last within whatever height remains.
+    for (index in pendingIndices) {
+        val childMaxHeight = if (constraints.hasBoundedHeight) {
+            (constraints.maxHeight - usedHeight).coerceAtLeast(0)
+        } else {
+            constraints.maxHeight
+        }
+        val placeable = measurables[index].measure(loose.copy(maxHeight = childMaxHeight))
+        placeables[index] = placeable
+        usedHeight += placeable.height
+    }
+    val totalWidth = placeables.maxOfOrNull { it?.width ?: 0 } ?: 0
+    val totalHeight = placeables.sumOf { it?.height ?: 0 }
+    layout(constraints.constrainWidth(totalWidth), constraints.constrainHeight(totalHeight)) {
+        var y = 0
+        for (placeable in placeables) {
+            if (placeable != null) {
+                placeable.placeRelative(0, y)
+                y += placeable.height
+            }
+        }
+    }
+}
+
+/**
+ * Inline vertical chat footer layout (matching [Column]'s zero extra RecomposeScope overhead during IME slides)
+ * that measures the composer and fixed chrome before [AssistantTrays] and pending cards in a single pass.
+ */
+@Composable
+private inline fun ChatFooterColumn(
+    budget: AssistantTrayFooterBudget,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val policy = remember(budget) { chatFooterMeasurePolicy(budget) }
+    Layout(content = content, modifier = modifier, measurePolicy = policy)
 }
 
 @Composable

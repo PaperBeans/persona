@@ -325,6 +325,30 @@ func (s *Service) relayWaits(to string, msg relayMsg) bool {
 	return b.replacing[to] || len(b.st.Queue[to]) > 0 || b.holdLocked(to, msg, time.Now()) > 0
 }
 
+// unresolvedSupervision reports whether msg is a supervision relay whose transcript outcome is not yet reconciled:
+// a tried attempt, a legacy durable-doubt-only entry, or a legacy withdrawn entry.
+func (msg relayMsg) unresolvedSupervision() bool {
+	return msg.Tool == superviseTool && (!msg.TriedAt.IsZero() || !msg.DoubtedAt.IsZero() || msg.Withdrawn)
+}
+
+// relayHasUnresolvedSupervision reports whether conversation to has a queued supervision relay whose transcript
+// outcome is not yet reconciled (tried, durable-doubt-only, withdrawn, or in-memory doubted). It fails closed when
+// the relay state cannot be read so an interjection cannot reorder ahead of an unresolved delivery (#12567).
+func (s *Service) relayHasUnresolvedSupervision(to string) bool {
+	b := &s.relays
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.relayLocked(context.Background()) {
+		return true
+	}
+	for _, m := range b.st.Queue[to] {
+		if m.unresolvedSupervision() || m.Tool == superviseTool && !b.doubted[relayMsgID(to, m)].IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
 // relayReplacing: conversation to is a background supervisor reserved for its replacement (supervise_round.go
 // backgroundOutgrown): nothing goes in straight, not even a decision reply that may interject into a running turn.
 func (s *Service) relayReplacing(to string) bool {
@@ -379,6 +403,7 @@ func (s *Service) drainConversations(machine string, ids []string) bool {
 // owner presence, rate limits, and tries in doubt. The owner's last message is forgotten once ownerPresentFor has
 // passed and what it held was handed on.
 func (s *Service) drainHeldRelays(ctx context.Context, now time.Time) {
+	s.escalateStaleSupervisorRelays(ctx, now)
 	leads := s.queueLeads(ctx)
 	b := &s.relays
 	b.mu.Lock()
@@ -391,7 +416,7 @@ func (s *Service) drainHeldRelays(ctx context.Context, now time.Time) {
 		if _, spoke := b.st.Spoke[id]; spoke || b.holds[id] != nil || b.draining[id] {
 			continue
 		}
-		if slices.ContainsFunc(q, func(m relayMsg) bool { return !m.Due.IsZero() || !m.TriedAt.IsZero() }) {
+		if slices.ContainsFunc(q, func(m relayMsg) bool { return !m.Due.IsZero() || !m.TriedAt.IsZero() || m.unresolvedSupervision() }) {
 			if i, _ := b.pickLocked(id, leads[id], now); i >= 0 {
 				due = append(due, id)
 			}

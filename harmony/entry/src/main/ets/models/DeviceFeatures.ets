@@ -15,6 +15,7 @@ import { messageDisplay } from './Compatibility';
 import { HubTransport, HttpFailure } from '../platform/HubTransport';
 import { VoiceAudioBridge } from '../platform/device/VoiceAudioBridge';
 import { tr } from '../design/Strings';
+import { nativeAlarmRows, nativeAlarmPlan, phoneAlarmGranted, PhoneAlarm } from '../platform/NativePhoneAlarms';
 import type { NativePhoneWritePlan } from '../platform/NativePhoneWrites';
 import { prepareContactWrite, prepareCalendarWrite, searchNativePlaces, hasNativeRecurrence } from '../platform/NativePhoneWrites';
 
@@ -275,6 +276,7 @@ export class DeviceFeatures {
   private voiceStarting: boolean = false;
   private voiceStartVisit: number = 0;
   private voiceCallProtocol: number = 0;
+  private alarmAccess:boolean=false;
   private registeredTransport: HubTransport | undefined;
   private registeredDeviceId: string = '';
 
@@ -285,6 +287,15 @@ export class DeviceFeatures {
   }
 
   private readonly catalog: DeviceToolDefinition[] = [
+    new DeviceToolDefinition('phone_alarms_list','List alarms and countdown timers set by Persona on this phone.','phone_native_alarms',objectSchema(),[],true),
+    new DeviceToolDefinition('phone_alarm_create','Set a Persona alarm for HH:mm, optional repeated weekdays, or one ISO date and time with a timezone. Requires approval on the phone. The device notification policy controls its ring.',
+      'phone_native_alarms',objectSchema(Wire.payload(['time','repeat','label'],[stringProperty('HH:mm or ISO 8601 time with timezone.'),
+        Wire.payload(['type','items','maxItems'],['array',Wire.payload(['type','enum'],['string',['mon','tue','wed','thu','fri','sat','sun']]),7]),
+        stringProperty('Label shown on this phone.')]),['time']),[],true,true),
+    new DeviceToolDefinition('phone_timer_start','Start a Persona countdown after approval on this phone. The device notification policy controls its ring. Returns its ID and scheduled end time.',
+      'phone_native_alarms',objectSchema(Wire.payload(['seconds','label'],[integerProperty('Timer length in seconds.',1,86400),stringProperty('Timer label.')]),['seconds']),[],true,true),
+    new DeviceToolDefinition('phone_alarm_cancel','Cancel a previously listed Persona alarm or timer with approval on this phone.',
+      'phone_native_alarms',objectSchema(Wire.payload(['id'],[stringProperty('ID returned by phone_alarms_list.')]),['id']),[],true,true),
     new DeviceToolDefinition('phone_contacts_search',
       "Search the phone's contacts by name, company, job title, email or phone number. Returns up to `limit` people with their name, company, job title, phone numbers (with labels such as mobile/work), email addresses and birthday (yyyy-MM-dd). Use this to look up a colleague's number before calling or drafting a message.",
       'contacts', objectSchema(Wire.payload(['query', 'limit'], [
@@ -827,6 +838,7 @@ export class DeviceFeatures {
 
   private usable(tool: DeviceToolDefinition): boolean {
     if (tool.foregroundOnly && !this.foregrounded) return false;
+    if (tool.source==='phone_native_alarms' && !this.alarmAccess) return false;
     if (tool.name === 'phone_location_search' && !canIUse('SystemCapability.Location.Location.Geocoder')) return false;
     for (const permission of tool.permissions) {
       if (this.permissionStatus(permission) !== 'granted') return false;
@@ -854,6 +866,9 @@ export class DeviceFeatures {
       if (!this.owns(owner)) return;
       const id = await this.deviceId();
       if (!this.owns(owner)) return;
+      const alarmAccess=await phoneAlarmGranted();
+      if (!this.owns(owner)) return;
+      this.alarmAccess=alarmAccess;
       const selected = this.catalog.filter((tool: DeviceToolDefinition) => this.usable(tool));
       const tools = selected.map((tool: DeviceToolDefinition): Object => tool.wire());
       const modelName = deviceInfo.productModel || deviceInfo.softwareModel || '';
@@ -988,6 +1003,7 @@ export class DeviceFeatures {
   private async runTool(call: RunningCall, name: string, args: Record<string, Object>): Promise<DeviceResult> {
     const tool = this.catalog.find((item: DeviceToolDefinition) => item.name === name);
     if (!tool) return resultText('Unknown phone tool: ' + name + '.', true);
+    if (tool.source==='phone_native_alarms' && (!this.alarmAccess || !await phoneAlarmGranted())) return resultText('Alarm access is unavailable. Review Alarms and Timers on the phone.',true);
     if (tool.foregroundOnly && !this.foregrounded) return resultText('This phone action is only available while Persona is on screen.', true);
     for (const permission of tool.permissions) {
       if (this.permissionStatus(permission) === 'not_determined') {
@@ -1003,6 +1019,7 @@ export class DeviceFeatures {
       const context = this.abilityContext;
       if (!context) return resultText('The phone window is unavailable.', true);
       if (name === 'phone_contacts_create' || name === 'phone_contacts_update') plan = await prepareContactWrite(context, args, name === 'phone_contacts_update');
+      else if (tool.source==='phone_native_alarms') plan=await nativeAlarmPlan(context,name,args);
       else if (name === 'phone_calendar_update_event' || name === 'phone_calendar_delete_event') plan = await prepareCalendarWrite(context, args, name === 'phone_calendar_delete_event');
       if (call.cancelled || call.expired || !this.owns(call.owner)) return resultText('The phone action ended before confirmation.', true);
       if (!this.foregrounded || !this.confirmAction) return resultText('The phone cannot show a native confirmation right now. Nothing was changed.', true);
@@ -1013,6 +1030,10 @@ export class DeviceFeatures {
     if (call.cancelled || call.expired || !this.owns(call.owner)) return resultText('The phone action ended before it started.', true);
     if (plan) return jsonResult(await plan.execute((): boolean => !call.cancelled && !call.expired && this.foregrounded && this.owns(call.owner) && this.usable(tool)));
     switch (name) {
+      case 'phone_alarms_list': {
+        const alarms=await nativeAlarmRows();
+        return jsonResult(Wire.payload(['count','alarms'],[alarms.length,alarms.map((alarm:PhoneAlarm)=>alarm.wire())]));
+      }
       case 'phone_location_search': return jsonResult(await searchNativePlaces(args));
       case 'phone_contacts_search': return await this.searchContacts(args);
       case 'phone_calendar_events': return await this.calendarEvents(args);

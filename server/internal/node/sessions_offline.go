@@ -141,11 +141,13 @@ func (n *Node) scanOffline() []proto.Session {
 			continue
 		}
 		// Another platform's runs (agentfilters.go) go before the newest are counted: hundreds a day would crowd out
-		// the user's own. So do a program's one-shot runs (`claude -p`, claude_oneshot.go).
+		// the user's own. So do a program's one-shot runs (`claude -p`, claude_oneshot.go), unless the desktop app's
+		// sidebar lists the transcript: a session New Agent starts there is written by `claude -p` and taken over by the
+		// app (claudedesktop_new.go), and says only sdk-cli until the app ends a turn in it (#15522).
 		if !forked[id] && n.agentFiltered("claude", p) {
 			continue
 		}
-		if !forked[id] && !unlisted[id] && n.oneShotRun(id, filepath.Base(filepath.Dir(p)), p, st, persona) {
+		if !forked[id] && !unlisted[id] && !inDesktop && n.oneShotRun(id, filepath.Base(filepath.Dir(p)), p, st, persona) {
 			continue
 		}
 		if inDesktop { // counted on their own: they neither take the others' 80 nor are pushed out by them
@@ -222,7 +224,7 @@ func (n *Node) scanOffline() []proto.Session {
 			LastText: snippet(m.lastText), UpdatedAt: lastUsed(m, c.st), Rev: c.st.Size(),
 		}
 		s.Activity, s.ActivityAt = m.activityOf()
-		setContext(&s, m)
+		n.setSessionContext(&s, m)
 		m.turnErr.set(&s) // Preserve the full gateway error and its reset after the terminal Agent exits.
 		s.ModelFallback = m.modelFallback
 		n.setModelRestore(&s, c.path, m)
@@ -240,6 +242,10 @@ func (n *Node) scanOffline() []proto.Session {
 // scanOffline reads only Claude's projects and codexSessions keeps the assistant's out of Agents, so such a conversation
 // had no row at all, and every client turned its composer off, with nothing left to send the message that resumes it (#2126).
 func (n *Node) codexAssistantsAtRest(seen map[string]bool) []proto.Session {
+	return n.codexAssistantsAtRestIn(seen, nil)
+}
+
+func (n *Node) codexAssistantsAtRestIn(seen map[string]bool, pass *codexListPass) []proto.Session {
 	if n.state == nil || n.codices == nil {
 		return nil
 	}
@@ -258,7 +264,7 @@ func (n *Node) codexAssistantsAtRest(seen map[string]bool) []proto.Session {
 	}
 	var cands []cand
 	for id := range cwds {
-		path := n.codexPath(id)
+		path := n.codexPathIn(id, pass)
 		if path == "" {
 			continue
 		}

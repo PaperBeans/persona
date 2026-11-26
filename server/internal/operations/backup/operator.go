@@ -27,6 +27,38 @@ func NewOperator() *Operator {
 	return &Operator{backend: newPostgresBackend(), now: time.Now, random: rand.Reader}
 }
 
+// VerificationSupport preflights only configuration and PostgreSQL client
+// discovery. It opens no database connection, creates no temporary files and
+// returns a stable reason instead of sensitive configuration or raw errors.
+func VerificationSupport(opts Options) Support {
+	return operationSupport(opts, "pg_restore")
+}
+
+// CreationSupport reports whether the terminal create workflow has its local
+// prerequisites. It does not and cannot establish that writes are quiesced.
+func CreationSupport(opts Options) Support {
+	return operationSupport(opts, "pg_dump", "pg_restore")
+}
+
+func operationSupport(opts Options, programs ...string) Support {
+	hub, manager, err := Discover(opts)
+	if err != nil {
+		reason := "configuration"
+		if strings.Contains(err.Error(), "externally hosted built-in manager") {
+			reason = "external_manager"
+		}
+		return Support{State: "unsupported", Reason: reason}
+	}
+	if err := NewOperator().checkClients(hub, manager, programs...); err != nil {
+		reason := "postgresql_tools"
+		if strings.Contains(err.Error(), "Docker Compose") {
+			reason = "compose"
+		}
+		return Support{State: "unsupported", Reason: reason}
+	}
+	return Support{State: "supported"}
+}
+
 func (o *Operator) Create(ctx context.Context, opts Options) (_ Result, err error) {
 	if !opts.WritesQuiesced {
 		return Result{}, errors.New("create requires --writes-quiesced after stopping the hub and built-in manager")

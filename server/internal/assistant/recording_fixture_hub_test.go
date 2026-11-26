@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -522,16 +523,16 @@ func (h *hubFixture) transcription(id string) map[string]any {
 }
 
 // lines are recording id's live log as texts and sources.
-func (h *hubFixture) lines(id string) []kb.LiveSegment {
+func (h *hubFixture) lines(id string) []recordingwire.LiveSegment {
 	h.t.Helper()
-	l, _, err := h.engine().LiveRead(id)
+	l, _, err := recW(h.engine()).LiveRead(id)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return l.Segments
 }
 
-func lineTexts(segs []kb.LiveSegment) []string {
+func lineTexts(segs []recordingwire.LiveSegment) []string {
 	out := make([]string, 0, len(segs))
 	for _, sg := range segs {
 		out = append(out, sg.Text)

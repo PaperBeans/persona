@@ -177,7 +177,7 @@ func (d *DB) listAssistantEntries(ctx context.Context, p proto.AssistantEntriesP
 		out.Entries = out.Entries[:p.Limit]
 	}
 	if len(out.Entries) > 0 {
-		out.After = encodeAssistantEntriesCursor(out.Entries[len(out.Entries)-1])
+		out.After = EncodeAssistantEntriesCursor(out.Entries[len(out.Entries)-1])
 	}
 	return out, nil
 }

@@ -71,6 +71,21 @@ func ownerActionDisplay(item ownerActionItem) (string, error) {
 	return out.String(), nil
 }
 
+func ownerActionItemDisplay(item ownerActionItem) (string, error) {
+	arguments, err := ownerActionDisplay(item)
+	if err != nil {
+		return "", err
+	}
+	if item.Display == "" {
+		return arguments, nil
+	}
+	text := item.Display + "\n\nCanonical arguments:\n" + arguments
+	if len(text) > ownerActionMaxDisplay {
+		return "", errors.New("built-in before/after and canonical arguments are too large to display in full")
+	}
+	return text, nil
+}
+
 func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self string, args json.RawMessage) (string, error) {
 	cfg := s.settings(ctx)
 	persistent := persistentOwnerActionCardsOn(cfg)
@@ -91,15 +106,9 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return "", errors.New("owner_action_prepare accepts exactly one JSON object")
 	}
-	if s.ext == nil {
-		return "", errors.New("connector tools are unavailable")
-	}
 	drafts := make([]ownerActionDraft, 0, len(in.Items))
+	ctx = withOwnerProfilePlan(ctx)
 	for _, item := range in.Items {
-		known, readOnly := s.ext.ToolAccess(item.Tool)
-		if !known || readOnly || !s.ext.ConnectorTool(item.Tool) {
-			return "", fmt.Errorf("%s is not a known connector action; prepare only exact side-effecting connector calls", item.Tool)
-		}
 		canonical, err := canonicalOwnerAction(item.Input)
 		if err != nil {
 			return "", err
@@ -107,7 +116,30 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 		if len(canonical) > ownerActionMaxDisplay {
 			return "", errors.New("an item is too large to display in full; call it directly for its ordinary approval card")
 		}
-		drafts = append(drafts, ownerActionDraft{Tool: item.Tool, Input: canonical})
+		draft := ownerActionDraft{Tool: item.Tool, Input: canonical}
+		if ownerBuiltinWrite(item.Tool) {
+			prepared, err := s.prepareOwnerBuiltin(ctx, machine, self, item.Tool, canonical)
+			if err != nil {
+				return "", err
+			}
+			draft.Display = prepared.display
+			if prepared.revision != nil {
+				expected := *prepared.revision
+				draft.Revision = &expected
+			}
+			if err := advanceOwnerProfilePlan(ctx, prepared); err != nil {
+				return "", err
+			}
+		} else {
+			if s.ext == nil {
+				return "", errors.New("connector tools are unavailable")
+			}
+			known, readOnly := s.ext.ToolAccess(item.Tool)
+			if !known || readOnly || !s.ext.ConnectorTool(item.Tool) {
+				return "", fmt.Errorf("%s is not a known side-effecting connector or supported built-in write", item.Tool)
+			}
+		}
+		drafts = append(drafts, draft)
 	}
 	book, err := s.ownerActions()
 	if err != nil {
@@ -118,7 +150,7 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 		return "", err
 	}
 	for _, item := range batch.Items {
-		if _, err := ownerActionDisplay(item); err != nil {
+		if _, err := ownerActionItemDisplay(item); err != nil {
 			_ = book.cancelPending(context.Background(), batch.ID)
 			return "", err
 		}
@@ -128,8 +160,20 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 		_ = book.cancelPending(context.Background(), batch.ID)
 		return "", err
 	}
+	batchSummary := i18n.T(s.lang(ctx), "assistant-owner_actions.batch", i18n.Args{"count": len(batch.Items), "phrases": strings.Join(phrases, " / "), "id": batch.ID})
+	var builtinDetails strings.Builder
+	for i, item := range batch.Items {
+		if item.Display != "" {
+			fmt.Fprintf(&builtinDetails, "\n\nItem %d/%d · %s\n%s", i+1, len(batch.Items), item.Tool, item.Display)
+		}
+	}
+	batchSummary += builtinDetails.String()
+	if len(batchSummary) > ownerActionMaxDisplay {
+		_ = book.cancelPending(context.Background(), batch.ID)
+		return "", errors.New("the batch's complete built-in before/after display is too large; split it into smaller batches")
+	}
 	for _, item := range batch.Items {
-		display, _ := ownerActionDisplay(item)
+		display, _ := ownerActionItemDisplay(item)
 		ix := proto.Interaction{
 			ID:                   ownerActionInteractionID(batch.ID, item.ID),
 			MachineID:            machine,
@@ -161,7 +205,7 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 		Kind:                 proto.IxPermission,
 		CreatedAt:            batch.CreatedAt,
 		ToolName:             ownerActionBatchTool,
-		Summary:              i18n.T(s.lang(ctx), "assistant-owner_actions.batch", i18n.Args{"count": len(batch.Items), "phrases": strings.Join(phrases, " / "), "id": batch.ID}),
+		Summary:              batchSummary,
 		ApprovalBatchID:      batch.ID,
 		OwnerProposal:        true,
 		OwnerApprovalPhrases: phrases,
@@ -177,22 +221,8 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 			_ = s.syncOwnerActionBatch(context.Background(), batch.ID)
 		}
 	}()
-	// Register the batch and every item before projecting decisions. A second
-	// resumable waiter below is the original tool caller; the background waiter
-	// retains timeout cleanup if that caller goes away.
-	ready := make(chan struct{})
-	go func() { _, _ = s.waitInteractionReady(context.Background(), batchIX, nil, ready) }()
-	<-ready
-	// Close the registration race in either direction: an item decision may
-	// complete before the batch card exists, or a batch decision before an item
-	// card exists. Durable state is authoritative in both cases.
-	// Decision projection belongs to the durable proposal, not to the lifetime
-	// of whichever tool caller happens to be waiting for it.
 	syncCtx := context.WithoutCancel(ctx)
-	if err := s.syncOwnerActionBatch(syncCtx, batch.ID); err != nil && !errors.Is(err, errNotPending) {
-		return "", err
-	}
-	resolution, err := s.waitInteraction(ctx, batchIX)
+	resolution, err := s.waitOwnerActionBatch(ctx, batchIX)
 	if err == nil && !resolution.Dismiss {
 		if err := s.syncOwnerActionBatch(syncCtx, batch.ID); err != nil && !errors.Is(err, errNotPending) {
 			return "", err
@@ -219,19 +249,45 @@ func (s *Service) toolOwnerActionPrepare(ctx context.Context, machine, self stri
 		return "The owner denied this exact batch. Do not execute any of its items.", nil
 	}
 	var out strings.Builder
-	out.WriteString("The owner approved the following exact operations. Call each listed connector tool exactly once with the canonical arguments below, without edits. Any other call needs its own approval. Do not retry an item after an uncertain external result.\n")
+	out.WriteString("The owner approved the following exact operations. Call each listed tool exactly once in item order with the canonical arguments below, without edits, and stop at the first error. Built-in calls consume their one-shot grants and report their item position and partial result. Any other call needs its own approval. Do not retry an item after an uncertain external result.\n")
 	approved := 0
-	for _, item := range current.Items {
+	for index, item := range current.Items {
 		if item.State != ownerActionGranted && item.State != ownerActionConsumed {
 			continue
 		}
 		approved++
-		fmt.Fprintf(&out, "\nItem %s\nTool: %s\nArguments: %s\n", item.ID, item.Tool, item.Canonical)
+		fmt.Fprintf(&out, "\nItem %d/%d · %s\nTool: %s\nArguments: %s\n", index+1, len(current.Items), item.ID, item.Tool, item.Canonical)
 	}
 	if approved == 0 {
 		return "The batch has no remaining approved items. Execute nothing.", nil
 	}
 	return out.String(), nil
+}
+
+// Both waiters observe the same published card. A quick reply can retire it
+// before the original tool caller resumes; publishing its ID again would lose that reply.
+func (s *Service) waitOwnerActionBatch(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
+	type result struct {
+		resolution proto.Resolution
+		err        error
+	}
+	registered := make(chan *pending, 1)
+	finished := make(chan result, 1)
+	go func() {
+		r, err := s.waitRegisteredInteraction(context.Background(), ix, nil, func(p *pending) { registered <- p })
+		finished <- result{r, err}
+	}()
+	select {
+	case outcome := <-finished:
+		return outcome.resolution, outcome.err
+	case p := <-registered:
+		// An item decision may already be durable when the batch card is first published.
+		err := s.syncOwnerActionBatch(context.WithoutCancel(ctx), ix.ApprovalBatchID)
+		if err != nil && !errors.Is(err, errNotPending) {
+			return proto.Resolution{}, err
+		}
+		return s.await(ctx, p)
+	}
 }
 
 func ownerActionCardProof(ix proto.Interaction, source string) ownerReplyProof {

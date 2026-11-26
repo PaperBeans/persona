@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -9,8 +10,9 @@ import (
 	"unicode/utf8"
 )
 
-// secret.run: the commands the user approved on the password card, run by the target computer's node with the
-// password they typed on its stdin (docs/protocol/protocol.md "hub ↔ node", docs/assistant/assistant.md "Password card").
+// secret.run: the commands the user approved on the password card, run by the target computer's node. The default
+// delivers their typed password only to sudo -S stdin; explicit env delivery uses PERSONA_SECRET instead
+// (docs/protocol/protocol.md "hub ↔ node", docs/assistant/assistant.md "Password card").
 
 // MethodSecretRun is the node method.
 const MethodSecretRun = "secret.run"
@@ -30,10 +32,36 @@ const (
 // what runs; other tools need their absolute paths.
 const SecretRunPath = "/usr/bin:/bin:/usr/sbin:/sbin"
 
+// Delivery is omitted or stdin for the original sudo -S-only contract. Env is an explicit one-off opt-in that puts the
+// password in each approved command's own environment, never in its arguments.
+const (
+	SecretRunDeliveryStdin = "stdin"
+	SecretRunDeliveryEnv   = "env"
+	SecretRunEnvironment   = "PERSONA_SECRET"
+)
+
+// CodeSecretRunEnvElsewhere refuses an env approval from a client that did not prove it rendered the env warning.
+const CodeSecretRunEnvElsewhere = "secret_run_env_elsewhere"
+
+// SecretRunEnvInteraction reports whether ix explicitly requests environment delivery. Older specialized clients
+// ignore the field and suppress Summary when commands exist, so the hub and manager must not let them approve it
+// blindly (their ordinary sudo-looking card cannot give informed consent).
+func SecretRunEnvInteraction(ix Interaction) bool {
+	if ix.ToolName != SecretRunTool {
+		return false
+	}
+	var input struct {
+		Delivery string `json:"delivery"`
+	}
+	_ = json.Unmarshal(ix.ToolInput, &input)
+	return input.Delivery == SecretRunDeliveryEnv
+}
+
 // SecretRunParams are secret.run's params. Check alone asks whether the node can run one at all (nothing runs).
 type SecretRunParams struct {
 	Check    bool     `json:"check,omitempty"`
 	Commands []string `json:"commands,omitempty"`
+	Delivery string   `json:"delivery,omitempty"`
 	// Password is base64 in JSON. Whoever builds or decodes it zeroes the slice once the call is over.
 	Password  []byte `json:"password,omitempty"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"` // for the whole run

@@ -184,3 +184,18 @@ func TestRepoMirrorsRequireFullCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestTodoHandoffRequiresFullCredentials(t *testing.T) {
+	patterns := routePatterns(t)
+	for _, pattern := range []string{
+		"GET /api/v1/todos/{id}/handoffs",
+		"POST /api/v1/todos/{id}/handoff",
+	} {
+		if !slices.Contains(patterns, pattern) {
+			t.Errorf("missing todo handoff route %s", pattern)
+		}
+		if scope := extwire.RouteScopes[pattern]; scope != "" {
+			t.Errorf("todo handoff route %s grants extension scope %s", pattern, scope)
+		}
+	}
+}

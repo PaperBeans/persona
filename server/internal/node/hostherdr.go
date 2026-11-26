@@ -233,7 +233,7 @@ func (h *herdrHost) prompt(ctx context.Context, pane host.PaneRef, text string, 
 			return host.ErrNoAgent
 		}
 		if before.AgentStatus == "blocked" {
-			return host.ErrAgentBlocked
+			return host.Mark(host.Mark(host.ErrAgentBlocked, host.ErrNotDelivered), host.ErrDialogOpen)
 		}
 		if err := t.c.PaneSendText(ctx, t.id, pasteStart+inertControls(text)+pasteEnd); err != nil {
 			return err
@@ -257,7 +257,7 @@ func (h *herdrHost) prompt(ctx context.Context, pane host.PaneRef, text string, 
 		return host.Mark(err, host.ErrNoAgent)
 	}
 	if herdr.IsBlocked(err) {
-		return host.Mark(err, host.ErrAgentBlocked)
+		return host.Mark(host.Mark(host.Mark(err, host.ErrAgentBlocked), host.ErrNotDelivered), host.ErrDialogOpen)
 	}
 	return err
 }

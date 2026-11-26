@@ -21,11 +21,14 @@ const (
 	// Gateway failures are observed from the latest failed turn after its process exits. Explicit user stops win.
 	StopUsageLimit     StopCause = "usage_limit"
 	StopTransientError StopCause = "transient_error"
+	// StopTimeout: supervision timeout stopped a stalled terminal Agent (tasks_stalled.go). Not a user stop, so the
+	// assistant may deliberately resume it with agent_send (resume: true).
+	StopTimeout StopCause = "timeout"
 )
 
 func (c StopCause) String() string {
 	switch c {
-	case StopUser, StopIdle, StopTaskCompleted, StopRestart, StopExit, StopResumeFailed, StopCompactFailed, StopUsageLimit, StopTransientError:
+	case StopUser, StopIdle, StopTaskCompleted, StopRestart, StopExit, StopResumeFailed, StopCompactFailed, StopUsageLimit, StopTransientError, StopTimeout:
 		return string(c)
 	default:
 		return "unknown"
@@ -33,11 +36,11 @@ func (c StopCause) String() string {
 }
 
 // AllowsSupervisorResume: c is a recorded stop that was not the user's (idle, a finished task, a restart, a failed
-// resume or compaction, a gateway error). A resume consumes such a stop before it starts, and an automatic stop or close
-// that records one maps any other cause to the user's. Whether the assistant may resume an Agent is
-// SupervisorMayResume, which also takes an unknown cause.
+// resume or compaction, a gateway error, a supervision timeout). A resume consumes such a stop before it starts, and
+// an automatic stop or close that records one maps any other cause to the user's. Whether the assistant may resume an
+// Agent is SupervisorMayResume, which also takes an unknown cause.
 func (c StopCause) AllowsSupervisorResume() bool {
-	return c == StopIdle || c == StopTaskCompleted || c == StopRestart || c == StopResumeFailed || c == StopCompactFailed || c == StopUsageLimit || c == StopTransientError
+	return c == StopIdle || c == StopTaskCompleted || c == StopRestart || c == StopResumeFailed || c == StopCompactFailed || c == StopUsageLimit || c == StopTransientError || c == StopTimeout
 }
 
 // UserStopped: the user ended the Agent: their Stop, Close or "Archive and close" (user), or the quit command sent

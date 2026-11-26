@@ -3,59 +3,319 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
   <title>Persona</title>
   <link rel="stylesheet" href="setup.css">
 </head>
-<body>
-  <main>
-    <div class="mark" aria-hidden="true">P</div>
-    <h1 id="setup-title" data-i18n="welcome"></h1>
-    <section id="connection-recovery" aria-labelledby="setup-title" hidden>
-      <p data-i18n="hub_connection_failed"></p>
-      <div class="actions">
-        <button id="retry" type="button" data-i18n="retry"></button>
-        <button id="local-settings" class="secondary" type="button" data-i18n="local_settings"></button>
+<body data-mode="onboarding" data-view="hub" data-tab="hub" data-platform="darwin">
+  <div class="titlebar-drag" aria-hidden="true"></div>
+
+  <div class="shell">
+    <!-- Left navigation rail (visible in Settings mode) -->
+    <aside class="settings-rail" aria-label="Settings navigation">
+      <div class="rail-brand">
+        <picture class="brand-mark brand-mark--sm" aria-hidden="true">
+          <source srcset="app-icon-dark.png" media="(prefers-color-scheme: dark)">
+          <img src="app-icon.png" alt="" width="28" height="28" draggable="false">
+        </picture>
+        <div class="rail-brand-text">
+          <span class="rail-brand-name">Persona</span>
+          <span class="rail-brand-sub" data-i18n="settings_title"></span>
+        </div>
       </div>
-    </section>
-    <section id="hub-settings" aria-labelledby="hub-heading">
-      <h2 id="hub-heading" data-i18n="your_hub"></h2>
-      <p data-i18n="hub_help"></p>
-      <form id="connect">
-        <label for="hub" data-i18n="hub_address"></label>
-        <input id="hub" name="hub" type="url" placeholder="https://hub.example.com" autocomplete="url" required autofocus>
-        <p class="hint" data-i18n="hub_hint"></p>
-        <button type="submit" data-i18n="continue"></button>
-      </form>
-    </section>
-    <section id="desktop-settings" aria-labelledby="desktop-heading">
-      <h2 id="desktop-heading" data-i18n="desktop_options"></h2>
-      <label class="choice" for="launch-at-login"><input id="launch-at-login" type="checkbox"> <span data-i18n="launch_at_login"></span></label>
-      <p id="launch-at-login-status" class="hint" role="status"></p>
-    </section>
-    <details id="link-settings">
-      <summary data-i18n="link_section"></summary>
-      <p data-i18n="link_intro"></p>
-      <div id="link-state" role="status" data-i18n="link_checking"></div>
-      <div class="actions">
-        <button id="link-refresh" type="button" data-i18n="refresh"></button>
-        <button id="link-reconnect" type="button" data-i18n="reconnect"></button>
-        <button id="node-install" type="button" data-i18n="install_node"></button>
+
+      <nav class="rail-nav" role="tablist">
+        <button id="nav-hub" class="rail-item is-active" type="button" role="tab" aria-selected="true" data-tab-target="hub">
+          <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M3.6 9h16.8M3.6 15h16.8M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18"/>
+          </svg>
+          <span class="rail-label" data-i18n="nav_hub"></span>
+        </button>
+        <button id="nav-link" class="rail-item" type="button" role="tab" aria-selected="false" data-tab-target="link">
+          <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2.5"/>
+            <path d="M8 20h8M12 16v4"/>
+          </svg>
+          <span class="rail-label" data-i18n="nav_link"></span>
+          <span id="rail-link-dot" class="status-dot status-dot--muted" aria-hidden="true"></span>
+        </button>
+        <button id="nav-desktop" class="rail-item" type="button" role="tab" aria-selected="false" data-tab-target="desktop">
+          <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16"/>
+            <circle cx="9" cy="6" r="2" fill="currentColor"/>
+            <circle cx="15" cy="12" r="2" fill="currentColor"/>
+            <circle cx="10" cy="18" r="2" fill="currentColor"/>
+          </svg>
+          <span class="rail-label" data-i18n="nav_desktop"></span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main scrollable stage -->
+    <main class="stage">
+      <div class="stage-inner">
+        <!-- Back bar when inspecting Persona Link during first-run onboarding -->
+        <div id="onboarding-back-bar" class="back-bar" hidden>
+          <button id="back-to-hub" class="ghost-btn" type="button">
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6"/>
+            </svg>
+            <span data-i18n="back_to_connect"></span>
+          </button>
+        </div>
+
+        <!-- Centered brand hero (visible in Onboarding & Recovery modes) -->
+        <header id="hero-header" class="hero">
+          <div class="hero-icon-wrap">
+            <picture class="brand-mark brand-mark--lg" aria-hidden="true">
+              <source srcset="app-icon-dark.png" media="(prefers-color-scheme: dark)">
+              <img src="app-icon.png" alt="" width="56" height="56" draggable="false">
+            </picture>
+            <span id="hero-badge" class="hero-badge" hidden aria-hidden="true">!</span>
+          </div>
+          <h1 id="setup-title" class="hero-title" data-i18n="welcome"></h1>
+          <p id="setup-subtitle" class="hero-subtitle" data-i18n="welcome_subtitle"></p>
+        </header>
+
+        <!-- Offline recovery card -->
+        <section id="connection-recovery" class="card" aria-labelledby="setup-title" hidden>
+          <div id="recovery-host-row" class="host-pill-row" hidden>
+            <span class="status-dot status-dot--warn" aria-hidden="true"></span>
+            <code id="recovery-host" class="host-pill"></code>
+          </div>
+          <p class="card-body-text" data-i18n="hub_connection_failed"></p>
+          <div class="split-actions">
+            <button id="local-settings" class="btn btn-secondary" type="button" data-i18n="local_settings"></button>
+            <button id="retry" class="btn btn-primary" type="button">
+              <span class="btn-spinner" aria-hidden="true" hidden></span>
+              <span class="btn-label" data-i18n="retry"></span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Hub connection section -->
+        <section id="hub-settings" class="panel" aria-labelledby="hub-heading">
+          <div class="panel-header settings-only">
+            <h2 id="hub-heading" class="panel-title" data-i18n="your_hub"></h2>
+            <p class="panel-desc" data-i18n="hub_help"></p>
+          </div>
+
+          <div class="card">
+            <form id="connect" novalidate>
+              <label class="field-label" for="hub" data-i18n="hub_address"></label>
+              <div class="input-well">
+                <svg class="ui-icon input-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                <input
+                  id="hub"
+                  name="hub"
+                  type="text"
+                  inputmode="url"
+                  data-i18n-placeholder="hub_placeholder"
+                  placeholder="persona://pair?… or https://hub.example.com"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  required
+                  autofocus
+                >
+                <button id="hub-clear" class="icon-clear" type="button" data-i18n-aria-label="clear_input" hidden>
+                  <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Dynamic smart input detection chip -->
+              <div id="input-detect-pill" class="detect-pill" hidden>
+                <span class="status-dot status-dot--ok" aria-hidden="true"></span>
+                <span id="input-detect-text"></span>
+                <span id="input-pin-badge" class="mini-badge" hidden>
+                  <svg class="ui-icon ui-icon--xs" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="4" y="11" width="16" height="10" rx="2"/>
+                    <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                  </svg>
+                  <span data-i18n="hint_pair_pinned"></span>
+                </span>
+              </div>
+
+              <!-- Callout when user pastes persona://link?... into the main Hub box -->
+              <div id="link-input-callout" class="callout callout--warn" hidden>
+                <div class="callout-text">
+                  <strong data-i18n="hint_link_detected_title"></strong>
+                  <p data-i18n="hint_link_detected_body"></p>
+                </div>
+                <div class="callout-actions">
+                  <button id="use-as-link" class="btn btn-primary btn-sm" type="button" data-i18n="hint_link_pair_now"></button>
+                  <button id="extract-hub-only" class="btn btn-secondary btn-sm" type="button" data-i18n="hint_link_use_hub"></button>
+                </div>
+              </div>
+
+              <p id="hub-hint-text" class="hint" data-i18n="hub_hint"></p>
+
+              <button id="connect-submit" class="btn btn-primary btn-block" type="submit">
+                <span class="btn-spinner" aria-hidden="true" hidden></span>
+                <span class="btn-label" data-i18n="continue"></span>
+                <svg class="ui-icon btn-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Friendly structured error card (shared by Onboarding Hub & Offline Recovery) -->
+        <div id="error" class="error-card" role="alert" hidden>
+          <div class="error-head">
+            <svg class="ui-icon error-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M12 8v5M12 16.5h.01"/>
+            </svg>
+            <div class="error-copy">
+              <strong id="error-title" class="error-title"></strong>
+              <p id="error-body" class="error-body"></p>
+            </div>
+          </div>
+          <ul id="error-tips" class="error-tips" hidden></ul>
+          <details id="error-tech-wrap" class="error-tech" hidden>
+            <summary data-i18n="error_technical_label"></summary>
+            <code id="error-tech-code"></code>
+          </details>
+        </div>
+
+        <!-- Onboarding footer links & collapsible help -->
+        <div id="onboarding-footer" class="onboarding-footer">
+          <div class="footer-links">
+            <button id="toggle-help" class="link-btn" type="button" aria-expanded="false" aria-controls="onboarding-help">
+              <span data-i18n="help_toggle"></span>
+            </button>
+            <span class="footer-sep" aria-hidden="true">·</span>
+            <button id="open-link-view" class="link-btn" type="button">
+              <span data-i18n="link_entry_btn"></span>
+            </button>
+          </div>
+
+          <div id="onboarding-help" class="help-card" hidden>
+            <ol class="help-steps">
+              <li data-i18n="help_step_1"></li>
+              <li data-i18n="help_step_2"></li>
+              <li data-i18n="help_step_3"></li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Persona Link section -->
+        <section id="link-settings" class="panel" aria-labelledby="link-heading">
+          <div class="panel-header">
+            <h2 id="link-heading" class="panel-title" data-i18n="link_section"></h2>
+            <p class="panel-desc" data-i18n="link_intro"></p>
+          </div>
+
+          <!-- Status & quick toolbar -->
+          <div class="card">
+            <div class="status-row">
+              <div class="status-meta">
+                <span id="link-status-dot" class="status-dot status-dot--muted" aria-hidden="true"></span>
+                <div id="link-state" class="status-text" role="status" data-i18n="link_checking"></div>
+              </div>
+              <span id="link-status-pill" class="status-pill" hidden></span>
+            </div>
+
+            <div class="actions">
+              <button id="link-refresh" class="btn btn-secondary btn-sm" type="button" data-i18n="refresh"></button>
+              <button id="link-reconnect" class="btn btn-secondary btn-sm" type="button" data-i18n="reconnect"></button>
+              <button id="node-install" class="btn btn-secondary btn-sm" type="button" data-i18n="install_node"></button>
+            </div>
+          </div>
+
+          <!-- Absent Link guide card -->
+          <div id="link-guide-card" class="card card--inset" hidden>
+            <p id="link-install-guide" class="card-body-text" data-i18n="link_install_guide" hidden></p>
+            <div class="actions">
+              <button id="link-install" class="btn btn-secondary btn-sm" type="button" data-i18n="link_install" hidden></button>
+            </div>
+          </div>
+
+          <!-- Pair this computer card -->
+          <div id="pair-card" class="card">
+            <form id="pair" novalidate>
+              <label class="field-label" for="pair-link" data-i18n="pair_computer"></label>
+              <p class="hint hint--top" data-i18n="pair_hint"></p>
+              <div class="input-well">
+                <svg class="ui-icon input-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                <input
+                  id="pair-link"
+                  type="text"
+                  data-i18n-placeholder="pair_placeholder"
+                  placeholder="persona://link?… or persona-link pair '…'"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                >
+              </div>
+              <button id="pair-submit" class="btn btn-primary btn-block" type="submit">
+                <span class="btn-spinner" aria-hidden="true" hidden></span>
+                <span class="btn-label" data-i18n="pair"></span>
+              </button>
+            </form>
+
+            <div id="link-result" class="feedback-banner" role="status" hidden></div>
+
+            <div id="link-login-prompt" class="next-step-bar" hidden>
+              <span data-i18n="pair_success_hub_ready"></span>
+              <button id="use-paired-hub" class="btn btn-primary btn-sm" type="button">
+                <span class="btn-spinner" aria-hidden="true" hidden></span>
+                <span class="btn-label" data-i18n="use_paired_hub"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Claude Code plugin switch card -->
+          <div class="card">
+            <div class="toggle-row">
+              <div class="toggle-copy">
+                <label class="toggle-title" for="claude-plugin" data-i18n="claude_plugin"></label>
+                <p id="claude-plugin-status" class="hint toggle-hint" role="status"></p>
+              </div>
+              <label class="switch">
+                <input id="claude-plugin" type="checkbox" disabled>
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </label>
+            </div>
+            <p class="hint hint--footer" data-i18n="link_footer"></p>
+          </div>
+        </section>
+
+        <!-- Desktop options section -->
+        <section id="desktop-settings" class="panel" aria-labelledby="desktop-heading">
+          <div class="panel-header">
+            <h2 id="desktop-heading" class="panel-title" data-i18n="desktop_options"></h2>
+            <p class="panel-desc" data-i18n="desktop_options_help"></p>
+          </div>
+
+          <div class="card">
+            <div class="toggle-row">
+              <div class="toggle-copy">
+                <label class="toggle-title" for="launch-at-login" data-i18n="launch_at_login"></label>
+                <p id="launch-at-login-status" class="hint toggle-hint" role="status"></p>
+              </div>
+              <label class="switch">
+                <input id="launch-at-login" type="checkbox">
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </label>
+            </div>
+          </div>
+        </section>
       </div>
-      <label class="choice" for="claude-plugin"><input id="claude-plugin" type="checkbox" disabled> <span data-i18n="claude_plugin"></span></label>
-      <p id="claude-plugin-status" class="hint" role="status"></p>
-      <p id="link-install-guide" data-i18n="link_install_guide" hidden></p>
-      <div class="actions"><button id="link-install" type="button" data-i18n="link_install" hidden></button></div>
-      <form id="pair">
-        <label for="pair-link" data-i18n="pair_computer"></label>
-        <input id="pair-link" type="text" placeholder="persona://link?…" autocomplete="off" spellcheck="false">
-        <button type="submit" data-i18n="pair"></button>
-      </form>
-      <p id="link-result" role="status"></p>
-      <p class="hint" data-i18n="link_footer"></p>
-    </details>
-    <p id="error" role="alert" hidden></p>
-  </main>
+    </main>
+  </div>
+
   <script src="setup.cjs"></script>
 </body>
 </html>

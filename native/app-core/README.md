@@ -75,7 +75,7 @@ python3 -I scripts/test_ohos_napi_defs.py           # declaration parser and dri
 
 `scripts/ohos-napi-defs.py` runs a host `cargo check` with the `ohos` feature and `NAPI_TYPE_DEF_TMP_FOLDER` set.
 `napi-derive-ohos` 1.2.0 writes one JSON record per exported function there; this generator maps those records to
-`harmony/entry/src/main/cpp/types/libpersona_core/index.d.ts` in its stable function order. `Buffer` is exposed as
+`harmony/entry/src/main/cpp/types/libpersona_core/index.d.ts` in its stable function order. Binary inputs, results and effects use native
 `Uint8Array`, and every wake/effect callback must have no leading error argument and return `void`; `changedChat`
 keeps separate chat and version arguments. The declaration's `CoreHost` facade and method references stay unchanged.
 `--check` compares the complete generated file; without it, the same deterministic output is written for inspection.

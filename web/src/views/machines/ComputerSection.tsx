@@ -5,91 +5,26 @@
 // itself (/screen/<mid>) is the page's "View screen" button (MachineDetail), whatever Cua Driver's state; while macOS asks
 // for access, the section points to it to click Allow from here. The hub is asked again
 // when the page opens, and every 2 s while a job runs and the tab is shown.
-import { useEffect, useRef, useState } from "react";
-import { api, enc, errorText } from "../../lib/api";
+import { useState } from "react";
 import { computerView, computerWatching, GRANT_HINT, NO_SCREEN_SHARING, type ComputerAction, type MachineComputer } from "../../lib/computer";
-import { documentPage, latestRequest, visiblePoll } from "../../lib/visible-poll";
-import { Button, cx, Dialog, EASE, Spinner, toast } from "../../ui/atoms";
+import { Button, cx, Dialog, EASE, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Switch } from "../settings/SettingsParts";
 import { t } from "../../i18n";
 import { AllowedComputerApps } from "./AllowedComputerApps";
+import { useMachineExtensionControl } from "./useMachineExtensionControl";
 
 export function ComputerSection({ mid, computer, online, manager }: { mid: string; computer: MachineComputer; online: boolean; manager?: string }) {
-  // What the hub said since the page opened (newer than the machine list's).
-  const [fresh, setFresh] = useState<MachineComputer | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [asking, setAsking] = useState(false);
   const [confirmInstall, setConfirmInstall] = useState(false);
-  const shown = fresh ?? computer;
-  const enabled = shown.enabled;
-  const watching = computerWatching(shown, online);
-
-  // One request line per Mac, like BrowserSection: only the latest read or write is shown, so a read sent before the
-  // switch or an action (or before a newer read) never puts an older state back (#5455).
-  const reads = useRef<ReturnType<typeof latestRequest<MachineComputer>> | null>(null);
-  useEffect(() => {
-    setFresh(null);
-    // a failed read leaves the machine list's copy (or the last answer) on screen
-    const line = latestRequest<MachineComputer>(setFresh, () => {});
-    reads.current = line;
-    return () => {
-      line.dispose();
-      if (reads.current === line) reads.current = null;
-    };
-  }, [mid]);
-
-  const refresh = () => reads.current?.run(() => api<MachineComputer>(`/machines/${enc(mid)}/computer`)) ?? Promise.resolve();
-
-  // Runs a write and shows its answer as the latest one (an older read still in flight is dropped). If another Mac is
-  // shown by the time it comes back, both its answer and its failure belong to the Mac left behind and are dropped.
-  const write = async (send: () => Promise<MachineComputer>) => {
-    const line = reads.current;
-    try {
-      const value = await send();
-      void line?.run(() => Promise.resolve(value));
-    } catch (e) {
-      if (line && line === reads.current) throw e;
-    }
-  };
-
-  useEffect(() => {
-    if (online && enabled) void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, online, enabled]);
-
-  useEffect(() => {
-    if (!watching) return;
-    // Every 2 s while the tab is shown, and once on coming back. visiblePoll asks right away when it starts, but the
-    // page just asked (on open or with the action that started this), so that first call is skipped.
-    let started = false;
-    const stop = visiblePoll(() => { if (started) void refresh(); }, 2000, documentPage);
-    started = true;
-    return stop;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, watching]);
-
-  const set = async (on: boolean) => {
-    setSaving(true);
-    try {
-      await write(() => api<MachineComputer>(`/machines/${enc(mid)}/computer`, { method: "PUT", json: { enabled: on } }));
-    } catch (e) {
-      toast(on ? t("machines-computersection.turn_on_failed", { error: errorText(e) }) : t("machines-computersection.turn_off_failed", { error: errorText(e) }), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const run = async (what: ComputerAction) => {
-    setAsking(true);
-    try {
-      await write(() => api<MachineComputer>(`/machines/${enc(mid)}/computer/${what}`, { method: "POST" }));
-    } catch (e) {
-      toast(errorText(e), "error");
-    } finally {
-      setAsking(false);
-    }
-  };
+  const { shown, enabled, saving, acting, toggle, postAction } = useMachineExtensionControl({
+    mid,
+    resource: "computer",
+    initial: computer,
+    online,
+    pollEvery: (s) => (computerWatching(s, online) ? 2000 : 0),
+    toggleError: (on, error) =>
+      on ? t("machines-computersection.turn_on_failed", { error }) : t("machines-computersection.turn_off_failed", { error }),
+  });
 
   const v = computerView(shown, online);
   // Screen Sharing as the machine list has it: the top bar's "View screen" reads the same answer (showsScreen), so the
@@ -97,7 +32,7 @@ export function ComputerSection({ mid, computer, online, manager }: { mid: strin
   const sharing = !!computer.screen_sharing;
   const allowing = v.kind === "granted" || (v.kind === "running" && shown.job?.kind === "grant");
   const action = (title: string, what: ComputerAction, prominent = false) => (
-    <Button tone={prominent ? "primary" : "secondary"} busy={asking} onClick={() => (what === "install" ? setConfirmInstall(true) : void run(what))}>
+    <Button tone={prominent ? "primary" : "secondary"} busy={acting} onClick={() => (what === "install" ? setConfirmInstall(true) : void postAction(what))}>
       {title}
     </Button>
   );
@@ -116,7 +51,7 @@ export function ComputerSection({ mid, computer, online, manager }: { mid: strin
             </div>
           </div>
           {saving && <Spinner />}
-          <Switch on={enabled} onChange={(on) => void set(on)} disabled={saving || !online} label={t("machines-computersection.allow")} />
+          <Switch on={enabled} onChange={(on) => void toggle(on)} disabled={saving || !online} label={t("machines-computersection.allow")} />
         </div>
         {v.kind !== "off" && (
           <div className="flex flex-col items-start gap-2.5 border-t border-line px-4 py-3">
@@ -178,7 +113,7 @@ export function ComputerSection({ mid, computer, online, manager }: { mid: strin
               tone="primary"
               onClick={() => {
                 setConfirmInstall(false);
-                void run("install");
+                void postAction("install");
               }}
             >
               {t("machines-computersection.install")}

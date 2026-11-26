@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,11 +18,13 @@ import (
 	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
-// Another Agent for an existing task (task_plan's continues, task_retry) runs on what that call names, else on the
-// task's own launch as its plan named it, else on the current default: a tier the task names resolves against the
-// model profile in use now, and a task that names neither a launcher nor a tier gets Model configuration › Agents as
-// it is now. What an earlier start resolved for the task is not a choice of this call (#12618). Launcher, model and
-// tier names are placeholders.
+// Another Agent for an existing task (task_plan's continues, task_retry) runs on what that call names, field by field,
+// else on the candidate of a tier its previous Agent ran on while that tier still lists it (#14701, which reverses
+// #12618 for tiers: candidate_dispatch_test.go covers the keeping and the re-pick), else on the task's own launch as
+// its plan named it, else on the current default: a tier resolves against the model profile in use now, and a task
+// that names neither a launcher nor a tier, and whose previous Agent ran on no tier, gets Model configuration › Agents
+// as it is now. What a default or the Agents binding resolved on an earlier start is not kept. Launcher, model and tier
+// names are placeholders.
 
 // restartHistoryStore is profileTaskStore that lists every plan as the plans' history, as the database does, so a
 // continuation's failed start is retried through the plan that binds its to-do now (currentPlanAssignment).
@@ -188,7 +191,8 @@ func TestOwnerRetryFollowsTheCurrentDefault(t *testing.T) {
 	}
 }
 
-// A tier the task named is resolved again against the model profile in use when the retry starts.
+// A tier the task named is resolved against the model profile in use when the retry starts: a one-candidate tier
+// whose candidate changed no longer lists the candidate the failed start ran on, so there is nothing to keep.
 func TestTaskRetryResolvesTheTaskTierNow(t *testing.T) {
 	s, f := restartHub(t)
 	saveTier(t, s, "deep", ModelTier{Launcher: "other", Model: "model-zero"})
@@ -245,9 +249,10 @@ func continuedOnFirst(t *testing.T, s *Service, f *fakeHub, original map[string]
 	return todo
 }
 
-// task_plan with continues: the replacement runs on what this call names, field by field, else on the current
-// default; whatever the task it continues named (a launcher, model and effort, or a tier) is not this call's.
-func TestTaskPlanContinuesFollowsTheCurrentDefault(t *testing.T) {
+// task_plan with continues: the replacement runs on what this call names, field by field; else, when the Agent it
+// continues ran on a tier, on that tier's candidate it ran on (kept, #14701), with this call's effort laid over it;
+// else on the current default. A launcher, model and effort the task it continues named are not this call's.
+func TestTaskPlanContinuesKeepsTheTiersCandidate(t *testing.T) {
 	saveTiers := func(t *testing.T, s *Service) {
 		t.Helper()
 		ps := modelProfiles{Revision: 1, Profiles: []ModelProfile{{ID: "p", Name: "P", Tiers: map[string]ModelTier{
@@ -269,6 +274,7 @@ func TestTaskPlanContinuesFollowsTheCurrentDefault(t *testing.T) {
 		{"original named a tier", map[string]any{"tier": "deep"}},
 		{"original named nothing", nil},
 	} {
+		onTier := original.pick["tier"] != nil
 		for _, c := range []struct {
 			name string
 			pick map[string]any
@@ -280,6 +286,11 @@ func TestTaskPlanContinuesFollowsTheCurrentDefault(t *testing.T) {
 			{"model", map[string]any{"model": "model-three"}, [3]string{"second", "model-three", "low"}},
 			{"effort", map[string]any{"effort": "medium"}, [3]string{"second", "model-two", "medium"}},
 		} {
+			want := c.want
+			if onTier && c.pick["launcher"] == nil && c.pick["model"] == nil && c.pick["tier"] == nil {
+				// The Agent it continues ran on tier deep's candidate: kept, this call's effort over it.
+				want = [3]string{"first", "model-one", cmp.Or(c.pick["effort"], any("high")).(string)}
+			}
 			t.Run(original.name+"/"+c.name, func(t *testing.T) {
 				s, f := restartHub(t)
 				saveTiers(t, s)
@@ -294,15 +305,16 @@ func TestTaskPlanContinuesFollowsTheCurrentDefault(t *testing.T) {
 					t.Fatal(err)
 				}
 				waitFor(t, "the continuation's start", func() bool { return len(startsOf(f)) > before && s.taskStarting.Load() == 0 })
-				if got := launchOf(startsOf(f)[before]); got != c.want {
-					t.Fatalf("continuation %v started %v, want %v", c.pick, got, c.want)
+				if got := launchOf(startsOf(f)[before]); got != want {
+					t.Fatalf("continuation %v started %v, want %v", c.pick, got, want)
 				}
 			})
 		}
 	}
 }
 
-// A continuation whose own start failed after writing itself back is retried on the current default too.
+// A continuation whose own start failed after writing itself back, of an Agent that ran on no tier, is retried on
+// the current default too.
 func TestContinuationRetryFollowsTheCurrentDefault(t *testing.T) {
 	s, f := restartHub(t)
 	original, _ := startRestartPlan(t, s, f, planRestartTask(t, s, nil), nil)

@@ -182,8 +182,8 @@ func TestTriageSettingsPutAfterReadFailure(t *testing.T) {
 	if w := serveAs(s, "answer", "PUT", "/api/v1/agents/triage", `{"enabled":true}`); w.Code != http.StatusForbidden {
 		t.Fatalf("answer-only PUT: %d %s", w.Code, w.Body)
 	}
-	if st.puts != 0 {
-		t.Fatalf("rejected PUT saved settings %d times", st.puts)
+	if puts := st.putCount(); puts != 0 {
+		t.Fatalf("rejected PUT saved settings %d times", puts)
 	}
 
 	want := TriageSwitches{Enabled: true, AutoContinue: true, Wake: true}

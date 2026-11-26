@@ -1,0 +1,100 @@
+{
+  "string": [
+    {
+      "name": "agent_task_manual",
+      "value": "Started Manually"
+    },
+    {
+      "name": "agent_task_unassigned",
+      "value": "Unassigned"
+    },
+    {
+      "name": "agent_task_manual_hint",
+      "value": "Agents you opened yourself in the terminal, on no to-do. Touch and hold one › Link to To-do… to file it."
+    },
+    {
+      "name": "agent_task_unassigned_hint",
+      "value": "On no to-do; often started from Lark, the phone or elsewhere. Touch and hold one › Link to To-do… to file it."
+    },
+    {
+      "name": "agent_task_secretary",
+      "value": "Secretary"
+    },
+    {
+      "name": "agent_task_new_chat",
+      "value": "New Chat"
+    },
+    {
+      "name": "agent_task_untitled",
+      "value": "Untitled To-do"
+    },
+    {
+      "name": "agent_task_detail",
+      "value": "View to-do details"
+    },
+    {
+      "name": "agent_task_needs_count",
+      "value": "{n} need you"
+    },
+    {
+      "name": "agent_task_working",
+      "value": "Working"
+    },
+    {
+      "name": "agent_task_needs_you",
+      "value": "Needs you"
+    },
+    {
+      "name": "agent_task_stuck",
+      "value": "Stuck"
+    },
+    {
+      "name": "agent_task_planned",
+      "value": "Not started"
+    },
+    {
+      "name": "agent_task_review",
+      "value": "Awaiting review"
+    },
+    {
+      "name": "agent_task_state_idle",
+      "value": "Seen"
+    },
+    {
+      "name": "agent_task_state_unknown",
+      "value": "Unknown"
+    },
+    {
+      "name": "agent_task_state_unread",
+      "value": "Unread"
+    },
+    {
+      "name": "agent_task_state_needs_you",
+      "value": "Needs You"
+    },
+    {
+      "name": "agent_task_state_working",
+      "value": "Working"
+    },
+    {
+      "name": "agent_task_state_offline",
+      "value": "Not running"
+    },
+    {
+      "name": "agent_task_count",
+      "value": "{n}"
+    },
+    {
+      "name": "agent_task_expanded",
+      "value": "Expanded"
+    },
+    {
+      "name": "agent_task_collapsed",
+      "value": "Collapsed"
+    },
+    {
+      "name": "agent_task_about",
+      "value": "About “{title}”"
+    }
+  ]
+}

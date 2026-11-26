@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
 import { DISPLAY_IDENTITY_KEY, resetManagerChoice, shownIdentity } from "./manager-choice";
-import { currentRoster, loadRoster, resetRoster, setRoster } from "./managers";
+import { currentRoster, loadRoster, resetRoster, setRoster, switcherLine } from "./managers";
 
 let count: number;
 let reads: number;
@@ -72,7 +72,7 @@ describe("reading the roster again", () => {
 
   it("keeps the remembered head through read failures except a genuinely unsupported roster", async () => {
     setRoster({ default: "assistant", managers: [{ id: "assistant", name: "助手", online: true }] });
-    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手" });
+    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手", isDefault: true, line: switcherLine({ id: "assistant", name: "助手", online: true }), tone: "green" });
     resetRoster(); // a reload: no fresh roster, but the head identity remains
 
     const fail = async (error: ApiError) => {
@@ -83,12 +83,12 @@ describe("reading the roster again", () => {
       await done;
     };
     await fail(new ApiError(503, "unavailable", { error: "unavailable" }));
-    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手" });
+    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手", isDefault: true, line: switcherLine({ id: "assistant", name: "助手", online: true }), tone: "green" });
     expect(localStorage.getItem(DISPLAY_IDENTITY_KEY)).not.toBeNull();
 
     resetRoster(); // cancel the temporary failure's retry without clearing the identity
     await fail(new ApiError(404, "gone", { error: "gone", code: "no_manager" }));
-    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手" });
+    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手", isDefault: true, line: switcherLine({ id: "assistant", name: "助手", online: true }), tone: "green" });
 
     resetRoster();
     await fail(new ApiError(404, "not found", { error: "not found" }));

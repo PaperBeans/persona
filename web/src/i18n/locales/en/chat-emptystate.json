@@ -1,0 +1,11 @@
+{
+  "agent_starter_repo": "Map out the current repository structure",
+  "agent_starter_git": "Check git status and recent changes",
+  "agent_starter_tests": "Run tests and report the results",
+  "assistant_starter_todos": "What's on my to-do list today?",
+  "assistant_starter_messages": "Summarize recent important messages",
+  "assistant_starter_tasks": "Help organize my current tasks",
+  "ask_persona": "Ask {name}",
+  "new_chat": "Start a new conversation",
+  "subtitle": "Type an idea, paste an image, or use / commands and @ file mentions"
+}

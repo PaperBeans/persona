@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -65,7 +66,7 @@ func streakToldLocked(sc *schedule, i int, wasOK bool) (t Task, n int, tell bool
 		return Task{}, 0, false
 	}
 	j := sc.indexLocked(r.RefID)
-	if j < 0 || sc.tasks[j].Repeat == repeatOnce {
+	if j < 0 || sc.tasks[j].Repeat == repeatOnce || sc.tasks[j].PageID != "" {
 		return Task{}, 0, false
 	}
 	n, newer, told, in := runStreak(sc.runs, r.RefID, r.ID)
@@ -80,10 +81,16 @@ func streakToldLocked(sc *schedule, i int, wasOK bool) (t Task, n int, tell bool
 	return sc.tasks[j], n, true
 }
 
-// pushStreak tells the user t has not gone through its last count runs (#4658): which task, how many, and the last
-// run's reason, in the conversation that run was in. Nothing repeats it until the task goes through once. It says
-// whether it pushed: not into a muted conversation, where the run's own failure push is all the user gets (#4785).
+// pushStreak tells the originating supervisor, leader, or main conversation that t has not gone through its last
+// count runs (#4658): which task, how many, and the last run's reason. Owner-subscribed briefings (Facts/Report)
+// and environments with no supervisor or main conversation keep pushing to the owner. Nothing repeats it until the
+// task goes through once. It says whether it handled the notice: not into a muted conversation, where the run's own
+// failure notice is all the user gets (#4785).
 func (s *Service) pushStreak(t Task, count int, last ScheduleRun) bool {
+	if t.PageID != "" {
+		s.pageChanged(t.PageID, pageStatus)
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if last.SessionID != "" && s.muted(last.MachineID, last.SessionID) {
@@ -92,16 +99,34 @@ func (s *Service) pushStreak(t Task, count int, last ScheduleRun) bool {
 	l := s.lang(ctx)
 	name := t.labelIn(l)
 	why := clip(oneLine(last.Error), 300)
-	// the lock screen does not name a task whose push says something sensitive (usage.go, scene 4)
-	if s.exitPolicy(ctx, name+"\n"+why, last.SessionID, t.Space).Redact {
-		name, _ = s.redactedNotice(ctx, l, t.Space)
-	}
+	policyText := name + "\n" + why
 	if why == "" {
 		why = i18n.T(l, "assistant-schedule.streak_unknown")
 	}
+	title := i18n.T(l, "assistant-schedule.streak", i18n.Args{"name": name, "count": count})
+	body := i18n.T(l, "assistant-schedule.streak_body", i18n.Args{"reason": why, "count": count})
+	if !t.Facts && !t.Report {
+		if to, ok := s.scheduleFailureTarget(ctx, t); ok {
+			text := fmt.Sprintf("%s (task=%s run=%s)\n%s", title, t.ID, last.ID, body)
+			if _, kept := s.keepRelayLater(to, relayMsg{
+				From:      cardScheduleStreak,
+				FromTitle: title,
+				Tool:      cardScheduleStreak,
+				Text:      text,
+				At:        time.Now().UTC(),
+			}); kept {
+				s.publish(ctx)
+			}
+			return true
+		}
+	}
+	// the lock screen does not name a task whose push says something sensitive (usage.go, scene 4)
+	if s.exitPolicy(ctx, policyText, last.SessionID, t.Space).Redact {
+		name, _ = s.redactedNotice(ctx, l, t.Space)
+	}
 	n := Notification{SessionID: last.SessionID, DeviceID: last.MachineID,
 		Title: i18n.T(l, "assistant-schedule.streak", i18n.Args{"name": name, "count": count}),
-		Body:  i18n.T(l, "assistant-schedule.streak_body", i18n.Args{"reason": why, "count": count})}
+		Body:  body}
 	if last.MachineID != "" {
 		if m, ok := s.device(ctx, last.MachineID); ok {
 			n.Subtitle = m.Name

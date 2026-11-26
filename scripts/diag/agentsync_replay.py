@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """How often the app pulls chats in the background (AgentSync), over a recording of a real hub's pushes
-(server/cmd/pushrec, docs/operations/testing.md "Push replay"): before the working-agent gap (a pull per transcript change, merged
+(server/scripts/pushrec, docs/operations/testing.md "Push replay"): before the working-agent gap (a pull per transcript change, merged
 over the 300 ms plan) and after (a working agent's chat at most every AgentSync.workingGap, at once when not working).
 Prints counts only; the recording stays on the machine it was made on.
 

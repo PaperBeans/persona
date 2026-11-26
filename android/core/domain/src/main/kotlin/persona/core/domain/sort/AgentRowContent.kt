@@ -68,6 +68,8 @@ data class AgentRowContext(
     val slot: String? = null,
     /** Under a By Status section that names its state (iOS `inStateSection`): no state word. */
     val stateSection: Boolean = false,
+    /** Hub setting `use_herdr_tab_name`: promotes the herdr tab name to title and moves the CLI title to the detail line. */
+    val preferHerdrTabName: Boolean = false,
 )
 
 /**
@@ -82,13 +84,15 @@ fun AgentSession.rowContent(
     val s = session
     val place = mutableListOf<CoreText>()
     val pane = context.pane
+    val primaryTab = s.displayTabName(context.preferHerdrTabName)
+    s.displayTitleDetail(context.preferHerdrTabName)?.let { place += CoreText.plain(it) }
     val source = s.source?.let { CoreText.joined(" · ", listOfNotNull(it.label, it.agentName?.let(CoreText::plain))) }
     (pane?.name?.let(CoreText::plain) ?: source)?.let {
         place += it
         if (pane?.launcher == true) place += CoreText.of(Key.AgentsStartedTab)
     }
     if (context.host) s.hostKind.takeIf { it.isNotEmpty() && it != "herdr" }?.let { place += CoreText.plain(it) }
-    val slot = if (pane == null) context.slot ?: s.slotLabel else null
+    val slot = if (pane == null && primaryTab == null) context.slot ?: s.slotLabel else null
     val space = if (context.located) s.spaceName?.takeIf(String::isNotBlank) ?: s.folderName.takeIf(String::isNotBlank) else null
     when {
         space != null -> place += CoreText.plain(slot?.let { "$space › $it" } ?: space)

@@ -188,5 +188,16 @@ describe("default palette contrast", () => {
     it(`${scheme}: --ink-3 stays a step quieter than --ink-2`, () => {
       expect(contrast(t["ink-3"], t.surface)).toBeLessThan(contrast(t["ink-2"], t.surface));
     });
+    it(`${scheme}: shell/sidebar --canvas sits deeper than main card --page and elevated --surface (#14696)`, () => {
+      // Lower luminance than --page in both schemes: darker neutral shell in light, deeper charcoal backdrop in dark.
+      const lum = (hex: string) => {
+        const full = hex.length === 4 ? `#${[...hex.slice(1)].map((c) => c + c).join("")}` : hex;
+        return channels(full).map((c) => c / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          .reduce((n, c, i) => n + c * [0.2126, 0.7152, 0.0722][i], 0);
+      };
+      expect(lum(t.canvas)).toBeLessThan(lum(t.page));
+      expect(lum(t.page)).toBeLessThan(lum(t.surface));
+      if (scheme === "dark") expect(lum(t.canvas)).toBeLessThan(lum(t.inset));
+    });
   }
 });

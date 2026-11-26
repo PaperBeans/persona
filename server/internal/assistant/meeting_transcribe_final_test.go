@@ -43,7 +43,7 @@ func TestFinalPassRetriesWhileUnreachable(t *testing.T) {
 	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)); n != 1+len(shortRec.lists["finalUnreachableRetries"]) {
 		t.Fatalf("%d tries", n)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := recW(h.engine()).MeetingRead(meetingRec)
 	if tr := m.Transcription; tr.FinalTries != 6 || tr.FinalUnreachable != 6 {
 		t.Fatalf("tries %d, unreachable %d", tr.FinalTries, tr.FinalUnreachable)
 	}
@@ -59,7 +59,7 @@ func TestFinalPassRetriesWhileUnreachable(t *testing.T) {
 	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)) - 6; n != 1+len(shortRec.lists["finalRetries"]) {
 		t.Fatalf("billed, then unavailable: %d tries", n)
 	}
-	m, _, _ = h.engine().MeetingRead(meetingOther)
+	m, _, _ = recW(h.engine()).MeetingRead(meetingOther)
 	if tr := m.Transcription; tr.FinalTries != 3 || tr.FinalUnreachable != 0 || tr.UsageSeconds < 3 {
 		t.Fatalf("billed, then unavailable: %+v", tr)
 	}
@@ -79,16 +79,21 @@ func TestFinalPassRetriesAndFallbacks(t *testing.T) {
 	if got := h.hubTexts(meetingRec); !slices.Equal(got, []string{"Live one.", "Live two."}) {
 		t.Fatalf("the final transcript %q", got)
 	}
-	m, _, _ := h.engine().MeetingRead(meetingRec)
+	m, _, _ := recW(h.engine()).MeetingRead(meetingRec)
 	if m.Transcription.FinalTries != 3 {
 		t.Fatalf("tries %d", m.Transcription.FinalTries)
 	}
 
-	h.meetingAudio(meetingOther)
+	// The complete upload kicks the running final-pass loop. Advertise the next recording's capabilities before
+	// that upload, not after it: its replay must never start with the previous recording's contribution info.
 	h.tr.set(func(f *fakeTranscriber) { f.info.Features = []string{extwire.TranscriptionLive} })
+	h.meetingAudio(meetingOther)
 	h.finalState(meetingOther, "final")
-	if got := h.hubTexts(meetingOther); !slices.Equal(got, []string{"Live one.", "Live two."}) || len(h.tr.jobsOf(extwire.TranscriptionReplay)) != 3 {
-		t.Fatalf("no replay: %q", got)
+	if got := h.hubTexts(meetingOther); !slices.Equal(got, []string{"Live one.", "Live two."}) {
+		t.Fatalf("the final transcript without replay: %q", got)
+	}
+	if n := len(h.tr.jobsOf(extwire.TranscriptionReplay)); n != 3 {
+		t.Fatalf("live-only contribution started another replay: %d total tries", n)
 	}
 
 	silent := "13131313-1313-4313-8313-131313131313"

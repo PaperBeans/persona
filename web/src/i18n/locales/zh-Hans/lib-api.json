@@ -1,5 +1,6 @@
 {
   "cant_reach_hub": "连不上 hub",
+  "page_error": "页面出错了：{detail}",
   "hub_no_response": "hub 太久没有回应：可能正在重启，或者网络不通。稍后再试。",
   "not_found": "找不到内容，或当前版本不支持此功能，请刷新页面或检查 hub 和电脑端是否需要更新。（{detail}）",
   "server_error": "服务暂时出错，请稍后重试；若一直失败，请检查 hub 是否正常运行。（{detail}）",

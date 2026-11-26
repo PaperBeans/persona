@@ -22,7 +22,7 @@ func (s *Service) channelRoutes() {
 		s.handle(pattern, func(w http.ResponseWriter, r *http.Request) { fn(w, withRequestLang(r)) })
 	}
 	handle("GET /api/v1/channels", func(w http.ResponseWriter, r *http.Request) {
-		list, err := s.channelList(r.Context())
+		list, err := s.channelList(r.Context(), s.integrationsV2On(r.Context()))
 		if err != nil {
 			apierr.Write(w, http.StatusBadGateway, err)
 			return
@@ -46,7 +46,7 @@ func (s *Service) channelRoutes() {
 				apierr.Write(w, http.StatusForbidden, errors.New("this device can only read and answer"))
 				return
 			}
-			v, ok, err := s.channelView(r.Context(), r.PathValue("id"))
+			v, ok, err := s.channelView(r.Context(), r.PathValue("id"), s.integrationsV2On(r.Context()))
 			switch {
 			case err != nil:
 				apierr.Write(w, http.StatusBadGateway, err)
@@ -72,15 +72,27 @@ func (s *Service) channelRoutes() {
 	}
 	handle("PUT /api/v1/channels/{id}", full(func(w http.ResponseWriter, r *http.Request, v channel.View) {
 		var in struct {
-			Enabled  *bool           `json:"enabled"`
-			Target   *channel.Target `json:"target"`
-			Features map[string]bool `json:"features"`
+			Enabled         *bool               `json:"enabled"`
+			Target          *channel.Target     `json:"target"`
+			ThreadMode      *channel.ThreadMode `json:"thread_mode"`
+			ThreadIdleHours *int                `json:"thread_idle_hours"`
+			Features        map[string]bool     `json:"features"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		if err := s.updateChannel(r.Context(), v, in.Enabled, in.Target, in.Features); err != nil {
+		if err := s.updateChannelFields(r.Context(), v, channelUpdate{
+			Enabled:         in.Enabled,
+			Target:          in.Target,
+			ThreadMode:      in.ThreadMode,
+			ThreadIdleHours: in.ThreadIdleHours,
+			Features:        in.Features,
+		}); err != nil {
+			if errors.Is(err, errChannelsUnread) {
+				apierr.Write(w, http.StatusServiceUnavailable, err)
+				return
+			}
 			var re *rpc.Error
 			if errors.As(err, &re) && re.Code == assistantwire.CodeNeedsTriageModel {
 				apierr.WriteCode(w, http.StatusConflict, re.Code, errors.New(re.Message))
@@ -98,7 +110,7 @@ func (s *Service) channelRoutes() {
 		}
 		s.forgetChannelTurns(v.ID)
 		if v.ID == channel.Feishu {
-			s.feishuUnpaired()
+			s.larkModule().Unpaired()
 		}
 		detail(w, r, v.ID)
 	}))
@@ -126,8 +138,21 @@ func (s *Service) channelRoutes() {
 	}))
 }
 
+type channelUpdate struct {
+	Enabled         *bool
+	Target          *channel.Target
+	ThreadMode      *channel.ThreadMode
+	ThreadIdleHours *int
+	Features        map[string]bool
+}
+
 // updateChannel applies the app's changes: only what is given.
 func (s *Service) updateChannel(ctx context.Context, v channel.View, enabled *bool, target *channel.Target, features map[string]bool) error {
+	return s.updateChannelFields(ctx, v, channelUpdate{Enabled: enabled, Target: target, Features: features})
+}
+
+func (s *Service) updateChannelFields(ctx context.Context, v channel.View, in channelUpdate) error {
+	enabled, target, threadMode, threadIdleHours, features := in.Enabled, in.Target, in.ThreadMode, in.ThreadIdleHours, in.Features
 	l := s.botLang(ctx)
 	if target != nil {
 		if err := target.Check(); err != nil {
@@ -135,6 +160,16 @@ func (s *Service) updateChannel(ctx context.Context, v channel.View, enabled *bo
 		}
 		if target.Kind == channel.TargetConversation && !s.isAssistantConversation(ctx, target.MachineID, target.SessionID) {
 			return errors.New(i18n.T(l, "assistant-channels.assistant_chats_only"))
+		}
+	}
+	if threadMode != nil {
+		if err := threadMode.Check(); err != nil {
+			return err
+		}
+	}
+	if threadIdleHours != nil {
+		if err := channel.CheckThreadIdleHours(*threadIdleHours); err != nil {
+			return err
 		}
 	}
 	known := map[string]bool{}
@@ -147,25 +182,40 @@ func (s *Service) updateChannel(ctx context.Context, v channel.View, enabled *bo
 		}
 	}
 	if v.ID == channel.Feishu {
+		if threadMode != nil || threadIdleHours != nil {
+			return errors.New("thread_mode and thread_idle_hours are only supported for extension channels")
+		}
 		return s.updateFeishuChannel(ctx, enabled, target, features)
 	}
 	if v.Source != channel.SourcePlugin {
 		return errors.New(i18n.T(l, "assistant-channels.not_set_here", i18n.Args{"name": v.Name}))
 	}
+	c := &s.chans
+	c.mu.Lock()
+	s.loadChannelsLocked(ctx)
+	if !c.loaded {
+		c.mu.Unlock()
+		return errChannelsUnread
+	}
 	if enabled != nil {
+		c.mu.Unlock()
 		if err := s.appCall(ctx, AppChannels, ChannelsEnable, map[string]any{"channel": v.ID, "on": *enabled}, nil); err != nil {
 			return err
 		}
+		c.mu.Lock()
 	}
-	c := &s.chans
-	c.mu.Lock()
 	defer c.mu.Unlock()
-	s.loadChannelsLocked(ctx)
 	p := s.channelPrefLocked(v.ID)
 	if target != nil {
 		t := *target
 		t.Title = ""
 		p.Target = &t
+	}
+	if threadMode != nil {
+		p.ThreadMode = *threadMode
+	}
+	if threadIdleHours != nil {
+		p.ThreadIdleHours = *threadIdleHours
 	}
 	for id, on := range features {
 		p.Features[id] = on

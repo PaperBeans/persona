@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"path"
 	"slices"
 	"strings"
@@ -20,13 +22,13 @@ import (
 )
 
 // The meeting's room conversation (docs/assistant/meeting-minutes.md "Meeting conversation (#3862)", "The room
-// conversation"): a room meeting (one whose upload carries room, kb/meeting.go) is attended by a conversation of its
+// conversation"): a room meeting (one whose upload carries room, writers/meeting.go) is attended by a conversation of its
 // own, a guest of kind meeting on the assistant's computer, limited to meeting material: Claude Code only, no runtime
 // tools, its own directory with a meeting CLAUDE.md, none of the owner's Claude Code setup (node/assistant_guest.go),
 // and only the meeting tools, bound to its recording (meeting_room_tools.go). It is a side exchange everywhere
 // (meeting_turns.go takes its every turn for a meeting turn).
 //
-// Its state is meeting.json's (kb.MeetingRoom): none until the role is not off, then starting (made once, also across
+// Its state is meeting.json's (recordingwire.MeetingRoom): none until the role is not off, then starting (made once, also across
 // a restart: the creation is written as pending, under a session id derived from the recording, before the node is
 // asked), ready, or unavailable with a problem (machine_offline and start_failed retried every minute); ended at the
 // meeting's end; deleted at the transcript's cut or with the recording (meetingRoomsSweep). The feeder looks at a
@@ -34,7 +36,7 @@ import (
 
 // purposeMeetingRoom is the model purpose a room starts on (#7980, the In-meeting conversation): the main chat's
 // launcher, model and effort until it is set apart in Model settings, always on Claude Code's CLI (models_room.go).
-const purposeMeetingRoom = kb.PurposeMeetingRoom
+const purposeMeetingRoom = recordingwire.PurposeMeetingRoom
 
 // Origins of a meeting's conversations (proto.Session.Origin): the room, and the follow-up made after the meeting.
 const (
@@ -72,7 +74,7 @@ func meetingSessionID(recording, part string) string {
 // meetingEnd is when recording r's meeting is over for its room ("The meeting's end"): the first upload carrying both
 // ended_at and complete, else feedEndWait after the first one carrying ended_at; a meeting no upload ended is over
 // feedStale after its last upload, and a trimmed one has ended. Zero while none of these has come; due says it has.
-func meetingEnd(r kb.Recording, l kb.Live, now time.Time) (at time.Time, due bool) {
+func meetingEnd(r recordingwire.Recording, l recordingwire.Live, now time.Time) (at time.Time, due bool) {
 	switch {
 	case r.Trimmed():
 		return now, true
@@ -88,7 +90,7 @@ func meetingEnd(r kb.Recording, l kb.Live, now time.Time) (at time.Time, due boo
 
 // roomLook is attendLook for a room meeting: it moves the room along (starting it, retrying it, ending it) and feeds
 // it what is due; when to look again (zero: when it next changes).
-func (s *Recordings) roomLook(ctx context.Context, e *kb.Engine, id string, l kb.Live, r kb.Recording, now time.Time) time.Time {
+func (s *Recordings) roomLook(ctx context.Context, e *kb.Engine, id string, l recordingwire.Live, r recordingwire.Recording, now time.Time) time.Time {
 	room := r.Conv.Room
 	endAt, ended := meetingEnd(r, l, now)
 	var next time.Time
@@ -96,30 +98,30 @@ func (s *Recordings) roomLook(ctx context.Context, e *kb.Engine, id string, l kb
 		next = endAt // the end is looked at when it is due
 	}
 	switch room.State {
-	case "", kb.RoomNone:
+	case "", recordingwire.RoomNone:
 		if ended || !r.Attending() {
 			return time.Time{} // none: the role has been off from the start, also after the end
 		}
 		return feedEarliest(s.roomStart(ctx, e, id, now), next)
-	case kb.RoomStarting:
+	case recordingwire.RoomStarting:
 		switch {
 		case ended:
-			s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.State = kb.RoomEnded })
+			s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { rm.State = recordingwire.RoomEnded })
 			return time.Time{}
 		case now.Sub(room.StartingAt) >= roomStartWithin:
-			s.roomSet(e, id, func(rm *kb.MeetingRoom) {
-				rm.State, rm.Problem, rm.Pending, rm.RetryAt = kb.RoomUnavailable, kb.RoomStartFailed, false, now.Add(roomRetry)
+			s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+				rm.State, rm.Problem, rm.Pending, rm.RetryAt = recordingwire.RoomUnavailable, recordingwire.RoomStartFailed, false, now.Add(roomRetry)
 			})
 			s.roomAsksFallBack(id)
 			return feedEarliest(now.Add(roomRetry), next)
 		}
 		return feedEarliest(s.roomStart(ctx, e, id, now), next)
-	case kb.RoomUnavailable:
+	case recordingwire.RoomUnavailable:
 		if ended {
-			s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.State = kb.RoomEnded })
+			s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { rm.State = recordingwire.RoomEnded })
 			return time.Time{}
 		}
-		if room.Problem != kb.RoomMachineOffline && room.Problem != kb.RoomStartFailed {
+		if room.Problem != recordingwire.RoomMachineOffline && room.Problem != recordingwire.RoomStartFailed {
 			return next // runtime_unsupported and node_too_old are not tried again
 		}
 		if !r.Attending() {
@@ -128,9 +130,11 @@ func (s *Recordings) roomLook(ctx context.Context, e *kb.Engine, id string, l kb
 		if now.Before(room.RetryAt) {
 			return feedEarliest(room.RetryAt, next)
 		}
-		s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.State, rm.StartingAt, rm.Pending = kb.RoomStarting, now, true })
+		s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+			rm.State, rm.StartingAt, rm.Pending = recordingwire.RoomStarting, now, true
+		})
 		return feedEarliest(s.roomStart(ctx, e, id, now), next)
-	case kb.RoomReady:
+	case recordingwire.RoomReady:
 		if ended {
 			return s.roomEnding(ctx, e, id, l, r, now)
 		}
@@ -139,9 +143,9 @@ func (s *Recordings) roomLook(ctx context.Context, e *kb.Engine, id string, l kb
 	return time.Time{} // ended, deleted: nothing more until the sweep deletes it
 }
 
-// roomSet changes recording id's room with fn (kb.MeetingUpdate); what it is after, false when it could not be written.
-func (s *Recordings) roomSet(e *kb.Engine, id string, fn func(rm *kb.MeetingRoom)) (kb.MeetingRoom, bool) {
-	m, err := e.MeetingUpdate(id, func(m *kb.Meeting, _ kb.Recording) error {
+// roomSet changes recording id's room with fn (writers.MeetingUpdate); what it is after, false when it could not be written.
+func (s *Recordings) roomSet(e *kb.Engine, id string, fn func(rm *recordingwire.MeetingRoom)) (recordingwire.MeetingRoom, bool) {
+	m, err := writersOf(e).MeetingUpdate(id, func(m *recordingwire.Meeting, _ recordingwire.Recording) error {
 		if m.Room == nil {
 			return errNoRoom
 		}
@@ -149,10 +153,10 @@ func (s *Recordings) roomSet(e *kb.Engine, id string, fn func(rm *kb.MeetingRoom
 		return nil
 	})
 	if err != nil {
-		if !errors.Is(err, kb.ErrNotFound) && !errors.Is(err, kb.ErrRecordingDeleted) && !errors.Is(err, errNoRoom) {
+		if !errors.Is(err, kbwire.ErrNotFound) && !errors.Is(err, recordingwire.ErrRecordingDeleted) && !errors.Is(err, errNoRoom) {
 			s.logf("meeting %s: room: %v", short(id), err)
 		}
-		return kb.MeetingRoom{}, false
+		return recordingwire.MeetingRoom{}, false
 	}
 	return *m.Room, true
 }
@@ -164,12 +168,12 @@ var errNoRoom = errors.New("not a room meeting")
 func (s *Recordings) roomStart(ctx context.Context, e *kb.Engine, id string, now time.Time) time.Time {
 	machine := s.settings(ctx).MachineID
 	sid := meetingSessionID(id, partRoom)
-	room, ok := s.roomSet(e, id, func(rm *kb.MeetingRoom) {
-		if rm.State == "" || rm.State == kb.RoomNone {
-			rm.Batching = kb.RoomBatchingLean // started by this manager: lean batches (meeting_room_lean.go)
+	room, ok := s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+		if rm.State == "" || rm.State == recordingwire.RoomNone {
+			rm.Batching = recordingwire.RoomBatchingLean // started by this manager: lean batches (meeting_room_lean.go)
 		}
-		if rm.State != kb.RoomStarting {
-			rm.State, rm.StartingAt = kb.RoomStarting, now
+		if rm.State != recordingwire.RoomStarting {
+			rm.State, rm.StartingAt = recordingwire.RoomStarting, now
 		}
 		if !rm.Pending || rm.SessionID == "" {
 			rm.Pending, rm.MachineID, rm.SessionID = true, machine, sid
@@ -180,19 +184,19 @@ func (s *Recordings) roomStart(ctx context.Context, e *kb.Engine, id string, now
 	}
 	machine = cmp.Or(room.MachineID, machine)
 	unavailable := func(problem string) time.Time {
-		s.roomSet(e, id, func(rm *kb.MeetingRoom) {
-			rm.State, rm.Problem, rm.Pending, rm.RetryAt = kb.RoomUnavailable, problem, false, now.Add(roomRetry)
+		s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+			rm.State, rm.Problem, rm.Pending, rm.RetryAt = recordingwire.RoomUnavailable, problem, false, now.Add(roomRetry)
 		})
 		s.roomAsksFallBack(id)
 		return now.Add(roomRetry)
 	}
 	if machine == "" || s.isWorkMachine(machine) {
-		return unavailable(kb.RoomMachineOffline)
+		return unavailable(recordingwire.RoomMachineOffline)
 	}
 	if _, online := s.attendeeMachine(ctx, machine); !online {
-		return unavailable(kb.RoomMachineOffline)
+		return unavailable(recordingwire.RoomMachineOffline)
 	}
-	_, r, err := e.MeetingRead(id)
+	_, r, err := writersOf(e).MeetingRead(id)
 	if err != nil {
 		return time.Time{}
 	}
@@ -203,12 +207,12 @@ func (s *Recordings) roomStart(ctx context.Context, e *kb.Engine, id string, now
 	case err != nil:
 		s.logf("meeting %s: start the room: %v", short(id), err)
 		if now.Sub(room.StartingAt) >= roomStartWithin {
-			return unavailable(kb.RoomStartFailed)
+			return unavailable(recordingwire.RoomStartFailed)
 		}
 		return now.Add(feedBusyPoll) // tried again while it may still be ready in time
 	}
-	s.roomSet(e, id, func(rm *kb.MeetingRoom) {
-		rm.State, rm.Problem, rm.Pending, rm.MachineID, rm.SessionID, rm.Started = kb.RoomReady, "", false, machine, got, true
+	s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) {
+		rm.State, rm.Problem, rm.Pending, rm.MachineID, rm.SessionID, rm.Started = recordingwire.RoomReady, "", false, machine, got, true
 	})
 	s.meetingKick(id) // the meeting so far, and the asks that waited for it
 	return time.Time{}
@@ -216,11 +220,11 @@ func (s *Recordings) roomStart(ctx context.Context, e *kb.Engine, id string, now
 
 // roomCreate makes recording r's room on machine under sid, or finds the one a start left there: its directory with
 // the meeting CLAUDE.md, the book's guest and origin noted before the node is asked (its first tool calls come before
-// the start answers), then the start with the meeting header. The session id it has; a problem (kb.Room*) when the
+// the start answers), then the start with the meeting header. The session id it has; a problem (recordingwire.Room*) when the
 // node cannot run a room, an error otherwise.
-func (s *Recordings) roomCreate(ctx context.Context, machine, sid string, r kb.Recording) (string, string, error) {
+func (s *Recordings) roomCreate(ctx context.Context, machine, sid string, r recordingwire.Recording) (string, string, error) {
 	lang := cmp.Or(strings.TrimSpace(r.Language), string(s.lang(ctx)))
-	lean := r.Conv != nil && r.Conv.Room != nil && r.Conv.Room.Batching >= kb.RoomBatchingLean // an older room keeps its own
+	lean := r.Conv != nil && r.Conv.Room != nil && r.Conv.Room.Batching >= recordingwire.RoomBatchingLean // an older room keeps its own
 	md := prompts.RenderMeetingRoomClaudeMD(prompts.MeetingRoomClaudeMD{Owner: s.owner(ctx), Language: lang, Lean: lean})
 	var prep struct {
 		Cwd      string `json:"cwd"`
@@ -230,15 +234,15 @@ func (s *Recordings) roomCreate(ctx context.Context, machine, sid string, r kb.R
 	dir := path.Join(meetingRoomDir, r.ID)
 	if err := s.call(ctx, machine, DeviceAssistantGuestPrepare, map[string]any{"dir": dir, "claude_md": md, "kind": guestKindMeeting}, &prep); err != nil {
 		if unknownMethod(err) {
-			return "", kb.RoomNodeTooOld, nil
+			return "", recordingwire.RoomNodeTooOld, nil
 		}
 		if errors.Is(err, ErrNoDevice) || offlineErr(err) {
-			return "", kb.RoomMachineOffline, nil
+			return "", recordingwire.RoomMachineOffline, nil
 		}
 		return "", "", err
 	}
 	if prep.Kind != guestKindMeeting || !prep.StartIDs || prep.Cwd == "" {
-		return "", kb.RoomNodeTooOld, nil // an older node: it would start an ordinary guest, with the owner's setup
+		return "", recordingwire.RoomNodeTooOld, nil // an older node: it would start an ordinary guest, with the owner's setup
 	}
 	if err := s.guestSetRoom(ctx, machine, sid, r.ID); err != nil {
 		return "", "", err // its tool calls could not be told from an ordinary guest's
@@ -270,21 +274,21 @@ func (s *Recordings) roomCreate(ctx context.Context, machine, sid string, r kb.R
 	if err != nil {
 		switch {
 		case guestAgentRefused(err):
-			return "", kb.RoomRuntimeUnsupported, nil
+			return "", recordingwire.RoomRuntimeUnsupported, nil
 		case errors.Is(err, ErrNoDevice) || offlineErr(err):
-			return "", kb.RoomMachineOffline, nil
+			return "", recordingwire.RoomMachineOffline, nil
 		}
 		return "", "", err
 	}
 	if res.SessionID != "" && res.SessionID != sid {
-		return "", kb.RoomNodeTooOld, nil // it did not start under the id: a node that cannot make a room once
+		return "", recordingwire.RoomNodeTooOld, nil // it did not start under the id: a node that cannot make a room once
 	}
 	return sid, "", nil
 }
 
 // roomHeader is recording r's room header: its upload's title and calendar hint, when it started, its language and
 // the room's role.
-func roomHeader(r kb.Recording, lang string, loc *time.Location) prompts.MeetingRoomHeader {
+func roomHeader(r recordingwire.Recording, lang string, loc *time.Location) prompts.MeetingRoomHeader {
 	h := prompts.MeetingRoomHeader{Title: feedMeetingName(r, loc), Started: r.StartedAt.In(loc).Format("2006-01-02 15:04 MST"),
 		Language: lang, Role: r.AttendanceRole()}
 	if c := r.Calendar; c != nil {
@@ -324,12 +328,12 @@ func guestAgentRefused(err error) bool {
 // soon. A room started with lean batches gets one at most every two minutes, the lists only at the boundaries, and its
 // scheduled compaction (meeting_room_lean.go), which holds the photos and the batch while it may run. When to look
 // again; with end, zero once the end batch went (or there was none to send) and no photo message is left failing.
-func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb.Live, r kb.Recording, now time.Time, end bool) (next time.Time) {
+func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l recordingwire.Live, r recordingwire.Recording, now time.Time, end bool) (next time.Time) {
 	room := r.Conv.Room
-	lean := room.Batching >= kb.RoomBatchingLean
+	lean := room.Batching >= recordingwire.RoomBatchingLean
 	if !r.Attending() {
-		s.attendNote(e, id, func(l *kb.Live) { l.FedTo, l.Problem = nil, "" }) // turned on again: the meeting so far
-		_, withdraw := e.PhotosForRoom(id)
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.FedTo, l.Problem = nil, "" }) // turned on again: the meeting so far
+		_, withdraw := writersOf(e).PhotosForRoom(id)
 		if lean && !room.Lean.CompactStartedAt.IsZero() && len(withdraw) > 0 {
 			// A compaction asked of the node holds the withdrawals too: settled here, none is started.
 			if at, held, _ := s.roomCompaction(ctx, e, id, l, r, now, false, true, s.roomRowRead(ctx, room)); held {
@@ -349,7 +353,7 @@ func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb
 	if roomAskWaiting(l) {
 		return now.Add(feedBusyPoll) // an ask goes first; the batch after it
 	}
-	queued, withdraw := e.PhotosForRoom(id)
+	queued, withdraw := writersOf(e).PhotosForRoom(id)
 	if end {
 		queued = nil // none after the meeting's end
 	}
@@ -377,7 +381,7 @@ func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb
 	if !end && !l.FedAt.IsZero() && now.Before(l.FedAt.Add(every)) {
 		return l.FedAt.Add(every)
 	}
-	ref := kb.SessionRef{MachineID: room.MachineID, SessionID: room.SessionID}
+	ref := recordingwire.SessionRef{MachineID: room.MachineID, SessionID: room.SessionID}
 	fresh := l.FedTo == nil || !s.sameMachine(l.FedTo.MachineID, ref.MachineID) || l.FedTo.SessionID != ref.SessionID
 	b := feedBatchOf(l, fresh, end)
 	b.room, b.lists = true, true
@@ -397,15 +401,15 @@ func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb
 		b.lean, b.lists = true, fresh || roomListsDue(ln, now)
 	}
 	// The room answered its own asks: they are in its thread already, only the ones meeting.answer took are told.
-	b.answers = slices.DeleteFunc(b.answers, func(a kb.LiveAsk) bool { return a.Via == kb.AskViaRoom })
+	b.answers = slices.DeleteFunc(b.answers, func(a recordingwire.LiveAsk) bool { return a.Via == recordingwire.AskViaRoom })
 	if b.empty() {
 		if end && l.FedTo == nil {
-			s.attendNote(e, id, func(l *kb.Live) { l.EndFed = true })
+			s.attendNote(e, id, func(l *recordingwire.Live) { l.EndFed = true })
 			return time.Time{}
 		}
 		if !end {
 			if !fresh && b.upto > l.Fed {
-				s.attendNote(e, id, func(l *kb.Live) { l.Fed = max(l.Fed, b.upto) })
+				s.attendNote(e, id, func(l *recordingwire.Live) { l.Fed = max(l.Fed, b.upto) })
 			}
 			return time.Time{}
 		}
@@ -427,7 +431,7 @@ func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb
 		return now.Add(feedRetry)
 	}
 	fedTo := target.ref
-	s.attendNote(e, id, func(l *kb.Live) {
+	s.attendNote(e, id, func(l *recordingwire.Live) {
 		if fresh {
 			l.Fed = b.upto
 		} else {
@@ -461,9 +465,9 @@ func (s *Recordings) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb
 }
 
 // roomAskWaiting: an ask of the meeting waits for the room or runs in it (pending, and not answered from material).
-func roomAskWaiting(l kb.Live) bool {
+func roomAskWaiting(l recordingwire.Live) bool {
 	for _, a := range l.Asks {
-		if a.State == askPending && a.Via != kb.AskViaMaterial {
+		if a.State == askPending && a.Via != recordingwire.AskViaMaterial {
 			return true
 		}
 	}
@@ -473,16 +477,16 @@ func roomAskWaiting(l kb.Live) bool {
 // roomEnding ends a ready room at the meeting's end: with the role on, it gets the end batch and turns ended once
 // that turn ends, feedEndWait after the end at the latest (an end batch not delivered by then is dropped); with the
 // role off at once.
-func (s *Recordings) roomEnding(ctx context.Context, e *kb.Engine, id string, l kb.Live, r kb.Recording, now time.Time) time.Time {
+func (s *Recordings) roomEnding(ctx context.Context, e *kb.Engine, id string, l recordingwire.Live, r recordingwire.Recording, now time.Time) time.Time {
 	room := r.Conv.Room
 	if room.EndingAt.IsZero() {
-		if rm, ok := s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.EndingAt = now }); ok {
+		if rm, ok := s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { rm.EndingAt = now }); ok {
 			room = &rm
 		}
 	}
 	deadline := room.EndingAt.Add(feedEndWait)
 	done := func() time.Time {
-		s.roomSet(e, id, func(rm *kb.MeetingRoom) { rm.State = kb.RoomEnded })
+		s.roomSet(e, id, func(rm *recordingwire.MeetingRoom) { rm.State = recordingwire.RoomEnded })
 		s.roomAsksFallBack(id)
 		return time.Time{}
 	}
@@ -497,7 +501,7 @@ func (s *Recordings) roomEnding(ctx context.Context, e *kb.Engine, id string, l 
 		return feedEarliest(now.Add(feedBusyPoll), deadline)
 	}
 	next := s.roomFeed(ctx, e, id, l, r, now, true)
-	if l2, _, err := e.LiveRead(id); err == nil && l2.EndFed && l2.FedTo == nil {
+	if l2, _, err := writersOf(e).LiveRead(id); err == nil && l2.EndFed && l2.FedTo == nil {
 		return done() // nothing was ever said to it: no end to tell
 	}
 	return feedEarliest(cmp.Or(next, now.Add(feedBusyPoll)), deadline)
@@ -531,9 +535,9 @@ func (s *Recordings) meetingRoomsSweep(ctx context.Context, e *kb.Engine) {
 	type room struct{ recording, machine, session string }
 	var rooms []room
 	seen := map[string]bool{}
-	for _, r := range e.RoomMeetings() {
+	for _, r := range writersOf(e).RoomMeetings() {
 		rm := r.Conv.Room
-		if r.Trimmed() && rm.SessionID != "" && rm.State != kb.RoomDeleted {
+		if r.Trimmed() && rm.SessionID != "" && rm.State != recordingwire.RoomDeleted {
 			rooms = append(rooms, room{r.ID, rm.MachineID, rm.SessionID})
 			seen[rm.SessionID] = true
 		}
@@ -542,9 +546,9 @@ func (s *Recordings) meetingRoomsSweep(ctx context.Context, e *kb.Engine) {
 		if seen[o.session] {
 			continue
 		}
-		m, r, err := e.MeetingRead(o.ref)
+		m, r, err := writersOf(e).MeetingRead(o.ref)
 		switch {
-		case errors.Is(err, kb.ErrNotFound), errors.Is(err, kb.ErrRecordingDeleted):
+		case errors.Is(err, kbwire.ErrNotFound), errors.Is(err, recordingwire.ErrRecordingDeleted):
 		case err != nil:
 			continue
 		case r.Trimmed(), m.Room == nil, m.Room.SessionID != o.session:
@@ -566,16 +570,16 @@ func (s *Recordings) roomDelete(ctx context.Context, e *kb.Engine, recording, ma
 	err := s.call(dctx, machine, DeviceAssistantGuestDelete, map[string]any{"dir": path.Join(meetingRoomDir, recording), "session_id": session}, nil)
 	if err != nil {
 		s.logf("meeting %s: delete its room: %v", short(recording), err)
-		s.roomSet(e, recording, func(rm *kb.MeetingRoom) {
-			if rm.SessionID == session && rm.State != kb.RoomDeleted {
-				rm.State = kb.RoomEnded // a copy is still on the assistant's computer
+		s.roomSet(e, recording, func(rm *recordingwire.MeetingRoom) {
+			if rm.SessionID == session && rm.State != recordingwire.RoomDeleted {
+				rm.State = recordingwire.RoomEnded // a copy is still on the assistant's computer
 			}
 		})
 		return false
 	}
-	s.roomSet(e, recording, func(rm *kb.MeetingRoom) {
+	s.roomSet(e, recording, func(rm *recordingwire.MeetingRoom) {
 		if rm.SessionID == session {
-			rm.State, rm.Problem, rm.MachineID, rm.SessionID, rm.Pending = kb.RoomDeleted, "", "", "", false
+			rm.State, rm.Problem, rm.MachineID, rm.SessionID, rm.Pending = recordingwire.RoomDeleted, "", "", "", false
 		}
 	})
 	if err := s.guestDrop(ctx, session); err != nil {
@@ -597,8 +601,8 @@ func (s *Recordings) roomRefusesSend(ctx context.Context, machine, session, lang
 	if err != nil {
 		return nil
 	}
-	m, _, err := e.MeetingRead(rec)
-	if err == nil && m.Room != nil && m.Room.SessionID == session && m.Room.State != kb.RoomEnded && m.Room.State != kb.RoomDeleted {
+	m, _, err := writersOf(e).MeetingRead(rec)
+	if err == nil && m.Room != nil && m.Room.SessionID == session && m.Room.State != recordingwire.RoomEnded && m.Room.State != recordingwire.RoomDeleted {
 		return nil
 	}
 	return &rpc.Error{Code: CodeMeetingEnded, Message: i18n.T(s.appLang(ctx, lang), "assistant-meeting.meeting_ended")}

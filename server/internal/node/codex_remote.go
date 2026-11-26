@@ -66,6 +66,7 @@ type remoteThread struct {
 	pinnedSeq uint64
 	buffer    *strings.Builder
 	lastDelta time.Time
+	created   time.Time // local thread/start completed while a loaded-list snapshot was in flight
 	revision  uint64
 	files     map[string][]string
 }
@@ -104,6 +105,9 @@ type codexRemote struct {
 	// refreshSeq orders refresh snapshots against coldResume updates so a refresh started before thread/resume
 	// never drops a newly cold-activated thread.
 	refreshSeq uint64
+	// A loaded-list snapshot can outlive the startup that created its thread.
+	// Keep discarded starts out of the registry until the server drops them.
+	discardedStarts map[string]time.Time
 }
 
 // codexSeen is what refreshes keep about a loaded thread besides its listing (#12517).
@@ -405,6 +409,7 @@ type remoteThreadData struct {
 	Preview        string          `json:"preview"`
 	Cwd            string          `json:"cwd"`
 	Path           string          `json:"path"`
+	HistoryMode    string          `json:"historyMode"`
 	ParentThreadID string          `json:"parentThreadId"`
 	Ephemeral      bool            `json:"ephemeral"`
 	Source         json.RawMessage `json:"source"`
@@ -419,6 +424,7 @@ type remoteThreadData struct {
 }
 
 func (c *codexRemote) refresh() error {
+	snapshot := time.Now()
 	c.mu.Lock()
 	wait, budget := cmp.Or(c.readWait, codexReadWait), cmp.Or(c.refreshWait, codexRefreshWait)
 	c.refreshSeq++
@@ -442,6 +448,10 @@ func (c *codexRemote) refresh() error {
 			continue
 		}
 		t := c.threads[raw]
+		if _, discarded := c.discardedStarts[raw]; discarded {
+			known[raw] = remoteThread{}
+			continue
+		}
 		seenRevision[raw] = t.revision
 		if t.provisional {
 			// Keep provisional coldResume state out of refresh's server-confirmed copy so a rolled-back
@@ -550,7 +560,13 @@ dispatch:
 			continue
 		}
 		path := rolloutPath(c.spec.Home, raw)
+		c.mu.Lock()
+		if _, discarded := c.discardedStarts[raw]; discarded {
+			c.mu.Unlock()
+			continue
+		}
 		public := c.n.registerCodex(c.spec.Home, raw, path)
+		c.mu.Unlock()
 		t.id, t.publicID, t.title, t.cwd = raw, public, firstNonEmpty(d.Name, d.Preview), d.Cwd
 		t.path = d.Path
 		if d.Model != "" { // an app-server that reports a thread's settings (older ones do not: keep what join said)
@@ -595,6 +611,12 @@ dispatch:
 		c.n.logf("codex %s: thread/read failed for %d of %d threads (%d timed out, %d not read in time, %d waiting after a timeout, %d ephemeral skipped): %v", c.spec.ID, failed, len(reads), timeouts, cut, waiting, ephemeral, cmp.Or(firstErr, ctx.Err()))
 	}
 	c.mu.Lock()
+	for raw, at := range c.discardedStarts {
+		delete(next, raw)
+		if _, listed := known[raw]; !listed && snapshot.Sub(at) > budget {
+			delete(c.discardedStarts, raw)
+		}
+	}
 	slow := map[string]codexRetry{}
 	seen := make(map[string]codexSeen, len(known))
 	for raw := range known { // threads no longer loaded are forgotten
@@ -638,9 +660,11 @@ dispatch:
 			next[raw] = t
 		}
 	}
-	// Preserve any thread cold-resumed after this refresh took its loaded-list snapshot (or still in flight).
+	// A local start after this snapshot owns the first turn and its settings. A cold resume also
+	// stays in the registry when an older loaded list omits it or the resume is still provisional.
 	for raw, old := range c.threads {
-		if _, ok := next[raw]; !ok && (old.provisional || old.pinnedSeq > snapSeq) {
+		_, listed := next[raw]
+		if old.created.After(snapshot) || (!listed && (old.provisional || old.pinnedSeq > snapSeq)) {
 			next[raw] = old
 		}
 	}

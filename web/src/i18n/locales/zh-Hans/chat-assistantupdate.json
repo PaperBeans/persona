@@ -1,0 +1,10 @@
+{
+  "waiting_idle": "更新已排队",
+  "transferring": "正在准备更新",
+  "restarting": "正在重启以应用更新",
+  "confirming": "正在检查连接",
+  "updating": "更新中",
+  "reconnect": "助手会自动重新连接。",
+  "pending_restart": "新版本已就绪",
+  "restart_when_idle": "助手会在空闲时自动重启。"
+}

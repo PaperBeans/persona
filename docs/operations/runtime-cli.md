@@ -278,7 +278,7 @@ PERSONACTL_UDID=<udid> HUB=… scripts/app/cli-tests/sync_cases.py send_tied_by_
 - The App is paired as `mock-<device>`. A two-device case's other device is scripted, as in `scripts/mock/test_sync_case_mock.py`, and the case runs once for each device the App can be (`<case>@<device>`).
 - Each step: the mock plays the hub's side, the runner does the user's action in the App (type and Send, a card's Allow / Deny, a failed bubble's Resend / Delete through `activate` `action:`, the alert a refusal raises through `alert`, relaunch), waits the step's `wait`, then compares the step's `expect` and the three invariants with what the chat shows.
 - The chat is read through its marks (`chatMark`, containers listed by `tree --containers`): `chat.user.<item>`, `chat.answer.<item>`, `chat.outbox.<state>.<message>` (the new-conversation page's first message too), `chat.card.<interaction>`, `chat.live`. An element belongs to the mark it is `in`, whatever is drawn over it. Rows scrolled out of sight still count: the chat's list keeps them in the tree.
-- The case is loaded with its times moved to now (`"now": true`): the simulator runs on the real clock, the cases are dated January 2026.
+- The simulator runs on the real clock. The runner loads each case with `"now": true` to shift its January 2026 timestamps to the present. In a new chat the mock dates transcript additions when it appends them so the first message can match its transcript line after a cold launch.
 - No `idb` needed. Every run terminates the App and deletes its `Library/Caches/state` and `chats-*` instead of reinstalling it, and a relaunch keeps `-pairURL` (`keep`): without one the App asks for notifications, a system alert only a touch answers, and the App stays inactive behind it with no socket. The runner fails at once with that hint when the App is not active after a launch; reboot your own simulator to clear such an alert. Don't switch `-ui.scheme` either: the App's icon follows it and the system says so in another alert.
 - Waits run in real time (the wake case waits 600 s); `SYNC_CASE_WAIT_CAP=<seconds>` shortens longer ones. `SYNC_CASE_TRACE=1` prints every step's view.
 - The assistant page has no queue strip, so `status` is not compared (the web's runner doesn't either).
@@ -287,6 +287,23 @@ PERSONACTL_UDID=<udid> HUB=… scripts/app/cli-tests/sync_cases.py send_tied_by_
 Not migrated, staying in XCUITest permanently: `testScrollingTheLongList` (`XCTOSSignpostMetric` measures scroll hitches), ChatFollowTests (real momentum scrolling),
 `testImageViewerStaysOpenThroughUpdates` (image viewer). Not migrated yet: `testFilterBarHugsTheTop` (#740), `testScrolledListHoldsStillThroughUpdates` (the CLI version is flaky),
 `testStateGroupingOpensSeenInOneTap` (could be migrated, but the CLI is slower).
+
+#### First-message recovery in a new conversation
+
+`SyncScenarioTests` drives `AppModel`. `AppModel.askPersona` calls `AssistantStart` when there is no main conversation. To exercise the pending message, failed bubble and Resend action, drive the new-conversation page in `AssistantView`. The two `chat.new` cases stay listed as known issues in the AppModel harness (#12238).
+
+Install the DEBUG app on a booted iOS simulator and start the mock hub as above. Set `PERSONACTL_BUNDLE` if the installed app uses a different bundle ID from the local configuration. Run both scenarios with the on-screen driver.
+
+```sh
+PERSONACTL_UDID=<udid> HUB=http://127.0.0.1:18760 scripts/app/cli-tests/sync_cases.py \
+  start_answer_cut_then_receipt start_refused_then_resent_new_op
+```
+
+- `start_answer_cut_then_receipt` checks that an interrupted start recovers from the original operation's receipt and that the first message and its reply each appear once.
+- `start_refused_then_resent_new_op` checks that the refused first message remains as a failed bubble and that Resend starts the conversation with a fresh operation ID.
+
+The summary for this run should read `2 passed, 0 known, 0 failed of 2 runs`.
+For a slow simulator launch, set `SYNC_CASE_LAUNCH_WAIT=180` to give the Runtime CLI up to 180 seconds to answer.
 
 ## Protocol and security
 

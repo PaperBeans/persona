@@ -39,11 +39,11 @@ func upstreamCode(err error) string {
 func (c *conversation) connect(woken bool) error {
 	c.mu.Lock()
 	p, w, model, voice := c.p, c.w, c.model, c.voice
-	history := voiceLines(c.history)
-	if !c.started && !c.resumed {
-		history = nil
-	}
 	c.mu.Unlock()
+	history, err := c.historyForConnect()
+	if err != nil {
+		return err
+	}
 
 	began := time.Now()
 	dctx, cancel := context.WithTimeout(c.ctx, startTimeout)
@@ -168,6 +168,27 @@ func (c *conversation) connect(woken bool) error {
 		c.runs.observeTarget(linkKey{c.target.MachineID, c.target.SessionID}) // after the runs handed back
 	}
 	return nil
+}
+
+// historyForConnect includes a line flushed by the old session only when its write succeeded. The socket
+// may already have dropped while its writer still owns the outcome; a failed line goes to the new one as input.
+func (c *conversation) historyForConnect() ([]prompts.VoiceLine, error) {
+	c.mu.Lock()
+	for c.sus.textWrite != nil {
+		done := c.sus.textWrite
+		c.mu.Unlock()
+		select {
+		case <-done:
+		case <-c.ctx.Done():
+			return nil, c.ctx.Err()
+		}
+		c.mu.Lock()
+	}
+	defer c.mu.Unlock()
+	if !c.started && !c.resumed {
+		return nil, nil
+	}
+	return voiceLines(c.history), nil
 }
 
 // startSession starts the upstream session on up, declaring tools (nil: none), and waits for the service to start it:
@@ -429,6 +450,10 @@ func (c *conversation) handle(gen int, e event) {
 		if c.dropAudio {
 			return // the rest of an answer cut off: the user never hears it, so it answers nothing (nudge.go)
 		}
+		if !c.turnsEnd && c.replyAudio.chunks > 0 && now.Sub(c.replyAudio.lastAt) > 1500*time.Millisecond {
+			c.finishReplyAudio(false) // upstream sends no turn-end signal: flush the earlier reply after a quiet gap
+		}
+		c.replyAudio.add(now, len(e.audio), c.outRate)
 		c.modelActed(now) // before its caption of the user's line closes, if that is still open: this answers it
 		c.pace.played(now, len(e.audio), c.outRate)
 		c.closeUser()
@@ -453,6 +478,7 @@ func (c *conversation) handle(gen int, e event) {
 		c.signals, c.turnsEnd = true, true
 		c.reply, c.replyVoiced = e.id, false
 		c.replying = true
+		c.openReply(time.Now())
 	case evTurnEnd:
 		c.dropAudio, c.cutAt = false, time.Time{}
 		c.turnsEnd = true
@@ -472,6 +498,7 @@ func (c *conversation) handle(gen int, e event) {
 				}
 			}
 		}
+		c.closeReply(false)
 		c.closeAsst()
 	case evInterrupted:
 		if e.id != "" {
@@ -484,6 +511,7 @@ func (c *conversation) handle(gen int, e event) {
 			return
 		}
 		c.sendApp(map[string]any{"type": "clear"})
+		c.closeReply(true)
 		c.pace.playEnd = time.Now() // the app drops what it had not played
 		c.closeAsst()
 	case evDelegation:
@@ -596,6 +624,7 @@ func (c *conversation) lost(gen int, why error) {
 		c.reconnects = 0 // it held: a drop now is not one of a run of them (docs/assistant/voice.md "Reconnect and resume")
 	}
 	if c.reconnects >= maxReconnects {
+		c.closeReply(true)
 		down, text := c.down.session == sessionNo(gen), c.down.text
 		c.mu.Unlock()
 		if down {
@@ -622,6 +651,7 @@ func (c *conversation) lost(gen int, why error) {
 	clear(c.unacked) // that session's: an ack or refusal of it never comes
 	c.pace.playEnd = time.Now()
 	c.sendApp(map[string]any{"type": "clear"})
+	c.closeReply(true)
 	c.closeAsst()
 	c.closeUser()
 	if c.owed.result {

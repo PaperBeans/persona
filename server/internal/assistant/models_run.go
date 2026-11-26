@@ -121,8 +121,10 @@ func (s *Service) modelRunErr(ctx context.Context, c ai.Config, err error) error
 		return errViaMachine(c.ViaMachine)
 	}
 	name := c.ViaMachine
-	if d, ok := s.device(ctx, c.ViaMachine); ok && d.Name != "" {
-		name = d.Name
+	if ctx.Err() == nil { // the display name is cosmetic; do not make another RPC with an expired context
+		if d, ok := s.device(ctx, c.ViaMachine); ok && d.Name != "" {
+			name = d.Name
+		}
 	}
 	args := i18n.Args{"name": name, "launcher": c.RunLauncher}
 	var re *rpc.Error

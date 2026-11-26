@@ -66,3 +66,54 @@ type MachineFileTransfer struct {
 // CodeFileTransferDisabled: the machine's file transfer switch is off (403): a dest=inbox upload to it, or a transfer
 // from or to it. Chat attachments and file previews / downloads do not depend on it.
 const CodeFileTransferDisabled = "file_transfer_disabled"
+
+// Agents' transfers (file_transfer, docs/protocol/file-transfer.md "Agents and the assistant"): the manager has the
+// source's node prepare what it sends (file.pack: a file as it is, a folder zipped into a temporary file, either with
+// its SHA-256), streams it with file.chunk into file.upload.* on the target (dest=path or inbox, with sha256 and, for a
+// folder, unpack), and has the source remove the temporary zip (file.pack.done).
+const (
+	MethodFilePack     = "file.pack"
+	MethodFilePackDone = "file.pack.done"
+)
+
+// The kinds of what file.pack prepares.
+const (
+	FilePackFile = "file"
+	FilePackDir  = "dir"
+)
+
+// MaxAgentTransferBytes bounds what one Agent's transfer moves: a file, or a folder's zip.
+const MaxAgentTransferBytes = MaxInboxUploadBytes
+
+// CodeChecksumMismatch: the bytes written on the target do not hash to what the source sent; nothing was kept.
+const CodeChecksumMismatch = "checksum_mismatch"
+
+// CodeTransferSecret: the path is a credential by its name (identity.TransferSecretName), which an Agent's transfer
+// does not read.
+const CodeTransferSecret = "credential"
+
+// FilePackRequest is file.pack's params: the file or folder to send, "~/", absolute or relative to Cwd.
+type FilePackRequest struct {
+	Path string `json:"path"`
+	Cwd  string `json:"cwd,omitempty"`
+}
+
+// FilePack is what file.pack prepared: Path is what file.chunk reads (the file itself, or the zip the folder was
+// packed into, Temp), at Revision, Size bytes hashing to SHA256. Name is the file's or the folder's own name, Source
+// the path it was found at.
+type FilePack struct {
+	Kind     string `json:"kind"`
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Source   string `json:"source"`
+	Size     int64  `json:"size"`
+	Revision string `json:"revision"`
+	SHA256   string `json:"sha256"`
+	Temp     bool   `json:"temp,omitempty"`
+	// A folder's: the files packed and their bytes before packing, and what was left out (credentials, links to
+	// outside it, what could not be read): how many, and the first few by their path in the folder.
+	Files        int      `json:"files,omitempty"`
+	Bytes        int64    `json:"bytes,omitempty"`
+	Skipped      int      `json:"skipped,omitempty"`
+	SkippedNames []string `json:"skipped_names,omitempty"`
+}

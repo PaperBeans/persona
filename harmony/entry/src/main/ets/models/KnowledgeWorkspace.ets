@@ -2,7 +2,7 @@ import type { ClientModel } from './ClientModel';
 import { ResourceRow, Wire } from './Wire';
 import type { HubRepository } from './HubRepository';
 
-const KNOWLEDGE_KINDS: string[] = ['projects', 'chats', 'people', 'docs', 'meetings', 'events', 'recordings'];
+const KNOWLEDGE_KINDS: string[] = ['projects', 'topics', 'chats', 'people', 'docs', 'meetings', 'events', 'recordings'];
 
 class KnowledgeOwner {
   root: ClientModel;
@@ -21,6 +21,31 @@ class KnowledgeOwner {
     this.root = root; this.rootGeneration = rootGeneration; this.rootScope = rootScope; this.rootManager = rootManager;
     this.client = client; this.repository = repository; this.generation = generation; this.scope = scope;
     this.manager = manager; this.target = target;
+  }
+}
+
+// The list encodes project duration and status as “short · active”; detail responses put those fields under meta.
+export class KnowledgeListEntry {
+  readonly priority: string;
+  readonly relevance: number;
+  readonly duration: string;
+  readonly section: string;
+  readonly tags: string[];
+  readonly summary: string;
+  readonly updated: string;
+
+  constructor(row: ResourceRow) {
+    const data = row.data(), meta = Wire.object(data, 'meta');
+    const extra = Wire.text(data, 'extra').split('·').map((part: string) => part.trim());
+    this.priority = Wire.text(data, 'importance') || Wire.text(meta, 'importance');
+    this.relevance = Wire.number(data, 'relevance', Wire.number(meta, 'relevance'));
+    this.tags = Wire.strings(data, 'tags').length ? Wire.strings(data, 'tags') : Wire.strings(meta, 'tags');
+    this.summary = Wire.text(data, 'one_line') || row.detail;
+    this.updated = Wire.text(data, 'updated') || Wire.text(data, 'started_at');
+    this.duration = row.path === 'projects' ? extra[0] || Wire.text(meta, 'kind') : '';
+    const status = extra[1] || Wire.text(meta, 'status') || row.state;
+    this.section = row.path !== 'projects' ? 'all' : status === 'ignored' ? 'ignored' : status === 'done' ? 'done' :
+      this.priority === 'P0' || this.priority === 'P1' ? 'focus' : 'active';
   }
 }
 
@@ -61,6 +86,7 @@ export class KnowledgeWorkspace {
   @Trace selected: ResourceRow = new ResourceRow();
   @Trace detail: Record<string, Object> = {};
   @Trace matches: Record<string, Object>[] = [];
+  @Trace supportsExpectedPinned:boolean = false;
   @Trace agents: ResourceRow[] = [];
   @Trace momentText: string = '';
   @Trace loading: boolean = false;
@@ -87,6 +113,8 @@ export class KnowledgeWorkspace {
   private revision: number = 0;
   private readRevision: number = 0;
   private listRows: ResourceRow[] = [];
+  private recordingPage: boolean = false;
+  private transientMeetingList: boolean = false;
   private searchTimer: number = -1;
   private draftWrite: Promise<void> = Promise.resolve();
   private momentTarget: string = '';
@@ -95,7 +123,7 @@ export class KnowledgeWorkspace {
   private detailEditorBaseline: number = 0;
   private detailInitialized: boolean = false;
 
-  async open(client: ClientModel, row?: ResourceRow, seed: ResourceRow[] = []): Promise<void> {
+  async open(client: ClientModel, row?: ResourceRow, seed: ResourceRow[] = [], initialKind: string = ''): Promise<void> {
     const revision = ++this.revision, readRevision = ++this.readRevision;
     if (this.searchTimer !== -1) clearTimeout(this.searchTimer);
     this.searchTimer = -1;
@@ -104,8 +132,11 @@ export class KnowledgeWorkspace {
     this.loading = true; this.busy = false; this.error = ''; this.writeState = ''; this.editOpen = false; this.editorDirty = false; this.editorRevision++;
     this.detailEditorBaseline = this.editorRevision;
     this.detailInitialized = false;
-    this.detail = {}; this.matches = []; this.agents = []; this.momentText = ''; this.momentTarget = ''; this.results = []; this.entries = [];
+    this.detail = {}; this.supportsExpectedPinned=false; this.matches = []; this.agents = []; this.momentText = ''; this.momentTarget = ''; this.results = []; this.entries = [];
     this.agentDraft = ''; this.agentLauncher = ''; this.directoryTargets = []; this.targetMachines = []; this.selectedDirectory = 0;
+    this.tags = [];
+    this.recordingPage = !row && initialKind === 'recordings';
+    this.transientMeetingList = !row && initialKind === 'meetings';
     this.listRows = seed.slice();
     if (row) {
       this.selected = this.copyRow(row);
@@ -119,11 +150,15 @@ export class KnowledgeWorkspace {
     try {
       owner = await this.capture(client, this.owner, row ? row.key() : 'list');
       if (!this.current(owner, revision) || !this.currentRead(revision, readRevision)) return;
-      const saved = Wire.parse(await owner.client.loadView('knowledge-workspace'));
+      const saved = Wire.parse(await owner.client.loadView(this.recordingPage ? 'knowledge-recordings' : 'knowledge-workspace'));
       if (!this.current(owner, revision) || !this.currentRead(revision, readRevision)) return;
       if (!row) {
-        this.kind = KNOWLEDGE_KINDS.includes(Wire.text(saved, 'kind')) ? Wire.text(saved, 'kind') : this.kind;
-        this.tag = Wire.text(saved, 'tag'); this.query = Wire.text(saved, 'query');
+        if (KNOWLEDGE_KINDS.includes(initialKind)) { this.kind = initialKind; this.tag = ''; this.query = this.recordingPage ? Wire.text(saved, 'query') : ''; }
+        else {
+          this.kind = KNOWLEDGE_KINDS.includes(Wire.text(saved, 'kind')) ? Wire.text(saved, 'kind') : this.kind;
+          if (this.kind === 'recordings') this.kind = 'meetings';
+          this.tag = Wire.text(saved, 'tag'); this.query = Wire.text(saved, 'query');
+        }
       }
       if (row) {
         await this.initializeDetail(owner, revision, row, readRevision);
@@ -140,7 +175,7 @@ export class KnowledgeWorkspace {
   }
 
   hide(): void {
-    this.revision++; this.readRevision++; this.client = undefined; this.editorClient = undefined; this.listRows = []; this.detail = {}; this.matches = []; this.agents = [];
+    this.revision++; this.readRevision++; this.client = undefined; this.editorClient = undefined; this.listRows = []; this.detail = {}; this.supportsExpectedPinned=false; this.matches = []; this.agents = [];
     this.detailInitialized = false;
     if (this.searchTimer !== -1) clearTimeout(this.searchTimer);
     this.searchTimer = -1;
@@ -169,7 +204,16 @@ export class KnowledgeWorkspace {
     this.invalidateListRead(); this.kind = kind; this.tag = ''; this.saveFilters(); this.refresh().catch(() => undefined);
   }
 
-  setTag(tag: string): void { this.invalidateListRead(); this.tag = tag; this.saveFilters(); this.refresh().catch(() => undefined); }
+  setTag(tag: string): void {
+    if (this.tag === tag) return;
+    this.tag = tag;
+    this.saveFilters();
+    // Search spans all kinds and tags. Keep its in-flight results while remembering the list filter.
+    if (!this.query.trim()) {
+      this.invalidateListRead();
+      this.refresh().catch(() => undefined);
+    }
+  }
 
   setQuery(query: string): void {
     this.invalidateListRead(); this.query = query;
@@ -215,10 +259,21 @@ export class KnowledgeWorkspace {
   async saveEdit(): Promise<boolean> {
     const row = this.selected, client = this.client;
     if (!row.id || !client || !this.canSaveEdit()) return false;
-    const editorRevision = this.editorRevision, revision = this.revision, targetKey = row.key(), ownerName = row.manager || this.owner;
     const relevance = Number(this.editRelevance), project = row.path === 'projects';
     const body = objectPayload(['importance', 'relevance', 'tags'], [this.editImportance, relevance, cleanTags(this.editTags)]);
     if (project) { body['status'] = this.editStatus; body['project_kind'] = this.editProjectKind; }
+    return this.updateEntry(body,true);
+  }
+
+  async saveFacts(value:string, expected:string):Promise<boolean> {
+    if (!this.supportsExpectedPinned || this.selected.path!=='recordings' || !this.selected.id || !this.client || this.busy || ['pending','unknown'].includes(this.writeState)) return false;
+    return this.updateEntry(objectPayload(['pinned','expected_pinned'],[value.trim(),expected]),false);
+  }
+
+  private async updateEntry(body:Record<string,Object>, metadata:boolean):Promise<boolean> {
+    const row=this.selected, client=this.client;
+    if (!client || !row.id) return false;
+    const editorRevision=this.editorRevision, revision=this.revision, targetKey=row.key(), ownerName=row.manager || this.owner;
     const path = '/api/v1/kb/' + segment(row.path) + '/' + segment(row.id);
     this.busy = true; this.error = ''; this.writeState = 'sending';
     let owner: KnowledgeOwner | undefined;
@@ -226,16 +281,23 @@ export class KnowledgeWorkspace {
       owner = await this.capture(client, ownerName, targetKey);
       if (!this.current(owner, revision) || this.selected.key() !== targetKey) return false;
       if (owner.client.operationBlocked(path)) { this.writeState = 'pending'; this.error = 'pending_action'; return false; }
-      await owner.repository.call(path, 'PUT', body, shortOperation());
+      const admitted=owner;
+      await owner.repository.call(path, 'PUT', body, shortOperation(), () => this.current(admitted,revision) && this.selected.key()===targetKey);
       if (!this.current(owner, revision) || this.selected.key() !== targetKey) return false;
       this.writeState = 'done';
       // An acknowledged save stays acknowledged if reading its new value back fails.
       await this.reloadDetail(owner, revision, row);
-      if (this.current(owner, revision) && editorRevision === this.editorRevision) { this.editOpen = false; this.editorDirty = false; this.clearEditorLater(owner, row); }
+      if (metadata && this.current(owner, revision) && editorRevision === this.editorRevision) { this.editOpen = false; this.editorDirty = false; this.clearEditorLater(owner, row); }
       return true;
     } catch (failure) {
       if (!owner || !this.current(owner, revision) || this.selected.key() !== targetKey) {
         if (!owner && this.revision === revision && this.client === client) { this.writeState = 'failed'; this.error = this.errorCode(failure as Error); }
+        return false;
+      }
+      if (!metadata && Wire.number(failure as Object as Record<string,Object>,'status')===409) {
+        this.writeState='failed';
+        await this.reloadDetail(owner,revision,row);
+        if (this.current(owner,revision) && this.selected.key()===targetKey && !this.error) this.error='phone_facts_changed';
         return false;
       }
       this.writeState = this.unknownWrite(failure as Error);
@@ -391,11 +453,41 @@ export class KnowledgeWorkspace {
     if (query) {
       await this.loadSearch(owner, revision, readRevision, query); return;
     }
-    const path = '/api/v1/kb/' + segment(kind) + (tag ? '?tag=' + segment(tag) : '');
-    const result = await owner.repository.call(path);
-    if (!this.current(owner, revision) || !this.currentRead(revision, readRevision)) return;
-    const rows = Wire.rows(result, 'items').map((data: Record<string, Object>) => this.entryRow(data, owner.manager, kind));
-    this.entries = rows; this.tags = Wire.strings(result, 'tags'); this.error = '';
+    const suffix = tag ? '?tag=' + segment(tag) : '';
+    if (kind === 'meetings' || this.recordingPage) {
+      const both = await Promise.all([owner.repository.call('/api/v1/kb/meetings' + suffix),
+        owner.repository.call('/api/v1/kb/recordings' + suffix)]);
+      if (!this.current(owner, revision) || !this.currentRead(revision, readRevision)) return;
+      const imported = Wire.rows(both[0], 'items').map((item: Record<string,Object>) => this.entryRow(item,owner.manager,'meetings'));
+      const recordings = Wire.rows(both[1], 'items').map((item: Record<string,Object>) => this.entryRow(item,owner.manager,'recordings'));
+      const replaced = new Set<string>(), byMeeting = new Map<string,ResourceRow>();
+      for (const row of imported) {
+        const key = JSON.stringify([row.manager,row.id]);
+        if (!byMeeting.has(key)) byMeeting.set(key,row);
+      }
+      for (const row of recordings) {
+        const entry = row.data(), meetingId = Wire.text(entry,'meeting_id');
+        const key = JSON.stringify([row.manager,meetingId]), original = meetingId ? byMeeting.get(key) : undefined;
+        if (!original) continue;
+        replaced.add(key);
+        entry['imported_meeting'] = original.data();
+        row.raw = JSON.stringify(entry);
+      }
+      const merged = imported.filter((row:ResourceRow) => !replaced.has(JSON.stringify([row.manager,row.id]))).concat(recordings);
+      const when = new Map<ResourceRow,number>();
+      for (const row of merged) {
+        const stamp = Date.parse(Wire.text(row.data(),'updated'));
+        when.set(row,Number.isFinite(stamp) ? stamp : 0);
+      }
+      this.entries = merged.sort((a:ResourceRow,b:ResourceRow) => (when.get(b) || 0) - (when.get(a) || 0));
+      this.tags = Array.from(new Set<string>(Wire.strings(both[0],'tags').concat(Wire.strings(both[1],'tags'))));
+    } else {
+      const result = await owner.repository.call('/api/v1/kb/' + segment(kind) + suffix);
+      if (!this.current(owner, revision) || !this.currentRead(revision, readRevision)) return;
+      this.entries = Wire.rows(result,'items').map((data:Record<string,Object>) => this.entryRow(data,owner.manager,kind));
+      this.tags = Wire.strings(result,'tags');
+    }
+    this.error = '';
   }
 
   private async loadSearch(owner: KnowledgeOwner, revision: number, readRevision: number, query: string): Promise<void> {
@@ -408,7 +500,7 @@ export class KnowledgeWorkspace {
       hit.hits = Wire.rows(data, 'hits').map((item: Record<string, Object>) => Wire.text(item, 'line'));
       return hit;
     });
-    this.results = hits; this.error = '';
+    this.results = this.recordingPage ? hits.filter((hit:KnowledgeSearchHit) => ['meetings','recordings'].includes(hit.entry.path)) : hits; this.error = '';
   }
 
   private async initializeDetail(owner: KnowledgeOwner, revision: number, row: ResourceRow, readRevision: number): Promise<void> {
@@ -431,6 +523,7 @@ export class KnowledgeWorkspace {
     const detail = Wire.object(result, 'detail');
     if (Wire.text(detail, 'id') !== row.id || Wire.text(detail, 'kind') !== row.path) throw new Error('request_updated');
     this.detail = detail;
+    this.supportsExpectedPinned=row.path==='recordings' && Wire.bool(result,'supports_expected_pinned');
     this.matches = Wire.rows(result, 'matches');
     this.agents = Wire.rows(result, 'agents').map((data: Record<string, Object>) => {
       const agent = ResourceRow.from(data, 'session'); agent.manager = owner.manager; return agent;
@@ -488,10 +581,10 @@ export class KnowledgeWorkspace {
 
   private async saveFilters(): Promise<void> {
     const client = this.client, revision = this.revision;
-    if (!client) return;
+    if (!client || this.transientMeetingList) return;
     const scope = this.viewScope;
     try {
-      await client.saveView('knowledge-workspace', JSON.stringify(objectPayload(['kind', 'tag', 'query'], [this.kind, this.tag, this.query])));
+      await client.saveView(this.recordingPage ? 'knowledge-recordings' : 'knowledge-workspace', JSON.stringify(objectPayload(['kind', 'tag', 'query'], [this.kind, this.tag, this.query])));
       if (this.revision !== revision || this.viewScope !== scope || this.client !== client) return;
     } catch (_) { if (this.revision === revision) this.error = 'knowledge_storage_unavailable'; }
   }
@@ -567,5 +660,35 @@ export class KnowledgeWorkspace {
     return known.includes(error.message) ? error.message : status === 401 || status === 403 ? 'permission_denied' :
       Wire.bool(data, 'resultPending') ? 'pending' :
       Wire.bool(data, 'resultUnknown') ? 'result_unknown' : 'knowledge_request_failed';
+  }
+}
+
+/** The open recording editor owns edits made while a previous fact save is waiting for the Hub. */
+@ObservedV2
+export class RecordingFactsDraft {
+  @Trace open: boolean = false;
+  @Trace text: string = '';
+  @Trace conflict: boolean = false;
+  @Trace baseline: string = '';
+  private lease: number = 0;
+  private revision: number = 0;
+
+  begin(value: string): void {
+    this.lease++; this.revision++; this.conflict=false; this.baseline=value; this.text=value; this.open=true;
+  }
+  edit(value: string): void { this.revision++; this.text=value; }
+  close(): void { this.lease++; this.revision++; this.conflict=false; this.open=false; this.text=''; this.baseline=''; }
+
+  async save(workspace: KnowledgeWorkspace): Promise<void> {
+    if (!this.open || workspace.busy || !workspace.supportsExpectedPinned) return;
+    const lease=this.lease, revision=this.revision, target=workspace.selected.key(), kind=workspace.selected.path, sent=this.text.trim();
+    const saved=await workspace.saveFacts(sent,this.baseline);
+    if (lease!==this.lease || workspace.selected.key()!==target || workspace.selected.path!==kind) return;
+    if (saved) {
+      this.baseline=sent; this.conflict=false;
+      if (this.revision===revision) this.close();
+    } else if (workspace.error==='phone_facts_changed') {
+      this.baseline=Wire.text(Wire.object(workspace.detail,'meta'),'pinned'); this.conflict=true;
+    }
   }
 }

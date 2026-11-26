@@ -59,9 +59,14 @@ func TestPRReviewWakeMessageDoesNotCompleteCriteria(t *testing.T) {
 				t.Fatal("the PR event no longer reaches the supervisor")
 			}
 			text := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{entry}})
-			for _, want := range append([]string{signal.Detail}, criteria...) {
+			for _, want := range []string{signal.Detail, "验收标准用 todo_get 取原文"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("supervisor message lost %q:\n%s", want, text)
+				}
+			}
+			for _, criterion := range criteria {
+				if strings.Contains(text, criterion) {
+					t.Errorf("supervisor message repeats criterion %q:\n%s", criterion, text)
 				}
 			}
 			// Match the legacy Chinese completion claim without adding user-facing copy to Go.

@@ -320,7 +320,10 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) (unrelat
 		prog.steps, prog.live, prog.dirty = nil, "", false
 		prog.from, prog.upTo = 0, 0
 		prog.open, prog.calls, prog.read, prog.edited, prog.subs, prog.subsMore = nil, 0, nil, nil, nil, 0
-		prog.items, prog.cot, prog.native = nil, cotProgress{}, nil
+		prog.items = nil
+		if n, ok := prog.sink.(interface{ NextTurn() }); ok {
+			n.NextTurn() // the sink's agent message of the turn goes with it
+		}
 	} else {
 		prog.finished = true
 		delete(c.live, r.ID)

@@ -226,7 +226,7 @@ func (s *Service) logicalRebind(ctx context.Context, c *db.LogicalConversation) 
 			}
 		}
 	}
-	if c.Epoch > 1 {
+	if logicalSourceMayBeRetired(c) {
 		_, _ = s.logicalPhysical(ctx, a.MachineID, "assistant.segment.restore", map[string]any{"session_id": a.SessionID})
 	}
 	s.logical.mu.Lock()

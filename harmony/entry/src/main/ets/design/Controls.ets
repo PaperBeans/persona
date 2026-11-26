@@ -35,6 +35,10 @@ class PersonaButtonModifier implements AttributeModifier<ButtonAttribute> {
 }
 
 export class ButtonStyles {
+  static touchRegion(side: number): Rectangle {
+    const hit = Math.max(44, side), offset = (side - hit) / 2;
+    return { x: offset, y: offset, width: hit, height: hit };
+  }
   static readonly icon: AttributeModifier<ButtonAttribute> = new PersonaButtonModifier('icon');
   static readonly iconPrimary: AttributeModifier<ButtonAttribute> = new PersonaButtonModifier('iconPrimary');
   static readonly primary: AttributeModifier<ButtonAttribute> = new PersonaButtonModifier('primary');

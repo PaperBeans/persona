@@ -5,16 +5,19 @@ import { useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, credentialOwner, enc, errorText } from "../../lib/api";
 import { decisionLaterKey, decisionRound } from "../../lib/assistant-entries";
-import { askRow, later } from "../../lib/feed";
+import { askRow } from "../../lib/brief-rows";
+import { later } from "../../lib/feed";
 import { defaultManager, MANAGER_HEADER, shownManager } from "../../lib/manager-choice";
 import { getState, putTodo, refreshTodos } from "../../lib/store";
-import { latestReview } from "../../lib/supervision";
-import { askOptions, openAsk, type Todo } from "../../lib/todos";
+import { latestReview, reviewState } from "../../lib/supervision";
+import { askOptions, openAsk, personalVerificationAsk, type Todo, type TodoStatus } from "../../lib/todos";
+import { StatusMark } from "../../ui/StatusMark";
 import { Button, toast } from "../../ui/atoms";
 import { AcceptRow } from "./Brief";
 import { BriefingMark } from "./BriefingMark";
 import { DecisionRow } from "./DecisionRow";
 import { ExpiredQuestion } from "./ExpiredQuestion";
+import WaitingTaskRow from "./WaitingTaskRow";
 import { FailedTaskRow } from "./FailedTaskRow";
 import RuleSuggestionLine from "./RuleSuggestionLine";
 import type { RuleCard } from "../../lib/rule-suggestion";
@@ -108,18 +111,38 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
 }
 
 export type NeedsYouPartProps =
-  /** A task's decision in the tray. */
-  | { decision: Todo; rowKey?: string; hideTitle?: boolean }
-  /** A task whose Agent did not start, in the tray (#10365). */
-  | { failed: Todo; rowKey: string; countsOpenAttr: { "data-counts-open"?: string } }
+  | { decision: Todo; rowKey?: string }
+  | { task: Todo; status: TodoStatus; rowKey?: string; hideTitle?: boolean; countsOpenAttr: { "data-counts-open"?: string } }
   /** The suggested rule of a plan card or a passed-up question, under it. */
   | { rule: RuleCard };
 
 /** What views/assistant/Tasks loads, with the first card that draws one and not with the first screen
- *  (startup-preload's budget): a decision's row, a failed start's row (#10365), or a suggested rule's line (#5802). One
- *  chunk behind one component, so the first screen names one file for all. */
+ *  (startup-preload's budget): a decision's row, an open acceptance ask's row, a failed start's row (#10365), or a
+ *  suggested rule's line (#5802). One chunk behind one component, so the first screen names one file for all. */
 export default function NeedsYouParts(props: NeedsYouPartProps) {
-  if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} hideTitle={props.hideTitle} />;
-  if ("failed" in props) return <FailedTaskRow todo={props.failed} rowKey={props.rowKey} countsOpenAttr={props.countsOpenAttr} />;
+  if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} />;
+  if ("task" in props) {
+    const { task, rowKey, hideTitle, countsOpenAttr } = props;
+    const verifying = reviewState(task) === "user_check";
+    const ask = verifying ? personalVerificationAsk(task) : openAsk(task);
+    if (verifying && !ask) return (
+      <button type="button" data-needs-row={rowKey} {...countsOpenAttr} onClick={() => openTask(task.id)} className="flex min-w-0 items-center gap-2 rounded-control bg-field px-3 py-2 text-left text-sm hover:bg-hover">
+        <StatusMark state="needs_you" />
+        <span className="min-w-0 flex-1 truncate">{task.title}</span>
+        <span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_user_check")}</span>
+      </button>
+    );
+    if (!verifying && (task.supervision?.state === "needs_user" || ask?.outcome === "decide")) {
+      const round = task.supervision?.reviews?.at(-1)?.at || task.decision_review?.review_at || ask?.asked_at;
+      return <TaskDecision key={task.id + round} todo={task} rowKey={rowKey} hideTitle={hideTitle} />;
+    }
+    if (ask) return (
+      <div data-needs-row={rowKey} {...countsOpenAttr} className="min-w-0 rounded-control bg-field px-3 py-2.5">
+        <AcceptRow stacked hideTitle={hideTitle} key={task.id + ask.asked_at} verification={task} row={askRow(task, ask)} />
+      </div>
+    );
+    if (props.status === "failed") return <FailedTaskRow todo={task} rowKey={rowKey ?? `task:${task.id}`} countsOpenAttr={countsOpenAttr} />;
+    return <WaitingTaskRow todo={task} status={props.status} rowKey={rowKey} countsOpenAttr={countsOpenAttr} />;
+  }
   return <RuleSuggestionLine of={props.rule} />;
 }

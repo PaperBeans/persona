@@ -111,8 +111,8 @@ func (m *Manager) signInstalledLocked(ctx context.Context) (string, error) {
 		_ = os.Remove(signed)
 		return "", err
 	}
-	// The file is another one now: a later Commit compares the program with this one (errSuperseded).
-	if st, err := os.Stat(m.exe); err == nil {
+	// Keep the installed identity after signing so a later Commit can detect external replacements.
+	if st, err := executableInfo(m.exe); err == nil {
 		m.identity = st
 	}
 	return "sha256 " + newSum, nil

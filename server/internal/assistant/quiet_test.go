@@ -23,13 +23,19 @@ func newQuietService(t testing.TB) (*Service, *fakeHub) {
 // newQuietServiceOn is newQuietService with st as its database (nil: none).
 func newQuietServiceOn(t testing.TB, st Store) (*Service, *fakeHub) {
 	t.Helper()
-	old := quietNoticeDelay
-	quietNoticeDelay = 30 * time.Millisecond
-	t.Cleanup(func() { quietNoticeDelay = old })
-	reachA, reachB, reachM := agentReachAttempts, agentReachBackoff, agentReachMax
-	agentReachAttempts, agentReachBackoff, agentReachMax = 2, time.Millisecond, 200*time.Millisecond
-	t.Cleanup(func() { agentReachAttempts, agentReachBackoff, agentReachMax = reachA, reachB, reachM })
+	if quietNoticeDelay != 30*time.Millisecond {
+		old := quietNoticeDelay
+		quietNoticeDelay = 30 * time.Millisecond
+		t.Cleanup(func() { quietNoticeDelay = old })
+	}
+	if agentReachAttempts != 2 || agentReachBackoff != time.Millisecond || agentReachMax != 200*time.Millisecond {
+		reachA, reachB, reachM := agentReachAttempts, agentReachBackoff, agentReachMax
+		agentReachAttempts, agentReachBackoff, agentReachMax = 2, time.Millisecond, 200*time.Millisecond
+		t.Cleanup(func() { agentReachAttempts, agentReachBackoff, agentReachMax = reachA, reachB, reachM })
+	}
 	s, f := newTaskServiceOn(t, st)
+	t.Cleanup(s.stopQuietTimers)
+	f.inbox = newFakeInbox()
 	shortSupervise(t, s)
 	f.mu.Lock()
 	f.hello.Assistant.MachineID = "server"
@@ -265,7 +271,7 @@ func TestQuietNoticeWaitsForTheTurn(t *testing.T) {
 	}
 }
 
-// Tasks from another conversation are not quiet: the hub pushes as always and main supervises them (#5732). With the
+// Tasks from a live side conversation are not quiet and stay supervised by that side conversation (#13657). With the
 // setting off a task from the main conversation is not quiet (the hub pushes) but is still supervised.
 func TestNotQuietTasksAreNotTold(t *testing.T) {
 	for _, c := range []struct {
@@ -274,17 +280,17 @@ func TestNotQuietTasksAreNotTold(t *testing.T) {
 		supervisor string
 		told       bool
 	}{
-		{"side conversation", func(v *Settings) { v.Main = "conv-main" }, "conv-main", true},
+		{"side conversation", func(v *Settings) { v.Main = "conv-main" }, "conv1", true},
 		{"setting off", func(v *Settings) { v.MainTasksQuiet = new(false) }, "conv1", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, f := newQuietService(t)
 			f.judge = `{"verdict":"done","reason":"好了"}`
 			setSettings(t, s, c.set)
-			if c.supervisor != "conv1" {
-				f.known[c.supervisor] = true
+			if c.name == "side conversation" {
+				f.known["conv-main"] = true
 				f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
-					proto.Session{SessionID: c.supervisor, MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+					proto.Session{SessionID: "conv-main", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
 			}
 			if todo := startedTask(t, s, f); todo.Quiet || todo.Supervision == nil || todo.Supervision.Supervisor != c.supervisor {
 				t.Fatalf("todo = %+v (supervision %+v)", todo, todo.Supervision)
@@ -565,13 +571,17 @@ func TestQueuedNeedsNoticeRecheckedAtDrain(t *testing.T) {
 			idleLark.Status = proto.StatusIdle
 			switch tc.mode {
 			case "unreachable":
+				f.mu.Lock()
 				f.sessionsFail["box"] = 100
+				f.mu.Unlock()
 				s.drainRelays("server", []proto.Session{idleLark})
 				time.Sleep(50 * time.Millisecond) // longer than the bounded retries, far below their cap
 				if q, sent := s.queuedFor("lark1"), f.sentTo("lark1"); q != 1 || sent != 0 {
 					t.Fatalf("an unreachable node was read as answered: %d queued, %d sent", q, sent)
 				}
+				f.mu.Lock()
 				f.sessionsFail["box"] = 0
+				f.mu.Unlock()
 				agentTurn(s, f, proto.StatusWorking, "", 0) // the node is back and the agent continues
 				s.drainRelays("server", []proto.Session{idleLark})
 			case "removed":

@@ -73,11 +73,13 @@ type FeishuBotSettings struct {
 	// dropped past botAISourcesKeep. Like the topic chats, the owner's: it goes when the owner does.
 	AISources []BotAISource `json:"ai_sources,omitempty"`
 	// NudgeAfter is how many minutes a card the bot sent may wait unanswered before the assistant nudges under it once
-	// (#6084, assistant/feishu_nudge.go): 0 is off, nil (never set) is assistantwire.NudgeAfterDefault.
+	// (#6084, modules/lark/nudge.go): 0 is off, nil (never set) is assistantwire.NudgeAfterDefault.
 	NudgeAfter *int `json:"nudge_after,omitempty"`
 	// SourceReportDelayMinutes is the preview window before a reply to the source group. Zero skips it.
 	SourceReportDelayMinutes *int `json:"source_report_delay_minutes,omitempty"`
 	SourceReportFullReply    bool `json:"source_report_full_reply,omitempty"`
+	// Handoff is the proxy-reply policy (bots_handoff.go). The owner's: it goes when the owner does.
+	Handoff *botHandoffPolicy `json:"handoff,omitempty"`
 }
 
 // BotFeatures are the parts that can be switched on one by one: kept here with the credentials, acted on by the
@@ -196,6 +198,8 @@ type botHub struct {
 	// bindGate serializes Feishu binding, including registration network calls, independently of mu.
 	// A channel lets a waiting client's context cancel without waiting for the current bind.
 	bindGate chan struct{}
+	// sync is the user sync: the bots' apps reading as the owner every day (larksync.go).
+	sync larkSync
 }
 
 func (b *botHub) clock() time.Time {
@@ -338,8 +342,12 @@ func (h *Manager) restartBotLocked() {
 		b.api = nil
 		return
 	}
-	if !botport.Available() { // a build without the lark module (persona_without_lark): the bot stays off
-		h.logf("bots: %v", botport.ErrUnavailable)
+	if !botport.Available(h.modules()) { // a build without the lark module (persona_without_lark), or switched off: the bot stays off
+		if botport.InBuild() {
+			h.logf("bots: the lark module is switched off in the modules setting")
+		} else {
+			h.logf("bots: %v", botport.ErrUnavailable)
+		}
 		b.api = nil
 		return
 	}
@@ -427,6 +435,12 @@ func (s FeishuBotSettings) copy() FeishuBotSettings {
 		r := *s.Registration
 		s.Registration = &r
 	}
+	if s.Handoff != nil {
+		h := *s.Handoff
+		h.DirectChats = slices.Clone(h.DirectChats)
+		h.BlockedChats = slices.Clone(h.BlockedChats)
+		s.Handoff = &h
+	}
 	return s
 }
 
@@ -450,6 +464,8 @@ type feishuBotView struct {
 
 	SourceReportDelayMinutes int  `json:"source_report_delay_minutes"`
 	SourceReportFullReply    bool `json:"source_report_full_reply"`
+	// Handoff is the proxy-reply policy; absent when the owner has never set one.
+	Handoff *botHandoffView `json:"handoff,omitempty"`
 	// Target and Agents are the assistant's (feishu.view): where the chat's messages go now, the agents bound to
 	// threads of the chat; left out while it is not connected.
 	Target  string                      `json:"target,omitempty"`
@@ -475,7 +491,8 @@ func (h *Manager) botView(ctx context.Context) feishuBotView {
 	appID, _, domain, fromConfig, _ := h.botCredentialsLocked()
 	v := feishuBotView{Enabled: s.Enabled, AppID: appID, Domain: botcard.ResolveDomain(domain), HasSecret: appID != "",
 		FromConfig: fromConfig, Features: s.Features, BotName: b.info.Name, NudgeAfter: s.nudgeAfter(),
-		SourceReportDelayMinutes: s.sourceReportDelayMinutes(), SourceReportFullReply: s.SourceReportFullReply}
+		SourceReportDelayMinutes: s.sourceReportDelayMinutes(), SourceReportFullReply: s.SourceReportFullReply,
+		Handoff: s.handoffView()}
 	if loadErr != nil {
 		v.Error = i18n.Localize(loadErr, h.botLang(ctx))
 	} else if b.conn != nil {
@@ -574,6 +591,8 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			// Zero posts as soon as the result is ready. Absent leaves the current setting.
 			SourceReportDelayMinutes json.RawMessage `json:"source_report_delay_minutes"`
 			SourceReportFullReply    *bool           `json:"source_report_full_reply"`
+			// Handoff replaces the proxy-reply policy keys that are present; absent leaves it (bots_handoff.go).
+			Handoff json.RawMessage `json:"handoff"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
@@ -665,6 +684,12 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 				return
 			}
 		}
+		if len(in.Handoff) > 0 && string(in.Handoff) != "null" {
+			if err := h.setHandoffPolicy(r.Context(), in.Handoff, in.AppID); err != nil {
+				writeErr(w, http.StatusBadRequest, err)
+				return
+			}
+		}
 		writeJSON(w, h.botView(r.Context()))
 	})
 	// pair: a code the user sends the bot from Feishu within 10 minutes; whoever sends it becomes the owner.
@@ -709,6 +734,17 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	// identity: the paired bot's public identity, never a secret (bots_handoff.go).
+	api.HandleFunc("GET /api/v1/bots/feishu/identity", func(w http.ResponseWriter, r *http.Request) {
+		if err := h.loadBotSettings(r.Context()); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		writeJSON(w, h.botIdentity(r.Context()))
+	})
+	// handoffs: an authorized caller hands a group question to the bot (bots_handoff.go).
+	api.HandleFunc("POST /api/v1/bots/feishu/handoffs", h.postHandoff)
+	h.larkSyncRoutes(api) // the user sync: /api/v1/bots/feishu/sync…
 }
 
 // botPairCode is a new six-digit pairing code.
@@ -727,7 +763,7 @@ func (h *Manager) unpairBot(ctx context.Context) error {
 	}
 	previous := b.set.copy()
 	had := b.set.Owner != nil
-	b.set.Owner, b.set.Pairing, b.set.TopicChats, b.set.AISources = nil, nil, nil, nil // the topic chats and the /ai sources were the owner's
+	b.set.Owner, b.set.Pairing, b.set.TopicChats, b.set.AISources, b.set.Handoff = nil, nil, nil, nil, nil // the topic chats, the /ai sources and the handoff policy were the owner's
 	b.set.Configure = nil
 	if err := h.saveBotSettingsLocked(); err != nil {
 		b.set = previous
@@ -824,7 +860,7 @@ func (h *Manager) applyBotUpdateWithReceipt(ctx context.Context, enabled *bool, 
 			if plain == "" {
 				return botConfigureReceipt{}, i18n.Err("hub-bots.needs_secret")
 			}
-			if !botport.Available() {
+			if !botport.Available(h.modules()) {
 				return botConfigureReceipt{}, botport.ErrUnavailable
 			}
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -878,7 +914,7 @@ func (h *Manager) applyBotUpdateWithReceipt(ctx context.Context, enabled *bool, 
 			records = append(records, botRecord{auditBotCredentials, d})
 		}
 		if next.AppID != cur.AppID {
-			cur.Owner, cur.Pairing, cur.TopicChats, cur.AISources = nil, nil, nil, nil
+			cur.Owner, cur.Pairing, cur.TopicChats, cur.AISources, cur.Handoff = nil, nil, nil, nil, nil
 		}
 		h.clearBotConfigureOnChangeLocked(next)
 		cur.AppID, cur.SecretEnc, cur.Domain = next.AppID, next.SecretEnc, next.Domain

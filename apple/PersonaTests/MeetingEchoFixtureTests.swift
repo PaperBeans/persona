@@ -3,7 +3,7 @@ import Testing
 @testable import Persona
 
 /// Persona's echo in a meeting (#5905, docs/assistant/meeting-minutes.md「Persona's echo」): every shared case in
-/// spec/fixtures/meeting-echo, which the hub's rule (`server/internal/kb/echo.go`) runs too. A case's line is the
+/// spec/fixtures/meeting-echo, which the hub's rule (`server/internal/modules/recording/writers/echo.go`) runs too. A case's line is the
 /// meeting's when the transcript shows it (`RecordingEntry.sentences`), Persona's echo when it is hidden there.
 @MainActor
 struct MeetingEchoFixtureTests {

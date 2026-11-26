@@ -21,15 +21,27 @@ func TestWaitInteractionResolved(t *testing.T) {
 	ft := newFleetTestNoStore(t)
 	s := ft.s
 	ix := proto.Interaction{ID: "ix_1", MachineID: "mac", SessionID: "s1", Kind: proto.IxPermission, Summary: "send mail"}
+	announced := make(chan struct{})
 	done := make(chan proto.Resolution, 1)
 	go func() {
-		r, err := s.waitInteraction(context.Background(), ix)
+		r, err := s.waitInteractionReady(t.Context(), ix, nil, announced)
 		if err != nil {
 			t.Errorf("waitInteraction: %v", err)
 		}
 		done <- r
 	}()
-	ft.waitPending(1)
+	// The phone answers an announced card. A pending entry alone can still be on its way to the Hub.
+	select {
+	case <-announced:
+	case <-time.After(5 * time.Second):
+		t.Fatal("interaction was not announced")
+	}
+	if got := s.pendingInteractions(); len(got) != 1 || got[0].ID != ix.ID {
+		t.Fatalf("pending after announcement = %+v, want %s", got, ix.ID)
+	}
+	if !ft.hubCards()[ix.ID] || len(ft.toldOf(assistantwire.EventFleetResolved)) != 0 {
+		t.Fatalf("expected the Hub to hold %s before answering, told %s", ix.ID, ft.toldText())
+	}
 	allow := true
 	if err := s.resolve("ix_1", proto.Resolution{Allow: &allow}); err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -47,7 +59,7 @@ func TestWaitInteractionResolved(t *testing.T) {
 		t.Fatalf("a second resolve should fail, got %v", err)
 	}
 	// The hub was told: the card, then its end.
-	if len(ft.toldOf(assistantwire.EventFleetInteraction)) != 1 || len(ft.toldOf(assistantwire.EventFleetResolved)) != 1 {
+	if len(ft.toldOf(assistantwire.EventFleetInteraction)) != 1 || len(ft.toldOf(assistantwire.EventFleetResolved)) != 1 || ft.hubCards()[ix.ID] {
 		t.Fatalf("told %s", ft.toldText())
 	}
 }
@@ -349,7 +361,8 @@ func TestResumableSurvivesAManagerRestart(t *testing.T) {
 	// The next manager, on the same table.
 	st := &restoreMem{fleetMem: ft.st}
 	f2 := newFakeHub()
-	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: t.Logf, Devices: ft.d})
+	// testLogf: restoring the cards starts deliveries of their results that can still be logging as the test ends (#16045).
+	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: testLogf(t), Devices: ft.d})
 	s2.FleetUp(context.Background())
 	var full assistantwire.FleetInteractions
 	for _, tl := range f2.told {
@@ -419,7 +432,8 @@ func TestRestartResolvesTheCardsTheLastManagerLeft(t *testing.T) {
 	// The next manager, on the same table.
 	st := &restoreMem{fleetMem: ft.st}
 	f2 := newFakeHub()
-	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: t.Logf, Devices: ft.d})
+	// testLogf: restoring the cards starts deliveries of their results that can still be logging as the test ends (#16045).
+	s2 := newRestartedService(t, Options{Hub: f2, Store: func() Store { return st }, Logf: testLogf(t), Devices: ft.d})
 	s2.FleetUp(context.Background())
 	if status, _, _ := st.InteractionOutcome(context.Background(), asked.ID); status != "cancelled" {
 		t.Fatalf("status %q", status)

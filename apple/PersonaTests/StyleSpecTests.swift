@@ -1,3 +1,4 @@
+import PersonaWire
 import SwiftUI
 import Testing
 import UIKit
@@ -72,6 +73,20 @@ struct StyleSpecTests {
     @Test func whiteOnTheAccent() {
         let found = Self.below(3.5) { (.white, $0.accent) }.filter { !$0.contains(Self.known) }
         #expect(found.isEmpty, "white on the accent under 3.5:1: \(found)")
+    }
+
+    /// The disk usage map's labels (docs/design/DESIGN_SYSTEM.md "Usage treemap"): its ink on every category and every
+    /// Last Used step, ≥ 4.5:1 in light and in dark; and the four steps get darker (light) as they get older.
+    @Test func usageMapLabelsReadOnEveryFill() {
+        let fills = StorageUsageCategory.allCases.map { ("\($0)", Theme.UsageMap.pair($0)) }
+            + Theme.UsageMap.Age.allCases.map { ("age \($0)", $0.pair) }
+        let ink = Theme.UsageMap.ink
+        for (name, f) in fills {
+            #expect(PersonaPalette.contrast(ink.light, f.light) >= 4.5, "light ink on \(name)")
+            #expect(PersonaPalette.contrast(ink.dark, f.dark) >= 4.5, "dark ink on \(name)")
+        }
+        let steps = Theme.UsageMap.Age.allCases.map { PersonaPalette.contrast($0.pair.light, 0xFFFFFF) }
+        #expect(steps == steps.sorted(), "the Last Used steps don't darken with age")
     }
 
     @Test func healthRingsHaveDistinctHuesAndReadableActivityLabels() {
@@ -245,6 +260,28 @@ struct StyleSpecTests {
             #expect(!kept.contains { Self.hex($0) == Self.hex(tint) && Self.hex($0, .dark) == Self.hex(tint, .dark) })
         }
         #expect(Set(Theme.Hue.minutesGroups.map { Self.hex($0) }).count == Theme.Hue.minutesGroups.count)
+    }
+
+    /// A to-do's ask card (#10465, `AskCard`) sits on the inset well (`Theme.Fill.well`) inside a To-dos row, whose cell
+    /// is the system's grouped cell in every style (`sectionCards()`): its exits' words in the accent ≥ 3:1 (the link
+    /// floor) and its own words ≥ 4.5:1 on that well, in every style and color, light and dark (DESIGN_SYSTEM 6.3: a
+    /// composite ground is tested).
+    @Test func anAskCardsWordsReadOnItsWell() {
+        let cell = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
+        var found: [String] = []
+        for style in AppStyle.allCases {
+            for (name, colors) in Self.colors {
+                let spec = StyleSpec(style.component, colors)
+                for (look, ui) in Self.appearances {
+                    let well = Self.over(Theme.Fill.well, Self.rgb(cell, ui), ui)
+                    for (what, ink, floor) in [("accent", spec.accent, 3.0), ("words", Theme.primaryText, 4.5)] {
+                        let c = Self.contrast(Self.rgb(ink, ui), well)
+                        if c < floor { found.append("\(style.rawValue)+\(name) \(look) \(what): \(String(format: "%.2f", c))") }
+                    }
+                }
+            }
+        }
+        #expect(found.isEmpty, "an ask card's words under their floor on its well: \(found)")
     }
 
     /// The colored canvases stay darker than the system's grouped cells in dark (#1C1C1E): Clay's at #1D1A23 was one

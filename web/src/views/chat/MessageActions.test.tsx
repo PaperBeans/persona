@@ -4,23 +4,25 @@ import { ChatActionsContext, liveValue, type ChatActions } from "./chat-actions"
 import { t } from "../../i18n";
 import { MessageActions } from "./MessageActions";
 import { moreActions, rewindActions, savePromptActions } from "./ReplyBar";
+import { LatestReplyId } from "./latest-message-time";
 
 const base: ChatActions = { draftKey: "m/s", canCompose: true, speaker: "Persona", title: "Persona", images: () => [] };
 
 function render(actions: ChatActions, itemId?: string, bar = true) {
   return renderToStaticMarkup(
-    <ChatActionsContext.Provider value={actions}>
-      <MessageActions text="回复" itemId={itemId} bar={bar}>
-        <p>回复</p>
-      </MessageActions>
-    </ChatActionsContext.Provider>,
+    <LatestReplyId.Provider value={itemId}>
+      <ChatActionsContext.Provider value={actions}>
+        <MessageActions text="回复" itemId={itemId} bar={bar}>
+          <p>回复</p>
+        </MessageActions>
+      </ChatActionsContext.Provider>
+    </LatestReplyId.Provider>,
   );
 }
 
-// cindy's bar under a turn's last reply (#5314; its buttons and order: ReplyBar.test.tsx). It loads after the first
-// screen: until then its row is kept, so the reply does not move when it comes.
+// The latest reply renders its bar from a separate chunk, with its row reserved during loading.
 describe("the reply bar", () => {
-  it("keeps its row while it loads", () => {
+  it("keeps the latest reply's row while its bar loads", () => {
     const html = render({ ...base, fork: () => {} }, "u1#0");
     expect(html).toContain('data-reply-bar="loading"');
     expect(html).toMatch(/data-reply-bar="loading" class="mt-1\.5 hidden h-6 \[@media\(hover:hover\)\]:block"/);

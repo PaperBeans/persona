@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -59,7 +60,171 @@ type spinWatch struct {
 	plan       bool // a plan was seen: planDone and planCur hold
 	planDone   int
 	planCur    string
+	bgSeen     bool // background work was observed at least once
+	bg         bgProgressSnap
 	step       int // the latest step its reports named
+}
+
+type workflowProgressSnap struct {
+	status        string
+	running       bool
+	phase         string
+	phaseIndex    int
+	agentsStarted int
+	agentsDone    int
+	agentsFailed  int
+	calls         int
+	updatedAt     time.Time
+	endedAt       time.Time
+}
+
+type subagentProgressSnap struct {
+	running   bool
+	steps     int
+	updatedAt time.Time
+}
+
+type bgProgressSnap struct {
+	workflows map[string]workflowProgressSnap
+	subagents map[string]subagentProgressSnap
+	tasks     map[string]time.Time
+}
+
+func workflowRunning(w proto.Workflow) bool {
+	if w.Status != "" && w.Status != proto.WorkflowRunning {
+		return false
+	}
+	return w.Running || w.Status == proto.WorkflowRunning
+}
+
+// aliveBackgroundWork reports whether c has live background work (running workflows, running subagents,
+// unexpired monitors, or active non-waiting/non-stalled background tasks) that keeps it from being stalled or timed out.
+func aliveBackgroundWork(c proto.Session, now time.Time) bool {
+	for _, w := range c.Workflows {
+		if workflowRunning(w) {
+			return true
+		}
+	}
+	for _, a := range c.Subagents {
+		if a.Running {
+			return true
+		}
+	}
+	for _, t := range c.Background {
+		switch t.Kind {
+		case "workflow", "agent":
+			return true
+		case "monitor":
+			if t.ExpiresAt != nil && t.ExpiresAt.After(now) {
+				return true
+			}
+			if t.ExpiresAt == nil && !c.BackgroundWaiting && c.BackgroundStalledSince == 0 {
+				return true
+			}
+		default:
+			if !c.BackgroundWaiting && c.BackgroundStalledSince == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func workflowSnapKey(w proto.Workflow, idx int) string {
+	return cmp.Or(w.RunID, w.TaskID, w.ToolUseID, w.Name, fmt.Sprintf("idx:%d", idx))
+}
+
+func workflowSnapshot(w proto.Workflow) workflowProgressSnap {
+	updated := w.UpdatedAt
+	for _, a := range w.Agents {
+		if a.StartedAt.After(updated) {
+			updated = a.StartedAt
+		}
+		if a.UpdatedAt.After(updated) {
+			updated = a.UpdatedAt
+		}
+		if a.EndedAt != nil && a.EndedAt.After(updated) {
+			updated = *a.EndedAt
+		}
+	}
+	var ended time.Time
+	if w.EndedAt != nil {
+		ended = *w.EndedAt
+	}
+	return workflowProgressSnap{
+		status:        w.Status,
+		running:       workflowRunning(w),
+		phase:         w.Phase,
+		phaseIndex:    w.PhaseIndex,
+		agentsStarted: w.AgentsStarted,
+		agentsDone:    w.AgentsDone,
+		agentsFailed:  w.AgentsFailed,
+		calls:         w.Calls,
+		updatedAt:     updated,
+		endedAt:       ended,
+	}
+}
+
+func backgroundProgressSnapshot(c proto.Session) bgProgressSnap {
+	var snap bgProgressSnap
+	if len(c.Workflows) > 0 {
+		snap.workflows = make(map[string]workflowProgressSnap, len(c.Workflows))
+		for i, w := range c.Workflows {
+			snap.workflows[workflowSnapKey(w, i)] = workflowSnapshot(w)
+		}
+	}
+	if len(c.Subagents) > 0 {
+		snap.subagents = make(map[string]subagentProgressSnap, len(c.Subagents))
+		for i, a := range c.Subagents {
+			key := cmp.Or(a.ID, a.SessionID, a.ToolUseID, fmt.Sprintf("idx:%d", i))
+			snap.subagents[key] = subagentProgressSnap{running: a.Running, steps: a.Steps, updatedAt: a.UpdatedAt}
+		}
+	}
+	if len(c.Background) > 0 {
+		snap.tasks = make(map[string]time.Time, len(c.Background))
+		for i, t := range c.Background {
+			key := cmp.Or(t.ID, t.RunID, fmt.Sprintf("%s:%s:%s:%d", t.Kind, t.Command, t.Description, i))
+			snap.tasks[key] = t.StartedAt
+		}
+	}
+	return snap
+}
+
+func backgroundProgressed(prev, cur bgProgressSnap) bool {
+	for k, w := range cur.workflows {
+		p, ok := prev.workflows[k]
+		if !ok {
+			if w.running || w.status != proto.WorkflowStalled {
+				return true
+			}
+			continue
+		}
+		if w.phase != p.phase || w.phaseIndex > p.phaseIndex || w.agentsStarted > p.agentsStarted ||
+			w.agentsDone > p.agentsDone || w.agentsFailed > p.agentsFailed || w.calls > p.calls ||
+			w.updatedAt.After(p.updatedAt) || w.endedAt.After(p.endedAt) ||
+			(p.running && !w.running && w.status != proto.WorkflowStalled) {
+			return true
+		}
+	}
+	for k, a := range cur.subagents {
+		p, ok := prev.subagents[k]
+		if !ok {
+			if a.running {
+				return true
+			}
+			continue
+		}
+		if a.steps > p.steps || a.updatedAt.After(p.updatedAt) {
+			return true
+		}
+	}
+	for k, started := range cur.tasks {
+		prevStarted, ok := prev.tasks[k]
+		if !ok || started.After(prevStarted) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *spinWatch) restart(now time.Time) {
@@ -114,7 +279,8 @@ func activityCall(line string) int {
 	return callNeutral
 }
 
-// observeProgress takes in what c shows now: a plan that moved, and a tool call not seen yet.
+// observeProgress takes in what c shows now: a plan that moved, background workflow/subagent/task progress,
+// and a tool call not seen yet.
 func (s *Service) observeProgress(c proto.Session, now time.Time) {
 	if c.SessionID == "" || c.Assistant {
 		return
@@ -129,6 +295,11 @@ func (s *Service) observeProgress(c proto.Session, now time.Time) {
 		}
 		w.plan, w.planDone, w.planCur = true, p.Done, p.Current
 	}
+	curBG := backgroundProgressSnapshot(c)
+	if w.bgSeen && backgroundProgressed(w.bg, curBG) {
+		w.restart(now)
+	}
+	w.bgSeen, w.bg = true, curBG
 	if c.ActivityAt == nil || c.Activity == "" || !c.ActivityAt.After(w.lastCall) {
 		return
 	}
@@ -149,6 +320,19 @@ func (s *Service) observeProgress(c proto.Session, now time.Time) {
 			w.lines[line]++
 		}
 	}
+}
+
+func (s *Service) lastProgressAt(machine, session string) time.Time {
+	if session == "" {
+		return time.Time{}
+	}
+	b := &s.progress
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if w := b.m[[2]string{machine, session}]; w != nil {
+		return w.progressAt
+	}
+	return time.Time{}
 }
 
 // progressMade: machine/session made progress, or was told something (a new stretch begins).
@@ -210,6 +394,9 @@ func (s *Service) noProgressSignal(t Todo, c proto.Session, now time.Time) (supe
 		return superviseSignal{}, false
 	}
 	s.observeProgress(c, now)
+	if aliveBackgroundWork(c, now) {
+		return superviseSignal{}, false
+	}
 	b := &s.progress
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -243,10 +243,15 @@ func TestAgentStartCarriesProjectContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.tabReply = "深色模式"
+	f.startReply = func(_ map[string]any, sess *proto.Session) *proto.StartInstead {
+		sess.SpaceKind, sess.SlotID, sess.SlotName = "herdr", "w1:t1", "agent-1"
+		return nil
+	}
 	args, _ := json.Marshal(map[string]string{"machine": "box", "cwd": "/code/weather", "prompt": "加深色模式"})
 	if _, err := s.runTool(context.Background(), "server", "conv9", "agent_start", args); err != nil {
 		t.Fatal(err)
 	}
+	waitAgentTabNaming(t, s)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.starts) != 1 {
@@ -293,7 +298,7 @@ func TestAgentStartCarriesExtensionProjectContext(t *testing.T) {
 
 func TestProjectContextMemoryOrderBoundsAndConflicts(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	p, _ := e.Store.Project("天气-app")
 	p.Kind = "long"
@@ -352,7 +357,7 @@ func TestProjectContextMemoryOrderBoundsAndConflicts(t *testing.T) {
 
 func TestProjectContextMemoryFallsBackToOneLineWithoutSummary(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	if err := e.AppendProjectMemory("天气-app", kb.ProjectMemoryRecord{ID: "one", Type: kb.ProjectMemoryOutcome, Conclusion: "result"}); err != nil {
 		t.Fatal(err)
@@ -365,7 +370,7 @@ func TestProjectContextMemoryFallsBackToOneLineWithoutSummary(t *testing.T) {
 
 func TestProjectContextSummaryUsesLongProjectBudget(t *testing.T) {
 	s, f, _ := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	p, _ := e.Store.Project("天气-app")
 	p.Kind = "long"
@@ -392,7 +397,7 @@ func TestProjectContextSummaryUsesLongProjectBudget(t *testing.T) {
 
 func TestProjectContextWithoutMemoryStaysLegacy(t *testing.T) {
 	s, f, todo := outcomeEnv(t, nil, outcomeReply)
-	f.hello.Locale = "en"
+	f.setLocale("en")
 	e := kbEng(t, s)
 	if err := e.Store.PutSummary(kb.KindProject, "天气-app", "Legacy summary must not replace OneLine"); err != nil {
 		t.Fatal(err)

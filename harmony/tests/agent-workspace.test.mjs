@@ -29,7 +29,7 @@ registerHooks({
       return { url: new URL('./Wire.ets', context.parentURL).href, shortCircuit: true };
     if (context.parentURL?.includes('/entry/src/main/ets/')) {
       const resolved = new URL(specifier, context.parentURL);
-      if (resolved.pathname.endsWith('/Wire')) resolved.pathname += '.ets';
+      if (['/Wire','/AgentActivityGroups','/AgentRepositoryPlace','/MachineDashboard','/InteractionDecision'].some(name=>resolved.pathname.endsWith(name))) resolved.pathname += '.ets';
       else if (!/\.[a-z]+$/i.test(resolved.pathname)) resolved.pathname += '.ts';
       return { url: resolved.href, shortCircuit: true };
     }
@@ -47,7 +47,7 @@ registerHooks({
 });
 
 const { AgentWorkspace } = await import('../entry/src/main/ets/models/AgentWorkspace.ets');
-const { ResourceRow } = await import('../entry/src/main/ets/models/Wire.ets');
+const { ResourceRow, Wire } = await import('../entry/src/main/ets/models/Wire.ets');
 
 function agent(id, fields = {}) {
   const data = {
@@ -100,8 +100,8 @@ function clientFixture(options = {}) {
     machineName(id) { return this.machines.find((row) => row.id === id)?.title || id; },
     shortPath(path) { return path.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/'); },
     operationBlocked(path) { return state.blocked.has(path); },
-    async loadView(key) { return state.views.get(state.scope + ':' + key) || ''; },
-    async saveView(key, value) { state.views.set(state.scope + ':' + key, value); },
+    async loadView(key) { return state.views.get(key === 'agent-hub-mode' ? key : state.scope + ':' + key) || ''; },
+    async saveView(key, value) { state.views.set(key === 'agent-hub-mode' ? key : state.scope + ':' + key, value); },
     directoryOwners(){return[this];}, groupName(){return 'Hub';}, directoryOwnerFor(row){return row.manager===this.profile.manager ? this : undefined;}, async refreshDirectory(){},
     async refresh() {}
   };
@@ -113,6 +113,83 @@ async function opened(options = {}) {
   await workspace.open(fixture.client);
   return { ...fixture, workspace };
 }
+
+test('Needs You omits only waiting rows with solely supervisor-held cards, including a folded child',async()=>{
+  const {AgentDecisionQueue}=await import('../entry/src/main/ets/models/AgentDecisionQueue.ets');
+  const waiting=id=>agent(id,{state:'needs_you',status:'idle'});
+  const {workspace,client,repo}=await opened({sessions:['bare','held','mixed','parent'].map(waiting)});
+  const card=(id,session_id,kind,delegating,extras={})=>({id,session_id,machine_id:'m1',manager:'work',kind,delegating,...extras});
+  let cards=[card('approval','held','permission',true),card('plan','mixed','plan',true),
+    card('ask','mixed','question',true),card('branch','child','screen',true,{folded_under:'parent'})];
+  repo.decisions=async()=>structuredClone(cards);
+  const queue=new AgentDecisionQueue();
+  async function refresh(){await queue.reload(client);workspace.updateSupervisorCards(client,queue);}
+  const needs=()=>workspace.groups.find(g=>g.id==='state/needs')?.rows.map(r=>r.id).sort();
+  await refresh();
+  assert.deepEqual(needs(),['bare','mixed']);
+  assert.equal(workspace.filterCounts.needsYou,2);
+  workspace.setQuickFilter('needsYou');
+  assert.deepEqual(workspace.visibleRows().map(r=>r.id).sort(),['bare','mixed']);
+  workspace.setSearch('parent');
+  assert.equal(workspace.filterCounts.needsYou,0);
+  workspace.setSearch('');workspace.setQuickFilter('all');
+  cards=cards.map(c=>({...c,delegating:false}));
+  await refresh();
+  assert.deepEqual(needs(),['bare','held','mixed','parent']);
+  assert.equal(workspace.filterCounts.needsYou,4);
+});
+
+test('the phone app and recent groupings read the native filtered inventory, retain history and use deterministic local folds', async () => {
+  const when = n => `2026-01-01T00:00:${String(n).padStart(2,'0')}Z`;
+  const sessions = [
+    agent('z', {agent:'codex',agent_surface:'desktop',space_kind:'codex_app',space_id:'codex-project:/r/a',space_name:'Alpha',space_index:2,updated_at:when(8)}),
+    agent('a', {agent:'codex',agent_surface:'desktop',space_kind:'codex_app',space_id:'codex-project:/r/b',space_name:'Beta',space_index:1,updated_at:when(4)}),
+    agent('loose', {agent:'codex',agent_surface:'desktop',space_kind:'codex_app',space_id:'codex-project:/Users/u/Documents/Codex/2026-01-01/untitled',space_name:'untitled',updated_at:when(3)}),
+    agent('old', {agent:'claude',agent_surface:'desktop',state:'offline',updated_at:when(1)}),
+    agent('engine', {space_kind:'herdr-core',updated_at:when(5)}),
+    agent('other', {updated_at:when(5)}),
+    agent('keep-session',{agent:'codex',agent_surface:'desktop',updated_at:when(9)})
+  ];
+  const {workspace}=await opened({sessions});
+  workspace.setGroupingMode('app');
+  assert.deepEqual(workspace.groups.filter(g=>g.presentation==='app' || g.presentation==='app-parent').map(g=>g.id),
+    ['app/desktop/claude code','app/desktop/codex','app/engine/herdr-core','app/other']);
+  const codexProjects=()=>workspace.groups.filter(g=>g.parent==='app/desktop/codex').map(g=>[g.machineName,g.rows.map(x=>x.id)]);
+  assert.deepEqual(codexProjects(),[['Beta',['a']],['Alpha',['z']],['',['loose']]]);
+  workspace.toggleFold('app/desktop/codex'); assert.deepEqual(codexProjects(),[]);
+  workspace.toggleFold('app/desktop/codex'); assert.equal(codexProjects().length,3);
+  workspace.setGroupingMode('recent');
+  assert.deepEqual(workspace.groups.find(g=>g.id==='recent').rows.map(x=>x.id),['z','engine','other','a','loose','old']);
+  workspace.setSearch('Agent old');
+  assert.deepEqual(workspace.unpinnedRows.map(x=>x.id),['old']);
+  assert.deepEqual(workspace.groups.find(g=>g.id==='recent').rows.map(x=>x.id),['old']);
+});
+
+test('phone grouping preference survives temporarily unavailable tasks and the same choice is restored after lookup', async () => {
+  const fixture=clientFixture(), workspace=new AgentWorkspace(undefined,'repo');
+  await workspace.open(fixture.client);
+  assert.equal(workspace.groupingMode,'repo');
+  assert.deepEqual(workspace.groupingOptions(),['repo','space','state','machine','app','recent']);
+  workspace.updateGroupingSupport(true,true); workspace.setGroupingMode('direction');
+  workspace.updateGroupingSupport(true,false); assert.equal(workspace.groupingMode,'todo');
+  workspace.updateGroupingSupport(false,false); assert.equal(workspace.groupingMode,'space');
+  workspace.updateGroupingSupport(true,true); assert.equal(workspace.groupingMode,'direction');
+  workspace.toggleGroupingFold('todo/unknown',true); assert.equal(workspace.groupingFolded('todo/unknown',true),false);
+  workspace.toggleGroupingFold('todo/unknown',false); assert.equal(workspace.groupingFolded('todo/unknown',true),true);
+});
+
+test('machine and project groupings display the real pending rows above their outline only for an unfiltered or Needs You view', async () => {
+  const {workspace}=await opened({sessions:[agent('pending',{state:'needs_you',status:'needs_you',space_name:'Weather'}),agent('running',{space_name:'Weather'})]});
+  for(const mode of ['machine','space']){
+    workspace.setGroupingMode(mode);
+    assert.deepEqual(workspace.groups[0].rows.map(value=>value.id),['pending']);
+    assert.equal(workspace.groups[0].id,'state/needs');
+    workspace.setSearch('Weather');assert.ok(workspace.groups.every(group=>group.id!=='state/needs'));
+    workspace.setSearch('');workspace.setQuickFilter('working');assert.ok(workspace.groups.every(group=>group.id!=='state/needs'));
+    workspace.setQuickFilter('needsYou');assert.equal(workspace.groups[0].id,'state/needs');
+    workspace.setQuickFilter('all');
+  }
+});
 
 test('pins fetch the current document and preserve unrelated space and session keys', async () => {
   const { workspace, state, client } = await opened();
@@ -437,6 +514,102 @@ test('legacy empty manager machine filters keep the Hub group', async () => {
   assert.deepEqual(workspace.visibleRows().map((row) => row.id), ['s1']);
 });
 
+function switchedHubs() {
+  const home = clientFixture(), work = clientFixture();
+  home.client.profile.id = 'home'; home.state.scope = 'home:work';
+  work.client.profile.id = 'work'; work.state.scope = 'work:work';
+  const fixtures = [home, work];
+  const rows = fixtures.map(({client}) => {
+    const row = agent('shared-agent', {title: client.profile.id});
+    row.group = client.profile.id; client.machines[0].group = row.group;
+    return row;
+  });
+  for (const {client} of fixtures) {
+    client.directoryReady = true; client.directorySessions = rows;
+    client.directoryOwners = () => fixtures.map((fixture) => fixture.client);
+    client.directoryOwnerFor = (row) => row.group === 'home' ? home.client : work.client;
+    client.features = ['agent_session_archives'];
+  }
+  work.state.views = home.state.views;
+  return {home, work};
+}
+
+test('All Hubs retains a deliberately chosen foreign machine across reloads and identical machine IDs', async () => {
+  const {home, work} = switchedHubs();
+  const workspace = new AgentWorkspace();
+  await workspace.open(home.client);
+  assert.deepEqual(workspace.visibleRows().map((row) => row.group).sort(), ['home', 'work']);
+  const selected = workspace.machineIdentity(work.client.machines[0]);
+  await workspace.setMachineFilter(selected);
+  assert.deepEqual(workspace.visibleRows().map((row) => row.group), ['work']);
+  await new Promise((resolve) => setTimeout(resolve, 240));
+  const restored = new AgentWorkspace();
+  await restored.open(home.client);
+  assert.equal(restored.currentHubOnly, false);
+  assert.equal(restored.machineFilter, selected);
+  assert.deepEqual(restored.visibleRows().map((row) => row.group), ['work']);
+});
+
+test('one-Hub mode follows the current pairing at first appearance, external switch and cold start', async () => {
+  const {home, work} = switchedHubs();
+  const workspace = new AgentWorkspace();
+  await workspace.open(home.client);
+  const oldMachine = workspace.machineIdentity(home.client.machines[0]);
+  await workspace.setMachineFilter(oldMachine);
+  await workspace.setCurrentHubOnly(true);
+  assert.equal(workspace.machineFilter, oldMachine);
+  assert.deepEqual(workspace.visibleRows().map((row) => row.group), ['home']);
+  work.state.views.set('work:work:agent-workspace', JSON.stringify({machine: oldMachine}));
+  workspace.hide();
+  await workspace.open(work.client);
+  assert.equal(workspace.currentHubOnly, true);
+  assert.equal(workspace.machineFilter, '');
+  assert.deepEqual(workspace.visibleRows().map((row) => row.group), ['work']);
+  const restored = new AgentWorkspace();
+  await restored.open(work.client);
+  assert.equal(restored.currentHubOnly, true);
+  assert.equal(restored.machineFilter, '');
+  assert.deepEqual(restored.visibleRows().map((row) => row.group), ['work']);
+  await restored.setCurrentHubOnly(false);
+  assert.deepEqual(restored.visibleRows().map((row) => row.group).sort(), ['home', 'work']);
+});
+
+test('narrowing a live archive invalidates foreign rows and ignores its older in-flight response', async () => {
+  const {home, work} = switchedHubs();
+  const workspace = new AgentWorkspace();
+  await workspace.open(home.client);
+  home.state.history = [JSON.parse(agent('home-archived').raw)];
+  let release, started;
+  const requested = new Promise((resolve) => started = resolve);
+  work.state.request = async ({path}) => {
+    if (!path.startsWith('/api/v1/sessions/archived')) return;
+    started(); return new Promise((resolve) => release = resolve);
+  };
+  const first = workspace.setHistory(true);
+  await requested;
+  await workspace.setCurrentHubOnly(true);
+  release({sessions: [JSON.parse(agent('foreign-archived').raw)]});
+  await first;
+  assert.deepEqual(workspace.visibleRows().map((row) => [row.group, row.id]), [['home', 'home-archived']]);
+  assert.equal(work.state.calls.filter(({path}) => path.startsWith('/api/v1/sessions/archived')).length, 1);
+});
+
+test('All Hubs archives target the selected owner even when its computer has left the live inventory', async () => {
+  const {home, work} = switchedHubs();
+  const workspace = new AgentWorkspace();
+  work.state.history = [JSON.parse(agent('old-work', {machine_id:'retired'}).raw)];
+  work.client.machines = [];
+  await workspace.open(home.client);
+  const qualified = JSON.stringify(['work', 'work', 'retired']);
+  await workspace.setMachineFilter(qualified); await workspace.setHistory(true);
+  assert.equal(workspace.machineFilter, qualified);
+  assert.deepEqual(workspace.visibleRows().map((row) => [row.group, row.id]), [['work', 'old-work']]);
+  assert.ok(work.state.calls.some(({path}) => path === '/api/v1/sessions/archived?machine_id=retired&manager=work'));
+  assert.ok(!home.state.calls.some(({path}) => path.startsWith('/api/v1/sessions/archived')));
+  await workspace.setMachineFilter('work|work|retired');
+  assert.deepEqual(workspace.visibleRows().map((row) => row.id), ['old-work']);
+});
+
 test('time-bounded searches use caller time and group titles remain visible', async () => {
   const {workspace} = await opened({sessions: [agent('s1', {updated_at: new Date().toISOString()})]});
   workspace.setSearch('since:24h');
@@ -530,15 +703,14 @@ test('archived sessions get a registry entry for machine grouping', async () => 
   assert.equal(w.groups[0].machineName, 'retired');
 });
 
-test('group folds use named native icons and idle expansion retains its count', () => {
+test('the whole group header announces the section, count and next fold action; idle expansion retains its count', () => {
   const source = readFileSync(new URL('../entry/src/main/ets/components/AgentListPage.ets', import.meta.url), 'utf8');
-  const header=source.slice(source.indexOf('  @Builder groupHeader('),source.indexOf('  private groupCounts('));
-  assert.match(header,/Button\(\{ type: ButtonType.Circle \}\)/);
-  assert.match(header,/binding\.value\.folded \? Symbols\.down : Symbols\.up/);
-  assert.match(header,/attributeModifier\(ButtonStyles\.icon\)/);
-  assert.ok(header.includes("tr(binding.value.folded ? 'agent_expand' : 'agent_collapse')"));
-  assert.ok(header.includes('this.workspace.toggleFold(binding.value.id)'));
-  assert.ok(source.includes("String(binding.value.totalRowCount - binding.value.rows.length) + ' ' + tr('agent_group_more_idle')"));
+  const header=source.slice(source.indexOf('  @Builder groupHeader('),source.indexOf('  private rowStatus('));
+  assert.match(source,/return tr\(STATE_LABELS\[group\.id\] \|\| ''\) \|\| group\.machineName/);
+  assert.match(header,/Button\(\{ type: ButtonType.Normal \}\)[\s\S]*Text\(this\.groupTitle\(binding\.value\)\)[\s\S]*String\(binding\.value\.totalRowCount\)/);
+  assert.match(header,/accessibilityText\(this\.groupTitle\(binding\.value\)[\s\S]*binding\.value\.totalRowCount[\s\S]*tr\(binding\.value\.folded \? 'agent_expand' : 'agent_collapse'\)/);
+  assert.match(header,/\.onClick\(\(\) => this\.workspace\.toggleFold\(binding\.value\.id\)\)\.id\('agents\.group\.toggle.'/);
+  assert.match(source,/String\(binding\.value\.totalRowCount\s*-\s*binding\.value\.rows\.length\)\s*\+\s*' '\s*\+\s*tr\('agent_group_more_idle'\)/);
   assert.ok(source.includes('this.workspace.toggleIdleRows(binding.value.id)'));
 });
 
@@ -612,4 +784,139 @@ test('a retired pin completion cannot release the busy lock of a new list operat
  workspace.revokeRowActions();const fresh=workspace.togglePin(client.sessions[1]);while(arrivals.length<2)await new Promise(r=>setImmediate(r));
  releases[0]();assert.equal(await old,false);assert.equal(workspace.busy,true,'old finally must not release new operation');
  releases[1]();assert.equal(await fresh,true);assert.equal(workspace.busy,false);assert.equal(state.calls.filter(c=>c.method==='PUT').length,1);
+});
+
+test('a Projects query uses the same real Hub and machine source inventory without changing the current Agents view', async () => {
+  const input=(group,id,pane,title)=>{const row=agent(id,{title,pane_id:pane,manager:'work',cwd:'/other',state:'idle'});row.group=group;return row;};
+  const one=input('one','shared','w:p1','weather'), two=input('two','shared','botmux:p1','weather');
+  const other=input('one','outside','w:p3','other'), native=input('one','orca','orca:p1','weather');
+  const masked=input('two','else','w:p2','weather');
+  const {client}=clientFixture();client.directoryMachines=[];
+  const workspace=new AgentWorkspace(undefined,'repo');
+  workspace.search='other tab';workspace.quickFilter='unread';workspace.machineFilter='unrelated';
+  const inventory=[one,two,other,native,masked], filter=JSON.stringify(['one','work',one.machine]);
+  const query=(quick,machineFilter='')=>workspace.repositoryQuery(client,inventory,'weather',quick,machineFilter);
+  const terminal=query('terminal',filter);
+  assert.deepEqual(terminal.filtered,['one|work|'+one.machine+'|shared']);
+  assert.equal(terminal.filter_counts.terminal,1);assert.equal(terminal.filter_counts.feishu,0);
+  assert.deepEqual(new Set(terminal.queryMatches),new Set(['one|work|'+one.machine+'|shared','one|work|'+native.machine+'|orca']));
+  const lark=query('feishu');
+  assert.deepEqual(lark.filtered,['two|work|'+two.machine+'|shared']);
+  assert.equal(lark.filter_counts.terminal,2);assert.equal(lark.filter_counts.feishu,1);
+  assert.deepEqual([workspace.search,workspace.quickFilter,workspace.machineFilter],['other tab','unread','unrelated']);
+});
+
+function projectSearchMethods(names, schedule=setTimeout) {
+  const pageSource = readFileSync(new URL('../entry/src/main/ets/components/ProjectsPage.ets', import.meta.url), 'utf8');
+  const methods = names.map(name=>pageSource.match(new RegExp('^  private '+name+'\\([\\s\\S]+?^  \\}', 'm'))[0]);
+  return new Function('Wire','setTimeout','return '+stripTypeScriptTypes('class Page {'+methods.join('\n')+'}'))(Wire,schedule);
+}
+
+test('project grouping changes the native result groups and keeps its machine, query and quick filter separate from Agents', async () => {
+  const Page=projectSearchMethods(['selectSearchGrouping','syncSearchGroups']);
+  const make = (group, id, title, machine, state='working') => {
+    const row=agent(id,{title,machine_id:machine,state,status:state,agent:'claude',space_name:'weather team'});row.group=group;return row;
+  };
+  const chosen=make('one','shared','Weather notes','m1'), otherMachine=make('one','far','Weather notes','m2');
+  const otherQuery=make('one','off','Summary','m1'), otherState=make('one','idle','Weather notes','m1','idle');
+  otherQuery.raw=JSON.stringify({...otherQuery.data(),space_name:'documentation'});
+  const foreign=make('two','shared','Weather notes','m1'), sources=[chosen,otherMachine,otherQuery,otherState,foreign];
+  const own=clientFixture({sessions:[chosen],machines:[machine('m1'),machine('m2')]}), peer=clientFixture({sessions:[foreign]});
+  own.client.profile.id='one';peer.client.profile.id='two';own.client.directoryOwners=()=>[own.client,peer.client];
+  own.client.directoryOwnerFor=row=>row.group==='two'?peer.client:own.client;
+  const standalone=new AgentWorkspace(undefined,'repo');await standalone.open(own.client);
+  standalone.setSearch('other tab');standalone.setQuickFilter('unread');await standalone.setMachineFilter('m2');
+  const projected=new AgentWorkspace(undefined,'repo',false);await projected.open(own.client);
+  const machineKey=JSON.stringify(['one','work','m1']);
+  const {AgentDecisionQueue}=await import('../entry/src/main/ets/models/AgentDecisionQueue.ets');
+  const page=Object.assign(new Page(),{model:own.client,groupedSearchRows:()=>{},spaceDecisions:new AgentDecisionQueue(),searchMode:true,quick:'working',
+    searchWorkspace:standalone,searchGroups:projected,searchTasks:{supportsTodos:false,supportsDirections:false},
+    directorySearchRows:sources,catalog:{browser:{query:'weather',machine:machineKey,searchGrouping:'repo'}}});
+  for(const mode of ['state','machine','repo','recent','state']){
+    page.selectSearchGrouping(mode);
+    assert.equal(projected.groupingMode,mode);assert.equal(standalone.groupingMode,mode);
+    assert.deepEqual([page.catalog.browser.query,page.quick,page.catalog.browser.machine],['weather','working',machineKey]);
+    assert.deepEqual([projected.search,projected.quickFilter,projected.machineFilter],['weather','working',machineKey]);
+    assert.deepEqual([standalone.search,standalone.quickFilter,standalone.machineFilter],['other tab','unread','m2']);
+    assert.deepEqual(projected.unpinnedRows.map(row=>row.key()),[chosen.key()]);
+    if(mode==='state')assert.deepEqual(projected.visibleRows().map(row=>row.key()),[chosen.key()]);
+    if(mode==='machine')assert.ok(projected.groups.some(group=>group.id.startsWith('machine/')));
+  }
+  page.selectSearchGrouping('direction');
+  assert.equal(projected.groupingMode,'state');
+  const previous=projected.visibleRows()[0];projected.selectRow(previous);
+  page.syncSearchGroups();assert.equal(projected.isSelected(previous),true);
+  await new Promise(resolve=>setTimeout(resolve,220));
+  const saved=JSON.parse(own.state.views.get(own.state.scope+':agent-workspace'));
+  assert.deepEqual([saved.search,saved.quick,saved.machine,saved.grouping],['other tab','unread','m2','state']);
+  projected.hide();page.syncSearchGroups();assert.equal(projected.isBoundTo(own.client),false);assert.deepEqual(projected.visibleRows(),[]);
+});
+
+test('a Projects search uses one decision snapshot for its query count, grouped rows and quick-answer admission across Hubs', async () => {
+  const {AgentDecisionQueue}=await import('../entry/src/main/ets/models/AgentDecisionQueue.ets');
+  const {projectSearchResult}=await import('../entry/src/main/ets/models/ProjectSearch.ets');
+  const cases=JSON.parse(readFileSync(new URL('../../spec/fixtures/needs-you/cases.json',import.meta.url))).cases;
+  const dataset=name=>cases.find(item=>item.name===name);
+  const terminal=dataset('a_routed_terminal_question_is_held');
+  const mixed=dataset('a_supervisor_held_card_beside_an_open_one_leaves_the_row');
+  function owner(group,fixture){
+    const rows=fixture.input.sessions.map(data=>{const row=agent(data.session_id,{...data,manager:'work'});row.group=group;return row;});
+    const guest=clientFixture({sessions:rows});
+    guest.client.profile.id=group;
+    guest.client.canApproveSession=()=>true;
+    guest.cards=structuredClone(fixture.input.interactions);
+    guest.writes=[];
+    guest.repo.decisions=async()=>structuredClone(guest.cards);
+    guest.repo.resolve=async(card,_option,_values,_op,admit)=>{
+      assert.equal(admit(),true);guest.writes.push(card.id);guest.cards=guest.cards.filter(value=>value.id!==card.id);
+    };
+    guest.client.directoryMachines=[];
+    return guest;
+  }
+  const primary=owner('primary',mixed),peer=owner('peer',terminal),root=primary.client;
+  root.directoryOwners=()=>[root,peer.client];
+  root.directoryOwnerFor=row=>row.group==='peer'?peer.client:row.group==='primary'?root:undefined;
+  const sessions=[...root.sessions,...peer.client.sessions];
+  const queue=new AgentDecisionQueue(),workspace=new AgentWorkspace(undefined,'repo',false),scheduled=[];
+  const Page=projectSearchMethods(['refreshSpaceDecisions','syncSearchGroups'],fn=>{scheduled.push(fn);return -1;});
+  const page=Object.assign(new Page(),{page:'projects',model:root,searchMode:true,groupedSearchRows:()=>{},quick:'needsYou',
+    catalog:{browser:{query:'',machine:'',searchGrouping:'state'}},spaceDecisions:queue,searchGroups:workspace,directorySearchRows:sessions});
+  const reload=async()=>{page.refreshSpaceDecisions();await scheduled.shift()();};
+  // Reading the remote directory can complete before opening the projection workspace.
+  await reload();await workspace.open(root);page.syncSearchGroups();
+  const state=()=>workspace.groups.find(item=>item.id==='state/needs')?.rows.map(row=>row.id).sort() || [];
+  const counted=()=>projectSearchResult(root,sessions,workspace.repositoryQuery(root,sessions,'','needsYou',''),page.searchCards,'','needsYou',
+    row=>[row.group,row.manager,row.machine,row.id].join('|')).counts.needsYou;
+  assert.deepEqual(state(),['p']);assert.equal(workspace.filterCounts.needsYou,1);assert.equal(counted(),1);
+  assert.deepEqual(queue.forSession(root,sessions[0]).map(card=>card.request.id),mixed.expected.rows[0].cards);
+  assert.deepEqual(queue.forSession(root,sessions[1]),[]);
+  const userQuestion=queue.forSession(root,sessions[0])[0];
+  assert.equal(queue.enabled(root,sessions[0],userQuestion),true);assert.deepEqual(userQuestion.quickOptions(),['8080','9090']);
+  // The secondary Hub can escalate while the primary does not change.
+  peer.cards[0]={...peer.cards[0],kind:'permission',delegating:false,tool_name:'Read'};
+  await reload();
+  assert.deepEqual(state(),['p','t']);assert.equal(workspace.filterCounts.needsYou,2);assert.equal(counted(),2);
+  const open=queue.forSession(root,sessions[1])[0];
+  assert.deepEqual(open.quickOptions(),['allow','deny']);
+  peer.cards[0].delegating=true;
+  await queue.answer(root,sessions[1],open,'allow','stale-preview',workspace.actionTicket(sessions[1]));
+  assert.deepEqual(peer.writes,[]);assert.deepEqual(primary.writes,[]);
+  // The answer's own authoritative re-read has to update both presentations even without a push event.
+  assert.deepEqual(state(),['p']);assert.equal(counted(),1);
+  assert.deepEqual(queue.forSession(root,sessions[1]),[]);assert.equal(queue.enabled(root,sessions[1],open),false);
+  peer.cards[0].delegating=false;await reload();
+  const handed=queue.forSession(root,sessions[1])[0];
+  assert.equal(queue.enabled(root,sessions[1],handed),true);
+  await queue.answer(root,sessions[1],handed,'allow','fresh-owner',workspace.actionTicket(sessions[1]));
+  assert.deepEqual(peer.writes,['ix-terminal']);assert.deepEqual(primary.writes,[]);
+  assert.deepEqual(queue.forSession(root,sessions[1]),[]);
+  const listSource=readFileSync(new URL('../entry/src/main/ets/components/AgentListPage.ets',import.meta.url),'utf8');
+  const lifecycle=['reloadDecisions','retireDecisions'].map(name=>listSource.match(new RegExp('^  private '+name+'\\([\\s\\S]+?^  \\}','m'))[0]);
+  const List=new Function('return '+stripTypeScriptTypes('class List {'+lifecycle.join('\n')+'}'))();
+  const rendered=Object.assign(new List(),{active:true,compactRoot:true,externalSearchControls:true,decisions:queue,workspace,model:root});
+  rendered.reloadDecisions();rendered.retireDecisions();
+  assert.equal(queue.forSession(root,sessions[0])[0].request.id,'ix-asked','returning to repository mode leaves the shared snapshot live');
+  const last=page.searchCards;
+  queue.clear();await queue.reload(root);
+  assert.equal(page.searchCards,last,'an owner change or a closed page releases its snapshot subscription');
 });

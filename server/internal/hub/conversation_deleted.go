@@ -159,6 +159,7 @@ func (m *Machine) rememberConversationDeleted(row proto.Session) bool {
 	}
 	_, known := m.deletedConversations[row.SessionID]
 	m.deletedConversations[row.SessionID] = row
+	delete(m.liveTools, row.SessionID)
 	m.sessions = m.overlayDeletedLocked(m.sessions)
 	m.raws, m.rawsOf = nil, keptList{}
 	return !known

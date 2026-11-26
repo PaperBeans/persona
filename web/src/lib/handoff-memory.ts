@@ -51,7 +51,16 @@ export function resolveHandOff(stored: string | null | undefined, isListed: (pat
   return { target: stored, lastTime: true, gone: false };
 }
 
-function entries(store: Storage): Entry[] {
+function defaultStore(): Storage | null {
+  try {
+    return (typeof localStorage === "undefined" ? null : localStorage) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function entries(store: Storage | null): Entry[] {
+  if (!store) return [];
   try {
     const list = JSON.parse(store.getItem(HANDOFF_MEMORY_KEY) ?? "[]");
     return Array.isArray(list) ? list.filter((e): e is Entry => typeof e?.source === "string" && typeof e?.target === "string") : [];
@@ -61,23 +70,29 @@ function entries(store: Storage): Entry[] {
 }
 
 /** Latest first, one per source. */
-export function handOffEntries(store: Storage = localStorage): Entry[] {
-  return entries(store);
+export function handOffEntries(store?: Storage): Entry[] {
+  return entries(store ?? defaultStore());
 }
 
-export function recallHandOff(key: string, store: Storage = localStorage): StoredTarget | null {
-  return entries(store).find((e) => e.source === key)?.target ?? null;
+export function recallHandOff(key: string, store?: Storage): StoredTarget | null {
+  return entries(store ?? defaultStore()).find((e) => e.source === key)?.target ?? null;
 }
 
-export function rememberHandOff(key: string, target: StoredTarget, store: Storage = localStorage) {
-  const list = [{ source: key, target }, ...entries(store).filter((e) => e.source !== key)].slice(0, HANDOFF_MEMORY_LIMIT);
+export function rememberHandOff(key: string, target: StoredTarget, store?: Storage) {
+  const s = store ?? defaultStore();
+  if (!s) return;
+  const list = [{ source: key, target }, ...entries(s).filter((e) => e.source !== key)].slice(0, HANDOFF_MEMORY_LIMIT);
   try {
-    store.setItem(HANDOFF_MEMORY_KEY, JSON.stringify(list));
+    s.setItem(HANDOFF_MEMORY_KEY, JSON.stringify(list));
   } catch {
     // a full or blocked storage only loses the memory
   }
 }
 
-export function forgetHandOffs(store: Storage = localStorage) {
-  store.removeItem(HANDOFF_MEMORY_KEY);
+export function forgetHandOffs(store?: Storage) {
+  try {
+    (store ?? defaultStore())?.removeItem(HANDOFF_MEMORY_KEY);
+  } catch {
+    // blocked storage must not interrupt sign-out
+  }
 }

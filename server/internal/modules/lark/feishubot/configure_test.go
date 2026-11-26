@@ -217,3 +217,37 @@ func TestCredentialRejected(t *testing.T) {
 		t.Error("a rate-limited token call: want not rejected")
 	}
 }
+
+func TestConfigureIssuePatchScopeCodes(t *testing.T) {
+	for _, code := range []int{230002, 230003, 99991672, 99991676} {
+		issue, detail := configureIssue(&APIError{Op: "configure", Code: code, Msg: "Access denied"})
+		if issue != IssuePatchScope || detail != "Access denied" {
+			t.Errorf("code %d: got (%q, %q), want (%q, %q)", code, issue, detail, IssuePatchScope, "Access denied")
+		}
+	}
+	// Non-app-scope gateway errors must not be misclassified as missing application:application:patch:
+	// 99991679 is user_access_token missing user authorization, 99991673 is app unavailable, 99991401 is IP allowlist.
+	for _, code := range []int{99991679, 99991673, 99991401} {
+		if issue, _ := configureIssue(&APIError{Op: "configure", Code: code, Msg: "other"}); issue == IssuePatchScope {
+			t.Errorf("code %d: got IssuePatchScope, want a non-patch-scope issue", code)
+		}
+	}
+}
+
+func TestAutoConfigureTreatsGatewayMissingScopeAsPatchScope(t *testing.T) {
+	for _, code := range []int{99991672, 99991676} {
+		noBackoff(t)
+		c, _, publishHits := configureSrv(t,
+			func(map[string]any) (int, string) {
+				return code, "Access denied. One of the following scopes is required: [application:application:patch]"
+			},
+			ok0)
+		rep := c.AutoConfigure(t.Context())
+		if rep.Configured || rep.Published || rep.Issue != IssuePatchScope {
+			t.Fatalf("code %d: report = %+v, want IssuePatchScope", code, rep)
+		}
+		if publishHits.Load() != 0 {
+			t.Fatalf("code %d: publish called %d times after refused config", code, publishHits.Load())
+		}
+	}
+}

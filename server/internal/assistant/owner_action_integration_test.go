@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,6 +123,74 @@ func prepareOwnerIntegrationBatch(t *testing.T, s *Service, args json.RawMessage
 	}
 	t.Fatalf("preparation has no batch card: %+v", cards)
 	return proto.Interaction{}, nil
+}
+
+type pausedOwnerBook struct {
+	*ownerActionTestStore
+	beforeRead func()
+}
+
+func (st *pausedOwnerBook) Setting(ctx context.Context, key string, out any) (bool, error) {
+	if key == ownerActionBookKey && st.beforeRead != nil {
+		st.beforeRead()
+	}
+	return st.ownerActionTestStore.Setting(ctx, key, out)
+}
+
+func TestOwnerReplyWhileBatchIsAnnouncedWakesOriginalTool(t *testing.T) {
+	hub, _ := feishuHub("ou_owner", time.Unix(100, 0))
+	on := true
+	hub.settings = &Settings{MachineID: "server", Main: "m1", OwnerReplyApproval: &on, PersistentOwnerActionCards: &on}
+	store := &pausedOwnerBook{ownerActionTestStore: &ownerActionTestStore{}}
+	s := newServiceOn(t, hub, store)
+	connector := &ownerActionConnector{svc: s}
+	s.SetExtensions(connector)
+	projecting, resume := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(resume) })
+	defer unblock()
+	var paused atomic.Bool
+	store.beforeRead = func() {
+		if paused.Load() {
+			return
+		}
+		s.fleet.mu.Lock()
+		published := false
+		for _, p := range s.fleet.interactions {
+			if p.ix.ToolName == ownerActionBatchTool {
+				published = true
+				break
+			}
+		}
+		s.fleet.mu.Unlock()
+		if published && paused.CompareAndSwap(false, true) {
+			close(projecting)
+			<-resume
+		}
+	}
+	args := json.RawMessage(`{"items":[{"tool":"mail_send","input":{"to":[{"email":"a@example.test"}],"subject":"one","body":"first"}}]}`)
+	card, prepared := prepareOwnerIntegrationBatch(t, s, args)
+	select {
+	case <-projecting:
+	case <-time.After(3 * time.Second):
+		t.Fatal("tool did not read the approval book after publishing its batch")
+	}
+	out, err := s.SendParams(t.Context(), SendParams{MachineID: "machine-1", SessionID: "session-1", Human: true,
+		Params: map[string]any{"text": "发", "client_msg_id": "quick-approval", "approval_reply_to": card.ID}})
+	if err != nil || out[ownerApprovalHandledParam] != card.ID {
+		t.Fatalf("owner reply was not accepted for this batch: %v", err)
+	}
+	unblock()
+	select {
+	case err := <-prepared:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("original tool did not receive the resolved batch")
+	}
+	if len(connector.executions()) != 0 || len(s.pendingInteractions()) != 0 {
+		t.Fatal("preparing the batch executed a connector or reopened a finished card")
+	}
 }
 
 func TestOwnerActionPrepareReplyAndConnectorExecuteExactlyOnce(t *testing.T) {

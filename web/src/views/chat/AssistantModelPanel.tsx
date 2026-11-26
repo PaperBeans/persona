@@ -5,10 +5,10 @@
 // message, on every device), drawn at once and put back with the hub's words if it says no; following the default again
 // is a DELETE. An older hub: the pick lasts for this page and goes with each message, as before. The new-conversation
 // page: the pick goes with the conversation's start.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, ApiError, errorText, sessionPath } from "../../lib/api";
-import { assistantPickKey, assistantSetup, ASSISTANT_START_SERVICE_TIER_FEATURE, type AssistantChat, type AssistantSetup } from "../../lib/assistant-models";
+import { assistantModelHost, assistantPickKey, assistantSetup, ASSISTANT_START_SERVICE_TIER_FEATURE, canonicalLauncher, findAssistantLauncher, type AssistantChat, type AssistantSetup } from "../../lib/assistant-models";
 import { assistantPanel, assistantPickOf } from "../../lib/assistant-panel";
 import { pickEffort, pickFast, pickLauncher, pickModel } from "../../lib/assistant-chat";
 import { conversationModelPath, dropConversationPick } from "../../lib/assistant-pick";
@@ -18,19 +18,23 @@ import type { PanelConfig } from "../../lib/model-panel";
 import { usePanelQuotas } from "../../lib/panel-quotas";
 import { TYPED_MODELS_FEATURE } from "../../lib/model-id";
 import { providerTitle } from "../../lib/provider-names";
+import type { LauncherQuotaAnswer } from "../../lib/quota";
 import { speedStep } from "../../lib/session-panel";
-import { assistantLaunchers, forgetModel, modelList, readModels, useModelLists } from "../../lib/session-models";
+import { assistantLaunchers, forgetModel, modelList, readModels, useModelLists, type AssistantLaunchers, type ModelList } from "../../lib/session-models";
 import { getSession, hubHas, refreshAssistant, upsertSession, useStore } from "../../lib/store";
 import type { ModelPick, Session } from "../../lib/types";
 import { Button, Dialog, toast } from "../../ui/atoms";
-import { ModelPanel } from "../../ui/model-panel/ModelPanel";
-import { ASSISTANT_SEGMENTS_FEATURE, assistantSwitchNeeded, conversationSwitchState, prepareConversationSwitch, submitConversationSwitch, type ConversationSwitchRequest } from "../../lib/conversation-switch";
+import { ModelPanel, type ModelPanelProps } from "../../ui/model-panel/ModelPanel";
+import { ASSISTANT_SEGMENTS_FEATURE, assistantSwitchNeeded, conversationSwitchState, prepareConversationSwitch, submitConversationSwitch, type ConversationSwitchRequest, type ConversationSwitchState } from "../../lib/conversation-switch";
 import { setServiceTier } from "./SessionDialogs";
+
+export type AssistantModelNoticeTone = "info" | "ok" | "error";
+export type AssistantModelNotice = (text: string, tone?: AssistantModelNoticeTone) => void;
 
 /** PUT …/model {launcher, model?, effort?, machine_id}: kept for the conversation. Drawn at once; put back, with the hub's
  *  words (out of the computer's scope, gone, another engine than the chat runs, can't run assistant chats…), if it says
  *  no. */
-async function keepPick(s: Session, pick: ModelPick): Promise<boolean> {
+async function keepPick(s: Session, pick: ModelPick, notify: AssistantModelNotice): Promise<boolean> {
   const before = s.model_pick;
   upsertSession({ ...s, model_pick: pick });
   try {
@@ -38,13 +42,13 @@ async function keepPick(s: Session, pick: ModelPick): Promise<boolean> {
     return true;
   } catch (e) {
     upsertSession({ ...(getSession(s.machine_id, s.session_id) ?? s), model_pick: before });
-    toast(t("chat-sessiondialogs.change_failed", { error: errorText(e) }), "error");
+    notify(t("chat-sessiondialogs.change_failed", { error: errorText(e) }), "error");
     return false;
   }
 }
 
 /** POST …/modes {effort} on an older hub (what the effort chip did): drawn at once, put back if it fails. */
-async function setEffort(s: Session, effort: string): Promise<boolean> {
+async function setEffort(s: Session, effort: string, notify: AssistantModelNotice): Promise<boolean> {
   const before = s.effort;
   upsertSession({ ...s, effort });
   try {
@@ -52,13 +56,20 @@ async function setEffort(s: Session, effort: string): Promise<boolean> {
     return true;
   } catch (e) {
     upsertSession({ ...(getSession(s.machine_id, s.session_id) ?? s), effort: before });
-    toast(t("chat-sessiondialogs.change_failed", { error: errorText(e) }), "error");
+    notify(t("chat-sessiondialogs.change_failed", { error: errorText(e) }), "error");
     return false;
   }
 }
 
+export interface PickStripProps {
+  chat: AssistantChat;
+  setup: AssistantSetup;
+  named: string;
+  onBack?: () => void;
+}
+
 /** The strip on top: where the setup comes from and, for a pick, the way back. */
-export function PickStrip({ chat, setup, named, onBack }: { chat: AssistantChat; setup: AssistantSetup; named: string; onBack?: () => void }) {
+export function PickStrip({ chat, setup, named, onBack }: PickStripProps) {
   const text = !chat.session
     ? t("chat-modelpill.header_new", { setup: named })
     : setup.source === "pick"
@@ -80,54 +91,222 @@ export function PickStrip({ chat, setup, named, onBack }: { chat: AssistantChat;
   );
 }
 
-export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: AssistantChat; mid: string; anchor: HTMLElement; onClose: () => void }) {
-  const version = useModelLists();
-  const canSwitch = useStore((s) => hubHas(s.features, ASSISTANT_SEGMENTS_FEATURE));
+export interface AssistantModelPanelProps {
+  chat: AssistantChat;
+  mid: string;
+  anchor: HTMLElement;
+  onClose: () => void;
+  /** Controlled assistant launcher catalog (`null` when unloaded) skips `assistantLaunchers` lookup. */
+  launchersInfo?: AssistantLaunchers | null;
+  /** Controlled provider model-list reader skips `modelList` cache reads. */
+  getModelList?: (provider: string) => ModelList;
+  /** Controlled current setup skips `assistantSetup` (and its page-local pick reads). */
+  setup?: AssistantSetup;
+  /** Controlled hub capabilities skip `useStore` and `useChosenManager`. */
+  canSwitch?: boolean;
+  typed?: boolean;
+  startServiceTier?: boolean;
+  /** Controlled supervision requirement skips `conversationSwitchState` fetch. */
+  supervisionRequired?: boolean;
+  /** Custom switch-state loader replacing `conversationSwitchState` when `supervisionRequired` is omitted. */
+  onLoadSwitchState?: (session: Pick<Session, "machine_id" | "session_id">) => Promise<ConversationSwitchState>;
+  /** Controlled provider quotas skip `usePanelQuotas`. */
+  quotas?: Readonly<Record<string, LauncherQuotaAnswer>>;
+  /** Controlled latest-session reader skips `getSession` store lookup. */
+  getLatestSession?: () => Session | undefined;
+  /** Controlled persisted-pick writer replacing `PUT .../model` + `upsertSession`. */
+  onKeepPick?: (session: Session, pick: ModelPick) => boolean | Promise<boolean>;
+  /** Controlled pick reset replacing `dropConversationPick` and page-local pick reset. */
+  onDropPick?: (session?: Session) => boolean | void | Promise<boolean | void>;
+  /** Controlled page-local/draft pick writer replacing `pickLauncher` / `pickModel` / `pickEffort`. */
+  onPickDraft?: (pick: ModelPick) => void;
+  /** Controlled new-conversation Fast flag writer replacing `pickFast`. */
+  onPickFast?: (fast: boolean) => void;
+  /** Controlled older-hub effort writer replacing `POST .../modes { effort }` + `upsertSession`. */
+  onSetEffort?: (session: Session, effort: string) => boolean | Promise<boolean>;
+  /** Controlled service-tier writer replacing `setServiceTier`. */
+  onSetServiceTier?: (session: Session, tier: string) => boolean | Promise<boolean>;
+  /** Controlled provider reload handler replacing `readModels`. */
+  onReload?: (provider: string) => void;
+  /** Controlled typed-model forget handler replacing `forgetModel`. */
+  onForget?: (provider: string, model: string) => void;
+  /** Controlled explicit conversation switch hooks replacing `prepareConversationSwitch`, `submitConversationSwitch`, and `refreshAssistant`. */
+  onPrepareSwitch?: (session: Session, pick: ModelPick) => Promise<ConversationSwitchRequest>;
+  onSubmitSwitch?: (session: Session, request: ConversationSwitchRequest) => Promise<void>;
+  onRefreshAssistant?: () => void | Promise<unknown>;
+  /** Controlled notification handler replacing global `toast`. */
+  onNotice?: AssistantModelNotice;
+  /** Controlled "Configure models" handler forwarded to `ModelPanel`. */
+  onConfigure?: () => void;
+}
+
+interface ResolvedCapabilitiesProps extends Omit<AssistantModelPanelProps, "canSwitch" | "typed" | "startServiceTier"> {
+  canSwitch: boolean;
+  typed: boolean;
+  startServiceTier: boolean;
+}
+
+interface ResolvedCatalogProps extends ResolvedCapabilitiesProps {
+  info: AssistantLaunchers | undefined;
+  listOf: (provider: string) => ModelList;
+  catalogVersion: number;
+}
+
+export function AssistantModelPanel(props: AssistantModelPanelProps) {
+  if (props.canSwitch !== undefined && props.typed !== undefined && props.startServiceTier !== undefined) {
+    return (
+      <AssistantModelCatalog
+        {...props}
+        canSwitch={props.canSwitch}
+        typed={props.typed}
+        startServiceTier={props.startServiceTier}
+      />
+    );
+  }
+  return <DefaultCapabilitiesPanel {...props} />;
+}
+
+function DefaultCapabilitiesPanel(props: AssistantModelPanelProps) {
+  const storeCanSwitch = useStore((s) => hubHas(s.features, ASSISTANT_SEGMENTS_FEATURE));
+  const storeTyped = useStore((s) => hubHas(s.features, TYPED_MODELS_FEATURE));
+  const storeStartServiceTier = useStore((s) => hubHas(s.features, ASSISTANT_START_SERVICE_TIER_FEATURE));
+  const canSwitch = props.canSwitch ?? storeCanSwitch;
+  const typed = props.typed ?? storeTyped;
+  if (props.startServiceTier !== undefined) {
+    return <AssistantModelCatalog {...props} canSwitch={canSwitch} typed={typed} startServiceTier={props.startServiceTier} />;
+  }
+  return <DefaultStartServiceTierPanel {...props} canSwitch={canSwitch} typed={typed} hubStartServiceTier={storeStartServiceTier} />;
+}
+
+function DefaultStartServiceTierPanel({
+  hubStartServiceTier,
+  ...props
+}: Omit<ResolvedCapabilitiesProps, "startServiceTier"> & { hubStartServiceTier: boolean }) {
+  const chosen = useChosenManager();
+  return <AssistantModelCatalog {...props} startServiceTier={hubStartServiceTier && !chosen} />;
+}
+
+function AssistantModelCatalog(props: ResolvedCapabilitiesProps) {
+  if (props.launchersInfo !== undefined && props.getModelList !== undefined) {
+    return <AssistantModelPanelView {...props} info={props.launchersInfo ?? undefined} listOf={props.getModelList} catalogVersion={0} />;
+  }
+  return <DefaultModelCatalogPanel {...props} />;
+}
+
+function DefaultModelCatalogPanel(props: ResolvedCapabilitiesProps) {
+  const catalogVersion = useModelLists();
+  const session = props.chat.session;
+  const defaultListOf = useCallback((name: string) => {
+    const host = assistantModelHost(session, name);
+    return host ? modelList(props.mid, name, "assistant", host) : modelList(props.mid, name, "assistant");
+  }, [props.mid, session]);
+  const info = props.launchersInfo !== undefined ? (props.launchersInfo ?? undefined) : assistantLaunchers(props.mid).info;
+  const listOf = props.getModelList ?? defaultListOf;
+  return <AssistantModelPanelView {...props} info={info} listOf={listOf} catalogVersion={catalogVersion} />;
+}
+
+function DefaultQuotasModelPanel({
+  mid,
+  launchers,
+  ...panelProps
+}: ModelPanelProps & { mid: string; launchers?: AssistantLaunchers["launchers"] }) {
+  const quotas = usePanelQuotas(mid, panelProps.providers, launchers);
+  return <ModelPanel {...panelProps} quotas={quotas} />;
+}
+
+function AssistantModelPanelView({
+  chat,
+  mid,
+  anchor,
+  onClose,
+  info,
+  listOf,
+  catalogVersion,
+  setup: controlledSetup,
+  canSwitch,
+  typed,
+  startServiceTier,
+  supervisionRequired: controlledSupervision,
+  onLoadSwitchState,
+  quotas: controlledQuotas,
+  getLatestSession,
+  onKeepPick,
+  onDropPick,
+  onPickDraft,
+  onPickFast,
+  onSetEffort,
+  onSetServiceTier,
+  onReload: controlledReload,
+  onForget: controlledForget,
+  onPrepareSwitch,
+  onSubmitSwitch,
+  onRefreshAssistant,
+  onNotice,
+  onConfigure,
+}: ResolvedCatalogProps) {
   const [switchPick, setSwitchPick] = useState<ModelPick | null>(null);
   const [switchError, setSwitchError] = useState("");
   const [switching, setSwitching] = useState(false);
   const [switchUncertain, setSwitchUncertain] = useState(false);
   const switchFlight = useRef(false);
   const switchRequest = useRef<ConversationSwitchRequest | null>(null);
-  const typed = useStore((s) => hubHas(s.features, TYPED_MODELS_FEATURE));
-  const chosen = useChosenManager();
-  const startServiceTier = useStore((s) => hubHas(s.features, ASSISTANT_START_SERVICE_TIER_FEATURE)) && !chosen;
-  const { info } = assistantLaunchers(mid);
-  const setup = assistantSetup(chat, info);
+  const setup = controlledSetup ?? assistantSetup(chat, info);
   const engine = chat.session?.agent || "claude";
-  const [supervisionRequired, setSupervisionRequired] = useState(false);
+  const [loadedSupervision, setLoadedSupervision] = useState(false);
   const roleMachine = chat.session?.machine_id;
   const roleSession = chat.session?.session_id;
+  const loadSwitchStateRef = useRef(onLoadSwitchState);
+  loadSwitchStateRef.current = onLoadSwitchState;
   useEffect(() => {
+    if (controlledSupervision !== undefined) return;
+    if (!canSwitch || !roleMachine || !roleSession) {
+      setLoadedSupervision(false);
+      return;
+    }
     let current = true;
-    if (!canSwitch || !roleMachine || !roleSession) return;
-    void conversationSwitchState({ machine_id: roleMachine, session_id: roleSession }).then((snapshot) => {
-      if (current) setSupervisionRequired(Boolean(snapshot.supervision_required));
+    setLoadedSupervision(false);
+    void (loadSwitchStateRef.current ?? conversationSwitchState)({ machine_id: roleMachine, session_id: roleSession }).then((snapshot) => {
+      if (current) setLoadedSupervision(Boolean(snapshot.supervision_required));
     }).catch(() => {});
     return () => { current = false; };
-  }, [canSwitch, roleMachine, roleSession]);
+  }, [controlledSupervision, canSwitch, roleMachine, roleSession]);
+  const supervisionRequired = controlledSupervision ?? loadedSupervision;
   // a chat that runs keeps its engine; one whose agent isn't known is refused nothing on a guess, as on the hub
   const running = Boolean(chat.session?.agent);
   const fast = Boolean(chat.session?.service_tiers?.some((x) => x.id === "priority"));
   const fastOn = Boolean(setup.fast);
+  const switchingMode = Boolean(canSwitch && chat.kept && chat.session);
+  const startingMode = !chat.session && startServiceTier;
   const { providers, state } = useMemo(
-    () => assistantPanel(setup, info, (name) => modelList(mid, name, "assistant"), { typed, engine, running, switching: Boolean(canSwitch && chat.kept && chat.session), supervision: supervisionRequired, starting: !chat.session && startServiceTier, fast, fastOn }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` stands for what was read
-    [setup.provider, setup.model, setup.effort, setup.fast, info, mid, typed, engine, running, fast, fastOn, startServiceTier, canSwitch, supervisionRequired, version],
+    () => assistantPanel(setup, info, listOf, { typed, engine, running, switching: switchingMode, supervision: supervisionRequired, starting: startingMode, fast, fastOn }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `catalogVersion` stands for what was read from the default cache
+    [setup.provider, setup.model, setup.effort, setup.fast, info, listOf, typed, engine, running, fast, fastOn, switchingMode, startingMode, supervisionRequired, catalogVersion],
   );
-  const latest = () => (chat.session ? (getSession(chat.session.machine_id, chat.session.session_id) ?? chat.session) : undefined);
+  const latest = () => (getLatestSession ? getLatestSession() : chat.session ? (getSession(chat.session.machine_id, chat.session.session_id) ?? chat.session) : undefined);
   const key = assistantPickKey(chat);
+  const notify: AssistantModelNotice = (text, tone) => {
+    if (onNotice) onNotice(text, tone);
+    else toast(text, tone);
+  };
 
   // the page's own pick (an older hub, the new-conversation page): launcher, then its model, then the effort
   const keepHere = (pick: ModelPick) => {
+    if (onPickDraft) {
+      onPickDraft(pick);
+      return;
+    }
     pickLauncher(key, pick.launcher);
     pickModel(key, pick.model);
     if (!chat.session) pickEffort(key, pick.effort);
   };
+  const setFastDraft = (on: boolean) => {
+    if (onPickFast) onPickFast(on);
+    else pickFast(on);
+  };
   const apply = async (pick: ModelPick): Promise<boolean> => {
     const s = latest();
     const provider = providers.find((p) => p.id === pick.launcher);
-    const target = info?.launchers.find((l) => l.name === pick.launcher);
+    const target = findAssistantLauncher(info, pick.launcher);
     if (s && chat.kept && canSwitch && provider && target && assistantSwitchNeeded(s, target, provider.engine)) {
       setSwitchPick(pick);
       switchRequest.current = null;
@@ -135,31 +314,25 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
       setSwitchUncertain(false);
       return false; // Confirmation, not a model pick, owns the explicit operation.
     }
-    if (s && chat.kept) return keepPick(s, pick);
+    if (s && chat.kept) return onKeepPick ? Boolean(await onKeepPick(s, pick)) : keepPick(s, pick, notify);
     keepHere(pick);
     // an older hub keeps the effort on the session (what the effort chip did)
-    if (s && pick.effort && pick.effort !== s.effort) return setEffort(s, pick.effort);
+    if (s && pick.effort && pick.effort !== s.effort) return onSetEffort ? Boolean(await onSetEffort(s, pick.effort)) : setEffort(s, pick.effort, notify);
     return true;
   };
   const onPick = async (config: PanelConfig) => {
-    const list = modelList(mid, config.provider, "assistant").list;
-    const pick = assistantPickOf(config, list, state.current);
+    const list = listOf(config.provider).list;
+    // On a new draft, state.current is the displayed setup rather than a saved pick: picking it still pins every option.
+    const pick = assistantPickOf(config, list, chat.session ? state.current : null);
     if (pick) {
       if (!(await apply(pick))) return false;
-    } else if (config.provider !== state.current?.provider || config.model !== state.current.model) {
+    } else if (!chat.session || config.provider !== state.current?.provider || config.model !== state.current.model) {
       return false;
     }
     if (!chat.session) {
       const row = list?.models.find((m) => m.id === config.model);
-      const fast = Boolean(startServiceTier && config.fast && modelSupportsFast(row));
-      if (!pick && fast) {
-        // A Recent or Favorite can differ from the shown setup only by Fast. Pin every displayed start option anyway:
-        // a cleared main must not revive its carried launcher, model or effort just because assistantPickOf saw no model edit.
-        const pin = assistantPickOf(config, list, null);
-        if (!pin) return false;
-        keepHere(pin);
-      }
-      pickFast(fast);
+      const nextFast = Boolean(startServiceTier && config.fast && modelSupportsFast(row));
+      setFastDraft(nextFast);
     }
     return true;
   };
@@ -170,7 +343,7 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
     let effortApplied = false;
     if (patch.fast !== undefined) {
       if (!s) {
-        const list = modelList(mid, now.provider, "assistant").list;
+        const list = listOf(now.provider).list;
         const row = list?.models.find((m) => m.id === now.model);
         if (patch.fast && (!startServiceTier || !modelSupportsFast(row))) return false;
         if (patch.fast) {
@@ -180,18 +353,28 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
           keepHere(pick);
           effortApplied = patch.effort !== undefined;
         }
-        pickFast(patch.fast);
+        setFastDraft(patch.fast);
       } else {
         const speed = speedStep(s, patch.fast, true);
-        if (!(speed && "service_tier" in speed && (await setServiceTier(s, speed.service_tier)))) return false;
+        if (!(speed && "service_tier" in speed)) return false;
+        const ok = onSetServiceTier ? Boolean(await onSetServiceTier(s, speed.service_tier)) : await setServiceTier(s, speed.service_tier);
+        if (!ok) return false;
       }
     }
     if (patch.effort === undefined || effortApplied) return true;
-    const pick = assistantPickOf({ ...now, effort: patch.effort }, modelList(mid, now.provider, "assistant").list, null);
+    const pick = assistantPickOf({ ...now, effort: patch.effort }, listOf(now.provider).list, null);
     return pick ? apply(pick) : false;
   };
   const back = () => {
     const s = latest();
+    if (onDropPick) {
+      try {
+        void Promise.resolve(onDropPick(s)).catch(() => {});
+      } catch {
+        // Controlled callback owns its own failure handling.
+      }
+      return;
+    }
     if (s && chat.kept) void dropConversationPick(s);
     else {
       pickLauncher(key, undefined);
@@ -199,15 +382,23 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
       pickFast(false);
     }
   };
-  const onReload = (provider: string) => void readModels(mid, provider, { purpose: "assistant", again: true, first: provider === setup.provider });
-  const onForget = (provider: string, model: string) => {
-    void forgetModel(mid, provider, model, "assistant").then((error) => error && toast(error, "error"));
-  };
-  const launcher = info?.launchers.find((l) => l.name === setup.provider);
-  const row = providers.find((p) => p.id === setup.provider)?.models?.find((m) => m.id === state.current?.model);
-  const named = [launcher ? providerTitle(launcher) : setup.provider, row?.name].filter(Boolean).join(" · ");
-
-  const quotas = usePanelQuotas(mid, providers, info?.launchers);
+  const onReload = controlledReload ?? ((provider: string) => {
+    const host = assistantModelHost(chat.session, provider);
+    void readModels(mid, provider, {
+      purpose: "assistant",
+      again: true,
+      first: canonicalLauncher(provider) === canonicalLauncher(setup.provider),
+      ...(host ? { host } : {}),
+    });
+  });
+  const onForget = controlledForget ?? ((provider: string, model: string) => {
+    const host = assistantModelHost(chat.session, provider);
+    void (host ? forgetModel(mid, provider, model, "assistant", host) : forgetModel(mid, provider, model, "assistant"))
+      .then((error) => error && notify(error, "error"));
+  });
+  const launcher = findAssistantLauncher(info, setup.provider);
+  const row = providers.find((p) => p.id === (launcher?.name ?? setup.provider))?.models?.find((m) => m.id === state.current?.model);
+  const named = [launcher ? providerTitle(launcher) : canonicalLauncher(setup.provider), row?.name].filter(Boolean).join(" · ");
 
   const confirmSwitch = async () => {
     const session = latest();
@@ -217,12 +408,17 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
     setSwitchError("");
     let submitted = false;
     try {
-      switchRequest.current ??= await prepareConversationSwitch(session, switchPick);
+      switchRequest.current ??= await (onPrepareSwitch ?? prepareConversationSwitch)(session, switchPick);
       submitted = true;
-      await submitConversationSwitch(session, switchRequest.current);
+      await (onSubmitSwitch ?? submitConversationSwitch)(session, switchRequest.current);
       setSwitchPick(null);
-      toast(t("chat-modelpanel.switch_requested"));
-      void refreshAssistant().catch(() => {});
+      switchRequest.current = null;
+      notify(t("chat-modelpanel.switch_requested"));
+      try {
+        void Promise.resolve((onRefreshAssistant ?? refreshAssistant)()).catch(() => {});
+      } catch {
+        // Switch already succeeded; refresh failure does not reopen confirmation.
+      }
       onClose();
     } catch (error) {
       const uncertain = submitted && !(error instanceof ApiError && error.body.delivered === "none");
@@ -233,21 +429,27 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   };
   const cancelSwitch = () => { if (!switchFlight.current) { setSwitchPick(null); switchRequest.current = null; } };
 
+  const panelProps: ModelPanelProps = {
+    anchor,
+    held: Boolean(switchPick),
+    onClose,
+    providers,
+    state,
+    scope: "assistant",
+    onPick,
+    onApplyCurrent,
+    onReload,
+    onForget,
+    onConfigure,
+    header: <PickStrip chat={chat} setup={setup} named={named} onBack={back} />,
+  };
+
   return ( <>
-    <ModelPanel
-      anchor={anchor}
-      held={Boolean(switchPick)}
-      onClose={onClose}
-      providers={providers}
-      state={state}
-      scope="assistant"
-      quotas={quotas}
-      onPick={onPick}
-      onApplyCurrent={onApplyCurrent}
-      onReload={onReload}
-      onForget={onForget}
-      header={<PickStrip chat={chat} setup={setup} named={named} onBack={back} />}
-    />
+    {controlledQuotas !== undefined ? (
+      <ModelPanel {...panelProps} quotas={controlledQuotas} />
+    ) : (
+      <DefaultQuotasModelPanel {...panelProps} mid={mid} launchers={info?.launchers} />
+    )}
     <Dialog open={Boolean(switchPick)} title={t("chat-modelpanel.switch_title")} onClose={cancelSwitch}
       footer={<><Button disabled={switching} onClick={cancelSwitch}>{t(switchUncertain ? "common.close" : "common.cancel")}</Button><Button disabled={switching} busy={switching} onClick={() => void confirmSwitch()}>{t("chat-modelpanel.switch_confirm")}</Button></>}>
       <p>{t("chat-modelpanel.switch_explanation", { name: providers.find((p) => p.id === switchPick?.launcher)?.name ?? switchPick?.launcher ?? "" })}</p>

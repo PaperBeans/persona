@@ -318,3 +318,61 @@ test('a failed initialization keeps selection closed throughout a gated retry',a
  gate.resolve();await retry;deviceLookBoundary.getGate=undefined;assert.equal(restored.ready,true);assert.equal(restored.avatarKey,choice.optionKey());assert.equal(restored.accentId,'avatar');
  const reopened=new DeviceLook();await reopened.initialize({filesDir:'/private/app'});assert.equal(reopened.avatarKey,choice.optionKey());assert.equal(reopened.accentId,'avatar');
 });
+
+test('compact navigation layout survives relaunch and composes with simultaneous density changes',async()=>{
+ const look=await openModel(makeClient());
+ assert.equal(look.phoneNavigation,'separate');
+ const [mode,density]=await Promise.all([look.setPhoneNavigation('merged'),look.setDensity('compact')]);
+ assert.equal(mode,true);assert.equal(density,true);
+ const restored=new DeviceLook();await restored.initialize({filesDir:'/private/app'});
+ assert.equal(restored.phoneNavigation,'merged');assert.equal(restored.density,'compact');
+ assert.equal(await restored.setPhoneNavigation('removed-option'),false);
+ await restored.setPhoneNavigation('separate');
+ const again=new DeviceLook();await again.initialize({filesDir:'/private/app'});assert.equal(again.phoneNavigation,'separate');
+});
+
+test('Agents row style and Compact List survive relaunch alongside existing density, accent, and navigation',async()=>{
+  deviceLookBoundary.reset();
+  deviceLookBoundary.saved.set('device-look',JSON.stringify({version:1,avatarId:'builtin',accentId:'coral',density:'compact',phoneNavigation:'merged'}));
+  const client=makeClient(),look=await openModel(client);
+  assert.equal(look.agentDisplay,'avatar');assert.equal(look.density,'compact');
+  assert.equal(await look.setAgentDisplay('compact'),true);assert.equal(look.agentDisplay,'compact');
+  assert.equal(await look.setAgentDisplay('list'),true);
+  const value=JSON.parse(deviceLookBoundary.saved.get('device-look'));
+  assert.equal(value['agents.rowStyle'],'compact');assert.equal(value['dev.compact'],true);
+  assert.equal(value.density,'compact');assert.equal(value.accentId,'coral');assert.equal(value.phoneNavigation,'merged');
+  const next=await openModel(client);assert.equal(next.agentDisplay,'list');
+  assert.equal(await next.setAgentDisplay('cards'),true);
+  assert.equal((await openModel(client)).agentDisplay,'cards');
+  assert.equal(await next.setAgentDisplay('unknown'),false);assert.equal(next.agentDisplay,'cards');
+  deviceLookBoundary.putError=true;
+  assert.equal(await next.setAgentDisplay('avatar'),false);assert.equal(next.agentDisplay,'cards');
+});
+
+test('concurrent Agents layout and other device settings commit without overwriting each other',async()=>{
+  deviceLookBoundary.reset();const look=await openModel(makeClient());
+  await Promise.all([look.setAgentDisplay('cards'),look.setDensity('compact'),look.setPhoneNavigation('merged'),look.setAgentDisplay('list')]);
+  const record=JSON.parse(deviceLookBoundary.saved.get('device-look'));
+  assert.equal(record['agents.rowStyle'],'cards');assert.equal(record['dev.compact'],true);
+  assert.equal(record.density,'compact');assert.equal(record.phoneNavigation,'merged');
+});
+
+test('chat appearance options default off, persist apart from the Hub, and restore the visible choice if storage rejects a change', async () => {
+  deviceLookBoundary.reset();
+  const first = await openModel();
+  assert.equal(first.composerGlow, false);
+  assert.equal(first.returnSends, false);
+  const writes = await Promise.all([first.setChatInteraction('ui.composerGlow', true), first.setChatInteraction('ui.returnSends', true)]);
+  assert.deepEqual(writes, [true, true]);
+  const next = await openModel();
+  assert.equal(next.composerGlow, true);
+  assert.equal(next.returnSends, true);
+  deviceLookBoundary.putError = true;
+  assert.equal(await next.setChatInteraction('ui.composerGlow', false), false);
+  assert.equal(next.composerGlow, true);
+  assert.equal(await next.setChatInteraction('unsupported', false), false);
+  deviceLookBoundary.putError = false;
+  assert.equal(await next.setChatInteraction('ui.returnSends', false), true);
+  assert.equal((await openModel()).returnSends, false);
+  assert.deepEqual(deviceLookBoundary.calls, []);
+});

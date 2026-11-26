@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,6 +45,10 @@ var codexHold = 45 * time.Second
 // codexConfirm is how long an answer may take to show in the rollout or on screen before it is reported as not taken.
 var codexConfirm = 12 * time.Second
 
+// Status may keep the host's blocked state while the rollout is unreadable.
+// Bound open calls that can outlive their status check on a stalled filesystem.
+var codexStatusReads = make(chan struct{}, 8)
+
 // codexStep is the pause after keys before the screen is read again; codexPoll, between looks while waiting.
 var (
 	codexStep = 350 * time.Millisecond
@@ -52,6 +57,7 @@ var (
 
 // codexTail reads one rollout's new lines into its open questions.
 type codexTail struct {
+	mu   sync.Mutex // serializes this rollout's cursor and question parser
 	path string
 	off  int64
 	part []byte // a line not ended yet
@@ -104,15 +110,14 @@ func (n *Node) syncCodexCards(ctx context.Context) {
 	// The questions of Claude sessions outside Persona's terminals ride along: the hub keeps them as it keeps these
 	// (claudeoutside_ask.go).
 	cards = append(cards, n.outsideAskCards()...)
+	// Matching blocked folders may resolve a symlink on the filesystem.
+	cards = slices.DeleteFunc(cards, func(ix proto.Interaction) bool { return n.sessionBlocked(ix.SessionID, ix.Cwd) })
 	now := time.Now()
 	n.cx.mu.Lock()
 	var list []proto.Interaction
 	var ids []string
 	var outsideAsks map[string]string
 	for _, ix := range cards {
-		if n.sessionBlocked(ix.SessionID, ix.Cwd) {
-			continue // a blocked Agent folder (agentdirs.go): the card stays on the computer's own screen
-		}
 		if d, gone := n.cx.dismissed[ix.ID]; gone {
 			d.seen = now // still asked: still the computer's
 			n.cx.dismissed[ix.ID] = d
@@ -330,8 +335,7 @@ func (c *codexCards) dismiss(session, id string) {
 	c.dismissed[id] = dismissedCard{session: session, seen: time.Now()}
 }
 
-// asks reads what the session's rollout added since last time and returns its open questions.
-func (c *codexCards) asks(id, path string) []transcript.CodexAsk {
+func (c *codexCards) tail(id, path string) *codexTail {
 	if path == "" {
 		return nil
 	}
@@ -345,18 +349,51 @@ func (c *codexCards) asks(id, path string) []transcript.CodexAsk {
 		t = &codexTail{path: path, off: -1}
 		c.tails[id] = t
 	}
+	return t
+}
+
+// asks reads just this rollout under its own lock. An open waiting for filesystem
+// access cannot keep another session from reading its questions or approval state.
+func (c *codexCards) asks(id, path string) []transcript.CodexAsk {
+	t := c.tail(id, path)
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.read()
 	return t.asks.Open()
 }
 
-// hasBlockingAsk reports whether the session's rollout currently holds an open non-async question.
+// A status check may clear the host's blocked state only after it sees that
+// no blocking question remains. Leave the host's state in place on a slow read.
 func (c *codexCards) hasBlockingAsk(id, path string) bool {
-	for _, ask := range c.asks(id, path) {
-		if !ask.Async {
-			return true
-		}
+	t := c.tail(id, path)
+	if t == nil {
+		return false
 	}
-	return false
+	if !t.mu.TryLock() {
+		return true
+	}
+	select {
+	case codexStatusReads <- struct{}{}:
+	default:
+		t.mu.Unlock()
+		return true
+	}
+	done := make(chan bool, 1)
+	go func() {
+		blocked := !t.read() || slices.ContainsFunc(t.asks.Open(), func(q transcript.CodexAsk) bool { return !q.Async })
+		t.mu.Unlock()
+		<-codexStatusReads
+		done <- blocked
+	}()
+	select {
+	case blocked := <-done:
+		return blocked
+	case <-time.After(100 * time.Millisecond):
+		return true
+	}
 }
 
 func (c *codexCards) setApproval(id string, on bool) {
@@ -396,29 +433,29 @@ func (c *codexCards) hasOutsideAsk(session string) bool {
 	return true
 }
 
-func (t *codexTail) read() {
+func (t *codexTail) read() bool {
 	f, err := os.Open(t.path)
 	if err != nil {
-		return
+		return false
 	}
 	defer f.Close()
 	st, err := f.Stat()
-	if err != nil {
-		return
+	if err != nil || !st.Mode().IsRegular() {
+		return false
 	}
 	if t.off < 0 || st.Size() < t.off { // first read, or the file was replaced
 		start := max(0, st.Size()-codexTailMax)
-		*t = codexTail{path: t.path, off: start, skip: start > 0}
+		t.off, t.part, t.skip, t.asks = start, nil, start > 0, transcript.CodexAsks{}
 	}
 	if st.Size() == t.off {
-		return
+		return true
 	}
 	if _, err := f.Seek(t.off, io.SeekStart); err != nil {
-		return
+		return false
 	}
 	buf, err := io.ReadAll(io.LimitReader(f, st.Size()-t.off))
 	if err != nil {
-		return
+		return false
 	}
 	t.off += int64(len(buf))
 	data := append(t.part, buf...)
@@ -435,6 +472,7 @@ func (t *codexTail) read() {
 		data = data[i+1:]
 	}
 	t.part = append([]byte(nil), data...)
+	return true
 }
 
 // askCard is the question card of an open call. Its id changes with the questions still open (a reply may answer

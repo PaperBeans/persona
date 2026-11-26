@@ -124,7 +124,11 @@ Truthfulness: time updates on every push (`AgentTime` lands with `show()` and is
 - The list's derived data is an immutable `AgentListProjection` (#1231): filters and counts, pins, the Repository/Project tree,
   repository headers, quiet flags and those sections' row entries, built once per published key (`AgentListProjectionCache.Key`:
   the feed's structural `revision`, every hub group's link identity, address and token, and small settings such as grouping,
-  filter, search, pins, mutes and the held row). An unchanged retained page reads the published value without touching the
+  filter, search, pins, mutes, the held row and the rows held after they were read during the visit, `heldSeen`, #12514).
+  The rows the list shows as Unread or Just finished come out of the projection (`needsSeen`) into
+  `AppModel.shownThisVisit`, which no view watches; only a row that is seen since moves into `seenThisVisit`, the part of
+  the key (`markSeen`, or `holdNotedSeen` where the lists land). A row that finishes derives the list once, as before
+  #12514; a row read changes the key in the same turn as its state, so it too derives the list once. An unchanged retained page reads the published value without touching the
   inventory. The first value, settings changes, critical landings, appended pages and credential changes are derived at once
   on the main actor. Ordinary structural revisions, including what a released hold lands, are derived off the main actor from
   a value snapshot by one serial worker. One derivation runs at a time and only the newest request waits behind it, so a
@@ -216,6 +220,8 @@ After any push sequence combined with any actions ends, the screen returns to hu
 ### Snapshot refresh ownership (#1634)
 
 Todo and session invalidations use `apple/Persona/App/CoalescedRefresh.swift`: one active read and one latest dirty follow-up, without a fixed cooldown or a new freshness delay. The hub's session lists add one bound while no Agents list is in sight (#9487, the web's #9042): their hint reads go at most once per 2 s window (`apple/Persona/App/HintWindow.swift`); the first hint after a quiet window reads at once, the hints inside a window share one read at its end, and a list coming into sight reads what waits at once (`RuntimeSessionLists.listInSight`, from `AgentsCoverWatch`). A list in sight reads every hint as before, so the timeliness table holds for what is on screen. A busy hub sends about one hint a second; out of sight that was a list read and a counts read for each. Hints received during a read merge; the trailing read reconciles them. A fast read that finishes before the next hint may still produce one GET per hint. Single-flight is not a request-rate quota, and reducing full todo bodies further depends on a compatibility-preserving manager-side delta/conditional protocol.
+
+Seen reconciliation has the same independent-read boundary (#12770). The first list that proves a mark recorded starts a 15-second settling window; `SeenOutbox` holds only rows with the pre-open `seen_at`, no send path resends it, and new activity ends it immediately. Expiry is evaluated by the existing landings and local actions, with no new timer. `SessionListPage.counts` is requested only for an unfiltered root or a filtered section on a `sessions_page_counts` hub, on first / initial `since` reads. `SessionListModel` publishes those counts with their row IDs and `keepSeen` adjusts only that coupled set; a filtered root keeps its separate all-state count read, and every standalone count remains unadjusted. Cursor continuations retain the first answer's coupled counts rather than replacing them with a separate read.
 
 Manual reads share an eligible active or queued read. Post-write confirmation cannot join a GET started before the write; todo publication is fenced by hub generation and local mutation revision. A cancelled UI waiter does not cancel another owner's shared read. Reset ends old waits and rejects late old-generation data. Session refresh preserves its frozen paging window and delta checkpoint; a manual refresh absorbs the existing short hint-merging task without swallowing its last invalidation.
 

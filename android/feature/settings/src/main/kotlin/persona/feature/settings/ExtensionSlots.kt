@@ -36,7 +36,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -55,26 +57,16 @@ internal object ExtensionSlotText {
     const val InboxItem = "inbox_item"
     private val known = setOf(NavPage, Card, MachineSection)
 
-    fun known(place: ExtensionUiPlace): Boolean = place.placement in known && place.extension.isNotEmpty() && place.id.isNotEmpty()
+    fun known(place: ExtensionUiPlace): Boolean =
+        place.placement in known && place.extension.isNotEmpty() && place.id.isNotEmpty() &&
+            !(place.placement == Card && DashboardPages.httpOnly(place.extension))
 
     /** An inbox item's page: for the items of one connector; one that names none draws for nobody's. */
     fun inboxItem(place: ExtensionUiPlace): Boolean =
         place.placement == InboxItem && place.extension.isNotEmpty() && place.id.isNotEmpty() && !place.connector.isNullOrBlank()
 
-    /** A nav page's icon from the few an extension may name; anything else is the extension's puzzle piece. */
-    fun icon(name: String?): PhIcon = when (name) {
-        "chart" -> PhIcons.ChartBar
-        "gauge" -> PhIcons.Gauge
-        "list" -> PhIcons.List
-        "bell" -> PhIcons.BellSimple
-        "doc" -> PhIcons.FileText
-        "calendar" -> PhIcons.CalendarBlank
-        "money" -> PhIcons.Coins
-        "branch", "merge" -> PhIcons.GitBranch
-        "code" -> PhIcons.Code
-        "pull_request" -> PhIcons.GitDiff
-        else -> PhIcons.PuzzlePiece
-    }
+    /** A nav page's icon from the shared extension/page icon list; anything else is the extension's puzzle piece. */
+    fun icon(name: String?): PhIcon = ExtensionIcons.of(name)
 
     /**
      * The settings tab's badge from the nav pages': the numbers added up; when there are only words ("New"), a dot.
@@ -110,22 +102,24 @@ data class ExtensionSlotsState(
     val inboxItemsKnown: Boolean = false,
 ) {
     val navPages: List<ExtensionUiPlace> get() = places.filter { it.placement == ExtensionSlotText.NavPage }
-    val cards: List<ExtensionUiPlace> get() = places.filter { it.placement == ExtensionSlotText.Card }
+    val cards: List<ExtensionUiPlace> get() = places.filter { it.placement == ExtensionSlotText.Card && !DashboardPages.httpOnly(it.extension) }
     val machineSections: List<ExtensionUiPlace> get() = places.filter { it.placement == ExtensionSlotText.MachineSection }
     val tabBadge: SlotBadge get() = ExtensionSlotText.tabBadge(places)
 }
 
 /**
  * Where the selected hub's extensions draw in this app, kept for the whole shell: read when the hub (with
- * `extension_ui_slots`) is online and when the settings list shows, and the nav pages' badges changed by the hub's
- * `extension_ui` events without reading the list again.
+ * `extension_ui_slots`) is online, when the settings list shows and when the hub says the assistant's Dashboards places
+ * changed (`assistant_pages`, [placesChanged]), and the nav pages' badges changed by the hub's `extension_ui` events
+ * without reading the list again.
  */
 class ExtensionSlots internal constructor(
     internal val api: ExtensionUi,
     private val slotsAvailable: Flow<Boolean>,
     private val events: Flow<ExtensionUiEvent>,
+    private val placesChanged: Flow<Unit> = emptyFlow(),
 ) {
-    constructor(extensions: ExtensionManagement) : this(extensions, extensions.slotsAvailable, extensions.uiEvents)
+    constructor(extensions: ExtensionManagement) : this(extensions, extensions.slotsAvailable, extensions.uiEvents, extensions.placesChanged)
 
     private val mutable = MutableStateFlow(ExtensionSlotsState())
     val state: StateFlow<ExtensionSlotsState> = mutable.asStateFlow()
@@ -134,6 +128,9 @@ class ExtensionSlots internal constructor(
     /** Runs while the shell does: reads the slots whenever the hub says it has them and is online, applies badges. */
     suspend fun run(online: Flow<Boolean>) = coroutineScope {
         launch { events.collect(::badge) }
+        // Dashboards (#15017): a page kept, pinned or removed adds or takes away rows, so the list is read again; a
+        // burst of these reads it once more after the read under way, not once per event.
+        launch { placesChanged.conflate().collect { load() } }
         combine(slotsAvailable, online) { slots, up -> slots to up }.distinctUntilChanged().collectLatest { (slots, up) ->
             supported = slots
             if (!slots) mutable.value = ExtensionSlotsState()
@@ -218,7 +215,7 @@ internal fun LazyListScope.extensionSlotItems(
     onOpen: (ExtensionUiPlace) -> Unit,
 ) {
     val pages = state.navPages
-    val shown = cards.filter { !it.state.unsupported }
+    val shown = cards.filter { !it.state.unsupported && !DashboardPages.httpOnly(it.place.extension) }
     if (pages.isEmpty() && shown.isEmpty()) return
     item("slots-title") { JSectionHeader(stringResource(R.string.settings_ext_title)) }
     shown.forEach { card ->

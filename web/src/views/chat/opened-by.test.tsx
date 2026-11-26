@@ -10,7 +10,7 @@ import { ChatContext } from "./chat-context";
 import { SegmentView } from "./SegmentView";
 
 // WeChat is a channel here, so a message whose client_msg_id starts with `wechat-` came in from it.
-vi.mock("../../lib/channels", async (original) => ({ ...(await original<typeof import("../../lib/channels")>()), useChannels: () => [{ id: "wechat", name: "微信", kind: "im" }] }));
+vi.mock("../../lib/channel-source", async (original) => ({ ...(await original<typeof import("../../lib/channel-source")>()), useChannels: () => [{ id: "wechat", name: "微信", kind: "im" }] }));
 
 // An external conversation's first message says where it came from (#3758), as a channel's message does (tests run in zh-Hans).
 const u = (id: string, text: string, extra: Partial<Item> = {}): Item => ({ id, seq: 1, role: "user", kind: "text", text, ...extra });

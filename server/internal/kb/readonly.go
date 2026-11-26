@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/kbwire"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-var ErrReadOnly = errors.New("the knowledge base is read-only")
+var ErrReadOnly = kbwire.ErrReadOnly
 
 // OpenReadOnly reads an archive in place. A missing archive is empty; existing
 // files must be readable. Opening never creates directories or repairs files.

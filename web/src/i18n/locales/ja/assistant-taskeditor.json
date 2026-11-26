@@ -106,7 +106,7 @@
   "cron_checking": "確認中…",
   "cron_next": "次回以降の実行（{zone}）",
   "cron_examples": "例",
-  "execution_options": "実行オプション",
+  "execution_options": "詳細設定",
   "execution_inheritance": "未指定の項目はメインの会話を引き継ぎます。別のエージェントを選ぶと、そのモデルと思考強度の既定値を使います。このタスクだけに適用されます。",
   "execution_computer": "実行するコンピュータ",
   "computer_default": "アシスタントに従う · {name}",

@@ -32,9 +32,9 @@ enum TodoViewJSON {
     }
 
     /// A view: in `section` (its phase the same, `done` for Done), ranked `rank`, with `asks` (ids) and a line.
-    static func view(_ section: String, rank: Int = 0, phase: String? = nil, asks: [String] = [], line: String = "persona_working",
-                     next: String? = nil, inactive: String? = nil) -> String {
-        var members = [#""phase":"\#(phase ?? section)""#, #""section":"\#(section)""#, #""reason":"rest""#,
+    static func view(_ section: TodoListSection, rank: Int = 0, phase: TodoPhase? = nil, asks: [String] = [],
+                     line: String = "persona_working", next: String? = nil, inactive: String? = nil) -> String {
+        var members = [#""phase":"\#(phase?.rawValue ?? section.rawValue)""#, #""section":"\#(section.rawValue)""#, #""reason":"rest""#,
                        #""line":{"key":"\#(line)"}"#, #""rank":\#(rank)"#]
         if !asks.isEmpty {
             members.append(#""asks":["# + asks.map { #"{"id":"\#($0)","kind":"decision","home":"todo"}"# }.joined(separator: ",") + "]")
@@ -45,8 +45,8 @@ enum TodoViewJSON {
     }
 
     /// Counts with every section named: `needsYou` N, `inProgress`, `open`, and the sections given.
-    static func counts(needsYou: Int, inProgress: Int = 0, open: Int = 0, sections: [String: Int] = [:]) -> String {
-        let all = TodoListSection.all.map { #""\#($0)":\#(sections[$0] ?? 0)"# }.joined(separator: ",")
+    static func counts(needsYou: Int, inProgress: Int = 0, open: Int = 0, sections: [TodoListSection: Int] = [:]) -> String {
+        let all = TodoListSection.all.map { #""\#($0.rawValue)":\#(sections[$0] ?? 0)"# }.joined(separator: ",")
         return #"{"open":\#(open),"needs_you":\#(needsYou),"in_progress":\#(inProgress),"sections":{\#(all)}}"#
     }
 

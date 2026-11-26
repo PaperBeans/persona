@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-view.schema.json",
+  "title": "Agent view",
+  "description": "An Agent's five-phase view (#15397, docs/plans/plan-typed-core.md 2.1, step P5): AgentPhase, AgentReason and AgentView, which the manager computes onto Session.view.",
+  "x-out": {
+    "go": "server/internal/agentviewwire/agent_view_gen.go",
+    "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/AgentViewWire.swift",
+    "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/AgentViewWire.kt",
+    "ts": "web/src/lib/agent-view-wire.ts",
+    "arkts": "harmony/entry/src/main/ets/models/AgentViewWire.ets",
+    "rust": "native/app-core/crates/persona-core/src/agent_view_wire.rs"
+  },
+  "$defs": {
+    "AgentPhase": {
+      "type": "string",
+      "enum": [
+        "needs_you",
+        "working",
+        "done",
+        "error",
+        "idle"
+      ],
+      "x-enum": "closed",
+      "x-unknown": "count",
+      "description": "Where an Agent stands, in one of five phases (docs/protocol/agent-states.md \"Five phases\"): it needs the owner, it works, it finished, it stopped on an error, or it is idle."
+    },
+    "AgentReason": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ReasonCards"
+        },
+        {
+          "$ref": "#/$defs/ReasonTerminalDialog"
+        },
+        {
+          "$ref": "#/$defs/ReasonTurn"
+        },
+        {
+          "$ref": "#/$defs/ReasonBackground"
+        },
+        {
+          "$ref": "#/$defs/ReasonUnseen"
+        },
+        {
+          "$ref": "#/$defs/ReasonJustFinished"
+        },
+        {
+          "$ref": "#/$defs/ReasonAsks"
+        },
+        {
+          "$ref": "#/$defs/ReasonUsageLimit"
+        },
+        {
+          "$ref": "#/$defs/ReasonModel"
+        },
+        {
+          "$ref": "#/$defs/ReasonStartRefused"
+        },
+        {
+          "$ref": "#/$defs/ReasonRestartInterrupted"
+        },
+        {
+          "$ref": "#/$defs/ReasonSeen"
+        },
+        {
+          "$ref": "#/$defs/ReasonNotRunning"
+        },
+        {
+          "$ref": "#/$defs/ReasonHostUnknown"
+        }
+      ],
+      "x-discriminator": "kind",
+      "x-enum": "closed",
+      "description": "Why an Agent is in its phase, tagged by kind. Each phase has its own reasons; a kind this app does not know reads as unknown."
+    },
+    "ReasonCards": {
+      "type": "object",
+      "description": "needs_you: pending cards (questions, plans, permissions, forms) stand for it, its folded children's included.",
+      "required": [
+        "kind",
+        "n"
+      ],
+      "properties": {
+        "kind": {
+          "const": "cards"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many cards its row holds."
+        },
+        "held": {
+          "type": "boolean",
+          "description": "None of them is the owner's yet: questions the assistant is still deciding on (D11)."
+        }
+      }
+    },
+    "ReasonTerminalDialog": {
+      "type": "object",
+      "description": "needs_you: a dialog its terminal shows that no card stands for.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "terminal_dialog"
+        }
+      }
+    },
+    "ReasonTurn": {
+      "type": "object",
+      "description": "working: its turn runs, or its task's supervisor holds every card it asked.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "turn"
+        }
+      }
+    },
+    "ReasonBackground": {
+      "type": "object",
+      "description": "working: its turn ended and only its background work runs (#2935).",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "background"
+        },
+        "waiting": {
+          "type": "boolean",
+          "description": "That work only waits: background commands that sleep or watch something, no subagent or workflow (#6045)."
+        }
+      }
+    },
+    "ReasonUnseen": {
+      "type": "object",
+      "description": "done: it finished and the owner has not seen the result.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "unseen"
+        }
+      }
+    },
+    "ReasonJustFinished": {
+      "type": "object",
+      "description": "done: seen, and its turn finished before anybody looked at it, within the triage's window (#9751).",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "just_finished"
+        }
+      }
+    },
+    "ReasonAsks": {
+      "type": "object",
+      "description": "done: it stopped on a question to the owner nobody answered yet (D-A, #5096): not counted in Needs you.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "asks"
+        },
+        "question": {
+          "type": "string",
+          "description": "What it asks, as the node read it off the reply; empty when the triage only says it waits on the owner."
+        },
+        "unseen": {
+          "type": "boolean",
+          "description": "The owner has not seen the reply yet."
+        }
+      }
+    },
+    "ReasonUsageLimit": {
+      "type": "object",
+      "description": "error: a subscription's usage limit ended its turn.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "usage_limit"
+        },
+        "resets_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the limit resets; absent when not known."
+        },
+        "resumes": {
+          "type": "boolean",
+          "description": "Its CLI goes on by itself once the limit resets."
+        }
+      }
+    },
+    "ReasonModel": {
+      "type": "object",
+      "description": "error: a model API error ended its turn.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "model"
+        },
+        "code": {
+          "type": "string",
+          "description": "What is wrong when the hub can tell (Session.turn_error_code: not_logged_in, auth_failed, model_route, rate_limited…); empty when it cannot."
+        }
+      }
+    },
+    "ReasonStartRefused": {
+      "type": "object",
+      "description": "error: its start was refused or failed.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "start_refused"
+        },
+        "code": {
+          "type": "string",
+          "description": "The start's coded refusal (Session.start_error_code: claude_missing, launcher_missing…); empty for a start that failed without one."
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The refusal's details (Session.start_error_args)."
+        }
+      }
+    },
+    "ReasonRestartInterrupted": {
+      "type": "object",
+      "description": "error: it was running when its computer's node restarted, and nothing carries it on until the owner says so (#1917, D-C).",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "restart_interrupted"
+        },
+        "resumable": {
+          "type": "boolean",
+          "description": "Continue can resume the conversation."
+        }
+      }
+    },
+    "ReasonSeen": {
+      "type": "object",
+      "description": "idle: finished and seen, ready for input.",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "seen"
+        }
+      }
+    },
+    "ReasonNotRunning": {
+      "type": "object",
+      "description": "idle: no process runs it (a transcript with no live agent).",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "not_running"
+        }
+      }
+    },
+    "ReasonHostUnknown": {
+      "type": "object",
+      "description": "idle: its host does not say where it stands (D-B); a screen may say \"status unknown\".",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "host_unknown"
+        }
+      }
+    },
+    "AgentView": {
+      "type": "object",
+      "x-decode": "strict",
+      "description": "An Agent as every client draws it, computed by the manager (docs/protocol/agent-states.md \"Five phases\"): its phase and why, whether it counts in the Agents list's Needs you, and where it sorts. Clients draw it and sort by rank; they never derive it.",
+      "required": [
+        "phase",
+        "rank"
+      ],
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/AgentPhase"
+        },
+        "reason": {
+          "$ref": "#/$defs/AgentReason"
+        },
+        "counted": {
+          "type": "boolean",
+          "description": "Its row counts in the Agents list's Needs you (the badge, the header, the filter): fleetcount's decision, never recomputed."
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Where it sorts, lower first: one order for every client (docs/protocol/agent-states.md \"Rank\"). Equal ranks go by the shared tie-break."
+        }
+      }
+    }
+  }
+}

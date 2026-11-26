@@ -54,6 +54,13 @@ nonisolated struct RecordingActivityAttributes: ActivityAttributes {
         /// the island stops counting instead of showing a recording that no longer runs. nil while paused, and in a state
         /// from before.
         var aliveAt: Double? = nil
+        /// Whether the hub still takes what the activity's buttons add (#15214): set to `off` while its recording module
+        /// is off, so Bookmark and Ask Persona / Talk are not drawn (they would do nothing); End and Stop always are.
+        /// nil with the module on and in a state from before, which reads as allowed; an unknown word too.
+        var module: PhoneRecordingAllowance? = nil
+
+        /// Bookmark and Ask Persona / Talk are drawn: always, unless the hub's recording module is off.
+        var offersChanges: Bool { (module ?? .allowed).offersWrites }
 
         var runningSinceDate: Date? { runningSince.map { Date(timeIntervalSince1970: $0) } }
 

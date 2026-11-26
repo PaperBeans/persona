@@ -248,7 +248,7 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
     const asked = revs.seen;
     const changed = !!revs.changed;
     revs.changed = false;
-    api<unknown>(`/recordings/${enc(id)}/photos`, request.current)
+    api<unknown>(`/recordings/${enc(id)}/photos`, { ...request.current, dedupe: false })
       .then((r) => {
         if (!current() || shown.current !== id || photoRevs.current !== revs) return;
         const list = recordingPhotos(r);
@@ -307,7 +307,7 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
     const from = asked.includes("lines") ? linesFrom(pos.next, pos.length) : undefined;
     const query = [parts === "all" ? "" : `parts=${asked.join(",")}`, from !== undefined ? `from=${from}` : ""].filter(Boolean).join("&");
     const path = `/recordings/${enc(id)}/live${query ? `?${query}` : ""}`;
-    api<RecordingLive>(path, request.current)
+    api<RecordingLive>(path, { ...request.current, dedupe: false })
       .then((r) => {
         if (!current() || shown.current !== id) return;
         if (apply(id, asked, r, from)) latest.current(["lines"]);
@@ -460,7 +460,7 @@ function useThread(conv: MeetingConversation | undefined, tick: number, auth: Au
     if (!key) return;
     let alive = true;
     // Session routes go to the conversation's own manager: no manager header of the page's.
-    api<ItemsPage>(`${sessionPath(mid, sid)}/items?${THREAD_PAGE}`, { token: auth.token, tokenOwner: auth.tokenOwner })
+    api<ItemsPage>(`${sessionPath(mid, sid)}/items?${THREAD_PAGE}`, { token: auth.token, tokenOwner: auth.tokenOwner, dedupe: false })
       .then((p) => { if (alive && current()) { setPage({ key, items: p.items ?? [], more: !!p.has_more }); setError(""); } })
       .catch((err) => { if (alive && current()) setError(errorText(err)); });
     return () => { alive = false; };

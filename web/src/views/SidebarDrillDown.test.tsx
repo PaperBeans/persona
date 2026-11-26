@@ -133,7 +133,7 @@ describe("the sidebar on an Agent's page opened from inside a page (#12055)", ()
 });
 
 describe("Main Chat in the sidebar, set to Full page (#13164)", () => {
-  const mainRow = () => host.querySelector<HTMLAnchorElement>(`a[title="${t("sidebar.persona_main")}"]`)!;
+  const mainRow = () => host.querySelector<HTMLAnchorElement>(`a[aria-description="${t("sidebar.persona_main")}"]`)!;
   const pick = async (a: HTMLAnchorElement) => {
     act(() => a.click());
     await flush();

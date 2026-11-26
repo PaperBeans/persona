@@ -69,7 +69,7 @@
 # It also runs go vet, in a job of its own (job_go_vet, #12894): go vet -ldflags= ./... over the whole server module,
 # then GOOS=windows GOARCH=amd64 go vet -ldflags= on each changed package group, or on ./... for a change outside every
 # group (go.mod, a file directly in server/plugins/, sdk/go), as CI's server lane vets for Linux and Windows. A group
-# with no package that builds for Windows (internal/fleetsoak, cmd/password-wasm) is left out of the Windows step, as
+# with no package that builds for Windows (scripts/fleetsoak, cmd/password-wasm) is left out of the Windows step, as
 # CI's ./... passes over it, and the PASS line names it. Being its own job, a vet that runs past its timeout on a cold
 # build cache is that job's TIMEOUT and cannot hide a FAIL of the guard job's contract tests. A changed .go file under server/ or sdk/go/ runs scripts/ci/gofmt.py on the changed .go
 # files (job_go_fmt; --all checks both trees whole, as CI's Go formatting step does), a job that takes no go slot: it
@@ -572,13 +572,17 @@ GO_GUARD_TESTS='^(TestHubAnswersOnlyItsOwnRoutes|TestHubDoesNotImportTheManager|
 '|TestRepositoryRetrievalGuidanceContract|TestEveryStartPathIsSupervisedOrOptedOut)$'
 
 # job_go_guards runs both guard commands, the second one also when the first failed, so one run names every failure.
+# In diff mode the first runs with CI_BASE_SHA set to the merge-base check-fast resolved, so archguard's
+# TestDomainLayers holds each domain count to the lower of its baseline and its count there, as the sleep ratchet's
+# --base does; --all is a full-tree run, held to the baseline only.
 job_go_guards() {
   [ "$HAVE_GO" -eq 1 ] || skip "go not found"
   JOB_SLOT=go
-  local _inner=$((TIMEOUT_GO_TEST - 10)) _rc=0
+  local _inner=$((TIMEOUT_GO_TEST - 10)) _rc=0 _base=""
   [ "$_inner" -lt 5 ] && _inner=5
-  in_dir server step "$TIMEOUT_GO_TEST" "go test ${GO_GUARD_PKGS[*]}" \
-    go test -count=1 -timeout "${_inner}s" "${GO_GUARD_PKGS[@]}" || _rc=$?
+  [ "$ALL" -eq 1 ] || _base=$MB
+  in_dir server step "$TIMEOUT_GO_TEST" "CI_BASE_SHA=$_base go test ${GO_GUARD_PKGS[*]}" \
+    env "CI_BASE_SHA=$_base" go test -count=1 -timeout "${_inner}s" "${GO_GUARD_PKGS[@]}" || _rc=$?
   in_dir server step "$TIMEOUT_GO_TEST" "go test -run <guard tests> ${GO_GUARD_TEST_PKGS[*]}" \
     go test -count=1 -timeout "${_inner}s" -run "$GO_GUARD_TESTS" "${GO_GUARD_TEST_PKGS[@]}" || _rc=$?
   return "$_rc"
@@ -605,7 +609,7 @@ job_go_fmt() {  # $1 = ALL for the whole of server/ and sdk/go/, else GO_FMT_FIL
 # . for the whole module; --all: the whole module), the second step also when the first failed, so one run names every
 # finding (#12894). -ldflags= clears a link flag GOFLAGS may carry and keeps the rest, as scripts/ci/server.sh does. The
 # Windows step names its environment through env, so its rerun line and --compare-main's rerun at the base keep it.
-# A group with no package that builds for Windows (every file of internal/fleetsoak is //go:build unix, of
+# A group with no package that builds for Windows (every file of scripts/fleetsoak is //go:build unix, of
 # cmd/password-wasm js && wasm), or whose directory is gone, is left out of the Windows step: given only such groups,
 # go vet says "no packages to vet" (or that the directory does not exist) and exits 1, where CI's ./... passes over
 # them. With no group left, the step does not run. The PASS line names each group left out (JOB_NOTE).
@@ -928,6 +932,7 @@ web_plan() {
 # under --each many listed paths share one (spec/fixtures/*). runtime_named's lines are read once per run too.
 READER_CACHE=()
 RUNTIME_NAMED=""; RUNTIME_NAMED_READ=0
+SUITE_CACHE=(); SUITE_IS_SUITE=()
 readers_of() {
   local _i=0
   while [ "$_i" -lt "${#READER_CACHE[@]}" ]; do
@@ -990,7 +995,12 @@ else
         integration:*) _p=${_c#integration:}; arr_has "$_p" "${INTEG[@]:-}" || INTEG+=("$_p") ;;
         sdk-ts) SDKTS=1 ;;
         deno-adapter) DENO_ADAPTER=1 ;;
-        go-package:*) _g=${_c#go-package:}; arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g") ;;
+        go-package:*)
+          _g=${_c#go-package:}
+          # A diff includes the old path of a moved or deleted package. --changed-from also plans hypothetical paths.
+          if [ -d "server/$_g" ] || [ -n "$CHANGED_FROM" ]; then
+            arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g")
+          fi ;;
         server-build) SERVER_BUILD=1 ;;
         go-guards) GO_GUARDS=1 ;;
         go-vet:*) _g=${_c#go-vet:}; arr_has "$_g" "${GO_VET_GROUPS[@]:-}" || GO_VET_GROUPS+=("$_g") ;;
@@ -1090,6 +1100,30 @@ client_named() {
 # Repository inputs that server tests read (the extra paths in server-test.yml's filter): a change to one also runs go
 # test on the packages that read it. Each regex matches the input as a path string or as filepath.Join elements.
 if [ "$ALL" -eq 0 ]; then
+  if [ "$EACH" -eq 1 ] && [ -f "$WORK/reader-plans.bin" ]; then
+    # The --each reader index was built from this frozen path list before any
+    # plan was made. Each record still belongs to exactly one path.
+    IFS= read -r -d '' _reader_path <&9 &&
+      IFS= read -r -d '' _server_named <&9 &&
+      IFS= read -r -d '' _runtime_named <&9 || {
+      echo "check-fast: the per-path reader index ended before $_each; no plan made" >&2
+      exit 2
+    }
+    if [ "$_reader_path" != "$CHANGED" ]; then
+      echo "check-fast: the per-path reader index names $_reader_path instead of $CHANGED; no plan made" >&2
+      exit 2
+    fi
+    while IFS= read -r _g; do
+      [ -n "$_g" ] && { arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g"); }
+    done <<< "$_server_named"
+    while IFS= read -r _pkg; do
+      [ -n "$_pkg" ] || continue
+      case "$_pkg" in
+        sdk/ts) SDKTS=1 ;;
+        *) _pkg=${_pkg#integrations/}; arr_has "$_pkg" "${INTEG[@]:-}" || INTEG+=("$_pkg") ;;
+      esac
+    done <<< "$_runtime_named"
+  else
   READER_RES=(); _client=0
   while IFS= read -r f; do
     _re=""
@@ -1121,6 +1155,7 @@ if [ "$ALL" -eq 0 ]; then
     done < <(LC_ALL=C awk -F '\t' 'NR == FNR { changed[$0] = 1; next } $1 in changed { print $2 }' \
                "$WORK/client-changed.txt" "$CLIENT_NAMED" | LC_ALL=C sort -u)
   fi
+  fi
 fi
 
 # runtime_named prints "<package> <path>" for each shared fixture or schema path (spec/..., schema/...) a file of an
@@ -1142,7 +1177,7 @@ runtime_named() {
 }
 
 # A changed spec/ or schema/ path also runs the runtime packages that read it: the path itself, or a directory it is in.
-if [ "$ALL" -eq 0 ] && printf '%s\n' "$CHANGED" | grep -qE '^(spec|schema)/'; then
+if [ "$ALL" -eq 0 ] && [ "$EACH" -eq 0 ] && printf '%s\n' "$CHANGED" | grep -qE '^(spec|schema)/'; then
   # Not in $( ): a failed search must stop this shell, not a subshell.
   if [ "$RUNTIME_NAMED_READ" -eq 0 ]; then
     runtime_named > "$WORK/runtime-named.txt"
@@ -1189,7 +1224,31 @@ script_test_add() {
   # Already added: every file of a large diff adds the same few suites again, and the grep below is a process each.
   arr_has "$1" "${SCRIPT_TESTS[@]:-}" && return 0
   [ -f "$1" ] || return 0
-  if ! grep -q unittest "$1"; then
+  # A path's suites are reset between --each probes, but its unittest
+  # classification is not. --each is a read-only plan, so retain that observation
+  # rather than spawning grep hundreds of times for the same tracked files.
+  if [ "$EACH" -eq 1 ]; then
+    local _i=0
+    while [ "$_i" -lt "${#SUITE_CACHE[@]}" ]; do
+      if [ "${SUITE_CACHE[$_i]}" = "$1" ]; then
+        if [ "${SUITE_IS_SUITE[$_i]}" -eq 1 ]; then
+          SCRIPT_TESTS+=("$1")
+        else
+          arr_has "SKIP  $1 (not a unittest suite)" "${INFO[@]:-}" || INFO+=("SKIP  $1 (not a unittest suite)")
+        fi
+        return 0
+      fi
+      _i=$((_i + 1))
+    done
+    local _is_suite=0
+    if grep -q unittest "$1"; then _is_suite=1; fi
+    SUITE_CACHE+=("$1")
+    SUITE_IS_SUITE+=("$_is_suite")
+    if [ "$_is_suite" -eq 0 ]; then
+      arr_has "SKIP  $1 (not a unittest suite)" "${INFO[@]:-}" || INFO+=("SKIP  $1 (not a unittest suite)")
+      return 0
+    fi
+  elif ! grep -q unittest "$1"; then
     arr_has "SKIP  $1 (not a unittest suite)" "${INFO[@]:-}" || INFO+=("SKIP  $1 (not a unittest suite)")
     return 0
   fi
@@ -1211,7 +1270,7 @@ script_test_add() {
 # scripts/ci/affected_drift.py works the same suites out on its own and compares (#11026).
 script_importers() {
   local _dir _mod _t
-  _dir=$(dirname "$1"); _mod=$(basename "$1" .py)
+  _dir=${1%/*}; _mod=${1##*/}; _mod=${_mod%.py}
   case "$_mod" in ""|*[!A-Za-z0-9_]*) return 0 ;; esac  # android-shards.py cannot be imported by name
   search "the scripts suites that import $1" "$WORK/importers-grep.txt" \
     -lE "^[[:space:]]*(from[[:space:]]+$_mod[[:space:]]+import|import[[:space:]]+([A-Za-z0-9_]+[[:space:]]*,[[:space:]]*)*$_mod([[:space:],]|\$))" \
@@ -1219,7 +1278,7 @@ script_importers() {
   while IFS= read -r _t; do
     case "${_t##*/}" in test_*.py) ;; *) continue ;; esac
     [ "$_t" != "$1" ] || continue
-    if [ "$(dirname "$_t")" = "$_dir" ] || grep -qF "$_dir" "$_t" || grep -qE "/[[:space:]]*\"${_dir##*/}\"" "$_t"; then
+    if [ "${_t%/*}" = "$_dir" ] || grep -qF "$_dir" "$_t" || grep -qE "/[[:space:]]*\"${_dir##*/}\"" "$_t"; then
       printf '%s\n' "$_t"
     fi
   done < "$WORK/importers-grep.txt"
@@ -1235,7 +1294,7 @@ else
     case "$f" in
       scripts/*/test_*.py) script_test_add "$f" ;;
       scripts/*.py|scripts/*.sh)
-        _name=$(basename "$f"); _name=${_name%.*}
+        _name=${f##*/}; _name=${_name%.*}
         _name=$(printf '%s' "$_name" | tr '-' '_')
         for _t in scripts/*/"test_$_name.py"; do script_test_add "$_t"; done
         case "$f" in *.sh) for _t in scripts/*/"test_${_name}_sh.py"; do script_test_add "$_t"; done ;; esac ;;
@@ -1423,16 +1482,24 @@ if [ "$ALL" -eq 0 ]; then
   exec 8< "$WORK/table.txt"
 fi
 
-# --each: plan every listed path on its own. paths.py plans the web check of all of them in one scan (web_plan) and
-# lists the CI lanes of each in one run (plan_changes).
+# --each: plan every listed path on its own. paths.py plans the web check of all of them in one scan (web_plan),
+# lists the CI lanes of each in one run (plan_changes), and affected_drift.py's --reader-plan-each indexes the
+# tracked Go/runtime reader matches once. The per-path records below still feed the original plan_changes for each
+# path separately; ordinary diff execution retains the dynamic git-grep searches above.
 if [ "$EACH" -eq 1 ]; then
   printf '%s\n' "$CHANGED" > "$WORK/each.txt"
   if [ "$HAVE_PY" -eq 1 ] && [ -f scripts/ci/paths.py ]; then
+    if [ ! -f scripts/ci/affected_drift.py ]; then
+      echo "check-fast: --each needs scripts/ci/affected_drift.py for its indexed readers" >&2
+      exit 2
+    fi
     "$TIMEOUT_BIN" -k 5s 900 python3 scripts/ci/paths.py --web-plan-each < "$WORK/each.txt" > "$WORK/web-plans.txt" \
       || { echo "check-fast: python3 scripts/ci/paths.py --web-plan-each failed" >&2; exit 2; }
     "$TIMEOUT_BIN" -k 5s 900 python3 scripts/ci/paths.py --lanes-for-each < "$WORK/each.txt" > "$WORK/lanes-each.txt" \
       || { echo "check-fast: python3 scripts/ci/paths.py --lanes-for-each failed" >&2; exit 2; }
-    exec 6< "$WORK/web-plans.txt" 7< "$WORK/lanes-each.txt"
+    "$TIMEOUT_BIN" -k 5s 900 python3 scripts/ci/affected_drift.py --reader-plan-each < "$WORK/each.txt" \
+      > "$WORK/reader-plans.bin" || { echo "check-fast: the per-path reader index failed" >&2; exit 2; }
+    exec 6< "$WORK/web-plans.txt" 7< "$WORK/lanes-each.txt" 9< "$WORK/reader-plans.bin"
   fi
   while IFS= read -r _each <&5; do
     plan_reset

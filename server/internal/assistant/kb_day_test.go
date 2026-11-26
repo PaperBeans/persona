@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"math"
 	"net/http"
 	"strings"
@@ -63,7 +64,7 @@ func TestDaySegmentsHTTP(t *testing.T) {
 	if wantCode(t, changed, codeBaseChanged); changed["base"] != float64(100) || changed["next"] != float64(5) || changed["error"] == "" {
 		t.Fatalf("base changed: %v", changed)
 	}
-	many := make([]map[string]any, kb.MaxAppendSegments+1)
+	many := make([]map[string]any, recordingwire.MaxAppendSegments+1)
 	for i := range many {
 		many[i] = map[string]any{"start": 4000 + i, "end": 4000 + i, "text": "x"}
 	}
@@ -124,10 +125,10 @@ func TestDaySegmentsHTTP(t *testing.T) {
 		}
 	}
 
-	// Expired: the day started before recording_days now (nothing written), as for a PUT.
+	// Expired: the day started before recording_text_days now (nothing written), as for a PUT.
 	old := time.Now().Add(-50 * time.Hour)
 	d.putDay(dayPart2, 10, d.owner, map[string]any{"started_at": old.Format(time.RFC3339), "day": old.In(d.owner).Format(time.DateOnly)})
-	setSettings(t, d.s, func(v *Settings) { one := 1; v.RecordingDays = &one })
+	setSettings(t, d.s, func(v *Settings) { one := 1; v.RecordingTextDays = &one })
 	if out := d.do("POST", segmentsPath(dayPart2), "", dayLines(10, 11), http.StatusOK); out["status"] != "expired" {
 		t.Fatalf("expired: %v", out)
 	}
@@ -262,7 +263,7 @@ func TestDayRecapAskTodosAndPush(t *testing.T) {
 
 	// The recap time comes (the evening routine's moved before now, though off): the ready recap pushes, once.
 	setEvening(t, d.s, "06:30", false)
-	d.engine().WriteDayRecaps(context.Background(), 1)
+	d.engine().RecordingProvider().WriteDayRecaps(context.Background(), 1)
 	pushes := d.f.pushed()
 	l := d.s.lang(context.Background())
 	if len(pushes) != 1 || pushes[0].ID != "ntf_dayrecap_"+r.Day || pushes[0].Kind != NotifyPush || pushes[0].SessionID != "c-main" ||
@@ -280,7 +281,7 @@ func TestDayRecapAskTodosAndPush(t *testing.T) {
 	d.putDay(dayPart2, 200, tz, map[string]any{"part": 2})
 	d.do("POST", segmentsPath(dayPart2), "", dayLines(200, 201), http.StatusOK)
 	d.recap(dayPart2)
-	d.engine().WriteDayRecaps(context.Background(), 1)
+	d.engine().RecordingProvider().WriteDayRecaps(context.Background(), 1)
 	if p := d.f.pushed(); len(p) != 1 {
 		t.Fatalf("pushed again: %+v", p)
 	}
@@ -290,6 +291,7 @@ func TestDayRecapAskTodosAndPush(t *testing.T) {
 // phone's uploads of it are expired, and its to-dos can still be confirmed; kb_get says only the recap is left.
 func TestDayRecapAfterTheTrim(t *testing.T) {
 	d := newDayFixture(t)
+	setSettings(t, d.s, func(v *Settings) { days := 14; v.RecordingTextDays = &days }) // the text is kept forever by default
 	path := "/api/v1/recordings/" + dayRec
 	d.putDay(dayRec, 100, d.owner, nil)
 	d.do("POST", segmentsPath(dayRec), "", dayLines(100, 101), http.StatusOK)
@@ -334,6 +336,7 @@ func TestDayRecapPushAtTheRecapTime(t *testing.T) {
 // The evening routine's facts say today's all-day recording to the model only: its coverage, each part's recap or
 // state, the timeline's titles and the to-dos not confirmed; never in the card, and not for another routine.
 func TestEveningFactsSayTodaysDayRecording(t *testing.T) {
+	needsBriefingModule(t)
 	d := newDayFixture(t)
 	ctx := context.Background()
 	if f := d.s.briefFactsAt(ctx, time.Now(), "evening"); f.Day != nil {
@@ -359,7 +362,7 @@ func TestEveningFactsSayTodaysDayRecording(t *testing.T) {
 	if f.Day == nil || len(f.Day.Parts) != 2 || len(f.Day.Timeline) != 2 || len(f.Day.Actions) != 1 || len(f.Day.Gaps) != 1 {
 		t.Fatalf("facts %+v", f.Day)
 	}
-	text := f.modelText()
+	text := d.s.briefModelText(f)
 	made := rc.GeneratedAt.In(d.owner).Format("15:04")
 	// Open, it was recorded until now; its text goes as far as the phone uploaded it.
 	recorded := "录音时段 08:00–" + now.In(d.owner).Format("15:04") + "，文字转写到 09:05，"
@@ -374,15 +377,15 @@ func TestEveningFactsSayTodaysDayRecording(t *testing.T) {
 		t.Errorf("facts carry the points:\n%s", text)
 	}
 	card, fallback, _ := d.s.briefCard(f, "晚报", "ok")
-	if strings.Contains(card.JSON(), "Export review") || strings.Contains(fallback, "Export review") || strings.Contains(f.countsText(), "Export review") {
+	if strings.Contains(card.JSON(), "Export review") || strings.Contains(fallback, "Export review") || strings.Contains(briefCountsIn(f, i18n.Lang(f.Lang)), "Export review") {
 		t.Fatalf("the card or the push carries the day: %s\n%s", card.JSON(), fallback)
 	}
-	if f := d.s.briefFactsAt(ctx, time.Now(), "morning"); f.Day != nil || strings.Contains(f.modelText(), "全天录音") {
+	if f := d.s.briefFactsAt(ctx, time.Now(), "morning"); f.Day != nil || strings.Contains(d.s.briefModelText(f), "全天录音") {
 		t.Fatalf("the morning routine: %+v", f.Day)
 	}
 	// Confirmed, a to-do is not a suggestion any more.
 	d.do("POST", "/api/v1/recordings/"+dayRec+"/minutes/todos", "", map[string]any{"version": 1, "actions": []string{"a1"}}, http.StatusOK)
-	if f := d.s.briefFactsAt(ctx, time.Now(), "evening"); len(f.Day.Actions) != 0 || strings.Contains(f.modelText(), "还没确认的建议待办") {
+	if f := d.s.briefFactsAt(ctx, time.Now(), "evening"); len(f.Day.Actions) != 0 || strings.Contains(d.s.briefModelText(f), "还没确认的建议待办") {
 		t.Fatalf("a confirmed to-do: %+v", f.Day.Actions)
 	}
 }
@@ -404,7 +407,7 @@ func TestDayRecapPushCountsEveryPart(t *testing.T) {
 		t.Fatalf("pushed before the recap time: %+v", p)
 	}
 	setEvening(t, d.s, "06:30", false)
-	d.engine().WriteDayRecaps(context.Background(), 1)
+	d.engine().RecordingProvider().WriteDayRecaps(context.Background(), 1)
 	_, day := today8(d.owner)
 	want := i18n.T(d.s.lang(context.Background()), "assistant-day-recap.ready_body", i18n.Args{"day": day, "meetings": 0, "actions": 2})
 	if p := d.f.pushed(); len(p) != 1 || p[0].Body != want {
@@ -434,11 +437,13 @@ func TestEveningFactsDayReadOnlyInTheOwnersZone(t *testing.T) {
 	d.f.mu.Lock()
 	d.f.hello.KB = &KBSettings{ReadOnly: true}
 	d.f.mu.Unlock()
-	f := d.s.briefFactsAt(context.Background(), now, "evening")
-	if f.Day == nil || f.Day.Date != y.Format(time.DateOnly) {
-		t.Fatalf("the owner's day in a read-only knowledge base: %+v", f.Day)
-	}
-	if text := f.modelText(); !strings.Contains(text, "录音时段 08:00–09:00，文字转写到 08:30") {
-		t.Fatalf("recorded and transcribed:\n%s", text)
+	if d.s.briefingOn() {
+		f := d.s.briefFactsAt(context.Background(), now, "evening")
+		if f.Day == nil || f.Day.Date != y.Format(time.DateOnly) {
+			t.Fatalf("the owner's day in a read-only knowledge base: %+v", f.Day)
+		}
+		if text := d.s.briefModelText(f); !strings.Contains(text, "录音时段 08:00–09:00，文字转写到 08:30") {
+			t.Fatalf("recorded and transcribed:\n%s", text)
+		}
 	}
 }

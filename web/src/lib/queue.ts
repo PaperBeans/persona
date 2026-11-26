@@ -34,6 +34,7 @@ function normalize(s: string): string {
 export interface QueuedParts {
   /** What was typed, without Claude's `[Image #n]` placeholders, the tags or the stand-in words of a message with no words. */
   text: string;
+  inlineTrailer?: string;
   /** Paths, on the session's machine, of the photos it was sent with (`<attached_images>`). */
   photos: string[];
   /** Files it carries as <persona-file> tags (a video or a file sent from the phone). */
@@ -94,9 +95,9 @@ export function parseQueued(raw: string, photosBeside = 0): QueuedParts {
     return "";
   });
   rest = rest.replace(IMAGES_BLOCK, (_, body: string) => `<attached_images>${body.replace(/^\s*path: ?/gm, "")}</attached_images>`);
-  const { text, files, photos } = parseUserText(rest);
+  const { text, files, photos, inlineTrailer } = parseUserText(rest);
   const carried = photosBeside + photos.length + files.length + contexts.length > 0;
-  return { text: carried && isStandIn(text) ? "" : text, photos, files, contexts };
+  return { text: carried && isStandIn(text) ? "" : text, photos, files, contexts, ...(inlineTrailer ? { inlineTrailer } : {}) };
 }
 
 function isStandIn(text: string): boolean {

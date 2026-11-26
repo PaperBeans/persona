@@ -265,6 +265,10 @@ func (c *Connector) describeCI(ctx context.Context, n notification, run ciRun, m
 		}
 	}
 	t.Context = ciContext(repo, run.branch, pr, n.Subject.Title)
+	if pr > 0 {
+		t.Tags = append(t.Tags, connectorwire.Tag{Key: connectorwire.TagExternalObject,
+			Value: fmt.Sprintf("%s/pull/%d", n.Repository.HTMLURL, pr)})
+	}
 	st := &c.inbox
 	_, epoch := st.bind(ctx)
 	if !st.enter(epoch) {

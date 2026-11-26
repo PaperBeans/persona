@@ -1,7 +1,7 @@
 # screen-video
 
 The live screen's video wire (#3954, `docs/extensions/computer-use.md` "Live screen video (#3954)"): the messages
-Persona Screen and its clients exchange. The iPhone (`PersonaScreenKit`) and the browser (`web/src/screen/video-wire.ts`,
+Persona Screen and its clients exchange. The iPhone (`PersonaScreenKit`) and the browser (`web/src/modules/screen-share/video-wire.ts`,
 #6558) read the same cases, so both frame every message alike.
 
 ## Rules

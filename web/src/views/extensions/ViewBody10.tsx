@@ -41,8 +41,25 @@ const MIN_ZOOM = 0.25;
 const MIN_STILL_ZOOM = 0.01;
 const MAX_ZOOM = 2;
 const STEP = 1.25;
+const FOLD_SIZE = 24;
+const FOLD_CLEARANCE = 4;
+const MAX_FOLD_SCALE = 1.35;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+/** Bounded counter-scale for FoldControl inside the zoomed layer: keeps the control readable around normal zoom
+ *  levels without inflating past the node gap at low zoom or growing oversized when zoomed in. */
+export function graphFoldScale(zoom: number, gap: number): number {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const maxByGap = Math.max(1, (gap - FOLD_CLEARANCE) / FOLD_SIZE);
+  return clamp(1 / safeZoom, 1 / MAX_ZOOM, Math.min(MAX_FOLD_SCALE, maxByGap));
+}
+
+/** Screen-space extent of FoldControl past its node edge along the layout axis. */
+export function graphFoldReach(zoom: number, gap: number): number {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return (gap / 2 + (FOLD_SIZE / 2) * graphFoldScale(safeZoom, gap)) * safeZoom;
+}
 
 /** A node's tone (a role color) as one of the named hues the web's `--hue-*` colors are. */
 const TONE_HUE: Record<string, string> = { positive: "green", caution: "orange", danger: "red" };
@@ -239,14 +256,14 @@ interface FoldProps {
 
 /** The fold control: its own control inside the node's own wrapper, fully beside the node on the side where its
  *  children leave it (right for a right tree, below for a down one) — never over the node, whose badge stays whole —
- *  and never a press of the node. It counters the layer's zoom, so it stays its own size on screen with a 44 px hit at
- *  any zoom. Folded, it shows the hidden count: a chip as wide as the count needs (+8 stays the 24 px circle,
- *  +123 grows past it), still centred on the gap. */
+ *  and never a press of the node. Its counter-scale stays bounded inside the gap so low zoom levels never inflate it
+ *  over adjacent cards. Folded, it shows the hidden count: a chip as wide as the count needs (+8 stays the 24 px
+ *  circle, +123 grows past it), still centred on the gap. */
 const FoldControl = memo(function FoldControl({ id, w, h, gap, down, folded, hidden, onToggle }: FoldProps) {
   const label = folded ? t("extensions-viewbody.graph_show_hidden", { count: hidden }) : t("extensions-viewbody.graph_fold");
   // +NNN at the submeta size with tabular numerals: about 7 px a digit plus the plus and the border's padding
   const wide = folded && hidden >= 100;
-  const size = wide ? Math.max(24, 14 + String(hidden).length * 7) : 24;
+  const size = wide ? Math.max(FOLD_SIZE, 14 + String(hidden).length * 7) : FOLD_SIZE;
   return (
     <button
       type="button"
@@ -257,14 +274,14 @@ const FoldControl = memo(function FoldControl({ id, w, h, gap, down, folded, hid
       onClick={() => onToggle(id)}
       className={cx(
         "touch-hit absolute z-[3] flex items-center justify-center rounded-full border border-line bg-surface text-ink-3 shadow-hairline",
-        "transition-transform duration-150 hover:text-ink",
+        "transition-colors duration-150 hover:text-ink",
       )}
       style={{
         width: size,
-        height: 24,
+        height: FOLD_SIZE,
         transform: "scale(var(--graph-fold-scale, 1))",
         transformOrigin: "center",
-        ...(down ? { left: w / 2 - size / 2, top: h + gap / 2 - 12 } : { left: w + gap / 2 - size / 2, top: h / 2 - 12 }),
+        ...(down ? { left: w / 2 - size / 2, top: h + gap / 2 - FOLD_SIZE / 2 } : { left: w + gap / 2 - size / 2, top: h / 2 - FOLD_SIZE / 2 }),
       }}
     >
       {folded ? (
@@ -380,12 +397,17 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   // The layout follows from the nodes, edges and folds alone, so a redraw that changes only states keeps every node
   // in place (spec/fixtures/graph-layout/README.md).
   const laid = useMemo(
-    () => layOutGraph({ nodes: item.nodes ?? [], edges: item.edges, layout: item.layout, direction: item.direction }, [...folds], still ? undefined : { maxLeafRows: 6 }),
+    () => layOutGraph(
+      { nodes: item.nodes ?? [], edges: item.edges, layout: item.layout, direction: item.direction },
+      [...folds],
+      still ? { groupByTitle: true } : { maxLeafRows: 6, groupByTitle: true },
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- still is the only reading of `full`/`compact` this takes
     [item.nodes, item.edges, item.layout, item.direction, folds, still],
   );
   const byId = useMemo(() => Object.fromEntries((item.nodes ?? []).map((n) => [n.id, n])), [item.nodes]);
   const down = item.direction === "down";
+  const foldGap = down ? pitchY - nodeH : pitchX - nodeW;
   const lw = (laid.size[0] - 1) * pitchX + nodeW + 2 * MARGIN;
   const lh = (laid.size[1] - 1) * pitchY + nodeH + 2 * MARGIN;
 
@@ -478,7 +500,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     }
     view.current = next;
     pane.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.zoom})`;
-    pane.style.setProperty("--graph-fold-scale", String(Math.max(1, 1 / next.zoom)));
+    pane.style.setProperty("--graph-fold-scale", String(graphFoldScale(next.zoom, foldGap)));
     moved.current = true;
     if (!still) {
       const s = readStore();
@@ -486,7 +508,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       s.moved = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readStore closes over keyed/scoped only through the store's own id
-  }, [at, nodeW, nodeH, lw, lh, still, keyed, scoped]);
+  }, [at, nodeW, nodeH, lw, lh, foldGap, still, keyed, scoped]);
 
   const inspect = useCallback((id: string) => {
     setSelectedNodeId(id);
@@ -529,8 +551,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     const apply = (v: CanvasView) => {
       view.current = v;
       pane.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
-      // the fold control counters the zoom, so it never shrinks below its own 24 px on screen (a 44 px hit)
-      pane.style.setProperty("--graph-fold-scale", String(Math.max(1, 1 / v.zoom)));
+      pane.style.setProperty("--graph-fold-scale", String(graphFoldScale(v.zoom, foldGap)));
       if (still) return; // a still preview never writes the store: the page's kept view stays whatever a card did
       const s = readStore();
       s.view = v;
@@ -738,7 +759,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     };
     // laid changes when the view is drawn again or a fold is toggled; the person's view survives it in `view`.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readStore closes over keyed/scoped only through the store's own id
-  }, [laid, still, full, storeKey, keyed, at, sel, byId, nodeW, nodeH, lw, lh]);
+  }, [laid, still, full, storeKey, keyed, at, sel, byId, nodeW, nodeH, lw, lh, foldGap]);
 
   // A node the keyboard focuses is panned into view. It does not count as the person moving the canvas (an untouched
   // key still re-fits), but the shift itself is kept: without it, the next redraw of an untouched key would take the
@@ -756,26 +777,21 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
     const sy = v.y + ny * v.zoom;
     const nw = nodeW * v.zoom;
     const nh = nodeH * v.zoom;
-    // the node's fold control sits beside it, fully past the node on the side its children leave it (right for a
-    // right tree, below for a down one), and counters the zoom (24 px drawn, a 44 px hit): a reveal that stops at the
-    // node's box leaves the control clipped at the stage edge, so the box it pans in grows by the control's far
-    // extent on that side — half the gap plus its own radius.
-    const gap = down ? (pitchY - nodeH) * v.zoom : (pitchX - nodeW) * v.zoom;
-    const reach = Math.max(24, gap / 2 + 24) * Math.max(1, 1 / v.zoom);
+    const reach = graphFoldReach(v.zoom, foldGap);
     const dx = sx < 12 ? 12 - sx : sx + nw > w - 12 - (down ? 0 : reach) ? w - 12 - (down ? 0 : reach) - nw - sx : 0;
     const dy = sy < 12 ? 12 - sy : sy + nh > h - 12 - (down ? reach : 0) ? h - 12 - (down ? reach : 0) - nh - sy : 0;
     if (dx || dy) {
       const next = { x: v.x + dx, y: v.y + dy, zoom: v.zoom };
       view.current = next;
       pane.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.zoom})`;
-      pane.style.setProperty("--graph-fold-scale", String(Math.max(1, 1 / next.zoom)));
+      pane.style.setProperty("--graph-fold-scale", String(graphFoldScale(next.zoom, foldGap)));
       if (!still) {
         const s = readStore();
         s.view = next; // kept without marking the person's move: an untouched key still re-fits on a resize
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readStore closes over keyed/scoped only through the store's own id
-  }, [at, nodeW, nodeH, pitchX, pitchY, down, still, keyed, scoped]);
+  }, [at, nodeW, nodeH, foldGap, down, still, keyed, scoped]);
 
   const toggle = useCallback((id: string) => {
     const next = new Set(folds);
@@ -832,7 +848,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
             onInspect={inspect}
             selected={id === activeSelectedId}
             fade={fadeOf(id)}
-            fold={needsFold ? <FoldControl id={id} w={nodeW} h={nodeH} gap={down ? pitchY - nodeH : pitchX - nodeW} down={down} folded={folded} hidden={hidden} onToggle={toggle} /> : undefined}
+            fold={needsFold ? <FoldControl id={id} w={nodeW} h={nodeH} gap={foldGap} down={down} folded={folded} hidden={hidden} onToggle={toggle} /> : undefined}
           />
         );
       })}
@@ -944,7 +960,10 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   };
 
   const outline = (
-    <aside className="hidden w-[208px] shrink-0 flex-col border-r border-line bg-surface md:flex md:h-full">
+    <aside
+      data-graph-outline-pane=""
+      className="hidden w-[208px] shrink-0 flex-col border-r border-line bg-surface md:flex md:h-full @min-[60rem]:w-[260px] @min-[80rem]:w-[300px]"
+    >
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
         <span className="min-w-0 flex-1 truncate text-meta font-semibold text-ink">{t("extensions-viewbody.graph_outline")}</span>
         <span className="shrink-0 text-submeta text-ink-3 tabular-nums">{laid.order.length}</span>
@@ -1129,7 +1148,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
       {timelineOpen && (
         <div className="max-h-40 overflow-y-auto pb-1">
           <div className="flex items-end gap-1.5 px-3">
-            <span className="w-[148px] shrink-0" />
+            <span className="w-[148px] shrink-0 @min-[60rem]:w-[200px]" />
             <div ref={trackRef} className="relative h-5 flex-1">
               {ticks.map((tick, i) => (
                 <span
@@ -1159,7 +1178,7 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
                 }}
                 className={cx("flex w-full items-center gap-1.5 px-3 text-left transition-colors hover:bg-hover", activeId === n.id && "bg-hover")}
               >
-                <span className="flex w-[148px] shrink-0 items-center gap-1.5">
+                <span className="flex w-[148px] shrink-0 items-center gap-1.5 @min-[60rem]:w-[200px]">
                   <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
                   <span className="min-w-0 flex-1 truncate text-submeta text-ink" title={n.title}>{n.title}</span>
                 </span>
@@ -1196,7 +1215,10 @@ export function GraphCanvas({ item, compact, busy, onPress, canPress }: {
   const canvasBandClass = full ? "min-h-[180px] md:h-full" : timedNodes.length > 0 && timelineOpen ? "graph-canvas-timed" : "graph-canvas";
   const room = (
     <div
-      className={cx(full ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-card border border-line bg-surface" : "graph-shell relative flex w-full flex-col")}
+      className={cx(
+        "@container",
+        full ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-card border border-line bg-surface" : "graph-shell relative flex w-full flex-col",
+      )}
       onKeyDown={(e) => {
         if (e.key !== "Escape" || !activeInspectorNode) return;
         e.preventDefault();

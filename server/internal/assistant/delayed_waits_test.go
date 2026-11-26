@@ -18,6 +18,7 @@ func newDelayedRetryFixture(t *testing.T, st Store) (*Service, *fakeHub, delayed
 	t.Helper()
 	n := newFakeHub().withMachine()
 	s := newServiceOn(t, n, st)
+	noDirectionsTimers(s)
 	now := time.Now()
 	task := Task{ID: "p", Title: "Example", Prompt: "go", Repeat: repeatInterval, EveryMinutes: 30,
 		At: now.Add(-time.Minute), Enabled: true, MachineID: "server", CreatedBy: "assistant"}
@@ -31,6 +32,7 @@ func newDelayedRetryFixture(t *testing.T, st Store) (*Service, *fakeHub, delayed
 	failedAt := now.Add(-time.Hour)
 	run := ScheduleRun{RefID: "p", At: failedAt, MachineID: "server", SessionID: "s1", Status: runFailed, Error: "usage limit"}
 	run.ID = s.recordRun(run)
+	waitFor(t, "the backfill's read of the to-dos", s.spaceBackfillScanIdle)
 	w := delayedWait{ID: "limit_" + run.ID, Kind: delayedScheduledRetry, At: now.Add(-time.Second),
 		Retry: &scheduledLimitRetry{Run: run, RunOf: failedAt, MachineName: "Example computer", LimitTurn: failedAt}}
 	if err := s.persistScheduledRetry(context.Background(), w); err != nil {
@@ -103,7 +105,7 @@ func TestScheduledRetryDoesNotDispatchUnclaimedAfterAmbiguousSave(t *testing.T) 
 		t.Fatal(err)
 	}
 	ambiguous := &ambiguousSaveStore{Store: st, fail: true}
-	first.store = func() Store { return ambiguous }
+	first.setStore(func() Store { return ambiguous })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	first.runScheduledLimitRetry(ctx, w, false)
@@ -275,7 +277,7 @@ func (st *compareGateStore) CompareSetting(ctx context.Context, key string, revi
 
 func TestScheduledRetryRechecksCancellationAfterClaim(t *testing.T) {
 	st := withDelayedWaitCAS(&memStore{})
-	first, n, w := newDelayedRetryFixture(t, st)
+	s, n, w := newDelayedRetryFixture(t, st)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	gate := &compareGateStore{Store: st}
@@ -286,14 +288,14 @@ func TestScheduledRetryRechecksCancellationAfterClaim(t *testing.T) {
 		}
 		return nil
 	}
-	first.store = func() Store { return gate }
+	s.setStore(func() Store { return gate })
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		first.runScheduledLimitRetry(context.Background(), w, true)
+		s.runScheduledLimitRetry(context.Background(), w, true)
 	}()
 	<-started
-	setTasks(first, Task{ID: "p", Repeat: repeatInterval, EveryMinutes: 30, Enabled: false})
+	setTasks(s, Task{ID: "p", Repeat: repeatInterval, EveryMinutes: 30, Enabled: false})
 	close(release)
 	<-done
 	if got := n.sent(); got != 0 {
@@ -651,7 +653,7 @@ func TestScheduledRetryCancellationIsSerializedWithClaim(t *testing.T) {
 			At: time.Now().Add(time.Hour), Enabled: true, MachineID: "server"})
 		return nil
 	}
-	first.store = func() Store { return gate }
+	first.setStore(func() Store { return gate })
 	first.runScheduledLimitRetry(context.Background(), w, true)
 	second := newServiceOn(t, n, st)
 	second.runScheduledLimitRetry(context.Background(), w, true)

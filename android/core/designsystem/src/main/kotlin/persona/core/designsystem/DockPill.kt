@@ -34,20 +34,22 @@ import persona.core.designsystem.icons.PhIcon
 fun JDockPill(text: String, running: Boolean, icon: PhIcon, spoken: String, modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null, onClickLabel: String? = null) {
     val palette = PersonaTheme.palette
-    Row(
-        modifier.widthIn(max = Tokens.Size.box280).heightIn(min = JChipTokens.height)
-            .then(if (onClick != null) Modifier.minimumInteractiveComponentSize() else Modifier)
-            .clip(CircleShape).background(palette.surfaceStrong)
-            .border(JChipTokens.border, palette.strokeBottom, CircleShape)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick) else Modifier)
-            .clearAndSetSemantics { contentDescription = spoken; if (onClick != null) role = Role.Button }
-            .padding(horizontal = JChipTokens.horizontalPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
-    ) {
-        if (running) JSpinner(Modifier.size(JChipTokens.iconSize), color = palette.ink2, stroke = Tokens.Size.lineMedium)
-        else JIcon(icon, null, size = JChipTokens.iconSize, tint = palette.ink2)
-        Text(text, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = palette.ink,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    CompactTouchLayout {
+        Row(
+            modifier.widthIn(max = Tokens.Size.box280).heightIn(min = JChipTokens.height)
+                .then(if (onClick != null) Modifier.minimumInteractiveComponentSize() else Modifier)
+                .clip(CircleShape).background(palette.surfaceStrong)
+                .border(JChipTokens.border, palette.strokeBottom, CircleShape)
+                .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick) else Modifier)
+                .clearAndSetSemantics { contentDescription = spoken; if (onClick != null) role = Role.Button }
+                .padding(horizontal = JChipTokens.horizontalPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
+        ) {
+            if (running) JSpinner(Modifier.size(JChipTokens.iconSize), color = palette.ink2, stroke = Tokens.Size.lineMedium)
+            else JIcon(icon, null, size = JChipTokens.iconSize, tint = palette.ink2)
+            Text(text, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = palette.ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }

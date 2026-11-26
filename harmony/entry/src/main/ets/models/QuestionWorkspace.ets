@@ -21,6 +21,28 @@ export class QuestionDraft {
     this.text = next; this.picks = selected;
   }
 }
+/** Question selections belong to the exact request revision in one conversation. */
+export class DecisionDrafts {
+  private scope: string = '';
+  private values: Map<string, QuestionDraft> = new Map();
+
+  bind(scope: string): void {
+    if (this.scope !== scope) { this.scope = scope; this.values.clear(); }
+  }
+  retain(ids: string[]): void {
+    for (const id of Array.from(this.values.keys())) if (!ids.includes(id)) this.values.delete(id);
+  }
+  draft(request: Decision): QuestionDraft | undefined {
+    if (request.kind !== 'question') return undefined;
+    const previous = this.values.get(request.id);
+    if (previous?.raw === request.raw) return previous;
+    const next = new QuestionDraft(this.scope, request);
+    next.begin(this.scope);
+    this.values.set(request.id, next);
+    return next;
+  }
+}
+
 export class QuestionSheet {
   readonly id: string; readonly request: Decision; readonly draft: QuestionDraft;
   constructor(id: string, request: Decision, draft: QuestionDraft) { this.id = id; this.request = request; this.draft = draft; }

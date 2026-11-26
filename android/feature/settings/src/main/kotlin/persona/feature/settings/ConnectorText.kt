@@ -11,6 +11,7 @@ import persona.core.contracts.api.ManagerRoster
 import persona.core.contracts.api.HubConnector
 import persona.core.contracts.api.LarkStatus
 import persona.core.contracts.api.MailAccount
+import persona.core.designsystem.MailAccess
 import persona.core.designsystem.Status
 import persona.core.designsystem.failureReasonText
 import android.content.res.Resources
@@ -177,11 +178,11 @@ internal sealed interface ConnectorRow {
 }
 
 /**
- * Settings › Connectors' rows: this phone, mail, Lark while the hub has Feishu chats ([lark], `LarkFeatures.chats`), then the
- * hub's other connectors (mail and Feishu have rows of their own).
+ * Settings › Connectors' rows: this phone, mail unless the hub's mail module is off ([mail], #15995), Lark while the hub
+ * has Feishu chats ([lark], `LarkFeatures.chats`), then the hub's other connectors (mail and Feishu have rows of their own).
  */
-internal fun connectorRows(hubConnectors: List<HubConnector>, lark: Boolean): List<ConnectorRow> =
-    listOfNotNull(ConnectorRow.Phone, ConnectorRow.Mail, ConnectorRow.Lark.takeIf { lark }) +
+internal fun connectorRows(hubConnectors: List<HubConnector>, lark: Boolean, mail: MailAccess = MailAccess.Live): List<ConnectorRow> =
+    listOfNotNull(ConnectorRow.Phone, ConnectorRow.Mail.takeIf { mail == MailAccess.Live }, ConnectorRow.Lark.takeIf { lark }) +
         hubConnectors.filter { it.id != "mail" && it.id != "lark" }.map(ConnectorRow::Hub)
 
 /** A merged list can contain the same provider under independent managers; name the owner when they collide. */

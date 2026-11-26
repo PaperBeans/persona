@@ -40,21 +40,32 @@ type agyTitleBook struct {
 }
 
 // agyPaneTitle titles s, the row of an agy pane, after conversation, the pane's conversation ("" while not known).
+// Persona's own sourced agent-start-*.sh shell title is always cleared, and a Persona-started pane falls back to its
+// start's first prompt while agy has not provided a companion, metadata or transcript title yet.
 func (n *Node) agyPaneTitle(s *proto.Session, conversation string) {
-	if conversation == "" {
-		return
+	if isStartScriptTitle(s.Title) {
+		s.Title = ""
 	}
-	if r, _, ok := n.runtimes.rowOf(agyAgent + "-" + conversation); ok && r.Title != "" && !agyStandInTitle(r) {
-		s.Title, s.TitleManual, s.TitleSource = r.Title, r.TitleManual, r.TitleSource
-		return
+	if conversation != "" {
+		if r, _, ok := n.runtimes.rowOf(agyAgent + "-" + conversation); ok && r.Title != "" && !agyStandInTitle(r) {
+			s.Title, s.TitleManual, s.TitleSource = r.Title, r.TitleManual, r.TitleSource
+			return
+		}
+		if title := n.agyNativeTitle(conversation); title != "" {
+			s.Title, s.TitleManual, s.TitleSource = title, false, proto.TitleSourceUnknown
+			return
+		}
+		if u, ok := n.agyTranscriptMeta(conversation); ok {
+			if title := promptTitle(u.first); title != "" {
+				s.Title, s.TitleManual, s.TitleSource = title, false, proto.TitleSourcePrompt
+				return
+			}
+		}
 	}
-	if title := n.agyNativeTitle(conversation); title != "" {
-		s.Title, s.TitleManual, s.TitleSource = title, false, proto.TitleSourceUnknown
-		return
-	}
-	if u, ok := n.agyTranscriptMeta(conversation); ok {
-		if title := promptTitle(u.first); title != "" {
-			s.Title, s.TitleManual, s.TitleSource = title, false, proto.TitleSourcePrompt
+	if n.state != nil {
+		if st, ok := n.state.get(s.SessionID); ok && st.StartTitle != "" &&
+			(s.Title == "" || s.Title == agyAgent || (s.Cwd != "" && s.Title == filepath.Base(s.Cwd))) {
+			s.Title, s.TitleManual, s.TitleSource = st.StartTitle, false, proto.TitleSourcePrompt
 		}
 	}
 }

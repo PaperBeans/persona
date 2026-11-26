@@ -1,19 +1,19 @@
 package recording
 
 import (
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"testing"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 // A meeting keeps its last MeetingHandoffsKept hand-offs.
 func TestMeetingHandoffsKept(t *testing.T) {
-	var m kb.Meeting
-	for i := range kb.MeetingHandoffsKept + 3 {
-		m.AddHandoff(kb.MeetingHandoff{ID: string(rune('a' + i)), State: kb.HandoffSent})
+	var m recordingwire.Meeting
+	for i := range recordingwire.MeetingHandoffsKept + 3 {
+		m.AddHandoff(recordingwire.MeetingHandoff{ID: string(rune('a' + i)), State: recordingwire.HandoffSent})
 	}
-	if len(m.Handoffs) != kb.MeetingHandoffsKept || m.Handoffs[0].ID != string(rune('a'+3)) {
+	if len(m.Handoffs) != recordingwire.MeetingHandoffsKept || m.Handoffs[0].ID != string(rune('a'+3)) {
 		t.Fatalf("kept %d, first %q", len(m.Handoffs), m.Handoffs[0].ID)
 	}
 }

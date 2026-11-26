@@ -88,7 +88,7 @@ func TestToolLoopReconnectContinuedProgressWithdrawsStaleCard(t *testing.T) {
 
 func TestToolLoopReadFailureDoesNotHideOrdinaryWorkWhenOff(t *testing.T) {
 	store := &workMemStore{}
-	store.failKeys = map[string]error{toolLoopsSetting: errors.New("loop storage unavailable")}
+	store.failKey(toolLoopsSetting, errors.New("loop storage unavailable"))
 	row := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: time.Now().UTC(), Work: proto.WorkState{Phase: proto.WorkDone, Line: "Done"}}
 	if err := store.PutSessionWork(context.Background(), row); err != nil {
 		t.Fatal(err)

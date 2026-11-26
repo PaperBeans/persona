@@ -4,7 +4,7 @@
 // A thread that cannot be read (a CI run, a rate limit, a connector without threads) shows what the hub collected
 // about the item instead, with "Open in X". Read-only otherwise: no pages for browsing the source (CLAUDE.md).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, ApiError, errorText } from "../../lib/api";
+import { api, ApiError, errorText, isAbort } from "../../lib/api";
 import {
   chatHeadline, checkLabel, githubStateLabel, isChatThread, isGitHubThread, labelColor, loadThread, mediaLine, mediaURL, mergeNewest, mergeOlder,
   reachMessage, replyInThread, reviewLabel, startsGroup, type ThreadChat, type ThreadMedia, type ThreadMessage, type ThreadPage, type ThreadPerson,
@@ -20,6 +20,7 @@ import { Markdown } from "../../ui/Markdown";
 import { ImageViewer } from "../chat/ImageViewer";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Monogram, useFollowEnd } from "./InboxParts";
+import { useLarkWrites } from "./lark-write-gate";
 import { LarkInboxContent } from "./LarkInboxContent";
 import { ConnectorReadNotice, ConnectorReplyTarget, conversationFailure, type ConversationFailure } from "./ConnectorReadNotice";
 
@@ -44,6 +45,7 @@ export function ConnectorBody({ item }: { item: InboxItem }) {
 
 function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: string }) {
   const id = item.source;
+  const readOnly = id === "larkcli" && !useLarkWrites();
   const thread = item.connector?.thread ?? "";
   const [page, setPage] = useState<ThreadPage | null>(null);
   const [failure, setFailure] = useState<ConversationFailure | null>(null);
@@ -154,7 +156,7 @@ function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: str
 
   const send = async (text: string, replyTo?: ThreadMessage) => {
     const scope = owner.current;
-    if (!scope || !page?.chat.reply) return false;
+    if (!scope || readOnly || !page?.chat.reply) return false;
     try {
       await replyInThread(id, { thread, action: page.chat.reply, text, reply_to: replyTo?.id }, manager);
     } catch (e) {
@@ -174,7 +176,7 @@ function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: str
     {failure && <div className="shrink-0 px-4 py-2"><ConnectorReadNotice failure={failure} onRetry={() => void load()} /></div>}
     {isGitHubThread(page.chat)
       ? <GitHubThread key={composerKey} id={id} item={item} page={page} older={older} onOlder={() => void loadOlder()} onSend={send} />
-      : <ChatThread key={composerKey} id={id} page={{ ...page, chat: { ...page.chat, name: page.chat.name || item.title } }} older={older} onOlder={() => void loadOlder()} onReach={reach} onSend={send} />}
+      : <ChatThread key={composerKey} id={id} page={{ ...page, chat: { ...page.chat, name: page.chat.name || item.title } }} older={older} readOnly={readOnly} onOlder={() => void loadOlder()} onReach={reach} onSend={send} />}
   </>;
 }
 
@@ -186,11 +188,13 @@ function ConnectorText({ item, problem, onRetry }: { item: InboxItem; problem?: 
   const c = item.connector;
   useEffect(() => {
     let live = true;
-    api<InboxItem>(itemPath(item.id), { headers: itemRequest(item) })
+    const abort = new AbortController();
+    api<InboxItem>(itemPath(item.id), { headers: itemRequest(item), signal: abort.signal })
       .then((r) => live && (setContext(r.context ?? ""), setFailure("")))
-      .catch((e) => live && setFailure(errorText(e)));
+      .catch((e) => { if (live && !isAbort(e)) setFailure(errorText(e)); });
     return () => {
       live = false;
+      abort.abort();
     };
   }, [item.id, item.manager]);
   return (
@@ -321,10 +325,11 @@ function OlderButton({ busy, onClick }: { busy: boolean; onClick: () => void }) 
 
 // ── a chat app's conversation (Telegram) ─────────────────
 
-function ChatThread({ id, page, older, onOlder, onReach, onSend }: {
+function ChatThread({ id, page, older, readOnly = false, onOlder, onReach, onSend }: {
   id: string;
   page: ThreadPage;
   older: boolean;
+  readOnly?: boolean;
   onOlder: () => void;
   /** Whether the message was reached; undefined when busy, retired or the read already reported its failure. */
   onReach: (id: string) => Promise<boolean | undefined>;
@@ -379,11 +384,11 @@ function ChatThread({ id, page, older, onOlder, onReach, onSend }: {
           {!page.messages.length && <p className="py-10 text-center text-[12.5px] text-ink-3">{t("inbox-connectorthread.empty")}</p>}
           {page.messages.map((m, i) => (
             <Bubble key={m.id} id={id} m={m} head={startsGroup(m, page.messages[i - 1])} group={group} lit={flash?.id === m.id}
-              onQuote={m.reply_to?.id ? () => void jump(m.reply_to!.id) : undefined} onReply={page.chat.reply ? () => setReplyTo(m) : undefined} />
+              onQuote={m.reply_to?.id ? () => void jump(m.reply_to!.id) : undefined} onReply={!readOnly && page.chat.reply ? () => setReplyTo(m) : undefined} />
           ))}
         </div>
       </div>
-      {page.chat.reply ? (
+      {!readOnly && page.chat.reply ? (
         <ThreadComposer placeholder={t("inbox-connectorthread.send_to", { name: page.chat.name })} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={onSend} />
       ) : null}
     </div>

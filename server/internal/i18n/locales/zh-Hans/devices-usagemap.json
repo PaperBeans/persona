@@ -1,0 +1,11 @@
+{
+  "read_only": "这台设备不能查看或更改这台电脑磁盘上的内容",
+  "bad_path": "磁盘地图打不开这个文件夹或项目",
+  "need_paths": "至少选一项",
+  "too_many": "一次最多选 {most} 项",
+  "confirmation_required": "请先确认：还没有移动任何东西",
+  "offline": "{name} 不在线",
+  "node_outdated": "更新这台电脑上的 Persona 后，才能查看它的磁盘地图",
+  "deadline": "{name} 太久没有回应，请重试",
+  "failed": "没能从 {name} 得到回应"
+}

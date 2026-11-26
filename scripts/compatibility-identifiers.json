@@ -179,6 +179,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "apple/PersonaLink/App/Info.plist": {
+      "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "apple/Persona/Resources/Info.plist": {
       "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
       "tokens": [
@@ -298,6 +306,22 @@
         "JARVIS_DATABASE_URL",
         "JARVIS_DB_PASSWORD_FILE",
         "JARVIS_HOME",
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/src/connect-input.ts": {
+      "reason": "Exact legacy pairing URL scheme accepted by existing desktop sign-in input.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/src/setup.js": {
+      "reason": "Exact legacy pairing URL scheme accepted by the desktop setup input compatibility parser.",
+      "tokens": [
         "jarvis"
       ],
       "path_tokens": [],
@@ -523,11 +547,13 @@
       "external_refs": []
     },
     "harmony/entry/src/main/ets/core/WireCompatibility.ts": {
-      "reason": "Harmony native transport and pairing compatibility with existing deployed hubs.",
+      "reason": "Harmony native transport, persisted session, pairing, deep-link and forwarded-context compatibility with existing deployed hubs.",
       "tokens": [
         "X-Jarvis-Client",
         "X-Jarvis-Op-Id",
-        "jarvis"
+        "jarvis",
+        "jarvis-context",
+        "jarvis-file"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -535,7 +561,9 @@
     "harmony/entry/src/main/ets/models/Compatibility.ets": {
       "reason": "Harmony context envelopes read and send the existing negotiated wire tag.",
       "tokens": [
-        "jarvis-context"
+        "jarvis",
+        "jarvis-context",
+        "jarvis-file"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -569,6 +597,7 @@
       "reason": "Dedicated adapter for a versioned runtime, protocol or persisted identity.",
       "tokens": [
         ".jarvis",
+        "jarvis-context",
         "jarvisd",
         "options.jarvisdBin"
       ],
@@ -577,6 +606,14 @@
     },
     "integrations/opencode/test/map.test.js": {
       "reason": "Exact regression fixture for stripping the legacy context marker while preserving visible text.",
+      "tokens": [
+        "jarvis-context"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "integrations/antigravity/test/status.test.js": {
+      "reason": "Preview fallback fixture retains the legacy context tag so it is never used as a title.",
       "tokens": [
         "jarvis-context"
       ],
@@ -1208,6 +1245,7 @@
       "tokens": [
         "JARVIS_ASSISTANT",
         "JARVIS_ASSISTANT_BIN",
+        "JARVIS_CATEGORIES",
         "JARVIS_GUEST",
         "JARVIS_SESSION_ID",
         "JARVIS_SPACE",
@@ -1218,6 +1256,14 @@
         "mcp__jarvis__todo_bind_thread",
         "mcp__jarvis__todo_decision_add",
         "mcp__jarvis__todo_decisions"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/node/session_mention_test.go": {
+      "reason": "Golden mentions retain the legacy context tag when annotating both quote forms.",
+      "tokens": [
+        "jarvis-context"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -1341,6 +1387,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "web/e2e/composer-inline-references.mjs": {
+      "reason": "Browser assertions for the exact legacy context/file markers accepted by the registered compatibility adapter.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "web/src/lib/assistant-chat.test.ts": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -1393,6 +1447,15 @@
         "my-jarvis-art",
         "plugin_jarvis",
         "started_by_jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "web/src/lib/disconnect.test.ts": {
+      "reason": "Exact regression fixture for legacy credential keys that sign-out must still remove.",
+      "tokens": [
+        "jarvis.token",
+        "jarvis.tokenId"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -1457,6 +1520,30 @@
       "reason": "Regression fixture for the historical state directory in a session's working directory.",
       "tokens": [
         ".jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "harmony/tests/agent-task-groups.test.mjs": {
+      "reason": "Exact persisted started-by compatibility fixture for the manual-task grouping contract.",
+      "tokens": [
+        "started_by_jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "harmony/tests/extension-ui.test.mjs": {
+      "reason": "Exact legacy deep-link compatibility assertion for the app-owned subscription setup route.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "harmony/entry/src/main/ets/models/Wire.ets": {
+      "reason": "Exact persisted started-by compatibility field used by the task-grouping reader.",
+      "tokens": [
+        "started_by_jarvis"
       ],
       "path_tokens": [],
       "external_refs": []

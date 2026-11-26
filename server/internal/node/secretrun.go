@@ -23,11 +23,12 @@ import (
 
 // secret.run (proto.SecretRunParams): the commands the user approved on the password card, run one after another
 // with /bin/sh -c in the home directory with PATH proto.SecretRunPath, each in a session and process group of its own,
-// stdout and stderr read together. A command that runs one sudo -S gets the password and a newline on its stdin, then
-// the pipe closed (sudo reads it there); any other gets an empty stdin. The run stops at the first command that exits
-// non-zero, cannot start or runs out of the run's time (its group is stopped: endGroup). A command whose output held
-// the password returns none of it (secretRedactor masks it as it is read, and counts). The password bytes are zeroed
-// when the run ends. Nothing here logs the params, the password or the output (docs/assistant/assistant.md "Password card").
+// stdout and stderr read together. The default gives one sudo -S the password and a newline on stdin, then closes the
+// pipe; every other stdin command and every env-delivered command gets an empty stdin. Explicit env delivery instead
+// puts the password in each command's PERSONA_SECRET. The run stops at the first command that exits non-zero, cannot
+// start or runs out of the run's time (its group is stopped: endGroup). A command whose output held the password
+// returns none of it (secretRedactor masks it as it is read, and counts). The password bytes are zeroed when the run
+// ends. Nothing here logs the params, the password or the output (docs/assistant/assistant.md "Password card").
 
 // secretRunGOOS is the system the node runs on (a variable so a test can play Windows).
 var secretRunGOOS = runtime.GOOS
@@ -58,6 +59,9 @@ func (n *Node) secretRun(ctx context.Context, params json.RawMessage) (any, erro
 	if err != nil {
 		return nil, errors.New("secret.run: bad params") // the decoder's error is not repeated: it may quote them
 	}
+	if err := checkSecretRunDelivery(p.Delivery); err != nil {
+		return nil, err
+	}
 	if secretRunGOOS == "windows" {
 		return nil, errors.New("secret.run: this computer runs Windows, which has no sudo -S to give the password to")
 	}
@@ -67,12 +71,16 @@ func (n *Node) secretRun(ctx context.Context, params json.RawMessage) (any, erro
 	if err := checkSecretRun(p); err != nil {
 		return nil, err
 	}
+	delivery := p.Delivery
+	if delivery == "" {
+		delivery = proto.SecretRunDeliveryStdin
+	}
 	timeout := time.Duration(p.TimeoutMS) * time.Millisecond
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	results := make([]proto.SecretRunResult, 0, len(p.Commands))
 	for _, c := range p.Commands {
-		r, inTime := runSecretCommand(rctx, n.home, c, p.Password)
+		r, inTime := runSecretCommand(rctx, n.home, c, p.Password, delivery)
 		if ctx.Err() != nil { // the caller went away (the connection ended): nobody is left to answer
 			return nil, errors.New("secret.run: interrupted, the commands were stopped")
 		}
@@ -85,6 +93,15 @@ func (n *Node) secretRun(ctx context.Context, params json.RawMessage) (any, erro
 		}
 	}
 	return proto.SecretRunAnswer{Results: results}, nil
+}
+
+func checkSecretRunDelivery(delivery string) error {
+	switch delivery {
+	case "", proto.SecretRunDeliveryStdin, proto.SecretRunDeliveryEnv:
+		return nil
+	default:
+		return fmt.Errorf("secret.run: delivery %q is not supported", delivery)
+	}
 }
 
 // checkSecretRun refuses a run outside the limits the tool keeps to as well.
@@ -113,16 +130,17 @@ func checkSecretRun(p proto.SecretRunParams) error {
 	return nil
 }
 
-// runSecretCommand runs one command until it exits or ctx ends (endGroup), the password on its stdin when it runs
-// sudo -S (proto.SecretRunSudo.GetsPassword). inTime is false when ctx's deadline had passed before the command could
-// start: the commands before it used up the run's time, and nothing ran.
-func runSecretCommand(ctx context.Context, home, command string, password []byte) (res proto.SecretRunResult, inTime bool) {
+// runSecretCommand runs one command until it exits or ctx ends (endGroup). With stdin delivery, only sudo -S gets the
+// password on stdin (proto.SecretRunSudo.GetsPassword). With explicit env delivery every command gets PERSONA_SECRET
+// and empty stdin. inTime is false when ctx's deadline had passed before the command could start: the commands before
+// it used up the run's time, and nothing ran.
+func runSecretCommand(ctx context.Context, home, command string, password []byte, delivery string) (res proto.SecretRunResult, inTime bool) {
 	res = proto.SecretRunResult{Command: command, ExitCode: -1}
 	out := newSecretRedactor(password, secretRunKeep)
 	defer out.zero()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = home
-	cmd.Env = secretRunEnv()
+	cmd.Env = secretRunEnv(password, delivery)
 	killGroupOnCancel(cmd) // its own session and group
 	// When ctx ends the group gets SIGTERM: sudo passes it on to the command it runs as root, which this user cannot
 	// signal (SIGKILL would end sudo alone). Wait gives it secretRunGrace, then endGroup kills what is left.
@@ -143,7 +161,7 @@ func runSecretCommand(ctx context.Context, home, command string, password []byte
 	cmd.Stdout, cmd.Stderr = out, out
 	var stdin io.WriteCloser
 	var err error
-	if proto.SecretRunSudoOf(command).GetsPassword() {
+	if delivery != proto.SecretRunDeliveryEnv && proto.SecretRunSudoOf(command).GetsPassword() {
 		stdin, err = cmd.StdinPipe()
 	} // else cmd.Stdin stays nil: /dev/null
 	if err == nil {
@@ -204,13 +222,19 @@ func endGroup(pid int, graceEnds time.Time) {
 	osproc.SweepGroup(pid, secretRunSweep)
 }
 
-// secretRunEnv is the node's environment with PATH proto.SecretRunPath.
-func secretRunEnv() []string {
+// secretRunEnv is the node's environment with PATH proto.SecretRunPath. Only explicit env delivery replaces
+// PERSONA_SECRET for the child; stdin delivery leaves the rest of the inherited environment byte for byte unchanged,
+// and the node process itself never gets the typed password.
+func secretRunEnv(password []byte, delivery string) []string {
 	env := []string{"PATH=" + proto.SecretRunPath}
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "PATH=") {
+		if !strings.HasPrefix(kv, "PATH=") &&
+			(delivery != proto.SecretRunDeliveryEnv || !strings.HasPrefix(kv, proto.SecretRunEnvironment+"=")) {
 			env = append(env, kv)
 		}
+	}
+	if delivery == proto.SecretRunDeliveryEnv {
+		env = append(env, proto.SecretRunEnvironment+"="+string(password))
 	}
 	return env
 }

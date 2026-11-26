@@ -293,15 +293,210 @@ var processExecutable = func(pid int) string {
 	return p
 }
 
+// packageProcessIdentity uses the runtime-sdk's marker format, not osproc's native identity string: both languages
+// must reach the same conclusion about a lock or lease written by the other. Empty means the OS gave no safe reading.
+func packageProcessIdentity(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return ""
+		}
+		text := string(data)
+		end := strings.LastIndex(text, ") ")
+		if end < 0 {
+			return ""
+		}
+		fields := strings.Fields(text[end+2:])
+		if len(fields) < 20 {
+			return ""
+		}
+		return fields[19]
+	}
+	args := []string{"-o", "lstart=", "-p", strconv.Itoa(pid)}
+	command := "ps"
+	if runtime.GOOS == "windows" {
+		command = "powershell.exe"
+		args = []string{"-NoProfile", "-NonInteractive", "-Command", fmt.Sprintf(`(Get-Process -Id %d).StartTime.ToUniversalTime().ToString("o")`, pid)}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = setEnvVar(setEnvVar(os.Environ(), "TZ", "UTC"), "LC_ALL", "C")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(string(out)), " ")
+}
+
+func packageProcessMatchesLease(pid int, marker string) bool {
+	if !osproc.Alive(pid) {
+		return false
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		return true // An unreadable marker is not safe to reclaim.
+	}
+	recorded := strings.TrimSpace(string(data))
+	if recorded == "" {
+		return true // Compatibility with the first PID-only lease format.
+	}
+	current := packageProcessIdentity(pid)
+	return current == "" || current == recorded // Unknown OS details fail closed; a proved mismatch is stale.
+}
+
+// packageVersionActive reads the runtime-sdk's process leases. Unknown or unreadable markers preserve the version.
+func packageVersionActive(dir, version string) bool {
+	entries, err := os.ReadDir(filepath.Join(dir, ".active", version))
+	if err != nil {
+		return !errors.Is(err, os.ErrNotExist)
+	}
+	for _, entry := range entries {
+		pidText, _, ok := strings.Cut(entry.Name(), "-")
+		pid, err := strconv.Atoi(pidText)
+		if !ok || err != nil || pid <= 0 || packageProcessMatchesLease(pid, filepath.Join(dir, ".active", version, entry.Name())) {
+			return true
+		}
+	}
+	return false
+}
+
+// lockPackageStore uses the runtime-sdk's lock directory and owner format. Go writers and JavaScript lease registration
+// therefore cannot prune a generation between its existence check and its lease write. A live foreign owner makes the
+// supervised bridge retry; a dead owner's marker is safe to reclaim while this process holds no lock of its own.
+func lockPackageStore(dir string) (func(), error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	random, err := randomHex(8)
+	if err != nil {
+		return nil, err
+	}
+	lock := filepath.Join(dir, ".install.lock")
+	owner := fmt.Sprintf("%d-%s", os.Getpid(), random)
+	ownerPath := filepath.Join(lock, owner)
+	for attempt := 0; attempt < 8; attempt++ {
+		err := os.Mkdir(lock, 0o700)
+		if err == nil {
+			if err := os.WriteFile(ownerPath, []byte(packageProcessIdentity(os.Getpid())), 0o600); err != nil {
+				_ = os.Remove(lock)
+				return nil, err
+			}
+			owners, err := os.ReadDir(lock)
+			if err != nil || len(owners) != 1 || owners[0].Name() != owner {
+				_ = os.Remove(ownerPath)
+				_ = os.Remove(lock)
+				if err != nil {
+					return nil, err
+				}
+				return nil, errors.New("runtime package store lock ownership changed")
+			}
+			return func() {
+				_ = os.Remove(ownerPath)
+				_ = os.Remove(lock)
+			}, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		owners, err := os.ReadDir(lock)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		stale := len(owners) > 0
+		for _, entry := range owners {
+			pidText, _, ok := strings.Cut(entry.Name(), "-")
+			pid, parseErr := strconv.Atoi(pidText)
+			if !ok || parseErr != nil || pid <= 0 || packageProcessMatchesLease(pid, filepath.Join(lock, entry.Name())) {
+				stale = false
+				break
+			}
+		}
+		if len(owners) == 0 {
+			if st, statErr := os.Stat(lock); statErr == nil && time.Since(st.ModTime()) > 30*time.Second {
+				if err := os.Remove(lock); err == nil || errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+			}
+		} else if stale {
+			for _, entry := range owners {
+				_ = os.Remove(filepath.Join(lock, entry.Name()))
+			}
+			// A new owner's marker makes this fail. Acquirers also verify sole ownership after publishing.
+			if err := os.Remove(lock); err == nil || errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+		}
+		return nil, errors.New("runtime package store is busy")
+	}
+	return nil, errors.New("runtime package store is busy")
+}
+
+// releasePackageReservations drops this node's startup-only reservations for older generations. Unix exec upgrades
+// keep both PID and start time, so liveness alone cannot make those reservations stale.
+func releasePackageReservations(dir, keep string) {
+	entries, _ := os.ReadDir(filepath.Join(dir, ".active"))
+	marker := fmt.Sprintf("%d-0000000000000000", os.Getpid())
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != keep {
+			lease := filepath.Join(dir, ".active", entry.Name())
+			_ = os.Remove(filepath.Join(lease, marker))
+			_ = os.Remove(lease) // Nonempty while a companion holds its own lease.
+		}
+	}
+}
+
+// reservePackageVersion pins a built-in generation to this node process before its companion starts. The companion
+// releases it after registering; a new embedded hash also releases older reservations (including across Unix exec).
+func reservePackageVersion(dir, version string) error {
+	releasePackageReservations(dir, version)
+	lease := filepath.Join(dir, ".active", version)
+	if err := os.MkdirAll(lease, 0o700); err != nil {
+		return err
+	}
+	marker := filepath.Join(lease, fmt.Sprintf("%d-0000000000000000", os.Getpid()))
+	return os.WriteFile(marker, []byte(packageProcessIdentity(os.Getpid())), 0o600)
+}
+
+func prunePackageVersions(dir, keep string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != keep && !strings.HasPrefix(e.Name(), ".") && !packageVersionActive(dir, e.Name()) {
+			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+			_ = os.RemoveAll(filepath.Join(dir, ".active", e.Name()))
+		}
+	}
+}
+
 // writePackage writes a package's files out under dir/<hash> once (a version written before is reused) and returns
 // that directory. Written beside and renamed in, so a half-written version is never run.
 func writePackage(dir string, pkg *runtimepkg.Package) (string, error) {
+	return writePackageWithReservation(dir, pkg, false)
+}
+
+// writePackageWithReservation is writePackage plus a node-owned lease for a companion that registers itself after exec.
+func writePackageWithReservation(dir string, pkg *runtimepkg.Package, reserve bool) (string, error) {
+	unlock, err := lockPackageStore(dir)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	final := filepath.Join(dir, pkg.Hash)
 	if st, err := os.Stat(final); err == nil && st.IsDir() {
+		if !reserve {
+			return final, nil
+		}
+		if err := reservePackageVersion(dir, pkg.Hash); err != nil {
+			return "", err
+		}
+		prunePackageVersions(dir, pkg.Hash)
 		return final, nil
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
 	}
 	tmp, err := os.MkdirTemp(dir, ".write-")
 	if err != nil {
@@ -323,13 +518,13 @@ func writePackage(dir string, pkg *runtimepkg.Package) (string, error) {
 	if err := os.Rename(tmp, final); err != nil && !dirExists(final) {
 		return "", err
 	}
-	// Older versions go; the one written now stays.
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if e.IsDir() && e.Name() != pkg.Hash && !strings.HasPrefix(e.Name(), ".") {
-			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+	if reserve {
+		if err := reservePackageVersion(dir, pkg.Hash); err != nil {
+			return "", err
 		}
 	}
+	// Older idle versions go; the one written now and generations with live companion leases stay.
+	prunePackageVersions(dir, pkg.Hash)
 	return final, nil
 }
 
@@ -480,8 +675,8 @@ var paseoBridgeCommand = func(ctx context.Context, rh *RuntimeHost) (*exec.Cmd, 
 		return nil, err
 	}
 	rh.logger.Printf("paseo bridge: Node.js %s, %s: %s", js.Version, js.From, js.Path)
-	cmd := exec.Command(js.Path, paseoBridgeArgs(dir, rh.path, home)...)
-	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path))
+	cmd := exec.Command(js.Path, paseoBridgeArgs(dir, rh.dialPath(), rh.mcpConfig(), home)...)
+	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.dialPath()))
 	cmd.Dir = dir
 	return cmd, nil
 }
@@ -489,9 +684,9 @@ var paseoBridgeCommand = func(ctx context.Context, rh *RuntimeHost) (*exec.Cmd, 
 // paseoBridgeArgs is the bridge's command line after the JavaScript runtime. The node's mcp.json (beside the runtime
 // socket) is what the bridge gives each new Agent as its Persona tools, and of those the Agent's own run without a card
 // (--allow-tools: agentAllowedTools without the office rule, which the bridge's Agents do not get).
-func paseoBridgeArgs(dir, socket, home string) []string {
+func paseoBridgeArgs(dir, socket, mcpConfig, home string) []string {
 	return []string{filepath.Join(dir, "paseo", "bridge.mjs"), "--socket", socket, "--paseo-home", home,
-		"--mcp-config", filepath.Join(filepath.Dir(socket), "mcp.json"),
+		"--mcp-config", mcpConfig,
 		"--allow-tools", strings.Join(compat.MCPAllowedToolNames(assistantwire.AgentOwnTools, true), ",")}
 }
 

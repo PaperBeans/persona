@@ -63,3 +63,41 @@ test('production adapter handles invalid input and has no release fallback', asy
     assert.throws(() => adapter.project(nativeInput(cases[0])), /invalid_core_projection|Unexpected/);
   } finally { await host.end(); }
 });
+
+test('phone source chips count and filter the same search-scoped native inventory across hubs', async () => {
+  const host = new HostCore(helperPath);
+  const adapter = new CoreAgentListAdapter();
+  const row = (hub, id, pane, title = 'weather') => ({
+    app_hub_group: hub, manager: 'owner', machine_id: 'm', session_id: id, pane_id: pane, title,
+    state: 'working', cwd: '/work', updated_at: '2026-01-01T00:01:00Z',
+  });
+  const raw = [row('a', 'same', 'herdr-core:p1'), row('b', 'same', 'botmux:p2'), row('a', 'orca', 'orca:p3'),
+    row('a', 'bare', 'other:p4'), row('a', 'no-pane', ''), row('a', 'other', 'rex:p5', 'unrelated')];
+  const input = nativeInput({input: {sessions: raw, machines: [], pins: {spaces: [], sessions: []},
+    mutes: {spaces: [], sessions: [], allowed: []}, settings: {grouping: 'state', quick: 'all', machine_filter: '',
+      query: 'weather', kept: [], include_filter_counts: true}}});
+  input.includeSourceFilters = true;
+  input.rows.forEach((entry) => {entry.id = [entry.raw.app_hub_group, entry.raw.manager, entry.raw.machine_id, entry.raw.session_id].join('|');});
+  const base = coreAgentSortInput(input);
+  base.settings.inventory = true;
+  const outputs = new Map();
+  try {
+    for (const sessions of [base.sessions, [base.sessions[0], base.sessions[3]], [base.sessions[1]]]) {
+      const req = {...base, sessions};
+      outputs.set(JSON.stringify(req), JSON.stringify(await host.sort(req)));
+    }
+    globalThis.coreProjectSort = (encoded) => {
+      assert.ok(outputs.has(encoded), 'the production filter must use the search-scoped native sessions');
+      return outputs.get(encoded);
+    };
+    for (const [selected, expected] of [['all', ['a|owner|m|same', 'b|owner|m|same', 'a|owner|m|orca', 'a|owner|m|bare', 'a|owner|m|no-pane']],
+      ['terminal', ['a|owner|m|same', 'a|owner|m|bare']], ['feishu', ['b|owner|m|same']]]) {
+      const projection = adapter.project({...input, quick: selected});
+      assert.deepEqual(new Set(projection.filtered), new Set(expected));
+      assert.equal(projection.filter_counts.terminal, 2);
+      assert.equal(projection.filter_counts.feishu, 1);
+    }
+  } finally {
+    await host.end();
+  }
+});

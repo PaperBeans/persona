@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stripAnsi } from "./ansi";
+import { parseAnsi, stripAnsi } from "./ansi";
 
 // Text a terminal wrote must read as plain text: no colour, no prompt records, no control bytes; line structure kept.
 describe("stripAnsi", () => {
@@ -60,5 +60,26 @@ describe("stripAnsi", () => {
     expect(stripAnsi("before\u001b]1337;CurrentDir=/Users/dev")).toBe("before");
     expect(stripAnsi("\u001b]1337;CurrentDir=/Users/dev\nError: no such file")).toBe("\nError: no such file");
     expect(stripAnsi("\u009d1337;CurrentDir=/Users/dev\nError: no such file")).toBe("\nError: no such file");
+  });
+});
+
+describe("parseAnsi", () => {
+  it("returns null for plain text without ESC", () => {
+    expect(parseAnsi("hello world\nline 2")).toBeNull();
+  });
+
+  it("parses foreground colors, bold/dim/italic/underline, and reset", () => {
+    const runs = parseAnsi("\u001b[1;32mPASS\u001b[0m plain \u001b[3;31mFAIL\u001b[39m end\u001b[0m");
+    expect(runs).toEqual([
+      { text: "PASS", fg: "text-green", bold: true },
+      { text: " plain " },
+      { text: "FAIL", fg: "text-red", italic: true },
+      { text: " end", italic: true },
+    ]);
+  });
+
+  it("strips non-SGR CSI sequences and skips extended 38;5/38;2 parameters", () => {
+    const runs = parseAnsi("\u001b[2K\u001b[38;5;208mwarn\u001b[0m \u001b[38;2;10;20;30mrgb\u001b[0m");
+    expect(runs).toEqual([{ text: "warn rgb" }]);
   });
 });

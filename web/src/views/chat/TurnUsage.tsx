@@ -30,7 +30,7 @@ const EDGE = 8;
 
 /** The bar's text after the time: cindy's 12 px, the time's color, 6 px after it, half a pixel down to line up with
  *  the icons; on the touch row it follows the row's own gap. */
-const TEXT = "relative top-[0.5px] inline-flex h-6 cursor-default items-center whitespace-nowrap text-[12px] text-ink-3";
+const TEXT = "relative top-[0.5px] inline-flex h-6 cursor-default items-center whitespace-nowrap text-[12px]";
 
 export function TurnUsage({ usage: key, ms, ttftMs, persona, touch, onOpen }: {
   /** lib/turn-usage.ts usageKey. */
@@ -109,7 +109,7 @@ function UsageTrigger({ label, lines, title, tip, touch, onOpen }: { label: stri
       <button
         ref={button}
         type="button"
-        className={cx(TEXT, touch ? "touch-hit" : "ml-1.5")}
+        className={cx(TEXT, touch ? "touch-hit text-ink-3" : "ml-1.5")}
         data-turn-usage={tip ? "tokens" : "cost"}
         aria-haspopup={tip ? undefined : "dialog"}
         aria-expanded={tip ? undefined : open}

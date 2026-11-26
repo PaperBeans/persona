@@ -391,4 +391,20 @@ describe("a session that lists its modes (#8261)", () => {
     expect(chip().textContent).toBe(t("lib-session-actions.mode_bypass_permissions"));
     expect(chip().className).toContain("text-red");
   });
+
+  it("opens its listed-modes menu when invoked via /permissions", () => {
+    act(() => root.render(<PermissionPicker session={grok()} />));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    let opened = false;
+    act(() => {
+      opened = requestPermissionPicker("mac/g1");
+    });
+    expect(opened).toBe(true);
+    expect(rows().map((r) => r.textContent)).toEqual([
+      expect.stringContaining(t("lib-session-actions.mode_launcher_default")),
+      expect.stringContaining(t("lib-session-actions.mode_bypass_permissions")),
+    ]);
+    expect(rows()[0].getAttribute("aria-checked")).toBe("true");
+    expect(rows()[1].getAttribute("aria-checked")).toBe("false");
+  });
 });

@@ -10,7 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -212,7 +214,7 @@ func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
 	s.ownerVerifiesAll = true
 	f.judge = `{"changed":"飞书机器人多了任务进展开关","link":"https://hub.example.com/settings?tab=feishu","how":"打开设置看开关"}`
 	agentTurn(s, f, proto.StatusWorking, "", 0)
-	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
+	agentTurn(s, f, proto.StatusDone, deployedReply+"\n交付：已上线并实测", 0)
 	waitFor(t, "the 请验收 card", func() bool { a := askOf(s, todo.ID); return a != nil && a.MessageID != "" })
 	card := acceptCardOf(posts())
 	top, lines := strings.Index(card, "✅ 做完了：已部署，按下面验收"), strings.Index(card, "改了什么")
@@ -347,20 +349,22 @@ func TestBriefingSaysTheSameVerdictAsTheCard(t *testing.T) {
 	if len(cardsWith(posts(), botcard.EscapeMarkdown(verdict))) != 1 {
 		t.Fatalf("the card does not say %q", verdict)
 	}
-	facts := s.briefFactsAt(ctx, time.Now(), "")
-	body := facts.body(s, "早报")
-	var row *briefBodyRow
-	for i := range body.Accept {
-		if body.Accept[i].ID == todo.ID {
-			row = &body.Accept[i]
+	if s.briefingOn() {
+		facts := s.briefFactsAt(ctx, time.Now(), "")
+		body := s.briefBodyOf(facts, "早报")
+		var row *briefBodyRow
+		for i := range body.Accept {
+			if body.Accept[i].ID == todo.ID {
+				row = &body.Accept[i]
+			}
 		}
-	}
-	if row == nil || row.Verdict != verdict || row.Outcome != outcomeCannot {
-		t.Fatalf("the brief's row %+v", row)
-	}
-	card, _, _ := s.briefCard(facts, "早报", "")
-	if js := card.JSON(); !strings.Contains(js, botcard.EscapeMarkdown(verdict)) || !strings.Contains(js, "知道了") {
-		t.Fatalf("the briefing card does not say it:\n%s", js)
+		if row == nil || row.Verdict != verdict || row.Outcome != outcomeCannot {
+			t.Fatalf("the brief's row %+v", row)
+		}
+		card, _, _ := s.briefCard(facts, "早报", "")
+		if js := card.JSON(); !strings.Contains(js, botcard.EscapeMarkdown(verdict)) || !strings.Contains(js, "知道了") {
+			t.Fatalf("the briefing card does not say it:\n%s", js)
+		}
 	}
 	var onBoard bool
 	for _, r := range s.boardRows(ctx, s.botLang(ctx), s.webBase(ctx), time.Now()) {
@@ -397,7 +401,7 @@ func TestRecommendationThatCannotReachTheAgentIsNotTaken(t *testing.T) {
 	notTaken := i18n.T(s.botLang(ctx), "assistant-reports.accept_not_taken", i18n.Args{"error": "node down"})
 	press := &botcard.CardAction{}
 	press.Action.Value = map[string]any{"a": "accept", "id": todo.ID}
-	if r := s.botCardAction(ctx, press, ""); r == nil || r.Toast == nil ||
+	if r := s.larkModule().Action(ctx, press, ""); r == nil || r.Toast == nil ||
 		r.Toast.Type != "error" || r.Toast.Content != notTaken {
 		t.Fatalf("the Lark button: %+v", r)
 	}
@@ -687,19 +691,14 @@ func TestDecisionAnsweredInWordsStaysDecidedWhenTheSendFails(t *testing.T) {
 func TestFeishuConclusionQuestionGoesToSupervisorWithoutAnswering(t *testing.T) {
 	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, false)
-	ctx := t.Context()
 	waitsForReview(t, s, f, todo.ID, "Two options: start with ten percent or defer the rollout.")
 	reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "Which rollout do you want?", "recommend": "Start with ten percent"})
 	a := askOf(s, todo.ID)
-	status, err := s.feishuStatus(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	before := len(sentToAgent(f))
 	var ev botcard.MessageEvent
 	ev.Message.ChatType, ev.Message.ParentID, ev.Message.MessageType = "p2p", a.MessageID, "text"
 	ev.Message.MessageID, ev.Message.Content = "om_background", `{"text":"能补充一下这个决定的背景吗"}`
-	s.feishuMessage(ev, status, "")
+	feishuSay(t, s, f, nil, ev, "")
 	task := todoNow(s, todo.ID)
 	if got := askOf(s, todo.ID); got == nil || !got.AcceptedAt.IsZero() || task.Supervision.State != reviewNeedsUser ||
 		task.DoneAt != nil || len(sentToAgent(f)) != before {
@@ -711,12 +710,248 @@ func TestFeishuConclusionQuestionGoesToSupervisorWithoutAnswering(t *testing.T) 
 	}
 	// The existing option still answers this exact card after the clarification.
 	ev.Message.MessageID, ev.Message.Content = "om_choice", `{"text":"B"}`
-	s.feishuMessage(ev, status, "")
+	feishuSay(t, s, f, nil, ev, "")
 	if got := askOf(s, todo.ID); got == nil || got.AcceptedAt.IsZero() {
 		t.Fatalf("explicit option did not answer: %+v", got)
 	}
 	sends := sentToAgent(f)[before:]
 	if len(sends) != 1 || !strings.Contains(sends[0], "先不动") {
 		t.Fatalf("agent got %v, want just the selected option", sends)
+	}
+}
+
+// Verification asks (!a.Conclusion) reflect the to-do's effective delivery state across locales and every surface
+// (Lark card, GET /todos ask, briefing feed, briefing card, snapshot), while preserving empty outcome (#14539).
+func TestConclusionVerificationCopyFollowsDeliveryState(t *testing.T) {
+	verifyAsk := &acceptAsk{}
+	for _, tc := range []struct {
+		name     string
+		lang     i18n.Lang
+		delivery *TodoDelivery
+		want     string
+	}{
+		{"zh live", i18n.ZhHans, &TodoDelivery{State: deliveryLive}, "✅ 做完了：已部署，按下面验收"},
+		{"zh pr", i18n.ZhHans, &TodoDelivery{State: deliveryPR}, "✅ 做完了：停在 PR，未部署，按下面验收"},
+		{"zh merged", i18n.ZhHans, &TodoDelivery{State: deliveryMerged}, "✅ 做完了：已合未部署，按下面验收"},
+		{"zh off", i18n.ZhHans, &TodoDelivery{State: deliveryOff}, "✅ 做完了：已部署但默认关着，按下面验收"},
+		{"zh none", i18n.ZhHans, &TodoDelivery{State: deliveryNone}, "✅ 做完了：请验收结果"},
+		{"zh nil", i18n.ZhHans, nil, "✅ 做完了：请验收结果"},
+		{"en live", i18n.En, &TodoDelivery{State: deliveryLive}, "✅ Done: deployed, check it below"},
+		{"en pr", i18n.En, &TodoDelivery{State: deliveryPR}, "✅ Done: PR open, not deployed yet; check it below"},
+		{"en merged", i18n.En, &TodoDelivery{State: deliveryMerged}, "✅ Done: merged, not deployed yet; check it below"},
+		{"en off", i18n.En, &TodoDelivery{State: deliveryOff}, "✅ Done: deployed, off by default; check it below"},
+		{"en none", i18n.En, &TodoDelivery{State: deliveryNone}, "✅ Done: please verify the result below"},
+		{"en nil", i18n.En, nil, "✅ Done: please verify the result below"},
+		{"ja live", i18n.Ja, &TodoDelivery{State: deliveryLive}, "✅ 完了：デプロイ済み。下の手順で確認してください"},
+		{"ja pr", i18n.Ja, &TodoDelivery{State: deliveryPR}, "✅ 完了：PR で停止中・未デプロイ。下の手順で確認してください"},
+		{"ja merged", i18n.Ja, &TodoDelivery{State: deliveryMerged}, "✅ 完了：マージ済み・未デプロイ。下の手順で確認してください"},
+		{"ja off", i18n.Ja, &TodoDelivery{State: deliveryOff}, "✅ 完了：デプロイ済み・既定でオフ。下の手順で確認してください"},
+		{"ja none", i18n.Ja, &TodoDelivery{State: deliveryNone}, "✅ 完了：結果を確認してください"},
+		{"ja nil", i18n.Ja, nil, "✅ 完了：結果を確認してください"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdictText(tc.lang, verifyAsk, tc.delivery); got != tc.want {
+				t.Fatalf("verdictText(%q, %+v) = %q, want %q", tc.lang, tc.delivery, got, tc.want)
+			}
+		})
+	}
+	// A conclusion keeps its own reason regardless of delivery state.
+	concl := &acceptAsk{Conclusion: true, Outcome: outcomeDone, Reason: "已完成方案"}
+	if got := verdictText(i18n.ZhHans, concl, &TodoDelivery{State: deliveryMerged}); got != "✅ 做完了：已完成方案" {
+		t.Fatalf("conclusion verdictText = %q", got)
+	}
+
+	// End-to-end: accepted + user_check with delivery.state=merged under default delivery_gate=merged must never
+	// claim "已部署，按下面验收" on any surface, and must keep Outcome == "".
+	needsLarkLayer(t)
+	s, f, todo, posts, _ := conclusionService(t, false)
+	ctx := t.Context()
+	s.setTaskDelivery(ctx, todo.ID, TodoDelivery{State: deliveryMerged, Gate: "等待部署", Unblock: unblockOther, At: time.Now().UTC()})
+	waitsForReview(t, s, f, todo.ID, "PR 已合并，等待部署。")
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":    "accepted",
+		"user_check": true,
+		"note":       "合并完成，请验收",
+		"checks":     completeReviewChecks(todoNow(s, todo.ID)),
+	})
+	waitFor(t, "user_check accept card", func() bool { a := askOf(s, todo.ID); return a != nil && a.MessageID != "" })
+
+	const wantVerdict = "✅ 做完了：已合未部署，按下面验收"
+	const forbidden = "已部署，按下面验收"
+
+	// 1. Lark accept card
+	card := acceptCardOf(posts())
+	if !strings.Contains(card, wantVerdict) || strings.Contains(card, forbidden) {
+		t.Fatalf("accept card verdict mismatch:\n%s", card)
+	}
+
+	// 2. todoAsks (GET /api/v1/todos) preserves empty Outcome and AskedAt
+	asks := s.todoAsks(ctx)
+	gotAsk, ok := asks[todo.ID]
+	if !ok {
+		t.Fatalf("todoAsks missing %s", todo.ID)
+	}
+	if gotAsk.Verdict != wantVerdict || gotAsk.Outcome != "" || gotAsk.AskedAt.IsZero() {
+		t.Fatalf("todoAsks[%s] = %+v, want verdict=%q outcome=\"\" non-zero asked_at", todo.ID, gotAsk, wantVerdict)
+	}
+
+	// 3. Briefing feed and briefing card
+	facts := s.briefFactsAt(ctx, time.Now(), "")
+	body := s.briefBodyOf(facts, "早报")
+	var row *briefBodyRow
+	for i := range body.Accept {
+		if body.Accept[i].ID == todo.ID {
+			row = &body.Accept[i]
+		}
+	}
+	if row == nil || row.Verdict != wantVerdict || row.Outcome != "" {
+		t.Fatalf("brief body row = %+v, want verdict=%q outcome=\"\"", row, wantVerdict)
+	}
+	briefCard, _, _ := s.briefCard(facts, "早报", "")
+	if js := briefCard.JSON(); !strings.Contains(js, botcard.EscapeMarkdown(wantVerdict)) || strings.Contains(js, forbidden) {
+		t.Fatalf("brief card verdict mismatch:\n%s", js)
+	}
+
+	// 4. Snapshot
+	snap, total := s.snapshotUnaccepted(ctx, s.location(ctx))
+	if total != 1 || len(snap) != 1 || snap[0].Verdict != wantVerdict {
+		t.Fatalf("snapshotUnaccepted = (%+v, %d), want verdict=%q", snap, total, wantVerdict)
+	}
+
+	// 5. Effective delivery (currentDelivery): a recorded pr hold promoted to merged by polled PR facts uses merged copy.
+	prURL := "https://github.com/o/r/pull/42"
+	now := time.Now().UTC()
+	s.setTaskStage(ctx, todo.ID, "review", prURL)
+	s.setTaskDelivery(ctx, todo.ID, TodoDelivery{State: deliveryPR, Gate: "等待合入", Unblock: unblockOther, At: now.Add(-time.Minute)})
+	if err := s.applyPRStatus(ctx, todoNow(s, todo.ID), TodoPRStatus{URL: prURL, State: "merged", CheckedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.todoAsks(ctx)[todo.ID].Verdict; got != wantVerdict {
+		t.Fatalf("currentDelivery-promoted verdict = %q, want %q", got, wantVerdict)
+	}
+}
+
+// askConclusion preserves a needs_user decision's Reason up to readDecision's 200-rune limit instead of re-clipping it
+// to 120 runes (#14659), while still capping values beyond 200 runes at 200.
+func TestAskConclusionPreservesDecisionReasonUpTo200Runes(t *testing.T) {
+	s, f, todo, _, _ := conclusionService(t, false)
+	waitsForReview(t, s, f, todo.ID, "MR is ready and waiting on reviewer assignment.")
+	reason180 := strings.Repeat("a", 180)
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":   "needs_user",
+		"reason":    reason180,
+		"recommend": "Assign reviewers now",
+	})
+	a := askOf(s, todo.ID)
+	if a == nil || a.Reason != reason180 {
+		t.Fatalf("decision reason clipped early: len=%d got=%q", utf8.RuneCountInString(a.Reason), a.Reason)
+	}
+	ask := listedAsk(t, s, todo.ID)
+	if ask == nil || ask["question"] != reason180 {
+		t.Fatalf("listed ask.question = %v, want 180-rune reason", ask["question"])
+	}
+
+	reason240 := strings.Repeat("b", 240)
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":   "needs_user",
+		"reason":    reason240,
+		"recommend": "Assign reviewers now",
+	})
+	a = askOf(s, todo.ID)
+	wantClipped := clip(reason240, decisionReasonMaxRunes)
+	if a == nil || a.Reason != wantClipped {
+		t.Fatalf("over-limit decision reason = %q (len=%d), want %q (len=%d)", a.Reason, utf8.RuneCountInString(a.Reason), wantClipped, utf8.RuneCountInString(wantClipped))
+	}
+}
+
+// conclusionLink follows the documented fallback order: explicit link -> stage PR / PRURL -> canonical saved
+// repository delivery PR/MR (skipping reference links) -> note/checks URL -> agent session -> to-do page (#14659).
+func TestConclusionLinkFallbackOrderIncludesRepositoryDeliveryPRs(t *testing.T) {
+	const (
+		explicitLink = "https://docs.example.com/decision/1"
+		stagePR      = "https://github.com/example/app/pull/42"
+		repoMR       = "https://gitlab.example.com/team/app/-/merge_requests/1468"
+		refPR        = "https://github.com/example/upstream/pull/99"
+		noteURL      = "https://docs.example.com/from-note"
+	)
+	st := &fakeTodoRepoStore{
+		planMemStore: &planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}},
+		repos:        map[string][]repository.TaskRepository{},
+	}
+	f := newFakeHub().withMachine()
+	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
+		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", PublicURL: "https://hub.example.com"}, nil
+	})
+	s := newServiceOn(t, f, st)
+	ctx := t.Context()
+	todo, err := s.createTodo(ctx, "Review MR", "Review delivery MR", "conv1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkTodoAgent(ctx, todo.ID, "box", "s1", "Review MR", "/code/app", "claude"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reference-only repo links do not override a URL in note/checks.
+	st.repos[todo.ID] = []repository.TaskRepository{{
+		RepoID: "repo_1",
+		Links: []repository.TaskLink{
+			{Kind: "issue", Number: "10", CanonicalURL: "https://github.com/example/app/issues/10", Role: repository.LinkRoleDelivery},
+			{Kind: "pull_request", Number: "99", CanonicalURL: refPR, Role: repository.LinkRoleReference},
+		},
+	}}
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Note: "See " + noteURL + "."}); got != noteURL {
+		t.Fatalf("reference PR should be skipped in favor of note URL: got %q, want %q", got, noteURL)
+	}
+
+	// Saved canonical repository delivery MR wins over note/checks URL and agent session link.
+	st.repos[todo.ID] = []repository.TaskRepository{{
+		RepoID: "repo_1",
+		Links: []repository.TaskLink{
+			{Kind: "pull_request", Number: "99", CanonicalURL: refPR, Role: repository.LinkRoleReference},
+			{Kind: "pull_request", Number: "1468", CanonicalURL: repoMR, Role: repository.LinkRoleDelivery},
+		},
+	}}
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Note: "See " + noteURL}); got != repoMR {
+		t.Fatalf("delivery repository MR fallback: got %q, want %q", got, repoMR)
+	}
+
+	// Empty role defaults to delivery (legacy saved links).
+	st.repos[todo.ID][0].Links[1].Role = ""
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Note: "See " + noteURL}); got != repoMR {
+		t.Fatalf("empty-role delivery repository MR fallback: got %q, want %q", got, repoMR)
+	}
+
+	// Stage PR takes precedence over repository delivery MR.
+	s.setTaskStage(ctx, todo.ID, "review", stagePR)
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Note: "See " + noteURL}); got != stagePR {
+		t.Fatalf("stage PR precedence: got %q, want %q", got, stagePR)
+	}
+
+	// Explicit in.Link takes precedence over stage PR.
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Link: explicitLink, Note: "See " + noteURL}); got != explicitLink {
+		t.Fatalf("explicit link precedence: got %q, want %q", got, explicitLink)
+	}
+
+	// Invalid explicit link (non-http scheme) is ignored and falls back cleanly.
+	if got := s.conclusionLink(ctx, todoNow(s, todo.ID), conclusionInput{Link: "javascript:alert(1)"}); got != stagePR {
+		t.Fatalf("invalid explicit link fallback: got %q, want %q", got, stagePR)
+	}
+
+	// With no PR, repo delivery link, or note URL: falls back to agent session link, then to-do page when no agent.
+	plainTodo, err := s.createTodo(ctx, "Plain task", "No PR yet", "conv1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkTodoAgent(ctx, plainTodo.ID, "box", "s1", "Plain task", "/code/app", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	cur := todoNow(s, plainTodo.ID)
+	if got := s.conclusionLink(ctx, cur, conclusionInput{}); got != "https://hub.example.com/s/box/s1" {
+		t.Fatalf("agent session fallback: got %q", got)
+	}
+	cur.Agents = nil
+	if got := s.conclusionLink(ctx, cur, conclusionInput{}); got != "https://hub.example.com/todos/"+plainTodo.ID {
+		t.Fatalf("todo page fallback: got %q", got)
 	}
 }

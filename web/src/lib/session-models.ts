@@ -15,7 +15,7 @@ import { sessionCan, stateOf } from "./format";
 import { runsAssistant, type AssistantLauncher } from "./assistant-chat";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
-  defaultModel, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
+  defaultModel, effortVariantBase, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, withoutEffortQualifier, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
 } from "./launcher-models";
 import { canSwitchModel, isCurrentModel, namesWholeModel, rowModelIds, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
@@ -234,7 +234,8 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
   const read = slot(Boolean(o.first)).then(async (done) => {
     try {
       if (scope.owner !== credentialOwner()) return;
-      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager });
+      // This read owns a queued generation; the per-key cache above, not an older GET, coalesces its callers.
+      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager, dedupe: false });
       for (const id of hidden) {
         if (r?.models.some((m) => m.id === id && m.custom)) {
           forgetting.get(sharedKey)?.get(id)?.restore.set(key, withoutCustom(r, id).restore);
@@ -357,7 +358,7 @@ export const ENGINE_SWITCH_FEATURE = "engine_switch";
 export function engineSwitchable(s: Session): boolean {
   const engine = sessionEngine(s);
   if (engine === "claude") return !s.source_kind && canSwitchModel(s);
-  return engine === "codex" && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
+  return (engine === "codex" || engine === "agy") && !s.assistant && !s.source_kind && Boolean(s.pane_id) && sessionCan(s, "send") && stateOf(s) !== "offline";
 }
 
 /** What the pill and the panel can change on the session now: its model (Claude Code in a terminal, a runtime that says
@@ -387,9 +388,12 @@ export function modelLabel(id: string): string {
   return claude !== trimmed ? claude : modelName({ id: trimmed });
 }
 
-export function pillModel(models: AgentModel[], active: string | undefined, fallback = active): string | undefined {
-  const row = currentModelRow(models, active);
-  return row && namesWholeModel(row, active) ? modelName(row) : fallback ? modelLabel(fallback) : undefined;
+export function pillModel(row: AgentModel | undefined, active: string | undefined, fallback = active): Pick<PillSetup, "model" | "effort"> {
+  if (!row || !namesWholeModel(row, active)) return { model: fallback ? modelLabel(fallback) : undefined };
+  const base = effortVariantBase(row.id, row.default_effort);
+  if (!base) return { model: modelName(row) };
+  const name = row.name?.trim() || row.id;
+  return { model: name === row.id ? modelLabel(base) : withoutEffortQualifier(name), effort: row.default_effort };
 }
 
 /** One setup as the pill draws it. */
@@ -447,10 +451,9 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
 }
 
 export function pillView(s: Session, e: ModelList, displayModel?: string): PillView {
-  const model = pillModel(e.list?.models ?? [], s.model || displayModel);
-  const out: PillView = { engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
+  const active = s.model || displayModel;
+  const out: PillView = { ...pillModel(currentModelRow(e.list?.models ?? [], active), active), engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
   if (s.agent_label) out.engineLabel = s.agent_label;
-  if (model) out.model = model;
   if (s.effort) out.effort = s.effort;
   if (s.service_tier === "priority") out.fast = true;
   return out;

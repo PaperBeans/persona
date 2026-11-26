@@ -2,7 +2,9 @@ package node
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -18,6 +20,17 @@ func TestCodexRewindPreservesNativePaneOperations(t *testing.T) {
 				waitFor(t, "joined", func() bool { return n.codexJoined(remoteRaw) })
 			} else {
 				n = remoteTestNode(t)
+				// A terminal pane is bound to its raw thread only with the thread's rollout found (#13827,
+				// codexPaneOwner); a bound pane without one is listed as unavailable. Give it the rollout it was bound by.
+				now := time.Now()
+				writeRollout(t, n.home, remoteRaw, n.home, now, now, event("task_started"))
+				rollouts, err := filepath.Glob(filepath.Join(n.codexHome(), "sessions", "*", "*", "*", "rollout-*-"+remoteRaw+".jsonl"))
+				if err != nil || len(rollouts) != 1 {
+					t.Fatalf("rollout: %v %v", rollouts, err)
+				}
+				n.mu.Lock()
+				n.paths[remoteRaw] = rollouts[0]
+				n.mu.Unlock()
 			}
 			n.mu.Lock()
 			n.agents[remoteRaw] = host.Agent{Agent: "codex", PaneID: "w1:p1", Cwd: n.home, AgentStatus: proto.StatusWorking}

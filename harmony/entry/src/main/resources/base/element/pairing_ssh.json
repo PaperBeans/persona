@@ -1,0 +1,140 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_ssh_title",
+      "value": "SSH Tunnel"
+    },
+    {
+      "name": "phone_pair_ssh_server",
+      "value": "SSH server"
+    },
+    {
+      "name": "phone_pair_ssh_key_help",
+      "value": "Use the private key authorized on the SSH server. Its SHA-256 host fingerprint is confirmed before authentication."
+    },
+    {
+      "name": "phone_pair_ssh_tls_pin",
+      "value": "Hub TLS fingerprint"
+    },
+    {
+      "name": "phone_pair_ssh_tls_help",
+      "value": "Use the HTTPS Hub address on the pairing form. A pairing link supplies the Hub TLS public-key fingerprint (SPKI). For a typed address enter the 43-character fingerprint from the same Hub."
+    },
+    {
+      "name": "phone_pair_ssh_this_key",
+      "value": "This device’s public key"
+    },
+    {
+      "name": "phone_pair_ssh_copy_key",
+      "value": "Copy public key"
+    },
+    {
+      "name": "phone_pair_ssh_copy_restricted",
+      "value": "Copy authorized_keys line"
+    },
+    {
+      "name": "phone_pair_ssh_public_help",
+      "value": "Add the restricted line to the SSH server’s authorized_keys file to permit forwarding only to the Hub target. The private key stays on this device."
+    },
+    {
+      "name": "phone_pair_ssh_import",
+      "value": "Use an existing private key"
+    },
+    {
+      "name": "phone_pair_ssh_use_device",
+      "value": "Use this device’s key"
+    },
+    {
+      "name": "phone_pair_ssh_copied",
+      "value": "Copied"
+    },
+    {
+      "name": "phone_pair_ssh_saved_key",
+      "value": "Pinned server fingerprint"
+    },
+    {
+      "name": "phone_pair_ssh_presented_key",
+      "value": "Presented fingerprint"
+    },
+    {
+      "name": "phone_pair_ssh_key_changed",
+      "value": "SSH server fingerprint changed"
+    },
+    {
+      "name": "phone_pair_ssh_confirm_peer",
+      "value": "Check the fingerprint against the server’s host public key before trusting it."
+    },
+    {
+      "name": "phone_pair_ssh_trust_replacement",
+      "value": "Trust new fingerprint"
+    },
+    {
+      "name": "phone_pair_ssh_trust",
+      "value": "Trust and save"
+    },
+    {
+      "name": "phone_pair_ssh_testing",
+      "value": "Testing…"
+    },
+    {
+      "name": "phone_pair_ssh_remove_title",
+      "value": "Delete SSH tunnel?"
+    },
+    {
+      "name": "phone_pair_ssh_remove_help",
+      "value": "This removes the tunnel settings. Remove the authorized_keys line on the server separately if you want to revoke its permission."
+    },
+    {
+      "name": "phone_pair_ssh_target",
+      "value": "Tunnel Target"
+    },
+    {
+      "name": "phone_pair_ssh_target_address",
+      "value": "Address"
+    },
+    {
+      "name": "phone_pair_ssh_target_help",
+      "value": "Enter the Hub address as seen from the SSH server. Both services on the same machine normally use 127.0.0.1:18660."
+    },
+    {
+      "name": "phone_pair_ssh_always",
+      "value": "Always Use SSH"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_help",
+      "value": "When off, this device tries the Hub directly and uses SSH if the Hub is unreachable."
+    },
+    {
+      "name": "phone_pair_ssh_direct_active",
+      "value": "Connected directly to the Hub"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_parent",
+      "value": "Connect to this address directly first, and use the SSH tunnel if that fails."
+    },
+    {
+      "name": "phone_pair_ssh_always_parent",
+      "value": "Always connect to this hub through the SSH tunnel."
+    },
+    {
+      "name": "phone_pair_ssh_host",
+      "value": "Host"
+    },
+    {
+      "name": "phone_pair_ssh_port",
+      "value": "Port"
+    },
+    {
+      "name": "phone_pair_ssh_user",
+      "value": "Username"
+    },
+    {
+      "name": "phone_pair_ssh_server_port",
+      "value": "SSH server port"
+    },
+    {
+      "name": "phone_pair_ssh_forward_port",
+      "value": "Tunnel destination port"
+    }
+  ]
+}

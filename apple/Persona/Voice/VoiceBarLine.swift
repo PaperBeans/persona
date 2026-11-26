@@ -99,6 +99,9 @@ nonisolated struct VoiceBarLine: Equatable, Sendable {
     static func make(phase: VoicePhase, link: VoiceLink, runs: [VoiceRun], session: Session?, cards: [Interaction],
                      muted: Bool, held: Bool = false, asking: String? = nil, notice: VoiceFailure? = nil, label: String,
                      dismissed: Set<String> = [], resendable: Set<String> = []) -> VoiceBarLine {
+        // A card its task's supervisor holds (`Interaction.supervisorHeld`) is the supervisor's, not the user's:
+        // neither asking, needing a tap, nor taking refused speech back as plan feedback.
+        let cards = cards.filter(\.answerableHere)
         let live = runs.filter { !dismissed.contains($0.id) && $0.state != .folded }
         // What did not go, while it is the latest word on it: a later instruction that went takes its place.
         if let last = live.last, [.refused, .failed, .unknown].contains(last.state) {

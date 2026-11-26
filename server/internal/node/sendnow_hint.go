@@ -17,12 +17,14 @@ import (
 // press (cmd, fn, a click) are quoted and nothing is pressed.
 
 // sendNowLineRE is a line ending in the send-now words: what comes before them (the keys, perhaps after the queued
-// message) and from the separator on. A gap or " · " may follow, for more hints on the line.
-var sendNowLineRE = lazyre.New(`(?i)^(.*?)(\s*(?:\bto|·|•|:|-|–|—|\||→)?\s*send\s+now)\s*\)?(?:\s*$|\s+·\s|\s{2,})`)
+// message) and from the separator on. A gap or " · " may follow, for more hints on the line. Matches both Claude
+// Code's "to send now" and Antigravity CLI's "(alt+m to send immediately)".
+var sendNowLineRE = lazyre.New(`(?i)^(.*?)(\s*(?:\bto|·|•|:|-|–|—|\||→)?\s*send\s+(?:now|immediately))\s*\)?(?:\s*$|\s+·\s|\s{2,})`)
 
 // hintStartRE is where the hint's keys start after other words on its line: the gap after a queued message the hint
-// follows, or the " · " after a label ("Queued · ctrl+enter to send now").
-var hintStartRE = lazyre.New(`\s+[·•]\s+|\s{2,}|\t`)
+// follows, the " · " after a label ("Queued · ctrl+enter to send now"), or the " (" before a parenthesized hint
+// ("Check the tests... (alt+m to send immediately)").
+var hintStartRE = lazyre.New(`\s+[·•]\s+|\s{2,}|\t|\s+\(`)
 
 // sendNowOffer is the send-now hint the screen shows beside a queued message (the lowest one, under any older text
 // that quotes one) and the keys it names, as Persona's key names: no keys when a terminal can't press them, "" for no

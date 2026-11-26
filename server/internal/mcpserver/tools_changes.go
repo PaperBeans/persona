@@ -23,12 +23,7 @@ func (s toolSnapshot) fingerprint() string {
 	items := make([]string, 0, len(s.Tools))
 	for _, tool := range s.Tools {
 		b, _ := json.Marshal(tool)
-		name, _ := tool["name"].(string)
-		item := string(b)
-		if s.WorkGuide[name] {
-			item = "discover:" + item
-		}
-		items = append(items, item)
+		items = append(items, string(b))
 	}
 	slices.Sort(items)
 	return strings.Join(items, "\n")

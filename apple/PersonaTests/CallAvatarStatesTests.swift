@@ -560,9 +560,9 @@ struct CallAvatarStatesTests {
         #expect(CallAssistant(.builtin, name: "  ").name == "Persona" && CallAssistant(.builtin).name == "Persona")
         let code = try Self.code("Persona/Calls/PersonaCalls.swift")
         #expect(code.contains("assistantName: @escaping @MainActor () -> String = { AppModel.shared.assistantShownName }"))
-        let bar = try Self.code("Persona/Views/Voice/VoiceReturnBar.swift")
+        let bar = try Self.code("Persona/Voice/VoiceReturnBar.swift")
         #expect(bar.contains("name: AppModel.shared.assistantShownName"))
-        let entry = try Self.code("Persona/Views/Voice/VoiceEntry.swift")
+        let entry = try Self.code("Persona/Voice/VoiceEntry.swift")
         #expect(entry.contains("session.assistant ? model.assistantShownName(in: key) : session.agentLabel"), "the voice bar's own name")
     }
 
@@ -684,7 +684,7 @@ struct CallAvatarStatesTests {
 
     /// The phone icon passes the voice chat that is on elsewhere, and the yes ends it through the same path as a call's.
     @Test func theIconAsksAboutTheVoiceChatInTheSources() throws {
-        let entry = try Self.code("Persona/Views/Voice/VoiceEntry.swift")
+        let entry = try Self.code("Persona/Voice/VoiceEntry.swift")
         #expect(entry.contains("voiceChat: voiceChatElsewhere(key, model: model), endingCall: endingCall"))
         #expect(entry.contains("case .callConversation(let key), .replaceVoice(let key): return await begin(key, model: model, endingCall: true)"))
         #expect(entry.contains("chat.surface != .call, !chat.phase.isEnded, chat.key != key"))

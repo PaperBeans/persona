@@ -6,6 +6,7 @@
   "relayed_from": "其他对话",
   "relayed_from_chat": "来自「{chat}」",
   "relayed_note": "对话空闲后送达",
+  "relayed_note_no_wake": "随下一轮消息送达",
   "relayed_summary_other": "{count} 条消息来自其他对话",
   "drag": "拖动第 {n} 条排队消息调整顺序",
   "send_now": "立即发送",

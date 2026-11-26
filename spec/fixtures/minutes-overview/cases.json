@@ -4,7 +4,7 @@
     {
       "name": "legacy_only",
       "description": "Minutes without an overview (before #6563, or the hub left it out): the layout as before, and the Markdown byte for byte as before.",
-      "source": "docs/assistant/meeting-minutes.md \"Markdown\"; server/internal/kb/minutes.go renderMinutes",
+      "source": "docs/assistant/meeting-minutes.md \"Markdown\"; server/internal/modules/recording/writers/minutes.go renderMinutes",
       "input": {
         "minutes": {
           "version": 1,

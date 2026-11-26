@@ -660,7 +660,7 @@ nonisolated enum CallOrigin: String, Equatable, Sendable {
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             LiveCallGate.sessionQueue.async {
                 do {
-                    try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: options)
+                    try AudioSessionBroker.shared.setCategory(.playAndRecord, mode: .voiceChat, options: options)
                 } catch {
                     PersonaCalls.log.notice("call: the audio category: \(error.localizedDescription, privacy: .public)")
                 }
@@ -693,20 +693,21 @@ nonisolated enum CallOrigin: String, Equatable, Sendable {
     /// Persona hears its own through `PhoneVoiceAudio`).
     private func watchInterruptions() {
         guard interruptions == nil else { return }
-        interruptions = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil,
-                                                               queue: .main) { @Sendable [weak self] note in
-            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+        interruptions = AudioSessionBroker.shared.observeInterruptions(queue: .main) { @Sendable [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 for call in self.calls where call.kind.isUrgent && call.phase.isLive {
-                    if type == .began { self.dispatch(call, .interruptionBegan) } else if type == .ended { self.dispatch(call, .interruptionEnded) }
+                    switch event {
+                    case .began: self.dispatch(call, .interruptionBegan)
+                    case .ended: self.dispatch(call, .interruptionEnded)
+                    }
                 }
             }
         }
     }
 
     private func stopWatchingInterruptions() {
-        if let interruptions { NotificationCenter.default.removeObserver(interruptions) }
+        if let interruptions { AudioSessionBroker.shared.removeObserver(interruptions) }
         interruptions = nil
     }
 

@@ -210,11 +210,6 @@
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Typography.kt": {
       "font": 39
     },
-    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Voice.kt": {
-      "color": 4,
-      "dp": 22,
-      "font": 2
-    },
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Workflows.kt": {
       "dp": 21
     },
@@ -746,6 +741,11 @@
     },
     "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalSelectText.kt": {
       "icon": 1
+    },
+    "android/module/voice/src/main/kotlin/persona/module/voice/VoiceComponents.kt": {
+      "color": 4,
+      "dp": 22,
+      "font": 2
     },
     "android/module/voice/src/main/kotlin/persona/module/voice/VoiceScreen.kt": {
       "icon": 14

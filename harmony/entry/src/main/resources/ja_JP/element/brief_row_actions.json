@@ -1,0 +1,68 @@
+{
+  "string": [
+    {
+      "name": "brief_row_accept",
+      "value": "承認"
+    },
+    {
+      "name": "brief_row_got_it",
+      "value": "了解"
+    },
+    {
+      "name": "brief_row_recommendation",
+      "value": "おすすめで進める"
+    },
+    {
+      "name": "brief_row_complete",
+      "value": "完了にする"
+    },
+    {
+      "name": "brief_row_handle",
+      "value": "処理済み"
+    },
+    {
+      "name": "brief_row_accepted",
+      "value": "検収済み"
+    },
+    {
+      "name": "brief_row_noted",
+      "value": "確認しました"
+    },
+    {
+      "name": "brief_row_recommended",
+      "value": "おすすめで進めました"
+    },
+    {
+      "name": "brief_row_handled",
+      "value": "処理済みにしました"
+    },
+    {
+      "name": "brief_row_already",
+      "value": "処理済みです"
+    },
+    {
+      "name": "brief_row_unsupported",
+      "value": "ハブのバージョンが古いため、このボタンは使えません"
+    },
+    {
+      "name": "brief_row_unknown",
+      "value": "結果は未確認です。操作の状態を確認してください。"
+    },
+    {
+      "name": "brief_row_pending",
+      "value": "確認待ち"
+    },
+    {
+      "name": "brief_row_accept_failed",
+      "value": "承認できませんでした。もう一度お試しください。"
+    },
+    {
+      "name": "brief_row_complete_failed",
+      "value": "タスクを完了にできませんでした。もう一度お試しください。"
+    },
+    {
+      "name": "brief_row_handle_failed",
+      "value": "処理済みにできませんでした。もう一度お試しください。"
+    }
+  ]
+}

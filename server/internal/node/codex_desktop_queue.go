@@ -37,8 +37,9 @@ var (
 )
 
 type codexDesktopMessage struct {
-	text  string
-	paths []string // the pictures, saved on this computer
+	text     string
+	paths    []string // the pictures, saved on this computer
+	clientID string   // stable clientUserMessageId carried across held/native-queue fallback
 }
 
 // codexDesktopThread is the node's side of one App thread: what waits for its turn to end, and the last turn it started.
@@ -88,11 +89,34 @@ func markSendQueued(ctx context.Context) {
 	}
 }
 
-// sendOrHoldCodexDesktop starts a turn with m in src's thread, or holds m until the turn running there ends.
+// sendOrHoldCodexDesktop starts a turn with m in src's thread, enqueues it through the native thread queue when the
+// legacy follower bus is absent, or holds m until the turn running on the legacy bus ends.
 func (n *Node) sendOrHoldCodexDesktop(ctx context.Context, src codexSource, m codexDesktopMessage) error {
 	t := codexDesktopQueue.thread(src)
 	t.send.Lock()
 	defer t.send.Unlock()
+	if m.clientID == "" {
+		if id, _ := ctx.Value(sendTraceKey{}).(string); id != "" {
+			m.clientID = id
+		} else {
+			m.clientID = newUUID()
+		}
+	}
+	if len(t.held) == 0 {
+		if cli := codexDesktopQueueCLI(src.home); cli != "" {
+			// An App with a live follower bus keeps its existing behavior. With no listener, persist
+			// busy sends immediately as well; the owner drains its queue after the current turn.
+			probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+			conn, dialErr := dialCodexDesktopBus(probeCtx, src.home)
+			cancel()
+			if dialErr == nil {
+				conn.Close()
+			} else if missingCodexDesktopBus(dialErr) {
+				enqueueCtx := context.WithValue(ctx, sendTraceKey{}, m.clientID)
+				return n.enqueueCodexDesktop(enqueueCtx, cli, src, codexDesktopInput([]codexDesktopMessage{m}))
+			}
+		}
+	}
 	working, mark := n.codexDesktopTurnState(src)
 	if len(t.held) > 0 || working || t.recentlyStarted(mark) {
 		t.held = append(t.held, m)
@@ -103,7 +127,7 @@ func (n *Node) sendOrHoldCodexDesktop(ctx context.Context, src codexSource, m co
 		markSendQueued(ctx)
 		return nil
 	}
-	return t.start(ctx, n, []codexDesktopMessage{m}, mark)
+	return t.start(context.WithValue(ctx, sendTraceKey{}, m.clientID), n, []codexDesktopMessage{m}, mark)
 }
 
 // recentlyStarted: the node started a turn here a moment ago and the App has written nothing since.
@@ -161,7 +185,11 @@ func (n *Node) deliverHeldCodexDesktop(t *codexDesktopThread) {
 		msgs := t.held
 		t.held, t.waiting = nil, false
 		if len(msgs) > 0 {
-			if err := t.start(context.Background(), n, msgs, mark); err != nil {
+			deliverCtx := context.Background()
+			if msgs[0].clientID != "" {
+				deliverCtx = context.WithValue(deliverCtx, sendTraceKey{}, msgs[0].clientID)
+			}
+			if err := t.start(deliverCtx, n, msgs, mark); err != nil {
 				log.Printf("codex app %s: %d held message(s) not delivered after its turn: %v", t.src.thread, len(msgs), err)
 			}
 		}

@@ -5,14 +5,16 @@ import { useRepositoryRequestContext as useRequestContext } from "../lib/use-rep
 import { t } from "../i18n";
 import { ApiError, errorText } from "../lib/api";
 import {
-  cleanRepositoryDraft, isExtensionProvider, loadRepositoryCatalog, loadTaskRepositories, repositoryDraft, repositoryLinkKindLabel,
-  repositoryLinkView, repositoryProviderName, saveTaskRepositories, validRepositoryAlias,
-  validRepositoryDraft, validRequestedRef, repositoryDuplicateLink,
+  cleanRepositoryDraft, formatRequestedRef, isExtensionProvider, isReferenceRepositoryLink, loadRepositoryCatalog, loadTaskRepositories,
+  partitionTaskRepositories, repositoryDraft, repositoryLinkKindLabel, repositoryLinkView, repositoryProviderName,
+  saveTaskRepositories, validRepositoryAlias, validRepositoryDraft, validRequestedRef, repositoryDuplicateLink,
   type CreateRepositoryBindings, type RepositoryCatalog, type RepositoryRequestContext, type RepositoryLinkInput, type RequestedRef,
-  type RepositoryLinkLabel, type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositoryLink, type TaskRepositorySet,
+  type RepositoryLinkLabel, type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositoryLink,
+  type TaskRepositoryRole, type TaskRepositorySet,
 } from "../lib/task-repositories";
 import { normalizedPR } from "../lib/todo-triage";
-import type { PRFacts } from "../lib/todos";
+import type { PRFacts, TodoRepoGate } from "../lib/todos";
+import { repoGatePRLabel, repoGateReasonLabel, repoGateTone, type RepoGateTone } from "../features/todos/repo-gate";
 import type { RepositoryIdentity } from "../lib/repository-identity";
 import { Group, Pill, Row, RowFailed, settingsInputClass } from "../views/settings/SettingsParts";
 import { Button, Collapse, Dialog, IconButton, Loading, Menu, toast, useMenu } from "./atoms";
@@ -44,8 +46,8 @@ const SourceNote = ({ name }: { name: string }) => <p role="status" data-reposit
  * the full value in its tooltip. An extension's source is named after the address, so a narrow line cuts its name
  * before the repository's path.
  */
-function RepositoryRow({ identity, name, source, children }: { identity: RepositoryIdentity; name?: string; source?: string; children?: React.ReactNode }) {
-  return <div className="flex items-center gap-2.5 px-4 py-2" data-repository-row>
+function RepositoryRow({ identity, name, source, role, children }: { identity: RepositoryIdentity; name?: string; source?: string; role?: TaskRepositoryRole; children?: React.ReactNode }) {
+  return <div className="flex items-center gap-2.5 px-4 py-2" data-repository-row data-repo-role={role}>
     <RepositoryMark provider={identity.provider} />
     <a href={identity.canonical_url} target="_blank" rel="noreferrer noopener" title={source ? `${identity.canonical_url} · ${source}` : identity.canonical_url}
       className="flex touch-hit min-w-0 flex-1 items-center gap-2">
@@ -61,7 +63,7 @@ function RepositoryRow({ identity, name, source, children }: { identity: Reposit
  * source may name the kinds its own way (`labels`, shown as given); a pasted address its source has not read yet is
  * the address itself, said to be checked on save.
  */
-function LinkRow({ identity, view, labels, pr, onRemove, disabled }: { identity: RepositoryIdentity; view: RepositoryLinkView; labels?: readonly RepositoryLinkLabel[]; pr?: PRFacts; onRemove?: () => void; disabled?: boolean }) {
+function LinkRow({ identity, view, labels, pr, referenceBadge, onRemove, disabled }: { identity: RepositoryIdentity; view: RepositoryLinkView; labels?: readonly RepositoryLinkLabel[]; pr?: PRFacts; referenceBadge?: boolean; onRemove?: () => void; disabled?: boolean }) {
   if (view.pending) {
     return <div className="flex items-start gap-2 py-2 pr-4 pl-10" data-repository-link data-link-pending>
       <span data-link-icon="link" className="mt-0.5 shrink-0 text-ink-3"><Icon name="link" size={14} /></span>
@@ -91,6 +93,7 @@ function LinkRow({ identity, view, labels, pr, onRemove, disabled }: { identity:
         <span className="shrink-0 font-medium tabular-nums text-accent-ink">{tag}</span>
         <Icon name="external" size={11} className="mt-1 ml-auto shrink-0 text-ink-3" />
       </a>
+      {referenceBadge && <span data-link-role="reference"><Pill>{t("task-repositories.link_role_reference")}</Pill></span>}
       {state && <Pill tone={tones[state]}>{t(`session-gitpr.state_${state}`)}</Pill>}
       {pr?.state === "open" && pr.conflicts && <Pill tone="orange">{t("task-repositories.pr_conflict")}</Pill>}
     </div>
@@ -293,7 +296,7 @@ const isUnsupported = (error: unknown) => error instanceof ApiError && error.sta
 
 /** A to-do's own PR, as the page already parses it (the editor does not read the stage bar, a first-screen chunk). */
 type LegacyPR = { url: string; text: string };
-type TodoRepositoryBindingsProps = { manager: string; owner: string; todoId: string; legacyPRs?: LegacyPR[]; prStatus?: PRFacts; otherPRs?: PRFacts[]; version?: unknown };
+type TodoRepositoryBindingsProps = { manager: string; owner: string; todoId: string; legacyPRs?: LegacyPR[]; prStatus?: PRFacts; otherPRs?: PRFacts[]; version?: unknown; todosV2?: boolean; repoGate?: TodoRepoGate; onRepositoriesCount?: (count: number) => void };
 
 function hasNewPRLinkTitle(previous: Map<string, PRFacts>, current: Map<string, PRFacts>, saved?: TaskRepositorySet) {
   if (previous === current) return false;
@@ -309,7 +312,7 @@ function hasNewPRLinkTitle(previous: Map<string, PRFacts>, current: Map<string, 
 export function TodoRepositoryBindings(props: TodoRepositoryBindingsProps) {
   return <TodoRepositoryBindingsSession key={`${props.owner}:${props.manager}:${props.todoId}`} {...props} />;
 }
-function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [], prStatus, otherPRs, version }: TodoRepositoryBindingsProps) {
+function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [], prStatus, otherPRs, version, todosV2, repoGate, onRepositoriesCount }: TodoRepositoryBindingsProps) {
   const prByURL = useMemo(() => {
     const facts = new Map<string, PRFacts>();
     if (prStatus) facts.set(normalizedPR(prStatus.url), prStatus);
@@ -473,10 +476,125 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
     finally { lock.current = false; endBusy(busy); }
   };
   const repositories = saved?.repositories ?? [];
+  useEffect(() => {
+    onRepositoriesCount?.(repositories.length);
+  }, [onRepositoriesCount, repositories.length]);
+  const matrix = useMemo(() => (todosV2 === true && repositories.length ? partitionTaskRepositories(repositories) : undefined), [todosV2, repositories]);
   const cleanDraft = cleanRepositoryDraft(draft);
   const duplicateLinks = repositoryDuplicateLink(cleanDraft, identities, saved?.repositories);
   const dirty = !!saved && JSON.stringify(cleanDraft) !== JSON.stringify(repositoryDraft(saved.repositories));
   if (unsupported && !legacyPRs.length) return null;
+  const renderMatrixGroup = (role: TaskRepositoryRole, rows: readonly TaskRepository[]) => {
+    if (!rows.length) return null;
+    const isTarget = role === "target";
+    return <Fragment key={role}>
+      <div data-repo-matrix-group={role} className="flex flex-wrap items-center justify-between gap-2 bg-inset px-4 py-1.5 text-submeta text-ink-3">
+        <span className="font-medium text-ink-2">{t(isTarget ? "task-repositories.role_target" : "task-repositories.role_reference")} ({rows.length})</span>
+        <span>{t(isTarget ? "task-repositories.role_target_hint" : "task-repositories.role_reference_hint")}</span>
+      </div>
+      {rows.map((repository) => {
+        const source = extensionSource(repository.source_snapshot.identity, repository.source_snapshot.provider_name, repository.provider_state);
+        const refLabel = formatRequestedRef(repository.requested_ref);
+        return <Fragment key={repository.repo_id}>
+          <RepositoryRow identity={repository.source_snapshot.identity} source={source?.name} role={role}>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+              <span data-repo-role-badge={role}>
+                <Pill tone={isTarget ? "accent" : undefined}>
+                  {t(isTarget ? "task-repositories.role_target" : "task-repositories.role_reference")}
+                </Pill>
+              </span>
+              {refLabel && <span data-repo-ref={repository.requested_ref.value} title={repository.requested_ref.value}>
+                <Pill>
+                  <span className="inline-flex items-center gap-1">
+                    <Icon name="branch" size={11} />
+                    <span className="max-w-28 truncate">{refLabel}</span>
+                  </span>
+                </Pill>
+              </span>}
+              {source?.unavailable && <Pill>{t("task-repositories.unavailable")}</Pill>}
+              {!!repository.links.length && <Pill>{repository.links.length}</Pill>}
+            </div>
+          </RepositoryRow>
+          {repository.links.map((link) => {
+            const view = repositoryLinkView(repository.source_snapshot.identity, link);
+            return view ? <LinkRow key={`${link.kind}:${link.number}`} identity={repository.source_snapshot.identity} view={view} labels={repository.link_kinds}
+              pr={link.kind === "pull_request" ? prByURL.get(normalizedPR(link.canonical_url)) : undefined}
+              referenceBadge={isTarget && isReferenceRepositoryLink(link)} /> : null;
+          })}
+          {source?.unavailable && <SourceNote name={source.name} />}
+          {!!repository.catalog_state && repository.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
+            {t(repository.catalog_state === "removed" ? "task-repositories.catalog_removed" : repository.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
+          </p>}
+        </Fragment>;
+      })}
+    </Fragment>;
+  };
+  const renderRepoGateBanner = () => {
+    if (todosV2 !== true || !repoGate) return null;
+    const tone = repoGateTone(repoGate.state);
+    const toneText: Record<RepoGateTone, string> = {
+      green: "text-green",
+      red: "text-red",
+      orange: "text-orange",
+      muted: "text-ink-3",
+    };
+    const toneBg: Record<RepoGateTone, string> = {
+      green: "bg-inset",
+      red: "bg-danger-wash",
+      orange: "bg-orange-tint",
+      muted: "bg-inset",
+    };
+    const headline =
+      repoGate.state === "reference_only"
+        ? t("todos.repo_gate_detail_reference_only", { count: repoGate.reference_count })
+        : repoGate.state === "ready"
+          ? t("todos.repo_gate_detail_ready", { ready: repoGate.ready_count, total: repoGate.target_count })
+          : repoGate.blocking_repo?.trim()
+            ? t("todos.repo_gate_detail_blocked", {
+                ready: repoGate.ready_count,
+                total: repoGate.target_count,
+                repo: repoGate.blocking_repo.trim(),
+              })
+            : t("todos.repo_gate_detail_pending", { ready: repoGate.ready_count, total: repoGate.target_count });
+    const reasonText = repoGateReasonLabel(repoGate);
+    const blockingPR = repoGate.blocking_pr?.trim();
+    return (
+      <div
+        data-testid="todo-detail-repo-gate"
+        data-gate-state={repoGate.state}
+        className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-submeta ${toneBg[tone]}`}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={`inline-flex items-center gap-1.5 font-medium ${toneText[tone]}`}>
+            <Icon name={tone === "green" ? "check" : "alertCircle"} size={13} className="shrink-0" />
+            <span className="tabular-nums">{headline}</span>
+          </span>
+          {repoGate.state !== "reference_only" && repoGate.state !== "ready" && reasonText && (
+            <span data-testid="todo-detail-repo-gate-reason" className="text-ink-2">
+              · {reasonText}
+            </span>
+          )}
+          {repoGate.state !== "reference_only" && repoGate.reference_count > 0 && (
+            <span data-testid="todo-detail-repo-gate-refs" className="text-ink-3 tabular-nums">
+              · {t("todos.repo_gate_detail_refs_note", { count: repoGate.reference_count })}
+            </span>
+          )}
+        </div>
+        {blockingPR && (
+          <a
+            href={blockingPR}
+            target="_blank"
+            rel="noreferrer noopener"
+            data-testid="todo-detail-repo-gate-pr"
+            className="touch-hit inline-flex shrink-0 items-center gap-1 font-medium whitespace-nowrap text-accent-ink hover:underline"
+          >
+            <span>{repoGatePRLabel(blockingPR)}</span>
+            <Icon name="external" size={11} />
+          </a>
+        )}
+      </div>
+    );
+  };
   return <section className="mt-6" data-todo-repositories>
     <Group title={t("task-repositories.section")} right={!unsupported &&
       // It stays enabled while the editor opens: a disabled button that had the focus drops it to the page, and the
@@ -488,24 +606,30 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
         ? legacyPRs.map((p) => <Row key={p.url} icon="pullRequest" hint={t("task-repositories.legacy_note")}
             label={<a href={p.url} target="_blank" rel="noreferrer noopener" className="text-accent-ink hover:underline">{p.text}</a>} />)
         : <>
-          {repositories.map((repository) => {
-            const source = extensionSource(repository.source_snapshot.identity, repository.source_snapshot.provider_name, repository.provider_state);
-            return <Fragment key={repository.repo_id}>
-              <RepositoryRow identity={repository.source_snapshot.identity} source={source?.name}>
-                {source?.unavailable && <Pill>{t("task-repositories.unavailable")}</Pill>}
-                {!!repository.links.length && <Pill>{repository.links.length}</Pill>}
-              </RepositoryRow>
-              {repository.links.map((link) => {
-                const view = repositoryLinkView(repository.source_snapshot.identity, link);
-                return view ? <LinkRow key={`${link.kind}:${link.number}`} identity={repository.source_snapshot.identity} view={view} labels={repository.link_kinds}
-                  pr={link.kind === "pull_request" ? prByURL.get(normalizedPR(link.canonical_url)) : undefined} /> : null;
+          {renderRepoGateBanner()}
+          {matrix
+            ? <div data-repo-matrix className="divide-y divide-line">
+                {renderMatrixGroup("target", matrix.target)}
+                {renderMatrixGroup("reference", matrix.reference)}
+              </div>
+            : repositories.map((repository) => {
+                const source = extensionSource(repository.source_snapshot.identity, repository.source_snapshot.provider_name, repository.provider_state);
+                return <Fragment key={repository.repo_id}>
+                  <RepositoryRow identity={repository.source_snapshot.identity} source={source?.name}>
+                    {source?.unavailable && <Pill>{t("task-repositories.unavailable")}</Pill>}
+                    {!!repository.links.length && <Pill>{repository.links.length}</Pill>}
+                  </RepositoryRow>
+                  {repository.links.map((link) => {
+                    const view = repositoryLinkView(repository.source_snapshot.identity, link);
+                    return view ? <LinkRow key={`${link.kind}:${link.number}`} identity={repository.source_snapshot.identity} view={view} labels={repository.link_kinds}
+                      pr={link.kind === "pull_request" ? prByURL.get(normalizedPR(link.canonical_url)) : undefined} /> : null;
+                  })}
+                  {source?.unavailable && <SourceNote name={source.name} />}
+                  {!!repository.catalog_state && repository.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
+                    {t(repository.catalog_state === "removed" ? "task-repositories.catalog_removed" : repository.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
+                  </p>}
+                </Fragment>;
               })}
-              {source?.unavailable && <SourceNote name={source.name} />}
-              {!!repository.catalog_state && repository.catalog_state !== "current" && <p role="status" data-repository-note className="py-2 pr-4 pl-10 text-submeta leading-snug text-ink-3">
-                {t(repository.catalog_state === "removed" ? "task-repositories.catalog_removed" : repository.catalog_state === "identity_changed" ? "task-repositories.identity_changed" : "task-repositories.unlisted")}
-              </p>}
-            </Fragment>;
-          })}
           {!saved && !error && <div className="px-4 py-3"><Loading /></div>}
           {/* A successful answer is the store's whole word, even empty: the manager imports the legacy history once and
               honours an explicit removal, so `pr_url` is a fallback for a missing route (above) and nowhere else. */}

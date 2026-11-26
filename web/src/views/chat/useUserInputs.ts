@@ -1,32 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api, sessionHistoryNotFound, sessionPath } from "../../lib/api";
 import { validUserInputIndex, type UserInputIndex } from "../../lib/user-input-index";
 import { endPull, pullKey, pullWait, startPull } from "../../lib/pull-gate";
 
-export function useRevealedInputSeq(scope: string, oldestSeq: number | undefined): { seq: number | undefined; reveal: () => void } {
-  const [range, setRange] = useState<{ scope: string; oldest: number; revealed?: number } | null>(null);
-  useEffect(() => {
-    if (oldestSeq === undefined) return;
-    setRange((previous) => {
-      if (previous?.scope !== scope) return { scope, oldest: oldestSeq };
-      if (oldestSeq >= previous.oldest) return previous;
-      return { scope, oldest: oldestSeq, revealed: oldestSeq };
-    });
-  }, [scope, oldestSeq]);
-  const reveal = useCallback(() => {
-    if (oldestSeq === undefined) return;
-    setRange((previous) => previous?.scope === scope && previous.revealed === oldestSeq ? previous : { scope, oldest: oldestSeq, revealed: oldestSeq });
-  }, [scope, oldestSeq]);
-  return { seq: range?.scope === scope ? range.revealed : undefined, reveal };
-}
-
 /** Separate lightweight metadata from transcript loading; never fetch older bodies for a hover or a scroll frame. */
-export function useUserInputs(mid: string, sid: string, history: string | undefined, newestInput: string | undefined, enabled: boolean, reload?: () => void): UserInputIndex | null {
-  const scope = `${mid}/${sid}/${history ?? ""}`;
+export function useUserInputs(mid: string, sid: string, history: string | undefined, newestInput: string | undefined, enabled: boolean, reload?: () => void, replaceEpoch?: number) {
+  const [revision, refresh] = useReducer((n: number) => n + 1, 0);
+  const scope = JSON.stringify([mid, sid, history, replaceEpoch, revision]);
   const scopeNow = useRef(scope);
   scopeNow.current = scope;
   const reloadNow = useRef(reload);
   reloadNow.current = reload;
+  const historyChanged = useCallback(() => {
+    refresh();
+    reloadNow.current?.();
+  }, []);
   const [state, setState] = useState<{ scope: string; index: UserInputIndex } | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -50,13 +38,14 @@ export function useUserInputs(mid: string, sid: string, history: string | undefi
         return;
       }
       holding = true;
-      void api<unknown>(`${sessionPath(mid, sid)}/items?user_inputs=1&lazy_images=1`, { signal: ctl.signal }).then((index) => {
+      void api<unknown>(`${sessionPath(mid, sid)}/items?user_inputs=1&meta_only=1`, { signal: ctl.signal }).then((index) => {
         if (!alive) return;
         if (!validUserInputIndex(index)) throw new Error("incomplete user input index");
         finish("ok");
         if (scopeNow.current !== scope) return;
         if (history && index.history && index.history !== history) {
           // A complete scan can discover a historical rewrite outside the tail. Refresh bodies before accepting it.
+          setState(null);
           reloadNow.current?.();
           return;
         }
@@ -77,5 +66,5 @@ export function useUserInputs(mid: string, sid: string, history: string | undefi
     load();
     return () => { alive = false; finish("aborted"); ctl.abort(); window.clearTimeout(timer); };
   }, [mid, sid, history, newestInput, enabled, scope]);
-  return enabled && state?.scope === scope ? state.index : null;
+  return { scope, index: enabled && state?.scope === scope ? state.index : null, historyChanged };
 }

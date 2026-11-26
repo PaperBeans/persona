@@ -174,10 +174,9 @@ func TestPreviewDrivesARealBrowser(t *testing.T) {
 	}
 
 	say(t, w, map[string]any{"t": "pick", "on": true})
-	time.Sleep(200 * time.Millisecond)
 	click(t, w, 50, 25)
 	p := next(t, r, w, "the picked element", isText("picked", nil))
-	if p.json["selector"] != "button#go" || p.json["tag"] != "button" || p.json["text"] != "Go" || p.json["url"] != home {
+	if p.json["selector"] != "button#go" || p.json["tag"] != "button" || p.json["text"] != "Go" || p.json["url"] != home || p.json["title"] != "v:a好" {
 		t.Fatalf("picked: %v", p.json)
 	}
 

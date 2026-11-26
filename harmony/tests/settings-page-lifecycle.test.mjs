@@ -2,8 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
+import { phoneSettingsSearchCatalog } from '../entry/src/main/ets/core/PhoneSettingsNavigation.ts';
 
 const source = readFileSync(new URL('../entry/src/main/ets/components/SettingsPage.ets', import.meta.url), 'utf8');
+const directory = readFileSync(new URL('../entry/src/main/ets/components/SettingsDirectory.ets', import.meta.url), 'utf8');
+
+test('the phone searches nested settings and restores exactly the query used to open a result', () => {
+  const catalog = directory.slice(directory.indexOf('const AGENT_OPTIONS:'), directory.indexOf('function languageName('));
+  const labels = directory.slice(directory.indexOf('function settingLabel('), directory.indexOf('@ComponentV2'));
+  const appear = directory.slice(directory.indexOf('  aboutToAppear():'), directory.indexOf('  aboutToDisappear():'));
+  const lookup = directory.slice(directory.indexOf('  @Computed get results()'), directory.indexOf('  @Builder managerMenu('))
+    .replace('@Computed ', '');
+  const strings = new Map(JSON.parse(readFileSync(new URL('../entry/src/main/resources/zh_CN/element/string.json', import.meta.url))).string
+    .map(entry => [entry.name, entry.value]));
+  const Search = new Function('tr','phoneSettingsSearchCatalog','canIUse',stripTypeScriptTypes(catalog + labels + ' class Search {' + appear + lookup + '}')+';return Search')(key => strings.get(key) || key,phoneSettingsSearchCatalog,()=>true);
+  const page = new Search(), actions = [];
+  Object.assign(page,{ initialQuery:' 深色  主题 ', label:id=>id, subtitle:()=>'', meeting:{open(){}}, readHubStatus(){}, field:{ stopEditing:()=>actions.push('dismiss') }, onOpen:id=>actions.push(id) });
+  page.aboutToAppear();
+  assert.deepEqual(page.results,['appearance']);
+  page.openEntry(page.results[0]);
+  assert.deepEqual(actions,['dismiss','appearance']);
+  assert.equal(page.query,' 深色  主题 ');
+  page.query='LaUnChErS'; assert.ok(page.results.includes('launchers'));
+  page.query=' '; assert.deepEqual(page.results,[]);
+  for(const [text,target] of [['模型','models'],['助手资料','assistant'],['知识库选择','phone_knowledge_selection'],
+    ['会议','phone_meeting_options'],['语言与听写','phone_language_options'],['外观与显示','appearance']]) {
+    page.query=text; assert.ok(page.results.includes(target),text);
+  }
+});
+
 function method(name) {
   const start = source.indexOf('  private ' + name + '(');
   assert.ok(start >= 0, name);
@@ -53,4 +80,21 @@ test('a late removal ACK cannot pop a reentered native detail page', async () =>
   f.page.management.removeExtension = () => new Promise(resolve => { finish = resolve; });
   f.page.confirmExtensionRemove(); f.confirm(); f.page.machineRevision++;
   finish(true); await Promise.resolve(); assert.equal(f.backs(), 0);
+});
+
+
+test('core Hub owns its explanatory footer before the separate Advanced card in each published language',()=>{
+  const build=directory.slice(directory.indexOf('  build() {'),directory.indexOf('export struct PhoneSettingsOptions'));
+  const hub=build.indexOf("this.section(tr('phone_settings_hub')");
+  const common=build.indexOf("'phone_settings_common_groups_footer'");
+  const advanced=build.indexOf("this.section('',['phone_settings_advanced'])");
+  const advancedFooter=build.indexOf("'phone_advanced_footer'");
+  assert.ok(hub>=0 && common>hub && advanced>common && advancedFooter>advanced);
+  const published={'base':'These two groups are the same whichever assistant is current.','en_US':'These two groups are the same whichever assistant is current.',
+    'zh_CN':'这两组和当前是哪个助手无关。','ja_JP':'この 2 つのグループは、どのアシスタントを選んでいても同じです。'};
+  for(const [locale,expected] of Object.entries(published)){
+    const strings=JSON.parse(readFileSync(new URL('../entry/src/main/resources/'+locale+'/element/string.json',import.meta.url),'utf8')).string;
+    assert.equal(strings.find(s=>s.name==='phone_settings_hub')?.value,'Hub');
+    assert.equal(strings.find(s=>s.name==='phone_settings_common_groups_footer')?.value,expected);
+  }
 });

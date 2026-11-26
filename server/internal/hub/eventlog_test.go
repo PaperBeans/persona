@@ -99,7 +99,7 @@ func TestBusBroadcastCarriesOnlyTheHubsEventSeq(t *testing.T) {
 
 	resumed := &client{out: make(chan []byte, 512)}
 	h.mu.Lock()
-	h.helloLocked(resumed, map[string]any{"type": "hello"}, stream, logged.Seq-1, true)
+	h.helloLocked(resumed, wsHello{Type: "hello"}, stream, logged.Seq-1, true)
 	h.mu.Unlock()
 	var hello map[string]any
 	if err := json.Unmarshal(<-resumed.out, &hello); err != nil || hello["resumed"] != true {

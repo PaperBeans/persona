@@ -1,0 +1,92 @@
+{
+  "string": [
+    {
+      "name": "intake_today",
+      "value": "Today"
+    },
+    {
+      "name": "intake_water",
+      "value": "Water"
+    },
+    {
+      "name": "intake_protein",
+      "value": "Protein"
+    },
+    {
+      "name": "intake_ml",
+      "value": "ml"
+    },
+    {
+      "name": "intake_g",
+      "value": "g"
+    },
+    {
+      "name": "intake_goal",
+      "value": "Goal: {goal} {unit}"
+    },
+    {
+      "name": "intake_ratio",
+      "value": "{today} of {goal} {unit}"
+    },
+    {
+      "name": "intake_cup",
+      "value": "Drank a Glass"
+    },
+    {
+      "name": "intake_other",
+      "value": "Other Amount"
+    },
+    {
+      "name": "intake_log_grams",
+      "value": "Log Grams"
+    },
+    {
+      "name": "intake_water_amount",
+      "value": "Water amount (ml)"
+    },
+    {
+      "name": "intake_protein_amount",
+      "value": "Protein amount (g)"
+    },
+    {
+      "name": "intake_water_hint",
+      "value": "Enter 1–3,000 ml, with at most one decimal place."
+    },
+    {
+      "name": "intake_protein_hint",
+      "value": "Enter 0.1–200 g, with at most one decimal place."
+    },
+    {
+      "name": "intake_log",
+      "value": "Log"
+    },
+    {
+      "name": "intake_undo",
+      "value": "Undo"
+    },
+    {
+      "name": "health_intake_logged",
+      "value": "Intake logged"
+    },
+    {
+      "name": "health_intake_undone",
+      "value": "Intake undone"
+    },
+    {
+      "name": "health_intake_update",
+      "value": "Update your hub first"
+    },
+    {
+      "name": "health_intake_load_failed",
+      "value": "Couldn't load today’s intake."
+    },
+    {
+      "name": "health_intake_record_failed",
+      "value": "Couldn't log this intake."
+    },
+    {
+      "name": "health_intake_undo_failed",
+      "value": "Couldn't undo this entry."
+    }
+  ]
+}

@@ -117,10 +117,13 @@ func (s *Service) resumeAllowed(ctx context.Context, self string, am Device, c p
 }
 
 // eventMayResume: an event Persona routes on its own (a PR's, an Inbox item's) may resume c only after a stop the node
-// recorded as not the user's. An unknown stop the supervisor resumes on purpose (agent_send, a rework), deciding that
-// the Agent's context is wanted; an event does not decide that (#11528). An archived one is left to resumeAllowed,
+// recorded as not the user's. An unknown stop or a supervision timeout stop is left to the supervisor's deliberate
+// agent_send resume; an event does not decide that on its own (#11528). An archived one is left to resumeAllowed,
 // which reads the node's own cause.
 func eventMayResume(c proto.Session) error {
+	if c.Capabilities != nil && c.Capabilities.StopCause == proto.StopTimeout {
+		return fmt.Errorf("%s stopped on supervision timeout: an event does not resume it; its supervisor may", agentLabel(c))
+	}
 	if c.Archived || c.Capabilities != nil && c.Capabilities.StopCause.AllowsSupervisorResume() {
 		return nil
 	}
@@ -258,6 +261,9 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	} else if id, ok := params["client_msg_id"]; ok {
 		startParams["client_msg_id"] = id
 	}
+	if task != nil {
+		sctx = context.WithValue(sctx, placementTaskKey{}, task.todo.ID)
+	}
 	err = s.call(sctx, am.ID, DeviceSessionStart, startParams, &res)
 	if err != nil {
 		if full && sendUnknown(err) {
@@ -300,6 +306,7 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	} else {
 		sendNote.sent(sctx, err)
 	}
+	s.progressMade(am.ID, c.SessionID, time.Now())
 	s.logf("resume %s on %s for %s: %s", short(c.SessionID), am.ID, self, why)
 	note := s.resumeNote(sctx, c, am, why)
 	said := ""
@@ -307,9 +314,17 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 		said = task.sent(sctx, s, told)
 		s.noteResume(sctx, self, task.todo.ID, am.ID, c.SessionID, note)
 		s.ensureSupervisor(sctx, task.todo.ID) // made or kept by adoptAgent; never left without a supervisor
+		if err := s.clearTimedOut(sctx, task.todo.ID); err != nil {
+			s.logf("task %s: clear timed_out on resume: %v", task.todo.ID, err)
+		}
 	} else if t, ok := s.openTodoOfAgent(am.ID, c.SessionID); ok {
 		s.ensureSupervisor(sctx, t.ID) // its task goes on with a supervisor, as a successor's does (tasks_successor.go)
 		s.releaseHold(sctx, t.ID)      // its supervisor sent it on: follow-ups go again (decision.go)
+		if t.Supervision != nil && t.Supervision.state(t) == reviewTimedOut {
+			if err := s.clearTimedOut(sctx, t.ID); err != nil {
+				s.logf("task %s: clear timed_out on resume: %v", t.ID, err)
+			}
+		}
 		if _, err := s.appendFeed(sctx, self, feedRouted, t.ID, map[string]string{"text": told, "from": routedFromAssistant,
 			"machine_id": am.ID, "session_id": c.SessionID}); err != nil {
 			s.logf("task %s: routed feed: %v", t.ID, err)

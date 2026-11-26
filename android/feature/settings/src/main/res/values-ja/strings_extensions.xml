@@ -437,4 +437,15 @@
     <string name="settings_ext_rule_remove_title">このルールを削除しますか？</string>
     <string name="settings_ext_rule_remove_body">次に%2$sの%1$sが必要とするとき、もう一度承認します。</string>
     <string name="settings_ext_rule_removed">ルールを削除しました</string>
+    <string name="settings_ext_secret_set_hint">設定済み · 末尾 %1$s</string>
+    <string name="settings_ext_entry_untitled">項目 %1$d</string>
+    <string name="settings_ext_entry_save_before_secret">この項目を保存してからシークレットを設定してください。</string>
+    <string name="settings_ext_entry_secret">シークレット</string>
+    <string name="settings_ext_entry_remove">%1$sを削除</string>
+    <string name="settings_ext_entry_add">項目を追加</string>
+    <string name="settings_ext_entry_editor_hint">各項目には個別のシークレットがあり、別々に保存され、保存後は再表示されません。</string>
+    <string name="settings_ext_entry_rebind_hint">変更したアドレスを保存すると、その項目のシークレットは消去されます。</string>
+    <string name="settings_ext_entry_remove_title">「%1$s」を削除しますか？</string>
+    <string name="settings_ext_entry_remove_body">保存すると、この項目と保存済みのシークレットが削除されます。</string>
+    <string name="settings_ext_entry_remove_confirm">項目を削除</string>
 </resources>

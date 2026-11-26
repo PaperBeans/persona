@@ -14,5 +14,7 @@
   "no_dir": "This session's folder is unknown",
   "reading": "Loading",
   "up": "Up one level",
-  "location": "Location"
+  "location": "Location",
+  "resize_label": "Resize file tree",
+  "resize_title": "Drag or use arrow keys to resize; double-click or Enter to reset"
 }

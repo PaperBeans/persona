@@ -9,10 +9,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { t } from "../../i18n";
 import { loadPages } from "../../lib/lazy-page";
 import { runtimeSessions } from "../../lib/runtime-list";
+import { parseUserText } from "../../lib/turns";
 import { applyCompleteSessions, getState, reset } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Composer, type Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
+import { changeComposerField, composerField, composerFieldText } from "./composer-test-field";
 
 const row = (id: string, extra: Partial<Session> = {}): Session => ({
   machine_id: "laptop", session_id: id, title: id, cwd: `/home/me/code/${id}`, status: "idle", state: "idle", agent: "claude",
@@ -70,16 +72,10 @@ afterEach(() => {
 const render = (onSend: (m: Outgoing) => Promise<boolean> = async () => true) =>
   act(() => root.render(<Composer draftKey="persona-new" placeholder="" mention={SOURCE} onSend={onSend} />));
 
-const box = () => host.querySelector("textarea")!;
+const box = () => composerField(host);
 
-async function type(text: string) {
-  const el = box();
-  await act(async () => {
-    el.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, text);
-    el.setSelectionRange(text.length, text.length);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+async function type(text: string, append = false) {
+  await act(async () => changeComposerField(box(), text, { append }));
   await act(async () => {}); // the workspaces' read settles
 }
 
@@ -89,7 +85,10 @@ const options = () => [...host.querySelectorAll('[role="option"]:not([data-panel
 
 describe("@ other sessions on a paging hub (#12983)", () => {
   it("starts from the list's summary rows and one opened chat, as a paging hub leaves the store", () => {
-    expect(api).toHaveBeenCalledWith(expect.stringMatching(/^\/sessions\?(.+&)?summary=1(&|$)/), undefined);
+    expect(api).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/sessions\?(.+&)?summary=1(&|$)/),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(getState().sessionSummaries.map((s) => s.session_id)).toEqual(["trip", "weather", "login"]);
     expect(Object.values(getState().sessions).flat().map((s) => s.session_id)).toEqual(["login"]);
   });
@@ -119,14 +118,14 @@ describe("@ other sessions on a paging hub (#12983)", () => {
     await type("@weath");
     key("Enter");
     expect(options()).toHaveLength(0); // the panel closed
-    expect(box().value).toBe("");
-    await type("What changed?");
+    expect(composerFieldText(host)).toBe("Weather app redesign ");
+    await type("What changed?", true);
     await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-composer.send")}"]`)!.click());
-    expect(onSend).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     const text = onSend.mock.calls[0][0].text;
     expect(text).toContain('url="persona://session/laptop/weather"');
     expect(text).toContain("/home/me/code/weather");
     expect(text).toContain("The new icons are in.");
-    expect(text.endsWith("</persona-context>\n\nWhat changed?")).toBe(true);
+    expect(parseUserText(text).text).toBe("Weather app redesign What changed?");
   });
 });

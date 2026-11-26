@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/textfmt"
@@ -141,10 +141,10 @@ const (
 
 // actionTodos makes a to-do of each of the actions named of list (the core's to-dos, Host.ActionTodos), after
 // checking each is one: an unknown one makes none.
-func (s *Recordings) actionTodos(ctx context.Context, list []kb.MinutesAction, actions []string, kind, recording string, version int,
-	note func(kb.MinutesAction) string) (out []any, made, byTask map[string]string, err error) {
+func (s *Recordings) actionTodos(ctx context.Context, list []recordingwire.MinutesAction, actions []string, kind, recording string, version int,
+	note func(recordingwire.MinutesAction) string) (out []any, made, byTask map[string]string, err error) {
 	for _, a := range actions {
-		if !slices.ContainsFunc(list, func(m kb.MinutesAction) bool { return m.ID == a }) {
+		if !slices.ContainsFunc(list, func(m recordingwire.MinutesAction) bool { return m.ID == a }) {
 			return nil, nil, nil, unknownActionError(a)
 		}
 	}

@@ -21,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 
 private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
     val configs = mutableListOf<JsonObject>()
+    val preservedConfigs = mutableListOf<JsonObject>()
     val secrets = mutableListOf<Pair<String, String?>>()
     var list: List<HubExtension> = listOf(detail.extension)
     var refuse: ExtensionConfigRejected? = null
@@ -44,6 +45,12 @@ private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
     }
     override suspend fun setConfig(id: String, config: JsonObject): ExtensionDetail {
         configs += config
+        refuse?.let { throw it }
+        detail = detail.copy(config = config)
+        return answer()
+    }
+    override suspend fun setConfigPreservingEntries(id: String, config: JsonObject): ExtensionDetail {
+        preservedConfigs += config
         refuse?.let { throw it }
         detail = detail.copy(config = config)
         return answer()
@@ -385,10 +392,11 @@ class ExtensionsStateTest {
         assertEquals("离线", ExtensionText.machineStatus(res, false, null, picksProgram = true, on = false))
         assertEquals("在线 · 等 hub 把程序发过去", ExtensionText.machineStatus(res, true, null, picksProgram = true, on = true))
 
-        // An unsaved edit elsewhere stays a draft; the switch goes to the hub alone.
+        // An unsaved edit elsewhere stays a draft; the switch goes to the hub alone, preserving entries.
         model.edit(listOf("note"), JsonPrimitive("草稿"))
         assertTrue(model.saveNow(listOf("machines"), ExtensionMachines.toggled(selected, "mac-b", true)))
-        assertEquals(buildJsonObject { putJsonArray("machines") { add("mac-a"); add("gone"); add("mac-b") } }, api.configs.last())
+        assertTrue(api.configs.isEmpty())
+        assertEquals(buildJsonObject { putJsonArray("machines") { add("mac-a"); add("gone"); add("mac-b") } }, api.preservedConfigs.last())
         assertEquals(JsonPrimitive("草稿"), model.state.value.value(listOf("note")))
         assertTrue(model.state.value.dirty)
 
@@ -567,5 +575,226 @@ class ExtensionsStateTest {
         assertEquals(listOf(false), api.uninstalls)
         assertEquals("uninstall cascade=true", api.cascades.last())
         assertEquals("B、ext-c 依赖 Example Notes，会一起停用。", ExtensionText.cascade(res, ExtensionCascade(listOf("B", "ext-c")), "Example Notes"))
+    }
+
+    private fun entryListDetail(required: Boolean = false, minItems: Int? = null, maxItems: Int = 2): ExtensionDetail {
+        val listField = ExtensionField(
+            name = "accounts",
+            type = "array",
+            title = "账号",
+            required = required,
+            minItems = minItems,
+            maxItems = maxItems,
+            secret = ExtensionEntrySecret(name = "account_key", title = "账号密钥", required = true, hint = "last4"),
+            items = ExtensionItems(
+                type = "object",
+                fields = listOf(
+                    ExtensionField("name", "string", title = "名称", required = true),
+                    ExtensionField("address", "string", title = "地址", format = "uri", required = true, clearsSecret = true),
+                ),
+            ),
+        )
+        return ExtensionDetail(
+            HubExtension("example-entries", "Example Entries", "connectors", "running", source = "installed", enabled = true),
+            form = listOf(listField, machinesField),
+            config = buildJsonObject {
+                putJsonArray("accounts") {
+                    addJsonObject {
+                        put("_id", "entry_saved")
+                        put("name", "主账号")
+                        put("address", "https://one.example.com")
+                    }
+                }
+            },
+            secrets = listOf(
+                ExtensionSecret("entry_saved", "账号密钥", required = true, set = true, hint = "1234", list = "accounts", entryTitle = "主账号"),
+            ),
+        )
+    }
+
+    @Test fun entryDraftPathsCompactionTitlesAndSecretStates() {
+        val detail = entryListDetail(required = true, minItems = 0)
+        val field = detail.form.first()
+        assertTrue(field.isEntryList)
+        assertEquals("accounts[0].address", ExtensionDraft.fieldPath(listOf("accounts", "0", "address")))
+        assertEquals("proxy.host", ExtensionDraft.fieldPath(listOf("proxy", "host")))
+        assertEquals(JsonPrimitive("https://one.example.com"), ExtensionDraft.value(detail.config, listOf("accounts", "0", "address")))
+
+        // Clearing the only text field on an entry keeps the entry object instead of removing the row.
+        val unsaved = buildJsonObject { putJsonArray("accounts") { addJsonObject { put("name", "Draft") } } }
+        val cleared = ExtensionDraft.set(unsaved, listOf("accounts", "0", "name"), null)
+        assertEquals(1, ExtensionDraft.entryItems(cleared, listOf("accounts")).size)
+        assertEquals(JsonObject(emptyMap()), ExtensionDraft.entryItems(cleared, listOf("accounts")).single())
+
+        // Compaction keeps [] only for required entry lists and drops [] for optional lists.
+        val emptyAccounts = buildJsonObject { putJsonArray("accounts") {} }
+        assertEquals(emptyAccounts, ExtensionDraft.compact(emptyAccounts, setOf("accounts")))
+        assertEquals(JsonObject(emptyMap()), ExtensionDraft.compact(emptyAccounts, emptySet()))
+
+        // Entry title prefers `name`, then first nonempty text field, then localized numbered fallback.
+        assertEquals("主账号", ExtensionText.entryTitle(res, field, buildJsonObject { put("name", " 主账号 "); put("address", "https://x") }, 0))
+        assertEquals("https://x", ExtensionText.entryTitle(res, field, buildJsonObject { put("name", " "); put("address", "https://x") }, 0))
+        assertEquals("条目 2", ExtensionText.entryTitle(res, field, JsonObject(emptyMap()), 1))
+
+        // Secret state shows last4 hint when present and sheet title includes entry title.
+        assertEquals("已设置 · 末 4 位 1234", ExtensionText.secretState(res, detail.secrets.single()))
+        assertEquals("主账号 · 账号密钥", ExtensionText.secretSheetTitle(detail.secrets.single()))
+        assertEquals("API Key", ExtensionText.secretSheetTitle(notes.secrets.single()))
+
+        val drawn = ExtensionDraft.paths(detail.form, detail.config)
+        assertTrue("accounts" in drawn)
+        assertTrue("accounts[0]._id" in drawn)
+        assertTrue("accounts[0].name" in drawn)
+        assertTrue("accounts[0].address" in drawn)
+    }
+
+    @Test fun entryListLifecyclePreservesIdsKeysValidationAndImmediateSaves() = runBlocking {
+        val base = entryListDetail(required = false, maxItems = 2)
+        val api = object : ExtensionApiStub() {
+            var current = base
+            val configs = mutableListOf<JsonObject>()
+            val preserved = mutableListOf<JsonObject>()
+            val secrets = mutableListOf<Pair<String, String?>>()
+            var refuse: ExtensionConfigRejected? = null
+            override suspend fun extension(id: String) = current
+            override suspend fun setConfig(id: String, config: JsonObject): ExtensionDetail {
+                configs += config
+                refuse?.let { throw it }
+                val savedAccounts = (config["accounts"] as? JsonArray)?.mapIndexed { index, el ->
+                    val obj = el as JsonObject
+                    if ("_id" in obj) obj else JsonObject(obj + ("_id" to JsonPrimitive("entry_minted_$index")))
+                }
+                val nextConfig = if (savedAccounts != null) JsonObject(config + ("accounts" to JsonArray(savedAccounts))) else config
+                val nextSecrets = savedAccounts.orEmpty().map { obj ->
+                    val entryId = obj["_id"]!!.jsonPrimitive.content
+                    val existing = current.secrets.firstOrNull { it.name == entryId }
+                    existing ?: ExtensionSecret(entryId, "账号密钥", required = true, set = false, list = "accounts",
+                        entryTitle = obj["name"]?.jsonPrimitive?.contentOrNull)
+                }
+                current = current.copy(config = nextConfig, secrets = nextSecrets)
+                return current
+            }
+            override suspend fun setConfigPreservingEntries(id: String, config: JsonObject): ExtensionDetail {
+                preserved += config
+                // Simulate hub preserving another entry added elsewhere while applying the machine switch.
+                val machines = config["machines"]
+                current = current.copy(config = if (machines != null) JsonObject(current.config + ("machines" to machines)) else current.config)
+                return current
+            }
+            override suspend fun setSecret(id: String, name: String, value: String): ExtensionDetail {
+                secrets += name to value
+                current = current.copy(secrets = current.secrets.map { if (it.name == name) it.copy(set = true, hint = value.takeLast(4)) else it })
+                return current
+            }
+        }
+        val model = ExtensionModel(api, "example-entries", res)
+        model.load()
+        assertFalse(model.state.value.dirty)
+        assertEquals(listOf("entry_saved"), model.state.value.entryKeys["accounts"])
+
+        // Add an entry up to maxItems = 2; a third add is ignored.
+        model.addEntry("accounts")
+        model.addEntry("accounts")
+        assertEquals(2, ExtensionDraft.entryItems(model.state.value.draft, listOf("accounts")).size)
+        val localKey = model.state.value.entryKeys["accounts"]!![1]
+        assertTrue(localKey.startsWith("new-entry-"))
+
+        // Editing fields keeps the local key identical and never leaks local keys into JSON.
+        model.edit(listOf("accounts", "1", "name"), JsonPrimitive("备用"))
+        model.edit(listOf("accounts", "1", "address"), JsonPrimitive("not-a-uri"))
+        assertEquals(localKey, model.state.value.entryKeys["accounts"]!![1])
+
+        // Immediate fixed-field save uses preserve_entries and retains unsaved entry edits.
+        assertTrue(model.saveNow(listOf("machines"), JsonArray(listOf(JsonPrimitive("mac-a")))))
+        assertEquals(1, api.preserved.size)
+        assertTrue(api.configs.isEmpty())
+        assertEquals(2, ExtensionDraft.entryItems(model.state.value.draft, listOf("accounts")).size)
+        assertEquals(localKey, model.state.value.entryKeys["accounts"]!![1])
+
+        // Setting the saved entry's secret keeps unsaved edits in the second entry intact.
+        assertTrue(model.setSecret("entry_saved", "placeholder-5678"))
+        assertEquals("entry_saved" to "placeholder-5678", api.secrets.single())
+        assertEquals("5678", model.state.value.detail!!.secrets.first { it.name == "entry_saved" }.hint)
+        assertEquals(JsonPrimitive("备用"), model.state.value.value(listOf("accounts", "1", "name")))
+
+        // Server rejects accounts[1].address -> error maps to that field, clears on edit.
+        api.refuse = ExtensionConfigRejected("accounts[1].address", "要是一个网址")
+        assertFalse(model.save())
+        assertEquals("要是一个网址", model.state.value.fieldError(listOf("accounts", "1", "address")))
+        assertNull(model.state.value.error)
+
+        api.refuse = null
+        model.edit(listOf("accounts", "1", "address"), JsonPrimitive("https://two.example.com"))
+        assertNull(model.state.value.fieldError(listOf("accounts", "1", "address")))
+        assertTrue(model.save())
+        val sent = api.configs.last()
+        assertFalse(sent.toString().contains("new-entry-"))
+        assertFalse(sent.toString().contains("account_key"))
+        val sentEntries = ExtensionDraft.entryItems(sent, listOf("accounts"))
+        assertEquals("entry_saved", ExtensionDraft.entryId(sentEntries[0]))
+        assertNull(ExtensionDraft.entryId(sentEntries[1]))
+        assertEquals(listOf("entry_saved", "entry_minted_1"), model.state.value.entryKeys["accounts"])
+
+        // Removing both entries omits an optional list only when Save runs.
+        model.removeEntryByKey("accounts", "entry_minted_1", required = false)
+        model.removeEntryByKey("accounts", "entry_saved", required = false)
+        assertTrue(model.state.value.dirty)
+        assertTrue(model.save())
+        assertFalse("accounts" in api.configs.last())
+    }
+
+    @Test fun clearingOnlyRemainingEntryFieldKeepsEntryRowAndSavedId() = runBlocking {
+        // 1. Sole unsaved entry with 1 populated field: clearing it keeps the empty row, its key, and compacted array.
+        val emptyDetail = entryListDetail(required = false, maxItems = 2).copy(config = JsonObject(emptyMap()), secrets = emptyList())
+        val unsavedModel = ExtensionModel(FakeExtensions(emptyDetail), "example-entries", res)
+        unsavedModel.load()
+        unsavedModel.addEntry("accounts")
+        val unsavedKey = unsavedModel.state.value.entryKeys["accounts"]!!.single()
+        unsavedModel.edit(listOf("accounts", "0", "name"), JsonPrimitive("Draft"))
+        unsavedModel.edit(listOf("accounts", "0", "name"), null)
+        assertEquals(listOf(JsonObject(emptyMap())), ExtensionDraft.entryItems(unsavedModel.state.value.draft, listOf("accounts")))
+        assertEquals(listOf(unsavedKey), unsavedModel.state.value.entryKeys["accounts"])
+        assertTrue(unsavedModel.state.value.dirty)
+        assertEquals(
+            buildJsonObject { putJsonArray("accounts") { addJsonObject {} } },
+            ExtensionDraft.compact(unsavedModel.state.value.draft, unsavedModel.state.value.requiredEntryLists),
+        )
+
+        // 2. Saved entry holding only _id + one populated field: clearing that field keeps the row and host-minted _id.
+        val savedOneField = entryListDetail(required = false, maxItems = 2).copy(
+            config = buildJsonObject {
+                putJsonArray("accounts") {
+                    addJsonObject {
+                        put("_id", "entry_saved")
+                        put("name", "主账号")
+                    }
+                }
+            },
+        )
+        val savedModel = ExtensionModel(FakeExtensions(savedOneField), "example-entries", res)
+        savedModel.load()
+        savedModel.edit(listOf("accounts", "0", "name"), null)
+        val keptEntry = ExtensionDraft.entryItems(savedModel.state.value.draft, listOf("accounts")).single()
+        assertEquals("entry_saved", ExtensionDraft.entryId(keptEntry))
+        assertEquals(listOf("entry_saved"), savedModel.state.value.entryKeys["accounts"])
+        assertEquals(
+            buildJsonObject { putJsonArray("accounts") { addJsonObject { put("_id", "entry_saved") } } },
+            ExtensionDraft.compact(savedModel.state.value.draft, savedModel.state.value.requiredEntryLists),
+        )
+
+        // 3. Clearing every field on a multi-field saved entry keeps the row and _id; object groups still collapse.
+        val fullModel = ExtensionModel(FakeExtensions(entryListDetail()), "example-entries", res)
+        fullModel.load()
+        fullModel.edit(listOf("accounts", "0", "name"), null)
+        fullModel.edit(listOf("accounts", "0", "address"), null)
+        assertEquals(
+            listOf(buildJsonObject { put("_id", "entry_saved") }),
+            ExtensionDraft.entryItems(fullModel.state.value.draft, listOf("accounts")),
+        )
+        assertNull(ExtensionDraft.value(fullModel.state.value.draft, listOf("accounts", "99999999999999999999", "name")))
+        assertEquals(
+            fullModel.state.value.draft,
+            ExtensionDraft.set(fullModel.state.value.draft, listOf("accounts", "99999999999999999999", "name"), null),
+        )
     }
 }

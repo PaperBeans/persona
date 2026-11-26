@@ -1,0 +1,8 @@
+<resources>
+    <string name="chat_command_input_kicker">コマンド入力</string>
+    <string name="chat_command_input_waiting">入力を待っています</string>
+    <string name="chat_command_input_line">入力</string>
+    <string name="chat_command_input_show">表示</string>
+    <string name="chat_command_input_hide">非表示</string>
+    <string name="chat_command_input_not_now">今はしない</string>
+</resources>

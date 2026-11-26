@@ -31,11 +31,11 @@ SUFFIX = """}
 declare const native: PersonaCoreNative;
 export default native;
 """
-FUNCTION = re.compile(r"^function ([A-Za-z_$][\w$]*)\((.*)\): (void|number|string|boolean|Buffer)$")
+FUNCTION = re.compile(r"^function ([A-Za-z_$][\w$]*)\((.*)\): (void|number|string|boolean|Uint8Array)$")
 CALLBACK = re.compile(r"^\(\((.*)\) => (void|unknown)\)$")
 PARAM = re.compile(r"^([A-Za-z_$][\w$]*)(\??): (.+)$")
 HOST_CALLBACKS = {"changed", "changedChat", "effects"}
-TYPES = {"number", "string", "boolean", "Buffer", "void"}
+TYPES = {"number", "string", "boolean", "Uint8Array", "void"}
 SIGNATURES = {
     "coreCreate": [("config", "Uint8Array"), ("changed", "CoreHost['changed']"), ("effects", "CoreHost['run']")],
     "coreCreateWithChat": [("config", "Uint8Array"), ("changed", "CoreHost['changed']"),
@@ -84,7 +84,7 @@ def split_parameters(text):
 
 def ts_type(text):
     if text in TYPES:
-        return "Uint8Array" if text == "Buffer" else text
+        return text
     match = CALLBACK.fullmatch(text)
     if not match:
         raise DefinitionError(f"unsupported generated type: {text}")
@@ -132,7 +132,7 @@ def host_parameter(parameter, kind):
     expected_types = {
         "changed": ["number"],
         "changedChat": ["string", "number"],
-        "effects": ["Buffer"],
+        "effects": ["Uint8Array"],
     }[parameter]
     if [kind for _, kind in kind] != expected_types:
         raise DefinitionError(f"{parameter} has the wrong positional callback arguments")
@@ -165,7 +165,7 @@ def generate(records):
         if arguments != SIGNATURES[name]:
             raise DefinitionError(f"{name} has an incomplete or changed positional parameter contract")
         if return_type != ("void" if name == "coreClose" else "string" if name.startswith(("coreProject", "coreDisplay"))
-                           else "Buffer" if name in ("coreDrain", "coreConfig")
+                           else "Uint8Array" if name in ("coreDrain", "coreConfig")
                            else "number" if name.startswith("coreCreate") else "boolean"):
             raise DefinitionError(f"{name} has the wrong return type")
         lines.append(f"  {name}({', '.join(parameter + ': ' + kind for parameter, kind in arguments)}): {ts_type(return_type)};")

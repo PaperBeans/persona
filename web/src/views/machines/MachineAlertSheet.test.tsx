@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AlertKind, LauncherHealthRecord, MachineAlert } from "../../lib/machine-alerts";
+import { resetRoster, setRoster } from "../../lib/managers";
 import type { Machine, MachineMetrics, Session } from "../../lib/types";
 
 vi.hoisted(() => {
@@ -68,7 +69,7 @@ const agents = [
   agent("u1", "Release notes", "unread"),
 ];
 
-function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
+function render(over: { machine?: Machine; kind?: Exclude<AlertKind, "disk">; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
   act(() => root.render(
     <MachineAlertSheet
       machine={over.machine ?? laptop}
@@ -85,6 +86,7 @@ function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAle
       onClose={() => {}}
       onReconnect={over.onReconnect ?? (() => {})}
       onRecords={over.onRecords ?? (() => {})}
+      onReloadRecords={over.onReloadRecords}
     />,
   ));
 }
@@ -110,6 +112,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   document.body.innerHTML = "";
+  resetRoster();
   vi.unstubAllGlobals();
 });
 
@@ -134,6 +137,17 @@ describe("the memory sheet", () => {
     render({ kind: "cpu", alerts: [{ kind: "cpu", severity: "warning" }] });
     await flush();
     expect($$("[data-process]").map((p) => p.getAttribute("data-process"))).toEqual(["node", "claude", "herdr", "personad"]);
+    expect($("[data-testid=load-definition]")).toBeNull(); // only the load alert explains load
+  });
+
+  it("says what load counts on a load alert, with the chip's per-core figure (#12519)", async () => {
+    routes["GET /api/v1/machines/laptop/diagnosis"] = () => json({ machine_id: "laptop", at: 1, processes });
+    render({ kind: "load", alerts: [{ kind: "load", severity: "warning", value: 0.4 }] });
+    await flush();
+    // 4 over 10 cores: one decimal, as the chip and the card write it (the sheet said 0.40)
+    expect($("[data-testid=pressure-figures]")?.textContent).toContain("每核 0.4");
+    expect($("[data-testid=pressure-figures]")?.textContent).not.toContain("0.40");
+    expect($("[data-testid=load-definition]")?.textContent).toMatch(/^负载 = 正在运行和排队等 CPU 的线程数/);
   });
 
   it("stops only the idle Agents, after a confirmation that lists them, one at a time, and says how it went", async () => {
@@ -193,7 +207,7 @@ describe("the memory sheet", () => {
   });
 });
 
-describe("the disk sheet", () => {
+describe("cache recovery on a computer without a usage map", () => {
   const disk = (caches: { id: string; path: string; bytes: number; in_use: boolean }[]) => ({
     machine_id: "laptop", at: 1,
     disk: { volumes: [{ mount: "/", used: 450 * GB, total: 500 * GB }], folders: [{ path: "~/code", bytes: 120 * GB }], partial: true, caches },
@@ -210,7 +224,9 @@ describe("the disk sheet", () => {
       ] : [{ id: "go-build", path: "~/.cache/go-build", bytes: 6 * GB, in_use: true }]));
     };
     routes["POST /api/v1/machines/laptop/cleanup"] = () => json({ freed_bytes: 4.8 * GB, items: [{ id: "npm-cache", bytes: 2 * GB, status: "cleaned" }, { id: "xcode-derived-data", bytes: 3 * GB, status: "in_use" }] });
-    render({ kind: "disk", alerts: [{ kind: "disk", severity: "critical" }] });
+    routes["GET /api/v1/machines/laptop/storage/usage"] = () => json({ code: "node_outdated" }, 409);
+    const { UsageMap } = await import("./UsageMap");
+    await act(async () => root.render(<UsageMap machine={laptop} focus={{ mode: "reclaim", seq: 1 }} />));
     await flush();
     expect($("[data-testid=folders]")?.textContent).toContain("~/code");
     expect($("[data-testid=folders-partial]")).not.toBeNull();
@@ -284,6 +300,22 @@ describe("the version sheet", () => {
     expect(state("done")).toBe("done");
   });
 
+  it("withdraws an open Redeploy confirmation when the computer starts updating elsewhere", async () => {
+    const show = (machine: Machine) => render({ machine, kind: "mismatch", agents: [] });
+    show(studio);
+    await flush();
+    await click($("[data-testid=redeploy]"));
+    const confirm = $("[data-testid=redeploy-confirm]") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+
+    show({ ...studio, deploy_phase: "restarting" });
+    await flush();
+    expect($('[data-step="restarting"]')?.getAttribute("data-state")).toBe("current");
+    expect(confirm.isConnected && !confirm.disabled).toBe(false);
+    await act(async () => { confirm.click(); });
+    expect(posts("/deploy")).toHaveLength(0);
+  });
+
   it("gives the hub's reason when it can't update the computer", async () => {
     render({ machine: { ...studio, kind: "link", can_deploy: false, deploy_reason: "Update this computer's Persona Link first." }, kind: "mismatch", alerts: [] });
     await flush();
@@ -297,6 +329,37 @@ describe("the version sheet", () => {
     await flush();
     hub.version = "v1-202611141020";
     expect($("[data-testid=build-gap]")?.textContent).toContain("不知道 hub 的版本");
+  });
+
+  it("shows co-located managers, restart notes in Redeploy confirmation, and pending_restart after deploy", async () => {
+    const withUid: Machine = { ...studio, machine_uid: "uid-studio", hostname: "studio.local" };
+    setRoster({
+      default: "m-1",
+      managers: [
+        { id: "m-1", name: "Studio 助手", online: true, machine_uid: "uid-studio", host: "studio.local", deploy: "service", version: "v1-202611100800" },
+      ],
+    });
+    routes["POST /api/v1/machines/studio/deploy"] = () => json({ ok: true });
+    render({ machine: withUid, kind: "mismatch", alerts: [{ kind: "mismatch", severity: "info" }], agents: [] });
+    await flush();
+
+    expect($("[data-testid=deploy-hosted-managers]")?.textContent).toContain("Studio 助手");
+    expect($("[data-testid=deploy-hosted-managers]")?.textContent).toContain("版本落后");
+    expect($("[data-testid=deploy-hosted-why]")?.textContent).toContain("Studio 助手");
+
+    await click($("[data-testid=redeploy]"));
+    expect($("[data-testid=redeploy-confirm-managers]")?.textContent).toContain("Studio 助手");
+    await click($("[data-testid=redeploy-confirm]"));
+
+    act(() => setRoster({
+      default: "m-1",
+      managers: [
+        { id: "m-1", name: "Studio 助手", online: true, machine_uid: "uid-studio", host: "studio.local", deploy: "service", version: "v1-202611100800", pending_restart: true },
+      ],
+    }));
+    render({ machine: { ...withUid, node_mismatch: false, node_version: "v1-202611141020" }, kind: "mismatch", alerts: [], agents: [] });
+    await flush();
+    expect($("[data-testid=deploy-done-pending-restart]")?.textContent).toContain("Studio 助手");
   });
 });
 
@@ -345,10 +408,22 @@ describe("the launcher sheet", () => {
     expect($("[data-launcher=codex]")?.textContent).toContain("连续失败 3 次");
     expect($("[data-launcher=team]")?.textContent).toContain("Team relay");
     expect($("[data-launcher=team]")?.textContent).toContain("401 invalid x-api-key");
-    expect($("[data-testid=healthy-launchers]")?.textContent).toBe("claude");
+    expect($("[data-testid=healthy-launchers]")?.textContent).toBe("Claude Code");
     await click($("[data-launcher=team] [data-testid=test-again]"));
     expect(posts("/launchers/health/check").map((c) => c.path)).toEqual(["/api/v1/launchers/health/check?machine=laptop&launcher=team"]);
     expect(got).toEqual([[expect.objectContaining({ launcher: "team", state: "ok" })]]);
     expect($("[data-launcher=team]")?.textContent).toContain("现在可以用了");
+  });
+
+  it("reads the records again when a check answers none for the launcher (#14534)", async () => {
+    routes["GET /api/v1/machines/laptop/launchers"] = () => json({ launchers: [{ name: "claude" }] });
+    routes["POST /api/v1/launchers/health/check"] = () => json({ records: [] });
+    let reloads = 0;
+    render({ kind: "launcher", alerts: [{ kind: "launcher", severity: "warning", count: 2 }], records, onReloadRecords: () => reloads++ });
+    await flush();
+    expect(reloads).toBe(0);
+    await click($("[data-launcher=team] [data-testid=test-again]"));
+    expect(reloads).toBe(1);
+    expect($("[data-launcher=team]")?.textContent).toContain("这次检查没有结果");
   });
 });

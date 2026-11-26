@@ -49,6 +49,24 @@ final class TodosV1PlacesTests: XCTestCase {
         XCTAssertTrue(target.exists, "no \(row) in the drawer:\n\(app.debugDescription)")
     }
 
+    /// `method` `path` on the mock hub, waited for (`todosMock`).
+    @MainActor private func call(_ hub: String, _ method: String, _ path: String) throws {
+        _ = try todosMock(try XCTUnwrap(URL(string: hub)), method, path)
+    }
+
+    /// The list's search field, opened (`todosSearchField`).
+    @MainActor private func searchField() -> XCUIElement { todosSearchField(app) }
+
+    /// Back from a pushed page: the system's back button, else the edge swipe.
+    @MainActor private func back() {
+        let system = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex.first(where: \.isHittable)
+        if let system { system.tap(); return }
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
     /// The list's title as a menu: the navigation bar's title button (the system's title menu has no identifier of its
     /// own; the bar's other buttons have theirs).
     @MainActor private func titleMenu() -> XCUIElement {
@@ -234,6 +252,35 @@ final class TodosV1PlacesTests: XCTestCase {
         XCTAssertTrue(element("todos.guard").exists, "still Today, with what needs the owner elsewhere")
     }
 
+    /// A search sets the place aside, and opening a result never changes it (#10465): on Today, "crash" finds Fix login
+    /// crash, which Today does not hold; its page opens, Back is the results with the words, and once the field is
+    /// cleared the list is Today again (its guard line back, no Needs you of its own, its title). Launched in English
+    /// only because the system's search controls (its Cancel) carry no identifier and are found by their words.
+    @MainActor func testOpeningASearchResultKeepsThePlace() throws {
+        try launch(try hub, ["-openTodoPlace", "today", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"])
+        let line = element("todos.guard")
+        XCTAssertTrue(line.waitForExistence(timeout: 60), "Today's guard line:\n\(app.debugDescription)")
+        let title = titleMenu().label
+        let result = element("todos.row.t04")
+        XCTAssertFalse(result.exists, "not one of Today's")
+        let field = searchField()
+        field.tap()
+        field.typeText("crash")
+        XCTAssertTrue(element("todos.searchChats").waitForExistence(timeout: 10), "no results for the words:\n\(app.debugDescription)")
+        XCTAssertTrue(result.exists && !line.exists, "found whatever the place, which is set aside:\n\(app.debugDescription)")
+        result.tap()
+        XCTAssertTrue(element("todo.toggleDone").waitForExistence(timeout: 20), "no to-do page:\n\(app.debugDescription)")
+        back()
+        XCTAssertTrue(result.waitForExistence(timeout: 10), "Back is the results again:\n\(app.debugDescription)")
+        XCTAssertEqual(app.searchFields.firstMatch.value as? String, "crash", "the words are kept")
+        let cancel = app.buttons.matching(NSPredicate(format: "label ==[c] 'cancel' OR label ==[c] 'close'")).allElementsBoundByIndex
+            .first(where: \.isHittable)
+        try XCTUnwrap(cancel, "no way out of the search:\n\(app.debugDescription)").tap()
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "Today again, its guard line back:\n\(app.debugDescription)")
+        XCTAssertTrue(result.waitForNonExistence(timeout: 5) && !element("todos.section.needs_you").exists, "Today's own list")
+        XCTAssertEqual(titleMenu().label, title, "the place never changed")
+    }
+
     /// An hour tapped on Upcoming's calendar opens the list's New To-Do (saved on the device first, as the foot's +),
     /// due that day at that time, All Day off; never the calendar's own sheet, which waits for the hub.
     @MainActor func testAnHourOnUpcomingsCalendarStartsANewToDoThen() throws {
@@ -246,11 +293,25 @@ final class TodosV1PlacesTests: XCTestCase {
         XCTAssertFalse(element("todo.calendar.newTitle").exists, "not the calendar's own sheet")
     }
 
-    /// An hour on the calendar's day, below its strip and its all-day row: by its column when the column is an element.
+    /// An hour on the calendar's day that is on screen, below its strip and its all-day row: half way between the first
+    /// two hour lines in sight, found by their labels in the hours' column, in the day's column. The day opens scrolled
+    /// to its first timed to-do or to now, so which hours are in sight depends on the time of day; the column is the
+    /// whole day tall, and its middle is off screen in the evening (a tap there landed on the bar above the hours).
     @MainActor private func hourOnTheCalendar() -> XCUICoordinate {
-        let hours = element("todo.calendar.axis")
-        return hours.exists ? hours.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            : app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.7))
+        let column = element("todo.calendar.axis")
+        guard column.exists else { return app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.7)) }
+        let day = column.frame
+        // The hours' scroll view, the innermost holding the column: what of the column it shows is what is on screen.
+        let scroll = app.scrollViews.containing(.any, identifier: "todo.calendar.axis").allElementsBoundByIndex
+            .filter { $0.frame.intersects(day) }.min { $0.frame.height < $1.frame.height }
+        let within: XCUIElement = scroll ?? app
+        let shown = within.frame.intersection(day).intersection(app.frame)
+        // The labels left of the column, wholly in sight: each sits on its hour's line (the now line's time among them).
+        let lines = within.staticTexts.allElementsBoundByIndex.map(\.frame)
+            .filter { $0.maxX <= day.minX + 1 && $0.minY >= shown.minY && $0.maxY <= shown.maxY }
+            .map(\.midY).sorted()
+        let y = lines.count >= 2 ? (lines[0] + lines[1]) / 2 : shown.midY
+        return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: shown.midX, dy: y))
     }
 
     /// A project picked in All Projects… that the title menu does not list (the mock's Garden, nothing open in it) is
@@ -277,8 +338,8 @@ final class TodosV1PlacesTests: XCTestCase {
     }
 
     /// The Sidebar layout's frames on an iPad on its side (`ipad11-landscape/closed`): the places in the sidebar with the
-    /// one shown shaded, on Today, on a project and on All To-dos, and a place picked while a to-do is pushed: its root,
-    /// swapped in without a pop.
+    /// one shown shaded, on Today, on a project and on All To-dos, the list searching, and a place picked while a to-do is
+    /// pushed: its root, swapped in without a pop.
     @MainActor private func padFrames(_ hub: String, _ extra: [String], wants: (String) -> Bool, shot: (String) -> Void) throws {
         XCUIDevice.shared.orientation = .landscapeLeft
         let relaunch = { (args: [String]) in try self.relaunch(hub, extra + args, layout: "sidebar") }
@@ -286,6 +347,20 @@ final class TodosV1PlacesTests: XCTestCase {
             try relaunch(["-openTodoPlace", place, "-todos.v1.upcomingCalendar", "NO"])
             _ = element("sidebar-todos-place-today").waitForExistence(timeout: 20)
             shot(frame)
+        }
+        // The list searching (#10465): an open and a closed match (Fix widget refresh crash seen and closed two days
+        // ago, so it is under Done this week at any hour; the mock put back after), whatever the place shown, Today.
+        if wants("~search") {
+            try call(hub, "PUT", "api/v1/todos/t08/seen")
+            try call(hub, "GET", "mock/todo-view?done_hours=t08:50")
+            defer { try? call(hub, "GET", "mock/reset") }
+            try relaunch(["-openTodoPlace", "today", "-todos.v1.upcomingCalendar", "NO"])
+            _ = element("sidebar-todos-place-today").waitForExistence(timeout: 20)
+            let field = searchField()
+            field.tap()
+            field.typeText("crash")
+            _ = element("todos.searchChats").waitForExistence(timeout: 10) // the results for the words
+            shot("~search")
         }
         if wants("~swap") {
             try relaunch(["-openTodoPlace", "project:kyoto"])

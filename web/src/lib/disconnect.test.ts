@@ -8,6 +8,7 @@ import { ApiError, errorText, HubTimeoutError } from "./api";
 import { pair, UNREVOKED_KEY } from "./auth";
 import { storeCredentials, storedCredentials } from "./compatibility";
 import { REVOKE_TIMEOUT_MS, revokeThisBrowser, signOutHere } from "./disconnect";
+import { reset } from "./store";
 
 let stored: Record<string, string>;
 const fetcher = vi.fn<typeof fetch>();
@@ -87,6 +88,33 @@ describe("revokeThisBrowser", () => {
     expect(await revokeThisBrowser()).toEqual({ ok: false, nothing: true });
     expect(calls()).toEqual(["GET /api/v1/auth/tokens"]);
   });
+
+  it("returns a clean failure without calling fetch when localStorage is blocked", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem() { throw new DOMException("blocked", "SecurityError"); },
+      setItem() { throw new DOMException("blocked", "SecurityError"); },
+      removeItem() { throw new DOMException("blocked", "SecurityError"); },
+    });
+    const r1 = await revokeThisBrowser();
+    expect(r1).toMatchObject({ ok: false, id: "" });
+    expect("error" in r1 && r1.error).toContain("blocked");
+    expect(fetcher).not.toHaveBeenCalled();
+
+    const prevDesc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("Storage disabled", "SecurityError"); },
+    });
+    try {
+      const r2 = await revokeThisBrowser();
+      expect(r2).toMatchObject({ ok: false, id: "" });
+      expect("error" in r2 && r2.error).toContain("Storage disabled");
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      if (prevDesc) Object.defineProperty(globalThis, "localStorage", prevDesc);
+      else delete (globalThis as Record<string, unknown>).localStorage;
+    }
+  });
 });
 
 describe("signing out without the revoke", () => {
@@ -129,6 +157,99 @@ describe("signing out without the revoke", () => {
   it("signs out when an older desktop lacks notification cleanup", () => {
     vi.stubGlobal("window", { personaDesktop: {} });
     expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(location.href).toBe("/");
+  });
+
+  it("still resets store and redirects to sign-in when localStorage throws SecurityError or is undefined", () => {
+    vi.mocked(reset).mockClear();
+    vi.stubGlobal("localStorage", {
+      getItem: () => { throw new DOMException("blocked", "SecurityError"); },
+      setItem: () => { throw new DOMException("blocked", "SecurityError"); },
+      removeItem: () => { throw new DOMException("blocked", "SecurityError"); },
+    });
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(reset).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/");
+
+    vi.mocked(reset).mockClear();
+    location.href = "/settings";
+    vi.stubGlobal("localStorage", undefined);
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(reset).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/");
+
+    vi.mocked(reset).mockClear();
+    location.href = "/settings";
+    const prevDesc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("Storage disabled", "SecurityError"); },
+    });
+    try {
+      expect(() => signOutHere("dev_browser")).not.toThrow();
+      expect(reset).toHaveBeenCalledOnce();
+      expect(location.href).toBe("/");
+    } finally {
+      if (prevDesc) Object.defineProperty(globalThis, "localStorage", prevDesc);
+      else delete (globalThis as Record<string, unknown>).localStorage;
+    }
+  });
+
+  it("still invalidates feed caches and removes credentials when getItem throws inside setToken", () => {
+    vi.mocked(reset).mockClear();
+    stored["persona.token"] = "jd_browser";
+    stored["jarvis.token"] = "jd_browser";
+    stored["persona.tokenId"] = "dev_browser";
+    stored["jarvis.tokenId"] = "dev_browser";
+    stored["persona.feedCache.v1:scope"] = '{"items":[]}';
+    vi.stubGlobal("localStorage", {
+      getItem: () => { throw new DOMException("read blocked", "SecurityError"); },
+      setItem: (key: string, value: string) => void (stored[key] = value),
+      removeItem: (key: string) => void delete stored[key],
+      get length() { return Object.keys(stored).length; },
+      key: (index: number) => Object.keys(stored)[index] ?? null,
+    });
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(stored["persona.feedCache.v1:scope"]).toBeUndefined();
+    expect(stored["persona.token"]).toBeUndefined();
+    expect(stored["jarvis.token"]).toBeUndefined();
+    expect(stored["persona.tokenId"]).toBeUndefined();
+    expect(stored["jarvis.tokenId"]).toBeUndefined();
+    expect(reset).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/");
+  });
+
+  it("still completes sign-out when desktop bridge notifications or island cleanup throw", () => {
+    vi.mocked(reset).mockClear();
+    storeCredentials("jd_browser", "dev_browser");
+    const setIslandState = vi.fn(() => { throw new Error("island IPC failed"); });
+    const clearNotifications = vi.fn(() => { throw new Error("notifications IPC failed"); });
+    vi.stubGlobal("window", { personaDesktop: { clearNotifications, setIslandState } });
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(clearNotifications).toHaveBeenCalledOnce();
+    expect(setIslandState).toHaveBeenCalledOnce();
+    expect(storedCredentials()).toEqual({ token: "", tokenId: "" });
+    expect(reset).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/");
+  });
+
+  it("keeps cleaning subsequent keys when removing handoff memory throws", () => {
+    vi.mocked(reset).mockClear();
+    storeCredentials("jd_browser", "dev_browser");
+    stored["inbox.handOffBySource"] = "[]";
+    stored["forward.recentTargets"] = "[]";
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored[key] ?? null,
+      setItem: (key: string, value: string) => void (stored[key] = value),
+      removeItem: (key: string) => {
+        if (key === "inbox.handOffBySource") throw new DOMException("blocked", "SecurityError");
+        delete stored[key];
+      },
+    });
+    expect(() => signOutHere("dev_browser")).not.toThrow();
+    expect(stored["forward.recentTargets"]).toBeUndefined();
+    expect(stored[UNREVOKED_KEY]).toBe("dev_browser");
+    expect(reset).toHaveBeenCalledOnce();
     expect(location.href).toBe("/");
   });
 });

@@ -7,7 +7,8 @@ import { drawnFromView, openAsDrawn } from "./view-triage";
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const ago = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
 const todo = (id: string, more: Partial<Todo> = {}): Todo => ({ id, title: `Errand ${id}`, created_at: ago(5), updated_at: ago(5), ...more });
-const view = (section: string, reason: string, more: Partial<TodoSummary> = {}): TodoSummary => ({ phase: "todo", section, reason, rank: 0, ...more });
+// The view as the wire carries it: raw strings, which may be a newer hub's values the closed types do not know.
+const view = (section: string, reason: string, more: object = {}): TodoSummary => ({ phase: "todo", section, reason, rank: 0, ...more }) as TodoSummary;
 const ids = (r: TriageResult) => Object.fromEntries(TRIAGE_SECTIONS.map((s) => [s, r.sections[s].map((g) => g.members.map((m) => m.id))]).filter(([, rows]) => rows.length));
 
 describe("drawnFromView", () => {
@@ -111,5 +112,66 @@ describe("drawnFromView", () => {
     const r = drawnFromView(local, NOW);
     expect(r.sections.just_done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_fresh_concern"]);
     expect(r.sections.done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_stale_concern"]);
+  });
+
+  it("maps boundary projection views deterministically into legacy sections for lossless rollback (#14541)", () => {
+    const list = [
+      // can_wait sits under waiting after real needs_you
+      todo("todo_real_ask", { view: view("needs_you", "agent_asks", { phase: "needs_you", rank: 0 }) }),
+      todo("todo_can_wait", { view: view("can_wait", "can_wait", { phase: "needs_you", can_wait: true, rank: 0 }) }),
+      // supervisor-held ask stays in working (persona_working)
+      todo("todo_sup_held", { view: view("working", "persona_working", { phase: "working", rank: 0 }) }),
+      // expired park stays in parked; real wake moves to working
+      todo("todo_parked_exp", { view: view("waiting", "parked", { phase: "waiting", rank: 0 }) }),
+      todo("todo_parked_wake", { view: view("working", "agent_running", { phase: "working", rank: 1 }) }),
+      // delivery merged stays in other; delivery live enters just_done
+      todo("todo_merged", { delivery: { state: "merged", at: ago(2) }, view: view("todo", "rest", { phase: "todo", rank: 0 }) }),
+      todo("todo_live", { delivery: { state: "live", at: ago(1) }, view: view("just_finished", "finished_unseen", { phase: "ready", line: { key: "deployed" }, rank: 0 }) }),
+      // new activity after seen_at returns to just_done
+      todo("todo_new_act", { seen_at: ago(3), view: view("just_finished", "finished_unseen", { phase: "ready", line: { key: "finished" }, rank: 1 }) }),
+    ];
+    const local = triageTodos(list, undefined, NOW);
+    const r = drawnFromView(local, NOW);
+    expect(ids(r)).toEqual({
+      waiting: [["todo_real_ask"], ["todo_can_wait"]],
+      working: [["todo_sup_held"], ["todo_parked_wake"]],
+      parked: [["todo_parked_exp"]],
+      other: [["todo_merged"]],
+      just_done: [["todo_live"], ["todo_new_act"]],
+    });
+    expect([r.open, r.shelved, r.finished, r.cancelled]).toEqual([8, 0, 0, 0]);
+  });
+
+  it("falls back row-by-row when view is missing or carries an unknown phase, section, or reason (#14583)", () => {
+    const list = [
+      todo("todo_known", { view: view("needs_you", "owner_decides", { phase: "needs_you", rank: 0 }) }),
+      todo("todo_missing"),
+      todo("todo_bad_phase", { view: view("needs_you", "owner_decides", { phase: "future_phase", rank: 0 }) }),
+      todo("todo_bad_section", { view: view("future_section", "owner_decides", { phase: "needs_you", rank: 0 }) }),
+      todo("todo_bad_reason", { view: view("needs_you", "future_reason", { phase: "needs_you", rank: 0 }) }),
+    ];
+    const r = drawnFromView(triageTodos(list, undefined, NOW), NOW);
+    expect(ids(r)).toEqual({
+      waiting: [["todo_known"]],
+      other: [["todo_bad_phase"], ["todo_bad_reason"], ["todo_bad_section"], ["todo_missing"]],
+    });
+    expect([r.open, r.shelved, r.finished, r.cancelled]).toEqual([5, 0, 0, 0]);
+  });
+
+  it("keeps a browser-restored inactive row in Other open across hub snapshots (#14583)", () => {
+    const shelved = todo("todo_shelved", {
+      created_at: ago(72),
+      updated_at: ago(72),
+      view: view("todo", "rest", { inactive: ago(72) }),
+    });
+    const restored = new Map<string, number>([["todo_shelved", NOW - 60_000]]);
+    const r = drawnFromView(triageTodos([shelved], undefined, NOW, restored), NOW, restored);
+    expect(ids(r)).toEqual({ other: [["todo_shelved"]] });
+    expect([r.open, r.shelved]).toEqual([1, 0]);
+    // Without local restore (or once 48 h have elapsed), the hub's inactive mark shelves it.
+    const expired = new Map<string, number>([["todo_shelved", NOW - 49 * 3_600_000]]);
+    const after = drawnFromView(triageTodos([shelved], undefined, NOW, expired), NOW, expired);
+    expect(ids(after)).toEqual({ shelved: [["todo_shelved"]] });
+    expect([after.open, after.shelved]).toEqual([0, 1]);
   });
 });

@@ -25,7 +25,7 @@ class ChatImageViewerTest {
 
     @Test fun actionsInOrderWithEditOnlyWhenTheChatTakesThePhoto() {
         assertEquals(listOf("保存", "分享", "拷贝"), chatViewerActions(res, FakeMedia(), { false }, null).map { it.label })
-        assertEquals(listOf("保存", "编辑", "分享", "拷贝"), chatViewerActions(res, FakeMedia(), { false }) { null }.map { it.label })
+        assertEquals(listOf("保存", "编辑", "分享", "拷贝"), chatViewerActions(res, FakeMedia(), { false }, { null }).map { it.label })
     }
 
     @Test fun noticesSayWhatHappened() = runTest {
@@ -41,14 +41,16 @@ class ChatImageViewerTest {
         assertEquals("拷贝失败", actions.getValue("拷贝").onClick(0, picture))
     }
 
-    @Test fun editStopsAtFourPhotosAndOtherwiseSaysWhatTheEditorSays() = runTest {
+    @Test fun editStopsAtHubPhotoLimitAndOtherwiseSaysWhatTheEditorSays() = runTest {
         var limit = true
         val edited = mutableListOf<Int>()
-        val edit = chatViewerActions(res, FakeMedia(), { limit }) { bytes -> edited += bytes.size; "这张图片没法编辑" }.first { it.label == "编辑" }
-        assertEquals("一次最多 4 张", edit.onClick(0, picture))
+        val edit = chatViewerActions(res, FakeMedia(), { limit }, { bytes -> edited += bytes.size; "这张图片没法编辑" }).first { it.label == "编辑" }
+        assertEquals("一次最多 20 张", edit.onClick(0, picture))
         assertEquals(emptyList<Int>(), edited)
         limit = false
         assertEquals("这张图片没法编辑", edit.onClick(0, picture))
         assertEquals(listOf(3), edited)
+        val customEdit = chatViewerActions(res, FakeMedia(), { true }, { null }, maxPhotos = 7).first { it.label == "编辑" }
+        assertEquals("一次最多 7 张", customEdit.onClick(0, picture))
     }
 }

@@ -15,7 +15,14 @@ ci_run 'Fixed sleeps' 60 python3 scripts/ci/sleep_ratchet.py
 ci_run 'Web font sizes' 60 python3 scripts/ci/web_font_ratchet.py
 # Disables of web/src's feature-module boundary (web/eslint.modules.config.mjs) may stay or fall, never rise (#13434).
 ci_run 'Web module boundary disables' 60 python3 scripts/ci/web_module_boundary_ratchet.py
+# Enum-like text columns without a CHECK and JSON columns with neither a shape CHECK nor an "opaque: <reason>" note
+# may only go, never come: a new one fails (docs/operations/testing.md "Count ratchets", #15397). No Go needed.
+ci_run 'Migration enum and JSON checks' 60 python3 scripts/ci/migration_enum_check.py
 ci_run 'Prompt language migration' 60 python3 scripts/ci/prompt_language_ratchet.py
+# Weak types in the contract packages and the hub's handlers may stay or fall, never rise, and with a base no
+# exception may add room (docs/operations/testing.md "Count ratchets", #15397). Needs Go: the hosted runner's go fetches
+# the toolchain server/go.mod names; without go the step fails, it is never skipped.
+ci_run 'Wire types ratchet' 300 python3 scripts/ci/wire_types_ratchet.py
 ci_run 'Case-sensitive paths and external references' 180 bash -c 'python3 scripts/test/test_path_case.py && python3 scripts/test/test_external_service_refs.py'
 # No Apple source imports CallKit and no build setting links it: App Review rejects that for China (#9290,
 # docs/operations/release.md "No CallKit"). scripts/ci/apple.sh checks the built apps' binaries too.

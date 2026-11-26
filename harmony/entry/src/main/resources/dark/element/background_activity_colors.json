@@ -1,0 +1,36 @@
+{
+  "color": [
+    {
+      "name": "activity_sheet_fill",
+      "value": "#1C1C1E"
+    },
+    {
+      "name": "activity_task_card",
+      "value": "#2C2C2E"
+    },
+    {
+      "name": "activity_card_edge",
+      "value": "#2A2A2C"
+    },
+    {
+      "name": "activity_exchange_fill",
+      "value": "#2A2A2E"
+    },
+    {
+      "name": "activity_answer_chip",
+      "value": "#323236"
+    },
+    {
+      "name": "activity_icon_well",
+      "value": "#39393D"
+    },
+    {
+      "name": "activity_grabber",
+      "value": "#626267"
+    },
+    {
+      "name": "activity_close_fill",
+      "value": "#3A3A3C"
+    }
+  ]
+}

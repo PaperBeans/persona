@@ -3,6 +3,9 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +19,7 @@ import (
 )
 
 // Feeding the meetings Persona attends (docs/assistant/meeting-minutes.md "Feeding the attending session"): the
-// phone appends the sentences it hears to the recording's live log (kb/live.go), and the attending session gets them
+// phone appends the sentences it hears to the recording's live log (writers/live.go), and the attending session gets them
 // as one message a batch, at most one a minute, with the questions answered on the phone since the last one, and an
 // end batch once the meeting is over. A batch goes only to a session that is free (meeting_attendee.go); one that
 // cannot take it keeps it for later, and the live log says why (its problem). What was given to which session is the
@@ -105,12 +108,12 @@ func (s *Recordings) attendResume(e *kb.Engine) {
 	if e == nil || e.Store.ReadOnly() {
 		return
 	}
-	for _, r := range e.AttendingRecordings() {
+	for _, r := range writersOf(e).AttendingRecordings() {
 		s.meetingKick(r.ID)
 	}
-	for _, r := range e.RoomMeetings() { // a room to start, settle, end or feed (meeting_room.go)
+	for _, r := range writersOf(e).RoomMeetings() { // a room to start, settle, end or feed (meeting_room.go)
 		switch r.Conv.Room.State {
-		case kb.RoomStarting, kb.RoomReady, kb.RoomUnavailable:
+		case recordingwire.RoomStarting, recordingwire.RoomReady, recordingwire.RoomUnavailable:
 			s.meetingKick(r.ID)
 		}
 	}
@@ -193,9 +196,9 @@ func (s *Recordings) attendLook(ctx context.Context, id string) time.Time {
 	case e.Store.ReadOnly():
 		return time.Time{} // nothing could be noted as fed: the phone's lines are refused there anyway
 	}
-	l, r, err := e.LiveRead(id)
+	l, r, err := writersOf(e).LiveRead(id)
 	switch {
-	case errors.Is(err, kb.ErrNotFound), errors.Is(err, kb.ErrRecordingDeleted):
+	case errors.Is(err, kbwire.ErrNotFound), errors.Is(err, recordingwire.ErrRecordingDeleted):
 		return time.Time{}
 	case err != nil:
 		s.logf("meeting %s: %v", short(id), err)
@@ -207,7 +210,7 @@ func (s *Recordings) attendLook(ctx context.Context, id string) time.Time {
 	}
 	if !r.Attending() {
 		// Off: nothing is fed while it is, and turned on again the session gets the meeting so far.
-		s.attendNote(e, id, func(l *kb.Live) { l.FedTo, l.Problem = nil, "" })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.FedTo, l.Problem = nil, "" })
 		return time.Time{}
 	}
 	if last := feedLatest(r.Updated, l.EndedAt); !last.IsZero() && now.Sub(last) > feedStale {
@@ -223,20 +226,20 @@ func (s *Recordings) attendLook(ctx context.Context, id string) time.Time {
 	}
 	ref, ok := s.attendeeRef(ctx, r)
 	if !ok { // no main chat
-		s.attendNote(e, id, func(l *kb.Live) { l.Problem = attendeeUnavailable })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.Problem = attendeeUnavailable })
 		return now.Add(feedRetry)
 	}
 	fresh := l.FedTo == nil || !s.sameMachine(l.FedTo.MachineID, ref.MachineID) || l.FedTo.SessionID != ref.SessionID
 	b := feedBatchOf(l, fresh, end)
 	if b.empty() {
 		if end && l.FedTo == nil { // nothing was ever said to anyone: no end to tell
-			s.attendNote(e, id, func(l *kb.Live) { l.EndFed = true })
+			s.attendNote(e, id, func(l *recordingwire.Live) { l.EndFed = true })
 			return time.Time{}
 		}
 		if !end {
 			// Only empty positions came: they count as given, so the phone does not show it catching up.
 			if !fresh && b.upto > l.Fed {
-				s.attendNote(e, id, func(l *kb.Live) { l.Fed = max(l.Fed, b.upto) })
+				s.attendNote(e, id, func(l *recordingwire.Live) { l.Fed = max(l.Fed, b.upto) })
 			}
 			return deadline
 		}
@@ -244,24 +247,24 @@ func (s *Recordings) attendLook(ctx context.Context, id string) time.Time {
 	target, verdict := s.attendeeCheck(ctx, ref, now)
 	switch verdict {
 	case attendeeBusy:
-		s.attendNote(e, id, func(l *kb.Live) { l.Problem = "" })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.Problem = "" })
 		return feedEarliest(now.Add(feedBusyPoll), deadline)
 	case attendeeUnavailable, attendeeNotAllowed:
-		s.attendNote(e, id, func(l *kb.Live) { l.Problem = verdict })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.Problem = verdict })
 		return feedEarliest(now.Add(feedRetry), deadline)
 	}
 	sent, err := s.feedSend(ctx, target, r, b)
 	switch {
 	case feedRefused(err): // a dialog or a draft at the computer: nothing pressed or cleared, the batch waits
-		s.attendNote(e, id, func(l *kb.Live) { l.Problem = "" })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.Problem = "" })
 		return feedEarliest(now.Add(feedBusyPoll), deadline)
 	case err != nil:
 		s.logf("meeting %s: batch to %s: %v", short(id), short(ref.SessionID), err)
-		s.attendNote(e, id, func(l *kb.Live) { l.Problem = attendeeUnavailable })
+		s.attendNote(e, id, func(l *recordingwire.Live) { l.Problem = attendeeUnavailable })
 		return feedEarliest(now.Add(feedRetry), deadline)
 	}
 	fedTo := target.ref
-	s.attendNote(e, id, func(l *kb.Live) {
+	s.attendNote(e, id, func(l *recordingwire.Live) {
 		if fresh {
 			l.Fed = b.upto
 		} else {
@@ -284,9 +287,9 @@ func (s *Recordings) attendLook(ctx context.Context, id string) time.Time {
 }
 
 // attendNote changes recording id's live log with fn (live.go LiveUpdate: written only when it changed).
-func (s *Recordings) attendNote(e *kb.Engine, id string, fn func(l *kb.Live)) {
-	if _, err := e.LiveUpdate(id, func(l *kb.Live, _ kb.Recording) error { fn(l); return nil }); err != nil &&
-		!errors.Is(err, kb.ErrNotFound) {
+func (s *Recordings) attendNote(e *kb.Engine, id string, fn func(l *recordingwire.Live)) {
+	if _, err := writersOf(e).LiveUpdate(id, func(l *recordingwire.Live, _ recordingwire.Recording) error { fn(l); return nil }); err != nil &&
+		!errors.Is(err, kbwire.ErrNotFound) {
 		s.logf("meeting %s: live log: %v", short(id), err)
 	}
 }
@@ -316,16 +319,16 @@ func feedRefused(err error) bool {
 	return errors.As(err, &re) && (re.Code == screen.DialogOpen || re.Code == screen.InputDraft)
 }
 
-// feedAskAnswered is an answered ask's state (kb.LiveAsk.State).
+// feedAskAnswered is an answered ask's state (recordingwire.LiveAsk.State).
 const feedAskAnswered = "answered"
 
 // feedBatch is what goes to the session now: the live lines up to upto that fit (leftOut earlier ones did not),
 // the questions answered, and whether it is the meeting so far (a session not fed before) or the end.
 type feedBatch struct {
 	upto    int
-	lines   []kb.LiveSegment
+	lines   []recordingwire.LiveSegment
 	leftOut int
-	answers []kb.LiveAsk
+	answers []recordingwire.LiveAsk
 	asks    map[string]bool // their ids, to note as fed
 	soFar   bool
 	end     bool
@@ -333,11 +336,11 @@ type feedBatch struct {
 	// topics: the room has meeting_topics_set, so the batch asks it to update its topics so far (topicsSoFar) and
 	// shows them (for a lean room only with lists).
 	topics      bool
-	topicsSoFar []kb.LiveTopic
+	topicsSoFar []recordingwire.LiveTopic
 	// highlights: the room has meeting_highlights_set, so the batch asks it to update its highlights so far
 	// (highlightsSoFar) and shows them (for a lean room only with lists).
 	highlights      bool
-	highlightsSoFar []kb.LiveHighlight
+	highlightsSoFar []recordingwire.LiveHighlight
 	// lean: a room started with lean batches that has both tools (#8253, meeting_room_lean.go): one short line instead
 	// of the rules, and the lists so far only at the boundaries (lists).
 	lean, lists bool
@@ -348,7 +351,7 @@ func (b feedBatch) empty() bool { return len(b.lines) == 0 && len(b.answers) == 
 // feedBatchOf is l's batch: the lines from the last one fed (from the start when fresh, the session not being the
 // one fed before), the latest that fit feedBatchRunes, and the questions answered and not given yet (all of them
 // when fresh). Empty positions are never fed.
-func feedBatchOf(l kb.Live, fresh, end bool) feedBatch {
+func feedBatchOf(l recordingwire.Live, fresh, end bool) feedBatch {
 	b := feedBatch{upto: len(l.Segments), soFar: fresh, end: end, asks: map[string]bool{}}
 	from := min(l.Fed, b.upto)
 	if fresh {
@@ -381,7 +384,7 @@ func feedBatchOf(l kb.Live, fresh, end bool) feedBatch {
 
 // feedMeetingName is how the batches and their source name meeting r: the upload's title, else its calendar hint's
 // (never the knowledge base's calendar match), else when it started; one line, clipped.
-func feedMeetingName(r kb.Recording, loc *time.Location) string {
+func feedMeetingName(r recordingwire.Recording, loc *time.Location) string {
 	name := strings.TrimSpace(r.Title)
 	if name == "" && r.Calendar != nil {
 		name = strings.TrimSpace(r.Calendar.Title)
@@ -394,13 +397,13 @@ func feedMeetingName(r kb.Recording, loc *time.Location) string {
 
 // feedText is batch b of meeting r as the session reads it (prompts/meeting/feed.md), in the user's language and
 // time zone.
-func feedText(r kb.Recording, b feedBatch, lang string, loc *time.Location) string {
+func feedText(r recordingwire.Recording, b feedBatch, lang string, loc *time.Location) string {
 	return prompts.RenderMeetingFeed(feedData(r, b, lang, loc))
 }
 
 // feedData is what prompts/meeting/feed.md renders batch b from; a lean batch without the lists has none of them.
-func feedData(r kb.Recording, b feedBatch, lang string, loc *time.Location) prompts.MeetingFeed {
-	at := func(sec float64) string { return kb.LiveClock(r, sec, loc) } // what a highlight's said_at names
+func feedData(r recordingwire.Recording, b feedBatch, lang string, loc *time.Location) prompts.MeetingFeed {
+	at := func(sec float64) string { return writers.LiveClock(r, sec, loc) } // what a highlight's said_at names
 	d := prompts.MeetingFeed{Lang: lang, Title: feedMeetingName(r, loc), Role: r.AttendanceRole(), SoFar: b.soFar, LeftOut: b.leftOut,
 		Ended: b.end, Room: b.room, Topics: b.room && b.topics, Highlights: b.room && b.highlights, Lean: b.room && b.lean, Lists: b.lists}
 	if !d.Lean || d.Lists { // the lists only where the text shows them
@@ -426,7 +429,7 @@ func feedData(r kb.Recording, b feedBatch, lang string, loc *time.Location) prom
 
 // meetingTopics are a meeting's topics as the prompts take them: each on one line, when it began as a time from the
 // meeting's start.
-func meetingTopics(topics []kb.LiveTopic) []prompts.MeetingTopic {
+func meetingTopics(topics []recordingwire.LiveTopic) []prompts.MeetingTopic {
 	var out []prompts.MeetingTopic
 	for _, t := range topics {
 		mt := prompts.MeetingTopic{State: t.State, Title: oneLine(t.Title), Note: oneLine(t.Note)}
@@ -441,7 +444,7 @@ func meetingTopics(topics []kb.LiveTopic) []prompts.MeetingTopic {
 // feedSend gives target batch b of meeting r, its turn marked a meeting turn first; when it was sent. Message source
 // meeting, never with a client_msg_id: it is not the user's, nor matched to a send of theirs, and does not take back a
 // question to the user (UserSpoke is not called).
-func (s *Recordings) feedSend(ctx context.Context, t attendeeTarget, r kb.Recording, b feedBatch) (time.Time, error) {
+func (s *Recordings) feedSend(ctx context.Context, t attendeeTarget, r recordingwire.Recording, b feedBatch) (time.Time, error) {
 	loc := s.location(ctx)
 	text := feedText(r, b, string(s.lang(ctx)), loc)
 	source := &proto.MessageSource{Kind: proto.SourceMeeting, Title: feedMeetingName(r, loc)}

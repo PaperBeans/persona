@@ -1,3 +1,4 @@
+import { decisionSourceItem } from './InteractionHistory';
 import { TranscriptReducer, TranscriptSync, TranscriptItem, TranscriptBatch, TranscriptAction, TranscriptSnapshot } from '../core/Domain';
 import { HubRepository, segment } from './HubRepository';
 import { ResourceRow, Wire } from './Wire';
@@ -6,6 +7,7 @@ import { boundedTranscriptCache } from '../core/TranscriptCache';
 
 // A visible conversation owns its subscription, paging and continuity state.
 export class TranscriptModel {
+  decisionSource(toolUseId: string): string { return decisionSourceItem(this.reducer.items, toolUseId); }
   private reducer: TranscriptReducer = new TranscriptReducer();
   private sync: TranscriptSync = new TranscriptSync(this.reducer);
   private active: boolean = true;
@@ -15,6 +17,7 @@ export class TranscriptModel {
   private refreshAgain: boolean = false;
   private fillRequested: boolean = false;
   private pendingFetches: Promise<void> = Promise.resolve();
+  private readonly liveSubscription: boolean;
   private readonly row: ResourceRow;
   private readonly repository: HubRepository;
   private readonly local: LocalStore;
@@ -23,7 +26,9 @@ export class TranscriptModel {
   private readonly failure: (error: Error) => void;
 
   constructor(row: ResourceRow, repository: HubRepository, local: LocalStore, key: string,
-    publish: (items: readonly TranscriptItem[], hasMore: boolean, historyReady: boolean) => void, failure: (error: Error) => void) {
+    publish: (items: readonly TranscriptItem[], hasMore: boolean, historyReady: boolean) => void, failure: (error: Error) => void,
+    liveSubscription: boolean = true) {
+    this.liveSubscription = liveSubscription;
     this.row = row; this.repository = repository; this.local = local; this.key = key; this.publish = publish; this.failure = failure;
   }
   private path(query: string): string {
@@ -70,7 +75,7 @@ export class TranscriptModel {
         this.emit();
       } catch (_) {}
     }
-    await this.drive(this.sync.reconnect());
+    if (this.liveSubscription) await this.drive(this.sync.reconnect());
     await this.latest();
   }
   async latest(): Promise<void> {
@@ -148,6 +153,7 @@ export class TranscriptModel {
           throw new Error('failed');
         } finally { if (this.currentRead(owner)) this.fillRunning = false; }
       } else if (action.kind === 'subscribe') {
+        if (!this.liveSubscription) continue;
         const payload: Record<string, Object> = Wire.payload(['type', 'machine_id', 'session_id', 'fold_work'], ['subscribe', this.row.machine, this.row.session || this.row.id, true]);
         if (action.sinceSeq !== undefined) payload['since_seq'] = action.sinceSeq;
         this.repository.transport.send(JSON.stringify(payload));
@@ -182,10 +188,12 @@ export class TranscriptModel {
   private emit(): void {
     if (!this.active) return;
     this.publish(this.reducer.items, this.reducer.hasMore === true, this.historyReady);
+    if (!this.liveSubscription) return; // The visible chat owns its cache and WebSocket subscription.
     this.local.put('transcript:' + this.key, boundedTranscriptCache(this.reducer.snapshot())).catch((error: Error) => { if (this.active) this.failure(error); });
   }
   close(): void {
     if (!this.active) return; this.active = false;
+    if (!this.liveSubscription) return;
     try { this.repository.transport.send(JSON.stringify(Wire.payload(['type', 'machine_id', 'session_id'], ['unsubscribe', this.row.machine, this.row.session || this.row.id]))); } catch (_) {}
   }
 }

@@ -146,6 +146,8 @@
     <string name="knowledge_ui_minutes_stale">纪要已更新，下面是最新版本；请确认行动项后再加入待办。</string>
     <string name="knowledge_ui_minutes_due">截止 %1$s</string>
     <string name="knowledge_ui_minutes_transcript_expired">转写已过保留期，只留下了这份纪要。</string>
+    <string name="knowledge_ui_minutes_paused">纪要已暂停</string>
+    <string name="knowledge_ui_minutes_paused_note">这个 hub 关闭了会议录音，所以不会再写入新内容。已有的内容都会保留。</string>
     <string name="knowledge_ui_handoff_title">交给 Agent</string>
     <string name="knowledge_ui_handoff_open_dialog">交给 Agent…</string>
     <string name="knowledge_ui_handoff_pick">选一个 Agent</string>

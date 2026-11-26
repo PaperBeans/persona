@@ -1,4 +1,6 @@
 import { IconActions } from '../design/IconActions';
+import { ScreenWheel, ScreenTwoFingers, screenScrollFactor } from '../core/ScreenWheel';
+import { screenScrollPreference } from '../platform/ScreenScrollPreference';
 import { Colors } from '../design/Colors';
 import { ButtonStyles } from '../design/Controls';
 import { image } from '@kit.ImageKit';
@@ -27,8 +29,23 @@ export struct ComputerScreenPage {
 
   private mounted: boolean = false;
   private pointerDown: boolean = false;
+  private wheel:ScreenWheel=new ScreenWheel();
+  private fingerMotion:ScreenTwoFingers=new ScreenTwoFingers();
+  private wheelTimer:number=-1;
+  private frameTime:number=0;
+  private multiTouch:boolean=false;
+  private ignoreRemaining:boolean=false;
+  private singlePending:boolean=false;
+  private startX:number=0;
+  private startY:number=0;
+  private wheelX:number=0;
+  private wheelY:number=0;
+  private previousY:number=0;
+  private previousTime:number=0;
+  private velocity:number=0;
+  private perPoint:number=1;
 
-  aboutToAppear(): void { this.mounted = true; this.updateVisibility(); }
+  aboutToAppear(): void { this.mounted = true; screenScrollPreference.load(this.getUIContext().getHostContext());this.updateVisibility(); }
 
   aboutToDisappear(): void {
     this.mounted = false;
@@ -46,6 +63,7 @@ export struct ComputerScreenPage {
   private isVisible(): boolean { return this.mounted && this.active; }
 
   private deactivate(): void {
+    this.stopWheel();
     this.pointerDown = false;
     this.clearFields();
     this.screen.hide();
@@ -68,7 +86,7 @@ export struct ComputerScreenPage {
   @Monitor('screen.phase') phaseChanged(): void { if (!this.screen.isLive()) this.clearFrame(); if (['idle', 'closed', 'failed', 'auth_failed', 'sharing_off'].includes(this.screen.phase)) this.clearFields(); }
 
   @Monitor('screen.controlRevision') controlChanged(): void {
-    if (!this.screen.controlAllowed()) { this.textDraft = ''; this.pointerDown = false; }
+    if (!this.screen.controlAllowed()) { this.textDraft = ''; this.pointerDown = false; this.stopWheel(); }
   }
 
   private open(): void {
@@ -76,6 +94,7 @@ export struct ComputerScreenPage {
     this.clearFields();
     this.clearFrame();
     this.frameRatio = 1;
+    this.stopWheel();
     this.pointerDown = false;
     this.screen.open(this.model, this.row).catch((): void => {});
   }
@@ -161,19 +180,70 @@ export struct ComputerScreenPage {
 
   private sendKey(value: number): void { if (!this.textSending) this.screen.pressKey(value); }
 
-  private touchFrame(event: TouchEvent): void {
-    if (this.textSending || !this.screen.controlAllowed() || this.frameAreaWidth <= 0 || this.frameAreaHeight <= 0 || event.changedTouches.length === 0) return;
-    const touch: TouchObject = event.changedTouches[0];
-    if (touch.type === TouchType.Down) {
-      this.pointerDown = this.screen.pointerFromView(touch.x, touch.y, this.frameAreaWidth, this.frameAreaHeight, 1);
-    } else if (touch.type === TouchType.Move) {
-      this.screen.pointerFromView(touch.x, touch.y, this.frameAreaWidth, this.frameAreaHeight, this.pointerDown ? 1 : 0);
-    } else if (touch.type === TouchType.Up) {
-      if (this.pointerDown && !this.screen.pointerFromView(touch.x, touch.y, this.frameAreaWidth, this.frameAreaHeight, 0)) this.screen.releasePointer();
-      this.pointerDown = false;
-    } else if (touch.type === TouchType.Cancel) {
-      this.screen.releasePointer();
-      this.pointerDown = false;
+  private stopWheel():void {
+    if (this.wheelTimer!==-1) clearTimeout(this.wheelTimer);
+    this.wheelTimer=-1;this.wheel.stop();this.multiTouch=false;this.ignoreRemaining=false;this.singlePending=false;
+  }
+
+  private paceWheel():void {
+    if (this.wheelTimer!==-1 || !this.wheel.busy) return;
+    const attempt=this.screen.connectionRevision();
+    this.frameTime=Date.now();
+    const frame=():void=>{
+      this.wheelTimer=-1;
+      if (!this.isVisible() || !this.screen.controlAllowed() || attempt!==this.screen.connectionRevision()) {this.stopWheel();return;}
+      const now=Date.now(),dt=Math.min(.1,Math.max(0,(now-this.frameTime)/1000));
+      this.frameTime=now;
+      const amount=this.wheel.frame(dt);
+      if (amount && !this.screen.scrollFromView(this.wheelX,this.wheelY,this.frameAreaWidth,this.frameAreaHeight,amount)) {this.stopWheel();return;}
+      if (this.wheel.busy) this.wheelTimer=setTimeout(frame,16);
+    };
+    this.wheelTimer=setTimeout(frame,16);
+  }
+
+  private twoTouches(a:TouchObject,b:TouchObject):void {
+    const x=(a.x+b.x)/2,y=(a.y+b.y)/2,spread=Math.hypot(a.x-b.x,a.y-b.y),now=Date.now();
+    if (!this.multiTouch) {
+      this.stopWheel();this.singlePending=false;
+      if (this.pointerDown) this.screen.releasePointer();
+      this.pointerDown=false;this.multiTouch=true;this.ignoreRemaining=true;
+      this.fingerMotion.begin(x,y,spread);this.wheel.begin();this.previousY=y;this.previousTime=now;this.velocity=0;
+      this.perPoint=this.screen.scrollPointsInView(this.frameAreaWidth,this.frameAreaHeight)*screenScrollFactor(screenScrollPreference.choice);
+      return;
+    }
+    if (this.fingerMotion.moved(x,y,spread)!=='scroll') return;
+    const dy=y-this.previousY,dt=Math.max(.001,(now-this.previousTime)/1000);
+    this.velocity=dy/dt;this.wheelX=x;this.wheelY=y;
+    this.wheel.move(dy,this.velocity,this.perPoint);this.previousY=y;this.previousTime=now;this.paceWheel();
+  }
+
+  private touchFrame(event:TouchEvent):void {
+    if (this.textSending || !this.screen.controlAllowed() || this.frameAreaWidth<=0 || this.frameAreaHeight<=0 || !event.changedTouches.length) return;
+    const touch=event.changedTouches[0];
+    if (touch.type===TouchType.Cancel || event.touches.length>2) {
+      this.screen.releasePointer();this.pointerDown=false;this.stopWheel();this.ignoreRemaining=true;return;
+    }
+    if (event.touches.length>=2 && touch.type!==TouchType.Up) {this.twoTouches(event.touches[0],event.touches[1]);return;}
+    if (this.multiTouch || this.ignoreRemaining) {
+      if (this.multiTouch && touch.type===TouchType.Up) {
+        this.multiTouch=false;
+        if (Date.now()-this.previousTime<100) this.wheel.release(this.velocity,this.perPoint);
+        this.paceWheel();
+      }
+      if (touch.type!==TouchType.Down) return;
+      this.ignoreRemaining=false;
+    }
+    if (touch.type===TouchType.Down) {
+      this.stopWheel();this.startX=touch.x;this.startY=touch.y;this.singlePending=true;
+    } else if (touch.type===TouchType.Move) {
+      if (this.singlePending && Math.hypot(touch.x-this.startX,touch.y-this.startY)<3) return;
+      if (this.singlePending) this.pointerDown=this.screen.pointerFromView(this.startX,this.startY,this.frameAreaWidth,this.frameAreaHeight,1);
+      this.singlePending=false;
+      this.screen.pointerFromView(touch.x,touch.y,this.frameAreaWidth,this.frameAreaHeight,this.pointerDown ? 1:0);
+    } else if (touch.type===TouchType.Up) {
+      if (this.singlePending) this.pointerDown=this.screen.pointerFromView(this.startX,this.startY,this.frameAreaWidth,this.frameAreaHeight,1);
+      if (this.pointerDown && !this.screen.pointerFromView(touch.x,touch.y,this.frameAreaWidth,this.frameAreaHeight,0)) this.screen.releasePointer();
+      this.pointerDown=false;this.singlePending=false;
     }
   }
 

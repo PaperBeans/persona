@@ -14,13 +14,13 @@ nonisolated enum TodosChoice: String, CaseIterable, Identifiable, Sendable {
 
     /// The sections the choice draws, in the list's order. Can wait sits folded at the foot of Needs you, Just finished
     /// at the foot of In progress (listed, not counted), Someday folded after To do.
-    var sections: [String] {
+    var sections: [TodoListSection] {
         switch self {
         case .all: TodoListSection.all
-        case .needsYou: [TodoListSection.needsYou, TodoListSection.canWait]
-        case .inProgress: [TodoListSection.working, TodoListSection.waiting, TodoListSection.justFinished]
-        case .todo: [TodoListSection.todo, TodoListSection.someday]
-        case .done: [TodoListSection.done]
+        case .needsYou: [.needsYou, .canWait]
+        case .inProgress: [.working, .waiting, .justFinished]
+        case .todo: [.todo, .someday]
+        case .done: [.done]
         }
     }
 
@@ -51,7 +51,7 @@ nonisolated enum TodosFilter {
     /// The five choices, always all of them, so none comes and goes while the menu is open: All with no subtitle; Needs
     /// You, In Progress (Working and Waiting) and To Do with their counts; Done with how many closed today, when any did.
     static func options(_ counts: TodoCounts, doneToday: Int, words: TodoWords = TodoWords()) -> [Option] {
-        let todo = counts.sections[TodoListSection.todo] ?? 0
+        let todo = counts.sections.todo
         return TodosChoice.allCases.map { choice in
             let subtitle: String? = switch choice {
             case .all: nil
@@ -99,13 +99,12 @@ nonisolated enum TodosFilter {
     }
 
     /// The sections whose rows decide the calm rule: the folded ones (Someday, Done) never break it.
-    static let unfolded: Set<String> = [TodoListSection.needsYou, TodoListSection.canWait, TodoListSection.working,
-                                        TodoListSection.waiting, TodoListSection.todo, TodoListSection.justFinished]
+    static let unfolded: Set<TodoListSection> = [.needsYou, .canWait, .working, .waiting, .todo, .justFinished]
 
     /// The calm rule (proposal 3.3): while only the owner's plain To do rows exist and nothing needs the owner, neither the
     /// Filter nor the section headers are drawn, so the list reads as a plain list; they come back once two sections have
     /// rows. `sections`: the sections that have rows; an empty list is not calm, it has its empty state.
-    static func calm(_ sections: [String]) -> Bool {
+    static func calm(_ sections: [TodoListSection]) -> Bool {
         !sections.isEmpty && Set(sections).intersection(unfolded).subtracting([TodoListSection.todo]).isEmpty
     }
 }

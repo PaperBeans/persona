@@ -7,7 +7,7 @@
 // (persona://inbox/<item>/source, "View in chat") shows the own body — the chat at the item's first message — with a way
 // back to the extension's page, which stays as it was. That source page has a same-address history entry too, so browser
 // Back and the page's back button both return to the extension.
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCloseOnBack } from "../../lib/back-close";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { ApiError, errorText } from "../../lib/api";
@@ -32,6 +32,10 @@ export function InboxExtensionBody({ item, place, own, onOwn }: { item: InboxIte
   const [fallback, setFallback] = useState<Fallback>("");
   const [source, setSource] = useState(false); // the extension opened the item's own source page
   const [n, setN] = useState(0);
+  const wideKey = `${place.extension}/${place.id}/${item.id}`;
+  const [wideAt, setWideAt] = useState<{ key: string; wide: boolean }>();
+  const onWide = useCallback((next: boolean) => setWideAt({ key: wideKey, wide: next }), [wideKey]);
+  const wide = wideAt?.key === wideKey && wideAt.wide;
   const context = useMemo(() => ({ item: item.id }), [item.id]);
   useCloseOnBack(source, () => setSource(false));
   const ownShown = !!fallback || source;
@@ -72,7 +76,7 @@ export function InboxExtensionBody({ item, place, own, onOwn }: { item: InboxIte
           {own()}
         </div>
       )}
-      <ExtensionPage hidden={source} place={place}>
+      <ExtensionPage hidden={source} place={place} wide={wide}>
         {/* the extension's own id scopes what a graph's `key` keeps (lib/extension-owner.tsx), so this page's
             graphs never share their pan, zoom and folds with another surface's */}
         <ExtensionOwnerScope owner={place.extension}>
@@ -85,6 +89,7 @@ export function InboxExtensionBody({ item, place, own, onOwn }: { item: InboxIte
             bare
             title={place.title}
             revision={item.version}
+            onWide={onWide}
             onUnsupported={() => setFallback({ quiet: true })}
             onMissing={() => setFallback({ quiet: true })}
             onFailed={(e) => setFallback(fallbackOf(e))}
@@ -97,10 +102,10 @@ export function InboxExtensionBody({ item, place, own, onOwn }: { item: InboxIte
 }
 
 /** The extension's page in its own scroller; kept (hidden) while the item's source is open, to come back to as it was. */
-function ExtensionPage({ hidden, place, children }: { hidden: boolean; place: UIPlace; children: React.ReactNode }) {
+function ExtensionPage({ hidden, place, wide, children }: { hidden: boolean; place: UIPlace; wide: boolean; children: React.ReactNode }) {
   return (
     <div className={cx("min-h-0 flex-1 overflow-y-auto", hidden && "hidden")} data-extension-inbox={`${place.extension}/${place.id}`}>
-      <div className="mx-auto max-w-[760px] px-4 py-5 sm:px-6">{children}</div>
+      <div data-extension-inbox-container className={cx("mx-auto px-4 py-5 sm:px-6", wide ? "max-w-[1680px]" : "max-w-[760px]")}>{children}</div>
     </div>
   );
 }

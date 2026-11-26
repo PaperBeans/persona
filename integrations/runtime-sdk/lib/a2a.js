@@ -4,6 +4,9 @@ const message = { message_id: text, text }
 
 export const a2aTools = [
   tool('a2a_sessions', 'Find sessions on this Persona Manager.', { machine_id: text }),
+  tool('a2a_read', 'Read another session’s recent conversation: messages, replies and one line per tool call. turns: 1 to 10, default 2.', {
+    machine_id: text, session_id: text, turns: { type: 'integer', minimum: 1, maximum: 10 },
+  }, ['machine_id', 'session_id']),
   tool('a2a_get', 'Read an A2A task or list this session’s tasks.', { ...task, before: text }),
   tool('a2a_send', 'Send work to another session, launch an Agent, or answer a task question. Keep message_id on retries.', {
     ...task, ...message, machine_id: text, session_id: text, cwd: text, launcher: text,

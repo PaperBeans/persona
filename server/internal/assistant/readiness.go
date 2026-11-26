@@ -177,6 +177,28 @@ type claudeSeen struct {
 	at      time.Time
 }
 
+// claudeAuthTarget identifies one claude.auth_status check for the main chat: the machine, the launcher its next turn
+// runs, Main chat's new-conversation Claude profile setting ("" for Persona's own, "legacy" for the machine's setup),
+// and the main conversation id (when one exists). Changing any of these checks the new target rather than reusing a
+// cached status from another profile (#14424).
+type claudeAuthTarget struct {
+	machine      string
+	launcher     string
+	configDir    string
+	conversation string
+}
+
+func (t claudeAuthTarget) params() map[string]any {
+	p := map[string]any{"name": t.launcher, "purpose": "assistant"}
+	if t.configDir != "" {
+		p["config_dir"] = t.configDir
+	}
+	if t.conversation != "" {
+		p["conversation"] = t.conversation
+	}
+	return p
+}
+
 // claudeAuth is a launcher's sign-in status on a machine as its node's claude.auth_status found it.
 type claudeAuth struct {
 	known bool // the node answered (an old one has no such method)
@@ -196,8 +218,8 @@ type readinessBook struct {
 	claude   map[string]claudeSeen    // by machine
 	claudeIn map[string]chan struct{} // the self-checks on their way, closed when done
 
-	auth   map[string]claudeAuth    // by machine + "/" + launcher
-	authIn map[string]chan struct{} // the questions on their way, closed when done
+	auth   map[claudeAuthTarget]claudeAuth    // by machine, launcher, profile setting and main conversation
+	authIn map[claudeAuthTarget]chan struct{} // the questions on their way, closed when done
 }
 
 // readinessLoadLocked reads the record once (with no database, or one that does not answer, it starts empty and
@@ -364,14 +386,15 @@ func (s *Service) readiness(ctx context.Context, probe bool, wait time.Duration)
 		// The steps after the computer are of the launcher the main conversation's next turn runs: its kept pick's
 		// when that is on another launcher than Main chat's, which "Try it" checks too (readinessTurnLauncher).
 		turn := s.readinessTurnLauncher(ctx, d.ID, launcher)
-		s.askAhead(d.ID, turn)
+		authTarget := s.readinessAuthTarget(ctx, d.ID, turn, v.Main)
+		s.askAhead(d.ID, authTarget)
 		if probe {
 			out.Probe = s.readinessProbe(ctx, d.ID, v)
 		}
 		deadline := time.Now().Add(wait) // the node's two answers are waited for together, not one after the other
 		rec := s.readinessRecordNow(ctx)
 		main, hasMain := s.readinessMain(ctx, d.ID, v.Main)
-		auth, _ := s.claudeAuthStatus(ctx, d.ID, turn, time.Until(deadline))
+		auth, _ := s.claudeAuthStatus(ctx, authTarget, time.Until(deadline))
 		model, modelOK := s.readinessModel(ctx, lang, d, launcher, turn, rec, main, hasMain, auth)
 		first := s.readinessFirst(ctx, lang, d, rec, v, main, hasMain)
 		// One button for the try: the first message's step offers it, and every client shows the try's spinner and
@@ -1052,23 +1075,33 @@ func (s *Service) askClaudeVersion(machine string, done chan struct{}) {
 	close(done)
 }
 
-// askAhead starts the node's two free answers the readiness waits for (Claude Code's version, the launcher's sign-in
-// status) when they are not cached, so that they run at the same time.
-func (s *Service) askAhead(machine, launcher string) {
-	s.claudeVersion(context.Background(), machine, 0, time.Time{})
-	s.claudeAuthStatus(context.Background(), machine, launcher, 0)
+// readinessAuthTarget builds the claude.auth_status target for the main chat's next turn on machine and launcher:
+// Main chat's configured new-conversation Claude profile ("" for Persona's private profile, "legacy" for this
+// computer's setup) and the main conversation id (when present).
+func (s *Service) readinessAuthTarget(ctx context.Context, machine, launcher, main string) claudeAuthTarget {
+	t := claudeAuthTarget{machine: machine, launcher: launcher, conversation: main}
+	if b, err := s.resolveModel(ctx, "assistant"); err == nil && b.ConfigDir != "" {
+		t.configDir = b.ConfigDir
+	}
+	return t
 }
 
-// claudeAuthStatus is launcher's sign-in status on machine (claude.auth_status), cached readinessAuthFresh, and
+// askAhead starts the node's two free answers the readiness waits for (Claude Code's version, the launcher's sign-in
+// status) when they are not cached, so that they run at the same time.
+func (s *Service) askAhead(machine string, auth claudeAuthTarget) {
+	s.claudeVersion(context.Background(), machine, 0, time.Time{})
+	s.claudeAuthStatus(context.Background(), auth, 0)
+}
+
+// claudeAuthStatus is target's sign-in status on target.machine (claude.auth_status), cached readinessAuthFresh, and
 // readinessClaudeRetry when signed out or not answered (readinessAuthFresh for an old node). An expired answer that
 // said nothing is answered at once while it is asked again. done false when the node did not answer within wait (the
 // question goes on, and is cached).
-func (s *Service) claudeAuthStatus(ctx context.Context, machine, launcher string, wait time.Duration) (claudeAuth, bool) {
-	key := machine + "/" + launcher
+func (s *Service) claudeAuthStatus(ctx context.Context, target claudeAuthTarget, wait time.Duration) (claudeAuth, bool) {
 	b := &s.ready
 	b.mu.Lock()
 	var stale *claudeAuth
-	if a, ok := b.auth[key]; ok {
+	if a, ok := b.auth[target]; ok {
 		fresh := readinessAuthFresh
 		saidNothing := !a.known && !a.old ||
 			a.st.State == proto.ClaudeAuthUnknown && (a.st.Reason == proto.ClaudeAuthTimeout || a.st.Reason == proto.ClaudeAuthUnreadable)
@@ -1087,14 +1120,14 @@ func (s *Service) claudeAuthStatus(ctx context.Context, machine, launcher string
 			stale = &a
 		}
 	}
-	ch := b.authIn[key]
+	ch := b.authIn[target]
 	if ch == nil {
 		ch = make(chan struct{})
 		if b.authIn == nil {
-			b.authIn = map[string]chan struct{}{}
+			b.authIn = map[claudeAuthTarget]chan struct{}{}
 		}
-		b.authIn[key] = ch
-		go s.askClaudeAuth(machine, launcher, key, ch)
+		b.authIn[target] = ch
+		go s.askClaudeAuth(target, ch)
 	}
 	b.mu.Unlock()
 	if stale != nil {
@@ -1114,19 +1147,19 @@ func (s *Service) claudeAuthStatus(ctx context.Context, machine, launcher string
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.auth[key], true
+	return b.auth[target], true
 }
 
-// askClaudeAuth asks machine's node whether Claude Code is signed in as launcher runs it, and keeps the answer.
-func (s *Service) askClaudeAuth(machine, launcher, key string, done chan struct{}) {
+// askClaudeAuth asks target.machine's node whether Claude Code is signed in for target, and keeps the answer.
+func (s *Service) askClaudeAuth(target claudeAuthTarget, done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	a := claudeAuth{at: time.Now()}
-	if err := s.call(ctx, machine, assistantwire.DeviceClaudeAuthStatus, map[string]any{"name": launcher}, &a.st); err != nil {
+	if err := s.call(ctx, target.machine, assistantwire.DeviceClaudeAuthStatus, target.params(), &a.st); err != nil {
 		// An old node has none: unknown, and not asked (or logged) again every minute.
 		a.old = strings.Contains(err.Error(), "unknown method")
 		if !a.old {
-			s.logf("assistant: readiness: claude.auth_status on %s: %v", machine, err)
+			s.logf("assistant: readiness: claude.auth_status on %s: %v", target.machine, err)
 		}
 	} else {
 		a.known = true
@@ -1134,10 +1167,10 @@ func (s *Service) askClaudeAuth(machine, launcher, key string, done chan struct{
 	b := &s.ready
 	b.mu.Lock()
 	if b.auth == nil {
-		b.auth = map[string]claudeAuth{}
+		b.auth = map[claudeAuthTarget]claudeAuth{}
 	}
-	b.auth[key] = a
-	delete(b.authIn, key)
+	b.auth[target] = a
+	delete(b.authIn, target)
 	b.mu.Unlock()
 	close(done)
 }

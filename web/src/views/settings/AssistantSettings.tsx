@@ -6,11 +6,14 @@ import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } 
 import { t } from "../../i18n";
 import { BASE } from "../../lib/base";
 import { settingsHref } from "./nav";
+import { formatIntegrationsSub } from "./integrations-route";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../../lib/api";
-import { MANAGER_HEADER } from "../../lib/manager-choice";
+import { defaultManager, MANAGER_HEADER, useKnownDefault } from "../../lib/manager-choice";
+import { useInboxSourcesShown } from "../../lib/subscriptions";
 import { mainRuntimeDetails, type MainExecution } from "../../lib/main-runtime";
 import { PERMISSION_MODES } from "../../lib/session-actions";
+import { ASSISTANT_PAGES_FEATURE } from "../../lib/extension-ui";
 import { ConfigurationManager } from "./ConfigurationManager";
 import { AgentAutoNaming, supportsAgentAutoNaming, type AgentAutoNamingState } from "./AgentAutoNaming";
 import { aboutMeSaves } from "./about-me-saves";
@@ -34,7 +37,7 @@ import { PageBoundary } from "../PageBoundary";
 
 const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
 const Repositories = lazyPage(() => import("./Repositories").then((m) => m.Repositories));
-const WorkspaceNaming = lazyPage(() => import("../../ui/WorkspaceNaming").then((m) => m.WorkspaceNaming));
+const WorkspaceNaming = lazyPage(() => import("../../ui/WorkspaceNaming").then((m) => m.WorkspaceNamingSettingsGroup));
 
 interface AssistantState extends AgentAutoNamingState, CacheKeepaliveState {
   manager?: string;
@@ -54,18 +57,27 @@ interface AssistantState extends AgentAutoNamingState, CacheKeepaliveState {
   main_tasks_quiet?: boolean;
   /** "Start what I asked for in the chat right away" (#2559): on by default; tasks the user asked for start without the plan card's "Start". */
   start_requested_tasks?: boolean;
+  workspace_naming_version?: string;
   task_workspace_preference?: "prefer-existing" | "prefer-new";
   /** "Fold background rounds" (#4314, docs/assistant/assistant.md "Background rounds"): on by default; unset from a hub before it (on). */
   main_background_folded?: boolean;
+  fold_routine_relay_replies?: boolean;
   /** "Show scheduled task chats" in the sidebar's Recent (#8324): off by default, one value for all of the user's
    *  devices; unset from a hub before it (no switch). All chats' ⋯ menu has the same switch (lib/recent-task-chats.ts). */
   recent_task_chats?: boolean;
   /** The role a meeting recording pre-selects (#2981, docs/assistant/meeting-minutes.md "Attendance fields"); only from a hub
    *  that attends meetings. */
   meeting_attendance_default?: string;
-  /** How many days recordings stay in the knowledge base (#3235), in effect; the phone drops its own older ones too. */
+  /** How many days recordings stay (#3235), in effect; the phone drops its own older ones too. From a hub with
+   *  `recording_audio_days` it is that value's old name. */
   recording_days?: number;
-  /** How many days a meeting's minutes stay once its transcript went (#3780), in effect: 0 means forever; finite windows never below `recording_days`. */
+  /** How many days recording audio is kept (#16412), in effect: 0 means forever; the phone drops its own older recordings. */
+  recording_audio_days?: number;
+  /** How many days a recording's text stays in the knowledge base (#16412), in effect: 0 means forever (the default).
+   *  Unset from a hub before it, whose `recording_days` cuts the text too. */
+  recording_text_days?: number;
+  /** How many days a meeting's minutes stay once its transcript went (#3780), in effect: 0 means forever; finite windows
+   *  never below the text's days (`recording_days` from a hub before #16412). */
   minutes_days?: number;
   /** "Follow up every agent Persona starts" (#3617, docs/assistant/unified-entry.md "Agent tasks"): off by default; unset
    *  from a hub before it. */
@@ -80,10 +92,15 @@ interface AssistantState extends AgentAutoNamingState, CacheKeepaliveState {
   /** Deterministic opt-in auto-forwarding of PR/Issue Inbox events to the bound open to-do's Agent (#12492): off by
    *  default; unset from a hub before it. */
   inbox_todo_forward?: boolean;
+  /** Unified Integrations & Extensions Labs trial (#14802): off by default; unset from a hub before it. */
+  integrations_v2?: boolean;
   /** "The main chat supervises its own tasks" (#4927, #5082, docs/assistant/unified-entry.md "Background supervisor"):
    *  off by default, which means the built-in background supervisor follows up the tasks no leader supervises; unset
    *  from a hub before it. */
   main_supervises_own_tasks?: boolean;
+  /** "Automatic supervision messages": on by default; off stops the follow-up messages that wake the supervising
+   *  conversations on their own; unset from a hub before it. */
+  auto_supervision_messages?: boolean;
   /** Three-tier PR/Issue delivery closeout gate (#12034): "off", "merged" (default), or "live"; unset from a hub before it. */
   delivery_gate?: string;
   /** Days a closed session stays listed before it archives itself (#3618, docs/assistant/todos.md "Closed sessions
@@ -92,6 +109,9 @@ interface AssistantState extends AgentAutoNamingState, CacheKeepaliveState {
   /** "Suggest the next message" (#4644, docs/assistant/assistant.md "Next-message suggestions"): off by default; unset
    *  from a hub before it. */
   next_suggestions?: boolean;
+  /** "Let Persona make dashboards" (#15017): off by default (absent is off); the switch is shown only when the hub
+   *  announces `assistant_pages`, and only for the default manager, which alone has Dashboards. */
+  dashboards?: boolean;
   /** "Run Claude chats in interactive Claude Code" (#10058, docs/assistant/assistant.md "Interactive Claude Code"): off
    *  by default; unset from a hub before it. */
   claude_interactive?: boolean;
@@ -114,8 +134,14 @@ const MEETING_ROLES = ["off", "listener", "participant"] as const;
 /** `delivery_gate`'s values, in the picker's order. */
 const DELIVERY_GATES = ["off", "merged", "live"] as const;
 
-/** Finite day bounds (docs/protocol/protocol.md). Minutes also accept 0, selected as Forever rather than typed. */
-const RETENTION = { recording_days: { min: 1, max: 365 }, minutes_days: { min: 1, max: 3650 } } as const;
+/** Finite day bounds (docs/protocol/protocol.md). All but the old `recording_days` also accept 0, selected as Forever
+ *  rather than typed. */
+const RETENTION = {
+  recording_days: { min: 1, max: 365 },
+  recording_audio_days: { min: 1, max: 3650 },
+  recording_text_days: { min: 1, max: 3650 },
+  minutes_days: { min: 1, max: 3650 },
+} as const;
 type Retention = keyof typeof RETENTION;
 
 export function AssistantSettings({ bare }: { /** Without its header (the profile page has its own). */ bare?: boolean } = {}) {
@@ -128,6 +154,8 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const scopedApi: typeof api = (path, init) => api(path, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), [MANAGER_HEADER]: manager } });
   const [directionNotes] = useState(() => directionNotesDeps(scopedApi));
   const persona = usePersona();
+  const defaultId = useKnownDefault();
+  const hasInboxSources = useInboxSourcesShown() === true;
   const machines = useStore((s) => s.machines);
   const [info, setInfo] = useState<AssistantState | null>(null);
   // where and with what the main chat runs (docs/assistant/assistant.md "Main conversation execution on the web"): kept
@@ -140,6 +168,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const [open, setOpen] = useState<{ file: MemoryFile; index?: boolean } | null>(null);
   const [quietBusy, setQuietBusy] = useState(false);
   const [foldBusy, setFoldBusy] = useState(false);
+  const [relayBusy, setRelayBusy] = useState(false);
   const [recentBusy, setRecentBusy] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
@@ -206,9 +235,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
     setRetentionBusy(true);
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { [field]: days } });
-      const want = field === "minutes_days" && days !== 0 ? Math.max(days, r.recording_days ?? days) : days;
+      // Minutes never go before the text: forever while it is kept forever, else at least its days.
+      const text = r.recording_text_days ?? r.recording_days;
+      const want = field === "minutes_days" && days !== 0 ? (text === 0 ? 0 : Math.max(days, text ?? days)) : days;
       if (r.manager !== manager || r[field] !== want) throw new Error(t("settings-assistantsettings.retention_unconfirmed"));
-      setInfo((i) => i ? { ...i, recording_days: r.recording_days, minutes_days: r.minutes_days } : i);
+      setInfo((i) => i ? { ...i, recording_days: r.recording_days, recording_audio_days: r.recording_audio_days,
+        recording_text_days: r.recording_text_days, minutes_days: r.minutes_days } : i);
     } catch (e) {
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally { setRetentionBusy(false); setRetentionTries((n) => n + 1); }
@@ -226,6 +258,23 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setSuggestBusy(false);
+    }
+  };
+
+  // Dashboards (#15017): only the owner changes it, the hub confirms the value shown
+  const pagesAnnounced = useStore((s) => s.features.includes(ASSISTANT_PAGES_FEATURE));
+  const [dashboardsBusy, setDashboardsBusy] = useState(false);
+  const setDashboards = async (on: boolean) => {
+    setDashboardsBusy(true);
+    setInfo((i) => (i ? { ...i, dashboards: on } : i));
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { dashboards: on } });
+      setInfo((i) => (i ? { ...i, dashboards: r.dashboards === true } : i));
+    } catch (e) {
+      setInfo((i) => (i ? { ...i, dashboards: !on } : i));
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally {
+      setDashboardsBusy(false);
     }
   };
 
@@ -288,6 +337,18 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
     }
   };
 
+  const setRelayReplies = async (on: boolean) => {
+    setRelayBusy(true);
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { fold_routine_relay_replies: on } });
+      if (r.manager !== manager || r.fold_routine_relay_replies !== on) throw new Error(t("settings-assistantsettings.relay_unconfirmed"));
+      setInfo((i) => i ? { ...i, fold_routine_relay_replies: on } : i);
+      void refreshAssistant().catch(() => {});
+    } catch (e) {
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally { setRelayBusy(false); }
+  };
+
   const setRecentTaskChats = async (on: boolean) => {
     setRecentBusy(true);
     setInfo((i) => (i ? { ...i, recent_task_chats: on } : i));
@@ -336,16 +397,16 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
 
   const [agentsBusy, setAgentsBusy] = useState(false);
   // One field of the Agents group (#3617, #3618, #4293, #5082, #12492): shown as chosen at once, taken back with the reason when the hub refuses.
-  const setAgents = async (patch: { agent_tasks: boolean } | { close_ended_terminals: boolean } | { inbox_signals: boolean } | { inbox_todo_forward: boolean } | { main_supervises_own_tasks: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
+  const setAgents = async (patch: { agent_tasks: boolean } | { close_ended_terminals: boolean } | { inbox_signals: boolean } | { inbox_todo_forward: boolean } | { main_supervises_own_tasks: boolean } | { auto_supervision_messages: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
     const before = info;
     setAgentsBusy(true);
     setInfo((i) => (i ? { ...i, ...patch } : i));
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
       // what the hub saved, when it says
-      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, close_ended_terminals: r.close_ended_terminals ?? i.close_ended_terminals, inbox_signals: r.inbox_signals ?? i.inbox_signals, inbox_todo_forward: r.inbox_todo_forward ?? i.inbox_todo_forward, main_supervises_own_tasks: r.main_supervises_own_tasks ?? i.main_supervises_own_tasks, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
+      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, close_ended_terminals: r.close_ended_terminals ?? i.close_ended_terminals, inbox_signals: r.inbox_signals ?? i.inbox_signals, inbox_todo_forward: r.inbox_todo_forward ?? i.inbox_todo_forward, main_supervises_own_tasks: r.main_supervises_own_tasks ?? i.main_supervises_own_tasks, auto_supervision_messages: r.auto_supervision_messages ?? i.auto_supervision_messages, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
     } catch (e) {
-      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, close_ended_terminals: before.close_ended_terminals, inbox_signals: before.inbox_signals, inbox_todo_forward: before.inbox_todo_forward, main_supervises_own_tasks: before.main_supervises_own_tasks, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
+      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, close_ended_terminals: before.close_ended_terminals, inbox_signals: before.inbox_signals, inbox_todo_forward: before.inbox_todo_forward, main_supervises_own_tasks: before.main_supervises_own_tasks, auto_supervision_messages: before.auto_supervision_messages, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setAgentsBusy(false);
@@ -395,6 +456,13 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   const index = files?.find((f) => f.name === MEMORY_INDEX);
   const on = tasks?.filter((task) => task.enabled).length ?? 0;
   const next = tasks ? upcoming(tasks, 1)[0] : undefined;
+  const deduplicateInboxForward = info?.integrations_v2 === true && hasInboxSources;
+  const nonDefaultManager = manager && manager !== (defaultId || defaultManager()) ? manager : undefined;
+  const inboxForwardSourcesHref = settingsHref(
+    "integrations",
+    formatIntegrationsSub({ kind: "sources", ...(nonDefaultManager ? { manager: nonDefaultManager } : {}) }),
+    false,
+  );
 
   if (!info && !error) return <Loading />;
 
@@ -443,6 +511,14 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
       </Group>
 
+      {typeof info?.fold_routine_relay_replies === "boolean" && (
+        <Group footer={t("settings-assistantsettings.relay_replies_footer")} anchor="relay-replies">
+          <Row label={t("settings-assistantsettings.relay_replies")}>
+            <Switch on={info.fold_routine_relay_replies} onChange={(on) => void setRelayReplies(on)} disabled={relayBusy} label={t("settings-assistantsettings.relay_replies")} />
+          </Row>
+        </Group>
+      )}
+
       {/* Show scheduled task chats in the sidebar's Recent (#8324): only from a hub that has the setting */}
       {typeof info?.recent_task_chats === "boolean" && (
         <Group title={t("settings-assistantsettings.recent_task_chats_title")} footer={t("settings-assistantsettings.recent_task_chats_footer")} anchor="recent-task-chats">
@@ -461,6 +537,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Group>
       )}
 
+      {/* Dashboards (#15017): only from a hub whose default manager has them, and only for that manager */}
+      {pagesAnnounced && info && manager === defaultId && (
+        <Group anchor="dashboards" footer={t("settings-assistantsettings.dashboards_footer")}>
+          <Row label={t("settings-assistantsettings.dashboards")}>
+            <Switch on={info.dashboards === true} onChange={(on) => void setDashboards(on)} disabled={dashboardsBusy} label={t("settings-assistantsettings.dashboards")} />
+          </Row>
+        </Group>
+      )}
+
       <Group anchor="dispatch-tasks" title={t("settings-assistantsettings.start_title")} footer={t("settings-assistantsettings.start_footer")}>
         <Row label={t("settings-assistantsettings.start_requested")} anchor="start-requested">
           <Switch on={info?.start_requested_tasks ?? true} onChange={(on) => void setStartRequested(on)} disabled={!info || startBusy} label={t("settings-assistantsettings.start_requested")} />
@@ -474,22 +559,32 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
             <option value="prefer-new">{t("settings-assistantsettings.workspace_prefer_new")}</option>
           </select>
         </Row>
-        {info?.manager === manager && info.task_workspace_preference === "prefer-new" && <PageBoundary page="workspace-naming">
-          <Suspense fallback={<Loading />}>
-            <WorkspaceNaming manager={manager} owner={owner} />
-          </Suspense>
-        </PageBoundary>}
         <TaskTrust manager={manager} machineName={(id) => machines.find((machine) => machine.id === id)?.name || id} />
       </Group>
 
+      {info?.manager === manager && info.workspace_naming_version && (
+        <div data-settings-group="workspace-naming">
+          <PageBoundary page="workspace-naming">
+            <Suspense fallback={<Loading />}>
+              <WorkspaceNaming manager={manager} owner={owner} version={info.workspace_naming_version} />
+            </Suspense>
+          </PageBoundary>
+        </div>
+      )}
+
       {/* Who follows up the main chat's tasks (#5082), delivery closeout gate (#12034), following up agents, their tasks' new messages, stopping idle ones and tidying closed ones (#3617, #4293, #4754, #3618): each row only from a hub that has its setting */}
-      {(supportsAgentAutoNaming(info) || typeof info?.main_supervises_own_tasks === "boolean" || typeof info?.delivery_gate === "string" || typeof info?.agent_tasks === "boolean" || typeof info?.close_ended_terminals === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.inbox_todo_forward === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && info && (
+      {(supportsAgentAutoNaming(info) || typeof info?.main_supervises_own_tasks === "boolean" || typeof info?.delivery_gate === "string" || typeof info?.agent_tasks === "boolean" || typeof info?.close_ended_terminals === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.auto_supervision_messages === "boolean" || typeof info?.inbox_todo_forward === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && info && (
         <Group anchor="agents" title={t("settings-assistantsettings.agents_title")}>
           {supportsAgentAutoNaming(info) && <AgentAutoNaming info={info} manager={manager} owner={owner}
             onSaved={(patch) => setInfo((current) => current ? { ...current, ...patch } : current)} />}
           {typeof info.main_supervises_own_tasks === "boolean" && (
             <Row label={t("settings-assistantsettings.main_supervises")} hint={t("settings-assistantsettings.main_supervises_hint")} wrapHint>
               <Switch on={info.main_supervises_own_tasks} onChange={(on) => void setAgents({ main_supervises_own_tasks: on })} disabled={agentsBusy} label={t("settings-assistantsettings.main_supervises")} />
+            </Row>
+          )}
+          {typeof info.auto_supervision_messages === "boolean" && (
+            <Row label={t("settings-assistantsettings.auto_supervision_messages")} hint={t("settings-assistantsettings.auto_supervision_messages_hint")} wrapHint>
+              <Switch on={info.auto_supervision_messages} onChange={(on) => void setAgents({ auto_supervision_messages: on })} disabled={agentsBusy} label={t("settings-assistantsettings.auto_supervision_messages")} />
             </Row>
           )}
           {typeof info.delivery_gate === "string" && (
@@ -520,9 +615,31 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
             </Row>
           )}
           {typeof info.inbox_todo_forward === "boolean" && (
-            <Row anchor="inbox-todo-forward" label={t("settings-assistantsettings.inbox_todo_forward")} hint={t("settings-assistantsettings.inbox_todo_forward_hint")} wrapHint>
-              <Switch on={info.inbox_todo_forward} onChange={(on) => void setAgents({ inbox_todo_forward: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_todo_forward")} />
-            </Row>
+            deduplicateInboxForward ? (
+              <a
+                data-settings-row="inbox-todo-forward"
+                href={BASE + inboxForwardSourcesHref}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  navigate(inboxForwardSourcesHref);
+                }}
+                className="flex items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover pointer-coarse:min-h-11"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-meta text-ink">{t("settings-assistantsettings.inbox_todo_forward")}</div>
+                  <div className="mt-0.5 text-submeta leading-snug text-ink-3">{t("settings-assistantsettings.inbox_todo_forward_moved_hint")}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 text-label text-ink-2">
+                  <span>{t(info.inbox_todo_forward ? "settings-assistantsettings.inbox_todo_forward_on" : "settings-assistantsettings.inbox_todo_forward_off")}</span>
+                  <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
+                </div>
+              </a>
+            ) : (
+              <Row anchor="inbox-todo-forward" label={t("settings-assistantsettings.inbox_todo_forward")} hint={t("settings-assistantsettings.inbox_todo_forward_hint")} wrapHint>
+                <Switch on={info.inbox_todo_forward} onChange={(on) => void setAgents({ inbox_todo_forward: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_todo_forward")} />
+              </Row>
+            )
           )}
           {typeof info.idle_close_hours === "number" && (
             <Row label={t("settings-assistantsettings.idle_close")} hint={t("settings-assistantsettings.idle_close_hint")} wrapHint>
@@ -606,7 +723,17 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Group>
       )}
 
-      {typeof info?.recording_days === "number" && (
+      {typeof info?.recording_text_days === "number" && typeof info.recording_audio_days === "number" ? (
+        // A hub with separate audio and text retentions (#16412).
+        <Group anchor="recordings" title={t("settings-assistantsettings.recordings_title")} footer={t("settings-assistantsettings.recordings_footer_split")}>
+          <DaysRow field="recording_audio_days" label={t("settings-assistantsettings.recording_audio_days")} value={info.recording_audio_days} tries={retentionTries}
+            disabled={info.manager !== manager || retentionBusy} onSave={(days) => void setRetention("recording_audio_days", days)} />
+          <DaysRow field="recording_text_days" label={t("settings-assistantsettings.recording_text_days")} value={info.recording_text_days} tries={retentionTries}
+            disabled={info.manager !== manager || retentionBusy} onSave={(days) => void setRetention("recording_text_days", days)} />
+          {typeof info.minutes_days === "number" && <DaysRow field="minutes_days" label={t("settings-assistantsettings.minutes_days")} value={info.minutes_days} tries={retentionTries}
+            disabled={info.manager !== manager || retentionBusy} onSave={(days) => void setRetention("minutes_days", days)} />}
+        </Group>
+      ) : typeof info?.recording_days === "number" && (
         // A manager from before minutes_days (#3780) deletes a recording's minutes with it: only one that says the minutes'
         // days promises they stay longer.
         <Group anchor="recordings" title={t("settings-assistantsettings.recordings_title")}
@@ -858,7 +985,8 @@ function AboutMe({ notesSaves, info, onSaved }: { notesSaves: ReturnType<typeof 
  *  unconfirmed or raised one (minutes never below the recordings' days) shows what is in effect. */
 function DaysRow({ field, label, value, tries, disabled, onSave }: { field: Retention; label: string; value: number; tries: number; disabled: boolean; onSave: (days: number) => void }) {
   const { min, max } = RETENTION[field];
-  const savedForever = field === "minutes_days" && value === 0;
+  const canForever = field !== "recording_days";
+  const savedForever = canForever && value === 0;
   const [forever, setForever] = useState(savedForever);
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { setDraft(String(value)); setForever(savedForever); }, [value, tries, savedForever]);
@@ -872,7 +1000,7 @@ function DaysRow({ field, label, value, tries, disabled, onSave }: { field: Rete
   };
   return (
     <Row label={label} hint={valid ? undefined : t("settings-assistantsettings.days_range", { min, max })}>
-      {field === "minutes_days" && <select aria-label={label} value={forever ? "forever" : "days"} disabled={disabled}
+      {canForever && <select aria-label={label} value={forever ? "forever" : "days"} disabled={disabled}
         className={settingsInputClass} onChange={(e) => {
           if (e.target.value === "forever") {
             if (!savedForever) onSave(0);

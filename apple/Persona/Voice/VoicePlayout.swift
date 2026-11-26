@@ -20,24 +20,56 @@ import Foundation
 /// joining a voice still playing: it went straight on, the gap was heard, and nothing counted it, so the lead never
 /// grew. Less than `floor` left counts as run dry too: the piece would reach the player too late. Each reply's arrival is
 /// measured (`VoiceReply`), and one that came slower than it plays raises the lead for the next before it runs dry.
+///
+/// Slow and bursty voices (#14933). Without word from the extension, where a reply begins and ends is guessed from the
+/// silences: `quiet` plays what is held, `stallWindow` tells a late piece from the next reply. A voice that makes its
+/// audio slower than it plays, or a sentence at a time with pauses between, broke both: a pause over `quiet` played a
+/// half-gathered lead that ran dry at once, and one over `stallWindow` split the reply in two, so the lead never grew. An
+/// extension with the `reply` feature (#14932) says where each reply begins and ends (`replyBegan`, `replyEnded`): inside
+/// one, every piece that finds the player dry is a stall of that reply however long the pause, only `replyQuiet` (an
+/// upstream that stops without ending its reply) plays a lead early, and its end plays what is held at once, so a short
+/// reply never waits out `quiet`. Without those frames everything is guessed from the silences as before.
+///
+/// A 2-second lead lasts about `2 / (1 - speed)` seconds of a voice that comes at `speed` of its pace (10 s at 0.8x, 5 s
+/// at 0.6x), so a voice that still runs dry with it gathers `raisedLeads.last`, a step reached only by running dry inside
+/// a marked reply: a reply that merely came slow raises the lead no further than the step before it. A stall in a marked
+/// reply that could be measured before that pause raises the lead straight to the step that lets the voice play for
+/// `playThrough` at its pace (the pause counted), instead of one step per stall; and a raised lead waits as long as that
+/// pace needs to gather it (`waitNow`, up to `longestWait`), where a fixed `1.5 x lead` played it half-gathered under
+/// 0.67x. The lead in use (`level`) never grows for a voice that keeps up: a fast voice plays after 200 ms as before.
 nonisolated struct VoicePlayout<Piece> {
     /// How much to gather before playing, until the voice stalls.
     static var lead: TimeInterval { 0.2 }
-    /// The longest the first held piece waits for the rest of `lead`; a raised lead waits as much longer.
+    /// The longest the first held piece waits for the rest of `lead`; a raised lead waits as much longer, or as long as the
+    /// voice's pace needs (`waitNow`).
     static var wait: TimeInterval { 0.3 }
-    /// The leads after the first stall, the second and the third or more.
-    static var raisedLeads: [TimeInterval] { [0.6, 1.2, 2.0] }
-    /// A piece that comes this soon after the player ran dry is the same reply arriving late, not the next one.
+    /// The leads after the first stall, the second, the third and the fourth or more. The last is reached only by
+    /// running dry inside a reply the extension marked (#14933).
+    static var raisedLeads: [TimeInterval] { [0.6, 1.2, 2.0, 3.5] }
+    /// The highest level without the extension's word, and for a reply that merely came slow: 2 s, as before #14933.
+    /// Without `reply` frames the tail of every reply waits `quiet` for its lead, and a pause over `quiet` plays the lead
+    /// half-gathered anyway, so a deeper one only adds silence there.
+    static var guessedTop: Int { raisedLeads.count - 1 }
+    /// A piece that comes this soon after the player ran dry is the same reply arriving late, not the next one (when the
+    /// extension does not say).
     static var stallWindow: TimeInterval { 1.5 }
     /// While a raised lead gathers, what is held plays once nothing more has come for this long.
     static var quiet: TimeInterval { 1.0 }
+    /// `quiet` inside a reply the extension said began (#14933): a pause between sentences is not its end, which the
+    /// extension says; this only keeps an upstream that stops mid-reply from holding the voice back for good.
+    static var replyQuiet: TimeInterval { 4.0 }
+    /// A stall raises the lead at least far enough for the voice to play this long before it would run dry again, at the
+    /// pace its reply came (#14933).
+    static var playThrough: TimeInterval { 8.0 }
+    /// The longest a raised lead waits for a slow voice to gather it (#14933).
+    static var longestWait: TimeInterval { 8.0 }
     /// Less than this left in the player as a piece comes counts as run dry: the render position it is read from is up to
     /// a render cycle old, and the piece still has to be scheduled.
     static var floor: TimeInterval { 0.05 }
 
     /// The voice's rate in frames per second.
     let rate: Int
-    /// How often the voice stalled, at most the number of `raisedLeads`: the lead in use.
+    /// The lead in use: 0 until the voice stalls, then the step of `raisedLeads` reached, at most their number.
     private(set) var level: Int
     /// How often the voice stalled in all, and how long the player had been dry when the last stall's piece came (0 when
     /// it still had less than `floor` left): for the call's log.
@@ -51,11 +83,38 @@ nonisolated struct VoicePlayout<Piece> {
     private(set) var reply: VoiceReply?
     /// The reply that ended last, until `takeEnded` hands it on.
     private var ended: VoiceReply?
+    /// The extension said a reply began and has not said it ended (#14933); false for one that does not say.
+    private(set) var inReply = false
+    /// The pace the last measured reply came at: what a raised lead waits for until the reply arriving can be measured.
+    private(set) var lastSpeed: Double?
+    /// What the replies said of the voice's pace so far (`VoiceLead.slow`).
+    private var cameSlow: Bool?
 
-    /// A new buffer at `rate`, at `level` (a new player for the same call keeps how far its voice stalled).
+    /// A new buffer at `rate`, at `level`: a call of a voice remembered slow starts higher (`VoiceLeadMemory`).
     init(rate: Int, level: Int = 0) {
         self.rate = rate
         self.level = min(max(level, 0), Self.raisedLeads.count)
+    }
+
+    /// A new buffer at `rate` for another player of the same call (a route change, new rates): the link and the voice
+    /// are the ones it learned on, so the raised lead and the measured pace stay (#12922). Nothing is held, and no reply
+    /// is open: the rest of one that was is guessed from the silences.
+    func moved(to rate: Int) -> VoicePlayout {
+        var next = VoicePlayout(rate: rate, level: level)
+        next.lastSpeed = lastSpeed
+        next.cameSlow = cameSlow
+        return next
+    }
+
+    /// How far the lead grew and what the replies said of the voice's pace, the one arriving included, for the next call
+    /// of the same voice.
+    var lead: VoiceLead { VoiceLead(level: level, slow: reply.map { Self.judged(cameSlow, $0) } ?? cameSlow) }
+
+    /// What the replies so far (`slow`) and `reply` say of the voice's pace: slow once one came slow or ran dry, kept up
+    /// once one was measured and none came slow, unknown until then.
+    private static func judged(_ slow: Bool?, _ reply: VoiceReply) -> Bool? {
+        if reply.stalls > 0 || reply.isSlow { return true }
+        return reply.speed != nil && slow == nil ? false : slow
     }
 
     /// How much to gather before playing now.
@@ -64,18 +123,34 @@ nonisolated struct VoicePlayout<Piece> {
     /// `leadNow` in frames at the voice's rate.
     var leadFrames: Int { max(1, Int(Double(rate) * leadNow)) }
 
-    /// The longest the first held piece waits for the rest of `leadNow`.
-    var waitNow: TimeInterval { level == 0 ? Self.wait : Self.wait * leadNow / Self.lead }
+    /// The longest the first held piece waits for the rest of `leadNow`: `wait`, and for a raised lead as much longer, or
+    /// as long as gathering it takes at the pace the reply comes (the last one's until it can be measured), up to
+    /// `longestWait`.
+    var waitNow: TimeInterval {
+        guard level > 0 else { return Self.wait }
+        let scaled = Self.wait * leadNow / Self.lead
+        guard let speed = reply?.speed ?? lastSpeed, speed > 0 else { return scaled }
+        return max(scaled, min(Self.longestWait, leadNow / speed + Self.wait))
+    }
 
     /// Something is held, waiting for the lead or for `due`.
     var isHolding: Bool { !held.isEmpty }
 
     /// When what is held is to play, lead or not (nil: nothing is held): once the first has waited `waitNow`, and while a
-    /// raised lead gathers, once nothing more has come for `quiet`.
+    /// raised lead gathers, once nothing more has come for `quiet` (`replyQuiet` inside a reply the extension marked).
     var due: TimeInterval? {
         guard !held.isEmpty else { return nil }
         let waited = firstHeldAt + waitNow
-        return level == 0 ? waited : min(waited, lastHeldAt + Self.quiet)
+        guard level > 0 else { return waited }
+        return min(waited, lastHeldAt + (inReply ? Self.replyQuiet : Self.quiet))
+    }
+
+    /// The lowest level whose lead lets a voice that comes at `speed` of its pace play for `playThrough` before it runs
+    /// dry (0 for an unmeasured or a fast one), at most the last.
+    static func fitting(_ speed: Double?) -> Int {
+        guard let speed, speed < 1 else { return 0 }
+        let needed = playThrough * (1 - max(0, speed))
+        return (raisedLeads.firstIndex { $0 >= needed } ?? raisedLeads.count - 1) + 1
     }
 
     /// A piece of the voice, `frames` long, arrived at `now`. `left` is what the player still had to play then, in seconds,
@@ -89,16 +164,22 @@ nonisolated struct VoicePlayout<Piece> {
             return [piece]
         }
         if held.isEmpty {
-            if reply != nil, let left, -left < Self.stallWindow {
-                // The same reply, late: the player ran dry in the middle of it, or is about to.
+            // The same reply, late: the player ran dry in the middle of it, or is about to. Inside a reply the extension
+            // marked, however long it paused.
+            if reply != nil, let left, inReply || -left < Self.stallWindow {
+                // Its pace, this pause included, once it could be measured without it: one hiccup early in a fast
+                // voice's reply is no slow voice.
+                let measured = reply?.speed != nil
                 stalls += 1
                 lastGap = max(0, -left)
-                level = min(level + 1, Self.raisedLeads.count)
                 reply?.stalls += 1
                 arrived(seconds, at: now, left: left)
+                let top = inReply ? Self.raisedLeads.count : Self.guessedTop
+                let next = max(level + 1, inReply && measured ? Self.fitting(reply?.speed) : 0)
+                level = max(level, min(next, top))
             } else {
                 endReply()
-                reply = VoiceReply(began: now, seconds: seconds)
+                arrived(seconds, at: now, left: nil)
             }
             firstHeldAt = now
         } else {
@@ -120,21 +201,38 @@ nonisolated struct VoicePlayout<Piece> {
     }
 
     /// Drops what is held (`clear`, a new player): the reply arriving is cut off, and the next piece is not taken for one
-    /// that came late.
+    /// that came late. The extension sends its `clear` before the end of the reply it cuts off.
     mutating func clear() {
         held = []
         heldFrames = 0
+        inReply = false
         endReply(cut: true)
+    }
+
+    /// The extension says a reply begins (#14933): its pieces are one reply until it says it ended.
+    mutating func replyBegan() {
+        endReply()
+        inReply = true
+    }
+
+    /// The extension says the reply is over (#14933): what is held is to play now, as nothing more of it comes.
+    mutating func replyEnded() -> [Piece] {
+        inReply = false
+        endReply()
+        return release()
     }
 
     /// The reply arriving is over (the next began, it was cut off, the call ends), kept for `takeEnded`. One that came
     /// slower than it plays (`VoiceReply.isSlow`) without running dry raises the lead for the next, as a stall would:
-    /// at that speed the next one runs dry once its lead is used up.
+    /// at that speed the next one runs dry once its lead is used up. Only up to the step before the last: the last is
+    /// for a voice that runs dry even so.
     mutating func endReply(cut: Bool = false) {
         guard var reply else { return }
         self.reply = nil
         reply.cut = cut
-        if reply.stalls == 0, reply.isSlow, level < Self.raisedLeads.count {
+        if let speed = reply.speed { lastSpeed = speed }
+        cameSlow = Self.judged(cameSlow, reply)
+        if reply.stalls == 0, reply.isSlow, level < Self.guessedTop {
             level += 1
             reply.raisedLead = true
         }
@@ -149,11 +247,20 @@ nonisolated struct VoicePlayout<Piece> {
 
     private mutating func arrived(_ seconds: TimeInterval, at now: TimeInterval, left: TimeInterval?) {
         if reply == nil {
-            reply = VoiceReply(began: now, seconds: seconds)
+            reply = VoiceReply(began: now, seconds: seconds, marked: inReply)
         } else {
             reply?.add(seconds, at: now, left: left)
         }
     }
+}
+
+/// How far a call's jitter buffer grew (`VoicePlayout.level`) and what its replies said of the voice's pace (#14933): the
+/// next call of the same voice starts from it (`VoiceLeadMemory`).
+nonisolated struct VoiceLead: Equatable, Sendable {
+    var level = 0
+    /// True once a reply came slower than it plays or the player ran dry mid-reply; false when the replies measured all
+    /// kept up; nil when none could be measured.
+    var slow: Bool?
 }
 
 /// One reply as its pieces arrived (#13963): how fast it came against how fast it plays, and how little the player had
@@ -180,12 +287,15 @@ nonisolated struct VoiceReply: Equatable, Sendable {
     var cut = false
     /// It came so slowly that the lead was raised for the next one.
     var raisedLead = false
+    /// The extension said where it began and ended (`reply` frames, #14933) rather than its silences telling.
+    var marked = false
 
-    init(began: TimeInterval, seconds: TimeInterval) {
+    init(began: TimeInterval, seconds: TimeInterval, marked: Bool = false) {
         self.began = began
         last = began
         self.seconds = seconds
         lastPiece = seconds
+        self.marked = marked
     }
 
     /// How long its pieces took to come, first to last.
@@ -211,7 +321,7 @@ nonisolated struct VoiceReply: Equatable, Sendable {
         func ms(_ t: TimeInterval) -> String { "\(Int((t * 1000).rounded())) ms" }
         let pace = speed.map { String(format: "%.2fx its pace", $0) } ?? "too quickly to measure"
         return "a reply of \(ms(seconds)) came in \(ms(span)) (\(pace)); the player's lowest cushion \(lowest.map(ms) ?? "not measured"), "
-            + "ran dry \(stalls) times, \(cut ? "cut off" : "over"); the next gathers \(ms(lead))"
+            + "ran dry \(stalls) times, \(cut ? "cut off" : "over")\(marked ? " (marked by the extension)" : ""); the next gathers \(ms(lead))"
             + (raisedLead ? ", raised as it came slower than it plays" : "")
     }
 }

@@ -84,6 +84,15 @@ class AssistantSettingsShotsTest {
     @Config(sdk = [35], qualifiers = "zh-w400dp-h2200dp-xhdpi")
     @Test fun nextSuggestionsSimplifiedChinese() = nextSuggestionShots("zh")
 
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi")
+    @Test fun dashboardsEnglish() = dashboardsShots("en")
+
+    @Config(sdk = [35], qualifiers = "zh-w400dp-h2400dp-xhdpi")
+    @Test fun dashboardsSimplifiedChinese() = dashboardsShots("zh")
+
+    @Config(sdk = [35], qualifiers = "ja-w400dp-h2400dp-xhdpi")
+    @Test fun dashboardsJapanese() = dashboardsShots("ja")
+
     @Config(sdk = [35], qualifiers = "en-w400dp-h3200dp-xhdpi")
     @Test fun recentTaskChatsLargeFont() = recentTaskChatsLargeFontShots()
 
@@ -114,7 +123,7 @@ class AssistantSettingsShotsTest {
         override suspend fun config() = config
         override suspend fun updateConfig(update: AssistantConfigUpdate): AssistantConfig {
             config = config.copy(timezone = update.timezone ?: config.timezone, notes = update.notes ?: config.notes,
-                nextSuggestions = update.nextSuggestions ?: config.nextSuggestions,
+                nextSuggestions = update.nextSuggestions ?: config.nextSuggestions, dashboards = update.dashboards ?: config.dashboards,
                 recentTaskChats = update.recentTaskChats ?: config.recentTaskChats)
             return config
         }
@@ -245,6 +254,45 @@ class AssistantSettingsShotsTest {
                 rule.waitForIdle()
                 val image = rule.onNodeWithTag("next-shot").captureToImage().asAndroidBitmap()
                 save("settings-next-suggestions-$language-$part-${s.name.lowercase()}-${if (d) "dark" else "light"}.png", image)
+            }
+        }
+    }
+
+    /** Dashboards (#15017): no switch while the hub does not say assistant_pages; with it, off (absent) and on. */
+    private fun dashboardsShots(language: String) {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var features by mutableStateOf(emptySet<String>())
+        var value by mutableStateOf<Boolean?>(null)
+        val management = FakeManagement("Morning", "Keep it short.")
+        var title = ""
+        rule.setContent {
+            title = stringResource(R.string.assistant_settings_dashboards)
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                val roster = ManagerRoster(listOf(HubManager("assistant", "Persona", online = true, isDefault = true)), "assistant")
+                CompositionLocalProvider(LocalManagerRoster provides roster, LocalHubFeatures provides features) {
+                    Box(Modifier.testTag("dashboards-shot").width(400.dp).height(2400.dp).background(PersonaTheme.palette.background)) {
+                        key(value) { AssistantSettingsScreen(management, machines, onBack = {}, onModelConfiguration = { _, _ -> }) }
+                    }
+                }
+            }
+        }
+        for ((part, feature, next) in listOf(Triple("hidden", false, null), Triple("off", true, null), Triple("on", true, true))) {
+            management.config = management.config.copy(dashboards = next)
+            features = if (feature) setOf(AssistantPagesFeature) else emptySet()
+            value = next
+            rule.waitForIdle()
+            when (part) {
+                "hidden" -> rule.onNodeWithText(title).assertDoesNotExist()
+                "off" -> rule.onNode(hasText(title) and isToggleable()).assertIsOff()
+                else -> rule.onNode(hasText(title) and isToggleable()).assertIsOn()
+            }
+            for (s in AppStyle.entries) for (d in listOf(false, true)) {
+                style = s
+                dark = d
+                rule.waitForIdle()
+                val image = rule.onNodeWithTag("dashboards-shot").captureToImage().asAndroidBitmap()
+                save("settings-dashboards-$language-$part-${s.name.lowercase()}-${if (d) "dark" else "light"}.png", image)
             }
         }
     }

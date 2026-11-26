@@ -143,6 +143,7 @@ func TestTheHubShowsTheHandOverUntilTheManagerReports(t *testing.T) {
 	h.cfg.Machines = []MachineConfig{{ID: "box", Name: "Box", Kind: "ssh"}}
 	box := newMeshNode("uid-box", "box", "s1")
 	box.resident = true
+	box.sessions = append(box.sessions, proto.Session{MachineID: "box", SessionID: "old-archived", Archived: true})
 	_ = st.PutSetting(context.Background(), devicesWarmKey, map[string]any{"saved_at": time.Now(), "machines": map[string]any{
 		"box": map[string]any{"info": proto.NodeInfo{Hostname: "box", Version: "test"}, "sessions": []proto.Session{{SessionID: "s1", Title: "旧的", Status: proto.StatusIdle}}}},
 		"engines": map[string]string{"box": proto.EngineHerdrCore}})
@@ -182,9 +183,12 @@ func TestTheHubShowsTheHandOverUntilTheManagerReports(t *testing.T) {
 		t.Fatal("the hand-over was read, not taken")
 	}
 	// Stopping, the hub hands the next process what the manager reported (its own settings, not the manager's).
-	waitFor(t, "the manager reports box", func() bool { s := m.snapshot(); return s.Online && len(m.sessionList()) == 1 })
-	// With the archived rows its manager told apart (#6836): still found by id while the manager comes back.
-	m.setArchived("assistant", []proto.Session{{MachineID: "box", SessionID: "old-archived", Archived: true}})
+	// An online hand-over can precede the live list and its separate archive report.
+	waitFor(t, "the manager reports the live and archived sessions", func() bool {
+		live, ok := m.session("s1")
+		archived, found := m.session("old-archived")
+		return m.snapshot().Online && ok && live.Title == "task s1" && found && archived.Archived && len(m.keptSessions()) == 1
+	})
 	h.saveDevicesWarm(context.Background())
 	next := newTestHub(t)
 	next.store = st

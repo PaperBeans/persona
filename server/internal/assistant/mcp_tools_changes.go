@@ -52,7 +52,7 @@ func (s *Service) sessionMCPToolsSince(ctx context.Context, machine, session str
 	if since != "" {
 		ctx = context.WithValue(ctx, revisionDiscoveryKey{}, true)
 	}
-	ctx = context.WithValue(ctx, guardDecisionKey{}, &guardDecisionCapture{})
+	ctx = s.mcpDiscoveryContext(ctx, machine, session, assistant)
 	base, changed := s.mcpChanges.snapshot()
 	cursor := s.guardDiscoveryCursor(ctx, machine, session, assistant, base)
 	if since == cursor {
@@ -66,7 +66,7 @@ func (s *Service) sessionMCPToolsSince(ctx context.Context, machine, session str
 			noteMCPWatchEvent("heartbeat")
 			// A heartbeat also rechecks filter state: expiry and read recovery do not call notify themselves.
 			base, _ = s.mcpChanges.snapshot()
-			ctx = context.WithValue(ctx, guardDecisionKey{}, &guardDecisionCapture{})
+			ctx = s.mcpDiscoveryContext(ctx, machine, session, assistant)
 			next := s.guardDiscoveryCursor(ctx, machine, session, assistant, base)
 			if next == cursor {
 				return map[string]any{"revision": cursor, "unchanged": true}
@@ -74,13 +74,13 @@ func (s *Service) sessionMCPToolsSince(ctx context.Context, machine, session str
 			cursor = next
 		case <-changed:
 			base, _ = s.mcpChanges.snapshot()
-			ctx = context.WithValue(ctx, guardDecisionKey{}, &guardDecisionCapture{})
+			ctx = s.mcpDiscoveryContext(ctx, machine, session, assistant)
 			cursor = s.guardDiscoveryCursor(ctx, machine, session, assistant, base)
 		}
 	}
 	// Filter with a fresh capture and return its decision as the revision too. An admission read and a list read may
 	// disagree transiently, but the list and revision a client caches always come from the same effective decision.
-	ctx = context.WithValue(ctx, guardDecisionKey{}, &guardDecisionCapture{})
+	ctx = s.mcpDiscoveryContext(ctx, machine, session, assistant)
 	tools, err := s.sessionMCPToolsChecked(ctx, machine, session, assistant, guest)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
@@ -89,4 +89,12 @@ func (s *Service) sessionMCPToolsSince(ctx context.Context, machine, session str
 		tools = []proto.Tool{}
 	}
 	return map[string]any{"tools": tools, "revision": s.guardDiscoveryCursor(ctx, machine, session, assistant, base)}
+}
+
+func (s *Service) mcpDiscoveryContext(ctx context.Context, machine, session string, assistant bool) context.Context {
+	if assistant && machine != "" && session != "" {
+		row, known := s.session(ctx, machine, session)
+		ctx = context.WithValue(ctx, callerSpaceSnapshotKey{}, callerSpaceSnapshot{machine, session, row, known})
+	}
+	return context.WithValue(ctx, guardDecisionKey{}, &guardDecisionCapture{})
 }

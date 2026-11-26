@@ -5,6 +5,8 @@ import { MANAGER_HEADER, useShownManager } from "../../lib/manager-choice";
 import { taskInputSettings, type Task, type TaskExecution } from "../../lib/routines";
 import { splitSkillDraft, type SkillCatalog } from "../../lib/skill-mentions";
 import { contextXML } from "../../lib/context-xml";
+import { readInlineDraft, writeInlineDraft } from "../../lib/inline-mentions";
+import { inlineBody, inlineReferences, readInlineBody } from "../../lib/inline-message";
 import { AGENT_COMMANDS, Composer } from "../chat/Composer";
 import { WORKFLOWS_COMMAND } from "../../lib/background-panel";
 import { PERMISSIONS_COMMAND } from "../../lib/permissions-command";
@@ -39,8 +41,16 @@ export function TaskPromptEditor({ draft, saved, disabled, onChange }: { draft: 
   const context = current?.context;
   const ex = context?.execution;
   const scope = context ? scopeOf(context) : "";
-  const { text, skills: refs } = useMemo(() => draft.prompt_selections ? splitSkillDraft(draft.prompt, true) : { text: draft.prompt, skills: [] }, [draft.prompt, draft.prompt_selections]);
-  const invalidFile = ex && refs.some((ref) => ref.kind === "file" && Object.entries(fileScope(ex)).some(([field, value]) => (ref.attrs?.[field] ?? "") !== value));
+  const { text, refs, files } = useMemo(() => {
+    const saved = draft.prompt_selections ? splitSkillDraft(draft.prompt, true) : { text: draft.prompt, skills: [] };
+    const inline = readInlineBody(saved.text, saved.skills);
+    return {
+      text: inline.used.size ? writeInlineDraft(inline.document) : saved.text,
+      refs: saved.skills.filter((ref) => !inline.used.has(ref)),
+      files: saved.skills.filter((ref) => ref.kind === "file"),
+    };
+  }, [draft.prompt, draft.prompt_selections]);
+  const invalidFile = ex && files.some((ref) => Object.entries(fileScope(ex)).some(([field, value]) => (ref.attrs?.[field] ?? "") !== value));
   const inputError = current?.error || current?.context?.input_error;
   const supported = ex && context?.task_input === true && ["claude", "codex"].includes(agentOf(ex));
   const mention = useMemo<MentionSource | undefined>(() => ex && supported ? {
@@ -66,7 +76,12 @@ export function TaskPromptEditor({ draft, saved, disabled, onChange }: { draft: 
           placeholder={t("assistant-taskeditor.prompt_placeholder")}
           editor={{
             text, refs, label: t("assistant-taskeditor.section_prompt"),
-            onChange: (body, selected) => onChange(selected.length ? `${selected.map(contextXML).join("\n")}\n\n${body}` : body, selected.length > 0),
+            onChange: (value, existing) => {
+              const doc = readInlineDraft(value);
+              const selected = inlineReferences([...existing, ...doc]);
+              const body = inlineBody(doc, false);
+              onChange(selected.length ? `${selected.map(contextXML).join("\n")}\n\n${body}` : body, selected.length > 0);
+            },
           }}
           disabled={disabled}
           machineId={ex?.machine_id}

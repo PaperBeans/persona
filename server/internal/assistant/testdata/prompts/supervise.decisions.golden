@@ -22,7 +22,7 @@
    验收标准：未记录
 
 4. 任务「Finish the migration」（todo_1，signal=recheck）：要用户拍板的决定等了超过一天还没人回答，已交回督办
-   验收标准：old table gone
+   验收标准用 todo_get 取原文
    当时发给用户的决定（why_owner=irreversible，不会默认执行）：Drop the old table?
    - 任务来历（hub 记的）：From the main conversation, 2026-11-07: “Finish the migration” · Now: migrated, old table still there
    - 选项「Drop it」：the old rows cannot be restored

@@ -6,6 +6,7 @@ import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.CancellationException
 import persona.core.designsystem.icons.PersonaIcons
+import persona.core.moduleapi.AudioUse
 import persona.core.moduleapi.MenuSlot
 import persona.core.moduleapi.ModuleHub
 import persona.core.moduleapi.ModuleMenuAction
@@ -25,6 +26,9 @@ import persona.core.navigation.ModelPurposeRoute
 object VoiceModule : PersonaModule {
     override val id = "voice"
     override val feature = ModuleRegistry.moduleFeature(id)
+
+    /** A conversation holds the microphone and the speaker; the core's broker ranks it under a call. */
+    override val audioUses = setOf(AudioUse.Conversation)
 
     override fun services(hub: ModuleHub): ModuleServices = VoiceServices(hub.identity, object : VoiceExtensions {
         // Like machine metrics: each call follows the live route with the pairing's pinned client and token.
@@ -47,7 +51,7 @@ object VoiceModule : PersonaModule {
             // Demo mode: the page is there, saying why it cannot work.
             entries.entry<VoiceRoute> { context.unavailable(stringResource(R.string.voice_demo_unavailable)) }
         } else {
-            entries.voiceEntries(context.navigator, services.extensions, services.identity,
+            entries.voiceEntries(context.navigator, services.extensions, services.identity, context.audioFocus,
                 onModelConfiguration = { purpose -> context.navigator.navigate(ModelPurposeRoute(purpose)) })
         }
     }

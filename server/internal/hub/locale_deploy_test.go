@@ -51,7 +51,7 @@ func TestDeploymentMachineResponsesAndReplay(t *testing.T) {
 	// An event recorded in Chinese is localized again during resume, without changing event_seq.
 	resumed := &client{hub: h, out: make(chan []byte, 8), acceptLang: i18n.Ja}
 	h.mu.Lock()
-	h.helloLocked(resumed, map[string]any{"type": "hello"}, h.events.stream, 0, true)
+	h.helloLocked(resumed, wsHello{Type: "hello"}, h.events.stream, 0, true)
 	h.mu.Unlock()
 	<-resumed.out // hello
 	read(resumed, i18n.Ja)
@@ -176,7 +176,7 @@ func TestComputerBrowserSnapshotsUseConnectionLanguage(t *testing.T) {
 	}
 	resumed := &client{hub: h, out: make(chan []byte, 8), acceptLang: i18n.Ja}
 	h.mu.Lock()
-	h.helloLocked(resumed, map[string]any{"type": "hello"}, h.events.stream, 0, true)
+	h.helloLocked(resumed, wsHello{Type: "hello"}, h.events.stream, 0, true)
 	h.mu.Unlock()
 	<-resumed.out
 	var replay struct {

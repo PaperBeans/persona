@@ -83,11 +83,13 @@ def main():
     # is embedded (internal/claudeplugin). Generated only after a passing run, a stale package failed every later one.
     run(['go', 'generate', './internal/runtimepkg'], root / 'server')
     sys.path.insert(0, str(root / 'scripts/test'))
-    from server_test_env import clean_environment
+    from server_test_env import clean_environment, with_trimpath
     test_env = clean_environment(os.environ)
     caches = json.loads(subprocess.check_output(
-        ['go', 'env', '-json', 'GOCACHE', 'GOMODCACHE', 'GOPATH'], cwd=root / 'server'))
+        ['go', 'env', '-json', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOFLAGS'], cwd=root / 'server'))
+    goflags = caches.pop('GOFLAGS', '') or ''
     test_env.update(caches)
+    test_env['GOFLAGS'] = with_trimpath(goflags)
     with tempfile.TemporaryDirectory(prefix='hub-release-tests-') as home:
         test_env.update(HOME=home, ZDOTDIR=home)
         # internal/node's and internal/assistant's serial runs outgrew Go's ten-minute -timeout: they run in

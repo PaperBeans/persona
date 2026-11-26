@@ -9,6 +9,7 @@ import { useStore } from "../lib/store";
 import { BREATHING, connStatus, phaseTone } from "../lib/connection";
 import { cx, Menu } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
+import { NoticeDot } from "../ui/NoticeDot";
 import { AppMark } from "../ui/AppMark";
 import { Icon } from "../ui/icons";
 import { formatChord, jumpHint, useBindings } from "../lib/shortcuts";
@@ -119,8 +120,9 @@ export function SidebarRail({ route, onSearch, onNewAgent }: { route: Route; onS
           p.to,
           pageLabel(p),
           <Icon name={p.icon} size={16} stroke={1.8} />,
-          p.badge !== undefined ? <span aria-hidden className={cx("absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-canvas", DOT_CLASS[p.badgeTone ?? "accent"])} /> : null,
-          [p.title ?? p.label, p.badge ?? p.hint].filter((x) => x !== undefined).join(" · "),
+          p.notice ? <NoticeDot className="absolute top-1.5 right-1.5 ring-2 ring-canvas" />
+            : p.badge !== undefined ? <span aria-hidden className={cx("absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-canvas", DOT_CLASS[p.badgeTone ?? "accent"])} /> : null,
+          [p.title ?? (p.notice ? pageLabel(p) : p.label), p.badge ?? p.hint].filter((x) => x !== undefined).join(" · "),
           p.color,
         ))}
         {more.length > 0 && (

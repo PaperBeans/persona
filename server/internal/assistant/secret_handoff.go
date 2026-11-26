@@ -195,12 +195,12 @@ func (s *Service) handoffApprove(ctx context.Context, convMachine, self string, 
 	input.Agent, input.MachineName, input.Cwd, input.Prompt = agent, h.machineName, cwd, clip(oneLine(prompt), 200)
 	raw, _ := json.Marshal(input)
 	now := time.Now().UTC()
-	expires := now.Add(handoffCardWait)
+	expires := now.Add(ownerCardMaxWait)
 	ix := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: convMachine, SessionID: self, SessionTitle: "Persona",
 		Kind: proto.IxPermission, ToolName: proto.SecretHandoffTool, ToolInput: raw, ToolTitle: i18n.T(l, "assistant-secret_handoff.title"),
 		Summary:     handoffSummary(l, len(names), agent, h.machineName),
 		AlwaysLabel: i18n.T(l, "assistant-secret_handoff.always", i18n.Args{"launcher": h.launcher, "machine": h.machineName}),
-		CreatedAt:   now, ExpiresAt: expires}
+		CreatedAt:   now, ExpiresAt: expires, SeenTTLSeconds: secondsCeil(handoffCardWait)}
 	r, err := s.ask(withCard(ctx, cardSecretForm), ix)
 	claim, vouched := s.takeHandoffClaim(ix.ID)
 	if err != nil {
@@ -217,7 +217,7 @@ func (s *Service) handoffApprove(ctx context.Context, convMachine, self string, 
 	// device the hub vouched for. Anything else declines, a no with "always" or other fields beside it included.
 	switch {
 	case vouched:
-	case r.Dismiss && !time.Now().Before(expires.Add(-time.Second)):
+	case r.Dismiss && (r.Outcome() == proto.OutcomeExpired || !time.Now().Before(expires.Add(-time.Second))):
 		return "", handoffAnswer(results(handoffExpired), "The hand-off card expired unanswered."), nil
 	case proto.SecretHandoffApproves(r): // not through the hub's gate: refused, as the hub would
 		return "", handoffAnswer(results(handoffDeclined), "The hand-off was not approved on iPhone or the web."), nil

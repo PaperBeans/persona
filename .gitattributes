@@ -28,13 +28,17 @@ sdk/go/wire/schema/*.schema.json linguist-generated=true
 sdk/go/bundle/sdk.tar.gz linguist-generated=true
 sdk/ts/src/wire.ts linguist-generated=true
 web/src/lib/extension-wire.ts linguist-generated=true
+web/src/lib/counts-wire.ts linguist-generated=true
 web/src/lib/recents-wire.ts linguist-generated=true
 web/src/lib/todo-view-wire.ts linguist-generated=true
+apple/Packages/PersonaWire/Sources/PersonaWire/CountsWire.swift linguist-generated=true
 apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift linguist-generated=true
 apple/Packages/PersonaWire/Sources/PersonaWire/RecentsWire.swift linguist-generated=true
 apple/Packages/PersonaWire/Sources/PersonaWire/TodoViewWire.swift linguist-generated=true
+android/core/contracts/src/main/kotlin/persona/core/contracts/generated/CountsWire.kt linguist-generated=true
 android/core/contracts/src/main/kotlin/persona/core/contracts/generated/ExtensionWire.kt linguist-generated=true
 android/core/contracts/src/main/kotlin/persona/core/contracts/generated/TodoViewWire.kt linguist-generated=true
+server/internal/assistantwire/counts_gen.go linguist-generated=true
 server/internal/assistantwire/todo_view_gen.go linguist-generated=true
 # persona-core-typegen (cargo run -p persona-core-typegen in native/app-core)
 android/core/rustcore/src/main/kotlin/persona/core/rustcore/wire/** linguist-generated=true

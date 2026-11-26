@@ -3,7 +3,7 @@
 // while the comment waits there, its words stay lit in the transcript with the card's number beside them. The marks
 // are drawn in the scroller's own content, so they scroll with it; they are measured again when the transcript
 // re-renders or resizes (streaming, a fold opening), and go with the card when it is removed or sent.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { anchorOf, onJumpToComment, rangeFor } from "../../lib/comment-marks";
 import { textQuote, type TextAnchor } from "../../lib/comments";
@@ -23,8 +23,50 @@ interface Box {
   rects: { x: number; y: number; w: number; h: number }[];
 }
 
+interface HighlightBucket {
+  base: Range[];
+  pulsed: Range[];
+}
+
 const DOT = 16;
 const FLASH_MS = 1400;
+const HIGHLIGHT_NAME = "persona-comment";
+const HIGHLIGHT_FLASH_NAME = "persona-comment-flash";
+
+// CSS.highlights is document-global while CommentMarks mounts per chat scroller (e.g. main chat + SidePanel).
+// Track each mounted instance's ranges separately and publish their union so panes never wipe each other.
+const highlightBuckets = new Map<symbol, HighlightBucket>();
+
+function supportsCustomHighlight(): boolean {
+  return typeof CSS !== "undefined" && Boolean(CSS.highlights) && typeof Highlight !== "undefined";
+}
+
+function publishCustomHighlights(): void {
+  if (!supportsCustomHighlight()) return;
+  const base: Range[] = [];
+  const pulsed: Range[] = [];
+  for (const bucket of highlightBuckets.values()) {
+    for (const r of bucket.base) base.push(r);
+    for (const r of bucket.pulsed) pulsed.push(r);
+  }
+  if (base.length) CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...base));
+  else CSS.highlights.delete(HIGHLIGHT_NAME);
+  if (pulsed.length) CSS.highlights.set(HIGHLIGHT_FLASH_NAME, new Highlight(...pulsed));
+  else CSS.highlights.delete(HIGHLIGHT_FLASH_NAME);
+}
+
+function setInstanceHighlights(owner: symbol, base: Range[], pulsed: Range[]): void {
+  if (base.length || pulsed.length) {
+    highlightBuckets.set(owner, { base, pulsed });
+    publishCustomHighlights();
+  } else if (highlightBuckets.delete(owner)) {
+    publishCustomHighlights();
+  }
+}
+
+function clearInstanceHighlights(owner: symbol): void {
+  if (highlightBuckets.delete(owner)) publishCustomHighlights();
+}
 
 /** `jump`: brings words into view `topOffset` px from the top and keeps them there while the exchanges around them are
  *  drawn (ChatView landRow); without it, the scroller's own smooth scroll. */
@@ -134,25 +176,68 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
   const boxesNow = useRef(boxes);
   boxesNow.current = boxes;
   const [flash, setFlash] = useState<string | null>(null);
+  const flashNow = useRef(flash);
+  flashNow.current = flash;
+  const flashTimer = useRef<number | undefined>(undefined);
+  const nativeHighlight = useMemo(() => supportsCustomHighlight(), []);
+  const [highlightOwner] = useState(() => Symbol());
+  const rangesNow = useRef(new Map<string, Range>());
+
+  const syncCustomHighlights = useCallback(
+    (activeFlash: string | null) => {
+      if (!nativeHighlight) return;
+      const base: Range[] = [];
+      const pulsed: Range[] = [];
+      for (const [id, range] of rangesNow.current) {
+        if (id === activeFlash) pulsed.push(range);
+        else base.push(range);
+      }
+      setInstanceHighlights(highlightOwner, base, pulsed);
+    },
+    [highlightOwner, nativeHighlight],
+  );
 
   const measure = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
     const base = el.getBoundingClientRect();
     const out: Box[] = [];
+    const nextRanges = new Map<string, Range>();
     for (const m of marks) {
       const range = rangeFor(el, m.anchor);
       if (!range) continue;
+      nextRanges.set(m.id, range);
       const rects = [...range.getClientRects()]
         .filter((r) => r.width > 0 && r.height > 0)
         .map((r) => ({ x: Math.round(r.left - base.left + el.scrollLeft), y: Math.round(r.top - base.top + el.scrollTop), w: Math.round(r.width), h: Math.round(r.height) }));
       if (rects.length) out.push({ id: m.id, n: m.n, rects });
     }
+    rangesNow.current = nextRanges;
+    syncCustomHighlights(flashNow.current);
     setBoxes((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
-  }, [marks, scroller]);
+  }, [marks, scroller, syncCustomHighlights]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    syncCustomHighlights(flash);
+  }, [flash, syncCustomHighlights]);
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = undefined;
+      rangesNow.current = new Map();
+      if (nativeHighlight) clearInstanceHighlights(highlightOwner);
+    };
+  }, [highlightOwner, nativeHighlight]);
+
+  // Passive effect so ancestor refs (ChatView's ref={scrollRef} wrapping CommentMarks) are attached before measuring.
+  useEffect(() => {
     if (!marks.length) {
+      rangesNow.current = new Map();
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = undefined;
+      setFlash((f) => (f ? null : f));
+      syncCustomHighlights(null);
       setBoxes((prev) => (prev.length ? [] : prev));
       return;
     }
@@ -175,11 +260,13 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
       mutations.disconnect();
       sizes.disconnect();
     };
-  }, [marks, measure, scroller]);
+  }, [marks, measure, scroller, syncCustomHighlights]);
 
   // the card's click: scroll to the words and pulse them
   const marksNow = useRef(marks);
   marksNow.current = marks;
+  const jumpNow = useRef(jump);
+  jumpNow.current = jump;
   useEffect(
     () =>
       onJumpToComment((id) => {
@@ -187,14 +274,19 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
         const el = scroller.current;
         if (!box || !el) return false;
         const anchor = marksNow.current.find((m) => m.id === id)?.anchor;
-        const words = jump && anchor ? rangeFor(el, anchor) : null;
-        if (words && jump) jump(words, -el.clientHeight / 3);
+        const jumpFn = jumpNow.current;
+        const words = jumpFn && anchor ? rangeFor(el, anchor) : null;
+        if (words && jumpFn) jumpFn(words, -el.clientHeight / 3);
         else el.scrollTo({ top: Math.max(0, box.rects[0].y - el.clientHeight / 3), behavior: scrollBehavior() });
+        window.clearTimeout(flashTimer.current);
         setFlash(id);
-        window.setTimeout(() => setFlash((f) => (f === id ? null : f)), FLASH_MS);
+        flashTimer.current = window.setTimeout(() => {
+          flashTimer.current = undefined;
+          setFlash((f) => (f === id ? null : f));
+        }, FLASH_MS);
         return true;
       }),
-    [scroller, jump],
+    [scroller],
   );
 
   return (
@@ -205,13 +297,14 @@ export function CommentMarks({ scroller, jump }: { scroller: RefObject<HTMLDivEl
             const last = b.rects[b.rects.length - 1];
             return (
               <div key={b.id} data-comment-mark={b.n}>
-                {b.rects.map((r, i) => (
-                  <span
-                    key={i}
-                    className={cx("absolute rounded-[3px] bg-accent/20 transition-shadow duration-300", flash === b.id && "shadow-[0_0_0_2px_var(--accent)]")}
-                    style={{ left: r.x - 1, top: r.y, width: r.w + 2, height: r.h }}
-                  />
-                ))}
+                {!nativeHighlight &&
+                  b.rects.map((r, i) => (
+                    <span
+                      key={i}
+                      className={cx("absolute rounded-[3px] bg-accent/20 transition-shadow duration-300", flash === b.id && "shadow-[0_0_0_2px_var(--accent)]")}
+                      style={{ left: r.x - 1, top: r.y, width: r.w + 2, height: r.h }}
+                    />
+                  ))}
                 <button
                   type="button"
                   tabIndex={-1}

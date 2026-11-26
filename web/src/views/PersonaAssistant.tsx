@@ -32,7 +32,7 @@ import { StartSessionButton } from "./StartSessionButton";
 import { conversationTitle } from "./assistant/conversations";
 import { t } from "../i18n";
 import { useAssistantTitle, useShownOffline } from "./ManagerParts";
-import { chosenManager, noteConversation, noteRoutedConversation, ownerHeaders, sameManager, shownManager, useShownManager } from "../lib/manager-choice";
+import { chosenManager, defaultManager, noteConversation, noteRoutedConversation, ownerHeaders, sameManager, shownManager, useShownManager } from "../lib/manager-choice";
 import type { AssistantInfo, Session } from "../lib/types";
 
 /** Every computer's tokens a day under the things to ask (#9506): a lazy chunk, not on the first screen. */
@@ -146,7 +146,7 @@ export function PersonaAssistant({ sid, fresh, routed, at, onToggleSidebar }: { 
   const manager = chosenManager() ?? "";
   // A reloaded conversation link needs its machine before the socket reconnects, so its saved outbox can appear.
   useEffect(() => {
-    if (sid && !fresh && !assistant && !assistantError) void refreshAssistant().catch(() => {});
+    if (sid && !fresh && !assistant && !assistantError) void refreshAssistant({ coalesce: true }).catch(() => {});
   }, [sid, fresh, assistant, assistantError, manager]);
   const cached = useMemo(() => {
     if (sid || fresh || assistant) return null;
@@ -180,6 +180,7 @@ export function PersonaAssistant({ sid, fresh, routed, at, onToggleSidebar }: { 
         mid={machine}
         sid={id}
         assistant
+        assistantManager={homeOther ? routedManager ?? defaultManager() : shown}
         starting={starting.has(id)}
         onToggleSidebar={onToggleSidebar}
         topCenter={topCenter}

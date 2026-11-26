@@ -106,8 +106,13 @@ struct PersonaSettingsPage: View {
                     Text(model.isDemo ? String(localized: "Demo mode only has the default avatar.") :
                         String(localized: "Avatars other than Mochi download from the hub when selected. To use an avatar’s colors, choose Match Avatar under Theme Color."))
                     if !model.isDemo, model.hubFeatures.contains(AvatarUploadsModel.feature) {
-                        // The hub makes avatars from images (#2405): how to make one, and how to delete one made that way.
-                        Text("New from Photo makes an avatar from an image of your own. To delete one you made, use the delete button in its corner.")
+                        // The hub makes avatars from images (#2405): how to make one, and how to delete one made that way;
+                        // with one that edits them too (#15449), how to edit one.
+                        if model.hubFeatures.contains(AvatarUploadsModel.statesFeature) {
+                            Text("New from Photo makes an avatar from an image of your own. To change or delete one you made, use the buttons in its corners.")
+                        } else {
+                            Text("New from Photo makes an avatar from an image of your own. To delete one you made, use the delete button in its corner.")
+                        }
                     }
                     if let failure = model.appIcon.failure {
                         Text(failure).foregroundStyle(Theme.danger)

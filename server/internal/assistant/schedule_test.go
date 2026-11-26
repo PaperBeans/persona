@@ -692,7 +692,9 @@ func scheduleStore(t *testing.T) *db.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(database.Close)
-	for _, k := range []string{tasksKey, routinesKey, followupsKey, runsKey} {
+	// The process shares one database (dbtest.Main), so also forget the settings an earlier test saved: a main
+	// conversation left there reroutes this test's schedule notices (scheduleFailureTarget) away from the owner push.
+	for _, k := range []string{tasksKey, routinesKey, followupsKey, runsKey, settingsKey} {
 		if err := database.PutSetting(context.Background(), k, nil); err != nil {
 			t.Fatal(err)
 		}

@@ -75,6 +75,13 @@ class ResolveOpIdTest {
         assertNull(sent.last().feature)
         transport.resolve("ix", Resolution(allow = true))
         assertNull(sent.last().feature)
+
+        transport.resolveOutcome("ix", Resolution(allow = true), handoffCard = true, secretRunEnv = true)
+        assertEquals("secret_run_env", sent.last().feature)
+        transport.resolveOutcome("ix", Resolution(allow = true), handoffCard = false, secretRunEnv = true)
+        assertNull(sent.last().feature)
+        transport.resolveOutcome("ix", Resolution(allow = false), handoffCard = true, secretRunEnv = true)
+        assertNull(sent.last().feature)
     }
 
     @Test fun retriesStopAfterTheBoundAndOtherFailuresAreNotRetried() = runTest {

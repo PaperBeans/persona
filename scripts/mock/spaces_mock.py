@@ -131,6 +131,24 @@ def register(d):
             st["files"][slug] = b.get("content", "")
         h.send_json(space_md(slug, st["files"]))
 
+    def conversations(h, req):
+        slug = req.match["slug"]
+        t = find(slug)
+        if not t or t.get("builtin") or t.get("archived"):
+            return h.send_json({"error": "not found"}, 404)
+        raw = req.query.get("limit", ["20"])[0]
+        try:
+            limit = int(raw) if str(int(raw)) == raw else 0
+        except ValueError:
+            limit = 0
+        if not 1 <= limit <= 50:
+            return h.send_json({"error": "limit must be 1 to 50"}, 400)
+        rows = sorted((c for c in hub.ASSISTANT if c.get("space") == slug and not c.get("archived")),
+                      key=lambda c: c.get("updated_at", ""), reverse=True)
+        h.send_json({"machine_id": "server", "total": len(rows), "conversations": [
+            {k: c.get(k, "") for k in ("session_id", "machine_id", "title", "updated_at", "space")} |
+            {"last_text": (c.get("last_text") or "")[:200]} for c in rows[:limit]]})
+
     def categories(h, req):
         sid = req.match["sid"]
         conv = next((c for c in hub.ASSISTANT if c["session_id"] == sid), None)
@@ -165,6 +183,7 @@ def register(d):
     d.route("PUT", BASE + r"/tracks/(?P<slug>[a-z][a-z0-9-]*)", track_change)
     d.route("GET", BASE + "/track-kinds", lambda h, req: h.send_json({"kinds": KINDS}))
     d.route(["GET", "PUT"], BASE + r"/tracks/(?P<slug>[a-z][a-z0-9-]*)/space-md", md)
+    d.route("GET", BASE + r"/tracks/(?P<slug>[a-z][a-z0-9-]*)/conversations", conversations)
     d.route(["GET", "PUT"], BASE + r"/conversations/(?P<sid>[^/]+)/categories", categories)
     d.route("GET", BASE + "/extension-trust", trust_list)
     d.route("PUT", BASE + r"/extension-trust/(?P<id>[^/]+)", trust_set)

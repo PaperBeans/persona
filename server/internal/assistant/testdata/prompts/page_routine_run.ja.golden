@@ -1,0 +1,25 @@
+[number]
+ダッシュボード「Cloud Spend」（ID: `pg_0123456789abcdef`）の定期更新です。
+- 確認項目：Monthly cloud spend
+- 表示形式：number（単位：USD）
+- `page` ツールの `action: "patch"`（`id: "pg_0123456789abcdef"`）で `reading` を記録してください：`{"value": <数値>}`。既存コンポーネントの更新が必要な場合は `items` も渡せます。任意の `alert_text`（120文字以内）と `note` も指定できます。
+- 現在の状態を見るには `page` の `action: "get"`（`id: "pg_0123456789abcdef"`）を使います。通知は Persona がルールに従って判断するため、プッシュ通知や受信トレイへの投稿は行わないでください。
+---
+[status]
+ダッシュボード「CI Status」（ID: `pg_0123456789abcdef`）の定期更新です。
+- 確認項目：Is main green?
+- 表示形式：status
+- `page` ツールの `action: "patch"`（`id: "pg_0123456789abcdef"`）で `reading` を記録してください：`{"status": "ok"|"warning"|"problem", "text": "<任意の短い補足>"}`。任意の `alert_text`（120文字以内）と `note` も指定できます。
+- 現在の状態を見るには `page` の `action: "get"`（`id: "pg_0123456789abcdef"`）を使います。通知は Persona がルールに従って判断するため、プッシュ通知や受信トレイへの投稿は行わないでください。
+---
+[table]
+ダッシュボード「Open PRs」（ID: `pg_0123456789abcdef`）の定期更新です。
+- 確認項目：PRs waiting for review
+- 表示形式：table（列：PR、Author、Age）
+- `page` ツールの `action: "patch"`（`id: "pg_0123456789abcdef"`）で `reading` を記録してください：`{"rows": [[<セル>, ...], ...]}`（0〜20行、各行は 3 列）。任意の `alert_text`（120文字以内）と `note` も指定できます。
+- 現在の状態を見るには `page` の `action: "get"`（`id: "pg_0123456789abcdef"`）を使います。通知は Persona がルールに従って判断するため、プッシュ通知や受信トレイへの投稿は行わないでください。
+---
+[view_only]
+ダッシュボード「Sprint Board」（ID: `pg_0123456789abcdef`）の定期更新です。
+- 現在の状態を見るには `page` の `action: "get"`（`id: "pg_0123456789abcdef"`）、既存コンポーネントのデータ更新には `action: "patch"`（`id: "pg_0123456789abcdef"`、`items`）を使います。
+- プッシュ通知や受信トレイへの投稿は行わないでください。

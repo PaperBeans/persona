@@ -72,7 +72,7 @@ func TestRemovalExcludesOnlyThatLink(t *testing.T) {
 	if len(alice.Projects)+len(chat.Projects) != 0 || len(alice.LockedFields)+len(chat.LockedFields) != 0 {
 		t.Fatalf("other side: alice %v %v, team-chat %v %v", alice.Projects, alice.LockedFields, chat.Projects, chat.LockedFields)
 	}
-	if !alice.excludes("projects", "billing-migration") || !chat.excludes("projects", "billing-migration") {
+	if !taggingExcludes(&alice.Tagging, "projects", "billing-migration") || !taggingExcludes(&chat.Tagging, "projects", "billing-migration") {
 		t.Fatalf("other side not excluded: alice %v, team-chat %v", alice.Excluded, chat.Excluded)
 	}
 
@@ -86,7 +86,7 @@ func TestRemovalExcludesOnlyThatLink(t *testing.T) {
 	if !slices.Equal(p.People, []string{"bob", "carol"}) || !slices.Equal(p.Chats, []string{"ops-chat", "new-chat"}) {
 		t.Fatalf("automatic write: people %v, chats %v", p.People, p.Chats)
 	}
-	if !p.excludes("people", "alice") || !p.excludes("chats", "team-chat") {
+	if !taggingExcludes(&p.Tagging, "people", "alice") || !taggingExcludes(&p.Tagging, "chats", "team-chat") {
 		t.Fatalf("a stale write dropped the exclusions: %v", p.Excluded)
 	}
 	// Automatic removals of what the user did not touch go on too.
@@ -128,7 +128,7 @@ func TestRemovalLocksListsUnlessToldNot(t *testing.T) {
 			if !slices.Contains(p.LockedFields, "people") || !slices.Contains(alice.LockedFields, "projects") {
 				t.Fatalf("lists not locked: project %v, alice %v", p.LockedFields, alice.LockedFields)
 			}
-			if !p.excludes("people", "alice") || !alice.excludes("projects", "billing-migration") {
+			if !taggingExcludes(&p.Tagging, "people", "alice") || !taggingExcludes(&alice.Tagging, "projects", "billing-migration") {
 				t.Fatalf("not excluded: project %v, alice %v", p.Excluded, alice.Excluded)
 			}
 			p.People = []string{"bob", "carol"}
@@ -155,7 +155,7 @@ func TestLinkingOrAllowingLiftsExclusion(t *testing.T) {
 	applyUser(t, e, KindProject, "billing-migration", UserUpdate{Update: Update{People: []string{"alice"}, Lock: off}})
 	p := project(t, e)
 	alice, _ := e.Store.Person("alice")
-	if !slices.Contains(p.People, "alice") || p.excludes("people", "alice") || alice.excludes("projects", "billing-migration") {
+	if !slices.Contains(p.People, "alice") || taggingExcludes(&p.Tagging, "people", "alice") || taggingExcludes(&alice.Tagging, "projects", "billing-migration") {
 		t.Fatalf("linking again: people %v, project excluded %v, alice excluded %v", p.People, p.Excluded, alice.Excluded)
 	}
 
@@ -179,7 +179,7 @@ func TestLinkingOrAllowingLiftsExclusion(t *testing.T) {
 	applyUser(t, e, KindChat, "ops-chat", UserUpdate{Update: Update{RemoveProjects: []string{"billing-migration"}}, LockLists: off})
 	applyUser(t, e, KindChat, "ops-chat", UserUpdate{AllowProjects: []string{"billing-migration"}})
 	c, _ := e.Store.Chat("ops-chat")
-	if p = project(t, e); len(c.Excluded) != 0 || p.excludes("chats", "ops-chat") {
+	if p = project(t, e); len(c.Excluded) != 0 || taggingExcludes(&p.Tagging, "chats", "ops-chat") {
 		t.Fatalf("allow_projects: chat %v, project %v", c.Excluded, p.Excluded)
 	}
 }
@@ -219,7 +219,7 @@ func TestRemovalExcludesChatPeopleAndItems(t *testing.T) {
 		t.Fatalf("chat people: %v", c.People)
 	}
 	alice, _ := e.Store.Person("alice")
-	if !alice.excludes("chats", "team-chat") {
+	if !taggingExcludes(&alice.Tagging, "chats", "team-chat") {
 		t.Fatalf("alice excluded %v", alice.Excluded)
 	}
 	it, _ := e.Store.Item(KindDoc, "design-doc")
@@ -229,7 +229,7 @@ func TestRemovalExcludesChatPeopleAndItems(t *testing.T) {
 	p.Items = []string{"docs/design-doc"}
 	_ = e.Store.PutProject(p)
 	it, _ = e.Store.Item(KindDoc, "design-doc")
-	if p = project(t, e); len(it.Projects)+len(p.Items) != 0 || !p.excludes("items", "docs/design-doc") {
+	if p = project(t, e); len(it.Projects)+len(p.Items) != 0 || !taggingExcludes(&p.Tagging, "items", "docs/design-doc") {
 		t.Fatalf("item links: doc %v, project items %v, excluded %v", it.Projects, p.Items, p.Excluded)
 	}
 }
@@ -260,7 +260,7 @@ func TestExtensionCannotRelinkWhatTheUserRemoved(t *testing.T) {
 	if _, err := e.ApplyExtension(KindProject, "billing-migration", Update{RemovePeople: []string{"bob"}, Lock: new(false)}, ExtensionWrite{Extension: "curator"}); err != nil {
 		t.Fatal(err)
 	}
-	if p := project(t, e); p.excludes("people", "bob") {
+	if p := project(t, e); taggingExcludes(&p.Tagging, "people", "bob") {
 		t.Fatalf("an extension's removal excluded: %v", p.Excluded)
 	}
 }
@@ -337,7 +337,7 @@ func TestMergesKeepRemovedLinksOut(t *testing.T) {
 			if slices.Contains(p.People, "alice") || slices.Contains(alice.Projects, "billing-migration") {
 				t.Fatalf("the merge brought alice back: project %v, alice %v", p.People, alice.Projects)
 			}
-			if !p.excludes("people", "dave") || !dave.excludes("projects", "billing-migration") {
+			if !taggingExcludes(&p.Tagging, "people", "dave") || !taggingExcludes(&dave.Tagging, "projects", "billing-migration") {
 				t.Fatalf("dave's removal did not carry: project %v, dave %v", p.Excluded, dave.Excluded)
 			}
 			p.People = append(p.People, "dave", "alice")
@@ -351,10 +351,10 @@ func TestMergesKeepRemovedLinksOut(t *testing.T) {
 			}
 			p = project(t, e)
 			dave, _ = e.Store.Person("dave")
-			if p.excludes("people", "dave") || dave.excludes("projects", "billing-migration") || !dave.excludes("projects", "billing-cutover") {
+			if taggingExcludes(&p.Tagging, "people", "dave") || taggingExcludes(&dave.Tagging, "projects", "billing-migration") || !taggingExcludes(&dave.Tagging, "projects", "billing-cutover") {
 				t.Fatalf("after unmerge: project %v, dave %v", p.Excluded, dave.Excluded)
 			}
-			if !p.excludes("people", "alice") {
+			if !taggingExcludes(&p.Tagging, "people", "alice") {
 				t.Fatalf("unmerge lifted the kept project's own removal: %v", p.Excluded)
 			}
 		})

@@ -1,0 +1,976 @@
+{
+  "about": "Dashboards phase 2 watch pages (#13020, docs/assistant/dashboards.md \"Phase 2: watch pages (#13020)\"). draws: a watch and its readings (oldest first) and what the manager draws in English with the time zone UTC at `now`: the page's first section and the Dashboards index row's value, spark, icon and icon color (glance_row; empty: the row keeps the page's own icon). trips: the alert rule against one reading. pushes: whether each step sends the page_alert push (number watch, rule below 2000 unless a step changes it).",
+  "now": "2026-11-25T09:00:00Z",
+  "tz": "UTC",
+  "draws": [
+    {
+      "name": "number_empty",
+      "watch": {
+        "question": "Rent for a 1-bed on Elm Street",
+        "display": "number",
+        "unit": "USD",
+        "alert": {
+          "when": "below",
+          "value": 2000
+        }
+      },
+      "readings": [],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Rent for a 1-bed on Elm Street",
+            "value": "—",
+            "detail": "Not checked yet"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "—"
+      }
+    },
+    {
+      "name": "number_normal",
+      "watch": {
+        "question": "Rent for a 1-bed on Elm Street",
+        "display": "number",
+        "unit": "USD",
+        "alert": {
+          "when": "below",
+          "value": 2000
+        }
+      },
+      "readings": [
+        {
+          "value": 2150,
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Rent for a 1-bed on Elm Street",
+            "value": "2,150 USD",
+            "detail": "Checked today 08:02"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "2,150 USD"
+      }
+    },
+    {
+      "name": "number_alert",
+      "watch": {
+        "question": "Rent for a 1-bed on Elm Street",
+        "display": "number",
+        "unit": "USD",
+        "alert": {
+          "when": "below",
+          "value": 2000
+        }
+      },
+      "readings": [
+        {
+          "value": 2150,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 1985.5,
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": true,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Rent for a 1-bed on Elm Street",
+            "value": "1,985.5 USD",
+            "detail": "Below 2,000 USD · Checked today 08:02",
+            "tone": "caution",
+            "icon": "warning"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "1,985.5 USD",
+        "icon": "warning",
+        "icon_color": "amber"
+      }
+    },
+    {
+      "name": "status_empty",
+      "watch": {
+        "question": "Are the shop's three sites up?",
+        "display": "status",
+        "alert": {
+          "when": "status",
+          "value": "problem"
+        }
+      },
+      "readings": [],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Are the shop's three sites up?",
+            "value": "—",
+            "detail": "Not checked yet",
+            "icon": "info",
+            "icon_color": "gray"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "—"
+      }
+    },
+    {
+      "name": "status_normal",
+      "watch": {
+        "question": "Are the shop's three sites up?",
+        "display": "status",
+        "alert": {
+          "when": "status",
+          "value": "problem"
+        }
+      },
+      "readings": [
+        {
+          "status": "ok",
+          "text": "All 3 sites up",
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Are the shop's three sites up?",
+            "value": "All 3 sites up",
+            "detail": "Checked today 08:02",
+            "icon": "check",
+            "icon_color": "green"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "All 3 sites up",
+        "icon": "check",
+        "icon_color": "green"
+      }
+    },
+    {
+      "name": "status_warning",
+      "watch": {
+        "question": "Are the shop's three sites up?",
+        "display": "status",
+        "alert": {
+          "when": "status",
+          "value": "problem"
+        }
+      },
+      "readings": [
+        {
+          "status": "warning",
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Are the shop's three sites up?",
+            "value": "Needs a look",
+            "detail": "Checked today 08:02",
+            "icon": "warning",
+            "icon_color": "amber"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "Needs a look",
+        "icon": "warning",
+        "icon_color": "amber"
+      }
+    },
+    {
+      "name": "status_alert",
+      "watch": {
+        "question": "Are the shop's three sites up?",
+        "display": "status",
+        "alert": {
+          "when": "status",
+          "value": "problem"
+        }
+      },
+      "readings": [
+        {
+          "status": "ok",
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "status": "problem",
+          "text": "Shop site down",
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": true,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Are the shop's three sites up?",
+            "value": "Shop site down",
+            "detail": "Problem · Checked today 08:02",
+            "icon": "warning",
+            "icon_color": "red"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "Shop site down",
+        "icon": "warning",
+        "icon_color": "red"
+      }
+    },
+    {
+      "name": "table_empty",
+      "watch": {
+        "question": "New 1-bed listings under 2,000 USD",
+        "display": "table",
+        "columns": [
+          "Listing",
+          "Rent"
+        ],
+        "alert": {
+          "when": "rows",
+          "value": 3
+        }
+      },
+      "readings": [],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "New 1-bed listings under 2,000 USD",
+            "value": "—",
+            "detail": "Not checked yet"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "—"
+      }
+    },
+    {
+      "name": "table_none_found",
+      "watch": {
+        "question": "New 1-bed listings under 2,000 USD",
+        "display": "table",
+        "columns": [
+          "Listing",
+          "Rent"
+        ],
+        "alert": {
+          "when": "rows",
+          "value": 3
+        }
+      },
+      "readings": [
+        {
+          "rows": [],
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "New 1-bed listings under 2,000 USD",
+            "value": "No rows",
+            "detail": "Checked today 08:02"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "No rows"
+      }
+    },
+    {
+      "name": "table_normal",
+      "watch": {
+        "question": "New 1-bed listings under 2,000 USD",
+        "display": "table",
+        "columns": [
+          "Listing",
+          "Rent"
+        ],
+        "alert": {
+          "when": "rows",
+          "value": 3
+        }
+      },
+      "readings": [
+        {
+          "rows": [
+            [
+              "12 Elm St, 2F",
+              "1,950"
+            ],
+            [
+              "40 Oak Ave",
+              "1,880"
+            ]
+          ],
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "New 1-bed listings under 2,000 USD",
+            "value": "2 rows",
+            "detail": "Checked today 08:02"
+          },
+          {
+            "type": "table",
+            "key": "persona.rows",
+            "columns": [
+              {
+                "title": "Listing"
+              },
+              {
+                "title": "Rent"
+              }
+            ],
+            "rows": [
+              [
+                "12 Elm St, 2F",
+                "1,950"
+              ],
+              [
+                "40 Oak Ave",
+                "1,880"
+              ]
+            ]
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "2 rows"
+      }
+    },
+    {
+      "name": "table_alert",
+      "watch": {
+        "question": "New 1-bed listings under 2,000 USD",
+        "display": "table",
+        "columns": [
+          "Listing",
+          "Rent"
+        ],
+        "alert": {
+          "when": "rows",
+          "value": 3
+        }
+      },
+      "readings": [
+        {
+          "rows": [
+            [
+              "12 Elm St, 2F",
+              "1,950"
+            ],
+            [
+              "40 Oak Ave",
+              "1,880"
+            ],
+            [
+              "7 Birch Rd",
+              "1,990"
+            ]
+          ],
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": true,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "New 1-bed listings under 2,000 USD",
+            "value": "3 rows",
+            "detail": "3 rows or more · Checked today 08:02",
+            "tone": "caution",
+            "icon": "warning"
+          },
+          {
+            "type": "table",
+            "key": "persona.rows",
+            "columns": [
+              {
+                "title": "Listing"
+              },
+              {
+                "title": "Rent"
+              }
+            ],
+            "rows": [
+              [
+                "12 Elm St, 2F",
+                "1,950"
+              ],
+              [
+                "40 Oak Ave",
+                "1,880"
+              ],
+              [
+                "7 Birch Rd",
+                "1,990"
+              ]
+            ]
+          }
+        ]
+      },
+      "glance_row": {
+        "icon": "warning",
+        "icon_color": "amber",
+        "value": "3 rows"
+      }
+    },
+    {
+      "name": "trend_empty",
+      "watch": {
+        "question": "Morning weight",
+        "display": "trend",
+        "unit": "kg",
+        "alert": {
+          "when": "above",
+          "value": 80
+        }
+      },
+      "readings": [],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Morning weight",
+            "value": "—",
+            "detail": "Not checked yet"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "—"
+      }
+    },
+    {
+      "name": "trend_one",
+      "watch": {
+        "question": "Morning weight",
+        "display": "trend",
+        "unit": "kg",
+        "alert": {
+          "when": "above",
+          "value": 80
+        }
+      },
+      "readings": [
+        {
+          "value": 78.2,
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Morning weight",
+            "value": "78.2 kg",
+            "detail": "Checked today 08:02"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "78.2 kg"
+      }
+    },
+    {
+      "name": "trend_normal",
+      "watch": {
+        "question": "Morning weight",
+        "display": "trend",
+        "unit": "kg",
+        "alert": {
+          "when": "above",
+          "value": 80
+        }
+      },
+      "readings": [
+        {
+          "value": 78.2,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 78,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 77.6,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 77.9,
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": false,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Morning weight",
+            "value": "77.9 kg",
+            "detail": "Checked today 08:02",
+            "spark": {
+              "values": [
+                78.2,
+                78,
+                77.6,
+                77.9
+              ],
+              "fill": true
+            }
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "77.9 kg",
+        "spark": {
+          "values": [
+            78.2,
+            78,
+            77.6,
+            77.9
+          ],
+          "fill": true
+        }
+      }
+    },
+    {
+      "name": "trend_alert",
+      "watch": {
+        "question": "Morning weight",
+        "display": "trend",
+        "unit": "kg",
+        "alert": {
+          "when": "above",
+          "value": 80
+        }
+      },
+      "readings": [
+        {
+          "value": 78.2,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 78,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 79.4,
+          "at": "2026-11-25T08:02:00Z"
+        },
+        {
+          "value": 80.3,
+          "at": "2026-11-25T08:02:00Z"
+        }
+      ],
+      "tripped": true,
+      "section": {
+        "key": "persona.watch",
+        "items": [
+          {
+            "type": "metric",
+            "key": "persona.reading",
+            "label": "Morning weight",
+            "value": "80.3 kg",
+            "detail": "Above 80 kg · Checked today 08:02",
+            "spark": {
+              "values": [
+                78.2,
+                78,
+                79.4,
+                80.3
+              ],
+              "fill": true,
+              "tone": "caution"
+            },
+            "tone": "caution",
+            "icon": "warning"
+          }
+        ]
+      },
+      "glance_row": {
+        "value": "80.3 kg",
+        "spark": {
+          "values": [
+            78.2,
+            78,
+            79.4,
+            80.3
+          ],
+          "fill": true,
+          "tone": "caution"
+        },
+        "icon": "warning",
+        "icon_color": "amber"
+      }
+    }
+  ],
+  "trips": [
+    {
+      "rule": {
+        "when": "above",
+        "value": 80
+      },
+      "reading": {
+        "value": 80
+      },
+      "trips": false
+    },
+    {
+      "rule": {
+        "when": "above",
+        "value": 80
+      },
+      "reading": {
+        "value": 80.01
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "below",
+        "value": 2000
+      },
+      "reading": {
+        "value": 2000
+      },
+      "trips": false
+    },
+    {
+      "rule": {
+        "when": "below",
+        "value": 2000
+      },
+      "reading": {
+        "value": 1999.99
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "below",
+        "value": 0
+      },
+      "reading": {
+        "value": -3
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "status",
+        "value": "warning"
+      },
+      "reading": {
+        "status": "ok"
+      },
+      "trips": false
+    },
+    {
+      "rule": {
+        "when": "status",
+        "value": "warning"
+      },
+      "reading": {
+        "status": "warning"
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "status",
+        "value": "warning"
+      },
+      "reading": {
+        "status": "problem"
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "status",
+        "value": "problem"
+      },
+      "reading": {
+        "status": "warning"
+      },
+      "trips": false
+    },
+    {
+      "rule": {
+        "when": "status",
+        "value": "problem"
+      },
+      "reading": {
+        "status": "problem"
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "rows",
+        "value": 1
+      },
+      "reading": {
+        "rows": []
+      },
+      "trips": false
+    },
+    {
+      "rule": {
+        "when": "rows",
+        "value": 1
+      },
+      "reading": {
+        "rows": [
+          [
+            "a",
+            "b"
+          ]
+        ]
+      },
+      "trips": true
+    },
+    {
+      "rule": {
+        "when": "rows",
+        "value": 3
+      },
+      "reading": {
+        "rows": [
+          [
+            "a",
+            "b"
+          ],
+          [
+            "c",
+            "d"
+          ]
+        ]
+      },
+      "trips": false
+    }
+  ],
+  "pushes": [
+    {
+      "name": "off_never_pushes",
+      "alert_on": false,
+      "steps": [
+        {
+          "value": 1900,
+          "push": false,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "value": 1800,
+          "push": false,
+          "at": "2026-11-25T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "edge_once",
+      "alert_on": true,
+      "steps": [
+        {
+          "value": 2100,
+          "push": false,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "value": 1950,
+          "push": true,
+          "at": "2026-11-25T09:00:00Z"
+        },
+        {
+          "value": 1900,
+          "push": false,
+          "at": "2026-11-25T10:00:00Z"
+        },
+        {
+          "value": 1850,
+          "push": false,
+          "at": "2026-11-25T11:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "first_reading_trips",
+      "alert_on": true,
+      "steps": [
+        {
+          "value": 1950,
+          "push": true,
+          "at": "2026-11-25T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "rearm_after_recovery_but_12h_window",
+      "alert_on": true,
+      "steps": [
+        {
+          "value": 1950,
+          "push": true,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "value": 2050,
+          "push": false,
+          "at": "2026-11-25T09:00:00Z"
+        },
+        {
+          "value": 1990,
+          "push": false,
+          "at": "2026-11-25T10:00:00Z"
+        },
+        {
+          "value": 2050,
+          "push": false,
+          "at": "2026-11-25T21:00:00Z"
+        },
+        {
+          "value": 1990,
+          "push": true,
+          "at": "2026-11-25T22:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "still_tripped_after_window_no_push",
+      "alert_on": true,
+      "steps": [
+        {
+          "value": 1950,
+          "push": true,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "value": 1940,
+          "push": false,
+          "at": "2026-11-26T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "switch_on_while_tripped_no_push",
+      "alert_on": false,
+      "steps": [
+        {
+          "value": 1950,
+          "push": false,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "switch": "on",
+          "push": false,
+          "at": "2026-11-25T08:30:00Z"
+        },
+        {
+          "value": 1940,
+          "push": false,
+          "at": "2026-11-25T09:00:00Z"
+        },
+        {
+          "value": 2050,
+          "push": false,
+          "at": "2026-11-25T10:00:00Z"
+        },
+        {
+          "value": 1960,
+          "push": true,
+          "at": "2026-11-25T23:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "rule_changed_turns_alert_off",
+      "alert_on": true,
+      "steps": [
+        {
+          "value": 2100,
+          "push": false,
+          "at": "2026-11-25T08:00:00Z"
+        },
+        {
+          "rule": {
+            "when": "below",
+            "value": 2200
+          },
+          "push": false,
+          "at": "2026-11-25T08:30:00Z"
+        },
+        {
+          "value": 2150,
+          "push": false,
+          "at": "2026-11-25T09:00:00Z"
+        }
+      ]
+    }
+  ]
+}

@@ -542,7 +542,13 @@ func (j *trJob) captionOf(s *trSession, e tevent, pos int64) *trItem {
 		return nil
 	}
 	if cur := s.capCur; cur != nil && e.item == cur.id {
-		if e.final || !trHasText(e.text) || trRevises(cur.text, e.text, pos-cur.at <= trSamples(trCaptionFresh)) {
+		fresh := pos-cur.at <= trSamples(trCaptionFresh)
+		if fresh && cur.parts[len(cur.parts)-1].window < s.window {
+			// A replacement can first hear the last syllable of its predecessor's window. Once speech in its
+			// own window starts, the reused item must still resemble that tail to be a revision of it.
+			fresh = j.windowAt(j.captionStart(s, pos)) < s.window
+		}
+		if e.final || !trHasText(e.text) || trRevises(cur.text, e.text, fresh) {
 			return cur
 		}
 		cur.closed = true // the next sentence, written over this one's text

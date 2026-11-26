@@ -33,6 +33,11 @@ const (
 	// (a taken one gets " 2"), where agents read it and nothing sweeps it. The limit is MaxUploadBytes. A node from
 	// before it uses its temp directory instead (the hub falls back), as every chat attachment did before.
 	UploadDestAttachment = "attachment"
+	// A file or a folder an Agent sends to another of the user's computers (dest=path, docs/protocol/file-transfer.md
+	// "Agents and the assistant"): path names where it goes, "~/" or absolute: an existing folder takes it under its
+	// own name, anything else is its new path. Only the home takes it (node/writeguard.go), with the limit of a folder
+	// upload; make_dirs creates missing folders on the way.
+	UploadDestPath = "path"
 	// What dest=dir does when the name is taken: "" refuses with CodeExists (409, the app asks), replace overwrites
 	// the file, keep puts it beside as "name 2.ext".
 	UploadConflictReplace = "replace"
@@ -52,4 +57,11 @@ type UploadedFile struct {
 	Path string `json:"path"` // absolute
 	Name string `json:"name"`
 	Size int64  `json:"size"`
+	// SHA256 is the hex SHA-256 of the bytes written, set when the upload was begun with an expected one (sha256),
+	// which they matched before the file got its name.
+	SHA256 string `json:"sha256,omitempty"`
+	// Files and Skipped: an upload begun with unpack, a zip unpacked into the folder Path: the files it made, and the
+	// entries it left out (links, special files).
+	Files   int `json:"files,omitempty"`
+	Skipped int `json:"skipped,omitempty"`
 }

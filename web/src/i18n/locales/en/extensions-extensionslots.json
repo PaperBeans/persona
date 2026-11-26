@@ -1,6 +1,8 @@
 {
   "sidebar": "Sidebar",
   "redraw": "Redraw",
+  "dashboards": "Dashboards",
+  "kept_by_persona": "Kept up to date by Persona",
   "extensions": "Extensions",
   "cards_collapse": "Collapse",
   "cards_expand": "Expand",

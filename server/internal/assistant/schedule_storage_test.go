@@ -362,7 +362,7 @@ func TestScheduleFailedMutationPreservesConcurrentChanges(t *testing.T) {
 		t.Run(map[bool]string{false: "user edit", true: "runtime outcome"}[outcome], func(t *testing.T) {
 			s, _, base := scheduleStorageFixture(t)
 			st := &blockedScheduleWrite{Store: base, entered: make(chan struct{}), release: make(chan struct{})}
-			s.store = func() Store { return st }
+			s.setStore(func() Store { return st })
 			failed := make(chan *httptest.ResponseRecorder, 1)
 			go func() {
 				failed <- scheduleRequest(s, "PUT", "tasks/daily", `{"title":"Rejected","prompt":"Rejected","repeat":"daily","time":"10:00","enabled":false}`)

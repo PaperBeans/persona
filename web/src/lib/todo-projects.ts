@@ -41,16 +41,16 @@ function subscribe(l: () => void): () => void {
 const current = () => (projects.of === pick() ? projects.list : NONE);
 
 /** Reads the list again (after a project was made, the first time, or for another assistant made current). */
-export function loadTodoProjects(): Promise<void> {
+export function loadTodoProjects(signal?: AbortSignal): Promise<void> {
   const of = pick();
-  if (loading?.of === of) return loading.done;
-  const done = api<{ items?: KBEntry[] }>("/kb/projects")
+  if (!signal && loading?.of === of) return loading.done;
+  const done = api<{ items?: KBEntry[] }>("/kb/projects", signal ? { signal } : {})
     .then((r) => set(of, todoProjectsOf(r.items ?? [])))
     .catch(() => undefined)
     .finally(() => {
       if (loading?.done === done) loading = undefined;
     });
-  loading = { of, done };
+  if (!signal) loading = { of, done };
   return done;
 }
 
@@ -66,7 +66,9 @@ export function useTodoProjects(): TodoProject[] {
   const picked = useChosenManager();
   const list = useSyncExternalStore(subscribe, current, current);
   useEffect(() => {
-    void loadTodoProjects(); // each page that shows them reads them fresh: a project made meanwhile shows up
+    const abort = new AbortController();
+    void loadTodoProjects(abort.signal); // each page that shows them reads them fresh: a project made meanwhile shows up
+    return () => abort.abort();
   }, [picked]);
   return list;
 }

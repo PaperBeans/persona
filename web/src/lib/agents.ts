@@ -3,8 +3,9 @@ import { storedValue, storeValue } from "./compatibility";
 // "<source>:<sessionKey>" and bridge keys contain "/", so the whole id is percent-encoded in paths.
 import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
-import { api, errorText } from "./api";
+import { api, errorText, invalidateInFlightGets } from "./api";
 import { SessionList, compareListIds } from "./session-list";
+import type { MarkedAgent } from "./agent-kind";
 import { toast } from "../ui/atoms";
 
 export interface AgentSession {
@@ -81,7 +82,16 @@ export interface AgentSourceStatus {
   enabled: boolean;
   error?: string;
   setup?: "missing" | "disabled" | "no_accounts" | string;
-  accounts?: unknown[];
+  accounts?: AgentAccount[];
+}
+
+/** One of a source's accounts as `/agents` lists it: the personal list's Browse by account groups by `accountId`. */
+export interface AgentAccount {
+  accountId: string;
+  provider?: string;
+  displayName?: string;
+  status?: string;
+  sessionCount?: number;
 }
 
 const SETUP_HINTS: Record<string, string> = {
@@ -97,11 +107,13 @@ export function fetchSources() {
   return api<{ sources: AgentSourceStatus[] | null }>("/agents").then((r) => r.sources ?? []);
 }
 
-export function fetchMessages(id: string, cursor?: string, limit = 50) {
+export function fetchMessages(id: string, cursor?: string, limit = 50, signal?: AbortSignal) {
   const q = new URLSearchParams({ limit: String(limit) });
   if (cursor) q.set("cursor", cursor);
-  return api<MessagePage>(`${agentPath(id)}/messages?${q}`).then((p) => ({ ...p, messages: p.messages ?? [] }));
+  return api<MessagePage>(`${agentPath(id)}/messages?${q}`, { signal }).then((p) => ({ ...p, messages: p.messages ?? [] }));
 }
+
+export const personalAgentDraftKey = (id: string) => `agent:${id}`;
 
 export function fetchAgentOutbox(id: string, limit = 100) {
   const q = new URLSearchParams({ session_id: id, limit: String(limit) });
@@ -197,10 +209,37 @@ export async function restoreAgentSession(s: Pick<AgentSession, "id" | "title">,
 
 // ── pure helpers (tested) ───────────────────────────────
 
-const PROVIDER_LABEL: Record<string, string> = { grok_bot: "Grok Bot", muse: "Muse", cue: "Cue", dots: "Dots", claude_duet: "Claude Duet" };
+const PROVIDER_LABEL: Record<string, string> = { grok_bot: "Grok Bot", muse: "Muse", muse2api: "Muse", cue: "Cue", dots: "Dots", claude_duet: "Claude Duet", gemini_tasks: "Gemini", groq: "Groq" };
 export function providerLabel(p: string): string {
   if (p === "bot") return t("lib-agents.bot");
   return PROVIDER_LABEL[p] ?? (p || t("lib-agents.other"));
+}
+
+// The agent mark (ui/AgentMark.tsx) a provider's product is drawn with, for the providers whose product has one bundled:
+// Dots drives ChatGPT, whose mark is the OpenAI Blossom the Codex mark already is. The others draw their label's letter.
+const PROVIDER_MARK: Record<string, MarkedAgent> = { grok_bot: "grok", dots: "codex", claude_duet: "claude", gemini_tasks: "gemini" };
+
+/** The `agent` to hand AgentMark for a provider: its product's mark, else its label, whose first letter is drawn ("" would
+ *  be Claude Code's). */
+export function providerMarkAgent(p: string): string {
+  return PROVIDER_MARK[p] ?? providerLabel(p);
+}
+
+/** What the personal list knows of the account a group is keyed by: its name and provider. The name is the account's own
+ *  (`displayName`), else its provider's label; an account `/agents` does not list is named after the provider of its
+ *  loaded sessions, and only one known nowhere by its id. `provider` is "" when nothing says which it is. */
+export function accountGroup(id: string, sources: readonly AgentSourceStatus[] | null | undefined, sessions: readonly Pick<AgentSession, "accountId" | "provider">[]): { name: string; provider: string } {
+  for (const src of sources ?? []) {
+    for (const a of Array.isArray(src.accounts) ? src.accounts : []) {
+      if (!a || typeof a !== "object" || a.accountId !== id) continue;
+      const provider = typeof a.provider === "string" ? a.provider : "";
+      const named = typeof a.displayName === "string" ? a.displayName.trim() : "";
+      if (named) return { name: named, provider };
+      if (provider) return { name: providerLabel(provider), provider };
+    }
+  }
+  const provider = sessions.find((s) => s.accountId === id && s.provider)?.provider ?? "";
+  return provider ? { name: providerLabel(provider), provider } : { name: id, provider: "" };
 }
 
 export const totalUnread = (list: AgentSession[]) => list.reduce((n, s) => n + (s.unreadCount || 0), 0);
@@ -360,6 +399,8 @@ export function resetAgents() {
   bounded = false;
   personalSessions.reset();
   listGen++;
+  invalidateInFlightGets("/agents/sessions");
+  invalidateInFlightGets("/agents");
   // the next login's first pull starts right away instead of waiting behind the old one
   inflight = null;
   queued = null;
@@ -383,7 +424,7 @@ export function useAgentList(): ListState {
 export type GroupBy = "date" | "provider" | "none";
 export type SortBy = "updated" | "unread" | "name";
 export type ShowMode = "all" | "unread" | "sendable";
-export interface AgentView {
+export interface AgentListView {
   group?: GroupBy;
   sort?: SortBy;
   show?: ShowMode;
@@ -395,15 +436,15 @@ export interface AgentSectionDef {
 }
 export interface AgentPrefs {
   pins: string[];
-  view: AgentView;
+  view: AgentListView;
   sections: AgentSectionDef[];
   assign: Record<string, string>; // session id → section id
   /** Removed from the list: session id → when (ms). Changed only through hide / unhide; the hub keeps it on a save. */
   hidden?: Record<string, number>;
 }
-export const DEFAULT_VIEW: Required<AgentView> = { group: "date", sort: "updated", show: "all", providers: [] };
+export const DEFAULT_VIEW: Required<AgentListView> = { group: "date", sort: "updated", show: "all", providers: [] };
 export const emptyPrefs = (): AgentPrefs => ({ pins: [], view: {}, sections: [], assign: {} });
-export const viewOf = (p: AgentPrefs): Required<AgentView> => ({ ...DEFAULT_VIEW, ...Object.fromEntries(Object.entries(p.view ?? {}).filter(([, v]) => v !== undefined && v !== "")) }) as Required<AgentView>;
+export const viewOf = (p: AgentPrefs): Required<AgentListView> => ({ ...DEFAULT_VIEW, ...Object.fromEntries(Object.entries(p.view ?? {}).filter(([, v]) => v !== undefined && v !== "")) }) as Required<AgentListView>;
 export const isDefaultView = (p: AgentPrefs) => {
   const v = viewOf(p);
   return v.group === DEFAULT_VIEW.group && v.sort === DEFAULT_VIEW.sort && v.show === DEFAULT_VIEW.show && !v.providers.length;
@@ -499,7 +540,7 @@ export function removeSection(p: AgentPrefs, id: string): AgentPrefs {
 }
 // "Reset to default" resets the view only; pins and sections stay.
 export const resetView = (p: AgentPrefs): AgentPrefs => ({ ...p, view: {} });
-export function setView(p: AgentPrefs, patch: AgentView): AgentPrefs {
+export function setView(p: AgentPrefs, patch: AgentListView): AgentPrefs {
   return { ...p, view: { ...p.view, ...patch } };
 }
 export function toggleProvider(p: AgentPrefs, provider: string): AgentPrefs {
@@ -553,7 +594,7 @@ export function refreshAgentPrefs(): Promise<void> {
   const rev = prefsOut ? -1 : prefsRev;
   if (rev === -1) prefsPullAfterSave = true;
   const seq = ++prefsGetSeq;
-  return api<AgentPrefs>("/agents/prefs")
+  return api<AgentPrefs>("/agents/prefs", { dedupe: false })
     .then((p) => {
       hubPrefs = true;
       if (rev !== prefsRev || seq < prefsGetApplied) return;

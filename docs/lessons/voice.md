@@ -552,6 +552,17 @@ Measured against a gateway's `/v1/realtime` (`gpt-realtime-1.5`, the GA Realtime
 - Before blaming the link, measure the upstream on its own. A probe call over the extension's unix socket gives each
   binary frame's arrival time and size: the service's speed and its piece size. The hub forwards bytes as they come,
   so whatever is left between the hub and the player is the phone's link or the app.
+- **Silence timers cannot tell a slow voice's pause from the end of its reply** (#14933, 2026-11-25). Voices that make
+  their audio slower than they play, or a sentence at a time, broke both guesses the playout made from the silences: a
+  pause over `quiet` (1 s) played a raised lead half-gathered, and one over the stall window (1.5 s) split the reply in
+  two, so the lead never grew past it. Under 0.67× a fixed wait of 1.5× the lead ran out before the lead could gather at
+  all. The extension knows where each reply begins and ends (`reply` frames, #14932): inside a marked reply every dry
+  player is a stall and the end plays what is held at once. Deeper leads only help there: without the frames the tail of
+  every reply waits `quiet` for the lead, and a replay of 1.2 s sentences with 1.2 s pauses kept its 3 gaps but gained
+  1.2 s of silence with a 3.5 s step, so the old 2 s top stays for extensions that send no edges. Replays (0.60× for
+  23 s: 7 gaps before, 6 without the frames, 4 with; three such replies: 11, 11, 5; 2 s pauses between sentences: 5,
+  5, 3) judge a change by gaps and by total silence: fewer, longer pauses can add up to more silence on a single long
+  reply.
 
 ## Meeting transcription against the real service (#3862, 2026-11-13)
 

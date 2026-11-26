@@ -56,7 +56,7 @@ import UserNotifications
         // (a VoIP call without CallKit, still going) holds the route: taking the session would cut into that call.
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { @Sendable _ in
             Task { @MainActor in
-                guard !AVAudioSession.sharedInstance().isOtherAudioPlaying else { return }
+                guard !AudioSessionBroker.shared.isOtherAudioPlaying else { return }
                 RecordingCapture.shared.resumeAfterInterruption()
             }
         }
@@ -81,6 +81,13 @@ import UserNotifications
     /// typed on the quick start (#8731), kept over the calendar's.
     func startMeeting(inForeground: Bool, openPage: Bool? = nil, attendance: RecordingAttendance? = nil,
                       event: RecordingMeeting? = nil, title: String? = nil) async -> Outcome {
+        // The hub's recording module is off (#15214): nothing new starts, said plainly, from every way in that lands here
+        // (the + list, the Home Screen's menu and widgets, Siri and Shortcuts, the Control, the Action button, a
+        // reminder's Start). One that already records is left to the lines below: its page opens, as before.
+        if capture.state == .idle, let refusal = Self.startRefusal(RecordingModule.allowance) {
+            if inForeground { AppModel.shared.toast = Toast(refusal) }
+            return .failed(refusal)
+        }
         // A live system call keeps its audio session (docs/apple/calls.md): refused with a note, nothing opens, the call
         // goes on. The + list, the home screen's menu, Siri and the Control land here; the Recordings page's own start
         // says it under its button (`RecordingCapture.callGate`).
@@ -133,6 +140,17 @@ import UserNotifications
         return .started
     }
 
+    /// Why a recording can't start on this hub, in the words Siri, Shortcuts and a toast say; nil when it can. With the
+    /// hub's recording module off (#15214) a local recording could never sync, so none starts.
+    nonisolated static func startRefusal(_ recording: RecordingAllowance) -> String? {
+        recording.offersWrites ? nil : String(localized: "Meeting recording is off on this hub.")
+    }
+
+    /// Whether the Live Activity's and the Lock Screen's buttons that change a running recording through the hub (Ask
+    /// Persona, Talk, Persona's role, Bookmark) still act: not with the hub's recording module off (#15214). Stop and
+    /// Pause always act: a recording that runs must be stoppable.
+    nonisolated static func changesOffered(_ recording: RecordingAllowance) -> Bool { recording.offersWrites }
+
     /// Whether a meeting asks for the system's echo-cancelled input as it starts (#3862 phase 4, decision 8): a room
     /// meeting that starts taking part; never switched while it records, so a later change of role keeps what it began
     /// with. Not on the simulator: voice processing doesn't run there (docs/assistant/voice.md 6.4).
@@ -171,6 +189,7 @@ import UserNotifications
     /// activity drawn before it said). Talk opens a talk window, Done ends the open span; a tap that no longer matches
     /// what is open does nothing (`MeetingCallRule.activityTap`).
     func talk(recordingID: String?, open: Bool?) {
+        guard Self.changesOffered(RecordingModule.allowance) else { return }
         guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString else { return }
         MeetingCall.shared.activityTap(id, open: open)
         Haptics.tap()
@@ -185,6 +204,7 @@ import UserNotifications
 
     /// The activity's Ask Persona: asks about what was just said.
     func ask(recordingID: String?) {
+        guard Self.changesOffered(RecordingModule.allowance) else { return }
         guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString,
               let entry = RecordingLibrary.shared.entry(id) else { return }
         MeetingAsk.shared.ask(entry)
@@ -197,6 +217,7 @@ import UserNotifications
     /// it stays off, never falling to the main chat (#3862), and the page opens the attendee picker.
     @discardableResult
     func setRole(_ role: MeetingAttendance, recordingID: String?) -> Bool {
+        guard Self.changesOffered(RecordingModule.allowance) else { return true }
         guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString,
               let entry = RecordingLibrary.shared.entry(id), entry.isMeeting, entry.source == .phone else { return true }
         // Persona out of the meeting: its room keeps following it where the meeting started with the notes role (#8851).
@@ -312,6 +333,7 @@ import UserNotifications
     }
 
     func addMark(recordingID: String?) {
+        guard Self.changesOffered(RecordingModule.allowance) else { return }
         guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString else { return }
         capture.addMark()
         Haptics.tap()

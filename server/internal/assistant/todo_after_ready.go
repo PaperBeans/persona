@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/assistant/todo/stagegate"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -212,6 +213,367 @@ func (s *Service) prerequisiteSatisfied(ctx context.Context, dep Todo, requireAc
 	}, true, nil
 }
 
+// todoStageUnlockRule holds explicit stage/contract early-unlock criteria declared on a dependent to-do.
+type todoStageUnlockRule struct {
+	Stage     stagegate.Stage
+	Contracts []string
+}
+
+// todoMetadataSources returns the structured text fields inspected for stage/contract declarations.
+func todoMetadataSources(t Todo) []string {
+	var out []string
+	if s := strings.TrimSpace(t.Notes); s != "" {
+		out = append(out, s)
+	}
+	if t.Brief != nil {
+		if g := strings.TrimSpace(t.Brief.Goal); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// splitStageGateValues splits comma-, semicolon-, or whitespace-separated tag lists.
+func splitStageGateValues(raw string) []string {
+	return strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\r' || r == '\n'
+	})
+}
+
+// parseStageGateKV parses a single "key: value" or "key=value" declaration into a lowercased key and trimmed value.
+func parseStageGateKV(raw string) (string, string, bool) {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimLeft(s, "-*• \t")
+	if s == "" {
+		return "", "", false
+	}
+	sep := strings.IndexAny(s, ":=")
+	if sep <= 0 {
+		return "", "", false
+	}
+	key := strings.ToLower(strings.TrimSpace(s[:sep]))
+	val := strings.TrimSpace(s[sep+1:])
+	if key == "" || val == "" {
+		return "", "", false
+	}
+	return key, val, true
+}
+
+// scanStageGateDecls extracts both bracketed inline tags (e.g. [stage:contract_ready], [unlock_stage: pr_open]) and
+// line-level key/value declarations (e.g. unlock_stage: pr_open) from text.
+func scanStageGateDecls(text string, visit func(key, val string)) {
+	rest := text
+	for {
+		open := strings.IndexByte(rest, '[')
+		if open < 0 {
+			break
+		}
+		rest = rest[open+1:]
+		close := strings.IndexByte(rest, ']')
+		if close < 0 {
+			break
+		}
+		if k, v, ok := parseStageGateKV(rest[:close]); ok {
+			visit(k, v)
+		}
+		rest = rest[close+1:]
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "[") {
+			continue
+		}
+		if k, v, ok := parseStageGateKV(trimmed); ok {
+			visit(k, v)
+		}
+	}
+}
+
+// maxStageGateStage returns whichever built-in stage has the higher monotonic rank.
+func maxStageGateStage(a, b stagegate.Stage) stagegate.Stage {
+	ra, oka := stagegate.StageRank(a)
+	rb, okb := stagegate.StageRank(b)
+	switch {
+	case !oka && !okb:
+		return ""
+	case !oka:
+		return b
+	case !okb:
+		return a
+	case rb > ra:
+		return b
+	default:
+		return a
+	}
+}
+
+// parseTodoStageUnlockRule extracts explicit stage/contract unlock criteria from a dependent to-do's notes or brief.
+// When no valid unlock_stage or unlock_contracts declaration is present, it returns (zero, false) so callers fall back
+// strictly to stagegate.CompletionEdges.
+func parseTodoStageUnlockRule(t Todo) (todoStageUnlockRule, bool) {
+	var rule todoStageUnlockRule
+	var rawContracts []string
+	for _, src := range todoMetadataSources(t) {
+		scanStageGateDecls(src, func(key, val string) {
+			switch key {
+			case "unlock_stage":
+				if norm, ok := stagegate.NormalizeStage(val); ok {
+					rule.Stage = norm
+				}
+			case "unlock_contract", "unlock_contracts":
+				rawContracts = append(rawContracts, splitStageGateValues(val)...)
+			}
+		})
+	}
+	rule.Contracts = stagegate.NormalizeContracts(rawContracts)
+	if rule.Stage == "" && len(rule.Contracts) == 0 {
+		return todoStageUnlockRule{}, false
+	}
+	return rule, true
+}
+
+// parseTodoStageAndContracts extracts explicit stage and contract readiness tags declared on a prerequisite to-do
+// (for example [contract:ready], [stage:contract_ready], or contracts: api_contract).
+func parseTodoStageAndContracts(t Todo) (stagegate.Stage, []string) {
+	var stage stagegate.Stage
+	var rawContracts []string
+	for _, src := range todoMetadataSources(t) {
+		scanStageGateDecls(src, func(key, val string) {
+			switch key {
+			case "stage":
+				if norm, ok := stagegate.NormalizeStage(val); ok {
+					stage = maxStageGateStage(stage, norm)
+				}
+			case "contract", "contracts":
+				tags := stagegate.NormalizeContracts(splitStageGateValues(val))
+				if len(tags) > 0 {
+					rawContracts = append(rawContracts, tags...)
+					stage = maxStageGateStage(stage, stagegate.StageContractReady)
+				}
+			}
+		})
+	}
+	return stage, stagegate.NormalizeContracts(rawContracts)
+}
+
+// todoAllDeliveryPRsMerged reports whether t has at least one bound delivery PR and every one is observed as merged.
+func todoAllDeliveryPRsMerged(t Todo, delivery []string) bool {
+	if len(delivery) == 0 {
+		return false
+	}
+	for _, u := range delivery {
+		f, ok := todoObservedPRState(t, u)
+		if !ok || !strings.EqualFold(f.State, "merged") {
+			return false
+		}
+	}
+	return true
+}
+
+// todoHasOpenPR reports whether any observed PR on t is currently open.
+func todoHasOpenPR(t Todo, delivery []string) bool {
+	if t.PRStatus != nil && strings.EqualFold(t.PRStatus.State, "open") {
+		return true
+	}
+	for _, f := range t.OtherPRs {
+		if strings.EqualFold(f.State, "open") {
+			return true
+		}
+	}
+	for _, u := range delivery {
+		if f, ok := todoObservedPRState(t, u); ok && strings.EqualFold(f.State, "open") {
+			return true
+		}
+	}
+	return false
+}
+
+// todoStageGateNode projects a live Todo into a pure stagegate.Node for todos_v2 dependency evaluation.
+// Cancelled and failed-start to-dos never report Done, Accepted, Stage, or Contracts so evaluation always fails closed.
+func todoStageGateNode(t Todo, requireAccepted bool, delivery []string) stagegate.Node {
+	return todoStageGateNodeWithRule(t, requireAccepted, delivery, nil)
+}
+
+func todoStageGateNodeWithRule(t Todo, requireAccepted bool, delivery []string, overrideRule *todoStageUnlockRule) stagegate.Node {
+	afterIDs := cleanIDs(t.After)
+	effectiveRequireAccepted := requireAccepted || t.RequireAcceptedAfter
+	var edges []stagegate.Edge
+	if len(afterIDs) > 0 {
+		rule, hasRule := parseTodoStageUnlockRule(t)
+		if !hasRule && overrideRule != nil && (overrideRule.Stage != "" || len(overrideRule.Contracts) > 0) {
+			rule = *overrideRule
+			hasRule = true
+		}
+		if hasRule {
+			sortedIDs := slices.Clone(afterIDs)
+			slices.Sort(sortedIDs)
+			edges = make([]stagegate.Edge, 0, len(sortedIDs))
+			for _, id := range sortedIDs {
+				edges = append(edges, stagegate.Edge{
+					PrereqID:          id,
+					Mode:              stagegate.UnlockOnStage,
+					RequiredStage:     rule.Stage,
+					RequiredContracts: rule.Contracts,
+					RequireAccepted:   effectiveRequireAccepted,
+				})
+			}
+		} else {
+			edges = stagegate.CompletionEdges(afterIDs, effectiveRequireAccepted)
+		}
+	}
+
+	cancelled := t.Cancelled() || t.DoneBy == db.DoneByCancelled
+	failedStart := t.StartError != ""
+	if cancelled || failedStart {
+		return stagegate.Node{
+			TodoID:    t.ID,
+			Cancelled: cancelled,
+			After:     edges,
+		}
+	}
+
+	allMerged := todoAllDeliveryPRsMerged(t, delivery)
+	hasOpenPR := todoHasOpenPR(t, delivery)
+	done := t.DoneAt != nil || allMerged
+	accepted := t.DoneAt != nil && t.DoneBy == db.DoneByReview && t.Supervision != nil && t.Supervision.state(t) == reviewAccepted
+
+	stage, contracts := parseTodoStageAndContracts(t)
+	if norm, ok := stagegate.NormalizeStage(t.Stage); ok {
+		stage = maxStageGateStage(stage, norm)
+	} else {
+		switch strings.ToLower(strings.TrimSpace(t.Stage)) {
+		case "review":
+			if hasOpenPR || (t.PRURL != "" && (t.PRStatus == nil || !strings.EqualFold(t.PRStatus.State, "closed"))) {
+				stage = maxStageGateStage(stage, stagegate.StagePROpen)
+			}
+		case "merge", "deploy", "verify":
+			stage = maxStageGateStage(stage, stagegate.StageMerged)
+		}
+	}
+	switch {
+	case t.DoneAt != nil:
+		stage = maxStageGateStage(stage, stagegate.StageDone)
+	case allMerged || (t.Delivery != nil && (t.Delivery.State == deliveryMerged || t.Delivery.State == deliveryLive)):
+		stage = maxStageGateStage(stage, stagegate.StageMerged)
+	case hasOpenPR:
+		stage = maxStageGateStage(stage, stagegate.StagePROpen)
+	case todoHasActiveAgent(t) || len(t.Agents) > 0:
+		stage = maxStageGateStage(stage, stagegate.StageDevelop)
+	}
+
+	return stagegate.Node{
+		TodoID:    t.ID,
+		Stage:     stage,
+		Contracts: contracts,
+		Done:      done,
+		Accepted:  accepted,
+		Cancelled: false,
+		After:     edges,
+	}
+}
+
+// todoStageGateSatisfiedReason summarizes why a prerequisite satisfied a stagegate evaluation.
+func todoStageGateSatisfiedReason(dep Todo, delivery []string, node stagegate.Node) string {
+	if dep.DoneAt != nil {
+		return "done"
+	}
+	if todoAllDeliveryPRsMerged(dep, delivery) {
+		return "pr_merged"
+	}
+	if node.Stage != "" {
+		return "stage:" + string(node.Stage)
+	}
+	return "stage_ready"
+}
+
+// checkTodoAfterReadyStageGate evaluates candidate's after prerequisites using the pure stagegate package when
+// todos_v2=true. It captures the transitive after subgraph for cycle detection and fails closed on missing
+// prerequisites, cancelled prerequisites, dependency cycles, or transient repository-store read errors.
+func (s *Service) checkTodoAfterReadyStageGate(ctx context.Context, candidate Todo, afterIDs []string) ([]prompts.SupervisePrerequisite, bool, error) {
+	reachable := map[string]Todo{candidate.ID: candidate}
+	reqAcceptedByID := map[string]bool{}
+
+	s.todos.mu.RLock()
+	reqAcceptedByID[candidate.ID] = candidate.PartOf != "" && s.hasRequestGateLocked(candidate.PartOf)
+	queue := append([]string(nil), afterIDs...)
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if _, seen := reachable[id]; seen {
+			continue
+		}
+		t, ok := s.todos.todos[id]
+		if !ok {
+			continue
+		}
+		cp := copyTodoLocked(t)
+		reachable[id] = cp
+		reqAcceptedByID[id] = cp.PartOf != "" && s.hasRequestGateLocked(cp.PartOf)
+		for _, nextID := range cleanIDs(cp.After) {
+			if _, seen := reachable[nextID]; !seen {
+				queue = append(queue, nextID)
+			}
+		}
+	}
+	s.todos.mu.RUnlock()
+
+	deliveryByID := make(map[string][]string, len(afterIDs))
+	for _, id := range afterIDs {
+		dep, ok := reachable[id]
+		if !ok {
+			continue
+		}
+		delivery, deliveryErr := s.todoDeliveryPRs(ctx, dep)
+		if deliveryErr != nil && dep.DoneAt == nil && !dep.Cancelled() && dep.StartError == "" {
+			return nil, false, deliveryErr
+		}
+		deliveryByID[id] = delivery
+	}
+
+	ids := make([]string, 0, len(reachable))
+	for id := range reachable {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	var candidateUnlockRule *todoStageUnlockRule
+	if _, hasNotesRule := parseTodoStageUnlockRule(candidate); !hasNotesRule {
+		if rule, ok := s.todoStageUnlockRuleFromBlockers(ctx, candidate.ID); ok {
+			candidateUnlockRule = &rule
+		}
+	}
+
+	nodes := make([]stagegate.Node, 0, len(ids))
+	nodeByID := make(map[string]stagegate.Node, len(ids))
+	for _, id := range ids {
+		var ruleOverride *todoStageUnlockRule
+		if id == candidate.ID {
+			ruleOverride = candidateUnlockRule
+		}
+		n := todoStageGateNodeWithRule(reachable[id], reqAcceptedByID[id], deliveryByID[id], ruleOverride)
+		nodes = append(nodes, n)
+		nodeByID[id] = n
+	}
+
+	ev := stagegate.Evaluate(nodes, candidate.ID, true)
+	if ev.Status != stagegate.StatusReady || !ev.Ready {
+		return nil, false, nil
+	}
+
+	out := make([]prompts.SupervisePrerequisite, 0, len(afterIDs))
+	for _, id := range afterIDs {
+		dep := reachable[id]
+		delivery := deliveryByID[id]
+		out = append(out, prompts.SupervisePrerequisite{
+			ID:        dep.ID,
+			Title:     dep.Title,
+			Reason:    todoStageGateSatisfiedReason(dep, delivery, nodeByID[id]),
+			MergedPRs: todoObservedMergedPRs(dep, delivery),
+		})
+	}
+	return out, true, nil
+}
+
 // checkTodoAfterReady checks whether candidate is an open, unstarted dependent to-do whose after prerequisites are
 // all satisfied, distinguishing a transient store read failure (err != nil) from a genuinely unready/ineligible to-do.
 func (s *Service) checkTodoAfterReady(ctx context.Context, candidate Todo) ([]prompts.SupervisePrerequisite, bool, error) {
@@ -225,6 +587,10 @@ func (s *Service) checkTodoAfterReady(ctx context.Context, candidate Todo) ([]pr
 	}
 	if todoHasActiveAgent(candidate) || s.requestStartPending(ctx, candidate) || s.workspaceQueuePending(ctx, candidate) {
 		return nil, false, nil
+	}
+
+	if s.settings(ctx).todosV2On() {
+		return s.checkTodoAfterReadyStageGate(ctx, candidate, afterIDs)
 	}
 
 	s.todos.mu.RLock()
@@ -527,7 +893,8 @@ func (s *Service) pruneTodoReadyWakes(ctx context.Context) {
 // maybeEmitTodoReady evaluates candidate and, if ready and not already woken for its current after set, queues a
 // todo_ready supervision signal for its owning supervisor conversation.
 func (s *Service) maybeEmitTodoReady(ctx context.Context, candidate Todo) {
-	if _, ready := s.todoAfterReadyState(ctx, candidate); !ready {
+	prereqs, ready := s.todoAfterReadyState(ctx, candidate)
+	if !ready {
 		return
 	}
 	key := todoReadyKey(candidate)
@@ -541,11 +908,31 @@ func (s *Service) maybeEmitTodoReady(ctx context.Context, candidate Todo) {
 	}
 	cfg := s.settings(ctx)
 	to := s.todoReadySupervisor(ctx, cfg, candidate)
+	// The sweep takes a snapshot before reading the plans and prerequisites. A workspace waiter can
+	// finish its automatic dispatch in the meantime. Its cleared queue is no longer a request to start it.
+	if s.isWorkspaceDispatching(candidate.ID) {
+		return
+	}
+	current, ok := s.todoNow(candidate.ID)
+	if !ok || current.DoneAt != nil || current.Cancelled() || current.StartError != "" || todoHasActiveAgent(current) ||
+		current.PlanID != candidate.PlanID || current.Origin != candidate.Origin || current.PartOf != candidate.PartOf ||
+		todoReadyKey(current) != key {
+		return
+	}
+	var extraPRs []string
+	for _, p := range prereqs {
+		extraPRs = append(extraPRs, p.MergedPRs...)
+	}
+	detail := ""
+	if prURLs := s.collectUpstreamPRURLs(ctx, candidate.ID, current.After, nil, extraPRs); len(prURLs) > 0 {
+		detail = "upstream PRs: " + strings.Join(prURLs, ", ")
+	}
 	s.signal(superviseSignal{
-		Todo: candidate.ID,
-		Kind: sigTodoReady,
-		Key:  key,
-		To:   to,
+		Todo:   candidate.ID,
+		Kind:   sigTodoReady,
+		Key:    key,
+		To:     to,
+		Detail: detail,
 	})
 }
 

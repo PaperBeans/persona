@@ -7,10 +7,11 @@ import {
   actOnSuggestion, canExpand, chainRows, chainTap, chainTime, firstLine, handlingFailed, handlingWord, preparing, suggestionButtons, suggestionTitle,
   type ChainEntry, type ChainTap, type InboxSuggestion,
 } from "../../lib/inbox-events";
-import { conversationRoute, getInbox, isDone, itemKey, itemPath, itemRequest, itemRoute, reloadInbox, replaceItem, sameItem, suggestionAct, uncertainReplyKey, useInbox, type InboxItem } from "../../lib/inbox";
+import { getInbox, isDone, itemKey, itemPath, itemRequest, itemRoute, reloadInbox, replaceItem, sameItem, suggestionAct, uncertainReplyKey, useInbox, type InboxItem } from "../../lib/inbox";
+import { conversationRoute } from "../../lib/conversation-page";
 import { api, ApiError, errorText } from "../../lib/api";
 import { markdownBody, markdownInSummary, withoutMarks } from "../../lib/inbox-markdown";
-import { docChangeLine } from "../../lib/inbox-page";
+import { docChangeLine, inboxSessionRoute, openInboxConversation } from "../../lib/inbox-page";
 import { otherManager } from "../../lib/manager-choice";
 import { nowText } from "../../lib/inbox-now";
 import { connectorBrand } from "../../lib/connectors";
@@ -30,16 +31,10 @@ import { useFoldScroll } from "../chat/fold-scroll";
 import { useInboxView } from "../../lib/inbox-view-memory";
 import { InboxLine } from "./InboxLine";
 import { Glyph, Spark, Tag } from "./InboxParts";
+import { useItemReadOnly } from "./item-write-gate";
 
 /** Where a tapped `source` entry (or "Original") opens the item's own page: at a Feishu position, a mail's uid, or a URL. */
 export type SourceAt = { position?: string; uid?: number; url?: string };
-
-/** The processing conversation's route: the assistant's conversations open in Persona, the rest as agents. */
-function useConversation(): (mid: string, sid: string) => Route {
-  const sessions = useStore((s) => s.sessions);
-  const assistant = useStore((s) => s.assistant);
-  return (mid, sid) => conversationRoute(mid, sid, sessions, assistant);
-}
 
 // ── the row ──────────────────────────────────────────────
 
@@ -212,12 +207,26 @@ function EventSummary({ text, marked = false }: { text: string; marked?: boolean
   );
 }
 
+/** Agent state can also mean the Assistant's handling chat has a child Agent. Check which session the chain links. */
+function assistantHandlingFallback(item: InboxItem, mid: string, sid: string): boolean {
+  const h = item.handling;
+  let assistant = h?.state !== "agent" || h.machine_id !== mid || h.session_id !== sid;
+  for (const e of item.chain ?? []) {
+    const link = e.link;
+    if (link?.type !== "session" || !("machine_id" in link) || link.machine_id !== mid || link.session_id !== sid) continue;
+    if (e.kind === "agent" || e.kind === "agent_stopped") return false;
+    if (e.kind === "handling" && !e.detail) assistant = true;
+  }
+  return assistant;
+}
+
 function HandlingLine({ item, now }: { item: InboxItem; now?: string }) {
-  const conversation = useConversation();
   const [sayOpen, setSayOpen] = useState(false);
   const [say, setSay] = useState("");
   const [acting, setActing] = useState(false);
   const h = item.handling;
+  const mid = h?.machine_id;
+  const sid = h?.session_id;
   const done = isDone(item);
   const canSay = !done && !item.suggestion;
   const failed = canSay && (h ? handlingFailed(item) : item.now === "failed" || item.agent?.state === "failed");
@@ -225,7 +234,6 @@ function HandlingLine({ item, now }: { item: InboxItem; now?: string }) {
   if (!h && !canSay && now === undefined) return null;
   const word = now ?? (done ? (item.done_by === "manager" ? t("inbox-inboxevent.manager_done") : undefined) : handlingWord(item));
   const working = h?.state === "looking" || h?.state === "agent";
-  const to = h?.machine_id && h.session_id ? conversation(h.machine_id, h.session_id) : undefined;
   const instruct = async (words: string) => {
     const text = words.trim();
     if (!text || acting) return;
@@ -272,8 +280,8 @@ function HandlingLine({ item, now }: { item: InboxItem; now?: string }) {
       setActing(false);
     }
   };
-  const open = to && (
-    <button type="button" onClick={() => openFromInbox(to)} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-label font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
+  const open = mid && sid && (
+    <button type="button" onClick={() => openInboxConversation(mid, sid, item.manager, assistantHandlingFallback(item, mid, sid))} className="-mx-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1 text-label font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover">
       {t("inbox-inboxevent.open_conversation")}
       <Icon name="chevronRight" size={11} stroke={2.4} />
     </button>
@@ -414,6 +422,8 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
   const busy = useInbox((st) => st.sending.includes(itemKey(item)));
   const uncertain = useInbox((st) => st.uncertainReplies[uncertainReplyKey(item, s.version)]);
   const attempt = s.kind === "reply" ? uncertain ?? item.suggestion_attempts?.find((a) => a.version === s.version) : undefined;
+  const readOnly = useItemReadOnly(item);
+  const replyReadOnly = s.kind === "reply" && readOnly;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(s.text);
   const [say, setSay] = useState("");
@@ -421,6 +431,7 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
   useEffect(() => setText(s.text), [s.text]);
   const b = suggestionButtons(s);
   const act = async (action: "confirm" | "reject" | "instruct", body?: string) => {
+    if (replyReadOnly && action !== "reject") return;
     setActing(action);
     const ok = await suggestionAct(item, action, body);
     setActing("");
@@ -428,7 +439,7 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
   };
   const edited = text.trim() && text !== s.text ? text : undefined;
   if (attempt) {
-    const retryable = attempt.status === "failed" && attempt.retryable && !isDone(item) && item.suggestion?.version === s.version;
+    const retryable = !replyReadOnly && attempt.status === "failed" && attempt.retryable && !isDone(item) && item.suggestion?.version === s.version;
     const label = attempt.status === "failed" ? "failed" : attempt.status === "sending" ? "sending" : attempt.status === "sent" ? "sent" : "uncertain";
     return (
       <section className="rounded-[14px] bg-surface p-3.5 shadow-card" data-suggestion={s.kind} data-delivery={attempt.status}>
@@ -461,28 +472,34 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
             className="w-full resize-y rounded-control bg-field px-2.5 py-2 text-meta leading-relaxed text-ink outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]"
             data-suggestion-editor
           />
-          <label className="flex h-8 items-center gap-2 rounded-control bg-field px-2.5 focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
-            <Icon name="chat" size={13} className="shrink-0 text-ink-3" />
-            <input
-              value={say}
-              onChange={(e) => setSay(e.target.value)}
-              placeholder={t("inbox-inboxevent.say_placeholder")}
-              aria-label={t("inbox-inboxevent.say")}
-              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
-              data-suggestion-say
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing && say.trim()) void act("instruct", say.trim());
-              }}
-            />
-          </label>
+          {!replyReadOnly && (
+            <label className="flex h-8 items-center gap-2 rounded-control bg-field px-2.5 focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
+              <Icon name="chat" size={13} className="shrink-0 text-ink-3" />
+              <input
+                value={say}
+                onChange={(e) => setSay(e.target.value)}
+                placeholder={t("inbox-inboxevent.say_placeholder")}
+                aria-label={t("inbox-inboxevent.say")}
+                className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
+                data-suggestion-say
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing && say.trim() && !replyReadOnly) void act("instruct", say.trim());
+                }}
+              />
+            </label>
+          )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button tone="quiet" disabled={busy} onClick={() => { setEditing(false); setText(s.text); setSay(""); }}>{t("common.cancel")}</Button>
-            <Button tone={say.trim() ? "accent" : "secondary"} icon="spark" disabled={!say.trim() || (busy && acting !== "instruct")} busy={acting === "instruct"} onClick={() => void act("instruct", say.trim())}>
-              {t("inbox-inboxevent.say")}
-            </Button>
-            <Button tone={say.trim() ? "secondary" : "accent"} icon={s.kind === "reply" && !s.handback ? "send" : "check"} disabled={!text.trim() || (busy && acting !== "confirm")} busy={acting === "confirm"} onClick={() => void act("confirm", edited)}>
-              {b.confirm}
-            </Button>
+            {!replyReadOnly && (
+              <>
+                <Button tone={say.trim() ? "accent" : "secondary"} icon="spark" disabled={!say.trim() || (busy && acting !== "instruct")} busy={acting === "instruct"} onClick={() => void act("instruct", say.trim())}>
+                  {t("inbox-inboxevent.say")}
+                </Button>
+                <Button tone={say.trim() ? "secondary" : "accent"} icon={s.kind === "reply" && !s.handback ? "send" : "check"} disabled={!text.trim() || (busy && acting !== "confirm")} busy={acting === "confirm"} onClick={() => void act("confirm", edited)}>
+                  {b.confirm}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       ) : (
@@ -497,10 +514,12 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
           {s.note && <p className="mt-1.5 text-label leading-relaxed text-ink-3">{s.note}</p>}
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <Button tone="quiet" disabled={busy && acting !== "reject"} busy={acting === "reject"} onClick={() => void act("reject")}>{t("inbox-inboxevent.reject")}</Button>
-            {b.edit && <Button tone="secondary" icon="pencil" disabled={busy} onClick={() => setEditing(true)}>{t("inbox-inboxevent.edit")}</Button>}
-            <Button tone="accent" icon={s.kind === "reply" && !s.handback ? "send" : "check"} disabled={busy && acting !== "confirm"} busy={acting === "confirm"} onClick={() => void act("confirm")}>
-              {b.confirm}
-            </Button>
+            {!replyReadOnly && b.edit && <Button tone="secondary" icon="pencil" disabled={busy} onClick={() => setEditing(true)}>{t("inbox-inboxevent.edit")}</Button>}
+            {!replyReadOnly && (
+              <Button tone="accent" icon={s.kind === "reply" && !s.handback ? "send" : "check"} disabled={busy && acting !== "confirm"} busy={acting === "confirm"} onClick={() => void act("confirm")}>
+                {b.confirm}
+              </Button>
+            )}
           </div>
         </>
       )}
@@ -586,8 +605,9 @@ export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: Sour
     setOpen(view.chainOpen(key));
   }
   useEffect(() => view.setChainOpen(key, open), [view, key, open]);
-  const conversation = useConversation();
+  const assistant = useStore((s) => s.assistant);
   const sessions = useStore((s) => s.sessions);
+  const summaries = useStore((s) => s.sessionSummaries);
   const all = item.chain ?? [];
   if (!all.length) return null;
   const rows = chainRows(all, open);
@@ -596,6 +616,15 @@ export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: Sour
     const link = agentSession(e);
     if (link) latestAgent.set(link.key, e.id);
   }
+  const conversation = (e: ChainEntry, mid: string, sid: string): Route => {
+    const h = item.handling;
+    // A handling entry without detail records an Assistant taking over. A suggestion with detail can come from an Agent.
+    if (e.kind === "handling" && (!e.detail || (h?.machine_id === mid && h.session_id === sid))) {
+      return inboxSessionRoute(mid, sid, item.manager, assistantHandlingFallback(item, mid, sid));
+    }
+    const row = sessions[mid]?.find((s) => s.session_id === sid) ?? summaries.find((s) => s.machine_id === mid && s.session_id === sid);
+    return conversationRoute(mid, sid, sessions, assistant, row);
+  };
   const tap = (x: ChainTap) => {
     if (x.kind === "source") {
       if (x.url) {
@@ -622,7 +651,7 @@ export function Chain({ item, onSource }: { item: InboxItem; onSource: (at: Sour
         )}
       </div>
       <ol className="flex flex-col">
-        {rows.map((e) => <ChainRow key={e.id} item={item} e={e} tap={chainTap(e, conversation, otherManager(item.manager))} onTap={tap} agentState={agentState(e)} />)}
+        {rows.map((e) => <ChainRow key={e.id} item={item} e={e} tap={chainTap(e, (mid, sid) => conversation(e, mid, sid), otherManager(item.manager))} onTap={tap} agentState={agentState(e)} />)}
       </ol>
     </section>
   );

@@ -39,6 +39,12 @@ type InboxTriage struct {
 
 func RenderInboxTriage(t InboxTriage) string { return render("inbox/triage", t) }
 
+// RenderInboxReplyPolicyReview is the legacy schema's independent second review. The shared legacy/compiled reply-policy
+// declarations are below with the upstream localized prompt declarations.
+func RenderInboxReplyPolicyReview() string {
+	return render("inbox/reply_policy_review", nil)
+}
+
 // InboxGroup is the system prompt that relates a conversation's new messages to its events (inbox/group, #1680).
 type InboxGroup struct {
 	Owner string // "" is the Chinese "you"
@@ -165,6 +171,9 @@ type InboxAgent struct {
 	Item     InboxItem
 	Task     string // what to do: the triage's summary ("" the default)
 	Reason   string // the triage's reason
+	// ReplyPolicy adds the drafting restrictions only when this item is in an enabled policy's scope. False leaves the
+	// legacy prompt byte-identical when the feature is absent or disabled.
+	ReplyPolicy bool
 	// Resumed: the conversation that handled the event is gone; Recap and Chain are where it got to.
 	Resumed bool
 	Recap   string
@@ -172,15 +181,26 @@ type InboxAgent struct {
 	Notes   []string // what came since (the user's answers…), each rendered (inbox/handling/*)
 	// Linked: the user's task the item is about (the judge's task_id), its progress for the reply.
 	Linked *InboxTask
-	Lark   *InboxAgentLark
-	Doc    *InboxAgentDoc
-	Moment *InboxAgentMoment
-	Mail   *InboxAgentMail
+	// HandoffTargets are the eligible existing conversations on this manager (main, leaders, linked task)
+	// that kind "handoff" may propose handing the item to (#13562).
+	HandoffTargets []InboxHandoffTarget
+	Lark           *InboxAgentLark
+	Doc            *InboxAgentDoc
+	Moment         *InboxAgentMoment
+	Mail           *InboxAgentMail
 	// Connector: an item of a connector's (GitHub…).
 	Connector *InboxAgentConnector
 	KB        *KBContext // what the knowledge base knows about the item's chat
 	// KnowledgeDir: the knowledge base directory the KB part names; "" is the default ~/.persona/data.
 	KnowledgeDir string
+}
+
+// InboxHandoffTarget is an eligible existing conversation on this manager listed in inbox/agent (#13562).
+type InboxHandoffTarget struct {
+	Machine string
+	Session string
+	Role    string // main | leader | task
+	Title   string
 }
 
 // InboxAgentLark is the item's Feishu chat; Account is the gateway account it is in when that is not lark.account.
@@ -350,3 +370,62 @@ type SubscriptionKind struct {
 }
 
 func RenderSubscriptionKind(k SubscriptionKind) string { return render("inbox/kinds/subscription", k) }
+
+// InboxReplyPolicy is the system prompt for classifying an Inbox item or reply text into a configured category
+// (inbox/reply_policy). The server maps the returned category to a route; the model never chooses a route.
+type InboxReplyPolicy struct {
+	Language   string   // Native language name; empty preserves the legacy Chinese output.
+	Owner      string   // "" is the Chinese "you"
+	Categories []string // sorted allowed category names from server policy
+	Rules      string   // optional extra classification guidance, trimmed
+}
+
+func RenderInboxReplyPolicy(p ...InboxReplyPolicy) string {
+	if len(p) == 0 {
+		return render("inbox/reply_policy_legacy", nil)
+	}
+	return render("inbox/reply_policy", p[0])
+}
+
+// InboxReplyPolicyInput combines the legacy owner-edit fields with the upstream localized item fields. Each renderer
+// selects its own template: legacy Text/Original/Edit never flow into the compiled schema's item presentation.
+type InboxReplyPolicyInput struct {
+	// Legacy Task 2 input.
+	Text     string
+	Original string
+	Edit     bool
+	// Upstream compiled-policy input.
+	Language  string // Native language name; empty preserves the legacy Chinese output.
+	Title     string
+	Sender    string
+	Source    string
+	Kind      string
+	Context   string
+	ReplyText string // non-empty when checking a proposed suggestion or final text before send
+}
+
+func RenderInboxReplyPolicyInput(in InboxReplyPolicyInput) string {
+	legacy := in.Text != "" || in.Original != "" || in.Edit ||
+		(in.Language == "" && in.Title == "" && in.Sender == "" && in.Source == "" && in.Kind == "" && in.Context == "" && in.ReplyText == "")
+	if legacy {
+		return render("inbox/reply_policy_legacy_input", in)
+	}
+	return render("inbox/reply_policy_input", in)
+}
+
+// RenderExternalInboxTriage gives the small-task model its routing response schema.
+func RenderExternalInboxTriage(language string) string {
+	return render("inbox/external_routing", struct{ Language string }{language})
+}
+
+// ExternalInboxUpdate is one source update routed to its existing owner.
+type ExternalInboxUpdate struct {
+	Language string
+	Event    string
+	Summary  string
+	URL      string
+}
+
+func RenderExternalInboxUpdate(in ExternalInboxUpdate) string {
+	return render("inbox/external_update", in)
+}

@@ -156,9 +156,15 @@ func (n *Node) sendCodexDesktop(ctx context.Context, src codexSource, text strin
 	if err != nil {
 		return refusal("bad_image", err.Error(), nil)
 	}
-	// While the App runs a turn in the thread the message waits here and goes in once, as a turn of its own, when the
-	// turn ends (codex_desktop_queue.go): a start-turn into a running turn is steered into it and then run again.
-	return n.sendOrHoldCodexDesktop(ctx, src, codexDesktopMessage{text: text, paths: paths})
+	clientID, _ := ctx.Value(sendTraceKey{}).(string)
+	if clientID == "" {
+		clientID = newUUID()
+		ctx = context.WithValue(ctx, sendTraceKey{}, clientID)
+	}
+	msg := codexDesktopMessage{text: text, paths: paths, clientID: clientID}
+	// Serialize both native-queue and legacy-bus delivery per thread (codex_desktop_queue.go), and while the App runs a
+	// turn on the legacy bus hold the message until the turn ends so it is never steered into the running turn.
+	return n.sendOrHoldCodexDesktop(ctx, src, msg)
 }
 
 // startCodexDesktopTurn asks the window owning src's thread to run a turn with input, as the App's own composer does.
@@ -167,6 +173,12 @@ func (n *Node) startCodexDesktopTurn(ctx context.Context, src codexSource, input
 	defer cancel()
 	c, err := dialCodexDesktop(ctx, src.home)
 	if err != nil {
+		// The App may have restarted between the routing decision and delivery of a held message.
+		if missingCodexDesktopBus(err) {
+			if cli := codexDesktopQueueCLI(src.home); cli != "" {
+				return n.enqueueCodexDesktop(ctx, cli, src, input)
+			}
+		}
 		return codexDesktopUnavailable(ctx)
 	}
 	defer c.close()
@@ -174,10 +186,14 @@ func (n *Node) startCodexDesktopTurn(ctx context.Context, src codexSource, input
 	if err != nil {
 		return err
 	}
+	clientID, _ := ctx.Value(sendTraceKey{}).(string)
+	if clientID == "" {
+		clientID = newUUID()
+	}
 	turn := map[string]any{
 		"conversationId": src.thread,
 		"turnStart": map[string]any{
-			"request": map[string]any{"threadId": src.thread, "clientUserMessageId": newUUID(), "input": input},
+			"request": map[string]any{"threadId": src.thread, "clientUserMessageId": clientID, "input": input},
 			"context": map[string]any{},
 		},
 	}
@@ -532,7 +548,8 @@ var codexTurnMarks sync.Map
 // subagents), the Codex CLI "codex-tui" / "cli", `codex exec` and the SDKs over it "codex_exec" / "codex_sdk_*" with
 // source "exec" (their subagents keep the originator). Only the App's threads go through its IPC bus.
 type codexOrigin struct {
-	desktop bool
+	desktop  bool
+	userChat bool // a desktop UI thread explicitly classified as user-created
 	// persona: a chat Persona started in the App (originator codexAppClient, codexapp_new.go), which the App lists
 	// without a record in its state; desktop too, so its subagents are the App's as well.
 	persona bool
@@ -603,6 +620,7 @@ func readCodexOrigin(path string) codexOrigin {
 	}
 	o.source = source
 	o.exec = source == "exec" || m.Payload.Originator == "codex_exec" || strings.HasPrefix(m.Payload.Originator, "codex_sdk")
+	o.userChat = o.desktop && source == "vscode" && m.Payload.ThreadSource == "user"
 	var spawned string
 	spawned, o.guardian, o.sub = codexSourceObject(m.Payload.Source)
 	o.parent = firstNonEmpty(m.Payload.Parent, spawned)
@@ -656,7 +674,7 @@ func codexDesktopChatIn(src codexSource, pass *codexListPass) bool {
 		return ok && !t.origin().sub
 	}
 	o := readCodexOrigin(src.path)
-	return o.desktop && o.parent == "" && (o.persona || pass.appState(src.home).listed(src.thread))
+	return o.desktop && !o.sub && !o.exec && (o.persona || o.userChat || pass.appState(src.home).listed(src.thread))
 }
 
 // loadedOwner is the App window that owns the thread, the App asked to open it when none does: it loads a thread it is

@@ -213,7 +213,7 @@ func (n *Node) screenDial(ctx context.Context, params json.RawMessage) (any, err
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Pair == "" {
 		return nil, &rpc.Error{Code: "video_unavailable", Message: "screen.dial: need id and pair"}
 	}
-	link := p.Link && n.links != nil && n.links.Get(p.Pair) != nil
+	link := p.Link && n.screenLinks() != nil && n.screenLinks().Get(p.Pair) != nil
 	if link && p.Attach {
 		return n.reattachScreen(p.ID, p.Pair, true)
 	}

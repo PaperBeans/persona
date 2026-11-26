@@ -4,6 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"io"
 	"math"
 	"slices"
@@ -26,7 +29,7 @@ import (
 // nothing billed) after each of finalUnreachableRetries, counted apart (finalRetryAfter); then the state is final
 // with the live sentences, or failed when the hub has none. A recording that never completes is complete for the pass
 // feedStale after its last upload. Once the pass stored its text the knowledge base makes the minutes (again,
-// quietly) and deletes the audio when no minutes will come (kb.FinalTranscriptStored).
+// quietly) and deletes the audio when no minutes will come (writers.FinalTranscriptStored).
 
 // finalPassState is one recording's final pass in this process: running (cancel ends the try, its recording deleted
 // or trimmed), when it may be tried again, the windows it finished (kept across tries) and where they end, and
@@ -44,11 +47,11 @@ type finalPassState struct {
 type finalWindow struct {
 	from, to  float64
 	kept      bool
-	sentences []kb.RecordingSegment
+	sentences []kbwire.RecordingSegment
 }
 
 // replayFrame is how much audio one binary frame of a replay carries (one second, under the 64 KiB a frame may be).
-const replayFrame = kb.AudioRate * 2
+const replayFrame = recordingwire.AudioRate * 2
 
 var (
 	errNoReplay  = errors.New("the transcription contribution has no replay")
@@ -87,7 +90,7 @@ func (s *Recordings) finalRound(ctx context.Context) {
 		return
 	}
 	s.hubSweep(e)
-	ids, err := e.HubRecordings()
+	ids, err := writersOf(e).HubRecordings()
 	if err != nil {
 		return
 	}
@@ -106,12 +109,12 @@ func (s *Recordings) finalRound(ctx context.Context) {
 
 // finalLook starts recording id's final pass when it is due.
 func (s *Recordings) finalLook(ctx context.Context, e *kb.Engine, id string, now time.Time) {
-	_, rec, err := e.MeetingRead(id)
+	_, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil || !rec.HubTranscribed() || rec.Trimmed() {
 		return
 	}
 	t := rec.Conv.Transcription
-	if t.State == kb.TranscriptionFinal || t.State == kb.TranscriptionFailed {
+	if t.State == recordingwire.TranscriptionFinal || t.State == recordingwire.TranscriptionFailed {
 		return
 	}
 	s.hubTr.mu.Lock()
@@ -134,10 +137,10 @@ func (s *Recordings) finalLook(ctx context.Context, e *kb.Engine, id string, now
 		return
 	}
 	if t.FinalFrom.IsZero() {
-		if t.State == kb.TranscriptionLive {
-			if _, err := e.TranscriptionUpdate(rec.ID, func(t *kb.MeetingTranscription, _ kb.Recording) error {
-				if t.State == kb.TranscriptionLive {
-					t.State = kb.TranscriptionFinishing
+		if t.State == recordingwire.TranscriptionLive {
+			if _, err := writersOf(e).TranscriptionUpdate(rec.ID, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
+				if t.State == recordingwire.TranscriptionLive {
+					t.State = recordingwire.TranscriptionFinishing
 				}
 				return nil
 			}); err != nil {
@@ -178,7 +181,7 @@ func (s *Recordings) finalLook(ctx context.Context, e *kb.Engine, id string, now
 // finalCancel ends recording id's final pass running in this process, if any (the recording deleted or trimmed): its
 // replay job is closed at once rather than transcribing what is gone; the try is not counted.
 func (s *Recordings) finalCancel(id string) {
-	id, ok := kb.RecordingID(id)
+	id, ok := recordingwire.RecordingID(id)
 	if !ok {
 		return
 	}
@@ -199,11 +202,11 @@ func (s *Recordings) finalPass(ctx context.Context, e *kb.Engine, id string, st 
 	s.hubTr.mu.Lock()
 	doneTo := st.doneTo
 	s.hubTr.mu.Unlock()
-	t, err := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
-		if t.State == kb.TranscriptionFinal || t.State == kb.TranscriptionFailed {
+	t, err := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
+		if t.State == recordingwire.TranscriptionFinal || t.State == recordingwire.TranscriptionFailed {
 			return errFinalDone
 		}
-		t.State = kb.TranscriptionFinishing
+		t.State = recordingwire.TranscriptionFinishing
 		if t.FinalFrom.IsZero() {
 			t.FinalFrom = now.UTC() // transcription_final from here
 		}
@@ -225,16 +228,16 @@ func (s *Recordings) finalPass(ctx context.Context, e *kb.Engine, id string, st 
 	if err != nil {
 		return err
 	}
-	var tl kb.Timeline // the complete upload's: its speaking spans mark Persona's echo in the final transcript
+	var tl recordingwire.Timeline // the complete upload's: its speaking spans mark Persona's echo in the final transcript
 	if t.Timeline != nil {
 		tl = *t.Timeline
 	}
 	live := h.Segments
-	if h.Pass == kb.HubPassFinal { // stored before a crash, before the state
+	if h.Pass == recordingwire.HubPassFinal { // stored before a crash, before the state
 		st.windows, live = []finalWindow{{from: 0, to: math.Inf(1), sentences: h.Segments}}, nil
 		return s.finalEnd(e, id, st, live, tl)
 	}
-	held, err := e.AudioHeld(id)
+	held, err := writersOf(e).AudioHeld(id)
 	if err != nil {
 		return err
 	}
@@ -256,7 +259,7 @@ func (s *Recordings) finalPass(ctx context.Context, e *kb.Engine, id string, st 
 	// A busy service (#13446) that billed nothing was never reached either, as when busy was upstream_unavailable.
 	unreachable := errors.As(err, &je) && (je.Code == extwire.TEUpstreamUnavailable || je.Code == extwire.TEUpstreamBusy) && !billed
 	if unreachable {
-		u, uerr := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+		u, uerr := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 			t.FinalUnreachable++
 			return nil
 		})
@@ -277,7 +280,7 @@ func (s *Recordings) finalPass(ctx context.Context, e *kb.Engine, id string, st 
 // finalRetryAfter is how long after a failed try of the final pass the next one starts, false when none is left. A try
 // that never reached the upstream (unreachable: counted in FinalUnreachable) waits by finalUnreachableRetries; any
 // other failed try by finalRetries, counted among the tries that were not unreachable (#9535).
-func finalRetryAfter(tm timings, t kb.MeetingTranscription, unreachable bool) (time.Duration, bool) {
+func finalRetryAfter(tm timings, t recordingwire.MeetingTranscription, unreachable bool) (time.Duration, bool) {
 	waits, n := tm.finalRetries, t.FinalTries-t.FinalUnreachable
 	if unreachable {
 		waits, n = tm.finalUnreachableRetries, t.FinalUnreachable
@@ -291,27 +294,27 @@ func finalRetryAfter(tm timings, t kb.MeetingTranscription, unreachable bool) (t
 // finalEnd stores recording id's final transcript (the windows done, the live sentences elsewhere), Persona's echo in
 // it marked by timeline tl (the live sentences judged before a late timeline repaired a span too), and its state:
 // final, or failed when the hub has no sentence of its own; then the minutes are told.
-func (s *Recordings) finalEnd(e *kb.Engine, id string, st *finalPassState, live []kb.RecordingSegment, tl kb.Timeline) error {
+func (s *Recordings) finalEnd(e *kb.Engine, id string, st *finalPassState, live []kbwire.RecordingSegment, tl recordingwire.Timeline) error {
 	merged := mergeFinal(st.windows, live)
 	for i, sg := range merged {
 		if !sg.Echo {
-			merged[i].Echo = kb.EchoOf(tl, sg.Start, sg.End, sg.Text)
+			merged[i].Echo = writers.EchoOf(tl, sg.Start, sg.End, sg.Text)
 		}
 	}
-	state := kb.TranscriptionFinal
+	state := recordingwire.TranscriptionFinal
 	if len(merged) == 0 {
-		state = kb.TranscriptionFailed
+		state = recordingwire.TranscriptionFailed
 	}
 	if len(merged) > 0 || len(live) > 0 {
-		if _, err := e.HubTranscriptPut(id, kb.HubPassFinal, merged); err != nil {
-			if errors.Is(err, kb.ErrNotFound) || errors.Is(err, kb.ErrRecordingDeleted) {
+		if _, err := writersOf(e).HubTranscriptPut(id, recordingwire.HubPassFinal, merged); err != nil {
+			if errors.Is(err, kbwire.ErrNotFound) || errors.Is(err, recordingwire.ErrRecordingDeleted) {
 				return nil
 			}
 			return err
 		}
 	}
 	now := time.Now().UTC()
-	if _, err := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
+	if _, err := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
 		t.State, t.FinalAt, t.Problem, t.Fallback = state, now, "", false
 		return nil
 	}); err != nil {
@@ -321,7 +324,7 @@ func (s *Recordings) finalEnd(e *kb.Engine, id string, st *finalPassState, live 
 	delete(s.hubTr.passes, id)
 	s.hubTr.mu.Unlock()
 	s.logf("recording %s: final pass %s: %d sentence(s), %d window(s)", id, state, len(merged), len(st.windows))
-	if err := e.FinalTranscriptStored(id); err != nil {
+	if err := writersOf(e).FinalTranscriptStored(id); err != nil {
 		s.logf("recording %s: final transcript stored: %v", id, err)
 	}
 	s.kbWake() // the minutes, from the final transcript
@@ -330,8 +333,8 @@ func (s *Recordings) finalEnd(e *kb.Engine, id string, st *finalPassState, live 
 
 // mergeFinal is the final transcript: the pass's sentences in the windows it did not keep, and the live sentences
 // (whose middle is) elsewhere, in time order.
-func mergeFinal(windows []finalWindow, live []kb.RecordingSegment) []kb.RecordingSegment {
-	var out []kb.RecordingSegment
+func mergeFinal(windows []finalWindow, live []kbwire.RecordingSegment) []kbwire.RecordingSegment {
+	var out []kbwire.RecordingSegment
 	var passed [][2]float64
 	for _, w := range windows {
 		if !w.kept {
@@ -345,14 +348,14 @@ func mergeFinal(windows []finalWindow, live []kb.RecordingSegment) []kb.Recordin
 			out = append(out, sg)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b kb.RecordingSegment) int { return cmp.Compare(a.Start, b.Start) })
+	slices.SortStableFunc(out, func(a, b kbwire.RecordingSegment) int { return cmp.Compare(a.Start, b.Start) })
 	return out
 }
 
 // replay runs a replay job over recording id's audio held from the first window not done: the transcript of record
 // as reference frames first, then the audio, at most replayAhead ahead of the job's ack, with seek over holes. The
 // windows it finishes join st (also when it fails later).
-func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [][2]float64, tl kb.Timeline, st *finalPassState) error {
+func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [][2]float64, tl recordingwire.Timeline, st *finalPassState) error {
 	ref, _, err := s.transcriptionTarget(ctx)
 	if err != nil {
 		return err
@@ -372,18 +375,18 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 	pos := int64(-1)
 	for _, h := range held {
 		if h[1] > doneTo {
-			pos = int64(math.Round(max(h[0], doneTo) * kb.AudioRate))
+			pos = int64(math.Round(max(h[0], doneTo) * recordingwire.AudioRate))
 			break
 		}
 	}
 	if pos < 0 {
 		return nil // every window done
 	}
-	record, err := e.RecordOf(id)
+	record, err := writersOf(e).RecordOf(id)
 	if err != nil {
 		return err
 	}
-	_, rec, err := e.MeetingRead(id)
+	_, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil {
 		return err
 	}
@@ -396,7 +399,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 		return err
 	}
 	start := extwire.TranscriptionFrame{Type: extwire.TFStart, Mode: extwire.TranscriptionReplay, Speed: 4,
-		Language: recordingLanguage(rec), Glossary: s.transcriptionGlossary(ctx, rec), At: extwire.F(float64(pos) / kb.AudioRate)}
+		Language: recordingLanguage(rec), Glossary: s.transcriptionGlossary(ctx, rec), At: extwire.F(float64(pos) / recordingwire.AudioRate)}
 	if err := jc.Send(rctx, start); err != nil {
 		jc.Close()
 		return err
@@ -445,7 +448,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 	}
 	go func() {
 		defer close(exited)
-		var cur []kb.RecordingSegment
+		var cur []kbwire.RecordingSegment
 		var usage float64
 		for {
 			f, err := jc.Read(jctx)
@@ -457,9 +460,9 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 			switch f.Type {
 			case extwire.TFSentence:
 				if f.Start != nil && f.End != nil && f.Text != nil {
-					sg := kb.RecordingSegment{Start: *f.Start, End: max(*f.End, *f.Start), Text: *f.Text, Source: kb.SourceHub}
-					if sg.Text != "" { // Persona's echo kept, marked (kb/echo.go)
-						sg.Echo = kb.EchoOf(tl, sg.Start, sg.End, sg.Text)
+					sg := kbwire.RecordingSegment{Start: *f.Start, End: max(*f.End, *f.Start), Text: *f.Text, Source: recordingwire.SourceHub}
+					if sg.Text != "" { // Persona's echo kept, marked (writers/echo.go)
+						sg.Echo = writers.EchoOf(tl, sg.Start, sg.End, sg.Text)
 						cur = append(cur, sg)
 					}
 				}
@@ -480,7 +483,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 			case extwire.TFAck:
 				if f.At != nil {
 					mu.Lock()
-					acked = max(acked, int64(*f.At*kb.AudioRate))
+					acked = max(acked, int64(*f.At*recordingwire.AudioRate))
 					mu.Unlock()
 					select {
 					case wake <- struct{}{}:
@@ -523,7 +526,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 	}()
 
 	buf := make([]byte, replayFrame)
-	ahead := int64(s.tm().replayAhead.Seconds() * kb.AudioRate)
+	ahead := int64(s.tm().replayAhead.Seconds() * recordingwire.AudioRate)
 	for {
 		for {
 			mu.Lock()
@@ -549,7 +552,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 			}
 			t.Stop()
 		}
-		n, err := e.AudioRead(id, float64(pos)/kb.AudioRate, buf)
+		n, err := writersOf(e).AudioRead(id, float64(pos)/recordingwire.AudioRate, buf)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -562,7 +565,7 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 				break
 			}
 			pos = next
-			if err := jc.Send(jctx, extwire.TranscriptionFrame{Type: extwire.TFSeek, At: extwire.F(float64(pos) / kb.AudioRate)}); err != nil {
+			if err := jc.Send(jctx, extwire.TranscriptionFrame{Type: extwire.TFSeek, At: extwire.F(float64(pos) / recordingwire.AudioRate)}); err != nil {
 				return sendFailed(err)
 			}
 			continue
@@ -590,12 +593,12 @@ func (s *Recordings) replay(ctx context.Context, e *kb.Engine, id string, held [
 // finalProgress tells the apps how far recording id's final pass is (#13461): the end of the last window it finished,
 // once per window. A failure to write it costs only the progress shown.
 func (s *Recordings) finalProgress(e *kb.Engine, id string, doneTo float64) {
-	if _, err := e.TranscriptionUpdate(id, func(t *kb.MeetingTranscription, _ kb.Recording) error {
-		if t.State == kb.TranscriptionFinishing {
+	if _, err := writersOf(e).TranscriptionUpdate(id, func(t *recordingwire.MeetingTranscription, _ recordingwire.Recording) error {
+		if t.State == recordingwire.TranscriptionFinishing {
 			t.FinalDone = max(t.FinalDone, doneTo)
 		}
 		return nil
-	}); err != nil && !errors.Is(err, kb.ErrNotFound) && !errors.Is(err, kb.ErrRecordingDeleted) {
+	}); err != nil && !errors.Is(err, kbwire.ErrNotFound) && !errors.Is(err, recordingwire.ErrRecordingDeleted) {
 		s.logf("recording %s: final pass progress: %v", id, err)
 	}
 }
@@ -603,7 +606,7 @@ func (s *Recordings) finalProgress(e *kb.Engine, id string, doneTo float64) {
 // nextHeld is the first sample of the audio held after sample pos (-1: none).
 func nextHeld(held [][2]float64, pos int64) int64 {
 	for _, h := range held {
-		if from := int64(math.Round(h[0] * kb.AudioRate)); from > pos {
+		if from := int64(math.Round(h[0] * recordingwire.AudioRate)); from > pos {
 			return from
 		}
 	}

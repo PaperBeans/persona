@@ -155,6 +155,9 @@ It sets `no-new-privileges`, permits bubblewrap's `clone`, `unshare`, `setns`, `
 standard seccomp allowlist, and otherwise retains that allowlist. These calls still
 need kernel permission: the non-root hub can mount only after creating its own user
 namespace, where it receives namespace-local capabilities, never host `CAP_SYS_ADMIN`.
+The sandbox retains its fresh PID namespace and binds the outer procfs read-only into it,
+so only that namespace's processes are visible. It does not mount another procfs: Docker's
+protected `/proc` mounts reject a fresh procfs even with an unprivileged user namespace.
 `clone3` retains Docker's fallback behavior. This is a wider syscall surface than the
 standard Docker profile, so use the supplied profile only for the hub.
 

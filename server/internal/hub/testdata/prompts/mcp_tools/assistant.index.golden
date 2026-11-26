@@ -5,6 +5,7 @@ mail_save_attachment
 mail_send
 resource_status
 ask_user
+ask_user_withdraw
 notify_user
 supervision_finish
 schedule_followup
@@ -52,12 +53,16 @@ model_profiles_list
 model_profile_get
 model_profile_switch
 model_profile_rollback
+model_profile_capture
+model_probe
+launcher_import
 repositories_list
 repository_get
 repository_add
 view_show
 view_update
 view_get
+page
 conversations_list
 conversations_switch
 conversation_read
@@ -92,7 +97,6 @@ direction_name
 leader_progress
 decision_record
 decisions_query
-health_intake
 subscription_list
 subscription_get
 subscription_sources

@@ -13,11 +13,13 @@ export interface SetupAsset {
   readonly contentType: string;
 }
 
-/** The page's three files, which copy-assets.mjs puts in dist/setup/, and nothing else. */
+/** The page's files, which copy-assets.mjs puts in dist/setup/, and nothing else. */
 const FILES = new Map<string, readonly [string, string]>([
   ["/setup.html", ["setup.html", "text/html; charset=utf-8"]],
   ["/setup.css", ["setup.css", "text/css; charset=utf-8"]],
   ["/setup.cjs", ["setup.cjs", "text/javascript; charset=utf-8"]],
+  ["/app-icon.png", ["app-icon.png", "image/png"]],
+  ["/app-icon-dark.png", ["app-icon-dark.png", "image/png"]],
 ]);
 
 /** The file and content type behind a request of the setup scheme: only a GET or HEAD of one of the page's three

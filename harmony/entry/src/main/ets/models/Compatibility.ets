@@ -1,5 +1,25 @@
 import { Wire } from './Wire';
 
+export const legacyProduct: string = 'jarvis';
+export const legacyContextTag: string = 'jarvis-context';
+export const legacyFileTag: string = 'jarvis-file';
+
+export function wireContextAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export function wireContextBody(value: string): string {
+  const closer = new RegExp('<(\\s*\\/\\s*(?:persona|' + legacyProduct + ')-context\\s*>)', 'gi');
+  return value.replace(closer, '').replace(closer, '&lt;$1');
+}
+
+export function wireForwardBlock(source: Record<string, Object>, tag: string): string {
+  const value = (key: string): string => Wire.text(source, key);
+  const keys = ['kind', 'title', 'url', 'msg', 'role', 'author', 'chat', 'project', 'machine', 'time'];
+  const attrs = keys.filter(k => k === 'kind' || k === 'title' || !!value(k)).map(k => k + '="' + wireContextAttribute(value(k)) + '"').join(' ');
+  return '<' + tag + ' ' + attrs + '>\n' + wireContextBody(value('text')) + '\n</' + tag + '>';
+}
+
 export function hasExtensionSlots(features: string[]): boolean {
   return features.includes('extension_ui_slots') || features.includes('plugin_ui_slots');
 }
@@ -16,6 +36,14 @@ function attribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function quoteBlock(source: Record<string,Object>, tag: string): string {
+  const title=wireContextAttribute(Wire.text(source,'title')), id=Wire.text(source,'msg'), part=Wire.text(source,'part');
+  const msg=id ? ' msg="'+wireContextAttribute(id)+'"' : '';
+  const selection=part==='selection' ? ' part="selection"' : '';
+  return '<'+tag+' kind="quote" title="'+title+'" url=""'+msg+selection+'>\n'+
+    wireContextBody(Wire.text(source,'text'))+'\n</'+tag+'>';
+}
+
 // Naming literals are confined to the compatibility boundary, as on the other clients.
 export function withSourceContext(text: string, context: string, features: string[]): string {
   if (!context) return text;
@@ -23,7 +51,8 @@ export function withSourceContext(text: string, context: string, features: strin
   const tag = features.includes('persona_contracts_v1') ? 'persona-context' : 'jarvis-context';
   const entries = Wire.rows(data, 'contexts');
   const sources = entries.length ? entries : [data];
-  return sources.map((source: Record<string, Object>) => '<' + tag + ' kind="' + attribute(Wire.text(source, 'kind', 'context')) +
+  return sources.map((source: Record<string, Object>) => Wire.text(source,'kind')==='forward' ? wireForwardBlock(source,tag) :
+    Wire.text(source,'kind')==='quote' ? quoteBlock(source,tag) : '<' + tag + ' kind="' + attribute(Wire.text(source, 'kind', 'context')) +
     '" title="' + attribute(Wire.text(source, 'title')) + '">' +
     JSON.stringify(source).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</' + tag + '>').join('\n') + '\n\n' + text;
 }

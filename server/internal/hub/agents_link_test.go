@@ -188,8 +188,8 @@ func TestAgentWorkOverTheBus(t *testing.T) {
 }
 
 // POST /api/v1/sessions: the manager says what a new Agent runs on (Models › Agents, a model picked for this start
-// over it) and names its tab. A start waits a little for a manager that is not connected yet (a hub that just
-// started); while there is none the hub applies Models › Agents itself and the tab gets no name.
+// over it) and gives its tab a local placeholder before naming it in the background. A start waits a little for a manager that is not connected yet (a hub that just
+// started); while there is none the start is refused.
 func TestAgentStartAsksTheManager(t *testing.T) {
 	h := newTestHub(t)
 	h.store = &newAgentStore{memStore: newMemStore(), b: assistantwire.ModelBinding{Provider: "launcher.work", Model: "m-1"}}
@@ -239,12 +239,12 @@ func TestAgentStartAsksTheManager(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("the start did not go on once the manager connected")
 	}
-	if p("launcher") != "work" || p("tab_name") != "fix-login" {
+	if p("launcher") != "work" || p("tab_name") != "persona" {
 		t.Fatalf("waited for the manager: %q %q", p("launcher"), p("tab_name"))
 	}
 
 	p = start(`{"machine_id":"box","cwd":"/code","prompt":"修一下登录页的报错"}`)
-	if p("launcher") != "work" || p("model") != "m-1" || p("model_fingerprint") == "" || p("tab_name") != "fix-login" {
+	if p("launcher") != "work" || p("model") != "m-1" || p("model_fingerprint") == "" || p("tab_name") != "persona" {
 		t.Fatalf("with the manager: %q %q %q", p("launcher"), p("model"), p("tab_name"))
 	}
 	p = start(`{"machine_id":"box","cwd":"/code","prompt":"x","launcher":"other","model":"picked","tab_name":"mine"}`)

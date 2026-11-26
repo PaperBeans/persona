@@ -1,0 +1,176 @@
+{
+  "string": [
+    {
+      "name": "tray_waiting_answer",
+      "value": "回答を待っています"
+    },
+    {
+      "name": "tray_draft_reply",
+      "value": "返信を下書き"
+    },
+    {
+      "name": "tray_did_not_start",
+      "value": "起動失敗"
+    },
+    {
+      "name": "tray_empty_tasks",
+      "value": "タスクはまだありません"
+    },
+    {
+      "name": "tray_empty_tasks_detail",
+      "value": "チャットでやることを伝えると、Personaがタスクにします。"
+    },
+    {
+      "name": "tray_orphaned",
+      "value": "誰も作業していません"
+    },
+    {
+      "name": "tray_orphaned_error",
+      "value": "エラー後に終了"
+    },
+    {
+      "name": "tray_orphaned_offline",
+      "value": "パソコンがオフライン"
+    },
+    {
+      "name": "tray_orphaned_closed",
+      "value": "終了済み"
+    },
+    {
+      "name": "task_recovery_heading",
+      "value": "エージェントを起動できませんでした"
+    },
+    {
+      "name": "task_recovery_workspace_taken",
+      "value": "前回の試行で作られた作業場所が残っています"
+    },
+    {
+      "name": "task_recovery_launcher_missing",
+      "value": "{launcher} はこのコンピューターのターミナルで開始できません"
+    },
+    {
+      "name": "task_recovery_gone",
+      "value": "このタスクはありません"
+    },
+    {
+      "name": "task_recovery_starting",
+      "value": "エージェントを起動中"
+    },
+    {
+      "name": "task_recovery_starting_detail",
+      "value": "起動すると、ここにチャットが表示されます。"
+    },
+    {
+      "name": "task_recovery_instead",
+      "value": "{launcher} で開始"
+    },
+    {
+      "name": "task_recovery_remove_title",
+      "value": "タスクを削除しますか？"
+    },
+    {
+      "name": "task_start_title",
+      "value": "コンピューターのターミナルが質問しています：「{value}」"
+    },
+    {
+      "name": "task_start_generic",
+      "value": "回答を選ぶと、そのタブでエージェントが起動します。"
+    },
+    {
+      "name": "task_start_secret",
+      "value": "パスワードを求めていますが、Persona はここからパスワードを入力しません。ここでキャンセルするか、コンピューターで入力してください。"
+    },
+    {
+      "name": "task_start_host",
+      "value": "新しいホスト鍵を信頼するかはコンピューターで決めてください。ここからは拒否だけできます。"
+    },
+    {
+      "name": "task_start_until",
+      "value": "タブは {value} まで開いたままです。"
+    },
+    {
+      "name": "task_start_enter_yes",
+      "value": "Enter（はい）"
+    },
+    {
+      "name": "task_start_enter_no",
+      "value": "Enter（いいえ）"
+    },
+    {
+      "name": "task_start_enter",
+      "value": "Enter"
+    },
+    {
+      "name": "task_start_cancel",
+      "value": "キャンセル（Ctrl-C）"
+    },
+    {
+      "name": "task_start_yes",
+      "value": "はい"
+    },
+    {
+      "name": "task_start_no",
+      "value": "いいえ"
+    },
+    {
+      "name": "task_start_yes_key",
+      "value": "はい（{value}）"
+    },
+    {
+      "name": "task_start_no_key",
+      "value": "いいえ（{value}）"
+    },
+    {
+      "name": "task_start_update",
+      "value": "更新する（{value}）"
+    },
+    {
+      "name": "task_start_not_now",
+      "value": "今はしない（{value}）"
+    },
+    {
+      "name": "task_start_continue",
+      "value": "このまま続ける（{value}）"
+    },
+    {
+      "name": "task_start_stop_compinit",
+      "value": "compinit を中止（{value}）"
+    },
+    {
+      "name": "task_start_empty_zshrc",
+      "value": "空の .zshrc を作る（{value}）"
+    },
+    {
+      "name": "task_start_quit_wizard",
+      "value": "ウィザードを終了（{value}）"
+    },
+    {
+      "name": "task_start_no_trust",
+      "value": "信頼しない（{value}）"
+    },
+    {
+      "name": "task_start_cancel_key",
+      "value": "キャンセル（{value}）"
+    },
+    {
+      "name": "task_start_press",
+      "value": "{value}を押す"
+    },
+    {
+      "name": "tray_plan_start",
+      "value": "開始"
+    },
+    {
+      "name": "tray_plan_start_many",
+      "value": "{count}件のタスクを開始"
+    },
+    {
+      "name": "tray_plan_edit",
+      "value": "編集"
+    },
+    {
+      "name": "tray_plan_dismiss",
+      "value": "開始しない"
+    }
+  ]
+}

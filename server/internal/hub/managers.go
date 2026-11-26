@@ -77,15 +77,17 @@ type managerInfo struct {
 	// {"hide"}). Hidden: that is in effect, and the apps leave it out of the switcher. Not while it is the default, owns
 	// a machine or has something in its inbox that needs the user: a machine that falls back to it (its manager
 	// removed) shows it again by itself (#9055).
-	Hide     bool       `json:"hide,omitempty"`
-	Hidden   bool       `json:"hidden,omitempty"`
-	Host     string     `json:"host,omitempty"`
-	OS       string     `json:"os,omitempty"`
-	Arch     string     `json:"arch,omitempty"`
-	Deploy   string     `json:"deploy,omitempty"`
-	Version  string     `json:"version,omitempty"`
-	Since    *time.Time `json:"since,omitempty"`     // connected since (online only)
-	LastSeen *time.Time `json:"last_seen,omitempty"` // last connected (offline: "last synced")
+	Hide           bool       `json:"hide,omitempty"`
+	Hidden         bool       `json:"hidden,omitempty"`
+	Host           string     `json:"host,omitempty"`
+	MachineUID     string     `json:"machine_uid,omitempty"`
+	OS             string     `json:"os,omitempty"`
+	Arch           string     `json:"arch,omitempty"`
+	Deploy         string     `json:"deploy,omitempty"`
+	Version        string     `json:"version,omitempty"`
+	PendingRestart bool       `json:"pending_restart,omitempty"`
+	Since          *time.Time `json:"since,omitempty"`     // connected since (online only)
+	LastSeen       *time.Time `json:"last_seen,omitempty"` // last connected (offline: "last synced")
 	// Installing: made with POST /api/v1/managers, its code not traded yet; until when the code is good (a time past:
 	// it expired, and POST …/code gives a new one). Dropped db.ManagerInstallKept after it expired.
 	Installing *time.Time `json:"installing,omitempty"`
@@ -96,6 +98,10 @@ type managerInfo struct {
 	// (inbox.needs_you). Absent: not known (it is away or being installed, a build from before it reported one, or
 	// its stored items could not be read).
 	InboxNeedsYou *int `json:"inbox_needs_you,omitempty"`
+	// CountsView: it is online and its manager.hello named the counts view (assistantwire.CapabilityCountsView), so
+	// the apps draw its counts from the view it tells (counts_view.go). Absent while it is offline: an app keeps the
+	// view it has (D13 of docs/plans/plan-derived-counts.md).
+	CountsView bool `json:"counts_view,omitempty"`
 }
 
 // defaultManager is the manager the entries that belong to none go to (Siri, the shortcuts, the assistant page as
@@ -152,13 +158,15 @@ func (h *Hub) managerList(ctx context.Context) ([]managerInfo, error) {
 			continue
 		}
 		m := managerInfo{ID: b.ID, Name: b.Name, Default: b.ID == def, Builtin: h.builtinManager(b.ID),
-			Host: b.Host, OS: b.OS, Arch: b.Arch, Deploy: b.Deploy, Version: b.Version, LastSeen: b.LastSeen}
+			Host: b.Host, MachineUID: b.MachineUID, OS: b.OS, Arch: b.Arch, Deploy: b.Deploy, Version: b.Version, LastSeen: b.LastSeen}
 		if p, ok := live[b.ID]; ok {
 			since := p.Since
 			m.Online, m.Since = true, &since
-			m.Host, m.OS, m.Arch, m.Deploy, m.Version = p.Host, p.OS, p.Arch, p.Deploy, p.Version
+			m.Host, m.MachineUID, m.OS, m.Arch, m.Deploy, m.Version = p.Host, p.MachineUID, p.OS, p.Arch, p.Deploy, p.Version
+			m.PendingRestart = p.PendingRestart
 			m.NeedsUpdate = !slices.Contains(p.Capabilities, assistantwire.CapabilityConfigOwn)
 			m.InboxNeedsYou = needsYou[b.ID]
+			m.CountsView = slices.Contains(p.Capabilities, assistantwire.CapabilityCountsView)
 		}
 		if m.Builtin {
 			// Not hidden while it is used: the default, a computer of its own, or something in its inbox that needs
@@ -274,6 +282,19 @@ func init() {
 				h.bus.mu.Unlock()
 				h.tellManagers()
 			})
+		}
+	})
+	handleBusEvent(assistantwire.EventManagerStatus, func(h *Hub, c *busConn, params json.RawMessage) {
+		var p assistantwire.ManagerStatus
+		if json.Unmarshal(params, &p) != nil || c.ident.Role != bus.RoleManager {
+			return
+		}
+		h.bus.mu.Lock()
+		changed := c.presence.PendingRestart != p.PendingRestart
+		c.presence.PendingRestart = p.PendingRestart
+		h.bus.mu.Unlock()
+		if changed {
+			h.tellManagers()
 		}
 	})
 }

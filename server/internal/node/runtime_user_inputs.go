@@ -11,11 +11,11 @@ import (
 )
 
 // Runtime sessions use their existing item paging, without requiring #2071 or a new runtime SDK method.
-// The server reduces a complete, coherent read to positions; never return a partial list as the total.
-func (n *Node) runtimeUserInputs(ctx context.Context, sid string, read func(any) (json.RawMessage, error)) (proto.UserInputIndex, error) {
+// The server reduces a complete, coherent read to the input index. A partial scan never supplies a total.
+func (n *Node) runtimeUserInputs(ctx context.Context, sid string, before int, metaOnly bool, read func(any) (json.RawMessage, error)) (proto.UserInputIndex, error) {
+	var compact transcript.CompactInputIndex
 	var all []proto.Item
 	history := ""
-	before := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return proto.UserInputIndex{}, err
@@ -43,12 +43,23 @@ func (n *Node) runtimeUserInputs(ctx context.Context, sid string, read func(any)
 		if page.History != "" {
 			history = page.History
 		}
-		all = append(all, page.Items...)
+		visible := page.Items[:0]
+		for _, it := range page.Items {
+			if before <= 0 || it.Seq < before {
+				visible = append(visible, it)
+			}
+		}
+		if metaOnly {
+			sort.SliceStable(visible, func(i, j int) bool { return visible[i].Seq < visible[j].Seq })
+			compact.Add(visible)
+		} else {
+			all = append(all, visible...)
+		}
 		if !page.HasMore {
 			break
 		}
 		next := before
-		for _, it := range page.Items {
+		for _, it := range visible {
 			if next == 0 || it.Seq < next {
 				next = it.Seq
 			}
@@ -57,6 +68,9 @@ func (n *Node) runtimeUserInputs(ctx context.Context, sid string, read func(any)
 			return proto.UserInputIndex{}, errors.New("user input history made no progress")
 		}
 		before = next
+	}
+	if metaOnly {
+		return compact.Index(history), nil
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Seq < all[j].Seq })
 	positions := transcript.UserInputPositions(all)

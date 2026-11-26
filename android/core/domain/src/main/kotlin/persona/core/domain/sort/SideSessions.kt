@@ -84,7 +84,7 @@ fun sideSearchHits(rows: List<AgentSession>, listed: List<AgentSession>, setting
     val shown = listed.mapTo(HashSet()) { it.session.key }
     return rows.mapNotNull { row ->
         val s = row.session
-        val parent = s.foldedUnder?.takeIf { s.sideHome != null && it.isNotBlank() }?.let { SessionKey(s.machineId, it) }
+        val parent = s.foldedUnderKey?.takeIf { s.sideHome != null }
         parent?.takeIf { it in shown && settings.admits(s, machineNames = machineNames) }?.path
     }.toSet()
 }
@@ -100,6 +100,89 @@ fun AgentListSettings.sideHit(parent: Session, rows: List<Session>, machineNames
     val plain = copy(queryAncestors = emptySet())
     if (plain.admits(parent, machineNames = machineNames)) return null
     return sideSessions(rows, parent.key).firstOrNull { plain.admits(it, machineNames = machineNames) }?.key
+}
+
+/**
+ * The side sessions folded under [parent] that keep it Unread (#13524, web `unreadSides`): the unread ones,
+ * most recent first (`updated` descending, then `sessionId` ascending).
+ */
+fun unreadSideSessions(rows: List<Session>, parent: SessionKey): List<Session> =
+    rows.filter {
+        it.machineId == parent.machineId &&
+            it.foldedUnder == parent.sessionId &&
+            it.isFoldedSide &&
+            it.key != parent &&
+            it.agentState == AgentState.Unread
+    }
+        .distinctBy { it.key }
+        .sortedWith(compareByDescending<Session> { it.updated }.thenBy { it.sessionId })
+
+/**
+ * What a parent row kept Unread by folded side sessions names under its title (#13524): the most recent unread side
+ * ([latest]) when the app holds the folded rows, how many unread sides there are in total ([count]), the remaining
+ * unread sides' titles ([otherTitles], newest first, for accessibility), and whether only the sides are unread
+ * ([replacesPreview] — the parent's own already-seen preview does not stand under the unread dot).
+ */
+data class UnreadSideSummary(
+    val latest: Session? = null,
+    val count: Int = 0,
+    val otherTitles: List<String> = emptyList(),
+    val replacesPreview: Boolean = false,
+) {
+    /** Additional unread side sessions beyond [latest] ("+N"). */
+    val extraCount: Int get() = if (latest != null) (count - 1).coerceAtLeast(0) else 0
+}
+
+/**
+ * The unread side-session summary for [parent]'s list row (#13524), or null when the row has no unread side (or is
+ * not shown as Unread, e.g. Working or Needs you). [ownParent] is the parent's own visible row before [foldRows]
+ * applied the folded state, so the row knows whether the parent itself is unread too. [rows] are the visible sessions
+ * (with local seen marks applied).
+ */
+fun unreadSideSummary(parent: Session, ownParent: Session? = null, rows: List<Session> = emptyList()): UnreadSideSummary? {
+    if (parent.assistant || parent.foldedState != AgentState.Unread) return null
+    val heldSides = sideSessions(rows, parent.key)
+    val ownUnread = (ownParent ?: parent).agentState == AgentState.Unread
+    if (heldSides.isNotEmpty()) {
+        val unread = unreadSideSessions(rows, parent.key)
+        if (unread.isEmpty()) return null
+        return UnreadSideSummary(
+            latest = unread.first(),
+            count = unread.size,
+            otherTitles = unread.drop(1).map { it.displayTitle },
+            replacesPreview = !ownUnread,
+        )
+    }
+    val hubCount = parent.children?.sidesUnread ?: 0
+    if (hubCount <= 0) return null
+    return UnreadSideSummary(
+        latest = null,
+        count = hubCount,
+        otherTitles = emptyList(),
+        replacesPreview = !ownUnread,
+    )
+}
+
+/**
+ * How many root rows in [hubSessions] that the hub counted as Unread are no longer Unread in [visibleSessions]
+ * (after local seen marks, #13524, web `heldCounts`). A parent marked seen locally stays counted Unread while any
+ * folded side is still unread; once its held sides are seen, it leaves Unread counts at once.
+ */
+fun unreadClearedBySeen(hubSessions: List<Session>, visibleSessions: List<Session>): Int {
+    val listed = hubSessions.mapTo(HashSet()) { it.key }
+    val visibleByKey = visibleSessions.associateBy { it.key }
+    val visibleSides = visibleSessions.filter { it.isFoldedSide }
+        .mapNotNull { side -> side.foldedUnderKey?.let { it to side } }
+        .groupBy({ it.first }, { it.second })
+    var cleared = 0
+    for (hub in hubSessions) {
+        if (hub.foldedUnderKey?.let { it in listed } == true) continue
+        if (hub.foldedState != AgentState.Unread) continue
+        val own = visibleByKey[hub.key] ?: hub
+        val held = visibleSides[hub.key].orEmpty().filter { it.key != hub.key }
+        if (own.withHeldSides(held).foldedState != AgentState.Unread) cleared++
+    }
+    return cleared
 }
 
 /**

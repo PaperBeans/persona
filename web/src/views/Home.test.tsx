@@ -40,6 +40,7 @@ vi.mock("../lib/ops", async (importOriginal) => ({ ...(await importOriginal<type
 const { Home, offlineLine, rowTags } = await import("./Home");
 const { answerCard } = await import("../lib/card-answer");
 const { allowBody } = await import("../lib/quick-answers");
+const { loadPages } = await import("../lib/lazy-page");
 const { t } = await import("../i18n");
 
 const mac: Machine = { id: "mac", name: "Mac", online: true };
@@ -209,6 +210,29 @@ describe("the overview", () => {
       expect(html).toContain("先接入一台电脑，再开始使用 Agent。");
       expect(html).not.toContain("没能读到 Agent 的状态");
     });
+  });
+
+  it("keeps the Computers row interaction style before and after the Rows view loads", async () => {
+    const row = /<a [^>]*href="\/machines\/mac"[^>]*class="[^"]*\bcard-interactive\b/;
+    expect(render([], [], { machines: [mac] })).toMatch(row);
+    await loadPages();
+    const { OVERVIEW_MACHINE_VIEW_KEY } = await import("./OverviewMachineView");
+    localStorage.setItem(OVERVIEW_MACHINE_VIEW_KEY, "rows");
+    try {
+      const html = render([], [], { machines: [mac] });
+      expect(html).toMatch(/role="radio" aria-checked="true" data-selected="true"[^>]*>行<\/button>/);
+      expect(html).toMatch(row);
+    } finally {
+      localStorage.removeItem(OVERVIEW_MACHINE_VIEW_KEY);
+    }
+  });
+
+  it("offers the Cards and Rows display switch on the Computers heading, with Cards selected by default", async () => {
+    await loadPages();
+    const html = render([], [], { machines: [mac] });
+    expect(html).toContain('role="radiogroup" aria-label="显示方式"');
+    expect(html).toMatch(/role="radio" aria-checked="true" data-selected="true"[^>]*>卡片<\/button>/);
+    expect(html).toMatch(/role="radio" aria-checked="false" data-selected="false"[^>]*>行<\/button>/);
   });
 
   it("never builds an empty sentence: with only a card whose agent is not counted, it says how many requests wait (audit item 30)", () => {

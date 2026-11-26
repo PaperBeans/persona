@@ -1,0 +1,140 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_ssh_title",
+      "value": "SSH トンネル"
+    },
+    {
+      "name": "phone_pair_ssh_server",
+      "value": "SSH サーバー"
+    },
+    {
+      "name": "phone_pair_ssh_key_help",
+      "value": "SSH サーバーで許可した秘密鍵を入力してください。認証の前にサーバーの SHA-256 ホスト指紋を確認します。"
+    },
+    {
+      "name": "phone_pair_ssh_tls_pin",
+      "value": "Hub の TLS 指紋"
+    },
+    {
+      "name": "phone_pair_ssh_tls_help",
+      "value": "ペアリング画面で Hub の HTTPS アドレスを指定します。ペアリングリンクには Hub の TLS 公開鍵の指紋（SPKI）が含まれます。アドレスを手入力する場合は同じ Hub の43文字の指紋を入力してください。"
+    },
+    {
+      "name": "phone_pair_ssh_this_key",
+      "value": "この端末の公開鍵"
+    },
+    {
+      "name": "phone_pair_ssh_copy_key",
+      "value": "公開鍵をコピー"
+    },
+    {
+      "name": "phone_pair_ssh_copy_restricted",
+      "value": "authorized_keys の行をコピー"
+    },
+    {
+      "name": "phone_pair_ssh_public_help",
+      "value": "制限付きの行を SSH サーバーの authorized_keys に追加すると、この Hub のみへ転送できます。秘密鍵はこの端末に保存されます。"
+    },
+    {
+      "name": "phone_pair_ssh_import",
+      "value": "既存の秘密鍵を使用"
+    },
+    {
+      "name": "phone_pair_ssh_use_device",
+      "value": "この端末の鍵を使用"
+    },
+    {
+      "name": "phone_pair_ssh_copied",
+      "value": "コピーしました"
+    },
+    {
+      "name": "phone_pair_ssh_saved_key",
+      "value": "確認済みのサーバーのフィンガープリント"
+    },
+    {
+      "name": "phone_pair_ssh_presented_key",
+      "value": "今回のフィンガープリント"
+    },
+    {
+      "name": "phone_pair_ssh_key_changed",
+      "value": "SSH サーバーのフィンガープリントが変わりました"
+    },
+    {
+      "name": "phone_pair_ssh_confirm_peer",
+      "value": "信頼する前に、サーバーのホスト公開鍵と照合してください。"
+    },
+    {
+      "name": "phone_pair_ssh_trust_replacement",
+      "value": "新しいフィンガープリントを信頼"
+    },
+    {
+      "name": "phone_pair_ssh_trust",
+      "value": "信頼して保存"
+    },
+    {
+      "name": "phone_pair_ssh_testing",
+      "value": "テスト中…"
+    },
+    {
+      "name": "phone_pair_ssh_remove_title",
+      "value": "SSH トンネルを削除しますか？"
+    },
+    {
+      "name": "phone_pair_ssh_remove_help",
+      "value": "トンネルの設定が削除されます。サーバーで権限も取り消す場合は、該当する authorized_keys の行を削除してください。"
+    },
+    {
+      "name": "phone_pair_ssh_target",
+      "value": "トンネルの接続先"
+    },
+    {
+      "name": "phone_pair_ssh_target_address",
+      "value": "アドレス"
+    },
+    {
+      "name": "phone_pair_ssh_target_help",
+      "value": "SSH サーバーから見た Hub のアドレスを入力します。同じマシンでは通常 127.0.0.1:18660 を使います。"
+    },
+    {
+      "name": "phone_pair_ssh_always",
+      "value": "常に SSH を使用"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_help",
+      "value": "オフの場合はまず Hub に直接接続し、接続できないときに SSH トンネルを使います。"
+    },
+    {
+      "name": "phone_pair_ssh_direct_active",
+      "value": "Hub に直接接続中"
+    },
+    {
+      "name": "phone_pair_ssh_fallback_parent",
+      "value": "まずこのアドレスに直接接続し、接続できないときは SSH トンネルを使います。"
+    },
+    {
+      "name": "phone_pair_ssh_always_parent",
+      "value": "この Hub には常に SSH トンネル経由で接続します。"
+    },
+    {
+      "name": "phone_pair_ssh_host",
+      "value": "ホスト"
+    },
+    {
+      "name": "phone_pair_ssh_port",
+      "value": "ポート"
+    },
+    {
+      "name": "phone_pair_ssh_user",
+      "value": "ユーザー名"
+    },
+    {
+      "name": "phone_pair_ssh_server_port",
+      "value": "SSH サーバーのポート"
+    },
+    {
+      "name": "phone_pair_ssh_forward_port",
+      "value": "トンネルの接続先ポート"
+    }
+  ]
+}

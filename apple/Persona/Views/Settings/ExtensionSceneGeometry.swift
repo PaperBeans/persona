@@ -156,6 +156,20 @@ nonisolated struct ExtensionSceneProjection: Equatable, Sendable {
         return simd_float4x4(columns: (r, u, o, p))
     }
 
+    /// A pin's pill around `anchor`, moved just enough to stay `Theme.Scene.pinEdgeInset` inside the viewport (centred
+    /// when it is wider than the viewport). A pill whose anchor is off screen (the model zoomed or turned past it) stays
+    /// with its anchor, so pins never pile up along an edge.
+    func keptInside(_ rect: CGRect, anchor: CGPoint) -> CGRect {
+        guard CGRect(origin: .zero, size: viewport).contains(anchor) else { return rect }
+        let inset = Theme.Scene.pinEdgeInset
+        func fit(_ origin: CGFloat, _ length: CGFloat, _ room: CGFloat) -> CGFloat {
+            guard length + 2 * inset <= room else { return (room - length) * 0.5 }
+            return min(max(origin, inset), room - inset - length)
+        }
+        return CGRect(x: fit(rect.minX, rect.width, viewport.width), y: fit(rect.minY, rect.height, viewport.height),
+                      width: rect.width, height: rect.height)
+    }
+
     /// Closed-form 2D projection in `viewport` points and camera-forward depth in metres.
     func project(planX: Double, planY: Double, height: Double = 0) -> (point: CGPoint, depth: Double) {
         let world = SIMD3<Double>(planX, height, -planY)

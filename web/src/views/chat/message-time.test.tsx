@@ -50,7 +50,7 @@ const count = (html: string, s: string) => html.split(s).length - 1;
 async function replyBar(pinned?: boolean) {
   await act(async () => root.render(<ReplyBar text="All done." ts={ts} more={[]} pinned={pinned} />));
   const bar = host.querySelector<HTMLElement>("[data-reply-bar]")!;
-  return { bar, time: bar.querySelector("time")!, buttons: bar.querySelector("button")!.parentElement! };
+  return { bar, time: bar.querySelector("time")! };
 }
 
 describe("message send time", () => {
@@ -81,18 +81,21 @@ describe("message send time", () => {
     expect(bar.classList.contains("opacity-0")).toBe(true);
   });
 
-  it("the chat's last reply keeps its time on screen; its buttons still wait for the pointer", async () => {
-    const { bar, time, buttons } = await replyBar(true);
-    expect(bar.classList.contains("opacity-0")).toBe(false);
+  it("the chat's last reply keeps its time on screen with its actions", async () => {
+    const { bar, time } = await replyBar(true);
     expect(time.closest(".opacity-0")).toBeNull();
-    expect(buttons.classList.contains("opacity-0")).toBe(true);
+    expect(bar.querySelector("button")?.closest(".opacity-0")).toBeNull();
   });
 
-  it("the pinned time keeps up without the pointer", async () => {
-    const { time } = await replyBar(true);
+  it("the pinned time updates on its own clock across hover changes", async () => {
+    const { bar, time } = await replyBar(true);
     const before = time.textContent;
+    act(() => void vi.advanceTimersByTime(5_000)); // crosses the minute mark before the next timer tick
+    act(() => void bar.parentElement!.dispatchEvent(new MouseEvent("mouseenter")));
+    expect(time.textContent).toBe(before);
+    act(() => void bar.parentElement!.dispatchEvent(new MouseEvent("mouseleave")));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      await vi.advanceTimersByTimeAsync(25_000);
     });
     expect(time.textContent).not.toBe(before);
   });

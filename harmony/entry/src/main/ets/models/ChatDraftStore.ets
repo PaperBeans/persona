@@ -6,6 +6,39 @@ export class ChatDraft {
   context: string = '';
   revision: string = '';
 }
+/** A prepared forwarded image is the same MIME + base64 pair as a normal picked image. */
+export class DraftForwardImage {
+  id:string='';
+  mime:string='';
+  data:string='';
+  item:string='';
+}
+const FORWARD_CHUNK=128*1024;
+function draftRows(raw:string):Record<string,Object>[] {
+  if (!raw) return [];
+  const doc=Wire.parse(raw), rows=Wire.rows(doc,'contexts');
+  return rows.length ? rows : Wire.text(doc,'kind') ? [doc] : [];
+}
+export function draftForwardRows(raw:string):Record<string,Object>[] {
+  return draftRows(raw).filter((r:Record<string,Object>)=>Wire.text(r,'kind')==='forward');
+}
+function savedForwardImages(raw:string):Record<string,Object>[] {
+  const result:Record<string,Object>[]=[];
+  for(const row of draftForwardRows(raw)) for(const file of Wire.rows(row,'local_images')) {
+    if (/^[0-9a-f-]{36}$/i.test(Wire.text(file,'id')) && ['image/jpeg','image/png'].includes(Wire.text(file,'mime')) &&
+      Number.isInteger(Wire.number(file,'chunks')) && Wire.number(file,'chunks')>0 && Wire.number(file,'chunks')<=32) result.push(file);
+  }
+  return result;
+}
+function imageKey(target:string,id:string,index:number):string { return 'draftmedia:'+target+':'+id+':'+index; }
+function removedMedia(target:string,before:string,after:string):string[] {
+  const remaining=new Set<string>(savedForwardImages(after).map((f:Record<string,Object>)=>Wire.text(f,'id')));
+  const keys:string[]=[];
+  for(const f of savedForwardImages(before)) if(!remaining.has(Wire.text(f,'id'))) {
+    for(let i=0;i<Wire.number(f,'chunks');i++) keys.push(imageKey(target,Wire.text(f,'id'),i));
+  }
+  return keys;
+}
 export class ChatOutboxEntry {
   id: string = '';
   target: string = '';
@@ -17,6 +50,8 @@ export class ChatOutboxEntry {
   // Rebound from the local store on read; never trust a persisted process epoch.
   localEpoch: number = 0;
   at: number = 0;
+  acceptedAt: number = 0;
+  afterSequence: number = 0;
   state: string = 'pending';
   confirmedPending: boolean = false;
   draft: string = '';
@@ -45,8 +80,8 @@ export class ChatDraftStore {
   async readSessionSnapshot(scope: string): Promise<string> {
     const key = 'snapshot:' + scope; return this.transaction(key, (): Promise<string> => this.local.get(key));
   }
-  async saveSessionSnapshot(scope: string, sessions: ResourceRow[], conversations: ResourceRow[], heldActions: Record<string, Object>[], current: () => boolean): Promise<void> {
-    const key = 'snapshot:' + scope, value = JSON.stringify({ sessions: sessions, conversations: conversations, heldActions: heldActions });
+  async saveSessionSnapshot(scope: string, sessions: ResourceRow[], conversations: ResourceRow[], heldActions: Record<string, Object>[], current: () => boolean, sidebarConfig?: string): Promise<void> {
+    const key = 'snapshot:' + scope, value = JSON.stringify({ sessions: sessions, conversations: conversations, heldActions: heldActions, sidebarConfig: sidebarConfig });
     await this.transaction(key, async (epoch: number): Promise<void> => {
       if (current()) await this.local.put(key, value, epoch);
     });
@@ -82,20 +117,82 @@ export class ChatDraftStore {
   async save(target: string, draft: ChatDraft): Promise<void> {
     const key = 'draft:' + target, raw = JSON.stringify(draft); return this.transaction(key, async (epoch: number): Promise<void> => this.local.put(key, raw, epoch));
   }
+  async appendForwards(target:string,references:Record<string,Object>[],images:DraftForwardImage[],revision:string,
+    current:()=>boolean):Promise<ChatDraft> {
+    const key='draft:'+target;
+    return this.transaction(key,async(epoch:number):Promise<ChatDraft>=>{
+      if (!current() || references.length<1 || references.length>30) throw new Error('request_updated');
+      const result=this.decodeDraft(await this.local.get(key));
+      const refs=draftRows(result.context);
+      if(refs.some((r:Record<string,Object>)=>Wire.text(r,'local_transfer')===revision))return result;
+      const values=new Map<string,string>();
+      let available=Math.max(0,4-savedForwardImages(result.context).length);
+      for (const original of references) {
+        const item=Wire.text(original,'msg'),origin=Wire.text(original,'url');
+        if(item && refs.some((ref:Record<string,Object>)=>Wire.text(ref,'kind')==='forward' && Wire.text(ref,'msg')===item && Wire.text(ref,'url')===origin))continue;
+        const entry=Wire.parse(JSON.stringify(original));entry['local_transfer']=revision;
+        const photos:Record<string,Object>[]=[];
+        for(const accepted of images) {
+          if(!available || accepted.item!==Wire.text(entry,'msg') || !accepted.data) continue;
+          if(!/^[0-9a-f-]{36}$/i.test(accepted.id) || !['image/jpeg','image/png'].includes(accepted.mime) || accepted.data.length>4*1024*1024) throw new Error('chat_attachment_request_too_large');
+          const chunks=Math.ceil(accepted.data.length/FORWARD_CHUNK);
+          for(let i=0;i<chunks;i++) values.set(imageKey(target,accepted.id,i),accepted.data.slice(i*FORWARD_CHUNK,(i+1)*FORWARD_CHUNK));
+          photos.push(Wire.payload(['id','mime','chunks'],[accepted.id,accepted.mime,chunks]));available--;
+        }
+        if(photos.length)entry['local_images']=photos;
+        refs.push(entry);
+      }
+      result.context=JSON.stringify(Wire.payload(['contexts'],[refs]));result.revision=revision;
+      values.set(key,JSON.stringify(result));
+      if(!current())throw new Error('request_updated');
+      await this.local.updateRecords(key,epoch,values,[],current);
+      return result;
+    });
+  }
+  async forwardedImages(target:string,context:string,available:number,current:()=>boolean):Promise<Object[]> {
+    const result:Object[]=[];
+    for(const file of savedForwardImages(context).slice(0,Math.max(0,available))) {
+      let data='';
+      for(let i=0;i<Wire.number(file,'chunks');i++){
+        if(!current())throw new Error('request_updated');
+        const part=await this.local.get(imageKey(target,Wire.text(file,'id'),i));if(!part)throw new Error('chat_attachment_storage_unavailable');
+        data+=part;
+      }
+      if(!current())throw new Error('request_updated');
+      result.push(Wire.payload(['mime','data'],[Wire.text(file,'mime'),data]));
+    }
+    return result;
+  }
+  async discardForwardMedia(target:string,before:string,after:string):Promise<void> {
+    const keys=removedMedia(target,before,after);if(!keys.length)return;
+    const main='draft:'+target;
+    await this.transaction(main,async(epoch:number):Promise<void>=>{
+      const current=this.decodeDraft(await this.local.get(main));
+      const safe=removedMedia(target,before,current.context).filter((k:string)=>keys.includes(k));
+      if(safe.length) await this.local.updateRecords(main,epoch,new Map<string,string>(),safe,()=>true);
+    });
+  }
+
   async acknowledge(target: string, revision: string): Promise<boolean> {
     if (!revision) return false;
     const key = 'draft:' + target;
     return this.transaction(key, async (epoch: number): Promise<boolean> => {
       const current = this.decodeDraft(await this.local.get(key));
       if (current.revision !== revision) return false;
-      await this.local.put(key, JSON.stringify(new ChatDraft()), epoch); return true;
+      const empty=JSON.stringify(new ChatDraft()), remove=removedMedia(target,current.context,'');
+      if(remove.length) {
+        const values=new Map<string,string>();values.set(key,empty);
+        await this.local.updateRecords(key,epoch,values,remove,()=>true);
+      } else await this.local.put(key,empty,epoch);
+      return true;
     });
   }
   private decodeEntry(data: Record<string, Object>): ChatOutboxEntry {
     const entry = new ChatOutboxEntry(); entry.id = Wire.text(data, 'id'); entry.target = Wire.text(data, 'target');
     entry.revision = Wire.text(data, 'revision'); entry.text = Wire.text(data, 'text'); entry.context = Wire.text(data, 'context');
     entry.draft = Wire.text(data, 'draft', entry.text); entry.confirmedPending = Wire.bool(data, 'confirmedPending');
-    entry.attachmentSnapshot = Wire.text(data, 'attachmentSnapshot'); entry.imageCount = Wire.number(data, 'imageCount'); entry.at = Wire.number(data, 'at'); entry.state = Wire.text(data, 'state', 'unknown'); return entry;
+    entry.attachmentSnapshot = Wire.text(data, 'attachmentSnapshot'); entry.imageCount = Wire.number(data, 'imageCount'); entry.at = Wire.number(data, 'at'); entry.state = Wire.text(data, 'state', 'unknown');
+    entry.acceptedAt = Wire.number(data, 'acceptedAt'); entry.afterSequence = Wire.number(data, 'afterSequence'); return entry;
   }
   private async entries(key: string): Promise<ChatOutboxEntry[]> {
     const raw = await this.local.get(key), data = raw ? Wire.record(JSON.parse(raw) as Object) : Wire.payload([], []), entries: ChatOutboxEntry[] = [];
@@ -127,7 +224,7 @@ export class ChatDraftStore {
       for (const old of removed) { try { await this.local.remove(key + ':' + old.id, epoch); } catch (_) {} }
     });
   }
-  async settle(scope: string, id: string, state: string): Promise<void> {
+  async settle(scope: string, id: string, state: string, acceptedAt: number = 0): Promise<void> {
     if (!['pending', 'unknown', 'failed', 'done', 'checked'].includes(state)) throw new Error('unsupported');
     const key = 'outbox:' + scope;
     return this.transaction(key, async (epoch: number): Promise<void> => {
@@ -136,7 +233,16 @@ export class ChatDraftStore {
       // An acknowledged message cannot become retryable because a later read or cleanup failed.
       if (entry.state === 'done' && state !== 'done') return;
       entry.state = state === 'checked' ? 'failed' : state; entry.confirmedPending = state === 'pending';
+      if (state === 'done' && acceptedAt > 0 && !entry.acceptedAt) entry.acceptedAt = acceptedAt;
       await this.local.put(key + ':' + entry.id, JSON.stringify(entry), epoch);
+    });
+  }
+  async finishFeedback(scope: string, id: string): Promise<void> {
+    const key = 'outbox:' + scope;
+    return this.transaction(key, async (epoch: number): Promise<void> => {
+      const raw = await this.local.get(key + ':' + id); if (!raw) return;
+      const entry = this.decodeEntry(Wire.parse(raw)); entry.acceptedAt = -1;
+      await this.local.put(key + ':' + id, JSON.stringify(entry), epoch);
     });
   }
   async attachmentsCommitted(scope: string, id: string): Promise<void> {

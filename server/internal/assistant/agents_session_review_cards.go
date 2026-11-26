@@ -271,6 +271,53 @@ func (s *Service) sessionReviewForAnswer(ctx context.Context, id string) (sessio
 	return e, sessionReviewInteraction(e), nil
 }
 
+// Register a result already listed from the book if its snapshot waiter has
+// not reached the phone queue. Read it under the same lock as reconnect so a
+// late callback cannot register a superseded result or withdraw another card.
+func (s *Service) startListedReviewWaiter(ctx context.Context, id string) (*askedOne, error) {
+	s.pubMu.Lock()
+	defer s.pubMu.Unlock()
+	e, ix, err := s.sessionReviewForAnswer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if e.State != sessionReviewPending || !time.Now().Before(ix.ExpiresAt) {
+		return nil, errGone(id)
+	}
+	s.reconcilePhoneAsks([]proto.Interaction{ix}, func(string) bool { return false })
+	s.fleet.askMu.Lock()
+	defer s.fleet.askMu.Unlock()
+	q := s.fleet.asked[id]
+	if q == nil || q.ready == nil {
+		return nil, errGone(id)
+	}
+	return q, nil
+}
+
+func (s *Service) readySessionReview(ctx context.Context, id string) (sessionReview, error) {
+	q, err := s.startListedReviewWaiter(ctx, id)
+	if err != nil {
+		return sessionReview{}, err
+	}
+	select {
+	case <-ctx.Done():
+		return sessionReview{}, ctx.Err()
+	case <-q.ready:
+	}
+	if q.registrationErr != nil {
+		return sessionReview{}, q.registrationErr
+	}
+	// The waiter can also finish by replaying an existing durable outcome.
+	e, ix, err := s.sessionReviewForAnswer(ctx, id)
+	if err != nil {
+		return sessionReview{}, err
+	}
+	if _, ok := s.pendingIx(id); !ok || e.State != sessionReviewPending || !time.Now().Before(ix.ExpiresAt) {
+		return sessionReview{}, errGone(id)
+	}
+	return e, nil
+}
+
 // sessionReviewResolve makes an app's answer synchronous. Send happens before the card is claimed: a failure keeps the
 // same card and no outcome. A durable delivery marker and client_msg_id make a later retry safe after any uncertain step.
 func (s *Service) sessionReviewResolve(ctx context.Context, id string, r proto.Resolution, approver *assistantwire.HandoffApprover) (bool, error) {
@@ -291,6 +338,12 @@ func (s *Service) sessionReviewResolve(ctx context.Context, id string, r proto.R
 	action := sessionReviewAnswerKind(ix, r)
 	if action == "" {
 		return true, &rpc.Error{Code: "bad_request", Message: "a review card takes Send to agent or Dismiss"}
+	}
+	if _, registered := s.pendingIx(id); !registered {
+		e, err = s.readySessionReview(ctx, id)
+		if err != nil {
+			return true, err
+		}
 	}
 	if action == sessionReviewAnswerSend && e.Delivery != sessionReviewDeliverySent {
 		if err := s.deliverSessionReview(ctx, &e); err != nil {
@@ -398,7 +451,19 @@ func (s *Service) finishSessionReviewAnswer(ctx context.Context, e sessionReview
 		v.State, v.ResolvedAt = state, &now
 		return nil
 	}); err != nil {
-		return err
+		if !errors.Is(err, errSessionReviewConflict) {
+			return err
+		}
+		// A second manager may have finalized the same durable answer while this
+		// request still held the pending revision. Acknowledge only that result.
+		winner, _, readErr := s.sessionReviewForAnswer(ctx, e.ID)
+		if readErr != nil {
+			return readErr
+		}
+		if winner.MachineID != e.MachineID || winner.SessionID != e.SessionID || winner.State != state ||
+			(state == sessionReviewSent && winner.Delivery != sessionReviewDeliverySent) {
+			return err
+		}
 	}
 	s.publishSoon()
 	return nil

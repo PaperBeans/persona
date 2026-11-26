@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ func TestRenderSpaceRecording(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*3600)
 	start := time.Date(2026, 11, 22, 1, 30, 0, 0, time.UTC)
 	end := start.Add(3725 * time.Second)
-	u := kb.RecordingUpload{Revision: 3, StartedAt: start, EndedAt: &end, Duration: 3725.4, Language: "en-US", Device: "phone",
+	u := recordingwire.RecordingUpload{Revision: 3, StartedAt: start, EndedAt: &end, Duration: 3725.4, Language: "en-US", Device: "phone",
 		Title: "Example \"budget\" review", Kind: kb.RecordingMeeting, Complete: true,
 		Segments: []kb.RecordingSegment{{Start: 0, End: 2, Text: "Hello  there."}, {Start: 3723, End: 3725, Text: "Bye.", Echo: true}}}
 	got := renderSpaceRecording("0b6f1c9e-3a52-4d1e-9a8f-2c4b5d6e7f80", u, []string{"finance"}, loc)
@@ -37,7 +38,7 @@ func TestRenderSpaceRecording(t *testing.T) {
 		t.Errorf("rendered:\n%s\nwant:\n%s", got, want)
 	}
 
-	plain := renderSpaceRecording("0b6f1c9e-3a52-4d1e-9a8f-2c4b5d6e7f80", kb.RecordingUpload{Revision: 1, StartedAt: start, Device: "watch", Kind: kb.RecordingNote}, nil, loc)
+	plain := renderSpaceRecording("0b6f1c9e-3a52-4d1e-9a8f-2c4b5d6e7f80", recordingwire.RecordingUpload{Revision: 1, StartedAt: start, Device: "watch", Kind: kb.RecordingNote}, nil, loc)
 	wantPlain := "---\nrecording: 0b6f1c9e-3a52-4d1e-9a8f-2c4b5d6e7f80\nkind: note\nstarted_at: 2026-11-22T09:30:00+08:00\ndevice: watch\n" +
 		"complete: false\nrevision: 1\ncategories: []\n---\n\n# 2026-11-22 09:30\n\n"
 	if plain != wantPlain {

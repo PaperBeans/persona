@@ -7,11 +7,11 @@
 // WorkflowCard); a background command or Monitor opens its result, full command and bounded output here, with Back to
 // the list, before its output file is known too (a Monitor's arrives with its first event, #10852); a subagent opens
 // only with one. The panel reads the session from the store, live; clocks tick only while something runs.
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { credentialOwner, subscribeCredentialOwner } from "../../lib/api";
-import { useBackgroundChat, type BackgroundPanel as BackgroundPanelObject } from "../../lib/background-panel";
-import { openPanel } from "../../lib/panel";
+import { useBackgroundChat, type BackgroundChat, type BackgroundPanel as BackgroundPanelObject } from "../../lib/background-panel";
+import { openPanel, type Panel } from "../../lib/panel";
 import { composing } from "../../lib/send-history";
 import { getSession, useStore } from "../../lib/store";
 import { backgroundDurationMs, backgroundStatus, backgroundTitle, loopCadence, loopNext, loopTask } from "../../lib/tasks";
@@ -60,11 +60,121 @@ function taskIcon(task: BackgroundTask): IconName {
   return "run";
 }
 
+export interface BackgroundCommandDetailViewProps {
+  mid: string;
+  sid: string;
+  cwd?: string;
+  task: BackgroundTask;
+  running: boolean;
+  focus: boolean;
+  owner: string;
+  manager?: string;
+  onBack: () => void;
+  onOpenFile: () => void;
+}
+
+export interface BackgroundPanelProps {
+  mid: string;
+  sid: string;
+  opened: BackgroundPanelObject;
+  onClose: () => void;
+  /** Explicit session snapshot (`null` means absent) skips the default store subscription. */
+  session?: Session | null;
+  /** Explicit auth partition skips the default credential-owner subscription. */
+  owner?: string;
+  /** Live session reader for action-time fencing; defaults to the latest controlled `session` or the default store. */
+  getCurrentSession?: () => Session | undefined;
+  /** Live auth-partition reader for action-time fencing; defaults to the latest controlled `owner` or `credentialOwner`. */
+  getCurrentOwner?: () => string;
+  /** Explicit chat actions (`null` means no chat is attached) skips the default background-chat registry. */
+  chat?: BackgroundChat | null;
+  /** Replaces the default side-panel navigator for list, task and file transitions. */
+  onOpenPanel?: (panel: Panel) => void;
+  /** Replaces clipboard writes when copying a command from the list. */
+  onCopyCommand?: (command: string) => void | Promise<void>;
+  /** Replaces the default command-output detail view when a host supplies its own output reader or view. */
+  renderCommandDetail?: (detail: BackgroundCommandDetailViewProps) => ReactNode;
+}
+
+export interface BackgroundListProps {
+  session: Session | undefined;
+  mid: string;
+  sid: string;
+  onOpenRun: (task: string) => void;
+  onOpenTask: (task: BackgroundTask) => void;
+  inOverview?: boolean;
+  /** Explicit auth partition skips reading the default credential owner. */
+  owner?: string;
+  /** Live session reader for copy-action fencing; defaults to the latest controlled `session` when `owner` is supplied, else the default store. */
+  getCurrentSession?: () => Session | undefined;
+  /** Live auth-partition reader for copy-action fencing; defaults to the latest controlled `owner`, else `credentialOwner`. */
+  getCurrentOwner?: () => string;
+  /** Explicit chat actions (`null` means no chat is attached) skips the default background-chat registry. */
+  chat?: BackgroundChat | null;
+  /** Replaces clipboard writes when copying a command. */
+  onCopyCommand?: (command: string) => void | Promise<void>;
+}
+
 /** `opened`: the panel object as last asked for (lib/panel.ts): one naming a run opens that run's detail, every time it
  *  is asked for again (a new object), as cindy consumes focusTaskId once. */
-export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; sid: string; opened: BackgroundPanelObject; onClose: () => void }) {
-  const session = useStore(() => getSession(mid, sid));
+export function BackgroundPanel(props: BackgroundPanelProps) {
+  if (props.session !== undefined) {
+    return <BackgroundPanelOwner {...props} resolvedSession={props.session ?? undefined} sessionControlled />;
+  }
+  return <DefaultSessionBackgroundPanel {...props} />;
+}
+
+function DefaultSessionBackgroundPanel(props: BackgroundPanelProps) {
+  const session = useStore(() => getSession(props.mid, props.sid));
+  return <BackgroundPanelOwner {...props} resolvedSession={session} sessionControlled={false} />;
+}
+
+type BackgroundPanelOwnerProps = BackgroundPanelProps & {
+  resolvedSession: Session | undefined;
+  sessionControlled: boolean;
+};
+
+function BackgroundPanelOwner(props: BackgroundPanelOwnerProps) {
+  if (props.owner !== undefined) {
+    return <BackgroundPanelView {...props} resolvedOwner={props.owner} ownerControlled />;
+  }
+  return <DefaultOwnerBackgroundPanel {...props} />;
+}
+
+function DefaultOwnerBackgroundPanel(props: BackgroundPanelOwnerProps) {
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
+  return <BackgroundPanelView {...props} resolvedOwner={owner} ownerControlled={false} />;
+}
+
+type BackgroundPanelViewProps = BackgroundPanelOwnerProps & {
+  resolvedOwner: string;
+  ownerControlled: boolean;
+};
+
+function BackgroundPanelView({
+  mid,
+  sid,
+  opened,
+  onClose,
+  resolvedSession: session,
+  sessionControlled,
+  resolvedOwner: owner,
+  ownerControlled,
+  getCurrentSession,
+  getCurrentOwner,
+  chat,
+  onOpenPanel,
+  onCopyCommand,
+  renderCommandDetail,
+}: BackgroundPanelViewProps) {
+  const latestSession = useRef(session);
+  latestSession.current = session;
+  const latestOwner = useRef(owner);
+  latestOwner.current = owner;
+  const openPanelRef = useRef(onOpenPanel ?? openPanel);
+  openPanelRef.current = onOpenPanel ?? openPanel;
+  const readSession = () => (getCurrentSession ? getCurrentSession() : sessionControlled ? latestSession.current : getSession(mid, sid));
+  const readOwner = () => (getCurrentOwner ? getCurrentOwner() : ownerControlled ? latestOwner.current : credentialOwner());
   const firstOwner = useRef(owner);
   const owned = firstOwner.current === owner;
   type Selection = { kind: "run"; id: string; fromRow: boolean }
@@ -111,7 +221,7 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
     if (retired) setShown(null);
     // A fallback list has no overview to return to. Clear the origin so ChatView shows the overview again and a row
     // opened from this list keeps the list's own Back behavior.
-    if (opened.from === "overview" && (retired || !shown)) openPanel({ kind: "background", mid, sid });
+    if (opened.from === "overview" && (retired || !shown)) openPanelRef.current({ kind: "background", mid, sid });
   }, [shown, run, command, commandCurrent, opened.from, mid, sid]);
   useEffect(() => { if (!owned) onClose(); }, [owned, onClose]);
   const rememberList = () => { listTop.current = list.current?.querySelector<HTMLElement>("[data-background-list]")?.scrollTop ?? 0; };
@@ -120,9 +230,26 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
     if (opened.from === "overview") { onClose(); return; }
     back.current = { kind: shown.kind, id: shown.kind === "run" ? shown.id : shown.task.id, top: listTop.current };
     setShown(null);
-    openPanel({ kind: "background", mid, sid });
+    openPanelRef.current({ kind: "background", mid, sid });
   };
   if (!owned) return null;
+  const commandDetail: BackgroundCommandDetailViewProps | undefined = command && commandCurrent ? {
+    mid,
+    sid,
+    cwd: command.cwd,
+    task: currentCommand ?? command.task,
+    running: Boolean(runningCommand && !endedCommand),
+    focus: command.fromRow,
+    owner: command.owner,
+    manager: command.manager,
+    onBack: goBack,
+    onOpenFile: () => {
+      const current = readSession();
+      const path = (currentCommand ?? command.task).output_file;
+      if (!path || readOwner() !== command.owner || !current || current.manager !== command.manager) return;
+      openPanelRef.current({ kind: "file", mid, path, cwd: command.cwd });
+    },
+  } : undefined;
   return (
     <div ref={container} className="flex min-h-0 flex-1 flex-col" data-background-panel onKeyDown={(event) => {
       if (!commandCurrent || event.key !== "Escape" || event.defaultPrevented || document.querySelector("[role=menu],[role=dialog]")) return;
@@ -140,47 +267,65 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
           focus={Boolean(shown?.fromRow)}
           onBack={goBack}
           onClose={onClose}
+          chat={chat}
         />
-      ) : command && commandCurrent ? (
-        <BackgroundCommandDetail
+      ) : command && commandDetail ? (
+        renderCommandDetail ? (
+          <Fragment key={JSON.stringify([mid, sid, command.task.id])}>{renderCommandDetail(commandDetail)}</Fragment>
+        ) : (
           // Not the output file: a Monitor's arrives later, and the detail switches to it in place (#10852).
-          key={JSON.stringify([mid, sid, command.task.id])}
-          mid={mid} sid={sid} cwd={command.cwd} task={currentCommand ?? command.task}
-          running={Boolean(runningCommand && !endedCommand)} focus={command.fromRow} owner={command.owner} manager={command.manager}
-          onBack={goBack}
-          onOpenFile={() => {
-            const current = getSession(mid, sid);
-            const path = (currentCommand ?? command.task).output_file;
-            if (!path || credentialOwner() !== command.owner || !current || current.manager !== command.manager) return;
-            openPanel({ kind: "file", mid, path, cwd: command.cwd });
-          }}
-        />
+          <BackgroundCommandDetail key={JSON.stringify([mid, sid, command.task.id])} {...commandDetail} />
+        )
       ) : (
         <div ref={list} className="flex min-h-0 flex-1 flex-col">
-          <BackgroundList session={session} mid={mid} sid={sid} onOpenRun={(id) => {
-            rememberList(); setShown({ kind: "run", id, fromRow: true });
-          }} onOpenTask={(task) => {
-            const current = getSession(mid, sid);
-            if (owner !== credentialOwner() || !current || current.manager !== session?.manager) return;
-            rememberList();
-            setShown({ kind: "command", task, cwd: session?.cwd, owner, manager: session?.manager, fromRow: true });
-            openPanel({ kind: "background", mid, sid, task: task.id });
-          }} />
+          <BackgroundList
+            session={session}
+            mid={mid}
+            sid={sid}
+            owner={owner}
+            getCurrentSession={readSession}
+            getCurrentOwner={readOwner}
+            chat={chat}
+            onCopyCommand={onCopyCommand}
+            onOpenRun={(id) => {
+              rememberList(); setShown({ kind: "run", id, fromRow: true });
+            }}
+            onOpenTask={(task) => {
+              const current = readSession();
+              if (owner !== readOwner() || !current || current.manager !== session?.manager) return;
+              rememberList();
+              setShown({ kind: "command", task, cwd: session?.cwd, owner, manager: session?.manager, fromRow: true });
+              openPanelRef.current({ kind: "background", mid, sid, task: task.id });
+            }}
+          />
         </div>
       )}
     </div>
   );
 }
 
-export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOverview }: {
-  session: Session | undefined;
-  mid: string;
-  sid: string;
-  onOpenRun: (task: string) => void;
-  onOpenTask: (task: BackgroundTask) => void;
-  inOverview?: boolean;
-}) {
-  const owner = credentialOwner();
+export function BackgroundList({
+  session,
+  mid,
+  sid,
+  onOpenRun,
+  onOpenTask,
+  inOverview,
+  owner: controlledOwner,
+  getCurrentSession,
+  getCurrentOwner,
+  chat,
+  onCopyCommand,
+}: BackgroundListProps) {
+  const ownerControlled = controlledOwner !== undefined || getCurrentOwner !== undefined;
+  const owner = controlledOwner ?? (getCurrentOwner ? getCurrentOwner() : credentialOwner());
+  const latestSession = useRef(session);
+  latestSession.current = session;
+  const latestOwner = useRef(owner);
+  latestOwner.current = owner;
+  const readOwner = () => (getCurrentOwner ? getCurrentOwner() : controlledOwner !== undefined ? latestOwner.current : credentialOwner());
+  const readSession = () => (getCurrentSession ? getCurrentSession() : ownerControlled ? latestSession.current : getSession(mid, sid));
+  const copyCommand = onCopyCommand ?? copyText;
   // an ended run leaves the list a day after it ended (recentWorkflows): the list's clock moves while something runs
   const busy = Boolean(session?.loop) || (session?.background?.length ?? 0) > 0 || (session?.workflows ?? []).some((w) => w.running);
   const now = useNow(60_000, busy);
@@ -204,8 +349,8 @@ export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOve
             : took !== null ? [<span key="time" className="tabular-nums">{workDuration(took)}</span>] : [])]}
         command={task.command}
         onCopy={() => {
-          const current = getSession(mid, sid);
-          if (owner === credentialOwner() && current && current.manager === session?.manager && task.command) void copyText(task.command);
+          const current = readSession();
+          if (owner === readOwner() && current && current.manager === session?.manager && task.command) void copyCommand(task.command);
         }}
         onClick={opensDetail(task) ? () => onOpenTask(task) : undefined}
         data={{ "data-bg-task": task.id }}
@@ -227,7 +372,7 @@ export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOve
       {(loop || running.length > 0 || tasks.length > 0) && (
         <section aria-labelledby={runningId} data-background-section="running">
           <SectionHeader id={runningId} label={t("chat-activity.section_running")} />
-          {loop && <LoopRow loop={loop} mid={mid} sid={sid} />}
+          {loop && <LoopRow loop={loop} mid={mid} sid={sid} chat={chat} />}
           {running.map((w) => (
             <RunRow key={w.task_id} run={w} onOpen={onOpenRun} />
           ))}
@@ -374,11 +519,19 @@ function RunRow({ run, onOpen }: { run: Workflow; onOpen: (task: string) => void
 
 /** The /loop driving the Agent (Persona's own; cindy lists none): what it repeats, how often and when it wakes next, and
  *  a Stop that asks first (the loop ends by a message the chat sends, lib/tasks.ts STOP_LOOP_MESSAGE). */
-function LoopRow({ loop, mid, sid }: { loop: LoopInfo; mid: string; sid: string }) {
+function LoopRow({ loop, mid, sid, chat }: { loop: LoopInfo; mid: string; sid: string; chat?: BackgroundChat | null }) {
+  if (chat !== undefined) return <LoopRowView loop={loop} chat={chat ?? undefined} />;
+  return <DefaultLoopRow loop={loop} mid={mid} sid={sid} />;
+}
+
+function DefaultLoopRow({ loop, mid, sid }: { loop: LoopInfo; mid: string; sid: string }) {
+  return <LoopRowView loop={loop} chat={useBackgroundChat(mid, sid)} />;
+}
+
+function LoopRowView({ loop, chat }: { loop: LoopInfo; chat: BackgroundChat | undefined }) {
   const now = useNow(30_000);
   const [confirming, setConfirming] = useState(false);
   // Stop goes through the chat page showing the session: none (the panel outlived it), no Stop rather than one that does nothing
-  const chat = useBackgroundChat(mid, sid);
   const task = loopTask(loop);
   const meta = [loopCadence(loop), loopNext(loop, now)].filter(Boolean).map((m, i) => <span key={i}>{m}</span>);
   const hint = [task, loop.reason].filter(Boolean).join("\n") || undefined;
@@ -421,14 +574,25 @@ function LoopRow({ loop, mid, sid }: { loop: LoopInfo; mid: string; sid: string 
 
 /** cindy's WorkflowDetail: Back, the run's mark and name, then the run's own card (its head, where it is or what it was
  *  for, the progress bar and the phases) and "Show in chat" while the chat page can bring its call into view. */
-function WorkflowDetail({ run, mid, sid, onBack, onClose, focus }: { run: Workflow; mid: string; sid: string; onBack: () => void; onClose: () => void; focus: boolean }) {
+function WorkflowDetail({ run, mid, sid, onBack, onClose, focus, chat }: { run: Workflow; mid: string; sid: string; onBack: () => void; onClose: () => void; focus: boolean; chat?: BackgroundChat | null }) {
+  if (chat !== undefined) {
+    return <WorkflowDetailView run={run} mid={mid} sid={sid} onBack={onBack} onClose={onClose} focus={focus} jumpToCall={chat?.jumpToCall} />;
+  }
+  return <DefaultWorkflowDetail run={run} mid={mid} sid={sid} onBack={onBack} onClose={onClose} focus={focus} />;
+}
+
+function DefaultWorkflowDetail({ run, mid, sid, onBack, onClose, focus }: { run: Workflow; mid: string; sid: string; onBack: () => void; onClose: () => void; focus: boolean }) {
+  const jumpToCall = useBackgroundChat(mid, sid)?.jumpToCall;
+  return <WorkflowDetailView run={run} mid={mid} sid={sid} onBack={onBack} onClose={onClose} focus={focus} jumpToCall={jumpToCall} />;
+}
+
+function WorkflowDetailView({ run, mid, sid, onBack, onClose, focus, jumpToCall }: { run: Workflow; mid: string; sid: string; onBack: () => void; onClose: () => void; focus: boolean; jumpToCall?: (call: string) => void }) {
   const bar = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (focus) bar.current?.querySelector<HTMLElement>("button")?.focus();
     // only as it opens
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const jumpToCall = useBackgroundChat(mid, sid)?.jumpToCall;
   const jump = jumpToCall
     ? (call: string) => {
         jumpToCall(call);

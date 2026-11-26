@@ -79,7 +79,7 @@ describe("a group's row", () => {
 describe("a to-do's row", () => {
   const show = () => {
     const tree = buildTodoTree([s("a", "working")], machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
-    act(() => root.render(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />));
+    act(() => root.render(<TodoTreeView tree={tree} activeKey="" {...stable} />));
   };
 
   it("keeps its title link's own taps above the chevron's square, in the touch row's height", () => {

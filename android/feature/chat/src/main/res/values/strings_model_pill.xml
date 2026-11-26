@@ -41,5 +41,12 @@
     <string name="chat_engine_switch_handoff_title">Handoff context</string>
     <string name="chat_modelpanel_engine_note">Switching engines rebuilds context and may lose content</string>
     <string name="chat_modelpanel_switch_scheduled">Switch scheduled: your next message moves the Agent to %1$s</string>
+    <string name="chat_modelpanel_switch_title">Switch this conversation?</string>
+    <string name="chat_modelpanel_switch_explanation">Continue with %1$s using recent messages and a summary. The conversation and its tasks stay here. Some details may be summarized. The new connection will take over with your next message.</string>
+    <string name="chat_modelpanel_switch_confirm">Switch connection</string>
+    <string name="chat_modelpanel_switch_requested">Switch requested. You can continue in this conversation.</string>
+    <string name="chat_modelpanel_switch_unavailable">Switching connections is unavailable. Refresh the conversation and try again.</string>
+    <string name="chat_modelpanel_switch_unconfirmed">The switch result is unconfirmed. Retrying uses the same request; it will not start another switch. %1$s</string>
+    <string name="chat_modelpanel_supervision_unavailable">This connection cannot receive separate task follow-up instructions.</string>
     <string name="chat_model_changed">Model changed from %1$s to %2$s</string>
 </resources>

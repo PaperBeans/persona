@@ -79,10 +79,11 @@ type Machine struct {
 	raws   map[string]string
 	rawsOf keptList
 	// rows are the sessions' rows as last pushed, by id (encodeKept), under rowsMu; never changed in place.
-	rowsMu   sync.Mutex
-	rows     map[string]keptRow
-	rowLen   atomic.Int64   // the average length of the rows encodeKept gave last (rowsSize)
-	watchers map[string]int // session id -> subscribed clients
+	rowsMu    sync.Mutex
+	rows      map[string]keptRow
+	rowLen    atomic.Int64                   // the average length of the rows encodeKept gave last (rowsSize)
+	watchers  map[string]int                 // session id -> subscribed clients
+	liveTools map[string]proto.LiveToolState // pending invocations for watched sessions, guarded by mu
 	// What the node was told about each session's watch (syncWatch): watchMu orders the session.watch /
 	// session.unwatch calls per session (a 1-slot channel, so a wait for it can end with the caller's ctx), nodeWatch
 	// is what the last of them left (absent: not watched). A slot goes when no call holds or waits for it and the
@@ -436,6 +437,7 @@ func (m *Machine) watcherLeft(id string) {
 	m.watchers[id]--
 	if m.watchers[id] <= 0 {
 		delete(m.watchers, id)
+		delete(m.liveTools, id)
 	}
 	m.mu.Unlock()
 }
@@ -842,6 +844,14 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 		}
 		m.hub.toSubscribers(m.cfg.ID, p.SessionID, screenPush{Type: "screen", MachineID: m.cfg.ID, SessionID: p.SessionID,
 			Text: p.Text, Status: p.Status, TS: time.Now().UTC()})
+	case "session.live_tools":
+		var p struct {
+			SessionID string `json:"session_id"`
+			proto.LiveToolState
+		}
+		if json.Unmarshal(params, &p) == nil && p.SessionID != "" && p.Tools != nil {
+			m.setLiveTools(p.SessionID, p.LiveToolState)
+		}
 	case "session.live": // a working Claude's status line as it is now: not kept, not replayed (docs/protocol/protocol.md "Live status")
 		var p struct {
 			SessionID string             `json:"session_id"`

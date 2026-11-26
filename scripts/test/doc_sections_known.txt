@@ -5,7 +5,6 @@ apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	App 里
 apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	兼容
 apple/Persona/Persona/Persona.swift	docs/apple/persona.md	App 图标
 apple/Persona/Views/Chat/ChatView.swift	docs/assistant/unified-entry.md	指向谁
-apple/Persona/Views/Chat/ChatView.swift	docs/integrations/codex.md	守护进程上的会话
 apple/Persona/Views/Mail/MailOutlookViews.swift	docs/extensions/mail.md	Outlook Connection
 apple/Persona/Views/Settings/AppearanceSettingsView.swift	docs/apple/ios.md	设计语言
 apple/Persona/Views/Settings/ExtensionsModel.swift	docs/extensions/extensions.md	自动升级
@@ -22,7 +21,6 @@ docs/extensions/extensions.md	docs/protocol/protocol.md	Personal Agents
 docs/integrations/codex.md	docs/operations/testing.md	Codex integration testing
 docs/integrations/engines.md	docs/plans/plan-orca-support.md	Side-by-side engines
 docs/operations/admin.md	extensions.md	Admin console: extensions
-docs/operations/admin.md	extensions.md	Health
 docs/operations/admin.md	mesh.md	One computer, multiple routes
 docs/operations/docker.md	docs/operations/hub-update.md	Taking skills out of the binary
 docs/operations/release.md	docs/operations/hub-update.md	Preventing rollback

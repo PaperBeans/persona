@@ -1,0 +1,12 @@
+{
+  "active": "Last active",
+  "branch": "Branch",
+  "computer": "Computer",
+  "model": "Model",
+  "source": "Source",
+  "status": "Status",
+  "tab": "Terminal",
+  "todo": "To-do",
+  "tool": "Tool",
+  "workspace": "Workspace"
+}

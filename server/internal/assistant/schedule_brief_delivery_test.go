@@ -28,9 +28,7 @@ func TestTaskBriefingModelSnapshotFailureKeepsFixedFacts(t *testing.T) {
 			task := Task{ID: "brief-job", Title: "Briefing", Prompt: "Give me the briefing", Repeat: repeatOnce,
 				At: time.Now().Add(-time.Minute), MachineID: "server", Facts: !report, Report: report}
 			setTasks(s, task)
-			s.brief.mu.Lock()
-			s.brief.byTask = map[string]*briefRun{task.ID: {facts: briefFallbackFacts(), label: "Earlier briefing"}}
-			s.brief.mu.Unlock()
+			s.briefSetTaskRun(task.ID, &briefRun{Facts: briefFallbackFacts(), Label: "Earlier briefing"})
 			st.failRead = modelRecordKey("task." + task.ID)
 			if _, err := s.runTask(task, task.At, time.Now(), true, false); err == nil || f.sent() != 0 {
 				t.Fatalf("model preparation failure sent a turn: %v, sends=%d", err, f.sent())

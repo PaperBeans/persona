@@ -25,8 +25,36 @@ func timeoutOwnedTerminal(c proto.Session) bool {
 
 func stalledSessionMoved(c proto.Session) time.Time {
 	at := c.UpdatedAt
-	if c.ActivityAt != nil && c.ActivityAt.After(at) {
-		at = *c.ActivityAt
+	advance := func(t time.Time) {
+		if t.After(at) {
+			at = t
+		}
+	}
+	if c.ActivityAt != nil {
+		advance(*c.ActivityAt)
+	}
+	for _, w := range c.Workflows {
+		advance(w.StartedAt)
+		advance(w.UpdatedAt)
+		if w.EndedAt != nil {
+			advance(*w.EndedAt)
+		}
+		for _, a := range w.Agents {
+			advance(a.StartedAt)
+			advance(a.UpdatedAt)
+			if a.EndedAt != nil {
+				advance(*a.EndedAt)
+			}
+		}
+	}
+	for _, a := range c.Subagents {
+		if a.Running {
+			advance(a.StartedAt)
+		}
+		advance(a.UpdatedAt)
+	}
+	for _, b := range c.Background {
+		advance(b.StartedAt)
 	}
 	return at
 }
@@ -57,17 +85,31 @@ func (s *Service) stalledSince(t Todo, c proto.Session, spinning bool) time.Time
 	return at
 }
 
-// stalledCloseDue says whether c is both stalled and past the closure threshold. The existing silent-stall and
-// no-progress rules decide what is stalled; merely moving a transcript never resets a spinning Agent's clock.
-func (s *Service) stalledCloseDue(t Todo, c proto.Session, now time.Time) (time.Time, bool) {
+// stalledCloseDue says whether c is both stalled and past the closure threshold. Live background work, observable
+// background progress, and supervisor handling of the current stall stretch prevent closure; merely moving a
+// transcript never resets a spinning Agent's clock.
+func (s *Service) stalledCloseDue(ctx context.Context, t Todo, c proto.Session, now time.Time) (time.Time, bool) {
 	if t.Supervision == nil || c.State != proto.StateWorking || c.PendingInteractions > 0 {
 		return time.Time{}, false
 	}
-	_, spinning := s.noProgressSignal(t, c, now)
+	s.observeProgress(c, now)
+	if aliveBackgroundWork(c, now) {
+		return time.Time{}, false
+	}
+	npSig, spinning := s.noProgressSignal(t, c, now)
 	moved := stalledSessionMoved(c)
 	silent := !moved.IsZero() && now.Sub(moved) >= stallAfter(t.Supervision.ExpectMinutes)
 	if !spinning && !silent {
 		return time.Time{}, false
+	}
+	if spinning {
+		if handled, known := s.stalledHandled(ctx, t.ID, sigNoProgress, c.SessionID, npSig.Key); !known || handled {
+			return time.Time{}, false
+		}
+	} else {
+		if handled, known := s.stalledHandled(ctx, t.ID, sigStalled, c.SessionID, stalledSignalKey(c.SessionID, moved)); !known || handled {
+			return time.Time{}, false
+		}
 	}
 	since := s.stalledSince(t, c, spinning)
 	return since, !since.IsZero() && now.Sub(since) >= stallCloseAfter(t.Supervision.ExpectMinutes)
@@ -81,14 +123,25 @@ func (s *Service) progressAfter(machine, session string, at time.Time) bool {
 	return w != nil && w.progressAt.After(at)
 }
 
-// timeoutActivityAfter reports activity that should cancel a recovered close. Polling during no_progress is still not
-// progress and must not restart the wait after a transient stop failure; silent-stall activity and real progress count.
-func (s *Service) timeoutActivityAfter(t Todo, c proto.Session, intent, now time.Time) bool {
-	if s.progressAfter(c.MachineID, c.SessionID, intent) {
+// timeoutActivityAfter reports activity or supervisor handling that should cancel a recovered close. Polling during
+// no_progress is still not progress and must not restart the wait after a transient stop failure; live background work,
+// supervisor-handled stalls, silent-stall activity and real progress count.
+func (s *Service) timeoutActivityAfter(ctx context.Context, t Todo, c proto.Session, intent, now time.Time) bool {
+	s.observeProgress(c, now)
+	if aliveBackgroundWork(c, now) || s.progressAfter(c.MachineID, c.SessionID, intent) {
 		return true
 	}
-	_, spinning := s.noProgressSignal(t, c, now)
-	return !spinning && stalledSessionMoved(c).After(intent)
+	npSig, spinning := s.noProgressSignal(t, c, now)
+	if spinning {
+		handled, known := s.stalledHandled(ctx, t.ID, sigNoProgress, c.SessionID, npSig.Key)
+		return !known || handled
+	}
+	moved := stalledSessionMoved(c)
+	if moved.After(intent) {
+		return true
+	}
+	handled, known := s.stalledHandled(ctx, t.ID, sigStalled, c.SessionID, stalledSignalKey(c.SessionID, moved))
+	return !known || handled
 }
 
 // closeStalledTask records timeout_closing before stopping every current terminal Agent of task. If a response or the
@@ -126,7 +179,7 @@ func (s *Service) closeStalledTask(ctx context.Context, task Todo, agents []prot
 			return
 		}
 		if !recovering {
-			if _, due := s.stalledCloseDue(task, c, now); !due {
+			if _, due := s.stalledCloseDue(ctx, task, c, now); !due {
 				return
 			}
 		}
@@ -192,12 +245,12 @@ func (s *Service) closeStalledTask(ctx context.Context, task Todo, agents []prot
 			continue
 		}
 		if !timeoutOwnedTerminal(live) || live.PaneID == "" || live.State != proto.StateWorking || live.PendingInteractions > 0 ||
-			recovering && s.timeoutActivityAfter(current, live, task.Supervision.UpdatedAt, now) {
+			recovering && s.timeoutActivityAfter(ctx, current, live, task.Supervision.UpdatedAt, now) {
 			cancelClosing()
 			return
 		}
 		if !recovering {
-			if _, due := s.stalledCloseDue(current, live, now); !due {
+			if _, due := s.stalledCloseDue(ctx, current, live, now); !due {
 				cancelClosing()
 				return
 			}
@@ -206,9 +259,9 @@ func (s *Service) closeStalledTask(ctx context.Context, task Todo, agents []prot
 			Stopped bool `json:"stopped"`
 		}
 		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		// A working Agent cannot use retire=true: that form is deliberately for still Agents. This is the same
-		// terminal-retaining stop as the user's Stop, so only an explicit user Resume can continue it.
-		err := s.call(cctx, c.MachineID, deviceSessionStop, map[string]any{"session_id": c.SessionID}, &result)
+		// A working Agent cannot use retire=true: that form is deliberately for still Agents. Pass StopTimeout so the
+		// node records supervision-timeout provenance (not a user stop) and allows the assistant to resume it.
+		err := s.call(cctx, c.MachineID, deviceSessionStop, map[string]any{"session_id": c.SessionID, "stop_cause": proto.StopTimeout}, &result)
 		cancel()
 		if err != nil {
 			s.logf("task %s: stalled stop: %v", task.ID, err)
@@ -270,6 +323,7 @@ func (s *Service) continueTimedOut(ctx context.Context, task Todo) (json.RawMess
 			Session proto.Session `json:"session"`
 		}
 		sctx, cancel := context.WithTimeout(ctx, agentStartTimeout)
+		sctx = context.WithValue(sctx, placementTaskKey{}, task.ID)
 		err := s.call(sctx, a.MachineID, DeviceSessionStart, map[string]any{
 			"resume_session_id": a.SessionID,
 			"prompt":            continueText,
@@ -279,7 +333,14 @@ func (s *Service) continueTimedOut(ctx context.Context, task Todo) (json.RawMess
 			return nil, fmt.Errorf("continue timed-out task in its original session: %w", err)
 		}
 	}
-	if _, _, err := s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+	if err := s.clearTimedOut(ctx, task.ID); err != nil {
+		return nil, err
+	}
+	return s.todoView(ctx, task.ID)
+}
+
+func (s *Service) clearTimedOut(ctx context.Context, id string) error {
+	_, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
 		if v.State != reviewTimedOut {
 			return false
 		}
@@ -288,8 +349,6 @@ func (s *Service) continueTimedOut(ctx context.Context, task Todo) (json.RawMess
 			v.State = reviewRework
 		}
 		return true
-	}); err != nil {
-		return nil, err
-	}
-	return s.todoView(ctx, task.ID)
+	})
+	return err
 }

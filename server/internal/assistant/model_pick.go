@@ -98,7 +98,7 @@ func (s *Service) modelPicksSet() (map[string]modelPick, bool) {
 	}
 	out := maps.Clone(b.m)
 	b.mu.Unlock()
-	if s.store != nil {
+	if s.storeFn.Load() != nil {
 		rows, _, err := s.logicalIndex()
 		if err != nil {
 			return out, false
@@ -123,9 +123,12 @@ func (s *Service) modelPickOf(ctx context.Context, machine, sid string) (modelPi
 }
 
 // readModelPick distinguishes an absent selection from an unreadable one at delivery boundaries.
+// Store read errors (logical conversation lookup or model-picks book load) surface as the localized
+// assistant-model_pick.err_unreadable error rather than a raw database error.
 func (s *Service) readModelPick(ctx context.Context, machine, sid string) (modelPick, bool, error) {
 	if c, err := s.logicalPickConversation(ctx, machine, sid); err != nil {
-		return modelPick{}, false, err
+		s.logf("load conversation model pick (%s/%s): %v", machine, short(sid), err)
+		return modelPick{}, false, i18n.Err("assistant-model_pick.err_unreadable")
 	} else if c != nil {
 		a, _ := c.Active()
 		return modelPick{MachineID: c.MachineID, Launcher: a.Launcher, Model: a.Model, Effort: a.Effort}, true, nil

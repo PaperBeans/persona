@@ -24,6 +24,10 @@ func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBindi
 			return b, p.Parent, err
 		}
 		b, err := s.resolveModel(ctx, p.Parent)
+		if err == nil && p.launch() == "headless" && s.desktopAppProvider(ctx, b.Provider) {
+			// The Inbox AI twin and Lark /agent run headless, which Agents' desktop app cannot (models_desktop.go).
+			return ModelBinding{Provider: launcherProvider("claude"), ConfigDir: b.ConfigDir}, mc(l, "source_desktop_fallback"), nil
+		}
 		return b, p.Parent, err
 	}
 	if p.ID == "agent.delegate" { // "Sorting"'s connection, with a stronger model on it (delegateModel)
@@ -126,6 +130,8 @@ func inheritedLabel(l i18n.Lang, p ModelPurpose, base ModelBinding, from string,
 		return mc(l, "source_delegate_connection", i18n.Args{"provider": name}) // the model is the user's pick, or the connection's own
 	case p.ID == "agent.delegate" || p.ID == purposeTranslate:
 		return mc(l, "source_delegate_default", i18n.Args{"provider": name, "model": model})
+	case p.Parent != "" && from != p.Parent: // a use that cannot follow its category's provider (models_desktop.go)
+		return from
 	case ownModelRecord(p.ID), isExtensionPurpose(p.ID):
 		return purposeName(l, p.Parent)
 	case from == mc(l, modelAutoSource):

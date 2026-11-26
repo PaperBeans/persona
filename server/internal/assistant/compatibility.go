@@ -2,27 +2,9 @@ package assistant
 
 import (
 	"encoding/json"
+
 	"github.com/nwverse/persona/server/internal/compat"
 )
-
-// Persist the pre-cutover enum so an older manager can resume the same bot
-// threads. The typed reader canonicalizes only this exact enum, not user data.
-type botTargetJSON botTarget
-
-func (t botTarget) MarshalJSON() ([]byte, error) {
-	copy := botTargetJSON(t)
-	copy.Kind = compat.LegacySource(copy.Kind)
-	return json.Marshal(copy)
-}
-func (t *botTarget) UnmarshalJSON(raw []byte) error {
-	var copy botTargetJSON
-	if err := json.Unmarshal(raw, &copy); err != nil {
-		return err
-	}
-	copy.Kind = compat.Source(copy.Kind)
-	*t = botTarget(copy)
-	return nil
-}
 
 type launcherViewJSON LauncherView
 

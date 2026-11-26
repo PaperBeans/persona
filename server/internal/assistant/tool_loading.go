@@ -57,6 +57,7 @@ func (s *Service) withToolLoading(ctx context.Context, self string, tools []prot
 	cleanRound := guide && s.cleanRoundSession(self)
 	deferring = deferring && !(settings.LoadAllTools != nil && *settings.LoadAllTools)
 	leader := deferring && s.isLeader(ctx, self)
+	pageRoutine := deferring && s.isPageRoutineSession(ctx, self)
 	out := slices.Clone(tools)
 	for i := range out {
 		// Keep planning and its allowed preflight reads directly available in a granted round.
@@ -64,7 +65,8 @@ func (s *Service) withToolLoading(ctx context.Context, self string, tools []prot
 		out[i].WorkGuideTool = guide && slices.Contains(workGuideTools, out[i].Name) &&
 			!(cleanRound && (out[i].Name == "task_plan" || grantSafeTools[out[i].Name]))
 		out[i].DeferLoading = deferring && !slices.Contains(coreTools, out[i].Name) &&
-			!(leader && slices.Contains(leaderCoreTools, out[i].Name))
+			!(leader && slices.Contains(leaderCoreTools, out[i].Name)) &&
+			!(pageRoutine && out[i].Name == pageToolName)
 	}
 	return out
 }

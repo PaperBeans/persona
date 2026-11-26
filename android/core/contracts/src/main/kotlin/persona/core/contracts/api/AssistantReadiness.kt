@@ -132,6 +132,7 @@ interface AssistantReadinessSource {
 interface HubCodedFailure {
     val status: Int?
     val code: String?
+    val delivered: String? get() = null
 }
 
 /** The first [HubCodedFailure] in [error]'s causes. */

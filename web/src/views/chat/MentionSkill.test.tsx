@@ -9,11 +9,15 @@ import { parseQueued } from "../../lib/queue";
 import { restoreQueued } from "./queue-restore";
 import { t } from "../../i18n";
 import { skillContext, skillDraft } from "../../lib/skill-mentions";
+import { readInlineDraft } from "../../lib/inline-mentions";
+import { inlineReferences } from "../../lib/inline-message";
+import { parseUserText } from "../../lib/turns";
 import { onModelPicker } from "../../lib/model-switch";
 import { onPermissionPicker } from "../../lib/permissions-command";
 import { Composer, type Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
 import type { ComposerCommand } from "../../lib/extension-prompts";
+import { changeComposerField, composerField, composerFieldText } from "./composer-test-field";
 
 vi.hoisted(() => {
   window.matchMedia = ((query: string) => ({ matches: query === "(any-pointer: fine)", media: query, onchange: null,
@@ -30,20 +34,21 @@ let host: HTMLDivElement;
 let root: Root;
 const source: MentionSource = { files: () => [], skills: { manager: "helper-a", session: "chat", launcher: "codex", environment: "profile-a" } };
 const onSend = vi.fn(async (_m: Outgoing) => true);
-const render = (mention = source, commands?: ComposerCommand[], machineId = "computer") => act(() => root.render(<Composer draftKey="skill-test" placeholder="" mention={mention} machineId={machineId} commands={commands} onSend={onSend} />));
-const box = () => host.querySelector("textarea")!;
+const render = (mention = source, commands?: ComposerCommand[], machineId = "computer", draftKey = "skill-test") => act(() => root.render(<Composer draftKey={draftKey} placeholder="" mention={mention} machineId={machineId} commands={commands} onSend={onSend} />));
+const box = () => composerField(host);
+const text = () => composerFieldText(host);
+const tokens = () => [...box().querySelectorAll<HTMLElement>("[data-inline-mention]")];
+const picked = () => {
+  act(() => window.dispatchEvent(new Event("pagehide")));
+  return inlineReferences(readInlineDraft(localStorage.getItem("draft:skill-test") ?? ""));
+};
 const options = () => [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 const waitForOptions = (count: number) => vi.waitFor(async () => {
   await act(async () => {});
   expect(options()).toHaveLength(count);
 });
-async function type(text: string) {
-  await act(async () => {
-    box().focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box(), text);
-    box().setSelectionRange(text.length, text.length);
-    box().dispatchEvent(new Event("input", { bubbles: true }));
-  });
+async function type(text: string, options?: Parameters<typeof changeComposerField>[2]) {
+  await act(async () => changeComposerField(box(), text, options));
 }
 const key = (k: string) => act(() => { box().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); });
 async function press(k: string, extra: KeyboardEventInit = {}) {
@@ -77,23 +82,24 @@ it("searches name/description locally, disambiguates equal names, selects with k
   expect(options()[1].textContent).not.toContain("project · .");
   key("ArrowDown");
   expect(host.querySelector("[data-picker-detail]")?.textContent).toContain("project · .");
-  await type("@security");
+  await type("Check @security please", { caret: "Check @security".length });
   expect(options()).toHaveLength(1);
   expect(api).toHaveBeenCalledTimes(1);
   expect(api.mock.calls[0][1]).toMatchObject({ headers: { "X-Persona-Manager": "helper-a" } });
   key("Enter");
-  expect(box().value).toBe("");
-  expect(host.textContent).toContain("review · project");
-  expect(host.textContent).not.toContain("project · .");
-  await type("Check this");
+  expect(text()).toBe("Check review please");
+  expect(tokens()[0].title).toBe("project · .");
+  expect(getContexts("skill-test")).toHaveLength(0);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+  await vi.waitFor(() => expect(onSend).toHaveBeenCalledOnce());
   expect(onSend.mock.calls[0][0].text).toContain('kind="skill" title="review" url="" ref="a"');
+  expect(parseUserText(onSend.mock.calls[0][0].text).text).toBe("Check review please");
   expect(localStorage.getItem("draft:skill-test") ?? "").toBe("");
   key("ArrowUp");
-  expect(box().value).toBe("Check this");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  expect(text()).toBe("Check review please");
+  expect(picked()[0].attrs?.ref).toBe("a");
   key("ArrowDown");
-  expect(box().value).toBe("");
+  expect(text()).toBe("");
   expect(getContexts("skill-test")).toHaveLength(0);
 });
 
@@ -104,24 +110,25 @@ it("sends on Ctrl+Enter with a highlighted @ skill instead of inserting its chip
   expect(options()[0].getAttribute("aria-selected")).toBe("true");
   expect((await press("Enter", { ctrlKey: true })).defaultPrevented).toBe(true);
   expect(onSend.mock.calls.map(([message]) => message.text)).toEqual(["@security"]);
-  expect(box().value).toBe("");
+  expect(text()).toBe("");
   expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
 });
 
-it("supports touch/click removal, restores edit/queue references and persists the selected identity in the draft", async () => {
+it("restores a mid-sentence selection after switching conversations or remounting", async () => {
   render();
-  await type("@wording");
+  await type("Use @wording here", { caret: "Use @wording".length });
   await waitForOptions(1);
   await act(async () => options()[0].click());
-  await type("Use this");
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
-  const draft = localStorage.getItem("draft:skill-test")!;
-  expect(draft).toContain('ref="b"');
-  act(() => sendDraft("skill-test", { type: "replace", text: draft }));
-  expect(box().value).toBe("Use this");
-  expect(getContexts("skill-test").filter((c) => c.kind === "skill")).toHaveLength(1);
-  act(() => host.querySelector<HTMLButtonElement>('button[aria-label="移除这个上下文"]')!.click());
-  expect(getContexts("skill-test")).toHaveLength(0);
+  render(source, undefined, "computer", "other-chat");
+  expect(text()).toBe("");
+  render();
+  expect(text()).toBe("Use review here");
+  expect(picked()[0].attrs?.ref).toBe("b");
+  act(() => root.unmount());
+  root = createRoot(host);
+  render();
+  expect(text()).toBe("Use review here");
+  expect(tokens()).toHaveLength(1);
 });
 
 it.each(["manager", "directory", "machine", "session", "launcher", "environment"])("never offers stale rows across %s switches, ignores late responses, and allows ordinary chat on failure", async (change) => {
@@ -151,11 +158,11 @@ it("retains the exact reference through queue pullback and refused sends", async
   render();
   const raw = skillDraft([skillContext(skills[1])], "Queued words");
   await act(async () => restoreQueued("skill-test", { machine_id: "computer", session_id: "chat" } as import("../../lib/types").Session, parseQueued(raw)));
-  expect(box().value).toBe("Queued words");
+  expect(text()).toBe("Queued words");
   expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
   onSend.mockImplementationOnce(async () => false);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
-  expect(box().value).toBe("Queued words");
+  expect(text()).toBe("Queued words");
   expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
 });
 
@@ -165,12 +172,12 @@ it("uses the ordinary session catalog and retains its selection on a refused sen
   await waitForOptions(1);
   expect(api.mock.calls[0][0]).toBe("/sessions/computer/chat/skills");
   key("Enter");
-  await type("Review the change");
+  await type("the change", { append: true });
   onSend.mockImplementationOnce(async () => false);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
   expect(onSend.mock.calls[0][0].text).toContain('ref="a"');
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
-  expect(box().value).toBe("Review the change");
+  expect(picked()[0].attrs?.ref).toBe("a");
+  expect(text()).toBe("review the change");
 });
 
 it("keeps existing file rows reachable beside a large skill catalog and searches beyond the empty preview", async () => {
@@ -288,22 +295,20 @@ it("ranks slash skills by exact, prefix, contained and description matches after
   ]);
 });
 
-it("adds the exact skill reference by pointer, removes the slash token and preserves it in drafts and Edit", async () => {
+it("replaces a slash query with the selected skill and restores it from the sent message when editing", async () => {
   render(source, COMMANDS);
   await type("/wording");
   await waitForOptions(1);
   await act(async () => options()[0].click());
-  expect(box().value).toBe("");
-  expect(getContexts("skill-test")[0]).toMatchObject({ kind: "skill", title: "review", attrs: { ref: "b" } });
-  expect(box().value).not.toContain("review");
-  await type("Use this");
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 280)); });
-  const draft = localStorage.getItem("draft:skill-test")!;
-  expect(draft).toContain('ref="b"');
-  expect(draft).not.toContain("@review");
-  act(() => sendDraft("skill-test", { type: "replace", text: draft }));
-  expect(box().value).toBe("Use this");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+  expect(text()).toBe("review ");
+  expect(picked()[0]).toMatchObject({ kind: "skill", title: "review", attrs: { ref: "b" } });
+  await type("this", { append: true });
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=composer-send]")!.click());
+  const wire = onSend.mock.calls[0][0].text;
+  expect(parseUserText(wire).text).toBe("review this");
+  act(() => sendDraft("skill-test", { type: "replace", text: wire, edit: true }));
+  expect(text()).toBe("review this");
+  expect(picked()[0].attrs?.ref).toBe("b");
 });
 
 it("selects a slash skill with the keyboard and retains its identity through retry and send history", async () => {
@@ -311,19 +316,19 @@ it("selects a slash skill with the keyboard and retains its identity through ret
   await type("/security");
   await waitForOptions(1);
   key("Enter");
-  expect(box().value).toBe("");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
-  await type("Check this");
+  expect(text()).toBe("review ");
+  expect(picked()[0].attrs?.ref).toBe("a");
+  await type("Check this", { append: true });
   onSend.mockImplementationOnce(async () => false);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
   const attempted = onSend.mock.calls[0][0].text;
   expect(attempted).toContain('kind="skill" title="review" url="" ref="a"');
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  expect(picked()[0].attrs?.ref).toBe("a");
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
   expect(onSend.mock.calls[1][0].text).toBe(attempted);
   key("ArrowUp");
-  expect(box().value).toBe("Check this");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("a");
+  expect(text()).toBe("review Check this");
+  expect(picked()[0].attrs?.ref).toBe("a");
 });
 
 it.each([{ name: "Ctrl", modifier: { ctrlKey: true } }, { name: "Cmd", modifier: { metaKey: true } }])("sends the draft on $name+Enter instead of picking the highlighted slash skill", async ({ modifier }) => {
@@ -333,7 +338,7 @@ it.each([{ name: "Ctrl", modifier: { ctrlKey: true } }, { name: "Cmd", modifier:
   expect(focused()?.textContent).toContain("Inspect security boundaries");
   expect((await press("Enter", modifier)).defaultPrevented).toBe(true);
   expect(onSend.mock.calls.map(([message]) => message.text)).toEqual(["/security"]);
-  expect(box().value).toBe("");
+  expect(text()).toBe("");
   expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
 });
 
@@ -352,7 +357,7 @@ it("leaves Mod+Alt+Enter and Mod+Shift+Enter for the window with a slash skill h
       expect((await press("Enter", modifier)).defaultPrevented).toBe(false);
       expect(onSend).not.toHaveBeenCalled();
       expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
-      expect(box().value).toBe("/security");
+      expect(text()).toBe("/security");
       expect(focused()?.textContent).toContain("Inspect security boundaries");
     }
   } finally {
@@ -373,8 +378,8 @@ it.each([{ name: "model", key: "Enter" }, { name: "permissions", key: "Tab" }])(
     expect(focused()?.textContent).toContain("Skill, not the command");
     key(pressed);
     expect(opened).not.toHaveBeenCalled();
-    expect(box().value).toBe("");
-    expect(getContexts("skill-test")[0].attrs?.ref).toBe(`skill-${name}`);
+    expect(text()).toBe(`${name} `);
+    expect(picked()[0].attrs?.ref).toBe(`skill-${name}`);
   } finally { off(); }
 });
 
@@ -457,11 +462,13 @@ it("keeps bare / closed when a Persona chat has no commands, opens on keyword, a
   await type("/wording");
   await waitForOptions(1);
   key("Tab");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
-  const raw = skillDraft(getContexts("skill-test"), "Queued words");
+  expect(picked()[0].attrs?.ref).toBe("b");
+  await type("Queued words", { append: true });
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=composer-send]")!.click());
+  const raw = onSend.mock.calls[0][0].text;
   await act(async () => restoreQueued("skill-test", { machine_id: "computer", session_id: "chat" } as import("../../lib/types").Session, parseQueued(raw)));
-  expect(box().value).toBe("Queued words");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+  expect(text()).toBe("review Queued words");
+  expect(picked()[0].attrs?.ref).toBe("b");
 });
 
 it("names both commands and skills when an unavailable slash catalog has no matching rows", async () => {
@@ -546,7 +553,7 @@ it.each((["Enter", "Tab", "ArrowDown", "ArrowUp"] as const).flatMap((pressed) =>
     await Promise.resolve();
   });
   expect(focused()?.textContent).toBe(selected);
-  expect(box().value).toBe("/e");
+  expect(text()).toBe("/e");
   expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
 });
 
@@ -565,7 +572,7 @@ it("renders warm results across triggers, preserves a selected identity on reord
   await waitForOptions(1);
   expect(focused()?.textContent).toContain("Check wording");
   key("Tab");
-  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+  expect(picked()[0].attrs?.ref).toBe("b");
 });
 
 it("keeps the selected local file when skills arrive after several @ edits", async () => {
@@ -581,5 +588,6 @@ it("keeps the selected local file when skills arrive after several @ edits", asy
   await waitForOptions(4);
   expect(focused()?.textContent).toContain("review.txt");
   key("Enter");
-  expect(box().value).toBe("@review.txt ");
+  expect(text()).toBe("review.txt ");
+  expect(picked()[0].attrs?.path).toBe("review.txt");
 });

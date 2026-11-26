@@ -5,15 +5,21 @@ import { readFileSync, existsSync } from 'node:fs';
 
 registerHooks({
   resolve(specifier, context, next) {
+    if (context.parentURL?.endsWith('/ClientModel.ets') && specifier === '../core/PhoneInterfaceStyle')
+      return {url:new URL('../core/PhoneInterfaceStyle.ts',context.parentURL).href,shortCircuit:true};
+    if ((context.parentURL?.endsWith('/Compatibility.ets') || context.parentURL?.endsWith('/ClientModel.ets')) && specifier === '../core/ChatForwardWire')
+      return {url:new URL('../core/ChatForwardWire.ts',context.parentURL).href,shortCircuit:true};
+    if (context.parentURL?.endsWith('/ClientModel.ets') && specifier === '../core/Markdown')
+      return {url:new URL('../core/Markdown.ts',context.parentURL).href,shortCircuit:true};
     if (specifier === '@kit.ArkTS') return { url: 'persona-question-test:arkts', shortCircuit: true };
     if (context.parentURL?.endsWith('/ClientModel.ets')) {
-      if (['./Wire', './InteractionDecision', './ChatDraftStore', '../core/Domain'].includes(specifier)) {
+      if (['../core/BackgroundActivity', '../core/ChatSendFeedback', '../core/DictationLanguage', './Wire', './AgentAttention', './InteractionDecision', './ChatDraftStore', '../core/Domain'].includes(specifier)) {
         const base = new URL(specifier, context.parentURL);
         return { url: base.href + (existsSync(new URL(base.href + '.ts')) ? '.ts' : '.ets'), shortCircuit: true };
       }
       return { url: 'persona-question-test:' + specifier, shortCircuit: true };
     }
-    if (context.parentURL?.endsWith('/InteractionDecision.ets') || context.parentURL?.endsWith('/ChatDraftStore.ets')) {
+    if (context.parentURL?.endsWith('/AgentAttention.ets') || context.parentURL?.endsWith('/InteractionDecision.ets') || context.parentURL?.endsWith('/ChatDraftStore.ets')) {
       if (specifier.startsWith('.')) return { url: new URL(specifier + '.ets', context.parentURL).href, shortCircuit: true };
     }
     if (context.parentURL?.endsWith('/Domain.ts') && specifier.startsWith('.'))
@@ -47,7 +53,8 @@ registerHooks({
         export class HubTransport { async request(){return '{}';} close(){} }
         export class EndpointConfig {}
         export class CredentialVault {}
-        export class LocalStore { data=new Map(); revision(){return 0;} accepts(){return true;} async put(key,value){this.data.set(key,value);} async get(key){return this.data.get(key)||'';} async remove(key){this.data.delete(key);} allowHub(){} async purgeHub(){} async open(){} async close(){} }
+        export const dictationPreference = {choice:"auto",last:"",load(){},remember(){}};
+      export class LocalStore { data=new Map(); revision(){return 0;} accepts(){return true;} async put(key,value){this.data.set(key,value);} async get(key){return this.data.get(key)||'';} async remove(key){this.data.delete(key);} allowHub(){} async purgeHub(){} async open(){} async close(){} }
         export class HubRepository {}
         export function segment(value){return encodeURIComponent(value);}
         export const tr=key=>key; export const Strings={refresh(){}};

@@ -8,6 +8,14 @@ import { addContext, contextXML, getContexts, removeContext, withContexts } from
 import { parseUserText } from "./turns";
 import type { Item, Session } from "./types";
 
+it("keeps inline metadata out of forward previews, including when another transcript block follows the trailer", () => {
+  const body = 'Use Review.\n\n<!-- persona-inline-v1 [[7,6,"opaque-anchor"]] -->';
+  expect(forwardBody(body)).toBe("Use Review.");
+  expect(forwardBody(body + "\nNext step.")).toBe("Use Review.\nNext step.");
+  const oldForward = parseUserText(`<persona-context kind="forward">${body}</persona-context>`);
+  expect(forwardSummary(oldForward.contexts[0].text)).toBe("Use Review.");
+});
+
 // router.ts listens to popstate at load (no window in node); links.ts only needs navigate from it.
 vi.mock("./router", () => ({ navigate: vi.fn() }));
 

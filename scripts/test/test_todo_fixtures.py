@@ -157,10 +157,11 @@ def paper(i):
 
 
 def open_schema(schema):
-    """schema with the enums it marks open ("a newer hub may send other values") left open."""
+    """schema with the enums a newer hub may send other values of left open: those it marks open ("a newer hub may send
+    other values") and the closed ones (x-enum "closed"), whose unknown values the clients decode as unknown."""
     out = json.loads(json.dumps(schema))
     for d in out["$defs"].values():
-        if "enum" in d and "a newer hub may send other values" in d.get("description", ""):
+        if "enum" in d and ("a newer hub may send other values" in d.get("description", "") or d.get("x-enum") == "closed"):
             del d["enum"]
     return out
 

@@ -36,7 +36,7 @@
       "required": ["machines"]
     },
     "BrowserRunParams": {
-      "description": "browser.run (browser.run): run a script inside an extension-isolated browser task space (ext-<extensionID>-<slot>) on machine_id.",
+      "description": "browser.run (browser.run): run a script inside an extension-isolated browser task space on machine_id.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

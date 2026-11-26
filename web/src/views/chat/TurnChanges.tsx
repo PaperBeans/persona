@@ -7,21 +7,13 @@ import { memo, useState } from "react";
 import { below } from "../../lib/files";
 import { openPanel } from "../../lib/panel";
 import { hubHas, useStore } from "../../lib/store";
-import type { ChangedFile, TurnChangeSet } from "../../lib/turn-changes";
+import { VISIBLE_FILES, turnChangesHeight, type ChangedFile, type TurnChangeSet } from "../../lib/turn-changes";
 import { REVIEW_FEATURE } from "../../lib/types";
 import { Button } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";
 
-/** Files listed before "Show N more files" (cindy's MAX_VISIBLE_FILES). */
-export const VISIBLE_FILES = 3;
-
-/** The card's height as drawn (Chrome, 2026-11-12), for an exchange's estimate before it is first drawn: its 4 px
- *  margins, border, the 64 px head, and the files' padding, rows and Show more row. */
-export function turnChangesHeight(c: TurnChangeSet): number {
-  const rows = Math.min(c.files.length, VISIBLE_FILES);
-  return 8 + 2 + 64 + 1 + 16 + rows * 36 + (c.files.length > VISIBLE_FILES ? 32 : 0);
-}
+export { VISIBLE_FILES, turnChangesHeight };
 
 /** "Show N more files" / "Show less": a row of its own, a finger tall on a touch screen like the files above it. */
 const LINK_ROW = "flex h-8 items-center gap-1 rounded-control px-2 text-[13px] whitespace-nowrap text-ink-2 transition-colors hover:bg-hover hover:text-ink [@media(pointer:coarse)]:h-11";

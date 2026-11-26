@@ -21,6 +21,8 @@
   "fixed_launcher_unhealthy": "固定コンピューター {machine} のランチャー {launcher} は利用できません：{reason}。タスクはこのコンピューターに残ります。正常に戻ってから再試行してください。",
   "launcher_not_on_machine": "{machine} にランチャー {launcher} がないため、何も起動していません。このコンピューターで使えるランチャー：{launchers}",
   "launcher_swapped": "{machine} に {launcher} がないため、{to}（既定のモデル）で実行します",
+  "launcher_desktop_default": "{launcher} はあなたが新規エージェントで始める会話にだけ使うため、{to}（既定のモデル）で実行します",
+  "launcher_desktop_default_model": "{launcher} はあなたが新規エージェントで始める会話にだけ使うため、{to}で、選択したモデル{model}をそのまま使って実行します",
   "launcher_swapped_model": "{machine}に{launcher}がないため、{to}で、選択したモデル{model}をそのまま使って実行します",
   "speed_type": "speed は文字列で指定してください：standard、fast、ultrafast。",
   "speed_invalid": "Agent speed {speed} が無効です。standard、fast、ultrafast のいずれかを指定してください。",
@@ -99,5 +101,11 @@
   "start_link_lost": "「{machine}」との接続が切れ、再接続後もタスクは起動していませんでした：{reason}",
   "start_machine_busy": "「{machine}」は接続されたままですが、待機時間内に応答がありませんでした（混雑している可能性があります）：{reason}",
   "start_link_down": "「{machine}」との接続が切れ、しばらく待っても再接続できませんでした：{reason}",
-  "start_goal_skipped": "開始目標なしで開始しました：{reason}"
+  "codex_effort_terminal": "指定された推論レベルを使うため、Codex はターミナルで起動します。承認や質問はターミナル画面を通じて行います。",
+  "start_goal_skipped": "開始目標なしで開始しました：{reason}",
+  "side_handover_title": "「{title}」をメイン会話に引き継ぎました",
+  "side_handover_archived": "元の会話「{origin}」がアーカイブされたため、タスク「{title}」のフォローをメイン会話に引き継ぎました。",
+  "side_handover_gone": "元の会話「{origin}」が利用できなくなったため、タスク「{title}」のフォローをメイン会話に引き継ぎました。",
+  "placement_waiting": "自動的なコンピューター配置を待機しています。",
+  "placement_no_match": "現在、このタスクの配置制約と容量制限を満たすオンラインのコンピューターがありません。"
 }

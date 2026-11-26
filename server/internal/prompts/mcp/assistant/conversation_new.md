@@ -20,7 +20,7 @@ Open a chat the owner requested. Returns its ID and preset configuration. It rep
     },
     "tier": {
       "type": "string",
-      "description": "Active profile preset; unknown or assistant-incompatible presets are refused"
+      "description": "Active profile preset or old name; unknown/assistant-incompatible: refused"
     },
     "pin": {
       "type": "boolean",

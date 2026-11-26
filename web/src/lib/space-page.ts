@@ -24,8 +24,8 @@ export interface SpaceView {
 
 const RECENT_LIMIT = 20;
 
-export function spaceView(sessions: readonly Session[], mid: string, space: string): SpaceView {
-  const mine = sessions.filter((s) => s.machine_id === mid && !s.assistant && s.space_id && spaceNameOf(s) === space);
+export function spaceView(sessions: readonly Session[], mid: string, space?: string): SpaceView {
+  const mine = sessions.filter((s) => s.machine_id === mid && !s.assistant && (space === undefined || (s.space_id && spaceNameOf(s) === space)));
   const live = mine.filter((s) => stateOf(s) !== "offline").sort(byAttention);
   const recent = mine
     .filter((s) => stateOf(s) === "offline")

@@ -46,7 +46,7 @@ func dismissalAnswerEnv(t *testing.T) (*todoEnv, *memStore, taskReviewDismissal)
 	st := &memStore{}
 	e := dismissalEnv(t, st, at, true)
 	feed := &planMemStore{memStore: st}
-	e.s.store = func() Store { return feed }
+	e.s.setStore(func() Store { return feed })
 	e.s.todos.todos["task"].Origin = "conversation"
 	e.s.todos.todos["task"].Agents = []TodoAgent{{MachineID: "server", SessionID: "worker"}}
 	e.f.sessions["server"] = []proto.Session{{MachineID: "server", SessionID: "worker", Status: proto.StatusIdle}}
@@ -174,7 +174,7 @@ func TestTaskReviewDismissalAnswerDelivery(t *testing.T) {
 					e.s.reviewDismissals.loaded = false
 					st.failKey(taskReviewDismissalsKey, errors.New("read failed"))
 				case "dismissal write":
-					st.failPut = errors.New("write failed")
+					st.setFailPut(errors.New("write failed"))
 				case "delivery":
 					e.f.failSend = errors.New("send refused")
 				}
@@ -184,7 +184,7 @@ func TestTaskReviewDismissalAnswerDelivery(t *testing.T) {
 						t.Fatalf("failed answer: %v, %v", ok, err)
 					}
 					st.failKey(taskReviewDismissalsKey, nil)
-					st.failPut = nil
+					st.setFailPut(nil)
 					assertAnswerDismissal(t, e.s, st, "task", before)
 					if len(sentToAgent(e.f)) != 0 {
 						t.Fatal("a failed answer was delivered")
@@ -267,7 +267,7 @@ func (st *dismissalAnswerWriteFails) PutSetting(ctx context.Context, key string,
 func TestTaskReviewDismissalAcceptanceSaveFailureKeepsIt(t *testing.T) {
 	e, st, before := dismissalAnswerEnv(t)
 	base := e.s.store()
-	e.s.store = func() Store { return &dismissalAnswerWriteFails{Store: base, key: acceptanceKey} }
+	e.s.setStore(func() Store { return &dismissalAnswerWriteFails{Store: base, key: acceptanceKey} })
 	if result, err := e.s.acceptTry(context.Background(), "task", ""); result.taken || !errors.Is(err, errAcceptStore) {
 		t.Fatalf("unsaved acceptance: %v, %v", result, err)
 	}
@@ -310,11 +310,11 @@ func TestTaskReviewDismissalAgentReplyAndLaterAnswer(t *testing.T) {
 				t.Fatal("paused default reached the Agent")
 			}
 
-			store := s.store
+			store := s.storeAccessor()
 			switch answer {
 			case "acceptance save failure":
 				base := s.store()
-				s.store = func() Store { return &dismissalAnswerWriteFails{Store: base, key: acceptanceKey} }
+				s.setStore(func() Store { return &dismissalAnswerWriteFails{Store: base, key: acceptanceKey} })
 			case "delivery failure":
 				f.failSend = errors.New("retryable send failure")
 			}
@@ -346,7 +346,8 @@ func TestTaskReviewDismissalAgentReplyAndLaterAnswer(t *testing.T) {
 				if len(sentToAgent(f)) != sent {
 					t.Fatal("failed answer reached the Agent")
 				}
-				s.store, f.failSend = store, nil
+				s.setStore(store)
+				f.failSend = nil
 				if result, err := s.acceptTry(ctx, todo.ID, ""); err != nil || !result.taken {
 					t.Fatalf("valid retry after the pause was rejected: %+v %v", result, err)
 				}
@@ -375,9 +376,9 @@ func TestTaskReviewDismissalCompletionWriteFailureDoesNotResend(t *testing.T) {
 		t.Run(entry, func(t *testing.T) {
 			e, st, before := dismissalAnswerEnv(t)
 			base := e.s.store()
-			e.s.store = func() Store {
+			e.s.setStore(func() Store {
 				return &dismissalAnswerWriteFails{Store: base, key: taskReviewDismissalsKey, onlyUndone: true}
-			}
+			})
 			if ok, err := dismissalAnswer(e.s, entry); !ok || err != nil {
 				t.Fatalf("already-delivered answer became retryable: %v, %v", ok, err)
 			}

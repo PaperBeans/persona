@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -108,10 +108,10 @@ func TestDecodeLargeBodyIsDecodeBody(t *testing.T) {
 				limit = c.limit(int64(len(b)))
 			}
 			sameAsDecodeBody(t, b, startBody{}, limit)
-			sameAsDecodeBody(t, b, kb.RecordingUpload{}, limit)
+			sameAsDecodeBody(t, b, recordingwire.RecordingUpload{}, limit)
 			sameAsDecodeBody[any](t, b, nil, limit)
 			sameAsDecodeBody(t, b, map[string]string(nil), limit)
-			if inPlace := int64(len(b)) <= limit && decodeInPlace(b, new(startBody)) == nil && decodeInPlace(b, new(kb.RecordingUpload)) == nil; inPlace != c.inPlace {
+			if inPlace := int64(len(b)) <= limit && decodeInPlace(b, new(startBody)) == nil && decodeInPlace(b, new(recordingwire.RecordingUpload)) == nil; inPlace != c.inPlace {
 				t.Errorf("decoded in place: %v, want %v", inPlace, c.inPlace)
 			}
 		})

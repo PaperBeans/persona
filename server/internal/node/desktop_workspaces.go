@@ -207,6 +207,12 @@ func (n *Node) decorateClaudeDesktop(s *proto.Session, index claudeDesktopIndex,
 	if root == "" {
 		return
 	}
+	// Older Desktop entries can lack their original folder. A transcript in an actual
+	// worktree then identifies the repository even if the index only kept a plain directory.
+	if about.originCwd == "" && about.cwd != s.Cwd && filepath.IsAbs(s.Cwd) && !inICloud(s.Cwd) &&
+		!codexRepositoryMarker(root) && codexRepositoryMarker(s.Cwd) {
+		root = claudeDesktopProjectRoot(s.Cwd, projects)
+	}
 	s.RepoRoot = root
 	if id, name := claudeDesktopDirectoryProject(root, n.home); id != "" {
 		s.SpaceKind, s.SpaceID, s.SpaceName = proto.SourceClaudeDesktop, id, name

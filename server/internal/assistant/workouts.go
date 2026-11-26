@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -136,12 +137,32 @@ func (s *Service) acceptWorkout(ctx context.Context, v WorkoutReport) error {
 	if err != nil {
 		return err
 	}
+	if v.Activity == assistantwire.WorkoutActivityStrength && s.healthMod != nil {
+		if err := s.healthMod.WorkoutReceived(ctx, assistantwire.StrengthWorkout{ID: v.ID, Start: v.Start, End: v.End, Report: data}); err != nil {
+			return err
+		}
+	}
 	now := time.Now().UTC()
-	task := Task{ID: id, WorkoutID: v.ID, Title: v.Title, Prompt: prompts.RenderWorkoutReport(string(data)), Repeat: repeatOnce, At: now, Enabled: true, Space: SpaceHealth, CreatedBy: "device", CreatedAt: now}
+	task := Task{ID: id, WorkoutID: v.ID, Title: v.Title, Prompt: prompts.RenderWorkoutReport(prompts.WorkoutReport{Data: string(data)}), Repeat: repeatOnce, At: now, Enabled: true, Space: SpaceHealth, CreatedBy: "device", CreatedAt: now}
 	if err := s.saveLocked(sc, append(slices.Clone(sc.tasks), task)); err != nil {
 		return err
 	}
 	return s.keepWorkoutReceipt(ctx, task)
+}
+
+func (s *Service) workoutPromptNow(ctx context.Context, t Task) (Task, string) {
+	if t.WorkoutID == "" || t.Space != SpaceHealth || s.healthMod == nil {
+		return t, ""
+	}
+	p, ok, err := s.healthMod.WorkoutReport(ctx, t.WorkoutID, answerLanguage(s.hello(ctx).Locale))
+	if err != nil {
+		s.logf("workout report %s: assembled prompt unavailable, using the stored one: %v", t.WorkoutID, err)
+	}
+	if ok && err == nil {
+		t.Prompt, t.PromptSelections = p.Prompt, false
+		return t, p.Start.In(s.location(ctx)).Format("2006-01-02")
+	}
+	return t, ""
 }
 func (s *Service) workoutRoutes() {
 	s.handle("POST /api/v1/assistant/health/workouts", func(w http.ResponseWriter, r *http.Request) {

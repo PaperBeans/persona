@@ -7,13 +7,15 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { hasFinePointer } from "../../lib/viewport";
 import { canRecall, opensSearch, readHistory, recallIndexOf, recallStep, recordSent } from "../../lib/send-history";
-import { splitSkillDraft } from "../../lib/skill-mentions";
+import { skillDraft, splitSkillDraft } from "../../lib/skill-mentions";
+import { editorText, inlineMessage, readInlineDraft } from "../../lib/inline-mentions";
+import type { InlineMentionInputHandle } from "./InlineMentionInput";
 
 export interface SendHistory {
   /** The search panel is open. */
   searching: boolean;
   /** Offers a key of the text box; true: it was ours and is handled. */
-  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => boolean;
   /** A message went out. */
   record: (text: string) => void;
   /** A row of the search was chosen: it lands in the box (not sent). */
@@ -21,12 +23,20 @@ export interface SendHistory {
   closeSearch: () => void;
 }
 
+// History keeps local draft IDs. Transcript edits have the same anchors even if a hub enriched a context body.
+function editableIdentity(raw: string) {
+  const { skills, text } = splitSkillDraft(raw);
+  const doc = readInlineDraft(text);
+  return skillDraft(skills, (inlineMessage()?.inlineBody(doc) ?? text).trim());
+}
+
 export function useSendHistory(o: {
   draftKey: string;
   draft: string;
+  editorText: string;
   setDraft: (text: string) => void;
   setCaret: (at: number) => void;
-  input: RefObject<HTMLTextAreaElement | null>;
+  input: RefObject<InlineMentionInputHandle | null>;
   disabled?: boolean;
   /** The words the box got when editing the last message began; null when it is not editing. */
   editing?: string | null;
@@ -42,7 +52,7 @@ export function useSendHistory(o: {
 
   const putCaretAtEnd = useCallback(
     (text: string) => {
-      const length = splitSkillDraft(text).text.length;
+      const length = editorText(readInlineDraft(splitSkillDraft(text).text)).length;
       setCaret(length);
       requestAnimationFrame(() => {
         input.current?.focus();
@@ -52,7 +62,7 @@ export function useSendHistory(o: {
     [input, setCaret],
   );
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): boolean => {
     if (disabled || !hasFinePointer()) return false;
     if (opensSearch(e)) {
       e.preventDefault();
@@ -62,15 +72,20 @@ export function useSendHistory(o: {
     if ((e.key !== "ArrowUp" && e.key !== "ArrowDown") || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
     const dir = e.key === "ArrowUp" ? "up" : "down";
     if (draft === "") shown.current = null;
-    if (editing != null && draft === editing && shown.current?.text !== draft) shown.current = { index: recallIndexOf(readHistory(draftKey), draft), text: draft };
-    const el = e.currentTarget;
-    if (el.selectionStart !== el.selectionEnd) return false;
+    const [start, end] = input.current?.selection() ?? [0, 0];
+    if (start !== end) return false;
+    const editingThis = editing != null && draft === editing;
+    if (editingThis && shown.current?.text !== draft) {
+      const list = readHistory(draftKey);
+      const identity = editableIdentity(draft);
+      shown.current = { index: recallIndexOf(list.map((entry) => ({ ...entry, text: editableIdentity(entry.text) })), identity), text: draft };
+    }
     const ok = canRecall({
       draft,
       shown: shown.current?.text ?? null,
       dir,
-      firstLine: !el.value.slice(0, el.selectionStart).includes("\n"),
-      lastLine: !el.value.slice(el.selectionEnd).includes("\n"),
+      firstLine: !o.editorText.slice(0, start).includes("\n"),
+      lastLine: !o.editorText.slice(end).includes("\n"),
     });
     if (!ok) return false;
     const list = readHistory(draftKey);
@@ -87,7 +102,7 @@ export function useSendHistory(o: {
     }
     const text = list[next].text;
     // an edit with no older message: it stays an edit
-    if (editing != null && text === draft) {
+    if (editingThis && editableIdentity(text) === editableIdentity(draft)) {
       shown.current = { index: next, text };
       return true;
     }

@@ -1,0 +1,18 @@
+{
+  "waiting": "Will start when {name} is back",
+  "starting": "Starting…",
+  "check": "Will check whether it started when {name} is back",
+  "unclear": "Couldn't confirm whether this Agent started. Retry checks the computer first.",
+  "unconfirmed": "Couldn't confirm whether this Agent started. Retry to start it anyway, or delete it.",
+  "refused": "Not started: {reason}",
+  "no_reason": "the computer didn't say why",
+  "expired": "Not started: {name} was away for 24 hours",
+  "signed_out": "Signed out on the device that started this Agent. Delete it and start again from a signed-in device.",
+  "starting_now": "This Agent is starting right now. Try again in a moment.",
+  "not_found": "This Agent start is no longer waiting.",
+  "read_only": "This device can't view or change Agent starts waiting for a computer.",
+  "store_failed": "Couldn't change this Agent start right now. Try again in a moment.",
+  "not_prepared": "Persona couldn't start this Agent",
+  "full": "Too many Agent starts are waiting for this computer. Delete some, or start this one when the computer is back.",
+  "unavailable": "Waiting Agent starts aren't available right now. Try again in a moment."
+}

@@ -297,7 +297,7 @@ export function EmojiImage({ name, size, catalog }: { name: string; size: number
 }
 
 /** The reactions under a message: emoji and count, mine tinted; a click puts mine on or takes it off. */
-export function Reactions({ reactions, onToggle }: { reactions: LarkReaction[]; onToggle?: (key: string) => void }) {
+export function Reactions({ reactions, onToggle, readOnly = false }: { reactions: LarkReaction[]; onToggle?: (key: string) => void; readOnly?: boolean }) {
   const catalog = useCatalog();
   if (!reactions.length) return null;
   return (
@@ -305,21 +305,25 @@ export function Reactions({ reactions, onToggle }: { reactions: LarkReaction[]; 
       {reactions.map((r) => {
         const who = (r.users ?? []).join(t("inbox-larkthread.name_separator"));
         const label = catalog?.emojis[r.key.toLowerCase()]?.label || r.key;
-        return (
+        const title = who ? t("inbox-larkthread.reacted_by", { names: who, emoji: label }) : label;
+        const className = cx(
+          "flex h-6 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap tabular-nums transition-colors",
+          r.mine ? "bg-accent-tint text-accent-ink shadow-[inset_0_0_0_1px_var(--color-accent)]" : "bg-field text-ink-2 enabled:hover:bg-hover",
+        );
+        const content = <><EmojiImage name={r.key} size={16} catalog={catalog} />{r.count}</>;
+        return readOnly ? (
+          <span key={r.key} title={title} className={className}>{content}</span>
+        ) : (
           <button
             key={r.key}
             type="button"
             disabled={!onToggle}
             onClick={() => onToggle?.(r.key)}
-            title={who ? t("inbox-larkthread.reacted_by", { names: who, emoji: label }) : label}
+            title={title}
             aria-pressed={Boolean(r.mine)}
-            className={cx(
-              "flex h-6 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap tabular-nums transition-colors",
-              r.mine ? "bg-accent-tint text-accent-ink shadow-[inset_0_0_0_1px_var(--color-accent)]" : "bg-field text-ink-2 enabled:hover:bg-hover",
-            )}
+            className={className}
           >
-            <EmojiImage name={r.key} size={16} catalog={catalog} />
-            {r.count}
+            {content}
           </button>
         );
       })}

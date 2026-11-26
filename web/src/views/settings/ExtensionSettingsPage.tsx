@@ -80,7 +80,7 @@ export function enableFooter(d: HubExtensionDetail, names: Record<string, string
 }
 
 /** Capabilities follow the full-rights market routes, not a manifest's configuration or arbitrary source URL. */
-function lifecycleReason(d: HubExtensionDetail, removing: boolean): string {
+export function lifecycleReason(d: HubExtensionDetail, removing: boolean): string {
   if (d.source === "builtin") return t(removing ? "settings-extensions.builtin_uninstall" : "settings-extensions.builtin_updates");
   if (d.read_only || d.source === "hub.json" || d.source === "dev" || d.attached || d.source === "installed") {
     return t(removing ? "settings-extensions.external_uninstall" : "settings-extensions.external_updates");
@@ -88,7 +88,7 @@ function lifecycleReason(d: HubExtensionDetail, removing: boolean): string {
   return t("settings-extensions.action_unknown");
 }
 
-function Updates({ d, manager, busy, market, canCheck, automatic, reason, onToggle, onUpgrade, onChecked }: {
+export function Updates({ d, manager, busy, market, canCheck, automatic, reason, onToggle, onUpgrade, onChecked }: {
   d: HubExtensionDetail; manager?: string; busy: boolean; market: string; canCheck: boolean; automatic: boolean; reason: string;
   onToggle: (on: boolean) => void; onUpgrade: (market: string, id: string) => void; onChecked: () => Promise<void>;
 }) {
@@ -160,7 +160,7 @@ function Updates({ d, manager, busy, market, canCheck, automatic, reason, onTogg
   );
 }
 
-function Information({ d }: { d: HubExtensionDetail }) {
+export function Information({ d }: { d: HubExtensionDetail }) {
   let home = "";
   try { home = d.homepage && new URL(d.homepage).protocol === "https:" ? d.homepage : ""; } catch { /* Invalid manifest URL stays unavailable. */ }
   const missing = t("settings-extensions.not_provided");

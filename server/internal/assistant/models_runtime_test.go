@@ -178,7 +178,7 @@ func TestModelProfilesIgnoreARuntime(t *testing.T) {
 	putRawSetting(t, s, modelProfilesKey, `{"revision":1,"profiles":[{"id":"selected","name":"Selected",`+
 		`"purposes":{"assistant":{"model":"test-other","runtime":"agentsdk"}},"updated_at":"2026-01-01T00:00:00Z"}]}`)
 	v := profilesOf(t, s)
-	if len(v.Profiles) != 1 || v.Profiles[0].Purposes["assistant"] != (ModelBinding{Model: "test-other"}) ||
+	if len(v.Profiles) != 1 || v.Profiles[0].Purposes["assistant"] != (ModelBinding{Provider: "launcher.claude", Model: "test-other"}) ||
 		!slices.Equal(v.Profiles[0].Changes, []string{"assistant"}) {
 		t.Fatalf("view: %+v", v)
 	}
@@ -190,7 +190,7 @@ func TestModelProfilesIgnoreARuntime(t *testing.T) {
 			t.Fatalf("%s after the switch: %s", key, raw)
 		}
 	}
-	if r := modelRecordOf(t, s, "assistant"); r.Binding != (ModelBinding{Model: "test-other"}) {
+	if r := modelRecordOf(t, s, "assistant"); r.Binding != (ModelBinding{Provider: "launcher.claude", Model: "test-other"}) {
 		t.Fatalf("switched to %+v", r)
 	}
 	if _, err := s.rollbackModelProfile(ctx, ProfileActor{Kind: "hub"}); err != nil {

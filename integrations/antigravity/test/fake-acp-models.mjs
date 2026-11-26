@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 const directory = process.argv[2]
+if (process.argv.includes('--warm')) process.exit(0)
 const settings = () => JSON.parse(readFileSync(`${directory}/catalog.json`, 'utf8'))
 const nativeSettings = () => {
   try { return JSON.parse(readFileSync(`${directory}/settings/settings.json`, 'utf8')) } catch { return {} }
@@ -19,11 +20,12 @@ if (process.argv.includes('models')) {
   }
 }
 const id = '11111111-2222-3333-4444-555555555555'
+const effortSuffix = /-(low|medium|high|xhigh|max)$/
 let model = 'gemini-future-medium'
 let effort = 'medium'
 let mode = 'default'
 const configuration = () => [
-  { id: 'model', category: 'model', currentValue: model.replace(/-(low|medium|high)$/, '') },
+  { id: 'model', category: 'model', currentValue: model.replace(effortSuffix, '') },
   { id: 'thought_level', currentValue: effort },
   { id: 'mode', currentValue: mode },
 ]
@@ -32,6 +34,11 @@ let pendingPermissions
 let loaded = false
 let settingsAgentMode
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
+
+const reportWindow = () => {
+  const size = settings().windows?.[model]
+  if (size !== undefined) send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'usage_update', used: 0, size } } })
+}
 
 // Opt-in native settings updates: agy 1.5.12 reports default when it refuses auto.
 const nativeAgentMode = () => {
@@ -54,15 +61,38 @@ const readPermissions = [
   { id: 'read-permission-rg', toolCallId: 'rg', title: 'run_command', rawInput: { command: 'rg "agentMode" settings.json' } },
   { id: 'read-permission-mcp', toolCallId: 'mcp-read', title: 'mcp_persona_messages_read', rawInput: { limit: 1 } },
 ]
-const askPermissions = (request, permissions) => {
-  pendingPermissions = { promptId: request.id, open: new Set() }
+const mixedPermissions = [
+  {
+    id: 'read-permission-bash', toolCallId: 'bash-write', title: 'run_command', rawInput: { command: 'git add -A && gh pr merge 1' },
+    options: [
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+    ],
+  },
+  {
+    id: 'read-permission-edit', toolCallId: 'edit-file', title: 'edit_file', rawInput: { Path: '/tmp/a.go', Target: 'a', Replacement: 'b' },
+    options: [
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      { optionId: 'once', name: 'Allow once', kind: 'allow_once' },
+    ],
+  },
+  {
+    id: 'read-permission-write', toolCallId: 'write-file', title: 'write_file', rawInput: { Path: '/tmp/b.go', Content: 'package b' },
+    options: [
+      { optionId: 'reject', name: 'Reject', kind: 'reject_always' },
+      { optionId: 'always-write', name: 'Always allow', kind: 'allow_always' },
+    ],
+  },
+]
+const askPermissions = (request, permissions, result = { stopReason: 'end_turn' }) => {
+  pendingPermissions = { promptId: request.id, open: new Set(), result }
   for (const permission of permissions) {
     pendingPermissions.open.add(permission.id)
     appendFileSync(`${directory}/calls.jsonl`, `${JSON.stringify({ method: 'fake/permission', id: permission.id })}\n`)
     send({ jsonrpc: '2.0', id: permission.id, method: 'session/request_permission', params: {
       sessionId: id,
       toolCall: { toolCallId: permission.toolCallId, title: permission.title, rawInput: permission.rawInput },
-      options: [
+      options: permission.options ?? [
         { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
         { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
         { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
@@ -73,9 +103,9 @@ const askPermissions = (request, permissions) => {
 const answerPermission = (request) => {
   if (!pendingPermissions?.open.delete(request.id)) return false
   if (pendingPermissions.open.size === 0) {
-    const promptId = pendingPermissions.promptId
+    const { promptId, result } = pendingPermissions
     pendingPermissions = undefined
-    send({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'end_turn' } })
+    send({ jsonrpc: '2.0', id: promptId, result })
   }
   return true
 }
@@ -86,7 +116,7 @@ const complete = (request, result, error) => {
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: 'auto' } } })
     setImmediate(() => send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: 'default' } } }))
   }
-  if (['session/set_model', 'session/set_mode'].includes(method) && !error) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions: configuration() } } })}\n`)
+  if ((method === 'session/set_mode' || (method === 'session/set_model' && !settings().omitSetModelConfigUpdate)) && !error) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions: configuration() } } })}\n`)
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -105,8 +135,28 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (method === 'initialize') result = { protocolVersion: 1, agentInfo: { version: 'test' } }
   if (method === 'session/new' || method === 'session/resume') {
     loaded = true
+    if (method === 'session/resume' && settings().resetModeOnResume) mode = 'default'
+    reportWindow()
     settingsAgentMode = nativeSettings().agentMode || 'default'
-    result = { sessionId: id, models: { availableModels: settings().models, currentModelId: model }, modes: { currentModeId: mode }, configOptions: configuration() }
+    if (method === 'session/resume' && settings().configUpdateOnResume) {
+      const configOptions = settings().configUpdateOnResume === 'effortOnly'
+        ? [{ id: 'thought_level', currentValue: effort }]
+        : settings().configUpdateOnResume === 'modelOnly'
+          ? [{ id: 'model', category: 'model', currentValue: model.replace(effortSuffix, '') }]
+          : configuration()
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'config_option_update', configOptions } } })
+    }
+    const modes = settings().availableModes ? { currentModeId: mode, availableModes: settings().availableModes } : { currentModeId: mode }
+    result = {
+      sessionId: id,
+      models: { availableModels: settings().models, currentModelId: model },
+      ...(method === 'session/resume' && settings().omitResumeModes ? {} : { modes }),
+      ...(method === 'session/resume' && settings().omitResumeConfig ? {} : { configOptions: configuration() }),
+    }
+    if (method === 'session/resume' && settings().askPermissionOnResume) {
+      askPermissions(request, readPermissions.slice(0, 1), result)
+      return
+    }
   }
   if (method === 'session/prompt') {
     syncSettingsMode()
@@ -115,8 +165,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: 'default' } } })
     }
     const text = params.prompt?.find((block) => block.type === 'text')?.text?.trim()
-    if (text === 'ask-read-permission' || text === 'ask-read-permissions') {
-      askPermissions(request, text === 'ask-read-permission' ? readPermissions.slice(0, 1) : readPermissions)
+    if (text === 'ask-read-permission' || text === 'ask-read-permissions' || text === 'ask-mixed-permissions') {
+      const batch = text === 'ask-read-permission'
+        ? readPermissions.slice(0, 1)
+        : text === 'ask-mixed-permissions' ? mixedPermissions : readPermissions
+      askPermissions(request, batch)
       return
     }
     if (settings().holdPrompt) return
@@ -132,7 +185,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'session/set_model') {
     if (!settings().models.some((entry) => entry.modelId === params.modelId)) error = { code: -32602, message: 'Model unavailable' }
-    else { model = params.modelId; effort = model.split('-').at(-1) }
+    else {
+      model = params.modelId
+      effort = effortSuffix.exec(model)?.[1]
+      reportWindow()
+    }
+  }
+  // An Antigravity CLI from before session/set_mode (#14533) answers it as an unknown method.
+  if (method === 'session/set_mode' && settings().noSetMode) {
+    complete(request, undefined, { code: -32601, message: `Method not found: ${method}` })
+    return
   }
   if (method === 'session/set_mode') {
     if (params.modeId === 'accept-edits' && settings().holdFallback) {
@@ -155,8 +217,9 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     } else mode = params.modeId
   }
   if (method === 'session/set_config_option') {
-    if (!['low', 'medium', 'high'].includes(params.value)) error = { code: -32602, message: 'Thinking level unavailable' }
-    else { effort = params.value; model = model.replace(/-(low|medium|high)$/, `-${effort}`); result = { configOptions: configuration() } }
+    const nextModel = `${model.replace(effortSuffix, '')}-${params.value}`
+    if (!settings().models.some((entry) => entry.modelId === nextModel)) error = { code: -32602, message: 'Thinking level unavailable' }
+    else { effort = params.value; model = nextModel; result = { configOptions: configuration() } }
   }
   complete(request, result, error)
 })

@@ -284,11 +284,11 @@ func TestLaterHandledStoreFailureIsNotHandled(t *testing.T) {
 	ctx := context.Background()
 	a, _, _ := e.s.laterQueue(ctx, "todo_a", "box", "ag1", "要不要先停写？", e.clk.Now())
 
-	e.st.failPut = errors.New("database unavailable")
+	e.st.setFailPut(errors.New("database unavailable"))
 	if ok, err := e.s.laterHandled(ctx, a.ID, e.clk.Now()); ok || err == nil {
 		t.Fatalf("not written: %v %v, want an error", ok, err)
 	}
-	e.st.failPut = nil
+	e.st.setFailPut(nil)
 	if open := e.s.laterOpen(ctx, e.clk.Now()); len(open) != 1 || open[0].ID != a.ID {
 		t.Fatalf("queue: %+v", open)
 	}

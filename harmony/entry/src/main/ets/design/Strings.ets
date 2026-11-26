@@ -16,3 +16,9 @@ export class Strings {
   }
 }
 export function tr(key: string): string { return Strings.get(key); }
+
+export function trError(value: string): string {
+  const message = tr(value);
+  if (message !== value || !/^[a-z][a-z0-9]*([_-][a-z0-9]+)*$/.test(value)) return message;
+  return tr('failed');
+}

@@ -147,6 +147,8 @@
     <string name="knowledge_ui_minutes_stale">The minutes changed. Showing the latest version; review the action items before adding them.</string>
     <string name="knowledge_ui_minutes_due">Due %1$s</string>
     <string name="knowledge_ui_minutes_transcript_expired">The transcript has expired. Only these minutes are kept.</string>
+    <string name="knowledge_ui_minutes_paused">Minutes are paused</string>
+    <string name="knowledge_ui_minutes_paused_note">Meeting recording is off on this hub, so nothing new is being written. Everything already here stays.</string>
     <string name="knowledge_ui_handoff_title">Hand to Agent</string>
     <string name="knowledge_ui_handoff_open_dialog">Hand to Agent…</string>
     <string name="knowledge_ui_handoff_pick">Pick an Agent</string>

@@ -14,7 +14,7 @@ from them instead of being written once per platform:
 | `connector.schema.json` | **Plugin-side.** The `connectors` extension point's calls (`docs/protocol/connector-protocol.md`): everything the hub asks a connector program (`connector.status`, `connector.inbox.collect`, `connector.thread.page`, `connector.archive.changes`, the read-only history import `connector.history.chats` / `connector.archive.history` / `connector.history.anchors`, `connector.group.*`, `connector.login.step`…), what the program asks back (`connector.secrets.*`, the knowledge base's `connector.posts.*` and `connector.archive.chats`, `connector.credentials.gh_token`, and the hub's own `sent.record`, which puts a send of the connector's in the sent-as-user ledger), `connector.recall` (the hub asks a connector that declares `recall` to take back a message it sent, once the user agreed), the `connector.changed` event, the capabilities, states and error codes |
 | `channel.schema.json` | **Plugin-side.** The `channel` extension point's calls (`docs/extensions/channels.md` "4. Contributing a channel"): `channel.receive` and `channel.status` from the program, `channel.send`, `channel.typing` and `channel.edit` from the hub, `cannot_send` |
 | `kb.schema.json` | **Plugin-side.** The knowledge base an extension reads and writes directly (`docs/extensions/extensions.md` "Knowledge base RPC"): `kb.list`, `kb.get`, `kb.day`, `kb.search`, `kb.update`, `kb.owner`, and the events `event.kb.changed` / `event.kb.forgotten` |
-| `assistant.schema.json` | **Plugin-side.** Reading the user's conversations with the assistant (`docs/extensions/extensions.md` "Assistant conversations"): `assistant.conversations`, `assistant.messages` with the permission `assistant.read`; unified ledger `assistant.entries.list` and `event.assistant.entries.changed` with `assistant.entries.read` |
+| `assistant.schema.json` | **Plugin-side.** Reading the user's conversations with the assistant (`docs/extensions/extensions.md` "Assistant conversations"): `assistant.conversations`, `assistant.messages` with the permission `assistant.read`; unified ledger `assistant.entries.list` and `event.assistant.entries.changed` with `assistant.entries.read`; and telling its main conversation something ("Assistant events"): `assistant.event` with the permission `assistant.events` |
 | `assistant_data.schema.json` | **Plugin-side.** The assistant content an extension writes in its data directory (`docs/extensions/extensions.md` "Assistant content from the data directory"): `assistant.data_status`, what the assistant reads now of the calling extension's data contributions |
 | `machines.schema.json` | **Plugin-side.** Requesting one-time computer pairing links and reading computer status (#12798): `machines.pair_link` (`machines.pair`) and `machines.status` (`machines.read` or `machines.pair`) |
 | `browser.schema.json` | **Plugin-side.** Cross-machine browser automation via pluggable `BrowserBackend` (#12866): `browser.machines` and `browser.run` (`browser.run`) |
@@ -25,6 +25,7 @@ from them instead of being written once per platform:
 | `leaders.schema.json` | **Plugin-side.** The leader events an extension subscribed to and was granted `leaders.read` is told of (`docs/extensions/extensions.md` "Leader events"): `event.leader.changed`, `event.leader.report` |
 | `repository.schema.json` | **Plugin-side.** The `repository_providers` extension point's calls (#10330): the manager asks a code-hosting source's program `repo.parse` (what repository an address on its hosts names), `repo.check` (it exists and is visible), `repo.link` (an issue or pull request of a repository, by address or by kind and number) the optional `repo.describe` (a stored link's title and state) and `repo.pr_status` (a stored pull request's state, for a contribution declaring the `pr_status` capability, #11584), and re-checks every answer; `RepoErrorCode`. The manifest's item (`RepositoryProviderItem`, `RepositoryLinkLabel`, `RepositoryLinkKind`, `RepositoryCapability`) is in `manifest.schema.json` |
 | `memory.schema.json` | **Plugin-side.** The `memory_sources` extension point's call (#13532, registered in #13586; the item is `MemorySourceItem` in `manifest.schema.json`): the manager reads a memory extension's entries one by one with `memory.entries` (`MemoryEntriesParams`, `MemoryEntriesResult`, `MemoryEntry`, `MemoryErrorCode`) and grades them by scene itself; see `docs/extensions/extensions.md` ("Memory sources") |
+| `offload.schema.json` | The `disk_offload` extension point's calls (#14576; the item is `DiskOffloadItem` in `manifest.schema.json`): the manager asks a provider's program `offload.inventory` (what it holds of a computer, drawn beside the disk usage map), `offload.run` (offload paths or restore items, after the user confirmed; `needs_install` names the tool to install), `offload.job` and the optional `offload.cancel`; and the manager routes' answers the apps read (`OffloadProviders`, `OffloadRunRequest`, `OffloadStarted`, `OffloadError`); see `docs/server/machine-usage-map.md` |
 | `examples/` | Examples: `<definition>.<name>.json` must hold to the schema; those under `examples/invalid/` must not. The plugin-side schemas' are in `examples/plugin/` (and `examples/plugin/invalid/`) |
 
 ## Generating
@@ -307,6 +308,9 @@ The generator understands only what is below; anything else stops it with an err
   fails `test_schema_keywords_are_known` (#4012); what an `x-` annotation holds is not checked as keywords.
   Rules a schema cannot say (at most 300 components a page, the same labels in every chart series, field names
   unique, `state` at most 16 KB) stay the hub's hand-written checks.
+- The opt-in typed keywords (`x-enum: closed`, `x-unknown: count`, `x-id`, enum-keyed maps made structs,
+  `x-decode: strict`, `x-opaque`) and the Rust output are described in `schema/wire/README.md` ("Typed keywords
+  (opt-in)"); no extension schema uses them yet.
 - A manifest example also has to pass the hub's `extension.Parse` (semantic checks beyond the schema, such as
   `contributes.events` needing `on_startup`): `server/internal/extension/manifest_examples_test.go` requires
   `examples/Manifest.*.json` and `sdk/templates/{go,ts}/persona-extension.json` (placeholders filled in) to install
@@ -406,6 +410,13 @@ an optional `SceneLight`). Numbers where 0 means something (`bottom`, `top`, `ya
 `x-go-pointer`. The hub's `downgrade11` (`server/internal/extension/ui_v11.go`) draws an older app the poster as an `image`, or
 without one a row per pin; a native stream's source may draw a scene too (`UIStreamItem` lists it), but its client never gets
 one: the hub draws it the same way. Its example is `examples/View.v11-scene-flat.json`.
+UI version 12 (#14730) adds one component, `map` (`MapComponent`: `alt`, `title`, `caption`, `viewport`, `markers` of
+`MapMarker`, `routes` of `MapRoute` using `MapCoordinate`, `links` of `MapLink`, `aspect`, `static`, `show_list`), validated
+by `sdk/go/wire/viewcheck12.go` (`CheckMap`). Numeric coordinates, viewport spans, and optional route metrics where zero
+is meaningful use `x-go-pointer`. A client on UI version 12 that omits another component may list it in
+`UIContext.unsupported` so older renderers keep selective downgrades without losing `map`. The hub's `downgrade12`
+(`server/internal/extension/ui_v12.go`) draws an older app or unsupported client summary text plus route, marker and
+link rows. Its example is `examples/View.v12-map-route.json`.
 
 ## Adding a call
 

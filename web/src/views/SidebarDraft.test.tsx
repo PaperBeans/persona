@@ -8,15 +8,15 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
-// every render of a SessionRow reads its preview once: counted per session
-const previews = vi.hoisted(() => new Map<string, number>());
-vi.mock("../lib/format", async (load) => {
-  const real = await load<typeof import("../lib/format")>();
+// every render of a SessionRow reads its left draft once: counted per session
+const draftReads = vi.hoisted(() => new Map<string, number>());
+vi.mock("../lib/drafts", async (load) => {
+  const real = await load<typeof import("../lib/drafts")>();
   return {
     ...real,
-    sessionPreview: (s: Parameters<typeof real.sessionPreview>[0]) => {
-      previews.set(s.session_id, (previews.get(s.session_id) ?? 0) + 1);
-      return real.sessionPreview(s);
+    useLeftDraft: (key: string | null) => {
+      if (key) draftReads.set(key, (draftReads.get(key) ?? 0) + 1);
+      return real.useLeftDraft(key);
     },
   };
 });
@@ -136,14 +136,14 @@ describe("a sidebar row with an unsent draft (#5568)", () => {
   it("does not re-render the list while you type", async () => {
     await act(() => refresh());
     await show("s1");
-    previews.clear();
+    draftReads.clear();
     typeInto("一个字");
     await settle();
     typeInto("一个字一个字");
     await settle();
     expect(localStorage.getItem("draft:mac/s1")).toBe("一个字一个字");
-    expect(previews.get("s1") ?? 0).toBe(0);
-    expect(previews.get("s2") ?? 0).toBe(0);
+    expect(draftReads.get("mac/s1") ?? 0).toBe(0);
+    expect(draftReads.get("mac/s2") ?? 0).toBe(0);
   });
 
   it("is not there for whitespace alone", async () => {

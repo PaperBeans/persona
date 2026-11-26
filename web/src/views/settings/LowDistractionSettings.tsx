@@ -12,6 +12,7 @@ import { api, errorText, isAbort, onCredentialChange } from "../../lib/api";
 import { lnModeEnabled } from "../../lib/push-intercepts";
 import { setPushGrading } from "../../lib/store";
 import { Spinner, toast } from "../../ui/atoms";
+import { HeldPushesDialog } from "../assistant/HeldPushes";
 import { Group, Row, RowFailed, Switch } from "./SettingsParts";
 
 type State = "loading" | "unsupported" | { on: boolean } | { error: string };
@@ -23,6 +24,7 @@ function missingRoute(e: unknown): boolean {
 export function LowDistractionSettings() {
   const [state, setState] = useState<State>("loading");
   const [busy, setBusy] = useState(false);
+  const [heldOpen, setHeldOpen] = useState(false);
   // The request the view waits for: each read and write takes the next number, and only the latest one's answer counts.
   const latest = useRef(0);
   const abort = useRef<AbortController | null>(null);
@@ -33,6 +35,7 @@ export function LowDistractionSettings() {
     const controller = new AbortController();
     abort.current = controller;
     setBusy(false);
+    setHeldOpen(false);
     setState("loading");
     api<unknown>("/push/ln-mode", { signal: controller.signal }).then(
       (r) => {
@@ -82,17 +85,26 @@ export function LowDistractionSettings() {
   };
 
   const label = t("settings-notifications.low_distraction");
+  const enabled = typeof state === "object" && "on" in state && state.on;
   return (
-    <Group anchor="low-distraction" footer={t("settings-notifications.low_distraction_footer")}>
-      {typeof state === "object" && "error" in state ? (
-        <RowFailed text={t("settings-notifications.low_distraction_load_failed")} retry={t("settings-notifications.retry")} onRetry={load} />
-      ) : state === "unsupported" ? (
-        <Row icon="bellOff" label={label} hint={t("settings-notifications.low_distraction_unsupported")} wrapHint />
-      ) : (
-        <Row icon="bellOff" label={label} hint={t("settings-notifications.low_distraction_hint")}>
-          {state === "loading" ? <Spinner /> : <Switch on={state.on} onChange={(next) => void toggle(next)} disabled={busy} label={label} />}
-        </Row>
-      )}
-    </Group>
+    <>
+      <Group anchor="low-distraction" footer={t("settings-notifications.low_distraction_footer")}>
+        {typeof state === "object" && "error" in state ? (
+          <RowFailed text={t("settings-notifications.low_distraction_load_failed")} retry={t("settings-notifications.retry")} onRetry={load} />
+        ) : state === "unsupported" ? (
+          <Row icon="bellOff" label={label} hint={t("settings-notifications.low_distraction_unsupported")} wrapHint />
+        ) : (
+          <>
+            <Row icon="bellOff" label={label} hint={t("settings-notifications.low_distraction_hint")}>
+              {state === "loading" ? <Spinner /> : <Switch on={state.on} onChange={(next) => void toggle(next)} disabled={busy} label={label} />}
+            </Row>
+            {enabled && (
+              <Row icon="bell" anchor="held-pushes" label={t("push-intercepts.held_entry")} hint={t("push-intercepts.held_entry_hint")} onClick={() => setHeldOpen(true)} />
+            )}
+          </>
+        )}
+      </Group>
+      <HeldPushesDialog open={enabled && heldOpen} onClose={() => setHeldOpen(false)} />
+    </>
   );
 }

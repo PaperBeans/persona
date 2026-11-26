@@ -417,7 +417,8 @@ func TestCodexEffortFollowsTheModel(t *testing.T) {
 	waitFor(t, "the new settings", func() bool { t := threadOf(c, remoteRaw); return t.model == "gpt-test" && t.effort == "low" })
 }
 
-// Codex in a pane with no app-server (the terminal route) and a compatible CLI keep the old refusal.
+// Codex in a pane with no app-server (the terminal route) whose session no Codex 0.169 or later started has no /model
+// to type (codex_terminal_modes.go) and says so; a compatible CLI keeps the old refusal. Neither offers efforts.
 func TestCodexEffortRefusedOffTheAppServer(t *testing.T) {
 	n := remoteTestNode(t)
 	n.modes = map[string]sessionModes{}
@@ -436,7 +437,10 @@ func TestCodexEffortRefusedOffTheAppServer(t *testing.T) {
 	n.mu.Unlock()
 	for _, id := range []string{codexID, traexID} {
 		_, err := request(t, n, "session.modes", map[string]any{"session_id": id, "effort": "high"})
-		if err == nil || !strings.Contains(err.Error(), "Codex / TRAE CLI 的会话不支持") {
+		if id == codexID && refusalCode(err) != proto.CodeModesCodexVersion {
+			t.Errorf("%s: %v", id, err)
+		}
+		if id == traexID && (err == nil || !strings.Contains(err.Error(), "Codex / TRAE CLI 的会话不支持")) {
 			t.Errorf("%s: %v", id, err)
 		}
 		if s := paneRow(t, n, id); len(s.Efforts) != 0 {
@@ -469,7 +473,7 @@ func TestCodexAppServerModelSwitchAndPendingFallback(t *testing.T) {
 	}
 
 	// Switching to acme/gpt-5-pro reconciles xhigh -> medium.
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "acme/gpt-5-pro", "", "", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "acme/gpt-5-pro", "", "", false); err != nil {
 		t.Fatal(err)
 	}
 	up := f.sent("thread/settings/update")
@@ -484,10 +488,10 @@ func TestCodexAppServerModelSwitchAndPendingFallback(t *testing.T) {
 	f.mu.Lock()
 	f.reject, f.rejectCode = "thread/settings/update", -32601
 	f.mu.Unlock()
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "beta/gpt-5-pro", "", "", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "beta/gpt-5-pro", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := n.setModelAndModes(ctx, remoteRaw, "", "", "xhigh", false); err != nil {
+	if _, _, err := n.setModelAndModes(ctx, remoteRaw, "", "", "xhigh", false); err != nil {
 		t.Fatal(err)
 	}
 	if s := paneRow(t, n, remoteRaw); s.Model != "beta/gpt-5-pro" || s.Effort != "xhigh" {

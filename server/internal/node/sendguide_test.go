@@ -3,6 +3,7 @@ package node
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,6 +133,92 @@ func TestSendAGuideTookIsNotReportedDelivered(t *testing.T) {
 			}
 			if prompts() != c.prompts || escs() != c.escPress {
 				t.Fatalf("prompts %d, esc %d; want %d and %d", prompts(), escs(), c.prompts, c.escPress)
+			}
+		})
+	}
+}
+
+// If a guide retry fails, Attempt 1 was already typed: a late-recorded transcript line confirms delivery ONLY when the
+// retry itself is proven not to have typed (e.g. agent_blocked); a retry that may have pasted stays delivered="unknown".
+func TestSendGuideRetryBlockedPreservesDeliveredOrUnknown(t *testing.T) {
+	teach := screenFixture(t, "claude-2.1.318-teach-auto-mode-184.txt")
+	empty := screenFixture(t, "claude-2.1.312-empty-162.txt")
+	emptyANSI := screenFixture(t, "claude-2.1.312-empty-162.ansi")
+	for _, tc := range []struct {
+		name        string
+		landedLate  bool
+		retryFail   herdrFail
+		wantSuccess bool
+		wantCode    string
+		wantSubstr  string
+	}{
+		{
+			name:        "refused retry with late transcript confirms delivery",
+			landedLate:  true,
+			retryFail:   herdrFail{Code: "agent_blocked", Message: "interactive input required"},
+			wantSuccess: true,
+		},
+		{
+			name:       "refused retry with unseen transcript stays unknown",
+			landedLate: false,
+			retryFail:  herdrFail{Code: "agent_blocked", Message: "interactive input required"},
+			wantCode:   "delivery_unknown",
+			wantSubstr: "还不能确认首次发送是否已经送达",
+		},
+		{
+			name:       "uncertain retry failure with late transcript stays unknown",
+			landedLate: true,
+			retryFail:  herdrFail{Code: "unavailable", Message: "connection lost after paste"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f, home, cwd := guideNode(t, true)
+			f.setScreens("w1:p1", empty, emptyANSI)
+			var mu sync.Mutex
+			attempt := 0
+			f.handle("agent.prompt", func(p map[string]any) any {
+				mu.Lock()
+				attempt++
+				cur := attempt
+				mu.Unlock()
+				if cur == 1 {
+					f.setScreens("w1:p1", teach, teach)
+					return map[string]any{}
+				}
+				if tc.landedLate {
+					appendTranscript(t, home, cwd, sidA, promptLine(cwd, str(p["text"]), 0))
+				}
+				return tc.retryFail
+			})
+			f.after(func(c herdrCall) {
+				if isKeys("esc")(c) {
+					f.setScreens("w1:p1", empty, emptyANSI)
+				}
+			})
+			_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "run the voice check"})
+			if tc.wantSuccess {
+				if err != nil {
+					t.Fatalf("first attempt landed and retry typed nothing, want nil error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected unknown delivery error")
+			}
+			code, data := refusalOf(t, err)
+			if data["delivered"] != deliveredUnknown {
+				t.Fatalf("delivered = %v (err=%v), want %q", data["delivered"], err, deliveredUnknown)
+			}
+			if tc.wantCode != "" && code != tc.wantCode {
+				t.Fatalf("code = %q (err=%v), want %q", code, err, tc.wantCode)
+			}
+			if tc.wantCode == "delivery_unknown" {
+				if data["reason"] != "guide_retry_refused" || data["retry_code"] != "dialog_open" || data["dialog"] == "" {
+					t.Fatalf("guide_retry_refused structured fields missing: %v", data)
+				}
+			}
+			if tc.wantSubstr != "" && !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("err = %q, want substring %q", err.Error(), tc.wantSubstr)
 			}
 		})
 	}

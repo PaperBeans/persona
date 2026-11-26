@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import kotlinx.coroutines.launch
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.Item
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
@@ -16,6 +17,7 @@ import persona.core.contracts.api.ChatRepository
 import persona.core.designsystem.FeedbackAction
 import persona.core.designsystem.FeedbackStyle
 import persona.core.designsystem.LocalAppFeedback
+import persona.core.designsystem.LocalHubImageLimits
 import persona.core.designsystem.LocalPersonaName
 
 /**
@@ -38,6 +40,7 @@ internal fun ChatMessageActions(
     onFork: ((String) -> Unit)?,
     rewindMenu: RewindMenu?,
     onDelete: (MessageTarget) -> Unit,
+    imageLimits: ImageLimits = LocalHubImageLimits.current.forAgent(session?.agent),
 ) {
     val resources = LocalResources.current
     val context = LocalContext.current
@@ -114,8 +117,8 @@ internal fun ChatMessageActions(
         star = starFlag, onStar = onStar)
     val targets = pick.sheet ?: return
     if (forwarding == null) return
-    val drafts = remember(targets, key, session, machine, renderStyle, forwarding) {
-        targets.map { forwardDraftOf(it, key, session, machine, renderStyle, forwarding) }
+    val drafts = remember(targets, key, session, machine, renderStyle, forwarding, imageLimits) {
+        targets.map { forwardDraftOf(it, key, session, machine, renderStyle, forwarding, maxPhotos = imageLimits.perMessage) }
     }
     ForwardSheet(drafts, forwarding,
         complete = {
@@ -127,13 +130,13 @@ internal fun ChatMessageActions(
             }
             val completed = mutableListOf<ForwardPlacement>()
             try {
-                var remainingPhotos = MAX_COMPOSER_MEDIA
+                var remainingPhotos = imageLimits.perMessage
                 for ((index, draft) in drafts.withIndex()) {
                     val paths = draft.photos.take(remainingPhotos)
                     val restored = when {
                         paths.isEmpty() -> RestoredPhotos()
                         photoReader == null -> RestoredPhotos(lost = paths.size)
-                        else -> forwardedPhotos(context, paths, photoReader::payload)
+                        else -> forwardedPhotos(context, paths, photoReader::payload, limits = imageLimits)
                     }
                     remainingPhotos -= restored.attachments.size
                     completed += ForwardPlacement(refs[index], restored.copy(lost = restored.lost + draft.photos.size - paths.size))

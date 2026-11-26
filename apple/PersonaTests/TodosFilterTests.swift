@@ -11,8 +11,8 @@ struct TodosFilterTests {
     private let en = TodoWords(locale: Locale(identifier: "en"))
 
     private func counts(needsYou: Int = 0, inProgress: Int = 0, todo: Int = 0) -> TodoCounts {
-        var sections = Dictionary(uniqueKeysWithValues: TodoListSection.all.map { ($0, 0) })
-        sections[TodoListSection.todo] = todo
+        var sections = TodoCountsSections()
+        sections.todo = todo
         return TodoCounts(open: needsYou + inProgress + todo, needsYou: needsYou, inProgress: inProgress, sections: sections)
     }
 
@@ -86,7 +86,7 @@ struct TodosFilterTests {
 struct TodosListLayoutTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    private func filed(_ id: String, _ section: String, rank: Int = 0, manager: String? = nil, project: String? = nil,
+    private func filed(_ id: String, _ section: TodoListSection, rank: Int = 0, manager: String? = nil, project: String? = nil,
                        partOf: String? = nil, closed: Bool = false) -> TodoFiled {
         TodoFiled(id: id, manager: manager, section: section, closed: closed || section == TodoListSection.done, rank: rank,
                   inactive: false, byView: true, quiet: false, partOf: partOf, project: project, asks: [])
@@ -108,13 +108,13 @@ struct TodosListLayoutTests {
                     filed("t14", TodoListSection.someday)]
         let out = TodosListLayout.layout(input(rows))
         #expect(!out.calm)
-        #expect(out.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working, TodoListSection.waiting,
-                                         TodoListSection.todo, TodoListSection.justFinished, "tail:someday"])
+        #expect(out.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue, TodoListSection.waiting.rawValue,
+                                         TodoListSection.todo.rawValue, TodoListSection.justFinished.rawValue, "tail:someday"])
         #expect(out.groups[0].keys == ["/t01", "/t02"] && out.groups[0].needs)
-        #expect(out.groups[0].folds.map(\.id) == [TodoListSection.canWait] && !out.groups[0].folds[0].open)
+        #expect(out.groups[0].folds.map(\.id) == [TodoListSection.canWait.rawValue] && !out.groups[0].folds[0].open)
         #expect(out.groups[4].folds.isEmpty, "the last card keeps no fold of the tail's")
         let someday = try #require(out.groups.last?.tail)
-        #expect(someday.id == TodoListSection.someday && someday.keys == ["/t14"] && !someday.open)
+        #expect(someday.id == TodoListSection.someday.rawValue && someday.keys == ["/t14"] && !someday.open)
         #expect(out.groups.last?.keys == [] && out.groups.last?.title == nil, "its rows only while open, under the fold itself")
         #expect(out.sections["/t01-s1"] == nil, "a step its parent carries is no row")
         #expect(out.doneToday == 0)
@@ -123,7 +123,7 @@ struct TodosListLayoutTests {
     @Test func anOutsideDecisionKeepsItsOwnRowWithAnOpenParent() {
         let rows = [filed("p", TodoListSection.needsYou), filed("todo_od_1", TodoListSection.needsYou, partOf: "p")]
         let out = TodosListLayout.layout(input(rows))
-        #expect(out.groups.map(\.id) == [TodoListSection.needsYou])
+        #expect(out.groups.map(\.id) == [TodoListSection.needsYou.rawValue])
         #expect(out.groups[0].keys == ["/p", "/todo_od_1"] && out.groups[0].count == 2)
         #expect(out.sections["/todo_od_1"] == TodoListSection.needsYou, "the request is associated with the parent, not carried as its step")
     }
@@ -134,12 +134,12 @@ struct TodosListLayoutTests {
                     filed("g", TodoListSection.someday)]
         var i = input(rows)
         i.choice = .needsYou
-        #expect(TodosListLayout.layout(i).groups.map(\.id) == [TodoListSection.needsYou])
+        #expect(TodosListLayout.layout(i).groups.map(\.id) == [TodoListSection.needsYou.rawValue])
         i.choice = .inProgress
-        #expect(TodosListLayout.layout(i).groups.map(\.id) == [TodoListSection.working, TodoListSection.waiting, TodoListSection.justFinished])
+        #expect(TodosListLayout.layout(i).groups.map(\.id) == [TodoListSection.working.rawValue, TodoListSection.waiting.rawValue, TodoListSection.justFinished.rawValue])
         i.choice = .todo
         let todo = TodosListLayout.layout(i).groups
-        #expect(todo.map(\.id) == [TodoListSection.todo, "tail:someday"] && todo[0].folds.isEmpty, "Someday folded after To do")
+        #expect(todo.map(\.id) == [TodoListSection.todo.rawValue, "tail:someday"] && todo[0].folds.isEmpty, "Someday folded after To do")
     }
 
     /// While only plain To do rows exist, no headers: one plain card, Someday folded after it.
@@ -148,13 +148,13 @@ struct TodosListLayoutTests {
                                                 filed("s", TodoListSection.someday)]))
         #expect(out.calm)
         #expect(out.groups.count == 2 && out.groups[0].title == nil && out.groups[0].keys == ["/a", "/b"])
-        #expect(out.groups[1].tail?.id == TodoListSection.someday)
+        #expect(out.groups[1].tail?.id == TodoListSection.someday.rawValue)
     }
 
     /// An open tail fold draws its rows; its group's keys stay empty, its rows are the fold's.
     @Test func aTailFoldOpensInPlace() {
         var i = input([filed("w", TodoListSection.working), filed("s", TodoListSection.someday)])
-        i.unfolded = [TodoListSection.someday]
+        i.unfolded = [TodoListSection.someday.rawValue]
         let out = TodosListLayout.layout(i)
         #expect(out.groups.last?.tail?.open == true && out.groups.last?.drawnKeys == ["/s"])
     }
@@ -168,7 +168,7 @@ struct TodosListLayoutTests {
         var i = input(rows, items: [TodoItem(id: "x", title: "x", dueAt: soon), TodoItem(id: "z", title: "z", priority: "high"),
                                     TodoItem(id: "y", title: "y", priority: "low")])
         let out = TodosListLayout.layout(i)
-        #expect(out.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working])
+        #expect(out.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue])
         #expect(out.groups[1].keys == ["home/y", "work/z", "home/x"])
         i.sort = .due
         let sorted = TodosListLayout.layout(i)
@@ -184,7 +184,7 @@ struct TodosListLayoutTests {
                     filed("c", TodoListSection.canWait, rank: 0), filed("d", TodoListSection.canWait, rank: 1)]
         var i = input(rows, items: [TodoItem(id: "b", title: "b", dueAt: now, priority: "high"),
                                     TodoItem(id: "d", title: "d", dueAt: now, priority: "high")])
-        i.unfolded = [TodoListSection.canWait]
+        i.unfolded = [TodoListSection.canWait.rawValue]
         for sort in TodosListSort.allCases {
             i.sort = sort
             let needs = TodosListLayout.layout(i).groups[0]
@@ -201,13 +201,13 @@ struct TodosListLayoutTests {
         for sort in TodosListSort.allCases {
             i.sort = sort
             #expect(TodosListLayout.layout(i).groups.map(\.id)
-                == [TodoListSection.needsYou, TodoListSection.working, TodoListSection.waiting, TodoListSection.todo], "\(sort)")
+                == [TodoListSection.needsYou, .working, .waiting, .todo].map(\.rawValue), "\(sort)")
         }
         i.sort = .suggested
         i.byProject = true
         i.projectName = { $0 == "kyoto" ? "Kyoto trip" : $0 }
         let grouped = TodosListLayout.layout(i)
-        #expect(grouped.groups.map(\.id) == [TodoListSection.needsYou, "project:home", "project:kyoto", "project:"])
+        #expect(grouped.groups.map(\.id) == [TodoListSection.needsYou.rawValue, "project:home", "project:kyoto", "project:"])
         #expect(grouped.groups[0].keys == ["/n"], "Needs you keeps its rows")
         #expect(grouped.groups[2].title == "Kyoto trip" && grouped.groups[2].keys == ["/c"] && grouped.groups[2].count == 1)
         var calm = input([filed("t", TodoListSection.todo, project: "home")])
@@ -241,15 +241,23 @@ struct TodosListLayoutTests {
         var i = input(rows, items: items)
         let all = TodosListLayout.layout(i)
         #expect(all.doneToday == 1)
-        #expect(all.groups.last?.tail?.id == TodoListSection.done && all.groups.last?.tail?.keys == ["/today"])
+        #expect(all.groups.last?.tail?.id == TodoListSection.done.rawValue && all.groups.last?.tail?.keys == ["/today"])
         i.choice = .done
         #expect(TodosListLayout.layout(i).groups.map(\.id) == ["done:today", "done:earlier"])
     }
 }
 
 extension TodosListLayoutTests {
-    /// The search looks through the open rows' titles and notes, case and accents aside, whatever the choice: the
-    /// sections stay, every fold opens, the counts are what matches, and closed to-dos wait for the search's next step.
+    /// `i` searching `query`, with what the model's look finds for it (`TodoSearch.hits`, off the main actor there).
+    private func searching(_ i: TodosListLayout.Input, _ query: String) -> TodosListLayout.Input {
+        var i = i
+        i.query = query
+        i.hits = TodoSearch.hits(i.items, words: TodoSearch.words(query))
+        return i
+    }
+
+    /// The search looks through every row's title and notes, open and closed, case and accents aside, whatever the choice:
+    /// the sections stay, every fold opens, the counts are what matches, and what closed comes last.
     @Test func theSearchKeepsTheSectionsAndOpensTheFolds() {
         let rows = [filed("k", TodoListSection.needsYou), filed("c", TodoListSection.canWait), filed("w", TodoListSection.working),
                     filed("t", TodoListSection.todo), filed("s", TodoListSection.someday), filed("d", TodoListSection.done)]
@@ -259,16 +267,60 @@ extension TodosListLayoutTests {
                                     TodoItem(id: "s", title: "Kyoto temples, someday"),
                                     TodoItem(id: "d", title: "Kyoto hotel booked", doneAt: now)])
         i.choice = .inProgress
-        i.query = "  kyoto "
+        i = searching(i, "  kyoto ")
         let out = TodosListLayout.layout(i)
         #expect(out.searching)
-        #expect(out.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.todo, "tail:someday"], "the choice set aside")
+        #expect(out.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.todo.rawValue, "tail:someday", "done:today"],
+                "the choice set aside, what closed last")
         #expect(out.groups[0].count == 1 && out.groups[0].folds.first?.open == true && out.groups[0].folds.first?.keys == ["/c"])
         #expect(out.groups[1].keys == ["/t"], "a match in the notes, its accent aside")
         #expect(out.groups[2].tail?.open == true)
-        #expect(!out.groups.flatMap(\.drawnKeys).contains("/d"), "closed to-dos come with the search's next step")
-        i.query = "nothing like it"
-        #expect(TodosListLayout.layout(i).groups.isEmpty)
+        #expect(out.groups[3].keys == ["/d"] && out.groups[3].count == 1
+                && out.groups[3].title == String(localized: "Done today [To-dos List]"), "a closed match, under Done today")
+        #expect(TodosListLayout.layout(searching(i, "nothing like it")).groups.isEmpty)
+    }
+
+    /// While searching, every closed match comes last, from any day, by the day it closed as the Filter's Done lists them
+    /// (its headings saying Done), the newest first under every sort; the hits worked out elsewhere are taken as given.
+    /// In UTC, so `now` (08:00) is not just after midnight in any machine's zone, where 5 minutes ago is yesterday.
+    @Test func closedMatchesComeLastByTheDayTheyClosed() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let ago = { (days: Int, minutes: Int) in cal.date(byAdding: .day, value: -days, to: self.now)!.addingTimeInterval(Double(-minutes * 60)) }
+        let rows = [filed("open", TodoListSection.todo), filed("w", TodoListSection.working),
+                    filed("d0", TodoListSection.done), filed("d1", TodoListSection.done), filed("d3a", TodoListSection.done),
+                    filed("d3b", TodoListSection.done), filed("d30", TodoListSection.done), filed("other", TodoListSection.done)]
+        var i = input(rows, items: [
+            TodoItem(id: "open", title: "Book the ryokan"), TodoItem(id: "w", title: "Draft the newsletter"),
+            TodoItem(id: "d0", title: "Ryokan shortlist", doneAt: ago(0, 5)),
+            TodoItem(id: "d1", title: "Ryokan budget", doneAt: ago(1, 0)),
+            TodoItem(id: "d3a", title: "Call the ryokan", doneAt: ago(3, 30), priority: "high"),
+            TodoItem(id: "d3b", title: "Email the ryokan", doneAt: ago(3, 10), dueAt: now, priority: "low"),
+            TodoItem(id: "d30", title: "Old ryokan notes", doneAt: ago(30, 0)),
+            TodoItem(id: "other", title: "Taxes", doneAt: ago(2, 0))])
+        i.calendar = cal
+        i = searching(i, "ryokan")
+        for sort in TodosListSort.allCases {
+            i.sort = sort
+            let out = TodosListLayout.layout(i)
+            #expect(out.groups.map(\.id) == [TodoListSection.todo.rawValue, "done:today", "done:yesterday", "done:week", "done:earlier"],
+                    "\(sort)")
+            #expect(out.groups.flatMap(\.keys) == ["/open", "/d0", "/d1", "/d3b", "/d3a", "/d30"], "newest first, \(sort)")
+            #expect(out.groups.map(\.count) == [1, 1, 1, 2, 1])
+            #expect(out.groups.dropFirst().map(\.title) == [
+                String(localized: "Done today [To-dos List]"), String(localized: "Done yesterday [To-dos List]"),
+                String(localized: "Done this week [To-dos List]"), String(localized: "Done earlier [To-dos List]")])
+        }
+        // The calm list (only plain to-dos open): its card, then the closed matches by day all the same.
+        let calm = input([filed("open", TodoListSection.todo), filed("d1", TodoListSection.done)],
+                         items: [TodoItem(id: "open", title: "Book the ryokan"), TodoItem(id: "d1", title: "Ryokan budget", doneAt: ago(1, 0))])
+        var c = calm
+        c.calendar = cal
+        let out = TodosListLayout.layout(searching(c, "ryokan"))
+        #expect(out.calm && out.groups.map(\.id) == ["plain", "done:yesterday"])
+        // Hits from elsewhere (the model's, found off the main actor) are what the list shows.
+        i.hits = ["d30": TodoSearchHit()]
+        #expect(TodosListLayout.layout(i).groups.flatMap(\.keys) == ["/d30"])
     }
 }
 

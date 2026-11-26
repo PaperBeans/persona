@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/update"
 )
@@ -144,14 +146,14 @@ func TestHelloResumes(t *testing.T) {
 	}
 	stream := h.events.stream
 	c := &client{out: make(chan []byte, 512)}
-	h.helloLocked(c, map[string]any{"type": "hello"}, stream, 1, true)
+	h.helloLocked(c, wsHello{Type: "hello"}, stream, 1, true)
 	got := read(c)
 	if len(got) != 3 || got[0]["type"] != "hello" || got[0]["resumed"] != true || got[0]["event_seq"] != float64(4) ||
 		got[1]["type"] != "inbox" || got[1]["event_seq"] != float64(2) || got[2]["type"] != "lark" {
 		t.Fatalf("resumed hello and replay (the form held back): %v", got)
 	}
 	c = &client{out: make(chan []byte, 512)}
-	h.helloLocked(c, map[string]any{"type": "hello"}, "another", 1, true)
+	h.helloLocked(c, wsHello{Type: "hello"}, "another", 1, true)
 	if got := read(c); len(got) != 1 || got[0]["resumed"] != false || got[0]["event_stream"] != stream {
 		t.Fatalf("another stream: %v", got)
 	}
@@ -227,19 +229,52 @@ func TestRestartIsPlanned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ln.Close()
+	socket, err := ln.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer socket.Close()
 	addr := ln.Addr().String()
-	_ = ln.Close()
 	cfg := Config{Listen: addr, PublicURL: "http://" + addr, Token: randomHex(24),
 		DatabaseURL: url, Machines: []MachineConfig{}, ShutdownTimeoutSeconds: 4}
 	raw, _ := json.Marshal(cfg)
 	if err := os.WriteFile(filepath.Join(dir, "hub.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	start := func() (context.CancelFunc, chan error) {
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() { done <- Run(ctx, update.Build{Version: "restart-test"}) }()
-		return cancel, done
+	ctx, stopTest := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stopTest()
+	start := func() func() error {
+		// systemd owns this listener across the restart. Give each real Run its own copy,
+		// so nobody else can take the app's endpoint between the two generations.
+		listener, err := osproc.FileListener(socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inheritedListeners()
+		inherited.mu.Lock()
+		inherited.lns = append(inherited.lns, listener)
+		inherited.mu.Unlock()
+		runCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		var runErr error
+		go func() {
+			runErr = Run(runCtx, update.Build{Version: "restart-test"})
+			if runErr != nil {
+				t.Errorf("Run: %v", runErr)
+				stopTest()
+			}
+			close(done)
+		}()
+		stop := func() error { cancel(); <-done; return runErr }
+		t.Cleanup(func() {
+			_ = stop()
+			inherited.mu.Lock()
+			inherited.lns = slices.DeleteFunc(inherited.lns, func(item net.Listener) bool { return item == listener })
+			inherited.mu.Unlock()
+			_ = listener.Close()
+		})
+		return stop
 	}
 	dial := func(ctx context.Context, query string) (*websocket.Conn, map[string]any) {
 		for {
@@ -261,10 +296,7 @@ func TestRestartIsPlanned(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	ctx, stopTest := context.WithTimeout(context.Background(), 30*time.Second)
-	defer stopTest()
-
-	cancel, done := start()
+	stop := start()
 	conn, hello := dial(ctx, "")
 	stream, _ := hello["event_stream"].(string)
 	seq, _ := hello["event_seq"].(float64)
@@ -288,16 +320,14 @@ func TestRestartIsPlanned(t *testing.T) {
 			}
 		}
 	}()
-	cancel()
-	if err := <-done; err != nil {
+	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := strings.Join(<-heard, ", "); got != "hub_restarting, close 1001 hub restarting" {
 		t.Fatalf("the app heard: %s", got)
 	}
 
-	cancel, done = start()
-	defer func() { cancel(); <-done }()
+	start()
 	conn, hello = dial(ctx, "?event_stream="+stream+"&event_seq="+strconv.Itoa(int(seq)))
 	defer conn.CloseNow()
 	if hello["event_stream"] != stream || hello["resumed"] != true {

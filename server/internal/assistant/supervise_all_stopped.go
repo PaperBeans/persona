@@ -381,6 +381,11 @@ func (s *Service) allStoppedGroup(ctx context.Context, t Todo, tasks []Todo, lis
 				continue // no full-machine row copies for every supervised task
 			}
 			c := *row
+			if c.BackgroundWorking || backgroundRunning(c) {
+				if at := s.lastProgressAt(c.MachineID, c.SessionID); at.After(c.UpdatedAt) {
+					c.UpdatedAt = at
+				}
+			}
 			if e, ok := s.workEntry([2]string{c.MachineID, c.SessionID}); ok {
 				w := e.Work
 				w.WakeAt, w.InteractionID, w.TurnAt = e.WakeAt, e.InteractionID, e.TurnAt

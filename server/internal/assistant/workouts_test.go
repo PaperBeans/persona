@@ -124,7 +124,7 @@ func TestWorkoutReceiptSurvivesRestartAndDeletion(t *testing.T) {
 	}
 }
 func TestGoldenWorkoutReport(t *testing.T) {
-	golden(t, "workout_report", prompts.RenderWorkoutReport(`{"activity":"Running","duration":600,"heart_rate":[]}`))
+	golden(t, "workout_report", prompts.RenderWorkoutReport(prompts.WorkoutReport{Data: `{"activity":"Running","duration":600,"heart_rate":[]}`}))
 }
 
 func TestWorkoutUploadRequiresFullRole(t *testing.T) {

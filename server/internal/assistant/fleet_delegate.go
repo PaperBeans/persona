@@ -238,12 +238,6 @@ func (s *Service) delegateSince(ix proto.Interaction, forget func(), since time.
 // it or tells the user. A call that comes too late is dropped. forget takes back delegable's note unless the answer
 // went.
 func (s *Service) delegateNow(ix proto.Interaction, forget func(), since time.Time) {
-	answered := false
-	defer func() {
-		if !answered {
-			forget()
-		}
-	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	timeout := s.hello(ctx).Agents.Delegate.Timeout()
 	cancel()
@@ -271,8 +265,9 @@ func (s *Service) delegateNow(ix proto.Interaction, forget func(), since time.Ti
 		// Noted since delegable: the agent has the answer at once and may ask the same again before this goes on.
 		ok, err := s.answerQuestion(ix.MachineID, ix.SessionID, ix.ID, d.res.Answers, d.res.Reason)
 		if ok {
-			answered = true
 			s.rememberDelegated(ix)
+		} else if err == nil {
+			forget() // no longer pending: no answer from the assistant
 		}
 		if ok || err == nil {
 			s.delegateMark(ix, "delegate_end")
@@ -283,6 +278,7 @@ func (s *Service) delegateNow(ix proto.Interaction, forget func(), since time.Ti
 		ix.Delegate = d.res.Ask
 	}
 	s.delegateMark(ix, "delegate_end") // before the user is told: a restart after this does not tell them twice
+	forget()                           // a repeat may arrive as soon as the first card becomes the user's
 	s.escalate(ix)
 }
 

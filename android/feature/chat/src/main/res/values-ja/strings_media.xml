@@ -4,6 +4,12 @@
     <string name="chat_composer_videos_only">動画を見てください</string>
     <string name="chat_composer_files_only">添付ファイルを見てください</string>
     <string name="chat_composer_file_limit">1件のメッセージに添付できるファイルは10個までです</string>
+    <string name="chat_composer_video_limit">動画は一度に%1$d本まで</string>
+    <string name="chat_composer_photos_too_large">画像の合計が大きすぎて、まとめて送れません</string>
+    <string name="chat_composer_photos_as_files_one">1件のメッセージに入れられる画像は%1$d枚までです。残りの1枚はファイルとして送ります</string>
+    <string name="chat_composer_photos_as_files_other">1件のメッセージに入れられる画像は%1$d枚までです。残りの%2$d枚はファイルとして送ります</string>
+    <string name="chat_composer_photos_bytes_as_files_one">画像の合計が大きすぎます。1枚はファイルとして送ります</string>
+    <string name="chat_composer_photos_bytes_as_files_other">画像の合計が大きすぎます。%1$d枚はファイルとして送ります</string>
     <string name="chat_attach_waiting">待機中</string>
     <plurals name="chat_files_more">
         <item quantity="other">ほか%1$d個のファイル</item>

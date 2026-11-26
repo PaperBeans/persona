@@ -85,6 +85,27 @@
     }
   },
   {
+    "name": "ask_user_withdraw",
+    "description": "Withdraw a pending ask_user question card created by this conversation when it is no longer needed. Only cancels this conversation's own ask_user question; another conversation's card and user-owned approvals, plans or screen dialogs are rejected. Repeated calls on an already-ended card of this conversation are idempotent.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "interaction_id"
+      ],
+      "properties": {
+        "interaction_id": {
+          "type": "string",
+          "description": "the pending ask_user interaction ID (ix_…)"
+        },
+        "reason": {
+          "type": "string",
+          "description": "optional short reason why the question is no longer needed"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
     "name": "notify_user",
     "description": "Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; ordinary replies already notify. In the hub's push grading, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
@@ -229,20 +250,24 @@
   },
   {
     "name": "schedule_routine",
-    "description": "Create a recurring routine, or pass `id` from list_followups to edit only the fields supplied. `enabled: false` pauses it. Use `time` with optional `weekdays`, or `cron` instead. Times use the user's zone; cron has 5 fields, runs at least 5m apart, supports the listed aliases, treats 0/7 as Sunday and restricted day fields as either. Seconds, @every and TZ= are refused; inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; \"\" clears it. From the second run Persona checks Agent answers, tool calls (not waits or repeats), criterion changes and progress reports; a long stall asks Change approach / Keep waiting, even with `push: asked`. Get owner consent before creating or changing recurring work.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Create a recurring routine, or pass `id` from list_followups to edit supplied fields. `enabled: false` pauses it. Use `time` (with optional `weekdays`) or 5-field `cron` in the user's zone (at least 5m apart; aliases, 0/7=Sun, Vixie day OR; no seconds/@every/TZ=; check reply's next runs). `until` needs RFC 3339 or relative duration.\n\nRuns inherit Main chat's launcher/model/effort (omit to keep; empty launcher resets). Permission mode is the user's. `fresh_each_run: true` starts a new chat per run with its state note. For a supervised to-do, pass `todo_id` (omit keeps; \"\" clears; Persona checks real progress from run 2 and asks on stalls). For a dashboard page you write, pass `page_id` (one routine/page, immutable, \u003e=60m apart, never pushes or posts to Inbox, no report/todo_id; held on draft until Keep, data-only grant on kept page). Get owner consent before creating or changing recurring work.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
         "todo_id": {
           "type": "string",
-          "description": "explicit supervised to-do this routine advances"
+          "description": "supervised to-do this routine advances"
+        },
+        "page_id": {
+          "type": "string",
+          "description": "pg_ dashboard page to refresh (immutable, \u003c=1/hour, no push/inbox/report/todo_id)"
         },
         "fresh_each_run": {
           "type": "boolean"
         },
         "id": {
           "type": "string",
-          "description": "to change an existing routine"
+          "description": "existing routine id to edit"
         },
         "title": {
           "type": "string",
@@ -250,7 +275,7 @@
         },
         "prompt": {
           "type": "string",
-          "description": "what to do each time, self-contained"
+          "description": "self-contained instructions for each run"
         },
         "time": {
           "type": "string",
@@ -263,18 +288,18 @@
             "minimum": 1,
             "maximum": 7
           },
-          "description": "1 = Monday … 7 = Sunday; omit or empty = every day"
+          "description": "1=Mon…7=Sun; omit/empty = every day"
         },
         "cron": {
           "type": "string",
-          "description": "instead of time / weekdays: minute hour day-of-month month day-of-week in the user's time zone, e.g. */30 9-18 * * 1-5 or 0 10 1 * *; or @hourly / @daily / @weekly / @monthly / @yearly"
+          "description": "replaces time/weekdays: 5 fields in user's zone (e.g. */30 9-18 * * 1-5) or @hourly/@daily/@weekly/@monthly/@yearly"
         },
         "enabled": {
           "type": "boolean"
         },
         "report": {
           "type": "boolean",
-          "description": "a daily report (such as a leader conversation's): each run opens with Persona's north-star lines (today's interruptions and availability, the change against yesterday until the same time, the source), which the report starts with. Omit to keep an existing routine's"
+          "description": "daily report: prepends Persona's north-star lines. Omit to keep"
         },
         "push": {
           "type": "string",
@@ -282,7 +307,7 @@
             "every",
             "asked"
           ],
-          "description": "every (default for a new task): each run's answer is pushed to the user; asked: only what a run sends with notify_user, for a task that watches something (it then runs in its own conversation). Omit to keep an existing task's"
+          "description": "every (default): push every answer; asked: only notify_user (own chat). Omit to keep"
         },
         "inbox": {
           "type": "string",
@@ -291,14 +316,14 @@
             "worthy",
             "every"
           ],
-          "description": "what of a run goes into the user's Inbox, independent of push: off (default for a new task), worthy (a run puts a row there with inbox_post only when it finds something worth a look; for a task that watches something), every (every run ends with a row made by Persona; for a briefing the user follows daily). Set it only when the user asked for it. Omit to keep an existing task's"
+          "description": "Inbox rows (only when requested): off (default), worthy (inbox_post), every. Omit to keep"
         },
         "run_if": {
           "type": [
             "object",
             "null"
           ],
-          "description": "Optional owner-approved shell check on the routine computer before scheduled runs. Exit 0 runs; exit 1 skips. Other errors follow on_error. Omit to keep it or use null to remove it.",
+          "description": "owner-approved pre-run shell check (exit 0 runs, 1 skips; null removes; omit keeps)",
           "properties": {
             "command": {
               "type": "string",
@@ -329,15 +354,15 @@
             "string",
             "null"
           ],
-          "description": "optional end time (RFC 3339 or 30m / 2h / 1d). After it, Persona turns the task off and records a skipped run instead of running. Omit to keep an existing task's end time; null clears it. Ignored for a one-off."
+          "description": "end time (RFC 3339 or 30m/2h/1d); null clears, omit keeps"
         },
         "launcher": {
           "type": "string",
-          "description": "this routine's own launcher, instead of Main chat's (a name on the computer where its runs start). Empty clears the override and follows Main chat again. Omit to keep an existing routine's"
+          "description": "launcher override; empty resets to Main chat; omit keeps"
         },
         "model": {
           "type": "string",
-          "description": "model id for the launcher above; without a launcher it pins the launcher the routine runs on now. Empty uses the launcher's default. Omit to keep an existing routine's"
+          "description": "model id for launcher; empty uses launcher default; omit keeps"
         },
         "effort": {
           "type": "string",
@@ -348,7 +373,7 @@
             "xhigh",
             "max"
           ],
-          "description": "thinking effort for Claude launchers; without a launcher it pins the launcher the routine runs on now. Omit to keep an existing routine's; empty clears it"
+          "description": "Claude thinking effort; omit keeps"
         }
       }
     }
@@ -759,7 +784,7 @@
   },
   {
     "name": "agent_start",
-    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nFor parallel work needing its own checkout, give `worktree.branch`: Persona uses the machine's engine (herdr or Orca) to create and list it under the workspace containing `cwd`, then starts the agent there. Never tell the agent to run `git worktree add`: that hides it from Orca and the app. Existing branches are checked out; new ones start at that workspace's HEAD. A branch checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
+    "description": "Start a new agent on one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent: Claude Code's starts Claude Code; pi or cursor (or one listed as that agent) starts pi or the Cursor CLI in a herdr pane with the model you give; agy starts the Antigravity CLI on the computer's companion when connected, else in a pane. Those three take no permission mode and no ultracode; their effort is their own.\n\nFor parallel work needing its own checkout, give `worktree.branch`: Persona uses the machine's engine (herdr or Orca) to create and list it under the workspace containing `cwd`, then starts the agent there. Never tell the agent to run `git worktree add`: that hides it from Orca and the app. Existing branches are checked out; new ones start at that workspace's HEAD. A branch checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -826,7 +851,11 @@
         },
         "tier": {
           "type": "string",
-          "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved before approval and shown on the card; explicit launcher/model/effort/speed overrides"
+          "description": "Agent preset from the 模型档位 line, by kind of work (old names work); picked before approval, shown on the card; explicit launcher/model/effort/speed overrides"
+        },
+        "host": {
+          "type": "string",
+          "description": "agy (Antigravity companion) or an enabled engine"
         },
         "speed": {
           "type": "string",
@@ -1027,7 +1056,7 @@
   },
   {
     "name": "interaction_answer",
-    "description": "Answer another agent's card for the user when they said what to answer or told you to decide: each question by its own wording with an option label it offers (multi-select: an array); no free text (use agent_send). A card a 督办 message handed you is yours: answer a question or terminal dialog (an option's label or number), or allow/deny a permission, plan or dialog's Yes/No with allow, giving reason; kept as the task's decision, not the user's. Forms, secrets, approvals that send or reply in the user's name, spend money or delete, and folder-trust or Bypass Permissions dialogs are the user's: ask_escalate them. Never other approvals or the assistant's own questions.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Answer another agent's card for the user when they said what to answer or told you to decide: each question by its own wording with an option label it offers (multi-select: an array); no free text (use agent_send). A card a 督办 message handed you is yours: answer a question or terminal dialog (an option's label or number), or allow/deny a permission, plan or dialog's Yes/No with allow, giving reason; kept as the task's decision, not the user's. You may always deny permissions/plans. Forms, secrets, allowing a message/reply as the user, spending or deletion, and folder-trust/Bypass Permissions dialogs are the user's: ask_escalate. Never other approvals or assistant questions.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1119,7 +1148,7 @@
   },
   {
     "name": "inbox_suggest",
-    "description": "Submit the event’s recap and one suggestion, replacing any earlier suggestion. It waits in the user's inbox; nothing goes out until they confirm, and then the program does exactly what it says (you never send it yourself). `kind`: `reply` — one message to send, `text` in the user's voice, ready to go out as it is (no blanks to fill in like 【…】: leave out what you could not find and say so in `note`; for a Feishu sheet / Base item `changes` proposes moving rows' status: ref, field and one of the values the item lists); `agent` — an Agent to start, `text` its instruction (`machine` and `cwd` optional); `todo` — a to-do for the user to add: `text` its title (clear, starting with the action, no chat or people names), `due` only when the message states a deadline: a day `2006-01-02` for all day, or a moment as RFC 3339 with its offset; leave it out when unsure and say so in `note`; the user can edit both and adds it with one tap (a row that came to a to-do counts as handled); `conclusion` — you dealt with it, `text` the conclusion, `outcome` `fyi` (worth knowing) or `done` (nothing to do). `handback: true` for one the user has to judge: their confirmation comes back here as an instruction instead of being carried out. `note`: one or two sentences on what you found and where. `recap`: the event's background, progress and where it is stuck (up to 600 characters), every time. `title`: what the matter is, without chat or person names; `summary`: one sentence on where things stand and who is waited on for what. Write both every time; items whose title comes from the source (mail, documents, PRs / issues, and the like) ignore `title`, and the tool says so. `related`: ids of inbox items in other chats or sources this one is about. `recap` without `kind` creates no suggestion, and may include `title`, `summary`, and `follow`. `follow` records waiting on the other side: `who` (empty means waiting for a reply), `next`, and `check_at` (RFC 3339 with a time zone) or `check_in` (such as `30m`, `4h`, or `2d`). `check_at` takes precedence; with neither, look again in `24h`; the resulting time is clamped to 30 minutes–14 days from now. `follow` is valid only without `kind`. `reported`: `{text, by}` records one externally visible action you or an Agent actually completed but the program did not observe, without verifying it; never use it for plans or actions not taken. `by` is `agent` or `assistant` (default `assistant`), and `text` is one sentence, kept on one line and clipped to 120 characters. It may be given alone or accompany `kind`, `recap`, `title`, `summary`, or `follow`; a filed item refuses it, and text identical to the item's latest `reported` entry is not recorded twice. Call it at the end of each turn. In a conversation the user handed an inbox item to (its context block names the item's id), pass that id as `item` and call it when you have something to write back to the item, and again whenever it changes (it also shows in that conversation as a card); it refuses an item not handed to this conversation or one the user already filed: answer in the chat then.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Submit the event’s recap and one suggestion (replaces any earlier one). Nothing goes out until the user confirms; the program executes it verbatim. `kind`: `reply` — message in the user's voice ready to send (no 【…】 blanks; omit unknowns and explain in `note`; Feishu sheet/Base `changes`: ref, field, listed value); `agent` — new Agent instruction in `text` (`machine`, `cwd` optional); `handoff` — hand to an existing eligible conversation on this manager (main, active leader, or linked task) with `machine`, `session`, and `text` as the note (processing chat only; refuses archived, unknown, or other-manager targets); `todo` — to-do title in `text` (action-led, no chat/people names), `due` only for an explicit deadline (`2006-01-02` all day or RFC 3339 with offset; omit if unsure and note why; confirming files the row); `conclusion` — dealt with, `text` conclusion, `outcome` `fyi` or `done`. `handback: true` returns confirmation here as an instruction for user judgment. `note`: 1–2 sentences on findings/evidence. `recap`: background, progress, blockers (≤600 chars) every time. `title` (no chat/person names) and `summary` (1 sentence on state and who waits) every time; source-titled items (mail, docs, PRs/issues) ignore `title`. `related`: ids of related items in other chats/sources. `recap` without `kind` creates no suggestion and may include `title`, `summary`, and `follow`. `follow` (valid only without `kind`) waits on the other side: `who` (empty = other side's reply), `next`, `check_at` (RFC 3339 with zone) or `check_in` (`30m`, `4h`, `2d`; default `24h`, clamped 30m–14d). `reported`: `{text, by}` records one completed external action unobserved by the program (never plans; `by` `agent`|`assistant`, default `assistant`; one line ≤120 chars; refused on filed items; deduped against latest). Call at end of turn. In a handed-off chat (context names event id), pass `item` to write back (also shown as a card); refuses unhanded or filed items.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -1134,6 +1163,7 @@
           "enum": [
             "reply",
             "agent",
+            "handoff",
             "conclusion",
             "todo"
           ]
@@ -1201,6 +1231,9 @@
           }
         },
         "machine": {
+          "type": "string"
+        },
+        "session": {
           "type": "string"
         },
         "cwd": {
@@ -1398,7 +1431,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts stay for recording_days (14 days by default), minutes and recaps for minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts stay for recording_text_days, minutes and recaps for minutes_days (both forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1430,7 +1463,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); minutes and recaps stay for minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts stay for recording_text_days, minutes and recaps for minutes_days (both forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1761,7 +1794,7 @@
   },
   {
     "name": "secret_run",
-    "description": "Run commands on one of the user's computers that need a password only the user knows, typically its sudo password. Never ask for a password in the conversation or in ask_user: call this instead. The user gets a card in the Persona app showing the computer, your purpose and every command verbatim, types the password there and taps Run; that computer's node then runs exactly those commands in order, each as the user with /bin/sh -c in the home directory and PATH=/usr/bin:/bin:/usr/sbin:/sbin (give other tools by their absolute path). Only a command that runs sudo with -S gets the password, as a line on its stdin; every other command gets an empty stdin. Write sudo as `sudo -S -k -p '' …`, one sudo per command and never after a pipe (sudo would read the pipe; run a pipeline as root with `sudo -S -k -p '' sh -c '…'`); a sudo without -S is refused. Where a sudoers rule says NOPASSWD, sudo does not read stdin and the command it runs gets the password instead, so do not give such a command anything that reads stdin. Commands are printable ASCII only, so the card shows exactly what runs. The first command that fails stops the run. Never write a command that prints, stores or sends the password; you never see it. The result is JSON with status (ran, failed, declined, expired or refused), the computer, a message and, for ran and failed, each command's exit_code, timed_out and output (stdout and stderr, clipped to its end); when a command's output held the password, none of it comes back (output_withheld: true). A command stopped at the timeout may still run as root: check before asking again. declined, expired and refused mean nothing ran: tell the user; ask again only if they want. Not on Windows.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Run commands on one of the user's computers with a password only the user knows, for sudo or one-off LAN/CLI auth. Never ask in chat or ask_user. The card lists the computer, purpose and commands verbatim and needs a fresh password and Run every time (no remembered/quick approval or Watch). The node runs only those commands in order with /bin/sh -c in the home directory and PATH=/usr/bin:/bin:/usr/sbin:/sbin (other tools need absolute paths). Commands are printable ASCII; the first failure stops.\n\ndelivery=stdin (default): only a command running one sudo -S gets the password and a newline on stdin; every other command gets empty stdin. Write sudo as `sudo -S -k -p '' …`, never after a pipe or without -S. With NOPASSWD, sudo does not read stdin and its command may read the password instead, so give that command no stdin reader.\n\ndelivery=env: explicit one-off non-sudo authentication. Every command gets the password in its PERSONA_SECRET environment and empty stdin, never in argv. The card warns that encoded output can evade literal redaction, so every command must be safe for the user to trust with the secret. Env requires the node's secret_run_env capability; an older node refuses during preflight before the user types anything. Not on Windows.\n\nNever print, store or send the password; you never see it. Result JSON: status (ran, failed, declined, expired or refused), computer, message and, for ran/failed, each exit_code, timed_out and clipped output. Literal password in output withholds it whole (output_withheld). A timeout may leave a root process: check before retrying. Declined, expired and refused mean nothing ran: tell the user and retry only if wanted.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1790,9 +1823,10 @@
         "delivery": {
           "type": "string",
           "enum": [
-            "stdin"
+            "stdin",
+            "env"
           ],
-          "description": "how the password reaches the commands: stdin, the default and only way"
+          "description": "stdin (default): sudo -S only; env: PERSONA_SECRET for one-off non-sudo commands"
         },
         "timeout_seconds": {
           "type": "integer",
@@ -1846,7 +1880,7 @@
   },
   {
     "name": "model_profiles_list",
-    "description": "List editable model profiles, current profile, changed fields, rollback and recent audit events. Profiles contain model settings only, never credentials.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "List profiles, active profile, drift, rollback previews and audit events. Model settings only, never credentials.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {},
@@ -1855,7 +1889,7 @@
   },
   {
     "name": "model_profile_get",
-    "description": "Inspect one model profile by id. See its purpose bindings, launcher model fields and named execution tiers (the Agent presets). Add, change or remove a tier with persona_settings key model_profiles.tiers; other fields are edited through the model-profiles HTTP API. Saving does not apply purpose or launcher settings.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Inspect a profile. Edit bindings with persona_settings model_profiles.bindings, tiers with model_profiles.tiers, or capture with model_profile_capture. Saving does not apply purposes/launchers.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -1873,7 +1907,7 @@
   },
   {
     "name": "model_profile_switch",
-    "description": "Switch atomically to a model profile by id when the user asks (for example economy or performance). Saves a before-image for model_profile_rollback and records actor/time. Applies on next model call or Agent start; does not interrupt running work. Inspect profiles first; do not assume economy needs any particular model.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Switch atomically to a profile by id; inspect first. Saves a rollback point and affects new model calls/Agent starts, not running work.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -1891,11 +1925,146 @@
   },
   {
     "name": "model_profile_rollback",
-    "description": "Undo the last model-profile switch using its saved before-image. Restores only touched model settings, not launcher credentials. Inspect the rollback preview with model_profiles_list first; a second rollback redoes the switch.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Undo the latest profile switch, restoring touched model settings only. Inspect the preview first; another rollback may redo it.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "model_profile_capture",
+    "description": "Capture current model fields into a profile with phone approval; does not apply them.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Existing profile id from model_profiles_list"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "model_probe",
+    "description": "Run bounded real samples through a saved provider; configuration unchanged, secrets hidden. Returns status, latency, blocks, usage, retries and redacted text.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "api": {
+          "type": "string",
+          "enum": [
+            "messages",
+            "chat"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "system": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "user"
+            ]
+          }
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 1
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 256
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 30
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "samples"
+      ]
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "launcher_import",
+    "description": "Preview/import Claude shell aliases. Preview is read-only/redacted. Commit needs names/owner approval and reuses current import rules. Names select groups/raw aliases; split/hide_originals control per-alias import/hiding. No overrides or secrets.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "commit"
+          ]
+        },
+        "machine": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 128
+        },
+        "split": {
+          "type": "boolean"
+        },
+        "hide_originals": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "machine"
+      ]
     },
     "defer_loading": true
   },
@@ -1993,7 +2162,7 @@
   },
   {
     "name": "view_show",
-    "description": "Create a persistent live card in the calling assistant conversation. Use the same View schema as persona-view and extension UI: sections of components, a required plain-text fallback, and optional named pages. The card stays at its feed position; use view_update to change it. The hub validates the View and returns field-level errors for correction. At most 64 KB per card and 200 cards per conversation. This does not send a push notification. Keep the conclusion in your normal reply too. Returns {id, version}; save the id for updates. Do not collect passwords or secrets in a card. An html component can call persona.reply / persona.open only when it has a key, and each call is confirmed by the user; the card's one reply is shared with its reply actions.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Create a live card in this assistant conversation: a View as persona-view and extension UI use (sections of components, a required plain-text fallback, optional named pages), at most 64 KB, 200 cards a conversation. It keeps its feed position; change it with view_update. Field-level errors come back for correction. No push: keep the conclusion in your reply too. Returns {id, version}. Never collect passwords or secrets. An html component with a key may call persona.reply / persona.open, each confirmed by the user; the card's one reply is shared with its reply actions.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2010,7 +2179,7 @@
   },
   {
     "name": "view_update",
-    "description": "Replace a live card created by this assistant conversation with a complete validated View. Other conversations and ordinary agents cannot modify it. Supply the version read from view_get to reject stale updates; without it the hub uses the version it reads at the start of this call. Validation or a version conflict leaves the previous card intact. Contents are stored before update notifications are coalesced (at most one per second). Returns {version}. Keep stable component keys to preserve editing and scroll state across devices.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Replace a live card of this conversation with a whole new View (rules as view_show); no other conversation or agent can. A version from view_get refuses a stale update; without one, the version read now is used. A refused update leaves the card as it was. Updates are stored at once and told at most once a second. Returns {version}. Keep component keys stable.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2038,7 +2207,7 @@
   },
   {
     "name": "view_get",
-    "description": "Read a persistent live card created by the calling assistant conversation. Returns its id, conversation, version, full View, timestamps and actions (the user's selected reply and submitted values, with pending/sent/failed delivery status; kind html is a reply from an html component's persona.reply, its text the reply the user confirmed; version is the card version the user saw when choosing). Use it before updating a card after resuming work; an id from another conversation is forbidden. Updating the card never clears a committed answer.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Read a live card of this conversation: id, version, View, times and actions (the user's reply and values, delivery pending/sent/failed; kind html is a persona.reply, its text what the user confirmed; version the one they saw). Read it before updating after resuming. An update never clears a committed answer.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2276,7 +2445,7 @@
         },
         "tier": {
           "type": "string",
-          "description": "Active profile preset; unknown or assistant-incompatible presets are refused"
+          "description": "Active profile preset or old name; unknown/assistant-incompatible: refused"
         },
         "pin": {
           "type": "boolean",
@@ -2320,7 +2489,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Use task_plan for code, repo research and multi-step work (one task per independent piece). Check machines_list, KB, agents_list and preferences for editable choices and one-line reasons. Main/lead plans start at once; elsewhere read-only, user_requested and preapproved kinds do; others and owner_step wait for 开始. Queued receipt means dispatched; check the to-do outcome and use agent_send.\n\nFixed machine_policy stays on that machine and refuses unavailable launchers; flexible moves portable work on failed health checks (explain why). Planning leads own their tasks: signals, cards, start remedies, review and cancellation. Main owns its tasks and receives needs_user escalations. Main may select a lead; agent_transfer persists ownership. An incompatible lead must gain supervision_policy before starting work. Check returned supervisor and similar work. Pass todo_id for caller's unassigned to-do (Lark topic, split, failed start).\n\nStarted tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides (manual Agents lack estimate_due). Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.\n\nEdits need readonly=false and authorized write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds the read-only constraint. Claude-family uses bypassPermissions for both; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor/agy refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review (workers cannot delegate).\n\nResolve repository identity via repositories_list (repository_get only when useful). The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's choice; this tool cannot set it.\n\nFor a saved workspace naming plan on an existing todo, select {\"backend\":{\"operation_id\":\"\u003cid\u003e\"}}. For a multi-repo container workspace, select {\"container\":{\"selected_repo_ids\":[\"\u003crepo_id\u003e\",...]}} (or {\"container\":{\"operation_id\":\"\u003cid\u003e\"}} with todo_id for a prepared container). Optional host picks an enabled engine. All selected repos must be ready before start.\n\nWorkspace policy: \"new\" isolates a checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\",\"queue\":true} picks one (queue:true or owner in after queues FIFO and auto-starts when free; else busy refuses with owner); \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing default, prefer-new to isolate), busy cwd uses new. Explicit existing never switches silently. Reusing explicit new branch needs clean checkout, no live Agent and no open owner, else refuse with path/owner. Engine owns creation/registration; never run git worktree add. Default branch: task/\u003ctodo id\u003e. Failed creation starts no Agent; workspaces stay after acceptance. Follow org read-only refusals; never retry unchanged.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Use task_plan for code, repo research and multi-step work (one task per independent piece). Check machines_list, KB, agents_list and preferences for editable choices and one-line reasons. Main/lead plans start at once; elsewhere read-only, user_requested and preapproved kinds do; others and owner_step wait for 开始. Queued receipt means dispatched; check to-do outcome and use agent_send.\n\nExplicit machine keeps fixed (default, refuses unavailable launchers) or flexible (moves portable work on failed health checks, explain why). Omit machine for automatic placement with optional placement_constraints. Planning leads own their tasks; main owns its own and receives needs_user escalations. Main may pick a lead; agent_transfer persists ownership. Incompatible leads need supervision_policy first. Check returned supervisor and similar work. Pass todo_id for caller's unassigned to-do (Lark topic, split, failed start).\n\nStarted tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides. Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.\n\nEdits need readonly=false and write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds read-only constraint. Claude-family and companion agy use bypassPermissions; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review.\n\nResolve repository via repositories_list (repository_get when useful); an explicit repository URL or path takes precedence. Saved bindings are references only; never infer machine/cwd. Non-repository tasks need no lookup (not a mandatory dispatch preflight). Closing terminal on acceptance is owner-only.\n\nSaved workspace naming plan on existing todo: {\"backend\":{\"operation_id\":\"\u003cid\u003e\"}}. Multi-repo container: {\"container\":{\"selected_repo_ids\":[...]}} (or operation_id with todo_id). Optional host picks enabled engine; selected repos must be ready.\n\nWorkspace: \"new\" isolates checkout; {\"new\":{\"branch\":\"task/my-change\"}} names branch; {\"existing\":\"\u003ccwd or id\u003e\",\"queue\":true} picks one (queue:true or owner in after queues FIFO, else busy refuses); \"none\" creates nothing. Omitted: readonly=none; writable Git follows assistant.task_workspace_preference, busy cwd uses new. Explicit existing never switches silently. Reusing explicit new branch needs clean checkout, no live Agent/owner. Engine owns creation; never run git worktree add. Default branch: task/\u003ctodo id\u003e. Failed creation starts no Agent; workspaces stay after acceptance. Follow org read-only refusals.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2334,7 +2503,7 @@
         },
         "supervisor": {
           "type": "string",
-          "description": "optional current leader id (assistant.leaders), selected by main; omitted: the planning lead, otherwise main"
+          "description": "optional leader id (assistant.leaders), selected by main; omitted: planning lead or main"
         },
         "tasks": {
           "type": "array",
@@ -2346,7 +2515,6 @@
               "title",
               "prompt",
               "role",
-              "machine",
               "readonly",
               "user_requested",
               "why"
@@ -2402,11 +2570,11 @@
               },
               "skip_project_memory": {
                 "type": "boolean",
-                "description": "default false; true skips project/direction memory; prompt unchanged"
+                "description": "default false; true skips project/direction memory in prompt"
               },
               "machine": {
                 "type": "string",
-                "description": "Machine id; fixed by default."
+                "description": "Machine id; omit for automatic placement."
               },
               "machine_policy": {
                 "type": "string",
@@ -2414,18 +2582,59 @@
                   "fixed",
                   "flexible"
                 ],
-                "description": "fixed (default): keep this machine; flexible: permit health-based moves only for portable work"
+                "description": "fixed (default) or flexible (health-based moves for portable work)"
+              },
+              "placement_constraints": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Optional auto-placement constraints when machine is omitted.",
+                "properties": {
+                  "os": {
+                    "type": "string",
+                    "enum": [
+                      "linux",
+                      "darwin",
+                      "windows"
+                    ]
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "require_hub": {
+                    "type": "boolean",
+                    "description": "default false (excludes hub)"
+                  },
+                  "workload": {
+                    "type": "string",
+                    "enum": [
+                      "light",
+                      "standard",
+                      "heavy"
+                    ]
+                  },
+                  "candidate_machines": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
               },
               "cwd": {
                 "type": "string",
-                "description": "Absolute or ~/ project dir, unless workspace.backend or workspace.container supplies it."
+                "description": "Abs or ~/ dir, unless workspace.backend/container supplies it."
               },
               "workspace": {
                 "type": [
                   "string",
                   "object"
                 ],
-                "description": "workspace policy; omit for default; existing: abs/~/path or workspace id on that machine; no custom root",
+                "description": "workspace policy; omit for default; existing: path or workspace id",
                 "oneOf": [
                   {
                     "type": "string",
@@ -2527,11 +2736,15 @@
               },
               "launcher": {
                 "type": "string",
-                "description": "listed launcher (Claude Code, pi, cursor or agy in herdr); unknown names refused with choices; empty: default/fallback, claude first, why says which"
+                "description": "listed launcher; empty: default/fallback, claude first"
+              },
+              "host": {
+                "type": "string",
+                "description": "agy (companion) or enabled engine"
               },
               "model": {
                 "type": "string",
-                "description": "model id or alias the agent takes; empty: the launcher's default"
+                "description": "model id/alias; empty: launcher default"
               },
               "permission": {
                 "type": "string",
@@ -2542,7 +2755,7 @@
                   "auto",
                   "bypassPermissions"
                 ],
-                "description": "mode; empty: writable default; readonly/replacement/Codex rules: see description; TRAE CLI and omp take none"
+                "description": "mode; empty: writable default; TRAE/omp take none"
               },
               "role": {
                 "type": "string",
@@ -2550,19 +2763,19 @@
                   "worker",
                   "leader"
                 ],
-                "description": "worker: ordinary; leader (any conversation): starts/reviews direct workers"
+                "description": "worker or leader (starts/reviews direct workers)"
               },
               "ultracode": {
                 "type": "boolean",
-                "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows, slower/costlier; small tasks: false; Claude Code 2.1.284+ only; never put in prompt/title"
+                "description": "large tasks only (Claude Code 2.1.284+ multi-agent); small: false; never in prompt/title"
               },
               "readonly": {
                 "type": "boolean",
-                "description": "true only for a task that must remain read-only; false for explicitly authorized file changes (a Codex read-only sandbox: see the description). The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
+                "description": "true only for read-only tasks; false for authorized edits. Adds「本任务只读：不改项目文件、不提交、不对外写入」when true"
               },
               "user_requested": {
                 "type": "boolean",
-                "description": "True only if the user's latest message asked for it; else false."
+                "description": "True only if user's latest message asked for it."
               },
               "owner_step": {
                 "type": "string",
@@ -2571,7 +2784,7 @@
                   "outward",
                   "irreversible"
                 ],
-                "description": "money, speaking as the user, or an unagreed irreversible step"
+                "description": "money, outward speech, or unagreed irreversible step"
               },
               "why": {
                 "type": "string",
@@ -2599,19 +2812,19 @@
               },
               "continues": {
                 "type": "string",
-                "description": "Original todo id. Reuse todo, original brief and effective criteria even on failed Start; never split. Start stops/releases active prior Agents and reopens if closed. Refuse unauthorized takeover, unreachable Agents that cannot be stopped, or open legacy successors."
+                "description": "Original todo id; reuses todo/brief, stops prior Agents, reopens if closed."
               },
               "scope_revision": {
                 "type": "string",
-                "description": "With continues after a scope change: exact task_scope scope_revision; refuse stale plans."
+                "description": "With continues after scope change: exact task_scope scope_revision."
               },
               "continues_why": {
                 "type": "string",
-                "description": "With continues: one-line stop/replacement reason saved on this plan."
+                "description": "With continues: one-line replacement reason."
               },
               "started_why": {
                 "type": "string",
-                "description": "If not just owner-requested (own idea, 督办 or routine): one-line start reason saved in brief."
+                "description": "Non-owner-requested start reason saved in brief."
               },
               "attachments": {
                 "type": "array",
@@ -2619,20 +2832,32 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "abs paths of pictures/files user gave in this chat (Claude Code path or app attachment); copied to agent with updated mentions; others refused"
+                "description": "Abs paths of chat files (Claude/app); copied with updated mentions."
               },
               "expect_minutes": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Optional minutes override. Omit/0: comparable history, or the 60-minute system_default; positive: override. Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)."
+                "description": "Optional minutes override (0/omit: auto or 60m)."
               },
               "project": {
                 "type": "string",
-                "description": "Existing kb_list projects slug/name for a clear long-term area; no near-duplicates."
+                "description": "Existing kb_list projects slug/name; no near-duplicates."
+              },
+              "audience": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "autonomous"
+                ],
+                "description": "Optional: human or autonomous."
+              },
+              "direction_id": {
+                "type": "string",
+                "description": "Direction id."
               },
               "part_of": {
                 "type": "string",
-                "description": "Optional request todo this is a piece of."
+                "description": "Request todo this is a piece of."
               },
               "after": {
                 "type": "array",
@@ -2643,15 +2868,15 @@
               },
               "todo_id": {
                 "type": "string",
-                "description": "Open or failed-start todo this chat opened/supervises; no live Agent. Release stopped Agents at Start. Equals continues if both are given."
+                "description": "Caller's open/failed-start todo with no live Agent; equals continues if both set."
               },
               "inbox_item": {
                 "type": "string",
-                "description": "Handed-off Inbox ID, or 'none' for unrelated work. Checks the conversation and manager; links without filing or replying."
+                "description": "Handed-off Inbox ID or 'none'; links without filing/replying."
               },
               "tier": {
                 "type": "string",
-                "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved at task start with its profile; explicit launcher/model/effort/speed overrides"
+                "description": "Agent preset from 模型档位; explicit launcher/model/effort/speed override."
               },
               "speed": {
                 "type": "string",
@@ -2660,7 +2885,7 @@
                   "fast",
                   "ultrafast"
                 ],
-                "description": "new-start speed; standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
+                "description": "new-start speed; standard/omitted: default; Codex: fast/ultrafast; Claude Code: fast"
               },
               "effort": {
                 "type": "string",
@@ -2696,7 +2921,7 @@
   },
   {
     "name": "task_review",
-    "description": "accepted closes work after the delivery gate (default delivery_gate=merged: park verified open PRs; linked issues must close). user_check keeps the task and Agent open until owner Pass and routes feedback to that Agent. If opted in at Start, accepted done cleans up the idle tab unless user_check. Report closed/skipped/pending; never close the tab yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new cap at 10 total); accept with a brief note instead of bouncing for low-ROI edge cases or style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits and needs_user if only the owner can contact, approve, or trigger work.\n\nFor accepted (outcome=done), include each done_when criterion once in checks (met=true, nonblank evidence), even with user_check. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts can omit checks and keep progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief over handovers or Agent claims.\n\nGive accepted outcome/reason/link. The hub sends conclusion cards and passes verification unless user_check. needs_user can default to recommend at 24h/deadline. Irreversible or visible_to_others only remind. Recheck at 24h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or acting irreversibly/externally.\n\nA non-main reviewer of another supervisor's task may only accept/cancel; send gaps via agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and cards end.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "accepted closes after delivery_gate (default merged: park verified open PRs; linked issues must close). user_check keeps task/Agent open until owner Pass and routes feedback there. If opted in at Start, accepted done cleans the idle tab unless user_check; report closed/skipped/pending, never close tabs yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new: 10 total); accept with a note over low-ROI edge/style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits; needs_user if only the owner can contact, approve, or trigger work.\n\nFor accepted (outcome=done), list each done_when once in checks (met=true, nonblank evidence), even with user_check; outcome=cannot, cancelled and criteria-free tasks keep prior rules. Other verdicts may omit checks and keep progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief over handovers/Agent claims; uncovered scope needs needs_user, user_check, or a linked follow-up to-do—never chat text alone.\n\nGive accepted outcome/reason/link; pass direct PR/MR/doc URL in link for needs_user when available. The hub sends conclusion cards and passes verification unless user_check. needs_user defaults to recommend at 24h/deadline; irreversible/visible_to_others only remind. Recheck at 24h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or acting irreversibly/externally.\n\nA non-main reviewer of another supervisor's task may only accept/cancel; send gaps via agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and cards end.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2746,11 +2971,11 @@
               },
               "evidence": {
                 "type": "string",
-                "description": "what shows it is met (a link, a command's output), or what is missing"
+                "description": "proof it is met (link, command output), or what is missing"
               }
             }
           },
-          "description": "each criterion (met or not) with evidence/gap; updates persisted state, evidence, time, and supervisor. Omitted entries keep progress"
+          "description": "each criterion with evidence/gap; updates state, evidence, time, and supervisor. Omitted entries keep progress"
         },
         "note": {
           "type": "string",
@@ -2783,7 +3008,7 @@
         },
         "link": {
           "type": "string",
-          "description": "accepted/needs_user: one evidence link (PR/page/doc); defaults to task PR, note/checks link, or agent chat"
+          "description": "accepted/needs_user: direct PR/MR/doc URL when available (shown on decision card); defaults to task PR/MR, note/checks URL, or chat"
         },
         "recommend": {
           "type": "string",
@@ -2813,7 +3038,7 @@
             "properties": {
               "label": {
                 "type": "string",
-                "description": "the option in a few words, as a button says it"
+                "description": "short button label"
               },
               "leads_to": {
                 "type": "string",
@@ -2825,7 +3050,7 @@
         },
         "cost_of_waiting": {
           "type": "string",
-          "description": "needs_user (required): one sentence saying what it costs if the user does not answer soon"
+          "description": "needs_user (required): one sentence on the cost of waiting"
         },
         "question_quote": {
           "type": "string",
@@ -3624,11 +3849,11 @@
         },
         "due": {
           "type": "string",
-          "description": "Day only: YYYY-MM-DD; otherwise YYYY-MM-DD HH:MM (user time zone) or RFC3339. Relative 2h/3d accepted."
+          "description": "YYYY-MM-DD, YYYY-MM-DD HH:MM (local), RFC3339, or 2h/3d."
         },
         "remind": {
           "type": "string",
-          "description": "Future reminder (user time zone/RFC3339 or relative 30m/2h/1d). Only if requested or deadline close and important."
+          "description": "Future reminder (local/RFC3339 or 30m/2h/1d). Only if asked or urgent."
         },
         "priority": {
           "type": "string",
@@ -3645,11 +3870,23 @@
             "todo",
             "concern"
           ],
-          "description": "todo (default); concern (main chat only) tracks a user-raised matter until concern_report reports its outcome; other completion tools cannot close it."
+          "description": "todo (default); concern (main chat only) closes only via concern_report."
+        },
+        "audience": {
+          "type": "string",
+          "enum": [
+            "human",
+            "autonomous"
+          ],
+          "description": "Optional: human or autonomous."
+        },
+        "direction_id": {
+          "type": "string",
+          "description": "Optional direction id."
         },
         "project": {
           "type": "string",
-          "description": "Existing kb_list project slug/name; prefer long-term work. Only when clear; no near-duplicates."
+          "description": "Existing kb_list project slug/name; only when clear, no near-duplicates."
         },
         "part_of": {
           "type": "string",
@@ -3802,7 +4039,7 @@
   },
   {
     "name": "todo_update",
-    "description": "Update supplied title, notes, due/reminder, priority, project, part_of or after immediately, including task to-dos; no confirmation. Omitted fields stay; \"\" clears notes/due/remind/project/part_of, [] clears after. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Update supplied fields immediately, including task to-dos; no confirmation. Omitted fields stay; \"\" clears notes/due/remind/project/part_of/audience/direction_id, [] clears after. New remind notifies again. Close/reopen via todo_complete/todo_reopen.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -3823,11 +4060,11 @@
         },
         "due": {
           "type": "string",
-          "description": "New due date YYYY-MM-DD or datetime (user's time zone/RFC3339); \"\" clears."
+          "description": "YYYY-MM-DD or datetime (local/RFC3339); \"\" clears."
         },
         "remind": {
           "type": "string",
-          "description": "New reminder datetime (user's time zone/RFC3339) or relative 30m/2h/1d; never past. \"\" clears."
+          "description": "Future datetime (local/RFC3339) or 30m/2h/1d; \"\" clears."
         },
         "priority": {
           "type": "string",
@@ -3839,7 +4076,15 @@
         },
         "project": {
           "type": "string",
-          "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates. \"\" clears."
+          "description": "Existing kb_list project slug/name; only when clear, no near-duplicates. \"\" clears."
+        },
+        "audience": {
+          "type": "string",
+          "description": "human, autonomous, or \"\" clears."
+        },
+        "direction_id": {
+          "type": "string",
+          "description": "Direction id, or \"\" clears."
         },
         "part_of": {
           "type": "string",
@@ -4018,7 +4263,7 @@
   },
   {
     "name": "decisions_query",
-    "description": "Decisions; scope:{executor,machine[],project[],personal}. memory[]: remembered entries this conversation may use (first page; none with by, trust or a status other than active).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "memory[] page 1: tag words match text/subjects/facet/categories (AND, ignore case). by/trust/non-active status: memory_omitted=ledger_filters; retry tag alone. scope=ledger-only\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -4049,51 +4294,40 @@
     "defer_loading": true
   },
   {
-    "name": "health_intake",
-    "description": "Health chats only. log kind/amount (water ml, protein g); list entries/IDs, daily totals/goals (default 7 days incl. today); delete record UUID, repeatable. Estimates need ask_user; new ID per log; list before retrying.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "name": "file_transfer",
+    "description": "Copy a file or a folder between this computer and another of the user's computers through Persona, in one call. Use it whenever a file you need is on another of the user's computers, or a file you made is needed on one: do not use ssh, scp, rsync or a chat upload for that, since the computers often cannot reach each other directly. Not for this computer itself: use your own file tools there. `send` copies `path` on this computer to `machine`; `fetch` copies `path` on `machine` to this computer; `list` shows the computers you can use and whether they are online, and copies nothing. Paths are absolute or start with `~/` (the home of the computer they are on). Without `dest` the copy lands in the receiving computer's receive folder under its own name, numbered when the name is taken. With `dest`, an existing folder takes it under its own name and any other path becomes its new name, with missing folders made on the way. Only the receiving computer's home is writable, and an existing name is refused unless `overwrite` is true (a folder is then merged, its files of the same name replaced). A folder is packed, sent and unpacked; links inside it are not carried. Credentials are never sent: SSH and other private keys, Persona's own credential files, sign-in files, `.env` files and the like are refused by name, and left out of a folder (the answer counts them). At most 2 GB, a folder at most 20,000 files. Both computers must be online. The call returns once the copy is complete and its SHA-256 is checked on the receiving computer, with where it is.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
-        "action"
+        "direction"
       ],
       "properties": {
-        "action": {
+        "direction": {
           "type": "string",
           "enum": [
-            "log",
-            "list",
-            "delete"
-          ]
+            "send",
+            "fetch",
+            "list"
+          ],
+          "description": "send: from this computer to machine; fetch: from machine to this computer; list: the computers you can use (copies nothing)"
         },
-        "kind": {
+        "machine": {
           "type": "string",
-          "enum": [
-            "water",
-            "protein"
-          ]
+          "description": "the other computer's id or name, as list shows it"
         },
-        "amount": {
-          "type": "number",
-          "description": "ml 1-3000; g \u003e0-200; max one decimal."
-        },
-        "at": {
+        "path": {
           "type": "string",
-          "description": "RFC3339; default now."
+          "description": "the file or folder to copy, on this computer for send or on machine for fetch: absolute or ~/…"
         },
-        "note": {
+        "dest": {
           "type": "string",
-          "description": "Food/portion; max 4096 UTF-8 bytes; no NUL."
+          "description": "where it goes on the receiving computer: absolute or ~/…; an existing folder takes it under its own name. Leave it out for the receive folder"
         },
-        "days": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 366
-        },
-        "id": {
-          "type": "string"
+        "overwrite": {
+          "type": "boolean",
+          "description": "replace what is already at dest (a folder is merged into); off by default, when a taken name is refused"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "defer_loading": true
   }

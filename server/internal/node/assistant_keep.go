@@ -1,7 +1,11 @@
 package node
 
 import (
+	"cmp"
+	"fmt"
 	"log"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,18 +23,109 @@ import (
 // liveAssistants is every headless assistant this process runs, whichever Node it reports to (AssistantsBusy).
 var liveAssistants sync.Map // *assistantProc -> struct{}
 
-// AssistantsBusy: a conversation is answering or waiting on its background tasks or monitors; a resident node asked
-// to restart (SIGHUP, a deploy) waits until none is (cmd/personad runResident). Idle ones resume on the next message.
-func AssistantsBusy() bool {
-	busy := false
+// busyAssistant describes one live headless assistant blocking a resident reload or update.
+type busyAssistant struct {
+	id         string
+	busy       bool
+	compacting bool
+	tasks      int
+}
+
+func busyAssistants() []busyAssistant {
+	var out []busyAssistant
 	liveAssistants.Range(func(k, _ any) bool {
 		p := k.(*assistantProc)
 		p.mu.Lock()
-		busy = p.alive() && (p.busy || p.compacting || len(p.tasks) > 0)
+		if p.alive() && (p.busy || p.compacting || len(p.tasks) > 0) {
+			out = append(out, busyAssistant{
+				id:         p.id,
+				busy:       p.busy,
+				compacting: p.compacting,
+				tasks:      len(p.tasks),
+			})
+		}
 		p.mu.Unlock()
-		return !busy
+		return true
 	})
-	return busy
+	return out
+}
+
+func hasBusyBackgroundTasks(busy []busyAssistant) bool {
+	for _, b := range busy {
+		if b.tasks > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func busyIDSet(busy []busyAssistant) map[string]struct{} {
+	ids := make(map[string]struct{}, len(busy))
+	for _, b := range busy {
+		ids[b.id] = struct{}{}
+	}
+	return ids
+}
+
+func anyIDBusy(busy []busyAssistant, ids map[string]struct{}) bool {
+	for _, b := range busy {
+		if _, ok := ids[b.id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// formatBusyAssistants returns a deterministic, privacy-safe summary of blocking conversations
+// (truncated conversation id and reason/task count only, never task descriptions or prompt text).
+func formatBusyAssistants(busy []busyAssistant) string {
+	sorted := append([]busyAssistant(nil), busy...)
+	slices.SortFunc(sorted, func(a, b busyAssistant) int {
+		if c := cmp.Compare(a.id, b.id); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.tasks, b.tasks); c != 0 {
+			return c
+		}
+		if a.busy != b.busy {
+			if a.busy {
+				return -1
+			}
+			return 1
+		}
+		if a.compacting != b.compacting {
+			if a.compacting {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
+	parts := make([]string, 0, len(sorted))
+	for _, b := range sorted {
+		var reasons []string
+		if b.busy {
+			reasons = append(reasons, "busy")
+		}
+		if b.compacting {
+			reasons = append(reasons, "compacting")
+		}
+		if b.tasks > 0 {
+			reasons = append(reasons, fmt.Sprintf("tasks=%d", b.tasks))
+		}
+		label := short(b.id)
+		if label == "" {
+			label = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("conv=%s (%s)", label, strings.Join(reasons, ", ")))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// AssistantsBusy: a conversation is answering or waiting on its background tasks or monitors; a resident node asked
+// to restart (SIGHUP, a deploy) waits until none is (cmd/personad runResident). Idle ones resume on the next message.
+func AssistantsBusy() bool {
+	return len(busyAssistants()) > 0
 }
 
 // keeperStopGrace is how long stopAndWait gives conversations to end on SIGTERM before it kills their process

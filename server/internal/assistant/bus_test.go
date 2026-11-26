@@ -6,8 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +29,17 @@ func TestRoutesAreTheWireOnes(t *testing.T) {
 	s := newTestService(t, newFakeHub())
 	got, want := s.Routes(), slices.Concat(assistantwire.Routes, assistantwire.InboxRoutes)
 	if !s.recordingOn() { // the recording module's routes are served only with it (recording.go)
-		want = slices.DeleteFunc(want, func(r string) bool { return strings.Contains(r, " /api/v1/recordings") })
+		want = slices.DeleteFunc(want, func(r string) bool {
+			// Stored photos' list and images are the core's own routes (kb_recording_media.go): they stay.
+			return strings.Contains(r, " /api/v1/recordings") && r != "GET /api/v1/recordings/{id}/photos" &&
+				r != "GET /api/v1/recordings/{id}/photos/{n}"
+		})
+	}
+	if !s.healthOn() { // the Health module's routes likewise (health_layer.go); workouts stay in the core
+		want = slices.DeleteFunc(want, func(r string) bool {
+			return strings.Contains(r, " /api/v1/assistant/health/intake") ||
+				strings.Contains(r, " /api/v1/assistant/health/items") || strings.Contains(r, " /api/v1/assistant/health/water/")
+		})
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -133,6 +146,119 @@ func TestBusHubUncompressedOnTheHubsMachine(t *testing.T) {
 		b := NewBusHub(BusOptions{ID: c.id, Deploy: c.deploy, Hub: c.hub, Token: "t"})
 		if b.client.Uncompressed != c.want {
 			t.Errorf("%+v: Uncompressed %v", c, b.client.Uncompressed)
+		}
+	}
+}
+
+// BusHub sends the host's machine_uid in manager.hello, omits pending_restart when false, sends manager.status live on
+// SetPendingRestart changes, and carries pending_restart: true in manager.hello across reconnects.
+func TestBusHubHelloMachineUIDAndPendingRestart(t *testing.T) {
+	hostDir := t.TempDir()
+	const uid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	if err := os.WriteFile(filepath.Join(hostDir, "machine-uid"), []byte(uid+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hellos := make(chan map[string]any, 4)
+	statuses := make(chan assistantwire.ManagerStatus, 8)
+	var mu sync.Mutex
+	var currentWS *websocket.Conn
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		currentWS = ws
+		mu.Unlock()
+		conn := bus.NewConn(r.Context(), ws)
+		p := rpc.New("h", conn)
+		p.OnRequest = func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			switch method {
+			case assistantwire.MethodHello:
+				var m map[string]any
+				_ = json.Unmarshal(params, &m)
+				hellos <- m
+				return map[string]any{}, nil
+			case assistantwire.MethodSnapshot:
+				return map[string]any{}, nil
+			}
+			return nil, &rpc.Error{Code: "not_found", Message: method}
+		}
+		p.OnEvent = func(event string, params json.RawMessage) {
+			if event == assistantwire.EventManagerStatus {
+				var st assistantwire.ManagerStatus
+				if json.Unmarshal(params, &st) == nil {
+					statuses <- st
+				}
+			}
+		}
+		_ = p.Serve(r.Context(), conn)
+	}))
+	defer srv.Close()
+
+	b := NewBusHub(BusOptions{ID: "m-123456", Hub: srv.URL, Token: "jb_x", HostDataDir: hostDir, Backoff: 10 * time.Millisecond, Logf: testLogf(t)})
+	st := &memStore{}
+	svc := New(Options{Hub: b, Store: func() Store { return st }, Logf: testLogf(t)})
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- b.Serve(ctx, svc) }()
+	defer func() {
+		cancel()
+		<-served
+	}()
+
+	select {
+	case h1 := <-hellos:
+		if h1["machine_uid"] != uid {
+			t.Fatalf("first hello machine_uid = %v, want %q", h1["machine_uid"], uid)
+		}
+		if _, has := h1["pending_restart"]; has {
+			t.Fatalf("first hello should omit pending_restart: %v", h1)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first manager.hello")
+	}
+	if err := b.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	b.SetPendingRestart(true)
+	select {
+	case got := <-statuses:
+		if !got.PendingRestart {
+			t.Fatalf("status = %+v, want pending_restart=true", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for manager.status true")
+	}
+
+	// Force a disconnect: the reconnecting manager.hello must carry pending_restart: true and machine_uid.
+	mu.Lock()
+	ws := currentWS
+	mu.Unlock()
+	_ = ws.Close(websocket.StatusGoingAway, "drop")
+	select {
+	case h2 := <-hellos:
+		if h2["machine_uid"] != uid || h2["pending_restart"] != true {
+			t.Fatalf("reconnect hello = %v, want machine_uid=%q pending_restart=true", h2, uid)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reconnect manager.hello")
+	}
+	if err := b.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	b.SetPendingRestart(false)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-statuses:
+			if !got.PendingRestart {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for manager.status false")
 		}
 	}
 }

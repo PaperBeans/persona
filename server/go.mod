@@ -12,16 +12,17 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/jackc/pgx/v5 v5.7.5
-	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/lnquy/cron v1.1.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/nwverse/persona/sdk/go v0.0.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55
 	github.com/tailscale/tailcat v0.7.0
 	github.com/tdewolff/parse/v2 v2.8.20
+	github.com/wailsapp/go-webview2 v1.0.23
 	github.com/yuin/goldmark v1.8.5
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.41.0
@@ -59,6 +60,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/kr/fs v0.1.0 // indirect

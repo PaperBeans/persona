@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -262,39 +261,6 @@ func fieldValues(l i18n.Lang, ix proto.Interaction, r proto.Resolution) []string
 
 // secretName is a field or property name that holds a credential whatever the card says about it.
 var secretName = lazyre.New(`(?i)pass|secret|token|credential|api[_-]?key|private|otp|pin\b`)
-
-// ixToolName is the tool a card asks about, for a sentence: the manager's name for people on its own tools' cards
-// (proto.Interaction.ToolTitle), else toolDisplayName.
-func ixToolName(ix proto.Interaction) string {
-	if ix.ToolTitle != "" {
-		return ix.ToolTitle
-	}
-	return toolDisplayName(ix.ToolName)
-}
-
-// toolDisplayName is a tool's name for a sentence: an MCP tool as "Persona · mail send" (Persona's own server keeps
-// its old id persona, which allow lists and hooks match), others as written.
-func toolDisplayName(name string) string {
-	name = compat.CanonicalMCPToolName(name)
-	rest, ok := strings.CutPrefix(name, "mcp__")
-	if !ok {
-		return name
-	}
-	server, tool := rest, ""
-	if i := strings.LastIndex(rest, "__"); i > 0 {
-		server, tool = rest[:i], strings.ReplaceAll(rest[i+2:], "_", " ")
-	}
-	if server = strings.TrimPrefix(server, "plugin_"); compat.IsMCPServer(server) {
-		server = "Persona"
-	}
-	if server == "" {
-		return name
-	}
-	if tool == "" {
-		return server
-	}
-	return server + " · " + tool
-}
 
 // permissionQuestion is what a permission card asked in full: the tool, what it would do, why the agent asks.
 func permissionQuestion(l i18n.Lang, ix proto.Interaction) string {

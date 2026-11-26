@@ -13,11 +13,12 @@ void Wipe(std::vector<uint8_t>& bytes) {
   bytes.clear();
 }
 struct Work {
+  enum class Operation { Open, Close, Observe, Verify };
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
-  bool closing = false;
-  std::string id, host, user, pin, target;
-  uint16_t port = 0, targetPort = 0;
+  Operation op = Operation::Open;
+  std::string id, host, user, pin, target, forwardHost;
+  uint16_t port = 0, targetPort = 0, forwardPort = 0;
   std::vector<std::string> resolvedHubIps;
   std::vector<const char*> resolvedHubIpPointers;
   std::vector<uint8_t> key, passphrase;
@@ -71,13 +72,19 @@ napi_value Error(napi_env env, const char* code) {
 }
 void Execute(napi_env, void* data) {
   auto* work = static_cast<Work*>(data);
-  if (work->closing) { persona_ssh_close(work->id.c_str()); return; }
+  if (work->op == Work::Operation::Close) { persona_ssh_close(work->id.c_str()); return; }
+  if (work->op == Work::Operation::Observe) {
+    work->result = persona_ssh_observe(work->id.c_str(), work->host.c_str(), work->port);
+    return;
+  }
   work->resolvedHubIpPointers.reserve(work->resolvedHubIps.size());
   for (const auto& address : work->resolvedHubIps) work->resolvedHubIpPointers.push_back(address.c_str());
   PersonaSshConfig config { work->id.c_str(), work->host.c_str(), work->port, work->user.c_str(), work->pin.c_str(),
     work->target.c_str(), work->targetPort, work->resolvedHubIpPointers.data(), work->resolvedHubIpPointers.size(),
     work->key.data(), work->key.size(), work->passphrase.data(), work->passphrase.size() };
-  work->result = persona_ssh_open(&config);
+  if (work->op == Work::Operation::Verify) work->result = persona_ssh_verify_target(&config);
+  else if (work->forwardPort) work->result = persona_ssh_open_to(&config, work->forwardHost.c_str(), work->forwardPort);
+  else work->result = persona_ssh_open(&config);
   Wipe(work->key); Wipe(work->passphrase);
 }
 void Complete(napi_env env, napi_status status, void* data) {
@@ -86,7 +93,7 @@ void Complete(napi_env env, napi_status status, void* data) {
     // Cancellation is immediate even if the open worker was never scheduled.
     persona_ssh_abandon(work->id.c_str());
     napi_reject_deferred(env, work->deferred, Error(env, "ssh_cancelled"));
-  } else if (work->closing) {
+  } else if (work->op == Work::Operation::Close) {
     napi_value empty; napi_get_undefined(env, &empty); napi_resolve_deferred(env, work->deferred, empty);
   } else if (!work->result) {
     persona_ssh_abandon(work->id.c_str()); napi_reject_deferred(env, work->deferred, Error(env, "ssh_native_failed"));
@@ -125,23 +132,36 @@ napi_value Queue(napi_env env, std::unique_ptr<Work> work) {
   }
   work.release(); return promise;
 }
-napi_value Open(napi_env env, napi_callback_info info) {
+napi_value Request(napi_env env, napi_callback_info info, Work::Operation op) {
   size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-  auto work = std::make_unique<Work>();
+  auto work = std::make_unique<Work>(); work->op = op;
   if (count != 1 || !Text(env, args[0], "id", work->id, 36) || !Text(env, args[0], "sshHost", work->host, 253) ||
-      !Port(env, args[0], "sshPort", work->port) || !Text(env, args[0], "username", work->user, 128) ||
+      !Port(env, args[0], "sshPort", work->port)) {
+    napi_throw_error(env, nullptr, "ssh_invalid_config"); return nullptr;
+  }
+  if (op != Work::Operation::Observe && (!Text(env, args[0], "username", work->user, 128) ||
       !Text(env, args[0], "hostKey", work->pin, 50) || !Text(env, args[0], "targetHost", work->target, 253) ||
       !Port(env, args[0], "targetPort", work->targetPort) || !TextArray(env, args[0], "resolvedHubIps", work->resolvedHubIps, 16, 45) ||
       !Bytes(env, args[0], "privateKey", work->key, 32768) ||
-      !Bytes(env, args[0], "passphrase", work->passphrase, 4096) || work->key.empty()) {
+      !Bytes(env, args[0], "passphrase", work->passphrase, 4096) || work->key.empty())) {
+    napi_throw_error(env, nullptr, "ssh_invalid_config"); return nullptr;
+  }
+  bool hasHost = false, hasPort = false;
+  if (napi_has_named_property(env, args[0], "forwardHost", &hasHost) != napi_ok ||
+      napi_has_named_property(env, args[0], "forwardPort", &hasPort) != napi_ok || hasHost != hasPort ||
+      (hasHost && (op != Work::Operation::Open || !Text(env, args[0], "forwardHost", work->forwardHost, 253) ||
+                   work->forwardHost.empty() || !Port(env, args[0], "forwardPort", work->forwardPort)))) {
     napi_throw_error(env, nullptr, "ssh_invalid_config"); return nullptr;
   }
   if (!persona_ssh_begin(work->id.c_str())) { napi_throw_error(env, nullptr, "ssh_busy"); return nullptr; }
   return Queue(env, std::move(work));
 }
+napi_value Open(napi_env env, napi_callback_info info) { return Request(env, info, Work::Operation::Open); }
+napi_value Observe(napi_env env, napi_callback_info info) { return Request(env, info, Work::Operation::Observe); }
+napi_value Verify(napi_env env, napi_callback_info info) { return Request(env, info, Work::Operation::Verify); }
 napi_value Close(napi_env env, napi_callback_info info) {
   size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-  auto work = std::make_unique<Work>(); work->closing = true;
+  auto work = std::make_unique<Work>(); work->op = Work::Operation::Close;
   if (count != 1 || !String(env, args[0], work->id, 36)) { napi_throw_error(env, nullptr, "ssh_invalid_config"); return nullptr; }
   persona_ssh_cancel(work->id.c_str());
   return Queue(env, std::move(work));
@@ -153,6 +173,8 @@ napi_value IsOpen(napi_env env, napi_callback_info info) {
 napi_value Init(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
     { "open", nullptr, Open, nullptr, nullptr, nullptr, napi_default, nullptr },
+    { "observeHost", nullptr, Observe, nullptr, nullptr, nullptr, napi_default, nullptr },
+    { "verifyTarget", nullptr, Verify, nullptr, nullptr, nullptr, napi_default, nullptr },
     { "close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, nullptr },
     { "isOpen", nullptr, IsOpen, nullptr, nullptr, nullptr, napi_default, nullptr },
   };

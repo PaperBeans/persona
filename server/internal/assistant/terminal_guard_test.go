@@ -30,6 +30,9 @@ var terminalClosers = map[string][]string{
 		"retireArchived",     // the user's "Archive and close" (close_terminal)
 		"closeEndedTerminal", // the owner's opt-in close_ended_terminals setting, when an Agent's session ends (#10355)
 	},
+	"session.retire_guarded": {
+		"retireArchived", // guarded idle archive-and-close with activity-version verification
+	},
 	"panes.close": {},
 	"tabs.close":  {},
 	"session.close_task_terminal": {
@@ -43,8 +46,12 @@ func TestOnlyUserActionsCloseAgentTerminals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	consts := map[string]string{"deviceSessionRetire": "session.retire", "deviceSessionStop": "session.stop",
-		"MethodCloseTaskTerminal": "session.close_task_terminal"}
+	consts := map[string]string{
+		"deviceSessionRetire":        "session.retire",
+		"deviceSessionRetireGuarded": "session.retire_guarded",
+		"deviceSessionStop":          "session.stop",
+		"MethodCloseTaskTerminal":    "session.close_task_terminal",
+	}
 	fset := token.NewFileSet()
 	found := map[string][]string{}
 	for _, name := range files {

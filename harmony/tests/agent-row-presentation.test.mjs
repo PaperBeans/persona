@@ -44,7 +44,7 @@ const BoundAgentGroup = new Function('return ' + stripTypeScriptTypes(classCode(
 
 function pageClass(wire, translate) {
   return new Function('BoundAgentRow', 'AgentRowPresentation', 'BoundAgentGroup', 'Wire', 'tr', 'Colors', 'reconcileBoundRows',
-    stripTypeScriptTypes('class Page {\n' + ['isRowSelected','syncRowBindings', 'bindAgentRows', 'updateAgentRowPresentation', 'rowTime', 'rowStatus', 'rowStatusColor']
+    stripTypeScriptTypes('class Page {\n' + ['isRowSelected','syncRowBindings', 'bindAgentRows', 'updateAgentRowPresentation', 'rowTime', 'rowStatus', 'rowStatusColor', 'needsStatusLabel', 'rowPlace']
       .map(methodCode).join('\n') + '\n}\n') + '\nreturn Page;')(
         BoundAgentRow, AgentRowPresentation, BoundAgentGroup, wire, translate,
         { needs: 'needs', working: 'working', unread: 'unread', secondary: 'secondary' }, reconcileBoundRows);
@@ -247,6 +247,86 @@ test('idle status uses the same localized words for the row and its spoken label
  }
 });
 
+test('state group headers replace repeated status words, while muted and machine sections retain each Agent’s state',()=>{
+ const {page}=fixture();
+ for(const group of ['pinned','state/needs','state/idle','state/working']) assert.equal(page.needsStatusLabel(group),false);
+ for(const group of ['state/muted','machine/home','space/project']) assert.equal(page.needsStatusLabel(group),true);
+ page.mixedMachines=true;page.workspace={groupingMode:'state'};
+ const display={brand:'claude',provider:'claude',spaceName:'login-form',metadata:['Hub','MacBook']};
+ assert.equal(page.rowPlace(display),'Claude · MacBook · login-form');
+ page.workspace.groupingMode='machine';assert.equal(page.rowPlace(display),'Claude · login-form');
+ const row=source.slice(source.indexOf('  @Builder agentRow('),source.indexOf('  @Builder rowContext('));
+ assert.match(row,/\.accessibilityText\(\[binding\.bound\.value\.title[\s\S]*this\.rowStatus\(binding\.presentation\)/);
+});
+
+test('phone search starts folded, reveals only from a downward top pull, and a saved query survives leaving',()=>{
+ const TouchType={Down:0,Move:1,Up:2};
+ const Search=new Function('TouchType','return '+stripTypeScriptTypes('class Search {'+
+   ['searchVisible','setSearchEditing','resetSearchReveal','trackPull','refreshAgents'].map(methodCode).join('\n')+'}'))(TouchType);
+ const page=new Search(); page.refreshGroupingSupport=()=>{};page.reloadDecisions=()=>{};
+ let top=0,refreshes=0;
+ page.workspace={search:'',setReadingDetail(){},refresh(){refreshes++;return Promise.resolve();},isBoundTo(){return true;}};
+ page.agentScroller={currentOffset:()=>({yOffset:top})};page.compactRoot=true;page.active=true;page.onSearchMode=()=>{};page.resetSearchReveal();
+ const gesture=(x,y)=>{page.trackPull({type:0,touches:[{windowX:0,windowY:10}]});page.trackPull({type:1,touches:[{windowX:x,windowY:10+y}]});};
+ assert.equal(page.searchVisible(),false);
+ top=180;gesture(0,80);assert.equal(page.searchVisible(),false);
+ top=0;gesture(90,55);assert.equal(page.searchVisible(),false);
+ gesture(0,30);assert.equal(page.searchVisible(),false);
+ gesture(1,60);assert.equal(page.searchVisible(),true);page.refreshAgents();assert.equal(refreshes,0);
+ page.trackPull({type:0,touches:[{windowX:0,windowY:10}]});page.refreshAgents();assert.equal(refreshes,1);
+ page.searchOpen=true;gesture(0,-60);assert.equal(page.searchVisible(),false,'scrolling the empty resting field folds it');
+ page.searchOpen=true;page.searchEditing=true;gesture(0,-60);assert.equal(page.searchVisible(),true,'the active editor stays available');
+ page.workspace.search='login';page.resetSearchReveal();assert.equal(page.searchVisible(),true);
+ gesture(0,-100);assert.equal(page.searchVisible(),true,'an unfocused query remains visible while scrolling');
+ page.workspace.search='';page.compactRoot=false;assert.equal(page.searchVisible(),true);
+ assert.match(source,/accessibilityCustomActions\(\[\{name:tr\('search_sessions'\),onAction:\(\)=>this.activateSearch\(\)\}\]\)/);
+ assert.match(source,/MenuItem\(\{content:tr\('search_sessions'\)\}\).*id\('agents.search_reveal'\)/);
+});
+
+test('choosing an Agents group keeps the resting header, active query, and list position', () => {
+  const groupRows = source.slice(source.indexOf('@Builder groupingMenu()'), source.indexOf(".id('agents.grouping.'+key)"));
+  const action = groupRows.slice(groupRows.indexOf('.onClick(') + '.onClick('.length).trim().slice(0, -1);
+  const pick = new Function('index', 'return (' + action + ')');
+  const Menu = new Function('return (' + stripTypeScriptTypes('class Menu {' + methodCode('selectGrouping') + '}') + ')')();
+  for (const [revealed, editing, query] of [[false,false,''], [true,false,''], [true,true,'weather']]) {
+    const page = new Menu();
+    page.availableGroupings = ['repo','state'];
+    page.searchOpen = revealed;
+    page.searchEditing = editing;
+    page.workspace = { groupingMode: 'repo', search: query, setGroupingMode(key) { this.groupingMode = key; } };
+    const scrollRequests = [];
+    page.agentScroller = { scrollToIndex(index) { scrollRequests.push(index); } };
+    page.resetSearchReveal = () => { page.searchOpen = false; page.searchEditing = false; };
+    for (const index of [0,1,1]) {
+      pick.call(page,index)();
+      assert.equal(page.workspace.groupingMode,page.availableGroupings[index]);
+      assert.deepEqual([page.searchOpen,page.searchEditing,page.workspace.search],[revealed,editing,query]);
+      assert.deepEqual(scrollRequests,[]);
+    }
+  }
+});
+
 test('visible selection can clear on Home without changing the cached selected Agent',()=>{
  const Page=pageClass({},key=>key),page=new Page(),binding={presentation:{selectionKey:'agent'}};page.workspace={selectedKey:'agent'};page.selectionVisible=true;assert.equal(page.isRowSelected(binding),true);page.selectionVisible=false;assert.equal(page.isRowSelected(binding),false);assert.equal(page.workspace.selectedKey,'agent');page.selectionVisible=true;assert.equal(page.isRowSelected(binding),true);
+});
+
+
+test('Needs You surfaces follow the visible oldest-first order as the decisions change', () => {
+  const getter=block(source.indexOf('  @Computed get orderedNeedsRows'), 'orderedNeedsRows').replace('@Computed ', '');
+  const methods=['displayRows','startsSurface','endsSurface'].map(methodCode).join('\n');
+  const Page=new Function('return '+stripTypeScriptTypes('class Page {\n'+getter+'\n'+methods+'\n}'))();
+  const page=new Page(), a={first:true,last:false,bound:{value:{waiting:20}}}, b={first:false,last:true,bound:{value:{waiting:10}}};
+  const group={value:{id:'state/needs'},rows:[a,b]};
+  page.groupBindings=[group];page.compactRoot=true;page.rail=false;
+  page.decisions={waitingSince:(_,row)=>row.waiting};
+  assert.deepEqual(page.displayRows(group),[b,a]);
+  assert.equal(page.startsSurface(b,group.value.id),true);assert.equal(page.endsSurface(b,group.value.id),false);
+  assert.equal(page.endsSurface(a,group.value.id),true);
+  a.bound.value.waiting=5;
+  assert.deepEqual(page.displayRows(group),[a,b]);
+  assert.equal(page.startsSurface(a,group.value.id),true);assert.equal(page.endsSurface(b,group.value.id),true);
+  group.rows=[b];
+  assert.equal(page.startsSurface(b,group.value.id),true);assert.equal(page.endsSurface(b,group.value.id),true);
+  page.rail=true;assert.equal(page.startsSurface(b,group.value.id),false);
+  assert.equal(page.endsSurface(b,'state/working'),true);
 });

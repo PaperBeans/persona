@@ -98,6 +98,8 @@ func (s *Service) taskNoticeOfStart(ctx context.Context, t Todo, machine, state,
 		}
 	case "interrupted":
 		g.Kind, g.Key = sigInterrupted, time.Now().UTC().Format(time.RFC3339)
+		s.signalOutageAware(ctx, t, g, nil, s.isOutageCausedInterrupted(ctx, t, g))
+		return
 	case "needs":
 		b := &s.supervise
 		b.mu.Lock()
@@ -181,7 +183,8 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		if ai.IsNotConfigured(err) {
 			detail = "判定模型未配置" // i18n-ignore: the supervision message is the assistant's prompt
 		}
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail, JudgeDown: true})
+		g := superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail, JudgeDown: true}
+		s.signalOutageAware(ctx, t, g, err, s.isOutageCausedUnjudged(ctx, t, c, err))
 		return
 	}
 	detail := verdictWords[c.Verdict]
@@ -189,7 +192,8 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		detail += "：" + c.Reason
 	}
 	if c.Verdict == verdictUnsure { // no word on it either way: not "stopped short" (#3111)
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail})
+		g := superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail}
+		s.signalOutageAware(ctx, t, g, nil, s.isOutageCausedUnjudged(ctx, t, c, nil))
 		return
 	}
 	if d := c.Delivery; c.Verdict == verdictUndelivered && d.held() { // where it is held, to chase (delivery.go)
@@ -283,7 +287,7 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	}
 	b := &s.supervise
 	b.mu.Lock()
-	keys := []string{t.ID + "|" + sigReview, t.ID + "|" + sigTimedOut, t.ID + "|" + sigParkedDue, t.ID + "|" + sigEstimateDue}
+	keys := []string{t.ID + "|" + sigReview, t.ID + "|" + sigReviewNudge, t.ID + "|" + sigTimedOut, t.ID + "|" + sigParkedDue, t.ID + "|" + sigEstimateDue, t.ID + "|" + sigOutageRecovery}
 	for _, key := range keys {
 		delete(b.pending, key)
 	}
@@ -343,6 +347,7 @@ func (s *Service) notifyTaskFailed(ctx context.Context, t Todo, machine, reason 
 		sub = "Persona"
 	}
 	s.push(withCard(ctx, cardTaskFailed), Notification{
+		CardID:    taskFailedCardID(t.ID), // started again (reopenFailedTodo): the push leaves the phone
 		Subtitle:  sub,
 		DeviceID:  here,
 		SessionID: t.Origin,

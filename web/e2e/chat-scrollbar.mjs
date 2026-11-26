@@ -69,8 +69,9 @@ async function geometry(page) {
   return page.evaluate(([chat, rail]) => {
     const sc = document.querySelector(chat), nav = document.querySelector(rail), content = sc.querySelector("[data-chat-content]");
     const r = sc.getBoundingClientRect(), n = nav?.getBoundingClientRect(), c = content.getBoundingClientRect();
+    const css = getComputedStyle(content);
     return { left: r.left, right: r.right, top: r.top, height: sc.clientHeight, gutter: sc.offsetWidth - sc.clientWidth,
-      navLeft: n?.left, navRight: n?.right, contentRight: c.right - parseFloat(getComputedStyle(content).paddingRight),
+      navLeft: n?.left, navRight: n?.right, contentLeft: c.left, paddingLeft: css.paddingLeft, paddingRight: css.paddingRight,
       scrollTop: sc.scrollTop, scrollHeight: sc.scrollHeight, overflow: document.documentElement.scrollWidth - innerWidth };
   }, [CHAT, RAIL]);
 }
@@ -85,7 +86,8 @@ async function run(theme, width, { touch = false, large = false, fallback = fals
     await page.goto(new URL(`/s/${MID}/${SID}`, base).href);
     await page.waitForFunction(chat => document.querySelector(chat)?.querySelectorAll("[data-user-bubble]").length === 16, CHAT);
     await page.waitForFunction(dark => document.documentElement.classList.contains("dark") === dark, theme === "dark");
-    if (!touch) await page.locator(RAIL).waitFor();
+    const hasRail = width >= 1440 && !touch;
+    if (hasRail) await page.locator(RAIL).waitFor();
     if (large) await page.evaluate(() => document.documentElement.dataset.textSize = "large");
     const sc = page.locator(CHAT);
     const beforeScroll = await geometry(page);
@@ -95,13 +97,15 @@ async function run(theme, width, { touch = false, large = false, fallback = fals
     await check(`${name} geometry and independent hit areas`, async () => {
       const g = await geometry(page);
       assert.ok(g.overflow <= 1);
-      if (touch) assert.equal(await page.locator(RAIL).count(), 0);
-      else {
-        assert.equal(Math.round(g.right - g.gutter - g.navRight), 16);
-        assert.ok(g.contentRight <= g.navLeft - 3, "Text stays clear of the rail even in a narrow panel");
-        const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-nav-rail]") != null, [g.right - Math.max(g.gutter / 2, 2), g.top + 50]);
-        assert.equal(hit, false, "The scrollbar edge cannot hit the rail");
+      assert.equal(g.paddingLeft, g.paddingRight, "The transcript keeps symmetric padding");
+      if (hasRail) {
+        assert.equal(Math.round(g.navLeft - g.left), 16);
+        assert.ok(g.contentLeft - g.navRight >= 12, "The rail sits in the existing left gutter");
+      } else {
+        assert.equal(await page.locator(RAIL).count(), 0);
       }
+      const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-nav-rail]") != null, [g.right - Math.max(g.gutter / 2, 2), g.top + g.height / 2]);
+      assert.equal(hit, false, "The scrollbar edge cannot hit the rail");
       return g;
     });
     if (!fallback && !forcedColors) {
@@ -115,7 +119,7 @@ async function run(theme, width, { touch = false, large = false, fallback = fals
       await check(`${name} quiet fade without layout shift`, async () => {
         const g = await geometry(page);
         assert.equal(g.gutter, beforeScroll.gutter);
-        assert.equal(g.contentRight, beforeScroll.contentRight);
+        assert.equal(g.contentLeft, beforeScroll.contentLeft);
         assert.equal(g.navRight, beforeScroll.navRight);
         assert.equal(await sc.evaluate(el => getComputedStyle(el).scrollbarColor), "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
         return { color: "transparent", gutter: g.gutter };
@@ -171,7 +175,7 @@ async function run(theme, width, { touch = false, large = false, fallback = fals
   } finally { await context.close(); }
 }
 try {
-  browser = await chromium.launch({ channel: "chrome", headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+  browser = await chromium.launch({ channel: "chrome", executablePath: process.env.CHROME_BIN, headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
   for (const theme of ["light", "dark"]) {
     await run(theme, 1600);
     await run(theme, 640);

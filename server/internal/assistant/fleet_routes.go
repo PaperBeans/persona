@@ -28,6 +28,7 @@ var FleetRoutes = []string{
 	"POST /api/v1/interactions/{id}/resolve",
 	"POST /api/v1/interactions/{id}/clarify",
 	"POST /api/v1/interactions/{id}/reanswer",
+	"POST /api/v1/interactions/{id}/seen",
 	"GET /api/v1/interactions/history",
 	"POST /api/v1/sessions/{mid}/{sid}/seen",
 }
@@ -60,6 +61,8 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 			switch {
 			case errors.Is(err, errHandoffElsewhere):
 				apierr.WriteCode(w, http.StatusForbidden, proto.CodeSecretHandoffElsewhere, err)
+			case errors.Is(err, errSecretRunEnv):
+				apierr.WriteCode(w, http.StatusForbidden, proto.CodeSecretRunEnvElsewhere, err)
 			case errors.Is(err, errNotPending):
 				s.writeEnded(r.Context(), w, id, res, err, r.Header.Get(RoleHeader) == roleExtension)
 			case errors.Is(err, errInvalidElicitation), errors.Is(err, errInvalidQuestionCancel), errors.Is(err, errInvalidEditedAnswer):
@@ -95,7 +98,11 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		}
 		apierr.WriteJSON(w, map[string]any{"ok": true, "pending": true})
 	})
-	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer)    // "Change answer" (fleet_delegate.go)
+	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer) // "Change answer" (fleet_delegate.go)
+	mux.HandleFunc("POST /api/v1/interactions/{id}/seen", func(w http.ResponseWriter, r *http.Request) {
+		s.markInteractionSeen(r.Context(), r.PathValue("id"))
+		apierr.WriteJSON(w, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("GET /api/v1/interactions/history", s.serveInteractionHistory) // interaction_history.go
 	mux.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/seen", func(w http.ResponseWriter, r *http.Request) {
 		m, ok := s.fleetMachine(r.PathValue("mid"))
@@ -224,9 +231,17 @@ func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.
 		}
 		sess, ok := s.nodeSession(m.ID, a.SessionID)
 		if ok {
-			sess.Assistant = m.isAssistant(sess)
+			if !sess.LogicalPlaceholder {
+				sess.Assistant = m.isAssistant(sess)
+			}
 			if sess.Assistant && sess.Space == "" {
-				sess.Space = identity.SpaceOf(sess.Cwd)
+				if sess.LogicalPlaceholder {
+					if sp, known := s.logicalRowSpace(ctx, sess); known {
+						sess.Space = sp
+					}
+				} else {
+					sess.Space = identity.SpaceOf(sess.Cwd)
+				}
 			}
 			s.nameAgentRow(m.ID, &sess)
 			// The node fills in no unified state: the callers that ask whether it works or waits for the user

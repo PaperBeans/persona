@@ -20,6 +20,14 @@ type memEntrySource struct {
 	listed  int
 }
 
+func entryIDList(entries []proto.AssistantEntry) []string {
+	ids := make([]string, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.ID
+	}
+	return ids
+}
+
 func (m *memEntrySource) NewestAssistantEntries(_ context.Context, p proto.AssistantEntriesParams, personal bool) (proto.AssistantEntriesResult, error) {
 	m.listed++
 	var match []proto.AssistantEntry
@@ -86,6 +94,7 @@ func memoryAssembleService(t *testing.T) (*Service, *fakeHub, *infoCategoryMemSt
 	f.hello.Assistant.Machines = []string{"qa-machine"}
 	f.mu.Unlock()
 	setSettings(t, s, func(v *Settings) { v.MachineID = "qa-machine" })
+	waitFor(t, "the backfill's read of the to-dos", s.spaceBackfillScanIdle)
 	if got := s.settings(ctx).MachineID; got != "qa-machine" {
 		t.Fatalf("the owner's computer = %q, want qa-machine", got)
 	}
@@ -97,14 +106,6 @@ func memoryAssembleService(t *testing.T) (*Service, *fakeHub, *infoCategoryMemSt
 	src := &memEntrySource{entries: []proto.AssistantEntry{entryQAFinance, entryQAPlain, entryQAUntagged, entryQAHealth, entryQAMain}}
 	s.memoryEntries = src
 	return s, f, st, src
-}
-
-func entryIDs(entries []proto.AssistantEntry) string {
-	var ids []string
-	for _, e := range entries {
-		ids = append(ids, e.ID)
-	}
-	return strings.Join(ids, ",")
 }
 
 // How an entry is seen (memoryEntryUses): its own categories and its track's; one with none takes its conversation's
@@ -177,7 +178,7 @@ func TestMemoryEntryTrackIsItsConversations(t *testing.T) {
 		}
 		// None of them reaches a recall in the main conversation.
 		f := s.assembleForConversation(ctx, "qa-main", assembleRecall)
-		if got := entryIDs(assembleEntries(entries, f, info).Entries); got != "" {
+		if got := strings.Join(entryIDList(assembleEntries(entries, f, info).Entries), ","); got != "" {
 			t.Errorf("tagging %v: recall in main = %s", tagging, got)
 		}
 	}
@@ -192,10 +193,10 @@ func TestMemoryStandingNeverCarriesSensitiveFromElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := entryIDs(a.Entries); got != "entry-qa-plain,entry-qa-main" {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{"entry-qa-plain", "entry-qa-main"}) {
 		t.Errorf("main standing = %s, want the personal general entry and the main track's", got)
 	}
-	if strings.Contains(entryIDs(a.Entries), entryQAFinance.ID) || len(a.Sensitive) != 0 {
+	if strings.Contains(strings.Join(entryIDList(a.Entries), ","), entryQAFinance.ID) || len(a.Sensitive) != 0 {
 		t.Errorf("main standing carries sensitive entries: %+v", a)
 	}
 	// Even when the main conversation was tagged finance: a standing channel never carries elsewhere's sensitive ones.
@@ -203,12 +204,12 @@ func TestMemoryStandingNeverCarriesSensitiveFromElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ = s.standingMemory(ctx, "qa-main")
-	if strings.Contains(entryIDs(a.Entries), entryQAFinance.ID) {
+	if strings.Contains(strings.Join(entryIDList(a.Entries), ","), entryQAFinance.ID) {
 		t.Errorf("main standing, tagged finance, carries %s", entryQAFinance.ID)
 	}
 	// In its own track (scene 1) it is carried; the main track's entry, finance by now and from elsewhere, is not.
 	a, _ = s.standingMemory(ctx, "qa-finance-1")
-	if got := entryIDs(a.Entries); got != "entry-qa-finance,entry-qa-plain" || !slices.Equal(a.Sensitive, []string{entryQAFinance.ID}) {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{"entry-qa-finance", "entry-qa-plain"}) || !slices.Equal(a.Sensitive, []string{entryQAFinance.ID}) {
 		t.Errorf("qa-finance standing = %s (sensitive %v)", got, a.Sensitive)
 	}
 }
@@ -220,7 +221,7 @@ func TestMemoryStandingBudget(t *testing.T) {
 		entries = append(entries, proto.AssistantEntry{ID: "entry-" + strconv.Itoa(i), Text: strings.Repeat("q", 600)})
 	}
 	a := assembleEntries(entries, assembleFor{Role: assembleStanding, SpaceKnown: true}, func(proto.AssistantEntry) infoUse { return infoUse{Known: true} })
-	if got := entryIDs(a.Entries); got != "entry-2,entry-3" {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{"entry-2", "entry-3"}) {
 		t.Errorf("standing within %d bytes = %s, want the newest two", memoryStandingSpaceMax, got)
 	}
 }
@@ -230,7 +231,7 @@ func TestMemoryStandingBudget(t *testing.T) {
 func TestMemoryRecallFollowsTheConversationsCategories(t *testing.T) {
 	ctx := context.Background()
 	s, _, _, src := memoryAssembleService(t)
-	if got := entryIDs(s.recallMemory(ctx, "qa-main", src.entries).Entries); got != "entry-qa-plain,entry-qa-main" {
+	if got := entryIDList(s.recallMemory(ctx, "qa-main", src.entries).Entries); !slices.Equal(got, []string{"entry-qa-plain", "entry-qa-main"}) {
 		t.Errorf("recall without finance = %s", got)
 	}
 	if err := s.tagConversation(ctx, "qa-main", []string{categoryFinance}, infoTaggedByModel, ""); err != nil {
@@ -238,18 +239,18 @@ func TestMemoryRecallFollowsTheConversationsCategories(t *testing.T) {
 	}
 	a := s.recallMemory(ctx, "qa-main", src.entries)
 	// The main track's entry takes its conversation's categories (finance now): it is in its own track, so it stays.
-	if got := entryIDs(a.Entries); got != "entry-qa-finance,entry-qa-plain,entry-qa-main" || !slices.Equal(a.Sensitive, []string{entryQAFinance.ID, entryQAMain.ID}) {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{"entry-qa-finance", "entry-qa-plain", "entry-qa-main"}) || !slices.Equal(a.Sensitive, []string{entryQAFinance.ID, entryQAMain.ID}) {
 		t.Errorf("recall with finance = %s (sensitive %v)", got, a.Sensitive)
 	}
 	// While a turn of the conversation waits to be tagged its categories are not known: nothing sensitive is recalled.
 	s.infoTagWaiting.set("qa-main", true)
-	if got := entryIDs(s.recallMemory(ctx, "qa-main", src.entries).Entries); strings.Contains(got, entryQAFinance.ID) {
+	if got := entryIDList(s.recallMemory(ctx, "qa-main", src.entries).Entries); strings.Contains(strings.Join(got, ","), entryQAFinance.ID) {
 		t.Errorf("recall while a turn waits = %s", got)
 	}
 	s.infoTagWaiting.set("qa-main", false)
 	// A general conversation of another track recalls its own track's entries, untagged ones included, and not the
 	// main track's entry, finance by now through its conversation.
-	if got := entryIDs(s.recallMemory(ctx, "qa-plain-1", src.entries).Entries); got != "entry-qa-plain,entry-qa-untagged" {
+	if got := entryIDList(s.recallMemory(ctx, "qa-plain-1", src.entries).Entries); !slices.Equal(got, []string{"entry-qa-plain", "entry-qa-untagged"}) {
 		t.Errorf("recall in qa-plain = %s", got)
 	}
 }
@@ -302,18 +303,18 @@ func TestMemoryHandOffCarriesOnlyWhatTheTaskMatches(t *testing.T) {
 	worker := task
 	worker.Parent = "qa-leader-task"
 	for name, tk := range map[string]PlanTask{"unconfirmed": unconfirmed, "general plan": general, "leader worker": worker} {
-		if a := s.handOffMemory(ctx, tk, "qa-machine"); entryIDs(a.Entries) != entryQAMain.ID || len(a.Sensitive) != 0 {
-			t.Errorf("%s hand-off = %s (sensitive %v), want only the general entry", name, entryIDs(a.Entries), a.Sensitive)
+		if a := s.handOffMemory(ctx, tk, "qa-machine"); !slices.Equal(entryIDList(a.Entries), []string{entryQAMain.ID}) || len(a.Sensitive) != 0 {
+			t.Errorf("%s hand-off = %s (sensitive %v), want only the general entry", name, entryIDList(a.Entries), a.Sensitive)
 		}
 	}
 	// A plan confirmed for health carries no finance entry, and no unknown health one either.
 	health := task
 	health.MemoryTopic = []string{categoryHealth}
-	if a := s.handOffMemory(ctx, health, "qa-machine"); entryIDs(a.Entries) != entryQAMain.ID || len(a.Sensitive) != 0 {
-		t.Errorf("hand-off confirmed for health = %s (sensitive %v)", entryIDs(a.Entries), a.Sensitive)
+	if a := s.handOffMemory(ctx, health, "qa-machine"); !slices.Equal(entryIDList(a.Entries), []string{entryQAMain.ID}) || len(a.Sensitive) != 0 {
+		t.Errorf("hand-off confirmed for health = %s (sensitive %v)", entryIDList(a.Entries), a.Sensitive)
 	}
 	// Another computer gets no personal entry; a task whose words bear on nothing (or only on common words) gets nothing.
-	if got := entryIDs(s.handOffMemory(ctx, task, "qa-other").Entries); got != entryQAMain.ID {
+	if got := entryIDList(s.handOffMemory(ctx, task, "qa-other").Entries); !slices.Equal(got, []string{entryQAMain.ID}) {
 		t.Errorf("hand-off to another computer = %s", got)
 	}
 	s.memoryEntries = &memEntrySource{entries: []proto.AssistantEntry{entryQAMain}}
@@ -366,10 +367,10 @@ func TestMemoryInboxCarriesNoSensitiveEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(a.Sensitive) != 0 || strings.Contains(entryIDs(a.Entries), entryQAFinance.ID) {
+	if len(a.Sensitive) != 0 || strings.Contains(strings.Join(entryIDList(a.Entries), ","), entryQAFinance.ID) {
 		t.Errorf("Inbox carries sensitive entries: %+v", a)
 	}
-	if got := entryIDs(a.Entries); got != entryQAMain.ID {
+	if got := entryIDList(a.Entries); !slices.Equal(got, []string{entryQAMain.ID}) {
 		t.Errorf("Inbox = %s, want the general entry the message bears on", got)
 	}
 }
@@ -382,7 +383,7 @@ func TestMemoryDecisionsQueryIsARecall(t *testing.T) {
 	finance, main := entryQAFinance, entryQAMain
 	finance.Type, main.Type = "decision", "decision"
 	ledger := &entriesMemStore{infoCategoryMemStore: st, entries: []proto.AssistantEntry{finance, main}}
-	s.store = func() Store { return ledger }
+	s.setStore(func() Store { return ledger })
 	query := func() string {
 		t.Helper()
 		raw, err := s.toolEntries(ctx, "qa-machine", "qa-main", "decisions_query", json.RawMessage(`{}`))
@@ -393,7 +394,7 @@ func TestMemoryDecisionsQueryIsARecall(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &out); err != nil || out.Entries == nil {
 			t.Fatalf("decisions_query = %s (%v)", raw, err)
 		}
-		return entryIDs(out.Entries)
+		return strings.Join(entryIDList(out.Entries), ",")
 	}
 	if got := query(); got != entryQAMain.ID {
 		t.Errorf("decisions in main = %s", got)

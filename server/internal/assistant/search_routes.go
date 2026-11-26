@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistant/chatsearch"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // GET /api/v1/assistant/search?q=&limit= (#6282, docs/protocol/protocol.md "Assistant chat search"): the conversations
@@ -125,7 +126,14 @@ func (s *Service) searchChats(ctx context.Context, q string, limit int) searchAn
 			if r == nil {
 				continue
 			}
-			snippet, ranges := chatsearch.Snippet(row.Body, words)
+			body := row.Body
+			if row.Role == "user" {
+				body = transcript.WithoutInlineReferenceAnchors(body)
+				if body != row.Body && !chatsearch.Holds(chatsearch.Fold(body), words) {
+					continue
+				}
+			}
+			snippet, ranges := chatsearch.Snippet(body, words)
 			r.Hits = append(r.Hits, searchHit{ItemID: row.ItemID, Seq: row.Seq, Role: row.Role, TS: row.TS, Snippet: snippet, Ranges: ranges})
 			r.MoreHits = max(0, row.Hits-searchPerChat)
 			if row.TS.After(r.newest) {

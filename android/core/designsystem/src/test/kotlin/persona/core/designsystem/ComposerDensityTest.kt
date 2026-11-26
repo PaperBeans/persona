@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -12,20 +14,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -111,6 +118,8 @@ class ComposerDensityTest {
     @Test fun briefAndBoardExpandedComposerKeepCompactVerticalDepthAndTouchTargets() {
         var style by mutableStateOf(AppStyle.Brief)
         var expanded by mutableStateOf(false)
+        var addClicks = 0
+        var mentionClicks = 0
         rule.setContent {
             LayoutDensity.apply(LayoutDensity.Standard)
             PersonaTheme(style = style, reduceMotion = true) {
@@ -119,8 +128,8 @@ class ComposerDensityTest {
                     expanded = expanded,
                     accessory = {},
                     leading = {
-                        JIconButton(PhIcons.Plus, "Add", {}, Modifier.testTag("add"))
-                        if (expanded) JIconButton(PhIcons.At, "Mention", {}, Modifier.testTag("mention"))
+                        JIconButton(PhIcons.Plus, "Add", { addClicks++ }, Modifier.testTag("add"))
+                        if (expanded) JIconButton(PhIcons.At, "Mention", { mentionClicks++ }, Modifier.testTag("mention"))
                     },
                     trailing = {
                         JIconButton(PhIcons.Microphone, "Dictate", {}, Modifier.testTag("mic"))
@@ -131,12 +140,13 @@ class ComposerDensityTest {
                 }
             }
         }
+        val minTouchPx = with(rule.density) { Tokens.MinTouch.android.toPx() }
         for (s in listOf(AppStyle.Brief, AppStyle.Board)) {
-            rule.runOnIdle { style = s; expanded = false }
+            rule.runOnIdle { style = s; expanded = false; addClicks = 0; mentionClicks = 0 }
             val idleFrame = rule.onNodeWithTag("frame").getUnclippedBoundsInRoot()
             val idleSend = rule.onNodeWithTag("send").getUnclippedBoundsInRoot()
             assertTrue("$s idle send touch height >= 48dp", idleSend.height >= Tokens.MinTouch.android)
-            // Compact idle height: top(4) + 48dp input row + bottom(6) = 58dp (down from 64–72dp).
+            // Compact idle height: top(4) + 48dp input row + bottom(6) = 58dp (down from 64-72dp).
             assertTrue("$s idle frame height (${idleFrame.height}) <= 60dp", idleFrame.height <= 60.dp)
 
             rule.runOnIdle { expanded = true }
@@ -144,11 +154,99 @@ class ComposerDensityTest {
             val openAdd = rule.onNodeWithTag("add").getUnclippedBoundsInRoot()
             val openMention = rule.onNodeWithTag("mention").getUnclippedBoundsInRoot()
             val openSend = rule.onNodeWithTag("send").getUnclippedBoundsInRoot()
-            assertTrue("$s expanded add touch height >= 48dp", openAdd.height >= Tokens.MinTouch.android)
-            assertTrue("$s expanded mention touch height >= 48dp", openMention.height >= Tokens.MinTouch.android)
-            assertTrue("$s expanded toolbar sits below input row without overlap", openAdd.top >= openSend.bottom - 0.5.dp)
-            // Compact expanded height: top(4) + 48dp input + 48dp toolbar + bottom(2) = 102dp (down from 124–136dp).
-            assertTrue("$s expanded frame height (${openFrame.height}) <= 106dp", openFrame.height <= 106.dp)
+            val addTouch = rule.onNodeWithTag("add").fetchSemanticsNode().touchBoundsInRoot
+            val mentionTouch = rule.onNodeWithTag("mention").fetchSemanticsNode().touchBoundsInRoot
+            // Balanced 36dp vertical layout box with 4dp top/bottom breathing room keeps icons clear of both the
+            // input surface and keyboard top while preserving full 48x48dp touch targets.
+            assertEquals("$s expanded add layout height", JChipTokens.height.value, openAdd.height.value, 0.5f)
+            assertEquals("$s expanded add layout width", Tokens.MinTouch.android.value, openAdd.width.value, 0.5f)
+            assertTrue("$s expanded add touch width (${addTouch.width}) >= $minTouchPx", addTouch.width >= minTouchPx - 0.5f)
+            assertTrue("$s expanded add touch height (${addTouch.height}) >= $minTouchPx", addTouch.height >= minTouchPx - 0.5f)
+            assertTrue("$s expanded mention touch width (${mentionTouch.width}) >= $minTouchPx", mentionTouch.width >= minTouchPx - 0.5f)
+            assertTrue("$s expanded mention touch height (${mentionTouch.height}) >= $minTouchPx", mentionTouch.height >= minTouchPx - 0.5f)
+            assertEquals("$s expanded toolbar top gap below input row", Tokens.Space.xs.value, (openAdd.top - openSend.bottom).value, 0.5f)
+            assertEquals("$s expanded toolbar bottom breathing room", Tokens.Space.xs.value, (openFrame.bottom - openAdd.bottom).value, 0.5f)
+            // Balanced expanded height: top(4) + 48dp input + gap(4) + 36dp toolbar + bottom(4) = 96dp (down from 102dp in #14032).
+            assertTrue("$s expanded frame height (${openFrame.height}) <= 98dp", openFrame.height <= 98.dp)
+
+            rule.onNodeWithTag("add").performClick()
+            rule.onNodeWithTag("mention").performClick()
+            rule.runOnIdle {
+                assertEquals("$s add button click dispatched", 1, addClicks)
+                assertEquals("$s mention button click dispatched", 1, mentionClicks)
+            }
+        }
+    }
+
+    @Test fun stackedTrayAndAccessoryChipsEliminate48dpLayoutBloatWhileKeepingTouchTargets() {
+        var style by mutableStateOf(AppStyle.Brief)
+        var trayClicks = 0
+        var chipClicks = 0
+        rule.setContent {
+            LayoutDensity.apply(LayoutDensity.Standard)
+            PersonaTheme(style = style, reduceMotion = true) {
+                Column(Modifier.width(360.dp).padding(top = Tokens.Space.l)) {
+                    Row(Modifier.testTag("tray-row")) {
+                        AssistantTrayEntry(
+                            label = "Needs you",
+                            count = 2,
+                            tone = AssistantTrayTone.Pending,
+                            expanded = false,
+                            description = "Collapsed",
+                            onClick = { trayClicks++ },
+                            modifier = Modifier.testTag("tray-entry"),
+                        )
+                    }
+                    Box(Modifier.size(Tokens.Space.l))
+                    ComposerFrame(
+                        modifier = Modifier.testTag("composer"),
+                        expanded = true,
+                        accessory = {
+                            JChip("Default: agy", Modifier.testTag("acc-chip"), onClick = { chipClicks++ })
+                        },
+                        leading = { JIconButton(PhIcons.Plus, "Add", {}, Modifier.testTag("add")) },
+                        trailing = { SendButton({}, Modifier.testTag("send")) },
+                    ) {
+                        Text("Ask Persona", Modifier.testTag("field"))
+                    }
+                }
+            }
+        }
+        val minTouchPx = with(rule.density) { Tokens.MinTouch.android.toPx() }
+        for (s in AppStyle.entries) {
+            rule.runOnIdle { style = s; trayClicks = 0; chipClicks = 0 }
+            val trayRow = rule.onNodeWithTag("tray-row").getUnclippedBoundsInRoot()
+            val trayEntry = rule.onNodeWithTag("tray-entry").getUnclippedBoundsInRoot()
+            val trayTouch = rule.onNodeWithTag("tray-entry").fetchSemanticsNode().touchBoundsInRoot
+            val accChip = rule.onNodeWithTag("acc-chip").getUnclippedBoundsInRoot()
+            val accTouch = rule.onNodeWithTag("acc-chip").fetchSemanticsNode().touchBoundsInRoot
+            val composer = rule.onNodeWithTag("composer").getUnclippedBoundsInRoot()
+
+            // Tray row matches the visible capsule/chip height rather than inflating to 48dp.
+            assertEquals("$s tray row height matches visible entry", trayEntry.height.value, trayRow.height.value, 0.5f)
+            assertTrue("$s tray row height (${trayRow.height}) < 48dp", trayRow.height < Tokens.MinTouch.android)
+            assertTrue("$s tray entry touch height (${trayTouch.height}) >= $minTouchPx", trayTouch.height >= minTouchPx - 0.5f)
+
+            // Accessory chip sits flush to ComposerFrame's top token padding (4dp in Brief/Board; 4+4+4=12dp inside Glass card).
+            assertEquals("$s accessory chip visible height", JChipTokens.height.value, accChip.height.value, 0.5f)
+            assertTrue("$s accessory chip touch height (${accTouch.height}) >= $minTouchPx", accTouch.height >= minTouchPx - 0.5f)
+            if (s != AppStyle.Glass) {
+                val topInset = accChip.top - composer.top
+                assertEquals("$s accessory chip starts at ComposerFrame top padding (no +6dp bloat)", Tokens.Space.xs.value, topInset.value, 0.5f)
+            }
+
+            // Real taps reach both the visual center and outside-edge 48dp touch floor of compact controls.
+            val chipBounds = rule.onNodeWithTag("acc-chip").fetchSemanticsNode().boundsInRoot
+            val trayBounds = rule.onNodeWithTag("tray-entry").fetchSemanticsNode().boundsInRoot
+            val outsideOffsetPx = with(rule.density) { 4.dp.toPx() }
+            rule.onRoot().performTouchInput { click(trayBounds.center) }
+            rule.onRoot().performTouchInput { click(Offset(trayBounds.center.x, trayBounds.top - outsideOffsetPx)) }
+            rule.onRoot().performTouchInput { click(chipBounds.center) }
+            rule.onRoot().performTouchInput { click(Offset(chipBounds.center.x, chipBounds.top - outsideOffsetPx)) }
+            rule.runOnIdle {
+                assertEquals("$s tray center + outside-edge taps delivered", 2, trayClicks)
+                assertEquals("$s accessory chip center + outside-edge taps delivered", 2, chipClicks)
+            }
         }
     }
 

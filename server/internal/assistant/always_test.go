@@ -68,7 +68,7 @@ func TestAlwaysGrantRoutes(t *testing.T) {
 		t.Run(result, func(t *testing.T) {
 			ft := newFleetTest(t)
 			st := &grantTestStore{fleetMem: ft.st}
-			ft.s.store = func() Store { return st }
+			ft.s.setStore(func() Store { return st })
 			resets := 0
 			setHub(ft.s, &grantTestHub{fakeHub: ft.f, reset: func(p DeviceCall) (json.RawMessage, error) {
 				resets++
@@ -127,7 +127,7 @@ func TestAlwaysGrantRoutes(t *testing.T) {
 func TestAlwaysGrantRouteErrors(t *testing.T) {
 	ft := newFleetTest(t)
 	st := &grantTestStore{fleetMem: ft.st}
-	ft.s.store = func() Store { return st }
+	ft.s.setStore(func() Store { return st })
 	base := "/api/v1/assistant/conversations/conv/always"
 	for _, method := range []string{"GET", "DELETE"} {
 		path := base
@@ -163,7 +163,7 @@ func TestAlwaysGrantRouteErrors(t *testing.T) {
 			t.Fatalf("store error: %d %s", w.Code, w.Body)
 		}
 	}
-	ft.s.store = func() Store { return nil }
+	ft.s.setStore(func() Store { return nil })
 	if w := serve(ft.s, "GET", base, ""); w.Code != 503 {
 		t.Fatalf("no store: %d", w.Code)
 	}
@@ -172,7 +172,7 @@ func TestAlwaysGrantRouteErrors(t *testing.T) {
 func TestRememberedAnswerDoesNotRestoreRevokedGrant(t *testing.T) {
 	ft := newFleetTest(t)
 	st := &grantTestStore{fleetMem: ft.st}
-	ft.s.store = func() Store { return st }
+	ft.s.setStore(func() Store { return st })
 	ix := alwaysIx("waiting", "conv", "tool:Bash")
 	done := make(chan proto.Resolution, 1)
 	go func() { r, _ := ft.s.waitInteraction(context.Background(), ix); done <- r }()

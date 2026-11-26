@@ -1,0 +1,12 @@
+<persona-context kind="message-source" title="">
+{"kind":"conversation","conversation_id":"caller-0001","title":"mac/caller-0001","relay_id":"persona-a2a-a2a-task-0001-1"}
+</persona-context>
+Persona A2A 任务 a2a-task-0001 来自 mac/caller-0001，状态为 submitted。
+这是会话间的消息。原有任务范围和用户审批要求继续有效。
+用任务 ID 调用 a2a_report，可以提问、报告失败或提交结果。每次上报使用新的 message_id，重试时沿用。需要对方输入时结束当前轮次，交付时总结结果和证据。
+如果当前工具没有集成 Persona MCP，将此 JSON 字符串解码为路径并按终端 shell 规则转义引用，再用它加 tool、相同的工具名称和 JSON 参数执行："/opt/task tools/persona-node"
+如果无法调用工具，需要补充信息时以「A2A a2a-task-0001 input_required」作为最终回复的首行，下一行写问题。失败时用「A2A a2a-task-0001 failed」和失败原因。完成时直接写结果。
+
+
+
+Run the Linux checks.

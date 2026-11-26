@@ -246,7 +246,10 @@ replaces the Assistant stack's root and does not animate; a drill-down pushes; e
 front pops; the shaded row follows the root (`AssistantSidebarShade`). An Agent root shades its exact Directions row with the
 same `JRow` selected look and semantics as the other rows; a nested sub-Agent opens its parent without selecting both rows.
 An Agent pushed from inside Persona keeps Persona's root shade on either tab, including compact windows; compact Persona
-retains its existing conversation shading. The conversation and the fixed places (Inbox, To-dos,
+retains its existing conversation shading. In the Merged sidebar layout (#13165), an Agent opened from inside a Persona page
+(such as a card in the main conversation) is pushed onto that root's own stack rather than the Agents tab, so picking another
+sidebar Agent or place leaves it on the conversation's stack, picking Main Chat again restores it with Back returning to the
+conversation, and re-picking Main Chat while it is already in front pops to the bare conversation. The conversation and the fixed places (Inbox, To-dos,
 Knowledge and Computers), plus the optional Lark Messages place while enabled, stay composed while another is in front, so the conversation keeps its non-saveable history, local
 operations, running effects and list anchor, and those places keep their list, filter and scroll. Messages is a retained Assistant secondary place, not a primary tab; its Lark chat drill-down stays on the Messages host so Back returns to that list. Turning its switch off forgets only that host and path and restores the Assistant path retained before it, even when Agents is selected; background cleanup leaves the selected tab unchanged. Folding inserts the
 conversation under that same list and unfolding removes it, so that page is not rebuilt. A to-do opened as its own root, or an

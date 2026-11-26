@@ -31,6 +31,52 @@ export interface Market {
   signature?: MarketSignature;
   /** The official market every hub has (#2351), listed first; absent on other markets and older hubs. */
   official?: boolean;
+  /** A private market's trusted public keys (docs/extensions/extensions.md "Private market keys"): while there are any,
+   *  its index must be signed by one of them. Absent on unsigned markets, the official one and older hubs. */
+  trusted_keys?: Record<string, string>; // key id → "ed25519:<base64>"
+}
+
+/** One trusted public key of a private market. */
+export interface MarketKey {
+  key: string;
+  key_id: string;
+}
+
+/** A market's trusted keys, by key id. */
+export function marketKeys(m?: Market | null): MarketKey[] {
+  return Object.entries(m?.trusted_keys ?? {})
+    .map(([key_id, key]) => ({ key_id, key }))
+    .sort((a, b) => a.key_id.localeCompare(b.key_id));
+}
+
+/** How an installed market extension was verified (ExtensionView.market_signature). */
+export interface ExtensionSignature {
+  state: string; // official | signed | key_removed | unsigned | market_invalid
+  key_id?: string;
+}
+
+const EXTENSION_SIGNATURES: Record<string, string> = {
+  official: t("lib-extension-market.ext_sig_official"),
+  signed: t("lib-extension-market.ext_sig_signed"),
+  key_removed: t("lib-extension-market.ext_sig_key_removed"),
+  unsigned: t("lib-extension-market.ext_sig_unsigned"),
+  market_invalid: t("lib-extension-market.ext_sig_market_invalid"),
+};
+
+/** An installed extension's verification as a short label, and the tone it shows in ("" from a hub that does not say). */
+export function extensionSignatureLabel(s?: ExtensionSignature): { text: string; tone: "green" | "accent" | "orange" | "red" | "gray" } | null {
+  if (!s?.state) return null;
+  const text = EXTENSION_SIGNATURES[s.state] ?? t("lib-extension-market.sig_state", { state: s.state });
+  const tone = s.state === "official" ? "accent" : s.state === "signed" ? "green" : s.state === "unsigned" ? "gray" : s.state === "key_removed" ? "orange" : "red";
+  return { text, tone };
+}
+
+/** The keys typed one per line (or separated by spaces or commas), without blanks. */
+export function parseKeyList(text: string): string[] {
+  return text
+    .split(/[\s,]+/)
+    .map((k) => k.trim())
+    .filter(Boolean);
 }
 
 /** A catalog's verification status. key_changed is an official pin mismatch, never a request to trust a key. */

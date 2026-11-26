@@ -1,0 +1,148 @@
+{
+  "string": [
+    {
+      "name": "sub_usage_heading",
+      "value": "Subscription Usage"
+    },
+    {
+      "name": "sub_usage_filter",
+      "value": "Account types shown"
+    },
+    {
+      "name": "sub_usage_other",
+      "value": "Other"
+    },
+    {
+      "name": "sub_usage_account_count",
+      "value": "{1} accounts"
+    },
+    {
+      "name": "sub_usage_outdated",
+      "value": "Outdated"
+    },
+    {
+      "name": "sub_usage_outdated_age",
+      "value": "Outdated · {1}"
+    },
+    {
+      "name": "sub_usage_seconds_ago",
+      "value": "{1} seconds ago"
+    },
+    {
+      "name": "sub_usage_minutes_ago",
+      "value": "{1} min ago"
+    },
+    {
+      "name": "sub_usage_hours_ago",
+      "value": "{1}h ago"
+    },
+    {
+      "name": "sub_usage_days_ago",
+      "value": "{1}d ago"
+    },
+    {
+      "name": "sub_usage_soon",
+      "value": "resets soon"
+    },
+    {
+      "name": "sub_usage_reset_mins",
+      "value": "resets in {1}m"
+    },
+    {
+      "name": "sub_usage_reset_clock",
+      "value": "Resets {1}"
+    },
+    {
+      "name": "sub_usage_reset_days",
+      "value": "resets in {1}d {2}h"
+    },
+    {
+      "name": "sub_usage_reset_hours",
+      "value": "resets in {1}h"
+    },
+    {
+      "name": "sub_usage_over",
+      "value": "Ahead of pace"
+    },
+    {
+      "name": "sub_usage_under",
+      "value": "Behind pace"
+    },
+    {
+      "name": "sub_usage_used",
+      "value": "{1} used"
+    },
+    {
+      "name": "sub_usage_protect",
+      "value": "Protect {1}%"
+    },
+    {
+      "name": "sub_usage_source_local",
+      "value": "Computer"
+    },
+    {
+      "name": "sub_usage_source_named",
+      "value": "Source: {1}"
+    },
+    {
+      "name": "sub_usage_source_plan",
+      "value": "{1}, source: {2}"
+    },
+    {
+      "name": "sub_usage_rejected",
+      "value": "The gateway turned the key away; update it in Admin → Usage sources. Showing the last numbers"
+    },
+    {
+      "name": "sub_usage_unreachable",
+      "value": "Can't reach the gateway right now; showing the last numbers"
+    },
+    {
+      "name": "sub_usage_failed",
+      "value": "Couldn't read the gateway; showing the last numbers"
+    },
+    {
+      "name": "sub_usage_error",
+      "value": "The gateway couldn't read this account; showing the numbers it saved"
+    },
+    {
+      "name": "sub_usage_timeline",
+      "value": "Reset timeline"
+    },
+    {
+      "name": "sub_usage_legend_short",
+      "value": "5h window resets"
+    },
+    {
+      "name": "sub_usage_legend_week",
+      "value": "7d window resets"
+    },
+    {
+      "name": "sub_usage_now",
+      "value": "Now"
+    },
+    {
+      "name": "sub_usage_axis_hours",
+      "value": "{1}h"
+    },
+    {
+      "name": "sub_usage_axis_days",
+      "value": "{1}d"
+    },
+    {
+      "name": "sub_usage_mins",
+      "value": "{1}m"
+    },
+    {
+      "name": "sub_usage_hours",
+      "value": "{1}h"
+    },
+    {
+      "name": "sub_usage_days",
+      "value": "{1}d"
+    },
+    {
+      "name": "sub_usage_days_hours",
+      "value": "{1}d {2}h"
+    }
+  ]
+}

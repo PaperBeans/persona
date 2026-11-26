@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
 });
+import { loadPages } from "../../lib/lazy-page";
 import { applyCompleteSessions, reset } from "../../lib/store";
 import { emptyTaskIndex } from "../../lib/tasks";
 import { segments } from "../../lib/turns";
@@ -39,15 +40,18 @@ const items: Item[] = [
 ];
 
 describe("the card and the session's folder", () => {
-  it("shows paths relative to the folder once the session row comes in", () => {
+  it("shows paths relative to the folder once the session row comes in", async () => {
     const seg = segments(items)[0];
-    act(() =>
+    await act(async () => {
       root.render(
         <ChatContext.Provider value={{ tasks: emptyTaskIndex(), subagents: [], scope: "t:", lineStyle: "agents" }}>
           <SegmentView seg={seg} live={false} mid="mac" sid="s1" expandFold={async () => {}} />
         </ChatContext.Provider>,
-      ),
-    );
+      );
+    });
+    await act(async () => {
+      await loadPages();
+    });
     const rows = () => [...host.querySelectorAll<HTMLElement>("[data-changed-file]")].map((r) => r.dataset.changedFile);
     expect(rows()).toEqual(["/code/app/src/a.ts"]);
     act(() => applyCompleteSessions([{ machine_id: "mac", session_id: "s1", title: "s1", cwd: "/code/app", status: "idle", state: "idle" } as Session]));

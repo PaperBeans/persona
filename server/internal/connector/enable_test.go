@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,6 +28,49 @@ func waitOn(t *testing.T, ch chan struct{}, what string) {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("no %s", what)
 	}
+}
+
+func TestStopWaitsForAReplacedWatcher(t *testing.T) {
+	r := NewRegistry(nil)
+	oldStarted, oldStopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	finish := sync.OnceFunc(func() { close(release) })
+	defer finish()
+	old := &fake{id: "example", watch: func(ctx context.Context, _ func(Scope)) error {
+		close(oldStarted)
+		<-ctx.Done()
+		close(oldStopping)
+		<-release
+		return nil
+	}}
+	if err := r.Add(old); err != nil {
+		t.Fatal(err)
+	}
+	r.Start(t.Context(), func(string, Scope) {}, t.Logf)
+	waitOn(t, oldStarted, "first watcher")
+	r.Remove(old.ID())
+	waitOn(t, oldStopping, "retired watcher's cancellation")
+	replacement := &runs{fake: fake{id: old.ID(), watch: func(ctx context.Context, _ func(Scope)) error {
+		<-ctx.Done()
+		return nil
+	}}, started: make(chan struct{}, 1), ended: make(chan struct{}, 1)}
+	if err := r.Add(replacement); err != nil {
+		t.Fatal(err)
+	}
+	waitOn(t, replacement.started, "replacement runner")
+	stopped := make(chan struct{})
+	go func() { r.Stop(); close(stopped) }()
+	waitOn(t, replacement.ended, "replacement runner's cancellation")
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while the retired watcher still held the fixture")
+	default:
+	}
+	finish()
+	waitOn(t, stopped, "all workers to exit")
+	r.Start(t.Context(), func(string, Scope) {}, t.Logf)
+	waitOn(t, replacement.started, "restart of the enabled runner")
+	r.Stop()
+	waitOn(t, replacement.ended, "restarted runner to stop")
 }
 
 // Switched off, a connector is "disabled" to every pipe (no tools, its tools refuse), stops running, and lists as

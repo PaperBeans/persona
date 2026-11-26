@@ -590,6 +590,7 @@ func TestExternalClearRetryCannotOverwriteConcurrentPick(t *testing.T) {
 	}
 	f.failAssistant = nil
 	s.work.eventWrites.Wait() // the failed send's diagnostics must finish before this fixture swaps its Store accessor
+	waitFor(t, "the backfill's read of the to-dos", s.spaceBackfillScanIdle)
 	h := s.loadHandoff(t.Context())
 	if h.For == "" {
 		t.Fatal("the first start did not reserve its ID")
@@ -619,14 +620,14 @@ func TestExternalClearRetryCannotOverwriteConcurrentPick(t *testing.T) {
 			arm.Store(true)
 		}
 	}}
-	s.store = func() Store {
+	s.setStore(func() Store {
 		if arm.CompareAndSwap(true, false) {
 			blocked.Store(true)
 			close(waiting)
 			<-releaseRetry
 		}
 		return wrapped
-	}
+	})
 	retryDone := make(chan error, 1)
 	go func() {
 		_, _, _, err := s.prepareExternalMain(context.WithValue(t.Context(), retryKey{}, true), StartParams{}, h)

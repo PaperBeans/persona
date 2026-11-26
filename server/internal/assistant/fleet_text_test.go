@@ -271,3 +271,17 @@ func TestClaudeDesktopComputerAttentionDoesNotSuggestTmux(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkAgentFirstDialogAttentionLocalized(t *testing.T) {
+	raw := i18n.T(i18n.Default, "hub-transcript_text.work_agent_first_dialog")
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		t.Run(string(lang), func(t *testing.T) {
+			s := proto.Session{AttentionReason: raw}
+			localizeSession(lang, &s)
+			want := i18n.T(lang, "hub-transcript_text.work_agent_first_dialog")
+			if s.AttentionReason != want {
+				t.Fatalf("localizeSession(%s) = %q, want %q", lang, s.AttentionReason, want)
+			}
+		})
+	}
+}

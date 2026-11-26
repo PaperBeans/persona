@@ -169,7 +169,17 @@ func TestSendQueuedNow(t *testing.T) {
 		t.Fatalf("nothing queued: %v, keys %q", err, h.keys)
 	}
 
-	// not a Claude: refused before looking
+	// Antigravity CLI (agy): recognizes "(alt+m to send immediately)" and dispatches alt+m
+	const agyQueuedScreen = "  Working on tests...\n\nCheck the linter output... (alt+m to send immediately)\n────────────────────────────────────────"
+	h = &queueHost{bareHost: bareHost{kind: host.Orca}, queued: agyQueuedScreen}
+	if err := node(h, agyAgent).sendQueuedNow(context.Background(), "s1"); err != nil {
+		t.Fatalf("agy send now: %v", err)
+	}
+	if got := strings.Join(h.keys, " "); got != "alt+m" {
+		t.Fatalf("agy keys %q, want alt+m", got)
+	}
+
+	// not a Claude or agy: refused before looking
 	h = &queueHost{bareHost: bareHost{kind: host.Orca}}
 	if err := node(h, "codex").sendQueuedNow(context.Background(), "s1"); codeOf(err) != "send_now_unsupported" || len(h.keys) != 0 {
 		t.Fatalf("codex: %v, keys %q", err, h.keys)
@@ -331,6 +341,12 @@ func TestSendNowOffer(t *testing.T) {
 		"❯ x\n∷ Queued · ctrl+enter to send now":                 "ctrl+enter",
 		"❯ x\n  ⎿  Queued · ctrl+enter to send now  ":            "ctrl+enter",
 		"❯ fix the ctrl+c\n  ⎿  Queued · ctrl+enter to send now": "ctrl+enter",
+		// Antigravity CLI (agy) queued line hint
+		"Check the tests... (alt+m to send immediately)":   "alt+m",
+		"❯ Check the tests... (Alt+M to send immediately)": "alt+m",
+		"Fix foo(bar) (opt+m to send immediately)":         "alt+m",
+		"  (alt+m to send immediately)":                    "alt+m",
+		"Check the tests... (alt+m to send immediately)  ": "alt+m",
 	} {
 		if _, keys := sendNowOffer(screen); strings.Join(keys, " ") != want {
 			t.Errorf("keys %q, want %q in\n%s", keys, want, screen)

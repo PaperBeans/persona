@@ -4,6 +4,7 @@ import SwiftUI
 /// open platform, enters its id and secret here, pairs by sending the bot a code, and switches on what it may do.
 struct FeishuBotView: View {
     @State private var model = FeishuBotModel()
+    @State private var sync = LarkSyncModel()
     @State private var confirmUnpair = false
 
     var body: some View {
@@ -22,13 +23,19 @@ struct FeishuBotView: View {
                     }
                 }
             }
+            // Reading Lark as the owner, every day (#15392): drawn only when the hub has the sync.
+            LarkSyncSections(model: sync)
             setupSection
         }
         .themedPage()
         .detailTitle(String(localized: "Lark Bot"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
-        .refreshable { await model.load() }
+        .task(id: model.status?.appID) { await sync.load() } // the chat bot's app, read again when it changes
+        .refreshable {
+            await model.load()
+            await sync.load()
+        }
         .task(id: model.status?.pairing?.code) { // waiting for the code: look again until it is used
             guard model.status?.pairing != nil else { return }
             while !Task.isCancelled, model.status?.pairing != nil, model.status?.owner == nil {
@@ -200,8 +207,9 @@ struct FeishuBotView: View {
         Section {
             step(1, "Create a custom app on the Lark Open Platform and enable the Bot capability")
             step(2, "Under Permissions, enable: read and send direct messages (im:message, im:message:send_as_bot), receive direct messages sent to the bot, and upload and download message resources. Reading contact names helps too (contact:user.base:readonly)")
-            step(3, "In Events & Callbacks, choose “Receive events through persistent connection” and subscribe to “Receive messages” and “Card action callbacks”")
-            step(4, "Publish a version (your company's admin may need to approve it), then enter the App ID and App Secret above")
+            step(3, "Knowledge sync permissions [Lark bot setup]")
+            step(4, "In Events & Callbacks, choose “Receive events through persistent connection” and subscribe to “Receive messages” and “Card action callbacks”")
+            step(5, "Publish a version (your company's admin may need to approve it), then enter the App ID and App Secret above")
         } header: {
             Text("How to Set Up the Bot")
         } footer: {

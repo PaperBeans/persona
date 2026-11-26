@@ -294,8 +294,8 @@ TILE_HITS = """(tile) => {
 
 def tile_hits(browser, base, shots):
     """An attachment's ✕ (#11442): a tap on a picture's middle opens the editor, not remove; the ✕ answers out of its
-    corner but not over what sits above the tray (the composer, the New Agent sheet); a file's ✕ answers down its column
-    and the file row scrolls no further for it."""
+    corner but not over what sits above the tray (the composer, the New Agent sheet); a file's ✕ answers down its column.
+    Photos and files wrap together without horizontal scrolling."""
     import struct
     import zlib
 
@@ -333,24 +333,28 @@ def tile_hits(browser, base, shots):
     expect(editor).to_have_count(0)
     page.wait_for_timeout(500)
 
-    # files: two overflow the row at 390, which must scroll no further for the ✕
+    # At 390 px, the first file fits beside the photo and the second wraps below it.
     page.locator("main input[type=file]").first.set_input_files([text("a.txt"), text("b.txt")])
-    tiles = page.locator("[data-testid=composer-files] > span")
+    strip = page.locator("[data-composer-attachments]")
+    tiles = strip.locator(":scope > [data-state]")
     expect(tiles).to_have_count(2)
-    page.wait_for_timeout(400)
+    strip.evaluate("(e) => Promise.all(e.getAnimations({ subtree: true }).map(a => a.finished))")
     f = tiles.first.evaluate(TILE_HITS)
     if f["corner"] != "remove" or f["centre"] == "remove":
         fail(f"a file's ✕ should answer at its corner and leave its middle: {f}")
     if f["w"] < 28 or f["h"] < 44:
         fail(f"a file's ✕ answers only {f['w']}×{f['h']} px")
-    row = page.locator("[data-testid=composer-files]").evaluate("""(e) => { const t = [...e.children].map((c) => c.getBoundingClientRect());
-      return [e.scrollWidth, t[t.length - 1].right - t[0].left]; }""")
-    if row[0] > row[1] + 0.5:
-        fail(f"the file row scrolls {row[0]} px for {row[1]:.0f} px of tiles")
+    wraps = strip.evaluate("""(e) => {
+      const tiles = [...e.children].map((c) => c.getBoundingClientRect());
+      return tiles.length === 3 && tiles[0].top === tiles[1].top && tiles[2].top > tiles[1].top
+        && e.scrollWidth === e.clientWidth;
+    }""")
+    if not wraps:
+        fail("the photo and files should share a wrapping strip without horizontal overflow")
     if shots:
         card = page.locator(COMPOSER).evaluate("(e) => { const r = e.closest('.rounded-\\\\[14px\\\\]').getBoundingClientRect(); return [r.top, r.height]; }")
         page.screenshot(path=os.path.join(shots, "390-attachments.png"), clip={"x": 0, "y": max(0, card[0] - 20), "width": 390, "height": card[1] + 40})
-    ok(f"a file's ✕ answers {f['w']}×{f['h']} px down its column; the row scrolls {row[0]} px, its tiles' width")
+    ok(f"a file's ✕ answers {f['w']}×{f['h']} px down its column; photo and files share a wrapping strip")
 
     # the New Agent sheet: no editor, the middle still is not remove, nor is the sheet above the tray
     page.evaluate("import('/src/lib/new-agent.ts').then((m) => m.openNewAgent())")

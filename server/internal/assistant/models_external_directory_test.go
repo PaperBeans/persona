@@ -317,7 +317,8 @@ func TestExternalDirectoryRequiresASourceTaggedAnswer(t *testing.T) {
 
 func TestExternalLaunchersChangedDoesNotWaitForConversationReads(t *testing.T) {
 	st := &memStore{}
-	s := &Service{store: func() Store { return st }}
+	s := &Service{}
+	s.setStore(func() Store { return st })
 	// Block Store reads as a stalled tombstone read would. A machine-level
 	// directory invalidation neither reads nor forwards a conversation's data.
 	st.mu.Lock()

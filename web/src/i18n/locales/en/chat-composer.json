@@ -1,5 +1,6 @@
 {
   "skills_changed": "Execution environment changed. Your draft is kept; remove selected skills and select them again.",
+  "reference_load_failed": "Couldn't load the references. Your draft is still available. Try again.",
   "cmd_continue_word": "/continue",
   "cmd_continue_desc": "Keep going",
   "cmd_continue_text": "Continue",
@@ -29,10 +30,6 @@
   "images_bytes_as_files_other": "These pictures are too large together. {count} of them will go as files.",
   "images_too_large": "These pictures are too large to send together",
   "image_unreadable": "Couldn't read {name}",
-  "suggestion_label": "Claude suggests: {suggestion}",
-  "suggestion_use": "Use",
-  "suggestion_use_hint": "Put it in the box (Tab)",
-  "suggestion_send": "Send now",
   "message": "Message",
   "interrupt": "Interrupt",
   "interrupt_hint": "Interrupt (Esc)",
@@ -41,7 +38,6 @@
   "send_hint": "Send (Enter) · New line (Shift+Enter)",
   "blocked_hint": "Not sent yet: {label}. What you wrote stays here.",
   "expand": "Expand the message box",
-  "collapse": "Collapse the message box",
   "more_actions": "More actions",
   "add_more": "Add files, images and more",
   "queue": "Queue message",
@@ -53,5 +49,9 @@
   "file_waiting": "Waiting",
   "file_failed": "Failed · click to retry",
   "file_cancel": "Cancel upload of {name}",
-  "file_retry": "Retry {name}"
+  "file_retry": "Retry {name}",
+  "confirm_run_title": "Run {word}?",
+  "confirm_ok": "Confirm",
+  "confirm_cancel": "Cancel",
+  "drop_here": "Drop images or files here"
 }

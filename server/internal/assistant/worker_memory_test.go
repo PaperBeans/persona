@@ -58,6 +58,8 @@ func newWorkerMemoryEnv(t *testing.T) *workerMemoryEnv {
 	todo := Todo{ID: "todo_worker", Title: "title-only", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"},
 		Agents: []TodoAgent{{MachineID: "box", SessionID: "s1", Cwd: "/code/worker"}}}
 	putTodo(s, todo)
+	// The supervising conversation, outside the health space: its worker outcome goes to a project (todo_scope.go).
+	f.setSessions("server", proto.Session{MachineID: "server", SessionID: "conv1", Title: "Persona", Assistant: true})
 	f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Title: todo.Title, Cwd: "/code/worker",
 		Status: proto.StatusDone, UpdatedAt: turnEnd, LastText: workerMemoryConclusion})
 	f.setItems(

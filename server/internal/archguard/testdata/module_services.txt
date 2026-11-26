@@ -15,6 +15,16 @@ imessage (test) internal/connector
 imessage (test) internal/connector/conformance
 imessage (test) internal/subscriptions
 #
-# Meeting recording keeps the recordings' storage in the knowledge base (the kb.Recording model with its Engine and
-# Store), which stays in the core until kb offers a recording port (#13407).
+# The Health module's water import runs its acceptance on the real SQL of the health_intake table too
+# (health_water_import_test.go, TestHealthWaterImportDatabase), which stays in internal/db.
+health (test) internal/db
+#
+# Meeting recording's writers are the module's own behind the storage port (recordingwire.Core, #13407). What it
+# still names of internal/kb is the handle the core hands it (kb.Engine, with RecordingCore, RecordingWriters and the
+# provider hook) and the core's readers and delete it calls on that handle (docs/plans/plan-kb-recording-port.md,
+# "PR 5 has landed", lists them).
 recording internal/kb
+#
+# The knowledge pages' module imports the connectors' older chat history into the knowledge base and marks a day's
+# lines by the sent ledger: it writes and reads the knowledge base (kb.Engine, kb.Selection), the core's memory (#14407).
+knowledge-ui internal/kb

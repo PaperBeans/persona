@@ -160,13 +160,18 @@ func TestTaskTerminalClosePreservesTranscriptAndWorkspace(t *testing.T) {
 func TestTaskTerminalCloseRefusesUnsafeState(t *testing.T) {
 	for _, scenario := range []string{
 		"replacement", "different session", "split", "last tab", "focused", "unknown focus", "working", "blocked",
-		"process replaced", "draft", "viewer", "rebound", "split during check", "focus during check", "disconnect during check",
+		"process replaced", "live child", "draft", "viewer", "rebound", "split during check", "focus during check", "disconnect during check",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			n, f, target, cwd, _ := taskTerminalFixture(t)
 			switch scenario {
 			case "process replaced":
 				taskTerminalForeground(f, target.PID+1)
+			case "live child":
+				// The fixture process is a real child of this runner.
+				target.PID = os.Getpid()
+				target.Process = procStartMark(target.PID)
+				taskTerminalForeground(f, target.PID)
 			case "draft":
 				f.setScreen(target.PaneID, "❯ Owner draft")
 			case "viewer":

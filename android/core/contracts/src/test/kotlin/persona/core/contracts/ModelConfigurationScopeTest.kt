@@ -110,5 +110,28 @@ class ModelConfigurationScopeTest {
         val patch = draft.patch(launcherPurpose)
         assertEquals("auto", patch["permission_mode"]?.toString()?.trim('"'))
         assertEquals("", draft.choosingProvider("launcher.codex").permissionMode)
+
+        // Capture input emits only minimal { revision, name, description?, capture: true }.
+        val captureWithDesc = ModelProfileSaveInput.capture(revision = 7, name = "Performance", description = "Fast models").toJson()
+        assertEquals(setOf("revision", "name", "description", "capture"), captureWithDesc.keys)
+        assertEquals("true", captureWithDesc["capture"]?.toString())
+        val captureNoDesc = ModelProfileSaveInput.capture(revision = 2, name = "Economy", description = "  ").toJson()
+        assertEquals(setOf("revision", "name", "capture"), captureNoDesc.keys)
+        assertEquals("true", captureNoDesc["capture"]?.toString())
+
+        // Cross-version compatibility: default speed ("standard") and empty permission_mode are omitted.
+        val compat = ModelProfileSaveInput(
+            revision = 4,
+            name = "Compat",
+            purposes = mapOf("assistant" to ModelBinding(provider = "launcher.claude", model = "sonnet", permissionMode = "")),
+            tiers = mapOf(
+                "standard" to ModelProfileTier(launcher = "claude", model = "sonnet", speed = "standard", permissionMode = ""),
+                "quick" to ModelProfileTier(launcher = "claude", speed = "fast", permissionMode = "plan"),
+            ),
+        ).toJson().toString()
+        assertFalse(compat.contains("\"speed\":\"standard\""))
+        assertFalse(compat.contains("\"permission_mode\":\"\""))
+        assertTrue(compat.contains("\"speed\":\"fast\""))
+        assertTrue(compat.contains("\"permission_mode\":\"plan\""))
     }
 }

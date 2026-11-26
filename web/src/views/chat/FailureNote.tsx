@@ -7,6 +7,17 @@ import { Button } from "../../ui/atoms";
 import { ErrorNotice } from "../../ui/ErrorNotice";
 import { t } from "../../i18n";
 
+export interface FailureNoteProps {
+  session?: Session;
+  onRetry: () => void;
+  /** Explicit failure text skips reading `session.failure_reason` and `stateOf(session)`. Pass `null` or `""` to hide. */
+  reason?: string | null;
+  /** Explicit external URL (https only) overrides `session.external_url`. Pass `null` or `""` to hide the external action. */
+  externalUrl?: string | null;
+  /** Handles opening the external link instead of a direct new-tab anchor. */
+  onOpenExternal?: (url: string) => void;
+}
+
 /** Whether the note shows: a notice the session can be retried from (not working, not on a card, not view-only),
  *  and not the one "Retry" was already pressed on (`retried`: the chat keeps it while the hub catches up). */
 export function showsFailureNote(session: Session, o: { retried?: string } = {}): boolean {
@@ -16,10 +27,10 @@ export function showsFailureNote(session: Session, o: { retried?: string } = {})
   return sessionCan(session, "send");
 }
 
-export function FailureNote({ session, onRetry }: { session: Session; onRetry: () => void }) {
-  const reason = failureReason(session);
+export function FailureNote({ session, onRetry, reason: controlledReason, externalUrl, onOpenExternal }: FailureNoteProps) {
+  const reason = controlledReason === undefined ? failureReason(session) : controlledReason?.trim() ? controlledReason : undefined;
   if (!reason) return null;
-  const link = externalLink(session);
+  const link = externalLink(externalUrl === undefined ? session : { external_url: externalUrl ?? undefined });
   return (
     <ErrorNotice
       role="status"
@@ -31,7 +42,14 @@ export function FailureNote({ session, onRetry }: { session: Session; onRetry: (
             {t("chat-chatview.retry")}
           </Button>
           {link && (
-            <Button icon="external" size="sm" className="touch-hit" testId="chat-failure-lark" href={link}>
+            <Button
+              icon="external"
+              size="sm"
+              className="touch-hit"
+              testId="chat-failure-lark"
+              href={onOpenExternal ? undefined : link}
+              onClick={onOpenExternal ? () => onOpenExternal(link) : undefined}
+            >
               {t("chat-chatview.open_in_lark")}
             </Button>
           )}

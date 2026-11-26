@@ -6,7 +6,6 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelModel, PanelProvider, PanelState } from "../../lib/model-panel";
-import { effortTitle } from "../../lib/session-actions";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -99,7 +98,7 @@ describe("the model panel's columns", () => {
 
   it("shows the running model's levels and picks another level's own model", async () => {
     const { onPick } = await open({ onApplyCurrent: async () => true });
-    expect(levels().map((b) => b.textContent)).toEqual(LEVELS.map(effortTitle));
+    expect(levels().map((b) => b.textContent)).toEqual(["Low", "Medium", "High", "XHigh"]);
     expect(pressed()).toBe("xhigh");
     act(() => levels().find((b) => b.dataset.panelLevel === "low")!.click());
     await flush();
@@ -187,5 +186,39 @@ describe("the model panel's columns", () => {
     expect(onApplyCurrent).toHaveBeenCalledWith({ fast: true });
     act(() => root.unmount());
     expect(stored("recent")).toEqual([{ provider: "codex", model: "gpt-5.5", effort: "medium", fast: true }]);
+  });
+
+  it("omits redundant provider subtitles on duplicate model names and draws TRAE mark for traex in three-column mode", async () => {
+    const traex: PanelProvider = { id: "traex", name: "TRAE CLI", engine: "traex", models: [{ id: "gpt-5.5", name: "GPT-5.5", efforts: [] }] };
+    const sharedClaude: PanelProvider = {
+      id: "claude",
+      name: "Claude Code",
+      engine: "claude",
+      models: [{ id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "high"], defaultEffort: "high" }],
+    };
+    const sharedCodex: PanelProvider = {
+      id: "codex",
+      name: "Codex",
+      engine: "codex",
+      models: [{ id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "high"], defaultEffort: "high" }],
+    };
+    const onPick = vi.fn(async () => true);
+    const onClose = vi.fn();
+    act(() =>
+      root.render(
+        <ModelPanel
+          anchor={anchor}
+          onClose={onClose}
+          providers={[sharedClaude, sharedCodex, traex]}
+          state={{ current: { provider: "claude", model: "gpt-5.5" }, recommended: ["claude"] }}
+          scope="agent"
+          onPick={onPick}
+        />,
+      ),
+    );
+    await flush();
+    expect(side("traex").querySelector('[data-agent-mark="trae"]')).not.toBeNull();
+    expect(side("traex").querySelector('[data-agent-mark="generic"]')).toBeNull();
+    expect(rows()[0].textContent).toBe("GPT-5.5");
   });
 });

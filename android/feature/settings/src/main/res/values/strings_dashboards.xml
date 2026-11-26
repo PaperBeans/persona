@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dashboards (#15017): the pages the assistant keeps for the owner, drawn as the reserved "-pages" extension's. -->
+<resources>
+    <!-- The place's name, shown while a Dashboards page loads when it has no title of its own yet. -->
+    <string name="settings_dashboards_title">Dashboards</string>
+    <!-- The line under the header of every Dashboards page but the index: the app says who keeps it, the page cannot. -->
+    <string name="settings_dashboards_owner">Kept up to date by Persona</string>
+</resources>

@@ -111,9 +111,12 @@ The update manager belongs to the resident process and is shared by all attach c
 When a co-located Hub update has already replaced the shared executable, the resident node can adopt the file if it is
 executable and its SHA-256 matches the verified target under the node's signing policy. It removes the redundant upload
 and follows the same reload and exact-version confirmation flow. Its confirmation record carries no rollback backup and
-keeps startup signing from modifying the shared executable while confirmation is pending. A different executable on disk
-still causes the commit to fail with `node executable was replaced by another deployment`. Older targets confirm by
+keeps startup signing from modifying the shared executable while confirmation is pending. Older targets confirm by
 running version and are eligible for adoption when their startup can use the verified file with its existing signature.
+
+If a different valid executable is already on disk when the commit takes its snapshot, the commit backs up that file
+and records its version for rollback, even if the resident process still runs an earlier version. An active swap
+must finish before another commit can adopt or replace the installed file.
 
 Before draining, the resident checks the installed replacement by running its `node-update-check`. Endpoint protection
 on some Macs holds a new executable's first start until its scan ends (about 30 s) and then caches the verdict by
@@ -131,7 +134,15 @@ ignore the notification.
 
 An independent recovery process from the old version stays next to the executable; it restores the backup if the new version crashes, fails to start or times out before confirmation. Under systemd it is a separate transient user service, so it does not exit when the node's cgroup is cleaned up; under launchd, and under a supervisor declared with `--supervised`, it is a process detached in a session of its own, outside the node's process group. Replacement is allowed only after the recovery process is ready. The switch itself is the same on Linux and macOS: the node runs the new executable in place (exec, same process id), and the supervisor only matters when the node exits: a crash, or the recovery process stopping a new version that never confirmed, after which the supervisor's restart runs the restored old file. Windows has no exec and will not replace a running program's file: the node moves its file aside, puts the new one in place and exits with `nodeproto.RestartExitCode`, which persona-link's supervisor answers by starting it again at once; the recovery process there is detached and reports itself ready through the transaction marker, and rolls back the same way ([windows.md](windows.md) "Updates through the hub"). The recovery process distinguishes the node from a process that later reused its id by its exact start time, with `ps -o lstart=` as the portable fallback; with a declared supervisor the node checks at startup that `ps` can report it (BusyBox's cannot) and otherwise says why it cannot be updated. Recovery does not depend on the new node starting successfully, nor on the hub being online at the time. The necessary local recovery transaction marker is stored next to the binary, for the same reason as the hub's self-update: recovery must work when the database and remote connections are unavailable; the hub's business state and update tasks are not written to local JSON.
 
-A rollback (or a commit's final swap) replaces the installed file only while that file is still the one the transaction itself put there: the content hash is read through one open descriptor and the inode, size and modification time it saw are rechecked against the path immediately before the rename. An external deployment — a plain copy, a package manager, the ssh deploy script — never takes the updater's directory lock, so one that lands in the window after the hash check is detected, not overwritten: the transaction is cleaned up and the deployed file stays. The recovery process identifies the node it watches by pid plus an exact start time where the platform gives one (clock ticks on Linux, microseconds on Mac, the creation time through a process handle on Windows), and on Linux and Windows the check and the kill act on one pinned process instance, so a reused pid is never mistaken for the recorded process; markers written by binaries without the exact identity still work through their second-resolution start time.
+A commit checks the installed file against the snapshot it took before preparing rollback. A rollback checks it against
+the replacement the transaction installed. Both read the hash through one open descriptor and recheck the inode, mode,
+size and modification time against the path immediately before the rename. A replacement detected between the snapshot
+and the swap causes the commit to report `node executable was replaced by another deployment`, clean up its rollback
+state and leave the deployed file in place.
+The recovery process identifies the node it watches by pid plus an exact start time where the platform gives one (clock
+ticks on Linux, microseconds on Mac, the creation time through a process handle on Windows). On Linux and Windows the
+check and the kill act on one pinned process instance, so a reused pid is never mistaken for the recorded process.
+Markers written by binaries without the exact identity still work through their second-resolution start time.
 
 On Linux, a killed or exited process that has not yet been reaped (state `Z` or `X` in procfs) has no live identity. The node treats such a watchdog as gone and starts a replacement, even if `ps` still reports its old start time. An authoritative missing-process or zombie result never falls back to `ps`; the fallback remains for unavailable exact readings and older transaction markers without an exact start time, after checking that the process is not known to be gone.
 

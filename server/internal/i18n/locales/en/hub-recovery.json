@@ -1,0 +1,7 @@
+{
+  "err_full_only": "Recovery requires a full device credential.",
+  "err_unavailable": "Recovery information is unavailable. Try again.",
+  "err_bundle_id": "Choose a bundle from the Recovery list again.",
+  "err_bundle_not_found": "That bundle is no longer in the Recovery folder. Refresh and try again.",
+  "err_busy": "Another Recovery check is running. Try again when it finishes."
+}

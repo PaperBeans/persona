@@ -97,10 +97,26 @@ export function useEarlierStretches(mid: string, sid: string, history: readonly 
   // the live stretch's items when the live session ran an earlier one too; else the transcript as it is
   const own = useMemo(() => liveStretch(live.items, legs, sid), [live.items, legs, sid]);
   const host = useMemo<StretchesHost | null>(
-    () => (key ? { mid, sid, scope, history: legs, live, report: hear } : null),
+    () => (key ? {
+      mid,
+      sid,
+      scope,
+      history: legs,
+      // Snapshot the tracked live fields so memo(EarlierStretches) sees updates even when the caller mutates `live` in place.
+      live: {
+        items: live.items,
+        hasMore: live.hasMore,
+        loading: live.loading,
+        loadingEarlier: live.loadingEarlier,
+        earlierPage: live.earlierPage,
+        loadEarlier: live.loadEarlier,
+        expandFold: live.expandFold,
+      },
+      report: hear,
+    } : null),
     // `live` is read through: its items, pages and loads are what the module plans with
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mid, sid, scope, key, legs, hear, live.items, live.hasMore, live.loading, live.loadEarlier, live.expandFold, live.earlierPage],
+    [mid, sid, scope, key, legs, hear, live.items, live.hasMore, live.loading, live.loadingEarlier, live.loadEarlier, live.expandFold, live.earlierPage],
   );
   return {
     liveItems: own ?? live.items,

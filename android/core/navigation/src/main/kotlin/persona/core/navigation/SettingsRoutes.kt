@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * One model use of Settings › Model configuration (docs/assistant/model-config.md), by the hub's purpose id: `agent.new`, `task.<id>`,
- * `plugin.<id>` (a voice extension's model, which the voice page also opens).
+ * `plugin.<id>` (an extension's model, which a module's page may also open).
  */
 @Serializable @SerialName("persona.core.navigation.ModelPurposeRoute") data class ModelPurposeRoute(val purposeId: String, val manager: String? = null) : NavKey
 

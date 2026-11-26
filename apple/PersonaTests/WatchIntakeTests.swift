@@ -226,6 +226,47 @@ import PersonaWire
         }
     }
 
+    @Test func itemSelectionSurvivesTheCacheAndOldHubsKeepBothItems() throws {
+        let json = #"{"water":{"today":750,"goal":2000},"protein":{"today":36,"goal":60},"days":[],"zone":"UTC","items":["protein"]}"#
+        let reading = try WatchIntakeReading(JSONDecoder().decode(WatchIntakeReading.Answer.self, from: Data(json.utf8)), at: now)
+        #expect(!reading.contains(.water) && reading.contains(.protein))
+        let cached = try JSONDecoder().decode(WatchIntakeReading.self, from: JSONEncoder().encode(reading))
+        #expect(cached.items == ["protein"])
+        let entry = WatchIntakeEntry(date: now, reading: cached, paired: true)
+        #expect(WatchIntakeComplicationView(entry: entry, kind: .water, family: .accessoryCircular).message == "Add Water in Health")
+        #expect(WatchIntakeComplicationView(entry: entry, kind: .protein, family: .accessoryRectangular).message == nil)
+        let old = WatchIntakeReading(water: reading.water, protein: reading.protein, nextDay: reading.nextDay, zone: reading.zone)
+        #expect(old.contains(.water) && old.contains(.protein))
+        #expect(String(localized: "Add Water in Health", locale: .init(identifier: "zh-Hans")) == "在健康里添加喝水")
+    }
+
+    @Test func removedItemComplicationsRenderInEveryFamilyAndTextSize() throws {
+        let reading = WatchIntakeReading(water: .init(today: 750, goal: 2000), protein: .init(today: 36, goal: 60),
+                                        nextDay: now.addingTimeInterval(3600), zone: "UTC", items: [])
+        let entry = WatchIntakeEntry(date: now, reading: reading, paired: true)
+        let output = ProcessInfo.processInfo.environment["PERSONA_WATCH_INTAKE_SHOTS"].map { URL(fileURLWithPath: $0) }
+        for scheme in [ColorScheme.light, .dark] { for largest in [false, true] {
+            let view = VStack(alignment: .leading, spacing: 16) {
+                ForEach(WatchIntakeKind.allCases, id: \.self) { kind in
+                    HStack(spacing: 12) {
+                        WatchIntakeComplicationView(entry: entry, kind: kind, family: .accessoryCircular).frame(width: 60, height: 60)
+                        WatchIntakeComplicationView(entry: entry, kind: kind, family: .accessoryRectangular).frame(width: 172, height: 76)
+                    }
+                    WatchIntakeComplicationView(entry: entry, kind: kind, family: .accessoryInline).frame(width: 260, height: 44)
+                }
+            }
+            .padding(20).frame(width: 296).background(scheme == .dark ? Color.black : .white)
+            .environment(\.colorScheme, scheme).environment(\.locale, Locale(identifier: "zh-Hans"))
+            .environment(\.dynamicTypeSize, largest ? .accessibility5 : .large)
+            let data = try #require(hostedImage(view, width: 296, scheme: scheme).pngData())
+            #expect(data.count > 1000)
+            if let output {
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                try data.write(to: output.appendingPathComponent("not-added-\(scheme == .dark ? "dark" : "light")-\(largest ? "largest" : "default").png"))
+            }
+        } }
+    }
+
     /// Native gauge subviews need a hosting window; ImageRenderer cannot flatten their UIKit adaptor.
     private func hostedImage<V: View>(_ content: V, width: CGFloat, scheme: ColorScheme) throws -> UIImage {
         let controller = UIHostingController(rootView: content)

@@ -189,13 +189,17 @@ nonisolated struct ExtensionField: Codable, Hashable, Sendable, Identifiable {
     var maximum: Double?
     /// How far an integer stepper moves; typing and validation are independent of this hint.
     var step: Int?
-    /// An array's items (strings, maybe from a list of choices).
+    /// An array's items (strings, maybe from a list of choices, or a flat entry object).
     var items: ExtensionItems?
     var minItems: Int?
     var maxItems: Int?
     var uniqueItems: Bool?
     /// An object's fields (a group of the form).
     var fields: [ExtensionField]?
+    /// x-secret: one write-only secret owned by each entry of an entry list (#9504).
+    var secret: ExtensionEntrySecret?
+    /// True on an entry address field whose change clears that entry's secret on save.
+    var clearsSecret: Bool?
     /// What to ask before a switch of it is turned on (x-confirm; the plugin cua's 「扩展开着时不自动锁屏」).
     var confirm: String?
     /// format machine: only machines of these systems (x-os); nil, any.
@@ -207,12 +211,23 @@ nonisolated struct ExtensionField: Codable, Hashable, Sendable, Identifiable {
     var picksMachine: Bool { type == "string" && format == "machine" && (self.enum ?? []).isEmpty }
     /// One of the hub's launchers by name (format launcher): a picker of them (#2385).
     var picksLauncher: Bool { type == "string" && format == "launcher" && (self.enum ?? []).isEmpty }
+    /// A top-level list of flat entries, each owning its own write-only secret (#9504).
+    var isEntryList: Bool { type == "array" && items?.type == "object" && secret != nil && !(items?.fields ?? []).isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case name, type, title, description, `default`, required, `enum`, format, pattern, minimum, maximum, step, items, fields, confirm, os
+        case name, type, title, description, `default`, required, `enum`, format, pattern, minimum, maximum, step, items, fields, secret, confirm, os
         case minLength = "min_length", maxLength = "max_length", minItems = "min_items", maxItems = "max_items"
-        case uniqueItems = "unique_items"
+        case uniqueItems = "unique_items", clearsSecret = "clears_secret"
     }
+}
+
+/// x-secret: one write-only secret owned by each entry of an entry list (#9504).
+nonisolated struct ExtensionEntrySecret: Codable, Hashable, Sendable {
+    var name: String
+    var title: String
+    var description: String?
+    var required: Bool?
+    var hint: String?
 }
 
 /// Integer configuration steppers share the Android app's fallback and bounds rules.
@@ -271,6 +286,8 @@ nonisolated struct ExtensionItems: Codable, Hashable, Sendable {
     var format: String?
     /// For machine: only machines of these systems (darwin, linux, windows); nil, any.
     var os: [String]?
+    /// For an entry list (`type == "object"`): one entry's declared flat string fields.
+    var fields: [ExtensionField]?
 }
 
 /// One value of a field's choices, with its label.
@@ -293,7 +310,18 @@ nonisolated struct ExtensionSecret: Codable, Hashable, Sendable, Identifiable {
     var hint: String?
     /// It holds a provider's reference, not a value (docs/extensions/secret-providers.md).
     var reference: SecretReference?
+    /// When non-empty, `name` is a live entry's host-minted storage ID in this entry list (#9504).
+    var list: String?
+    /// Display title of the live entry when `list` is set.
+    var entryTitle: String?
     var id: String { name }
+    /// Whether this secret belongs to an entry in an entry list rather than the fixed Secrets group.
+    var isEntrySecret: Bool { list?.isEmpty == false }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, title, description, required, set, hint, reference, list
+        case entryTitle = "entry_title"
+    }
 }
 
 /// A setting that holds one of a provider's references: another extension's secret, or a model provider's key (on one
@@ -304,6 +332,8 @@ nonisolated struct ExtensionSecretUser: Codable, Hashable, Sendable, Identifiabl
     var extensionName: String?
     var secret: String?
     var secretTitle: String?
+    /// A live entry's display title when `secret` is its host-owned storage ID (#9504).
+    var entryTitle: String?
     var launcher: String?
     var launcherName: String?
     var machine: String?
@@ -311,7 +341,7 @@ nonisolated struct ExtensionSecretUser: Codable, Hashable, Sendable, Identifiabl
     var id: String { [kind, `extension` ?? launcher ?? "", secret ?? machine ?? ""].joined(separator: "/") }
     private enum CodingKeys: String, CodingKey {
         case kind, `extension`, secret, launcher, machine, reference
-        case extensionName = "extension_name", secretTitle = "secret_title", launcherName = "launcher_name"
+        case extensionName = "extension_name", secretTitle = "secret_title", entryTitle = "entry_title", launcherName = "launcher_name"
     }
 }
 
@@ -428,14 +458,19 @@ nonisolated struct HubExtensionList: Decodable, Sendable {
 }
 
 extension APIClient {
+    /// Every detail-returning extension settings request opts into entry lists so responses never hide the entry editor.
+    static let entryListsQuery = ["entry_lists": "1"]
+    /// Immediate fixed-field writes preserve the hub's current entry lists while still returning the opted-in detail.
+    static let preserveEntriesQuery = ["entry_lists": "1", "preserve_entries": "1"]
+
     func plugins() async throws -> [HubExtension] { try await pluginList().plugins }
 
     func pluginList() async throws -> HubExtensionList { try await get(extensionPath("")) }
 
-    func plugin(_ id: String) async throws -> HubExtensionDetail { try await get(extensionPath("/\(id)/-/")) }
+    func plugin(_ id: String) async throws -> HubExtensionDetail { try await get(extensionPath("/\(id)/-/"), query: Self.entryListsQuery) }
 
     func setExtension(_ id: String, autoUpgrade: Bool) async throws -> HubExtensionDetail {
-        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/auto-upgrade"), body: ["auto": autoUpgrade]))
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/auto-upgrade"), query: Self.entryListsQuery, body: ["auto": autoUpgrade]))
     }
 
     func pluginUpgrades() async throws -> ExtensionUpgrades { try await get(extensionPath("/-/upgrades")) }
@@ -447,28 +482,29 @@ extension APIClient {
     func setExtension(_ id: String, enabled: Bool, cascade: Bool = false) async throws -> HubExtensionDetail {
         var body = ["enabled": enabled]
         if cascade { body["cascade"] = true }
-        return try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/enabled"), body: body))
+        return try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/enabled"), query: Self.entryListsQuery, body: body))
     }
 
-    func setExtension(_ id: String, config: [String: JSONValue]) async throws -> HubExtensionDetail {
+    func setExtension(_ id: String, config: [String: JSONValue], preserveEntries: Bool = false) async throws -> HubExtensionDetail {
         struct Body: Encodable { var config: [String: JSONValue] }
-        return try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/config"), body: Body(config: config)))
+        let query = preserveEntries ? Self.preserveEntriesQuery : Self.entryListsQuery
+        return try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/config"), query: query, body: Body(config: config)))
     }
 
     func setExtension(_ id: String, secret name: String, value: String) async throws -> HubExtensionDetail {
-        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), body: ["value": value]))
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), query: Self.entryListsQuery, body: ["value": value]))
     }
 
     func setExtension(_ id: String, secret name: String, reference: String) async throws -> HubExtensionDetail {
-        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), body: ["reference": reference]))
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), query: Self.entryListsQuery, body: ["reference": reference]))
     }
 
     func removeHandoffRule(_ id: String, rule: String) async throws -> HubExtensionDetail {
-        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/handoff-rules/\(rule)")))
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/handoff-rules/\(rule)"), query: Self.entryListsQuery))
     }
 
     func clearExtension(_ id: String, secret name: String) async throws -> HubExtensionDetail {
-        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/secrets/\(name)")))
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/secrets/\(name)"), query: Self.entryListsQuery))
     }
 }
 
@@ -581,6 +617,53 @@ enum ExtensionText {
         guard s.set else { return s.required == true ? String(localized: "Not set (required)") : String(localized: "Not set") }
         guard let hint = s.hint, !hint.isEmpty else { return String(localized: "Set") }
         return String(localized: "Set · ends in \(hint)", comment: "A secret that is set, with its last four characters")
+    }
+
+    /// An entry card's display title: its `name`, else its first nonempty declared text field, else a localized numbered label.
+    static func entryTitle(list: ExtensionField, entry: [String: JSONValue], index: Int) -> String {
+        let fields = list.items?.fields ?? []
+        for preferred in [true, false] {
+            for field in fields {
+                if preferred && field.name != "name" { continue }
+                if case .string(let raw) = entry[field.name] {
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return trimmed }
+                }
+            }
+        }
+        return String(localized: "Entry \(index + 1)")
+    }
+
+    /// The secret sheet's title: both entry and secret for a dynamic entry secret, or the secret's own label.
+    static func secretSheetTitle(_ secret: ExtensionSecret, fallbackEntryTitle: String? = nil) -> String {
+        let secretLabel = secret.title.isEmpty ? secret.name : secret.title
+        guard secret.isEntrySecret else { return secretLabel }
+        let entry = [secret.entryTitle, fallbackEntryTitle]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        guard let entry else { return secretLabel }
+        return "\(entry) · \(secretLabel)"
+    }
+
+    /// A secret provider's "Used By" row title, appending the live entry's display title when present.
+    static func secretUserLabel(_ u: ExtensionSecretUser, machineName: (String) -> String) -> String {
+        if u.kind == "launcher" {
+            let name = u.launcherName ?? u.launcher ?? ""
+            return u.machine.map { String(localized: "\(name) key on \(machineName($0))") } ?? String(localized: "\(name) key")
+        }
+        let base = "\(u.extensionName ?? u.extension ?? "") › \(u.secretTitle ?? u.secret ?? "")"
+        if let entry = u.entryTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !entry.isEmpty {
+            return "\(base) (\(entry))"
+        }
+        return base
+    }
+
+    /// A secret provider's "Used By" reference detail line, prefixing the entry title when present.
+    static func secretUserDetail(_ u: ExtensionSecretUser) -> String {
+        if let entry = u.entryTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !entry.isEmpty {
+            return "\(entry) · \(u.reference)"
+        }
+        return u.reference
     }
 
     /// Whether an enabled plugin's program runs right now, under its description; nil for any other state.
@@ -819,6 +902,8 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
     private(set) var formError: String?
     /// The configuration being edited; saved as a whole (PUT replaces it).
     var draft: [String: JSONValue] = [:] { didSet { keepDraft() } }
+    /// UI-only stable keys for each entry list's rows (saved entries use `_id`, unsaved ones a local key); never enters JSON.
+    private(set) var entryKeys: [String: [String]] = [:]
     /// What number fields hold as typed, by path, until they read as a number.
     var numberText: [String: String] = [:] { didSet { keepDraft() } }
     /// The hub's launchers for the form's launcher pickers (format launcher), read once the form has one: nil before,
@@ -827,6 +912,9 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
     private(set) var loadingLaunchers = false
     @ObservationIgnored private let deps: Deps
     @ObservationIgnored private var draftKey: ExtensionDrafts.Key?
+    @ObservationIgnored private var nextEntryKey = 0
+
+    nonisolated static let defaultMaxEntries = 32
 
     init(id: String, manager: String? = nil, deps: Deps = .live) {
         self.id = id
@@ -837,7 +925,16 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
     /// The client for this page's requests: its manager named on each.
     private var api: APIClient? { deps.api()?.manager(manager) }
 
-    var dirty: Bool { (detail.map { draft != $0.config } ?? false) || !numberProblems.isEmpty }
+    var requiredEntryLists: Set<String> {
+        Set((detail?.form ?? []).filter { $0.isEntryList && $0.required == true }.map(\.name))
+    }
+
+    var dirty: Bool {
+        guard let detail else { return !numberProblems.isEmpty }
+        let required = requiredEntryLists
+        return Self.compact(draft, requiredEntryLists: required) != Self.compact(detail.config, requiredEntryLists: required)
+            || !numberProblems.isEmpty
+    }
 
     /// Number fields typed into that do not read as one, by path.
     var numberProblems: [String: String] {
@@ -871,7 +968,11 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
     /// page's other requests.
     func loadLaunchersIfNeeded() async {
         guard launchers == nil, !loadingLaunchers, let form = detail?.form,
-              form.contains(where: { $0.picksLauncher || ($0.fields ?? []).contains(where: \.picksLauncher) }),
+              form.contains(where: {
+                  $0.picksLauncher
+                      || ($0.fields ?? []).contains(where: \.picksLauncher)
+                      || ($0.items?.fields ?? []).contains(where: \.picksLauncher)
+              }),
               let api else { return }
         loadingLaunchers = true
         defer { loadingLaunchers = false }
@@ -912,8 +1013,8 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         defer { changingEnabled = false }
         do {
             guard let api else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
-            detail = try await api.setExtension(id, enabled: on, cascade: cascade)
-            error = nil
+            let d = try await api.setExtension(id, enabled: on, cascade: cascade)
+            applyDetail(d, preservingDraft: true)
             disableConfirmation = nil
             disableDialogPresented = false
         } catch let e as APIError where !on && !cascade && e.code == "has_dependents" {
@@ -941,8 +1042,8 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         defer { changingContribution = nil }
         do {
             guard let api else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
-            detail = try await api.setExtensionContribution(id, point: contribution.point, id: contribution.contributionID, enabled: enabled)
-            error = nil
+            let d = try await api.setExtensionContribution(id, point: contribution.point, id: contribution.contributionID, enabled: enabled)
+            applyDetail(d, preservingDraft: true)
         } catch {
             self.error = error.localizedDescription
         }
@@ -962,28 +1063,98 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         defer { saving = false }
         fieldErrors = [:]
         formError = nil
-        let ok = await run(refused: { self.formError = $0 }) { api in try await api.setExtension(self.id, config: Self.compact(self.draft)) }
+        let payload = Self.compact(draft, requiredEntryLists: requiredEntryLists)
+        let ok = await run(refused: { self.formError = $0 }) { api in try await api.setExtension(self.id, config: payload) }
         if ok { numberText = [:] }
         return ok
     }
 
-    /// Saves one field at once (a machine's switch) on top of what the hub has, keeping the rest of what is being
-    /// edited for Save.
+    /// Saves one field at once (a machine's switch) on top of what the hub has using `preserve_entries=1`, so stale
+    /// immediate writes never clobber entries added elsewhere; other unsaved edits stay in the draft.
     func saveNow(_ value: JSONValue?, at path: [String]) async {
         guard let saved = detail?.config else { return }
+        let wasDirty = dirty
         let editing = draft
+        let editingKeys = entryKeys
+        let requiredLists = requiredEntryLists
         set(value, at: path) // shows at once
         saving = true
         defer { saving = false }
         formError = nil
-        let key = path.joined(separator: ".")
+        let key = Self.fieldPath(path)
         let ok = await run(refused: { self.formError = $0 }) { api in
-            try await api.setExtension(self.id, config: Self.compact(Self.setting(saved, path[...], value)))
+            try await api.setExtension(self.id, config: Self.compact(Self.setting(saved, path[...], value), requiredEntryLists: requiredLists), preserveEntries: true)
         }
         // A retry that succeeds clears this field's refusal; errors on fields still being edited stay.
         if ok { fieldErrors.removeValue(forKey: key) }
-        // run took the hub's answer as the draft: the other edits go back on top of it.
-        draft = Self.setting(editing, path[...], ok ? self.value(path) : Self.value(in: saved, path))
+        if ok, !wasDirty {
+            // Clean draft adopts the hub's fresh config and entry keys (including entries added elsewhere).
+            return
+        }
+        // Keep other unsaved edits (or roll back the failed switch) along with their stable entry keys.
+        entryKeys = editingKeys
+        let freshValue = ok ? (detail.flatMap { Self.value(in: $0.config, path) }) : Self.value(in: saved, path)
+        draft = Self.setting(editing, path[...], freshValue)
+    }
+
+    /// Appends an empty unsaved entry to `listName`, keeping a stable UI-only key that never enters JSON.
+    func addEntry(to listName: String) {
+        guard let field = detail?.form.first(where: { $0.name == listName && $0.isEntryList }) else { return }
+        let entries = Self.entryItems(in: draft, at: [listName])
+        let maxItems = field.maxItems ?? Self.defaultMaxEntries
+        guard entries.count < maxItems else { return }
+        let existingKeys = entryKeys[listName] ?? entries.map { Self.entryID(of: $0) ?? nextLocalEntryKey() }
+        let nextEntries: [JSONValue] = entries.map(JSONValue.object) + [.object([:])]
+        entryKeys[listName] = existingKeys + [nextLocalEntryKey()]
+        fieldErrors.removeValue(forKey: listName)
+        draft = Self.setting(draft, [listName][...], .array(nextEntries))
+    }
+
+    /// Removes the entry identified by its stable `key` from `listName` in the draft only (persisted on Save).
+    func removeEntry(from listName: String, key: String) {
+        guard let field = detail?.form.first(where: { $0.name == listName && $0.isEntryList }) else { return }
+        let entries = Self.entryItems(in: draft, at: [listName])
+        let minItems = field.minItems ?? 0
+        if field.required == true && entries.count <= minItems { return }
+        let existingKeys = entryKeys[listName] ?? entries.enumerated().map { entryKey(for: listName, at: $0.offset, entry: $0.element) }
+        guard let index = existingKeys.firstIndex(of: key), entries.indices.contains(index) else { return }
+        var remaining = entries
+        remaining.remove(at: index)
+        var remainingKeys = existingKeys
+        remainingKeys.remove(at: index)
+        let nextValue: JSONValue? = (remaining.isEmpty && field.required != true) ? nil : .array(remaining.map(JSONValue.object))
+        entryKeys[listName] = remainingKeys
+        let prefix = "\(listName)["
+        fieldErrors = fieldErrors.filter { $0.key != listName && !$0.key.hasPrefix(prefix) }
+        draft = Self.setting(draft, [listName][...], nextValue)
+    }
+
+    func entryKey(for listName: String, at index: Int, entry: [String: JSONValue]) -> String {
+        if let keys = entryKeys[listName], keys.indices.contains(index) { return keys[index] }
+        return Self.entryID(of: entry) ?? "entry-\(index)"
+    }
+
+    private func nextLocalEntryKey() -> String {
+        nextEntryKey += 1
+        return "new-entry-\(nextEntryKey)"
+    }
+
+    private func keysFor(detail: HubExtensionDetail, config: [String: JSONValue]) -> [String: [String]] {
+        var out: [String: [String]] = [:]
+        for field in detail.form where field.isEntryList {
+            out[field.name] = Self.entryItems(in: config, at: [field.name]).map { Self.entryID(of: $0) ?? nextLocalEntryKey() }
+        }
+        return out
+    }
+
+    private func syncNextEntryKey(with map: [String: [String]]) {
+        for list in map.values {
+            for key in list where key.hasPrefix("new-entry-") {
+                if let n = Int(key.dropFirst("new-entry-".count)) {
+                    nextEntryKey = max(nextEntryKey, n)
+                }
+            }
+        }
     }
 
     /// Saves a secret. The value is only sent: never kept here, put in an error or logged.
@@ -1015,7 +1186,29 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
 
     private func keepDraft() {
         guard let key = draftKey, detail != nil else { return }
-        deps.drafts.values[key] = dirty ? .init(config: draft, numbers: numberText) : nil
+        deps.drafts.values[key] = dirty ? .init(config: draft, numbers: numberText, entryKeys: entryKeys) : nil
+    }
+
+    private func applyDetail(_ d: HubExtensionDetail, preservingDraft: Bool) {
+        let hasLiveEdits = preservingDraft && detail != nil && (dirty || !numberText.isEmpty)
+        let editing = hasLiveEdits ? draft : nil
+        let numbers = hasLiveEdits ? numberText : nil
+        let liveKeys = hasLiveEdits ? entryKeys : nil
+        let savedDraft = preservingDraft ? draftKey.flatMap { deps.drafts.values[$0] } : nil
+        let kept = editing ?? savedDraft?.config
+        let keptNumbers = numbers ?? savedDraft?.numbers
+        let keptKeys = liveKeys ?? savedDraft?.entryKeys
+        detail = d
+        let nextConfig = kept ?? d.config
+        if let keptKeys, kept != nil {
+            syncNextEntryKey(with: keptKeys)
+            entryKeys = keptKeys
+        } else {
+            entryKeys = keysFor(detail: d, config: nextConfig)
+        }
+        draft = nextConfig
+        numberText = keptNumbers ?? [:]
+        error = nil
     }
 
     /// Takes the new configuration on save; reloading and non-configuration actions keep the unsaved draft.
@@ -1026,17 +1219,18 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         do {
             guard let api else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
             let d = try await call(api)
-            let editing = preservingDraft && detail != nil ? draft : nil
-            let numbers = preservingDraft && detail != nil ? numberText : nil
-            let kept = editing ?? (preservingDraft ? draftKey.flatMap { deps.drafts.values[$0]?.config } : nil)
-            let keptNumbers = numbers ?? (preservingDraft ? draftKey.flatMap { deps.drafts.values[$0]?.numbers } : nil)
-            detail = d
-            draft = kept ?? d.config
-            numberText = keptNumbers ?? [:]
-            error = nil
+            applyDetail(d, preservingDraft: preservingDraft)
             return true
         } catch let e as APIError where e.code == "invalid_config" {
-            fieldErrors = [e.fields["field"] ?? "": e.fields["message"] ?? e.message]
+            let field = e.fields["field"] ?? ""
+            let message = e.fields["message"] ?? e.message
+            if !field.isEmpty && Self.drawnPaths(in: detail?.form ?? [], draft: draft).contains(field) {
+                fieldErrors = [field: message]
+                formError = nil
+            } else {
+                fieldErrors = [:]
+                formError = message
+            }
             error = nil
             return false
         } catch {
@@ -1062,50 +1256,135 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
 
     // MARK: the draft by path
 
-    func value(_ path: [String]) -> JSONValue? { Self.value(in: draft, path) }
-
-    static func value(in obj: [String: JSONValue], _ path: [String]) -> JSONValue? {
-        var cur: JSONValue = .object(obj)
-        for key in path {
-            guard let next = cur[key] else { return nil }
-            cur = next
-        }
-        return cur == .null ? nil : cur
+    nonisolated static func isArrayIndex(_ part: String) -> Bool {
+        guard !part.isEmpty else { return false }
+        if part == "0" { return true }
+        return part.first != "0" && part.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
-    /// Sets (nil: removes) the value at path; an emptied group goes too.
-    func set(_ value: JSONValue?, at path: [String]) {
-        draft = Self.setting(draft, path[...], value)
-    }
-
-    private static func setting(_ obj: [String: JSONValue], _ path: ArraySlice<String>, _ value: JSONValue?) -> [String: JSONValue] {
-        guard let key = path.first else { return obj }
-        var out = obj
-        if path.count == 1 {
-            out[key] = value
-        } else {
-            let inner = setting(obj[key]?.object ?? [:], path.dropFirst(), value)
-            out[key] = inner.isEmpty ? nil : .object(inner)
+    /// Dotted field path with entry indexes in the hub's validation-error form: `accounts[0].address`.
+    nonisolated static func fieldPath(_ path: [String]) -> String {
+        var out = ""
+        for part in path {
+            if isArrayIndex(part) {
+                out += "[\(part)]"
+            } else if out.isEmpty {
+                out = part
+            } else {
+                out += ".\(part)"
+            }
         }
         return out
     }
 
-    /// Without empty strings and lists the user cleared: "not set" (the schema's default applies).
-    static func compact(_ obj: [String: JSONValue]) -> [String: JSONValue] {
-        obj.compactMapValues { v in
-            switch v {
-            case .null: nil
-            case .string(let s) where s.isEmpty: nil
-            case .array(let a) where a.isEmpty: nil
-            case .object(let o): compact(o).isEmpty ? nil : .object(compact(o))
-            default: v
+    nonisolated static func entryItems(in config: [String: JSONValue], at path: [String]) -> [[String: JSONValue]] {
+        guard case .array(let items)? = value(in: config, path) else { return [] }
+        return items.compactMap(\.object)
+    }
+
+    nonisolated static func entryID(of entry: [String: JSONValue]) -> String? {
+        guard case .string(let id)? = entry["_id"], !id.isEmpty else { return nil }
+        return id
+    }
+
+    /// The validation-error path of every field the form draws (plain fields, groups, and entry-list rows).
+    nonisolated static func drawnPaths(in form: [ExtensionField], draft: [String: JSONValue] = [:]) -> Set<String> {
+        var out: Set<String> = []
+        for field in form {
+            if field.type == "object" {
+                for sub in field.fields ?? [] { out.insert("\(field.name).\(sub.name)") }
+            } else if field.isEntryList {
+                out.insert(field.name)
+                let entries = entryItems(in: draft, at: [field.name])
+                let subFields = field.items?.fields ?? []
+                for index in entries.indices {
+                    out.insert("\(field.name)[\(index)]._id")
+                    for sub in subFields { out.insert("\(field.name)[\(index)].\(sub.name)") }
+                }
+            } else {
+                out.insert(field.name)
             }
         }
+        return out
+    }
+
+    func value(_ path: [String]) -> JSONValue? { Self.value(in: draft, path) }
+
+    nonisolated static func value(in obj: [String: JSONValue], _ path: [String]) -> JSONValue? {
+        var cur: JSONValue = .object(obj)
+        for key in path {
+            switch cur {
+            case .array(let list):
+                guard isArrayIndex(key), let index = Int(key), list.indices.contains(index) else { return nil }
+                cur = list[index]
+            case .object(let dict):
+                guard let next = dict[key] else { return nil }
+                cur = next
+            default:
+                return nil
+            }
+        }
+        return cur == .null ? nil : cur
+    }
+
+    /// Sets (nil: removes) the value at path; an emptied group goes too. Numeric segments address entry rows.
+    func set(_ value: JSONValue?, at path: [String]) {
+        fieldErrors.removeValue(forKey: Self.fieldPath(path))
+        draft = Self.setting(draft, path[...], value)
+    }
+
+    private nonisolated static func setting(_ obj: [String: JSONValue], _ path: ArraySlice<String>, _ value: JSONValue?) -> [String: JSONValue] {
+        settingValue(.object(obj), path, value)?.object ?? [:]
+    }
+
+    private nonisolated static func settingValue(_ current: JSONValue?, _ path: ArraySlice<String>, _ value: JSONValue?) -> JSONValue? {
+        guard let key = path.first else { return value }
+        let rest = path.dropFirst()
+        if case .array(var list)? = current {
+            guard isArrayIndex(key), let index = Int(key), list.indices.contains(index) else { return current }
+            let next = rest.isEmpty ? value : settingValue(list[index], rest, value)
+            if let next { list[index] = next } else { list.remove(at: index) }
+            return .array(list)
+        }
+        var dict = current?.object ?? [:]
+        if rest.isEmpty {
+            dict[key] = value
+            return .object(dict)
+        }
+        let next = settingValue(dict[key], rest, value)
+        if let next, next != .object([:]) {
+            dict[key] = next
+        } else {
+            dict[key] = nil
+        }
+        return .object(dict)
+    }
+
+    /// Without empty strings and lists the user cleared: "not set" (the schema's default applies). A required entry list
+    /// named in `requiredEntryLists` is the exception: its explicit `[]` is a present, valid value the hub must receive.
+    nonisolated static func compact(_ obj: [String: JSONValue], requiredEntryLists: Set<String> = []) -> [String: JSONValue] {
+        var out: [String: JSONValue] = [:]
+        for (key, value) in obj {
+            switch value {
+            case .null:
+                continue
+            case .string(let s) where s.isEmpty:
+                continue
+            case .array(let a) where a.isEmpty && !requiredEntryLists.contains(key):
+                continue
+            case .object(let o):
+                let inner = compact(o)
+                if !inner.isEmpty { out[key] = .object(inner) }
+            default:
+                out[key] = value
+            }
+        }
+        return out
     }
 
     /// The error of a field (the hub's, or a number that does not read as one).
     func fieldError(_ path: [String]) -> String? {
-        let key = path.joined(separator: ".")
+        let key = Self.fieldPath(path)
         return fieldErrors[key] ?? numberProblems[key]
     }
 }

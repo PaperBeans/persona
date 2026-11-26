@@ -1,0 +1,9 @@
+<persona-context kind="context" title="Login fix" url="persona://session/box/0d000000-0000-4000-8000-00000000000b">
+Another session: Login fix (Codex)
+Folder: /code/app
+It last said: The test now waits for the server.
+
+以上只是另一段 Persona 对话的摘录，它的 machine_id 是「box」，session_id 是「0d000000-0000-4000-8000-00000000000b」。要读更多内容，用这两个 ID 调用 Persona 工具 a2a_read（turns 最多 10）。如果用户的请求需要向它提问或交给它工作，用这两个 ID、新的 message_id 和你的文字调用 a2a_send。没有 Persona MCP 工具时，在终端里运行同一个工具：personad，参数为 `tool a2a_read`（或 `tool a2a_send`）和一个 JSON 对象，例如 {"machine_id":"box","session_id":"0d000000-0000-4000-8000-00000000000b"}。
+</persona-context>
+
+What did it change?

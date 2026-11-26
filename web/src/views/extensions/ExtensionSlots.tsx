@@ -2,8 +2,8 @@
 // its entry is on the sidebar), the cards on "Overview" (overview_card, as the user arranged them: lib/overview-cards.ts,
 // laid out among Overview's own sections by views/OverviewBody.tsx) and the sections on a machine's page (machine_section). Each draws the extension's declarative View with ExtensionUI;
 // the list comes from lib/extension-slots.ts.
-import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { uiIcon, type UIIcon, type UIPlace, type UITone } from "../../lib/extension-ui";
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { PAGES_INDEX, PAGES_UI, uiIcon, type UIIcon, type UIPlace, type UIPush, type UITone } from "../../lib/extension-ui";
 import { useExtensionPlace, useExtensionSlot } from "../../lib/extension-slots";
 import { halvesPaired, type ArrangedCard, type ArrangedItem, type CardSpan, type SectionId } from "../../lib/overview-cards";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
@@ -33,7 +33,7 @@ const OwnerScope = ({ extension, children }: { extension: string; children: Reac
 
 /** A nav_page's icon from the fixed vocabulary, as one of the web's icons (unknown: the extension's). */
 const NAV_ICON: Record<UIIcon, IconName> = { extension: "extension", plugin: "extension", chart: "chart", gauge: "gauge", list: "list", bell: "bell", doc: "read", calendar: "calendar", money: "money",
-  branch: "branch", code: "code", pull_request: "pullRequest", merge: "merge", ...NEW_ICON_GLYPH };
+  branch: "branch", code: "code", pull_request: "pullRequest", merge: "merge", map: "map", ...NEW_ICON_GLYPH };
 export const navIcon = (icon?: string): IconName => NAV_ICON[uiIcon(icon)];
 
 /** A badge's tone as the sidebar's badge colors. */
@@ -55,28 +55,58 @@ export function ExtensionNavPage({ extension, ui, onToggleSidebar }: { extension
   const [n, setN] = useState(0);
   // a page a card or a section pushed opens here with the state it was pushed with (?state=)
   const state = useMemo(() => new URLSearchParams(location.search).get("state") ?? undefined, [extension, ui]);
-  const title = place?.title || ui;
-  // the extension's name after the title, unless it only says the title again
-  const name = nameBesideTitle(place?.extension_name, title);
-  // a code review or a file browser (UI version 4) and a dashboard of columns (8) take the page's whole width; everything
-  // else stays a column
-  const [wide, setWide] = useState(false);
+  // Dashboards (#15017): a page is titled by its own view (the hub writes the page's title there), since only a pinned
+  // page is listed; then its place's, then the product's name, never its id. Every page but the index says under its
+  // title that Persona keeps it, in the app's words at every width: the page's own words cannot pass for the app's.
+  const pages = extension === PAGES_UI;
+  const owned = pages && ui !== PAGES_INDEX;
+  // the title its view gave, for the page it was given for (this page stays mounted from one page to the next)
+  const at = `${extension}/${ui}`;
+  const [drawn, setDrawn] = useState<{ at: string; title?: string }>();
+  const onTitle = useCallback((title?: string) => setDrawn({ at, title }), [at]);
+  const viewTitle = pages && drawn?.at === at ? drawn.title : undefined;
+  const title = viewTitle || place?.title || (pages ? t("extensions-extensionslots.dashboards") : ui);
+  // the extension's name after the title, unless it only says the title again (a Dashboards page says who keeps it instead)
+  const name = owned ? undefined : nameBesideTitle(place?.extension_name, title);
+  // one heading, under which a Dashboards page adds its ownership line
+  const heading = <h1 className="min-w-0 truncate text-[14px] font-semibold text-ink">{title}</h1>;
+  // the index opens a page as a page of its own (its title, its ownership line, its address), not on its own stack
+  const openPage = useCallback(
+    (p: UIPush) => {
+      if (!p.ui || p.ui === ui || p.state) return false;
+      navigate(pageRoute(extension, p.ui));
+      return true;
+    },
+    [extension, ui],
+  );
+  // a code review or a file browser (UI version 4), a dashboard of columns (8), and interactive canvases (10–12: graph,
+  // scene, map) take the page's whole width; everything else stays a column
+  const [wideAt, setWideAt] = useState<{ at: string; wide: boolean }>();
+  const onWide = useCallback((next: boolean) => setWideAt({ at, wide: next }), [at]);
+  const wide = wideAt?.at === at && wideAt.wide;
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("extensions-extensionslots.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <span className="flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-field text-ink-2">
-          <Icon name={navIcon(place?.icon)} size={14} />
+          <Icon name={navIcon(place?.icon ?? (pages ? "chart" : undefined))} size={14} />
         </span>
-        <h1 className="min-w-0 truncate text-[14px] font-semibold text-ink">{title}</h1>
+        {owned ? (
+          <div className="min-w-0">
+            {heading}
+            <p className="truncate text-label text-ink-3" data-ownership-line>{t("extensions-extensionslots.kept_by_persona")}</p>
+          </div>
+        ) : (
+          heading
+        )}
         {name && <span className="hidden min-w-0 truncate text-[12px] text-ink-3 sm:inline">{name}</span>}
         <span className="flex-1" />
         <IconButton icon="retry" label={t("extensions-extensionslots.redraw")} onClick={() => setN((x) => x + 1)} />
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cx("mx-auto flex flex-col px-4 py-6 sm:px-8", wide ? "max-w-[1680px]" : "max-w-[880px]")}>
+        <div data-extension-page-container className={cx("mx-auto flex flex-col px-4 py-6 sm:px-8", wide ? "max-w-[1680px]" : "max-w-[880px]")}>
           <Suspense fallback={<Loading />}>
-            <OwnerScope extension={extension}><ExtensionUI key={`${extension}/${ui}/${n}`} extension={extension} ui={ui} title={title} bare state={state} onWide={setWide} remember /></OwnerScope>
+            <OwnerScope extension={extension}><ExtensionUI key={`${extension}/${ui}/${n}`} extension={extension} ui={ui} title={title} bare state={state} onWide={onWide} remember {...(pages ? { onTitle, openPage } : {})} /></OwnerScope>
           </Suspense>
         </div>
       </div>

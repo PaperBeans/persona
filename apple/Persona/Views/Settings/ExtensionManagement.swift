@@ -212,13 +212,18 @@ nonisolated struct ExtensionInstallRequest: Encodable {
     static let shared = ExtensionDrafts()
     /// An extension's draft by hub, id and manager (another manager's copy of the same id has its own).
     struct Key: Hashable { var source: String; var id: String; var manager: String? = nil }
-    struct Draft { var config: [String: JSONValue]; var numbers: [String: String] }
+    struct Draft {
+        var config: [String: JSONValue]
+        var numbers: [String: String]
+        /// UI-only stable entry keys for entry-list drafts; never enters JSON.
+        var entryKeys: [String: [String]] = [:]
+    }
     var values: [Key: Draft] = [:]
 }
 
 extension APIClient {
     func setExtensionContribution(_ ext: String, point: String, id: String, enabled: Bool) async throws -> HubExtensionDetail {
         try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT",
-            extensionPath("/\(ext)/-/contributions/\(point)/\(id)"), body: ["enabled": enabled]))
+            extensionPath("/\(ext)/-/contributions/\(point)/\(id)"), query: Self.entryListsQuery, body: ["enabled": enabled]))
     }
 }

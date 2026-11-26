@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/nwverse/persona/server/internal/kb"
 )
 
 // The attending routes through the manager's HTTP (docs/assistant/meeting-minutes.md "Attending a meeting"). All
@@ -53,7 +51,7 @@ func TestMeetingLiveHTTP(t *testing.T) {
 	if out := m.do("POST", livePath(meetingRec), "", two, http.StatusOK); out["next"] != float64(2) {
 		t.Fatalf("replay: %v", out)
 	}
-	l, _, _ := m.engine().LiveRead(meetingRec)
+	l, _, _ := recW(m.engine()).LiveRead(meetingRec)
 	if len(l.Segments) != 2 || l.Segments[1].Start != 0 || l.Segments[1].End != 0 {
 		t.Fatalf("stored %+v", l.Segments)
 	}
@@ -77,7 +75,7 @@ func TestMeetingLiveHTTP(t *testing.T) {
 			t.Errorf("%s: %v", name, out)
 		}
 	}
-	many := make([]map[string]any, kb.MaxLiveRequest+1)
+	many := make([]map[string]any, maxLiveRequest+1)
 	for i := range many {
 		many[i] = map[string]any{"start": i, "end": i, "text": "x"}
 	}
@@ -120,7 +118,7 @@ func TestMeetingLiveFull(t *testing.T) {
 	m := newMeetingFixture(t)
 	m.upload(meetingRec, 1, map[string]any{"attendance": "listener"})
 	big := strings.Repeat("a", 4000)
-	segs := make([]map[string]any, kb.MaxLiveRequest)
+	segs := make([]map[string]any, maxLiveRequest)
 	for i := range segs {
 		segs[i] = map[string]any{"start": i, "end": i, "text": big}
 	}
@@ -181,3 +179,7 @@ func TestMeetingAttendanceDefaultSetting(t *testing.T) {
 		t.Fatalf("another setting changed it: %s", got)
 	}
 }
+
+// maxLiveRequest is how many sentences one POST …/live carries at most (the recording module's limit,
+// internal/modules/recording/writers MaxLiveRequest).
+const maxLiveRequest = 200

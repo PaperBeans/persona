@@ -251,7 +251,7 @@ func (h *Hub) deliverNotify(in notifyRequest, machine, extID, manager string) (m
 	// Something that needs you: devices that turned off "Needs you" (prefs.input) get none of these either.
 	wants := pushWants{Kind: "input"}.fn()
 	build := func(i18n.Lang) map[string]any { return payload }
-	policy := pushPolicy{level: in.PushLevel, title: in.Title, body: in.Body}
+	policy := pushPolicy{kind: kindAlert, level: in.PushLevel, title: in.Title, body: in.Body, extension: extID}
 	if in.ID != "" { // the caller's own id, apart from every other manager's and extension's same id
 		policy.relatedKey = "notify:" + manager + "/" + extID + "/" + in.ID
 	}

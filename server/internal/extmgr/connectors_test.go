@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botport"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connector/proc"
 	"github.com/nwverse/persona/server/internal/extension"
@@ -20,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/githubport"
 	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/imessagewire"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -215,10 +217,14 @@ func TestConnectorsListTheSameCapabilities(t *testing.T) {
 	want := []string{
 		"mail tools,actions,archive hosts=[] options=false",
 		"github status,tools,actions,events,hosts,inbox,archive,login,options,threads hosts=[github.com] options=true",
+		"larksync status,archive,items hosts=[] options=false",                      // the Lark user sync's outbox (larksync_connector.go)
 		"imessage status,tools,catalog,events,inbox,archive hosts=[] options=false", // catalog: inbox_things (#6317)
 	}
-	if githubport.Factory() == nil { // a build without the GitHub module has no built-in GitHub connector
+	if githubport.Factory(moduleswitch.Set{}) == nil { // a build without the GitHub module has no built-in GitHub connector
 		want = slices.DeleteFunc(want, func(s string) bool { return strings.HasPrefix(s, "github ") })
+	}
+	if !botport.Available(moduleswitch.Set{}) { // nor one without the lark module the Lark user sync's
+		want = slices.DeleteFunc(want, func(s string) bool { return strings.HasPrefix(s, "larksync ") })
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

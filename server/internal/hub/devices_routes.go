@@ -127,6 +127,10 @@ func (h *Hub) deviceRoutesRelayed(api *http.ServeMux) {
 				writeErrCode(w, http.StatusForbidden, proto.CodeReadOnly, i18n.Err("outbox.read_only"))
 				return
 			}
+			if (pattern == devicewire.HeldStartsListRoute || pattern == devicewire.HeldStartRetryRoute || pattern == devicewire.HeldStartDeleteRoute) && !personSent(r.Context()) {
+				writeErrCode(w, http.StatusForbidden, proto.CodeReadOnly, i18n.Err("devices-held-starts.read_only"))
+				return
+			}
 			if fullOnly && !mayTrust(principalOf(r.Context())) {
 				writeErrCode(w, http.StatusForbidden, "forbidden", i18n.Err("hub-link_switch.forbidden"))
 				return

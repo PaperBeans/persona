@@ -367,19 +367,15 @@ struct PhoneSystemToolsTests {
 
     /// iOS 26.0 requires the Alert Stop field. From iOS 26.1 Apple deprecates it and the newer AlarmKit encoder omits
     /// it; Xcode 27.2 / iOS 27.0 demonstrates that omission. No other version may substitute Pause/Resume for Stop.
+    /// The encoder ships with the OS, so the runtime decides, not the compiler: Xcode 26.1–26.6 are Swift 6.2/6.3 and run
+    /// on iOS 26.1+ simulators that omit it too (#14501).
     @available(iOS 26.0, *)
     private func requireEncodedStop(
         alert: [String: Any], tintArchive: String, expectedText: LocalizedStringResource, state: String
     ) throws {
-        #if compiler(>=6.4)
-        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion > 26 ||
-            (ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26 &&
-             ProcessInfo.processInfo.operatingSystemVersion.minorVersion >= 1) {
-            if alert["stopButton"] == nil {
-                return
-            }
+        if #available(iOS 26.1, *), alert["stopButton"] == nil {
+            return
         }
-        #endif
         let stop = try #require(alert["stopButton"] as? [String: Any],
                                 "\(state): iOS 26.0 requires the Alert Stop configuration")
         #expect(stop["systemImageName"] as? String == Theme.Icon.interrupt, "\(state): actual Stop symbol")

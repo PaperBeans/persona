@@ -201,3 +201,113 @@ func TestNoProgressRendered(t *testing.T) {
 		t.Fatalf("worker supervise:\n%s", got)
 	}
 }
+
+func TestNoProgressTracksBackgroundWorkflowAndSubagentProgress(t *testing.T) {
+	base := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	task := Todo{ID: "t", Supervision: &Supervision{Supervisor: "main"}}
+
+	t.Run("workflow phase and completed agents advance progress", func(t *testing.T) {
+		s := &Service{}
+		c := spinning(base, 0)
+		c.Workflows = []proto.Workflow{{
+			RunID: "wf_1", TaskID: "w1", Name: "audit", Status: proto.WorkflowRunning, Running: true,
+			Phase: "Scan", PhaseIndex: 1, AgentsStarted: 2, AgentsDone: 0, StartedAt: base, UpdatedAt: base,
+		}}
+		s.observeProgress(c, base)
+		if got := s.lastProgressAt("box", "s1"); !got.IsZero() {
+			t.Fatalf("initial observation recorded progress: %v", got)
+		}
+
+		// While the workflow runs, polling never raises no_progress, and advancing workflow counts resets progressAt.
+		for i := 1; i <= 40; i++ {
+			now := base.Add(time.Duration(i) * time.Minute)
+			row := spinning(base, i)
+			wf := c.Workflows[0]
+			if i >= 20 {
+				wf.Phase, wf.PhaseIndex, wf.AgentsDone = "Verify", 2, 1
+			}
+			row.Workflows = []proto.Workflow{wf}
+			if g, ok := s.noProgressSignal(task, row, now); ok {
+				t.Fatalf("minute %d: running workflow raised no_progress: %+v", i, g)
+			}
+		}
+		if got, want := s.lastProgressAt("box", "s1"), base.Add(20*time.Minute); !got.Equal(want) {
+			t.Fatalf("progressAt = %v, want %v", got, want)
+		}
+
+		// Completing the workflow counts as progress at completion; transitioning to WorkflowStalled does not.
+		doneAt := base.Add(41 * time.Minute)
+		doneRow := spinning(base, 41)
+		doneRow.Workflows = []proto.Workflow{{
+			RunID: "wf_1", TaskID: "w1", Name: "audit", Status: proto.WorkflowCompleted, Running: false,
+			Phase: "Verify", PhaseIndex: 2, AgentsStarted: 2, AgentsDone: 2, StartedAt: base, UpdatedAt: doneAt, EndedAt: &doneAt,
+		}}
+		s.observeProgress(doneRow, doneAt)
+		if got := s.lastProgressAt("box", "s1"); !got.Equal(doneAt) {
+			t.Fatalf("completed workflow progressAt = %v, want %v", got, doneAt)
+		}
+	})
+
+	t.Run("stalled workflow does not count as progress or alive work", func(t *testing.T) {
+		s := &Service{}
+		c := spinning(base, 0)
+		c.Workflows = []proto.Workflow{{
+			RunID: "wf_2", TaskID: "w2", Status: proto.WorkflowRunning, Running: true,
+			Phase: "Scan", AgentsStarted: 1, StartedAt: base, UpdatedAt: base,
+		}}
+		s.observeProgress(c, base)
+		stalled := spinning(base, 31)
+		stalled.Workflows = []proto.Workflow{{
+			RunID: "wf_2", TaskID: "w2", Status: proto.WorkflowStalled, Running: false,
+			Phase: "Scan", AgentsStarted: 1, StartedAt: base, UpdatedAt: base,
+		}}
+		s.observeProgress(stalled, base.Add(31*time.Minute))
+		if aliveBackgroundWork(stalled, base.Add(31*time.Minute)) {
+			t.Fatal("WorkflowStalled counted as alive background work")
+		}
+		if got := s.lastProgressAt("box", "s1"); !got.IsZero() {
+			t.Fatalf("WorkflowStalled falsely recorded progress: %v", got)
+		}
+	})
+
+	t.Run("subagent steps advance progress", func(t *testing.T) {
+		s := &Service{}
+		c := spinning(base, 0)
+		c.Subagents = []proto.Subagent{{ID: "a1", Running: true, Steps: 3, StartedAt: base, UpdatedAt: base}}
+		s.observeProgress(c, base)
+		at15 := base.Add(15 * time.Minute)
+		next := spinning(base, 15)
+		next.Subagents = []proto.Subagent{{ID: "a1", Running: true, Steps: 5, StartedAt: base, UpdatedAt: at15}}
+		if _, ok := s.noProgressSignal(task, next, at15); ok {
+			t.Fatal("running subagent raised no_progress")
+		}
+		if got := s.lastProgressAt("box", "s1"); !got.Equal(at15) {
+			t.Fatalf("subagent progressAt = %v, want %v", got, at15)
+		}
+	})
+
+	t.Run("waiting or stalled background shell is not alive work", func(t *testing.T) {
+		waiting := proto.Session{
+			State: proto.StateWorking, BackgroundWorking: true, BackgroundWaiting: true,
+			Background: []proto.BackgroundTask{{ID: "b1", Kind: "shell", StartedAt: base}},
+		}
+		if aliveBackgroundWork(waiting, base.Add(time.Hour)) {
+			t.Fatal("waiting background shell counted as alive work")
+		}
+		hung := proto.Session{
+			State: proto.StateWorking, BackgroundWorking: true,
+			BackgroundStalledSince: proto.UnixTime32Of(base),
+			Background:             []proto.BackgroundTask{{ID: "b1", Kind: "shell", StartedAt: base}},
+		}
+		if aliveBackgroundWork(hung, base.Add(time.Hour)) {
+			t.Fatal("stalled background shell counted as alive work")
+		}
+		active := proto.Session{
+			State: proto.StateWorking, BackgroundWorking: true,
+			Background: []proto.BackgroundTask{{ID: "b1", Kind: "shell", StartedAt: base}},
+		}
+		if !aliveBackgroundWork(active, base.Add(time.Hour)) {
+			t.Fatal("active non-waiting background shell did not count as alive work")
+		}
+	})
+}

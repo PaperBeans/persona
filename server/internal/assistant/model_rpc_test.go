@@ -293,6 +293,14 @@ func TestExtensionCompleteRespectsAHeldConnection(t *testing.T) {
 	if sent != 1 {
 		t.Fatalf("sent %d times while held", sent)
 	}
+	// A later fake model may get this same loopback address after the listener closes.
+	other := newFakeHub()
+	other.fakeModel(t)
+	next := other.hello.Models.AI
+	next.BaseURL = srv.URL
+	if ai.Held(next) != nil {
+		t.Fatal("an independent model fixture inherited the previous account's quota hold")
+	}
 }
 
 func TestReplySchemaSubset(t *testing.T) {

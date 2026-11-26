@@ -342,11 +342,11 @@ func TestInboxAgentSweepRetriesAnUndoneStop(t *testing.T) {
 	started := time.Now().Add(-2 * time.Hour)
 	it.Agent.StartedAt = &started
 	store := &inboxAgentStopFailStore{inboxMemStore: h.st, failStop: true}
-	previousStore := h.Service.store
-	h.Service.store = func() Store { return store }
+	previousStore := h.Service.storeAccessor()
+	h.Service.setStore(func() Store { return store })
 	t.Cleanup(func() {
 		h.deliverNotes(context.Background(), it) // finish tellSoon's save before restoring the store it reads
-		h.Service.store = previousStore
+		h.Service.setStore(previousStore)
 	})
 	h.sweepInboxAgents(context.Background(), InboxAgentConfig{Enabled: true}, time.Now())
 	if it.Handling.State != HandlingAgent || it.Agent.State == AgentFailed || inboxAgentStoppedCount(it) != 0 || len(h.f.sentToAgents()) != 0 {

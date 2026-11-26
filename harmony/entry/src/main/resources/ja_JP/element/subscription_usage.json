@@ -1,0 +1,148 @@
+{
+  "string": [
+    {
+      "name": "sub_usage_heading",
+      "value": "サブスクリプションの使用量"
+    },
+    {
+      "name": "sub_usage_filter",
+      "value": "表示するアカウントの種類"
+    },
+    {
+      "name": "sub_usage_other",
+      "value": "その他"
+    },
+    {
+      "name": "sub_usage_account_count",
+      "value": "{1}アカウント"
+    },
+    {
+      "name": "sub_usage_outdated",
+      "value": "古いデータ"
+    },
+    {
+      "name": "sub_usage_outdated_age",
+      "value": "古いデータ · {1}"
+    },
+    {
+      "name": "sub_usage_seconds_ago",
+      "value": "{1}秒前"
+    },
+    {
+      "name": "sub_usage_minutes_ago",
+      "value": "{1}分前"
+    },
+    {
+      "name": "sub_usage_hours_ago",
+      "value": "{1}時間前"
+    },
+    {
+      "name": "sub_usage_days_ago",
+      "value": "{1}日前"
+    },
+    {
+      "name": "sub_usage_soon",
+      "value": "まもなくリセット"
+    },
+    {
+      "name": "sub_usage_reset_mins",
+      "value": "{1}分後にリセット"
+    },
+    {
+      "name": "sub_usage_reset_clock",
+      "value": "{1}にリセット"
+    },
+    {
+      "name": "sub_usage_reset_days",
+      "value": "{1}日{2}時間後にリセット"
+    },
+    {
+      "name": "sub_usage_reset_hours",
+      "value": "{1}時間後にリセット"
+    },
+    {
+      "name": "sub_usage_over",
+      "value": "ペース速め"
+    },
+    {
+      "name": "sub_usage_under",
+      "value": "ペース遅め"
+    },
+    {
+      "name": "sub_usage_used",
+      "value": "{1}使用済み"
+    },
+    {
+      "name": "sub_usage_protect",
+      "value": "保護 {1}%"
+    },
+    {
+      "name": "sub_usage_source_local",
+      "value": "コンピューター"
+    },
+    {
+      "name": "sub_usage_source_named",
+      "value": "ソース：{1}"
+    },
+    {
+      "name": "sub_usage_source_plan",
+      "value": "{1}、ソース：{2}"
+    },
+    {
+      "name": "sub_usage_rejected",
+      "value": "ゲートウェイがキーを拒否しました。管理画面 → 使用量ソースで更新してください。前回の数値を表示しています"
+    },
+    {
+      "name": "sub_usage_unreachable",
+      "value": "ゲートウェイに一時的に接続できません。前回の数値を表示しています"
+    },
+    {
+      "name": "sub_usage_failed",
+      "value": "ゲートウェイを読み取れませんでした。前回の数値を表示しています"
+    },
+    {
+      "name": "sub_usage_error",
+      "value": "ゲートウェイがこのアカウントを読み込めませんでした。保存されている数値を表示しています"
+    },
+    {
+      "name": "sub_usage_timeline",
+      "value": "リセットのタイムライン"
+    },
+    {
+      "name": "sub_usage_legend_short",
+      "value": "5h ウィンドウのリセット"
+    },
+    {
+      "name": "sub_usage_legend_week",
+      "value": "7d ウィンドウのリセット"
+    },
+    {
+      "name": "sub_usage_now",
+      "value": "現在"
+    },
+    {
+      "name": "sub_usage_axis_hours",
+      "value": "{1}h"
+    },
+    {
+      "name": "sub_usage_axis_days",
+      "value": "{1}d"
+    },
+    {
+      "name": "sub_usage_mins",
+      "value": "{1}分"
+    },
+    {
+      "name": "sub_usage_hours",
+      "value": "{1}時間"
+    },
+    {
+      "name": "sub_usage_days",
+      "value": "{1}日"
+    },
+    {
+      "name": "sub_usage_days_hours",
+      "value": "{1}日{2}時間"
+    }
+  ]
+}

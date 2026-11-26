@@ -240,6 +240,82 @@ struct ExtensionSceneModelTests {
         #expect(!reopened.touched && reopened.camera == ExtensionSceneCameraState(yaw: 205, pitch: 38, zoom: 1.2))
     }
 
+    @Test func aTallFullScreenViewOpensSteeperAndTheCardKeepsTheScenesPitch() async {
+        let scene = Self.sampleScene(camera: ExtensionSceneCamera(yaw: 205, pitch: 35, zoom: 1))
+        let model = ExtensionSceneModel(scene: scene, keeps: false)
+        await model.reload(scene)
+        let steep = Theme.Scene.tallViewPitch
+
+        // an untouched camera follows the tall view's default, and back when the view closes
+        model.setTallView(true)
+        #expect(model.camera == ExtensionSceneCameraState(yaw: 205, pitch: steep, zoom: 1) && !model.touched)
+        #expect(model.defaultCamera == model.camera)
+        model.setTallView(false)
+        #expect(model.camera == ExtensionSceneCameraState(yaw: 205, pitch: 35, zoom: 1))
+
+        // a redraw keeps the tall default; reset goes back to it
+        model.setTallView(true)
+        await model.reload(scene)
+        #expect(model.camera.pitch == steep)
+        model.orbit(deltaYaw: 20, deltaPitch: -15)
+        model.reset()
+        #expect(model.camera.pitch == steep && !model.touched)
+
+        // a camera the person turned stays where they left it when the view closes
+        model.orbit(deltaYaw: 20, deltaPitch: -5)
+        let turned = model.camera
+        model.setTallView(false)
+        #expect(model.camera == turned && model.touched)
+
+        // a scene that already looks down more keeps its own pitch
+        let top = Self.sampleScene(camera: ExtensionSceneCamera(yaw: 205, pitch: 80, zoom: 1))
+        let topModel = ExtensionSceneModel(scene: top, keeps: false)
+        topModel.setTallView(true)
+        #expect(topModel.camera.pitch == 80)
+    }
+
+    @Test func aPinOnScreenStaysInsideTheViewport() {
+        let projection = ExtensionSceneProjection(bounds: ExtensionSceneBounds.of(Self.sampleShapes()),
+                                                  camera: ExtensionSceneCameraState(), viewport: CGSize(width: 300, height: 600))
+        let inset = Theme.Scene.pinEdgeInset
+        // a pill hanging off the left edge moves right; one off the bottom moves up
+        let left = projection.keptInside(CGRect(x: -30, y: 100, width: 120, height: 30), anchor: CGPoint(x: 30, y: 115))
+        #expect(left.minX == inset && left.minY == 100 && left.width == 120)
+        let bottom = projection.keptInside(CGRect(x: 200, y: 590, width: 80, height: 30), anchor: CGPoint(x: 240, y: 595))
+        #expect(bottom.maxY == 600 - inset && bottom.minX == 200)
+        // wider than the viewport: centred
+        let wide = projection.keptInside(CGRect(x: 0, y: 10, width: 400, height: 30), anchor: CGPoint(x: 200, y: 25))
+        #expect(wide.midX == 150)
+        // an anchor off screen keeps its pill with it
+        let off = CGRect(x: -200, y: 100, width: 120, height: 30)
+        #expect(projection.keptInside(off, anchor: CGPoint(x: -140, y: 115)) == off)
+    }
+
+    @Test func pinsWithAnIconShowOnlyTheIconAndNeverChangeSizeWhileTurning() {
+        let pins = [
+            ExtensionScenePin(id: "lamp", at: [-1.9, 0.3], height: 2.35, label: "Ceiling lamp", state: "On", icon: "light"),
+            ExtensionScenePin(id: "lamp2", at: [-1.7, 0.4], height: 2.35, label: "Reading lamp", state: "Off", icon: "light"),
+            ExtensionScenePin(id: "plain", at: [2.3, 0.3], label: "Kettle", state: "Off"),
+        ]
+        let bounds = ExtensionSceneBounds.of(Self.sampleShapes())
+        let compact = Theme.Size.scenePinCompactWidth
+        var plainWidths: Set<CGFloat> = []
+        for yaw in stride(from: 0.0, to: 360, by: 15) {
+            for zoom in [0.6, 1.0, 2.5] {
+                let projection = ExtensionSceneProjection(bounds: bounds, camera: ExtensionSceneCameraState(yaw: yaw, pitch: 40, zoom: zoom),
+                                                          viewport: CGSize(width: 390, height: 600))
+                let placed = ExtensionScenePinLayout.place(pins, projection: projection, scale: 1)
+                // the two lamps stand close together: both stay the same compact pill at every angle and zoom
+                for id in ["lamp", "lamp2"] {
+                    #expect(placed[id]?.collapsed == true && placed[id]?.rect.width == compact, "\(id) at yaw \(yaw), zoom \(zoom)")
+                }
+                if let plain = placed["plain"] { plainWidths.insert(plain.rect.width) }
+            }
+        }
+        // a pin without an icon has only words to show: it keeps them when nothing nearer covers it
+        #expect(plainWidths.contains { $0 > compact })
+    }
+
     @Test func persistenceKeyScopesByNamespaceAndCoalescesWheelSaves() async throws {
         let a = ExtensionSceneModel(scene: Self.sampleScene(), namespace: "example-home/home-a", keeps: false)
         let b = ExtensionSceneModel(scene: Self.sampleScene(), namespace: "example-home/home-b", keeps: false)

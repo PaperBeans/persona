@@ -7,7 +7,7 @@ import { useState } from "react";
 import { t } from "../../i18n";
 import {
   addPageGroup, arrangeSections, EXTENSION_CAP, getSidebarPrefs, inList, LOCKED, movePageGroup, ordered, pageGroups, removePageGroup, renamePageGroup,
-  resetSidebarPrefs, restoreSidebarPrefs, setPageGroup, setPageOrder, setPageShown, useSidebarPrefs, chosen,
+  resetSidebarPrefs, restoreSidebarPrefs, setPageGroup, setPageOrder, setPageShown, setMoreShown, useSidebarPrefs, chosen, moreShown,
 } from "../../lib/sidebar-pages";
 import { useStartPageSynced } from "../../lib/start-page";
 import { Button, cx, IconButton, toast } from "../../ui/atoms";
@@ -83,7 +83,7 @@ export function SidebarPagesGroup() {
       anchor="sidebar-pages"
       title={t("settings.sidebar_pages")}
       footer={`${t("settings.sidebar_pages_footer", { cap: EXTENSION_CAP })} ${synced ? t("settings.start_page_footer_synced") : t("settings.start_page_footer_local")}`}
-      right={chosen(prefs) ? <Button tone="quiet" onClick={resetSidebarPrefs} className="-mb-1 h-6 px-2 text-[11.5px]">{t("settings.sidebar_pages_reset")}</Button> : undefined}
+      right={chosen(prefs) ? <Button tone="quiet" onClick={resetSidebarPrefs} className="-mb-1 h-6 px-2 text-submeta">{t("settings.sidebar_pages_reset")}</Button> : undefined}
     >
       {sections.map((s, gi) => {
         const inGroup = s.pages.map((p) => p.k);
@@ -148,8 +148,8 @@ export function SidebarPagesGroup() {
                     {/* the page's name and where it is wrap on a phone, beside the row's controls, rather than being cut */}
                     {/* at least a name's width: on a phone the controls go under it rather than squeezing it */}
                     <div className="min-w-32 flex-1">
-                      <div className="break-words text-[13px] text-ink">{p.label}</div>
-                      <div className="mt-0.5 break-words text-[11.5px] text-ink-3">
+                      <div className="break-words text-meta text-ink">{p.label}</div>
+                      <div className="mt-0.5 break-words text-submeta text-ink-3">
                         {locked ? t("settings.sidebar_pages_locked") : on ? t("settings.sidebar_pages_in_list") : t("settings.sidebar_pages_in_more")}
                         {from && ` · ${from}`}
                       </div>
@@ -173,6 +173,14 @@ export function SidebarPagesGroup() {
           </div>
         );
       })}
+      <div data-sidebar-more className="flex min-h-11 items-center gap-3 border-t border-line px-3 py-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-inset text-ink-2 shadow-hairline"><Icon name="more" size={14} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="text-meta text-ink">{t("settings.sidebar_more_show")}</div>
+          <div className="mt-0.5 break-words text-submeta text-ink-3">{t(moreShown(prefs) ? "settings.sidebar_more_hint_on" : "settings.sidebar_more_hint_off")}</div>
+        </div>
+        <Switch on={moreShown(prefs)} onChange={setMoreShown} label={t("settings.sidebar_more_show")} />
+      </div>
       <div className="flex min-h-11 items-center px-3 py-1.5">
         {editing === "+" ? (
           <NameField initial="" label={t("settings.sidebar_groups_name")} onCancel={() => setEditing(null)} onDone={(v) => (v.trim() && addPageGroup(ids, v), setEditing(null))} />

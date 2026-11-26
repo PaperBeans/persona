@@ -18,6 +18,8 @@ export struct ExtensionPage {
   @Param context: ExtensionViewRecord = {};
   @Param initialView: ExtensionViewRecord | undefined = undefined;
   @Param compact: boolean = false;
+  @Param inboxSources: boolean = false;
+  @Param healthIntake: boolean = false;
   @Param active: boolean = true;
   @Param authorized: boolean = true;
   @Param refreshRevision: number = 0;
@@ -32,7 +34,7 @@ export struct ExtensionPage {
   aboutToDisappear(): void { this.extensionUI.dispose(); this.bound = false; }
   private bindPage(): void {
     this.extensionUI.setNavigationHandler((effect: ExtensionUINavigationEffect) => this.dispatchNavigation(effect));
-    this.extensionUI.bind(this.model, this.extensionId, this.uiId, this.context, this.initialView, this.compact, this.onLink, this.active && this.authorized, this.state);
+    this.extensionUI.bind(this.model, this.extensionId, this.uiId, this.context, this.initialView, this.compact, this.onLink, this.active && this.authorized, this.state, this.inboxSources,this.healthIntake);
     if (!this.authorized) this.extensionUI.invalidateAuthorization();
     this.extensionUI.setVisible(this.active && this.authorized); this.bound = true;
     this.onTitle(this.extensionUI.pageTitle || this.extensionId);
@@ -58,7 +60,7 @@ export struct ExtensionPage {
       primaryButton: { value: tr('cancel'), action: () => this.extensionUI.confirmAction(token, false) },
       secondaryButton: { value: tr('confirm'), action: () => this.extensionUI.confirmAction(token, true) } });
   }
-  @Monitor('context', 'extensionId', 'uiId', 'state') inputChanged(): void {
+  @Monitor('context', 'extensionId', 'uiId', 'state', 'inboxSources', 'healthIntake') inputChanged(): void {
     if (this.bound) this.bindPage();
   }
 

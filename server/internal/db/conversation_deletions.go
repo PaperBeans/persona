@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -22,6 +23,13 @@ func conversationDeletionKey(machine, session string) string {
 // from overlapping manager processes before deletion and index cleanup.
 func (d *DB) PutConversationDeletion(ctx context.Context, machine, session string, row json.RawMessage) error {
 	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		// The pages it kept for the owner go to Recently removed, and its drafts go, in the same transaction
+		// (Dashboards, #15017). First: the pages' lock comes before any setting row's (assistant_pages.go).
+		if machine != "" && session != "" {
+			if _, err := RemoveConversationAssistantPagesTx(ctx, tx, machine, session, time.Now()); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO settings (key,value,updated_at) VALUES ($1,'{}',now()) ON CONFLICT (key) DO NOTHING`, ConversationDeletionsKey); err != nil {
 			return err
 		}

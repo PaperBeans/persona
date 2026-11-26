@@ -1,7 +1,7 @@
 // The two small dialogs the palette's node commands ask with (lib/node-palette.ts): a name for a rename, a yes for a
 // close. Mounted once, with the sidebar.
 import { useState, useSyncExternalStore } from "react";
-import { answerAsk, getAsk, subscribeAsk } from "../lib/node-palette";
+import { answerAsk, getAsk, subscribeAsk } from "../lib/node-ask";
 import { Button, Dialog } from "../ui/atoms";
 import { t } from "../i18n";
 

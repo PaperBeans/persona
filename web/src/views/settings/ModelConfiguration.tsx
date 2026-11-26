@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, ApiError, enc, errorText } from "../../lib/api";
+import { api, ApiError, enc, errorText, invalidateInFlightGets } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
   providerAgent, providerName, modelProviderTitle, modelPurpose, modelSummary, runtimeLabel, usageTokens,
@@ -10,17 +10,19 @@ import {
   ownRecord, parentCategory, permissionModesForProvider, providersFor, purposeDescription, purposeGroups, purposeLaunch, resetPatch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter,
   withUsesAfterCategories,
 } from "../../lib/model-config-execution";
-import { BYPASS_MODE, BYPASS_WARNING, modeTitle } from "../../lib/session-actions";
+import { BYPASS_MODE, BYPASS_WARNING, CODEX_EFFORTS, modeTitle } from "../../lib/session-actions";
 import { ASSISTANT_MODEL_PICK_FEATURE, mainChatAgentMismatch } from "../../lib/assistant-models";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import type { AssistantLaunchers } from "../../lib/session-models";
-import { effortChoices, takesEffort } from "../../lib/launcher-models";
+import { launcherBindingState } from "../../lib/launcher-model-binding";
+import { ALL_EFFORTS } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
 import { formatTokens } from "../../lib/tokens";
 import { formatNumber, t } from "../../i18n";
 import { Button, Dialog, IconButton, Loading, toast } from "../../ui/atoms";
 import { Segmented } from "../assistant/parts";
 import { Icon } from "../../ui/icons";
+import { LauncherEffortSelect } from "../../ui/LauncherEffortSelect";
 import { Group, Pill, Row } from "./SettingsParts";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { ConfigurationManager } from "./ConfigurationManager";
@@ -72,8 +74,9 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   // Each load's number: only the latest one's answer is shown, so an older GET still on its way (the first one, a
   // Refresh) cannot put back what a save's reload has just replaced.
   const loads = useRef(0);
-  const load = async () => {
+  const load = async (fresh = false) => {
     const at = ++loads.current;
+    if (fresh) invalidateInFlightGets("/model-config");
     try {
       // the background supervisor's purpose is listed right after Main chat (#5082). A hub since #5806 has it in the
       // catalog; one before that answers it by its own id only, so only then is it asked for. There, only a hub that
@@ -107,7 +110,7 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3" />
           {query && <IconButton icon="x" label={t("settings-modelconfiguration.clear")} size={22} iconSize={12} onClick={() => setQuery("")} />}
         </label>
-        <IconButton icon="retry" label={t("settings-modelconfiguration.refresh")} onClick={() => void load()} />
+        <IconButton icon="retry" label={t("settings-modelconfiguration.refresh")} onClick={() => void load(true)} />
       </div>
       <p className="mb-5 px-1 text-[12px] leading-relaxed text-ink-3">{t("settings-modelconfiguration.intro")}</p>
       {!data && !error && <Loading />}
@@ -172,6 +175,10 @@ function PurposeRow({ purpose: p, providers, sourceName, category, onOpen }: { p
           </div>
           {usage && <div data-testid="purpose-usage" className="mt-1 truncate" title={usageDetail}>
             {t("settings-modelconfiguration.usage", { count: usage.calls, calls: formatNumber(usage.calls), tokens: formatTokens(usageTokens(usage)) })}
+            {/* failed calls on the line itself, not only in its tooltip: a purpose whose every call fails otherwise reads as busy */}
+            {usage.failures > 0 && <span data-testid="purpose-usage-failures" className="text-red">
+              {" · "}{t("settings-modelconfiguration.usage_failures", { count: usage.failures, failures: formatNumber(usage.failures) })}
+            </span>}
           </div>}
         </>} />
       </div>
@@ -223,9 +230,10 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
       ?? a.conversations.find((row) => row.machine_id === a.machine_id && row.session_id === a.main);
   });
   const kept = useStore((s) => s.features.includes(ASSISTANT_MODEL_PICK_FEATURE));
-  const load = async () => {
+  const load = async (fresh = false) => {
     if (!id) return;
     const at = ++loads.current;
+    if (fresh) invalidateInFlightGets("/model-config/purposes");
     try {
       const r = await modelPurpose(id, manager);
       if (!alive.current || at !== loads.current) return;
@@ -297,11 +305,11 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   const inheritedModel = following
     ? sameParentProvider ? parent?.effective?.model : undefined
     : sameEffectiveProvider && !p?.override?.model ? p?.effective?.model : undefined;
-  const inherited: ModelBinding = inheritedModel ? { model: inheritedModel } : {};
   const effortModel = draft.model.trim() || inheritedModel || chosen?.model || p?.effective?.model || "";
   const inheritedEffort = following
     ? sameParentProvider ? parent?.effective?.effort : undefined
     : sameEffectiveProvider && !p?.override.effort ? p?.effective?.effort : undefined;
+  const inherited: ModelBinding = { model: inheritedModel || (listProvider ? chosen?.model : undefined), effort: inheritedEffort };
   const chatEffort = !directAPI && chosen?.kind === "api" && chosen.api === "chat"
     ? directEffortState(chosen, [], effortModel) : undefined;
   const effectiveAgent = providerAgent(effectiveProvider, p?.effective?.provider);
@@ -315,13 +323,9 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
       ? sameParentProvider ? parent?.effective?.permission_mode : undefined
       : sameEffectiveProvider && !p?.override?.permission_mode ? p?.effective?.permission_mode : undefined;
   const codexRunLauncher = p?.kind === "api" && isModelRunLauncher(chosen) && chosenAgent === "codex";
-  const listedEfforts = launcherList.status === "ready" && launcherList.list && takesEffort(launcherList.list.agent)
-    ? effortChoices(launcherList.list, draft.model, inherited)
-    : (codexRunLauncher
-      ? ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-      : p?.id === "inbox.triage" || p?.kind === "api"
-        ? ["off", "low", "medium", "high", "xhigh", "max"]
-        : ["low", "medium", "high", "xhigh", "max"]);
+  const allowed = codexRunLauncher ? ["off", ...CODEX_EFFORTS.map((level) => level.id)]
+    : p?.kind === "api" ? ["off", ...ALL_EFFORTS] : ALL_EFFORTS;
+  const launcherBinding = launcherBindingState(launcherList.list, draft, inherited, { allowed });
   const mainDefaultProvider = draft.provider || p?.effective?.provider;
   const mainInfo: AssistantLaunchers = {
     launchers: (data?.providers ?? []).map((v) => ({ name: v.id, display_name: v.name, agent: providerAgent(v) })),
@@ -354,9 +358,11 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
       // whatever this page grouped it under),
       // else the draft's fields, effort with them where the provider it runs on takes one
       const permissionAllowed = permissionModes.length > 0;
-      const patch = restore ? resetPatch(p, draft.runtime, draft.config_dir) : modelPatch(p, draft, effortAllowed, permissionAllowed);
+      const savedDraft = { ...draft, ...launcherBinding.legacy };
+      const patch = restore ? resetPatch(p, draft.runtime, draft.config_dir) : modelPatch(p, savedDraft, effortAllowed, permissionAllowed);
       // Editing only the candidate order must not rewrite an independently inherited binding.
-      const bindingUnchanged = !restore && candidateChange && JSON.stringify(patch) === JSON.stringify(modelPatch(p, draftForPurpose(p), effortAllowed, permissionAllowed));
+      const bindingUnchanged = !restore && candidateChange &&
+        JSON.stringify(modelPatch(p, draft, effortAllowed, permissionAllowed)) === JSON.stringify(modelPatch(p, draftForPurpose(p), effortAllowed, permissionAllowed));
       const changes = !restore && candidateChange ? { ...(bindingUnchanged ? { revision: p.revision } : patch), candidates: candidateChange } : patch;
       const r = await saveModelPurpose(p, changes, manager);
       if (!alive.current) return;
@@ -424,15 +430,16 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
             {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
           </select> : picker ? <div inert={busy}><Suspense fallback={<Loading />}><ModelPicker
             models={launcherList}
-            model={draft.model}
+            model={launcherBinding.model}
             followed={inherited}
+            ariaLabel={t("settings-modelconfiguration.specific_model")}
             open={picking}
             onToggle={() => setPicking((o) => !o)}
             query={query}
             onQuery={setQuery}
             search={search}
             onPick={(id) => {
-              setDraft((d) => ({ ...d, model: id }));
+              setDraft((d) => ({ ...d, ...launcherBinding.pickModel(id) }));
               setPicking(false);
               setQuery("");
             }}
@@ -456,12 +463,9 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
           )}
         </div>}
         {!directAPI && effortAllowed && (chatEffort ? <DirectEffortSelect state={chatEffort} value={draft.effort} inherited={inheritedEffort} disabled={busy}
-          onChange={(effort) => setDraft((d) => ({ ...d, effort }))} /> : <label className="block">
-          <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
-          <input className={inputClass} value={draft.effort} disabled={busy} placeholder={(following && !draft.provider ? parent?.effective?.effort : p.effective?.effort) || t("settings-modelconfiguration.follow_default")} list="model-efforts"
-            onChange={(e) => setDraft((d) => ({ ...d, effort: e.target.value }))} />
-          <datalist id="model-efforts">{listedEfforts.map((v) => <option key={v} value={v} />)}</datalist>
-        </label>)}
+          onChange={(effort) => setDraft((d) => ({ ...d, effort }))} /> : <LauncherEffortSelect
+          {...launcherBinding} className={inputClass} disabled={busy || launcherList.status === "loading"}
+          onChange={(effort) => setDraft((d) => ({ ...d, ...launcherBinding.pickEffort(effort) }))} />)}
         {!directAPI && permissionModes.length > 0 && <label className="block">
           <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.permission_mode")}</span>
           <select data-permission-mode-select className={inputClass} value={draft.permission_mode ?? ""} disabled={busy}
@@ -496,7 +500,7 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
         <p className="text-[11.5px] leading-relaxed text-ink-3">{p.kind === "plugin" ? t("settings-modelconfiguration.save_note_plugin") : t("settings-modelconfiguration.save_note")}</p>
       </div>}
       {error && <p role="alert" className="mt-3 text-[12px] text-red">{error}</p>}
-      {(conflict || (!p && error)) && <Button tone="secondary" disabled={busy} onClick={() => void load()}>{conflict ? t("settings-modelconfiguration.reload_discard") : t("settings-modelconfiguration.retry")}</Button>}
+      {(conflict || (!p && error)) && <Button tone="secondary" disabled={busy} onClick={() => void load(true)}>{conflict ? t("settings-modelconfiguration.reload_discard") : t("settings-modelconfiguration.retry")}</Button>}
     </Dialog>
   );
 }

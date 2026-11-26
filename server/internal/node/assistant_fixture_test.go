@@ -90,29 +90,9 @@ func cliTestHome(t *testing.T, home func(*testing.T, string)) *cliFixture {
 	buf := &syncBuffer{}
 	n.logger = log.New(buf, "", 0)
 	fh := withFakeHub(t, n)
-	// Every process it started, the warm spare too, has exited when the test ends: liveAssistants is the test binary's,
-	// and a later test reading it (update_inventory.go) would find one still running.
-	t.Cleanup(func() {
-		n.mu.Lock()
-		ids := make([]string, 0, len(n.procs))
-		for id := range n.procs {
-			ids = append(ids, id)
-		}
-		spare := n.spare
-		n.spare = nil
-		n.mu.Unlock()
-		var procs []*assistantProc
-		for _, id := range ids {
-			n.cancelAssistantRecovery(id)
-			if p := n.takeAssistant(id); p != nil {
-				procs = append(procs, p)
-			}
-		}
-		if spare != nil {
-			procs = append(procs, spare)
-		}
-		stopAndWait(procs)
-	})
+	// Every process it started, the warm spare and any retired attempt too, has exited when the test ends:
+	// liveAssistants is the test binary's, and a later test reading it (update_inventory.go) would find one still running.
+	t.Cleanup(n.stopAllAssistants)
 	return &cliFixture{n: n, fh: fh, dir: dir, log: buf}
 }
 

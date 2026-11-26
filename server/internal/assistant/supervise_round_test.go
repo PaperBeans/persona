@@ -152,7 +152,7 @@ func TestGoldenBackgroundSupervisorFresh(t *testing.T) {
 			want = append(want, roundHeaderLine)
 		case strings.HasPrefix(line, "<persona-supervision level="):
 			want = append(want, prompts.SuperviseRoundMarker)
-		case line == "   验收标准：PR 合并到 main":
+		case line == "   验收标准用 todo_get 取原文" && strings.Contains(want[len(want)-2], "任务「修登录崩溃」"):
 			want = append(want, "   上次结论（11-14 10:20）：rework，补深色截图")
 		}
 	}

@@ -3,6 +3,7 @@ import SwiftUI
 /// Today's hub totals. Entry uses the shared short-text alert and reversible-action toast.
 struct HealthTodaySection: View {
     let page: HealthModel
+    var kinds: [HealthIntake.Kind] = [.water, .protein]
     var openDetail: (HealthIntake.Kind) -> Void
     @State private var asking = false
     @State private var kind = HealthIntake.Kind.water
@@ -23,16 +24,14 @@ struct HealthTodaySection: View {
                     .accessibilityIdentifier("health-update-hub")
             } else if let intake = page.intake {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
-                    VStack(spacing: Theme.Space.s) {
-                        ring(.water, portion: intake.water)
-                        waterActions
+                    ForEach(kinds, id: \.rawValue) { kind in
+                        VStack(spacing: Theme.Space.s) {
+                            ring(kind, portion: kind == .water ? intake.water : intake.protein)
+                            if kind == .water { waterActions }
+                            else { action("Log Grams", id: "health-log-protein") { ask(.protein) } }
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
-                    VStack(spacing: Theme.Space.s) {
-                        ring(.protein, portion: intake.protein)
-                        action("Log Grams", id: "health-log-protein") { ask(.protein) }
-                    }
-                    .frame(maxWidth: .infinity)
                 }
                 .font(Theme.Font.label)
                 .disabled(page.intakeBusy)

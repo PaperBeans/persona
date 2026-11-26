@@ -26,7 +26,7 @@ struct TodosPlacesModelTests {
 
     private static let fixed = [place("all", needsYou: 3), place("today"), place("upcoming")]
 
-    private static func filed(_ id: String, _ section: String = TodoListSection.todo, closed: Bool = false, project: String? = nil,
+    private static func filed(_ id: String, _ section: TodoListSection = .todo, closed: Bool = false, project: String? = nil,
                               partOf: String? = nil, quiet: Bool = false) -> TodoFiled {
         TodoFiled(id: id, manager: nil, section: section, closed: closed, rank: 0, inactive: false, byView: true, quiet: quiet,
                   partOf: partOf, project: project, asks: section == TodoListSection.needsYou ? ["ask:" + id] : [])
@@ -226,7 +226,7 @@ struct TodosPlacesModelTests {
     /// A project's place says its project in its title: line 3 leaves it out of every row there, Needs you's included,
     /// where All To-dos keeps it beside another fact.
     @Test func aProjectsPlaceLeavesItsNameOffLine3() {
-        let view = TodoSummary(phase: TodoPhase.needsYou, section: TodoListSection.needsYou, reason: "rest",
+        let view = TodoSummary(phase: TodoPhase.needsYou, section: TodoListSection.needsYou, reason: TodoReason.rest,
                                steps: TodoStepCount(done: 1, total: 3))
         let item = TodoItem(id: "t01", title: "Plan the Kyoto trip", project: "kyoto")
         let row = Self.filed("t01", TodoListSection.needsYou, project: "kyoto")
@@ -239,7 +239,9 @@ struct TodosPlacesModelTests {
 
     /// Upcoming's calendar colours each to-do by its view's phase, not by its sessions.
     @Test func theCalendarReadsTheView() {
-        let view = { (phase: String, reason: String) in TodoSummary(phase: phase, section: phase, reason: reason, rank: 0) }
+        let view = { (phase: TodoPhase, reason: TodoReason) in
+            TodoSummary(phase: phase, section: TodoListSection(rawValue: phase.rawValue), reason: reason, rank: 0)
+        }
         #expect(TodoUpcomingLayout.calendarState(view(TodoPhase.needsYou, TodoReason.agentAsks), fallback: .notStarted) == .needsYou)
         #expect(TodoUpcomingLayout.calendarState(view(TodoPhase.needsYou, TodoReason.failedStart), fallback: .notStarted) == .failed)
         #expect(TodoUpcomingLayout.calendarState(view(TodoPhase.ready, TodoReason.agentRunning), fallback: .notStarted) == .unread)
@@ -394,7 +396,7 @@ struct TodosPlacesModelTests {
 
         places.show(.project("weather"))
         list.place = places.current
-        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working])
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou.rawValue, TodoListSection.working.rawValue])
         #expect(list.needsYou == 1, "the place's part of N")
         #expect(list.placeCounts?.inProgress == 1 && list.filters, "the Filter counts the place's rows")
         #expect(list.hiddenNeeds == 1 && list.hiddenElsewhere, "Kyoto trip's to-do needs the owner too")
@@ -647,14 +649,19 @@ struct TodosPlacesModelTests {
         await store.refresh(api: hub.client)
         try await waitForPlacesTest { list.ready && list.hasRows }
         list.place = .project("kyoto")
+        let counts = list.filterOptions, needsYou = list.needsYou
         #expect(!list.groups.flatMap(\.drawnKeys).contains("/t03"))
         list.query = "t03"
+        try await waitForPlacesTest { list.searchedWords == "t03" }
         #expect(list.searching && list.groups.flatMap(\.drawnKeys) == ["/t03"], "Weather App's, from Kyoto trip")
         #expect(list.hiddenNeeds == 0 && !list.placeIsEmpty)
+        #expect(list.place == .project("kyoto") && list.filterOptions == counts && list.needsYou == needsYou,
+                "the place is set aside, never changed: its numbers stay")
         list.query = "nothing like it"
+        try await waitForPlacesTest { list.searchedWords == "nothing like it" }
         #expect(list.isEmpty && !list.placeIsEmpty, "the search's own empty state")
         list.query = ""
-        #expect(list.groups.flatMap(\.drawnKeys) == ["/t01"] && list.hiddenNeeds == 1)
+        #expect(list.groups.flatMap(\.drawnKeys) == ["/t01"] && list.hiddenNeeds == 1, "the place, at once")
     }
 
     /// A list made on Upcoming counts what needs the owner elsewhere once it starts, whatever the page draws first: its

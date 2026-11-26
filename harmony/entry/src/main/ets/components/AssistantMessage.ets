@@ -46,7 +46,7 @@ export struct AssistantMessage {
       ForEach(this.parts, (part: AssistantMessagePart) => {
         if (part.cardKey) AssistantViewCard({ model: this.model, feed: this.feed, item: this.item, cardKey: part.cardKey,
           active: this.active && this.model.connected, onLink: (address: string) => this.onLink(address), onOpenResource: (address: string) => this.openResource(address) })
-        else if (part.text) MarkdownText({ text: part.text, onLink: (address: string) => this.onLink(address) })
+        else if (part.text) MarkdownText({ text: part.text, chatReply: true, onLink: (address: string) => this.onLink(address) })
       }, (part: AssistantMessagePart) => part.id)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }

@@ -1,3 +1,4 @@
+import { nativeHubAccessTests } from './NativeHubAccess.test';
 import { Pairing } from '../../../main/ets/platform/Pairing';
 import { afterAll, beforeAll, describe, it, expect } from '@ohos/hypium';
 import { abilityDelegatorRegistry } from '@kit.TestKit';
@@ -90,6 +91,7 @@ export function nativeIPv6TransportTests(): void {
 }
 
 export default function nativeTransportTests(): void {
+  nativeHubAccessTests(fixtureArgument('fixtureAddress'), fixtureArgument('fixturePin'));
   describe('NativeTransport', (): void => {
     it('committed_app_language_updates_http_and_existing_websocket_locale', 0, async (): Promise<void> => {
       const transport = fixture();

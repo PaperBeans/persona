@@ -6,14 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunStep } from "../../lib/run-step";
 import { Icon } from "../../ui/icons";
 import { FADE_OUT_MS, LINGER_MS } from "../../ui/motion";
-import { RunningStatusView, statusWords, WaitingView } from "./RunningStatusBar";
+import { formatBackgroundWhat, RunningStatusView, statusWords, WaitingView } from "./RunningStatusBar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => vi.useRealTimers());
 
 const render = (props: Parameters<typeof RunningStatusView>[0]) => renderToStaticMarkup(<RunningStatusView {...props} />);
-const statusIcon = (name: "terminal" | "sparkles") => renderToStaticMarkup(<Icon name={name} size={14} className="shrink-0 -translate-y-px" />);
+const statusIcon = (name: "terminal" | "sparkles" | "retry", tone = "text-accent-ink") => renderToStaticMarkup(<Icon name={name} size={14} className={`shrink-0 ${tone} -translate-y-px`} />);
 const tool = (name: string, spawning?: boolean): RunStep => ({ kind: "tool", tool: name, ...(spawning ? { spawning } : {}) });
 const agent = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step).text;
 const plain = (step?: RunStep, live: Parameters<typeof statusWords>[0] = null) => statusWords(live, step, true).text;
@@ -88,7 +88,9 @@ describe("RunningStatusView", () => {
     expect(html).toContain("data-running-tokens");
     expect(html).not.toContain("tok/s");
     expect(html).not.toContain("data-running-speed");
-    expect(html).toContain("text-status-accent");
+    expect(html).toContain("text-ink-2");
+    expect(html).toContain("text-accent-ink");
+    expect(html).not.toContain("text-status-accent");
     expect(html).toContain('data-running-status="on"');
   });
 
@@ -138,10 +140,34 @@ describe("RunningStatusView", () => {
     expect(html).not.toContain("4m 5s");
     expect(html).not.toContain("tok");
     expect(html).not.toContain("data-running-speed");
-    expect(html).toContain("text-status-accent");
+    expect(html).toContain("text-ink-2");
+    expect(html).toContain("text-accent-ink");
+    expect(html).not.toContain("text-status-accent");
     expect(html).not.toContain("text-status-waiting");
     expect(html).toContain(statusIcon("terminal"));
     expect(html).not.toContain(statusIcon("sparkles"));
+  });
+
+  it("cleans raw Cron/Prompt strings in background task summaries", () => {
+    expect(formatBackgroundWhat("Cron: */30 * * * *, Prompt: Check PR status")).toBe("每 30 分钟 · Check PR status");
+    expect(formatBackgroundWhat("Cron: 0 * * * *, Prompt: Sync workspace")).toBe("每小时 · Sync workspace");
+    expect(formatBackgroundWhat("Cron: 0 */2 * * *, Prompt: Poll build")).toBe("每 2 小时 · Poll build");
+    expect(formatBackgroundWhat("Cron: 0 9 * * *, Prompt: Daily digest")).toBe("每天 09:00 · Daily digest");
+    expect(formatBackgroundWhat("Cron: 15 10 * * 1-5, Prompt: Weekday standup")).toBe("Weekday standup");
+    expect(formatBackgroundWhat("Build release")).toBe("Build release");
+    const html = render({ live: null, working: true, command: { what: "Cron: */30 * * * *, Prompt: Check PR status", more: 0 } });
+    expect(html).toContain("每 30 分钟 · Check PR status");
+    expect(html).not.toContain("Cron:");
+    expect(html).not.toContain("Prompt:");
+  });
+
+  it("shows the task prompt when the Cron fields contain comma-separated lists", () => {
+    const what = "Cron: 0,15,30 * * * 1,5, Prompt: Check deploys, then report";
+    expect(formatBackgroundWhat(what)).toBe("Check deploys, then report");
+    const html = render({ live: null, working: true, command: { what, more: 0 } });
+    expect(html).toContain("Check deploys, then report");
+    expect(html).not.toContain("Cron:");
+    expect(html).not.toContain("Prompt:");
   });
 
   it("a finished background command keeps its terminal line while it lingers, then fades without becoming Done", () => {
@@ -213,6 +239,14 @@ describe("RunningStatusView", () => {
   it("is not there while nothing works", () => {
     expect(render({ live: null, working: false })).toBe("");
   });
+
+  it("renders a subtle stop button with Esc hint when onStop is provided", () => {
+    const html = render({ live: { verb: "Frosting", elapsed_s: 5 }, working: true, onStop: () => {} });
+    expect(html).toContain("中断");
+    expect(html).toContain("<kbd");
+    expect(html).toContain("Esc</kbd>");
+    expect(html).toContain("sm:inline-flex");
+  });
 });
 
 describe("model request retries (#887)", () => {
@@ -243,6 +277,8 @@ describe("model request retries (#887)", () => {
     expect(html).toContain("5/10");
     expect(html).toContain("请求太多，被限流了");
     expect(html).toContain("重试");
+    expect(html).toContain("text-status-working");
+    expect(html).toContain(statusIcon("retry", "text-status-working"));
   });
 
   it("upgrades a generic API Error with the classifier, renders attempt updates and clears on normal work", () => {

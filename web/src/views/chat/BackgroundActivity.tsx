@@ -8,6 +8,7 @@ import { t } from "../../i18n";
 import { Button, Dialog, Loading } from "../../ui/atoms";
 import { CardConversation } from "../../ui/AssistantCard";
 import { FeedLineView } from "../assistant/Tasks";
+import { HeldPushesEntry } from "../assistant/HeldPushes";
 import { ChatContext, type ChatContextValue } from "./chat-context";
 import { ChatLineView } from "./Lines";
 import { useTranscript } from "./useTranscript";
@@ -44,6 +45,7 @@ function ActivityBody({ mid, sid, updatedAt, rev, live }: { mid: string; sid: st
   const ctx = useMemo<ChatContextValue>(() => ({ tasks, subagents: NO_SUBAGENTS, scope: `${mid}/${sid}:background:`, workflowCalls: NO_WORKFLOW_CALLS }), [tasks, mid, sid]);
   return (
     <div className="flex flex-col gap-4" data-background-activity>
+      <HeldPushesEntry className="inline-flex h-8 shrink-0 items-center gap-2 self-start rounded-full bg-field px-3 text-label font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink" />
       {tr.loading && !tr.items.length && <div className="flex justify-center py-10"><Loading /></div>}
       {tr.error && !tr.items.length && <div className="flex flex-col items-center gap-3 py-8 text-center"><p className="text-meta text-ink-2">{tr.error}</p><Button icon="retry" onClick={tr.reload}>{t("chat-chatview.retry")}</Button></div>}
       {!tr.loading && !activity.length && !tr.error && <p className="py-8 text-center text-meta text-ink-3">{t("chat-chatview.background_empty")}</p>}

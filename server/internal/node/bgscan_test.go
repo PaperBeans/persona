@@ -439,3 +439,70 @@ func TestBackgroundTasksSeesManuallyBackgrounded(t *testing.T) {
 		t.Fatalf("background tasks: %+v", got)
 	}
 }
+
+func TestBackgroundTasksKeepsCodexPlans(t *testing.T) {
+	filler := bytes.Repeat([]byte(`{"timestamp":"2026-11-22T10:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"working"}}`+"\n"), quickTail/64)
+
+	t.Run("wire update_plan and functions.update_plan across filler and append", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rollout-wire.jsonl")
+		head := `{"timestamp":"2026-11-22T10:00:00Z","type":"session_meta","payload":{"id":"t1","cwd":"/work"}}` + "\n" +
+			`{"timestamp":"2026-11-22T10:00:01Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","call_id":"call_wire_1","arguments":"{\"plan\":[{\"step\":\"Read\",\"status\":\"completed\"},{\"step\":\"Patch\",\"status\":\"in_progress\"}]}"}}` + "\n" +
+			`{"timestamp":"2026-11-22T10:00:02Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_wire_1","output":"Plan updated"}}` + "\n"
+		if err := os.WriteFile(path, append([]byte(head), filler...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n := &Node{bgScans: map[string]*bgScan{}, metas: map[string]quickMeta{}}
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := n.meta(path, st)
+		if p := m.plan; p == nil || p.Done != 1 || p.Total != 2 || p.Current != "Patch" {
+			t.Fatalf("wire update_plan from far back = %+v", p)
+		}
+
+		// Append functions.update_plan in two writes separated by filler so PlanPending must bridge the gap.
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(`{"timestamp":"2026-11-22T10:01:00Z","type":"response_item","payload":{"type":"function_call","name":"functions.update_plan","call_id":"call_wire_2","arguments":"{\"plan\":[{\"step\":\"Read\",\"status\":\"completed\"},{\"step\":\"Patch\",\"status\":\"completed\"},{\"step\":\"Verify\",\"status\":\"in_progress\"}]}"}}` + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		n.backgroundTasks(path)
+		if _, err := f.Write(filler[:bytes.Index(filler[4096:], []byte("\n"))+4097]); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(`{"timestamp":"2026-11-22T10:01:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_wire_2","output":"Plan updated"}}` + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		f.Close()
+
+		n.backgroundTasks(path)
+		if p := n.bgPlan(path); p == nil || p.Done != 2 || p.Total != 3 || p.Current != "Verify" ||
+			!p.At.Equal(time.Date(2026, 11, 22, 10, 1, 5, 0, time.UTC)) {
+			t.Fatalf("functions.update_plan after append = %+v", p)
+		}
+	})
+
+	t.Run("native plan_update event", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rollout-native.jsonl")
+		head := `{"timestamp":"2026-11-22T10:00:00Z","type":"session_meta","payload":{"id":"t2","cwd":"/work"}}` + "\n" +
+			`{"timestamp":"2026-11-22T10:00:01Z","type":"event_msg","payload":{"type":"plan_update","plan":[{"step":"Inspect","status":"completed"},{"step":"Ship","status":"in_progress"}]}}` + "\n"
+		if err := os.WriteFile(path, append([]byte(head), filler...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n := &Node{bgScans: map[string]*bgScan{}, metas: map[string]quickMeta{}}
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := n.meta(path, st)
+		if p := m.plan; p == nil || p.Done != 1 || p.Total != 2 || p.Current != "Ship" {
+			t.Fatalf("native plan_update from far back = %+v", p)
+		}
+	})
+}

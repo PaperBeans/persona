@@ -63,7 +63,7 @@ func TestWorkQuestionCancelAndPauseThroughPhoneLifecycle(t *testing.T) {
 			s, f, ix := deferredCardFixture(t, work)
 			s.waitWorkEvents()
 			store := &workQuestionFlowStore{fleetMem: newFleetMem(), work: work}
-			s.store = func() Store { return store }
+			s.setStore(func() Store { return store })
 			if err := s.putTriageSwitches(context.Background(), TriageSwitches{Enabled: true, Decide: true}); err != nil {
 				t.Fatal(err)
 			}

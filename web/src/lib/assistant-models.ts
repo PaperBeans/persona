@@ -6,12 +6,12 @@ import { assistantSwitchNeeded } from "./assistant-execution";
 // and the background supervisor follow Model configuration › Main chat and another chat keeps what it started with. On an older hub a pick lasts for this page and goes with each message
 // (lib/assistant-chat.ts), as before; the new-conversation page's pick goes with the conversation's start. First-screen
 // code: the panel's own data is lib/assistant-panel.ts, loaded with the panel.
-import { agentId, sessionAgent } from "./agent-kind";
+import { agentId, isMarked, providerAgent, sessionAgent } from "./agent-kind";
 import { explicitLauncherModel } from "./compatibility";
-import { conversationKey, launcherOffered, NEW_CONVERSATION, pickedEffort, pickedFast, pickedLauncher, pickedModel } from "./assistant-chat";
+import { conversationKey, launcherOffered, NEW_CONVERSATION, pickedEffort, pickedFast, pickedLauncher, pickedModel, type AssistantLauncher } from "./assistant-chat";
 import { modelSupportsFast, type LauncherDefault } from "./launcher-models";
 import { providerTitle } from "./provider-names";
-import { currentModelRow, pillModel, type AssistantLaunchers, type ModelList, type PillView } from "./session-models";
+import { currentModelRow, pillModel, sessionModelHost, type AssistantLaunchers, type ModelList, type PillView } from "./session-models";
 import type { ModelPick, Session } from "./types";
 
 /** The hub keeps a Persona chat's pick (`model_pick`, PUT / DELETE …/conversations/{id}/model). */
@@ -76,22 +76,89 @@ export interface MainChatAgentMismatch {
 }
 
 // Model configuration prefixes launcher providers; a session names the same launcher without that prefix.
-const canonicalLauncher = (name: string) => name.startsWith("launcher.") ? name.slice("launcher.".length) : name;
+export const canonicalLauncher = (name: string) => name.startsWith("launcher.") ? name.slice("launcher.".length) : name;
+
+/** Looks up a launcher in the assistant catalog by exact name or canonical name without the `launcher.` prefix. */
+export function findAssistantLauncher(info: AssistantLaunchers | undefined, name: string | undefined): AssistantLauncher | undefined {
+  if (!info || !name) return undefined;
+  return info.launchers.find((l) => l.name === name)
+    ?? info.launchers.find((l) => canonicalLauncher(l.name) === canonicalLauncher(name));
+}
+
+/** The launcher a running Persona session actually uses: its reported launcher, else its runtime instance or non-Claude engine. */
+export function sessionActualLauncher(s: Session): string | undefined {
+  if (s.launcher) return s.launcher;
+  if (s.source_kind === "runtime" && s.source_instance_id) return s.source_instance_id;
+  if (s.source_kind === "codex_app_server" || s.source_kind === "codex_history") return "codex";
+  const agent = agentId(sessionAgent(s).agent);
+  return agent !== "claude" ? agent : undefined;
+}
+
+/** Shared catalog host key for an assistant launcher on this conversation: the AGY companion host only for that session's own AGY launcher. */
+export function assistantModelHost(session: Session | undefined, provider: string): "agy" | undefined {
+  if (!session) return undefined;
+  const host = sessionModelHost(session);
+  if (!host) return undefined;
+  const actual = sessionActualLauncher(session);
+  return actual && canonicalLauncher(actual) === canonicalLauncher(provider) ? host : undefined;
+}
+
+function configuredAgentOf(
+  configuredLauncher: string,
+  info: AssistantLaunchers | undefined,
+): { agent?: string; launcher?: AssistantLauncher; known: boolean } {
+  const launcher = findAssistantLauncher(info, configuredLauncher);
+  if (launcher) {
+    return {
+      agent: agentId(providerAgent(launcher.agent_type || launcher.agent, launcher.name)),
+      launcher,
+      known: true,
+    };
+  }
+  const unavailable = info?.unavailable.find((u) => u.name === configuredLauncher || canonicalLauncher(u.name) === canonicalLauncher(configuredLauncher));
+  if (unavailable) {
+    const raw = providerAgent(unavailable.agent, unavailable.name);
+    const bare = canonicalLauncher(unavailable.name);
+    const guessed = raw ? agentId(raw) : (bare && isMarked(agentId(bare)) ? agentId(bare) : undefined);
+    return { agent: guessed, known: Boolean(guessed) };
+  }
+  const bare = canonicalLauncher(configuredLauncher);
+  const id = agentId(bare);
+  if (bare && isMarked(id)) return { agent: id, known: true };
+  return { known: false };
+}
 
 /** A confirmed Main-chat-setting mismatch: both launchers are known and their agent kinds differ. An unloaded list,
  *  an unknown default, another launcher of the same kind, or a conversation's own pick changes nothing. */
 export function mainChatAgentMismatch(c: AssistantChat, info: AssistantLaunchers | undefined): MainChatAgentMismatch | undefined {
   const s = c.session;
-  if (!s || !c.isMain || !s.launcher || !info || assistantPick(c)) return undefined;
+  const actualLauncher = s ? sessionActualLauncher(s) : undefined;
+  if (!s || !c.isMain || !actualLauncher || !info || assistantPick(c)) return undefined;
   const configuredLauncher = (c.def === undefined ? info.def : c.def)?.provider || c.config;
-  if (!configuredLauncher || canonicalLauncher(configuredLauncher) === canonicalLauncher(s.launcher)) return undefined;
-  const configured = info.launchers.find((l) => l.name === configuredLauncher)
-    ?? info.launchers.find((l) => canonicalLauncher(l.name) === canonicalLauncher(configuredLauncher));
+  if (!configuredLauncher || canonicalLauncher(configuredLauncher) === canonicalLauncher(actualLauncher)) return undefined;
+  const configured = findAssistantLauncher(info, configuredLauncher);
   if (!configured) return undefined;
-  const configuredAgent = agentId(configured.agent_type || configured.agent);
+  const configuredAgent = agentId(providerAgent(configured.agent_type || configured.agent, configured.name));
   const actualAgent = agentId(sessionAgent(s).agent);
   if (configuredAgent === actualAgent && !assistantSwitchNeeded(s, configured, configuredAgent)) return undefined;
-  return { configuredLauncher, configuredAgent, actualLauncher: s.launcher, actualAgent };
+  return { configuredLauncher, configuredAgent, actualLauncher, actualAgent };
+}
+
+/** Whether a running default-following conversation runs on an engine/runtime that cannot silently follow the configured
+ *  default (including before the assistant catalog finishes loading or when the configured engine is unavailable). */
+function runningConnectionProvider(c: AssistantChat, info: AssistantLaunchers | undefined, def: LauncherDefault | null | undefined): string | undefined {
+  const s = c.session;
+  if (!s || !(c.followsDefault ?? c.isMain)) return undefined;
+  const actualLauncher = sessionActualLauncher(s);
+  const actualAgent = agentId(sessionAgent(s).agent);
+  const configuredLauncher = def?.provider || c.config;
+  if (!configuredLauncher) return undefined;
+  if (actualLauncher && canonicalLauncher(configuredLauncher) === canonicalLauncher(actualLauncher)) return undefined;
+  if (!actualLauncher && actualAgent === "claude") return undefined;
+  const cfg = configuredAgentOf(configuredLauncher, info);
+  if (!cfg.known || !cfg.agent) return undefined;
+  if (cfg.agent === actualAgent && (!cfg.launcher || !assistantSwitchNeeded(s, cfg.launcher, cfg.agent))) return undefined;
+  return actualLauncher || actualAgent;
 }
 
 /** The setup the chat's next message runs on (as the hub decides it, assistant/start.go sendModel). */
@@ -99,33 +166,80 @@ export function assistantSetup(c: AssistantChat, info: AssistantLaunchers | unde
   const s = c.session;
   const pick = assistantPick(c);
   const fast = s?.service_tier === "priority" || (!s && pickedFast());
-  if (pick) return { provider: pick.launcher, model: pick.model, effort: pick.effort ?? s?.effort, ...(fast ? { fast: true } : {}), source: "pick" };
+  // An Antigravity variant pick carries its effort in the new model ID.
+  const sessionEffort = (model?: string) => s?.agent === "agy" && model && model !== s.model ? undefined : s?.effort;
+  if (pick) return { provider: pick.launcher, model: pick.model, effort: pick.effort ?? sessionEffort(pick.model), ...(fast ? { fast: true } : {}), source: "pick" };
+  const def = c.def === undefined ? info?.def : c.def;
   const mismatch = mainChatAgentMismatch(c, info);
   if (s && mismatch) return { provider: mismatch.actualLauncher, model: s.model, effort: s.effort, ...(fast ? { fast: true } : {}), source: "own" };
-  const def = c.def === undefined ? info?.def : c.def;
+  const keepRunning = runningConnectionProvider(c, info, def);
+  if (s && keepRunning) return { provider: keepRunning, model: s.model, effort: s.effort, ...(fast ? { fast: true } : {}), source: "own" };
   if (!s || (c.followsDefault ?? c.isMain)) {
-    const provider = def?.provider || c.config || s?.launcher || "claude";
-    return { provider, model: def?.model || (s?.launcher === provider ? s.model : undefined), effort: c.isMain ? def?.effort || s?.effort : s?.effort ?? (def?.effort || undefined), ...(fast ? { fast: true } : {}), source: "default" };
+    const actual = s ? sessionActualLauncher(s) : undefined;
+    const provider = def?.provider || c.config || actual || "claude";
+    const sameActual = Boolean(s && (s.launcher === provider || (!s.launcher && actual && canonicalLauncher(actual) === canonicalLauncher(provider))));
+    const model = def?.model || (sameActual ? s?.model : undefined);
+    const effort = sessionEffort(model);
+    return { provider, model, effort: c.isMain ? def?.effort || effort : effort ?? (def?.effort || undefined), ...(fast ? { fast: true } : {}), source: "default" };
   }
   // a launcher the list no longer offers is not what the next message runs on: the hub moves the chat to the assistant's
-  const own = launcherOffered(info?.launchers ?? null, s.launcher) ? s.launcher : undefined;
+  const actual = sessionActualLauncher(s);
+  const candidate = s.launcher || actual;
+  const own = candidate && (launcherOffered(info?.launchers ?? null, candidate) || (!info && actual)) ? candidate : undefined;
   return { provider: own || c.config || "claude", model: own ? s.model : undefined, effort: s.effort, ...(fast ? { fast: true } : {}), source: "own" };
 }
 
 /** What the pill draws: the launcher (its name for people), the model as its list names it (none set: its default entry,
  *  else the model it is configured with), the effort, Fast. */
 export function assistantPillView(c: AssistantChat, setup: AssistantSetup, info: AssistantLaunchers | undefined, e: ModelList): PillView {
-  const launcher = info?.launchers.find((l) => l.name === setup.provider);
-  const row = currentModelRow(e.list?.models ?? [], setup.model);
-  const id = setup.model || explicitLauncherModel(launcher?.model);
+  const launcher = findAssistantLauncher(info, setup.provider);
+  const actual = c.session ? sessionActualLauncher(c.session) : undefined;
+  const providerBare = canonicalLauncher(setup.provider);
+  const matchesSession = Boolean(
+    c.session && (
+      (actual && canonicalLauncher(actual) === providerBare) ||
+      (!actual && !launcher && !isMarked(agentId(providerBare)))
+    ),
+  );
+  const launcherEngine = launcher ? providerAgent(launcher.agent_type || launcher.agent, launcher.name) : "";
+  const providerMarked = providerBare && isMarked(agentId(providerBare)) ? agentId(providerBare) : "";
+  const sessionEng = c.session ? sessionAgent(c.session).agent : "";
+  const engine = agentId(
+    launcherEngine ||
+    e.list?.agent ||
+    providerMarked ||
+    (matchesSession ? sessionEng : "") ||
+    sessionEng,
+  );
+  const sessionModel = setup.source !== "pick" && matchesSession ? c.session?.model : undefined;
+  const activeModel = setup.model || sessionModel;
+  const id = activeModel || explicitLauncherModel(launcher?.model);
+  const models = e.list?.models ?? [];
+  let row = currentModelRow(models, activeModel) ?? (id !== activeModel ? currentModelRow(models, id) : undefined);
+  let displayActive = activeModel;
+  let displayFallback = id;
+  // When following a default without an explicit "default" pick, prefer the concrete resolved model over a generic label.
+  if (!activeModel && setup.source !== "pick" && row?.id === "default" && row.resolved) {
+    const resolvedId = row.resolved;
+    const resolvedRow = currentModelRow(models, resolvedId);
+    if (resolvedRow && resolvedRow.id !== "default") {
+      row = resolvedRow;
+      displayActive = resolvedId;
+      displayFallback = resolvedId;
+    } else {
+      row = undefined;
+      displayActive = resolvedId;
+      displayFallback = resolvedId;
+    }
+  }
   const out: PillView = {
-    engine: agentId(launcher?.agent_type || launcher?.agent || c.session?.agent),
-    provider: launcher ? providerTitle(launcher) : setup.provider,
+    ...pillModel(row, displayActive, displayFallback),
+    engine,
+    provider: providerTitle(launcher ?? { name: providerBare }),
     loading: e.list === undefined && Boolean(e.loading),
     failed: e.list === undefined && Boolean(e.error),
   };
-  const model = pillModel(e.list?.models ?? [], setup.model, id);
-  if (model) out.model = model;
+  if (c.session?.agent_label && matchesSession && engine === agentId(sessionEng)) out.engineLabel = c.session.agent_label;
   if (setup.effort) out.effort = setup.effort;
   if (setup.fast && (c.session || modelSupportsFast(row))) out.fast = true;
   return out;

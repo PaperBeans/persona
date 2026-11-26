@@ -318,7 +318,7 @@ func (s *Store) commitIngest(c *Chat, lines []ingestLine, r messageReceipts, sel
 	if err := json.Unmarshal(in.Meta, c); err != nil {
 		return err
 	}
-	c.persisted = true
+	c.Persisted = true
 	return nil
 }
 

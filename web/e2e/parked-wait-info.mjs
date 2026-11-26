@@ -30,10 +30,15 @@ const tasks = [
   ] } },
   { id: "wait-review", title: "Merge schedule update", created_at: since, updated_at: iso(-60_000), agents: [], pr_url: pr(73).url, pr_status: pr(73), supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Waiting for review", until: iso(2 * 86400_000), waiting_on: "someone_else", count: 1, evidence: evidence("merge_review", "Review team", "Approval and merge", { url: pr(73).url, ready: true, contact: { ...contact, url: "https://example.test/review/73" } }) }, reviews: [{ at: iso(-27 * 3600_000), verdict: "parked", parks: 1, evidence: evidence("merge_review", "Review team", "Approval and merge", { url: pr(73).url, ready: true, contact: { ...contact, url: "https://example.test/review/73" } }) }] } },
   { id: "wait-legacy", title: "Check vendor delivery", created_at: since, updated_at: iso(-60_000), agents: [], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Waiting on vendor", until: iso(86400_000), waiting_on: "external_event", count: 1 }, reviews: [] } },
+  { id: "wait-date", title: "Schedule the next review", created_at: since, updated_at: iso(-60_000), agents: [], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Wait for the release window", until: iso(3600_000), waiting_on: "date", count: 1, evidence: evidence("date", "Release window", "The scheduled check runs") }, reviews: [] } },
+  { id: "wait-recheck", title: "Review with background work", created_at: since, updated_at: iso(-60_000), agents: [{ machine_id: "demo", session_id: "recheck-agent", linked_at: since }], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Check background work", until: iso(3600_000), waiting_on: "date", count: 1, evidence: evidence("date", "Background review", "The scheduled check runs") }, reviews: [] } },
+  { id: "wait-recheck-foreground", title: "Review with a working turn", created_at: since, updated_at: iso(-60_000), agents: [{ machine_id: "demo", session_id: "recheck-unread", linked_at: since }, { machine_id: "demo", session_id: "recheck-working", linked_at: since }], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Check the working turn", until: iso(3600_000), waiting_on: "date", count: 1, evidence: evidence("date", "Working review", "The scheduled check runs") }, reviews: [] } },
+  { id: "wait-recheck-idle", title: "Review with an idle parent", created_at: since, updated_at: iso(-60_000), agents: [{ machine_id: "demo", session_id: "recheck-idle", linked_at: since }], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Check the idle parent", until: iso(3600_000), waiting_on: "date", count: 1, evidence: evidence("date", "Idle review", "The scheduled check runs") }, reviews: [] } },
+  { id: "wait-recheck-invalid", title: "Review with an invalid date", created_at: since, updated_at: iso(-60_000), agents: [{ machine_id: "demo", session_id: "recheck-invalid", linked_at: since }], supervision: { supervisor: "demo-main", state: "parked", parked: { reason: "Check the invalid date", until: "not-a-time", waiting_on: "date", count: 1, evidence: evidence("date", "Invalid date review", "The scheduled check runs") }, reviews: [] } },
   { id: "wait-unrecorded-review", title: "Merge earlier copy update", created_at: since, updated_at: iso(-60_000), agents: [], pr_url: pr(74).url, pr_status: pr(74) },
   { id: "wait-active", title: "Draft rollout notes", created_at: since, updated_at: iso(-60_000), agents: [{ machine_id: "demo", session_id: "active-agent", linked_at: since }], supervision: { supervisor: "demo-main", state: "pending_review" } },
 ].map(task => ({ ...task, origin: "demo-main" })).reverse();
-const waitingOrder = ["wait-person", "wait-review", "wait-legacy", "wait-unrecorded-review"];
+const waitingOrder = ["wait-person", "wait-review", "wait-date", "wait-legacy", "wait-unrecorded-review"];
 const reads = [], writes = [], forbidden = [], cases = [];
 const sid = "demo-main";
 const api = async (route) => {
@@ -51,7 +56,11 @@ const api = async (route) => {
   const session = { machine_id: "demo", session_id: sid, title: "Example conversation", assistant: true, state: "idle", status: "idle", updated_at: since };
   let body = {};
   if (path === "/machines") body = { machines: [{ id: "demo", name: "Example computer", online: true, os: "linux" }] };
-  else if (path === "/sessions") body = { sessions: [session, ...tasks.flatMap(t => (t.agents ?? []).map(a => ({ ...a, title: t.title, state: t.id === "wait-person" ? "unread" : t.id === "wait-active" ? "working" : "idle", status: t.id === "wait-active" ? "working" : "idle", updated_at: since, state_since: since })))] };
+  else if (path === "/sessions") body = { sessions: [session, ...tasks.flatMap(t => (t.agents ?? []).map(a => ({
+    ...a, title: t.title, state: a.session_id === "recheck-working" ? "working" : a.session_id === "recheck-unread" || t.id === "wait-person" || t.id === "wait-recheck" ? "unread" : t.id === "wait-active" ? "working" : "idle",
+    status: a.session_id === "recheck-working" || t.id === "wait-active" ? "working" : "idle", updated_at: since, state_since: since,
+    ...(t.id === "wait-recheck" || t.id === "wait-recheck-idle" || t.id === "wait-recheck-invalid" ? { background_working: true, background_tasks_count: 1 } : {}),
+  })))] };
   else if (path === "/interactions") body = { interactions: [] };
   else if (path === "/assistant") body = { machine_id: "demo", main: sid, conversations: [session], tasks: [], memory: [] };
   else if (path === "/todos") body = { todos: tasks };
@@ -111,6 +120,7 @@ try {
       const grouped = await page.locator('[data-tray-entry="parked"]').count() > 0;
       // Let startup effects finish their synthetic responses before measuring the local-only tray interaction.
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await page.waitForLoadState("networkidle");
       const preReadCount = reads.length;
       const feedback = await page.evaluate(async (key) => {
         const start = performance.now();
@@ -133,18 +143,55 @@ try {
       const readyMs = await page.evaluate(start => performance.now() - start, feedback.start);
       assert(feedback.ms < 1000 && readyMs < 1000, "local feedback and information-ready are measured separately, both under 1s");
       assert.equal(await person.getAttribute("data-wait-kind"), "person_reply");
-      assert((await person.locator("[data-wait-contact]").innerText()).includes("Riley"));
+      assert.equal(await person.getAttribute("data-wait-collapsed"), "true", "list row defaults to collapsed two-line card");
       assert.equal(await person.locator("[data-wait-age]").getAttribute("title"), firstContact.sent_at, "a later request does not reset the first wait");
       assert.equal(await person.getAttribute("data-wait-overdue"), "true");
-      assert.equal(await person.locator("[data-wait-contact]").getAttribute("href"), contact.url);
-      assert((await person.locator("[data-wait-wake]").innerText()).includes("They confirm a date"));
+      assert.equal(await person.locator("[data-wait-contact]").count(), 0, "contact receipt is hidden until expanded");
       assert.equal(reads.length, preReadCount, `opening wait metadata reads: ${JSON.stringify(reads.slice(preReadCount))}`);
       const extraMetadataGets = reads.length - preReadCount;
-      await person.locator("summary").click();
+      const nextCheckLabel = { en: "Next check", "zh-Hans": "下次复查", ja: "次回確認" }[mode.lang];
+      const recheck = page.locator('[data-task-slot="task:wait-recheck"]');
+      const foreground = page.locator('[data-task-slot="task:wait-recheck-foreground"]');
+      const idle = page.locator('[data-task-slot="task:wait-recheck-idle"]');
+      const invalid = page.locator('[data-task-slot="task:wait-recheck-invalid"]');
+      const ordinaryActive = page.locator('[data-task-slot="task:wait-active"]');
+      await page.locator('[data-tray-entry="running"]').click();
+      await recheck.waitFor();
+      await foreground.waitFor();
+      await idle.waitFor();
+      await recheck.getByText(nextCheckLabel).waitFor();
+      await foreground.getByText(nextCheckLabel).waitFor();
+      await idle.getByText(nextCheckLabel).waitFor();
+      await invalid.getByText({ en: "Background tasks running", "zh-Hans": "后台任务", ja: "バックグラウンドタスク" }[mode.lang]).waitFor();
+      assert.equal(await recheck.locator("[data-task-todo-state]").count(), 0);
+      assert((await recheck.innerText()).includes(nextCheckLabel));
+      const foregroundText = await foreground.innerText();
+      assert.deepEqual({
+        foregroundNextCheck: foregroundText.includes(nextCheckLabel),
+        foregroundParkedLine: foregroundText.includes({ en: "Parked until", "zh-Hans": "搁置到", ja: "まで保留" }[mode.lang]),
+        foregroundChips: await foreground.locator("[data-task-todo-state]").count(),
+        idleNextCheck: (await idle.innerText()).includes(nextCheckLabel),
+        idleChips: await idle.locator("[data-task-todo-state]").count(),
+        invalidNextCheck: (await invalid.innerText()).includes(nextCheckLabel),
+        ordinaryActiveNextCheck: (await ordinaryActive.innerText()).includes(nextCheckLabel),
+      }, { foregroundNextCheck: true, foregroundParkedLine: false, foregroundChips: 0, idleNextCheck: true, idleChips: 0, invalidNextCheck: false, ordinaryActiveNextCheck: false });
+      assert.equal(await page.locator('[data-parked-task-row="wait-recheck"]').count(), 0);
+      await shot("recheck");
+      await page.locator('[data-tray-entry="parked"]').click();
+      const dateWait = page.locator('[data-task-wait-info="wait-date"]'); await dateWait.waitFor();
+      assert.equal(await dateWait.locator("[data-wait-contact-missing]").count(), 0);
+      await dateWait.locator("[data-wait-toggle]").click();
+      assert.equal(await dateWait.getAttribute("data-wait-collapsed"), "false");
+      assert((await dateWait.locator("[data-wait-wake]").innerText()).includes("The scheduled check runs"));
+      await person.locator("[data-wait-toggle]").click();
+      assert.equal(await person.getAttribute("data-wait-collapsed"), "false");
       await person.locator("[data-wait-request]").waitFor({ state: "visible" });
+      assert((await person.locator("[data-wait-contact]").innerText()).includes("Riley"));
+      assert.equal(await person.locator("[data-wait-contact]").getAttribute("href"), contact.url);
+      assert((await person.locator("[data-wait-wake]").innerText()).includes("They confirm a date"));
       assert((await person.locator("[data-wait-reason]").innerText()).includes("design team"));
       if (mode.view === "phone") {
-        for (const control of ["[data-wait-contact]", "summary", '[data-testid="wait-reminder"]']) {
+        for (const control of ["[data-wait-contact]", "[data-wait-toggle]", '[data-testid="wait-reminder"]']) {
           const box = await person.locator(control).boundingBox();
           assert(box && box.width >= 44 && box.height >= 44, `touch control ${control} has a 44px target`);
         }
@@ -173,10 +220,13 @@ try {
       if (!grouped) await page.locator('[data-tray-entry="pr"]').click();
       const review = page.locator('[data-task-wait-info="wait-review"]'); await review.waitFor();
       assert.equal(await review.getAttribute("data-wait-kind"), "merge_review");
+      assert.equal(await review.getAttribute("data-wait-collapsed"), "true");
+      await review.locator("[data-wait-toggle]").click();
       assert.equal(await review.locator('[data-pr-waiting-url="https://github.com/example/demo/pull/73"]').count(), 1);
       assert.equal(await review.locator('[data-wait-source][href="https://github.com/example/demo/pull/73"]').count(), 1);
       assert.equal(await review.locator("[data-wait-contact]").count(), 1);
       const unknown = page.locator('[data-task-wait-info="wait-unrecorded-review"]');
+      await unknown.locator("[data-wait-toggle]").click();
       assert.equal(await unknown.locator("[data-wait-contact-missing]").count(), 1);
       assert.equal(await unknown.locator("[data-wait-age]").getAttribute("title"), null, "poll time is not a wait start");
       await review.scrollIntoViewIfNeeded();
@@ -184,15 +234,18 @@ try {
       await page.locator(".assistant-action-tray").getByRole("button", { name: words.all, exact: true }).click();
       const board = page.locator('[data-testid="task-board"]');
       await board.locator('[data-task-wait-info="wait-person"]').waitFor();
-      assert.equal(await board.locator("[data-task-wait-info]").count(), 4);
+      assert.equal(await board.locator("[data-task-wait-info]").count(), 5);
+      assert.equal(await board.locator('[data-wait-collapsed="true"]').count(), 5);
       assert.deepEqual(await board.locator("[data-task-wait-info]").evaluateAll(rows => rows.map(row => row.dataset.taskWaitInfo)), waitingOrder);
       assert.equal(await board.locator('[data-task-wait-info="wait-active"]').count(), 0);
       await shot("all");
       await page.goto(`${base}/todos`);
       const rows = page.locator("[data-todo]");
       await rows.locator('[data-task-wait-info="wait-person"]').waitFor();
-      assert.equal(await rows.locator("[data-task-wait-info]").count(), 4);
+      assert.equal(await rows.locator("[data-task-wait-info]").count(), 5);
+      assert.equal(await rows.locator('[data-wait-collapsed="true"]').count(), 5);
       assert.deepEqual(await rows.locator("[data-task-wait-info]").evaluateAll(rows => rows.map(row => row.dataset.taskWaitInfo)), waitingOrder);
+      await rows.locator('[data-task-wait-info="wait-legacy"] [data-wait-toggle]').click();
       assert.equal(await rows.locator('[data-task-wait-info="wait-legacy"] [data-wait-contact-missing]').count(), 1);
       assert.equal(await rows.locator('[data-task-wait-info="wait-active"]').count(), 0);
       await shot("todos");
@@ -204,7 +257,7 @@ try {
       await details.scrollIntoViewIfNeeded();
       await shot("details");
       assert.deepEqual(errors, []);
-      cases.push({ ...mode, grouped, progress: true, prTray: true, all: 4, todos: 4, screenshots: 6, feedbackMs: feedback.ms,
+      cases.push({ ...mode, grouped, progress: true, prTray: true, all: 5, todos: 5, screenshots: 7, feedbackMs: feedback.ms,
         readyMs, extraMetadataGets, draftWrites, elapsedMs: Math.round(performance.now() - started) });
     } catch (error) {
       await page.screenshot({ path: join(shots, `${stem}-failed.png`) }).catch(() => {});

@@ -1,0 +1,17 @@
+/* Use the bubble's ink to keep accent labels readable on its colored fill. */
+.inline-reference {
+  color: var(--accent-ink);
+  color: color-mix(in srgb, var(--accent-ink) 70%, var(--ink));
+  transition-property: none;
+}
+
+@media (hover: hover) {
+  .inline-reference:hover {
+    background-color: color-mix(in srgb, var(--accent-ink) 8%, transparent);
+  }
+}
+
+.inline-reference:active,
+.inline-reference[aria-expanded="true"] {
+  background-color: color-mix(in srgb, var(--accent-ink) 12%, transparent);
+}

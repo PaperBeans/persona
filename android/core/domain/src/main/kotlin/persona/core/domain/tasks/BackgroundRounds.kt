@@ -7,6 +7,7 @@ import persona.core.contracts.Item
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.MessageSource
 import persona.core.contracts.canonicalMcpToolName
+import persona.core.contracts.stripToolResultTimestampHeaders
 import persona.core.domain.injectedOf
 import persona.core.domain.isPersonaTool
 import persona.core.domain.lines.ChatLine
@@ -106,7 +107,9 @@ fun supervisionVisible(ordered: List<Item>, results: Map<String, Item>, live: Bo
             "task_review" -> if (stringField(use.toolInput as? JsonObject, "verdict") in setOf("accepted", "needs_user")) return true
             "supervision_finish" -> {
                 // A failed or malformed receipt does not decide visibility.
-                val receipt = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull()
+                val receipt = runCatching {
+                    JsonCodec.parseToJsonElement(stripToolResultTimestampHeaders(result.text.orEmpty())) as? JsonObject
+                }.getOrNull()
                 when (stringField(receipt, "visibility")) {
                     "user" -> return true
                     "silent" -> silent = true

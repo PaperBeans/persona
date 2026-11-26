@@ -1,6 +1,8 @@
 // Reader-controlled expansion survives live remounts and history paging; a run's completion collapses its summary.
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
+export const MAX_EXPANDED_ENTRIES = 500;
+
 const opened = new Map<string, boolean>();
 /** The drawn groups, told when something outside them opened theirs (`openExpanded`). */
 const openListeners = new Set<(keys: ReadonlySet<string>) => void>();
@@ -8,7 +10,7 @@ const openListeners = new Set<(keys: ReadonlySet<string>) => void>();
 /** Opens these keys from outside their groups ("Jump to the step that started it"): the ones on screen redraw open. */
 export function openExpanded(keys: string[]) {
   if (!keys.length) return;
-  for (const k of keys) opened.set(k, true);
+  for (const k of keys) setCapped(opened, k, true);
   const set = new Set(keys);
   openListeners.forEach((l) => l(set));
 }
@@ -30,8 +32,19 @@ export function forgetExpanded() {
   foldRanges.clear();
 }
 
+function setCapped<K, V>(map: Map<K, V>, key: K, value: V, limit = MAX_EXPANDED_ENTRIES) {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > limit) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 export function openFoldRange(scope: string, from: number, through: number) {
-  foldRanges.set(scope, [...(foldRanges.get(scope) ?? []), [from, through]]);
+  const prev = foldRanges.get(scope) ?? [];
+  setCapped(foldRanges, scope, [...prev, [from, through]]);
 }
 
 export function inOpenedFold(scope: string, seq?: number): boolean {
@@ -49,7 +62,7 @@ export function useExpanded(key: string, initial = false): [boolean, (next: bool
   const set = useCallback(
     (next: boolean | ((v: boolean) => boolean)) => {
       const v = typeof next === "function" ? next(opened.get(key) ?? initial) : next;
-      opened.set(key, v);
+      setCapped(opened, key, v);
       bump((n) => n + 1);
     },
     [key, initial],
@@ -66,11 +79,11 @@ export function useLiveOverride(key: string, running: boolean): [boolean | undef
   useLayoutEffect(() => {
     if (running) {
       // Mark even an untouched run: a previously opened historical summary must fold again when this run ends.
-      if (!liveOverrides.has(key)) liveOverrides.set(key, false);
+      if (!liveOverrides.has(key)) setCapped(liveOverrides, key, false);
       // Jump-to-call and search reveal use openExpanded, not the header's own toggle.
       const listen = (keys: ReadonlySet<string>) => {
         if (!keys.has(key)) return;
-        liveOverrides.set(key, true);
+        setCapped(liveOverrides, key, true);
         bump((n) => n + 1);
       };
       openListeners.add(listen);
@@ -79,13 +92,13 @@ export function useLiveOverride(key: string, running: boolean): [boolean | undef
     if (!liveOverrides.has(key)) return;
     liveOverrides.delete(key);
     // An external reveal may also have saved `opened`: completion still collapses the run before paint.
-    opened.set(key, false);
+    setCapped(opened, key, false);
     const keys = new Set([key]);
     openListeners.forEach((l) => l(keys));
   }, [key, running]);
   const set = useCallback(
     (next: boolean) => {
-      liveOverrides.set(key, next);
+      setCapped(liveOverrides, key, next);
       bump((n) => n + 1);
     },
     [key],

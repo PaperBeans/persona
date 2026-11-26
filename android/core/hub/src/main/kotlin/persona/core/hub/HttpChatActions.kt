@@ -21,11 +21,12 @@ class HttpChatActions internal constructor(
     private val request: suspend (String, String, RequestBody?) -> Response,
     /** Slow lane with custom headers (e.g. `X-Persona-Op-Id` on idempotent session starts); falls back to [slowRequest]. */
     private val slowRequestWithHeaders: (suspend (String, String, RequestBody?, Map<String, String>) -> Response)? = null,
+    private val crossMachineHierarchy: () -> Boolean = { false },
 ) : ChatActions {
     internal constructor(
         slowRequest: (suspend (String, String, RequestBody?) -> Response)? = null,
         request: suspend (String, String, RequestBody?) -> Response,
-    ) : this(slowRequest, request, null)
+    ) : this(slowRequest, request, null, { false })
 
     constructor(connection: OkHttpHubConnection) : this(
         slowRequest = { path, method, body -> connection.request(path, method, body, readTimeoutSeconds = REWIND_READ_TIMEOUT_SECONDS) },
@@ -33,6 +34,7 @@ class HttpChatActions internal constructor(
         slowRequestWithHeaders = { path, method, body, headers ->
             connection.request(path, method, body, headers = headers, readTimeoutSeconds = REWIND_READ_TIMEOUT_SECONDS)
         },
+        crossMachineHierarchy = { SESSIONS_CROSS_MACHINE_HIERARCHY in connection.serverFeatures.value },
     )
 
     private val slow get() = slowRequest ?: request
@@ -283,11 +285,18 @@ class HttpChatActions internal constructor(
         var cursor: String? = null
         var revision: String? = null
         var total = 0
+        val cross = crossMachineHierarchy()
         do {
             val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/sessions")
                 .addQueryParameter("summary", "1").addQueryParameter("limit", "200")
-                .addQueryParameter("machine_id", session.machineId).addQueryParameter("parent_session_id", session.sessionId)
                 .apply {
+                    if (cross) {
+                        addQueryParameter("parent_machine_id", session.machineId)
+                        addQueryParameter("parent_session_id", session.sessionId)
+                    } else {
+                        addQueryParameter("machine_id", session.machineId)
+                        addQueryParameter("parent_session_id", session.sessionId)
+                    }
                     cursor?.let { addQueryParameter("cursor", it) }
                     since?.let { addQueryParameter("since", it) }
                 }.build()
@@ -302,7 +311,16 @@ class HttpChatActions internal constructor(
             if (revision != null && revision != page.revision) throw HubFailure(HubError.Protocol, retryable = false)
             revision = page.revision
             total = page.total
-            rows += page.sessions.filter { it.foldedUnder == session.sessionId }.map { it.copy(machineId = session.machineId) }
+            rows += page.sessions.map { row ->
+                if (row.machineId.isBlank()) row.copy(machineId = session.machineId) else row
+            }.filter { row ->
+                if (cross) {
+                    row.foldedUnderKey == session.key ||
+                        (row.foldedUnder.isNullOrBlank() && row.parentKey == session.key)
+                } else {
+                    row.foldedUnder == session.sessionId && row.machineId == session.machineId
+                }
+            }
             removed += page.remove
             cursor = if (page.hasMore) {
                 page.nextCursor?.takeIf { it.isNotBlank() && cursors.add(it) }

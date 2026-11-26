@@ -1,0 +1,11 @@
+{
+  "awaiting_judgment": "最近一次为未判定",
+  "interrupted": "Agent 已中断",
+  "last_interrupted": "最近一次为中断",
+  "offline": "Agent 离线",
+  "rework_round": "返工第 {round} 轮",
+  "sep": "，",
+  "stopped": "Agent 已停止",
+  "stopped_error": "Agent 因错误停止",
+  "unjudged": "完成状态未判定"
+}

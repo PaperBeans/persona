@@ -1,15 +1,24 @@
 import { IconActions } from '../design/IconActions';
+import { composerReadingSize } from '../core/ComposerSize';
+import { agentReplyBodySize } from '../core/Markdown';
+import { PhoneStyle } from '../design/PhoneStyle';
 import { LengthMetrics } from '@kit.ArkUI';
+import { NativeEnvironment, nativeEnvironment } from '../platform/NativeEnvironment';
+import { PhoneOutlineIcon } from '../design/PhoneOutlineIcon';
 import { QuestionDraft } from '../models/QuestionWorkspace';
 import { Symbols } from '../design/Symbols';
+import { MarkdownText } from './MarkdownText';
 import { ClientModel } from '../models/ClientModel';
-import { Decision, DecisionField, Wire } from '../models/Wire';
+import { Decision, DecisionField, ResourceRow, Wire } from '../models/Wire';
+import { AgentDecisionQueue, AgentDecisionCard } from '../models/AgentDecisionQueue';
+import { util } from '@kit.ArkTS';
 import {
   InteractionChoice, InteractionSchemaField, InteractionValidation,
-  interactionCanDefer, interactionCanSubmit, interactionElicitationDefaults, interactionElicitationMessage,
+  interactionCardAgent, interactionQuestionHeader, interactionPermissionTool, interactionPermissionSubject, interactionSessionAllowance, interactionAllowanceScope,
+  recordedPlanMode, interactionCanDefer, interactionCanSubmit, interactionSupervisorHeld, interactionToolName, interactionElicitationDefaults, interactionElicitationMessage,
   interactionElicitationMode, interactionElicitationSupported, interactionElicitationUrl, interactionHistoryResolution,
-  interactionPermissionFieldPlaceholder, interactionQuestionOptions,
-  interactionSchemaFields, interactionScreenCanCancel, interactionScreenMulti, interactionScreenOptions,
+  interactionPermissionFieldPlaceholder, interactionPlanTitle, interactionQuestionOptions,
+  interactionSchemaFields, interactionSkipReason, interactionScreenCanCancel, interactionScreenMulti, interactionScreenOptions,
   interactionScreenQuestion, interactionScreenSubmitLabel, validateInteractionElicitation
 } from '../models/InteractionDecision';
 import { Tokens } from '../design/Tokens';
@@ -22,8 +31,75 @@ export struct InteractionDecisionForm {
   @Require @Param model: ClientModel;
   @Require @Param request: Decision;
   @Param readOnly: boolean = false;
+  @Param docked: boolean = false;
+  @Local private headerEnvironment: NativeEnvironment = nativeEnvironment;
+  @Param resizeDock: boolean = false;
+  @Event onDockResize:(phase:string,delta:number)=>void = (_phase:string,_delta:number)=>{};
+  @Local private dockTitleHeight: number = 0;
+  @Local private planNaturalHeight: number = 0;
+  @Computed get dockPlanPreview(): string {
+    return this.taskPlanSource().split('\n',31).slice(0,30).join('\n');
+  }
+  private dockPlanLineHeight(lines: number): number {
+    // The fold measures an N-line native body Text. Markdown uses its own reading
+    // face. Only the N - 1 gaps between its lines have extra leading.
+    const scale = nativeEnvironment.fontScale;
+    const body = composerReadingSize(scale);
+    const markdownPoints = agentReplyBodySize(scale);
+    return body.line + markdownPoints * 0.26 * (lines - 1) / lines;
+  }
+  private dockPlanShownHeight():number {
+    const full=this.planNaturalHeight;
+    if (!full) return 0;
+    const maximum = this.model.style === 'beautiful' ? 6 : 8;
+    const line = this.dockPlanLineHeight(maximum), cap=this.dockBodyLimit(), toggle=this.agentFontSize(13)*1.2+4;
+    const lines=Math.max(2,Math.min(maximum,Math.floor((cap-toggle+0.5)/line)));
+    const shown=Math.min(full,lines*line);
+    return this.dockPlanPreview.length===this.taskPlanSource().length && full-shown<2.5*line ? full : shown;
+  }
+  @Builder dockPlanWords() {
+    Column({space:4}) {
+      if (this.model.style==='beautiful') {
+        Text(tr('style_plan_question')).fontSize(17).fontWeight(FontWeight.Medium).fontColor(Colors.ink)
+          .width('100%').textAlign(TextAlign.Start).margin({bottom:6})
+      }
+      Scroll() {
+        Column() {
+          MarkdownText({text:this.dockPlanPreview,chatReply:true,recapReading:true,dockPlan:true,onLink:this.onLink})
+        }.width('100%').onAreaChange((_before:Area,area:Area):void => {
+          const h=Number(area.height);if (h>0 && Math.abs(h-this.planNaturalHeight)>0.5) this.planNaturalHeight=h;
+        })
+      }.width('100%').height(this.planNaturalHeight ? this.dockPlanShownHeight() : undefined)
+        .scrollBar(BarState.Off).enableScrollInteraction(false).align(Alignment.TopStart)
+      if (this.dockPlanPreview.length<this.taskPlanSource().length || this.planNaturalHeight>this.dockPlanShownHeight()+1) Button({type:ButtonType.Normal}) {
+        Row({space:4}) {
+          Text(tr('phone_decision_full_text')).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontWeight(FontWeight.Medium).fontColor(Colors.link)
+          SymbolGlyph(Symbols.expand).fontSize(Tokens.interfaceFontVp(12,nativeEnvironment.fontScale)).fontColor([Colors.link])
+        }
+      }.padding(0).backgroundColor(Color.Transparent).height(this.agentFontSize(13)*1.2)
+        .responseRegion({x:0,y:-6,width:'100%',height:36}).accessibilityText(tr('phone_decision_full_text'))
+        .onClick(() => { if (this.admission()) this.fullPlan=true; }).id('interaction.task.plan.expand')
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+  @Param agentCard: boolean = false;
+  @Param dockSource: string = '';
+  @Event onDockFold: () => void = () => {};
+  @Event onViewTask: () => void = () => {};
+  @Param taskQueue: AgentDecisionQueue | undefined = undefined;
+  @Param taskCard: AgentDecisionCard | undefined = undefined;
+  @Param taskAgent: ResourceRow | undefined = undefined;
   @Param pinFooter: boolean = false;
   @Param fillAvailable: boolean = false;
+  @Param heightLimit: number = 0;
+  @Local inlineBodyHeight: number = 0;
+  @Local inlineFooterHeight: number = 44;
+  @Local inlineHeaderHeight: number = 28;
+  @Local cardFolded: boolean = false;
+  @Local questionPage: number = 0;
+  @Local reviewingQuestions: boolean = false;
+  @Local otherQuestion: string = '';
+  @Local commandExpanded: boolean = false;
+  @Local fullPlan: boolean = false;
   @Param draft: QuestionDraft | undefined = undefined;
   @Param draftSession: string = '';
   @Event admission: () => boolean = (): boolean => true;
@@ -43,7 +119,7 @@ export struct InteractionDecisionForm {
   @Local formValues: Record<string, Object> = Wire.payload([], []);
 
   aboutToAppear(): void { this.resetForm(); if (this.draft && this.draft.id === this.request.id && this.draft.raw === this.request.raw && this.draft.owns(this.draftSession)) { const text: Record<string, string> = {}, picks: Record<string, string[]> = {}; Object.keys(this.draft.text).forEach((key: string) => text[key] = this.draft!.text[key]); Object.keys(this.draft.picks).forEach((key: string) => picks[key] = this.draft!.picks[key].slice()); this.textValues = text; this.questionPicks = picks; } }
-  aboutToDisappear(): void { if (this.draft && this.draft.id === this.request.id && this.draft.raw === this.request.raw) this.draft.save(this.textValues, this.questionPicks, this.draftSession); }
+  aboutToDisappear(): void { this.fullPlan=false; if (this.draft && this.draft.id === this.request.id && this.draft.raw === this.request.raw) this.draft.save(this.textValues, this.questionPicks, this.draftSession); }
   @Monitor('request.id', 'request.raw') requestChanged(): void { this.resetForm(); }
   @Monitor('request.revision') revisionChanged(): void {
     this.selectedScreen = '';
@@ -53,6 +129,8 @@ export struct InteractionDecisionForm {
   }
 
   private resetForm(): void {
+    this.cardFolded = false; this.questionPage=0; this.reviewingQuestions=false; this.otherQuestion=''; this.commandExpanded=false;
+    this.fullPlan = false;
     this.selected = '';
     this.selectedScreen = '';
     this.screenOptions = [];
@@ -68,13 +146,16 @@ export struct InteractionDecisionForm {
     this.questionOptions = choices;
   }
 
-  private persistQuestionDraft(): void { if (this.request.kind === 'question' && this.draft && this.admission()) this.draft.save(this.textValues, this.questionPicks, this.draftSession); }
+  private persistQuestionDraft(): void { if (this.request.kind === 'question' && this.draft && this.draft.id===this.request.id && this.draft.raw===this.request.raw && this.draft.owns(this.draftSession) && this.admission()) this.draft.save(this.textValues, this.questionPicks, this.draftSession); }
   private canRespond(): boolean {
-    return this.admission() && !this.busy && this.model.canApprove() && interactionCanSubmit(this.request, this.readOnly);
+    if (!this.admission() || this.busy || !interactionCanSubmit(this.request,this.readOnly)) return false;
+    if (this.taskQueue) return !!this.taskCard && this.taskCard.request===this.request && !!this.taskAgent &&
+      this.taskQueue.enabled(this.model,this.taskAgent,this.taskCard);
+    return this.model.canApprove();
   }
 
   private canDefer(): boolean {
-    return interactionCanDefer(this.request, this.model.selected.kind, this.readOnly, this.busy);
+    return !this.taskQueue && interactionCanDefer(this.request, this.model.selected.kind, this.readOnly, this.busy);
   }
 
   private headerPrompt(): string {
@@ -240,6 +321,7 @@ export struct InteractionDecisionForm {
       });
     } else if (this.request.kind === 'plan') {
       values['feedback'] = this.textValues['feedback'] || '';
+      if (this.selected==='approve' && this.textValues['mode']) values['mode']=this.textValues['mode'];
     } else if (this.request.kind === 'permission') {
       if (this.selected !== 'deny') this.request.fields.forEach((field: DecisionField) => {
         const value = (this.textValues[field.key] || '').trim();
@@ -266,16 +348,23 @@ export struct InteractionDecisionForm {
 
   private submit(option: string): void {
     if (!this.canRespond()) return;
-    if (this.request.kind === 'question' && option === 'cancel') {
+    if (option === 'dismiss') {
+      if ((!this.taskQueue && !this.agentCard) || interactionToolName(this.request) === 'ask_user') return;
+    } else if (this.request.kind === 'question' && option === 'cancel') {
       if (!interactionScreenCanCancel(this.request)) return;
     } else if (this.request.kind === 'elicitation' && (option === 'decline' || option === 'cancel')) {
       // Decline and cancel remain available when a form is unsupported or incomplete.
     } else if (!this.canSubmit()) return;
-    const values = this.request.kind === 'question' && option === 'cancel' || this.request.kind === 'elicitation' && option !== 'accept' ?
+    const values = option === 'dismiss' || this.request.kind === 'question' && option === 'cancel' || this.request.kind === 'elicitation' && option !== 'accept' ?
       Wire.payload([], []) : this.answerValues();
     this.busy = true;
     this.clearSecrets();
-    this.model.answer(option, values, this.request, this.admission).then(() => { this.busy = false; if (this.request.status === 'resolved') this.onResolved(); });
+    const request=this.request, raw=request.raw, agent=this.taskAgent, card=this.taskCard;
+    const answer=this.taskQueue && agent && card ? this.taskQueue.answerForm(this.model,agent,card,option,values,util.generateRandomUUID(),this.admission) :
+      this.model.answer(option,values,request,this.admission);
+    answer.then(() => { if (request===this.request && request.raw===raw && request.status==='resolved') this.onResolved(); })
+      .catch(() => { if (request===this.request && request.raw===raw && this.admission()) this.model.error='failed'; })
+      .finally(() => { if (request===this.request && request.raw===raw) this.busy=false; });
   }
 
   private historySummary(): string {
@@ -501,6 +590,445 @@ export struct InteractionDecisionForm {
 
   }
 
+  private taskPlanSource():string {
+    const envelope=Wire.parse(this.request.raw), details=Wire.object(envelope,'interaction');
+    return Wire.text(Object.keys(details).length ? details : envelope,'plan') || this.request.prompt;
+  }
+
+  private cardHeading():string {
+    if (this.request.kind==='plan') return tr('phone_agent_plan_approval');
+    if (this.request.kind==='permission') return tr('phone_agent_needs_approval');
+    if (this.request.kind==='question') {
+      if (this.agentCard) return tr('phone_agent_asks').replace('{agent}',interactionCardAgent(this.request,this.model.selected.data()));
+      const provider=interactionToolName(this.request)==='ask_user' ? 'Persona' : Wire.text(this.taskAgent?.data() || {},'agent_label') || Wire.text(this.taskAgent?.data() || {},'agent');
+      return tr('phone_agent_asks').replace('{agent}',provider==='claude' ? 'Claude' : provider==='codex' ? 'Codex' : provider || tr('agent'));
+    }
+    return tr('needs_you');
+  }
+
+  private foldPreview():string {
+    if (this.taskCard) return this.taskCard.preview;
+    if (!this.agentCard) return '';
+    if (this.request.kind==='question') return this.request.fields[0]?.title || this.request.prompt;
+    if (this.request.kind==='plan') return interactionPlanTitle(this.taskPlanSource(),tr('plan'));
+    if (this.request.kind==='permission') return interactionPermissionSubject(this.request) || interactionPermissionTool(this.request);
+    return this.headerPrompt();
+  }
+
+  private toggleCard():void {
+    if (!this.admission()) return;
+    if (this.docked) this.onDockFold();
+    else this.cardFolded=!this.cardFolded;
+  }
+
+  @Builder planReader() {
+    Column() {
+      Row() {
+        Button({type:ButtonType.Circle}) { SymbolGlyph(IconActions.symbol('close')).fontSize('19vp').fontColor([Colors.ink]) }
+          .attributeModifier(ButtonStyles.chrome).accessibilityText(tr('close')).onClick(() => this.fullPlan=false).id('interaction.task.reader.close')
+        Text(interactionPlanTitle(this.taskPlanSource(),tr('plan'))).layoutWeight(1).fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17))
+          .fontWeight(FontWeight.Medium).fontColor(Colors.ink).textAlign(TextAlign.Center).maxLines(1)
+          .textOverflow({overflow:TextOverflow.Ellipsis}).id('interaction.task.reader.title')
+        Blank().width(Tokens.touch).accessibilityLevel('no')
+      }.width('100%').padding({left:12,right:12,top:6,bottom:6})
+      Scroll() {
+        Column() { MarkdownText({text:this.taskPlanSource(),chatReply:true,onLink:this.onLink}) }
+          .width('100%').alignItems(HorizontalAlign.Start).padding(16)
+      }.width('100%').layoutWeight(1).align(Alignment.TopStart).id('interaction.task.reader')
+    }.width('100%').height('100%').backgroundColor(Colors.surface)
+  }
+
+  @Builder dockMenu() {
+    Menu() {
+      if ((this.taskQueue || this.agentCard) && interactionToolName(this.request) !== 'ask_user') MenuItem({content:tr('phone_interaction_terminal')})
+        .enabled(this.canRespond()).onClick(() => this.submit('dismiss'))
+    }
+  }
+  private agentFontSize(points:number):number {
+    return points*Math.min(nativeEnvironment.fontScale,Tokens.interfaceScaleFor(points));
+  }
+  private headerControlSide():number {
+    return this.agentCard || this.docked ? 28*Math.max(1,Math.min(nativeEnvironment.fontScale,67/51)) : 28;
+  }
+  private dockSkipTarget():number {
+    // The 44-point target grows with the interface, with a fixed eight-point
+    // overlap at each edge of the header, like the two pager arrows.
+    return 44 * this.headerControlSide() / 28;
+  }
+  private dockGlyphScale(points:number):number {
+    return Math.min(this.headerEnvironment.fontScale,Tokens.interfaceScaleFor(points));
+  }
+  @Computed get systemDockHeader():boolean {
+    return this.docked && Colors.systemControls && Colors.styleID==='glass';
+  }
+  private dockPlanCaptionLine():string | undefined {
+    return this.taskQueue && this.request.kind==='plan' ? String(this.agentFontSize(13)*1.23)+'vp' : undefined;
+  }
+  private agentActionHeight():number {
+    return 30 + this.agentFontSize(17)*1.2;
+  }
+  @Computed get supervisorHeld():boolean {
+    return !this.readOnly && interactionSupervisorHeld(this.request);
+  }
+  @Builder supervisorNote() {
+    Row({space:8}) {
+      SymbolGlyph($r('sys.symbol.eye')).fontSize(13).fontColor([Colors.secondary]).accessibilityLevel('no')
+      Column({space:3}) {
+        Text(tr('interaction_supervisor_handling')).fontSize(13).fontWeight(600).fontColor(Colors.ink)
+        Text(tr('interaction_supervisor_escalation')).fontSize(13).fontColor(Colors.secondary)
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+    }.width('100%').padding(12).alignItems(VerticalAlign.Top).backgroundColor(Colors.control).borderRadius(12)
+      .accessibilityGroup(true).id('interaction.supervisor-held')
+  }
+  @Builder taskHeader() {
+    Row({space:this.docked ? 6 : 5}) {
+      Button({type:ButtonType.Normal}) {
+        Row({space:this.docked ? 6 : 5}) {
+          if (this.docked && this.request.kind==='plan') {
+            Stack() {
+              PhoneOutlineIcon({name:'decisionClipboard',color:this.systemDockHeader ? Colors.needsMark : Colors.link})
+                .scale({x:this.dockGlyphScale(12),y:this.dockGlyphScale(12)})
+            }.width(13*this.dockGlyphScale(12)).height(this.headerControlSide()).accessibilityLevel('no')
+          } else {
+            SymbolGlyph(this.request.kind==='plan' ? Symbols.document : this.request.kind==='question' ? $r('sys.symbol.ellipsis_bubble') : $r('sys.symbol.hand_raised_fingers_spread'))
+              .fontSize(this.agentCard || this.docked ? Tokens.interfaceFontVp(13,this.headerEnvironment.fontScale) : '13vp').fontColor([Colors.link])
+          }
+          Text(this.cardHeading()).fontSize(12).maxFontScale(Tokens.interfaceScaleFor(12)).fontWeight(600)
+            .fontColor(this.systemDockHeader ? $r('app.color.decision_header_title') : Colors.link).maxLines(1)
+            .layoutWeight(this.docked && !this.cardFolded ? 1 : 0).textOverflow({overflow:TextOverflow.Ellipsis})
+          if (this.cardFolded && this.foldPreview()) Text(this.foldPreview()).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13))
+            .fontColor(Colors.ink).maxLines(1).textOverflow({overflow:TextOverflow.Ellipsis}).layoutWeight(1)
+        }.align(Alignment.Start).width('100%').padding({right:this.docked ? 4 : 0}).clip(this.docked)
+      }.layoutWeight(1).height(this.headerControlSide()).backgroundColor(Color.Transparent).padding(0)
+        .onClick(() => this.toggleCard()).accessibilityText(this.cardHeading()).accessibilityDescription(tr(this.cardFolded ? 'control_collapsed' : 'control_expanded'))
+      if (this.docked && this.taskAgent) Button(tr('decision_view_in_chat'),{type:ButtonType.Normal})
+        .height(this.headerControlSide()).padding({left:8,right:6}).margin({right:-6}).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13))
+        .fontColor(this.systemDockHeader ? Colors.needsMark : Colors.link)
+        .responseRegion({x:0,y:-5,width:'100%',height:Math.max(44,this.headerControlSide())}).backgroundColor(Color.Transparent)
+        .onClick(() => { if (this.admission()) this.onViewTask(); }).id('interaction.task.source')
+      if (!this.supervisorHeld && this.docked && interactionSkipReason(this.request)) Button(tr('decision_skip'),{type:ButtonType.Normal})
+        .height(this.dockSkipTarget()-16).constraintSize({minWidth:this.dockSkipTarget()}).padding({left:5,right:5})
+        .fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(this.systemDockHeader ? Colors.needsMark : Colors.tertiary)
+        .responseRegion({x:0,y:-8,width:'100%',height:this.dockSkipTarget()}).backgroundColor(Color.Transparent).enabled(false).id('interaction.task.skip_unavailable')
+      else if (!this.supervisorHeld && (this.docked || this.agentCard) && interactionScreenCanCancel(this.request)) Button(tr('decision_skip'),{type:ButtonType.Normal})
+        .height(this.headerControlSide()).padding({left:3,right:3}).fontSize(12).maxFontScale(Tokens.interfaceScaleFor(12)).fontColor(Colors.link)
+        .backgroundColor(Color.Transparent).enabled(this.canRespond()).onClick(() => this.submit('cancel')).id('interaction.task.skip')
+      if (!this.cardFolded && this.request.kind==='plan') Button({type:ButtonType.Circle}) {
+        if (this.docked) {
+          PhoneOutlineIcon({name:'decisionEnlarge',color:this.systemDockHeader ? $r('app.color.decision_header_secondary') : Colors.secondary})
+            .scale({x:this.dockGlyphScale(13),y:this.dockGlyphScale(13)})
+        } else {
+          SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right')).fontSize('13vp').fontColor([Colors.secondary])
+        }
+      }.width(this.headerControlSide()).height(this.headerControlSide()).padding(0).backgroundColor(Color.Transparent).accessibilityText(tr('phone_plan_fullscreen'))
+        .onClick(() => { if (this.admission()) this.fullPlan=true; }).id('interaction.task.expand_plan')
+      if (!this.supervisorHeld && (this.taskQueue || this.agentCard) && interactionToolName(this.request)!=='ask_user') Button({type:ButtonType.Circle}) {
+        Row({space:this.docked ? 2.17 : 2}) {
+          ForEach([0,1,2],(_dot:number) => {
+            Circle().width(this.docked ? 2.67 : 2.5).height(this.docked ? 2.67 : 2.5)
+              .fill(this.systemDockHeader ? $r('app.color.decision_header_secondary') : Colors.secondary)
+          },(dot:number) => String(dot))
+        }.scale({x:this.docked ? this.dockGlyphScale(13) : 1,y:this.docked ? this.dockGlyphScale(13) : 1})
+      }.width(this.headerControlSide()).height(this.headerControlSide()).padding(0).backgroundColor(Color.Transparent).enabled(this.canRespond()).accessibilityText(tr('more'))
+        .bindMenu(this.dockMenu).id('interaction.task.menu')
+      Button({type:ButtonType.Circle}) {
+        if (this.docked) {
+          PhoneOutlineIcon({name:'decisionChevron',color:this.systemDockHeader ? $r('app.color.decision_header_secondary') : Colors.secondary})
+            .rotate({angle:this.cardFolded ? 180 : 0}).scale({x:this.dockGlyphScale(13),y:this.dockGlyphScale(13)})
+        } else {
+          SymbolGlyph(this.cardFolded ? Symbols.up : Symbols.down).fontSize('13vp').fontColor([Colors.secondary])
+        }
+      }.width(this.agentCard || this.docked ? this.headerControlSide() : 27).height(this.agentCard || this.docked ? this.headerControlSide() : 27).padding(0)
+        .backgroundColor(this.systemDockHeader ? $r('app.color.decision_header_chip') : Colors.control)
+        .accessibilityText(tr(this.cardFolded ? 'agent_expand' : 'agent_collapse'))
+        .accessibilityDescription(tr(this.cardFolded ? 'control_collapsed' : 'control_expanded')).onClick(() => this.toggleCard()).id('interaction.task.fold')
+    }.width('100%').onAreaChange((_before:Area,area:Area) => {
+      const height=Number(area.height);
+      if (height>0 && Math.abs(this.inlineHeaderHeight-height)>0.5) this.inlineHeaderHeight=height;
+    })
+  }
+
+  private approveTaskPlan(mode:string):void {
+    if (!this.canRespond()) return;
+    this.selected='approve'; this.setText('mode',mode); this.submit('approve');
+  }
+
+  // System control sizes track the control font independently of the uncapped plan body.
+  private dockActionSize(primary:boolean):number {
+    const growth=(Math.max(17,this.agentFontSize(17))-17)/6;
+    return 17*1.2+(primary ? 30+growth*4 : 14+growth*2);
+  }
+  private dockActionInk(): ResourceColor {
+    return this.model.style==='system' ? Colors.ink : Colors.onAction;
+  }
+  @Builder dockSecondary(label:string,id:string,edits:boolean) {
+    Button(tr(label),{type:ButtonType.Capsule}).layoutWeight(1).height(this.dockActionSize(false)).padding({left:8,right:8})
+      .fontSize(17).maxFontScale(19/17).fontWeight(FontWeight.Normal).fontColor(Colors.link).backgroundColor($r('app.color.persona_dock_secondary_surface'))
+      .border({width:Tokens.divider,color:Colors.divider,radius:this.dockActionSize(false)/2})
+      .shadow({radius:3,color:nativeEnvironment.dark ? '#30000000' : '#16000000',offsetY:1})
+      .responseRegion({x:0,y:(this.dockActionSize(false)-44)/2,width:'100%',height:Math.max(44,this.dockActionSize(false))})
+      .enabled(this.canRespond()).onClick(() => { if (edits) this.approveTaskPlan('acceptEdits'); else this.selected='deny'; }).id(id)
+  }
+
+  @Builder beautifulPlanChoice(label:string,detail:string,mode:string,id:string) {
+    Button({type:ButtonType.Normal}) {
+      Row({space:10}) {
+        Circle().width(16).height(16).fill(Color.Transparent).stroke(Colors.secondary).strokeWidth(1)
+        Column({space:2}) {
+          Text(label).fontSize(15).maxFontScale(Tokens.interfaceScaleFor(15)).fontColor(Colors.ink)
+          Text(detail).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(Colors.secondary)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      }.width('100%').constraintSize({minHeight:49}).padding({top:4,bottom:4})
+    }.width('100%').padding(0).borderRadius(0).backgroundColor(Color.Transparent)
+      .accessibilityText(label+'，'+detail).enabled(this.canRespond()).onClick(()=>this.approveTaskPlan(mode)).id(id)
+  }
+  @Builder beautifulPlanChoices() {
+    Column({space:4}) {
+      if (recordedPlanMode(this.request)) {
+        this.beautifulPlanChoice(tr('approve'),this.terminalPlanLabel(recordedPlanMode(this.request)),recordedPlanMode(this.request),'interaction.task.approve')
+      } else {
+        this.beautifulPlanChoice(tr('session_task_approve_run'),tr('style_plan_run_detail'),'bypassPermissions','interaction.task.approve')
+        this.beautifulPlanChoice(tr('style_plan_edits'),tr('style_plan_edits_detail'),'acceptEdits','interaction.task.edits')
+      }
+      TextInput({text:this.textValues['feedback'] || '',placeholder:tr('style_plan_return_hint')})
+        .fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).height(32).padding({left:10,right:8,top:4,bottom:4})
+        .backgroundColor(Color.Transparent).enabled(this.canRespond()).enterKeyType(EnterKeyType.Send)
+        .onSubmit(()=>{if((this.textValues['feedback'] || '').trim()) this.submit('deny');})
+        .onChange((value:string)=>{this.selected=value.trim() ? 'deny' : '';this.setText('feedback',value);}).id('interaction.task.feedback')
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+  @Builder beautifulPlanSubmit() {
+    Row() {
+      Blank().layoutWeight(1)
+      Button(tr('send'),{type:ButtonType.Capsule}).constraintSize({minWidth:56,minHeight:28}).height(28).padding({left:12,right:12})
+        .fontSize(14).fontColor(Color.White).backgroundColor(Colors.action)
+        .enabled(this.canRespond() && !!(this.textValues['feedback'] || '').trim())
+        .onClick(()=>this.submit('deny')).id('interaction.task.return')
+    }.width('100%').padding({top:6,bottom:6})
+  }
+  private terminalPlanLabel(mode:string):string {
+    if(mode==='acceptEdits') return tr('style_plan_mode_edits');
+    if(mode==='bypassPermissions') return tr('style_plan_mode_all');
+    return mode==='auto' ? tr('style_plan_mode_auto') : tr('style_plan_mode_default');
+  }
+  @Builder taskPlanActions() {
+    Column({space:this.docked ? 12 : 5}) {
+      if (this.model.style==='beautiful') {
+        this.beautifulPlanChoices()
+        this.beautifulPlanSubmit()
+      } else if (this.selected==='deny') {
+        TextArea({text:this.textValues['feedback'] || '',placeholder:tr('feedback')}).height(48)
+          .onChange((value:string) => this.setText('feedback',value)).id('interaction.task.feedback')
+        Row({space:6}) {
+          Button(tr('cancel')).layoutWeight(1).fontSize(13).onClick(() => this.selected='')
+          Button(tr('session_task_return')).layoutWeight(1).fontSize(13).enabled(this.canRespond()).onClick(() => this.submit('deny'))
+        }.width('100%')
+      } else if (this.docked) {
+        Button({type:ButtonType.Capsule}) {
+          Row({space:6}) {
+            if (!recordedPlanMode(this.request)) SymbolGlyph($r('sys.symbol.play_fill')).fontSize(Tokens.interfaceFontVp(14,nativeEnvironment.fontScale)).fontColor([this.dockActionInk()])
+            Text(tr(recordedPlanMode(this.request) ? 'approve' : 'session_task_approve_run')).fontSize(17).maxFontScale(21/17)
+              .fontColor(this.dockActionInk()).fontWeight(FontWeight.Medium).maxLines(1)
+          }
+        }.width('100%').height(this.dockActionSize(true)).padding({left:8,right:8}).backgroundColor(Colors.action)
+          .accessibilityText(tr(recordedPlanMode(this.request) ? 'approve' : 'session_task_approve_run')).enabled(this.canRespond())
+          .onClick(() => this.approveTaskPlan(recordedPlanMode(this.request) || 'bypassPermissions')).id('interaction.task.approve')
+        Row({space:8}) {
+          if (!recordedPlanMode(this.request)) this.dockSecondary('session_task_auto_edits','interaction.task.edits',true)
+          this.dockSecondary('session_task_return','interaction.task.return',false)
+        }.width('100%')
+      } else {
+        Button({type:ButtonType.Capsule}) {
+          Row({space:6}) {
+            SymbolGlyph($r('sys.symbol.play_fill')).fontSize('14vp').fontColor([Colors.onAction])
+            Text(tr(recordedPlanMode(this.request) ? 'approve' : 'session_task_approve_run')).fontSize(16).maxFontScale(Tokens.interfaceScaleFor(16)).fontColor(Colors.onAction)
+          }
+        }.width('100%').constraintSize({minHeight:44}).accessibilityText(tr(recordedPlanMode(this.request) ? 'approve' : 'session_task_approve_run'))
+          .backgroundColor(Colors.action).enabled(this.canRespond())
+          .onClick(() => this.approveTaskPlan(recordedPlanMode(this.request) || 'bypassPermissions')).id('interaction.task.approve')
+        Row({space:6}) {
+          if (!recordedPlanMode(this.request)) Button(tr('session_task_auto_edits')).layoutWeight(1).fontSize(13).maxFontScale(Tokens.navigationTextMaxScale)
+            .constraintSize({minHeight:38}).backgroundColor(Colors.control).fontColor(Colors.link).enabled(this.canRespond())
+            .onClick(() => this.approveTaskPlan('acceptEdits')).id('interaction.task.edits')
+          Button(tr('session_task_return')).layoutWeight(1).fontSize(13).maxFontScale(Tokens.navigationTextMaxScale).constraintSize({minHeight:38})
+            .backgroundColor(Colors.control).fontColor(Colors.link).enabled(this.canRespond()).onClick(() => this.selected='deny').id('interaction.task.return')
+        }.width('100%')
+      }
+      if (this.taskQueue?.error) Text(tr(this.taskQueue.error)).fontSize(12).fontColor(Colors.danger)
+    }.width('100%')
+  }
+
+  private sendPermission(action:string):void {
+    if (!this.canRespond() || action==='allow_session' && !interactionSessionAllowance(this.request)) return;
+    this.selected=action==='deny' ? 'deny' : 'approve';
+    this.submit(action);
+  }
+  private permissionAllowed():boolean {
+    return this.canRespond() && !this.request.fields.some((field:DecisionField) => field.required && !(this.textValues[field.key] || '').trim());
+  }
+  private permissionScope():string {
+    const scope=interactionAllowanceScope(this.request);
+    return scope.startsWith('decision_scope_') ? tr(scope) : scope;
+  }
+  private pickedAnswer(field:DecisionField):string {
+    return (this.textValues[field.key+':other'] || (this.questionPicks[field.key] || []).join(', ')).trim();
+  }
+  private chooseAgentAnswer(field:DecisionField,choice:InteractionChoice):void {
+    if (!this.canRespond()) return;
+    this.otherQuestion='';this.pickQuestion(field,choice);
+    if (field.kind==='multi_choice') return;
+    if (this.request.fields.length===1) this.submit('answer');
+    else if (this.questionPage+1<this.request.fields.length) this.questionPage++;
+    else this.reviewingQuestions=true;
+  }
+  @Computed get permissionSubject():string { return interactionPermissionSubject(this.request); }
+  private longPermissionCommand():boolean {
+    const body=this.permissionSubject;
+    return body.length>320 || body.split('\n').length>5;
+  }
+  @Builder agentPermissionBody() {
+    Column({space:12}) {
+      Row({space:8}) {
+        if (interactionToolName(this.request)==='Bash') Text('>_').fontFamily('monospace').fontSize(Tokens.interfaceFontVp(12,nativeEnvironment.fontScale)).fontWeight(600)
+          .fontColor(Colors.link).padding({left:2,right:2}).border({width:1,color:Colors.link,radius:3}).accessibilityLevel('no')
+        else SymbolGlyph(Symbols.document).fontSize('17vp').fontColor([Colors.link])
+        Text(interactionPermissionTool(this.request) || tr('tool')).fontSize(15).maxFontScale(Tokens.interfaceScaleFor(15))
+          .fontWeight(600).fontColor(Colors.ink).id('interaction.permission.tool')
+      }.width('100%')
+      if (this.permissionSubject) Text(this.permissionSubject).fontFamily('monospace')
+        .fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(Colors.ink)
+        .letterSpacing(String(this.agentFontSize(13)/80)+'vp').lineHeight(String(this.agentFontSize(13)*1.2)+'vp')
+        .maxLines(this.commandExpanded || !this.longPermissionCommand() ? undefined : 5).textOverflow({overflow:TextOverflow.Ellipsis})
+        .width('100%').padding(12).backgroundColor(Colors.subtle).borderRadius(10).id('interaction.permission.command')
+      if (this.longPermissionCommand()) Button(tr(this.commandExpanded ? 'agent_collapse' : 'agent_expand'),{buttonStyle:ButtonStyleMode.TEXTUAL})
+        .fontSize(13).fontColor(Colors.link).onClick(() => this.commandExpanded=!this.commandExpanded).id('interaction.permission.expand')
+      ForEach(this.request.fields,(field:DecisionField) => this.permissionField(field),(field:DecisionField) => field.key)
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+  @Builder agentPermissionActions() {
+    Column({space:12}) {
+      Row({space:8}) {
+        Button(tr('deny'),{type:ButtonType.Capsule}).layoutWeight(1).height(this.agentActionHeight()).constraintSize({minHeight:this.agentActionHeight()}).fontSize(17)
+          .maxFontScale(Tokens.interfaceScaleFor(17)).backgroundColor(Colors.control).fontColor(Colors.link).enabled(this.canRespond())
+          .onClick(() => this.sendPermission('deny')).id('interaction.permission.deny')
+        Button(tr('allow'),{type:ButtonType.Capsule}).layoutWeight(1).height(this.agentActionHeight()).constraintSize({minHeight:this.agentActionHeight()}).fontSize(17)
+          .maxFontScale(Tokens.interfaceScaleFor(17)).backgroundColor(Colors.action).fontColor(Colors.onAction).enabled(this.permissionAllowed())
+          .onClick(() => this.sendPermission('allow')).id('interaction.permission.allow')
+      }.width('100%')
+      if (interactionSessionAllowance(this.request)) {
+        Row() {
+          Text(tr('decision_allow_session')).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).lineHeight(String(this.agentFontSize(13)*1.2)+'vp').fontColor(Colors.ink)
+            .accessibilityRole(AccessibilityRoleType.BUTTON).enabled(this.permissionAllowed())
+            .responseRegion({x:0,y:-6,width:'100%',height:'160%'})
+            .onClick(() => this.sendPermission('allow_session')).id('interaction.permission.allow_session')
+        }.width('100%').justifyContent(FlexAlign.Center)
+        if (this.permissionScope()) Text(this.permissionScope()).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).lineHeight(String(this.agentFontSize(13)*1.2)+'vp').fontColor(Colors.secondary)
+          .width('100%').id('interaction.permission.scope')
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder agentQuestion(field:DecisionField) {
+    Column({space:12}) {
+      if (interactionQuestionHeader(this.request,field.key) || this.request.fields.length>1)
+        Text([interactionQuestionHeader(this.request,field.key),this.request.fields.length>1 ? String(this.questionPage+1)+'/'+String(this.request.fields.length) : '']
+          .filter((item:string) => !!item).join(' · ')).fontSize(12).maxFontScale(Tokens.interfaceScaleFor(12))
+          .fontWeight(600).fontColor(Colors.secondary).width('100%')
+      Text(field.title).fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17)).fontWeight(600).fontColor(Colors.ink)
+        .width('100%').id('interaction.question.title')
+      Column() {
+        ForEach(this.questionChoices(field),(choice:InteractionChoice,i:number) => {
+          Row({space:12}) {
+            Text(String(i+1)).width(28).fontSize(12).maxFontScale(Tokens.interfaceScaleFor(12)).textAlign(TextAlign.Center).fontColor(Colors.secondary)
+            Column({space:4}) {
+              Text(choice.label).fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17)).fontWeight(500).fontColor(Colors.ink)
+              if (choice.detail) Text(choice.detail).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(Colors.secondary)
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            if (this.pickedQuestion(field,choice.label)) SymbolGlyph(Symbols.check).fontSize('16vp').fontColor([Colors.link])
+          }.width('100%').padding(12).constraintSize({minHeight:choice.detail ? 64 : 48}).enabled(this.canRespond())
+            .accessibilityGroup(true).accessibilitySelected(this.pickedQuestion(field,choice.label)).accessibilityText(choice.label)
+            .onClick(() => this.chooseAgentAnswer(field,choice)).id('interaction.question.'+field.key+'.'+choice.label)
+          Divider().color(Colors.divider).strokeWidth(0.5).margin({left:52})
+        },(choice:InteractionChoice) => choice.label)
+        if (!this.questionChoices(field).length || this.otherQuestion===field.key || this.textValues[field.key+':other']) {
+          TextInput({text:this.textValues[field.key+':other'] || '',placeholder:tr('decision_other_choice')})
+            .width('100%').constraintSize({minHeight:48}).fontSize(16).enabled(this.canRespond())
+            .onChange((v:string) => this.setText(field.key+':other',v)).id('interaction.question.'+field.key+'.other')
+        } else Button({type:ButtonType.Normal}) {
+          Row({space:12}) {
+            SymbolGlyph(Symbols.edit).width(28).fontSize('14vp').fontColor([Colors.secondary])
+            Text(tr('decision_other_choice')).fontSize(17).maxFontScale(Tokens.interfaceScaleFor(17)).fontColor(Colors.secondary)
+          }.width('100%').padding(12)
+        }.width('100%').constraintSize({minHeight:48}).backgroundColor(Color.Transparent).padding(0).enabled(this.canRespond())
+          .onClick(() => this.otherQuestion=field.key).id('interaction.question.other')
+      }.width('100%').backgroundColor(Colors.subtle).borderRadius(12).clip(true)
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+  @Builder agentQuestionActions() {
+    Row({space:8}) {
+      if (this.questionPage>0 || this.reviewingQuestions) Button(tr('decision_previous')).layoutWeight(1).fontSize(15)
+        .enabled(this.canRespond()).onClick(() => {
+          if (this.reviewingQuestions) this.reviewingQuestions=false;
+          else this.questionPage--;
+        }).id('interaction.question.previous')
+      if (this.reviewingQuestions || this.request.fields.length===1)
+        Button(tr('answer'),{type:ButtonType.Capsule}).layoutWeight(1).fontSize(16).backgroundColor(Colors.action).fontColor(Colors.onAction)
+          .enabled(this.canSubmit()).onClick(() => this.submit('answer')).id('interaction.submit')
+      else if (this.request.fields.length>0) Button(tr(this.questionPage+1<this.request.fields.length ? 'decision_next' : 'review'))
+        .layoutWeight(1).fontSize(15).enabled(this.canRespond() && !!this.pickedAnswer(this.request.fields[this.questionPage]))
+        .onClick(() => { if (this.questionPage+1<this.request.fields.length) this.questionPage++;else this.reviewingQuestions=true; })
+        .id('interaction.question.next')
+    }.width('100%')
+  }
+  @Builder agentBody() {
+    if (this.readOnly) this.formBody()
+    else if (this.request.kind==='permission') this.agentPermissionBody()
+    else if (this.request.kind==='plan') MarkdownText({text:this.taskPlanSource(),chatReply:true,onLink:this.onLink})
+    else if (this.request.kind==='question' && this.request.fields.length) {
+      if (this.reviewingQuestions) Column({space:8}) {
+        ForEach(this.request.fields,(field:DecisionField) => {
+          Text(field.title).fontSize(15).fontWeight(600).fontColor(Colors.ink).width('100%')
+          Text(this.pickedAnswer(field)).fontSize(15).fontColor(Colors.secondary).width('100%')
+        },(field:DecisionField) => field.key)
+      }.width('100%').alignItems(HorizontalAlign.Start)
+      else this.agentQuestion(this.request.fields[this.questionPage])
+    } else this.formBody()
+  }
+  private agentHasFooter():boolean {
+    if (this.readOnly) return false;
+    if (this.request.kind!=='question' || this.request.fields.length!==1) return true;
+    const field=this.request.fields[0];
+    return field.kind==='multi_choice' || !this.questionChoices(field).length || this.otherQuestion===field.key || !!this.textValues[field.key+':other'];
+  }
+  @Builder agentFooter() {
+    if (this.request.kind==='permission') this.agentPermissionActions()
+    else if (this.request.kind==='plan') this.taskPlanActions()
+    else if (this.request.kind==='question') this.agentQuestionActions()
+    else this.responseFooter()
+    if (this.model.error && ['permission','plan','question'].includes(this.request.kind)) Text(tr(this.model.error)).fontSize(13).fontColor(Colors.danger)
+  }
+  @Builder agentDecisionCard() {
+    Column({space:12}) {
+      this.taskHeader()
+      if (!this.cardFolded) {
+        if (this.heightLimit>0) Scroll() {
+          Column() { this.agentBody() }.width('100%').alignItems(HorizontalAlign.Start)
+            .onAreaChange((_before:Area,after:Area) => {
+              const h=Number(after.height); if (h>0 && Math.abs(this.inlineBodyHeight-h)>0.5) this.inlineBodyHeight=h;
+            })
+        }.width('100%').height(this.inlineBodyHeight>0 ? Math.min(this.inlineBodyHeight,this.inlineSpace()) : undefined)
+          .constraintSize({maxHeight:this.inlineSpace()}).align(Alignment.TopStart).id('interaction.body')
+        else Column() { this.agentBody() }.width('100%').alignItems(HorizontalAlign.Start).id('interaction.body')
+        if (this.agentHasFooter()) Column() { this.agentFooter() }.width('100%')
+          .onAreaChange((_before:Area,after:Area) => {
+            const h=Number(after.height); if (h>0 && Math.abs(this.inlineFooterHeight-h)>0.5) this.inlineFooterHeight=h;
+          })
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start).padding({left:16,right:16,top:12,bottom:16})
+      .backgroundColor(Colors.surface).border({width:0.6,color:Colors.divider,radius:20}).borderRadius(20).id('interaction.card')
+      .bindSheet($$this.fullPlan,this.planReader(),{height:SheetSize.LARGE,showClose:false,dragBar:false,preferType:SheetType.BOTTOM})
+  }
+
   @Builder responseFooter() {
     Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(Tokens.gap), cross: LengthMetrics.vp(Tokens.gap) } }) {
       if (this.deferred && !this.readOnly) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('interaction_question_reopen')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('interaction_question_reopen', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('interaction_question_reopen')).bindTips(tr('interaction_question_reopen'))
@@ -509,12 +1037,14 @@ export struct InteractionDecisionForm {
         if (this.pinFooter || this.fillAvailable) Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(0), cross: LengthMetrics.vp(Tokens.gap) } }) {
           if (this.pinFooter || this.canDefer()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('interaction_question_later')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('interaction_question_later', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('interaction_question_later')).bindTips(tr('interaction_question_later')).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) }).enabled(this.canDefer())
             .onClick(() => { this.deferred = true; this.onLater(); }).id('interaction.later')
-          if (interactionScreenCanCancel(this.request) && !this.pinFooter) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) })
+          if (interactionScreenCanCancel(this.request) && !this.pinFooter && !this.docked) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel')).flexShrink(0).margin({ end: LengthMetrics.vp(Tokens.gap) })
             .enabled(this.canRespond()).onClick(() => this.submit('cancel')).id('interaction.cancel')
           if (interactionScreenCanCancel(this.request) && this.pinFooter) Button({ type: ButtonType.Circle }) { Image(Symbols.more).width(Tokens.symbol).height(Tokens.symbol).fillColor(Colors.ink) }
             .attributeModifier(ButtonStyles.chrome).enabled(this.canRespond()).accessibilityText(tr('more'))
             .margin({ end: LengthMetrics.vp(Tokens.gap) }).bindMenu([{ value: tr('interaction_question_cancel'), action: () => this.submit('cancel') }]).flexShrink(0).id('interaction.more')
-          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('confirm')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('confirm', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('confirm')).bindTips(tr('confirm')).flexShrink(0).enabled(this.canSubmit())
+          Button(tr('answer'), { type: ButtonType.Capsule }).fontSize(16).fontWeight(FontWeight.Medium)
+            .height(38).padding({ left: 16, right: 16 }).backgroundColor(Colors.action).fontColor(Colors.onAction)
+            .accessibilityText(tr('answer')).enabled(this.canSubmit())
             .onClick(() => this.submit('answer')).id('interaction.submit')
         }.width('100%')
         else {
@@ -522,7 +1052,9 @@ export struct InteractionDecisionForm {
             .onClick(() => { this.deferred = true; this.onLater(); }).id('interaction.later')
           if (interactionScreenCanCancel(this.request)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('cancel')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('cancel', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('cancel')).bindTips(tr('cancel'))
             .enabled(this.canRespond()).onClick(() => this.submit('cancel')).id('interaction.cancel')
-          Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('confirm')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('confirm', true)]) }.attributeModifier(ButtonStyles.iconPrimary).accessibilityText(tr('confirm')).bindTips(tr('confirm')).enabled(this.canSubmit())
+          Button(tr('answer'), { type: ButtonType.Capsule }).fontSize(16).fontWeight(FontWeight.Medium)
+            .height(38).padding({ left: 16, right: 16 }).backgroundColor(Colors.action).fontColor(Colors.onAction)
+            .accessibilityText(tr('answer')).enabled(this.canSubmit())
             .onClick(() => this.submit('answer')).id('interaction.submit')
         }
       } else if (!this.readOnly && this.request.kind === 'elicitation') {
@@ -543,7 +1075,8 @@ export struct InteractionDecisionForm {
         Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol(this.submitIconKey())).fontSize(Tokens.symbolFont).fontColor([IconActions.color(this.submitIconKey(), this.submitIconKey() !== 'deny')]) }.attributeModifier(this.submitIconKey() === 'deny' ? ButtonStyles.icon : ButtonStyles.iconPrimary).accessibilityText(this.submitIconLabel()).bindTips(this.submitIconLabel()).enabled(this.canSubmit())
           .onClick(() => this.submit(this.submitButtonOption())).id('interaction.submit')
       }
-      if (this.model.error) Text(tr(this.model.error)).fontSize(Tokens.meta).fontColor(Colors.needs).width('100%')
+      if (this.taskQueue ? this.taskQueue.error : this.model.error)
+        Text(tr(this.taskQueue ? this.taskQueue.error : this.model.error)).fontSize(Tokens.meta).fontColor(Colors.needs).width('100%')
     }.width('100%').padding({ top: Tokens.gap })
 
   }
@@ -555,8 +1088,153 @@ export struct InteractionDecisionForm {
     } else if (!this.deferred) this.bodyContent()
   }
 
+  // The grip moves with the card: a local y coordinate would reset part of each
+  // drag as layout follows the finger. Read the stable window coordinates instead.
+  @Local private gripWidth:number = 0;
+  private gripWindowY:number = 0;
+  private gripWindowX:number = 0;
+  private gripDistance:number = 0;
+  private gripDown:boolean = false;
+  private gripMoved:boolean = false;
+  private gripEnded:number = 0;
+  private trackGrip(event:TouchEvent):void {
+    const touch=event.changedTouches[0] || event.touches[0];
+    if (event.type===TouchType.Down && touch) {
+      this.gripDown=true;this.gripMoved=false;this.gripDistance=0;this.gripWindowY=touch.windowY;this.gripWindowX=touch.windowX;
+      event.stopPropagation();return;
+    }
+    if (!this.gripDown) return;
+    if (event.type===TouchType.Move && touch) {
+      const dy=touch.windowY-this.gripWindowY;
+      if (!this.gripMoved && Math.abs(dy)>=4 && Math.abs(dy)>Math.abs(touch.windowX-this.gripWindowX)) {
+        this.gripMoved=true;this.onDockResize('begin',0);
+      }
+      if (this.gripMoved) { this.gripDistance=dy;this.onDockResize('move',dy); }
+    } else if (event.type===TouchType.Up || event.type===TouchType.Cancel) {
+      this.gripDown=false;this.gripEnded=Date.now();
+      if (this.gripMoved) this.onDockResize(event.type===TouchType.Up ? 'end' : 'cancel',this.gripDistance);
+      else if (event.type===TouchType.Up) this.onDockResize('toggle',0);
+    }
+    event.stopPropagation();
+  }
+  @Builder dockGrip() {
+    Button({type:ButtonType.Normal}) {
+      Row() {
+        Blank().width(38*this.headerControlSide()/28).height(5*this.headerControlSide()/28)
+          .backgroundColor(Colors.tertiary).borderRadius(4)
+      }.width('100%').height(16).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+    }.width('100%').height(16).padding(0).backgroundColor(Color.Transparent)
+       .onAreaChange((_before:Area,area:Area):void => {
+        const w=Number(area.width);if (w>0 && Math.abs(w-this.gripWidth)>0.5) this.gripWidth=w;
+      }).responseRegion({x:-8,y:-8,width:this.gripWidth>0 ? this.gripWidth+16 : '100%',height:32}).accessibilityText(tr('phone_decision_height'))
+      .accessibilityDescription(tr('phone_decision_height_hint')).accessibilityCustomActions([
+        {name:tr('phone_decision_taller'),onAction:() => this.onDockResize('up',0)},
+        {name:tr('phone_decision_shorter'),onAction:() => this.onDockResize('down',0)}])
+      .onTouch((event:TouchEvent):void => this.trackGrip(event))
+      .onClick(() => { if (Date.now()-this.gripEnded>400) this.onDockResize('toggle',0); }).id('interaction.grabber')
+  }
+  private dockHeadingAway():boolean {
+    // On a short keyboard viewport keep the answer interface ahead of the optional title row.
+    return !this.resizeDock && nativeEnvironment.keyboardHeightPx>0 && !this.cardFolded &&
+      this.dockTitleHeight>0 && this.heightLimit-16-this.dockTitleHeight-12-12-16<120;
+  }
+  private dockBodyLimit():number {
+    const header=this.dockHeadingAway() ? 0 : this.dockTitleHeight || this.headerControlSide();
+    return Math.max(44,this.heightLimit-header-this.inlineFooterHeight-(this.resizeDock ? 16 : 12)-16-(header>0 ? 12 : 0)-12);
+  }
+  @Builder dockBacklight() {
+    if (Colors.styleID === 'clay') {
+      Rect().width('100%').height('100%').radius(22).fill(Colors.surface)
+        .shadow({ radius: 6, color: nativeEnvironment.dark ? '#CC3A3445' : '#CCFFFFFF', offsetX: -4, offsetY: -4 })
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+    }
+  }
+  @Builder dockPanel() {
+    Column() {
+      if (this.resizeDock && !this.cardFolded) this.dockGrip()
+      if (!this.dockHeadingAway()) Column({space:2}) {
+        this.taskHeader()
+        if (!this.cardFolded && this.dockSource) Text(this.dockSource).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13))
+          .lineHeight(this.dockPlanCaptionLine()).fontColor(Colors.secondary).maxLines(2).width('100%').id('interaction.task.origin')
+        if (!this.cardFolded && interactionSkipReason(this.request)) Text(tr(interactionSkipReason(this.request)))
+          .fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).lineHeight(this.dockPlanCaptionLine())
+          .fontColor($r('app.color.persona_dock_warning')).width('100%').id('interaction.task.skip_reason')
+      }.width('100%').alignItems(HorizontalAlign.Start).onAreaChange((_before:Area,area:Area):void => {
+        const h=Number(area.height);if (h>0 && Math.abs(h-this.dockTitleHeight)>0.5) this.dockTitleHeight=h;
+      })
+      if (!this.cardFolded) Column({space:12}) {
+        Scroll() {
+          Column() {
+            if (this.taskQueue && this.request.kind==='plan') {
+              this.dockPlanWords()
+              if (this.model.style==='beautiful') this.beautifulPlanChoices()
+            }
+            else this.formBody()
+          }.width('100%').alignItems(HorizontalAlign.Start).onAreaChange((_before:Area,area:Area):void => {
+            const h=Number(area.height);if (h>0 && Math.abs(h-this.inlineBodyHeight)>0.5) this.inlineBodyHeight=h;
+          })
+        }.width('100%').height(Math.min(this.inlineBodyHeight || this.dockBodyLimit(),this.dockBodyLimit()))
+          .scrollBar(BarState.Auto).align(Alignment.TopStart).id('interaction.body')
+        Column() {
+          if (this.taskQueue && this.request.kind==='plan' && this.model.style==='beautiful') this.beautifulPlanSubmit()
+          else if (this.taskQueue && this.request.kind==='plan') this.taskPlanActions()
+          else this.responseFooter()
+        }.width('100%').onAreaChange((_before:Area,area:Area):void => {
+          const h=Number(area.height);if (h>=0 && Math.abs(h-this.inlineFooterHeight)>0.5) this.inlineFooterHeight=h;
+        })
+      }.width('100%').padding({top:this.dockHeadingAway() ? 0 : 12})
+    }.width('100%').padding({left:16,right:16,top:this.resizeDock && !this.cardFolded ? 0 : 12,bottom:16})
+      .alignItems(HorizontalAlign.Start).backgroundColor(Colors.surface).borderRadius(22)
+      .background(this.dockBacklight)
+      .outline({width:PhoneStyle.surfaceEdgeWidth(Tokens.divider),color:Colors.styleEdge || Colors.divider,radius:22})
+      .shadow(PhoneStyle.surfaceShadow({radius:8,color:nativeEnvironment.dark ? '#36000000' : '#15000000',offsetY:2})).id('interaction.card')
+      .bindSheet($$this.fullPlan,this.planReader(),{height:SheetSize.LARGE,showClose:false,dragBar:false,preferType:SheetType.BOTTOM})
+  }
+  private inlineSpace(): number {
+    if (this.agentCard) return Math.max(1,this.heightLimit-this.inlineHeaderHeight-40-(this.agentHasFooter() ? this.inlineFooterHeight+12 : 0));
+    return Math.max(1, this.heightLimit - this.inlineFooterHeight - (this.docked || this.taskQueue ? this.inlineHeaderHeight + 28 : 22));
+  }
   build() {
-    if (this.fillAvailable && !this.pinFooter && this.request.kind !== 'question') Scroll() {
+    if (this.supervisorHeld) Column({space:12}) {
+      this.taskHeader()
+      if (!this.cardFolded) this.supervisorNote()
+    }.width('100%').padding({left:16,right:16,top:12,bottom:16}).alignItems(HorizontalAlign.Start)
+      .backgroundColor(Colors.surface).border({width:0.6,color:Colors.divider,radius:20}).borderRadius(20).id('interaction.card')
+      .bindSheet($$this.fullPlan,this.planReader(),{height:SheetSize.LARGE,showClose:false,dragBar:false,preferType:SheetType.BOTTOM})
+    else if (this.agentCard) this.agentDecisionCard()
+    else if (this.docked) this.dockPanel()
+    else if (this.heightLimit > 0) Column({space: 6}) {
+      if (this.docked || this.taskQueue) this.taskHeader()
+      if (!this.cardFolded) Scroll() {
+        Column({space: Tokens.gap}) {
+          if (this.docked && this.dockSource) Text(this.dockSource).fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13))
+            .fontColor(Colors.secondary).maxLines(2).width('100%').id('interaction.task.origin')
+          if (this.docked && interactionSkipReason(this.request)) Text(tr(interactionSkipReason(this.request)))
+            .fontSize(13).maxFontScale(Tokens.interfaceScaleFor(13)).fontColor(Colors.secondary).width('100%').id('interaction.task.skip_reason')
+          if (!this.docked && !this.taskQueue) Row({space: 6}) {
+            Circle().width(7).height(7).fill(Colors.needs)
+            Text(tr(this.request.kind === 'question' ? 'question' : this.request.kind === 'plan' ? 'plan' : 'needs_you'))
+              .fontSize(13).fontWeight(FontWeight.Medium).fontColor(Colors.secondary)
+          }.width('100%')
+          if (this.taskQueue && this.request.kind==='plan') MarkdownText({text:this.taskPlanSource(),chatReply:true,onLink:this.onLink})
+          else this.formBody()
+        }.width('100%').alignItems(HorizontalAlign.Start).onAreaChange((_before: Area, area: Area) => {
+          const h = Number(area.height);
+          if (Number.isFinite(h) && h > 0 && Math.abs(this.inlineBodyHeight - h) > 0.5) this.inlineBodyHeight = h;
+        })
+      }.width('100%').height(this.inlineBodyHeight > 0 ? Math.min(this.inlineBodyHeight, this.inlineSpace()) : undefined)
+        .constraintSize({maxHeight: this.inlineSpace()}).scrollBar(BarState.Auto).align(Alignment.TopStart).id('interaction.body')
+      if (!this.cardFolded) Column() {
+        if (this.taskQueue && this.request.kind==='plan') this.taskPlanActions()
+        else this.responseFooter()
+      }.width('100%').onAreaChange((_before: Area, area: Area) => {
+        const h = Number(area.height);
+        if (Number.isFinite(h) && h > 0 && Math.abs(this.inlineFooterHeight - h) > 0.5) this.inlineFooterHeight = h;
+      })
+    }.width('100%').padding({left:this.docked ? 16 : 12,right:this.docked ? 16 : 12,top:8,bottom:8}).alignItems(HorizontalAlign.Start)
+      .backgroundColor(Colors.surface).border({width:0.6,color:Colors.divider,radius:16}).borderRadius(16).id('interaction.card')
+      .bindSheet($$this.fullPlan,this.planReader(),{height:SheetSize.LARGE,showClose:false,dragBar:false,preferType:SheetType.BOTTOM})
+    else if (this.fillAvailable && !this.pinFooter && this.request.kind !== 'question') Scroll() {
       Column({ space: Tokens.gap }) { this.formBody(); this.responseFooter() }
         .width('100%').padding({ top: Tokens.page }).alignItems(HorizontalAlign.Start)
     }.width('100%').height('100%').scrollBar(BarState.Auto).align(Alignment.TopStart).id('interaction.body')

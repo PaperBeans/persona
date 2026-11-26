@@ -52,6 +52,7 @@ type herdrSessions struct {
 	at       time.Time     // the last time herdr answered or failed to (zero: never)
 	listing  chan struct{} // closed when the ask now out ends; nil: none out
 	sessions map[string]*herdrSession
+	blocked  map[string]bool // named sessions kept out of Persona (#14898)
 	skipped  map[string]bool // names logged once as left alone
 	fails    herdr.LogBackoff
 }
@@ -83,6 +84,29 @@ func (s *herdrSessions) log(format string, args ...any) {
 	}
 }
 
+// setBlocked replaces the named sessions kept out of Persona (#14898), dropping newly blocked ones immediately and
+// clearing the list's freshness timestamp so unblocked sessions are picked up on the next listing.
+func (s *herdrSessions) setBlocked(names []string) {
+	if s == nil {
+		return
+	}
+	next := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name != "" {
+			next[name] = true
+		}
+	}
+	s.mu.Lock()
+	s.blocked = next
+	for name := range s.sessions {
+		if next[name] {
+			delete(s.sessions, name)
+		}
+	}
+	s.at = time.Time{}
+	s.mu.Unlock()
+}
+
 // running are the running named sessions, by name. A list sessionsEvery old is asked for again in the background
 // (callers get it as it was meanwhile); only the very first call waits for herdr's answer, until until at most.
 func (s *herdrSessions) running(ctx context.Context, until time.Time) []*herdrSession {
@@ -111,6 +135,10 @@ func (s *herdrSessions) lookup(ctx context.Context, name string) *herdrSession {
 		return nil
 	}
 	s.mu.Lock()
+	if s.blocked[name] {
+		s.mu.Unlock()
+		return nil
+	}
 	ns := s.sessions[name]
 	var done chan struct{}
 	if ns == nil && (s.listing != nil || time.Since(s.at) >= time.Second) {
@@ -178,6 +206,8 @@ func (s *herdrSessions) refresh(ctx context.Context) {
 		}
 		why := ""
 		switch {
+		case s.blocked[info.Name]:
+			continue // explicitly blocked by user setting (#14898)
 		case herdr.IsOwnSession(info.Name):
 			continue // another node's data directory: that node drives it
 		case !herdr.ValidSessionName(info.Name):

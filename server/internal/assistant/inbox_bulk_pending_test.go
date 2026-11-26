@@ -80,7 +80,7 @@ func TestInboxBulkDoesNotAcknowledgePendingFiling(t *testing.T) {
 							competing = out
 						})
 					}}
-					h.store = func() Store { return probe }
+					h.setStore(func() Store { return probe })
 					code, out := inboxCall(t, mux, "POST", first.path, first.body)
 					wantCode := 200
 					if fail && !first.bulk {
@@ -163,7 +163,7 @@ func TestInboxBulkPendingFilingDoesNotBlockOtherSuccesses(t *testing.T) {
 					waitForItem(t, h, other.ID, func(it *InboxItem) bool { return it.DoneBy == "dismissed" })
 				})
 			}}
-			h.store = func() Store { return probe }
+			h.setStore(func() Store { return probe })
 			inboxCall(t, mux, "POST", "/api/v1/inbox/item/done", `{"done":true}`)
 			select {
 			case out := <-second:
@@ -246,7 +246,7 @@ func TestInboxBulkFilterIncludesPendingReopen(t *testing.T) {
 							}
 						})
 					}}
-					h.store = func() Store { return probe }
+					h.setStore(func() Store { return probe })
 					path, firstBody := "/api/v1/inbox/item/done", `{"done":false}`
 					if bulk {
 						path, firstBody = "/api/v1/inbox/bulk", `{"action":"reopen","ids":["item"]}`

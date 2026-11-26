@@ -553,6 +553,15 @@ func TestFitFieldsV6(t *testing.T) {
 }
 
 // A widget draws none of version 6: controls, actions and pictures are left out, a grid is rows.
+func TestFieldItemsLegacyTextKinds(t *testing.T) {
+	for _, kind := range []string{"", wire.FieldKindText, wire.FieldKindMultiline} {
+		got := fieldItems(UIElem{Type: "field", Name: "content", Label: "SPACE.md", Kind: kind, Value: "first\nsecond"}, i18n.Default)
+		if len(got) != 1 || got[0].Kind != "text" || got[0].Name != "content" || got[0].Value != "first\nsecond" {
+			t.Fatalf("%q: %+v", kind, got)
+		}
+	}
+}
+
 func TestFitWidgetV6(t *testing.T) {
 	for _, name := range []string{"controls", "tiles", "media", "charts"} {
 		v := v6Example(t, name)

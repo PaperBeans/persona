@@ -33,6 +33,12 @@ const (
 	LayoutContainer Layout = "container"
 )
 
+// ValidLayout allows only a single repository to occupy the task root.
+// A container can also be an empty task folder.
+func ValidLayout(layout Layout, count int) bool {
+	return layout == LayoutRoot && count == 1 || layout == LayoutContainer && count >= 0
+}
+
 // TaskWorkflow declares a repository's optional default task-collaboration cadence.
 // Unset ("") and TaskWorkflowIsolated preserve existing default behavior; TaskWorkflowSharedBranch
 // cooperates with serial workspace queueing (#13142) and multi-repository container workspaces (#13143).
@@ -201,10 +207,13 @@ func IsWindowsReservedName(name string) bool {
 
 // RepositoryPath maps only explicitly selected layouts; legacy cwd requests never use it.
 func RepositoryPath(layout Layout, alias string, count int) (string, error) {
-	if layout == LayoutRoot && count == 1 {
+	if count == 0 || !ValidLayout(layout, count) {
+		return "", Problem("invalid")
+	}
+	if layout == LayoutRoot {
 		return ".", nil
 	}
-	if layout != LayoutContainer || alias == "" {
+	if alias == "" {
 		return "", Problem("invalid")
 	}
 	if err := ValidateAlias(alias); err != nil {
@@ -522,7 +531,54 @@ type PreparationRepository struct {
 	DirectoryAlias string         `json:"directory_alias,omitempty"`
 	RequestedRef   RequestedRef   `json:"requested_ref"`
 	SourceSnapshot SourceSnapshot `json:"source_snapshot"`
+	Local          *LocalCheckout `json:"local,omitempty"`
 }
+
+// LocalCheckout is a computer-resolved Git source for a single root worktree.
+// It carries the selected commit even when the source has a moving HEAD.
+type LocalCheckout struct {
+	CommonDir      string `json:"common_dir"`
+	Commit         string `json:"commit"`
+	ExistingBranch bool   `json:"existing_branch,omitempty"`
+}
+type LocalSourceRequest struct {
+	Cwd        string `json:"cwd"`
+	TaskBranch string `json:"task_branch,omitempty"`
+}
+
+type LocalSource struct {
+	Repository   *PreparationRepository `json:"repository,omitempty"`
+	ExistingPath string                 `json:"existing_path,omitempty"`
+	Error        LocalSourceError       `json:"error,omitempty"`
+}
+
+type LocalSourceError string
+
+const (
+	LocalSourceInvalidPath LocalSourceError = "invalid_path"
+	LocalSourceInvalid     LocalSourceError = "source_invalid"
+	LocalSourceUnavailable LocalSourceError = "source_unavailable"
+	LocalSourceInvalidRef  LocalSourceError = "ref_invalid"
+	LocalSourceNoCommits   LocalSourceError = "no_commits"
+)
+
+type RepositoryID string
+
+type BranchSourceKind string
+
+const (
+	BranchRepositoryDefault BranchSourceKind = "repository_default"
+	BranchExplicit          BranchSourceKind = "explicit_branch"
+	BranchOtherRef          BranchSourceKind = "non_branch_ref"
+)
+
+// BranchSource describes the input available to a branch template. A default ref has no known branch yet.
+type BranchSource struct {
+	RepoID RepositoryID     `json:"repo_id"`
+	Kind   BranchSourceKind `json:"kind"`
+	Branch string           `json:"branch,omitempty"`
+}
+
 type PreparationSnapshot struct {
 	SchemaVersion int                     `json:"schema_version"`
 	Manager       string                  `json:"manager"`
@@ -547,9 +603,30 @@ func Snapshot(manager, todo string, revision int64, rows []TaskRepository, selec
 			return out, Problem("not_found")
 		}
 		r := rows[index]
-		out.Repositories = append(out.Repositories, PreparationRepository{r.RepoID, r.DirectoryAlias, r.RequestedRef, r.SourceSnapshot})
+		out.Repositories = append(out.Repositories, PreparationRepository{RepoID: r.RepoID, DirectoryAlias: r.DirectoryAlias, RequestedRef: r.RequestedRef, SourceSnapshot: r.SourceSnapshot})
 	}
 	slices.SortFunc(out.Repositories, func(a, b PreparationRepository) int { return strings.Compare(a.RepoID, b.RepoID) })
+	return digestPreparationSnapshot(out)
+}
+
+// LocalSnapshot binds a computer-resolved source without changing the to-do's
+// catalog associations. Local and catalog sources are mutually exclusive.
+func LocalSnapshot(manager, todo string, repo PreparationRepository) (PreparationSnapshot, error) {
+	var out PreparationSnapshot
+	if repo.Local == nil || repo.SourceSnapshot != (SourceSnapshot{}) || repo.Local.CommonDir == "" ||
+		repo.RepoID != "local" || repo.DirectoryAlias == "" || ValidateAlias(repo.DirectoryAlias) != nil {
+		return out, Problem("invalid")
+	}
+	ref, err := NormalizeRef(repo.RequestedRef)
+	commit, commitErr := NormalizeRef(RequestedRef{Kind: "commit", Value: repo.Local.Commit})
+	if err != nil || ref != repo.RequestedRef || commitErr != nil || commit.Value != repo.Local.Commit ||
+		(ref.Kind != "branch" && (ref.Kind != "commit" || ref.Value != commit.Value || repo.Local.ExistingBranch)) {
+		return out, Problem("invalid")
+	}
+	return digestPreparationSnapshot(PreparationSnapshot{SchemaVersion: 1, Manager: manager, TodoID: todo, Repositories: []PreparationRepository{repo}})
+}
+
+func digestPreparationSnapshot(out PreparationSnapshot) (PreparationSnapshot, error) {
 	payload := struct {
 		SchemaVersion int                     `json:"schema_version"`
 		Manager       string                  `json:"manager"`

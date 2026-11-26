@@ -4,27 +4,32 @@
     "agents_needs_you": {
       "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents, directory-hidden sessions and sessions whose only pending cards are held (delegating; a card its task's supervisor holds, a routed terminal question included, is in no row either) left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
       "pinned_by": "spec/fixtures/needs-you",
+      "producer": {"file": "server/internal/assistant/fleetcount/fleetcountadapt/view.go", "symbol": "Fleet.View"},
       "waits_on": [],
       "refined_by": ["D11"]
     },
     "inbox_unread": {
       "rule": "Unread open action items, one per item: what every client's Inbox tab counts today.",
       "pinned_by": null,
+      "producer": null,
       "waits_on": ["D7"]
     },
     "inbox_action": {
       "rule": "Open action items, read or not, one per item: what the manager tells the roster as inbox_needs_you (tellInboxNeedsYou).",
       "pinned_by": null,
+      "producer": null,
       "waits_on": []
     },
     "todos_needs_you": {
       "rule": "N: the to-dos in Needs you, each once, quiet ones and Can wait left out, a step with its parent (TodoCounts.needs_you).",
       "pinned_by": "spec/fixtures/todo-counts",
-      "waits_on": ["D8"]
+      "producer": {"file": "server/internal/assistant/fleetcount/fleetcountadapt/view.go", "symbol": "Fleet.View"},
+      "waits_on": []
     },
     "persona_cards": {
       "rule": null,
       "pinned_by": null,
+      "producer": null,
       "waits_on": ["D9"]
     }
   },
@@ -199,9 +204,10 @@
       "count": ["agents_needs_you"],
       "scope": "default_manager",
       "code": [
-        {"file": "server/internal/assistant/fleet_live.go", "symbol": "needsYou"},
-        {"file": "server/internal/assistant/fleet_live.go", "symbol": "liveCounts"},
-        {"file": "server/internal/assistant/fleet_live.go", "symbol": "cardStands"}
+        {"file": "server/internal/assistant/fleetcount/tally.go", "symbol": "AgentsNeedsYou"},
+        {"file": "server/internal/assistant/fleetcount/agent.go", "symbol": "Counts"},
+        {"file": "server/internal/assistant/fleetcount/tally.go", "symbol": "stands"},
+        {"file": "server/internal/assistant/fleetcount/fleetcountadapt/render.go", "symbol": "LiveActivity"}
       ],
       "tests": [{"file": "server/internal/assistant/fleet_attention_test.go", "symbol": "TestLiveActivityKeepsItsOwnCount"}],
       "status": "differs",

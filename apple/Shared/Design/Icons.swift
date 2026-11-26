@@ -585,6 +585,18 @@ extension Theme {
         static let phoneControl = "iphone.radiowaves.left.and.right"
         static let watch = "applewatch"
         static let storage = "internaldrive"
+        /// The disk usage map (#14576): what fills a computer's disk, as boxes sized by what they hold.
+        static let usageMap = "square.split.bottomrightquarter"
+        /// Offload an item to the cloud through an extension's `disk_offload` provider.
+        static let cloudOffload = "icloud.and.arrow.up"
+        /// Bring an offloaded item back to the computer.
+        static let cloudRestore = gitFetch
+        /// A local box holding offloaded items (its badge), and the cloud side of the map.
+        static let offloaded = gitUpstream
+        /// Not changed for over a year (the map's Last Used tint marks cold boxes with it).
+        static let cold = pluginSnow
+        /// Clean a rebuildable cache (the existing cleanup's catalog).
+        static let cleanCache = "bubbles.and.sparkles"
         static let scanCode = "qrcode.viewfinder"
         static let handoff = "iphone.and.arrow.forward"
         /// The default web browser (open a link outside the app).
@@ -734,6 +746,8 @@ extension Theme {
         static let memory = "brain"
         /// Search (a list's, the sidebar's).
         static let search = "magnifyingglass"
+        /// A session's title as what a search reads (the Agents list's Search In › Title, #7443).
+        static let sessionTitle = "textformat"
         /// The knowledge base (~/.persona/data).
         static let knowledge = "books.vertical"
         /// A knowledge-base topic (#7251): what Persona learned on one subject.
@@ -864,6 +878,11 @@ extension Theme {
         static let fileOther = "doc.fill"
         /// A Feishu Base (bitable) as a file.
         static let baseFilled = "square.grid.3x2.fill"
+        /// Interactive extension maps and travel modes (UI version 12).
+        static let map = knowledgeMap
+        static let travelWalk = "figure.walk"
+        static let travelTransit = "tram"
+        static let travelCycle = "bicycle"
     }
 
     /// Other products' own marks, in the asset catalog's Brands folder (sources and terms in THIRD_PARTY_NOTICES.md).

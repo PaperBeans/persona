@@ -40,6 +40,8 @@ nonisolated enum RecordingPhase: Equatable, Sendable {
     /// Where the recording's minutes are (`RecordingMinutesModel.State`); nil is "not asked yet".
     nonisolated enum Minutes: Equatable, Sendable {
         case absent, waitingForText, waitingForSync, writing, ready, failed, unsupported
+        /// Held back while the hub's recording module is off (#15214).
+        case paused
     }
 
     /// Where the upload is (`RecordingSync.Status`).
@@ -120,7 +122,8 @@ nonisolated enum RecordingPhase: Equatable, Sendable {
         case .writing: return .writingMinutes
         case .ready: return .done(hasMinutes: true)
         case .failed: return .failed(Failure(step: .writing, reason: held.minutesFailedReason, action: .tryAgainMinutes))
-        case .absent, .unsupported: return .done(hasMinutes: false)
+        // Paused with the recording module off (#15214): nothing more happens now, and no step keeps spinning.
+        case .absent, .unsupported, .paused: return .done(hasMinutes: false)
         }
     }
 

@@ -206,3 +206,18 @@ test('keyboard input cannot overtake an in-flight Unicode paste or clear a repla
  gate.resolve(true);await sending;f.page.sendKey(0xff0d);assert.equal(f.keys(),1);assert.equal(f.page.textDraft,'');
  const second=deferred();f.page.textDraft='中文';f.page.screen.sendText=()=>second.promise;const old=f.page.submitText();f.bump();f.page.clearFields();f.page.textDraft='中文';second.resolve(true);await old;assert.equal(f.page.textDraft,'中文');
 });
+
+test('primary taps survive, a two-finger gesture never clicks, and it releases a previously held drag',async()=>{
+ const {ScreenWheel,ScreenTwoFingers,screenScrollFactor}=await import('../entry/src/main/ets/core/ScreenWheel.ts');
+ const touchType={Down:0,Up:1,Move:2,Cancel:3};
+ const Behavior=new Function('TouchType','screenScrollPreference','screenScrollFactor','return '+stripTypeScriptTypes('class TouchBehavior {'+['stopWheel','twoTouches','touchFrame'].map(pageMethod).join('\n')+'}'))(touchType,{choice:'default'},screenScrollFactor);
+ const page=new Behavior(),sent=[];Object.assign(page,{wheel:new ScreenWheel(),fingerMotion:new ScreenTwoFingers(),wheelTimer:-1,
+   frameAreaWidth:300,frameAreaHeight:180,paceWheel(){},screen:{controlAllowed:()=>true,scrollPointsInView:()=>1,
+     pointerFromView(x,y,w,h,btn){sent.push(btn);return true},releasePointer(){sent.push(0)}}});
+ function event(type,points){const touches=points.map(([x,y])=>({x,y,type}));page.touchFrame({touches,changedTouches:touches});}
+ event(0,[[30,50]]);event(1,[[30,50]]);assert.deepEqual(sent.splice(0),[1,0]);
+ event(0,[[30,50]]);event(0,[[30,50],[60,50]]);event(2,[[30,60],[60,60]]);event(1,[[60,60]]);event(1,[[60,60]]);
+ assert.deepEqual(sent,[]);assert.equal(page.wheel.busy,true);
+ event(0,[[30,50]]);assert.equal(page.wheel.busy,false);event(2,[[35,55]]);event(0,[[35,55],[85,55]]);
+ assert.deepEqual(sent,[1,1,0]);assert.equal(page.pointerDown,false);
+});

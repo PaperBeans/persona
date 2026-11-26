@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -65,16 +65,16 @@ func TestRoomCompactionDueRule(t *testing.T) {
 		{0, 45*60 - 1, 50000, false},
 		{0, 120 * 60, 9998, false},
 	} {
-		l := kb.Live{Segments: []kb.LiveSegment{{Start: c.from, End: c.from + 1, Text: strings.Repeat("a", c.runes/2)},
+		l := recordingwire.Live{Segments: []recordingwire.LiveSegment{{Start: c.from, End: c.from + 1, Text: strings.Repeat("a", c.runes/2)},
 			{Start: c.to - 1, End: c.to, Text: strings.Repeat("b", c.runes-c.runes/2)}, {Start: c.to + 600, End: c.to + 601, Text: "not fed yet"}}, Fed: 2}
-		if got := roomCompactDue(l, kb.MeetingRoomLean{}); got != c.want {
+		if got := roomCompactDue(l, recordingwire.MeetingRoomLean{}); got != c.want {
 			t.Errorf("%+v: %v", c, got)
 		}
-		if roomCompactDue(l, kb.MeetingRoomLean{SpanAt: 1}) { // the first line given before the last compaction
+		if roomCompactDue(l, recordingwire.MeetingRoomLean{SpanAt: 1}) { // the first line given before the last compaction
 			t.Errorf("%+v: due without its first line", c)
 		}
 	}
-	if roomCompactDue(kb.Live{}, kb.MeetingRoomLean{SpanAt: 3}) {
+	if roomCompactDue(recordingwire.Live{}, recordingwire.MeetingRoomLean{SpanAt: 3}) {
 		t.Error("due with nothing given")
 	}
 	// The span batches give: the earliest start to the latest end among their lines, and their characters.
@@ -106,8 +106,8 @@ func TestRoomCompactionWaitsForAnIdleRoom(t *testing.T) {
 	}
 	lr.row(func(c *proto.Session) { c.Status, c.State = proto.StatusIdle, proto.StateIdle })
 
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
-		l.Asks = append(l.Asks, kb.LiveAsk{ID: askOne, Question: "q", State: askPending, Via: kb.AskViaRoom, AskedAt: lr.now()})
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
+		l.Asks = append(l.Asks, recordingwire.LiveAsk{ID: askOne, Question: "q", State: askPending, Via: recordingwire.AskViaRoom, AskedAt: lr.now()})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestRoomCompactionWaitsForAnIdleRoom(t *testing.T) {
 	lr.s.asks.mu.Lock()
 	delete(lr.s.asks.running, meetingRec)
 	lr.s.asks.mu.Unlock()
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error { l.Asks = nil; return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error { l.Asks = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,7 +139,7 @@ func TestRoomCompactionWaitsForAnIdleRoom(t *testing.T) {
 		t.Fatalf("compacted with a photo to go in: %d", n)
 	}
 	// Deleted: its withdrawal goes in first (it may have reached the room), and the compaction waits for that too.
-	if _, err := lr.engine().PhotoDelete(meetingRec, 1); err != nil {
+	if _, err := writersOf(lr.engine()).PhotoDelete(meetingRec, 1); err != nil {
 		t.Fatal(err)
 	}
 	lr.look()
@@ -176,7 +176,7 @@ func TestRoomCompactionWaitsForAnIdleRoom(t *testing.T) {
 	if !roomWorking(row) {
 		t.Fatal("a compaction does not count as working")
 	}
-	if _, verdict := lr.s.attendeeCheckFor(context.Background(), kb.SessionRef{MachineID: "server", SessionID: lr.sid}, lr.now(), meetingRec); verdict != attendeeBusy {
+	if _, verdict := lr.s.attendeeCheckFor(context.Background(), recordingwire.SessionRef{MachineID: "server", SessionID: lr.sid}, lr.now(), meetingRec); verdict != attendeeBusy {
 		t.Fatalf("a batch would go during it: %q", verdict)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -286,12 +286,12 @@ func TestRoomCompactionInDoubt(t *testing.T) {
 		lr.look()
 		lr.due()
 		lr.advance(30 * time.Second)
-		l, r, err := lr.engine().LiveRead(meetingRec)
+		l, r, err := writersOf(lr.engine()).LiveRead(meetingRec)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Its record gone from meeting.json under the look: the mark cannot be written.
-		if _, err := lr.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { m.Room = nil; return nil }); err != nil {
+		if _, err := writersOf(lr.engine()).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error { m.Room = nil; return nil }); err != nil {
 			t.Fatal(err)
 		}
 		if _, held, _ := lr.s.roomCompaction(context.Background(), lr.engine(), meetingRec, l, r, lr.now(), true, false, lr.s.roomRowRead(context.Background(), r.Conv.Room)); held ||
@@ -368,7 +368,7 @@ func TestRoomCompactionAskedHoldsAsksAndPhotos(t *testing.T) {
 	lr.addPhoto(meetingRec, photoBody(t, photoTwo, 40, nil))
 	lr.advance(2 * time.Minute)
 	lr.look()
-	if _, err := lr.engine().PhotoDelete(meetingRec, 1); err != nil {
+	if _, err := writersOf(lr.engine()).PhotoDelete(meetingRec, 1); err != nil {
 		t.Fatal(err)
 	}
 	lr.upload(meetingRec, 2, map[string]any{"room": map[string]any{"attendance": "off"}, "started_at": lr.start.Format(time.RFC3339)})
@@ -390,7 +390,9 @@ func TestRoomCompactionAskedHoldsAsksAndPhotos(t *testing.T) {
 		t.Fatalf("after it: %v", sent)
 	}
 	// One never shown counts as ended after 10 minutes: an ask waits no longer.
-	lr.setLean(func(ln *kb.MeetingRoomLean) { ln.CompactStartedAt, ln.CompactSeen = lr.now(), asked.Add(time.Second) })
+	lr.setLean(func(ln *recordingwire.MeetingRoomLean) {
+		ln.CompactStartedAt, ln.CompactSeen = lr.now(), asked.Add(time.Second)
+	})
 	lr.advance(roomCompactLost)
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -401,10 +403,10 @@ func TestRoomCompactionAskedHoldsAsksAndPhotos(t *testing.T) {
 
 // A lean batch without the lists has none of them to render: the topics and highlights are not made up for nothing.
 func TestFeedLeanBatchLeavesOutTheListsItDoesNotShow(t *testing.T) {
-	r := kb.Recording{ID: meetingRec, StartedAt: time.Date(2026, 11, 10, 14, 0, 0, 0, time.UTC)}
+	r := recordingwire.Recording{ID: meetingRec, StartedAt: time.Date(2026, 11, 10, 14, 0, 0, 0, time.UTC)}
 	at := 60.0
-	b := feedBatch{room: true, topics: true, highlights: true, lean: true, topicsSoFar: []kb.LiveTopic{{Title: "Pricing", State: kb.TopicCurrent, At: &at}},
-		highlightsSoFar: []kb.LiveHighlight{{Text: "We keep the cap.", At: 60}}, lines: []kb.LiveSegment{{Start: 60, End: 65, Text: "Ada: we keep the cap."}}}
+	b := feedBatch{room: true, topics: true, highlights: true, lean: true, topicsSoFar: []recordingwire.LiveTopic{{Title: "Pricing", State: recordingwire.TopicCurrent, At: &at}},
+		highlightsSoFar: []recordingwire.LiveHighlight{{Text: "We keep the cap.", At: 60}}, lines: []recordingwire.LiveSegment{{Start: 60, End: 65, Text: "Ada: we keep the cap."}}}
 	if d := feedData(r, b, "en", time.UTC); d.TopicsSoFar != nil || d.HighlightsSoFar != nil {
 		t.Fatalf("a lean batch without the lists: %+v", d)
 	}
@@ -452,24 +454,24 @@ func runRoomTwoHours(t *testing.T, older bool) roomTwoHourRun {
 		turnEnd = lr.now().Add(20 * time.Second)
 	}
 	lr.f.mu.Unlock()
-	topicsAt := func(minute float64) []kb.LiveTopic {
-		var out []kb.LiveTopic
-		k := min(kb.MaxTopics, 1+int(minute)/6)
+	topicsAt := func(minute float64) []recordingwire.LiveTopic {
+		var out []recordingwire.LiveTopic
+		k := min(recordingwire.MaxTopics, 1+int(minute)/6)
 		for i := range k {
 			at := float64(i * 360)
-			state := kb.TopicDone
+			state := recordingwire.TopicDone
 			if i == k-1 {
-				state = kb.TopicCurrent
+				state = recordingwire.TopicCurrent
 			}
-			out = append(out, kb.LiveTopic{Title: fmt.Sprintf("议题%02d：发布计划与测试安排", i+1), State: state, At: &at})
+			out = append(out, recordingwire.LiveTopic{Title: fmt.Sprintf("议题%02d：发布计划与测试安排", i+1), State: state, At: &at})
 		}
 		return out
 	}
-	highlightsAt := func(minute float64) []kb.LiveHighlight {
-		var out []kb.LiveHighlight
+	highlightsAt := func(minute float64) []recordingwire.LiveHighlight {
+		var out []recordingwire.LiveHighlight
 		for i, m := range []float64{10, 30, 60, 90} {
 			if minute >= m {
-				out = append(out, kb.LiveHighlight{Text: fmt.Sprintf("要点%d：发布推迟一周，测试先补齐回归用例", i+1), At: m * 60, End: m*60 + 5.5})
+				out = append(out, recordingwire.LiveHighlight{Text: fmt.Sprintf("要点%d：发布推迟一周，测试先补齐回归用例", i+1), At: m * 60, End: m*60 + 5.5})
 			}
 		}
 		return out
@@ -496,7 +498,7 @@ func runRoomTwoHours(t *testing.T, older bool) roomTwoHourRun {
 			lr.rowLocked(func(c *proto.Session) { c.Status, c.State, c.UpdatedAt = proto.StatusIdle, proto.StateIdle, turnEnd })
 			turnEnd = time.Time{}
 			lr.f.mu.Unlock()
-			if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+			if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
 				l.Topics, l.Highlights = topicsAt(minute), highlightsAt(minute)
 				return nil
 			}); err != nil {
@@ -575,12 +577,12 @@ func (lr *leanRoom) compactCalls() []time.Time {
 // say appends the lines said from second from on, each 6 seconds after the last.
 func (lr *leanRoom) say(from float64, texts ...string) {
 	lr.t.Helper()
-	var segs []kb.LiveSegment
+	var segs []recordingwire.LiveSegment
 	for i, text := range texts {
 		start := from + float64(6*i)
-		segs = append(segs, kb.LiveSegment{Start: start, End: start + 5.5, Text: text})
+		segs = append(segs, recordingwire.LiveSegment{Start: start, End: start + 5.5, Text: text})
 	}
-	if _, _, err := lr.engine().LiveAppend(meetingRec, lr.pos, segs); err != nil {
+	if _, _, err := writersOf(lr.engine()).LiveAppend(meetingRec, lr.pos, segs); err != nil {
 		lr.t.Fatal(err)
 	}
 	lr.pos += len(segs)
@@ -598,12 +600,12 @@ func (lr *leanRoom) batches() []string {
 	return out
 }
 
-func (lr *leanRoom) lean() kb.MeetingRoomLean { return lr.meeting(meetingRec).Room.Lean }
+func (lr *leanRoom) lean() recordingwire.MeetingRoomLean { return lr.meeting(meetingRec).Room.Lean }
 
 // setLean changes the room's bookkeeping (a span that is due, say).
-func (lr *leanRoom) setLean(fn func(ln *kb.MeetingRoomLean)) {
+func (lr *leanRoom) setLean(fn func(ln *recordingwire.MeetingRoomLean)) {
 	lr.t.Helper()
-	if _, err := lr.engine().MeetingUpdate(meetingRec, func(m *kb.Meeting, _ kb.Recording) error { fn(&m.Room.Lean); return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).MeetingUpdate(meetingRec, func(m *recordingwire.Meeting, _ recordingwire.Recording) error { fn(&m.Room.Lean); return nil }); err != nil {
 		lr.t.Fatal(err)
 	}
 }
@@ -612,24 +614,24 @@ func (lr *leanRoom) setLean(fn func(ln *kb.MeetingRoomLean)) {
 // characters, given to the room (the live log's feed position past them) as batches would have.
 func (lr *leanRoom) due() {
 	lr.t.Helper()
-	var segs []kb.LiveSegment
+	var segs []recordingwire.LiveSegment
 	for i := range 12 {
 		start := float64(i) * 250 // the last ends at 2755.5: 46 minutes from the first's start
-		segs = append(segs, kb.LiveSegment{Start: start, End: start + 5.5, Text: strings.Repeat("字", 1000)})
+		segs = append(segs, recordingwire.LiveSegment{Start: start, End: start + 5.5, Text: strings.Repeat("字", 1000)})
 	}
-	if _, _, err := lr.engine().LiveAppend(meetingRec, lr.pos, segs); err != nil {
+	if _, _, err := writersOf(lr.engine()).LiveAppend(meetingRec, lr.pos, segs); err != nil {
 		lr.t.Fatal(err)
 	}
 	lr.pos += len(segs)
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
 		lr.t.Fatal(err)
 	}
 }
 
 // live is the recording's live log now.
-func (lr *leanRoom) live() kb.Live {
+func (lr *leanRoom) live() recordingwire.Live {
 	lr.t.Helper()
-	l, _, err := lr.engine().LiveRead(meetingRec)
+	l, _, err := writersOf(lr.engine()).LiveRead(meetingRec)
 	if err != nil {
 		lr.t.Fatal(err)
 	}
@@ -646,7 +648,7 @@ func hasLists(text string) bool {
 // batch a minute too.
 func TestRoomLeanBatchesEveryTwoMinutes(t *testing.T) {
 	lr := newLeanRoom(t)
-	if m := lr.meeting(meetingRec); m.Room.Batching != kb.RoomBatchingLean {
+	if m := lr.meeting(meetingRec); m.Room.Batching != recordingwire.RoomBatchingLean {
 		t.Fatalf("room %+v", m.Room)
 	}
 	if md, _ := lr.prepared[0]["claude_md"].(string); !strings.Contains(md, "Batches of lines come every two minutes") ||
@@ -687,7 +689,7 @@ func TestRoomLeanBatchesEveryTwoMinutes(t *testing.T) {
 	if len(b) != 4 || !strings.Contains(b[3], "meeting_topics_set") || !strings.Contains(b[3], "Topics so far:") {
 		t.Fatalf("an older room's batches %v", b[2:])
 	}
-	if lr.meeting(meetingRec).Room.Lean != (kb.MeetingRoomLean{}) {
+	if lr.meeting(meetingRec).Room.Lean != (recordingwire.MeetingRoomLean{}) {
 		t.Fatalf("an older room keeps lean bookkeeping: %+v", lr.meeting(meetingRec).Room.Lean)
 	}
 	if feedBatchEvery != time.Minute {
@@ -700,7 +702,7 @@ func TestRoomLeanBatchesEveryTwoMinutes(t *testing.T) {
 // they last went is kept in meeting.json, so a restart behaves; it raises no revision the apps read.
 func TestRoomLeanListsAtBoundaries(t *testing.T) {
 	lr := newLeanRoom(t)
-	revs := lr.meeting(meetingRec).Revs[kb.PartRoom]
+	revs := lr.meeting(meetingRec).Revs[recordingwire.PartRoom]
 	var shown []bool
 	for i := range 17 { // a batch every two minutes for 32 minutes
 		lr.say(float64(i*120+10), fmt.Sprintf("Ada: point %d.", i))
@@ -720,7 +722,7 @@ func TestRoomLeanListsAtBoundaries(t *testing.T) {
 	if _, _, runes := lr.span(); !lr.lean().ListsAt.Equal(lr.start.Add(time.Minute+30*time.Minute)) || runes == 0 {
 		t.Fatalf("bookkeeping %+v, %d characters", lr.lean(), runes)
 	}
-	if got := lr.meeting(meetingRec).Revs[kb.PartRoom]; got != revs {
+	if got := lr.meeting(meetingRec).Revs[recordingwire.PartRoom]; got != revs {
 		t.Fatalf("the room's revision went from %d to %d", revs, got)
 	}
 	// Fed afresh (the role turned off and on again): the meeting so far, with the lists.
@@ -737,7 +739,7 @@ func TestRoomLeanListsAtBoundaries(t *testing.T) {
 	if b := lr.batches(); hasLists(b[len(b)-1]) {
 		t.Fatalf("after the meeting so far %s", b[len(b)-1])
 	}
-	lr.setLean(func(ln *kb.MeetingRoomLean) { ln.ListsDue = true })
+	lr.setLean(func(ln *recordingwire.MeetingRoomLean) { ln.ListsDue = true })
 	lr.advance(roomLeanEvery)
 	lr.say(19*120+10, "Bo: done.")
 	lr.look()
@@ -749,7 +751,7 @@ func TestRoomLeanListsAtBoundaries(t *testing.T) {
 // attendNoteFresh has the room fed afresh, as after its role turned off and on again.
 func (lr *leanRoom) attendNoteFresh() {
 	lr.t.Helper()
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error { l.FedTo = nil; return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error { l.FedTo = nil; return nil }); err != nil {
 		lr.t.Fatal(err)
 	}
 }
@@ -760,15 +762,15 @@ func TestRoomCompactionSpanSurvivesALostNote(t *testing.T) {
 	lr := newLeanRoom(t)
 	lr.say(10, "Ada: we keep the cap.")
 	lr.look()
-	var segs []kb.LiveSegment
+	var segs []recordingwire.LiveSegment
 	for i := range 11 { // 40 minutes and 11,000 characters given: not due yet
-		segs = append(segs, kb.LiveSegment{Start: float64(i * 240), End: float64(i*240) + 5.5, Text: strings.Repeat("字", 1000)})
+		segs = append(segs, recordingwire.LiveSegment{Start: float64(i * 240), End: float64(i*240) + 5.5, Text: strings.Repeat("字", 1000)})
 	}
-	if _, _, err := lr.engine().LiveAppend(meetingRec, lr.pos, segs); err != nil {
+	if _, _, err := writersOf(lr.engine()).LiveAppend(meetingRec, lr.pos, segs); err != nil {
 		t.Fatal(err)
 	}
 	lr.pos += len(segs)
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if lr.spanDue() {
@@ -778,7 +780,7 @@ func TestRoomCompactionSpanSurvivesALostNote(t *testing.T) {
 	lr.advance(roomLeanEvery)
 	lr.say(46*60, "Bo: and the tiers, at minute 46.")
 	lr.look()
-	lr.setLean(func(ln *kb.MeetingRoomLean) { *ln = before }) // the note after the batch lost
+	lr.setLean(func(ln *recordingwire.MeetingRoomLean) { *ln = before }) // the note after the batch lost
 	lr.advance(feedBusyPoll)
 	lr.look()
 	if n := len(lr.compactCalls()); n != 1 {
@@ -838,7 +840,7 @@ func TestRoomCompactionRetries(t *testing.T) {
 	}
 
 	// A node that would have to start the room's process on another agent: never either.
-	lr.setLean(func(ln *kb.MeetingRoomLean) { ln.Never = false })
+	lr.setLean(func(ln *recordingwire.MeetingRoomLean) { ln.Never = false })
 	lr.f.mu.Lock()
 	lr.compactErr = errors.New("a guest conversation runs on Claude Code only (its built-in tools can be taken away there)")
 	lr.f.mu.Unlock()
@@ -1035,7 +1037,7 @@ func TestRoomLeanNoticesACompactionInAListsBatch(t *testing.T) {
 	lr.row(func(c *proto.Session) { c.ContextTokens = 120000 })
 	lr.advance(30 * time.Second)
 	lr.look()
-	lr.setLean(func(ln *kb.MeetingRoomLean) { ln.ListsDue = true }) // the half hour, say
+	lr.setLean(func(ln *recordingwire.MeetingRoomLean) { ln.ListsDue = true }) // the half hour, say
 	lr.advance(roomLeanEvery)
 	lr.say(130, "Bo: and the tiers.")
 	lr.look()
@@ -1164,7 +1166,7 @@ func TestRoomCompactionLateEndKeepsLaterBatches(t *testing.T) {
 	asked := lr.lean().CompactStartedAt
 	// Lines given after it was asked for (as by a batch that went before its row showed it).
 	lr.say(lr.now().Sub(lr.start).Seconds(), "Bo: after it was asked for.")
-	if _, err := lr.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
+	if _, err := writersOf(lr.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error { l.Fed = len(l.Segments); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	lr.row(func(c *proto.Session) {

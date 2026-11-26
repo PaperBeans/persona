@@ -250,6 +250,93 @@ func TestTaskHandoffExecutableIsData(t *testing.T) {
 	}
 }
 
+// taskHandoffTestFleet gives s the manager's own devices, as a running manager has them: the assistant's machine, and
+// "box", whose node said it runs from exe when its connection began ("": a node that did not say).
+func taskHandoffTestFleet(s *Service, exe string) {
+	d := newFleetDevs()
+	d.add("server", "Server")
+	d.add("box", "Box").executable = exe
+	s.devs = d
+}
+
+// nodeInfoAsked is the machines node.info was asked of, in order.
+func (h *taskHandoffTestHub) nodeInfoAsked() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.infoCalls...)
+}
+
+// A node.info that answers later than the hint may wait no longer drops the terminal entry (#14446). A node works
+// node.info out whole, Claude Code's version from an interactive login shell included, so a computer whose shell takes
+// seconds to start never answered within that second. The executable the node named when its connection began, as
+// the devices keep it, is named instead, and the node is not asked again.
+func TestTaskHandoffSlowNodeInfoKeepsExecutable(t *testing.T) {
+	for _, tool := range []string{"task_plan", "agent_start"} {
+		t.Run(tool, func(t *testing.T) {
+			s, f, h := taskHandoffTestFixture(t, "codex")
+			exe := h.info["box"].Executable
+			taskHandoffTestFleet(s, exe)
+			h.infoWait = true // every node.info answers after the hint's wait
+			old := agentStartListTimeout
+			agentStartListTimeout = 10 * time.Millisecond
+			t.Cleanup(func() { agentStartListTimeout = old })
+			prompt := taskHandoffTestStart(t, s, f, tool)
+			if got := taskHandoffTestExecutable(t, prompt); got != exe {
+				t.Fatalf("executable = %q, want %q: %s", got, exe, prompt)
+			}
+			assertTerminalOwnTools(t, prompt)
+			assertScopedHandoff(t, prompt)
+			assertHandoffContract(t, prompt)
+			if asked := h.nodeInfoAsked(); len(asked) != 0 {
+				t.Fatalf("node.info was asked again of %v", asked)
+			}
+		})
+	}
+}
+
+// Both entries (a new Agent's, an adopted session's) read the executable the devices keep first. The node is asked,
+// within the hint's second, only when the devices name no absolute path: a node that did not say, a machine this
+// manager does not hold.
+func TestTaskHandoffExecutableSources(t *testing.T) {
+	ctx := context.Background()
+	entries := []struct {
+		name  string
+		entry func(s *Service, machine string) prompts.TaskHandoff
+	}{
+		{"start", func(s *Service, machine string) prompts.TaskHandoff {
+			return s.taskEntry(ctx, machine, startAgent{agent: "codex", source: "zshrc"})
+		}},
+		{"adopted", func(s *Service, machine string) prompts.TaskHandoff {
+			return s.adoptedTaskEntry(ctx, machine, proto.Session{Agent: "codex"})
+		}},
+	}
+	for _, e := range entries {
+		for _, c := range []struct {
+			name, held, machine, want string
+			asked                     bool
+		}{
+			{name: "held", held: "/opt/held tools/persona-node", machine: "box", want: "/opt/held tools/persona-node"},
+			{name: "held without one", machine: "box", want: "/opt/task tools/persona-node", asked: true},
+			{name: "held relative", held: "personad", machine: "box", want: "/opt/task tools/persona-node", asked: true},
+			{name: "not held", held: "/opt/held tools/persona-node", machine: "far", want: "/opt/far/persona-node", asked: true},
+		} {
+			t.Run(e.name+"/"+c.name, func(t *testing.T) {
+				s, _, h := taskHandoffTestFixture(t, "codex")
+				h.info["far"] = proto.NodeInfo{Executable: "/opt/far/persona-node"}
+				taskHandoffTestFleet(s, c.held)
+				got := e.entry(s, c.machine)
+				var path string
+				if err := json.Unmarshal([]byte(got.Executable), &path); err != nil || path != c.want {
+					t.Fatalf("executable = %q (%v), want %q", got.Executable, err, c.want)
+				}
+				if asked := len(h.nodeInfoAsked()) != 0; asked != c.asked {
+					t.Fatalf("node.info asked: %v, want %v", asked, c.asked)
+				}
+			})
+		}
+	}
+}
+
 func TestTaskHandoffUsesFinalDetourFamilyAndMachine(t *testing.T) {
 	for _, tool := range []string{"task_plan", "agent_start"} {
 		t.Run(tool, func(t *testing.T) {

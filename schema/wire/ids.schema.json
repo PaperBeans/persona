@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ids.schema.json",
+  "title": "Wire IDs",
+  "description": "The IDs that cross the wire as closed types, and AgentRef (#15397, docs/plans/plan-typed-core.md 2.3). New wire schemas use x-id for the same names; the contract MachineID/SessionID/InteractionID are distinct from core's opaque agentref types, and an adapter converts between them once.",
+  "x-out": {
+    "go": "server/internal/wireids/ids_gen.go",
+    "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/IDsWire.swift",
+    "kotlin": "android/core/contracts/src/main/kotlin/persona/core/contracts/generated/IDsWire.kt",
+    "ts": "web/src/lib/ids-wire.ts",
+    "arkts": "harmony/entry/src/main/ets/models/IDsWire.ets",
+    "rust": "native/app-core/crates/persona-core/src/ids_wire.rs"
+  },
+  "$defs": {
+    "MachineID": {
+      "type": "string",
+      "x-id": "MachineID",
+      "description": "A computer that runs a node, as the hub names it."
+    },
+    "SessionID": {
+      "type": "string",
+      "x-id": "SessionID",
+      "description": "An Agent session, as its machine names it. Opaque: never parsed."
+    },
+    "InteractionID": {
+      "type": "string",
+      "x-id": "InteractionID",
+      "description": "One pending question, plan or tool approval of a session."
+    },
+    "TodoID": {
+      "type": "string",
+      "x-id": "TodoID",
+      "description": "A to-do."
+    },
+    "ConversationID": {
+      "type": "string",
+      "x-id": "ConversationID",
+      "description": "An assistant conversation."
+    },
+    "HubID": {
+      "type": "string",
+      "x-id": "HubID",
+      "description": "A hub, as a device pairs with it."
+    },
+    "DeviceID": {
+      "type": "string",
+      "x-id": "DeviceID",
+      "description": "A paired device: a phone, watch, Mac, web browser."
+    },
+    "ExtensionID": {
+      "type": "string",
+      "x-id": "ExtensionID",
+      "description": "An installed extension."
+    },
+    "ClientMsgID": {
+      "type": "string",
+      "x-id": "ClientMsgID",
+      "description": "A message id a client makes so a resend is not delivered twice."
+    },
+    "InboxItemID": {
+      "type": "string",
+      "x-id": "InboxItemID",
+      "description": "An Inbox item."
+    },
+    "ConnectorID": {
+      "type": "string",
+      "x-id": "ConnectorID",
+      "description": "A connector."
+    },
+    "SubscriptionID": {
+      "type": "string",
+      "x-id": "SubscriptionID",
+      "description": "A subscription of an extension."
+    },
+    "AgentRef": {
+      "type": "object",
+      "description": "The one shape for \"points at an Agent\": the machine it runs on and its session there. Replaces [2]string and paired string parameters.",
+      "x-decode": "strict",
+      "required": [
+        "machine",
+        "session"
+      ],
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineID"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionID"
+        }
+      }
+    }
+  }
+}

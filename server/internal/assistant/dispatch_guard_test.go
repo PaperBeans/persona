@@ -48,6 +48,12 @@ func putGuard(t *testing.T, s *Service, g DispatchGuard) {
 	}
 }
 
+// conversationNames are the names of a conversation's list when no guard narrows it: the global list without page,
+// which only a conversation that writes dashboards gets (off in these tests, pages_tool.go).
+func conversationNames(all []string) []string {
+	return slices.DeleteFunc(slices.Clone(all), func(name string) bool { return name == pageToolName })
+}
+
 func guardNamesOf(tools []proto.Tool) []string {
 	out := make([]string, 0, len(tools))
 	for _, tool := range tools {
@@ -85,15 +91,15 @@ func TestDispatchGuardRefusalAndToolNarrowing(t *testing.T) {
 	}
 
 	visible := guardNamesOf(s.ToolsFor(context.Background(), guardMachine, guardSession))
-	if len(visible) != len(all)-len(dispatchGuardToolNames) {
-		t.Fatalf("narrowed tools %d, want %d", len(visible), len(all)-len(dispatchGuardToolNames))
+	if len(visible) != len(conversationNames(all))-len(dispatchGuardToolNames) {
+		t.Fatalf("narrowed tools %d, want %d", len(visible), len(conversationNames(all))-len(dispatchGuardToolNames))
 	}
 	for _, name := range dispatchGuardToolNames {
 		if slices.Contains(visible, name) {
 			t.Fatalf("target still lists guarded tool %q", name)
 		}
 	}
-	if got := guardNamesOf(s.ToolsFor(context.Background(), guardMachine, otherSession)); !slices.Equal(got, all) {
+	if got := guardNamesOf(s.ToolsFor(context.Background(), guardMachine, otherSession)); !slices.Equal(got, conversationNames(all)) {
 		t.Fatalf("another session's tool list changed")
 	}
 	if got := guardNamesOf(s.Tools(context.Background())); !slices.Equal(got, all) {
@@ -112,7 +118,7 @@ func TestDispatchGuardDefaultsAndFallback(t *testing.T) {
 		if err := s.guardRefusal(ctx, guardMachine, guardSession, "task_plan"); err != nil {
 			t.Fatalf("%s: guard refused: %v", name, err)
 		}
-		if got := guardNamesOf(s.ToolsFor(ctx, guardMachine, guardSession)); !slices.Equal(got, all) {
+		if got := guardNamesOf(s.ToolsFor(ctx, guardMachine, guardSession)); !slices.Equal(got, conversationNames(all)) {
 			t.Fatalf("%s: tool list narrowed", name)
 		}
 	}

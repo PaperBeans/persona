@@ -8,7 +8,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 )
 
@@ -173,9 +175,12 @@ var actionBodies = map[string]string{
 }
 
 func postAction(h *Hub, role, path, body string) int {
+	return postActionAs(h, principal{Role: role, ID: "dev"}, path, body)
+}
+func postActionAs(h *Hub, actor principal, path, body string) int {
 	r := httptest.NewRequest("POST", "/api/v1/machines/m1/"+path, strings.NewReader(body))
 	r.SetPathValue("mid", "m1")
-	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, principal{Role: role, ID: "dev"}))
+	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, actor))
 	w := httptest.NewRecorder()
 	h.nodeAction(nodeActions[path])(w, r)
 	return w.Code
@@ -294,6 +299,76 @@ func TestNodeActionsPassOnlyTheirFields(t *testing.T) {
 func TestWorktreeRemoveWaitsAsLongAsDelete(t *testing.T) {
 	if remove, del := nodeActions["worktree/remove"].timeout, nodeActions["worktree/delete"].timeout; remove < del {
 		t.Fatalf("worktree/remove %s, worktree/delete %s", remove, del)
+	}
+}
+
+func TestHerdrCleanupPreviewUsesTheAuthenticatedDevice(t *testing.T) {
+	tn := newTermNode(t)
+	store := newPairStore()
+	tn.hub.store = store
+	tn.hub.cfg = &Config{Token: "synthetic-master"}
+	if err := store.CreateDeviceToken(t.Context(), db.DeviceToken{ID: "dev", Role: roleFull}, hashToken("synthetic-enrolled-phone")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreatePairToken(t.Context(), hashToken("jp_synthetic"), time.Now().Add(time.Hour), ""); err != nil {
+		t.Fatal(err)
+	}
+	phone, ok := tn.hub.authenticate(t.Context(), "synthetic-enrolled-phone")
+	if !ok || !phone.registeredDevice {
+		t.Fatal("missing authenticated device")
+	}
+	for i, c := range []struct{ body, want string }{
+		{`{"kind":"herdr","locale":"en","workspace_id":"w","preview":true,"preview_device":"other"}`, `{"kind":"herdr","locale":"en","preview":true,"preview_device":"dev","workspace_id":"w"}`},
+		{`{"kind":"herdr","locale":"en","workspace_id":"w","reconcile":true,"revoke_preview":true,"preview_token":"token","preview_device":"other"}`, `{"kind":"herdr","locale":"en","preview_device":"dev","preview_token":"token","reconcile":true,"revoke_preview":true,"workspace_id":"w"}`},
+		{`{"kind":"orca","locale":"en","workspace_id":"w","preview":true,"preview_device":"dev"}`, `{"kind":"orca","locale":"en","preview":true,"workspace_id":"w"}`},
+	} {
+		if code := postActionAs(tn.hub, phone, "worktree/delete", c.body); code != http.StatusOK {
+			t.Fatalf("HTTP %d for %s", code, c.body)
+		}
+		tn.await(t, i+1)
+		tn.mu.Lock()
+		got := tn.args["worktree.delete"]
+		tn.mu.Unlock()
+		if got != c.want {
+			t.Fatalf("node received %s, want %s", got, c.want)
+		}
+	}
+	for _, body := range []string{
+		`{"kind":"herdr","workspace_id":"w","reconcile":true,"revoke_preview":"true","preview_token":"token"}`,
+		`{"kind":"herdr","workspace_id":"w","revoke_preview":true,"preview_token":"token"}`,
+		`{"kind":"herdr","workspace_id":"w","reconcile":true,"revoke_preview":true}`,
+		`{"kind":"herdr","workspace_id":"w","reconcile":true,"revoke_preview":true,"force":true,"preview_token":"token"}`,
+		`{"kind":"orca","workspace_id":"w","reconcile":true,"revoke_preview":true,"preview_token":"token"}`,
+	} {
+		if code := postAction(tn.hub, roleFull, "worktree/delete", body); code != http.StatusBadRequest {
+			t.Fatalf("malformed request HTTP %d: %s", code, body)
+		}
+	}
+	if got := tn.await(t, 3); len(got) != 3 {
+		t.Fatalf("malformed flag reached node: %v", got)
+	}
+	preview := `{"kind":"herdr","workspace_id":"w","locale":"en","preview":true,"preview_device":"dev"}`
+	for i, token := range []string{"synthetic-master", "jp_synthetic"} {
+		actor, ok := tn.hub.authenticate(t.Context(), token)
+		if !ok || actor.registeredDevice || actor.Role != roleFull {
+			t.Fatalf("unexpected principal for legacy full credential: %+v", actor)
+		}
+		if code := postActionAs(tn.hub, actor, "worktree/delete", preview); code != http.StatusOK {
+			t.Fatal(code)
+		}
+		tn.await(t, i+4)
+		tn.mu.Lock()
+		got := tn.args["worktree.delete"]
+		tn.mu.Unlock()
+		if got != `{"kind":"herdr","locale":"en","preview":true,"workspace_id":"w"}` {
+			t.Fatalf("unregistered credential gained preview ownership: %s", got)
+		}
+	}
+	if code := postActionAs(tn.hub, principal{Role: roleExtension, ID: "extension:example"}, "worktree/delete", preview); code != http.StatusForbidden {
+		t.Fatalf("extension HTTP %d", code)
+	}
+	if got := tn.await(t, 5); len(got) != 5 {
+		t.Fatalf("extension reached native checkout: %v", got)
 	}
 }
 

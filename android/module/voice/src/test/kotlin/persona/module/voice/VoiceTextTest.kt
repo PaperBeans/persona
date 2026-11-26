@@ -1,7 +1,6 @@
 package persona.module.voice
 
 import android.media.AudioDeviceInfo
-import persona.core.designsystem.VoiceOrbMode
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
 import java.io.IOException

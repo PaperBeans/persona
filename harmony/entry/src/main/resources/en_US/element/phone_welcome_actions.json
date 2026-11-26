@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "welcome_action_scan",
+      "value": "Scan to connect a hub"
+    },
+    {
+      "name": "welcome_action_other",
+      "value": "Other ways"
+    },
+    {
+      "name": "welcome_action_help",
+      "value": "Help"
+    },
+    {
+      "name": "welcome_action_demo",
+      "value": "Demo"
+    },
+    {
+      "name": "welcome_action_hint",
+      "value": "Setting up the hub shows a QR code; or, on a device that's already connected, open Settings › Devices › Connect a new device"
+    },
+    {
+      "name": "welcome_action_done",
+      "value": "OK"
+    }
+  ]
+}

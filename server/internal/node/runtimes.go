@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // RuntimeProtocol is the runtime wire's version, answered to runtime.hello; it grows only for changes old runtimes misread.
@@ -75,12 +76,16 @@ type runtimeHello struct {
 		QueueSendNow bool `json:"queue_send_now"`
 		// Assistant: its launcher may run the Persona assistant (assistant_runtime.go; docs/integrations/runtimes.md "Assistant").
 		Assistant bool `json:"assistant"`
+		// RemoteAgent: the assistant runtime runs remotely (e.g. cloud API / extension backend) without local
+		// filesystem tools; node exposes memory_read/memory_write MCP tools and enforces confirm-writes posture.
+		RemoteAgent bool `json:"remote_agent"`
 		// SupervisionPolicy: the runtime carries manager-owned supervision_instructions on its own authoritative
 		// policy channel (separate from user messages) on session.start and session.send, and fails closed
 		// (assistant_supervision_runtime) when a nonempty policy cannot be applied (#11173).
 		SupervisionPolicy bool `json:"supervision_policy"`
-		// AssistantEnvironment: the local runtime applies the generic, non-proxied Assistant process environment
-		// only to dedicated Assistant workers, including replacements, and never to shared ordinary-Agent workers.
+		// AssistantEnvironment: the local runtime applies the generic Assistant process environment (including
+		// session-scoped gate proxy addresses, never Auth-held credentials or raw upstream sockets) only to dedicated
+		// Assistant workers, including replacements, and never to shared ordinary-Agent workers.
 		AssistantEnvironment bool `json:"assistant_environment"`
 		// Execution reports the actual per-session execution environment via session.execution.
 		Execution bool `json:"execution"`
@@ -122,6 +127,9 @@ type runtimeHello struct {
 		// inactive ones too (sessions_history.go).
 		History bool `json:"history"`
 	} `json:"caps"`
+	// CodexClaims are the Codex app-server instances the runtime serves itself, which the node leaves to it
+	// (codex_instance_claims.go): a runtime on the socket's, never a daemon's.
+	CodexClaims []runtimeCodexClaim `json:"codex_claims,omitempty"`
 }
 
 // runtimeConn is one connected runtime.
@@ -135,7 +143,11 @@ type runtimeConn struct {
 	hello    runtimeHello
 	ready    bool            // runtime.hello arrived
 	sessions []proto.Session // its last runtime.sessions
-	watched  map[string]bool // sessions this connection was asked to watch, including an attempt still pending
+	// sessionsListed is true once this connection has pushed its first runtime.sessions list.
+	// Before that arrives (for example while a freshly started runtime scans disk), absence from
+	// runtimeRegistry.owner/known cannot prove a runtime session is gone.
+	sessionsListed bool
+	watched        map[string]bool // sessions this connection was asked to watch, including an attempt still pending
 	// watchTokens identifies the current attempt for each watched session. The counter is per connection and is never
 	// reset while it can have an RPC outstanding, so a late error cannot clear a newer attempt or a later hub watch.
 	watchTokens    map[string]uint64
@@ -167,6 +179,9 @@ type runtimeConn struct {
 	// a system that does not tell). A runtime running the assistant vouches for its descendants' MCP servers
 	// (mcpAssistantOf).
 	pid int
+	// superseded is true once a newer runtime.hello of the same runtime replaced this connection as stale (guarded by
+	// runtimeRegistry.mu).
+	superseded bool
 }
 
 // isDaemon: the node dialed it (a daemon in daemons.json), it did not connect to the socket.
@@ -193,11 +208,68 @@ func (h *runtimeConn) agent() string {
 	return h.hello.Runtime
 }
 
+// listedSessions reports whether this runtime connection has pushed at least one runtime.sessions snapshot.
+func (h *runtimeConn) listedSessions() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessionsListed
+}
+
 // assistant: the runtime runs the Persona assistant's conversations (caps.assistant).
 func (h *runtimeConn) assistant() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.hello.Caps.Assistant
+}
+
+// remoteAgent: the runtime runs assistant conversations remotely without local filesystem access (caps.assistant && caps.remote_agent).
+func (h *runtimeConn) remoteAgent() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hello.Caps.Assistant && h.hello.Caps.RemoteAgent
+}
+
+// isRemoteRuntimeSession reports whether session carries the remote-assistant confirm-writes posture, using durable
+// session state, gateProxy marks, and registry records (including ambiguous ownership and startup state load) so
+// disconnects or ownership changes never clear the boundary.
+func (n *Node) isRemoteRuntimeSession(session string) bool {
+	if n == nil || session == "" {
+		return false
+	}
+	id := session
+	if parent, _, ok := splitRuntimeChild(session); ok {
+		id = parent
+	}
+	if n.gates().remoteSession(id) || (id != session && n.gates().remoteSession(session)) {
+		return true
+	}
+	if n.state != nil {
+		for _, candidate := range []string{id, session} {
+			if st, ok := n.state.get(candidate); ok {
+				if st.RemoteAgent {
+					return true
+				}
+				if st.Launcher != "" {
+					if h := n.assistantRuntime(st.Launcher); h != nil && h.remoteAgent() {
+						return true
+					}
+				}
+			}
+			if candidate == session {
+				break
+			}
+		}
+	}
+	if n.runtimes != nil && n.runtimes.isRemoteSession(session) {
+		return true
+	}
+	if n.state != nil && n.state.isLoading() && runtimeSessionID(id) {
+		return true
+	}
+	return false
 }
 
 // supervisionPolicy: the runtime runs assistant conversations and accepts supervision_instructions on its own policy
@@ -208,12 +280,14 @@ func (h *runtimeConn) supervisionPolicy() bool {
 	return h.hello.Caps.Assistant && h.hello.Caps.SupervisionPolicy
 }
 
-// assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic non-proxied environment.
-// A daemon can be on another computer, where local command paths and credentials must not be sent.
+// assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic Assistant environment
+// (with session-scoped local gate proxy addresses for Auth-backed / relayed gates). A daemon or remote-agent
+// runtime can run off-machine or without local filesystem access, where local command paths and local proxy
+// addresses must not be sent.
 func (h *runtimeConn) assistantEnvironment() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.hello.Caps.Assistant && h.hello.Caps.AssistantEnvironment && h.daemon == ""
+	return h.hello.Caps.Assistant && h.hello.Caps.AssistantEnvironment && !h.hello.Caps.RemoteAgent && h.daemon == ""
 }
 
 // label is what the apps call the runtime.
@@ -240,10 +314,46 @@ const (
 	maxRuntimeTaskText   = 500
 )
 
+// bridgePreview shortens engine replies before they go over the local runtime connection.
+// Strip marker lines before snippet flattens them. A marker-only update stays a single
+// marker on this connection so the receiving node can keep the session's previous words.
+func bridgePreview(text string) string {
+	words := transcript.WithoutBotmuxSentinel(text)
+	if text != "" && words == "" {
+		return transcript.BotmuxSentinel
+	}
+	return snippet(words)
+}
+
+// runtimePreviews reads the previous snapshot only if a row or child reports nothing but
+// the botmux sentinel. Ordinary snapshots need no index or extra lock.
+func (h *runtimeConn) runtimePreviews() func(id, text string) string {
+	var previous map[string]string
+	return func(id, text string) string {
+		clean := transcript.WithoutBotmuxSentinel(text)
+		if clean != "" || text == "" {
+			return clean
+		}
+		if previous == nil {
+			h.mu.Lock()
+			previous = make(map[string]string, len(h.sessions))
+			for i := range h.sessions {
+				s := &h.sessions[i]
+				previous[s.SessionID] = s.LastText
+				for _, a := range s.Subagents {
+					previous[a.SessionID] = a.LastText
+				}
+			}
+			h.mu.Unlock()
+		}
+		return previous[id]
+	}
+}
+
 // runtimeWork keeps a row's subagents and background tasks to what the apps can use: subagents with a valid id, each
 // readable as "<session>@<id>" (whatever the runtime wrote there), background tasks with an id; text clipped, the
 // lists bounded. A runtime's background task has no output file of this machine's to open.
-func runtimeWork(s *proto.Session) {
+func runtimeWork(s *proto.Session, preview func(id, text string) string) {
 	clip := func(t string) string {
 		if r := []rune(t); len(r) > maxRuntimeTaskText {
 			return string(r[:maxRuntimeTaskText]) + "…"
@@ -258,7 +368,7 @@ func runtimeWork(s *proto.Session) {
 		}
 		seen[a.ID] = true
 		a.SessionID = s.SessionID + "@" + a.ID
-		a.Description, a.LastText, a.Type, a.Model = clip(a.Description), clip(a.LastText), clip(a.Type), clip(a.Model)
+		a.Description, a.LastText, a.Type, a.Model = clip(a.Description), clip(preview(a.SessionID, a.LastText)), clip(a.Type), clip(a.Model)
 		subs = append(subs, a)
 	}
 	s.Subagents = subs

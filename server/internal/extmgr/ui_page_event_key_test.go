@@ -13,11 +13,14 @@ func TestStreamEventKeyFindsGraphAndScene(t *testing.T) {
 		{"type": "graph", "key": "work", "nodes": [{"id": "a", "title": "A", "action": {"id": "cb-node"}}]},
 		{"type": "scene", "key": "home", "alt": "A flat", "shapes": [{"kind": "box", "center": [0, 0], "size": [1, 1], "bottom": 0, "top": 1}],
 		 "pins": [{"id": "lamp", "at": [0, 0], "label": "Lamp", "action": {"id": "cb-pin"}}]},
+		{"type": "map", "key": "trip", "alt": "Commute",
+		 "markers": [{"id": "dest", "lat": 39.9, "lon": 116.4, "label": "Office", "action": {"id": "cb-marker"}}]},
 		{"type": "button", "key": "b", "title": "B", "action": {"id": "cb-button"}}
 	]}]}`)
 	for _, c := range []struct{ key, action, want string }{
 		{"work/a", "cb-node", "work"},
 		{"home/lamp", "cb-pin", "home"},
+		{"trip/dest", "cb-marker", "trip"},
 		{"b", "cb-button", "b"},
 		{"home/gone", "cb-unknown", "home/gone"},
 	} {

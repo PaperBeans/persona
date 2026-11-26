@@ -22,5 +22,11 @@
   "more_workflows_other": "ほか {count} 件",
   "more_waits_other": "他 {count} 件",
   "background_subtasks": "バックグラウンドのサブタスクが実行中、モデル使用量を消費しています…",
-  "retrying": "再試行中（{attempt}/{max}）・{reason}…"
+  "retrying": "再試行中（{attempt}/{max}）・{reason}…",
+  "every_minutes": "{count}分ごと",
+  "every_hours": "{count}時間ごと",
+  "hourly": "毎時",
+  "daily_at": "毎日 {time}",
+  "interrupt": "中断",
+  "interrupt_hint": "中断（Esc）"
 }

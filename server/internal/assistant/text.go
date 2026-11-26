@@ -23,6 +23,10 @@ var (
 	short         = textfmt.Short
 	agentLabel    = textfmt.AgentLabel
 	stateNames    = textfmt.StateNames
+	// ixToolName and toolDisplayName name a card's tool for a sentence; the fleet's rows name it the same way
+	// (fleetview.InteractionDetail).
+	ixToolName      = textfmt.ToolName
+	toolDisplayName = textfmt.ToolDisplayName
 )
 
 // transcriptText is a conversation's recent items for a model to read (agent_read, conversation_read): the

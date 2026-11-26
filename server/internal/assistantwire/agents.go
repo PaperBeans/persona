@@ -26,6 +26,9 @@ type AgentsConfig struct {
 	// (docs/plans/plan-agent-dispatch.md).
 	Dispatch DispatchConfig `json:"dispatch,omitzero"`
 	A2A      A2AConfig      `json:"a2a,omitzero"`
+	// FileTransfer is manager.json agents.file_transfer: the Agents' and the assistant's file_transfer tool, moving
+	// files between the user's computers (docs/protocol/file-transfer.md "Agents and the assistant").
+	FileTransfer FileTransferConfig `json:"file_transfer,omitzero"`
 	// LauncherHealth is manager.json agents.launcher_health: checking each machine's launchers (docs/server/launcher-health.md).
 	LauncherHealth LauncherHealthConfig `json:"launcher_health,omitzero"`
 	// Review is manager.json agents.review: the independent reviewer of a supervised task's finished change (#2173,
@@ -53,7 +56,10 @@ func (c A2AConfig) LaunchAllowed() bool { return c.Launch == nil || *c.Launch }
 
 const ScopeA2A = "agents.a2a"
 
-var A2AToolNames = []string{"a2a_sessions", "a2a_send", "a2a_get", "a2a_report", "a2a_cancel"}
+// A2AToolNames are the A2A tools every session in scope gets, whatever its harness: the node binds their caller
+// (node.callerTools) and the A2A-only catalogs (session MCP tickets, daemons, `personad tool`) keep exactly these.
+// a2a_read reads another session's recent conversation (#13831).
+var A2AToolNames = []string{"a2a_sessions", "a2a_read", "a2a_send", "a2a_get", "a2a_report", "a2a_cancel"}
 
 func IsA2ATool(name string) bool {
 	return slices.Contains(A2AToolNames, name)
@@ -78,6 +84,16 @@ func (c DispatchConfig) Limit() int {
 	}
 	return c.MaxActive
 }
+
+// FileTransferConfig is manager.json agents.file_transfer: the file_transfer tool. On unless Enabled is false: it
+// moves files only between the user's own confirmed personal computers, at an Agent's or the assistant's call, under
+// the guards the tool's own (no overwrite unless asked, credentials refused, an audit row each).
+type FileTransferConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// On: the switch, on unless set false.
+func (c FileTransferConfig) On() bool { return c.Enabled == nil || *c.Enabled }
 
 // ReviewConfig is manager.json agents.review: when a supervised task's agent is judged done, a reviewer agent started
 // with Launcher (a launcher on the agent's computer), Model and Effort (its defaults when empty) and Permission (a
@@ -239,6 +255,8 @@ const (
 	MethodAgentResumeParams = "agents.resume_params"
 	// MethodAgentTabName: {prompt} → {name}: a herdr tab's name for an Agent started with prompt ("" when none).
 	MethodAgentTabName = "agents.tab_name"
+	// EventAgentTabNameStarted: AgentTabNameStart, one way: a start has its session, so its model name can finish off the caller's path.
+	EventAgentTabNameStarted = "agents.tab_name_started"
 	// EventSessionSeen: SessionSeen, one way: the user looked at a session in an app.
 	EventSessionSeen = "session.seen"
 )
@@ -252,6 +270,24 @@ type AgentStartParams struct {
 	NameFrom  string         `json:"name_from,omitempty"`
 	Lang      string         `json:"lang,omitempty"`
 }
+
+// AgentTabNameStart is agents.tab_name_started's params: the started session and the placeholder its tab still has to
+// carry before the late automatic name may replace it. NameFrom is the prompt or name hint, without project context.
+type AgentTabNameStart struct {
+	MachineID       AgentMachineID `json:"machine_id"`
+	SessionID       AgentSessionID `json:"session_id"`
+	TabID           AgentTabID     `json:"tab_id"`
+	ExpectedTabName string         `json:"expected_tab_name"`
+	NameFrom        string         `json:"name_from"`
+}
+
+// The distinct ID types keep a late rename from accidentally crossing computers, sessions and terminal tabs. They are
+// named strings only at this wire boundary; their JSON bytes are unchanged.
+type (
+	AgentMachineID string
+	AgentSessionID string
+	AgentTabID     string
+)
 
 // AgentResumeParams is agents.resume_params's params: Params are the message's (the node's session.send; the hub
 // sends none and puts the answer's over its own: a message may carry pictures).

@@ -136,7 +136,7 @@ func restartFleet(t *testing.T, ix proto.Interaction, decide func(DelegateParams
 	t.Helper()
 	first := newDelegateFleet(t, decide)
 	st = &restartMem{restoreMem: &restoreMem{fleetMem: first.st}}
-	first.s.store = func() Store { return st }
+	first.s.setStore(func() Store { return st })
 	hookCtx, hookGone := context.WithCancel(context.Background())
 	gone := make(chan struct{})
 	go func() { _, _ = first.s.waitInteraction(hookCtx, ix); close(gone) }()

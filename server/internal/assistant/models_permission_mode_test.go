@@ -680,8 +680,11 @@ func TestModelProfilePermissionModeValidationAndCapture(t *testing.T) {
 	if purposes["assistant"].PermissionMode != "bypassPermissions" || purposes["agent.new"].PermissionMode != "acceptEdits" {
 		t.Fatalf("captured purposes missing permission_mode: %+v", purposes)
 	}
-	if tiers["strong"].PermissionMode != "" || tiers["standard"].PermissionMode != "" {
+	if len(tiers) != 2 || tiers["core"].PermissionMode != "" || tiers["dev"].PermissionMode != "" {
 		t.Fatalf("captureModels leaked permission_mode into seeded tiers: %+v", tiers)
+	}
+	if !slices.Equal(tiers["core"].Aliases, []string{"strong"}) || !slices.Equal(tiers["dev"].Aliases, []string{"standard"}) {
+		t.Fatalf("captured tiers do not answer to their older names: %+v", tiers)
 	}
 }
 

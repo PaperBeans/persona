@@ -263,7 +263,7 @@ describe("PendingCards", () => {
 
   it("names a child session's card by the child's title, on its parent's page (#5120)", () => {
     expect(permissionFrom({ folded_under: "lead", session_title: "  Write the\n tests " })).toBe("来自子 Agent · Write the tests");
-    expect(permissionFrom({ folded_under: "lead" })).toBe("来自子 Agent · 子 Agent 任务");
+    expect(permissionFrom({ folded_under: "lead" })).toBe("来自子 Agent · 子智能体任务");
     expect(permissionFrom({ folded_under: "lead", session_title: "y".repeat(80) })).toBe(`来自子 Agent · ${"y".repeat(47)}…`);
     // a question card says it too, at its top; the session's own cards say nothing
     const questions = [{ question: "用哪个框架？", options: [{ label: "A" }] }] as Interaction["questions"];
@@ -383,6 +383,12 @@ describe("Composer", () => {
     vi.stubGlobal("localStorage", { getItem: () => null });
     const html = renderToStaticMarkup(<Composer draftKey="t" placeholder="给 Agent 发消息…" onSend={async () => true} />);
     expect(html).toMatch(/<textarea[^>]*style="max-height:min\(240px, calc\(var\(--kb-h\) \* 0.35\)\)"/);
+  });
+
+  it("omits the attachment strip from an empty composer's dock", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    const html = renderToStaticMarkup(<Composer draftKey="t" placeholder="…" onSend={async () => true} />);
+    expect(html).not.toContain("data-composer-attachments");
   });
 });
 

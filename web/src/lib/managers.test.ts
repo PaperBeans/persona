@@ -1,7 +1,7 @@
 // Settings › Managers' words (docs/assistant/managers.md): where one runs, its status line, why Delete is off, and the hub's refusals.
 import { describe, expect, it } from "vitest";
 import { ApiError, errorText } from "./api";
-import { deleteBlocked, deployText, managerError, minutesLeft, statusLine, unsupported, validName, whereText, type Manager } from "./managers";
+import { deleteBlocked, deployText, hostedManagerAttention, hostedManagersForMachine, managerError, managerVersionLag, minutesLeft, statusLine, unsupported, validName, whereText, type Manager, type ManagerList } from "./managers";
 
 const NOW = Date.parse("2026-11-05T12:00:00Z");
 const m = (over: Partial<Manager>): Manager => ({ id: "m-1", name: "工作", online: false, ...over });
@@ -55,5 +55,57 @@ describe("助手", () => {
     expect(managerError(err(500))).toContain("raw");
     expect(unsupported(err(404))).toBe(true);
     expect(unsupported(err(404, "no_manager"))).toBe(false);
+  });
+});
+
+describe("hostedManagersForMachine and version lag", () => {
+  const roster = (managers: Manager[], def = "assistant"): ManagerList => ({ default: def, managers });
+
+  it("matches by machine_uid first and does not fall back to host when distinct UIDs disagree", () => {
+    const list = roster([
+      m({ id: "m-1", name: "Work", online: true, machine_uid: "UID-1", host: "other-host" }),
+      m({ id: "m-2", name: "Conflict", online: true, machine_uid: "UID-2", host: "dev-box" }),
+      m({ id: "assistant", name: "Default", online: true, machine_uid: "uid-1", host: "dev-box" }),
+      m({ id: "m-inst", name: "Installing", online: false, machine_uid: "uid-1", installing: "2099-01-01T00:00:00Z" }),
+    ]);
+    const matched = hostedManagersForMachine(list, { id: "dev", hostname: "dev-box", machine_uid: "UID-1" });
+    expect(matched.map((x) => x.id)).toEqual(["assistant", "m-1"]);
+  });
+
+  it("falls back to case-insensitive host match when either side lacks machine_uid", () => {
+    const list = roster([
+      m({ id: "m-old", name: "Legacy", online: true, host: "Dev-Box" }),
+      m({ id: "m-new", name: "New", online: true, machine_uid: "uid-a", host: "DEV-BOX" }),
+      m({ id: "m-other", name: "Other", online: true, host: "nas" }),
+      m({ id: "m-empty", name: "NoHost", online: true }),
+    ], "m-old");
+    // Machine has UID, legacy manager does not -> host fallback matches m-old
+    expect(hostedManagersForMachine(list, { id: "dev", hostname: "dev-box", machine_uid: "uid-b" }).map((x) => x.id)).toEqual(["m-old"]);
+    // Machine lacks UID, manager has UID -> host fallback matches both
+    expect(hostedManagersForMachine(list, { id: "dev", hostname: "dev-box" }).map((x) => x.id)).toEqual(["m-old", "m-new"]);
+    // Machine lacks hostname -> falls back to machine.id
+    expect(hostedManagersForMachine(list, { id: "NAS" }).map((x) => x.id)).toEqual(["m-other"]);
+    // Machine has hostname -> does not false-match machine.id against another manager's host
+    expect(hostedManagersForMachine(list, { id: "nas", hostname: "workstation" })).toEqual([]);
+    // Null roster
+    expect(hostedManagersForMachine(null, { id: "dev", hostname: "dev-box" })).toEqual([]);
+  });
+
+  it("detects version lag and prioritizes pending_restart", () => {
+    expect(managerVersionLag({ online: true, version: "v1-202611201000" }, "v1-202611241200")).toBe(true);
+    expect(managerVersionLag({ online: true, version: "v1-202611241200" }, "v1-202611241200")).toBe(false);
+    expect(managerVersionLag({ online: true, version: "v1-202611251200" }, "v1-202611241200")).toBe(false);
+    expect(managerVersionLag({ online: true, version: "v0.9.0" }, "v0.10.0")).toBe(true);
+    expect(managerVersionLag({ online: true, version: "v0.10.0" }, "v0.9.0")).toBe(false);
+    expect(managerVersionLag({ online: true, version: "sha-old" }, "sha-new")).toBe(true);
+    expect(managerVersionLag({ online: true, version: "dev" }, "v1-202611241200")).toBe(false);
+    expect(managerVersionLag({ online: true, version: "v1-202611201000" }, "unknown")).toBe(false);
+    expect(managerVersionLag({ online: true, version: undefined }, "v1-202611241200")).toBe(false);
+    expect(managerVersionLag({ online: false, version: "v1-202611201000" }, "v1-202611241200")).toBe(false);
+
+    expect(hostedManagerAttention({ online: true, version: "v1-202611201000", pending_restart: true }, "v1-202611241200")).toBe("pending_restart");
+    expect(hostedManagerAttention({ online: true, version: "v1-202611241200", pending_restart: true }, "v1-202611241200")).toBe("pending_restart");
+    expect(hostedManagerAttention({ online: true, version: "v1-202611201000" }, "v1-202611241200")).toBe("version_lag");
+    expect(hostedManagerAttention({ online: true, version: "v1-202611241200" }, "v1-202611241200")).toBeNull();
   });
 });

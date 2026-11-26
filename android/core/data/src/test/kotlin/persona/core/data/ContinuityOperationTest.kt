@@ -1,6 +1,7 @@
 package persona.core.data
 
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.*
 import org.junit.Assert.*
@@ -283,7 +284,7 @@ class ContinuityOperationTest {
                 else ItemsResponse(listOf(item(2), item(3), item(4)), history = "h")
             }
             val opening = h.scope.async { h.repository.expandFold(key, 2, 3) }
-            h.frames.run()
+            pump(h.frames) { queries == listOf(2 to 3) }
             assertEquals(listOf(2 to 3), queries)
             h.adapter.accept(ContinuityAdapter.Input.Push(ContinuityAdapter.Batch(listOf(fold(2, 4)), "h", 3, 4)))
             h.frames.run()
@@ -294,13 +295,69 @@ class ContinuityOperationTest {
         }
     }
 
+    @Test fun changedFoldWhileOpeningReconnectIsInFlightDeliversBothRangesOnce() = runBlocking {
+        Harness(listOf(fold(2))).use { h ->
+            val reconnectEntered = CompletableDeferred<Unit>()
+            val releaseReconnect = CompletableDeferred<Unit>()
+            h.beforeAccept = { input ->
+                if (input == ContinuityAdapter.Input.Reconnect) {
+                    reconnectEntered.complete(Unit)
+                    releaseReconnect.await()
+                }
+            }
+            h.scope.launch { h.repository.observe(key).collect { h.snapshot.set(it) } }
+            pump(h.frames) { h.snapshot.get().verified }
+            withTimeout(5_000) { reconnectEntered.await() }
+            val oldPage = CompletableDeferred<ItemsResponse>()
+            val queries = ConcurrentLinkedQueue<Pair<Int?, Int?>>()
+            h.transport.fetch = { query ->
+                queries.add(query.fromSeq to query.throughSeq)
+                if (query.throughSeq == 3) oldPage.await()
+                else ItemsResponse(listOf(item(2), item(3), item(4)), history = "h")
+            }
+            // Start fold expansion while opening's Reconnect still holds entry.inputs on Dispatchers.Default.
+            val opening = h.scope.async { h.repository.expandFold(key, 2, 3) }
+            releaseReconnect.complete(Unit)
+            pump(h.frames) { queries.toList() == listOf(2 to 3) }
+            assertEquals(listOf(2 to 3), queries.toList())
+            h.adapter.accept(ContinuityAdapter.Input.Push(ContinuityAdapter.Batch(listOf(fold(2, 4)), "h", 3, 4)))
+            h.frames.run()
+            oldPage.complete(ItemsResponse(listOf(item(2).copy(text = "stale"), item(3)), history = "h"))
+            pump(h.frames) { opening.isCompleted }
+            assertEquals(listOf(2 to 3, 2 to 4), queries.toList())
+            assertEquals(listOf(item(2), item(3), item(4)), opening.await())
+        }
+    }
+
+    @Test fun changedFoldDiscardsOldRangeItemsWhoseIdsDisappearInRefetch() = runBlocking {
+        Harness(listOf(fold(2))).use { h ->
+            h.open()
+            val oldPage = CompletableDeferred<ItemsResponse>()
+            val queries = mutableListOf<Pair<Int?, Int?>>()
+            h.transport.fetch = { query ->
+                queries += query.fromSeq to query.throughSeq
+                if (query.throughSeq == 3) oldPage.await()
+                else ItemsResponse(listOf(item(2), item(3), item(4)), history = "h")
+            }
+            val opening = h.scope.async { h.repository.expandFold(key, 2, 3) }
+            pump(h.frames) { queries == listOf(2 to 3) }
+            h.adapter.accept(ContinuityAdapter.Input.Push(ContinuityAdapter.Batch(listOf(fold(2, 4)), "h", 3, 4)))
+            h.frames.run()
+            oldPage.complete(ItemsResponse(listOf(item(2).copy(text = "stale"), item(3).copy(id = "3#stale")), history = "h"))
+            pump(h.frames) { opening.isCompleted }
+            assertEquals(listOf(2 to 3, 2 to 4), queries)
+            assertEquals(listOf(item(2), item(3), item(4)), opening.await())
+        }
+    }
+
     @Test fun aPushedFoldMemberDoesNotDiscardDownloadedExpansionItems() = runBlocking {
         Harness(listOf(item(1), fold(2), item(4))).use { h ->
             h.open()
             val held = CompletableDeferred<ItemsResponse>()
-            h.transport.fetch = { held.await() }
+            val requested = CompletableDeferred<Unit>()
+            h.transport.fetch = { requested.complete(Unit); held.await() }
             val expansion = h.scope.async { h.repository.expandFold(key, 2, 3) }
-            h.frames.run()
+            pump(h.frames) { requested.isCompleted }
             // The push replaces the fold before the range response arrives, as in the synchronous parity test.
             h.adapter.accept(ContinuityAdapter.Input.Push(ContinuityAdapter.Batch(listOf(item(3)), "h", 3, 3)))
             h.frames.run()
@@ -338,6 +395,7 @@ class ContinuityOperationTest {
             ItemsResponse(initial, history = "h", toSeq = initial.maxOf { it.fold?.throughSeq ?: it.seq }, hasMore = hasMore)
         } }
         val snapshot = AtomicReference(ChatSnapshot())
+        private val reconnected = AtomicBoolean(false)
         lateinit var adapter: RustContinuityAdapter
         var beforeAccept: suspend (ContinuityAdapter.Input) -> Unit = {}
         val repository = HubChatRepository(transport, connection, FakeItemsCache(CachedChat()), FakeSessions(), scope,
@@ -346,14 +404,20 @@ class ContinuityOperationTest {
                     object : ContinuityAdapter by real {
                         override suspend fun accept(input: ContinuityAdapter.Input, operation: Long?): ContinuityAdapter.Applied? {
                             beforeAccept(input)
-                            return real.accept(input, operation)
+                            return real.accept(input, operation).also {
+                                if (input == ContinuityAdapter.Input.Reconnect) reconnected.set(true)
+                            }
                         }
                     }
                 }
             })
         suspend fun open() {
             scope.launch { repository.observe(key).collect { snapshot.set(it) } }
-            pump(frames) { snapshot.get().verified }
+            pump(frames) { snapshot.get().verified && reconnected.get() }
+            val entries = repository.javaClass.getDeclaredField("entries").apply { isAccessible = true }.get(repository) as Map<*, *>
+            val entry = entries[key]
+            val opening = entry?.javaClass?.getDeclaredField("opening")?.apply { isAccessible = true }?.get(entry) as? Job
+            opening?.join()
             frames.run()
         }
         override fun close() { scope.cancel(); driver.close() }

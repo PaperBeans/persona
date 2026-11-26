@@ -429,6 +429,8 @@ data class SessionCapabilities(
      * between them (`persona.core.domain.sort.listedModes`); null from an older node and wherever Claude Code's modes stand.
      */
     @SerialName("permission_modes") val permissionModes: List<String>? = null,
+    /** Reply to asynchronous questions without granting general approval support. */
+    @SerialName("answer_questions") val answerQuestions: Boolean = false,
 )
 
 /**
@@ -551,6 +553,9 @@ data class ModeChange(
     @WireTime val at: String = "",
 )
 
+/** Hub hello feature advertising cross-machine subagent folding, orphan filtering, and parent_machine_id queries. */
+const val SESSIONS_CROSS_MACHINE_HIERARCHY = "sessions_cross_machine_hierarchy"
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionSerializer::class)
 data class Session(
@@ -592,11 +597,19 @@ data class Session(
     @SerialName("source_instance_id") val sourceInstanceId: String? = null,
     @SerialName("parent_thread_id") val parentThreadId: String? = null,
     @SerialName("parent_session_id") val parentSessionId: String? = null,
+    /** When [parentSessionId] lives on another computer (cross-machine A2A / dispatch subagent); null for same-machine. */
+    @SerialName("parent_machine_id") val parentMachineId: String? = null,
     @SerialName("root_session_id") val rootSessionId: String? = null,
     @SerialName("is_subagent") val isSubagent: Boolean = false,
     @SerialName("asking_parent_session_id") val askingParentSessionId: String? = null,
     /** The listed ancestor whose chat owns this child (sessions_hierarchy). */
     @SerialName("folded_under") val foldedUnder: String? = null,
+    /** Beside [foldedUnder] when the topmost listed ancestor lives on another computer; null for same-machine folds. */
+    @SerialName("folded_under_machine_id") val foldedUnderMachineId: String? = null,
+    /** Durable A2A task ID that launched this subagent session; null for peer messages and non-A2A subagents. */
+    @SerialName("a2a_task_id") val a2aTaskId: String? = null,
+    /** How a subagent session was created: native, a2a, dispatch, runtime, or spawned. */
+    @SerialName("subagent_origin") val subagentOrigin: String? = null,
     /** Why a row that is no child folds: [FoldedAs.WORKER] (a tab's worker, #5180) or [FoldedAs.SIDE] (#7944). */
     @SerialName("folded_as") val foldedAs: String? = null,
     /**
@@ -833,8 +846,20 @@ data class Session(
     @SerialName("engine_history") val engineHistory: List<EngineLeg> = emptyList(),
     /** The manager's current queue. A complete session row without the field has no held messages. */
     val undelivered: List<HeldAgentMessage>? = null,
+    /** Terminal host reported by the hub (`herdr`, `herdr-core`, `orca`, `tern`, `rex`, `botmux`); optional on older hubs. */
+    @SerialName("host") val host: String? = null,
 ) {
     val key: SessionKey get() = SessionKey(machineId, sessionId)
+    /** The listed ancestor's key (`folded_under_machine_id` when cross-machine, else `machine_id`); null when not folded. */
+    val foldedUnderKey: SessionKey?
+        get() = foldedUnder?.takeIf(String::isNotBlank)?.let {
+            SessionKey(foldedUnderMachineId?.takeIf(String::isNotBlank) ?: machineId, it)
+        }
+    /** Direct parent session key (`parent_machine_id` when cross-machine, else `machine_id`); null when absent. */
+    val parentKey: SessionKey?
+        get() = parentSessionId?.takeIf(String::isNotBlank)?.let {
+            SessionKey(parentMachineId?.takeIf(String::isNotBlank) ?: machineId, it)
+        }
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
     val isHealth: Boolean get() = space == persona.core.contracts.api.AssistantSpace.HEALTH
     /** A chat of any space ([space]: health or a domain space, #13500), which the assistant's own lists leave out. */
@@ -1322,6 +1347,8 @@ data class Interaction(
     @SerialName("session_id") val sessionId: String = "",
     @SerialName("session_title") val sessionTitle: String? = null,
     @SerialName("folded_under") val foldedUnder: String? = null,
+    /** Beside [foldedUnder] when the folded ancestor lives on another computer; null for same-machine folds. */
+    @SerialName("folded_under_machine_id") val foldedUnderMachineId: String? = null,
     @SerialName("folded_as") val foldedAs: String? = null,
     /** The side session whose chat this card belongs to when it comes from a row folded through one (#7944). */
     @SerialName("folded_side") val foldedSide: String? = null,
@@ -1389,6 +1416,8 @@ data class Interaction(
     @SerialName("delegating") val delegating: Boolean = false,
     /** What the assistant filled in when it handed the question to the user. */
     @SerialName("delegate") val delegate: Delegate? = null,
+    /** True when the card has no interactive computer terminal or UI to hand back to; absent/false keeps "Leave to computer". */
+    @SerialName("no_hand_back") val noHandBack: Boolean = false,
 ) {
     val sessionKey: SessionKey get() = SessionKey(machineId, sessionId)
     /** The one exact reply this card advertises. Anything else stays an ordinary card action. */
@@ -1406,7 +1435,11 @@ data class Interaction(
             else -> null
         }
     /** The page that answers it; resolution still uses this interaction's own id and session. */
-    val homeKey: SessionKey get() = SessionKey(machineId, foldedUnder?.takeIf(String::isNotBlank) ?: sessionId)
+    val homeKey: SessionKey
+        get() {
+            val folded = foldedUnder?.takeIf(String::isNotBlank) ?: return SessionKey(machineId, sessionId)
+            return SessionKey(foldedUnderMachineId?.takeIf(String::isNotBlank) ?: machineId, folded)
+        }
 
     /** Asked by an agent other than Claude Code (Codex, a compatible CLI, a runtime's): the card is that agent's, never Claude's. */
     val fromOtherAgent: Boolean get() = !agent.isNullOrEmpty() && agent != "claude"
@@ -1456,7 +1489,7 @@ data class Interaction(
             return SecretHandoffRequest(variables, text("agent"), text("machine_name"), text("cwd"), text("prompt"))
         }
 
-    /** A password card's computer, purpose and commands (the commands exactly as sent); null for any other card. */
+    /** A password card's computer, purpose, delivery and commands (the commands exactly as sent); null for any other card. */
     val secretRun: SecretRunRequest?
         get() {
             if (!isSecretRun) return null
@@ -1464,7 +1497,8 @@ data class Interaction(
             fun text(key: String) = (input?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
             val commands = (input?.get("commands") as? JsonArray).orEmpty()
                 .mapNotNull { command -> (command as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf(String::isNotBlank) }
-            return SecretRunRequest(text("machine_name").ifEmpty { text("machine") }, text("purpose"), commands)
+            val delivery = if ((input?.get("delivery") as? JsonPrimitive)?.takeIf { it.isString }?.content == "env") "env" else "stdin"
+            return SecretRunRequest(text("machine_name").ifEmpty { text("machine") }, text("purpose"), commands, delivery)
         }
 
     /** One line for a notification or a list row. */
@@ -1507,8 +1541,8 @@ data class SecretHandoffRequest(
     val prompt: String,
 )
 
-/** What a password card ([Interaction.isSecretRun], #1137) would run: the computer's name, why, and the commands. */
-data class SecretRunRequest(val machine: String, val purpose: String, val commands: List<String>) {
+/** What a password card ([Interaction.isSecretRun], #1137) would run: the computer's name, why, delivery and the commands. */
+data class SecretRunRequest(val machine: String, val purpose: String, val commands: List<String>, val delivery: String = "stdin") {
     companion object {
         /** The card's one field, declared by the hub: Run sends the typed password under this key in [Resolution.values]. */
         const val PASSWORD = "password"

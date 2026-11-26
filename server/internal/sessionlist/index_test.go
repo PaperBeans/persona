@@ -516,6 +516,50 @@ func TestRevisionExpiryAndBounds(t *testing.T) {
 	mustQuery(t, &i, Options{Since: i.Revision()})
 }
 
+func TestRecentRevisionSurvivesHighChurnBurst(t *testing.T) {
+	const legacyMaxJournalRevisions = 128
+	var i Index
+	i.Replace("batch", []Item{testItem("a", 0)})
+	baseline := i.Revision()
+	for n := 1; n <= 2*legacyMaxJournalRevisions; n++ {
+		i.Replace("batch", []Item{testItem("a", n)})
+	}
+	p := mustQuery(t, &i, Options{Since: baseline})
+	if len(i.journal) <= legacyMaxJournalRevisions || i.journalChanges > maxJournalChanges {
+		t.Fatalf("high-churn journal: revisions=%d changes=%d", len(i.journal), i.journalChanges)
+	}
+	if !reflect.DeepEqual(sessionIDs(p), []string{"a"}) || len(p.Remove) != 0 || p.HasMore || p.Revision != i.Revision() {
+		t.Fatalf("high-churn delta = %+v", p)
+	}
+}
+
+func TestJournalChangedIDBudgetStillExpires(t *testing.T) {
+	const idsPerRevision = 256
+	revisions := maxJournalChanges/idsPerRevision + 1
+	if revisions >= maxJournalRevisions {
+		t.Fatalf("test must exercise the changed-ID bound before the revision bound: revisions=%d max=%d", revisions, maxJournalRevisions)
+	}
+	var i Index
+	baseline := i.Revision()
+	var atFloor string
+	items := make([]Item, idsPerRevision)
+	for n := 0; n < revisions; n++ {
+		for j := range items {
+			items[j] = testItem(fmt.Sprintf("item-%03d", j), n)
+		}
+		i.Replace("batch", items)
+		if n == 0 {
+			atFloor = i.Revision()
+		}
+	}
+	_, err := i.Query(Options{Since: baseline})
+	requireCode(t, err, "revision_expired")
+	mustQuery(t, &i, Options{Since: atFloor})
+	if i.floor != 1 || i.journalChanges > maxJournalChanges || len(i.journal) >= maxJournalRevisions {
+		t.Fatalf("changed-ID eviction: floor=%d revisions=%d changes=%d", i.floor, len(i.journal), i.journalChanges)
+	}
+}
+
 func TestCursorExpiryBindingAndEviction(t *testing.T) {
 	now := testTime
 	i := Index{now: func() time.Time { return now }}

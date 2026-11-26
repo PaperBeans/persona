@@ -108,3 +108,11 @@ Replacing a transcript file can reuse the same session and sequence numbers. The
 on paged items. If an earlier-page read first sees the change, discard the old snapshot before requesting the
 replacement's latest page. Fold ranges have no history field, so keep the request's owner through delivery.
 Exercise both orders in which the page and the replacement WebSocket batch can arrive.
+
+## Size socket limits per stream, not per read
+
+The Hub's session list on `/api/v1/ws` grows with the fleet and can pass 1 MiB in one event; a client-wide 1 MiB
+frame cap turned it into a `frame_too_large` reconnect loop with an empty Agents list (#14371). Bound each stream by
+the largest message it legitimately carries (Hub events 64 MiB, port relays 1 MiB), check frames and fragments
+against that, and feed each TLS read into the buffer in pieces: one read can hold the tail of one frame and several
+whole ones. Keep the failure reason on the state callback so tests can tell a size limit from a broken socket.

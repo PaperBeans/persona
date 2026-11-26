@@ -1,5 +1,7 @@
 // Package backup implements verified, whole-install backup and recovery as an
-// operations command. It deliberately does not extend the hub's business API.
+// operations command. Web exposure stays in operations/recovery and is limited
+// to aggregate offline inspection and explicit temporary-database verification;
+// creation and restore remain terminal operations.
 package backup
 
 import (
@@ -18,6 +20,13 @@ const (
 	managerKeyPath  = "runtime/managers/assistant/secret.key"
 	hubKeyPath      = "runtime/secret.key"
 )
+
+// Support describes whether an operation can run on this installation without
+// exposing configuration, database URLs, executable paths or raw errors.
+type Support struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+}
 
 // Target is one PostgreSQL database and the client used to dump it. URL is
 // never serialized into a manifest or included in an error.

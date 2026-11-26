@@ -93,6 +93,7 @@ data class ExtensionManifest(
      * executable; writes and arbitrary command lines are not part of this contract.
      */
     @SerialName("host_integrations") val hostIntegrations: List<ExtensionHostIntegrationSpec>? = null,
+    val upgrade: ExtensionUpgradeSpec? = null,
 )
 
 /**
@@ -184,6 +185,28 @@ data class ExtensionAuthSpec(
      * do leave it out of its pages.
      */
     val page: String? = null,
+)
+
+/**
+ * What the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The hub snapshots
+ * the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse the manifest.
+ */
+@Serializable
+data class ExtensionUpgradeSpec(
+    /**
+     * auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade.
+     */
+    val backup: String? = null,
+    /**
+     * Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the
+     * upgrade.
+     */
+    val prepare: Boolean? = null,
+    /**
+     * Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+     * snapshot.
+     */
+    @SerialName("health_check") val healthCheck: Boolean? = null,
 )
 
 @Serializable
@@ -402,6 +425,7 @@ data class ExtensionContributes(
     val assistant: List<ExtensionAssistantItem>? = null,
     @SerialName("mcp_servers") val mcpServers: List<ExtensionMCPServerItem>? = null,
     val ui: List<ExtensionUIItem>? = null,
+    @SerialName("track_kinds") val trackKinds: List<ExtensionTrackKindItem>? = null,
     @SerialName("agent_sources") val agentSources: List<ExtensionAgentSourceItem>? = null,
     val channel: List<ExtensionChannelItem>? = null,
     val events: List<ExtensionEventsItem>? = null,
@@ -418,6 +442,7 @@ data class ExtensionContributes(
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
     @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
+    @SerialName("disk_offload") val diskOffload: List<ExtensionDiskOffloadItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
     /** Extra keys stay at this object's level on the wire; declared fields always win. */
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
@@ -439,6 +464,7 @@ private data class ExtensionContributesKnown(
     val assistant: List<ExtensionAssistantItem>? = null,
     @SerialName("mcp_servers") val mcpServers: List<ExtensionMCPServerItem>? = null,
     val ui: List<ExtensionUIItem>? = null,
+    @SerialName("track_kinds") val trackKinds: List<ExtensionTrackKindItem>? = null,
     @SerialName("agent_sources") val agentSources: List<ExtensionAgentSourceItem>? = null,
     val channel: List<ExtensionChannelItem>? = null,
     val events: List<ExtensionEventsItem>? = null,
@@ -455,12 +481,13 @@ private data class ExtensionContributesKnown(
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
     @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
+    @SerialName("disk_offload") val diskOffload: List<ExtensionDiskOffloadItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
 )
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "track_kinds", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "disk_offload", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -483,6 +510,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             assistant = fields.assistant,
             mcpServers = fields.mcpServers,
             ui = fields.ui,
+            trackKinds = fields.trackKinds,
             agentSources = fields.agentSources,
             channel = fields.channel,
             events = fields.events,
@@ -499,6 +527,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             secretProviders = fields.secretProviders,
             repositoryProviders = fields.repositoryProviders,
             memorySources = fields.memorySources,
+            diskOffload = fields.diskOffload,
             messaging = fields.messaging,
             additionalProperties = obj.filterKeys { it !in keys },
         )
@@ -521,6 +550,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             assistant = value.assistant,
             mcpServers = value.mcpServers,
             ui = value.ui,
+            trackKinds = value.trackKinds,
             agentSources = value.agentSources,
             channel = value.channel,
             events = value.events,
@@ -537,6 +567,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             secretProviders = value.secretProviders,
             repositoryProviders = value.repositoryProviders,
             memorySources = value.memorySources,
+            diskOffload = value.diskOffload,
             messaging = value.messaging,
         )
         val obj = output.json.encodeToJsonElement(known, fields) as JsonObject
@@ -869,6 +900,40 @@ data class ExtensionRepositoryProviderItem(
 )
 
 /**
+ * A provider that moves items from a computer to storage elsewhere, lists what it already holds and brings items back
+ * (docs/server/machine-usage-map.md "Extension point disk_offload"): the disk usage map draws its inventory beside
+ * the computer's disk and offers Offload; the manager asks the program (offload.inventory, offload.run, offload.job,
+ * offload.cancel; offload.schema.json) after the user confirmed. Needs the program to speak the protocol.
+ */
+@Serializable
+data class ExtensionDiskOffloadItem(
+    val id: String = "",
+    /**
+     * What the map and its menus call the provider (Offload to Example Cloud). Not only spaces, no control
+     * characters.
+     */
+    val name: String = "",
+    /**
+     * What it takes from the map; without it, files and folders.
+     */
+    val kinds: List<String>? = null,
+    /**
+     * Items it holds can be brought back (Restore on the map's cloud side).
+     */
+    val restore: Boolean? = null,
+)
+
+/**
+ * What a disk_offload provider takes: file, dir (a folder) or app (a macOS app bundle).
+ */
+object ExtensionDiskOffloadKind {
+    const val FILE = "file"
+    const val DIR = "dir"
+    const val APP = "app"
+    val ALL = listOf("file", "dir", "app")
+}
+
+/**
  * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
  * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
  * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
@@ -997,6 +1062,45 @@ data class ExtensionConnectorItem(
      * install preview says so.
      */
     @SerialName("sends_as_user") val sendsAsUser: Boolean? = null,
+)
+
+@Serializable
+data class ExtensionTrackAttention(
+    @SerialName("push_cap") val pushCap: String? = null,
+    @SerialName("deep_default") val deepDefault: String? = null,
+    @SerialName("enter_mode") val enterMode: String? = null,
+)
+
+@Serializable
+data class ExtensionTrackSidebar(
+    val group: String? = null,
+    val order: Int? = null,
+    val icon: String? = null,
+)
+
+@Serializable
+data class ExtensionTrackKindConfig(
+    val schema: Int = 0,
+    val template: String = "",
+    @SerialName("user_instructions") val userInstructions: String? = null,
+    val context: String = "",
+    @SerialName("default_categories") val defaultCategories: List<String> = emptyList(),
+    @SerialName("tag_focus") val tagFocus: List<String> = emptyList(),
+    val rhythms: List<Map<String, JsonElement>> = emptyList(),
+    val attention: ExtensionTrackAttention = ExtensionTrackAttention(),
+    val supervision: String = "",
+    val usage: List<Map<String, JsonElement>> = emptyList(),
+    val assembly: String = "",
+    @SerialName("capture_target") val captureTarget: Boolean? = null,
+    val channels: List<String> = emptyList(),
+    val sidebar: ExtensionTrackSidebar = ExtensionTrackSidebar(),
+)
+
+@Serializable
+data class ExtensionTrackKindItem(
+    val id: String = "",
+    val title: String = "",
+    val config: ExtensionTrackKindConfig = ExtensionTrackKindConfig(),
 )
 
 /**
@@ -1408,7 +1512,8 @@ object ExtensionHubCapability {
     const val INBOX_GROUP = "inbox_group"
     const val INBOX_GROUP_STATE = "inbox_group_state"
     const val TOOL_IMAGES = "tool_images"
-    val ALL = listOf("inbox_group", "inbox_group_state", "tool_images")
+    const val TOOL_VIEWS = "tool_views"
+    val ALL = listOf("inbox_group", "inbox_group_state", "tool_images", "tool_views")
 }
 
 /**
@@ -1425,6 +1530,11 @@ data class ExtensionInitializeParams(
      * The configuration with the schema's defaults filled in.
      */
     val config: JsonElement? = null,
+    /**
+     * The manager's source-privacy boundary, sent only to an extension contributing a selected connector. Runtime
+     * authorization input, not extension settings persisted in the extension registry.
+     */
+    @SerialName("inbox_visibility") val inboxVisibility: JsonElement? = null,
     val secrets: Map<String, String>? = null,
     val granted: ExtensionPermissions = ExtensionPermissions(),
     /**
@@ -1604,6 +1714,11 @@ data class ExtensionUIContext(
     val locale: String? = null,
     val platform: String? = null,
     @SerialName("ui_version") val uiVersion: Int? = null,
+    /**
+     * Component types this client cannot draw even within ui_version (such as ["scene"] while rendering v12 "map").
+     * The hub downgrades each listed type in place.
+     */
+    val unsupported: List<String>? = null,
     /**
      * Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current client
      * or hub advertises it.
@@ -2414,8 +2529,8 @@ sealed interface ExtensionComponent {
     data class Unknown(override val type: String, val raw: JsonObject = JsonObject(emptyMap())) : ExtensionComponent
 
     companion object {
-        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene")
-        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6, "graph" to 10, "scene" to 11)
+        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene", "map")
+        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6, "graph" to 10, "scene" to 11, "map" to 12)
     }
 }
 
@@ -2457,6 +2572,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
                 "carousel" -> input.json.decodeFromJsonElement(ExtensionCarouselComponent.serializer(), obj)
                 "graph" -> input.json.decodeFromJsonElement(ExtensionGraphComponent.serializer(), obj)
                 "scene" -> input.json.decodeFromJsonElement(ExtensionSceneComponent.serializer(), obj)
+                "map" -> input.json.decodeFromJsonElement(ExtensionMapComponent.serializer(), obj)
                 else -> ExtensionComponent.Unknown(tag, obj)
             }
         } catch (_: SerializationException) {
@@ -2497,6 +2613,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
             is ExtensionCarouselComponent -> output.json.encodeToJsonElement(ExtensionCarouselComponent.serializer(), value) as JsonObject
             is ExtensionGraphComponent -> output.json.encodeToJsonElement(ExtensionGraphComponent.serializer(), value) as JsonObject
             is ExtensionSceneComponent -> output.json.encodeToJsonElement(ExtensionSceneComponent.serializer(), value) as JsonObject
+            is ExtensionMapComponent -> output.json.encodeToJsonElement(ExtensionMapComponent.serializer(), value) as JsonObject
             is ExtensionComponent.Unknown -> value.raw
         }
         output.encodeJsonElement(JsonObject(obj + ("type" to JsonPrimitive(value.type))))
@@ -3283,6 +3400,127 @@ object ExtensionSceneWarmth {
     const val COOL = "cool"
     val ALL = listOf("warm", "cool")
 }
+
+/**
+ * An interactive native map (UI version 12): route polylines and markers (waypoints, origin, destination, pins) with
+ * distance/duration metadata and external https map links. Drawn as a snapshot preview in cards and inline tool
+ * views; tapping opens an interactive sheet unless static is true. An older app gets the caption, route summaries,
+ * marker rows and links.
+ */
+@Serializable
+data class ExtensionMapComponent(
+    override val type: String = "map",
+    /**
+     * Keeps camera state across redraws of the page.
+     */
+    val key: String? = null,
+    val title: String? = null,
+    /**
+     * Read out by screen readers and shown as fallback text when the map cannot be drawn.
+     */
+    val alt: String = "",
+    val caption: String? = null,
+    val aspect: String? = null,
+    val viewport: ExtensionMapViewport? = null,
+    val markers: List<ExtensionMapMarker>? = null,
+    val routes: List<ExtensionMapRoute>? = null,
+    val links: List<ExtensionMapLink>? = null,
+    /**
+     * When true, stays a non-interactive snapshot and does not open an interactive sheet.
+     */
+    val static: Boolean? = null,
+    /**
+     * When true (or when multiple routes/stops exist without a compact override), shows a companion route/stop list
+     * beneath the map.
+     */
+    @SerialName("show_list") val showList: Boolean? = null,
+) : ExtensionComponent
+
+/**
+ * Travel mode of a route polyline (UI version 12).
+ */
+object ExtensionMapTravelMode {
+    const val DRIVING = "driving"
+    const val WALKING = "walking"
+    const val TRANSIT = "transit"
+    const val CYCLING = "cycling"
+    val ALL = listOf("driving", "walking", "transit", "cycling")
+}
+
+/**
+ * Semantic role of a marker on a map (UI version 12).
+ */
+object ExtensionMapMarkerKind {
+    const val ORIGIN = "origin"
+    const val DESTINATION = "destination"
+    const val WAYPOINT = "waypoint"
+    const val PIN = "pin"
+    const val USER = "user"
+    val ALL = listOf("origin", "destination", "waypoint", "pin", "user")
+}
+
+/**
+ * A geographic point in WGS-84 (UI version 12).
+ */
+@Serializable
+data class ExtensionMapCoordinate(
+    val lat: Double = 0.0,
+    val lon: Double = 0.0,
+)
+
+/**
+ * Initial map framing in WGS-84 when not auto-fitted to markers and routes (UI version 12).
+ */
+@Serializable
+data class ExtensionMapViewport(
+    val center: ExtensionMapCoordinate = ExtensionMapCoordinate(),
+    @SerialName("span_lat") val spanLat: Double? = null,
+    @SerialName("span_lon") val spanLon: Double? = null,
+)
+
+/**
+ * One location pin on a map (UI version 12), in tone's role color or color's named color (never both).
+ */
+@Serializable
+data class ExtensionMapMarker(
+    val id: String = "",
+    val lat: Double = 0.0,
+    val lon: Double = 0.0,
+    val kind: String? = null,
+    val label: String = "",
+    val subtitle: String? = null,
+    val detail: String? = null,
+    val icon: String? = null,
+    val tone: String? = null,
+    val color: String? = null,
+    val action: ExtensionAction? = null,
+)
+
+/**
+ * One route polyline on a map (UI version 12), in WGS-84 coordinates.
+ */
+@Serializable
+data class ExtensionMapRoute(
+    val id: String = "",
+    val label: String? = null,
+    val mode: String? = null,
+    @SerialName("distance_meters") val distanceMeters: Int? = null,
+    @SerialName("duration_seconds") val durationSeconds: Int? = null,
+    val summary: String? = null,
+    val selected: Boolean? = null,
+    val tone: String? = null,
+    val color: String? = null,
+    val points: List<ExtensionMapCoordinate> = emptyList(),
+)
+
+/**
+ * An https link shown beside or inside a map component (UI version 12).
+ */
+@Serializable
+data class ExtensionMapLink(
+    val title: String = "",
+    val url: String = "",
+)
 
 /**
  * Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension
@@ -6669,3 +6907,307 @@ object ExtensionUIPageSnapshotSerializer : KSerializer<ExtensionUIPageSnapshot> 
         output.encodeJsonElement(obj)
     }
 }
+
+/**
+ * Whether the provider can work on this computer: ready; needs_install (its tool is not on the computer: the first
+ * offload asks to install it, OffloadTool); needs_setup (the user has to set it up first, in the extension's
+ * settings: detail says what); unavailable (detail says why).
+ */
+object ExtensionOffloadState {
+    const val READY = "ready"
+    const val NEEDS_INSTALL = "needs_install"
+    const val NEEDS_SETUP = "needs_setup"
+    const val UNAVAILABLE = "unavailable"
+    val ALL = listOf("ready", "needs_install", "needs_setup", "unavailable")
+}
+
+/**
+ * What an offloaded item was: a file, a dir (folder), an app, an app's data (app_data), a bundle of items moved
+ * together, a session archive, or other.
+ */
+object ExtensionOffloadItemKind {
+    const val FILE = "file"
+    const val DIR = "dir"
+    const val APP = "app"
+    const val APP_DATA = "app_data"
+    const val BUNDLE = "bundle"
+    const val SESSION = "session"
+    const val OTHER = "other"
+    val ALL = listOf("file", "dir", "app", "app_data", "bundle", "session", "other")
+}
+
+/**
+ * What offload.run does: offload (move paths away) or restore (bring items back by id).
+ */
+object ExtensionOffloadAction {
+    const val OFFLOAD = "offload"
+    const val RESTORE = "restore"
+    val ALL = listOf("offload", "restore")
+}
+
+/**
+ * offload.run's answer: started (a job runs: job), needs_install (the tool is missing and install was not given:
+ * nothing happened; tool), refused (nothing happened; items say why), ok (a dry run's answer: items).
+ */
+object ExtensionOffloadRunStatus {
+    const val STARTED = "started"
+    const val NEEDS_INSTALL = "needs_install"
+    const val REFUSED = "refused"
+    const val OK = "ok"
+    val ALL = listOf("started", "needs_install", "refused", "ok")
+}
+
+/**
+ * A job: running, done, failed (error says why) or canceled.
+ */
+object ExtensionOffloadJobState {
+    const val RUNNING = "running"
+    const val DONE = "done"
+    const val FAILED = "failed"
+    const val CANCELED = "canceled"
+    val ALL = listOf("running", "done", "failed", "canceled")
+}
+
+/**
+ * What a running job does now: install (its tool), check, upload, verify, cleanup (removing the originals), download
+ * (a restore).
+ */
+object ExtensionOffloadPhase {
+    const val INSTALL = "install"
+    const val CHECK = "check"
+    const val UPLOAD = "upload"
+    const val VERIFY = "verify"
+    const val CLEANUP = "cleanup"
+    const val DOWNLOAD = "download"
+    val ALL = listOf("install", "check", "upload", "verify", "cleanup", "download")
+}
+
+/**
+ * One item of a job: pending, running, done, failed or skipped.
+ */
+object ExtensionOffloadJobItemStatus {
+    const val PENDING = "pending"
+    const val RUNNING = "running"
+    const val DONE = "done"
+    const val FAILED = "failed"
+    const val SKIPPED = "skipped"
+    val ALL = listOf("pending", "running", "done", "failed", "skipped")
+}
+
+/**
+ * The program the provider needs on the computer. source is one sentence in the caller's language saying where it
+ * comes from and where it is installed; the install confirmation shows it.
+ */
+@Serializable
+data class ExtensionOffloadTool(
+    val name: String = "",
+    val title: String? = null,
+    val version: String? = null,
+    val installed: Boolean = false,
+    val source: String? = null,
+    val detail: String? = null,
+)
+
+/**
+ * One item the provider holds of this computer. bytes is the size it had on disk, what the map draws so both sides
+ * share one scale; stored_bytes what it takes where it is stored; origin_path where it was and where a restore puts
+ * it; stub_path the placeholder left behind, if any; local_bytes what of it is still on the computer (a cache). Times
+ * are Unix seconds.
+ */
+@Serializable
+data class ExtensionOffloadItem(
+    val id: String = "",
+    val name: String = "",
+    val kind: String = "",
+    val bytes: Long = 0L,
+    @SerialName("stored_bytes") val storedBytes: Long? = null,
+    @SerialName("origin_path") val originPath: String? = null,
+    @SerialName("stub_path") val stubPath: String? = null,
+    @SerialName("local_bytes") val localBytes: Long? = null,
+    @SerialName("offloaded_at") val offloadedAt: Long? = null,
+    @SerialName("used_at") val usedAt: Long? = null,
+    /**
+     * Items moved together share a group (an app and its data).
+     */
+    val group: String? = null,
+    val restorable: Boolean = false,
+)
+
+/**
+ * What the inventory left out past its 500 largest items.
+ */
+@Serializable
+data class ExtensionOffloadMore(
+    val count: Int = 0,
+    val bytes: Long = 0L,
+)
+
+/**
+ * offload.inventory: what the provider holds of machine. refresh asks it not to answer from its own cache.
+ */
+@Serializable
+data class ExtensionOffloadInventoryParams(
+    val contribution: String = "",
+    val locale: String = "",
+    val machine: ExtensionUIMachine = ExtensionUIMachine(),
+    val refresh: Boolean? = null,
+)
+
+/**
+ * What the provider holds of the computer, largest first, at most 500 items (the rest summed in more). at is when it
+ * was read (Unix seconds); total_bytes the items' bytes together, stored_bytes what they take where they are stored;
+ * partial when the list may be incomplete. items may be left out when there are none; the manager's answer to the
+ * apps always has it.
+ */
+@Serializable
+data class ExtensionOffloadInventory(
+    val state: String = "",
+    val detail: String? = null,
+    val tool: ExtensionOffloadTool? = null,
+    val at: Long = 0L,
+    @SerialName("total_bytes") val totalBytes: Long = 0L,
+    @SerialName("stored_bytes") val storedBytes: Long? = null,
+    val partial: Boolean? = null,
+    val items: List<ExtensionOffloadItem>? = null,
+    val more: ExtensionOffloadMore? = null,
+)
+
+/**
+ * offload.run: offload paths (absolute, on machine, each already agreed by the node's protection rules) or restore
+ * items (ids of the inventory), at most 50. dry_run only checks and answers status ok with each item; install lets
+ * the job install the tool first (the user agreed to that too). request_id is the same for a retry of the same
+ * request.
+ */
+@Serializable
+data class ExtensionOffloadRunParams(
+    val contribution: String = "",
+    val locale: String = "",
+    val machine: ExtensionUIMachine = ExtensionUIMachine(),
+    val action: String = "",
+    val paths: List<String>? = null,
+    val items: List<String>? = null,
+    @SerialName("dry_run") val dryRun: Boolean? = null,
+    val install: Boolean? = null,
+    @SerialName("request_id") val requestId: String = "",
+)
+
+/**
+ * One path or item of a run's answer: why it is refused (reason, in the caller's language), or a dry run's verdict
+ * (ok, bytes). refusal is set only by the manager, when the computer's own protection rules refused the path before
+ * the program was asked (a machine.storage.check refusal code: credentials, app_managed, ...).
+ */
+@Serializable
+data class ExtensionOffloadRunItem(
+    val path: String? = null,
+    val id: String? = null,
+    val ok: Boolean? = null,
+    val reason: String? = null,
+    val refusal: String? = null,
+    val bytes: Long? = null,
+)
+
+/**
+ * offload.run's answer (OffloadRunStatus).
+ */
+@Serializable
+data class ExtensionOffloadRunResult(
+    val status: String = "",
+    val job: String? = null,
+    val tool: ExtensionOffloadTool? = null,
+    val items: List<ExtensionOffloadRunItem>? = null,
+)
+
+/**
+ * offload.job and offload.cancel: the job offload.run started.
+ */
+@Serializable
+data class ExtensionOffloadJobParams(
+    val contribution: String = "",
+    val locale: String = "",
+    val machine: ExtensionUIMachine = ExtensionUIMachine(),
+    val job: String = "",
+)
+
+/**
+ * One path (offload) or item (restore) of a job.
+ */
+@Serializable
+data class ExtensionOffloadJobItem(
+    val path: String? = null,
+    val id: String? = null,
+    val status: String = "",
+    val error: String? = null,
+    val bytes: Long? = null,
+)
+
+/**
+ * How a job goes. A job belongs to the extension: a client that lost track asks the inventory again. items may be
+ * left out; the manager's answer to the apps always has it.
+ */
+@Serializable
+data class ExtensionOffloadJob(
+    val state: String = "",
+    val phase: String? = null,
+    @SerialName("done_bytes") val doneBytes: Long = 0L,
+    @SerialName("total_bytes") val totalBytes: Long = 0L,
+    @SerialName("freed_bytes") val freedBytes: Long? = null,
+    val error: String? = null,
+    val items: List<ExtensionOffloadJobItem>? = null,
+)
+
+/**
+ * One enabled disk_offload contribution, as GET /api/v1/extensions/-/offload lists it for the apps.
+ */
+@Serializable
+data class ExtensionOffloadProvider(
+    val extension: String = "",
+    val id: String = "",
+    val name: String = "",
+    val kinds: List<String> = emptyList(),
+    val restore: Boolean = false,
+)
+
+/**
+ * GET /api/v1/extensions/-/offload?machine=: the providers the map can offer on that computer.
+ */
+@Serializable
+data class ExtensionOffloadProviders(
+    val providers: List<ExtensionOffloadProvider> = emptyList(),
+)
+
+/**
+ * POST /api/v1/extensions/{id}/-/offload/{cid}/run, an app's request: without dry_run or confirm it is refused
+ * (confirmation_required); install only after the user agreed to the tool's install confirmation.
+ */
+@Serializable
+data class ExtensionOffloadRunRequest(
+    val machine: String = "",
+    val action: String = "",
+    val paths: List<String>? = null,
+    val items: List<String>? = null,
+    @SerialName("dry_run") val dryRun: Boolean? = null,
+    val confirm: Boolean? = null,
+    val install: Boolean? = null,
+)
+
+/**
+ * The run route's 202 answer: the job to follow with GET …/jobs/{job}.
+ */
+@Serializable
+data class ExtensionOffloadStarted(
+    val job: String = "",
+)
+
+/**
+ * An offload route's error: error in the reader's language and a code (bad_request, confirmation_required, read_only,
+ * not_found, machine_offline, node_outdated, tool_install_required with tool, offload_refused with items,
+ * plugin_failed (detail: the provider's own words, one line), usage_failed, deadline).
+ */
+@Serializable
+data class ExtensionOffloadError(
+    val error: String = "",
+    val code: String = "",
+    val tool: ExtensionOffloadTool? = null,
+    val detail: String? = null,
+    val items: List<ExtensionOffloadRunItem>? = null,
+)

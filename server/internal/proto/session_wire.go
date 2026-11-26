@@ -21,7 +21,7 @@ import (
 // fields differ from them (a field added, renamed, retyped or retagged by a change that did not update this file),
 // appendSession leaves every session to the reflect encoder: the session is sent whole, only slower, until its line
 // here and this hash are brought up to date. TestSessionWireMatchesReflect fails meanwhile and prints the new hash.
-const sessionWireLayout = 0x722045b466997879
+const sessionWireLayout = 0x3a4a9b026ed8443a
 
 var sessionWireCurrent = sessionLayout() == sessionWireLayout && hierarchyLayout() == hierarchyWireLayout
 
@@ -41,7 +41,7 @@ const (
 
 // hierarchyWireLayout is the layout hash of SessionHierarchy and SessionChildren, whose members appendSession writes
 // on the row: while either differs, appendSession leaves every session to the reflect encoder, as for sessionWireLayout.
-const hierarchyWireLayout = 0xcbafbe8c1840ae26
+const hierarchyWireLayout = 0x53676730036e062b
 
 // hierarchyLayout hashes SessionHierarchy's fields, then SessionChildren's.
 func hierarchyLayout() uint64 {
@@ -331,6 +331,9 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 			w.value(`"context_breakdown":`, h.ContextBreakdown)
 		}
 		w.boolean(`"deleted":`, h.Deleted, true)
+		if h.View != nil {
+			w.value(`"view":`, h.View)
+		}
 	}
 	w.boolean(legacyStartedMember, s.StartedByPersona, false) // sessionWire's legacy key (compatibility.go)
 	return append(w.b, '}'), w.ok

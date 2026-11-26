@@ -192,11 +192,11 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	hello := h.hello()
 	// Replace the random client ID, and the hub's feature list with the samples' fixed one (wireFeatures), leaving
 	// every other protocol field from hello intact.
-	hello["client_id"] = "000000000001"
-	if got, _ := hello["features"].([]string); !slices.Equal(got, h.features()) {
-		t.Fatalf("hello no longer carries features() under features: %v", hello["features"])
+	hello.ClientID = "000000000001"
+	if !slices.Equal(hello.Features, h.features()) {
+		t.Fatalf("hello no longer carries features() under features: %v", hello.Features)
 	}
-	hello["features"] = wireFeatures
+	hello.Features = wireFeatures
 	add("connection", "hello_features", "The hello lists the hub's features; the sample carries a fixed list with one flag no client knows, which decoders keep reading past.", "event", ws(hello),
 		map[string]any{"/type": "hello", "/features": wireFeatures}, "server/internal/hub/hello.go: Hub.hello", "server/internal/hub/hello_features_test.go: TestHelloAndHealthCarryTheHubsFeatures",
 		"apple/Shared/LiveConnection.swift: ServerEvent.decode", "docs/protocol/protocol.md: Health check and feature flags")

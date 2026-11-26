@@ -19,8 +19,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Task delivery tracking (#5732), through the real hub HTTP stack and assistant bus: a side chat dispatches to main,
-// judged work waits for acceptance, owner-only work pushes once, and cancellation / takeover stay visible in both
+// Task delivery tracking (#5732, #13657), through the real hub HTTP stack and assistant bus: a live side chat
+// supervises the work it dispatches while main keeps a read-only overview, judged work waits for acceptance,
+// owner-only work stays with its supervisor without pushing directly, and cancellation / takeover stay visible in both
 // directions. The only computer is a fake node; the hub and assistant share the test's isolated Postgres.
 func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 	h, srv, _ := newBusHub(t)
@@ -66,14 +67,14 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 	n.known["main-1"], n.known["side-2"] = true, true
 	taskNode := connectTaskNode(t, h, "box")
 	taskNode.nextID = "agent-old-1"
-	// Leave the legacy switch off: new side-chat work must still be supervised by main, never by a new background stream.
+	// Leave the legacy switch off: a live side chat supervises its own dispatched work, never a new background stream.
 	if err := store.PutSetting(ctx, "assistant", assistant.Settings{MachineID: "server", Main: "main-1", Timezone: "Asia/Shanghai"}); err != nil {
 		t.Fatal(err)
 	}
 	app := dialTestApp(t, h, srv)
 	dialAssistant(t, h, srv.URL, true)
 
-	mcp := func(conversation, name string, args any) string {
+	mcpCall := func(conversation, name string, args any) proto.ToolResult {
 		t.Helper()
 		raw, _ := json.Marshal(args)
 		params, _ := json.Marshal(map[string]any{"name": name, "args": json.RawMessage(raw), "session_id": conversation, "assistant": true})
@@ -81,7 +82,11 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := res.(proto.ToolResult)
+		return res.(proto.ToolResult)
+	}
+	mcp := func(conversation, name string, args any) string {
+		t.Helper()
+		r := mcpCall(conversation, name, args)
 		if r.IsError {
 			t.Fatalf("%s: %s", name, textOf(r))
 		}
@@ -142,8 +147,8 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 		}
 	}
 
-	if res := plan("子对话交付验证", ""); !strings.Contains(res, "main conversation") {
-		t.Fatalf("side dispatch does not name main: %s", res)
+	if res := plan("子对话交付验证", ""); !strings.Contains(res, "You supervise them") {
+		t.Fatalf("side dispatch does not report local supervision: %s", res)
 	}
 	var first Todo
 	eventually(t, 10*time.Second, "the side-chat task and its agent", func() bool {
@@ -155,7 +160,7 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 		}
 		return false
 	})
-	if first.Origin != "side-2" || first.Supervision == nil || first.Supervision.Supervisor != "main-1" {
+	if first.Origin != "side-2" || first.Supervision == nil || first.Supervision.Supervisor != "side-2" {
 		t.Fatalf("origin / supervisor = %+v", first)
 	}
 	snapshot := func() string {
@@ -171,24 +176,24 @@ func TestTaskDeliveryTrackingOverTheBus(t *testing.T) {
 
 	agent(first, proto.StatusWorking, "")
 	agent(first, proto.StatusDone, "实现和验证均已完成")
-	eventually(t, 10*time.Second, "main's delivery digest", func() bool { return len(digests("main-1")) == 1 })
-	if got := len(digests("side-2")); got != 0 {
-		t.Fatalf("side chat received %d supervision digests", got)
+	eventually(t, 10*time.Second, "side chat's delivery digest", func() bool { return len(digests("side-2")) == 1 })
+	if got := len(digests("main-1")); got != 0 {
+		t.Fatalf("main chat received %d supervision digests for side-2's task", got)
 	}
 	first = todoNow(h, first.ID)
 	if first.DoneAt != nil || first.Supervision == nil || first.Supervision.State != "pending_review" {
 		t.Fatalf("judged delivery closed or misplaced the task: %+v", first)
 	}
-	if d := digests("main-1")[0]; !strings.Contains(d, "待逐项复核，不代表完成") || !strings.Contains(d, "实现和验证均已交付") {
+	if d := digests("side-2")[0]; !strings.Contains(d, "待逐项复核，不代表完成") || !strings.Contains(d, "实现和验证均已交付") {
 		t.Fatalf("delivery digest:\n%s", d)
 	}
-	if text := snapshot(); !strings.Contains(text, "已交付·待看") {
+	if text := snapshot(); !strings.Contains(text, "已交付·待看") || !strings.Contains(text, "由该对话督办，主对话只读概览") {
 		t.Fatalf("snapshot delivery:\n%s", text)
 	}
 	t.Logf("delivery: todo=%s done_at=%v state=%s main_digests=%d side_digests=%d snapshot_awaiting_review=true", first.ID, first.DoneAt,
 		first.Supervision.State, len(digests("main-1")), len(digests("side-2")))
 
-	// A new stretch its agent says only the owner can move goes to main, the supervisor, not to the owner: no push,
+	// A new stretch its agent says only the owner can move goes to side-2, the supervisor, not to the owner: no push,
 	// no needs_user state (decision rights), and the wait holds so the work cannot be accepted meanwhile.
 	drainApp()
 	verdict.Store(`{"verdict":"needs_user","reason":"需要你本人操作确认发布"}`)
@@ -218,8 +223,11 @@ pushChecked:
 		t.Fatalf("snapshot owner wait:\n%s", text)
 	}
 	t.Logf("owner wait: todo=%s done_at=%v waits=present state=%s push=0", first.ID, todoNow(h, first.ID).DoneAt, todoNow(h, first.ID).Supervision.State)
-	// Cancellation is its own outcome in the API and in main's live snapshot.
-	mcp("main-1", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "用户调整方案，不再按原计划发布"})
+	// Cancellation is its own outcome in the API and in main's live snapshot; only the supervising side chat may review it.
+	if r := mcpCall("main-1", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "主对话越权复核"}); !r.IsError {
+		t.Fatalf("main chat reviewed side-2's task: %s", textOf(r))
+	}
+	mcp("side-2", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "用户调整方案，不再按原计划发布"})
 	eventually(t, 10*time.Second, "the cancellation projection", func() bool {
 		cur := todoNow(h, first.ID)
 		// The API keeps done_by=review for old clients; cancelled_at / cancelled_reason carry the distinct outcome.
@@ -266,7 +274,7 @@ pushChecked:
 		return false
 	})
 	if continued.ID != first.ID || continued.Title != first.Title || continued.Origin != "side-2" ||
-		continued.Supervision == nil || continued.Supervision.Supervisor != "main-1" || len(continued.Agents) != 2 {
+		continued.Supervision == nil || continued.Supervision.Supervisor != "side-2" || len(continued.Agents) != 2 {
 		t.Fatalf("same-card continuation = %+v", continued)
 	}
 	predecessorReleased := false
@@ -286,7 +294,7 @@ pushChecked:
 
 	// Adopting the closed card's replacement Agent is the explicit card-replacement path. It creates one linked
 	// history: the old card points forward and the new card points back.
-	mcp("main-1", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "改为独立新卡接手"})
+	mcp("side-2", "task_review", map[string]any{"todo_id": first.ID, "verdict": "cancelled", "note": "改为独立新卡接手"})
 	eventually(t, 10*time.Second, "the second cancellation before card replacement", func() bool {
 		return todoNow(h, first.ID).DoneAt != nil
 	})

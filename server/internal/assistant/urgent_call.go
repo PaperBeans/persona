@@ -142,9 +142,6 @@ func (q *urgentQuiet) inQuiet(at time.Time) bool {
 // urgentSettings is the stored setting, or the default (off) before the owner changed it.
 func (s *Service) urgentSettings(ctx context.Context) (urgentCallSettings, error) {
 	set := defaultUrgentCallSettings()
-	if s.store == nil { // a Service made without New (tests): no settings
-		return set, nil
-	}
 	st := s.store()
 	if st == nil {
 		return set, nil
@@ -206,9 +203,6 @@ type urgentStore interface {
 }
 
 func (s *Service) urgentStore() urgentStore {
-	if s.store == nil {
-		return nil
-	}
 	st, _ := s.store().(urgentStore)
 	return st
 }

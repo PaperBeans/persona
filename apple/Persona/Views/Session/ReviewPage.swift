@@ -5,15 +5,20 @@ import SwiftUI
 // blocks and a summary. iOS only: the Mac app is frozen (docs/apple/mac.md).
 
 #if os(iOS)
-/// The review page asked for: from ⋯ (the scope the session last used) or from the Git pane (Uncommitted).
+/// The review page asked for: from ⋯ (the scope the session last used), from the Git pane (Uncommitted),
+/// or from a turn's Changed Files card (Branch, optionally focusing `targetFile`).
 struct ReviewRequest: Identifiable {
     let id = UUID()
     var scope: GitReviewScope?
+    var targetFile: String? = nil
 }
 
 struct ReviewPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    let requestedScope: GitReviewScope?
+    let targetFile: String?
+    let onFallbackFile: ((String) -> Void)?
     @State private var review: ReviewModel
     @State private var note = ""
     @State private var finishing = false
@@ -23,8 +28,14 @@ struct ReviewPage: View {
     @State private var folded: Set<String> = []
     @State private var opened: Set<String> = []
     @State private var pickingCommit = false
+    @State private var selectedFile: String? = nil
+    @State private var handledTarget = false
 
-    init(key: SessionKey, cwd: String, scope: GitReviewScope?, api: @escaping () -> APIClient?) {
+    init(key: SessionKey, cwd: String, scope: GitReviewScope?, targetFile: String? = nil,
+         onFallbackFile: ((String) -> Void)? = nil, api: @escaping () -> APIClient?) {
+        self.requestedScope = scope
+        self.targetFile = targetFile
+        self.onFallbackFile = onFallbackFile
         _review = State(initialValue: ReviewModel(key: key, cwd: cwd, scope: scope, api: api))
     }
 
@@ -33,21 +44,50 @@ struct ReviewPage: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Space.flush) {
-                    scopeBar
-                    if review.stale { staleBar }
-                    content
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: Theme.Space.flush) {
+                        scopeBar
+                        if review.stale { staleBar }
+                        content
+                    }
+                }
+                .themedPage()
+                .navigationTitle(Text("Review Changes"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    SheetClose(id: "review.close") { dismiss() }
+                    ToolbarItem(placement: .principal) { title }
+                }
+                .safeAreaInset(edge: .bottom) { bottomBar }
+                .task(id: review.phase) {
+                    guard !handledTarget, let targetFile else { return }
+                    let wanted = requestedScope ?? review.scope
+                    switch ReviewLogic.resolveTargetFile(targetFile, cwd: review.cwd, requestedScope: wanted,
+                                                         currentScope: review.scope, phase: review.phase) {
+                    case .pending:
+                        return
+                    case .ignore:
+                        handledTarget = true
+                        return
+                    case .select(let matched):
+                        handledTarget = true
+                        selectedFile = matched
+                        folded.remove(matched)
+                        opened.insert(matched)
+                        await Task.yield()
+                        if !Task.isCancelled {
+                            withAnimation(Theme.Motion.state) {
+                                proxy.scrollTo(ReviewLogic.fileAnchor(matched), anchor: .top)
+                            }
+                        }
+                    case .fallback(let path):
+                        handledTarget = true
+                        onFallbackFile?(path)
+                        dismiss()
+                    }
                 }
             }
-            .themedPage()
-            .navigationTitle(Text("Review Changes"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                SheetClose(id: "review.close") { dismiss() }
-                ToolbarItem(placement: .principal) { title }
-            }
-            .safeAreaInset(edge: .bottom) { bottomBar }
         }
         .task { await review.load() }
         .fsLive(group: review.key.group, machineID: review.key.machineID, cwd: review.cwd, paths: [], git: true) { change in
@@ -83,6 +123,8 @@ struct ReviewPage: View {
             case .commit: .since
             }
         }, set: { s in
+            handledTarget = true
+            selectedFile = nil
             switch s {
             case .uncommitted: Task { await review.select(.uncommitted) }
             case .branch: Task { await review.select(.branch) }
@@ -128,6 +170,8 @@ struct ReviewPage: View {
         NavigationStack {
             List(review.commits) { c in
                 Button {
+                    handledTarget = true
+                    selectedFile = nil
                     pickingCommit = false
                     Task { await review.select(.commit(c.hash)) }
                 } label: { GitCommitRow(commit: c, isHead: false) }
@@ -250,7 +294,11 @@ struct ReviewPage: View {
             .padding(.top, Theme.Space.xxl)
     }
 
-    private func reselect(_ s: GitReviewScope) { Task { await review.select(s) } }
+    private func reselect(_ s: GitReviewScope) {
+        handledTarget = true
+        selectedFile = nil
+        Task { await review.select(s) }
+    }
     private func reload() { Task { await review.load() } }
 
     /// A file: its header (a tap folds it), then what can be shown of it.
@@ -262,6 +310,16 @@ struct ReviewPage: View {
                 if quiet { opened.formSymmetricDifference([f.path]) } else { folded.formSymmetricDifference([f.path]) }
             }
         }
+        .overlay(alignment: .leading) {
+            if selectedFile == f.path {
+                Rectangle()
+                    .fill(Theme.accent)
+                    .frame(width: Theme.Size.bar)
+                    .allowsHitTesting(false)
+            }
+        }
+        .id(ReviewLogic.fileAnchor(f.path))
+        .accessibilityAddTraits(selectedFile == f.path ? .isSelected : [])
         .accessibilityIdentifier("review.file")
         if f.refused == true {
             note(String(localized: "Not shown: this file holds secrets."))

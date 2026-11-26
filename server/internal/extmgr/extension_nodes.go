@@ -101,11 +101,16 @@ func (pn *extensionNodes) set(pluginID, machine string, st proto.PluginNodeState
 	pn.states[pluginID][machine] = st
 }
 
-func (pn *extensionNodes) forget(pluginID string, keep []string) {
+// forgetNodeState removes this machine's state and states no longer selected.
+// Read the current selection under nodes.mu: an old sync snapshot must not prune
+// another machine's state recorded after a configuration change.
+func (ps *extensions) forgetNodeState(pluginID, machine string) {
+	pn := &ps.nodes
 	pn.mu.Lock()
 	defer pn.mu.Unlock()
+	keep := ps.nodeMachines(ps.reg.SnapshotExact(pluginID))
 	for m := range pn.states[pluginID] {
-		if !slices.Contains(keep, m) {
+		if m == machine || !slices.Contains(keep, m) {
 			delete(pn.states[pluginID], m)
 		}
 	}
@@ -606,7 +611,7 @@ func (h *Manager) syncExtensionNode(ctx context.Context, p *extension.Extension,
 	ps := h.extensions
 	id := p.Record.ID
 	if !ps.nodeRunsOn(ctx, p, m) {
-		ps.nodes.forget(id, slices.DeleteFunc(ps.nodeMachines(p), func(mid string) bool { return mid == m.cfg.ID }))
+		ps.forgetNodeState(id, m.cfg.ID)
 		return nil
 	}
 	if !online {

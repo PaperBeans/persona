@@ -5,16 +5,18 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { parseAPIError } from "../../lib/api-errors";
 import { turnErrorFix } from "../../lib/readiness";
 import { recoveryExhausted } from "../../lib/model-fallback";
 import { usageLimitClock } from "../../lib/usage-limit";
 import type { ChatLine } from "../../lib/turns";
 import type { Item } from "../../lib/types";
-import { ChatLineView, ErrorBanner, errorKey } from "./Lines";
+import { APIErrorDetails, ChatLineView, ErrorBanner, errorKey } from "./Lines";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+beforeAll(async () => { await APIErrorDetails.preload(); });
 
 type ErrorLine = Extract<ChatLine, { kind: "apiError" }>;
 function line(text: string): ErrorLine {
@@ -144,7 +146,7 @@ describe("a model error is cindy's error notice (#5157)", () => {
   it("is a neutral card: the red mark only, what happened, what helps, then Retry and Error details", () => {
     const html = banner(gpu, false);
     expect(html).toContain("data-error-notice");
-    expect(html).toContain("border border-line bg-surface");
+    expect(html).toContain("bg-surface p-3 shadow-card");
     expect(html).not.toMatch(/bg-red-tint|var\(--red\)_22%/);
     expect(html).toContain('class="mt-0.5 inline-flex shrink-0 text-red"');
     expect(html).toContain("推理服务暂时没有可用的 GPU");

@@ -176,9 +176,9 @@ func (n *Node) launchers(ctx context.Context, refresh ...bool) ([]proto.Launcher
 	}
 }
 
-func scanLaunchers(ctx context.Context) ([]byte, error) {
+func scanLaunchers(ctx context.Context, env ...string) ([]byte, error) {
 	began := time.Now()
-	out, err := launcherShellOutput(ctx, launcherScript)
+	out, err := launcherShellOutput(ctx, launcherScript, env...)
 	// A background child can hold stdout open after a complete scan. A partial frame can be just a banner.
 	if _, complete := launcherOutput(string(out)); !complete {
 		took := time.Since(began).Round(time.Millisecond)
@@ -190,8 +190,9 @@ func scanLaunchers(ctx context.Context) ([]byte, error) {
 	return out, nil
 }
 
-func launcherShellOutput(ctx context.Context, script string) ([]byte, error) {
+func launcherShellOutput(ctx context.Context, script string, env ...string) ([]byte, error) {
 	cmd := loginShell(ctx, script)
+	cmd.Env = append(cmd.Environ(), env...)
 	// A shell's children can hold stdout open after it dies. Bound the group and the pipe wait (#10952).
 	killGroupOnCancel(cmd)
 	return cmd.Output()
@@ -255,7 +256,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 	list = append(list, pathList...)
 	maps.Copy(settings, pathSettings)
 	if len(list) == 0 {
-		list = []proto.Launcher{{Name: "claude"}}
+		list = []proto.Launcher{{Name: "claude", DisplayName: "Claude Code"}}
 	}
 	codex = map[string][]string{}
 	ls, words := parseCodexAliases(aliases)
@@ -266,7 +267,7 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		codexWord = bundledCodexCLI() // the ChatGPT app's own, by its path: the shell would not find it
 	}
 	if codexWord != "" && words["codex"] == nil {
-		list = append(list, proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc", PromptOptional: true, RunHere: true})
+		list = append(list, proto.Launcher{Name: "codex", Agent: "codex", Source: "zshrc", DisplayName: "Codex", PromptOptional: true, RunHere: true})
 		codex["codex"] = []string{codexWord}
 	}
 	for _, l := range ls {
@@ -279,16 +280,16 @@ func mergeLaunchers(out string) (list []proto.Launcher, codex map[string][]strin
 		list = append(list, proto.Launcher{Name: traexAgent, Agent: traexAgent, Source: "zshrc", DisplayName: "TRAE CLI"})
 	}
 	if strings.TrimSpace(ompPath) != "" && !seen["omp"] && codex["omp"] == nil {
-		list = append(list, proto.Launcher{Name: "omp", Agent: "omp", Source: "zshrc"})
+		list = append(list, proto.Launcher{Name: "omp", Agent: "omp", Source: "zshrc", DisplayName: "Oh My Pi"})
 	}
-	for _, bin := range []struct{ name, agent, path string }{
-		{"pi", piAgent, piPath},
-		{"cursor", cursorAgent, cursorPath},
-		{"agy", agyAgent, agyPath},
+	for _, bin := range []struct{ name, agent, displayName, path string }{
+		{"pi", piAgent, "", piPath},
+		{"cursor", cursorAgent, "Cursor", cursorPath},
+		{"agy", agyAgent, "Antigravity CLI", agyPath},
 	} {
 		if strings.TrimSpace(bin.path) != "" && !seen[bin.name] && codex[bin.name] == nil {
 			list = append(list, proto.Launcher{Name: bin.name, Agent: bin.agent, Source: "zshrc",
-				RuntimeFallback: bin.agent == agyAgent && !taken[bin.name]})
+				DisplayName: bin.displayName, RuntimeFallback: bin.agent == agyAgent && !taken[bin.name]})
 		}
 	}
 	return list, codex, settings, scripts

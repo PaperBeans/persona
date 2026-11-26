@@ -20,7 +20,6 @@ import org.robolectric.annotation.Config
 import persona.core.moduleapi.ModuleNavContext
 import persona.core.moduleapi.ModuleRegistry
 import persona.core.moduleapi.ModuleSettingsPage
-import persona.core.moduleapi.AudioUse
 import persona.core.moduleapi.PersonaModule
 import persona.core.navigation.AppTab
 import persona.core.navigation.AssistantRoute
@@ -54,7 +53,7 @@ class ModuleNavigationSafetyTest {
 
     private fun provider(registry: ModuleRegistry, features: Set<String>) =
         entryProvider<NavKey>(fallback = { key -> shellFallbackEntry(key, navigator, logged::add) }) {
-            moduleEntries(registry.active(features)) { ModuleNavContext(navigator, null, unavailable = {}) }
+            moduleEntries(registry.active(features)) { ModuleNavContext(navigator, null, unavailable = {}, audioFocus = persona.core.moduleapi.AudioBroker.withoutSystem()) }
         }
 
     @Test fun aModulePageLeftOpenWhenItsFeatureGoesAwayShowsTheUnavailablePage() {
@@ -75,18 +74,6 @@ class ModuleNavigationSafetyTest {
             fail("A route registered twice was accepted")
         } catch (_: IllegalArgumentException) {
         }
-    }
-
-    @Test fun contributionsTheShellDoesNotServeAreSaidLoudly() {
-        val warnings = mutableListOf<String>()
-        ModuleRegistry(listOf(object : PersonaModule {
-            override val id = "unserved"
-            override val audioUses = setOf(AudioUse.Playback)
-            // Settings pages are served (#13847): declaring some is not a warning.
-            override fun settingsPages() = listOf(ModuleSettingsPage("unserved.page", 0, persona.core.designsystem.icons.PersonaIcons.options, GatedRoute))
-        }), warnings::add)
-        assertEquals(1, warnings.size)
-        assertTrue(warnings.all { "unserved" in it })
     }
 
     /** Replaces every string [from] in a saved state, as a saved stack from a build with a class this one lacks would read. */

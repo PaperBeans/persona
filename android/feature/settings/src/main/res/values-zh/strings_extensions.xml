@@ -437,4 +437,15 @@
     <string name="settings_ext_rule_remove_title">移除这条规则？</string>
     <string name="settings_ext_rule_remove_body">下次 %2$s 上的 %1$s 需要它时，会重新请你批准。</string>
     <string name="settings_ext_rule_removed">规则已移除</string>
+    <string name="settings_ext_secret_set_hint">已设置 · 末 4 位 %1$s</string>
+    <string name="settings_ext_entry_untitled">条目 %1$d</string>
+    <string name="settings_ext_entry_save_before_secret">保存此条目后才能设置密钥。</string>
+    <string name="settings_ext_entry_secret">密钥</string>
+    <string name="settings_ext_entry_remove">移除%1$s</string>
+    <string name="settings_ext_entry_add">添加条目</string>
+    <string name="settings_ext_entry_editor_hint">每个条目都有单独的密钥，单独存储且保存后不再显示。</string>
+    <string name="settings_ext_entry_rebind_hint">保存更改后的地址会清除该条目的密钥。</string>
+    <string name="settings_ext_entry_remove_title">移除「%1$s」？</string>
+    <string name="settings_ext_entry_remove_body">保存时将删除此条目及其已保存的密钥。</string>
+    <string name="settings_ext_entry_remove_confirm">移除条目</string>
 </resources>

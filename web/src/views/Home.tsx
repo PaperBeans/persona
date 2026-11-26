@@ -1,5 +1,5 @@
 // Overview: what needs you, what is running, what just finished — Beautiful UI's Task Rows — and the computers.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { SESSIONS_HIERARCHY_FEATURE } from "../lib/child-sessions";
 import { homeKey } from "../lib/folded-rows";
 import { ago, backgroundWaiting, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
@@ -19,7 +19,7 @@ import { heldAsWorking, userCards } from "../lib/supervisor-held";
 import { agentLabel } from "../lib/mentions";
 import { hubLabel, machineWithHub } from "../lib/mesh";
 import { isPending, machineErrorText } from "../lib/add-computer";
-import { machineDeployment } from "../lib/machine-deploy";
+import { disconnectExpected } from "../lib/machine-connection-state";
 import { classifyConnection } from "../lib/connection-failure";
 import { href, navigate, onLinkClick, type Route } from "../lib/router";
 import { useScrollMemory } from "../lib/scroll-memory";
@@ -28,6 +28,7 @@ import { getSession, useStore, withTaskRows } from "../lib/store";
 import { retryAgentList } from "../lib/sessions";
 import { checkOutbox, discardOutbox, entryReason, heldOnComputer, outboxEntry, queueToSession, retryOutbox, retryOutboxEntry } from "../lib/outbox";
 import { homeTasks, type HomeTask } from "../lib/home-tasks";
+import { lazyPage } from "../lib/lazy-page";
 import { overviewActions, type ActionableComputer, type ActionableOutbox } from "../lib/overview-actions";
 import { useRoster } from "../lib/managers";
 import { sessionLauncher } from "../lib/model-switch";
@@ -48,9 +49,12 @@ import { resolve } from "./chat/Interactions";
 import { deleteFailed } from "./chat/OutboxBubbles";
 import { OverviewArrangeButton } from "./extensions/ExtensionSlots";
 import { OverviewBody, type OverviewSections } from "./OverviewBody";
+import { OverviewSummaryBoundary } from "./OverviewSummaryBoundary";
 import { TodoStageBar } from "./TodoStageBar";
 import { t } from "../i18n";
 import { markAllSeenLabel, STATE_LABEL, stateCount, stateName } from "../lib/state-labels";
+
+const OverviewMachineSection = lazyPage(() => import("./OverviewMachineSection").then((m) => m.OverviewMachineSection));
 
 function greeting() {
   const h = new Date().getHours();
@@ -131,8 +135,43 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   // Overview being arranged (#9745, #10905): the order of its cards and sections, which are hidden, how wide a card is
   const [arranging, setArranging] = useState(false);
 
+  const [machineSectionReady, setMachineSectionReady] = useState(() => OverviewMachineSection.ready());
+  useEffect(() => {
+    if (!loaded || machines.length === 0 || machineSectionReady) return;
+    let alive = true;
+    void OverviewMachineSection.preload().then(() => { if (alive) setMachineSectionReady(true); }, () => {});
+    return () => { alive = false; };
+  }, [loaded, machines.length, machineSectionReady]);
+
   // Overview's own sections, above the cards by default (#11147), each what it draws (nothing while it has no rows): the user may move them,
   // and hide the ones whose rows don't need them (#10905, views/OverviewBody.tsx)
+  const computerRows = loaded && machines.length > 0 && (
+    <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
+        {machines.map((m) => {
+          const count = agentCounts && (agentCounts.get(m.id) ?? 0);
+          const line = m.online ? [count !== undefined && t("home.machine_agents", { count }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
+          const hub = hubLabel(m, machines);
+          const detail = { name: "machine" as const, mid: m.id };
+          return (
+            <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card card-interactive">
+              <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
+                <Icon name="machine" size={15} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-[13px] font-medium text-ink">{m.name}</span>
+                  {hub && <span className="shrink-0 truncate text-[11.5px] text-ink-3">{hub}</span>}
+                </span>
+                <span className="block truncate text-[11.5px] text-ink-3" title={!m.online && m.error && offlineLine(m) !== m.error ? m.error : undefined} data-machine-line>{line}</span>
+              </span>
+              <span className={cx("size-2 shrink-0 rounded-full", m.online ? "bg-green" : "bg-line-strong")} title={m.online ? t("home.online") : t("home.offline")} />
+            </a>
+          );
+        })}
+      </div>
+    </Group>
+  );
   const sections: OverviewSections = {
     // the headline counts agents; this counts each visible request, failed send or unavailable computer once
     needs_you: loaded && (needsCount > 0 || held.length > 0) && (
@@ -229,31 +268,13 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
       </Group>
     ),
     computers: loaded && machines.length > 0 && (
-      <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="touch-hit text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
-          {machines.map((m) => {
-            const count = agentCounts && (agentCounts.get(m.id) ?? 0);
-            const line = m.online ? [count !== undefined && t("home.machine_agents", { count }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
-            const hub = hubLabel(m, machines);
-            const detail = { name: "machine" as const, mid: m.id };
-            return (
-              <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card transition-colors hover:bg-hover">
-                <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
-                  <Icon name="machine" size={15} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-ink">{m.name}</span>
-                    {hub && <span className="shrink-0 truncate text-[11.5px] text-ink-3">{hub}</span>}
-                  </span>
-                  <span className="block truncate text-[11.5px] text-ink-3" title={!m.online && m.error && offlineLine(m) !== m.error ? m.error : undefined} data-machine-line>{line}</span>
-                </span>
-                <span className={cx("size-2 shrink-0 rounded-full", m.online ? "bg-green" : "bg-line-strong")} title={m.online ? t("home.online") : t("home.offline")} />
-              </a>
-            );
-          })}
-        </div>
-      </Group>
+      machineSectionReady ? (
+        <OverviewSummaryBoundary fallback={computerRows}>
+          <Suspense fallback={computerRows}>
+            <OverviewMachineSection Section={Group} machines={machines} agentCounts={agentCounts} offlineText={offlineLine} />
+          </Suspense>
+        </OverviewSummaryBoundary>
+      ) : computerRows
     ),
   };
   // with nothing to do, after Unread's place whether it is drawn or not: all is quiet, or how to add a computer
@@ -712,7 +733,7 @@ function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry
       href={href(to)}
       onClick={(e) => onLinkClick(e, to, entry)}
       title={[title, ...tags].join(" · ")}
-      className={cx("group flex min-w-0 items-center gap-2.5 rounded-card px-3 py-2 transition-[background-color,transform] duration-150", !below && "bg-surface shadow-card hover:bg-inset active:scale-[0.995]")}
+      className={cx("group flex min-w-0 items-center gap-2.5 rounded-card px-3 py-2", !below && "bg-surface shadow-card card-interactive")}
       style={below ? undefined : enter}
     >
       {done ? (
@@ -727,13 +748,13 @@ function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry
         {(detail || tags.length > 0) && (
           <span className={cx("mt-0.5 flex min-w-0 gap-1.5 text-[12.5px] leading-[18px] text-ink-2", actions ? "flex-col items-start gap-0.5" : "items-center")}>
             {tags.length > 0 && (
-              <span className="hidden shrink-0 items-center gap-1 sm:flex" data-row-tags>
+              <span className="hidden min-w-0 max-w-full items-center gap-1 sm:flex" data-row-tags>
                 {tags.map((x) => (
                   <span key={x} className="max-w-[12em] truncate rounded-chip bg-field px-1.5 text-[11px] leading-[17px] text-ink-3">{x}</span>
                 ))}
               </span>
             )}
-            {detail && <span className={cx("min-w-0", actions ? "line-clamp-3 w-full [overflow-wrap:anywhere]" : "flex-1 truncate")} title={actions ? detail : undefined}>{detail}</span>}
+            {detail && <span className={actions ? "line-clamp-3 w-full min-w-0 [overflow-wrap:anywhere]" : "min-w-1/2 flex-1 truncate"} title={actions ? detail : undefined}>{detail}</span>}
           </span>
         )}
       </span>
@@ -744,7 +765,7 @@ function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry
   if (!below) return link;
   return (
     // the capsule shades while the link part is hovered, not while a button is
-    <div className="rounded-card bg-surface shadow-card transition-colors duration-150 has-[>a:hover]:bg-inset" style={enter}>
+    <div className="rounded-card bg-surface shadow-card transition-shadow duration-150 has-[>a:hover]:shadow-btn" style={enter}>
       {link}
       {below}
     </div>
@@ -792,6 +813,6 @@ export function offlineLine(m: Machine): string {
   if (isPending(m)) return t("machines.never_connected");
   const coded = machineErrorText(m.error_code);
   if (coded) return coded;
-  if (machineDeployment(m).expectedDisconnect) return t("machines.waiting_node");
+  if (disconnectExpected(m)) return t("machines.waiting_node");
   return classifyConnection(m)?.title ?? (m.error || t("home.offline"));
 }

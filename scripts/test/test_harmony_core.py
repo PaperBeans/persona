@@ -2,6 +2,7 @@
 """Check the HarmonyOS NAPI integration's resource and test registration invariants."""
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,34 @@ class HarmonyCoreIntegrationTest(unittest.TestCase):
         self.assertIn('expect(patch.ops.length).assertEqual(1)', replay)
         self.assertIn("expect(patch.ops[0].kind).assertEqual('update')", replay)
         self.assertIn("getRawFileContent('core-fixtures/continuity.json')", replay)
+        self.assertIn('nativeTestModuleContext()', replay)
+        context = (ENTRY / 'src/ohosTest/ets/test/NativeContext.ets').read_text()
+        module = json.loads((ENTRY / 'src/ohosTest/module.json5').read_text())['module']['name']
+        self.assertIn(f"TEST_MODULE: string = '{module}'", context)
+        self.assertIn('bindNativeTestContext(this.context)', runner)
+        self.assertIn('application.createModuleContext(nativeTestContext(), TEST_MODULE)', context)
         self.assertIn('finally { native.coreClose(handle); }', replay)
+
+    def test_hypium_requires_real_passing_cases_not_just_a_finished_runner(self):
+        verify = runpy.run_path(str(ROOT / 'harmony/tests/check-hypium-result.py'))['verify']
+        def report(statuses, counts, suite='NativePersonaCore'):
+            lines = [f'OHOS_REPORT_STATUS: class={suite}\nOHOS_REPORT_STATUS: test={name}\nOHOS_REPORT_STATUS_CODE: {code}'
+                     for name, code in statuses]
+            return '\n'.join(lines + ['OHOS_REPORT_RESULT: stream=Tests run: %d, Failure: %d, Error: %d, Pass: %d, Ignore: %d' % counts,
+                                      'OHOS_REPORT_CODE: 0', 'TestFinished-ResultCode: 0'])
+
+        passing = [('corpus', 1), ('corpus', 0), ('updates', 1), ('updates', 0)]
+        good = report(passing, (2, 0, 0, 2, 0))
+        verify(good, 'NativePersonaCore', 2)
+        bad = [report([('corpus', -1), ('updates', -1)], (2, 0, 2, 0, 0)),
+               report([('corpus', 0), ('corpus', 0)], (2, 0, 0, 2, 0)),
+               report(passing, (2, 0, 0, 2, 0), 'NativeStorage'),
+               report([('corpus', 0)], (2, 0, 0, 1, 1)),
+               good.replace('OHOS_REPORT_CODE: 0', 'OHOS_REPORT_CODE: -1'),
+               'TestFinished-ResultCode: 0']
+        for text in bad:
+            with self.subTest(log=text), self.assertRaises(ValueError):
+                verify(text, 'NativePersonaCore', 2)
 
     def test_packaging_has_no_duplicate_fixture_expectations(self):
         with tempfile.TemporaryDirectory() as directory:

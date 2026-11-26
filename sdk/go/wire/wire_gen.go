@@ -5,6 +5,7 @@ package wire
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -63,6 +64,7 @@ type Manifest struct {
 	// Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
 	// executable; writes and arbitrary command lines are not part of this contract.
 	HostIntegrations []HostIntegrationSpec `json:"host_integrations,omitempty"`
+	Upgrade          *UpgradeSpec          `json:"upgrade,omitempty"`
 }
 
 // HostIntegrationSpec: A configured CLI integration, selected by a closed ID rather than by an extension-provided
@@ -122,6 +124,19 @@ type AuthSpec struct {
 	// An extension_page (plugin_page) ui contribution: its own sign-in page for apps that do not know auth; apps that do
 	// leave it out of its pages.
 	Page string `json:"page,omitempty"`
+}
+
+// UpgradeSpec: what the extension asks of the hub around an automatic upgrade (docs "Backup before an upgrade"). The
+// hub snapshots the data directory before every automatic upgrade whether or not this is there. Hubs before it refuse
+// the manifest.
+type UpgradeSpec struct {
+	// auto (the default): the upgrade goes ahead when the snapshot fails; required: no snapshot, no upgrade.
+	Backup string `json:"backup,omitempty"`
+	// Before the snapshot the hub calls upgrade.prepare on the installed version's program; an error stops the upgrade.
+	Prepare bool `json:"prepare,omitempty"`
+	// Once the new version is up the hub calls its upgrade.health; an error rolls the upgrade back and restores the
+	// snapshot.
+	HealthCheck bool `json:"health_check,omitempty"`
 }
 
 type Dependency struct {
@@ -279,6 +294,7 @@ type Contributes struct {
 	Assistant           []AssistantItem          `json:"assistant,omitempty"`
 	McpServers          []MCPServerItem          `json:"mcp_servers,omitempty"`
 	UI                  []UIItem                 `json:"ui,omitempty"`
+	TrackKinds          []TrackKindItem          `json:"track_kinds,omitempty"`
 	AgentSources        []AgentSourceItem        `json:"agent_sources,omitempty"`
 	Channel             []ChannelItem            `json:"channel,omitempty"`
 	Events              []EventsItem             `json:"events,omitempty"`
@@ -295,6 +311,7 @@ type Contributes struct {
 	SecretProviders     []SecretProviderItem     `json:"secret_providers,omitempty"`
 	RepositoryProviders []RepositoryProviderItem `json:"repository_providers,omitempty"`
 	MemorySources       []MemorySourceItem       `json:"memory_sources,omitempty"`
+	DiskOffload         []DiskOffloadItem        `json:"disk_offload,omitempty"`
 	Messaging           []MessagingItem          `json:"messaging,omitempty"`
 	// Extra keys stay at this object's level on the wire; they cannot replace declared fields.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
@@ -306,7 +323,7 @@ func (v *Contributes) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	declared := map[string]json.RawMessage{}
-	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging"} {
+	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "track_kinds", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "disk_offload", "messaging"} {
 		if value, ok := extra[key]; ok {
 			declared[key] = value
 			delete(extra, key)
@@ -338,7 +355,7 @@ func (v Contributes) MarshalJSON() ([]byte, error) {
 	}
 	for key, value := range v.AdditionalProperties {
 		switch key {
-		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging":
+		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "track_kinds", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "disk_offload", "messaging":
 			continue
 		}
 		fields[key] = value
@@ -596,6 +613,31 @@ type RepositoryProviderItem struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+// DiskOffloadItem: A provider that moves items from a computer to storage elsewhere, lists what it already holds and
+// brings items back (docs/server/machine-usage-map.md "Extension point disk_offload"): the disk usage map draws its
+// inventory beside the computer's disk and offers Offload; the manager asks the program (offload.inventory,
+// offload.run, offload.job, offload.cancel; offload.schema.json) after the user confirmed. Needs the program to speak
+// the protocol.
+type DiskOffloadItem struct {
+	ID string `json:"id"`
+	// What the map and its menus call the provider (Offload to Example Cloud). Not only spaces, no control characters.
+	Name string `json:"name"`
+	// What it takes from the map; without it, files and folders.
+	Kinds []string `json:"kinds,omitempty"`
+	// Items it holds can be brought back (Restore on the map's cloud side).
+	Restore bool `json:"restore,omitempty"`
+}
+
+// DiskOffloadKind: what a disk_offload provider takes: file, dir (a folder) or app (a macOS app bundle).
+const (
+	DiskOffloadKindFile = "file"
+	DiskOffloadKindDir  = "dir"
+	DiskOffloadKindApp  = "app"
+)
+
+// DiskOffloadKinds are the values of DiskOffloadKind, in order.
+var DiskOffloadKinds = []string{"file", "dir", "app"}
+
 // MemorySourceItem: the extension's memory, read by the manager one entry at a time (memory.entries;
 // memory.schema.json) so the hub decides which entries reach which scene (a conversation's standing context, a
 // recall, a dispatched task, the Inbox's helper). Needs the program to speak the protocol; one per extension. Once
@@ -687,6 +729,41 @@ type ConnectorItem struct {
 	// replies, say). Its program may then record each one in the sent-as-user ledger with sent.record, and the install
 	// preview says so.
 	SendsAsUser bool `json:"sends_as_user,omitempty"`
+}
+
+type TrackAttention struct {
+	PushCap     string `json:"push_cap,omitempty"`
+	DeepDefault string `json:"deep_default,omitempty"`
+	EnterMode   string `json:"enter_mode,omitempty"`
+}
+
+type TrackSidebar struct {
+	Group string `json:"group,omitempty"`
+	Order int    `json:"order,omitempty"`
+	Icon  string `json:"icon,omitempty"`
+}
+
+type TrackKindConfig struct {
+	Schema            int                          `json:"schema"`
+	Template          string                       `json:"template"`
+	UserInstructions  string                       `json:"user_instructions,omitempty"`
+	Context           string                       `json:"context"`
+	DefaultCategories []string                     `json:"default_categories"`
+	TagFocus          []string                     `json:"tag_focus"`
+	Rhythms           []map[string]json.RawMessage `json:"rhythms"`
+	Attention         TrackAttention               `json:"attention"`
+	Supervision       string                       `json:"supervision"`
+	Usage             []map[string]json.RawMessage `json:"usage"`
+	Assembly          string                       `json:"assembly"`
+	CaptureTarget     bool                         `json:"capture_target,omitempty"`
+	Channels          []string                     `json:"channels"`
+	Sidebar           TrackSidebar                 `json:"sidebar"`
+}
+
+type TrackKindItem struct {
+	ID     string          `json:"id"`
+	Title  string          `json:"title"`
+	Config TrackKindConfig `json:"config"`
 }
 
 // NamedItem: A contribution with only an id and a name: voice, transcription, speech, computer, browser.
@@ -1000,10 +1077,11 @@ const (
 	HubCapabilityInboxGroup      = "inbox_group"
 	HubCapabilityInboxGroupState = "inbox_group_state"
 	HubCapabilityToolImages      = "tool_images"
+	HubCapabilityToolViews       = "tool_views"
 )
 
 // HubCapabilities are the values of HubCapability, in order.
-var HubCapabilities = []string{"inbox_group", "inbox_group_state", "tool_images"}
+var HubCapabilities = []string{"inbox_group", "inbox_group_state", "tool_images", "tool_views"}
 
 // InitializeParams: what the hub sends first. The extension is under extension; hubs before the rename (#1844) send
 // it as plugin, newer hubs send both.
@@ -1013,9 +1091,12 @@ type InitializeParams struct {
 	Extension *ExtensionInfo `json:"extension,omitempty"`
 	Plugin    *ExtensionInfo `json:"plugin,omitempty"`
 	// The configuration with the schema's defaults filled in.
-	Config  json.RawMessage   `json:"config,omitempty"`
-	Secrets map[string]string `json:"secrets,omitempty"`
-	Granted Permissions       `json:"granted"`
+	Config json.RawMessage `json:"config,omitempty"`
+	// The manager's source-privacy boundary, sent only to an extension contributing a selected connector. Runtime
+	// authorization input, not extension settings persisted in the extension registry.
+	InboxVisibility json.RawMessage   `json:"inbox_visibility,omitempty"`
+	Secrets         map[string]string `json:"secrets,omitempty"`
+	Granted         Permissions       `json:"granted"`
 	// The contributions this run is for, by extension point.
 	Active map[string][]string `json:"active,omitempty"`
 	// The contributions of the other extensions that are on to the points it exports, by its point id (event
@@ -1149,6 +1230,9 @@ type UIContext struct {
 	Locale    string `json:"locale,omitempty"`
 	Platform  string `json:"platform,omitempty"`
 	UIVersion int    `json:"ui_version,omitempty"`
+	// Component types this client cannot draw even within ui_version (such as ["scene"] while rendering v12 "map"). The
+	// hub downgrades each listed type in place.
+	Unsupported []string `json:"unsupported,omitempty"`
 	// Explicit stream opt-in, independent of ui_version. Absent means snapshot-only. Contract only: no current client or
 	// hub advertises it.
 	Stream *UIStreamCapability `json:"stream,omitempty"`
@@ -1930,11 +2014,20 @@ type Component struct {
 	Folded []string `json:"folded,omitempty"`
 	// A picture of the model for an older app (an image in its place) and for share as image. Without it an older app
 	// gets a row per pin.
-	Poster *ImageSource `json:"poster,omitempty"`
-	Camera *SceneCamera `json:"camera,omitempty"`
-	Shapes []SceneShape `json:"shapes,omitempty"`
-	Labels []SceneLabel `json:"labels,omitempty"`
-	Pins   []ScenePin   `json:"pins,omitempty"`
+	Poster   *ImageSource `json:"poster,omitempty"`
+	Camera   *SceneCamera `json:"camera,omitempty"`
+	Shapes   []SceneShape `json:"shapes,omitempty"`
+	Labels   []SceneLabel `json:"labels,omitempty"`
+	Pins     []ScenePin   `json:"pins,omitempty"`
+	Viewport *MapViewport `json:"viewport,omitempty"`
+	Markers  []MapMarker  `json:"markers,omitempty"`
+	Routes   []MapRoute   `json:"routes,omitempty"`
+	Links    []MapLink    `json:"links,omitempty"`
+	// When true, stays a non-interactive snapshot and does not open an interactive sheet.
+	Static bool `json:"static,omitempty"`
+	// When true (or when multiple routes/stops exist without a compact override), shows a companion route/stop list
+	// beneath the map.
+	ShowList bool `json:"show_list,omitempty"`
 }
 
 // Component types.
@@ -1967,13 +2060,14 @@ const (
 	ComponentCarousel      = "carousel"
 	ComponentGraph         = "graph"
 	ComponentScene         = "scene"
+	ComponentMap           = "map"
 )
 
 // ComponentTypes are the types of Component, in order.
-var ComponentTypes = []string{"text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene"}
+var ComponentTypes = []string{"text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene", "map"}
 
 // ComponentSince is the UI version that brought each type.
-var ComponentSince = map[string]int{"text": 1, "metric": 1, "progress": 1, "row": 1, "button": 1, "link": 1, "field": 1, "divider": 1, "chart": 2, "stat_grid": 2, "segmented": 2, "markdown": 3, "table": 3, "empty": 3, "loading": 3, "html": 4, "header": 4, "breadcrumb": 4, "file_tree": 4, "code": 4, "diff": 4, "comment_thread": 4, "composer": 4, "image": 6, "grid": 6, "carousel": 6, "graph": 10, "scene": 11}
+var ComponentSince = map[string]int{"text": 1, "metric": 1, "progress": 1, "row": 1, "button": 1, "link": 1, "field": 1, "divider": 1, "chart": 2, "stat_grid": 2, "segmented": 2, "markdown": 3, "table": 3, "empty": 3, "loading": 3, "html": 4, "header": 4, "breadcrumb": 4, "file_tree": 4, "code": 4, "diff": 4, "comment_thread": 4, "composer": 4, "image": 6, "grid": 6, "carousel": 6, "graph": 10, "scene": 11, "map": 12}
 
 // GraphNode: one node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress
 // bar, in tone's role color or color's named color (never both), with optional timing and inspector details.
@@ -2132,6 +2226,77 @@ const (
 
 // SceneWarmths are the values of SceneWarmth, in order.
 var SceneWarmths = []string{"warm", "cool"}
+
+// MapTravelMode: travel mode of a route polyline (UI version 12).
+const (
+	MapTravelModeDriving = "driving"
+	MapTravelModeWalking = "walking"
+	MapTravelModeTransit = "transit"
+	MapTravelModeCycling = "cycling"
+)
+
+// MapTravelModes are the values of MapTravelMode, in order.
+var MapTravelModes = []string{"driving", "walking", "transit", "cycling"}
+
+// MapMarkerKind: semantic role of a marker on a map (UI version 12).
+const (
+	MapMarkerKindOrigin      = "origin"
+	MapMarkerKindDestination = "destination"
+	MapMarkerKindWaypoint    = "waypoint"
+	MapMarkerKindPin         = "pin"
+	MapMarkerKindUser        = "user"
+)
+
+// MapMarkerKinds are the values of MapMarkerKind, in order.
+var MapMarkerKinds = []string{"origin", "destination", "waypoint", "pin", "user"}
+
+// MapCoordinate: A geographic point in WGS-84 (UI version 12).
+type MapCoordinate struct {
+	Lat *float64 `json:"lat"`
+	Lon *float64 `json:"lon"`
+}
+
+// MapViewport: initial map framing in WGS-84 when not auto-fitted to markers and routes (UI version 12).
+type MapViewport struct {
+	Center  MapCoordinate `json:"center"`
+	SpanLat *float64      `json:"span_lat,omitempty"`
+	SpanLon *float64      `json:"span_lon,omitempty"`
+}
+
+// MapMarker: one location pin on a map (UI version 12), in tone's role color or color's named color (never both).
+type MapMarker struct {
+	ID       string   `json:"id"`
+	Lat      *float64 `json:"lat"`
+	Lon      *float64 `json:"lon"`
+	Kind     string   `json:"kind,omitempty"`
+	Label    string   `json:"label"`
+	Subtitle string   `json:"subtitle,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	Icon     string   `json:"icon,omitempty"`
+	Tone     string   `json:"tone,omitempty"`
+	Color    string   `json:"color,omitempty"`
+	Action   *Action  `json:"action,omitempty"`
+}
+
+// MapRoute: one route polyline on a map (UI version 12), in WGS-84 coordinates.
+type MapRoute struct {
+	ID              string          `json:"id"`
+	Label           string          `json:"label,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	DistanceMeters  *int            `json:"distance_meters,omitempty"`
+	DurationSeconds *int            `json:"duration_seconds,omitempty"`
+	Summary         string          `json:"summary,omitempty"`
+	Selected        bool            `json:"selected,omitempty"`
+	Tone            string          `json:"tone,omitempty"`
+	Color           string          `json:"color,omitempty"`
+	Points          []MapCoordinate `json:"points"`
+}
+
+// MapLink: an https link shown beside or inside a map component (UI version 12).
+type MapLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
 
 // ImageSource: where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref
 // the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref:
@@ -3546,31 +3711,32 @@ var ConnectorErrorCodes = []string{"rate_limited", "no_machine", "offline", "nod
 // read-only sources and calls their short tool names. An extension's connector with one this hub does not know loses
 // only that capability.
 const (
-	ConnectorCapabilityStatus         = "status"
-	ConnectorCapabilityTools          = "tools"
-	ConnectorCapabilityActions        = "actions"
-	ConnectorCapabilityEvents         = "events"
-	ConnectorCapabilityInbox          = "inbox"
-	ConnectorCapabilitySettle         = "settle"
-	ConnectorCapabilityArchive        = "archive"
-	ConnectorCapabilityChats          = "chats"
-	ConnectorCapabilityItems          = "items"
-	ConnectorCapabilityLogin          = "login"
-	ConnectorCapabilityOptions        = "options"
-	ConnectorCapabilityThreads        = "threads"
-	ConnectorCapabilitySnapshot       = "snapshot"
-	ConnectorCapabilityGroup          = "group"
-	ConnectorCapabilityMeta           = "meta"
-	ConnectorCapabilityFallback       = "fallback"
-	ConnectorCapabilityMachines       = "machines"
-	ConnectorCapabilityRecall         = "recall"
-	ConnectorCapabilityHistory        = "history"
-	ConnectorCapabilityHistoryAnchors = "history_anchors"
-	ConnectorCapabilityCatalog        = "catalog"
+	ConnectorCapabilityStatus          = "status"
+	ConnectorCapabilityTools           = "tools"
+	ConnectorCapabilityActions         = "actions"
+	ConnectorCapabilityEvents          = "events"
+	ConnectorCapabilityInbox           = "inbox"
+	ConnectorCapabilitySettle          = "settle"
+	ConnectorCapabilityArchive         = "archive"
+	ConnectorCapabilityChats           = "chats"
+	ConnectorCapabilityItems           = "items"
+	ConnectorCapabilityLogin           = "login"
+	ConnectorCapabilityOptions         = "options"
+	ConnectorCapabilityThreads         = "threads"
+	ConnectorCapabilitySnapshot        = "snapshot"
+	ConnectorCapabilityGroup           = "group"
+	ConnectorCapabilityMeta            = "meta"
+	ConnectorCapabilityFallback        = "fallback"
+	ConnectorCapabilityMachines        = "machines"
+	ConnectorCapabilityRecall          = "recall"
+	ConnectorCapabilityHistory         = "history"
+	ConnectorCapabilityHistoryAnchors  = "history_anchors"
+	ConnectorCapabilityCatalog         = "catalog"
+	ConnectorCapabilityInboxVisibility = "inbox_visibility"
 )
 
 // ConnectorCapabilities are the values of ConnectorCapability, in order.
-var ConnectorCapabilities = []string{"status", "tools", "actions", "events", "inbox", "settle", "archive", "chats", "items", "login", "options", "threads", "snapshot", "group", "meta", "fallback", "machines", "recall", "history", "history_anchors", "catalog"}
+var ConnectorCapabilities = []string{"status", "tools", "actions", "events", "inbox", "settle", "archive", "chats", "items", "login", "options", "threads", "snapshot", "group", "meta", "fallback", "machines", "recall", "history", "history_anchors", "catalog", "inbox_visibility"}
 
 // ConnectorState: connectorStatus.state. disabled is the hub's own (the user switched it off); a program never
 // answers it.
@@ -3765,6 +3931,10 @@ type ConnectorCallResult struct {
 	// 16, each a whole JPEG, PNG or WebP of at most 1 MiB and 2000 pixels a side, together at most 4 MiB and 8 million
 	// pixels; the hub leaves out any over a limit and says so after the text.
 	Images []ConnectorToolImage `json:"images,omitempty"`
+	// tools.call only (actions.do and catalog.call ignore it): declarative Views rendered out-of-band inline on the tool
+	// call item in chat (never added to the model's context), on a hub whose initialize lists the capability tool_views.
+	// At most 4 views and 128 KiB JSON total; the text must still stand on its own.
+	Views []View `json:"views,omitempty"`
 	// actions.do only (tools.call ignores it): the id, on the other side, of the message the write made, when the
 	// service gave one (a comment's id, a mail's Message-ID, a chat message's id). The hub trims it and keeps it as the
 	// sent-as-user ledger row's message_ref; one longer than 200 characters is dropped (the row has none), not cut.
@@ -4385,18 +4555,39 @@ type ConnectorKBItem struct {
 	// Why it concerns the owner, as far as the program can tell: mentions (the document mentions the owner),
 	// comment_mentions (a comment or reply on it does), authored (the owner owns it), viewed (the owner opened it
 	// recently). The knowledge base's selection keeps documents by them; leave out what the program cannot tell.
-	Signals      []string  `json:"signals,omitempty"`
-	Importance   string    `json:"importance,omitempty"`
-	Relevance    int       `json:"relevance,omitempty"`
-	Tags         []string  `json:"tags,omitempty"`
-	Locked       bool      `json:"locked,omitempty"`
-	TaggedAt     time.Time `json:"tagged_at,omitzero"`
-	Pinned       string    `json:"pinned,omitempty"`
-	LockedFields []string  `json:"locked_fields,omitempty"`
+	Signals []string `json:"signals,omitempty"`
+	// The content's identity across sources (feishu_doc:<obj_token>): items from two sources with the same key are kept
+	// once, with both in sources.
+	CanonicalKey string `json:"canonical_key,omitempty"`
+	// Other ids other sources store the same content under (a wiki node token).
+	Aliases []string `json:"aliases,omitempty"`
+	// Only grows: an item handed over with a lower revision than the stored one does not replace it.
+	Revision int    `json:"revision,omitempty"`
+	BodyHash string `json:"body_hash,omitempty"`
+	// The item's text (a document as Markdown, a meeting's transcript), bounded by the source.
+	Content string `json:"content,omitempty"`
+	// Every place the content was read from.
+	Sources      []ConnectorKBSourceRef `json:"sources,omitempty"`
+	Importance   string                 `json:"importance,omitempty"`
+	Relevance    int                    `json:"relevance,omitempty"`
+	Tags         []string               `json:"tags,omitempty"`
+	Locked       bool                   `json:"locked,omitempty"`
+	TaggedAt     time.Time              `json:"tagged_at,omitzero"`
+	Pinned       string                 `json:"pinned,omitempty"`
+	LockedFields []string               `json:"locked_fields,omitempty"`
 	// The store's: which extension holds a locked field. A connector's is ignored.
 	Provenance map[string]ConnectorKBProvenance `json:"provenance,omitempty"`
 	// The store's: the links the user removed, by list. A connector's is ignored.
 	Excluded map[string][]string `json:"excluded,omitempty"`
+}
+
+// ConnectorKBSourceRef: one place a knowledge-base item was read from.
+type ConnectorKBSourceRef struct {
+	Channel string    `json:"channel"`
+	Binding string    `json:"binding,omitempty"`
+	Account string    `json:"account,omitempty"`
+	Entry   string    `json:"entry,omitempty"`
+	SeenAt  time.Time `json:"seen_at,omitzero"`
 }
 
 // ConnectorKBProvenance: who holds a locked field of a knowledge-base entity, and from what (kb.schema.json
@@ -4724,6 +4915,17 @@ const (
 // ChannelSendKinds are the values of ChannelSendKind, in order.
 var ChannelSendKinds = []string{"answer", "note", "ask", "push"}
 
+// ChannelChatKind: what kind of chat a channel message came from: direct (private chat), group (regular group chat),
+// or topic (a topic or thread inside a group).
+const (
+	ChannelChatKindDirect = "direct"
+	ChannelChatKindGroup  = "group"
+	ChannelChatKindTopic  = "topic"
+)
+
+// ChannelChatKinds are the values of ChannelChatKind, in order.
+var ChannelChatKinds = []string{"direct", "group", "topic"}
+
 // ChannelReceiveParams: channel.receive: one of the owner's messages (only the owner's). Answered once the hub has
 // it, deduplicated by id and queued, not after the turn.
 type ChannelReceiveParams struct {
@@ -4743,6 +4945,12 @@ type ChannelMessage struct {
 	Chat string `json:"chat,omitempty"`
 	// The topic or thread within chat, when the request came from one.
 	Topic string `json:"topic,omitempty"`
+	// Opaque chat or group identifier for conversation routing when integrations_v2 is enabled.
+	ChatID string `json:"chat_id,omitempty"`
+	// Kind of chat the message came from (direct, group, or topic), when known.
+	ChatKind string `json:"chat_kind,omitempty"`
+	// Opaque topic or thread identifier within chat_id for conversation routing when integrations_v2 is enabled.
+	TopicID string `json:"topic_id,omitempty"`
 	// Context the extension gathered for this request, such as nearby chat history. It is data, not owner-authored
 	// instructions.
 	Context string `json:"context,omitempty"`
@@ -4840,17 +5048,19 @@ var KBKinds = []string{"projects", "chats", "people", "docs", "meetings", "event
 // KBErrorCode: error.code of a knowledge-base call besides permission_denied (data {scope}, the one missing):
 // invalid_params, not_found, assistant_offline (the manager is away), kb_unavailable (not open yet), conflict
 // (kb.update touches fields the user or another extension holds; data KBConflict, nothing was written).
-// assistant_offline and kb_unavailable are worth trying again; conflict is for the user to decide.
+// assistant_offline and kb_unavailable are worth trying again; conflict is for the user to decide. deleted:
+// kb.put_recording of a recording the user deleted, which is not made again.
 const (
 	KBErrorCodeInvalidParams    = "invalid_params"
 	KBErrorCodeNotFound         = "not_found"
 	KBErrorCodeAssistantOffline = "assistant_offline"
 	KBErrorCodeKbUnavailable    = "kb_unavailable"
 	KBErrorCodeConflict         = "conflict"
+	KBErrorCodeDeleted          = "deleted"
 )
 
 // KBErrorCodes are the values of KBErrorCode, in order.
-var KBErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "kb_unavailable", "conflict"}
+var KBErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "kb_unavailable", "conflict", "deleted"}
 
 // KBConflict: the data of a conflict error: field → who holds it (user, or ext:<extension id>); a linked entity's
 // field is <kind>/<id>.<field>.
@@ -4923,6 +5133,10 @@ type KBEntry struct {
 	// A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872);
 	// absent on other kinds, before a match and from an older hub.
 	MeetingID string `json:"meeting_id,omitempty"`
+	// A recording whose stored state is in flight (an upload not complete, minutes or a day recap pending, a hub
+	// transcription not final) while nothing can settle it: module_off when the recording module is off. Derived when
+	// read, never stored; absent otherwise and from an older hub.
+	Paused string `json:"paused,omitempty"`
 	// Reference-only for a project that stores pointers. Omitted means full.
 	ProjectMode string              `json:"project_mode,omitempty"`
 	Freshness   *KBProjectFreshness `json:"freshness,omitempty"`
@@ -4987,6 +5201,9 @@ type KBDetail struct {
 	// A person's profiles by writer ("user", "ext:<id>"), as written; summary shows them too
 	// (docs/assistant/knowledge.md "Person profiles").
 	Profiles map[string]KBProfileRecord `json:"profiles,omitempty"`
+	// A recording's in-flight state that nothing can settle, as KBEntry.paused: module_off when the recording module is
+	// off. Derived when read, never stored.
+	Paused string `json:"paused,omitempty"`
 	// Reference-only for a project that stores pointers. Omitted means full.
 	ProjectMode string              `json:"project_mode,omitempty"`
 	Freshness   *KBProjectFreshness `json:"freshness,omitempty"`
@@ -5241,6 +5458,96 @@ type KBUpdateResult struct {
 	// Fields the update carried that its kind does not use (a person's summary and log, for one), and links to make that
 	// the user removed: not applied, each with why.
 	Ignored []KBIgnoredField `json:"ignored,omitempty"`
+}
+
+// KBPutRecordingParams: kb.put_recording (kb.write): create or update the extension's own recording with its minutes
+// and, optionally, its transcript (docs/extensions/extensions.md "Writing recordings and minutes"). It is the
+// extension's: no other extension may write it, and no extension a recording the phone uploaded (permission_denied).
+// The same params again change nothing; a recording the user deleted is not made again (deleted). A recording with
+// minutes is kept past recording_days, its minutes until minutes_days.
+type KBPutRecordingParams struct {
+	// A UUID the extension picks; one derived from its own source id makes a retry land on the same recording.
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	// An RFC 3339 time.
+	StartedAt time.Time `json:"started_at"`
+	// An RFC 3339 time, not before started_at.
+	EndedAt time.Time `json:"ended_at,omitzero"`
+	// An i18n code (zh-Hans, en, ja).
+	Language string              `json:"language,omitempty"`
+	Minutes  *KBRecordingMinutes `json:"minutes,omitempty"`
+	// Optional; n, source and echo are the hub's and are dropped. Without minutes, the hub makes minutes of it when the
+	// recording module is on.
+	Transcript []KBRecordingSegment `json:"transcript,omitempty"`
+	// Slugs of existing projects to link it to; a later write never removes a link.
+	Projects []string            `json:"projects,omitempty"`
+	Meeting  *KBRecordingMeeting `json:"meeting,omitempty"`
+}
+
+// KBRecordingMinutes: the minutes the extension wrote, stored as minutes.json and minutes.md. The hub sets version,
+// revision, generated_at, when, start and end. Minutes or a transcript is required.
+type KBRecordingMinutes struct {
+	Title     string            `json:"title,omitempty"`
+	Where     string            `json:"where,omitempty"`
+	Attendees []string          `json:"attendees,omitempty"`
+	Points    []KBMinutesPoint  `json:"points,omitempty"`
+	Decisions []KBMinutesItem   `json:"decisions,omitempty"`
+	Actions   []KBMinutesAction `json:"actions,omitempty"`
+	Open      []KBMinutesItem   `json:"open,omitempty"`
+	// An i18n code: what the minutes are written in.
+	Language string `json:"language,omitempty"`
+	// The minutes as Markdown: minutes.md, what searches and kb.get read. Required, not blank.
+	Markdown string `json:"markdown"`
+}
+
+// KBMinutesItem: A decision or an open question of the minutes.
+type KBMinutesItem struct {
+	Text string `json:"text"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+}
+
+// KBMinutesPoint: A point discussed; who only when the source names the person.
+type KBMinutesPoint struct {
+	Text string `json:"text"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+	Who   string  `json:"who,omitempty"`
+}
+
+// KBMinutesAction: an action item. id is the extension's, stable across writes (at most 64 characters): a to-do the
+// user made of it stays on it.
+type KBMinutesAction struct {
+	ID   string `json:"id"`
+	Who  string `json:"who,omitempty"`
+	What string `json:"what"`
+	// The deadline as said.
+	By string `json:"by,omitempty"`
+	// YYYY-MM-DD, when by is one date.
+	DueDate string `json:"due_date,omitempty"`
+	// Seconds from the recording's start.
+	At    float64 `json:"at"`
+	Photo int     `json:"photo,omitempty"`
+	// The hub's: the to-do made of it.
+	TodoID string `json:"todo_id,omitempty"`
+}
+
+// KBRecordingMeeting: the calendar item (events) or imported meeting (meetings) the recording was; it must exist.
+type KBRecordingMeeting struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+type KBPutRecordingResult struct {
+	ID string `json:"id"`
+	// The hub's revision of the recording: 1 when created, one more for each write that changed it.
+	Revision int  `json:"revision"`
+	Created  bool `json:"created,omitempty"`
+	// The write was the same as the last one; nothing was written.
+	Unchanged      bool `json:"unchanged,omitempty"`
+	MinutesVersion int  `json:"minutes_version,omitempty"`
 }
 
 // KBOwnerParams: kb.owner takes nothing.
@@ -5518,19 +5825,25 @@ type ModelRefusal struct {
 }
 
 // AssistantErrorCode: error.code of the assistant calls besides permission_denied (data {scope: "assistant.read"}, or
-// "assistant.memory.read" for assistant.memory, or "assistant.entries.read" for assistant.entries.list):
-// invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space);
-// assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or
-// not set up: try again).
+// "assistant.memory.read" for assistant.memory, or "assistant.entries.read" for assistant.entries.list, or
+// "assistant.events" for assistant.event): invalid_params; not_found (assistant.messages: no such conversation in the
+// assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's
+// computer is not connected or not set up: try again); assistant.event only: no_main_conversation (the user has no
+// main conversation: nothing was started or changed, do not retry until they have one); rate_limited (data
+// {retry_after} in seconds: too many events from this extension); queue_full (this extension already has the most
+// events waiting behind a running turn: try again later).
 const (
-	AssistantErrorCodeInvalidParams    = "invalid_params"
-	AssistantErrorCodeNotFound         = "not_found"
-	AssistantErrorCodeAssistantOffline = "assistant_offline"
-	AssistantErrorCodeMachineOffline   = "machine_offline"
+	AssistantErrorCodeInvalidParams      = "invalid_params"
+	AssistantErrorCodeNotFound           = "not_found"
+	AssistantErrorCodeAssistantOffline   = "assistant_offline"
+	AssistantErrorCodeMachineOffline     = "machine_offline"
+	AssistantErrorCodeNoMainConversation = "no_main_conversation"
+	AssistantErrorCodeRateLimited        = "rate_limited"
+	AssistantErrorCodeQueueFull          = "queue_full"
 )
 
 // AssistantErrorCodes are the values of AssistantErrorCode, in order.
-var AssistantErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "machine_offline"}
+var AssistantErrorCodes = []string{"invalid_params", "not_found", "assistant_offline", "machine_offline", "no_main_conversation", "rate_limited", "queue_full"}
 
 // AssistantConversationsParams: assistant.conversations (assistant.read): the conversations last active at or after
 // since, newest first.
@@ -5720,6 +6033,118 @@ type AssistantEntriesChangedEvent struct {
 	Status   string `json:"status"`
 }
 
+// AssistantEventSeverity: how much the user should care. info: tell them only if it matters to what they are doing;
+// warning: they should hear about it; critical: they need to know now.
+const (
+	AssistantEventSeverityInfo     = "info"
+	AssistantEventSeverityWarning  = "warning"
+	AssistantEventSeverityCritical = "critical"
+)
+
+// AssistantEventSeverities are the values of AssistantEventSeverity, in order.
+var AssistantEventSeverities = []string{"info", "warning", "critical"}
+
+// AssistantEventState: where the thing an event's key names is now, in the extension's own words (firing, resolved,
+// ...): a label each extension chooses.
+// It is free text, not a closed set of values.
+type AssistantEventState string
+
+// AssistantEventReplace: whether an event takes the place of one of the extension's with the same key still waiting
+// behind a running turn: absent and true replace, false keeps the earlier one as its own message.
+// It has three values: AssistantEventReplaceDefault (absent from the JSON), AssistantEventReplaceTrue and
+// AssistantEventReplaceFalse.
+type AssistantEventReplace uint8
+
+const (
+	// AssistantEventReplaceDefault: absent.
+	AssistantEventReplaceDefault AssistantEventReplace = iota
+	// AssistantEventReplaceTrue: true.
+	AssistantEventReplaceTrue
+	// AssistantEventReplaceFalse: false.
+	AssistantEventReplaceFalse
+)
+
+// IsZero reports AssistantEventReplaceDefault, which omitzero leaves out of the JSON.
+func (v AssistantEventReplace) IsZero() bool { return v == AssistantEventReplaceDefault }
+
+// Or is the boolean v says, or absent when v is the default.
+func (v AssistantEventReplace) Or(absent bool) bool {
+	switch v {
+	case AssistantEventReplaceTrue:
+		return true
+	case AssistantEventReplaceFalse:
+		return false
+	}
+	return absent
+}
+
+// MarshalJSON writes true or false; AssistantEventReplaceDefault is null (a field tagged omitzero leaves it out
+// instead).
+func (v AssistantEventReplace) MarshalJSON() ([]byte, error) {
+	switch v {
+	case AssistantEventReplaceDefault:
+		return []byte("null"), nil
+	case AssistantEventReplaceTrue:
+		return []byte("true"), nil
+	case AssistantEventReplaceFalse:
+		return []byte("false"), nil
+	}
+	return nil, errors.New("AssistantEventReplace: not one of its three values")
+}
+
+// UnmarshalJSON reads true or false, and null as absent; anything else fails.
+func (v *AssistantEventReplace) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*v = AssistantEventReplaceDefault
+		return nil
+	}
+	var b bool
+	if err := json.Unmarshal(data, &b); err != nil {
+		return err
+	}
+	*v = AssistantEventReplaceFalse
+	if b {
+		*v = AssistantEventReplaceTrue
+	}
+	return nil
+}
+
+// AssistantEventParams: assistant.event (assistant.events): one event for the assistant's main conversation. The
+// assistant gets it as something an extension observed, never as the user's words, and decides what to tell the user.
+// An event with the same key as one of this extension's still waiting behind a running turn replaces it, unless
+// replace is false. Lengths are in characters.
+type AssistantEventParams struct {
+	// What the event is about (one monitored thing). The same extension and key replace an event not yet delivered.
+	Key      string `json:"key"`
+	Severity string `json:"severity,omitempty"`
+	// One line saying what happened.
+	Title string `json:"title"`
+	// The details.
+	Body string `json:"body,omitempty"`
+	// What the extension suggests be done about it: a suggestion for the assistant to weigh, not an order.
+	ActionHint string `json:"action_hint,omitempty"`
+	// Where the thing the key names is now, in the extension's words (firing, resolved, ...).
+	State AssistantEventState `json:"state,omitempty"`
+	// false keeps an earlier event with the same key as its own message instead of replacing it. Absent is true.
+	Replace AssistantEventReplace `json:"replace,omitzero"`
+}
+
+// AssistantEventDelivery: what happened to the event. delivered: sent into the idle main conversation now. queued:
+// the conversation is running (or not reachable just now), so it goes in when its turn ends. replaced: it took the
+// place of an earlier event with the same key that was still queued.
+const (
+	AssistantEventDeliveryDelivered = "delivered"
+	AssistantEventDeliveryQueued    = "queued"
+	AssistantEventDeliveryReplaced  = "replaced"
+)
+
+// AssistantEventDeliveries are the values of AssistantEventDelivery, in order.
+var AssistantEventDeliveries = []string{"delivered", "queued", "replaced"}
+
+type AssistantEventResult struct {
+	Delivery string `json:"delivery"`
+}
+
 // AssistantDataStatusParams: assistant.data_status takes no parameters.
 type AssistantDataStatusParams struct {
 }
@@ -5868,8 +6293,8 @@ type BrowserMachinesResult struct {
 	Machines []BrowserMachine `json:"machines"`
 }
 
-// BrowserRunParams: browser.run (browser.run): run a script inside an extension-isolated browser task space
-// (ext-<extensionID>-<slot>) on machine_id.
+// BrowserRunParams: browser.run (browser.run): run a script inside an extension-isolated browser task space on
+// machine_id.
 type BrowserRunParams struct {
 	MachineID string `json:"machine_id"`
 	// Browser backend to use (default: ego).
@@ -6712,6 +7137,10 @@ type MemoryEntriesResult struct {
 	HasMore bool `json:"has_more"`
 	// Opaque: what to send as after for the next page; required in practice whenever has_more is true.
 	After string `json:"after,omitempty"`
+	// The bytes of standing entries' text the program wants a standing channel to carry (its own setting, say). The hub
+	// keeps this budget apart from its own memory ledger's, caps it at 8192 and takes the largest any page states; left
+	// out or 0: 4096. Entries past it are left out, the most important kept.
+	StandingBytes int `json:"standing_bytes,omitempty"`
 }
 
 // MemoryEntry: one entry as the program keeps it. Only an active entry is carried; the others may be answered (so a
@@ -6722,8 +7151,8 @@ type MemoryEntry struct {
 	ID string `json:"id"`
 	// What the entry says, as the program would render it, on one or a few lines.
 	Text string `json:"text"`
-	// The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by
-	// it.
+	// The program's own grouping (preferences, workflow, people…). Used for explicit recall tag matching; it does not
+	// change priority or visibility.
 	Facet string `json:"facet,omitempty"`
 	// active: the program would use it today, whatever it calls that state itself (a program with its own stable or
 	// shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no
@@ -6743,6 +7172,261 @@ type MemoryEntry struct {
 	// The names whose mention brings the entry in (a person, a project, a place): what a task's or a message's words are
 	// matched with, besides its text.
 	Subjects []string `json:"subjects,omitempty"`
+}
+
+// OffloadState: whether the provider can work on this computer: ready; needs_install (its tool is not on the
+// computer: the first offload asks to install it, OffloadTool); needs_setup (the user has to set it up first, in the
+// extension's settings: detail says what); unavailable (detail says why).
+const (
+	OffloadStateReady        = "ready"
+	OffloadStateNeedsInstall = "needs_install"
+	OffloadStateNeedsSetup   = "needs_setup"
+	OffloadStateUnavailable  = "unavailable"
+)
+
+// OffloadStates are the values of OffloadState, in order.
+var OffloadStates = []string{"ready", "needs_install", "needs_setup", "unavailable"}
+
+// OffloadItemKind: what an offloaded item was: a file, a dir (folder), an app, an app's data (app_data), a bundle of
+// items moved together, a session archive, or other.
+const (
+	OffloadItemKindFile    = "file"
+	OffloadItemKindDir     = "dir"
+	OffloadItemKindApp     = "app"
+	OffloadItemKindAppData = "app_data"
+	OffloadItemKindBundle  = "bundle"
+	OffloadItemKindSession = "session"
+	OffloadItemKindOther   = "other"
+)
+
+// OffloadItemKinds are the values of OffloadItemKind, in order.
+var OffloadItemKinds = []string{"file", "dir", "app", "app_data", "bundle", "session", "other"}
+
+// OffloadAction: what offload.run does: offload (move paths away) or restore (bring items back by id).
+const (
+	OffloadActionOffload = "offload"
+	OffloadActionRestore = "restore"
+)
+
+// OffloadActions are the values of OffloadAction, in order.
+var OffloadActions = []string{"offload", "restore"}
+
+// OffloadRunStatus: offload.run's answer: started (a job runs: job), needs_install (the tool is missing and install
+// was not given: nothing happened; tool), refused (nothing happened; items say why), ok (a dry run's answer: items).
+const (
+	OffloadRunStatusStarted      = "started"
+	OffloadRunStatusNeedsInstall = "needs_install"
+	OffloadRunStatusRefused      = "refused"
+	OffloadRunStatusOk           = "ok"
+)
+
+// OffloadRunStatuses are the values of OffloadRunStatus, in order.
+var OffloadRunStatuses = []string{"started", "needs_install", "refused", "ok"}
+
+// OffloadJobState: A job: running, done, failed (error says why) or canceled.
+const (
+	OffloadJobStateRunning  = "running"
+	OffloadJobStateDone     = "done"
+	OffloadJobStateFailed   = "failed"
+	OffloadJobStateCanceled = "canceled"
+)
+
+// OffloadJobStates are the values of OffloadJobState, in order.
+var OffloadJobStates = []string{"running", "done", "failed", "canceled"}
+
+// OffloadPhase: what a running job does now: install (its tool), check, upload, verify, cleanup (removing the
+// originals), download (a restore).
+const (
+	OffloadPhaseInstall  = "install"
+	OffloadPhaseCheck    = "check"
+	OffloadPhaseUpload   = "upload"
+	OffloadPhaseVerify   = "verify"
+	OffloadPhaseCleanup  = "cleanup"
+	OffloadPhaseDownload = "download"
+)
+
+// OffloadPhases are the values of OffloadPhase, in order.
+var OffloadPhases = []string{"install", "check", "upload", "verify", "cleanup", "download"}
+
+// OffloadJobItemStatus: one item of a job: pending, running, done, failed or skipped.
+const (
+	OffloadJobItemStatusPending = "pending"
+	OffloadJobItemStatusRunning = "running"
+	OffloadJobItemStatusDone    = "done"
+	OffloadJobItemStatusFailed  = "failed"
+	OffloadJobItemStatusSkipped = "skipped"
+)
+
+// OffloadJobItemStatuses are the values of OffloadJobItemStatus, in order.
+var OffloadJobItemStatuses = []string{"pending", "running", "done", "failed", "skipped"}
+
+// OffloadTool: the program the provider needs on the computer. source is one sentence in the caller's language saying
+// where it comes from and where it is installed; the install confirmation shows it.
+type OffloadTool struct {
+	Name      string `json:"name"`
+	Title     string `json:"title,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Installed bool   `json:"installed"`
+	Source    string `json:"source,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+// OffloadItem: one item the provider holds of this computer. bytes is the size it had on disk, what the map draws so
+// both sides share one scale; stored_bytes what it takes where it is stored; origin_path where it was and where a
+// restore puts it; stub_path the placeholder left behind, if any; local_bytes what of it is still on the computer (a
+// cache). Times are Unix seconds.
+type OffloadItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Bytes       int64  `json:"bytes"`
+	StoredBytes int64  `json:"stored_bytes,omitempty"`
+	OriginPath  string `json:"origin_path,omitempty"`
+	StubPath    string `json:"stub_path,omitempty"`
+	LocalBytes  int64  `json:"local_bytes,omitempty"`
+	OffloadedAt int64  `json:"offloaded_at,omitempty"`
+	UsedAt      int64  `json:"used_at,omitempty"`
+	// Items moved together share a group (an app and its data).
+	Group      string `json:"group,omitempty"`
+	Restorable bool   `json:"restorable"`
+}
+
+// OffloadMore: what the inventory left out past its 500 largest items.
+type OffloadMore struct {
+	Count int   `json:"count"`
+	Bytes int64 `json:"bytes"`
+}
+
+// OffloadInventoryParams: offload.inventory: what the provider holds of machine. refresh asks it not to answer from
+// its own cache.
+type OffloadInventoryParams struct {
+	Contribution string    `json:"contribution"`
+	Locale       string    `json:"locale"`
+	Machine      UIMachine `json:"machine"`
+	Refresh      bool      `json:"refresh,omitempty"`
+}
+
+// OffloadInventory: what the provider holds of the computer, largest first, at most 500 items (the rest summed in
+// more). at is when it was read (Unix seconds); total_bytes the items' bytes together, stored_bytes what they take
+// where they are stored; partial when the list may be incomplete. items may be left out when there are none; the
+// manager's answer to the apps always has it.
+type OffloadInventory struct {
+	State       string        `json:"state"`
+	Detail      string        `json:"detail,omitempty"`
+	Tool        *OffloadTool  `json:"tool,omitempty"`
+	At          int64         `json:"at"`
+	TotalBytes  int64         `json:"total_bytes"`
+	StoredBytes int64         `json:"stored_bytes,omitempty"`
+	Partial     bool          `json:"partial,omitempty"`
+	Items       []OffloadItem `json:"items,omitempty"`
+	More        *OffloadMore  `json:"more,omitempty"`
+}
+
+// OffloadRunParams: offload.run: offload paths (absolute, on machine, each already agreed by the node's protection
+// rules) or restore items (ids of the inventory), at most 50. dry_run only checks and answers status ok with each
+// item; install lets the job install the tool first (the user agreed to that too). request_id is the same for a retry
+// of the same request.
+type OffloadRunParams struct {
+	Contribution string    `json:"contribution"`
+	Locale       string    `json:"locale"`
+	Machine      UIMachine `json:"machine"`
+	Action       string    `json:"action"`
+	Paths        []string  `json:"paths,omitempty"`
+	Items        []string  `json:"items,omitempty"`
+	DryRun       bool      `json:"dry_run,omitempty"`
+	Install      bool      `json:"install,omitempty"`
+	RequestID    string    `json:"request_id"`
+}
+
+// OffloadRunItem: one path or item of a run's answer: why it is refused (reason, in the caller's language), or a dry
+// run's verdict (ok, bytes). refusal is set only by the manager, when the computer's own protection rules refused the
+// path before the program was asked (a machine.storage.check refusal code: credentials, app_managed, ...).
+type OffloadRunItem struct {
+	Path    string `json:"path,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Ok      bool   `json:"ok,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Refusal string `json:"refusal,omitempty"`
+	Bytes   int64  `json:"bytes,omitempty"`
+}
+
+// OffloadRunResult: offload.run's answer (OffloadRunStatus).
+type OffloadRunResult struct {
+	Status string           `json:"status"`
+	Job    string           `json:"job,omitempty"`
+	Tool   *OffloadTool     `json:"tool,omitempty"`
+	Items  []OffloadRunItem `json:"items,omitempty"`
+}
+
+// OffloadJobParams: offload.job and offload.cancel: the job offload.run started.
+type OffloadJobParams struct {
+	Contribution string    `json:"contribution"`
+	Locale       string    `json:"locale"`
+	Machine      UIMachine `json:"machine"`
+	Job          string    `json:"job"`
+}
+
+// OffloadJobItem: one path (offload) or item (restore) of a job.
+type OffloadJobItem struct {
+	Path   string `json:"path,omitempty"`
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+	Bytes  int64  `json:"bytes,omitempty"`
+}
+
+// OffloadJob: how a job goes. A job belongs to the extension: a client that lost track asks the inventory again.
+// items may be left out; the manager's answer to the apps always has it.
+type OffloadJob struct {
+	State      string           `json:"state"`
+	Phase      string           `json:"phase,omitempty"`
+	DoneBytes  int64            `json:"done_bytes"`
+	TotalBytes int64            `json:"total_bytes"`
+	FreedBytes int64            `json:"freed_bytes,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	Items      []OffloadJobItem `json:"items,omitempty"`
+}
+
+// OffloadProvider: one enabled disk_offload contribution, as GET /api/v1/extensions/-/offload lists it for the apps.
+type OffloadProvider struct {
+	Extension string   `json:"extension"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Kinds     []string `json:"kinds"`
+	Restore   bool     `json:"restore"`
+}
+
+// OffloadProviders: GET /api/v1/extensions/-/offload?machine=: the providers the map can offer on that computer.
+type OffloadProviders struct {
+	Providers []OffloadProvider `json:"providers"`
+}
+
+// OffloadRunRequest: POST /api/v1/extensions/{id}/-/offload/{cid}/run, an app's request: without dry_run or confirm
+// it is refused (confirmation_required); install only after the user agreed to the tool's install confirmation.
+type OffloadRunRequest struct {
+	Machine string   `json:"machine"`
+	Action  string   `json:"action"`
+	Paths   []string `json:"paths,omitempty"`
+	Items   []string `json:"items,omitempty"`
+	DryRun  bool     `json:"dry_run,omitempty"`
+	Confirm bool     `json:"confirm,omitempty"`
+	Install bool     `json:"install,omitempty"`
+}
+
+// OffloadStarted: the run route's 202 answer: the job to follow with GET …/jobs/{job}.
+type OffloadStarted struct {
+	Job string `json:"job"`
+}
+
+// OffloadError: an offload route's error: error in the reader's language and a code (bad_request,
+// confirmation_required, read_only, not_found, machine_offline, node_outdated, tool_install_required with tool,
+// offload_refused with items, plugin_failed (detail: the provider's own words, one line), usage_failed, deadline).
+type OffloadError struct {
+	Error  string           `json:"error"`
+	Code   string           `json:"code"`
+	Tool   *OffloadTool     `json:"tool,omitempty"`
+	Detail string           `json:"detail,omitempty"`
+	Items  []OffloadRunItem `json:"items,omitempty"`
 }
 
 // requiredJSONComponent preserves required fields only inside stream payloads.
@@ -7193,6 +7877,25 @@ func (v requiredJSONComponent) MarshalJSON() ([]byte, error) {
 				return out
 			}(),
 		})
+	case "map":
+		return json.Marshal(struct {
+			plain
+			Alt    string                   `json:"alt"`
+			Shapes []requiredJSONSceneShape `json:"shapes,omitempty"`
+		}{
+			plain: plain(v),
+			Alt:   v.Alt,
+			Shapes: func() []requiredJSONSceneShape {
+				if v.Shapes == nil {
+					return nil
+				}
+				out := make([]requiredJSONSceneShape, len(v.Shapes))
+				for i, item := range v.Shapes {
+					out[i] = (requiredJSONSceneShape)(item)
+				}
+				return out
+			}(),
+		})
 	default:
 		return json.Marshal(plain(v))
 	}
@@ -7315,6 +8018,7 @@ var newDef = map[string]func() any{
 	"ToolArchive":                   func() any { return new(ToolArchive) },
 	"ToolNPM":                       func() any { return new(ToolNPM) },
 	"AuthSpec":                      func() any { return new(AuthSpec) },
+	"UpgradeSpec":                   func() any { return new(UpgradeSpec) },
 	"Dependency":                    func() any { return new(Dependency) },
 	"Exports":                       func() any { return new(Exports) },
 	"ExportedPoint":                 func() any { return new(ExportedPoint) },
@@ -7346,12 +8050,17 @@ var newDef = map[string]func() any{
 	"AuthRelayItem":                 func() any { return new(AuthRelayItem) },
 	"SecretProviderItem":            func() any { return new(SecretProviderItem) },
 	"RepositoryProviderItem":        func() any { return new(RepositoryProviderItem) },
+	"DiskOffloadItem":               func() any { return new(DiskOffloadItem) },
 	"MemorySourceItem":              func() any { return new(MemorySourceItem) },
 	"RepositoryLinkLabel":           func() any { return new(RepositoryLinkLabel) },
 	"ErrorReportsItem":              func() any { return new(ErrorReportsItem) },
 	"TunnelItem":                    func() any { return new(TunnelItem) },
 	"AgentFilterItem":               func() any { return new(AgentFilterItem) },
 	"ConnectorItem":                 func() any { return new(ConnectorItem) },
+	"TrackAttention":                func() any { return new(TrackAttention) },
+	"TrackSidebar":                  func() any { return new(TrackSidebar) },
+	"TrackKindConfig":               func() any { return new(TrackKindConfig) },
+	"TrackKindItem":                 func() any { return new(TrackKindItem) },
 	"NamedItem":                     func() any { return new(NamedItem) },
 	"QuotaItem":                     func() any { return new(QuotaItem) },
 	"UsageItem":                     func() any { return new(UsageItem) },
@@ -7437,6 +8146,11 @@ var newDef = map[string]func() any{
 	"SceneLabel":                    func() any { return new(SceneLabel) },
 	"ScenePin":                      func() any { return new(ScenePin) },
 	"SceneLight":                    func() any { return new(SceneLight) },
+	"MapCoordinate":                 func() any { return new(MapCoordinate) },
+	"MapViewport":                   func() any { return new(MapViewport) },
+	"MapMarker":                     func() any { return new(MapMarker) },
+	"MapRoute":                      func() any { return new(MapRoute) },
+	"MapLink":                       func() any { return new(MapLink) },
 	"ImageSource":                   func() any { return new(ImageSource) },
 	"RowControl":                    func() any { return new(RowControl) },
 	"RowAction":                     func() any { return new(RowAction) },
@@ -7614,6 +8328,7 @@ var newDef = map[string]func() any{
 	"ConnectorHistoryAnchor":        func() any { return new(ConnectorHistoryAnchor) },
 	"ConnectorItems":                func() any { return new(ConnectorItems) },
 	"ConnectorKBItem":               func() any { return new(ConnectorKBItem) },
+	"ConnectorKBSourceRef":          func() any { return new(ConnectorKBSourceRef) },
 	"ConnectorKBProvenance":         func() any { return new(ConnectorKBProvenance) },
 	"ConnectorKBEvidence":           func() any { return new(ConnectorKBEvidence) },
 	"ConnectorDocTitleParams":       func() any { return new(ConnectorDocTitleParams) },
@@ -7693,6 +8408,13 @@ var newDef = map[string]func() any{
 	"KBHit":                         func() any { return new(KBHit) },
 	"KBUpdateParams":                func() any { return new(KBUpdateParams) },
 	"KBUpdateResult":                func() any { return new(KBUpdateResult) },
+	"KBPutRecordingParams":          func() any { return new(KBPutRecordingParams) },
+	"KBRecordingMinutes":            func() any { return new(KBRecordingMinutes) },
+	"KBMinutesItem":                 func() any { return new(KBMinutesItem) },
+	"KBMinutesPoint":                func() any { return new(KBMinutesPoint) },
+	"KBMinutesAction":               func() any { return new(KBMinutesAction) },
+	"KBRecordingMeeting":            func() any { return new(KBRecordingMeeting) },
+	"KBPutRecordingResult":          func() any { return new(KBPutRecordingResult) },
 	"KBOwnerParams":                 func() any { return new(KBOwnerParams) },
 	"KBOwner":                       func() any { return new(KBOwner) },
 	"KBChangedEvent":                func() any { return new(KBChangedEvent) },
@@ -7731,6 +8453,8 @@ var newDef = map[string]func() any{
 	"AssistantEntriesParams":        func() any { return new(AssistantEntriesParams) },
 	"AssistantEntriesResult":        func() any { return new(AssistantEntriesResult) },
 	"AssistantEntriesChangedEvent":  func() any { return new(AssistantEntriesChangedEvent) },
+	"AssistantEventParams":          func() any { return new(AssistantEventParams) },
+	"AssistantEventResult":          func() any { return new(AssistantEventResult) },
 	"AssistantDataStatusParams":     func() any { return new(AssistantDataStatusParams) },
 	"AssistantDataItem":             func() any { return new(AssistantDataItem) },
 	"AssistantDataStatusResult":     func() any { return new(AssistantDataStatusResult) },
@@ -7806,6 +8530,22 @@ var newDef = map[string]func() any{
 	"MemoryEntriesParams":           func() any { return new(MemoryEntriesParams) },
 	"MemoryEntriesResult":           func() any { return new(MemoryEntriesResult) },
 	"MemoryEntry":                   func() any { return new(MemoryEntry) },
+	"OffloadTool":                   func() any { return new(OffloadTool) },
+	"OffloadItem":                   func() any { return new(OffloadItem) },
+	"OffloadMore":                   func() any { return new(OffloadMore) },
+	"OffloadInventoryParams":        func() any { return new(OffloadInventoryParams) },
+	"OffloadInventory":              func() any { return new(OffloadInventory) },
+	"OffloadRunParams":              func() any { return new(OffloadRunParams) },
+	"OffloadRunItem":                func() any { return new(OffloadRunItem) },
+	"OffloadRunResult":              func() any { return new(OffloadRunResult) },
+	"OffloadJobParams":              func() any { return new(OffloadJobParams) },
+	"OffloadJobItem":                func() any { return new(OffloadJobItem) },
+	"OffloadJob":                    func() any { return new(OffloadJob) },
+	"OffloadProvider":               func() any { return new(OffloadProvider) },
+	"OffloadProviders":              func() any { return new(OffloadProviders) },
+	"OffloadRunRequest":             func() any { return new(OffloadRunRequest) },
+	"OffloadStarted":                func() any { return new(OffloadStarted) },
+	"OffloadError":                  func() any { return new(OffloadError) },
 }
 
 // Call is one call or event of an extension point's protocol (the schemas' x-methods and x-events): who
@@ -7875,6 +8615,7 @@ var Calls = map[string]Call{
 	"kb.update":                       {Name: "kb.update", From: "program", Params: "KBUpdateParams", Result: "KBUpdateResult"},
 	"kb.owner":                        {Name: "kb.owner", From: "program", Params: "KBOwnerParams", Result: "KBOwner"},
 	"kb.recent":                       {Name: "kb.recent", From: "program", Params: "KBRecentParams", Result: "KBRecentResult"},
+	"kb.put_recording":                {Name: "kb.put_recording", From: "program", Params: "KBPutRecordingParams", Result: "KBPutRecordingResult"},
 	"event.kb.changed":                {Name: "event.kb.changed", From: "hub", Params: "KBChangedEvent", Result: "", Event: true},
 	"event.kb.forgotten":              {Name: "event.kb.forgotten", From: "hub", Params: "KBForgottenEvent", Result: "", Event: true},
 	"event.todo.changed":              {Name: "event.todo.changed", From: "hub", Params: "TodoChangedEvent", Result: "", Event: true},
@@ -7886,6 +8627,7 @@ var Calls = map[string]Call{
 	"assistant.messages":              {Name: "assistant.messages", From: "program", Params: "AssistantMessagesParams", Result: "AssistantMessagesResult"},
 	"assistant.memory":                {Name: "assistant.memory", From: "program", Params: "AssistantMemoryParams", Result: "AssistantMemoryResult"},
 	"assistant.entries.list":          {Name: "assistant.entries.list", From: "program", Params: "AssistantEntriesParams", Result: "AssistantEntriesResult"},
+	"assistant.event":                 {Name: "assistant.event", From: "program", Params: "AssistantEventParams", Result: "AssistantEventResult"},
 	"event.assistant.entries.changed": {Name: "event.assistant.entries.changed", From: "hub", Params: "AssistantEntriesChangedEvent", Result: "", Event: true},
 	"assistant.data_status":           {Name: "assistant.data_status", From: "program", Params: "AssistantDataStatusParams", Result: "AssistantDataStatusResult"},
 	"machines.pair_link":              {Name: "machines.pair_link", From: "program", Params: "MachinesPairLinkParams", Result: "MachinesPairLinkResult"},
@@ -7918,4 +8660,8 @@ var Calls = map[string]Call{
 	"repo.describe":                   {Name: "repo.describe", From: "hub", Params: "RepoDescribeParams", Result: "RepoDescribeResult"},
 	"repo.pr_status":                  {Name: "repo.pr_status", From: "hub", Params: "RepoPRStatusParams", Result: "RepoPRStatusResult"},
 	"memory.entries":                  {Name: "memory.entries", From: "hub", Params: "MemoryEntriesParams", Result: "MemoryEntriesResult"},
+	"offload.inventory":               {Name: "offload.inventory", From: "hub", Params: "OffloadInventoryParams", Result: "OffloadInventory"},
+	"offload.run":                     {Name: "offload.run", From: "hub", Params: "OffloadRunParams", Result: "OffloadRunResult"},
+	"offload.job":                     {Name: "offload.job", From: "hub", Params: "OffloadJobParams", Result: "OffloadJob"},
+	"offload.cancel":                  {Name: "offload.cancel", From: "hub", Params: "OffloadJobParams", Result: "Empty"},
 }

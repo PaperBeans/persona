@@ -11,6 +11,7 @@ import (
 
 // A sticker carries no request: it is accepted silently, with no reaction, no run and no reply.
 func TestFeishuStickerIsAcceptedSilently(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, _ := feishuHub("ou_a", time.Unix(100, 0))
 	f.settings = &Settings{MachineID: "server", Main: "m1"}
 	f.setSessions("server", proto.Session{SessionID: "m1", Assistant: true})
@@ -20,7 +21,7 @@ func TestFeishuStickerIsAcceptedSilently(t *testing.T) {
 
 	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "om_s", "p2p", "sticker", `{"file_key":"f1"}`
-	s.feishuMessage(ev, FeishuStatus{Ready: true, Features: FeishuFeatures{Main: true}}, "")
+	feishuSay(t, s, f, withFeatures(f, FeishuFeatures{Main: true}), ev, "")
 	if reactions != 0 {
 		t.Fatalf("a sticker got a reaction: %d", reactions)
 	}
@@ -30,7 +31,7 @@ func TestFeishuStickerIsAcceptedSilently(t *testing.T) {
 
 	// An ordinary text message still goes through.
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_t", "text", `{"text":"你好"}`
-	s.feishuMessage(ev, FeishuStatus{Ready: true, Features: FeishuFeatures{Main: true}}, "")
+	feishuSay(t, s, f, withFeatures(f, FeishuFeatures{Main: true}), ev, "")
 	if text := sendOnceText(f); text == "" {
 		t.Fatal("an ordinary text message was not sent")
 	}

@@ -135,6 +135,7 @@ export const native = {
   audioHarness,
   audioApi,
   reset() {
+    this.alarmAllowed=false;this.alarmNext=0;this.alarmRows=[];
     this.permissions.clear();
     for (const permission of Object.values(PERMISSIONS)) this.permissions.set(permission, permissionCodes.granted);
     this.permissionRequests.length = 0;
@@ -232,6 +233,8 @@ const kitSources = {
   '@kit.AbilityKit': 'export const common = {}; export const abilityAccessCtrl = globalThis.__personaDeviceTest.abilityAccessCtrl; export const bundleManager = globalThis.__personaDeviceTest.bundleManager; export const Permissions = {};',
   '@kit.ArkData': 'export const preferences = globalThis.__personaDeviceTest.preferences;',
   '@kit.ArkTS': 'export const util = globalThis.__personaDeviceTest.util;',
+  '@kit.NotificationKit': 'export const notificationManager=globalThis.__personaDeviceTest.phoneNotification;',
+  '@kit.BackgroundTasksKit': 'export const reminderAgentManager=globalThis.__personaDeviceTest.phoneReminder;',
   '@kit.AudioKit': 'export const audio = globalThis.__personaDeviceTest.audioApi;',
   '@kit.CalendarKit': 'export const calendarManager = globalThis.__personaDeviceTest.calendarManager;',
   '@kit.ContactsKit': 'export const contact = globalThis.__personaDeviceTest.contact;',
@@ -242,6 +245,11 @@ const kitSources = {
   '@kit.BasicServicesKit': 'export const batteryInfo = globalThis.__personaDeviceTest.batteryInfo; export const deviceInfo = globalThis.__personaDeviceTest.deviceInfo; export const pasteboard = globalThis.__personaDeviceTest.pasteboard; export const systemDateTime = globalThis.__personaDeviceTest.systemDateTime;'
 };
 
+native.phoneNotification={SlotType:{SERVICE_INFORMATION:2},async isNotificationEnabled(){return native.alarmAllowed===true;}};
+native.phoneReminder={ReminderType:{REMINDER_TYPE_TIMER:0,REMINDER_TYPE_CALENDAR:1,REMINDER_TYPE_ALARM:2},
+  async getAllValidReminders(){return Array.from(native.alarmRows || []);},
+  async publishReminder(req){const id=++native.alarmNext;native.alarmRows.push({reminderId:id,reminderReq:req});return id;},
+  async cancelReminder(id){native.alarmRows=native.alarmRows.filter(x=>x.reminderId!==id);}};
 native.abilityAccessCtrl = abilityAccessCtrl;
 native.preferences = preferences;
 native.util = util;

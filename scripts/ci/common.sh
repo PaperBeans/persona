@@ -12,7 +12,8 @@ else
   CI_ROOT="$CI_IMPLEMENTATION_ROOT"
 fi
 cd "$CI_ROOT"
-ci_run() {
+ci_run() { ci_run_step "$@"; }
+ci_run_step() {
   local label="$1" seconds="$2"
   shift 2
   CI_IMPLEMENTATION_ROOT="$CI_IMPLEMENTATION_ROOT" \

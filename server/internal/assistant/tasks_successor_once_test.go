@@ -63,6 +63,7 @@ func stoppedTaskOnGate(t *testing.T) (*Service, *successorGateHub, Todo) {
 	f.ownModels = true
 	h := &successorGateHub{fakeHub: f, arrived: make(chan struct{}, 4), gate: make(chan struct{})}
 	s := withSettings(t, f, New(Options{Hub: h, Logf: testLogf(t)}))
+	t.Cleanup(s.stopQuietTimers)
 	shortSupervise(t, s)
 	f.hello.Assistant.MachineID = "server"
 	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })

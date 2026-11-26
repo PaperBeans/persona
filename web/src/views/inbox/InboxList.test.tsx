@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The inbox that could not load the first time (#2970, after Android's failure empty state): its own empty state with
 // "Retry", never "All caught up" under a red error; "Retry" loads again and the ordinary empty state comes back.
+import { registerTestMailbox } from "../../test/mailbox-fixture";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +59,8 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
 });
+
+registerTestMailbox();
 
 describe("收件箱：列表不会横向滚动", () => {
   // overflow-y alone made the list scroll sideways whenever something inside was wider than the 380px column, cutting

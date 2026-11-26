@@ -33,6 +33,7 @@ try {
     else if (path === "/extensions") body = { extensions: [] };
     else if (path === "/managers") body = { managers: [] };
     else if (path.endsWith("/claude-dirs")) body = { dirs: [], blocked: [], live: true };
+    else if (path.endsWith("/herdr/sessions")) body = { sessions: [], blocked: [], live: true };
     else if (path.endsWith("-settings")) body = { settings: [] };
    }
    await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });

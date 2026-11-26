@@ -47,6 +47,7 @@ type codexConn struct {
 	pending             map[int64]chan codexReply
 	asks                map[string]context.CancelFunc // server request id → the phone question waiting for it
 	turnID              string                        // the turn running, "" when idle
+	endedTurnID         string                        // the turn that already completed; its late started is not a new turn
 	files               map[string][]string           // fileChange item id → paths, for the approval card
 	closed              bool
 	threadID            string

@@ -13,6 +13,7 @@ import (
 
 // Exercise the public DM entrance, including commands, card decisions, target lookup and Start.
 func TestFeishuNewFirstMessageIgnoresOldReply(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, kind := range []string{targetPersona, targetAgent} {
 		for _, binding := range []string{"parent", "root", "both", "question", "unbound question"} {
 			t.Run(kind+"/"+binding, func(t *testing.T) {
@@ -40,11 +41,11 @@ func TestFeishuNewFirstMessageIgnoresOldReply(t *testing.T) {
 				})
 				f.answerApp(AppFeishu, FeishuUserName, func(json.RawMessage) (any, error) { return map[string]any{"name": "Previous author"}, nil })
 				s := newTestService(t, f)
-				if _, err := s.feishuStatus(context.Background()); err != nil {
+				if _, err := s.chat().Status(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				s.setBotCurrent(old)
-				s.rememberBotThread("om_old", old, "Previous conversation")
+				s.larkModule().SetTarget(old)
+				s.larkModule().RememberThread("om_old", old, "Previous conversation")
 				ev := privateEvent("om_new", "/new 2")
 				switch binding {
 				case "parent":
@@ -55,9 +56,7 @@ func TestFeishuNewFirstMessageIgnoresOldReply(t *testing.T) {
 					ev.Message.ParentID, ev.Message.RootID = "om_old", "om_old"
 				}
 				if strings.Contains(binding, "question") {
-					s.fbot.mu.Lock()
-					s.fbot.cards = map[string]botCard{ix.ID: {MessageID: "om_old", Ix: ix, At: time.Now()}}
-					s.fbot.mu.Unlock()
+					keepChatCard(s, ix.ID, &botCard{MessageID: "om_old", Ix: ix, At: time.Now()})
 				}
 				raw, err := json.Marshal(ev)
 				if err != nil {
@@ -68,19 +67,16 @@ func TestFeishuNewFirstMessageIgnoresOldReply(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				s.fbot.mu.Lock()
-				done := s.fbot.line
-				s.fbot.mu.Unlock()
-				select {
-				case <-done:
-				case <-time.After(10 * time.Second):
+				wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := s.larkModule().Wait(wctx); err != nil {
 					t.Fatal("DM did not finish")
 				}
+				cancel()
 				runs := s.channelRuns(channel.Feishu)
 				if len(runs) != 1 || runs[0].SessionID == "oldchat01" || runs[0].ReplyTo != "om_new" {
 					t.Fatalf("new run: %+v", runs)
 				}
-				cur := s.botTargetFor("", "")
+				cur := s.larkModule().Route("", "")
 				if cur.SessionID != runs[0].SessionID || cur.Kind != targetPersona {
 					t.Fatalf("new current: %+v", cur)
 				}
@@ -140,14 +136,11 @@ func deliverNewReplyDM(t *testing.T, s *Service, id, text, parent, root, action 
 	if err := s.FeishuMessage(context.Background(), FeishuMessage{Event: raw, Action: action}); err != nil {
 		t.Fatal(err)
 	}
-	s.fbot.mu.Lock()
-	done := s.fbot.line
-	s.fbot.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
+	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.larkModule().Wait(wctx); err != nil {
 		t.Fatal("DM did not finish")
 	}
+	cancel()
 }
 
 func newCommandReplyBot(t *testing.T, features FeishuFeatures) (*Service, *fakeHub) {
@@ -162,16 +155,17 @@ func newCommandReplyBot(t *testing.T, features FeishuFeatures) (*Service, *fakeH
 		f.answerApp(AppFeishu, m, func(json.RawMessage) (any, error) { return map[string]any{}, nil })
 	}
 	s := newTestService(t, f)
-	if _, err := s.feishuStatus(context.Background()); err != nil {
+	if _, err := s.chat().Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	old := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "oldchat01"}
-	s.setBotCurrent(old)
-	s.rememberBotThread("om_old", old, "Previous conversation")
+	s.larkModule().SetTarget(old)
+	s.larkModule().RememberThread("om_old", old, "Previous conversation")
 	return s, f
 }
 
 func TestFeishuNewBareCommandDefersStart(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := newCommandReplyBot(t, FeishuFeatures{Main: true, Cards: true})
 	deliverNewReplyDM(t, s, "om_bare", "/new \n", "om_old", "om_old", "oa_test")
 	f.mu.Lock()
@@ -180,10 +174,10 @@ func TestFeishuNewBareCommandDefersStart(t *testing.T) {
 	if starts != 0 || len(handoffs(f)) != 0 || len(f.appParams(AppFeishu, FeishuText)) != 1 {
 		t.Fatal("bare /new did not only confirm")
 	}
-	if got := s.botTargetFor("", ""); got.Kind != targetPersona || got.SessionID != "" {
+	if got := s.larkModule().Route("", ""); got.Kind != targetPersona || got.SessionID != "" {
 		t.Fatalf("next unbound message target: %+v", got)
 	}
-	if got := s.botTargetFor("om_old", "om_old"); got.SessionID != "oldchat01" {
+	if got := s.larkModule().Route("om_old", "om_old"); got.SessionID != "oldchat01" {
 		t.Fatalf("bare /new erased the old binding: %+v", got)
 	}
 	deliverNewReplyDM(t, s, "om_followup", "First request", "", "", "oa_test")
@@ -195,6 +189,7 @@ func TestFeishuNewBareCommandDefersStart(t *testing.T) {
 }
 
 func TestFeishuNewReplyControls(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, c := range []struct {
 		name, text string
 		disabled   bool
@@ -217,7 +212,7 @@ func TestFeishuNewReplyControls(t *testing.T) {
 			if len(f.sends) != 0 || f.made != 0 {
 				t.Fatalf("control started a conversation: %+v", f.sends)
 			}
-			if got := s.botTargetFor("", ""); got.SessionID != "oldchat01" {
+			if got := s.larkModule().Route("", ""); got.SessionID != "oldchat01" {
 				t.Fatalf("control changed current: %+v", got)
 			}
 		})
@@ -225,6 +220,7 @@ func TestFeishuNewReplyControls(t *testing.T) {
 }
 
 func TestFeishuNewReplyCommandSpellings(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, text := range []string{"/NEW\tFirst\n\n  second", "／new\u3000First\n\n  second", "/新对话 First\n\n  second"} {
 		t.Run(text, func(t *testing.T) {
 			s, f := newCommandReplyBot(t, FeishuFeatures{Main: true})
@@ -239,15 +235,14 @@ func TestFeishuNewReplyCommandSpellings(t *testing.T) {
 }
 
 func TestFeishuNewOrdinaryCardReplyStillAnswers(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	s, f := newCommandReplyBot(t, FeishuFeatures{Main: true, Cards: true})
 	ix := proto.Interaction{ID: "ix_control", MachineID: "server", SessionID: "oldchat01", Kind: proto.IxQuestion,
 		Questions: []proto.Question{{Question: "Which option?", Options: []proto.QuestionOption{{Label: "First"}, {Label: "Second"}}}}}
 	for _, m := range []string{InteractionsGet, InteractionsResolve} {
 		f.answerApp(AppInteractions, m, func(json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil })
 	}
-	s.fbot.mu.Lock()
-	s.fbot.cards = map[string]botCard{ix.ID: {MessageID: "om_old", Ix: ix, At: time.Now()}}
-	s.fbot.mu.Unlock()
+	keepChatCard(s, ix.ID, &botCard{MessageID: "om_old", Ix: ix, At: time.Now()})
 	deliverNewReplyDM(t, s, "om_answer", "2", "om_old", "om_old", "oa_test")
 	resolves := f.appParams(AppInteractions, InteractionsResolve)
 	if len(resolves) != 1 || resolves[0]["interaction_id"] != ix.ID {

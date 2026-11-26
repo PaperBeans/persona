@@ -37,7 +37,10 @@ const managerHealthDir = { ...health, session_id: "manager-health-dir", title: "
 const emptyPins: AgentPins = { sessions: [], spaces: [] };
 const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
 let host: HTMLDivElement, root: Root;
-const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
+const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
+  for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); });
+};
 const grouping = () => host.querySelector('[role="radiogroup"][aria-label="Agent 分组"]');
 const chosen = () => grouping()?.querySelector('[aria-checked="true"]')?.textContent;
 const pagedList = () => host.querySelector("[data-paged-sessions]");

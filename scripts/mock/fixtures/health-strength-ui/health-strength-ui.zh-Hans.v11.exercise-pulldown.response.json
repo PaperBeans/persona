@@ -1,0 +1,251 @@
+{
+  "view": {
+    "title": "Lat pulldown",
+    "sections": [
+      {
+        "title": "座椅和设置",
+        "items": [
+          {
+            "type": "text",
+            "text": "器械标注的配重"
+          },
+          {
+            "type": "text",
+            "text": "Seat 3"
+          }
+        ]
+      },
+      {
+        "title": "每天最好成绩",
+        "items": [
+          {
+            "type": "segmented",
+            "value": "weight",
+            "action": {
+              "id": "metric"
+            },
+            "name": "metric",
+            "choices": [
+              {
+                "value": "weight",
+                "title": "重量（kg）"
+              },
+              {
+                "value": "e1rm",
+                "title": "估算极限"
+              }
+            ]
+          },
+          {
+            "type": "segmented",
+            "value": "30",
+            "action": {
+              "id": "range"
+            },
+            "name": "days",
+            "choices": [
+              {
+                "value": "30",
+                "title": "30 天"
+              },
+              {
+                "value": "90",
+                "title": "90 天"
+              },
+              {
+                "value": "365",
+                "title": "365 天"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "kind": "line",
+            "series": [
+              {
+                "name": "重量（kg）",
+                "points": [
+                  {
+                    "label": "2026-10-30",
+                    "value": 47.5
+                  },
+                  {
+                    "label": "2026-11-03",
+                    "value": 47.5
+                  },
+                  {
+                    "label": "2026-11-08",
+                    "value": 50
+                  },
+                  {
+                    "label": "2026-11-13",
+                    "value": 52.5
+                  },
+                  {
+                    "label": "2026-11-17",
+                    "value": 52.5
+                  },
+                  {
+                    "label": "2026-11-22",
+                    "value": 55
+                  }
+                ]
+              }
+            ],
+            "unit": "kg"
+          }
+        ]
+      },
+      {
+        "title": "组记录",
+        "items": [
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-22 19:22 · 55 kg × 10",
+            "action": {
+              "id": "undo:f88c1e39-cd55-5d74-b23f-226745409290"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-22 19:18 · 55 kg × 10",
+            "action": {
+              "id": "undo:572c2d60-8e9d-57b3-9b4f-2c0c3f2ef3dd"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-22 19:14 · 55 kg × 10",
+            "action": {
+              "id": "undo:1faf22bf-01a7-5927-a278-e80cb9355eb5"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-17 19:22 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:35780de2-62fc-5822-b53f-5646e4eebba5"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-17 19:18 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:dda4d303-5891-5a7d-9590-8558ef461850"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-17 19:14 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:a040023b-3f92-51cb-9886-f254bf49d0ef"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-13 19:22 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:ab94e693-c82e-5b8c-90bb-15bb65b6238b"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-13 19:18 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:176d6807-18d9-59f0-9e4f-caa945e7fe43"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-13 19:14 · 52.5 kg × 10",
+            "action": {
+              "id": "undo:84c081a0-13e3-5459-afc2-6f957a94e55c"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-08 19:22 · 50 kg × 10",
+            "action": {
+              "id": "undo:22543140-5d1c-57db-a179-eee762adb40a"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-08 19:18 · 50 kg × 10",
+            "action": {
+              "id": "undo:513a8657-0772-567e-ba14-0133f84c8f71"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-08 19:14 · 50 kg × 10",
+            "action": {
+              "id": "undo:4e73d35d-f589-5c23-b0be-a0100f76b5b4"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-03 19:22 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:90c852c3-ea88-5c92-9cad-2106e5210b82"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-03 19:18 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:9f4f50de-82ae-5634-9741-8f56deb2f579"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-11-03 19:14 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:849cb372-2b28-5a64-b684-cb99d0382cc6"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-10-30 19:22 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:c3e931e0-6067-5457-ab87-f3e8eaf920b1"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-10-30 19:18 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:4fbbcabf-7314-5425-be68-866024b8a368"
+            }
+          },
+          {
+            "type": "row",
+            "value": "撤销",
+            "title": "2026-10-30 19:14 · 47.5 kg × 10",
+            "action": {
+              "id": "undo:49b449fd-78ef-512d-a223-31e1f8ee795f"
+            }
+          }
+        ]
+      }
+    ],
+    "state": "{\"page\":\"strength.exercise\",\"exercise\":\"414be15a-052b-5d21-958f-ea019279e657\",\"metric\":\"weight\",\"days\":30}"
+  }
+}

@@ -257,6 +257,12 @@ struct TodoDetailView: View {
                 .padding(.vertical, Theme.Space.xs)
             }
 
+            if let wait = todo.wait {
+                TodoWaitSection(wait: wait, openDetail: openDetail) { url in
+                    link = LinkTarget(url: url)
+                }
+            }
+
             TodoPlanSection(todo: todo).id(todo.id) // due date, reminder, priority (#1683)
 
             if todo.supervision != nil {
@@ -386,7 +392,7 @@ struct TodoDetailView: View {
         // The buttons float over the notes, which scroll on behind them and blur under them, with no band of page
         // color (on one they sat on a white strip, #9008).
         .floatingFooter(over: Theme.groupedPage) {
-            bottomBar(todo)
+            bottomBar(todo, lookup: lookup)
         }
         #if DEBUG
         // `-showDecisionHistory YES` also scrolls the notes to the top once the decisions are read, so the whole
@@ -521,7 +527,7 @@ struct TodoDetailView: View {
         }
     }
 
-    private func bottomBar(_ todo: TodoItem) -> some View {
+    private func bottomBar(_ todo: TodoItem, lookup: @escaping TodosLogic.SessionLookup) -> some View {
         // Side by side while both labels fit whole, else one above the other, Hand to Agent first (#6151): side by side
         // they were cut to "Hand to A…" from xxLarge.
         // Two pills floating over the notes, the Sidebar layout's foot's (`floatingPill`, #4206): 46 pt as its New
@@ -529,7 +535,7 @@ struct TodoDetailView: View {
         // is no wider than a readable page, centered, as the Inbox's hand-off bar. At the large control size across
         // the whole page they were 61 pt tall and on an iPad 380 pt wide each, on a white strip (#9008).
         StackingButtonRow(spacing: Theme.Space.m, stackedSpacing: Theme.Space.s) {
-            bottomButtons(todo)
+            bottomButtons(todo, lookup: lookup)
         }
         .frame(maxWidth: Theme.Size.readable)
         .frame(maxWidth: .infinity)
@@ -540,11 +546,10 @@ struct TodoDetailView: View {
     /// Hand to Agent the Theme Color's pill, the one solid button; Done / Reopen the glass one. Each label is measured
     /// at its full size (`minimumScale: 1`): with the row's 0.8 allowance "Hand to Agent" stayed beside Done at
     /// xxxLarge, cut to "Hand to Age…" instead of shrunk (#9008).
-    @ViewBuilder private func bottomButtons(_ todo: TodoItem) -> some View {
-        // A failed start can carry done_at while it still checks open and waits for its owner (#3713).
-        let open = TodoTriageLogic.checksAsOpen(todo, among: { store.todos }, lookup: {
-            TodosLogic.makeSessionLookup(model.allSessions(inFront: inFront))
-        }, now: .now)
+    @ViewBuilder private func bottomButtons(_ todo: TodoItem, lookup: @escaping TodosLogic.SessionLookup) -> some View {
+        // A failed start can carry done_at while it still checks open and waits for its owner (#3713). The page's own
+        // lookup (`content`), not a second read of every Agent (AllSessionsReadersTests).
+        let open = TodoTriageLogic.checksAsOpen(todo, among: { store.todos }, lookup: { lookup }, now: .now)
         let canRetry = open && tasks.state(todo) == .failed && !(todo.origin ?? "").isEmpty
         let instead = canRetry ? tasks.retryLauncher(todo, features: model.hubFeatures) : nil
         let busy = tasks.busyRetries.contains(todo.id)

@@ -194,6 +194,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     /// How often the voice ran dry mid-reply this call (#12922), for the log's last line.
     private var stalls = 0
     private var activated = false
+    private var audioLease: AudioSessionBroker.Lease?
     private var observers: [NSObjectProtocol] = []
     /// The engine's configuration-change observer: a rebuilt engine gets its own.
     private var engineObserver: NSObjectProtocol?
@@ -220,21 +221,22 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         self.format = format
         self.uplink = uplink
         self.events = events
-        let session = AVAudioSession.sharedInstance()
-        if owner == .system { return try startOnSystemSession(session) }
+        if owner == .system { return try startOnSystemSession() }
+        let broker = AudioSessionBroker.shared
         do {
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: Self.sessionOptions)
-            try session.setActive(true)
+            try broker.setCategory(.playAndRecord, mode: .voiceChat, options: Self.sessionOptions)
+            try broker.setActive(true)
         } catch {
             Self.log.error("voice: audio session failed: \(error.localizedDescription, privacy: .public)")
             throw VoiceAudioError.session
         }
         activated = true
+        audioLease = broker.acquire(id: "voice.conversation", module: "voice", kind: .voiceConversation)
         // The route before the engine, so it is built for the device that plays.
         route = VoiceRoute.Follower(startedAt: .now)
-        follow(route.starting(Self.snapshot(session)), why: "start")
+        follow(route.starting(Self.snapshot(broker)), why: "start")
         let capture = VoiceCapture.plan(recordingAllowed: AVAudioApplication.shared.recordPermission == .granted,
-                                        inputAvailable: session.isInputAvailable, simulator: VoiceCapture.simulator,
+                                        inputAvailable: broker.isInputAvailable, simulator: VoiceCapture.simulator,
                                         probe: { VoiceInputProbe.shared.run() })
         self.capture = capture
         do {
@@ -251,12 +253,12 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
         observe()
         // Once more with the engine running: voice processing can move the route as it starts.
-        follow(route.starting(Self.snapshot(session)), why: "engine")
+        follow(route.starting(Self.snapshot(broker)), why: "engine")
     }
 
     /// The system's session: the microphone is planned now, as `start` frames read `cancelsEcho` before any engine
     /// exists, and opened once the system activated the session (now, if it already did).
-    private func startOnSystemSession(_ session: AVAudioSession) throws {
+    private func startOnSystemSession() throws {
         let allowed = AVAudioApplication.shared.recordPermission == .granted
         let capture: VoiceCapture
         if VoiceCapture.simulator, allowed, !systemActive {
@@ -266,7 +268,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
             probeLater = true
         } else {
             // Before the system activates the session it may not list the input yet: `bringUp` looks again.
-            capture = VoiceCapture.plan(recordingAllowed: allowed, inputAvailable: session.isInputAvailable || !systemActive,
+            capture = VoiceCapture.plan(recordingAllowed: allowed, inputAvailable: AudioSessionBroker.shared.isInputAvailable || !systemActive,
                                         simulator: VoiceCapture.simulator, probe: { VoiceInputProbe.shared.run() })
         }
         self.capture = capture
@@ -309,18 +311,18 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     /// is on hold (taking it off hold brings it up).
     private func bringUp() {
         guard owner == .system, systemActive, !held, events != nil, engine == nil else { return }
-        let session = AVAudioSession.sharedInstance()
+        let broker = AudioSessionBroker.shared
         if probeLater {
             probeLater = false
             capture = VoiceCapture.plan(recordingAllowed: AVAudioApplication.shared.recordPermission == .granted,
-                                        inputAvailable: session.isInputAvailable, simulator: true, probe: { VoiceInputProbe.shared.run() })
+                                        inputAvailable: broker.isInputAvailable, simulator: true, probe: { VoiceInputProbe.shared.run() })
         }
         if case .unavailable(let problem) = capture {
             Self.log.error("voice: no microphone to record from on the call (\(String(describing: problem), privacy: .public))")
             events?(.failed)
             return
         }
-        guard session.isInputAvailable else {
+        guard broker.isInputAvailable else {
             Self.log.error("voice: the call's audio session has no input")
             events?(.failed)
             return
@@ -334,7 +336,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
         watchEngine()
         // Port kinds only, never device names (they can carry a person's name).
-        Self.log.notice("voice: call audio on (echo cancellation \(self.cancelsEcho, privacy: .public), \(Self.describe(session), privacy: .public))")
+        Self.log.notice("voice: call audio on (echo cancellation \(self.cancelsEcho, privacy: .public), \(Self.describe(broker), privacy: .public))")
         onRunning?()
     }
 
@@ -373,6 +375,31 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     func cue(_ pcm: Data) { schedule(pcm, voice: false) }
 
+    /// A reply began, or ended: then what is held plays now, without waiting for `quiet` or the lead (#14933).
+    func reply(_ open: Bool) {
+        guard !open else {
+            playout.replyBegan()
+            logEndedReply()
+            return holdUntilDue()
+        }
+        let ready = playout.replyEnded()
+        logEndedReply()
+        holdUntilDue()
+        guard let player, engine?.isRunning == true else { return }
+        for piece in ready { enqueue(piece.buffer, level: piece.level, on: player) }
+    }
+
+    var lead: VoiceLead { playout.lead }
+
+    func startLead(at level: Int) {
+        dropHeld()
+        playout = VoicePlayout(rate: playout.rate, level: level)
+        if level > 0 {
+            let lead = Int(playout.leadNow * 1000)
+            Self.log.notice("voice: this voice came slower than it plays on a call before: gathering \(lead, privacy: .public) ms before playing")
+        }
+    }
+
     func clear() {
         logCut("cut off")
         generation += 1
@@ -398,14 +425,17 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         interruptedNow = false
         let newRates = rewireOnResume
         rewireOnResume = false
-        let session = AVAudioSession.sharedInstance()
+        let broker = AudioSessionBroker.shared
         do {
-            try session.setActive(true)
+            try broker.setActive(true)
         } catch {
             Self.log.error("voice: the audio session would not come back after the interruption: \(error.localizedDescription, privacy: .public)")
             throw VoiceAudioError.session
         }
         activated = true
+        if audioLease == nil {
+            audioLease = broker.acquire(id: "voice.conversation", module: "voice", kind: .voiceConversation)
+        }
         guard let engine else { return }
         // Running again by itself, and at the rates it runs at: nothing to do.
         guard !engine.isRunning || newRates else { return }
@@ -415,14 +445,14 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         } catch {
             try rebuild()
         }
-        Self.log.notice("voice: audio back after the interruption (\(Self.describe(session), privacy: .public))")
+        Self.log.notice("voice: audio back after the interruption (\(Self.describe(broker), privacy: .public))")
     }
 
     func stop() {
         probeLater = false
         interruptedNow = false
         rewireOnResume = false
-        for token in observers { NotificationCenter.default.removeObserver(token) }
+        for token in observers { AudioSessionBroker.shared.removeObserver(token) }
         observers = []
         if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
         engineObserver = nil
@@ -444,12 +474,14 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
         stalls = 0
         playout = VoicePlayout(rate: format.outputRate)
+        audioLease?.release()
+        audioLease = nil
         if activated {
             activated = false
-            let session = AVAudioSession.sharedInstance()
-            if preferredInput { try? session.setPreferredInput(nil) }
-            if overrodeOutput { try? session.overrideOutputAudioPort(.none) }
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            let broker = AudioSessionBroker.shared
+            if preferredInput { try? broker.setPreferredInput(nil) }
+            if overrodeOutput { try? broker.overrideOutputAudioPort(.none) }
+            try? broker.setActive(false, options: .notifyOthersOnDeactivation)
         }
         preferredInput = false
         overrodeOutput = false
@@ -517,7 +549,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         self.playFormat = playFormat
         self.pump = pump
         // A new player for the same call: the link is the one the voice stalled on, so the raised lead stays (#12922).
-        playout = VoicePlayout(rate: format.outputRate, level: playout.level)
+        playout = playout.moved(to: format.outputRate)
         clock.restart()
     }
 
@@ -531,7 +563,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         player = nil
         pump = nil
         // The new route may have no input (#5029): reading the input node then would set up an I/O unit that cannot start.
-        guard AVAudioSession.sharedInstance().isInputAvailable else { throw VoiceAudioError.noInput }
+        guard AudioSessionBroker.shared.isInputAvailable else { throw VoiceAudioError.noInput }
         try wire(engine)
         engine.prepare()
         do { try engine.start() } catch { throw VoiceAudioError.engine }
@@ -551,7 +583,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         player = nil
         playFormat = nil
         pump = nil
-        guard AVAudioSession.sharedInstance().isInputAvailable else { throw VoiceAudioError.noInput }
+        guard AudioSessionBroker.shared.isInputAvailable else { throw VoiceAudioError.noInput }
         // A system call's manager hears of the new engine both ways: voice processing turning on again can surface as a
         // system mute, which is the engine's and not the owner's until a moment after it runs.
         if owner == .system { onStarting?() }
@@ -665,7 +697,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         let left = max(0, measured ?? 0)
         guard left > 0 || playout.isHolding || (measured == nil && !queued.isEmpty) else { return }
         let amount = measured == nil ? "an unknown amount" : "\(Int((left * 1000).rounded())) ms"
-        let route = Self.describe(AVAudioSession.sharedInstance().currentRoute)
+        let route = Self.describe(AudioSessionBroker.shared.currentRoute)
         Self.log.notice("voice: \(what, privacy: .public) with \(amount, privacy: .public) still in the player\(self.playout.isHolding ? " and more held" : "", privacy: .public) (\(route, privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
@@ -704,28 +736,21 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     // MARK: System
 
     private func observe() {
-        let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil,
-                                            queue: .main) { @Sendable [weak self] note in
-            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+        let broker = AudioSessionBroker.shared
+        observers.append(broker.observeInterruptions(queue: .main) { @Sendable [weak self] event in
             // Both hear the end: a system call was held, the phone's voice chat paused (#9887), neither ended.
-            if type == .ended {
-                let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
-                MainActor.assumeIsolated { self?.events?(.interruptionEnded(shouldResume: options.contains(.shouldResume))) }
-                return
+            switch event {
+            case .ended(let shouldResume):
+                MainActor.assumeIsolated { self?.events?(.interruptionEnded(shouldResume: shouldResume)) }
+            case .began:
+                MainActor.assumeIsolated { self?.interrupted() }
             }
-            guard type == .began else { return }
-            MainActor.assumeIsolated { self?.interrupted() }
         })
-        observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil,
-                                            queue: .main) { @Sendable [weak self] _ in
+        observers.append(broker.observeMediaServicesReset(queue: .main) { @Sendable [weak self] in
             MainActor.assumeIsolated { self?.events?(.reset) }
         })
         // Headphones in or out, Bluetooth connected or gone: choose the route again (`VoiceRoute`).
-        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil,
-                                            queue: .main) { @Sendable [weak self] note in
-            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
-                .flatMap(AVAudioSession.RouteChangeReason.init)
+        observers.append(broker.observeRouteChanges(queue: .main) { @Sendable [weak self] reason in
             MainActor.assumeIsolated { self?.routeMoved(reason) }
         })
         watchEngine()
@@ -759,17 +784,17 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     private func routeMoved(_ reason: AVAudioSession.RouteChangeReason?) {
         guard engine != nil else { return }
-        let session = AVAudioSession.sharedInstance()
+        let broker = AudioSessionBroker.shared
         if owner == .app {
             let change: VoiceRoute.Change = switch reason {
             case .newDeviceAvailable: .deviceArrived
             case .oldDeviceUnavailable: .deviceLeft
             default: .other
             }
-            follow(route.changed(Self.snapshot(session), change, at: .now), why: Self.describe(reason))
+            follow(route.changed(Self.snapshot(broker), change, at: .now), why: Self.describe(reason))
         } else {
             // The system routes a call: the route is only followed, never moved.
-            Self.log.notice("voice: call route after \(Self.describe(reason), privacy: .public): \(Self.describe(session), privacy: .public)")
+            Self.log.notice("voice: call route after \(Self.describe(reason), privacy: .public): \(Self.describe(broker), privacy: .public)")
         }
         // An engine the change stopped without telling (the configuration change normally does).
         routeChanged()
@@ -783,7 +808,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         guard let engine, !engine.isRunning else { return }
         do {
             try rewire(engine)
-            Self.log.notice("voice: audio route changed, microphone set up again (\(Self.describe(AVAudioSession.sharedInstance()), privacy: .public))")
+            Self.log.notice("voice: audio route changed, microphone set up again (\(Self.describe(), privacy: .public))")
         } catch {
             Self.log.notice("voice: the engine would not start again on the new route, building a new one")
             do {
@@ -800,11 +825,11 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     /// Applies what `VoiceRoute` decided. Failing to move the route never ends the call: it goes on where it is.
     private func follow(_ plan: VoiceRoute.Plan, why: String) {
-        let session = AVAudioSession.sharedInstance()
+        let broker = AudioSessionBroker.shared
         if let id = plan.input {
-            if let port = session.availableInputs?.first(where: { $0.uid == id }) {
+            if let port = broker.availableInputs.first(where: { $0.uid == id }) {
                 do {
-                    try session.setPreferredInput(port)
+                    try broker.setPreferredInput(port)
                     preferredInput = true
                 } catch {
                     Self.log.notice("voice: could not prefer the \(port.portType.rawValue, privacy: .public) microphone: \(error.localizedDescription, privacy: .public)")
@@ -813,21 +838,21 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
         if plan.speaker {
             do {
-                try session.overrideOutputAudioPort(.speaker)
+                try broker.overrideOutputAudioPort(.speaker)
                 overrodeOutput = true
             } catch {
                 Self.log.notice("voice: could not move the voice to the speaker: \(error.localizedDescription, privacy: .public)")
             }
         }
         // Port kinds only, never device names (they can carry a person's name).
-        Self.log.notice("voice: route after \(why, privacy: .public): \(Self.describe(session), privacy: .public)\(plan == .keep ? "" : " (moved)", privacy: .public)")
+        Self.log.notice("voice: route after \(why, privacy: .public): \(Self.describe(broker), privacy: .public)\(plan == .keep ? "" : " (moved)", privacy: .public)")
     }
 
     /// The session as `VoiceRoute` sees it (also the meeting's spoken answers, `MeetingSpeaker`).
-    static func snapshot(_ session: AVAudioSession) -> VoiceRoute.Snapshot {
-        let route = session.currentRoute
+    static func snapshot(_ broker: AudioSessionBroker = .shared) -> VoiceRoute.Snapshot {
+        let route = broker.currentRoute
         return VoiceRoute.Snapshot(outputs: route.outputs.map(device), inputs: route.inputs.map(device),
-                                   available: (session.availableInputs ?? []).map(device))
+                                   available: broker.availableInputs.map(device))
     }
 
     private static func device(_ port: AVAudioSessionPortDescription) -> VoiceRoute.Device {
@@ -852,9 +877,9 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     /// The route as `describe(_:)` gives it, with how long after the player renders it is heard (#13963): the output
     /// latency, which delays every completion, and the I/O buffer, which is how old a render position can be.
-    static func describe(_ session: AVAudioSession) -> String {
-        let latency = Int((session.outputLatency * 1000).rounded()), buffer = Int((session.ioBufferDuration * 1000).rounded())
-        return describe(session.currentRoute) + ", output latency \(latency) ms, I/O buffer \(buffer) ms"
+    static func describe(_ broker: AudioSessionBroker = .shared) -> String {
+        let latency = Int((broker.outputLatency * 1000).rounded()), buffer = Int((broker.ioBufferDuration * 1000).rounded())
+        return describe(broker.currentRoute) + ", output latency \(latency) ms, I/O buffer \(buffer) ms"
     }
 
     static func describe(_ route: AVAudioSessionRouteDescription) -> String {

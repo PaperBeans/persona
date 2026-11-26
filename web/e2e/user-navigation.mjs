@@ -24,8 +24,8 @@ const RAIL = "[data-nav-rail]";
 const PREVIEW = "[data-nav-preview], [data-nav-rail-preview]";
 const MID = "demo";
 const SID = "navigation-demo";
-const WIDE = { width: 1600, height: 900 };
-const NARROW = { width: 1024, height: 820 };
+const WIDE = { width: 1440, height: 900 };
+const NARROW = { width: 390, height: 844 };
 const INPUTS = 16;
 const MANY_INPUTS = 240;
 const TIMEOUT_MS = 15_000;
@@ -52,7 +52,8 @@ function transcript(count) {
   const start = Date.UTC(2026, 0, 1);
   return Array.from({ length: count }, (_, index) => {
     const seq = index * 2 + 1;
-    const paragraphs = count > INPUTS ? 2 : 7;
+    // Keep enough content below the last anchor for it to reach the top on a jump.
+    const paragraphs = count > INPUTS ? (index === count - 1 ? 14 : 2) : 7;
     return [
       { id: `nav-user-${index}#0`, seq, ts: new Date(start + seq * 1000).toISOString(), role: "user", kind: "text", text: input(index) },
       { id: `nav-answer-${index}#0`, seq: seq + 1, ts: new Date(start + (seq + 1) * 1000).toISOString(), role: "assistant", kind: "text",
@@ -91,16 +92,18 @@ async function geometry(page) {
     const sc = document.querySelector(chat), nav = document.querySelector(rail);
     if (!sc || !nav) return null;
     const rect = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
-    return { chat: rect(sc), rail: rect(nav), overflow: document.documentElement.scrollWidth - innerWidth };
+    const content = sc.querySelector("[data-chat-content]");
+    const sidebar = document.querySelector("[data-sidebar-column]");
+    return { chat: rect(sc), rail: rect(nav), content: rect(content), sidebar: rect(sidebar), overflow: document.documentElement.scrollWidth - innerWidth };
   }, [CHAT, RAIL]);
 }
-async function rightEdge(page) {
+async function leftGutter(page) {
   const box = await geometry(page);
   assert.ok(box, "The body scroller and rail exist");
   assert.ok(box.rail.width > 0 && box.rail.height > 0, "The rail has a real hit strip");
-  assert.ok(box.rail.left > (box.chat.left + box.chat.right) / 2, "The rail is on the right, not the old left margin");
-  assert.ok(box.chat.right - box.rail.right >= -2 && box.chat.right - box.rail.right <= 48, "The rail follows the body scroller's right edge");
-  assert.ok(box.rail.right <= await page.evaluate(() => innerWidth), "The rail stays inside the viewport");
+  assert.ok(box.rail.left > box.chat.left && box.rail.left > box.sidebar.right, "The rail starts inside the chat pane after the app sidebar");
+  assert.ok(box.content.left - box.rail.right >= 12, "The rail fits clear of the centered transcript");
+  assert.ok(box.rail.left - box.chat.left <= 16, "The rail follows the left edge of the pane");
   assert.ok(box.overflow <= 1, "The page does not overflow horizontally");
   return box;
 }
@@ -175,14 +178,14 @@ async function previewStyle(page, index) {
       titleWhitespace: h.whiteSpace, lines: p.webkitLineClamp };
   });
   assert.equal(style.radius, "16px");
-  assert.equal(style.padding, "20px");
+  assert.equal(style.padding, "16px");
   assert.equal(style.border, "1px");
   assert.notEqual(style.shadow, "none");
   assert.ok(Number(style.weight) >= 600);
   assert.equal(style.titleWhitespace, "nowrap");
-  assert.equal(style.lines, "2");
+  assert.equal(style.lines, "3");
   const box = await page.locator(PREVIEW).boundingBox(), mark = await tick(page, index).boundingBox();
-  assert.ok(box.x + box.width <= mark.x + 1, "The card is left of the right-edge rail");
+  assert.ok(Math.abs(box.x - (mark.x + mark.width)) <= 1, "The card's hover bridge starts at the right edge of the tick");
   assert.ok(Math.abs(box.y + box.height / 2 - mark.y - mark.height / 2) < 2, "The card aligns vertically with its input");
   const profile = await page.locator(`${RAIL} [data-nav-mark]`).evaluateAll((marks) => marks.map((mark) => ({ width: parseFloat(mark.style.width), opacity: parseFloat(mark.style.opacity) })));
   assert.ok(profile[index - 1].width > profile[index - 2].width && profile[index - 2].width > profile[index - 3].width, "Marks shorten smoothly away from hover");
@@ -192,19 +195,22 @@ async function previewStyle(page, index) {
 
 async function idleMarks(page) {
   assert.equal(await page.locator(PREVIEW).count(), 0, "Idle widths are checked without a preview");
-  await page.waitForFunction((rail) => [...document.querySelectorAll(`${rail} [data-nav-mark]`)].every((mark) =>
-    Math.abs(mark.getBoundingClientRect().width - parseFloat(mark.style.width)) < 0.1), RAIL);
+  await page.waitForFunction((rail) => [...document.querySelectorAll(`${rail} [data-nav-mark]`)].every((mark) => {
+    const box = mark.getBoundingClientRect();
+    return Math.abs(box.width - parseFloat(mark.style.width)) < 0.1
+      && Math.abs(box.height - parseFloat(mark.style.height)) < 0.1
+      && Math.abs(Number(getComputedStyle(mark).opacity) - Number(mark.style.opacity)) < 0.001;
+  }), RAIL);
   const marks = await page.locator(`${RAIL} [data-nav-mark]`).evaluateAll((nodes) => nodes.map((mark) => ({
     width: mark.getBoundingClientRect().width, height: mark.getBoundingClientRect().height,
     current: mark.dataset.navMark === "current", color: getComputedStyle(mark).backgroundColor,
     opacity: getComputedStyle(mark).opacity,
   })));
   assert.ok(marks.length > 1, "Compare multiple rendered marks");
-  assert.ok(marks.every((mark) => Math.abs(mark.width - 6) < 0.1), "Every idle mark uses the same short tick width, including the current input");
-  assert.ok(marks.every((mark) => Math.abs(mark.height - 1.5) < 0.1), "The current idle input uses color emphasis, not larger geometry");
+  assert.ok(marks.filter((mark) => !mark.current).every((mark) => Math.abs(mark.width - 6) < 0.1 && Math.abs(mark.height - 1) < 0.1), "Idle marks stay short and thin");
   const current = marks.find((mark) => mark.current), other = marks.find((mark) => !mark.current);
-  assert.ok(current && other && current.color !== other.color && current.opacity === "1", "Current-position color emphasis remains");
-  return { marks: marks.length, widths: [...new Set(marks.map((mark) => mark.width))], currentUsesColorOnly: true };
+  assert.ok(current && other && current.color !== other.color && Number(current.opacity) > 0.999 && current.width > other.width && current.height > other.height, "The current mark has stronger color, width and thickness");
+  return { marks: marks.length, widths: [...new Set(marks.map((mark) => mark.width))], current };
 }
 
 async function armExitProbe(page) {
@@ -225,11 +231,10 @@ async function armExitProbe(page) {
 async function bodyWheel(page, delta) {
   const box = await page.locator(CHAT).boundingBox();
   assert.ok(box, "The chat is visible");
-  await page.mouse.move(box.x + Math.min(32, box.width / 4), box.y + box.height * 0.5);
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5);
   const before = await page.locator(CHAT).evaluate((el) => el.scrollTop);
   await page.mouse.wheel(0, delta);
   await page.waitForFunction(([chat, top]) => Math.abs((document.querySelector(chat)?.scrollTop ?? top) - top) > 5, [CHAT, before]);
-  await page.waitForFunction((rail) => Number(getComputedStyle(document.querySelector(rail)).opacity) > 0.95, RAIL);
 }
 async function settleScroll(page) {
   await page.locator(CHAT).evaluate(async (el) => {
@@ -244,21 +249,15 @@ async function settleScroll(page) {
     if (still < 4) throw new Error("The body scroll did not settle");
   });
 }
-async function quietAndWake(page, run) {
+async function quietAndFocus(page, run) {
   await page.evaluate(() => document.activeElement?.blur());
   await bodyWheel(page, 80);
   await settleScroll(page);
-  const before = Date.now();
-  await page.waitForFunction((rail) => Number(getComputedStyle(document.querySelector(rail)).opacity) <= 0.01, RAIL, { timeout: 2800, polling: 40 });
-  const elapsedMs = Date.now() - before;
-  assert.ok(elapsedMs >= 1500, "The rail must not disappear immediately after body scrolling");
-  assert.equal(await page.locator(RAIL).count(), 1, "An invisible rail retains its edge trigger");
+  // Let the former 2s idle delay plus its fade elapse.
+  await page.waitForTimeout(2400);
+  const opacity = await page.locator(RAIL).evaluate((el) => Number(getComputedStyle(el).opacity));
+  assert.equal(opacity, 1, "The rail remains visible after scrolling settles");
   await screenshot(page, run, "idle");
-  const box = await geometry(page);
-  await page.mouse.move(box.rail.right - Math.min(4, box.rail.width / 2), (box.rail.top + box.rail.bottom) / 2);
-  await page.waitForFunction((rail) => Number(getComputedStyle(document.querySelector(rail)).opacity) > 0.95, RAIL);
-  await page.mouse.move(box.chat.left + 32, (box.chat.top + box.chat.bottom) / 2);
-  await page.waitForFunction((rail) => Number(getComputedStyle(document.querySelector(rail)).opacity) <= 0.01, RAIL, { timeout: 2800 });
   // Use actual Tab traversal, not focus() on a possibly negative-tabindex element.
   await page.evaluate(() => document.activeElement?.blur());
   let reached = false;
@@ -268,13 +267,14 @@ async function quietAndWake(page, run) {
     reached = await page.evaluate((rail) => !!document.activeElement?.closest(rail), RAIL);
     if (reached) break;
   }
-  assert.ok(reached, "Tab reaches the hidden but focusable edge trigger");
-  await page.waitForFunction((rail) => Number(getComputedStyle(document.querySelector(rail)).opacity) > 0.95, RAIL);
-  assert.ok(await page.locator(PREVIEW).count(), "Tab focus creates an interactive preview, not an idle current-position bell");
+  assert.ok(reached, "Tab reaches the navigation rail");
+  assert.ok(await page.locator(PREVIEW).count(), "Tab focus opens the preview");
+  const outline = await page.locator(`${RAIL} button[aria-describedby]`).evaluate((button) => getComputedStyle(button).outlineStyle);
+  assert.equal(outline, "solid", "Keyboard focus is visible on the selected tick");
   const focusedMark = await page.locator(`${RAIL} [data-nav-mark='hover'], ${RAIL} [data-nav-mark='current-hover']`).evaluate(el => parseFloat(el.style.width));
   assert.ok(focusedMark >= 22, "Keyboard focus keeps the interactive expansion");
   await screenshot(page, run, "edge-focus");
-  return { idleAfterSettledScrollMs: elapsedMs, opacity: 0, tabReachable: reached };
+  return { idleAfterSettledScrollMs: 2400, opacity, tabReachable: reached };
 }
 async function fixture(context, run, count) {
   const items = transcript(count);
@@ -355,27 +355,57 @@ async function open(browser, name, theme, viewport, count, reducedMotion = "no-p
   page.on("console", (message) => { if (message.type() === "error") run.consoleErrors.push(message.text()); });
   page.on("response", (response) => { if (response.status() >= 400) run.failedReads.push({ path: new URL(response.url()).pathname, status: response.status() }); });
   await page.goto(new URL(`/s/${MID}/${SID}`, base).href);
-  await page.locator(`${CHAT} [data-user-bubble]`).last().waitFor();
-  await page.waitForFunction(([chat, count]) => document.querySelector(chat)?.querySelectorAll("[data-user-bubble]").length === count, [CHAT, count]);
+  await page.locator(`${CHAT} [data-user-bubble]`).getByText(input(count - 1), { exact: true }).waitFor();
+  // Long chats keep anchors for earlier exchanges and mount rich bubbles as they approach the viewport.
+  await page.waitForFunction(([chat, count]) => document.querySelector(chat)?.querySelectorAll('[data-line^="seg:nav-user-"]').length === count, [CHAT, count]);
   await page.waitForFunction((dark) => document.documentElement.classList.contains("dark") === dark, theme === "dark");
-  try {
-    await page.locator(RAIL).waitFor();
-  } catch (error) {
-    await page.screenshot({ path: join(output, `${name}-launch-failure.png`) });
-    const diagnostic = await page.locator(CHAT).evaluate((sc) => ({ height: sc.clientHeight, width: sc.clientWidth, fine: matchMedia("(any-pointer: fine)").matches, lines: sc.querySelectorAll("[data-line]").length }));
-    throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}`);
+  if (viewport.width === WIDE.width) {
+    try {
+      await page.locator(RAIL).waitFor();
+    } catch (error) {
+      await page.screenshot({ path: join(output, `${name}-launch-failure.png`) });
+      const diagnostic = await page.locator(CHAT).evaluate((sc) => ({ height: sc.clientHeight, width: sc.clientWidth, fine: matchMedia("(any-pointer: fine)").matches, lines: sc.querySelectorAll("[data-line]").length }));
+      throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}`);
+    }
+    assert.ok((await page.locator(RAIL).getAttribute("aria-label"))?.trim(), "The navigation region has a screen-reader label");
   }
-  assert.ok((await page.locator(RAIL).getAttribute("aria-label"))?.trim(), "The navigation region has a screen-reader label");
   return { context, page, run };
 }
 async function standard(browser, theme, size) {
   const name = `${size}-${theme}`;
-  const { context, page, run } = await open(browser, name, theme, size === "wide" ? WIDE : NARROW, INPUTS);
+  const { context, page, run } = await open(browser, name, theme, size === "wide" ? WIDE : NARROW, size === "wide" ? INPUTS : INPUTS - 1);
   try {
-    await check(`${name}: body scrolling reveals right-edge navigation`, async () => {
+    if (size === "narrow") {
+      await check(`${name}: the narrow conversation scrolls without a rail or extra padding`, async () => {
+        await bodyWheel(page, -420);
+        await settleScroll(page);
+        assert.equal(await page.locator(RAIL).count(), 0);
+        const layout = await page.locator(CHAT).evaluate((sc) => {
+          const { paddingLeft, paddingRight } = getComputedStyle(sc.querySelector("[data-chat-content]"));
+          return { paddingLeft, paddingRight, width: innerWidth, pageWidth: document.documentElement.scrollWidth };
+        });
+        assert.equal(layout.paddingLeft, layout.paddingRight);
+        assert.equal(layout.width, layout.pageWidth);
+        await screenshot(page, run, "without-rail");
+        await page.evaluate(() => { document.documentElement.dataset.textSize = "large"; });
+        await settleScroll(page);
+        assert.equal(await page.locator(RAIL).count(), 0);
+        await screenshot(page, run, "large-text");
+        return layout;
+      });
+      return;
+    }
+    await check(`${name}: the rail is visible by default in the left gutter`, async () => {
+      const box = await leftGutter(page);
+      assert.equal(await page.locator(RAIL).evaluate((el) => getComputedStyle(el).opacity), "1");
+      assert.equal(await page.locator(PREVIEW).count(), 0);
+      await screenshot(page, run, "rest");
+      return box;
+    });
+    await check(`${name}: body scrolling updates the current input`, async () => {
       await bodyWheel(page, -420);
       await settleScroll(page);
-      const box = await rightEdge(page);
+      const box = await leftGutter(page);
       assert.equal(await page.locator(`${RAIL} button[data-tick]`).count(), INPUTS, "Every loaded user input has a mark");
       // Independent geometry oracle for the current input; do not infer it from aria-current itself.
       const expected = await page.locator(CHAT).evaluate((sc) => {
@@ -391,11 +421,13 @@ async function standard(browser, theme, size) {
       return { box, currentInput: expected + 1, idle };
     });
     await check(`${name}: hover previews a user input and a short answer`, async () => {
+      const left = (await tick(page, 3).locator("[data-nav-mark]").boundingBox()).x;
       await tick(page, 3).hover();
       await preview(page, 3);
       await page.waitForTimeout(2200);
       assert.ok(await page.locator(RAIL).evaluate((el) => Number(getComputedStyle(el).opacity) > 0.95), "Hover keeps the navigation visible");
       const style = await previewStyle(page, 3);
+      assert.equal((await tick(page, 3).locator("[data-nav-mark]").boundingBox()).x, left, "The tick's left edge stays fixed as it expands rightward");
       const profile = await page.locator(`${RAIL} button[data-tick]`).evaluateAll((buttons) => buttons.map((button) => {
         const mark = button.querySelector("[data-nav-mark]");
         return { index: Number(button.dataset.tick), current: button.getAttribute("aria-current") === "true", width: mark.getBoundingClientRect().width };
@@ -424,12 +456,12 @@ async function standard(browser, theme, size) {
       await screenshot(page, run, "hover-card");
       await armExitProbe(page);
       const chat = await page.locator(CHAT).boundingBox();
-      await page.mouse.move(chat.x + 32, chat.y + chat.height / 2);
+      await page.mouse.move(chat.x + chat.width * 0.7, chat.y + chat.height / 2);
       await page.waitForFunction((selector) => !document.querySelector(selector), PREVIEW, { timeout: 350, polling: "raf" });
       const sample = await page.evaluate(() => { window.__navExitCleanup(); return window.__navExitSample; });
       const elapsedMs = sample.hiddenAt - sample.leftAt;
       assert.ok(sample.leftAt !== null && sample.hiddenAt !== null && elapsedMs >= 0 && elapsedMs < 100, "No grace-period timer may delay the card's removal");
-      assert.equal(await page.locator(RAIL).getAttribute("data-visible"), "true", "Immediate card removal does not prematurely hide the rail");
+      assert.equal(await page.locator(RAIL).evaluate((el) => getComputedStyle(el).opacity), "1");
       const idle = await idleMarks(page);
       await screenshot(page, run, "after-exit");
       return { elapsedMs, previewPresentAfterExit: false, railRetained: true, idle };
@@ -477,7 +509,7 @@ async function standard(browser, theme, size) {
       await page.waitForFunction((selector) => !document.querySelector(selector), PREVIEW);
       assert.equal(run.interceptedWrites.length, writesBeforeEscape, "Escape in the navigator must not interrupt the session");
     });
-    await check(`${name}: idle fades to zero; pointer and Tab wake the retained edge`, () => quietAndWake(page, run));
+    await check(`${name}: the resting rail stays visible and is reachable by Tab`, () => quietAndFocus(page, run));
     await check(`${name}: no writes reach the hub and no page or overlay errors`, async () => {
       assert.ok(run.mockHellos > 0, "The actual mock socket handshake was observed");
       assert.ok(run.reads.some((r) => r.path.endsWith("/items")), "The actual app requested the synthetic transcript");
@@ -488,10 +520,11 @@ async function standard(browser, theme, size) {
 }
 async function many(browser, theme) {
   const name = `many-${theme}`;
-  const { context, page, run } = await open(browser, name, theme, NARROW, MANY_INPUTS, "reduce");
+  const { context, page, run } = await open(browser, name, theme, WIDE, MANY_INPUTS, "reduce");
   try {
-    await bodyWheel(page, -160);
     await check(`${name}: every loaded mark remains keyboard reachable, including the earliest`, async () => {
+      await bodyWheel(page, -100_000);
+      await page.waitForFunction(([rail, first]) => document.querySelector(`${rail} button[data-tick="0"]`)?.getAttribute("aria-label").includes(first), [RAIL, input(0)]);
       await page.locator(RAIL).focus();
       await page.keyboard.press("Home");
       await waitForSelection(page, 0);
@@ -513,29 +546,37 @@ async function many(browser, theme) {
         }
       }
       assert.deepEqual(reached, Array.from({ length: MANY_INPUTS }, (_, index) => index), "Windowing must not discard the older inputs");
+      const track = page.locator("[data-nav-track]");
+      const trackHeight = await track.evaluate(el => el.clientHeight);
+      const pitch = (await tick(page, MANY_INPUTS - 1).boundingBox()).height;
+      assert.ok(pitch >= 7 && pitch <= 8);
+      assert.ok(maxRenderedMarks > 28 && maxRenderedMarks <= Math.ceil(trackHeight / pitch) + 9);
       await page.keyboard.press("Home");
       await waitForSelection(page, 0);
       await page.keyboard.press("Enter");
       await landed(page, 0);
-      await check(`${name}: wheel windows reach later and earlier inputs without losing them`, async () => {
+      await check(`${name}: the rail's wheel scrolls its own track`, async () => {
         const count = await page.locator(`${RAIL} button[data-tick]`).count();
-        if (count === MANY_INPUTS) return { windowing: "not needed; all inputs rendered" };
-        const box = await page.locator(RAIL).boundingBox();
-        assert.ok(box, "The windowed rail has a real wheel target");
-        await page.mouse.move(box.x + box.width / 2, box.y + 4);
+        const box = await track.boundingBox();
+        assert.ok(box, "The rail has a visible wheel target");
+        await page.waitForFunction(() => document.querySelector("[data-nav-track]").scrollTop === 0);
+        const before = await page.locator(CHAT).evaluate((sc) => sc.scrollTop);
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.wheel(0, 400);
-        await page.waitForFunction((rail) => Number(document.querySelector(`${rail} button[data-tick]`)?.getAttribute("data-tick")) > 0, RAIL);
-        const later = await selectedIndex(page);
-        assert.ok(later > 0, "Wheel navigation exposes later inputs");
+        await page.waitForFunction(() => document.querySelector("[data-nav-track]").scrollTop > 100);
+        const later = Number(await track.locator("button[data-tick]").first().getAttribute("data-tick")) + 6;
+        await tick(page, later).hover();
         await preview(page, later);
         await page.mouse.wheel(0, -400);
-        await page.waitForFunction((rail) => !!document.querySelector(`${rail} button[data-tick='0']`), RAIL);
+        await page.waitForFunction(() => document.querySelector("[data-nav-track]").scrollTop === 0);
+        await tick(page, 0).hover();
         await preview(page, 0);
+        assert.equal(await page.locator(CHAT).evaluate((sc) => sc.scrollTop), before, "Wheel input on the rail does not move the transcript");
         return { renderedMarks: count, laterInput: later + 1, earliestRestored: true };
       });
       await tick(page, 0).click();
       await landed(page, 0);
-      await rightEdge(page);
+      await leftGutter(page);
       await healthy(page, run);
       return { reachedInputs: reached.length, maxRenderedMarks, earliestAccessibleAfterTraversingAll: true };
     });
@@ -551,7 +592,7 @@ try {
     assert.equal(health.ok, true);
     return { version: health.version, readOnlyProbe: true };
   });
-  browser = await chromium.launch({ channel: "chrome", headless: true });
+  browser = await chromium.launch({ channel: "chrome", executablePath: process.env.CHROME_BIN, headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
   results.browser = browser.version();
   for (const theme of ["light", "dark"]) {
     await standard(browser, theme, "wide");
@@ -562,6 +603,7 @@ try {
 } catch (error) {
   results.status = timedOut ? "timeout" : "fail";
   results.errors.push(error.message);
+  console.error(error.stack);
   process.exitCode = 1;
 } finally {
   clearTimeout(deadline);

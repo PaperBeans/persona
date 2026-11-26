@@ -122,6 +122,7 @@
   "secret_run_decline": "Decline",
   "secret_run_run": "Run",
   "secret_run_note": "Used once, never saved. The assistant never sees it.",
+  "secret_run_env_warning": "Warning: the typed password goes directly to every command listed above via PERSONA_SECRET. Encoded output may evade redaction.",
   "secret_run_card_only": "Answer it on the card: type the password and Run, or Decline",
   "secret_handoff_title": "Hand secrets to an Agent?",
   "secret_handoff_lead": "“{agent}” on {machine} gets these for this run only:",

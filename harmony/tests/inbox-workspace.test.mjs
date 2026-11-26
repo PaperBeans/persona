@@ -56,7 +56,7 @@ registerHooks({
   }
 });
 
-const { InboxAttachmentDraft, InboxWorkspace, inboxRowSourceLabel } = await import('../entry/src/main/ets/models/InboxWorkspace.ets');
+const { InboxAttachmentDraft, InboxWorkspace, inboxRowSourceLabel, inboxTier } = await import('../entry/src/main/ets/models/InboxWorkspace.ets');
 const { HubRepository } = await import('../entry/src/main/ets/models/HubRepository.ets');
 const { ResourceRow } = await import('../entry/src/main/ets/models/Wire.ets');
 const { HttpFailure, EndpointConfig } = await import('persona-inbox:transport');
@@ -1021,5 +1021,135 @@ test('reply and process accept a matching direct entry or item envelope before c
     if (operation === 'reply') { assert.equal(workspace.writeState, 'sent'); assert.equal(workspace.replyDraft, ''); }
     else assert.equal(workspace.detail.done, true);
     await workspace.close();
+  }
+});
+
+test('the phone Inbox bar honors Hub status, legacy triage, Done and the stored search choice', () => {
+  const workspace=new InboxWorkspace();
+  const make=(id,extra={})=>rowFor({id,title:id,source:'lark',account:'a',...extra});
+  workspace.items=[make('review',{status:'action',tier:'noise'}),make('processing',{status:'working'}),
+    make('report',{tier:'fyi'}),make('bulk',{tier:'noise'}),make('before-triage',{tier:'working'}),
+    make('archived',{tier:'action',done_at:'2026-11-17T04:00:00Z'})];
+  assert.equal(inboxTier({status:'unrecognized',tier:'noise'}),'noise');
+  const view=()=>workspace.listView();
+  assert.deepEqual(view().choices.map(x=>[x.key,x.count]),[['action',2],['working',1],['fyi',1],['done',1],['all',0]]);
+  assert.deepEqual(workspace.filteredItems.map(x=>x.id),['review','before-triage']);
+  workspace.statusFilter='fyi';workspace.setSearch('archived');
+  assert.equal(workspace.statusFilter,'all');assert.deepEqual(workspace.filteredItems.map(x=>x.id),['archived']);
+  workspace.statusFilter='done';workspace.setSearch('');assert.equal(workspace.statusFilter,'fyi');
+  workspace.statusFilter='all';assert.deepEqual(view().sections.map(x=>x.key),['action','working','fyi','noise','done']);
+  workspace.sourceFilter='mail';workspace.statusFilter='working';
+  assert.deepEqual(view().choices.map(x=>x.key),['action','working','all']);
+});
+
+test('Inbox groups each open card under its source, orders Agent requests by their own time and searches their own text',async()=>{
+  const rows=[{id:'dm',source:'lark',account:'chat',kind:'dm',title:'A message',tier:'action'},
+    {id:'thread',source:'mail',account:'box',kind:'mail',title:'A thread',tier:'action'},
+    {id:'topic',source:'lark',account:'chat',kind:'bot',title:'A group discussion',tier:'action'}];
+  const q=(id,kind,time,extra={})=>({id,kind,manager:'work',machine_id:'machine',session_id:'session',session_title:'Review',created_at:time,...extra});
+  const asks=[q('q','question','2026-01-02T11:00Z',{questions:[{question:'Which format?'}]}),
+    q('p','plan','2026-01-02T10:00Z',{plan:'\n ## Support photos\n\n1. Details'}),
+    q('cmd','permission','2026-01-02T12:00Z',{tool_name:'Bash',tool_input:{command:'swift test'}}),
+    q('muted','plan','2026-01-02T09:00Z',{muted:true})];
+  const f=makeHarness({rows,handle:async call=>{
+    if (pathOnly(call.path)==='/api/v1/interactions') return {interactions:asks};
+    if (pathOnly(call.path)==='/api/v1/mail/accounts') return {accounts:[{id:'box',email:'me@example.com'}]};
+  }});
+  const session=ResourceRow.from({session_id:'session',machine_id:'machine',manager:'work',title:'Recent chat title',last_text:'Last chat text'},'session');
+  session.group=f.client.profile.id; f.client.sessions=[session];
+  const workspace=new InboxWorkspace();await workspace.open(f.client);await waitFor(()=>workspace.waitingAgents.length===3 && workspace.filterAddresses.box);
+  const section=workspace.listView().sections[0];
+  assert.deepEqual(section.groups.map(g=>[g.key,g.rows.length]),[['agents',3],['lark',2],['mail:box',1]]);
+  assert.deepEqual(section.groups[0].rows.map(row=>row.detail),['Support photos','Which format?','swift test']);
+  assert.deepEqual(section.groups[0].rows.map(row=>row.title),['Review','Review','Review']);
+  assert.equal(workspace.filterAccountName('box'),'me@example.com');assert.deepEqual(workspace.sourceAccounts,['box']);
+  workspace.setSearch('Which format');assert.deepEqual(workspace.filteredItems.map(row=>row.detail),['Which format?']);
+  workspace.setSearch('');workspace.kindFilter='agent';assert.equal(workspace.filteredItems.length,3);
+  workspace.kindFilter='group';assert.deepEqual(workspace.filteredItems.map(row=>row.id),['topic']);
+  workspace.kindFilter='dm';assert.deepEqual(workspace.filteredItems.map(row=>row.id),['dm']);
+  workspace.kindFilter='';workspace.accountFilter='box';assert.deepEqual(workspace.filteredItems.map(row=>row.id),['thread']);
+  await workspace.close();
+});
+
+test('server done cursors are read in order, overlapping recent rows win, and duplicate history pages stop',async()=>{
+  const seen=[];
+  const old={id:'old',title:'Earlier',source:'mail',account:'a',done_at:'2026-11-11T06:00:00Z'};
+  const current={...old,id:'current',title:'Current',done_at:'2026-11-16T06:00:00Z'};
+  const f=makeHarness({rows:[current],handle:async req=>{
+    const path=pathOnly(req.path);
+    if (path==='/api/v1/inbox/done/days') return {days:[{day:'2026-11-11',count:1}]};
+    if (path!=='/api/v1/inbox/done')return undefined;
+    seen.push(req.path);return {items:[{...current,title:'Stale copy'},old],next:{before:old.done_at,before_id:'old'}};
+  }});
+  const workspace=new InboxWorkspace();await workspace.open(f.client);workspace.statusFilter='done';
+  await workspace.loadOlderDone();await workspace.loadOlderDone();await workspace.loadOlderDone();
+  assert.deepEqual(workspace.filteredItems.map(x=>x.title),['Current','Earlier']);assert.equal(seen.length,2);
+  assert.equal(queryValue(seen[1],'before_id'),'old');assert.equal(queryValue(seen[1],'manager'),'work');assert.equal(workspace.historyEnded,true);
+  await workspace.close();
+});
+
+test('an outstanding history request cannot populate a closed or newly bound Inbox',async()=>{
+  let entered,finish;const arrived=new Promise(r=>{entered=r});
+  const f=makeHarness({handle:async req=>{
+    if(pathOnly(req.path)!=='/api/v1/inbox/done')return undefined;
+    entered();return new Promise(r=>{finish=r});
+  }});
+  const workspace=new InboxWorkspace();await workspace.open(f.client);
+  const loading=workspace.loadOlderDone();await arrived;await workspace.close();
+  finish({items:[{id:'old',source:'mail',done_at:'2026-11-12T00:00:00Z'}]});await loading;
+  assert.deepEqual(workspace.doneItems,[]);
+});
+
+test('grouping open Inbox items by local calendar day keeps waiting Agents first and restores source grouping', () => {
+  const workspace = new InboxWorkspace();
+  const now = new Date(2026, 10, 23, 1, 15);
+  function dated(id, days, source = 'lark') {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate()-days, 23, 30);
+    return rowFor({id, title:id, source, account:'mailbox', tier:'action', updated_at:date.toISOString()});
+  }
+  const waiting = ResourceRow.from({session_id:'s',machine_id:'m',title:'Agent'},'session');
+  workspace.waitingAgents = [waiting];
+  workspace.items = [dated('last week',7), dated('two days',2,'mail'), dated('today',0), dated('yesterday',1),
+    dated('six days',6), dated('last month',30), dated('today later',-1,'mail'), rowFor({id:'undated',title:'undated',source:'lark'})];
+  const timed = workspace.listView('', () => '', true, now).sections[0];
+  assert.deepEqual(timed.groups.map(g => g.key), ['agents','time:today','time:yesterday','time:d:2026-11-21','time:d:2026-11-17','time:week','time:month']);
+  assert.deepEqual(timed.groups[0].rows, [waiting]);
+  assert.deepEqual(timed.groups[1].rows.map(r => r.id), ['today','today later']);
+  assert.deepEqual(timed.groups.at(-1).rows.map(r => r.id), ['last month','undated']);
+  assert.deepEqual(workspace.listView().sections[0].groups.map(g => g.key), ['agents','lark','mail:mailbox']);
+  workspace.kindFilter='agent';
+  assert.deepEqual(workspace.listView('', () => '', true, now).sections[0].groups, []);
+  assert.equal(workspace.filteredItems[0], waiting);
+});
+
+test('Inbox time grouping preserves applied filters, does not add a heading to a single open bucket, and leaves in-progress rows flat', () => {
+  const workspace = new InboxWorkspace();
+  const now = new Date(2026,10,23,12);
+  workspace.items=['action','working'].flatMap(tier => ['lark','mail'].map(source =>
+    rowFor({id: tier+source, title: tier+source, tier, status:tier, source, account:'work', updated_at:now.toISOString()})));
+  workspace.sourceFilter='lark';
+  const only = workspace.listView('', () => '', true, now).sections[0];
+  assert.deepEqual(only.groups, []); assert.deepEqual(only.rows.map(r=>r.id),['actionlark']);
+  workspace.sourceFilter='all'; workspace.statusFilter='working';
+  const working = workspace.listView('', () => '', true, now).sections[0];
+  assert.deepEqual(working.groups, []); assert.equal(working.rows.length,2);
+});
+
+test('both compact Inbox list routes select the phone presentation and keep source details separate', () => {
+  const source=readFileSync(new URL('../entry/src/main/ets/pages/Index.ets',import.meta.url),'utf8');
+  const calls=source.split('InboxWorkspacePage({').slice(1);
+  assert.equal(calls.length,2);
+  for (const call of calls) {
+    const argumentsLine=call.split('\n')[0];
+    const binding=/\bphoneList:\s*([^,}]+)/.exec(argumentsLine);
+    assert.ok(binding, 'each Inbox entry passes its phone presentation');
+    const phoneList=new Function('name','return '+binding[1]);
+    assert.equal(phoneList.call({wide:()=>false},'resources'),true);
+    assert.equal(phoneList.call({wide:()=>true},'resources'),false);
+    if (argumentsLine.includes("'resources'")) {
+      for (const detail of ['inbox','todo_source','todo_thread']) {
+        assert.equal(phoneList.call({wide:()=>false},detail),false);
+      }
+    }
   }
 });

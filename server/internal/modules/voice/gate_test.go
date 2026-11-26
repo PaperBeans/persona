@@ -609,13 +609,10 @@ func framesOf(u *fakeUpstream, amp int16) int {
 	})
 }
 
-// sound sends the app's audio at amplitude amp (tone) for d, in 20 ms frames: at once, or in real time (paced).
-func (a *app) sound(d time.Duration, amp int16, paced bool) {
+// sound sends the app's audio at amplitude amp (tone) for d, in 20 ms frames.
+func (a *app) sound(d time.Duration, amp int16) {
 	for range int(d / (20 * time.Millisecond)) {
 		_ = a.c.Write(context.Background(), websocket.MessageBinary, tone(320, amp))
-		if paced {
-			time.Sleep(20 * time.Millisecond)
-		}
 	}
 }
 
@@ -641,9 +638,9 @@ func TestUserVoiceOpensTheGateBeforeTheCaption(t *testing.T) {
 	setVar(t, &echoTail, 100*time.Millisecond)
 	hub, up, a := askedByVoice(t, 300*time.Millisecond, nil)
 	time.Sleep(300*time.Millisecond + echoTail + 200*time.Millisecond) // the question has played out
-	a.sound(200*time.Millisecond, 100, false)                          // the room
-	a.sound(300*time.Millisecond, 3000, false)                         // "the second one"
-	a.sound(100*time.Millisecond, 100, false)
+	a.sound(200*time.Millisecond, 100)                                 // the room
+	a.sound(300*time.Millisecond, 3000)                                // "the second one"
+	a.sound(100*time.Millisecond, 100)
 	waitFor(t, "the service has the user's voice", func() bool { return framesOf(up.fakeUpstream, 3000) == 15 })
 	up.call("dlg1", "回答：第二个")
 	if got := content(up.nextMatch(on("dlg1"))); !strings.Contains(got, "用户的回答已经交给 Claude Code 了") {
@@ -660,26 +657,44 @@ func TestUserVoiceOpensTheGateBeforeTheCaption(t *testing.T) {
 // whatever its level), a handover that says nothing is still refused as unprompted and the card is not answered.
 func TestNoUserVoiceStillRefused(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		sound func(a *app, speech time.Duration)
+		name     string
+		speech   time.Duration
+		echoTail time.Duration
+		sound    func(t *testing.T, up *lateCaptionUpstream, a *app, speech time.Duration)
 	}{
-		{"quiet room", func(a *app, speech time.Duration) {
-			time.Sleep(speech + echoTail + 200*time.Millisecond)
-			a.sound(time.Second, 100, false)
-		}},
-		{"echo", func(a *app, speech time.Duration) {
-			// Its speech, as loud as a voice, from when it reached the app until echoTail is nearly out.
-			a.sound(speech+echoTail-300*time.Millisecond, 3000, true)
-			a.sound(300*time.Millisecond, 100, false)
-			time.Sleep(echoTail)
-		}},
+		{
+			name:     "quiet room",
+			speech:   time.Second,
+			echoTail: 800 * time.Millisecond,
+			sound: func(_ *testing.T, _ *lateCaptionUpstream, a *app, speech time.Duration) {
+				time.Sleep(speech + echoTail + 200*time.Millisecond)
+				a.sound(time.Second, 100)
+			},
+		},
+		{
+			name:     "echo",
+			speech:   300 * time.Millisecond,
+			echoTail: 5 * time.Second,
+			sound: func(t *testing.T, up *lateCaptionUpstream, a *app, speech time.Duration) {
+				// Loud echo (>= spokeVoice) while the model's speech plays and again after playEnd
+				// while well inside echoTail, then quiet room audio. Avoids wall-clock drift from
+				// per-frame sleeps overshooting playEnd+echoTail under CPU load.
+				a.sound(300*time.Millisecond, 3000)
+				waitFor(t, "echo during speech forwarded", func() bool { return framesOf(up.fakeUpstream, 3000) >= 15 })
+				timer := time.NewTimer(speech + 50*time.Millisecond)
+				defer timer.Stop()
+				<-timer.C
+				a.sound(300*time.Millisecond, 3000)
+				waitFor(t, "echo during echoTail forwarded", func() bool { return framesOf(up.fakeUpstream, 3000) >= 30 })
+				a.sound(300*time.Millisecond, 100)
+			},
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			setVar(t, &gateWait, 300*time.Millisecond)
-			setVar(t, &echoTail, 800*time.Millisecond)
-			speech := time.Second
-			hub, up, a := askedByVoice(t, speech, nil)
-			c.sound(a, speech)
+			setVar(t, &echoTail, c.echoTail)
+			hub, up, a := askedByVoice(t, c.speech, nil)
+			c.sound(t, up, a, c.speech)
 			waitFor(t, "the service has the app's audio", func() bool { return framesOf(up.fakeUpstream, 100) >= 15 })
 			up.call("dlg1", "回答：第二个")
 			if got := content(up.nextMatch(on("dlg1"))); !strings.Contains(got, unpromptedWords) {
@@ -718,9 +733,9 @@ func TestEchoCaptionDoesNotOpenTheGate(t *testing.T) {
 			a.until(func(f map[string]any) bool { return f["type"] == "transcript" && f["role"] == "user" })
 			time.Sleep(speech + echoTail + 200*time.Millisecond) // the question has played out
 			if c.voice {
-				a.sound(200*time.Millisecond, 100, false)
-				a.sound(300*time.Millisecond, 3000, false)
-				a.sound(100*time.Millisecond, 100, false)
+				a.sound(200*time.Millisecond, 100)
+				a.sound(300*time.Millisecond, 3000)
+				a.sound(100*time.Millisecond, 100)
 				waitFor(t, "the service has the user's voice", func() bool { return framesOf(up.fakeUpstream, 3000) == 15 })
 			}
 			up.call("dlg1", "回答：第二个")

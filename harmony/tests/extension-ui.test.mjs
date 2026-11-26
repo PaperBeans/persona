@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === '@kit.ArkTS') return { url: 'mock:arkts', shortCircuit: true };
-    if (context.parentURL?.endsWith('/models/ExtensionUI.ets')) {
+    if ((context.parentURL?.endsWith('/models/ExtensionUI.ets') || context.parentURL?.endsWith('/models/InboxSources.ets'))) {
       if (specifier === './ClientModel') return { url: 'mock:client', shortCircuit: true };
       if (specifier === './HubRepository') return { url: 'mock:repository', shortCircuit: true };
       if (specifier === '../design/Strings') return { url: 'mock:strings', shortCircuit: true };
@@ -588,4 +588,76 @@ test('a pure stream mount applies normal receipts only after their version is co
   assert.deepEqual(links,[]);assert.equal(model.busy,true);
   model.receive(JSON.stringify({type:'extension_ui_stream',kind:'snapshot',snapshot:streamSnapshot(view,2)}));
   assert.deepEqual(links,['https://example.com/completed']);assert.equal(model.busy,false);assert.equal(model.canInteract(),true);model.dispose();
+});
+
+test('manager-drawn Inbox Sources keeps its reserved route, owner and presentation links during navigation', async () => {
+  const reads = [], links = [];
+  const view = viewWith({ type: 'button', key: 'graph', title: 'Relationships', action: { id: 'open-graph' } });
+  const fixture = fixtureClient({
+    manager: 'a/b',
+    request: async (path, method, body) => {
+      reads.push([path, method, JSON.parse(body)]);
+      return JSON.stringify({ view });
+    },
+    call: async () => ({ open_url: 'persona://sources-graph', view }),
+  });
+  const model = new ExtensionUIModel();
+  model.bind(fixture.client, '-subscriptions', 'pages', { assistant: 'Ada', graph: true }, undefined, true, url => links.push(url), true, '', true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(reads[0], ['/api/v1/subscriptions/-/ui?manager=a%2Fb', 'POST', { context: { assistant: 'Ada', graph: true, ui_version: 6 }, state: '' }]);
+  await model.performAction('graph', 'open-graph');
+  assert.deepEqual(links, ['persona://sources-graph']);
+  assert.equal(fixture.state.calls[0].path, reads[0][0]);
+  assert.equal(fixture.state.calls[0].body.action, 'open-graph');
+  model.dispose();
+  model.bind(fixture.client, '-subscriptions', 'pages', {}, view, true, url => links.push(url));
+  await model.performAction('graph', 'open-graph');
+  assert.equal(fixture.state.calls.at(-1).path, '/api/v1/extensions/-subscriptions/-/ui/pages');
+  assert.equal(links.length, 1);
+  model.dispose();
+});
+
+test('subscription setup links accept bounded text on the app-owned route', async () => {
+  const { inboxSourcesLink } = await import('../entry/src/main/ets/core/WireCompatibility.ts');
+  assert.deepEqual(inboxSourcesLink('jarvis://ask/?text=C%2B%2B%20%E5%A5%BD'), { kind: 'ask', text: 'C++ 好' });
+  assert.deepEqual(inboxSourcesLink('persona://sources-graph'), { kind: 'graph', text: '' });
+  for (const bad of ['https://ask?text=x', 'persona://ask/other?text=x', 'persona://ask@other?text=x', 'persona://ask?text=%20', 'persona://ask?text=%xy', 'persona://ask?text=' + 'x'.repeat(8001)]) assert.equal(inboxSourcesLink(bad), undefined, bad.slice(0,32));
+});
+
+test('source relationships preserve manager ordering, overlapping destinations and the nested settings back path', async () => {
+  const { InboxSourcesGraph, InboxSourcesNavigation } = await import('../entry/src/main/ets/models/InboxSources.ets');
+  const nav = new InboxSourcesNavigation();
+  nav.reset(); const home = nav.current();
+  nav.push('', 'Source Relationships', true); const graphPage = nav.current();
+  nav.push('object:12', 'Mail');
+  nav.setTitle(home.serial, 'A page that is no longer open');
+  assert.equal(nav.title, 'Mail');
+  assert.equal(nav.back(), true); assert.equal(nav.current().serial, graphPage.serial);
+  assert.equal(nav.back(), true); assert.equal(nav.current().serial, home.serial); assert.equal(nav.back(), false);
+  const graph = new InboxSourcesGraph();
+  graph.data = {
+    extensions: [{ id: 'local' }, { id: 'work' }],
+    reads: [{ id: 'in', extension: 'local' }, { id: 'sync', extension: 'work' }],
+    sources: [{ id: '1', read: 'sync', reading: false, to: ['kb'] }, { id: '2', read: 'in', reading: true, to: ['inbox','kb'] }],
+  };
+  assert.deepEqual(['all','inbox','kb','idle'].map(filter => graph.count(filter)), [2,1,2,1]);
+  assert.deepEqual(graph.groups().map(g => [g.entry.id, g.sources[0].id]), [['local','2'],['work','1']]);
+  graph.filter = 'idle';
+  assert.deepEqual(graph.groups().map(g => g.entry.id), ['work']);
+  graph.clear(); assert.equal(graph.count('all'), 0); assert.equal(graph.filter, 'all');
+});
+
+test('the Health rings open only their reserved HTTP form, even when the Hub advertises streaming extensions',async()=>{
+  for(const kind of ['water','protein']) {
+    const captured=[], f=fixtureClient({features:['extension_ui_stream_v1'],request:async(path,method,raw)=>{
+      captured.push([path,method,JSON.parse(raw)]);
+      return JSON.stringify({view:{title:kind,sections:[{items:[{type:'text',text:kind}]}]}});
+    }});
+    const pending=()=>new Promise(resolve=>setImmediate(resolve)),model=new ExtensionUIModel();
+    model.bind(f.client,'-health-intake','pages',{locale:'en-US'},undefined,false,()=>{},true,JSON.stringify({kind}),false,true);
+    await pending();assert.deepEqual(captured[0],['/api/v1/assistant/health/intake/ui?space=health','POST',{state:JSON.stringify({kind}),context:{locale:'en-US',ui_version:6}}]);assert.equal(model.phase,'ready');
+    assert.equal(model.isStream(),false);assert.equal(f.state.sent.length,0);model.dispose();
+    const plugin=new ExtensionUIModel();plugin.bind(f.client,'-health-intake','pages',{},undefined,true,()=>{},true,'',false,false);
+    await pending();assert.equal(captured.at(-1)[0],'/api/v1/extensions/-health-intake/-/ui/pages');plugin.dispose();
+  }
 });

@@ -69,13 +69,83 @@ nonisolated enum SideFold {
         var isEmpty: Bool { sides == 0 }
     }
 
+    /// What a parent row kept Unread by folded side sessions names under its title (#13524, web #13496): the most recent
+    /// unread side when folded rows are held (`latestKey` / `latestTitle`), how many unread sides exist in total (`count`),
+    /// the remaining unread sides' titles (`otherTitles`, newest first, for VoiceOver / tooltip), and whether only the
+    /// sides are unread (`replacesPreview`, so the parent's own already-seen preview does not stand under the unread dot).
+    struct UnreadSummary: Hashable, Sendable {
+        var latestKey: SessionKey?
+        var latestTitle: String?
+        var count: Int
+        var otherTitles: [String] = []
+        var replacesPreview: Bool
+
+        /// Additional unread side sessions beyond `latestKey` ("+N").
+        var extraCount: Int { latestKey != nil ? max(0, count - 1) : 0 }
+    }
+
+    /// The side sessions among a parent's folded rows that keep it Unread (#13524, web `unreadSides`): unread sides only,
+    /// newest `updatedAt` first, tie-broken by `sessionID` ascending.
+    static func unreadSides(_ rows: [Session]) -> [Session] {
+        rows.filter { $0.foldedAs == side && $0.state == .unread }
+            .sorted { a, b in
+                let p = a.updatedAt ?? .distantPast, q = b.updatedAt ?? .distantPast
+                if p != q { return p > q }
+                return a.sessionID < b.sessionID
+            }
+    }
+
+    /// The unread side-session summary for a folded parent row (#13524), or nil when the row has no unread side or is not
+    /// shown as Unread (e.g. Working or Needs You). `ownState` is the parent's own raw state before folding; `sides` are
+    /// the held side sessions for this parent (nil when only the hub's rollup is held on a paged list).
+    static func unreadSummary(parent: Session, ownState: AgentState? = nil, sides: [Session]? = nil) -> UnreadSummary? {
+        guard !parent.assistant, parent.state == .unread else { return nil }
+        let ownUnread = (ownState ?? parent.state) == .unread
+        if let sides, !sides.isEmpty {
+            let unread = unreadSides(sides)
+            guard let first = unread.first else { return nil }
+            return UnreadSummary(
+                latestKey: first.key,
+                latestTitle: first.displayTitle,
+                count: unread.count,
+                otherTitles: unread.dropFirst().map(\.displayTitle),
+                replacesPreview: !ownUnread
+            )
+        }
+        let hubCount = parent.children?.sidesUnread ?? 0
+        guard hubCount > 0 else { return nil }
+        return UnreadSummary(
+            latestKey: nil,
+            latestTitle: nil,
+            count: hubCount,
+            otherTitles: [],
+            replacesPreview: !ownUnread
+        )
+    }
+
+    /// How many root rows in `hub` that the hub counted as Unread are no longer Unread in `visible` (after local seen
+    /// marks and held side rows, #13524, web `heldCounts`). A parent marked seen locally stays counted Unread while any
+    /// folded side is unread; once its held sides are seen, it leaves Unread counts immediately.
+    static func unreadClearedBySeen(hub: [Session], visible: [Session], groups: Set<String>) -> Int {
+        let hubFold = fold(hub, groups: groups)
+        let visibleFold = fold(visible, groups: groups)
+        let visibleByKey = Dictionary(visibleFold.listed.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        var cleared = 0
+        for row in hubFold.listed where !row.assistant && row.state == .unread {
+            if let shown = visibleByKey[row.key], shown.state != .unread {
+                cleared += 1
+            }
+        }
+        return cleared
+    }
+
     /// The state a parent shows and is counted by with its sides (the hub's `Session.FoldedState`, sides only): it needs
     /// the user when it or a row of its sides does; it works when one of them works, unless it has a result not looked at
     /// yet or awaits the user's reply; it is unread when it or one of its sides is; otherwise its own.
     static func foldedState(_ s: Session, _ r: Rollup) -> AgentState {
         if s.state == .needsYou || r.needsYou > 0 { return .needsYou }
         if r.working > 0 && s.state != .unread && !(s.state == .idle && s.awaitsReply) { return .working }
-        if s.state == .unread || r.unread > 0 { return .unread }
+        if s.state == .unread || (s.state != .working && r.unread > 0) { return .unread }
         return s.state
     }
 
@@ -93,6 +163,8 @@ nonisolated enum SideFold {
         var chat: [SessionKey: SessionKey] = [:]
         /// Each parent's rollup: from the rows held, else (a paged row) the hub's `children`.
         var rollups: [SessionKey: Rollup] = [:]
+        /// Each parent row kept Unread by one or more folded side sessions (#13524).
+        var unreadSummaries: [SessionKey: UnreadSummary] = [:]
 
         init(listed: [Session] = []) { self.listed = listed }
     }
@@ -150,14 +222,21 @@ nonisolated enum SideFold {
         var listed: [Session] = []
         listed.reserveCapacity(sessions.count - out.home.count)
         for i in sessions.indices where parent[i] < 0 {
-            var s = sessions[i]
+            let rawParent = sessions[i]
+            var s = rawParent
             if let list = members[i], let r = out.rollups[s.key] {
-                s = folded(s, members: list.map { sessions[$0] }, rollup: r)
+                s = folded(rawParent, members: list.map { sessions[$0] }, rollup: r)
+                if let summary = unreadSummary(parent: s, ownState: rawParent.state, sides: out.sides[s.key]) {
+                    out.unreadSummaries[s.key] = summary
+                }
             } else if groups.contains(s.group), let c = s.children, c.sides > 0, out.rollups[s.key] == nil {
                 // A paged row whose sides are not held: the hub's rollup says what they add up to.
                 let r = Rollup(c)
                 out.rollups[s.key] = r
-                s.state = foldedState(s, r)
+                s.state = foldedState(rawParent, r)
+                if let summary = unreadSummary(parent: s, ownState: rawParent.state, sides: nil) {
+                    out.unreadSummaries[s.key] = summary
+                }
             }
             listed.append(s)
         }

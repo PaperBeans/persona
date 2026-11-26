@@ -30,7 +30,10 @@
   "err_tier_not_found": "使用中のモデルプロファイル「{profile}」には階層{tier}がありません。利用可能な階層：{tiers}。",
   "err_tier_model": "プリセット {tier}：{model} はモデル ID ではありません。英字か数字で始め、英数字と . _ - / : @ [ ] だけを使ってください。",
   "err_tier_description": "プリセット {tier} の説明は 1 行、{max} 文字以内にしてください。",
-  "tier_strong": "このプロファイル作成時のメインチャットのモデル：設計、レビュー、難しい問題。",
-  "tier_standard": "このプロファイル作成時の新規 Agent のモデル：日常のコーディング。",
-  "err_permission_mode": "{where} の権限モード {mode} は無効です。選択肢：{modes}。"
+  "tier_core": "このプロファイル作成時のメインチャットのモデル：中核の設計と実装、レビュー、難しい問題。",
+  "tier_dev": "このプロファイル作成時の新規 Agent のモデル：開発、調査、リサーチ。",
+  "err_permission_mode": "{where} の権限モード {mode} は無効です。選択肢：{modes}。",
+  "err_tier_candidates": "階層 {tier} の候補が {max} 個を超えています。",
+  "err_tier_alias": "階層 {tier}：{alias} は別名にできません。階層名の形式で、ほかの階層の名前や別名と重ならないものにしてください。",
+  "err_forbidden_field": "モデルプロファイルに認証情報やエンドポイントの項目 {field} は含められません。"
 }

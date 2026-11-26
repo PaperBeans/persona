@@ -193,8 +193,12 @@ type runtimeStartParams struct {
 	// (caps.same_kind) and does not have it: it starts one of its own of that kind, or refuses.
 	AgentType       string
 	RequireLauncher bool // the start carries context to a fresh session on its old launcher
-	Shell           bool // Launcher is a login shell's launcher: the runtime picks its own of that name (no caps.same_kind)
-	OpenElsewhere   bool // a running claude has Resume open: only a runtime running it may take it
+	// DeferMCP asks an Antigravity Companion to return its real session id before attaching MCP or sending the first
+	// prompt. The manager activates that starting row with an ordinary send after linking the task role. Older nodes and
+	// Companions ignore the field; only an answer that actually says Starting is activated again.
+	DeferMCP      bool `json:"defer_mcp"`
+	Shell         bool // Launcher is a login shell's launcher: the runtime picks its own of that name (no caps.same_kind)
+	OpenElsewhere bool // a running claude has Resume open: only a runtime running it may take it
 }
 
 // engineRuntimes maps the engines that are a runtime to that runtime's id (engine.go).

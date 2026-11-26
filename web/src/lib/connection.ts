@@ -15,6 +15,8 @@ export interface ConnLink {
   restarting: boolean;
   /** The browser has a network (navigator.onLine). */
   networkUp: boolean;
+  /** Optional error reason probed via HTTP after a rejected WebSocket upgrade. */
+  lastError?: string;
 }
 
 /** How long a restart is told as one ("Hub is updating…"): after it the hub is just out of reach (the app's
@@ -95,6 +97,7 @@ export function phaseExplanation(p: ConnPhase): string {
 export function connFacts(p: ConnPhase, link: ConnLink, now: number): string[] {
   if (p === "online") return [];
   const out: string[] = [];
+  if (p !== "no_network" && link.lastError) out.push(link.lastError);
   if (p !== "no_network" && link.nextTry) {
     const s = Math.ceil((link.nextTry - now) / 1000);
     out.push(s > 0 ? t("lib-connection.retry_in", { count: s }) : t("lib-connection.retrying"));

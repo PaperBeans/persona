@@ -1,6 +1,6 @@
 package conformance_test
 
-// The plugin protocol's schemas (schema/extension/connector.schema.json, channel.schema.json, kb.schema.json, todos.schema.json, leaders.schema.json, models.schema.json, repository.schema.json) describe what the server's
+// The plugin protocol's schemas (schema/extension/connector.schema.json, channel.schema.json, kb.schema.json, todos.schema.json, leaders.schema.json, models.schema.json, repository.schema.json, offload.schema.json) describe what the server's
 // own code sends and reads: every call and event they list is held to the Go types the hub and connector/serve put on
 // the wire, field by field, and every connector method the server knows is in them. The schema is what an extension
 // is written from; this keeps it from drifting from the code.
@@ -27,6 +27,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extmgr/storage"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 const schemaDir = "../../../../schema/extension"
@@ -106,23 +107,27 @@ var goTypes = map[string]any{
 	"ChannelTypingParams":  channel.TypingParams{},
 	"ChannelEditParams":    channel.EditParams{},
 
-	"KBListParams":     assistantwire.KBListParams{},
-	"KBListResult":     assistantwire.KBListResult{},
-	"KBGetParams":      assistantwire.KBGetParams{},
-	"KBGetResult":      assistantwire.KBGetResult{},
-	"KBDayParams":      assistantwire.KBDayParams{},
-	"KBDayResult":      assistantwire.KBDayResult{},
-	"KBSearchParams":   assistantwire.KBSearchParams{},
-	"KBSearchResult":   assistantwire.KBSearchResult{},
-	"KBUpdateParams":   assistantwire.KBUpdateParams{},
-	"KBUpdateResult":   assistantwire.KBUpdateResult{},
-	"KBRecentParams":   assistantwire.KBRecentParams{},
-	"KBRecentResult":   assistantwire.KBRecentResult{},
-	"KBOwnerParams":    struct{}{},
-	"KBOwner":          assistantwire.KBOwner{},
-	"KBChangedEvent":   assistantwire.KBChanged{},
-	"KBForgottenEvent": assistantwire.KBForgottenEvent{},
+	"KBListParams":         assistantwire.KBListParams{},
+	"KBListResult":         assistantwire.KBListResult{},
+	"KBGetParams":          assistantwire.KBGetParams{},
+	"KBGetResult":          assistantwire.KBGetResult{},
+	"KBDayParams":          assistantwire.KBDayParams{},
+	"KBDayResult":          assistantwire.KBDayResult{},
+	"KBSearchParams":       assistantwire.KBSearchParams{},
+	"KBSearchResult":       assistantwire.KBSearchResult{},
+	"KBUpdateParams":       assistantwire.KBUpdateParams{},
+	"KBUpdateResult":       assistantwire.KBUpdateResult{},
+	"KBRecentParams":       assistantwire.KBRecentParams{},
+	"KBRecentResult":       assistantwire.KBRecentResult{},
+	"KBOwnerParams":        struct{}{},
+	"KBPutRecordingParams": recordingwire.RecordingWrite{},
+	"KBPutRecordingResult": recordingwire.RecordingWriteResult{},
+	"KBOwner":              assistantwire.KBOwner{},
+	"KBChangedEvent":       assistantwire.KBChanged{},
+	"KBForgottenEvent":     assistantwire.KBForgottenEvent{},
 
+	"AssistantEventParams":         assistantwire.AssistantEventParams{},
+	"AssistantEventResult":         assistantwire.AssistantEventResult{},
 	"AssistantConversationsParams": assistantwire.AssistantConversationsParams{},
 	"AssistantConversationsResult": assistantwire.AssistantConversationsResult{},
 	"AssistantMessagesParams":      assistantwire.AssistantMessagesParams{},
@@ -165,6 +170,15 @@ var goTypes = map[string]any{
 	"RepoDescribeResult": wire.RepoDescribeResult{},
 	"RepoPRStatusParams": wire.RepoPRStatusParams{},
 	"RepoPRStatusResult": wire.RepoPRStatusResult{},
+
+	// The manager calls a disk_offload provider with the generated wire types and reads its answers into them
+	// (extmgr/extension_offload.go), re-checking each answer before it is used.
+	"OffloadInventoryParams": wire.OffloadInventoryParams{},
+	"OffloadInventory":       wire.OffloadInventory{},
+	"OffloadRunParams":       wire.OffloadRunParams{},
+	"OffloadRunResult":       wire.OffloadRunResult{},
+	"OffloadJobParams":       wire.OffloadJobParams{},
+	"OffloadJob":             wire.OffloadJob{},
 
 	"MachinesPairLinkParams": wire.MachinesPairLinkParams{},
 	"MachinesPairLinkResult": wire.MachinesPairLinkResult{},
@@ -230,6 +244,7 @@ var channelCalls = []string{channel.MReceive, channel.MStatus, channel.MSend, ch
 
 var kbCalls = []string{assistantwire.MethodKBList, assistantwire.MethodKBGet, assistantwire.MethodKBDay,
 	assistantwire.MethodKBSearch, assistantwire.MethodKBUpdate, assistantwire.MethodKBOwner, assistantwire.MethodKBRecent,
+	assistantwire.MethodKBPutRecording,
 	"event." + assistantwire.EventKBChanged, "event." + assistantwire.EventKBForgotten}
 
 // The model call the hub forwards for extensions granted models (models.schema.json).
@@ -240,10 +255,11 @@ var transcriptionCalls = []string{assistantwire.MethodTranscriptionStart, assist
 	assistantwire.MethodTranscriptionFinish, assistantwire.MethodTranscriptionCancel}
 
 // The assistant's conversations the hub forwards for extensions granted assistant.read, its memory for those granted
-// assistant.memory.read (assistant.schema.json), and what it reads back of an extension's data contributions
-// (assistant_data.schema.json).
+// assistant.memory.read (assistant.schema.json), what it reads back of an extension's data contributions
+// (assistant_data.schema.json), and the events for those granted assistant.events (assistant.schema.json).
 var assistantCalls = []string{assistantwire.MethodAssistantConversations, assistantwire.MethodAssistantMessages,
-	assistantwire.MethodAssistantMemory, assistantwire.MethodAssistantDataStatus, assistantwire.MethodAssistantEntriesList, "event." + assistantwire.EventAssistantEntriesChanged}
+	assistantwire.MethodAssistantMemory, assistantwire.MethodAssistantDataStatus, assistantwire.MethodAssistantEntriesList, "event." + assistantwire.EventAssistantEntriesChanged,
+	assistantwire.MethodAssistantEvent}
 
 // The to-do events the hub tells the extensions granted todos.read (todos.schema.json).
 var todoCalls = []string{"event." + assistantwire.EventTodoChanged, "event." + assistantwire.EventTodoDecision}
@@ -254,6 +270,10 @@ var leaderCalls = []string{"event." + assistantwire.EventLeaderChanged, "event."
 // The calls the manager makes to a repository_providers contribution's program (repository.schema.json).
 var repoCalls = []string{ext.RepositoryNamespace + ".parse", ext.RepositoryNamespace + ".check", ext.RepositoryNamespace + ".link",
 	ext.RepositoryNamespace + ".describe", ext.RepositoryNamespace + ".pr_status"}
+
+// The calls the manager makes to a disk_offload contribution's program (offload.schema.json).
+var offloadCalls = []string{ext.OffloadNamespace + ".inventory", ext.OffloadNamespace + ".run", ext.OffloadNamespace + ".job",
+	ext.OffloadNamespace + ".cancel"}
 
 var storageCalls = []string{"storage.request", "storage.get", "storage.list", "storage.transaction",
 	"storage.queue.list", "storage.queue.enqueue", "storage.queue.claim", "storage.queue.renew", "storage.queue.ack", "storage.queue.forget", "storage.queue.retry",
@@ -276,6 +296,7 @@ func TestPluginSchemasListTheServersCalls(t *testing.T) {
 	want = append(want, sentCalls...)
 	want = append(want, storageCalls...)
 	want = append(want, repoCalls...)
+	want = append(want, offloadCalls...)
 	for _, name := range want {
 		if _, ok := wire.Calls[name]; !ok {
 			t.Errorf("%s: the server has it, schema/extension does not list it (x-methods / x-events)", name)
@@ -283,7 +304,7 @@ func TestPluginSchemasListTheServersCalls(t *testing.T) {
 	}
 	for name := range wire.Calls {
 		if (strings.HasPrefix(name, serve.Namespace+".") || strings.HasPrefix(name, channel.Namespace+".") ||
-			strings.HasPrefix(name, "kb.") || strings.HasPrefix(name, "event.kb.") || strings.HasPrefix(name, "event.todo.") || strings.HasPrefix(name, "event.leader.") || strings.HasPrefix(name, "sent.") || strings.HasPrefix(name, "model.") || strings.HasPrefix(name, "transcription.") || strings.HasPrefix(name, "assistant.") || strings.HasPrefix(name, "storage.") || strings.HasPrefix(name, ext.RepositoryNamespace+".")) &&
+			strings.HasPrefix(name, "kb.") || strings.HasPrefix(name, "event.kb.") || strings.HasPrefix(name, "event.todo.") || strings.HasPrefix(name, "event.leader.") || strings.HasPrefix(name, "sent.") || strings.HasPrefix(name, "model.") || strings.HasPrefix(name, "transcription.") || strings.HasPrefix(name, "assistant.") || strings.HasPrefix(name, "storage.") || strings.HasPrefix(name, ext.RepositoryNamespace+".") || strings.HasPrefix(name, ext.OffloadNamespace+".")) &&
 			!slices.Contains(want, name) {
 			t.Errorf("%s: schema/extension lists it, the server has no such call", name)
 		}
@@ -472,6 +493,11 @@ var (
 )
 
 // compare holds the schema node at to the Go type g: the same JSON kind, and for an object the same fields.
+var (
+	marshalerType   = reflect.TypeFor[json.Marshaler]()
+	unmarshalerType = reflect.TypeFor[json.Unmarshaler]()
+)
+
 func (s schemas) compare(t *testing.T, at string, node map[string]any, g reflect.Type, seen map[string]bool) {
 	t.Helper()
 	for g.Kind() == reflect.Pointer {
@@ -500,6 +526,68 @@ func (s schemas) compare(t *testing.T, at string, node map[string]any, g reflect
 		}
 		if b["type"] == "null" {
 			s.compare(t, at, a, g, seen)
+			return
+		}
+	}
+	if disc := asString(node["x-discriminator"]); disc != "" {
+		if choices := asSlice(node["oneOf"]); len(choices) > 0 {
+			if g.Kind() != reflect.Struct {
+				t.Errorf("%s: the schema says discriminated union (%s), Go has %s", at, disc, g)
+				return
+			}
+			fields := map[string]goField{}
+			jsonFields(g, fields)
+			df, ok := fields[disc]
+			if !ok {
+				t.Errorf("%s.%s: discriminator in the schema, not in Go's %s", at, disc, g)
+			} else {
+				if df.omitempty {
+					t.Errorf("%s.%s: discriminator in the schema, Go's %s leaves it out when empty", at, disc, g)
+				}
+				if df.typ.Kind() != reflect.String {
+					t.Errorf("%s.%s: discriminator is string, Go has %s", at, disc, df.typ)
+				}
+			}
+			merged := map[string]map[string]any{}
+			for _, choice := range choices {
+				cm, _ := choice.(map[string]any)
+				ref := asString(cm["$ref"])
+				if ref == "" {
+					t.Errorf("%s: union branch without $ref", at)
+					continue
+				}
+				vname, variant := s.ref(t, ref)
+				vprops, _ := variant["properties"].(map[string]any)
+				dnode, _ := vprops[disc].(map[string]any)
+				if _, ok := dnode["const"].(string); !ok {
+					t.Errorf("%s→%s.%s: variant discriminator lacks string const", at, vname, disc)
+				}
+				for pname, pv := range vprops {
+					if pname == disc {
+						continue
+					}
+					pm, _ := pv.(map[string]any)
+					if _, exists := merged[pname]; !exists {
+						merged[pname] = pm
+					}
+				}
+			}
+			for pname, pm := range merged {
+				f, ok := fields[pname]
+				if !ok {
+					t.Errorf("%s.%s: in the schema, not in Go's %s", at, pname, g)
+					continue
+				}
+				s.compare(t, at+"."+pname, pm, f.typ, seen)
+			}
+			for fname := range fields {
+				if fname == disc {
+					continue
+				}
+				if _, ok := merged[fname]; !ok {
+					t.Errorf("%s.%s: Go's %s sends it, the schema does not say it", at, fname, g)
+				}
+			}
 			return
 		}
 	}
@@ -532,6 +620,14 @@ func (s schemas) compare(t *testing.T, at string, node map[string]any, g reflect
 	case "number":
 		kind(reflect.Float64, reflect.Float32)
 	case "boolean":
+		if asString(node["x-tristate"]) != "" {
+			// An optional boolean whose absence means something: a closed type of its own that reads and writes
+			// the boolean itself (assistantwire.EventReplace).
+			if !g.Implements(marshalerType) || !reflect.PointerTo(g).Implements(unmarshalerType) {
+				t.Errorf("%s: the schema says x-tristate, Go's %s does not read and write its own JSON", at, g)
+			}
+			return
+		}
 		kind(reflect.Bool)
 	case "array":
 		kind(reflect.Slice)

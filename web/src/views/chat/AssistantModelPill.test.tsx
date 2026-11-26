@@ -152,7 +152,7 @@ describe("a Persona chat's pill on a hub that keeps picks", () => {
     expect(panel.props!.providers.map((p) => [p.id, p.unavailable ?? ""])).toEqual([["claude", ""], ["relay", ""], ["codex", otherEngine], ["gpt-direct", "Responses API"]]);
     expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus", effort: "high" });
     expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_default", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_default", { setup: "Claude Code · Opus 5.5" }));
   });
 
   it("keeps a pick for the conversation (PUT), drawn at once, and follows the default again (DELETE)", async () => {
@@ -350,7 +350,7 @@ describe("an older hub and the new-conversation page", () => {
     // what it says now is the default's, effort included
     expect(pill().textContent).toContain("Opus 5.5");
     await open();
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "Claude Code · Opus 5.5" }));
     expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus", effort: "high" });
   });
 
@@ -455,12 +455,56 @@ describe("an older hub and the new-conversation page", () => {
     await show(undefined);
     expect(pill().textContent).toContain("Opus 5.5");
     await open();
-    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "claude · Opus 5.5" }));
+    expect(strip()!.textContent).toBe(t("chat-modelpill.header_new", { setup: "Claude Code · Opus 5.5" }));
     // nothing runs yet: every engine can start it
     expect(panel.props!.providers.find((p) => p.id === "codex")!.unavailable).toBeUndefined();
     expect(await act(() => panel.props!.onPick({ provider: "relay", model: "haiku", effort: "low" }))).toBe(true);
     expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION), pickedEffort(NEW_CONVERSATION)]).toEqual(["relay", "haiku", "low"]);
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
+  });
+
+  it("picking the displayed default model on a fresh draft pins it, and Follow default clears it explicitly (#13567)", async () => {
+    await show(undefined);
+    await open();
+    const shown = panel.props!.state.current!;
+    expect(shown).toEqual({ provider: "claude", model: "opus", effort: "high" });
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
+    // Picking the already-displayed named model must pin it instead of dropping the pick as a no-op.
+    expect(await act(() => panel.props!.onPick(shown))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION), pickedEffort(NEW_CONVERSATION)]).toEqual(["claude", "opus", "high"]);
+    await flush();
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("pick");
+    // Picking the explicit "default" row follows the launcher default (launcher pinned, model omitted).
+    expect(await act(() => panel.props!.onPick({ provider: "claude", model: "default" }))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION)]).toEqual(["claude", undefined]);
+    // Clicking Follow default clears the whole draft pick back to following Model configuration.
+    await act(async () => strip()!.querySelector("button")!.click());
+    await flush();
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION), pickedEffort(NEW_CONVERSATION)]).toEqual([undefined, undefined, undefined]);
+    expect(strip()!.getAttribute("data-pick-strip")).toBe("default");
+  });
+
+  it("picking a concrete model marked default: true on a fresh draft keeps its model ID (#13567)", async () => {
+    defaultSetup = { provider: "claude", model: "", effort: "" };
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/claude/models")) {
+        return json({
+          agent: "claude",
+          models: [
+            { id: "default", name: "Default (recommended)", default: false, resolved: "claude-opus-5-5", efforts: ALL },
+            { id: "opus", name: "Opus 5.5", default: true, resolved: "claude-opus-5-5", efforts: ALL },
+          ],
+        });
+      }
+      return origFetch(input, init);
+    }));
+    await show(undefined);
+    await open();
+    expect(panel.props!.state.current).toEqual({ provider: "claude", model: "opus" });
+    expect(await act(() => panel.props!.onPick({ provider: "claude", model: "opus" }))).toBe(true);
+    expect([pickedLauncher(NEW_CONVERSATION), pickedModel(NEW_CONVERSATION)]).toEqual(["claude", "opus"]);
   });
 
   it("replays the shared eligible choices in both pickers without a legacy concrete default model", async () => {
@@ -665,4 +709,70 @@ it("keeps the actual engine connection until a same-kind runtime default is expl
   expect(getSession(mid(), "c1")?.launcher).toBe("claude");
   expect(getSession(mid(), "c1")?.model_pick).toBeUndefined();
   expect(defaultSetup).toEqual({ provider: "claude", model: "opus", effort: "high" });
+});
+
+it("shows the actual AGY engine and Gemini model on main chat under default Claude config instead of Claude Default (recommended), and loads and switches models in the panel from a cold cache", async () => {
+  defaultSetup = { provider: "claude", model: "", effort: "high" };
+  mainSetup = { provider: "claude", model: "", effort: "high" };
+  const agyCalls: string[] = [];
+  const origFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/launchers?purpose=assistant") && !url.includes("purpose=assistant.main") && !url.includes("purpose=assistant.supervise")) {
+      return json({
+        launchers: [
+          { name: "claude", source: "builtin" },
+          { name: "agy", source: "agy", agent: "agy", assistant: true },
+        ],
+        default: defaultSetup,
+        unavailable: [],
+      });
+    }
+    if (url.includes("/agy/models")) {
+      agyCalls.push(url);
+      if (!url.includes("host=agy")) {
+        return json({ agent: "agy", models: [] });
+      }
+      return json({
+        agent: "agy",
+        models: [
+          { id: "gemini-3-pro-high", name: "Gemini 3 Pro (High)", default_effort: "high", efforts: ["low", "medium", "high"] },
+          { id: "gemini-3-flash", name: "Gemini 3 Flash", efforts: ["low", "medium", "high"] },
+        ],
+      });
+    }
+    return origFetch(input, init);
+  }));
+  await show(chat({
+    agent: "agy",
+    launcher: undefined,
+    source_kind: "runtime",
+    source_instance_id: "agy",
+    model: "gemini-3-pro-high",
+    effort: "high",
+  }));
+  expect(pill().querySelector("[data-pill-engine]")?.getAttribute("data-pill-engine")).toBe("agy");
+  expect(pill().textContent).toContain("Gemini 3 Pro");
+  expect(pill().textContent).not.toContain("Default (recommended)");
+  expect(agyCalls.some((url) => url.includes("/launchers/agy/models") && url.includes("host=agy"))).toBe(true);
+
+  // Opening the panel on a cold cache must read the same host=agy cache key (never stuck in loading) and allow switching models.
+  await open();
+  const agyProvider = panel.props!.providers.find((p) => p.id === "agy")!;
+  expect(agyProvider).toBeDefined();
+  expect(agyProvider.loading).toBeFalsy();
+  expect(agyProvider.models?.map((m) => m.id)).toEqual(["gemini-3-pro-high", "gemini-3-flash"]);
+  expect(panel.props!.state.current).toEqual({ provider: "agy", model: "gemini-3-pro-high", effort: "high" });
+
+  expect(await act(() => panel.props!.onPick({ provider: "agy", model: "gemini-3-flash", effort: "medium" }))).toBe(true);
+  expect(sent("PUT")).toEqual([{ launcher: "agy", model: "gemini-3-flash", effort: "medium", machine_id: mid() }]);
+  expect(getSession(mid(), "c1")?.model_pick).toEqual({ launcher: "agy", model: "gemini-3-flash", effort: "medium" });
+
+  // Reloading AGY from the panel must also keep the host=agy cache key.
+  const beforeReload = agyCalls.length;
+  await act(async () => {
+    panel.props!.onReload!("agy");
+  });
+  await flush();
+  expect(agyCalls.slice(beforeReload).some((url) => url.includes("/launchers/agy/models") && url.includes("host=agy"))).toBe(true);
 });

@@ -75,9 +75,6 @@ func Serve(ctx context.Context, version string, in io.Reader, out io.Writer) err
 			werr = err
 		}
 	}
-	ctx = context.WithValue(ctx, workCatalogKey{}, &workCatalog{notify: func() {
-		writeNotification(notification{JSONRPC: "2.0", Method: "notifications/tools/list_changed", Params: map[string]any{}})
-	}})
 	for sc.Scan() {
 		var req request
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil || req.Method == "" {
@@ -317,11 +314,7 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		if listed, ok := ctx.Value(toolsListedKey{}).(func(toolSnapshot)); ok {
 			listed(snapshot)
 		}
-		tools := snapshot.Tools
-		if catalog, ok := ctx.Value(workCatalogKey{}).(*workCatalog); ok {
-			tools = catalog.list(snapshot)
-		}
-		return map[string]any{"tools": tools}, nil
+		return map[string]any{"tools": snapshot.Tools}, nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -333,10 +326,13 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		if rerr := checkCallParams(&p.Name, &p.Arguments); rerr != nil {
 			return nil, rerr
 		}
-		if p.Name == workSearchName {
-			if catalog, ok := ctx.Value(workCatalogKey{}).(*workCatalog); ok && catalog.active() {
-				return catalog.search(ctx, p.Arguments), nil
+		if p.Name == workSearchName && isAssistant() && !isGuest() && toolSet() == "" {
+			if result := searchWorkTools(ctx, p.Arguments); result != nil {
+				return result, nil
 			}
+		}
+		if p.Name == fileTransferTool { // a path on this computer relative to the agent's directory (file_transfer.go)
+			p.Arguments = fileTransferArgs(p.Arguments, workingDir())
 		}
 		var copied *clipboardCopy // phone_clipboard_set with file: read here, on the agent's machine (clipboard_file.go)
 		if p.Name == clipboardSetTool {
@@ -515,8 +511,15 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 	if len(work) > 0 {
 		cwd, err := os.Getwd()
 		if err != nil || !assistantskills.WorkGuideReady(cwd) || slices.ContainsFunc(res.Tools, func(t proto.Tool) bool { return t.Name == workSearchName }) {
-			// Keep the full catalog if prepare fell back to full instructions, or an extension owns the search name.
+			// Keep the original list if prepare fell back to full instructions, or an extension owns the search name.
 			work = nil
+		} else {
+			// Reconnects can return the same tools in a different order. Claude caches
+			// the ordered definitions, so advertise a canonical list for the guide.
+			slices.SortStableFunc(tools, func(a, b map[string]any) int {
+				return strings.Compare(a["name"].(string), b["name"].(string))
+			})
+			tools = append(tools, workSearchTool)
 		}
 	}
 	return toolSnapshot{Tools: tools, WorkGuide: work, Revision: res.Revision, Session: res.Session}, nil

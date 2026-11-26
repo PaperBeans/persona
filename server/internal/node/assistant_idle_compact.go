@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -11,7 +12,10 @@ import (
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
-const idleCompactionDeliveryWait = 30 * time.Second
+const (
+	idleCompactionDeliveryWait = 30 * time.Second
+	idleCompactionRetryDelay   = 5 * time.Minute
+)
 
 type idleCompactionInputKey struct{}
 
@@ -22,10 +26,28 @@ type idleCompactionInput struct {
 }
 
 type idleCompactionState struct {
-	Policy    assistantwire.IdleCompaction `json:"policy"`
-	Since     time.Time                    `json:"since"`
-	Tokens    int                          `json:"tokens"`
-	Attempted bool                         `json:"attempted"`
+	Policy           assistantwire.IdleCompaction `json:"policy"`
+	Since            time.Time                    `json:"since"`
+	Tokens           int                          `json:"tokens"`
+	Attempted        bool                         `json:"attempted"`
+	AttemptStartedAt time.Time                    `json:"attempt_started_at,omitzero"`
+	Retried          bool                         `json:"retried,omitempty"`
+}
+
+func (a *idleCompactionState) resetAttempt() {
+	a.Attempted, a.AttemptStartedAt, a.Retried = false, time.Time{}, false
+}
+
+func (a *idleCompactionState) recordAttempt(at time.Time) {
+	a.Retried = a.Attempted
+	a.Attempted, a.AttemptStartedAt = true, at
+}
+
+func (a idleCompactionState) canRetry(run *proto.Compaction, now time.Time) bool {
+	return !a.Retried && !a.AttemptStartedAt.IsZero() && run != nil && run.State == proto.CompactionFailed &&
+		run.StartedAt.Equal(a.AttemptStartedAt) && run.FinishedAt != nil &&
+		now.Sub(*run.FinishedAt) >= idleCompactionRetryDelay &&
+		strings.Contains(strings.ToLower(run.Error), "summarization produced empty response")
 }
 
 // Record user activity on receipt, before typing/lifecycle locks that may be held
@@ -40,10 +62,12 @@ func (n *Node) noteIdleCompactionInput(id string, input idleCompactionInput) {
 			a = *st.IdleCompaction
 		}
 		if input.Policy != nil && a.Policy != *input.Policy && !input.At.Before(a.Since) {
-			a.Policy, a.Since, a.Attempted = *input.Policy, input.At, false
+			a.Policy, a.Since = *input.Policy, input.At
+			a.resetAttempt()
 		}
 		if input.Source == nil && input.At.After(a.Since) {
-			a.Since, a.Attempted = input.At, false
+			a.Since = input.At
+			a.resetAttempt()
 		}
 		if st.IdleCompaction != nil && a == *st.IdleCompaction {
 			return false
@@ -68,7 +92,7 @@ func (n *Node) recordIdleCompactionContext(id string, tokens int) {
 		if tokens < a.Tokens {
 			a.Since = time.Now()
 			if tokens < a.Policy.ContextTokens {
-				a.Attempted = false
+				a.resetAttempt()
 			}
 		}
 		a.Tokens = tokens
@@ -110,23 +134,28 @@ func (n *Node) idleCompactBeforeInput(ctx context.Context, p *assistantProc) err
 		n.recordIdleCompactionContext(p.id, tokens)
 	}
 	if !compacting {
+		now := time.Now().UTC()
 		start := false
 		n.state.update(p.id, func(st *sessionState) bool {
 			if !st.IsMain || st.IdleCompaction == nil {
 				return false
 			}
 			a := *st.IdleCompaction
-			if a.Attempted || a.Since.IsZero() || time.Since(a.Since) < time.Duration(c.IdleMinutes)*time.Minute || a.Tokens < c.ContextTokens {
+			if a.Since.IsZero() || now.Sub(a.Since) < time.Duration(c.IdleMinutes)*time.Minute || a.Tokens < c.ContextTokens {
 				return false
 			}
-			a.Attempted, start = true, true
+			if a.Attempted && !a.canRetry(st.Compaction, now) {
+				return false
+			}
+			a.recordAttempt(now)
+			start = true
 			st.IdleCompaction = &a
 			return true
 		})
 		if !start {
 			return nil
 		}
-		if err := n.compactAssistantProc(ctx, p); err != nil {
+		if err := n.compactAssistantProc(ctx, p, now); err != nil {
 			return err
 		}
 		n.logf("assistant %s: compacting before unattended delivery", short(p.id))
@@ -147,8 +176,8 @@ func (n *Node) idleCompactBeforeInput(ctx context.Context, p *assistantProc) err
 		compacting = p.compacting
 		p.mu.Unlock()
 		if !compacting {
-			// Failure also releases delivery. The latch prevents a costly retry loop;
-			// the original message is still useful on the uncompressed context.
+			// Release the original message even after a failure. An eligible retry
+			// requires a later unattended delivery.
 			return nil
 		}
 		select {

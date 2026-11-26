@@ -8,10 +8,8 @@
   "details": "Details",
   "memory": "Memory",
   "load": "Load",
-  "disk": "Disk",
   "cores_one": "{count} core",
   "cores_other": "{count} cores",
-  "per_core": "{value} per core",
   "processes_memory": "Using the most memory",
   "processes_cpu": "Using the most CPU",
   "processes_loading": "Looking at what's using this computer…",
@@ -48,7 +46,6 @@
   "stop_failed_item": "\"{title}\" didn't stop: {error}",
   "handoff": "Hand work to another computer",
   "volume_used": "{used} of {total} · {percent}",
-  "disk_free": "{size} free",
   "disk_loading": "Looking at what's using the disk…",
   "folders_title": "Largest folders in your home folder",
   "folders_none": "No large folders found.",
@@ -169,5 +166,8 @@
   "handoff_confirm_body_other": "Move {count} pieces of work from {source} to {target}:",
   "handoff_confirm_note": "Persona handles it in the main chat and tells you how it went; the Agents on {source} stop only after the new ones have started.",
   "handoff_confirm": "Send to Persona",
-  "mismatch_resolved": "Persona on this computer is now the same deployment as the hub."
+  "mismatch_resolved": "Persona on this computer is now the same deployment as the hub.",
+  "mismatch_hosted_managers": "Redeploying updates the shared personad program; co-located assistant ({names}) will restart smoothly once idle.",
+  "deploy_done_pending_restart": "Co-located assistant ({names}) is busy and will restart automatically once idle to switch to the new build.",
+  "redeploy_confirm_managers": "Co-located assistant ({names}) shares personad on this computer and will restart smoothly once idle."
 }

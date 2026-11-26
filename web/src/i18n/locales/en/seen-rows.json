@@ -1,0 +1,11 @@
+{
+  "label": "Seen Agents",
+  "stay": "Stay until refresh",
+  "leave": "Leave when the chat closes",
+  "hint": "An Agent you open or mark as seen from Unread or Just finished keeps its place, marked as seen, until you reload, click Clear seen or choose a filter. With Leave when the chat closes it moves to Seen as soon as you leave its chat. Applies to this browser only.",
+  "notice": "Agents you read stay where they were, marked as seen, until you reload or click Clear seen.",
+  "change_in_settings": "Change in Settings",
+  "dismiss": "Dismiss notice",
+  "clear_seen": "Clear seen ({count})",
+  "clear_seen_hint": "Takes the Agents you have read out of this section."
+}

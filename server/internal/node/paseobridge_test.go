@@ -231,13 +231,18 @@ func TestJSRuntimeEnv(t *testing.T) {
 }
 
 // The bridge is told the node's mcp.json, the one beside the runtime socket, to give its new Agents the Persona tools,
-// and which of them its Agents call without a card: the same as a Claude Agent's start allows (#4966).
+// and which of them its Agents call without a card: the same as a Claude Agent's start allows (#4966). On Windows it
+// dials the runtime pipe, but mcp.json still sits beside the socket, not in \\.\pipe.
 func TestPaseoBridgeArgsNameTheNodesMCPConfig(t *testing.T) {
-	got := paseoBridgeArgs("/pkg", "/data/persona/runtime.sock", "/home/u/.paseo")
-	want := []string{"/pkg/paseo/bridge.mjs", "--socket", "/data/persona/runtime.sock", "--paseo-home", "/home/u/.paseo",
-		"--mcp-config", "/data/persona/mcp.json", "--allow-tools", ownToolsRule}
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %q, want %q", got, want)
+	sock := filepath.FromSlash("/data/persona/runtime.sock")
+	for _, pipe := range []string{"", `\\.\pipe\persona-runtime-0123456789abcdef`} {
+		rh := &RuntimeHost{path: sock, pipe: pipe}
+		got := paseoBridgeArgs("/pkg", rh.dialPath(), rh.mcpConfig(), "/home/u/.paseo")
+		want := []string{filepath.FromSlash("/pkg/paseo/bridge.mjs"), "--socket", rh.dialPath(), "--paseo-home", "/home/u/.paseo",
+			"--mcp-config", filepath.FromSlash("/data/persona/mcp.json"), "--allow-tools", ownToolsRule}
+		if !slices.Equal(got, want) {
+			t.Fatalf("pipe %q: got %q, want %q", pipe, got, want)
+		}
 	}
 }
 

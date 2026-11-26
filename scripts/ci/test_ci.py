@@ -584,7 +584,7 @@ class AppleWorkflowTests(unittest.TestCase):
     def test_reusable_lane_uses_quoted_environment_not_script_interpolation(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/apple-test.yml').read_text()
-        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-ipad-diagnostic]', workflow)
+        self.assertIn('options: [ios, ios18, ios-build, ios-core-only, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]', workflow)
         self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.lane == 'ios18'", workflow)
         floor = workflow.split('\n  ios18:\n', 1)[1]
         for required in ('runs-on: macos-15', '/Applications/Xcode_26.3.app/Contents/Developer',
@@ -623,7 +623,8 @@ class PostgresCleanupTests(unittest.TestCase):
                 shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
                 copy_go_trimpath(root)
                 # Run the real entrypoint and EXIT trap without starting Docker or Go tests.
-                (root / "common.sh").write_text("""ci_run() {
+                (root / "common.sh").write_text("""ci_run() { ci_run_step "$@"; }
+ci_run_step() {
   local label="$1"
   shift 2
   case "$label" in
@@ -654,6 +655,36 @@ if [ "$1" = run ]; then exit "$FIXTURE_RUN_STATUS"; fi
                 self.assertEqual(list(fixtures.iterdir()), [])
 
 
+class ServerShardBudgetTests(unittest.TestCase):
+    def test_isolated_lanes_initialize_ordinary_and_core_budgets(self):
+        cases = [(lane, lane.removeprefix("core-"), "900" if "managers" in lane else "600", lane.startswith("core-"))
+                 for lane in ("node", "managers", "other", "core-node", "core-managers", "core-other")]
+        for lane, shard, seconds, core in cases:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixtures = root / "fixtures"
+                fixtures.mkdir()
+                shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
+                copy_go_trimpath(root)
+                log = root / "steps"
+                (root / "common.sh").write_text("""ci_run() {
+  printf '%s|%s|%s\n' "$1" "$2" "$GOFLAGS" >> "$FIXTURE_STEPS"
+}
+""")
+                docker = root / "docker"
+                docker.write_text("#!/bin/sh\nexit 0\n")
+                docker.chmod(0o755)
+                environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                                   TMPDIR=str(fixtures), FIXTURE_STEPS=str(log), GOFLAGS="-mod=readonly")
+                result = subprocess.run(["bash", str(root / "server.sh"), lane], cwd=root,
+                                        env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                label = f"Server {shard} tests with Postgres" + (", core only" if core else "")
+                steps = [line.split("|", 2) for line in log.read_text().splitlines()]
+                flags = "-mod=readonly -trimpath" + (" -tags=persona_core_only" if core else "")
+                self.assertEqual([step for step in steps if step[0] == label], [[label, seconds, flags]])
+
+
 def copy_go_trimpath(root):
     """server.sh composes GOFLAGS with scripts/test/go_trimpath.sh, relative to the repository root it runs from."""
     (root / "scripts/test").mkdir(parents=True)
@@ -669,7 +700,8 @@ class ServerGoFlagsTests(unittest.TestCase):
             shutil.copyfile(Path(__file__).with_name("server.sh"), root / "server.sh")
             copy_go_trimpath(root)
             log = root / "steps"
-            (root / "common.sh").write_text("""ci_run() {
+            (root / "common.sh").write_text("""ci_run() { ci_run_step "$@"; }
+ci_run_step() {
   printf '%s|%s|%s\\n' "$1" "$GOFLAGS" "$*" >> "$FIXTURE_STEPS"
 }
 """)

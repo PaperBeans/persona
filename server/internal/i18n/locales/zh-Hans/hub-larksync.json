@@ -1,0 +1,18 @@
+{
+  "unavailable": "这个中枢不支持每日同步",
+  "settings_unavailable": "读不到每日同步的设置，请稍后再试",
+  "no_bot": "这个机器人没有设置每日同步",
+  "no_binding": "这个账号没有连接每日同步",
+  "no_app": "这个机器人还没有应用，请先完成设置",
+  "bad_redirect": "返回地址必须是网页版的 /lark-oauth 页面",
+  "auth_expired": "授权已过期，请重新开始",
+  "auth_failed": "飞书没有接受这次授权，请重新开始",
+  "auth_denied": "授权在飞书里被拒绝了",
+  "register_hint": "在飞书里打开页面并确认：Persona 会创建一个应用，把你的聊天和文档读进知识库。在另一台设备上，也可以用飞书扫码。",
+  "device_hint": "在飞书里打开页面（或用飞书扫码），允许 Persona 以你的身份读取",
+  "device_open_link": "在飞书中打开",
+  "reauth_title": "飞书同步需要你重新授权",
+  "reauth_body_one": "请在 {count} 天内重新授权 {label}，每日同步才能继续",
+  "reauth_body_other": "请在 {count} 天内重新授权 {label}，每日同步才能继续",
+  "account_n": "账号 {n}"
+}

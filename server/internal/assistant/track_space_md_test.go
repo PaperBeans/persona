@@ -151,10 +151,11 @@ func TestTrackSpaceMDRoutes(t *testing.T) {
 func TestSpaceStateUpdateTool(t *testing.T) {
 	ctx := context.Background()
 	s, _, n := spaceMDService(t)
-	if toolListed(s.Tools(ctx), spaceStateTool) || toolListed(s.ToolsFor(ctx, "server", "plain-00-0000"), spaceStateTool) {
+	if toolListed(s.Tools(ctx), spaceStateTool) {
 		t.Fatal("space_state_update is in the assistant's shared list")
 	}
-	if !toolListed(s.sessionMCPTools(ctx, "server", "plain-00-0000", true, false), spaceStateTool) {
+	if !toolListed(s.ToolsFor(ctx, "server", "plain-00-0000"), spaceStateTool) ||
+		!toolListed(s.sessionMCPTools(ctx, "server", "plain-00-0000", true, false), spaceStateTool) {
 		t.Fatal("the space's conversation lacks space_state_update")
 	}
 	for _, sid := range []string{"main-0000-0000", "sleep-000-0000"} {

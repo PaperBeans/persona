@@ -105,7 +105,7 @@ class AgentCreationServiceTest {
                 """{"name":"odd","agent":"paseo","permission_modes":"default"},{"name":"claude"}]}"""))
             val launchers = service.launchers("computer")
             assertEquals(listOf("grok", "kimi", "odd", "claude"), launchers.map { it.name })
-            assertEquals(listOf("Grok", "kimi", "odd", "claude"), launchers.map { it.title })
+            assertEquals(listOf("Grok", "kimi", "odd", "Claude Code"), launchers.map { it.title })
             assertEquals(listOf(listOf("default", "bypassPermissions"), listOf("default"), null, null), launchers.map { it.permissionModes })
             assertEquals(listOf("paseo", "paseo", "paseo", "claude"), launchers.map { it.agentType })
         }

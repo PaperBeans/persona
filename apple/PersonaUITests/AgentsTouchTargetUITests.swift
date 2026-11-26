@@ -3,10 +3,11 @@ import XCTest
 /// Every row, heading and fold control a finger taps in the Agents list is at least 44 pt tall (#3753), in every grouping
 /// and display, and a tap just inside a row's or a heading's edge lands on it (a plain button takes taps on its label
 /// alone: the label has to be the whole row). Against the long mock list with worktrees and a Codex chat's subagents:
-///   PORT=<port> MOCK_AGENTS=1 MOCK_WORKTREES=1 MOCK_ORCA_CHILDREN=1 MOCK_DESKTOP_APPS=1 python3 scripts/mock/mock_hub.py
+///   PORT=<port> MOCK_AGENTS=1 MOCK_MANAGERS=1 MOCK_WORKTREES=1 MOCK_ORCA_CHILDREN=1 MOCK_DESKTOP_APPS=1 python3 scripts/mock/mock_hub.py
 ///   TEST_RUNNER_PERSONA_TOUCH_HUB=http://127.0.0.1:<port>
 /// TEST_RUNNER_PERSONA_TOUCH_GROUPINGS=repo,state and TEST_RUNNER_PERSONA_TOUCH_DISPLAYS=avatar,list narrow the matrix;
-/// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps each one's first screen. Runs in English (the labels it reads).
+/// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps each one's first screen, and TEST_RUNNER_PERSONA_TEXT_SIZE=<UIContentSizeCategory
+/// raw value> launches at that text size. Runs in English (the labels it reads).
 final class AgentsTouchTargetUITests: XCTestCase {
     private var hub = ""
     private var app: XCUIApplication!
@@ -16,7 +17,7 @@ final class AgentsTouchTargetUITests: XCTestCase {
     static let tapped: Set<String> = ["agents.row", "agents.compactRow", "agents.project", "agents.worktree", "agents.foldWorkspace",
                                       "agents.childSpaces", "agents.host", "agents.showAll", "agents.tab", "agents.quietSpace",
                                       "agents.waiting", "agents.section", "agents.space", "agents.idleFold", "agents.collapse",
-                                      "agents.subtasks"]
+                                      "agents.subtasks", "agents.clearSeen"]
     static let groupings = ["repo", "space", "state", "machine", "app", "todo", "recent"]
     /// Avatar, Two Lines, State Cards, Compact List.
     static let displays = ["avatar", "compact", "cards", "list"]
@@ -26,12 +27,13 @@ final class AgentsTouchTargetUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = true
         guard let h = ProcessInfo.processInfo.environment["PERSONA_TOUCH_HUB"] else {
-            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AGENTS=1 MOCK_WORKTREES=1 MOCK_ORCA_CHILDREN=1 MOCK_DESKTOP_APPS=1 (PERSONA_TOUCH_HUB)")
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AGENTS=1 MOCK_MANAGERS=1 MOCK_WORKTREES=1 MOCK_ORCA_CHILDREN=1 MOCK_DESKTOP_APPS=1 (PERSONA_TOUCH_HUB)")
         }
         hub = h
     }
 
     override func tearDown() {
+        if !hub.isEmpty { setHierarchyFold(true) }
         if let app, (testRun?.totalFailureCount ?? 0) > 0 {
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = "failure"
@@ -79,6 +81,45 @@ final class AgentsTouchTargetUITests: XCTestCase {
         add(a)
     }
 
+    /// A By Status section holding a row read during the visit (#12514): its Clear Seen is a finger tall, and the chevron
+    /// beside it folds the section from a finger's width, not only on its glyph.
+    @MainActor func testClearSeenAndTheChevronBesideItAreFingerSized() throws {
+        // Every row unread as the mock starts, whatever an earlier run marked.
+        _ = try? Data(contentsOf: URL(string: hub + "/mock/reset")!)
+        launch(grouping: "state", display: "list")
+        let window = app.windows.firstMatch
+        let column = app.collectionViews.firstMatch
+        let unread = app.buttons.matching(identifier: "agents.section").matching(NSPredicate(format: "label BEGINSWITH 'Unread'")).firstMatch
+        bringUp(unread, column: column)
+        // Then high on the screen: rows under it to press, and the notice that comes at the list's foot once a row stays
+        // covers neither the heading nor its controls.
+        for _ in 0..<3 where unread.exists && unread.frame.minY > window.frame.height * 0.35 {
+            let from = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: window.frame.height * 0.25 - unread.frame.minY)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(unread.exists && unread.isHittable, "no Unread heading")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["agents.row", "agents.compactRow"])).allElementsBoundByIndex
+        let row = try XCTUnwrap(rows.filter { $0.exists && $0.frame.minY >= unread.frame.maxY - 1 }.min { $0.frame.minY < $1.frame.minY },
+                                "a row under Unread")
+        row.press(forDuration: 1.0)
+        let mark = app.buttons["Mark as Seen"].firstMatch
+        XCTAssertTrue(mark.waitForExistence(timeout: 5), "the row's menu offers Mark as Seen")
+        mark.tap()
+        let clear = app.buttons["agents.clearSeen"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 5), "the read row is held, and Unread offers Clear Seen")
+        shot("touch-state-clear-seen")
+        XCTAssertGreaterThanOrEqual(clear.frame.height, Self.floor, "Clear Seen is \(clear.frame.height) pt tall")
+        XCTAssertGreaterThanOrEqual(unread.frame.height, Self.floor, "the Unread heading is \(unread.frame.height) pt tall")
+        // The chevron's square starts just past Clear Seen: 30 pt past it is beyond the glyph's own width.
+        let f = clear.frame
+        for _ in 0..<2 {
+            let before = unread.label
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: f.maxX + 30, dy: f.midY)).tap()
+            XCTAssertTrue(waitUntil { unread.exists && unread.label != before }, "a tap by the chevron did nothing (\(before))")
+        }
+    }
+
     /// A tap 3 pt inside the top and the bottom of a heading or a row that folds lands on it: the machine's heading and a
     /// repository's header (By Repository), a state's heading and a Codex chat's Subtasks (By Status), "N more idle"
     /// (Compact List, By Project).
@@ -94,6 +135,9 @@ final class AgentsTouchTargetUITests: XCTestCase {
         if host.exists && host.isHittable { foldsByItsEdges(host, "the machine's heading") }
         app.terminate()
 
+        // Current hubs fold Codex subagents into their parent chat (`sessions_hierarchy`, #5120/#8010); turn hierarchy
+        // folding off on the mock to exercise the pre-hierarchy `CodexSubtasksRow` (`agents.subtasks`) fallback (#13575).
+        setHierarchyFold(false)
         launch(grouping: "state", display: "list")
         let state = app.buttons.matching(identifier: "agents.section").matching(NSPredicate(format: "label BEGINSWITH 'Unread'")).firstMatch
         bringUp(state, column: column)
@@ -111,6 +155,7 @@ final class AgentsTouchTargetUITests: XCTestCase {
         tap(subtasks, nearTop: false)
         XCTAssertTrue(waitUntil { !subagent.exists }, "a tap by the Subtasks row's bottom edge did not fold it")
         app.terminate()
+        setHierarchyFold(true)
 
         launch(grouping: "space", display: "list")
         let idle = app.buttons.matching(identifier: "agents.idleFold").firstMatch
@@ -123,14 +168,30 @@ final class AgentsTouchTargetUITests: XCTestCase {
     }
 
     /// Taps by its top edge, then by its bottom edge: each folds or opens it (its label says which).
+    /// When a section header cell wraps an inner plain Button, verifies the inner button covers the cell's vertical edges
+    /// so edge taps land inside the button on iOS 26 as well as iOS 27 (#13575).
     @MainActor private func foldsByItsEdges(_ element: XCUIElement, _ what: String) {
-        XCTAssertGreaterThanOrEqual(element.frame.height, Self.floor, "\(what) is \(element.frame.height) pt tall")
+        let outer = element.frame
+        XCTAssertGreaterThanOrEqual(outer.height, Self.floor, "\(what) is \(outer.height) pt tall")
+        let inner = element.buttons.firstMatch
+        if inner.exists {
+            let f = inner.frame
+            XCTAssertLessThanOrEqual(f.minY - outer.minY, 1.5, "\(what) has \(f.minY - outer.minY) pt dead margin at its top edge")
+            XCTAssertLessThanOrEqual(outer.maxY - f.maxY, 1.5, "\(what) has \(outer.maxY - f.maxY) pt dead margin at its bottom edge")
+        }
         for top in [true, false] {
             let before = element.label
             tap(element, nearTop: top)
             let changed = waitUntil { element.exists && element.label != before }
             XCTAssertTrue(changed, "a tap by \(what)'s \(top ? "top" : "bottom") edge did nothing (\(before))")
         }
+    }
+
+    private func setHierarchyFold(_ on: Bool) {
+        guard let url = URL(string: "\(hub)/mock/hierarchy?on=\(on ? 1 : 0)") else { return }
+        let sem = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { _, _, _ in sem.signal() }.resume()
+        _ = sem.wait(timeout: .now() + 5)
     }
 
     @MainActor private func tap(_ element: XCUIElement, nearTop: Bool) {
@@ -209,6 +270,7 @@ final class AgentsTouchTargetUITests: XCTestCase {
         let look = display == "list" ? ["-dev.compact", "YES"] : ["-dev.compact", "NO", "-agents.rowStyle", display]
         app.launchArguments = ["-pairURL", pair, "-tab", "dev", "-dev.openChat", "", "-openAgentsFresh", "YES",
                                "-dev.grouping", grouping, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + look
+        if let size = ProcessInfo.processInfo.environment["PERSONA_TEXT_SIZE"] { app.launchArguments += ["-UIPreferredContentSizeCategoryName", size] }
         app.launchPinned()
         XCTAssertTrue(app.buttons["agents.filter.all"].waitForExistence(timeout: 20), "no Agents list (\(grouping) \(display))")
         sleep(2)

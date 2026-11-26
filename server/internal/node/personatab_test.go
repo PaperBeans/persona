@@ -28,7 +28,7 @@ func withStop(t *testing.T, rounds int, wait time.Duration) {
 
 // quitsOn makes herdr's snapshot lose agent once Ctrl+C has been pressed twice in its pane, as claude exiting to its
 // shell does: the pane stays, holding the shell (marked as Persona's for the session).
-func quitsOn(f *fakeHerdr, pane, session string, still []any, gone map[string]any) {
+func quitsOn(f *fakeHerdr, pane, session string, still []any, gone map[string]any, processExited ...func()) {
 	var mu sync.Mutex
 	presses := 0
 	f.after(func(c herdrCall) {
@@ -40,6 +40,9 @@ func quitsOn(f *fakeHerdr, pane, session string, still []any, gone map[string]an
 		n := presses
 		mu.Unlock()
 		if n == 2 {
+			for _, exit := range processExited {
+				exit()
+			}
 			f.reply("session.snapshot", snapshot(nil, nil, still, []any{gone}))
 		}
 	})

@@ -1,0 +1,12 @@
+{
+  "pasted_preview_hint": "点击预览或展开到输入框",
+  "pasted_chip_other": "已粘贴文本 · {count} 字",
+  "pasted_remove": "移除粘贴文本",
+  "pasted_stats": "{lines} 行 · {chars} 字",
+  "pasted_expand": "展开到输入框",
+  "collapse": "收起输入框",
+  "suggestion_label": "Claude 建议：{suggestion}",
+  "suggestion_use": "采用",
+  "suggestion_use_hint": "填入输入框（Tab）",
+  "suggestion_send": "直接发送"
+}

@@ -84,6 +84,7 @@ func endUnrelatedAnswerRun(t *testing.T, s *Service, f *fakeHub, r *channel.Run,
 }
 
 func TestUnrelatedChannelEndKeepsNextTurnMirrors(t *testing.T) {
+	needsLarkLayer(t)
 	for _, via := range []string{"poll", "live items", "owner send"} {
 		for _, card := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/card=%v", via, card), func(t *testing.T) {
@@ -104,6 +105,7 @@ func TestUnrelatedChannelEndKeepsNextTurnMirrors(t *testing.T) {
 
 // A completion can arrive before either the item event or the polling watch ended the old wait.
 func TestUnrelatedChannelEndDiscoveredAtCompletion(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name    string
 		card    bool
@@ -163,6 +165,7 @@ func TestUnrelatedChannelEndDiscoveredAtCompletion(t *testing.T) {
 }
 
 func TestChannelCompletionKeepsOtherRunEndings(t *testing.T) {
+	needsLarkLayer(t)
 	for _, ending := range []string{"answer", "pending", "quiet", "recalled", "timeout"} {
 		t.Run(ending, func(t *testing.T) {
 			s, f, r, _ := unrelatedAnswerService(t, false)
@@ -201,6 +204,7 @@ func TestChannelCompletionKeepsOtherRunEndings(t *testing.T) {
 }
 
 func TestUnrelatedChannelEndCompletionRetriesCardCleanup(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, _ := unrelatedAnswerService(t, true)
 	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) { return nil, context.DeadlineExceeded })
 	s.channelTurnEnded(context.Background(), r.MachineID, r.SessionID)
@@ -252,6 +256,7 @@ func TestUnrelatedChannelEndPreservesMirrorScope(t *testing.T) {
 }
 
 func TestUnrelatedChannelEndPreservesAnsweredMarkers(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, p := unrelatedAnswerService(t, false)
 	now := time.Now()
 	prior := now.Add(-time.Minute)
@@ -294,6 +299,7 @@ func TestUnrelatedChannelEndPreservesAnsweredMarkers(t *testing.T) {
 }
 
 func TestUnrelatedChannelEndKeepsCompletionPush(t *testing.T) {
+	needsLarkLayer(t)
 	for _, delivered := range []bool{false, true} {
 		t.Run(fmt.Sprintf("delivered=%v", delivered), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

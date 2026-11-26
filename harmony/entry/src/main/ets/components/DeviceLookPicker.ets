@@ -10,6 +10,7 @@ import { tr } from '../design/Strings';
 export struct DeviceLookPicker {
   @Require @Param model: DeviceLook;
   @Param active: boolean = true;
+  @Param showAccent: boolean = true;
   @Event onAvatarSelected: (key: string) => void = (_key: string): void => {};
   @Event onAccentSelected: (id: string) => void = (_id: string): void => {};
   @Event onRefresh: () => void = (): void => {};
@@ -46,7 +47,7 @@ export struct DeviceLookPicker {
           }.width('100%').constraintSize({ minHeight: Tokens.touch }).padding({ left: Tokens.page, right: Tokens.page, top: Tokens.inset, bottom: Tokens.inset })
         }.onClick(() => this.selectAvatar(avatar.optionKey())).id('device-look-avatar-' + avatar.optionKey())
       }, (avatar: DeviceLookAvatar) => avatar.optionKey())
-      ListItem() {
+      if (this.showAccent) ListItem() {
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween, alignItems: ItemAlign.Center, space: { main: LengthMetrics.vp(Tokens.inset), cross: LengthMetrics.vp(Tokens.gap) } }) {
           Text(tr('device_look_accent_heading')).fontSize(Tokens.body).flexShrink(0).constraintSize({ maxWidth: '100%' })
           Select(this.accentChoices()).attributeModifier(SelectStyles.inline).selected(this.accentIndex()).value(this.accentLabel(this.model.accentId)).enabled(this.active && this.model.ready)

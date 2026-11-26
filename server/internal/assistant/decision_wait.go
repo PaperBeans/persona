@@ -227,7 +227,7 @@ func (s *Service) briefListed(f *briefFacts) {
 	}
 	changed := false
 	for _, r := range f.Accept {
-		if a := b.asks[r.id]; a != nil && a.ForBriefing && a.AskedAt.Equal(r.asked) {
+		if a := b.asks[r.ID]; a != nil && a.ForBriefing && a.AskedAt.Equal(r.Asked) {
 			a.ForBriefing, changed = false, true
 		}
 	}

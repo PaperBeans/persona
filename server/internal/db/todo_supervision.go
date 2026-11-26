@@ -28,6 +28,9 @@ type TodoSupervisionRow struct {
 	// Waits is the done judge's finding that the latest stretch of work stopped on the owner's decision (#1277), JSON the
 	// assistant owns; nil when it does not hold.
 	Waits json.RawMessage `json:"waits,omitempty"`
+	// OwnerWork is the latest owner instruction and Persona assignment per linked Agent session (#15406), JSON the
+	// assistant owns. It is kept apart from the review state and is never exposed with the to-do.
+	OwnerWork json.RawMessage `json:"owner_work,omitempty"`
 	// PendingSince is when the task entered pending_review; nil in every other state, and for a task that was already
 	// waiting for review with no time recorded.
 	PendingSince *time.Time `json:"pending_since,omitempty"`
@@ -72,7 +75,7 @@ func AlignTodoCriteria(doneWhen []string, criteria []TodoCriterion) []TodoCriter
 
 // ListTodoSupervision returns every supervised task's ledger.
 func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, error) {
-	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, updated_at, criteria, pending_since, supervisor_source, cardless_told_at
+	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at
 		FROM todo_supervision`)
 	if err != nil {
 		return nil, err
@@ -81,8 +84,8 @@ func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, err
 	var out []TodoSupervisionRow
 	for rows.Next() {
 		var r TodoSupervisionRow
-		var when, auto, waits, criteria []byte
-		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt); err != nil {
+		var when, auto, waits, ownerWork, criteria []byte
+		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &ownerWork, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt); err != nil {
 			return nil, err
 		}
 		if len(auto) > 0 {
@@ -90,6 +93,9 @@ func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, err
 		}
 		if len(waits) > 0 {
 			r.Waits = waits
+		}
+		if len(ownerWork) > 0 && string(ownerWork) != "[]" {
+			r.OwnerWork = ownerWork
 		}
 		_ = json.Unmarshal(when, &r.DoneWhen)
 		_ = json.Unmarshal(criteria, &r.Criteria)
@@ -115,19 +121,24 @@ func (d *DB) PutTodoSupervision(ctx context.Context, r TodoSupervisionRow) error
 		reviews = json.RawMessage("[]")
 	}
 	var auto, waits []byte // NULL when no review ran / when no wait holds
+	ownerWork := r.OwnerWork
+	if len(ownerWork) == 0 {
+		ownerWork = json.RawMessage("[]")
+	}
 	if len(r.AutoReview) > 0 {
 		auto = r.AutoReview
 	}
 	if len(r.Waits) > 0 {
 		waits = r.Waits
 	}
-	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, updated_at, criteria, pending_since, supervisor_source, cardless_told_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
+	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
 		ON CONFLICT (todo_id) DO UPDATE SET supervisor = EXCLUDED.supervisor, done_when = EXCLUDED.done_when,
 			expect_minutes = EXCLUDED.expect_minutes, state = EXCLUDED.state, round = EXCLUDED.round,
-			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, waits = EXCLUDED.waits, updated_at = EXCLUDED.updated_at, criteria = EXCLUDED.criteria,
+			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, waits = EXCLUDED.waits, owner_work = EXCLUDED.owner_work,
+			updated_at = EXCLUDED.updated_at, criteria = EXCLUDED.criteria,
 			pending_since = EXCLUDED.pending_since, supervisor_source = EXCLUDED.supervisor_source, cardless_told_at = EXCLUDED.cardless_told_at`,
-		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt)
+		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, ownerWork, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt)
 	if err != nil {
 		return err
 	}

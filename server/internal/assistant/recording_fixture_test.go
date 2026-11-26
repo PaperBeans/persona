@@ -27,6 +27,7 @@ import (
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -486,7 +487,7 @@ func (d *dayFixture) recap(id string) *kb.DayRecap {
 	d.t.Helper()
 	e := d.engine()
 	for range 5 {
-		e.WriteDayRecaps(context.Background(), 1)
+		e.RecordingProvider().WriteDayRecaps(context.Background(), 1)
 		if r, ok := e.Store.Recording(id); ok && r.RecapState == kb.MinutesReady {
 			rc, err := e.ReadDayRecap(id)
 			if err != nil {
@@ -526,7 +527,7 @@ func (m *meetingFixture) minutesFor(id, reply string) {
 	e := m.engine()
 	model := minutesModel{reply: reply}
 	e.Model, e.ModelFor = model, func(string) kb.Model { return model }
-	if n := e.WriteMinutes(context.Background(), 5); n < 1 {
+	if n := e.RecordingProvider().WriteMinutes(context.Background(), 5); n < 1 {
 		m.t.Fatalf("no minutes written for %s", id)
 	}
 }
@@ -555,7 +556,7 @@ func (m minutesModel) JSONMax(_ context.Context, _, _ string, _ int, out any) er
 // meeting is recording id's meeting.json now.
 func (r *roomFixture) meeting(id string) kb.Meeting {
 	r.t.Helper()
-	m, _, err := r.engine().MeetingRead(id)
+	m, _, err := recW(r.engine()).MeetingRead(id)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -573,4 +574,27 @@ func (r *roomFixture) sentOnce() []map[string]any {
 	r.f.mu.Lock()
 	defer r.f.mu.Unlock()
 	return slices.Clone(r.f.sentOnce)
+}
+
+// recWriters is the recording module's write side of a knowledge base as these tests call it: the upload, the live
+// log and meeting.json are the module's writers (internal/modules/recording/writers), which the core's tests reach
+// through the provider the module's hook gave the knowledge base, never by importing the module.
+type recWriters interface {
+	PutRecording(rawID string, u recordingwire.RecordingUpload, now time.Time) (recordingwire.RecordingPut, error)
+	LiveAppend(rawID string, from int, segs []recordingwire.LiveSegment) (recordingwire.Live, recordingwire.Recording, error)
+	LiveRead(rawID string) (recordingwire.Live, recordingwire.Recording, error)
+	LiveUpdate(rawID string, fn func(l *recordingwire.Live, r recordingwire.Recording) error) (recordingwire.Live, error)
+	MeetingRead(rawID string) (recordingwire.Meeting, recordingwire.Recording, error)
+	MeetingUpdate(rawID string, fn func(m *recordingwire.Meeting, r recordingwire.Recording) error) (recordingwire.Meeting, error)
+	HasMinutes(id string) bool
+}
+
+// recW is knowledge base e's recording writers; a knowledge base without the module has none, and a test that asks
+// for them there is one that should have skipped (needsRecordingModule).
+func recW(e *kb.Engine) recWriters {
+	w, ok := e.RecordingProvider().(recWriters)
+	if !ok {
+		panic("this knowledge base has no recording writers: the recording module is not hooked")
+	}
+	return w
 }

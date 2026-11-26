@@ -51,6 +51,8 @@ import Synchronization
     private var phone: PhoneScreenLink?
     /// Restore waits for the page's picture before the system grows the small window back into it.
     private let restore = VNCPiPRestore()
+    /// Playback lease recorded while the small window's audio session is active.
+    private var audioLease: AudioSessionBroker.Lease?
 
     static var supported: Bool { AVPictureInPictureController.isPictureInPictureSupported() || showsSource }
     var active: Bool { controller?.isPictureInPictureActive == true }
@@ -80,15 +82,19 @@ import Synchronization
         // A live system call keeps its audio session (docs/apple/calls.md): the playback category would cut the call's
         // microphone. The small window still gets its source; whether the system offers it then is its own call.
         if !LiveCallGate.callIsLive {
-            let audio = AVAudioSession.sharedInstance()
             do {
-                try audio.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
-                try audio.setActive(true)
+                try AudioSessionBroker.shared.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                try AudioSessionBroker.shared.setActive(true)
+                audioLease = AudioSessionBroker.shared.acquire(id: "screen-share.pip", module: "screen-share", kind: .playback)
             } catch {
                 note(String(localized: "Couldn't start the audio session: \(error.localizedDescription)"))
             }
         }
-        guard let window = Self.mainWindow() else { return note(String(localized: "Can't find the app's main window")) }
+        guard let window = Self.mainWindow() else {
+            audioLease?.release()
+            audioLease = nil
+            return note(String(localized: "Can't find the app's main window"))
+        }
         let session = VNC.hold(ref)
         let v = VNCScreenUIView(frame: .zero)
         v.session = session
@@ -306,6 +312,8 @@ import Synchronization
     private func end() {
         waiting?.cancel()
         waiting = nil
+        audioLease?.release()
+        audioLease = nil
         drawing?.cancel()
         drawing = nil
         card = nil

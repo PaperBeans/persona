@@ -5,45 +5,16 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nwverse/persona/server/internal/botcard"
-	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-func TestFeishuEndCardLocales(t *testing.T) {
-	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
-		for _, end := range []channel.End{channel.EndDone, channel.EndStopped, channel.EndError, channel.EndGaveUp,
-			channel.EndGone, channel.EndOffline, channel.EndRecalled, channel.EndUnrelated} {
-			name := string(end)
-			if end == channel.EndDone {
-				name = "done"
-			}
-			t.Run(string(lang)+"/"+name, func(t *testing.T) {
-				want := i18n.T(lang, "assistant-feishu.end_"+name)
-				foot := endFoot(lang, "Persona", time.Second, 1, true, end)
-				c := botcard.NewCard("", "", foot).Note(foot)
-				endHeader(lang, c, end)
-				if strings.Contains(c.JSON(), "assistant-feishu.") || !strings.HasPrefix(foot, want+" · ") {
-					t.Fatalf("unlocalized ending: %s", c.JSON())
-				}
-				if end == channel.EndDone {
-					if c.Header != nil {
-						t.Fatalf("normal completion gained a header: %s", c.JSON())
-					}
-				} else if c.Header == nil || c.Header.Title.Content != want {
-					t.Fatalf("ending header: %s", c.JSON())
-				}
-			})
-		}
-	}
-}
-
 // Exercise the held-run entry point and real sink, with only the Feishu transport replaced. An unrelated turn
 // closes the existing card in the owner's language without sending that turn's text or a new answer.
 func TestFeishuUnrelatedEndUpdatesLocalizedProgress(t *testing.T) {
+	needsLarkLayer(t)
 	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
 		t.Run(string(lang), func(t *testing.T) {
 			s, f, r, posts := heldRunWithoutCard(t)

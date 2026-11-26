@@ -18,6 +18,8 @@ struct SideSessions: Equatable {
 
     var rows: [Row] = []
     var rollup = SideFold.Rollup()
+    /// Present when one or more folded side sessions keep this parent row Unread (#13524).
+    var unreadSummary: SideFold.UnreadSummary?
 
     init() {}
 
@@ -26,6 +28,7 @@ struct SideSessions: Equatable {
             Row(key: $0.key, title: $0.displayTitle, state: $0.state, label: $0.stateLabel, waitsInBackground: $0.waitsInBackground)
         }
         rollup = fold.rollups[parent] ?? SideFold.Rollup()
+        unreadSummary = fold.unreadSummaries[parent]
     }
 
     /// How many: the sides held, else (a paged row whose sides are not held) the hub's count.

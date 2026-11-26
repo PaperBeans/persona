@@ -798,6 +798,15 @@ var Points = map[string]Point{
 	}},
 	// repository_providers: a code-hosting source for the repository catalog and a to-do's repositories and links on the
 	// exact hosts it names (repo.parse / repo.check / repo.link / repo.describe, docs/extensions/repository-providers.md).
+	// disk_offload: a provider that moves items from a computer to storage elsewhere and back (DiskOffloadItem,
+	// disk_offload.go; the calls are offload.schema.json's).
+	"disk_offload": {Name: "disk_offload", Namespace: "offload", Version: 1, NeedsRPC: true, Item: func(raw json.RawMessage) (string, error) {
+		var it DiskOffloadItem
+		if err := strict(raw, &it); err != nil {
+			return "", err
+		}
+		return it.ID, checkDiskOffload(it)
+	}},
 	"repository_providers": {Name: "repository_providers", Namespace: "repo", Version: 1, NeedsRPC: true, Item: func(raw json.RawMessage) (string, error) {
 		var p RepositoryProviderItem
 		if err := strict(raw, &p); err != nil {

@@ -73,14 +73,14 @@ nonisolated enum TodoUpcomingLayout {
     /// `fallback`.
     static func calendarState(_ view: TodoSummary?, fallback: TaskState) -> TaskState {
         guard let view else { return fallback }
-        if view.reason == TodoReason.failedStart { return .failed }
+        if view.reason == .failedStart { return .failed }
         switch view.phase {
-        case TodoPhase.needsYou: return .needsYou
-        case TodoPhase.working: return .working
-        case TodoPhase.waiting: return .waiting
-        case TodoPhase.ready: return .unread
-        case TodoPhase.done: return .done
-        default: return .notStarted
+        case .needsYou: return .needsYou
+        case .working: return .working
+        case .waiting: return .waiting
+        case .ready: return .unread
+        case .done: return .done
+        case .todo, .someday, .unknown: return .notStarted
         }
     }
 }

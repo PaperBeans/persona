@@ -143,20 +143,22 @@ func (s *switchShare) takeRestart(id string, now time.Time) string {
 }
 
 // settleRestart ends a try of session id's restart in mode: done or failed drops it, errRestartLater puts it off.
-func (s *switchShare) settleRestart(id, mode string, err error, now time.Time) {
+// False means the user dropped or replaced this try meanwhile; its outcome must not be reported as a completion.
+func (s *switchShare) settleRestart(id, mode string, err error, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.restarts[id]
 	if r == nil || r.mode != mode {
-		return // dropped or replaced meanwhile
+		return false // dropped or replaced meanwhile
 	}
 	r.applying = false
 	if !errors.Is(err, errRestartLater) {
 		delete(s.restarts, id)
-		return
+		return true
 	}
 	r.delay = min(max(r.delay*2, modeRestartRetry), modeRestartMaxRetry)
 	r.retryAt = now.Add(r.delay)
+	return true
 }
 
 // needsModeRestart: mode can reach session id's running agent only by starting it again (Allow All for a claude whose
@@ -197,12 +199,13 @@ func (n *Node) queueModeRestart(id, mode string) error {
 	return nil
 }
 
-// dropModeRestart drops a restart session id waits for, as a pick of another mode, picked, does. A pick of the mode the
-// session runs in now calls it off and changes nothing else (cancelled, #11089); any other replaces it.
-func (n *Node) dropModeRestart(id, picked string) {
+// dropModeRestart drops a restart session id waits for, as a pick of another mode, picked, does, and reports whether
+// a waiting restart was dropped. A pick of the mode the session runs in now calls it off and changes nothing else
+// (cancelled, #11089); any other replaces it.
+func (n *Node) dropModeRestart(id, picked string) bool {
 	mode := n.switches().restartMode(id)
 	if mode == "" {
-		return
+		return false
 	}
 	reason := proto.ModeRestartReasonReplaced
 	if now, _ := n.modesOf(id); now == picked {
@@ -212,6 +215,7 @@ func (n *Node) dropModeRestart(id, picked string) {
 	n.logf("session %s: waiting restart in permission mode %s dropped: %s picked (%s)", id, mode, picked, reason)
 	n.reportModeRestart(id, mode, proto.ModeRestartDropped, reason)
 	n.notifySessions()
+	return true
 }
 
 // reportModeRestart tells the manager what became of session id's restart in mode and why (a ModeRestartReason… code,
@@ -315,7 +319,9 @@ func (n *Node) tryModeRestart(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), switchProbeWait)
 	defer cancel()
 	err := n.runModeRestart(ctx, id, mode)
-	n.switches().settleRestart(id, mode, err, time.Now())
+	if !n.switches().settleRestart(id, mode, err, time.Now()) {
+		return
+	}
 	var gone restartGoneError
 	switch {
 	case err == nil:

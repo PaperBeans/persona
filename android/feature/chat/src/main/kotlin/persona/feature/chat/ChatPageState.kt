@@ -443,12 +443,13 @@ internal fun rememberChatPageSubagents(
     key: SessionKey, chrome: ChatChromeBindings, readOnly: Boolean, session: Session?,
     openBackground: ((BackgroundDestination) -> Unit)?,
 ): ChatPageSubagents {
-    val subagentLinks = remember(session?.subagents, chrome.onOpenSession, readOnly, key.machineId) {
+    val subagentLinks = remember(session?.subagents, chrome.onOpenSubagent, chrome.onOpenSession, readOnly, key.machineId) {
         val listed = session?.subagents.orEmpty()
+        val opener = chrome.onOpenSubagent ?: chrome.onOpenSession
         if (listed.isEmpty()) null
         else ChatSubagents(listed.filter { !it.toolUseId.isNullOrBlank() && it.sessionId.isNotBlank() }
             .associate { it.toolUseId!! to SessionKey(key.machineId, it.sessionId) },
-            chrome.onOpenSession?.takeIf { !readOnly }, listed.associateBy(persona.core.domain.lines.Subagents::callOf))
+            opener?.takeIf { !readOnly }, listed.associateBy(persona.core.domain.lines.Subagents::callOf))
     }
     val subagentFolds = remember(key) { SubagentFolds() }
     // A Workflow call draws its run's card (#3435): the session's runs by the call that launched them, their agents

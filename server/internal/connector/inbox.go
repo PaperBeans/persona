@@ -30,6 +30,7 @@ const (
 	GroupMessagesBefore = connectorwire.GroupMessagesBefore
 	GroupSearch         = connectorwire.GroupSearch
 	TagBranch           = connectorwire.TagBranch
+	TagExternalObject   = connectorwire.TagExternalObject
 	TagChat             = connectorwire.TagChat
 	TagRepo             = connectorwire.TagRepo
 	TagSender           = connectorwire.TagSender

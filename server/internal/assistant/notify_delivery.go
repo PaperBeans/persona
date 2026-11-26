@@ -1,6 +1,8 @@
 package assistant
 
 import (
+	"slices"
+
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -40,6 +42,7 @@ func notifyMissed(res NotifyResult) string {
 // the briefing, kept until a device or the hub is back, or received by nothing, and then where its copies to the chat
 // channels went (copies, channels_copies.go). A hub that does not report devices keeps the old answer.
 func notifyAnswerText(l i18n.Lang, res NotifyResult, copies []pushCopy) string {
+	copies = slices.DeleteFunc(slices.Clone(copies), func(c pushCopy) bool { return c.state == copySkipped }) // a channel this hub does not have is not mentioned
 	if len(copies) == 0 {
 		return notifyDevicesText(l, res)
 	}

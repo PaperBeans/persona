@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, Session } from "./types";
 import { makeSessionLookup, type Todo } from "./todos";
+import type { TodoSummary } from "./todo-view-wire";
 import { ownerBadge, ownerNeeds, triage, triageTodos, waitsOnOwner } from "./todo-triage";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -171,11 +172,11 @@ describe("the badge's rules", () => {
     expect(Object.fromEntries(ownerNeeds([{ ...asking, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0 } }], lookup, NOW))).toEqual({ asking: "agent_asks" });
     expect(Object.fromEntries(ownerNeeds([{ ...asking, view: { phase: "needs_you", section: "needs_you", reason: "verify", rank: 0 } }], lookup, NOW))).toEqual({ asking: "owner_decides" });
     // a view this web does not know falls back to its own triage
-    expect(counted([{ ...asking, view: { phase: "working", section: "a_newer_section", reason: "persona_working", rank: 0 } }])).toEqual(["asking"]);
+    expect(counted([{ ...asking, view: { phase: "working", section: "a_newer_section", reason: "persona_working", rank: 0 } as unknown as TodoSummary }])).toEqual(["asking"]);
   });
 
   it("counts what the hub counts in needs_you once it sends views: one number with the hub and the tray", () => {
-    const v = (section: string, phase = section) => ({ phase, section, reason: section === "needs_you" ? "owner_decides" : "rest", rank: 0 });
+    const v = (section: string, phase = section) => ({ phase, section, reason: section === "needs_you" ? "owner_decides" : "rest", rank: 0 }) as TodoSummary;
     // the owner's own to-do the hub files under To do is not in its needs_you, so not in the badge
     expect(counted([personal("mine", { view: v("todo") })])).toEqual([]);
     // a step an open parent carries is counted with the parent only; a closed parent's step counts by itself

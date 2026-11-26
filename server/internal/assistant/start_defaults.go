@@ -558,7 +558,7 @@ func (s *Service) applyStartExtras(ctx context.Context, t *PlanTask, caller star
 	// Claude Code only; other agents keep whatever they were given.
 	tierEffort := false
 	if caller.tier != "" {
-		if tm, err := s.tierModel(ctx, caller.tier); err == nil && tm.Effort != "" {
+		if pick, err := s.pickTierCandidate(ctx, caller.tier, tierFacts{Machine: t.Machine}); err == nil && pick.Tier.Effort != "" {
 			tierEffort = true
 		}
 	}

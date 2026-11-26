@@ -49,13 +49,19 @@ export function isOverlayEntry(state: unknown, id: string): boolean {
   return Boolean(state && typeof state === "object" && (state as Record<string, unknown>)[KEY] === id);
 }
 
-/** Removes only overlay metadata, preserving the page's other history state. */
-function clearOverlayMarkers(state: Record<string, unknown>) {
-  const rest = { ...state };
+/** Returns `state` without overlay metadata, preserving the page's own history state. */
+export function withoutOverlayState(state: unknown): Record<string, unknown> | null {
+  if (!state || typeof state !== "object") return null;
+  const rest = { ...(state as Record<string, unknown>) };
   delete rest[KEY];
   delete rest[AT];
   delete rest[DEPTH];
-  history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
+  return Object.keys(rest).length ? rest : null;
+}
+
+/** Removes only overlay metadata, preserving the page's other history state. */
+function clearOverlayMarkers(state: Record<string, unknown>) {
+  history.replaceState(withoutOverlayState(state), "", location.href);
 }
 
 /** Opens one overlay's history entry: Back calls `onClose`. Returns the close (from the page) that takes it off. */

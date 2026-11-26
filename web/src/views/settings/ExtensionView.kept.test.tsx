@@ -187,6 +187,28 @@ describe("an extension page on reload", () => {
     expect(onWide).toHaveBeenLastCalledWith(true);
   });
 
+  it("reports wide mode for cached and live graph and map canvas views", async () => {
+    const graphView: UIView = {
+      title: "Topology",
+      sections: [{ items: [{ type: "graph", key: "topo", nodes: [{ id: "a", title: "Router" }, { id: "b", title: "Switch" }], edges: [{ from: "a", to: "b" }] }] }],
+    };
+    const mapView: UIView = {
+      title: "Route",
+      sections: [{ items: [{ type: "map", key: "route", alt: "Route map", markers: [{ id: "m1", lat: 35.68, lon: 139.76, label: "Start" }] }] }],
+    };
+    keepView({ ...page, version: UI_VERSION, manager: "m-1" }, graphView);
+    const onWide = vi.fn();
+    await act(async () => root.render(<ExtensionUI extension="example-today" ui="today" bare remember onWide={onWide} />));
+    await flush();
+    expect(kept()).not.toBeNull();
+    expect(onWide).toHaveBeenLastCalledWith(true);
+
+    act(() => setRosterDefault("m-1"));
+    await answer(mapView);
+    expect(kept()).toBeNull();
+    expect(onWide).toHaveBeenLastCalledWith(true);
+  });
+
   it("keeps View-level tabs, filter, search, and split layout while refreshing so layout does not jump", async () => {
     const board = (status: string): UIView => ({
       title: "Fleet Board",

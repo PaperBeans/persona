@@ -1,0 +1,337 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "one_session_with_its_cards",
+      "description": "A session with three cards waiting is one counted row, its cards oldest first.",
+      "input": {
+        "needs_you": "cards_of_one_session_are_one_row"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 1,
+          "as_of": 1795593601000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan",
+                    "ix-question",
+                    "ix-permission"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "a_session_waiting_in_its_terminal",
+      "description": "A session that waits in its terminal with no card is a counted row without cards.",
+      "input": {
+        "needs_you": "a_session_waiting_in_its_terminal_is_a_row"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 2,
+          "as_of": 1795593602000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:macbook/s2"
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "cards_on_no_session",
+      "description": "A card on no session is a row of its own, keyed by the card, with that one card.",
+      "input": {
+        "needs_you": "a_card_with_no_session_is_its_own_row"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 3,
+          "as_of": 1795593603000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 2,
+              "keys": [
+                {
+                  "id": "card:ix-a",
+                  "cards": [
+                    "ix-a"
+                  ]
+                },
+                {
+                  "id": "card:ix-b",
+                  "cards": [
+                    "ix-b"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "a_childs_card_under_its_parent",
+      "description": "A child's card is under the row of the session the hub folds the child under.",
+      "input": {
+        "needs_you": "a_childs_card_counts_under_its_parent"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 4,
+          "as_of": 1795593604000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/lead",
+                  "cards": [
+                    "ix-child"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "muted_rows_are_held_and_quiet_ones_absent",
+      "description": "Muted agents are listed in held as muted; a quiet task's agent is in neither list, since the live round never hands it in.",
+      "input": {
+        "needs_you": "muted_and_quiet_agents_are_rows_but_not_on_the_badge"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 5,
+          "as_of": 1795593605000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 2,
+              "keys": [
+                {
+                  "id": "agent:studio/s3"
+                },
+                {
+                  "id": "agent:macbook/s5"
+                }
+              ],
+              "held": [
+                {
+                  "id": "agent:studio/s1",
+                  "why": "muted"
+                },
+                {
+                  "id": "agent:studio/s2",
+                  "why": "muted"
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "a_held_card_counts_nowhere",
+      "description": "A session whose only card the assistant still holds is listed in held as held, and n is 0; totals still says 0.",
+      "input": {
+        "needs_you": "a_held_card_is_listed_but_counts_nowhere"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 6,
+          "as_of": 1795593606000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 0,
+              "held": [
+                {
+                  "id": "agent:studio/d",
+                  "why": "held"
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "a_handed_card_beside_a_held_one",
+      "description": "A session with a held card and a card handed to the owner counts, with both cards.",
+      "input": {
+        "needs_you": "a_handed_card_beside_a_held_one_counts"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 7,
+          "as_of": 1795593607000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/m",
+                  "cards": [
+                    "ix-held",
+                    "ix-handed"
+                  ]
+                }
+              ]
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "nothing_waits",
+      "description": "Nothing waits: n is 0, with no rows. totals is optional and absent here.",
+      "input": {
+        "needs_you": "other_states_do_not_need_the_user"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 8,
+          "as_of": 1795593608000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "the_to_do_lists_needs_you",
+      "description": "Once the manager has counted its to-dos, todos_needs_you is the to-do list's needs_you (the todo-counts case's counts, as GET /api/v1/todos answers them), beside the agents' count. The list's counts carry no rows, so keys lists none and all of n is more.",
+      "input": {
+        "needs_you": "cards_of_one_session_are_one_row",
+        "todo_counts": "ranked_list"
+      },
+      "expected": {
+        "view": {
+          "epoch": "b7e1c2a9",
+          "rev": 9,
+          "as_of": 1795593609000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 1,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-plan",
+                    "ix-question",
+                    "ix-permission"
+                  ]
+                }
+              ]
+            },
+            "todos_needs_you": {
+              "n": 4,
+              "more": 4
+            }
+          },
+          "totals": {
+            "agents_needs_you": 1,
+            "todos_needs_you": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "rows_past_the_keys_are_more",
+      "description": "keys lists fewer rows than n counts (at most 200, fewer to keep the view small); more is the rest, so n is the rows keys lists plus more.",
+      "expected": {
+        "view": {
+          "epoch": "4d0f8e13",
+          "rev": 1,
+          "as_of": 1795593601000,
+          "build": "1.0.0",
+          "counts": {
+            "agents_needs_you": {
+              "n": 3,
+              "keys": [
+                {
+                  "id": "agent:studio/s1",
+                  "cards": [
+                    "ix-1"
+                  ]
+                }
+              ],
+              "more": 2
+            }
+          },
+          "totals": {
+            "agents_needs_you": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "a_count_the_build_does_not_work_out_is_absent",
+      "description": "A manager build from before a count id leaves it out of counts and totals: the count is unknown, never 0.",
+      "expected": {
+        "view": {
+          "epoch": "9c5a7b20",
+          "rev": 1,
+          "as_of": 1795593601000,
+          "build": "1.0.0",
+          "counts": {}
+        }
+      }
+    }
+  ]
+}

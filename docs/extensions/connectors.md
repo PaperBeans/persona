@@ -3,6 +3,10 @@
 A connector is Persona's standard way to connect a data source: GitHub, Messages (iMessage), Telegram, Lark and mail each have one. The hub's pipelines
 (assistant tools, write gates, Inbox, knowledge base, status in Settings › Connectors, live events) attach automatically according to what the connector provides; adding a source does not require changing those pipelines.
 
+In web Settings, enabling `integrations_v2` under Labs groups a connector’s account, channel and Inbox controls
+on one **Integrations & Extensions** detail page. Turning it off returns to the separate pages using the same saved
+connection. See [web Labs](../web/web.md#labs) and [channel settings](channels.md#7-ui).
+
 This document has three parts:
 
 - **I. Current structure (v1)**: the actual structure after the Lark and mail migration (M0–M6) and the merged GitHub, Messages and Telegram work. Follow this to add a connector.

@@ -17,24 +17,31 @@ import { Button, Dialog, EASE, IconButton, Loading, Menu, toast, useMenu } from 
 import { Icon, type IconName } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { ChatView } from "../chat/ChatView";
+import { ReadOnlyChatView } from "../chat/ReadOnlyChatView";
 import { Composer, type Outgoing } from "../chat/Composer";
 import { conversationTitle } from "../assistant/conversations";
 import { Empty, SectionTitle, Tag } from "../assistant/parts";
 import { spaceEntry } from "./entry";
 import { useSpaceConversations } from "./conversations";
+import { HEALTH_TRACK, healthArchiveTrack, healthReadOnly } from "../../lib/health-archive";
+import { HealthReadOnlyData } from "./HealthReadOnlyData";
 import { ConversationCategories } from "./ConversationCategories";
 import { categoryLabel } from "./labels";
 import { SpaceMdEditor } from "./SpaceMdEditor";
 import { t } from "../../i18n";
 
+const trackIcon = (track?: Track): IconName => track?.slug === HEALTH_TRACK ? "heart" : spaceIcon(track);
+
 export function Space({ slug, sid, fresh, onToggleSidebar }: { slug: string; sid?: string; fresh?: boolean; onToggleSidebar: () => void }) {
+  const readOnly = healthReadOnly(slug);
   const { tracks, supported } = useTracks();
-  const track = tracks?.find((x) => x.slug === slug);
-  // known once the tracks are read: an unknown or archived space says so, with the way back
-  if (tracks && (!track || track.archived) && !sid) return <SpaceGone slug={slug} archived={track?.archived === true} onToggleSidebar={onToggleSidebar} />;
-  if (supported === false) return <SpaceGone slug={slug} archived={false} onToggleSidebar={onToggleSidebar} />;
-  if (sid) return <SpaceConversation slug={slug} sid={sid} track={track} onToggleSidebar={onToggleSidebar} />;
-  if (fresh) return track ? <SpaceHome track={track} onToggleSidebar={onToggleSidebar} /> : <Centered />;
+  const track = readOnly ? tracks?.find((x) => x.slug === slug) ?? healthArchiveTrack() : tracks?.find((x) => x.slug === slug);
+  // known once the tracks are read: an unknown or archived space says so, with the way back. Health predates that
+  // optional API and keeps its built-in archive metadata instead.
+  if (!readOnly && tracks && (!track || track.archived) && !sid) return <SpaceGone slug={slug} archived={track?.archived === true} onToggleSidebar={onToggleSidebar} />;
+  if (!readOnly && supported === false) return <SpaceGone slug={slug} archived={false} onToggleSidebar={onToggleSidebar} />;
+  if (sid) return <SpaceConversation slug={slug} sid={sid} track={track} readOnly={readOnly} onToggleSidebar={onToggleSidebar} />;
+  if (fresh) return track ? <SpaceHome track={track} readOnly={readOnly} onToggleSidebar={onToggleSidebar} /> : <Centered />;
   return <SpaceResume slug={slug} />;
 }
 
@@ -82,7 +89,7 @@ function SpaceGone({ slug, archived, onToggleSidebar }: { slug: string; archived
 }
 
 /** A conversation's header: its categories, the space's past conversations, and New. */
-function SpaceChatActions({ slug, sid, list }: { slug: string; sid: string; list: Session[] | null }) {
+function SpaceChatActions({ slug, sid, list, readOnly }: { slug: string; sid: string; list: Session[] | null; readOnly: boolean }) {
   const menu = useMenu();
   const items = (list ?? []).map((s) => ({
     key: s.session_id,
@@ -93,16 +100,16 @@ function SpaceChatActions({ slug, sid, list }: { slug: string; sid: string; list
   }));
   return (
     <>
-      <span className="hidden sm:flex"><ConversationCategories sid={sid} /></span>
+      {!readOnly && <span className="hidden sm:flex"><ConversationCategories sid={sid} /></span>}
       {items.length > 0 && <IconButton icon="clock" label={t("spaces.history")} onClick={menu.open} active={Boolean(menu.anchor)} />}
-      <IconButton icon="compose" label={t("spaces.new_chat")} onClick={() => navigate({ name: "track", slug, fresh: true })} />
+      {!readOnly && <IconButton icon="compose" label={t("spaces.new_chat")} onClick={() => navigate({ name: "track", slug, fresh: true })} />}
       {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={320} header={t("spaces.recent")} items={items} />}
     </>
   );
 }
 
 /** One of the space's conversations, on the space's computer (its list says which). */
-function SpaceConversation({ slug, sid, track, onToggleSidebar }: { slug: string; sid: string; track?: Track; onToggleSidebar: () => void }) {
+function SpaceConversation({ slug, sid, track, readOnly, onToggleSidebar }: { slug: string; sid: string; track?: Track; readOnly: boolean; onToggleSidebar: () => void }) {
   const { list, mid, error, reload } = useSpaceConversations(slug);
   const [retrying, setRetrying] = useState(false);
   if (!mid && error) {
@@ -112,7 +119,7 @@ function SpaceConversation({ slug, sid, track, onToggleSidebar }: { slug: string
     };
     return (
       <div className="flex h-full flex-col">
-        <Header title={track?.title || slug} icon={spaceIcon(track)} onToggleSidebar={onToggleSidebar} />
+        <Header title={track?.title || slug} icon={trackIcon(track)} onToggleSidebar={onToggleSidebar} />
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center" role="alert">
           <p className="max-w-[420px] break-words text-meta text-ink-2">{t("spaces.conversation_load_failed", { error })}</p>
           <Button onClick={retry} busy={retrying} icon="retry">{t("spaces.retry")}</Button>
@@ -121,13 +128,15 @@ function SpaceConversation({ slug, sid, track, onToggleSidebar }: { slug: string
     );
   }
   if (!mid) return <Centered />;
-  return <ChatView key={sid} mid={mid} sid={sid} assistant placeholder={t("spaces.ask_placeholder", { name: track?.title || slug })} onToggleSidebar={onToggleSidebar} headerActions={<SpaceChatActions slug={slug} sid={sid} list={list} />} />;
+  const history = <SpaceChatActions slug={slug} sid={sid} list={list} readOnly={readOnly} />;
+  if (readOnly) return <ReadOnlyChatView key={sid} mid={mid} sid={sid} onToggleSidebar={onToggleSidebar} headerActions={history} />;
+  return <ChatView key={sid} mid={mid} sid={sid} assistant placeholder={t("spaces.ask_placeholder", { name: track?.title || slug })} onToggleSidebar={onToggleSidebar} headerActions={history} />;
 }
 
-function SpaceHome({ track, onToggleSidebar }: { track: Track; onToggleSidebar: () => void }) {
+function SpaceHome({ track, readOnly, onToggleSidebar }: { track: Track; readOnly: boolean; onToggleSidebar: () => void }) {
   const slug = track.slug;
   const { list, mid, error, reload } = useSpaceConversations(slug);
-  const icon = spaceIcon(track);
+  const icon = trackIcon(track);
   const menu = useMenu();
   const [editing, setEditing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -155,7 +164,7 @@ function SpaceHome({ track, onToggleSidebar }: { track: Track; onToggleSidebar: 
     <div className="flex h-full flex-col">
       <Header title={track.title || slug} icon={icon} onToggleSidebar={onToggleSidebar}>
         <IconButton icon="retry" label={t("spaces.refresh")} onClick={() => void reload()} />
-        {!track.builtin && <IconButton icon="more" label={t("spaces.actions")} onClick={menu.open} active={Boolean(menu.anchor)} />}
+        {!track.builtin && !readOnly && <IconButton icon="more" label={t("spaces.actions")} onClick={menu.open} active={Boolean(menu.anchor)} />}
       </Header>
       {menu.anchor && (
         <Menu
@@ -178,17 +187,26 @@ function SpaceHome({ track, onToggleSidebar }: { track: Track; onToggleSidebar: 
             {track.description && <p className="mt-1.5 max-w-[520px] text-meta leading-relaxed text-ink-2">{track.description}</p>}
           </div>
 
-          <Composer draftKey={`track-new:${slug}`} placeholder={t("spaces.ask_placeholder", { name: track.title || slug })} machineId={mid} onSend={start} disabled={starting} autoFocus commands={[]} />
-          <p className="mt-2 flex items-start gap-1.5 px-1 text-label leading-relaxed text-ink-3" data-testid="space-privacy">
-            <Icon name="lock" size={12} className="mt-0.5 shrink-0" />
-            <span>{t("spaces.privacy_line")}</span>
-          </p>
+          {readOnly ? (
+            <p role="status" data-testid="health-readonly-note" className="mb-5 flex items-start gap-2 rounded-card bg-inset px-4 py-3 text-meta leading-relaxed text-ink-2">
+              <Icon name="lock" size={14} className="mt-0.5 shrink-0" />
+              <span>{t("spaces.health_read_only")}</span>
+            </p>
+          ) : (
+            <>
+              <Composer draftKey={`track-new:${slug}`} placeholder={t("spaces.ask_placeholder", { name: track.title || slug })} machineId={mid} onSend={start} disabled={starting} autoFocus commands={[]} />
+              <p className="mt-2 flex items-start gap-1.5 px-1 text-label leading-relaxed text-ink-3" data-testid="space-privacy">
+                <Icon name="lock" size={12} className="mt-0.5 shrink-0" />
+                <span>{t("spaces.privacy_line")}</span>
+              </p>
+            </>
+          )}
 
           <section className="mt-7">
             <SectionTitle>{t("spaces.recent")}</SectionTitle>
             {list === null && !error && <div className="flex justify-center py-8"><Loading /></div>}
             {error && list === null && <Empty icon="info" title={t("spaces.load_failed")}>{error}</Empty>}
-            {list && list.length === 0 && <Empty icon={icon} title={t("spaces.empty_title")}>{t("spaces.empty_body")}</Empty>}
+            {list && list.length === 0 && <Empty icon={icon} title={t("spaces.empty_title")}>{t(readOnly ? "spaces.empty_readonly_body" : "spaces.empty_body")}</Empty>}
             {list && list.length > 0 && (
               <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                 {list.map((s) => <SpaceRow key={s.session_id} slug={slug} s={s} icon={icon} />)}
@@ -196,7 +214,11 @@ function SpaceHome({ track, onToggleSidebar }: { track: Track; onToggleSidebar: 
             )}
           </section>
 
-          <SpaceMdCard slug={slug} title={track.title || slug} latest={saved} editable={!track.builtin} onEdit={() => setEditing(true)} />
+          {readOnly && <HealthReadOnlyData mid={mid} unavailable={error} />}
+
+          {/* A built-in space (the Health archive) has no SPACE.md of its own: spaceTrack excludes it, so asking for one
+              is always a 404 (server/internal/assistant/track_space.go). Draw the card only for a track that can have one. */}
+          {!track.builtin && <SpaceMdCard slug={slug} title={track.title || slug} latest={saved} editable={!track.builtin && !readOnly} onEdit={() => setEditing(true)} />}
 
           <section className="mt-7 mb-4">
             <SectionTitle>{t("spaces.categories")}</SectionTitle>
@@ -211,8 +233,8 @@ function SpaceHome({ track, onToggleSidebar }: { track: Track; onToggleSidebar: 
           </section>
         </div>
       </div>
-      <SpaceMdEditor open={editing} slug={slug} onClose={() => setEditing(false)} onSaved={setSaved} />
-      <ArchiveDialog open={archiving} track={track} onClose={() => setArchiving(false)} />
+      {!readOnly && <SpaceMdEditor open={editing} slug={slug} onClose={() => setEditing(false)} onSaved={setSaved} />}
+      {!readOnly && <ArchiveDialog open={archiving} track={track} onClose={() => setArchiving(false)} />}
     </div>
   );
 }

@@ -60,13 +60,15 @@ def features():
                 ["assistant_compact", "assistant_main_new", "assistant_main_clear"] if os.environ.get("MOCK_MAIN_ACTIONS") == "1" else []) + (
                 ["messaging"] if os.environ.get("MOCK_MESSAGING") == "1" else []) + (
                 ["conversation_origin"] if os.environ.get("MOCK_AUTO_CONVERSATIONS") == "1" else []) + (
-                ["sessions_list", "sessions_lookup", "sessions_hierarchy", "sessions_todo", "sessions_quick_filters", "sessions_just_finished", "sessions_agents_only"] if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
+                (["sessions_list", "sessions_lookup"] + (["sessions_hierarchy"] if NET["hierarchy"] else []) + ["sessions_todo", "sessions_quick_filters", "sessions_just_finished", "sessions_agents_only"]) if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
                 ["sessions_catalog"] if CATALOG else []) + (
                 ["sessions_side_fold"] if SIDE_FOLD else []) + (
                 ["preview"] if os.environ.get("MOCK_PREVIEW") else []) + (
                 ["task_cron"] if os.environ.get("MOCK_CRON") == "1" else []) + (
                 [] if os.environ.get("MOCK_TODO_SEEN") == "off" else ["todo_seen"]) + (
-                [] if os.environ.get("MOCK_LOOK_UPLOADS") == "off" else ["look_uploads"]) + (
+                ([] if os.environ.get("MOCK_LOOK_UPLOADS") == "off" else
+                 ["look_uploads"] if os.environ.get("MOCK_LOOK_UPLOADS") == "basic" else
+                 ["look_uploads", "look_uploads_states"])) + (
                 [] if os.environ.get("MOCK_TODO_IMAGES") == "off" else ["todo_images"])
 
 
@@ -478,6 +480,7 @@ for _mid in filter(None, os.environ.get("MOCK_OFFLINE_MACHINES", "").split(","))
     for _m in MACHINES:
         if _m["id"] == _mid:
             _m.update(online=False, error="ssh: connect to host %s port 22: Operation timed out" % _mid, last_seen=ago(hours=1))
+# Load-queue selection and its help text live in machine_load_mock (a registered mock domain, #12519).
 # MOCK_LONG_OS=1: the server's OS has a long name, so its card's chips (OS, herdr, claude) do not fit on one line.
 if os.environ.get("MOCK_LONG_OS"):
     SYSTEMS["server"]["name"] = "Example GNU/Linux 2 (codename)"
@@ -546,6 +549,7 @@ def metric_at(mid, t):
     rx = max(0.0, {"server": 2.4e6, "macbook": 4.5e5, "studio": 1.2e6, "nas": 3e5}[template] * (1 + 0.6 * wave + 0.5 * h))
     tx = rx * {"server": 0.35, "macbook": 0.2, "studio": 0.6, "nas": 1.4}[template] * (0.7 + 0.6 * h)
     load = sys_["cores"] * cpu / 100 * (0.9 + 0.3 * h)
+    cpu, load = machine_alerts.queued(mid, cpu, load, sys_["cores"], h)
     disk_frac = {"server": 0.64, "macbook": 0.71, "studio": 0.38, "nas": 0.93}[template]
     if concern_level == "critical":
         disk_frac = 0.95
@@ -865,6 +869,16 @@ SESSIONS = [
     sess("macbook", RECIPE, "菜谱网站加搜索", "/Users/me/code/recipes", "offline", "offline", "", 0, "", 0, 60 * 26,
          "搜索做好了，支持按食材和用时筛选。", space_kind=None, space_id=None, space_name=None, slot_id=None, slot_name=None),
 ]
+
+# MOCK_CODEX_ROUTE=terminal: the Codex agent is a Codex 0.169 or later in its pane, so it offers its model and thinking
+# effort as an app-server thread does (#12572, docs/integrations/codex.md "On the terminal route"): capabilities.model
+# and the efforts of the model it runs; the node types Codex's own /model to apply a pick.
+if os.environ.get("MOCK_CODEX_ROUTE") == "terminal":
+    for _s in SESSIONS:
+        if _s["session_id"] == ORDERS:
+            _s.update(launcher="codex", effort="medium", efforts=["low", "medium", "high", "xhigh"],
+                      capabilities={"read": True, "send": True, "interrupt": True, "approve": True, "terminal": True,
+                                    "modes": False, "model": True})
 
 if os.environ.get("MOCK_NEXT_SUGGESTIONS") == "1":  # see NEXT_SUGGESTIONS
     for _s in SESSIONS:
@@ -2157,10 +2171,10 @@ def mock_png(w=96, h=64):
 
 
 # MOCK_PERSONA_QUEUE=1 (#4342): the first Persona chat is at work with two of the user's messages queued (the second
-# went with a photo, so its words are the apps' stand-in) and one from another conversation, which the assistant holds
-# until the turn ends (`queued_relayed`: only shown and copied). POST …/queue answers the photos with the queue.
+# went with a photo, so its words are the apps' stand-in) and one from another conversation, kept for its next
+# message (`queued_relayed`: only shown and copied). POST …/queue answers the photos with the queue.
 QUEUED_PHOTOS = {"请看图片": [{"mime": "image/png", "data": mock_png()}]}
-PERSONA_QUEUE_MESSAGES = ["顺便把下周三的会也挪到下午", "请看图片", "来自「早报 · 周三」：会议纪要整理好了，要不要发给参会的人？"]
+PERSONA_QUEUE_MESSAGES = ["顺便把下周三的会也挪到下午", "请看图片", "来自「早报 · 周三」（不唤醒）：会议纪要整理好了，要不要发给参会的人？"]
 if os.environ.get("MOCK_PERSONA_QUEUE") == "1":
     ASSISTANT[0].update({"state": "working", "status": "working", "queued_relayed": 1,
                          "queued": list(PERSONA_QUEUE_MESSAGES)})
@@ -2659,17 +2673,21 @@ ASSISTANT_CONFIG = {"machine_id": "server", "launcher": "claude", "timezone": "A
                     "meeting_attendance_default": os.environ.get("MOCK_MEETING_ATTENDANCE_DEFAULT", "off"),
                     "meeting_transcription_default": os.environ.get("MOCK_MEETING_TRANSCRIPTION_DEFAULT", "device"),
                     "meeting_glossary": [], "meeting_transcription_extension": "",
-                    # How long recordings stay (#3235, MOCK_RECORDING_DAYS) and a meeting's minutes after its transcript
-                    # went (#3780, MOCK_MINUTES_DAYS): 0 means forever; finite windows are never fewer than the recordings'.
-                    "recording_days": int(os.environ.get("MOCK_RECORDING_DAYS", "14")),
+                    # How long recording audio stays (#16412, formerly recording_days; MOCK_RECORDING_DAYS), a recording's
+                    # text (forever until a PUT changes it) and a meeting's minutes after its transcript went (#3780,
+                    # MOCK_MINUTES_DAYS): 0 means forever; finite minutes windows are never fewer than the text's.
+                    "recording_audio_days": int(os.environ.get("MOCK_RECORDING_DAYS", "14")),
+                    "recording_text_days": 0,
                     "minutes_days": int(os.environ.get("MOCK_MINUTES_DAYS", "0")),
                     # Knowledge points by topic (#3783), on by default; MOCK_KB_TOPICS_OFF=1 starts it off (#7251's empty map).
                     "kb_topics": os.environ.get("MOCK_KB_TOPICS_OFF") != "1",
                     # The sidebar's Recent lists the scheduled tasks' chats too (#8324), off by default;
                     # MOCK_RECENT_TASK_CHATS=1 starts on; =absent is a hub from before it. Left out with MOCK_LEGACY_HUB.
                     "recent_task_chats": os.environ.get("MOCK_RECENT_TASK_CHATS") == "1"}
-# What PUT /api/v1/assistant takes for the two retentions, as the hub's profile_write.go.
-RETENTION_BOUNDS = {"recording_days": (1, 365), "minutes_days": (0, 3650)}
+# What PUT /api/v1/assistant takes for the retentions, as the hub's profile_write.go; recording_days is the old name of
+# recording_audio_days.
+RETENTION_BOUNDS = {"recording_days": (1, 3650), "recording_audio_days": (0, 3650), "recording_text_days": (0, 3650),
+                    "minutes_days": (0, 3650)}
 
 
 def assistant_state(space="", archived=False):
@@ -2681,10 +2699,13 @@ def assistant_state(space="", archived=False):
     out = {"manager": MANAGERS["default"], "machine_id": cfg["machine_id"], "launcher": cfg["launcher"],
            "cwd": home + "/.persona/" + (space or "assistant") if home else "",
            "timezone": cfg["timezone"], "notes_effective": notes.strip(), "main_tasks_quiet": cfg["main_tasks_quiet"],
-           "recording_days": cfg["recording_days"], "minutes_days": 0 if cfg["minutes_days"] == 0 else max(cfg["minutes_days"], cfg["recording_days"]),
+           "recording_days": cfg["recording_audio_days"], "recording_audio_days": cfg["recording_audio_days"],
+           "recording_text_days": cfg["recording_text_days"],
+           "minutes_days": 0 if cfg["minutes_days"] == 0 or cfg["recording_text_days"] == 0 else max(cfg["minutes_days"], cfg["recording_text_days"]),
            "conversations": [s for s in ASSISTANT if s["machine_id"] == cfg["machine_id"] and s.get("space", "") == space
                              and (archived or not s.get("archived"))]}
     if not os.environ.get("MOCK_LEGACY_HUB"):
+        out["integrations_v2"] = MANAGER_INTEGRATIONS_V2.get(MANAGERS["default"], False)
         out.update(work_guide=MANAGER_WORK_GUIDES.get(MANAGERS["default"], False), agent_tasks=cfg["agent_tasks"], task_lessons=cfg["task_lessons"], close_ended_terminals=cfg["close_ended_terminals"], inbox_signals=cfg["inbox_signals"], archive_closed_days=cfg["archive_closed_days"],
                    idle_close_hours=cfg["idle_close_hours"], kb_topics=cfg["kb_topics"],
                    main_supervises_own_tasks=cfg["main_supervises_own_tasks"], next_suggestions=cfg["next_suggestions"],
@@ -4007,7 +4028,7 @@ def day_fields(body):
 
 
 def day_expired(rid, body):
-    days = ASSISTANT_CONFIG["recording_days"]
+    days = ASSISTANT_CONFIG["recording_text_days"]
     return rid in RECORDINGS_TRIMMED or bool(days and day_time(body["started_at"]) < datetime.now(timezone.utc) - timedelta(days=days))
 
 
@@ -4252,7 +4273,7 @@ def recording_minutes_next(rid):
 
 
 def minutes_span(body):
-    """`when`, `start` and `end` as the hub writes them (server/internal/kb/minutes.go `minutesWhen`, #4713): the recording's
+    """`when`, `start` and `end` as the hub writes them (server/internal/modules/recording/writers/minutes.go `minutesWhen`, #4713): the recording's
     own start to its end (`duration`, or `ended_at` when later; at least a minute) in the local zone. `when` adds the end's
     date when it is another day; `start` / `end` are RFC 3339 with the offset, whole seconds, for the apps to format."""
     def at(v):
@@ -4484,7 +4505,7 @@ def minutes_overview(m, segs, lang):
 
 
 def minutes_markdown(m, body, lang, ov=None):
-    """minutes.md as the hub writes it (kb/minutes.go renderMinutes): with clock times in the local zone, sections with
+    """minutes.md as the hub writes it (modules/recording/writers/minutes.go renderMinutes): with clock times in the local zone, sections with
     nothing left out, the fixed words from the hub's kb-minutes.json in the minutes' language. With the overview ov (the
     overview shape's; a malformed one is never laid out) it follows the contract's "Markdown" (#6563): the headline, the
     core conclusions, the topics under their group headings (or as the sections with one untitled group) with decisions
@@ -4721,11 +4742,37 @@ def assistant_for_manager(h):
     st = assistant_state("", False)
     notes = MANAGER_NOTES.get(mid, "")
     # Another manager is one from before meeting attendance and the retention settings: none of their fields.
-    st = {k: v for k, v in st.items() if k not in ("main", "notes", "meeting_attendance_default", "recording_days", "minutes_days",
+    st = {k: v for k, v in st.items() if k not in ("main", "notes", "meeting_attendance_default", "recording_days", "recording_audio_days",
+                                                           "recording_text_days", "minutes_days",
                                                            "meeting_transcription_default", "meeting_glossary", "meeting_transcription_extension", "meeting_transcription_ready")}
     if "work_guide" in st:
         st["work_guide"] = MANAGER_WORK_GUIDES.get(mid, False)
+        st["integrations_v2"] = MANAGER_INTEGRATIONS_V2.get(mid, False)
     return (dict(st, manager=mid, conversations=[], tasks=[], notes=notes, notes_effective=notes), 200)
+
+
+def update_labs(h, body):
+    if os.environ.get("MOCK_LEGACY_HUB"):
+        return None
+    labs = {key: state for key, state in (("work_guide", MANAGER_WORK_GUIDES), ("integrations_v2", MANAGER_INTEGRATIONS_V2))
+            if body.get(key) is not None}
+    if labs:
+        header = h.headers.get("X-Persona-Manager")
+        query = (parse_qs(urlparse(h.path).query).get("manager") or [None])[0]
+        mid = header or query
+        if not mid or (header and query and header != query):
+            return ({"code": "bad_request"}, 400)
+        if is_read_only(h): return ({"code": "forbidden"}, 403)
+        with MANAGER_LABS_LOCK:
+            for key, state in labs.items():
+                expected = body.get("expected_" + key)
+                if type(body[key]) is not bool or (expected is not None and type(expected) is not bool):
+                    return ({"code": "bad_request"}, 400)
+                if expected is not None and expected != state.get(mid, False):
+                    return ({"code": "configuration_conflict"}, 409)
+            for key, state in labs.items():
+                state[mid] = body[key]
+    return None
 
 
 def other_manager(h):
@@ -4742,6 +4789,8 @@ def other_manager(h):
 
 # Each other manager's own 说明 (设置 › 助手 with its X-Persona-Manager): a whole assistant has its own.
 MANAGER_WORK_GUIDES = {}
+MANAGER_INTEGRATIONS_V2 = {}
+MANAGER_LABS_LOCK = threading.Lock()
 MANAGER_NOTES = {"m-3fa21c": "这是「工作」管理者：只管工作电脑上的事和工作邮箱。"}
 
 
@@ -4959,7 +5008,7 @@ def recording_named(out, body, rid=None):
 
 
 def recording_kind(body):
-    """An upload's kind as the hub's clean() reads it (kb/recordings.go): trimmed and lowercased, absent or "" a note;
+    """An upload's kind as the hub's clean() reads it (modules/recording/writers/recordings.go): trimmed and lowercased, absent or "" a note;
     None when it is neither (a 400)."""
     kind = body.get("kind")
     if kind is None: return "note"
@@ -4970,7 +5019,7 @@ def recording_kind(body):
 
 def meeting_attendance(body):
     """The role an upload puts in effect, the session it names (None: the main chat, and always when the role is off) and
-    why the role is off when another was asked for, as the hub's normalizeAttendance (kb/live.go) in its order: a role off
+    why the role is off when another was asked for, as the hub's normalizeAttendance (modules/recording/writers/live.go) in its order: a role off
     or absent says nothing whatever the session; then the role, the kind and the session are checked. A problem with these
     two fields never fails the upload (meeting-minutes.md "On PUT"). A watch recording is not refused: the phone never
     gives it a role."""
@@ -5200,7 +5249,7 @@ def meeting_ask(h, st, body, rec):
 
 
 # The meeting conversation (#3862, docs/assistant/meeting-minutes.md "Phase 1: the meeting conversation"), as the hub
-# branch has it (server/internal/modules/recording/meeting_*.go, server/internal/kb/meeting.go, hub/meeting_receipts.go): the
+# branch has it (server/internal/modules/recording/meeting_*.go, server/internal/modules/recording/writers/meeting.go, hub/meeting_receipts.go): the
 # feature `meeting_conversation` (only beside meeting_attendance); the upload's `room` and `private`, kept apart from the
 # #2981 fields as meeting.json is (a recording that once had `room` stays a room meeting, its role the room's); one room
 # conversation per attended room meeting (an assistant conversation, origin `meeting`, header first); …/ask answered in
@@ -6796,7 +6845,7 @@ def transcription_union(spans, margin=0):
     return out
 
 
-# Persona's echo (#5905, meeting-minutes.md "Persona's echo"), the hub's rule (kb/echo.go) for its own sentences in hub
+# Persona's echo (#5905, meeting-minutes.md "Persona's echo"), the hub's rule (modules/recording/writers/echo.go) for its own sentences in hub
 # mode: a line overlapping a speaking span widened by 0.5 s whose words are the answer said there (60% of its distinct
 # character bigrams, after NFKC, lower case, letters and decimal digits only); a span without text keeps the time rule
 # from before (half of the line inside, no margin). Checked against spec/fixtures/meeting-echo by the transcription tests.
@@ -7530,6 +7579,7 @@ def recordings_route_locked(h, method, p):
             detail = dict(KB_DETAIL[("recordings", rid)], kind="recordings", id=rid,
                           path="/home/me/.persona/data/recordings/" + rid)
             out = {"detail": detail}
+            if not os.environ.get("MOCK_LEGACY_HUB"): out["supports_expected_pinned"] = True
             word = parse_qs(urlparse(h.path).query).get("q", [""])[0]
             if word: out["matches"] = day_recap_matches(rid, word)
             return h.send_json(out) or True
@@ -7617,7 +7667,9 @@ def recordings_route_locked(h, method, p):
     if os.environ.get("MOCK_RECORDINGS_DOWN") == "1":
         return h.send_json({"error": "知识库暂时不可用", "code": "kb_unavailable"}, 503) or True
     if p == "/api/v1/recordings" and method == "GET":
-        return h.send_json({"days": ASSISTANT_CONFIG["recording_days"], "deleted": sorted(RECORDINGS_DELETED),
+        audio = ASSISTANT_CONFIG["recording_audio_days"]  # phones take 1–365 as days (#16412)
+        return h.send_json({"days": audio if 0 < audio <= 365 else 365, "audio_days": audio,
+                            "text_days": ASSISTANT_CONFIG["recording_text_days"], "deleted": sorted(RECORDINGS_DELETED),
                             "recordings": [{"id": k, "revision": v["revision"], "complete": v.get("complete", False),
                                             "started_at": v["started_at"],
                                             **({f: v[f] for f in ("kind", "day", "part", "next", "base", "recap_state", "recap_final", "recap_final_at") if f in v}
@@ -7712,7 +7764,7 @@ def recordings_route_locked(h, method, p):
     if have and (have.get("kind") == "day") != (kind == "day"):
         return h.send_json({"error": "recording kind cannot change to or from day", "code": "kind_changed"}, 409) or True
     if kind == "day": return day_put(h, rid, body)
-    if rid in RECORDINGS_TRIMMED:  # the hub takes no transcript back (kb/recordings.go putRecording)
+    if rid in RECORDINGS_TRIMMED:  # the hub takes no transcript back (modules/recording/writers/recordings.go putRecording)
         out = {"id": rid, "revision": body["revision"], "status": "expired"}
         if MEETING_ATTENDANCE: out["attendance"] = "off"
         if (v := upload_room_view(rid, body)) is not None: out["room"] = v
@@ -10479,6 +10531,27 @@ if os.environ.get("MOCK_SECRET_RUN") in ("pending", "ran", "withheld", "long"):
             ensure_ascii=False), 1) + [
             it("assistant", "text", 0.5, text="第二条命令失败了（退出码 5）：launchd 没能加载这个任务。我先看看 plist 的权限再告诉你。")]
 
+# MOCK_SECRET_RUN=env: the explicit one-off non-sudo mode. Every command receives PERSONA_SECRET; the card warns
+# about it after showing the commands. It is separate so the original stdin fixtures stay byte for byte unchanged.
+if os.environ.get("MOCK_SECRET_RUN") == "env":
+    _env_input = {"machine": "studio", "machine_name": "Mac Studio", "delivery": "env",
+                  "purpose": "登录一次局域网设备，查看已连接客户端",
+                  "commands": ["/usr/bin/env sh -c 'test -n \"$PERSONA_SECRET\"'",
+                               "/usr/bin/curl -H \"Authorization: Bearer $PERSONA_SECRET\" https://example.test"]}
+    ITEMS[ASK1] = ITEMS[ASK1] + [
+        it("user", "text", 2, text="帮我登录一次局域网设备，看看现在连着哪些客户端，用一次就行"),
+        it("assistant", "text", 1.5, text="这次不用 sudo。每条命令都会通过 PERSONA_SECRET 拿到密码，请逐条核对后再运行。")]
+    ITEMS[ASK1].append(it("assistant", "tool_use", 1, tool_use_id="toolu_secret_run", tool_name="mcp__persona__secret_run",
+                          tool_input=_env_input))
+    INTERACTIONS.append(
+        {"id": "ix_secret_run", "machine_id": "server", "session_id": ASK1, "session_title": "Persona",
+         "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(minutes=9),
+         "tool_name": "secret_run", "tool_use_id": "toolu_secret_run", "tool_input": _env_input,
+         "summary": "在 Mac Studio 上运行（%s）：\n" % _env_input["purpose"]
+                    + "\n".join("$ " + c for c in _env_input["commands"])
+                    + "\n警告：你输入的密码会通过 PERSONA_SECRET 直接传给上面列出的每一条命令。编码后的输出可能绕过脱敏。",
+         "fields": [{"key": "password", "label": "密码", "placeholder": "只用这一次，不会保存", "secret": True}]})
+
 # MOCK_SECRET_HANDOFF=1: the hand-off card (secret_handoff, #3962) in Persona's main conversation: the assistant asked to
 # start an Agent on the MacBook with two values from a made-up provider; nothing has been handed over. Its approval is
 # taken from the card alone (the app sends X-Persona-Features: secret_handoff with it).
@@ -12091,6 +12164,7 @@ _CLAUDE_DIRS = [("~/.claude", "default", 0, 86), ("~/.config/claude/work", "conf
 # not there at all, as a node that blocks them lists none (#10053). A change pushes that computer's rows and replays
 # its pending cards, as the manager does; the cards never leave the inventory.
 AGENT_DIRS_HIDDEN = {}
+AGENT_DIRS_RULE_LOCK = threading.RLock()
 AGENT_DIRS_FAIL = {"n": 0}  # GET /mock/agent_dirs_fail?n=<count>: the next n reads of the list answer 503
 
 
@@ -12119,11 +12193,19 @@ def _hidden_by_directory(mid, cwd, action="hide"):
 
 
 def _agent_dirs_hidden_state(mid):
-    return {"rules": AGENT_DIRS_HIDDEN.get(mid, []), "home": _machine_home(mid)}
+    return {"rules": AGENT_DIRS_HIDDEN.get(mid, []), "home": _machine_home(mid),
+            **({} if os.environ.get("MOCK_LEGACY_HUB") else {"supports_expected_rules": True})}
 
 
 def _set_agent_dirs_hidden(mid, body):
     """PUT …/agent-dirs/hidden: the whole list, checked as the manager checks it; (state, None) or (None, error)."""
+    with AGENT_DIRS_RULE_LOCK:
+        if "expected_rules" in body and body["expected_rules"] != AGENT_DIRS_HIDDEN.get(mid, []):
+            return None, "agent directory rules changed"
+        return _apply_agent_dirs_hidden(mid, body)
+
+
+def _apply_agent_dirs_hidden(mid, body):
     rules = []
     for r in body.get("rules") or []:
         pat = (r.get("pattern") or "").strip()
@@ -18804,7 +18886,8 @@ MODES_LOG = []  # POST …/modes requests, GET /mock/modes (the model picker's a
 
 
 def all_sessions():
-    rows = fold_hierarchy([decorated_session(s) for s in (SESSIONS + ASSISTANT)])
+    raw = [decorated_session(s) for s in (SESSIONS + ASSISTANT)]
+    rows = fold_hierarchy(raw) if NET["hierarchy"] else raw
     if not AGENT_DIRS_HIDDEN:
         return rows
     return [dict(r, hidden_by_directory=True) if not r.get("assistant") and _hidden_by_directory(r["machine_id"], r.get("cwd")) else r
@@ -19881,7 +19964,8 @@ def persona_file(rest):
     for base in PERSONA_ROOTS:
         root = os.path.realpath(os.path.join(base, pid))
         p = os.path.realpath(os.path.join(root, f))
-        if p.startswith(root + os.sep) and os.path.isfile(p) and not os.path.basename(p).startswith("."):
+        rel = os.path.relpath(p, root) if p.startswith(root + os.sep) else ""
+        if rel and os.path.isfile(p) and not any(part.startswith(".") for part in rel.split(os.sep)):
             return p
     return None
 
@@ -19944,10 +20028,13 @@ def ext_look_personas():
     return out
 
 
-# ---------- uploaded looks (docs/apple/persona.md "Uploading an image", #2404) ----------
+# ---------- uploaded looks (docs/apple/persona.md "Uploading an image", #2404, #15449) ----------
 # POST /api/v1/looks/uploads makes a package in a temporary directory, as the hub does in personas/u-<hex>; the mock
-# keeps the image as it came for every size and state (the hub scales it and draws the states). DELETE takes it away.
-# MOCK_LOOK_UPLOADS=off: a hub without them (no look_uploads feature, 404); =demo: one uploaded look at start.
+# keeps uploaded pictures as sent (so animated files play in browsers and UIImageView) and computes colors + source.
+# PATCH /api/v1/looks/uploads/{id} edits an uploaded look; DELETE takes it away.
+# MOCK_LOOK_UPLOADS=off: a hub without them (no look_uploads feature, 404);
+# =basic: an older hub (look_uploads only, no look_uploads_states, PATCH 404);
+# =demo: seeds u-demo0001 (legacy) and u-demo0002 (colors, animated marked working state, still unmarked offline state).
 # MOCK_LOOK_UPLOAD_FILES=fail: the looks POST makes are listed but their files answer 503, so the apps' "made but not
 # downloaded" path (Try Again) can be seen.
 UPLOADED_LOOKS = tempfile.mkdtemp(prefix="mock-look-uploads-")
@@ -19956,12 +20043,35 @@ PERSONA_ROOTS.append(UPLOADED_LOOKS)
 UPLOAD_STATES = ("idle", "thinking", "working", "needs_you", "offline")
 
 
+def _png_chunk(tag, data):
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+
 def _png_rgba(w, h, pixel):
     """A PNG of w×h, pixel(x, y) → (r, g, b, a), without Pillow."""
     rows = b"".join(b"\x00" + bytes(c for x in range(w) for c in pixel(x, y)) for y in range(h))
-    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+    return (b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + _png_chunk(b"IDAT", zlib.compress(rows, 9)) + _png_chunk(b"IEND", b""))
+
+
+def _apng_rgba(w, h, frames, delay_num=160, delay_den=1000):
+    """A looping APNG of w×h from pixel(x, y) callables, without Pillow."""
+    out = bytearray(b"\x89PNG\r\n\x1a\n")
+    out += _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+    out += _png_chunk(b"acTL", struct.pack(">II", len(frames), 0))
+    seq = 0
+    for idx, pixel in enumerate(frames):
+        rows = b"".join(b"\x00" + bytes(c for x in range(w) for c in pixel(x, y)) for y in range(h))
+        zdata = zlib.compress(rows, 9)
+        out += _png_chunk(b"fcTL", struct.pack(">IIIIIHHBB", seq, w, h, 0, 0, delay_num, delay_den, 0, 0))
+        seq += 1
+        if idx == 0:
+            out += _png_chunk(b"IDAT", zdata)
+        else:
+            out += _png_chunk(b"fdAT", struct.pack(">I", seq) + zdata)
+            seq += 1
+    out += _png_chunk(b"IEND", b"")
+    return bytes(out)
 
 
 def _demo_upload_png(side=256):
@@ -19974,20 +20084,329 @@ def _demo_upload_png(side=256):
     return _png_rgba(side, side, px)
 
 
-def make_uploaded_look(name, image, subtitle="", lid=None):
+def _demo_mikan_png(side=144):
+    """A made-up blue-sky character picture for u-demo0002."""
+    half = side / 2.0
+    def px(x, y):
+        dx, dy = x + 0.5 - half, y + 0.5 - half
+        if dx * dx + dy * dy > half * half:
+            return (0, 0, 0, 0)
+        if ((x - side * 0.36) ** 2 + (y - side * 0.44) ** 2) ** 0.5 < side * 0.06 or ((x - side * 0.64) ** 2 + (y - side * 0.44) ** 2) ** 0.5 < side * 0.06:
+            return (24, 34, 54, 255)
+        t = min(1.0, y / float(side))
+        return (int(84 - 26 * t), int(152 - 30 * t), int(232 - 20 * t), 255)
+    return _png_rgba(side, side, px)
+
+
+def _demo_working_apng(side=144):
+    """A 4-frame animated APNG for u-demo0002's working state (moving orange rim dot)."""
+    half = side / 2.0
+    r_outer = half
+    r_inner = half * 0.86
+    r_orbit = half * 0.92
+    frames = []
+    for k in range(4):
+        ang = (k * math.pi / 2.0) - math.pi / 2.0
+        ox, oy = half + r_orbit * math.cos(ang), half + r_orbit * math.sin(ang)
+        def make_px(ox=ox, oy=oy):
+            def px(x, y):
+                dx, dy = x + 0.5 - half, y + 0.5 - half
+                dist = (dx * dx + dy * dy) ** 0.5
+                if dist > r_outer:
+                    return (0, 0, 0, 0)
+                if ((x + 0.5 - ox) ** 2 + (y + 0.5 - oy) ** 2) ** 0.5 < side * 0.09:
+                    return (240, 140, 30, 255)
+                if dist > r_inner:
+                    return (240, 140, 30, 110)
+                if ((x - side * 0.36) ** 2 + (y - side * 0.46) ** 2) ** 0.5 < side * 0.055 or ((x - side * 0.64) ** 2 + (y - side * 0.46) ** 2) ** 0.5 < side * 0.055:
+                    return (24, 34, 54, 255)
+                return (74, 144, 226, 255)
+            return px
+        frames.append(make_px())
+    return _apng_rgba(side, side, frames, delay_num=160, delay_den=1000)
+
+
+def _demo_offline_png(side=144):
+    """A distinct own still picture for u-demo0002's offline state (mark off)."""
+    half = side / 2.0
+    def px(x, y):
+        dx, dy = x + 0.5 - half, y + 0.5 - half
+        if dx * dx + dy * dy > half * half:
+            return (0, 0, 0, 0)
+        if abs(y - side * 0.50) < side * 0.025 and (side * 0.28 < x < side * 0.44 or side * 0.56 < x < side * 0.72):
+            return (36, 46, 62, 255)
+        return (110, 134, 168, 255)
+    return _png_rgba(side, side, px)
+
+
+def _look_hex_rgb(s):
+    s = s.strip().lstrip("#")
+    return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+
+
+def _look_rgb_hex(c):
+    return "#%02X%02X%02X" % tuple(max(0, min(255, int(round(v)))) for v in c)
+
+
+def _look_luminance(c):
+    def lin(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+
+
+def _look_contrast(a, b):
+    la, lb = _look_luminance(a), _look_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _look_shade(rgb, min_on_white, min_on_page, page):
+    import colorsys
+    r, g, b = rgb
+    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    if s < 0.08 or (max(r, g, b) - min(r, g, b)) < 8:
+        s = 0.0
+    else:
+        s = max(s, 0.65)
+    def to_rgb8(L):
+        return tuple(max(0, min(255, int(round(v * 255.0)))) for v in colorsys.hls_to_rgb(h, L, s))
+    def ok(cand):
+        return _look_contrast((255, 255, 255), cand) >= min_on_white and (min_on_page <= 0 or _look_contrast(cand, page) >= min_on_page)
+    for i in range(201):
+        cand = to_rgb8(l * (1.0 - i / 200.0))
+        if ok(cand):
+            return cand
+    for i in range(1, 201):
+        cand = to_rgb8(l + (1.0 - l) * (i / 200.0))
+        if ok(cand):
+            return cand
+    return (110, 110, 110)
+
+
+def _look_palette(seed_hex):
+    primary = _look_hex_rgb(seed_hex)
+    if max(primary) - min(primary) < 8:
+        secondary = (90, 90, 90)
+    else:
+        secondary = tuple(int(round(primary[i] * 0.3 + (60, 120, 200)[i] * 0.7)) for i in range(3))
+    al = _look_shade(primary, 4.55, 3.05, (255, 255, 255))
+    ad = _look_shade(primary, 3.65, 3.05, (0, 0, 0))
+    bl = _look_shade(al, 4.75, 0.0, (255, 255, 255))
+    bd = _look_shade(ad, 4.65, 0.0, (0, 0, 0))
+    return {
+        "light": {"primary": _look_rgb_hex(primary), "secondary": _look_rgb_hex(secondary),
+                  "accent": _look_rgb_hex(al), "bubble": _look_rgb_hex(bl), "bubble_text": "#FFFFFF"},
+        "dark": {"primary": _look_rgb_hex(primary), "secondary": _look_rgb_hex(secondary),
+                 "accent": _look_rgb_hex(ad), "bubble": _look_rgb_hex(bd), "bubble_text": "#FFFFFF"},
+    }
+
+
+def _look_auto_seed(image_bytes):
+    """Extract the automatic seed per spec/fixtures/look-colors for 8-bit RGB/RGBA PNGs; fixed fallback otherwise."""
+    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "#E8A054"
+    pos, w, h, ctype = 8, 0, 0, -1
+    idat = bytearray()
+    while pos + 8 <= len(image_bytes):
+        length = struct.unpack(">I", image_bytes[pos:pos + 4])[0]
+        tag = image_bytes[pos + 4:pos + 8]
+        chunk = image_bytes[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if tag == b"IHDR" and len(chunk) == 13:
+            w, h, depth, ctype, comp, filt, interlace = struct.unpack(">IIBBBBB", chunk)
+            if depth != 8 or ctype not in (2, 6) or comp != 0 or filt != 0 or interlace != 0 or w * h > 4_000_000:
+                return "#E8A054"
+        elif tag == b"IDAT":
+            idat += chunk
+        elif tag == b"IEND":
+            break
+    if w <= 0 or h <= 0 or not idat:
+        return "#E8A054"
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except Exception:
+        return "#E8A054"
+    bpp = 4 if ctype == 6 else 3
+    stride = w * bpp
+    if len(raw) < h * (stride + 1):
+        return "#E8A054"
+    prev = bytearray(stride)
+    kept = []
+    for y in range(h):
+        off = y * (stride + 1)
+        ftype = raw[off]
+        row = bytearray(raw[off + 1:off + 1 + stride])
+        if ftype == 1:
+            for i in range(bpp, stride):
+                row[i] = (row[i] + row[i - bpp]) & 0xFF
+        elif ftype == 2:
+            for i in range(stride):
+                row[i] = (row[i] + prev[i]) & 0xFF
+        elif ftype == 3:
+            for i in range(stride):
+                left = row[i - bpp] if i >= bpp else 0
+                row[i] = (row[i] + ((left + prev[i]) >> 1)) & 0xFF
+        elif ftype == 4:
+            for i in range(stride):
+                a = row[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                row[i] = (row[i] + pr) & 0xFF
+        elif ftype != 0:
+            return "#E8A054"
+        prev = row
+        for x in range(0, stride, bpp):
+            r, g, b = row[x], row[x + 1], row[x + 2]
+            a = row[x + 3] if bpp == 4 else 255
+            if a <= 200:
+                continue
+            mx = max(r, g, b)
+            d = mx - min(r, g, b)
+            if mx < 90 or 10 * d <= 3 * mx:
+                continue
+            if mx == r:
+                num = (g - b) if g >= b else (g - b) + 6 * d
+            elif mx == g:
+                num = (b - r) + 2 * d
+            else:
+                num = (r - g) + 4 * d
+            kept.append((r, g, b, (6 * num) // d % 36))
+    if len(kept) < 50:
+        return "#787878"
+    counts = [0] * 36
+    for _, _, _, hb in kept:
+        counts[hb] += 1
+    peak = max(range(36), key=lambda i: counts[i])
+    near = {(peak + 35) % 36, peak, (peak + 1) % 36}
+    sel = [px for px in kept if px[3] in near]
+    idx = (len(sel) - 1) // 2
+    return "#%02X%02X%02X" % (
+        sorted(px[0] for px in sel)[idx],
+        sorted(px[1] for px in sel)[idx],
+        sorted(px[2] for px in sel)[idx],
+    )
+
+
+def _look_decode_image(data):
+    if not isinstance(data, str):
+        return None
+    data = data.strip()
+    if data.startswith("data:") and ";base64," in data:
+        data = data.split(";base64,", 1)[1]
+    if not data:
+        return None
+    try:
+        image = base64.b64decode(data + "=" * (-len(data) % 4))
+    except Exception:
+        return None
+    if not (image.startswith(b"\x89PNG") or image.startswith(b"\xff\xd8") or image[8:12] == b"WEBP" or image.startswith(b"GIF8")):
+        return None
+    return image
+
+
+def _look_check_crop(crop):
+    if crop is None:
+        return True
+    if not isinstance(crop, dict):
+        return False
+    for k in ("x", "y", "side"):
+        v = crop.get(k)
+        if not isinstance(v, int) or isinstance(v, bool):
+            return False
+    return crop["x"] >= 0 and crop["y"] >= 0 and crop["side"] >= 64
+
+
+def _look_check_color(val):
+    if not isinstance(val, str):
+        return None
+    v = val.strip()
+    if v == "auto":
+        return "auto"
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+        return v.upper()
+    return None
+
+
+def _look_text_ok(s, limit):
+    if len(s) > limit:
+        return False
+    for ch in s:
+        o = ord(ch)
+        if o < 32 or o == 127 or (0x202A <= o <= 0x202E) or (0x2066 <= o <= 0x2069) or o in (0x061C, 0x200E, 0x200F):
+            return False
+    return True
+
+
+def _look_apng_meta(image_bytes):
+    """Returns (frames, fps) when image_bytes is an APNG with >1 frames, else (1, None)."""
+    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return 1, None
+    pos = 8
+    while pos + 8 <= len(image_bytes):
+        length = struct.unpack(">I", image_bytes[pos:pos + 4])[0]
+        tag = image_bytes[pos + 4:pos + 8]
+        chunk = image_bytes[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if tag == b"acTL" and len(chunk) == 8:
+            nframes = struct.unpack(">II", chunk)[0]
+            if nframes > 1:
+                return nframes, 6
+        elif tag == b"IDAT":
+            break
+    return 1, None
+
+
+def make_uploaded_look(name, image, subtitle="", lid=None, color="auto", states=None, legacy=False):
     lid = lid or "u-" + uuid.uuid4().hex[:8]
     root = os.path.join(UPLOADED_LOOKS, lid)
-    os.makedirs(os.path.join(root, "avatar"))
-    os.makedirs(os.path.join(root, "dot"))
+    os.makedirs(os.path.join(root, "avatar"), exist_ok=True)
+    os.makedirs(os.path.join(root, "dot"), exist_ok=True)
+    os.makedirs(os.path.join(root, ".edit"), exist_ok=True)
+    open(os.path.join(root, ".edit", "main"), "wb").write(image)
     sizes = {}
     for side in (64, 128, 256, 512):
         open(os.path.join(root, "avatar", "%d.png" % side), "wb").write(image)
         sizes[str(side)] = "avatar/%d.png" % side
+    states = states or {}
+    dot_states = {}
+    source_states = {}
+    main_frames, main_fps = _look_apng_meta(image)
     for st in UPLOAD_STATES:
-        open(os.path.join(root, "dot", st + ".png"), "wb").write(image)
+        spec = states.get(st)
+        if spec:
+            st_bytes = spec["bytes"]
+            open(os.path.join(root, "dot", st + ".png"), "wb").write(st_bytes)
+            open(os.path.join(root, ".edit", "state_" + st), "wb").write(st_bytes)
+            entry = {"file": "dot/%s.png" % st}
+            nf, nfps = spec.get("frames"), spec.get("fps")
+            if not nf:
+                nf, nfps = _look_apng_meta(st_bytes)
+            if nf and nf > 1:
+                entry["fps"] = nfps or 6
+                entry["frames"] = nf
+            dot_states[st] = entry
+            source_states[st] = {"own": True, "mark": False if st == "idle" else bool(spec.get("mark", True))}
+        else:
+            open(os.path.join(root, "dot", st + ".png"), "wb").write(image)
+            entry = {"file": "dot/%s.png" % st}
+            if st != "offline" and main_frames > 1:
+                entry["fps"] = main_fps or 6
+                entry["frames"] = main_frames
+            dot_states[st] = entry
+    source = {"kind": "upload", "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     m = {"format": 1, "id": lid, "name": name, "avatar": {"sizes": sizes, "safe": 1},
-         "dot": {"size": 144, "states": {st: {"file": "dot/%s.png" % st} for st in UPLOAD_STATES}},
-         "app_icon_fallback": "persona", "source": {"kind": "upload", "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}}
+         "dot": {"size": 144, "states": dot_states},
+         "app_icon_fallback": "persona", "source": source}
+    if not legacy:
+        is_auto = (color == "auto")
+        seed = _look_auto_seed(image) if is_auto else color
+        m["colors"] = _look_palette(seed)
+        source["color"] = {"seed": seed, "auto": is_auto}
+        if source_states:
+            source["states"] = source_states
     if subtitle:
         m["subtitle"] = subtitle
     json.dump(m, open(os.path.join(root, "persona.json"), "w"), ensure_ascii=False, indent=2)
@@ -19995,7 +20414,15 @@ def make_uploaded_look(name, image, subtitle="", lid=None):
 
 
 if os.environ.get("MOCK_LOOK_UPLOADS") == "demo":
-    make_uploaded_look("豆豆", _demo_upload_png(), lid="u-demo0001")
+    make_uploaded_look("豆豆", _demo_upload_png(), lid="u-demo0001", legacy=True)
+    make_uploaded_look(
+        "Mikan", _demo_mikan_png(), subtitle="Custom states and color", lid="u-demo0002",
+        color="#3A7BD5",
+        states={
+            "working": {"bytes": _demo_working_apng(), "mark": True, "fps": 6, "frames": 4},
+            "offline": {"bytes": _demo_offline_png(), "mark": False},
+        },
+    )
 
 
 def _push_live(msg):
@@ -20006,26 +20433,62 @@ def _push_live(msg):
             pass
 
 
+def _look_err(handler, status, code, message):
+    handler.send_json({"error": message, "code": code}, status)
+    return True
+
+
 def look_uploads_route(handler, method, p, raw):
-    if os.environ.get("MOCK_LOOK_UPLOADS") == "off" or not p.startswith("/api/v1/looks/uploads"):
+    mode = os.environ.get("MOCK_LOOK_UPLOADS", "")
+    if not p.startswith("/api/v1/looks/uploads"):
         return False
+    if mode == "off":
+        return _look_err(handler, 404, "not_found", "not found")
     if p == "/api/v1/looks/uploads" and method == "POST":
         body = json.loads(raw or b"{}")
         name = (body.get("name") or "").strip()
         if not name:
-            handler.send_json({"error": "给形象起个名字", "code": "no_name"}, 400)
-            return True
-        data = body.get("image") or ""
-        if data.startswith("data:") and ";base64," in data:
-            data = data.split(";base64,", 1)[1]
-        try:
-            image = base64.b64decode(data + "=" * (-len(data) % 4))
-        except Exception:
-            image = b""
-        if not (image.startswith(b"\x89PNG") or image.startswith(b"\xff\xd8") or image[8:12] == b"WEBP" or image.startswith(b"GIF8")):
-            handler.send_json({"error": "这个文件不是 Persona 能读的图片，请用 PNG、JPEG、WebP 或 GIF", "code": "not_image"}, 400)
-            return True
-        lid = make_uploaded_look(name, image, (body.get("subtitle") or "").strip())
+            return _look_err(handler, 400, "no_name", "Give the avatar a name")
+        if not _look_text_ok(name, 40):
+            return _look_err(handler, 400, "bad_name", "The name can be up to 40 characters, without control characters")
+        subtitle = (body.get("subtitle") or "").strip()
+        if not _look_text_ok(subtitle, 80):
+            return _look_err(handler, 400, "bad_subtitle", "The description can be up to 80 characters, without control characters")
+        if not (body.get("image") or "").strip():
+            return _look_err(handler, 400, "no_image", "Choose an image for the avatar")
+        image = _look_decode_image(body.get("image"))
+        if image is None:
+            return _look_err(handler, 400, "not_image", "This file isn't an image Persona can read. Use a PNG, JPEG, WebP or GIF")
+        if not _look_check_crop(body.get("crop")):
+            return _look_err(handler, 400, "bad_crop", "Invalid crop")
+        color_val = "auto"
+        if "color" in body and body["color"] is not None and body["color"] != "":
+            color_val = _look_check_color(body["color"])
+            if color_val is None:
+                return _look_err(handler, 400, "bad_color", "Use auto or a #RRGGBB color")
+        parsed_states = {}
+        if "states" in body and body["states"] is not None:
+            if not isinstance(body["states"], dict):
+                return _look_err(handler, 400, "bad_fields", "Invalid states")
+            for st, spec in body["states"].items():
+                if st not in UPLOAD_STATES:
+                    return _look_err(handler, 400, "bad_state", "Unknown state: " + str(st))
+                if not isinstance(spec, dict) or not spec:
+                    return _look_err(handler, 400, "bad_fields", "Invalid state entry")
+                if spec.get("auto"):
+                    return _look_err(handler, 400, "bad_fields", "auto is not valid on POST")
+                if not spec.get("image"):
+                    if "mark" in spec:
+                        return _look_err(handler, 400, "mark_without_image", "Choose a picture for this state before changing its mark")
+                    return _look_err(handler, 400, "bad_fields", "State entry requires an image")
+                st_img = _look_decode_image(spec.get("image"))
+                if st_img is None:
+                    return _look_err(handler, 400, "not_image", "This file isn't an image Persona can read. Use a PNG, JPEG, WebP or GIF")
+                if not _look_check_crop(spec.get("crop")):
+                    return _look_err(handler, 400, "bad_crop", "Invalid crop")
+                mark = True if "mark" not in spec or spec["mark"] is None else bool(spec["mark"])
+                parsed_states[st] = {"bytes": st_img, "mark": False if st == "idle" else mark}
+        lid = make_uploaded_look(name, image, subtitle, color=color_val, states=parsed_states, legacy=(mode == "basic"))
         MADE_LOOKS.add(lid)
         looks = looks_list()
         out = {"look": next(l for l in looks if l["id"] == lid)}
@@ -20037,14 +20500,156 @@ def look_uploads_route(handler, method, p, raw):
         handler.send_json(out)
         return True
     lid = p[len("/api/v1/looks/uploads/"):]
+    if method == "PATCH" and lid and "/" not in lid:
+        if mode == "basic":
+            return _look_err(handler, 404, "not_found", "not found")
+        root = os.path.join(UPLOADED_LOOKS, lid)
+        mpath = os.path.join(root, "persona.json")
+        if not os.path.isfile(mpath) or lid.startswith("."):
+            if any(x["id"] == lid for x in personas()):
+                return _look_err(handler, 409, "not_uploaded", "Only avatars made from an uploaded image can be edited here")
+            return _look_err(handler, 404, "not_found", "This avatar is no longer on the hub")
+        m = json.load(open(mpath))
+        if (m.get("source") or {}).get("kind") != "upload":
+            return _look_err(handler, 409, "not_uploaded", "Only avatars made from an uploaded image can be edited here")
+        body = json.loads(raw or b"{}")
+        if not isinstance(body, dict):
+            return _look_err(handler, 400, "bad_fields", "Invalid body")
+        has_any = any(k in body for k in ("name", "subtitle", "image", "states", "color"))
+        if not has_any or ("crop" in body and "image" not in body):
+            return _look_err(handler, 400, "bad_fields", "Nothing to update")
+        if "states" in body and isinstance(body["states"], dict) and not body["states"] and not any(k in body for k in ("name", "subtitle", "image", "color")):
+            return _look_err(handler, 400, "bad_fields", "Nothing to update")
+        name = m["name"]
+        if "name" in body:
+            name = (body["name"] or "").strip() if isinstance(body["name"], str) else ""
+            if not name:
+                return _look_err(handler, 400, "no_name", "Give the avatar a name")
+            if not _look_text_ok(name, 40):
+                return _look_err(handler, 400, "bad_name", "The name can be up to 40 characters, without control characters")
+        subtitle = m.get("subtitle", "")
+        if "subtitle" in body:
+            subtitle = (body["subtitle"] or "").strip() if isinstance(body["subtitle"], str) else ""
+            if not _look_text_ok(subtitle, 80):
+                return _look_err(handler, 400, "bad_subtitle", "The description can be up to 80 characters, without control characters")
+        new_main = None
+        if "image" in body:
+            new_main = _look_decode_image(body["image"])
+            if new_main is None:
+                return _look_err(handler, 400, "not_image", "This file isn't an image Persona can read. Use a PNG, JPEG, WebP or GIF")
+            if not _look_check_crop(body.get("crop")):
+                return _look_err(handler, 400, "bad_crop", "Invalid crop")
+        new_color = None
+        if "color" in body:
+            new_color = _look_check_color(body["color"])
+            if new_color is None:
+                return _look_err(handler, 400, "bad_color", "Use auto or a #RRGGBB color")
+        source = dict(m.get("source") or {"kind": "upload"})
+        src_states = {k: dict(v) for k, v in (source.get("states") or {}).items()}
+        state_updates = {}
+        if "states" in body:
+            if not isinstance(body["states"], dict):
+                return _look_err(handler, 400, "bad_fields", "Invalid states")
+            for st, spec in body["states"].items():
+                if st not in UPLOAD_STATES:
+                    return _look_err(handler, 400, "bad_state", "Unknown state: " + str(st))
+                if not isinstance(spec, dict) or not spec:
+                    return _look_err(handler, 400, "bad_fields", "Invalid state entry")
+                if spec.get("auto"):
+                    if any(k in spec for k in ("image", "crop", "mark")):
+                        return _look_err(handler, 400, "bad_fields", "auto cannot be combined with image, crop or mark")
+                    state_updates[st] = {"auto": True}
+                elif "image" in spec:
+                    st_img = _look_decode_image(spec.get("image"))
+                    if st_img is None:
+                        return _look_err(handler, 400, "not_image", "This file isn't an image Persona can read. Use a PNG, JPEG, WebP or GIF")
+                    if not _look_check_crop(spec.get("crop")):
+                        return _look_err(handler, 400, "bad_crop", "Invalid crop")
+                    mark = True if "mark" not in spec or spec["mark"] is None else bool(spec["mark"])
+                    state_updates[st] = {"bytes": st_img, "mark": False if st == "idle" else mark}
+                elif "crop" in spec:
+                    return _look_err(handler, 400, "bad_fields", "crop requires image")
+                elif "mark" in spec:
+                    if not (src_states.get(st) or {}).get("own"):
+                        return _look_err(handler, 400, "mark_without_image", "Choose a picture for this state before changing its mark")
+                    state_updates[st] = {"mark": False if st == "idle" else bool(spec["mark"])}
+                else:
+                    return _look_err(handler, 400, "bad_fields", "Invalid state entry")
+        os.makedirs(os.path.join(root, ".edit"), exist_ok=True)
+        edit_main = os.path.join(root, ".edit", "main")
+        if new_main is not None:
+            main_bytes = new_main
+            open(edit_main, "wb").write(main_bytes)
+            for side in (64, 128, 256, 512):
+                open(os.path.join(root, "avatar", "%d.png" % side), "wb").write(main_bytes)
+        elif os.path.isfile(edit_main):
+            main_bytes = open(edit_main, "rb").read()
+        else:
+            main_bytes = open(os.path.join(root, "avatar", "512.png"), "rb").read()
+        dot_states = dict((m.get("dot") or {}).get("states") or {})
+        main_frames, main_fps = _look_apng_meta(main_bytes)
+        for st, upd in state_updates.items():
+            st_edit = os.path.join(root, ".edit", "state_" + st)
+            if upd.get("auto"):
+                src_states.pop(st, None)
+                if os.path.isfile(st_edit):
+                    os.remove(st_edit)
+                open(os.path.join(root, "dot", st + ".png"), "wb").write(main_bytes)
+                entry = {"file": "dot/%s.png" % st}
+                if st != "offline" and main_frames > 1:
+                    entry["fps"], entry["frames"] = main_fps or 6, main_frames
+                dot_states[st] = entry
+            elif "bytes" in upd:
+                open(os.path.join(root, "dot", st + ".png"), "wb").write(upd["bytes"])
+                open(st_edit, "wb").write(upd["bytes"])
+                nf, nfps = _look_apng_meta(upd["bytes"])
+                entry = {"file": "dot/%s.png" % st}
+                if nf > 1:
+                    entry["fps"], entry["frames"] = nfps or 6, nf
+                dot_states[st] = entry
+                src_states[st] = {"own": True, "mark": upd["mark"]}
+            else:
+                src_states[st] = {"own": True, "mark": upd["mark"]}
+        if new_main is not None:
+            for st in UPLOAD_STATES:
+                if not (src_states.get(st) or {}).get("own"):
+                    open(os.path.join(root, "dot", st + ".png"), "wb").write(main_bytes)
+                    entry = {"file": "dot/%s.png" % st}
+                    if st != "offline" and main_frames > 1:
+                        entry["fps"], entry["frames"] = main_fps or 6, main_frames
+                    dot_states[st] = entry
+        m["name"] = name
+        if subtitle:
+            m["subtitle"] = subtitle
+        else:
+            m.pop("subtitle", None)
+        m["dot"] = {"size": 144, "states": dot_states}
+        if src_states:
+            source["states"] = src_states
+        else:
+            source.pop("states", None)
+        cur_color = source.get("color")
+        if new_color is not None:
+            is_auto = (new_color == "auto")
+            seed = _look_auto_seed(main_bytes) if is_auto else new_color
+            m["colors"] = _look_palette(seed)
+            source["color"] = {"seed": seed, "auto": is_auto}
+        elif new_main is not None and (cur_color is None or cur_color.get("auto")):
+            seed = _look_auto_seed(main_bytes)
+            m["colors"] = _look_palette(seed)
+            source["color"] = {"seed": seed, "auto": True}
+        m["source"] = source
+        json.dump(m, open(mpath, "w"), ensure_ascii=False, indent=2)
+        _push_live({"type": "personas"})
+        looks = looks_list()
+        handler.send_json({"look": next(l for l in looks if l["id"] == lid)})
+        return True
     if method == "DELETE" and lid and "/" not in lid:
         root = os.path.join(UPLOADED_LOOKS, lid)
         if not os.path.isdir(root) or lid.startswith("."):
             if any(x["id"] == lid for x in personas()):  # a package of the hub's not made from an upload
-                handler.send_json({"error": "这里只能删除用上传的图片做的形象", "code": "not_uploaded"}, 409)
-            else:
-                handler.send_json({"error": "这个形象已经不在 hub 上了", "code": "not_found"}, 404)
-            return True
+                return _look_err(handler, 409, "not_uploaded", "这里只能删除用上传的图片做的形象")
+            return _look_err(handler, 404, "not_found", "这个形象已经不在 hub 上了")
         shutil.rmtree(root)
         _push_live({"type": "personas"})
         if LOOK_CHOICE["id"] == lid:
@@ -20329,7 +20934,8 @@ def span(items, frm=None, to=None):
 #   GET /mock/delay?s=3   the same, from now on (0 turns it off)
 #   GET /mock/down?s=8    the hub is gone for that long: open WebSockets drop, new connections are closed unanswered
 #   GET /mock/reject?s=8  this device's credential is revoked for that long: open WebSockets drop, handshakes answer 401
-NET = {"delay": float(os.environ.get("MOCK_DELAY", "0")), "down_until": 0.0, "reject_until": 0.0}
+#   GET /mock/hierarchy?on=0|1  disable/enable sessions_hierarchy folding (folded_under), for pre-hierarchy client fallback tests
+NET = {"delay": float(os.environ.get("MOCK_DELAY", "0")), "down_until": 0.0, "reject_until": 0.0, "hierarchy": True}
 
 # ---------- frames lost, doubled, late or out of order (#1073) ----------
 # POST /mock/wire {"rules": [{"type": "items", "action": "drop" | "dup" | "delay" | "hold", "ms": 1500, "count": 1,
@@ -20436,8 +21042,10 @@ def case_route(h, method, p, q, body):
             case_json(h, {"error": str(e)}, 400)
             return True
         CASE.close()
-        # "now": its times moved to the present, for an app on the real clock (the iOS simulator's)
-        CASE = sync_case.CaseHub(case, shift=sync_case.shift_to(time.time()) if asked.get("now") else 0)
+        # "now": move fixture times to the present for an app on the real clock (the iOS simulator's).
+        live_time = time.time if asked.get("now") else None
+        shift = sync_case.shift_to(live_time()) if live_time else 0
+        CASE = sync_case.CaseHub(case, shift=shift, live_time=live_time)
         case_json(h, CASE.state())
         return True
     if method == "GET" and MOCK_WEB and not p.startswith(("/api/", "/mock/")):
@@ -20551,6 +21159,7 @@ _SEARCH_DROP = [re.compile(r"(?s)<persona-view-errors\b[^>]*>.*?</persona-view-e
                 re.compile(r"<" + FILE_TAG_PATTERN + r"\b[^>]*?/?>(?:\s*</" + FILE_TAG_PATTERN + r">)?")]
 _SEARCH_PASTED = re.compile(r"(?s)<pasted_content\b[^>]*>(.*?)</pasted_content>")
 _SEARCH_IMAGES = [re.compile(r"(?s)<attached_images>.*?</attached_images>"), re.compile(r"\[Image #\d+\]\s?")]
+_SEARCH_INLINE_REFERENCE = re.compile(r"(?:^|\r?\n\r?\n)<!-- persona-inline-v1 \[[^\r\n]*", re.M)
 _SEARCH_ACTION = re.compile(r'\n<persona-action view="[^"<>]*" action="[^"<>]*">\{[^<>]*\}</persona-action>$')
 _SEARCH_CARD = re.compile(r"```(persona-view|persona-card)[^\n]*\n(.*?)\n```[^\n]*(?:\n|$)", re.S)
 
@@ -20583,7 +21192,7 @@ def search_index_text(item):
         text = _SEARCH_PASTED.sub(r"\1", text)
         for r in _SEARCH_IMAGES:
             text = r.sub("", text)
-        text = _SEARCH_ACTION.sub("", text.strip()).strip()
+        text = _SEARCH_ACTION.sub("", _SEARCH_INLINE_REFERENCE.sub("", text).strip()).strip()
     else:
         return None
     return text if text.strip() else None
@@ -21977,9 +22586,12 @@ def file_streamed(f, q):
 
 
 def net_control(path, q):
-    """Handles /mock/delay, /mock/down and /mock/reject; True if it was one of them."""
+    """Handles /mock/delay, /mock/down, /mock/reject and /mock/hierarchy; True if it was one of them."""
     if path == "/mock/delay":
         NET["delay"] = float(q.get("s", ["0"])[0])
+        return True
+    if path == "/mock/hierarchy":
+        NET["hierarchy"] = q.get("on", ["1"])[0] != "0"
         return True
     if path == "/mock/down":
         NET["down_until"] = time.time() + float(q.get("s", ["5"])[0])
@@ -26348,6 +26960,11 @@ class H(BaseHTTPRequestHandler):
             ]})
         if p == "/api/v1/assistant/conversations/" + ASK1 + "/always":
             return self.send_json({"grants": ALWAYS_GRANTS})
+        if SUBSCRIPTION_INBOX and p == "/api/v1/subscriptions":
+            return self.send_json({"subscriptions": [
+                {"id": source["id"], "label": source["name"], "connector": "mail", "extension": "mail",
+                 "source": source["read"], "source_name": source["name"], "recipe_origin": "catalog",
+                 "to_inbox": True, "to_kb": False, "state": "ok"} for source in SOURCES_GRAPH["sources"]]})
         if p == "/api/v1/subscriptions/-/graph": return self.send_json(SOURCES_GRAPH)
         if recordings_route(self, "GET", p): return
         if custom_models_route(self, "GET", p, q): return
@@ -27392,6 +28009,7 @@ class H(BaseHTTPRequestHandler):
                       "summary": e.get("one_line")}, **KB_DETAIL.get((kind, e["id"]), {}))
             if kind == "recordings": d["meta"] = meeting_detail_meta(e["id"], d.get("meta") or {})
             out = {"detail": d}
+            if kind == "recordings" and not os.environ.get("MOCK_LEGACY_HUB"): out["supports_expected_pinned"] = True
             word = (q.get("q") or [""])[0]
             if word:
                 ms = [{"path": "%s/%s/summary.md" % (kind, e["id"]), "n": i + 1, "line": l.strip()}
@@ -28260,27 +28878,33 @@ class H(BaseHTTPRequestHandler):
             if os.environ.get("MOCK_KB_SAVE_FAIL") == "1": return self.send_json({"error": "知识库暂时写不进去"}, 502)
             kind, eid = p.split("/")[4:6]
             body = json.loads(self.last_body or b"{}")
-            e = next((e for e in KB.get(kind, []) if e["id"] == eid), None)
-            if e is None: return self.send_json({"error": "not found"}, 404)
-            for k in ("importance", "relevance", "tags"):
-                if k in body: e[k] = body[k]
-            if kind == "projects" and ("status" in body or "project_kind" in body):
-                pk, st = (e.get("extra") or "short · active").split(" · ")
-                e["extra"] = "%s · %s" % (body.get("project_kind") or pk, body.get("status") or st)
-            meta = KB_DETAIL.get((kind, eid), {}).get("meta")
-            if meta is not None:
-                meta.update({k: e[k] for k in ("importance", "relevance", "tags") if k in e})
-                if kind == "projects": meta["kind"], meta["status"] = e["extra"].split(" · ")
-            if isinstance(body.get("pinned"), str):  # confirmed facts: "" clears them
-                m = kb_meta(kind, eid)
-                if body["pinned"]: m["pinned"] = body["pinned"]
-                else: m.pop("pinned", None)
-            lock = body["lock_lists"] if "lock_lists" in body else body.get("lock") is not False
-            for field, lst in (("remove_people", "people"), ("remove_chats", "chats"), ("remove_projects", "projects")):
-                for oid in body.get(field) or []: kb_unlink(kind, eid, lst, oid, lock)
-            for field, lst in (("allow_people", "people"), ("allow_chats", "chats"), ("allow_projects", "projects")):
-                for oid in body.get(field) or []: kb_allow(kind, eid, lst, oid)
-            KB_UPDATES.append({"kind": kind, "id": eid, **body})
+            with RECORDINGS_LOCK:
+                e = next((e for e in KB.get(kind, []) if e["id"] == eid), None)
+                if e is None: return self.send_json({"error": "not found"}, 404)
+                if "expected_pinned" in body:
+                    if kind != "recordings" or not isinstance(body.get("pinned"), str) or not isinstance(body["expected_pinned"], str):
+                        return self.send_json({"error":"expected_pinned requires a recording pinned update"},400)
+                    if body["expected_pinned"] != (kb_meta(kind,eid) or {}).get("pinned", ""):
+                        return self.send_json({"error":"conflict"},409)
+                for k in ("importance", "relevance", "tags"):
+                    if k in body: e[k] = body[k]
+                if kind == "projects" and ("status" in body or "project_kind" in body):
+                    pk, st = (e.get("extra") or "short · active").split(" · ")
+                    e["extra"] = "%s · %s" % (body.get("project_kind") or pk, body.get("status") or st)
+                meta = KB_DETAIL.get((kind, eid), {}).get("meta")
+                if meta is not None:
+                    meta.update({k: e[k] for k in ("importance", "relevance", "tags") if k in e})
+                    if kind == "projects": meta["kind"], meta["status"] = e["extra"].split(" · ")
+                if isinstance(body.get("pinned"), str):  # confirmed facts: "" clears them
+                    m = kb_meta(kind, eid)
+                    if body["pinned"]: m["pinned"] = body["pinned"]
+                    else: m.pop("pinned", None)
+                lock = body["lock_lists"] if "lock_lists" in body else body.get("lock") is not False
+                for field, lst in (("remove_people", "people"), ("remove_chats", "chats"), ("remove_projects", "projects")):
+                    for oid in body.get(field) or []: kb_unlink(kind, eid, lst, oid, lock)
+                for field, lst in (("allow_people", "people"), ("allow_chats", "chats"), ("allow_projects", "projects")):
+                    for oid in body.get(field) or []: kb_allow(kind, eid, lst, oid)
+                KB_UPDATES.append({"kind": kind, "id": eid, **body})
             return self.send_json({"ok": True})
         if os.environ.get("MOCK_LARK_NATIVE_OLK") and (p == "/test/lark-encryption/reset" or p == "/api/v1/lark/encryption/unlock" or p.endswith(("/encryption/covers", "/encryption/prepare", "/encrypted-messages"))):
             body = json.loads(self.last_body or b"{}")
@@ -28892,21 +29516,14 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.last_body or b"{}")
             PINS.update(spaces=list(body.get("spaces") or []), sessions=list(body.get("sessions") or []))
             return self.send_json(PINS)
-        if p == "/api/v1/assistant" and self.command == "PUT" and not os.environ.get("MOCK_LEGACY_HUB"):
-            body = json.loads(self.last_body or b"{}")
-            if "work_guide" in body:
-                mid = self.headers.get("X-Persona-Manager")
-                if not mid or type(body["work_guide"]) is not bool: return self.send_json({"code": "bad_request"}, 400)
-                other = assistant_for_manager(self)
-                if other and other[1] != 200: return self.send_json(*other)
-                if is_read_only(self): return self.send_json({"code": "forbidden"}, 403)
-                if body.get("expected_work_guide", MANAGER_WORK_GUIDES.get(mid, False)) != MANAGER_WORK_GUIDES.get(mid, False):
-                    return self.send_json({"code": "configuration_conflict"}, 409)
-                MANAGER_WORK_GUIDES[mid] = body["work_guide"]
+        if SUBSCRIPTION_INBOX and self.command == "POST" and p == "/api/v1/subscriptions/-/ui":
+            items = [{"type": "text", "text": source["name"]} for source in SOURCES_GRAPH["sources"]]
+            return self.send_json({"view": {"title": "Inbox sources", "sections": [{"items": items}]}})
         if p == "/api/v1/assistant" and self.command == "PUT" and (other := assistant_for_manager(self)) is not None:
             if other[1] != 200: return self.send_json(*other)
             body = json.loads(self.last_body or b"{}")
-            mid = self.headers.get("X-Persona-Manager") or (parse_qs(urlparse(self.path).query).get("manager") or [""])[0]
+            if error := update_labs(self, body): return self.send_json(*error)
+            mid = other[0]["manager"]
             if body.get("notes") is not None: MANAGER_NOTES[mid] = body["notes"]
             return self.send_json(assistant_for_manager(self)[0])
         if p == "/api/v1/assistant" and self.command == "PUT":  # Settings › Assistant: only the fields sent change
@@ -28929,12 +29546,10 @@ class H(BaseHTTPRequestHandler):
                 hours = body["idle_close_hours"]
                 if not isinstance(hours, int) or isinstance(hours, bool) or not 0 <= hours <= 8760:
                     return self.send_json({"error": "idle_close_hours must be 0–8760"}, 400)
-                ASSISTANT_CONFIG["idle_close_hours"] = hours
             if "archive_closed_days" in body:  # 0–3650, as the hub checks it (#3618)
                 days = body["archive_closed_days"]
                 if not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 3650:
                     return self.send_json({"error": "archive_closed_days must be 0–3650"}, 400)
-                ASSISTANT_CONFIG["archive_closed_days"] = days
             # As the hub's profile_write.go: checked before anything changes; the session-name settings only from a
             # request that names its manager (#4965).
             naming = [k for k in ("agent_auto_naming", "agent_auto_naming_max", "agent_auto_naming_interval_hours") if k in body]
@@ -28949,7 +29564,12 @@ class H(BaseHTTPRequestHandler):
                 mode = body["default_permission_mode"]
                 if mode not in ("default", "acceptEdits", "plan", "auto", "bypassPermissions"):
                     return self.send_json({"error": "bad default_permission_mode"}, 400)
-                ASSISTANT_CONFIG["default_permission_mode"] = mode
+            if body.get("machine_id") and not any(m["id"] == body["machine_id"] for m in MACHINES):
+                return self.send_json({"error": "unknown machine"}, 400)
+            if error := update_labs(self, body): return self.send_json(*error)
+            for key in ("idle_close_hours", "archive_closed_days", "default_permission_mode"):
+                if key in body:
+                    ASSISTANT_CONFIG[key] = body[key]
             for key in ("start_requested_tasks", "agent_auto_naming"):
                 if isinstance(body.get(key), bool):
                     ASSISTANT_CONFIG[key] = body[key]
@@ -28973,8 +29593,6 @@ class H(BaseHTTPRequestHandler):
             if isinstance(body.get("claude_interactive"), bool):
                 ASSISTANT_CONFIG["claude_interactive"] = body["claude_interactive"]
             if body.get("machine_id"):
-                if not any(m["id"] == body["machine_id"] for m in MACHINES):
-                    return self.send_json({"error": "unknown machine"}, 400)
                 ASSISTANT_CONFIG["machine_id"] = body["machine_id"]
             if body.get("launcher"):
                 ASSISTANT_CONFIG["launcher"] = body["launcher"]
@@ -28996,7 +29614,7 @@ class H(BaseHTTPRequestHandler):
             if MEETING_ATTENDANCE and "meeting_attendance_default" in body:
                 ASSISTANT_CONFIG["meeting_attendance_default"] = body["meeting_attendance_default"]
             for key in RETENTION_BOUNDS:
-                if key in body: ASSISTANT_CONFIG[key] = body[key]
+                if key in body: ASSISTANT_CONFIG["recording_audio_days" if key == "recording_days" else key] = body[key]
             ASSISTANT_CONFIG.update(transcription_config)
             return self.send_json(assistant_state())
         if "/health/reports/" in p and p.startswith("/api/v1/machines/") and self.command == "DELETE":
@@ -29165,7 +29783,12 @@ class H(BaseHTTPRequestHandler):
                 return self.send_json({"error": "the hub could not take this answer"}, 400)
             if RESOLVE_MODE[0] == "slow":
                 time.sleep(6)
-            RESOLVED.append({"id": p.split("/")[4], "resolution": json.loads(self.last_body or b"{}")})
+            _resolution = json.loads(self.last_body or b"{}")
+            if os.environ.get("MOCK_SECRET_RUN") == "env" and p.split("/")[4] == "ix_secret_run" and \
+                    _resolution.get("allow") is True and \
+                    "secret_run_env" not in [feature.strip() for feature in self.headers.get("X-Persona-Features", "").split(",")]:
+                return self.send_json({"error": "update the app to approve environment delivery", "code": "secret_run_env_elsewhere"}, 403)
+            RESOLVED.append({"id": p.split("/")[4], "resolution": _resolution})
             if os.environ.get("MOCK_CODEX") and p.split("/")[4] == "cxa_orders_curl" and \
                     sum(r["id"] == "cxa_orders_curl" for r in RESOLVED) == 1:
                 return self.send_json({"error": "电脑上 Codex 的输入框里有没发出去的内容：「先看下慢查询日志」。这次什么都没输入，免得和它拼在一起：在电脑上发出去或清空后再答。",
@@ -29181,7 +29804,7 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"ok": True})
         if p.startswith("/api/v1/machines/") and p.endswith("/agent-dirs/hidden") and self.command == "PUT":
             state, err = _set_agent_dirs_hidden(p.split("/")[4], json.loads(self.last_body or b"{}"))
-            return self.send_json({"error": err} if err else state, 400 if err else 200)
+            return self.send_json({"error": err} if err else state, 409 if err == "agent directory rules changed" else 400 if err else 200)
         if p.startswith("/api/v1/machines/") and p.endswith("/claude-dirs/blocked") and self.command == "PUT":
             body, mid = json.loads(self.last_body or b"{}"), p.split("/")[4]
             pats = []
@@ -29905,8 +30528,23 @@ if CHANNELS_MODE:
             _s["channels"] = ["feishu"]
 
 
-def _channel_detail(c):
-    d = dict(c)
+CHANNEL_ROUTING = {}  # (manager, channel id) -> explicitly saved routing fields
+
+
+def _channel_view(c, manager):
+    if os.environ.get("MOCK_LEGACY_HUB") or c["source"] != "plugin" or not c["installed"] or c["kind"] not in ("im", "mention"):
+        return c
+    prefs = CHANNEL_ROUTING.get((manager, c["id"]), {})
+    inherit_topics = MANAGER_INTEGRATIONS_V2.get(manager) and c["capabilities"].get("threads")
+    return dict(c, thread_mode=prefs.get("thread_mode", "per_topic" if inherit_topics else "channel_default"),
+                **({"thread_idle_hours": prefs["thread_idle_hours"]} if prefs.get("thread_idle_hours") else {}))
+
+
+def _channel_detail(c, manager):
+    d = dict(_channel_view(c, manager))
+    override = {"per_topic": "topics", "per_group_and_topic": "groups_and_topics"}.get(d.get("thread_mode"))
+    if override and MANAGER_INTEGRATIONS_V2.get(manager):
+        d["target_override"] = {"mode": override}
     d["waiting"] = {"answers": 1 if c["id"] == "wechat" else 0, "asks": 0}
     if c["id"] in ("wechat", "feishu"):
         d["conversations"] = [{"machine_id": "server", "session_id": ASK1, "title": "今天要处理的事", "at": ago(minutes=3)},
@@ -29920,23 +30558,32 @@ def channels_route(handler, p, body):
     """MOCK_CHANNELS: GET /api/v1/channels, one channel's page, its settings, binding and test. False otherwise."""
     if not CHANNELS_MODE or not (p.startswith("/api/v1/channels") or p == "/mock/channels"):
         return False
+    manager = handler.headers.get("X-Persona-Manager") or (parse_qs(urlparse(handler.path).query).get("manager") or [MANAGERS["default"]])[0]
     method = handler.command
     if p == "/mock/channels":
         return handler.send_json({"tests": CHANNEL_TESTS}) or True
     if p == "/api/v1/channels" and method == "GET":
         order = {"app": 0}
         rank = lambda c: order.get(c["id"], 1 if c["state"] == "connected" else 3 if c["state"] == "not_installed" else 2)
-        return handler.send_json({"channels": sorted(CHANNELS.values(), key=rank)}) or True
+        return handler.send_json({"channels": [_channel_view(c, manager) for c in sorted(CHANNELS.values(), key=rank)]}) or True
     parts = p.split("/")  # ['', 'api', 'v1', 'channels', id, ...]
     c = CHANNELS.get(parts[4]) if len(parts) > 4 else None
     if c is None:
         return handler.send_json({"error": "no such channel", "code": "not_found"}, 404) or True
     rest, req = parts[5:], json.loads(body or b"{}") if body else {}
     if rest == [] and method == "GET":
-        return handler.send_json(_channel_detail(c)) or True
+        return handler.send_json(_channel_detail(c, manager)) or True
     if c.get("read_only") or c["source"] == "market":
         return handler.send_json({"error": c["name"] + " 不在这里设置", "code": "read_only"}, 409) or True
     if rest == [] and method == "PUT":
+        routing = {k: req[k] for k in ("thread_mode", "thread_idle_hours")
+                   if req.get(k) is not None and not os.environ.get("MOCK_LEGACY_HUB")}
+        if routing and c["source"] != "plugin":
+            return handler.send_json({"error": "Routing requires an extension channel", "code": "invalid"}, 400) or True
+        if "thread_mode" in routing and routing["thread_mode"] not in ("channel_default", "per_group_and_topic", "per_topic"):
+            return handler.send_json({"error": "Invalid thread_mode", "code": "invalid"}, 400) or True
+        if "thread_idle_hours" in routing and (type(routing["thread_idle_hours"]) is not int or not 0 <= routing["thread_idle_hours"] <= 87600):
+            return handler.send_json({"error": "Invalid thread_idle_hours", "code": "invalid"}, 400) or True
         if "enabled" in req:
             c["enabled"] = bool(req["enabled"])
             c["state"] = "disabled" if not c["enabled"] else ("connected" if c.get("account") else "not_connected")
@@ -29947,11 +30594,13 @@ def channels_route(handler, p, body):
             title = next((s["title"] for s in ASSISTANT if s["session_id"] == t.get("session_id")), None)
             c["target"] = {k: v for k, v in {"kind": t.get("kind"), "machine_id": t.get("machine_id"), "session_id": t.get("session_id"),
                                              "title": title}.items() if v}
+        if routing:
+            CHANNEL_ROUTING.setdefault((manager, c["id"]), {}).update(routing)
         for fid, on in (req.get("features") or {}).items():
             for f in c.get("features", []):
                 if f["id"] == fid:
                     f["on"] = bool(on)
-        return handler.send_json(_channel_detail(c)) or True
+        return handler.send_json(_channel_detail(c, manager)) or True
     if rest == ["bind"] and method == "POST":
         step = req.get("step") or ""
         if c["id"] == "wechat":
@@ -29993,7 +30642,7 @@ def channels_route(handler, p, body):
     if rest == ["binding"] and method == "DELETE":
         c.pop("account", None)
         c["state"] = "not_connected"
-        return handler.send_json(_channel_detail(c)) or True
+        return handler.send_json(_channel_detail(c, manager)) or True
     if rest == ["test"] and method == "POST":
         if c["state"] != "connected":
             return handler.send_json({"error": c["name"] + " 还没连上"}, 502) or True
@@ -30013,7 +30662,8 @@ _features_without_channels = features
 
 
 def features():
-    return _features_without_channels() + (["channels"] if CHANNELS_MODE else [])
+    return (_features_without_channels() + (["channels"] if CHANNELS_MODE else [])
+            + (["inbox_sources", "inbox_sources_graph"] if SUBSCRIPTION_INBOX and SUBSCRIPTION_INBOX != "old" else []))
 
 
 MOCK_HELP.append("MOCK_TASKS_CONTINUED=1|starting  (with MOCK_TASKS=1) One to-do two later plans continued: two released Agents and a running one, each plan's hand-off card its own Agent (#11854); starting: the newest Agent not linked yet")

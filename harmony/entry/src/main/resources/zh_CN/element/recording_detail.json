@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "recording_detail_ask",
+      "value": "问 Persona"
+    },
+    {
+      "name": "recording_detail_folder_access",
+      "value": "Persona、AI 分身和各台电脑上的 Agent 都能直接读这个目录。"
+    },
+    {
+      "name": "recording_facts_instruction",
+      "value": "写下关于「{name}」、Persona 应始终当作事实的内容。Persona 会参考它，但不会改动。"
+    },
+    {
+      "name": "recording_facts_delete",
+      "value": "删除确认的事实"
+    },
+    {
+      "name": "recording_facts_edit",
+      "value": "编辑确认的事实"
+    },
+    {
+      "name": "recording_facts_deleted",
+      "value": "已删除确认的事实"
+    }
+  ]
+}

@@ -64,5 +64,6 @@ internal fun mergedSidebar(
         // The knowledge pages are a module's (#13934): shown while it serves them, and never in demo mode.
         showKnowledge = session.knowledge != null &&
             persona.core.moduleapi.LocalModulePlaces.current.serves(persona.core.navigation.KnowledgeRoute::class),
+        herdrTabNameHubs = preferences.herdrTabNameHubs,
     )
 }

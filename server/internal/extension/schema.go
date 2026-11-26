@@ -20,6 +20,14 @@ import (
 // ConfigMost is the largest configuration value kept.
 const ConfigMost = 64 << 10
 
+// Allowed configuration property section hints for grouping settings in clients.
+const (
+	SectionConnection = "connection"
+	SectionChannel    = "channel"
+	SectionInbox      = "inbox"
+	SectionAdvanced   = "advanced"
+)
+
 // Schema is a plugin's configuration in the settings-form subset, its properties in manifest order. Entry lists are
 // editable only for clients that opt in; other clients receive a compatibility projection.
 type Schema struct {
@@ -28,14 +36,16 @@ type Schema struct {
 
 // Field is one property, as the form draws it.
 type Field struct {
-	Name        string          `json:"name"`
-	Type        string          `json:"type"` // string | integer | number | boolean | array | object
-	Title       string          `json:"title,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Default     json.RawMessage `json:"default,omitempty"`
-	Required    bool            `json:"required,omitempty"`
-	Enum        []Choice        `json:"enum,omitempty"`
-	Format      string          `json:"format,omitempty"` // uri | email | hostname | machine | launcher
+	Name        string `json:"name"`
+	Type        string `json:"type"` // string | integer | number | boolean | array | object
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Section is an optional UI grouping hint (connection | channel | inbox | advanced).
+	Section  string          `json:"section,omitempty"`
+	Default  json.RawMessage `json:"default,omitempty"`
+	Required bool            `json:"required,omitempty"`
+	Enum     []Choice        `json:"enum,omitempty"`
+	Format   string          `json:"format,omitempty"` // uri | email | hostname | machine | launcher
 	// OS, for format machine: only machines of these systems (x-os: darwin, linux, windows); none, any.
 	OS []string `json:"os,omitempty"`
 	// Confirm (x-confirm): what a form asks before a switch is turned on (a boolean, or a machine of a machine list),
@@ -72,7 +82,7 @@ type Choice struct {
 }
 
 var (
-	describing = []string{"title", "description", "default", "x-confirm"}
+	describing = []string{"title", "description", "default", "x-confirm", "section"}
 	keysFor    = map[string][]string{
 		"string":  {"enum", "oneOf", "format", "x-os", "pattern", "minLength", "maxLength"},
 		"integer": {"enum", "oneOf", "minimum", "maximum", "x-step"},
@@ -84,6 +94,7 @@ var (
 	// machine: one of the hub's machines, by id: a form draws a list of them as a switch each and one of them as a
 	// picker (x-os narrows both). launcher: one of the hub's launchers, by name: a form draws a picker of them.
 	formats      = []string{"uri", "email", "hostname", "machine", "launcher"}
+	sections     = []string{SectionConnection, SectionChannel, SectionInbox, SectionAdvanced}
 	systems      = []string{"darwin", "linux", "windows"}
 	hostnameLike = lazyre.New(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
 )
@@ -239,6 +250,11 @@ func parseFieldMode(name string, raw json.RawMessage, at string, depth int, entr
 	}
 	var errs []error
 	errs = append(errs, str("title", &f.Title), str("description", &f.Description), str("format", &f.Format), str("pattern", &f.Pattern), str("x-confirm", &f.Confirm))
+	if raw, ok := m["section"]; ok {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &f.Section) != nil {
+			errs = append(errs, errors.New("section: a string"))
+		}
+	}
 	var err error
 	if f.MinLength, err = count("minLength"); err != nil {
 		errs = append(errs, err)
@@ -288,6 +304,9 @@ func parseFieldMode(name string, raw json.RawMessage, at string, depth int, entr
 	}
 	if f.Format != "" && !slices.Contains(formats, f.Format) {
 		return fail("format %q: uri, email, hostname, machine or launcher", f.Format)
+	}
+	if f.Section != "" && !slices.Contains(sections, f.Section) {
+		return fail("section %q: connection, channel, inbox or advanced", f.Section)
 	}
 	if raw, ok := m["x-os"]; ok {
 		if f.Format != "machine" {

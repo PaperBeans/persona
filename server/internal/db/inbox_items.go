@@ -33,21 +33,18 @@ func (d *DB) PutInboxItems(ctx context.Context, rows []InboxRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	// A bare pgx.Batch is only a pipeline of autocommit statements, so a connection failure midway can leave some
-	// rows stored; the explicit transaction makes the all-or-nothing contract real.
-	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
+	return d.Transaction(ctx, func(tx pgx.Tx) error {
+		return WriteInboxItems(ctx, tx, rows)
+	})
+}
+
+// WriteInboxItems lets the Inbox commit source receipts in the same transaction as its rows.
+func WriteInboxItems(ctx context.Context, tx pgx.Tx, rows []InboxRow) error {
+	var batch pgx.Batch
+	for _, row := range rows {
+		batch.Queue(putInboxItemSQL, row.ID, row.Data, row.UpdatedAt, row.DoneAt)
 	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-	var b pgx.Batch
-	for _, r := range rows {
-		b.Queue(putInboxItemSQL, r.ID, r.Data, r.UpdatedAt, r.DoneAt)
-	}
-	if err := tx.SendBatch(ctx, &b).Close(); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return tx.SendBatch(ctx, &batch).Close()
 }
 
 // PutConversationInboxItems commits an assistant post only while its source
@@ -62,11 +59,7 @@ func (d *DB) PutConversationInboxItems(ctx context.Context, machine, session str
 		if err := conversationAvailableTx(ctx, tx, machine, session); err != nil {
 			return err
 		}
-		var batch pgx.Batch
-		for _, row := range rows {
-			batch.Queue(putInboxItemSQL, row.ID, row.Data, row.UpdatedAt, row.DoneAt)
-		}
-		return tx.SendBatch(ctx, &batch).Close()
+		return WriteInboxItems(ctx, tx, rows)
 	})
 }
 

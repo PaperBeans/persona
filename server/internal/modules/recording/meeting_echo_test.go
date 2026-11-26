@@ -18,7 +18,7 @@ func TestFollowupSeedLeavesPersonasEchoOut(t *testing.T) {
 	}, "spoken": []map[string]any{{"start": 10, "end": 17.5, "text": "You kept the cap."},
 		{"start": 18, "end": 24.5, "text": "You kept the cap for this release."}}})
 	e := m.engine()
-	meeting, rec, err := e.MeetingRead(meetingRec)
+	meeting, rec, err := writersOf(e).MeetingRead(meetingRec)
 	if err != nil {
 		t.Fatal(err)
 	}

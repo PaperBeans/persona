@@ -13,7 +13,7 @@ import { sessionTitle } from "./format";
 import { interactionAsk } from "./inbox";
 import { plainMarkdown } from "./plain-markdown";
 import { byTime } from "./times";
-import { requestHome } from "./child-sessions";
+import { requestHome, requestHomeMachine } from "./child-sessions";
 import type { Interaction, Session } from "./types";
 
 export type DonePref = "off" | "long" | "always";
@@ -498,7 +498,7 @@ export interface Waiting {
  *  session's card is its parent's (#5120). */
 export function waitingCard(interactions: readonly Interaction[], s: Pick<Session, "machine_id" | "session_id">): Interaction | undefined {
   return interactions
-    .filter((ix) => ix.machine_id === s.machine_id && requestHome(ix) === s.session_id && !isDelegating(ix) && !supervisorHeld(ix))
+    .filter((ix) => requestHomeMachine(ix) === s.machine_id && requestHome(ix) === s.session_id && !isDelegating(ix) && !supervisorHeld(ix))
     .sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id))[0];
 }
 

@@ -1,8 +1,9 @@
 // Adapt the selected Assistant's settings resource to the Labs form.
 import { t } from "../i18n";
 import { api, ApiError } from "./api";
-import { MANAGER_HEADER } from "./manager-choice";
+import { MANAGER_HEADER, shownManager } from "./manager-choice";
 import { checkUpdate, CONFIGURATION_VERSION, ConfigurationError, type ConfigurationDocument, type ConfigurationSource } from "./configuration/contract";
+import { patchAssistant } from "./store";
 
 const field = "work_guide";
 type Settings = { manager?: string; work_guide?: boolean };
@@ -44,6 +45,7 @@ export function workGuideLabsSource(manager: string): ConfigurationSource {
         const state = await api<Settings>("/assistant", { method: "PUT", headers, signal,
           json: { work_guide: value, expected_work_guide: expected } });
         if (state.work_guide !== value) throw new ConfigurationError("configuration_unavailable");
+        if (manager === shownManager()) patchAssistant({ work_guide: state.work_guide === true });
         return document(manager, state, true);
       } catch (e) {
         if (e instanceof ApiError) throw ConfigurationError.fromBody(e.body, e.status);

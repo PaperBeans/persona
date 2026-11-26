@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/nwverse/persona/server/internal/botcard"
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/larkhost"
 )
 
@@ -26,7 +25,7 @@ func (s *Service) botPostKeyed(ctx context.Context, replyTo string, card *botcar
 // feishuTarget says where a feishu.post / feishu.text goes beyond the default (larkhost.Target): the chat to send into
 // (ChatID; "" is the owner's private chat, the only one the hub accepts for now), whether a reply goes into the
 // parent's thread, whether a reply whose parent is gone fails (the hub's no_detour) instead of landing in the chat as
-// a message of its own, and whether it answers the owner's "/read" in a group (feishu_read.go). The zero value is what
+// a message of its own, and whether it answers the owner's "/read" in a group (the lark module's read.go). The zero value is what
 // the calls always did.
 type feishuTarget = larkhost.Target
 
@@ -104,12 +103,6 @@ func (s *Service) botNoteTo(ctx context.Context, to feishuTarget, messageID, tex
 	}
 }
 
-// botReplyTo writes text under messageID at to: key makes the same line, sent again, land once; full says the text is
-// a task's whole answer (the hub's full_answer).
-func (s *Service) botReplyTo(ctx context.Context, to feishuTarget, messageID, text, key string, full bool) error {
-	return s.appCall(ctx, AppFeishu, FeishuText, targetParams(to, map[string]any{"reply_to": messageID, "text": text, "uuid": key, "full_answer": full}), nil)
-}
-
 // botSay sends a line of text into the owner's chat.
 func (s *Service) botSay(ctx context.Context, text string) {
 	if err := s.appCall(ctx, AppFeishu, FeishuText, map[string]any{"text": text}, nil); err != nil {
@@ -119,35 +112,4 @@ func (s *Service) botSay(ctx context.Context, text string) {
 
 func (s *Service) botUpdateCard(ctx context.Context, messageID string, card *botcard.Card) error {
 	return s.appCall(ctx, AppFeishu, FeishuUpdateCard, map[string]any{"message_id": messageID, "card": s.workbenchStamp(ctx, card).JSON()}, nil)
-}
-
-func (s *Service) botReact(ctx context.Context, messageID, emoji string) (string, error) {
-	var res struct {
-		ReactionID string `json:"reaction_id"`
-	}
-	err := s.appCall(ctx, AppFeishu, FeishuReact, map[string]any{"message_id": messageID, "emoji": emoji}, &res)
-	return res.ReactionID, err
-}
-
-func (s *Service) botUnreact(ctx context.Context, messageID, reactionID string) {
-	_ = s.appCall(ctx, AppFeishu, FeishuUnreact, map[string]any{"message_id": messageID, "reaction_id": reactionID}, nil)
-}
-
-func (s *Service) botMessages(ctx context.Context, messageID string) ([]botcard.Item, error) {
-	var res struct {
-		Items []botcard.Item `json:"items"`
-	}
-	err := s.appCall(ctx, AppFeishu, FeishuMessages, map[string]any{"message_id": messageID}, &res)
-	return res.Items, err
-}
-
-// botName is a user's name (the hub's contact lookup; "someone" when it can't be read).
-func (s *Service) botName(ctx context.Context, openID string, lang i18n.Lang) string {
-	var res struct {
-		Name string `json:"name"`
-	}
-	if err := s.appCall(ctx, AppFeishu, FeishuUserName, map[string]any{"open_id": openID}, &res); err != nil || res.Name == "" {
-		return i18n.T(lang, "assistant-feishu.unknown_sender")
-	}
-	return res.Name
 }

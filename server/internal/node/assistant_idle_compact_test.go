@@ -55,13 +55,21 @@ func (s *idleCompactSink) Write(line []byte) (int, error) {
 func idleCompactFixture(t *testing.T) (*Node, *assistantProc, *idleCompactSink) {
 	t.Helper()
 	n := codexTestNode(t)
+	// Record the fake process's launcher and profile as a real start would. The
+	// compaction watchdog can then time delivery without discovering a legacy profile in the host shell.
+	const launcher = "idle-compaction-test"
+	n.setManaged([]proto.ManagedLauncher{{Name: launcher, Kind: "api", Agent: "claude"}})
+	cachedAssistantProbe(t, launcher, proto.LauncherDetail{Agent: "claude"})
 	sink := &idleCompactSink{compact: make(chan struct{}, 10)}
 	p := viewErrorsClaude(t, n, sink)
+	p.launcher = launcher
 	p.model.IsMain = true
-	p.fingerprint = n.executionFingerprint("claude", modelExecution{IsMain: true})
+	p.model.ConfigDir = "default"
+	p.fingerprint = n.executionFingerprint(launcher, p.model)
 	p.context = idleCompactPolicy.ContextTokens
 	p.stdin = &ackControlWriter{WriteCloser: sink, p: p}
 	n.state.update(p.id, func(st *sessionState) bool {
+		st.Launcher, st.ConfigDir = p.launcher, p.model.ConfigDir
 		st.IsMain = true
 		st.OriginKnown = true
 		st.IdleCompaction = &idleCompactionState{
@@ -94,6 +102,96 @@ func idleCompactAwait(t *testing.T, done <-chan error) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("unattended delivery did not finish")
+	}
+}
+
+const emptyCompactionResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Error during compaction: summarization produced empty response"]}`
+
+func TestMainIdleReleaseCompactionReportsEmptySummary(t *testing.T) {
+	n, p, sink := idleCompactFixture(t)
+	previous, _ := n.state.get(p.id)
+	p.lastActive = time.Now().Add(-time.Hour)
+	p.compactIdleAt = p.context
+	n.sweepAssistants()
+	st, _ := n.state.get(p.id)
+	if st.Compaction == nil || st.Compaction.State != proto.CompactionRunning || !strings.Contains(sink.String(), `"/compact"`) {
+		t.Fatalf("release did not report its compaction: %+v", st.Compaction)
+	}
+	idleCompactStream(n, p, emptyCompactionResult)
+	n.state.put(p.id, previous)
+	st, _ = n.state.get(p.id)
+	if st.Compaction == nil || st.Compaction.State != proto.CompactionFailed || !strings.Contains(st.Compaction.Error, "summarization produced empty response") {
+		t.Fatalf("release lost the provider's reason: %+v", st.Compaction)
+	}
+	p.lastActive = time.Now().Add(-time.Hour)
+	n.sweepAssistants()
+	if got := strings.Count(sink.String(), `"/compact"`); got != 1 {
+		t.Fatalf("the reaper repeated /compact %d times", got)
+	}
+}
+
+func TestEmptyIdleCompactionRetriesOnceOnALaterDelivery(t *testing.T) {
+	n, p, sink := idleCompactFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	source := &proto.MessageSource{Kind: proto.SourceSupervision}
+	deliver := func() error { return idleCompactCall(ctx, n, p, idleCompactPolicy, source) }
+	failAttempt := func() {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- deliver() }()
+		select {
+		case <-sink.compact:
+		case <-time.After(3 * time.Second):
+			t.Fatal("eligible delivery did not start /compact")
+		}
+		idleCompactStream(n, p, emptyCompactionResult)
+		idleCompactAwait(t, done)
+		idleCompactStream(n, p, `{"type":"result","subtype":"success"}`)
+	}
+	ageAndRestore := func() {
+		t.Helper()
+		st, _ := n.state.get(p.id)
+		if st.Compaction == nil || st.Compaction.State != proto.CompactionFailed {
+			t.Fatalf("compaction outcome was not saved: %+v", st.Compaction)
+		}
+		finished := time.Now().Add(-10 * time.Minute)
+		run, idle := *st.Compaction, *st.IdleCompaction
+		run.StartedAt, run.FinishedAt = finished.Add(-time.Second), &finished
+		idle.AttemptStartedAt = run.StartedAt
+		st.Compaction, st.IdleCompaction = &run, &idle
+		raw, err := json.Marshal(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored sessionState
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		n.state.update(p.id, func(st *sessionState) bool {
+			*st = restored
+			return true
+		})
+	}
+	failAttempt()
+	if err := deliver(); err != nil {
+		t.Fatal(err)
+	}
+	idleCompactStream(n, p, `{"type":"result","subtype":"success"}`)
+	if got := strings.Count(sink.String(), `"/compact"`); got != 1 {
+		t.Fatalf("retried before the delay: %d", got)
+	}
+	ageAndRestore()
+	failAttempt()
+	ageAndRestore()
+	if err := deliver(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(sink.String(), `"/compact"`); got != 2 {
+		t.Fatalf("bounded recovery issued %d compactions, want 2", got)
+	}
+	if got := strings.Count(sink.String(), "background wake"); got != 4 {
+		t.Fatalf("delivered %d of 4 unattended messages", got)
 	}
 }
 
@@ -196,12 +294,20 @@ func TestIdleCompactionLatchSurvivesRestartAndRearmsAfterDrop(t *testing.T) {
 	defer cancel()
 	source := &proto.MessageSource{Kind: proto.SourceSupervision}
 	done := make(chan error, 1)
-	go func() { done <- idleCompactCall(ctx, n, p, idleCompactPolicy, source) }()
-	select {
-	case <-sink.compact:
-	case <-time.After(3 * time.Second):
-		t.Fatal("first unattended message did not compact")
+	sendAndAwaitCompact := func(phase string) {
+		t.Helper()
+		var trace syncBuffer
+		n.logger.SetOutput(&trace)
+		go func() { done <- idleCompactCall(ctx, n, p, idleCompactPolicy, source) }()
+		select {
+		case <-sink.compact:
+		case err := <-done:
+			t.Fatalf("%s: assistant.send returned before the /compact response (err=%v, original sent=%t)\n%s", phase, err, strings.Contains(sink.String(), "background wake"), trace.String())
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: no /compact within 3s\n%s", phase, trace.String())
+		}
 	}
+	sendAndAwaitCompact("first unattended delivery")
 	// A failed attempt must not spin, even if context is still large and a new
 	// node has to recover the session's state from the hub.
 	idleCompactStream(n, p, `{"type":"result","subtype":"success","result":"Not enough messages to compact."}`)
@@ -249,12 +355,7 @@ func TestIdleCompactionLatchSurvivesRestartAndRearmsAfterDrop(t *testing.T) {
 		st.IdleCompaction = &a
 		return true
 	})
-	go func() { done <- idleCompactCall(ctx, n, p, idleCompactPolicy, source) }()
-	select {
-	case <-sink.compact:
-	case <-time.After(3 * time.Second):
-		t.Fatal("threshold recrossing and another idle gap did not compact")
-	}
+	sendAndAwaitCompact("threshold recrossed after another idle interval")
 	idleCompactStream(n, p,
 		`{"type":"system","subtype":"compact_boundary","compact_metadata":{"post_tokens":90000}}`,
 		`{"type":"result","subtype":"success"}`)

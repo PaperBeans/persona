@@ -136,15 +136,34 @@ func TestSupervisedTaskOverTheBus(t *testing.T) {
 	}
 	eventually(t, 10*time.Second, "the link", func() bool { ts := taskTodos(h); return len(ts) == 1 && len(ts[0].Agents) == 1 })
 
+	reads := func() int {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.itemReads
+	}
+	queuedRelays := func() []json.RawMessage {
+		var st struct {
+			Queue map[string][]json.RawMessage `json:"queue"`
+		}
+		if _, err := store.Setting(ctx, "assistant.relay", &st); err != nil {
+			t.Fatalf("read assistant.relay: %v", err)
+		}
+		return st.Queue["main-1"]
+	}
+
 	// It stops to ask which way: the main conversation hears it, and its answer is not pushed.
 	agent(proto.StatusWorking, "")
 	agent(proto.StatusDone, "两种走法：A 先灰度，B 直接全量。你选一个？")
 	eventually(t, 10*time.Second, "the 督办 message", func() bool { return len(digests()) == 1 })
 	if d := digests()[0]; !strings.Contains(d, "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种；用户还没收到") ||
-		!strings.Contains(d, "验收标准：测试 hub 已部署并验证") || !strings.Contains(d, "A 先灰度") {
+		!strings.Contains(d, "验收标准用 todo_get 取原文") || !strings.Contains(d, "A 先灰度") {
 		t.Fatalf("message:\n%s", d)
 	}
+	eventually(t, 10*time.Second, "the transcript confirmation read", func() bool { return reads() >= 1 })
 	eventually(t, 10*time.Second, "the hold on its pushes", func() bool { return shown(h, "main-1").Supervising })
+	if q := queuedRelays(); len(q) != 0 {
+		t.Fatalf("confirmed supervision digest remained queued in assistant.relay: %d", len(q))
+	}
 
 	// The assistant decided (it tells the agent; the fake node's ids are too short for agent_send); the agent is done:
 	// waits for review, not closed.
@@ -202,5 +221,115 @@ func TestSupervisedTaskOverTheBus(t *testing.T) {
 	}
 	if got := len(digests()); got != 3 {
 		t.Fatalf("%d messages", got)
+	}
+	eventually(t, 10*time.Second, "all transcript confirmation reads", func() bool { return reads() >= 3 })
+	if !shown(h, "main-1").Supervising {
+		t.Fatal("confirmed supervision digests did not keep the push hold on main-1")
+	}
+	if q := queuedRelays(); len(q) != 0 {
+		t.Fatalf("confirmed supervision digests left %d queued relay(s) in assistant.relay", len(q))
+	}
+}
+
+// Regression for #14646 / #12567: over the bus, a supervision assistant.send that succeeds without a matching
+// user item in session.items must fail transcript confirmation, persist the tried relay in assistant.relay, and
+// release the push hold on main-1.
+func TestSupervisedTaskOverTheBusUnconfirmedTranscriptReleasesHold(t *testing.T) {
+	h, srv, _ := newBusHub(t)
+	store := managerDB(t, h)
+	ctx := context.Background()
+	keys := []string{"assistant", "assistant.tasks", "assistant.routines", "assistant.followups", "assistant.runs",
+		"assistant.titles", "assistant.archived", "assistant.relay"}
+	clear := func() {
+		for _, k := range keys {
+			_ = store.PutSetting(context.Background(), k, nil)
+		}
+	}
+	clear()
+	t.Cleanup(clear)
+	if list, err := store.ListTodos(ctx); err == nil {
+		for _, r := range list {
+			_ = store.DeleteTodo(ctx, r.ID)
+		}
+	}
+	old := taskSettleDelay
+	taskSettleDelay = func(NotifyConfig) time.Duration { return 0 }
+	t.Cleanup(func() { taskSettleDelay = old })
+	t.Cleanup(assistant.SetSuperviseTimings(50*time.Millisecond, 300*time.Millisecond, 100*time.Millisecond))
+
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]any{"type": "text",
+			"text": `{"verdict":"needs_user","reason":"需要决定部署顺序"}`}}})
+	}))
+	t.Cleanup(judge.Close)
+	key := filepath.Join(t.TempDir(), "key")
+	_ = os.WriteFile(key, []byte("k"), 0o600)
+	setManagerJSON(t, h, "inbox", map[string]any{"triage_ai": ai.Config{BaseURL: judge.URL, APIKeyFile: key, Model: "m"}})
+
+	n := newAssistantNode(t, h)
+	n.m.info.Home = "/home/me"
+	n.omitSentItems = true // simulate RPC success without a transcript user item
+	editSessions(n.m, func([]proto.Session) []proto.Session {
+		return []proto.Session{{SessionID: "main-1", Cwd: convDir, Title: "Persona", UpdatedAt: time.Now().UTC()}}
+	})
+	n.known["main-1"] = true
+	box := connectTaskNode(t, h, "box")
+	mainSupervises := true
+	if err := store.PutSetting(ctx, "assistant", assistant.Settings{MachineID: "server", Main: "main-1", Timezone: "Asia/Shanghai",
+		MainSupervisesOwnTasks: &mainSupervises}); err != nil {
+		t.Fatal(err)
+	}
+	dialAssistant(t, h, srv.URL, true)
+
+	raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{"title": "部署 hub", "prompt": "把 hub 部署到测试环境并验证", "role": "worker",
+		"machine": "box", "cwd": "/code/app", "readonly": false, "permission": "bypassPermissions", "user_requested": true, "why": "部署脚本在 box 上",
+		"done_when": []string{"测试 hub 已部署并验证"}, "expect_minutes": 20}}})
+	params, _ := json.Marshal(map[string]any{"name": "task_plan", "args": json.RawMessage(raw), "session_id": "main-1", "assistant": true})
+	res, err := nodeAsks(ctx, n.m, "mcp.call", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.(proto.ToolResult); r.IsError {
+		t.Fatalf("task_plan: %s", textOf(r))
+	}
+	eventually(t, 10*time.Second, "the agent", func() bool { s, _ := box.calls(); return len(s) == 1 })
+	eventually(t, 10*time.Second, "the link", func() bool { ts := taskTodos(h); return len(ts) == 1 && len(ts[0].Agents) == 1 })
+
+	boxMachine := h.byID["box"]
+	boxMachine.setSessions([]proto.Session{{SessionID: "s1", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, State: proto.StateWorking,
+		UpdatedAt: time.Now()}})
+	boxMachine.setSessions([]proto.Session{{SessionID: "s1", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone, State: proto.StateUnread,
+		LastText: "A 还是 B？", UpdatedAt: time.Now()}})
+
+	type queuedRelay struct {
+		OnceID    string    `json:"once_id"`
+		TriedAt   time.Time `json:"tried_at"`
+		DoubtedAt time.Time `json:"doubted_at"`
+		Looks     int       `json:"looks"`
+		LookAfter time.Time `json:"look_after"`
+	}
+	var head queuedRelay
+	eventually(t, 10*time.Second, "unconfirmed supervision relay persisted in assistant.relay", func() bool {
+		var st struct {
+			Queue map[string][]queuedRelay `json:"queue"`
+		}
+		if _, err := store.Setting(ctx, "assistant.relay", &st); err != nil {
+			return false
+		}
+		if len(st.Queue["main-1"]) != 1 {
+			return false
+		}
+		head = st.Queue["main-1"][0]
+		return head.OnceID != "" && !head.TriedAt.IsZero() && !head.DoubtedAt.IsZero() && head.Looks == 1 && !head.LookAfter.IsZero()
+	})
+	eventually(t, 10*time.Second, "push hold released after unconfirmed supervision send", func() bool {
+		return !shown(h, "main-1").Supervising
+	})
+	n.mu.Lock()
+	reads := n.itemReads
+	n.mu.Unlock()
+	if reads == 0 {
+		t.Fatal("unconfirmed supervision send did not inspect session.items")
 	}
 }

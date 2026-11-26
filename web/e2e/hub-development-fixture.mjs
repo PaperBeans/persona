@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 const web = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.PORT || 5996);
 const current = "a".repeat(40), latest = "b".repeat(40), saved = "c".repeat(40);
+const installedAt = "2026-11-13T01:02:03Z";
 const backups = [{ id: "snapshot-20261112000100000000-cccccccccccc", version: "web-dev-cccccccccccc-202611120001",
-  build: 202611120001, commit: saved, updated_at: "2026-11-12T10:00:00Z", created_at: "2026-11-13T10:00:00Z" }];
+  build: 202611120001, commit: saved, updated_at: "2026-11-12T10:25:11Z", created_at: "2026-11-13T10:26:35.123Z" }];
 const assistants = [
   { id: "assistant", name: "Example assistant", online: true, builtin: true, default: true },
   { id: "studio", name: "Studio", online: true },
@@ -27,10 +28,10 @@ function reset(input = {}) {
   requests = [];
   status = { version: "web-dev-aaaaaaaaaaaa-202611130001", build: 202611130001, channel: "release", source: "web-dev",
     can_update: true, state: mode, busy: [], auto: false, auto_notice: false, confirmed: true, auto_update_nodes: false,
-    development: { configured: true, branch: "main", current_commit: current, current_updated_at: "2026-11-13T10:00:00Z",
+    development: { configured: true, branch: "main", current_commit: current, current_updated_at: installedAt,
       builtin_quiesce: true, backup_default_directory: "/var/lib/persona/update/development-backups" },
     latest: { version: "web-dev-bbbbbbbbbbbb-202611140001", build: 202611140001, newer: true, bad: false,
-      commit: latest, updated_at: "2026-11-14T10:00:00Z", branch: "main" },
+      commit: latest, updated_at: "2026-11-14T10:23:45+08:00", branch: "main" },
     backup: { id: backups[0].id, retained: 3, pruned: [] }, last_check: "2026-11-15T10:00:00Z" };
   if (mode === "release" || mode === "setup") {
     status.source = "release"; status.state = "idle"; status.latest = undefined;
@@ -42,7 +43,27 @@ function reset(input = {}) {
     status.latest = { version: "0.7.0-beta.1", build: 202611171300, newer: true, bad: false };
   }
   if (mode === "multi-assistant") status.state = "available";
-  if (mode === "backing_up") status.progress = "Synthetic snapshot: verifying saved programs";
+  if (mode === "building") {
+    status.development_progress = { phase: "building", step: "go_build", step_index: 5, step_total: 6,
+      elapsed_seconds: 38, percent: 75, item_label: "personad (linux-amd64)", item_done: 3, item_total: 4 };
+  }
+  if (mode === "backing_up" || mode === "external-quiesce") {
+    status.state = "backing_up";
+    status.development.builtin_quiesce = mode === "backing_up";
+    status.development_progress = { phase: "backing_up", step: "archive_files", step_index: 3,
+      step_total: status.development.builtin_quiesce ? 5 : 6, elapsed_seconds: 24, percent: 39,
+      bytes_done: 182 * 1024 ** 2, bytes_total: 460 * 1024 ** 2, bytes_per_second: 21.5 * 1024 ** 2,
+      item_done: 20, item_total: 45 };
+  }
+  if (mode === "applying_backup") {
+    status.latest = { ...backups[0], backup_id: backups[0].id, newer: false, bad: false };
+    status.development_progress = { phase: "applying_backup", step: "prepare_artifacts", step_index: 2,
+      step_total: 2, elapsed_seconds: 9, item_done: 0, item_total: 2, percent: 0 };
+  }
+  if (mode === "downloading") {
+    status.version = "0.6.2"; status.source = "release"; status.progress = "hub 75%";
+    status.latest = { version: "0.6.3", build: 202611170001, newer: true, bad: false };
+  }
   if (mode === "failed") status.error = "Update recovery is unresolved. Inspect the retained adoption journal and staged programs before retrying. (Synthetic fixture)";
   if (mode === "rolled_back") { status.latest.newer = false; status.error = "The attempted version did not start. Previous programs restored; current database and history preserved. (Synthetic fixture)"; }
 }
@@ -90,7 +111,7 @@ const server = await createServer({ root: web, configFile: web + '/vite.config.t
       if (path === '/hub/update' && req.method === 'GET') value = status;
       else if (path === '/hub/update/history') value = { history: [{ from_version: 'web-dev-cccccccccccc-202611120001', to_version: status.version,
         to_build: status.build, result: mode === 'rolled_back' ? 'rolled_back' : 'updated', auto: false, source: 'web-dev', commit: current,
-        started: '2026-11-13T10:00:00Z', ended: '2026-11-13T10:00:00Z' }] };
+        started: '2026-11-13T01:01:01Z', ended: installedAt }] };
       else if (path === '/hub/update/backups') {
         if (mode === 'backup-error') { res.statusCode = 409; value = { error: 'Synthetic backup inventory unavailable' }; }
         else value = { backups };

@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 // @ a workspace in the Persona assistant's composer (#5594): the menu lists the hub's workspaces (GET /workspaces),
-// filters them as you type, Enter picks one into a chip, and the message goes out with a
+// filters them as you type, Enter inserts one inline, and the message goes out with a
 // <persona-context kind="workspace" machine cwd> in front. Agents' composers don't offer workspaces.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPages } from "../../lib/lazy-page";
+import { parseUserText } from "../../lib/turns";
 import type { Workspace } from "../../lib/workspace-board";
 import { Composer, type Outgoing } from "./Composer";
 import type { MentionSource } from "./ComposerPanel";
+import { changeComposerField, composerField, composerFieldText } from "./composer-test-field";
 
 const WORKSPACES: Workspace[] = [
   { id: "w1", machine_id: "laptop", source: "herdr", source_id: "1", title: "weather", cwd: "/home/me/code/weather", branch: "main", online: true, available: true },
@@ -53,16 +55,10 @@ afterEach(() => {
 const render = (mention: MentionSource, onSend: (m: Outgoing) => Promise<boolean> = async () => true, draftKey = "persona-new") =>
   act(() => root.render(<Composer draftKey={draftKey} placeholder="" mention={mention} onSend={onSend} />));
 
-const box = () => host.querySelector("textarea")!;
+const box = () => composerField(host);
 
-async function type(text: string) {
-  const el = box();
-  await act(async () => {
-    el.focus();
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, text);
-    el.setSelectionRange(text.length, text.length);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+async function type(text: string, caret = text.length) {
+  await act(async () => changeComposerField(box(), text, { caret }));
   await act(async () => {}); // the workspaces' read settles
 }
 
@@ -89,21 +85,20 @@ describe("@ workspaces", () => {
     expect(options()[0]).toContain("notes");
   });
 
-  it("picks with the keyboard into a chip and sends the workspace in front of the message", async () => {
+  it("inserts the workspace inline and keeps its leading selection tag", async () => {
     const onSend = vi.fn(async (_m: Outgoing) => true);
     render({ self: "persona-new", files: () => [], workspaces: true }, onSend);
-    await type("@wea");
+    await type("Add dark mode to @wea please", "Add dark mode to @wea".length);
     key("Enter");
     expect(options()).toHaveLength(0); // the menu closed
-    expect(box().value).toBe("");
-    expect(host.textContent).toContain("工作区");
-    await type("Add a dark mode");
+    expect(composerFieldText(host)).toBe("Add dark mode to weather please");
+    expect(box().querySelector("[data-inline-mention]")?.getAttribute("title")).toBe("/home/me/code/weather · main");
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
-    expect(onSend).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     const text = onSend.mock.calls[0][0].text;
     expect(text).toMatch(/^<persona-context kind="workspace" title="weather" url="" machine="laptop" cwd="\/home\/me\/code\/weather" branch="main">\n/);
     expect(text).toContain("工作区：weather");
-    expect(text.endsWith("</persona-context>\n\nAdd a dark mode")).toBe(true);
+    expect(parseUserText(text).text).toBe("Add dark mode to weather please");
   });
 
   it("is not offered where the source doesn't ask for it (an agent's composer)", async () => {

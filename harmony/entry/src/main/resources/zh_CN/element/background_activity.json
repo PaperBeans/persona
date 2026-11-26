@@ -1,0 +1,80 @@
+{
+  "string": [
+    {
+      "name": "background_activity",
+      "value": "后台活动"
+    },
+    {
+      "name": "activity_empty",
+      "value": "没有后台活动"
+    },
+    {
+      "name": "activity_empty_detail",
+      "value": "已完成的静默轮次会保留在这里，供你查看。"
+    },
+    {
+      "name": "activity_record",
+      "value": "已在后台处理"
+    },
+    {
+      "name": "activity_answered",
+      "value": "已回答"
+    },
+    {
+      "name": "activity_task",
+      "value": "任务"
+    },
+    {
+      "name": "activity_expand",
+      "value": "展开详情"
+    },
+    {
+      "name": "activity_handoff_active",
+      "value": "已在运行"
+    },
+    {
+      "name": "activity_handoff_resumed",
+      "value": "已接着做"
+    },
+    {
+      "name": "activity_handoff_continuation",
+      "value": "续接"
+    },
+    {
+      "name": "activity_handoff_new",
+      "value": "新任务"
+    },
+    {
+      "name": "activity_me",
+      "value": "我"
+    },
+    {
+      "name": "activity_input",
+      "value": "督办输入"
+    },
+    {
+      "name": "activity_no_motion",
+      "value": "还没有动静"
+    },
+    {
+      "name": "activity_starting_agent",
+      "value": "正在开 Agent"
+    },
+    {
+      "name": "activity_task_gone",
+      "value": "这个任务已经不存在"
+    },
+    {
+      "name": "activity_closed",
+      "value": "Agent 还没起来就关了"
+    },
+    {
+      "name": "activity_starting",
+      "value": "正在开"
+    },
+    {
+      "name": "activity_start_failed",
+      "value": "Agent 未能启动"
+    }
+  ]
+}

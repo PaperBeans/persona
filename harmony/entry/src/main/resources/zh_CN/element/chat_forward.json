@@ -1,0 +1,156 @@
+{
+  "string": [
+    {
+      "name": "chat_forward_action",
+      "value": "转发"
+    },
+    {
+      "name": "chat_forward_to",
+      "value": "转发到"
+    },
+    {
+      "name": "chat_forward_count",
+      "value": "已选 {1} 条"
+    },
+    {
+      "name": "chat_forward_questions",
+      "value": "包含提问"
+    },
+    {
+      "name": "chat_forward_export",
+      "value": "导出图片"
+    },
+    {
+      "name": "chat_forward_share",
+      "value": "分享为图片…"
+    },
+    {
+      "name": "chat_forward_select",
+      "value": "多选…"
+    },
+    {
+      "name": "chat_forward_recent",
+      "value": "最近"
+    },
+    {
+      "name": "chat_forward_new",
+      "value": "新建 Agent…"
+    },
+    {
+      "name": "chat_forward_new_detail",
+      "value": "选电脑、文件夹和模型"
+    },
+    {
+      "name": "chat_forward_search",
+      "value": "搜索对话、电脑或项目"
+    },
+    {
+      "name": "chat_forward_no_matches",
+      "value": "没有匹配的对话"
+    },
+    {
+      "name": "chat_forward_from",
+      "value": "转发自 {1}"
+    },
+    {
+      "name": "chat_forward_many",
+      "value": "转发的 {1} 条消息"
+    },
+    {
+      "name": "chat_forward_me",
+      "value": "我"
+    },
+    {
+      "name": "chat_forward_single_note",
+      "value": "请看上面转发的消息。"
+    },
+    {
+      "name": "chat_forward_several_note",
+      "value": "请看上面转发的几条消息。"
+    },
+    {
+      "name": "chat_forward_cut",
+      "value": "（原文更长，到这里截断了。）"
+    },
+    {
+      "name": "chat_forward_computer_file",
+      "value": "（在 {1} 上的文件：{2}）"
+    },
+    {
+      "name": "chat_forward_file",
+      "value": "（文件：{1}）"
+    },
+    {
+      "name": "chat_forward_limit",
+      "value": "最多选择 30 条消息。"
+    },
+    {
+      "name": "chat_forward_byline",
+      "value": "："
+    },
+    {
+      "name": "chat_forward_source_conversation",
+      "value": "对话"
+    },
+    {
+      "name": "chat_forward_source_patrol",
+      "value": "巡检"
+    },
+    {
+      "name": "chat_forward_source_followup",
+      "value": "定时跟进"
+    },
+    {
+      "name": "chat_forward_source_scheduled_task",
+      "value": "由已安排任务发送"
+    },
+    {
+      "name": "chat_forward_source_supervision",
+      "value": "督办巡检"
+    },
+    {
+      "name": "chat_forward_source_meeting",
+      "value": "会议"
+    },
+    {
+      "name": "chat_forward_source_system",
+      "value": "系统"
+    },
+    {
+      "name": "chat_forward_route_from_persona",
+      "value": "从 {1} 转发 · 发给 Persona"
+    },
+    {
+      "name": "chat_forward_route_persona",
+      "value": "发给 Persona"
+    },
+    {
+      "name": "chat_forward_route_agent",
+      "value": "发给 {1}"
+    },
+    {
+      "name": "chat_forward_route_cross",
+      "value": "从 {1} 转发 · 发到 {3} 上的 {2}"
+    },
+    {
+      "name": "chat_forward_route_on",
+      "value": "发到 {2} 上的 {1}"
+    },
+    {
+      "name": "chat_forward_remove",
+      "value": "取消转发"
+    },
+    {
+      "name": "chat_context_only_note",
+      "value": "参考上面的内容。"
+    },
+    {
+      "name": "chat_context_image_note",
+      "value": "请看图片"
+    },
+    {
+      "name": "chat_context_files_note",
+      "value": "请看附件"
+    }
+  ]
+}

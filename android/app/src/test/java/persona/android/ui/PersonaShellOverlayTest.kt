@@ -648,6 +648,54 @@ class PersonaShellOverlayTest {
     }
 
     @Config(qualifiers = "en-w1000dp-h800dp-mdpi")
+    @Test fun mergedMainChatKeepsConversationOpenedAgentAcrossSidebarAgentSwitchAndBack() {
+        var openFromConversation: (() -> Unit)? = null
+        shell(
+            sidebarLayout = SidebarLayout.Merged,
+            assistantReply = "Main conversation reply.",
+            onConversationReady = { openFromConversation = it },
+        ) { scenario ->
+            awaitText("Main conversation reply.")
+            assertFalse(hasDisplayedContentDescription("Back"))
+
+            // Open an Agent from inside the main conversation (same path as WaitingElsewhere / card openWithCard).
+            rule.runOnIdle { requireNotNull(openFromConversation).invoke() }
+            frames()
+            awaitText("The trip outline is ready.")
+            assertTrue("an Agent opened from the conversation must show Back", hasDisplayedContentDescription("Back"))
+
+            // Pick another Agent in the merged sidebar beside the page.
+            if (!isTextDisplayed(otherAgent.displayTitle)) {
+                rule.onNodeWithTag("merged-sidebar-list").performTouchInput { swipeUp() }
+                frames()
+            }
+            awaitText(otherAgent.displayTitle)
+            clickText(otherAgent.displayTitle)
+            awaitText("The packing list is ready.")
+            assertFalse("a sidebar Agent root must not show Back", hasDisplayedContentDescription("Back"))
+
+            // Pick Main conversation in the sidebar again: the conversation's pushed Agent returns in front with Back.
+            clickText("Main conversation")
+            awaitText("The trip outline is ready.")
+            assertTrue("returning to Main conversation must restore the pushed Agent with Back", hasDisplayedContentDescription("Back"))
+
+            // Back returns from the pushed Agent to the main conversation.
+            back(scenario)
+            awaitText("Main conversation reply.")
+            assertFalse(hasDisplayedContentDescription("Back"))
+
+            // Re-picking Main conversation while the pushed Agent is already in front pops to the bare conversation.
+            rule.runOnIdle { requireNotNull(openFromConversation).invoke() }
+            frames()
+            awaitText("The trip outline is ready.")
+            assertTrue(hasDisplayedContentDescription("Back"))
+            clickText("Main conversation")
+            awaitText("Main conversation reply.")
+            assertFalse(hasDisplayedContentDescription("Back"))
+        }
+    }
+
+    @Config(qualifiers = "en-w1000dp-h800dp-mdpi")
     @Test fun separateIsDefaultAndAppearanceSwitchKeepsTheOpenChatAndSettings() {
         shell(sidebarLayout = SidebarLayout.Separate) { scenario ->
             awaitText("The trip outline is ready.")
@@ -729,6 +777,7 @@ class PersonaShellOverlayTest {
         sidebarLayout: SidebarLayout? = null,
         openNavigation: MutableState<((Router) -> ResolvedRoute?)?>? = null,
         files: SessionFiles? = null, assistantReply: String? = null,
+        onConversationReady: ((() -> Unit) -> Unit)? = null,
         content: (@Composable (ShellSession) -> Unit)? = null,
         check: (ActivityScenario<ComponentActivity>) -> Unit) {
         AssistantManagerChoice.choose("hub", null, "assistant")
@@ -848,6 +897,7 @@ class PersonaShellOverlayTest {
                 override fun notice(message: String) = false
             }
             override val terminalPanes: TerminalPanes? = null
+            override val audioFocus = persona.core.moduleapi.AudioBroker.withoutSystem()
             override fun groupTerminal(key: SessionKey): TerminalTransport? = null
             override fun exitDemo() = Unit
         }
@@ -864,6 +914,10 @@ class PersonaShellOverlayTest {
                         val assistantHost = remember {
                             AssistantHostBindings(hubScope.path, management, drafts, scope, false, repositories.machines.value,
                                 assistant, mainSender, chatContent = { key, _ ->
+                                    val elsewhere = persona.feature.chat.LocalWaitingElsewhere.current
+                                    if (key == main.key && elsewhere != null && onConversationReady != null) {
+                                        SideEffect { onConversationReady { elsewhere.open(agent.key, "req-1") } }
+                                    }
                                     persona.feature.chat.ChatDestination(ChatRoute(key.machineId, key.sessionId, ConversationKind.Assistant),
                                         unused<Navigator>(), embedded = true,
                                         showTopBar = false, renderStyle = persona.feature.chat.ChatRenderStyle.Assistant,

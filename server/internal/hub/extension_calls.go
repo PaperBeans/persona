@@ -49,9 +49,12 @@ func (h *Hub) trackRelayed(r *http.Request) (_ *http.Request, done func()) {
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if p.PairHash != "" {
+	switch {
+	case p.PairHash != "":
 		ctx, cancel = h.pairContext(r.Context(), p)
-	} else {
+	case !p.ExpiresAt.IsZero():
+		ctx, cancel = expiringContext(r.Context(), p.ExpiresAt)
+	default:
 		ctx, cancel = context.WithCancel(r.Context())
 	}
 	r = r.WithContext(ctx)

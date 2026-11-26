@@ -12,7 +12,13 @@ MOCK_TODO_VIEW=1      features todo_view and todo_places. GET /api/v1/todos: eve
                       starts again on the MacBook). PATCH, DELETE and …/seen stay mock_hub.py's; once a PATCH is taken,
                       the hub's rules for a tick on a failed start (closed now) and a reopen (out of Someday, no longer
                       failed) are applied. The Widget run's plan is a card (GET /api/v1/interactions); answering it
-                      sets the run working. The views follow every write.
+                      sets the run working. The views follow every write. With the hello's todo_asks (unless
+                      MOCK_TODO_VIEW_ASKS=0), POST /api/v1/todos/{id}/asks/{ask}/answer answers the asks the views list
+                      as the hub does: T01's decision (an option, a fixed answer, later, decline and its undo with the
+                      receipt; 400 for no answer at all) and T03's retry; 409 ask_stale with the row once an ask no longer waits,
+                      answer_in_session for a run's ask (answered through its card), 404 ask_not_found for an id of no
+                      known form. Each ask says its risk and lock-screen rule (T01's decision and T03's retry safe, the
+                      Widget's plan open, with its card's id).
 MOCK_TODO_VIEW=old    a hub from before the view: the same to-dos with neither `view` nor `counts` (nor
                       `someday_until` or `restored_at`), 405 for the item and places routes (PATCH and DELETE
                       /api/v1/todos/{id} match their path, as docs/protocol/protocol.md says), 404 for someday and
@@ -29,9 +35,9 @@ Send receipts         (docs/protocol/protocol.md "Message feedback (#5258)") und
                       message_send_state: 1, and under 1 and late also todo_send_state: 1, as the hub writes them. A
                       session's message with a client_msg_id says message_send_state processing to the session's
                       subscribers before it is relayed, then delivered, kept, failed or unknown as it is answered; a
-                      message on a to-do's conversation route (served with MOCK_TASKS=1) with X-Persona-Op-Id says
-                      todo_send_state the same way to the full devices that declared it (client_hello or ?features=;
-                      not under old). Only the request that claimed the id says anything: the same op id waits up to 10 s for
+                      message on a to-do's conversation route (served with MOCK_TASKS=1), and an answer on the asks
+                      route, with X-Persona-Op-Id says todo_send_state the same way to the full devices that declared it
+                      (client_hello or ?features=; not under old). Only the request that claimed the id says anything: the same op id waits up to 10 s for
                       the first answer and gets it back (202 {"state": "pending"} after that), the same client_msg_id
                       waits for the first answer, and an op id that is not a UUID is 400. MOCK_SEND_DELAY_MS holds
                       the to-do's message as long as a session's.
@@ -40,6 +46,8 @@ GET /mock/churn?todos=1[&n=20&ms=3000]  n times, ms apart, the newsletter's work
 GET /mock/todo-view   the mode, whether the hello names the view now, the late phase and the managers.
 GET /mock/todo-view?seen_hours=25  until /mock/reset, a finished to-do's seen mark counts as that many hours old, so a
                       row seen now reads as seen a day ago: To do with finished_seen (the list's Mark Done).
+GET /mock/todo-view?done_hours=t08:50  until /mock/reset, the closed to-do t08 closed that many hours before now (and
+                      `todos` is pushed), so a search finds it under an earlier day whatever the hour.
 
 Time: the moment the mock starts plays the prototype's now (Wednesday 18 November 2026, 10:14), and every time is
 placed from it as the prototype places it, so a row the prototype shows as 16 minutes old is 16 minutes old when the
@@ -95,10 +103,12 @@ PLAN_CARD = "ix_todo_widget_plan"
 
 HELP = ["MOCK_TODO_VIEW=1|old|late  the To-dos view from the design prototype's to-dos (#10465, "
         "scripts/mock/todo_view_mock.py): rows with view, counts and an ETag, the item and places routes, Someday and "
-        "restore, today's answers to its asks, and the send receipts (message_send_state, and except under old "
-        "todo_send_state under X-Persona-Op-Id, with the hello's markers); old: a hub from before it (405); late: the "
-        "hello names it only after a reconnect (MOCK_TODO_VIEW_LATE_SECONDS apart, default 5; /mock/reset starts it "
-        "again)",
+        "restore, today's answers to its asks and the asks route (feature todo_asks), and the send receipts "
+        "(message_send_state, and except under old todo_send_state under X-Persona-Op-Id, with the hello's markers); "
+        "old: a hub from before it (405); late: the hello names it only after a reconnect (MOCK_TODO_VIEW_LATE_SECONDS "
+        "apart, default 5; /mock/reset starts it again)",
+        "MOCK_TODO_VIEW_ASKS=0  with MOCK_TODO_VIEW=1: the hello leaves out todo_asks and the asks route is not there "
+        "(404), a hub whose managers answer only through today's accept and retry routes",
         "MOCK_TODO_MANAGERS=2  with MOCK_TODO_VIEW: the Weather App's to-dos are a second manager's (stamped rows, "
         "counts added up, places merged)"]
 
@@ -223,13 +233,13 @@ def prototype(c, origin):
     widget_since = c.at(0, 10, 12)
     widget_ask = {"id": "run:macbook/%s@%s" % (sid(1), widget_since), "kind": "plan", "home": "run",
                   "run": {"machine_id": "macbook", "session_id": sid(1), "title": "Widget"},
-                  "text": "Plan awaiting approval"}
+                  "text": "Plan awaiting approval", "risk": "open", "lockscreen": "open_only", "interaction": PLAN_CARD}
     views = {
         "t01": {"phase": "needs_you", "section": "needs_you", "reason": "owner_decides",
                 "line": line("decision", text="Which ryokan?", recommend="Ryokan Hanami"), "since": asked,
                 "asks": [{"id": "todo:decision@" + asked, "kind": "decision", "home": "todo", "round": asked,
                           "text": "Which ryokan?", "recommend": "Ryokan Hanami", "options": options,
-                          "default_at": deadline}]},
+                          "default_at": deadline, "risk": "safe", "lockscreen": "answer"}]},
         "t13": {"phase": "needs_you", "section": "can_wait", "reason": "awaits_reply", "can_wait": True,
                 "line": line("awaits_reply", run="Persona", text="Do you want roadside cover? It adds ¥4,800 a year."),
                 "since": c.at(0, 9, 14)},
@@ -332,7 +342,8 @@ def failed_start(t, done, now):
         v = {"phase": "needs_you", "section": "needs_you", "reason": "failed_start",
              "line": line("failed_start", error=t["start_error"]), "since": stamp(done), "next_change_at": stamp(end)}
         if t.get("origin"):
-            v["asks"] = [{"id": "todo:retry@" + t["done_at"], "kind": "retry", "home": "todo"}]
+            v["asks"] = [{"id": "todo:retry@" + t["done_at"], "kind": "retry", "home": "todo", "risk": "safe",
+                          "lockscreen": "answer"}]
         return v
     last = max(x for x in (done, parse(t.get("updated_at")), parse(t.get("restored_at"))) if x)
     v = {"phase": "todo", "section": "todo", "reason": "rest"}
@@ -813,6 +824,14 @@ def accept(h, tid):
         return h.send_json({"error": "This was already handled"}, 409)
     if option and option not in [o["label"] for o in ask.get("options", [])]:
         return h.send_json({"error": "no such option: %s" % option}, 400)
+    decide(t, ask, option, response)
+    return h.send_json({"ok": True})
+
+
+def decide(t, ask, option, response):
+    """T01's decision answered: an option or the plain press takes it (Persona books the choice and Pick a ryokan is
+    done); explain_first keeps the round waiting with no default; the other fixed answers end it."""
+    tid = t["id"]
     now = stamp(datetime.now(timezone.utc))
     if response:
         said = {"response": response, "ended": response != "explain_first"}
@@ -826,7 +845,6 @@ def accept(h, tid):
     if said["ended"] and sup.get("state") == "needs_user":
         sup["state"] = ""  # the round is over: no review waits on the owner (ownerCannotAnswer, chooseOption)
     _hub["push_todos"]()
-    return h.send_json({"ok": True})
 
 
 def retry(h, tid):
@@ -838,6 +856,13 @@ def retry(h, tid):
     t = find(tid)
     if not t.get("origin") or (t.get("done_at") and not t.get("start_error")):
         return h.send_json({"error": "Only a to-do Persona handed out whose start failed can be started again"}, 409)
+    start_again(t)
+    return h.send_json({"todo": item(tid, datetime.now(timezone.utc))})
+
+
+def start_again(t):
+    """A failed start Persona handed out reopens without its error, and its Agent starts on the MacBook in a session of
+    its own, working."""
     if t.get("start_error"):
         now = stamp(datetime.now(timezone.utc))
         t.update(done_at=None, reopened_at=now, updated_at=now)
@@ -853,7 +878,106 @@ def retry(h, tid):
              "cwd": PICTURES, "agent": "claude", "start_error": "", "source": "spawned", "via": ""}]
         _hub["push_machine"]("macbook")
         _hub["push_todos"]()
-    return h.send_json({"todo": item(tid, datetime.now(timezone.utc))})
+
+
+# ---------- the asks route (#10465, feature todo_asks; docs/protocol/protocol.md, its row in the REST table) ----------
+
+ASKS = re.compile(r"/api/v1/todos/([^/]+)/asks/([^/]+)/answer")
+
+
+def asks_listed():
+    """Whether the hello names todo_asks now: with the view, unless MOCK_TODO_VIEW_ASKS=0 (a hub whose managers answer
+    only through today's routes)."""
+    return listed() and os.environ.get("MOCK_TODO_VIEW_ASKS") != "0"
+
+
+def answer_ask(h, tid, ask):
+    """POST /api/v1/todos/{id}/asks/{ask}/answer under the hub's todo_answer receipt: with X-Persona-Op-Id, Processing
+    goes out at once (todo_send_state, to the full devices that declared it), the final state with the answer, and the
+    same op id gets the first reply back (202 pending after 10 s), with nothing done again."""
+    op = (h.headers.get("X-Persona-Op-Id") or "").lower()
+    if op:
+        if not UUID.fullmatch(op):
+            return h.send_json({"error": "operation id must be a UUID"}, 400)
+        flight, claimed = join(_state["ops"], "answer:" + op)
+        if not claimed:
+            if not flight.done.wait(10):
+                return h.send_json({"state": "pending"}, 202)
+            status, reply = flight.answer
+            return h.send_json(reply, status)
+
+        def then(status, reply):
+            flight.answer = (status, reply)
+            flight.done.set()
+            to_full_wanting(receipt("todo_send_state", todo_outcome(status, reply), todo_id=tid, client_op_id=op))
+
+        to_full_wanting(receipt("todo_send_state", "processing", todo_id=tid, client_op_id=op))
+        answered(h, then)
+    return answer_now(h, tid, ask)
+
+
+def answer_now(h, tid, ask):
+    """The answer itself, by the id the row's view lists: T01's decision (an option, none for the recommendation, a
+    fixed answer, later, decline, undo with its receipt) and T03's retry (no answer: started again)."""
+    if _hub["is_read_only"](h):
+        return h.send_json({"error": "read-only role cannot answer to-dos", "delivered": "none"}, 403)
+    t = find(tid)
+    if not t:
+        return h.send_json({"error": "todo not found", "code": "todo_not_found", "delivered": "none"}, 404)
+    body = body_of(h)
+    given = [k for k in ("option", "response", "text", "outcome") if (body or {}).get(k)]
+    if body is None or len(given) > 1:
+        return h.send_json({"error": "give one answer", "delivered": "none"}, 400)
+    if ask.startswith("run:") or "/run:" in ask:
+        return h.send_json({"error": "A run's ask is answered at its card", "code": "answer_in_session", "delivered": "none"}, 409)
+    if not re.match(r"(todo:(decision|retry)@|step:)", ask):
+        return h.send_json({"error": "no such ask", "code": "ask_not_found", "delivered": "none"}, 404)
+    now = datetime.now(timezone.utc)
+    row = item(tid, now)
+    waiting = {a["id"]: a for a in ((row or {}).get("view") or {}).get("asks", [])}
+    outcome = str(body.get("outcome") or "")
+    if outcome == "undo":
+        book = _hub["DECISION_DISMISSALS"].get(tid)
+        if not book or book["undone"] or book["dismissal_id"] != str(body.get("receipt") or ""):
+            return h.send_json({"error": "That was not declined", "code": "ask_stale", "delivered": "none", "todo": row}, 409)
+        book["undone"] = True
+        _hub["push_todos"]()
+        return h.send_json({"ask": ask, "outcome": "undone", "todo": item(tid, now)})
+    if ask not in waiting:
+        return h.send_json({"error": "This was already handled", "code": "ask_stale", "delivered": "none", "todo": row}, 409)
+    kind = waiting[ask]["kind"]
+    if outcome == "later":
+        return h.send_json({"ask": ask, "outcome": "later", "todo": row})
+    if kind == "retry":
+        if given:
+            return h.send_json({"error": "A start that failed takes no answer", "delivered": "none"}, 400)
+        start_again(t)
+        return h.send_json({"ask": ask, "outcome": "answered", "todo": item(tid, datetime.now(timezone.utc))})
+    legacy = legacy_ask(t)
+    if not legacy:
+        return h.send_json({"error": "This was already handled", "code": "ask_stale", "delivered": "none", "todo": row}, 409)
+    if outcome == "decline":
+        review = _hub["current_decision_review"](t)
+        if not review:
+            return h.send_json({"error": "No review waits on you", "code": "not_declinable", "delivered": "none"}, 409)
+        receipt_id = "dsm_" + hashlib.sha256((tid + review["review_at"] + str(time.time())).encode()).hexdigest()[:8]
+        _hub["DECISION_DISMISSALS"][tid] = {"review_at": review["review_at"], "dismissal_id": receipt_id, "undone": False}
+        _hub["push_todos"]()
+        return h.send_json({"ask": ask, "outcome": "declined", "receipt": receipt_id, "todo": item(tid, now)})
+    if outcome:
+        return h.send_json({"error": "outcome must be later, decline or undo", "delivered": "none"}, 400)
+    option, response = str(body.get("option") or ""), str(body.get("response") or "")
+    if not (option or response or body.get("text")):
+        # As the hub's errAnswerNeeded: a decision has no one action, so it takes an option, a fixed answer or words.
+        return h.send_json({"error": "a decision takes an option, a fixed answer or your words", "delivered": "none"}, 400)
+    if response and response not in RESPONSES:
+        return h.send_json({"error": "no such fixed answer", "delivered": "none"}, 400)
+    if option and option not in [o["label"] for o in legacy.get("options", [])]:
+        return h.send_json({"error": "no such option: %s" % option, "delivered": "none"}, 400)
+    if body.get("text"):
+        option = legacy["recommend"]  # the owner's words: the mock takes them as the recommendation
+    decide(t, legacy, option, response)
+    return h.send_json({"ask": ask, "outcome": "answered", "todo": item(tid, datetime.now(timezone.utc))})
 
 
 # ---------- send receipts (#10465; docs/protocol/protocol.md "Message feedback (#5258)") ----------
@@ -1045,9 +1169,15 @@ def route(h, method, path):
     if method == "POST" and receipts(h, path):
         return True
     if method == "GET" and path == "/mock/todo-view":
-        hours = parse_qs(urlparse(h.path).query).get("seen_hours")
+        query = parse_qs(urlparse(h.path).query)
+        hours = query.get("seen_hours")
         if hours:
             _state["seen_hours"] = float(hours[0])
+        tid, _, back = (query.get("done_hours") or [""])[0].partition(":")
+        closed = find(tid) if tid and back else None
+        if closed and closed.get("done_at"):
+            closed["done_at"] = stamp(datetime.now(timezone.utc) - timedelta(hours=float(back)))
+            _hub["push_todos"]()
         return h.send_json({"mode": MODE, "listed": listed(), "phase": _state["phase"], "managers": managers(),
                             "churn": _state["churn"]}) or True
     query = parse_qs(urlparse(h.path).query) if path == "/mock/churn" else {}
@@ -1062,6 +1192,11 @@ def route(h, method, path):
     if method == "POST" and path == "/api/v1/interactions/%s/resolve" % PLAN_CARD:
         after(h, plan_answered((body_of(h) or {}).get("approve") is True))
         return False  # mock_hub.py resolves the card
+    m = ASKS.fullmatch(path)
+    if m and method == "POST":
+        if MODE == "old" or not asks_listed():  # a hub without todo_asks: no such route
+            return h.send_json({"error": "not found"}, 404) or True
+        return answer_ask(h, unquote(m[1]), unquote(m[2])) or True
     parts = path.split("/")  # ['', 'api', 'v1', 'todos', id, what]
     if parts[:4] != ["", "api", "v1", "todos"]:
         return False
@@ -1212,7 +1347,9 @@ def install(hub):
 
     def features():
         f = before()
-        return f + [x for x in ("todo_view", "todo_places") if x not in f] if listed() else f
+        if not listed():
+            return f
+        return f + [x for x in ("todo_view", "todo_places") + (("todo_asks",) if asks_listed() else ()) if x not in f]
 
     hub["features"] = features
     hub["send_state_hello"] = receipt_versions

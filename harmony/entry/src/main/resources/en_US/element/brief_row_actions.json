@@ -1,0 +1,68 @@
+{
+  "string": [
+    {
+      "name": "brief_row_accept",
+      "value": "Accept"
+    },
+    {
+      "name": "brief_row_got_it",
+      "value": "Got It"
+    },
+    {
+      "name": "brief_row_recommendation",
+      "value": "Take Recommendation"
+    },
+    {
+      "name": "brief_row_complete",
+      "value": "Complete Directly"
+    },
+    {
+      "name": "brief_row_handle",
+      "value": "Handled"
+    },
+    {
+      "name": "brief_row_accepted",
+      "value": "Accepted"
+    },
+    {
+      "name": "brief_row_noted",
+      "value": "Noted"
+    },
+    {
+      "name": "brief_row_recommended",
+      "value": "Recommendation taken"
+    },
+    {
+      "name": "brief_row_handled",
+      "value": "Marked as handled"
+    },
+    {
+      "name": "brief_row_already",
+      "value": "Already handled"
+    },
+    {
+      "name": "brief_row_unsupported",
+      "value": "The hub is too old for this button"
+    },
+    {
+      "name": "brief_row_unknown",
+      "value": "Result unknown. Check the operation before trying again."
+    },
+    {
+      "name": "brief_row_pending",
+      "value": "Waiting for confirmation"
+    },
+    {
+      "name": "brief_row_accept_failed",
+      "value": "Couldn’t accept. Try again."
+    },
+    {
+      "name": "brief_row_complete_failed",
+      "value": "Couldn’t complete the task. Try again."
+    },
+    {
+      "name": "brief_row_handle_failed",
+      "value": "Couldn’t mark as handled. Try again."
+    }
+  ]
+}

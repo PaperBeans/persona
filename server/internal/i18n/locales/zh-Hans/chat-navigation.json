@@ -1,0 +1,7 @@
+{
+  "invalid": "会话导航请求无效。",
+  "history_changed": "会话已变化。刷新问题列表后重试。",
+  "target_missing": "这个位置已不在会话中。",
+  "unavailable": "此会话不支持直接打开该位置。",
+  "node_outdated": "请更新这台电脑上的 Persona，以预览会话内容并直接打开较早的问题。"
+}

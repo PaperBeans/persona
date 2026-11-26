@@ -124,14 +124,32 @@ func (n *Node) herdrWorktreeDelete(ctx context.Context, id string, in workspaceD
 	if !in.Preview {
 		composerDeletions.Lock()
 		prior = composerDeletions.previews[in.Token]
-		dispatched := prior != nil && prior.dispatched
-		composerDeletions.Unlock()
 		if prior == nil || prior.node != n || prior.herdr == nil || prior.herdr.workspace.ID != id ||
 			prior.herdr.closeOnly != in.CloseOnly || time.Since(prior.created) > 24*time.Hour {
+			composerDeletions.Unlock()
 			return nil, composerError(ctx, "preview_required")
 		}
+		owned := prior.requester != "" && prior.requester == in.Requester
+		if in.RevokePreview && prior.requester != "" && !owned {
+			composerDeletions.Unlock()
+			return nil, composerError(ctx, "preview_required")
+		}
+		if in.RevokePreview && owned && !prior.dispatched {
+			prior.revoked = true
+		}
+		revoked, dispatched := prior.revoked, prior.dispatched
+		composerDeletions.Unlock()
 		if in.Reconcile {
-			return n.reconcileHerdrDeletion(ctx, prior), nil
+			if revoked && owned {
+				return proto.WorktreeDeleteResult{WorkspaceID: id, State: "preview_revoked", RevokedPreviewToken: in.Token}, nil
+			}
+			observation := n.reconcileHerdrDeletion(ctx, prior)
+			// A later confirmation may win the race. RevokePreview checks again under the dispatch lock.
+			observation.CanRevokePreview = owned && !dispatched && !revoked && observation.State == "present"
+			return observation, nil
+		}
+		if revoked {
+			return nil, composerError(ctx, "preview_stale")
 		}
 		if dispatched {
 			return nil, composerError(ctx, "delete_dispatched")
@@ -142,6 +160,9 @@ func (n *Node) herdrWorktreeDelete(ctx context.Context, id string, in workspaceD
 		return nil, err
 	}
 	if in.Preview {
+		if !in.CloseOnly {
+			current.requester = in.Requester
+		}
 		token, err := rememberWorkspaceDeletion(current)
 		if err != nil {
 			return nil, err
@@ -156,6 +177,10 @@ func (n *Node) herdrWorktreeDelete(ctx context.Context, id string, in workspaceD
 		return nil, composerError(ctx, "dirty")
 	}
 	composerDeletions.Lock()
+	if prior.revoked {
+		composerDeletions.Unlock()
+		return nil, composerError(ctx, "preview_stale")
+	}
 	if prior.dispatched {
 		composerDeletions.Unlock()
 		return nil, composerError(ctx, "delete_dispatched")

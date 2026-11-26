@@ -20,18 +20,25 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 	defer b.dedupMu.Unlock()
 	cfg := s.settings(ctx)
 	target := t.Supervision.Supervisor
-	normalize := func(g superviseSignal) superviseSignal {
+	normalize := func(g superviseSignal) (superviseSignal, bool) {
 		if g.Todo != t.ID {
-			return g
+			return g, false
 		}
 		if g.Kind == sigAsk {
-			return s.currentSupervisorSignal(g)
+			next := s.currentSupervisorSignal(g)
+			return next, next.To != g.To
 		}
 		if s.digestTo(ctx, cfg, g) == target {
+			retargeted := g.To != target
 			g.To = target
+			if g.Kind == sigReview && g.Recipient != "" && g.Recipient != target {
+				g.Recipient = target
+				retargeted = true
+			}
 			g.batchTo, g.batchUntil = "", time.Time{}
+			return g, retargeted
 		}
-		return g
+		return g, false
 	}
 	// Release reservations before routes change, while old ask entries can still be reconstructed.
 	r.mu.Lock()
@@ -82,10 +89,15 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 	}
 	s.fleet.mu.Unlock()
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.init()
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			r.mu.Unlock()
+			b.mu.Unlock()
+		}
+	}()
 	state := r.st
 	state.Queue = maps.Clone(state.Queue)
 	state.SupervisePending = maps.Clone(state.SupervisePending)
@@ -93,6 +105,8 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 		state.SupervisePending = map[string]superviseSignal{}
 	}
 	var moved []superviseSignal
+	var retargeted []superviseSignal
+	retargetedReview := false
 	for to, queue := range state.Queue {
 		next := make([]relayMsg, 0, len(queue))
 		for _, msg := range queue {
@@ -107,7 +121,10 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 			}
 			var kept []superviseSignal
 			for _, g := range signals {
-				n := normalize(g)
+				n, changed := normalize(g)
+				if changed && n.Kind == sigReview {
+					retargetedReview = true
+				}
 				if g.Todo == t.ID && n.To == target && to != target {
 					moved = mergeSignals(moved, []superviseSignal{n})
 				} else {
@@ -129,10 +146,24 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 	// destination and admits the new one; an idle new supervisor need not wait for the old one's turn.
 	pending := mergeSignals(moved, fresh)
 	for _, g := range state.SupervisePending {
-		pending = mergeSignals(pending, []superviseSignal{normalize(g)})
+		n, changed := normalize(g)
+		if changed {
+			retargeted = append(retargeted, n)
+			if n.Kind == sigReview {
+				retargetedReview = true
+			}
+		}
+		pending = mergeSignals(pending, []superviseSignal{n})
 	}
 	for _, g := range b.pending {
-		pending = mergeSignals(pending, []superviseSignal{normalize(g)})
+		n, changed := normalize(g)
+		if changed {
+			retargeted = append(retargeted, n)
+			if n.Kind == sigReview {
+				retargetedReview = true
+			}
+		}
+		pending = mergeSignals(pending, []superviseSignal{n})
 	}
 	state.SupervisePending = map[string]superviseSignal{}
 	for _, g := range pending {
@@ -155,10 +186,19 @@ func (s *Service) transferPendingAsks(ctx context.Context, t Todo) error {
 	for _, g := range moved {
 		delete(b.sent, g.id())
 	}
+	for _, g := range retargeted {
+		delete(b.sent, g.id())
+	}
 	for _, g := range fresh {
 		delete(b.sent, g.id())
 	}
 	s.scheduleDigestLocked(now)
+	locked = false
+	r.mu.Unlock()
+	b.mu.Unlock()
+	if retargetedReview {
+		s.retargetTurnSignalRecipient(ctx, t.ID, target)
+	}
 	return nil
 }
 

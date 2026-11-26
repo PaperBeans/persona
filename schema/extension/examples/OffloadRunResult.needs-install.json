@@ -1,0 +1,5 @@
+{
+  "status": "needs_install",
+  "tool": {"name": "example-cli", "title": "Example Cloud tool", "installed": false,
+    "source": "Downloaded from the Example Cloud release page and installed in ~/.local/bin on this computer."}
+}

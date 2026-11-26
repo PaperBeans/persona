@@ -2,7 +2,8 @@
 // knowledge kind (`kbKinds`) adds parts to the page of each entry of that kind (the recording module: a meeting's
 // minutes, conversation and transcript). The page (views/knowledge/KBDetail.tsx) lays itself out as a function of those
 // parts; this draws it with the module's parts once the module's code is in, and with none before (its chunk loads when
-// such an entry opens, never at start) or when no module that is on names the kind.
+// such an entry opens, never at start). A default panel may supply a Core read-only detail for a kind whose data stays
+// available with the module off (recordings); other kinds without an enabled module draw with no parts.
 import { useEffect, useState, type ComponentType } from "react";
 import { loadModule, moduleKBKindAt, moduleState, useModuleStates, type ModuleKBDetailParts, type ModuleKBDetailProps } from "./module-host";
 
@@ -39,7 +40,7 @@ export function loadKBDetailParts(kind: string): Promise<ComponentType<ModuleKBD
 }
 
 /** The page of a knowledge entry, with the parts the module that names its kind adds. */
-export function ModuleKBDetail(props: ModuleKBDetailProps) {
+export function ModuleKBDetail({ readOnly: ReadOnly, ...props }: ModuleKBDetailProps & { readOnly?: ComponentType<ModuleKBDetailProps> }) {
   const id = useKBKindModule(props.kind);
   const [Parts, setParts] = useState<ComponentType<ModuleKBDetailProps> | null>(() => (id ? drawn.get(id) ?? null : null));
   const { kind } = props;
@@ -55,7 +56,8 @@ export function ModuleKBDetail(props: ModuleKBDetailProps) {
       live = false;
     };
   }, [id, kind]);
-  if (!id || !Parts) return <>{props.children(NO_PARTS)}</>;
+  if (!id) return ReadOnly ? <ReadOnly {...props} /> : <>{props.children(NO_PARTS)}</>;
+  if (!Parts) return <>{props.children(NO_PARTS)}</>;
   return <Parts {...props} />;
 }
 

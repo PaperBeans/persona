@@ -17,7 +17,7 @@ import dagger.hilt.components.SingletonComponent
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.PersonaTheme
-import persona.core.domain.sort.canApprove
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.domain.sort.fromSide
 import persona.core.domain.answer.*
 import javax.inject.Inject
@@ -86,7 +86,7 @@ interface RequestEditorServices {
 internal fun requestApprovalBlockedReason(request: Interaction, child: Session?, fallback: String?,
     blocked: (Session) -> String?): String? =
     if (!request.foldedUnder.isNullOrBlank() && child != null && child.key == request.sessionKey) {
-        if (child.canApprove) null else blocked(child)
+        if (child.canAnswerInteraction(request)) null else blocked(child)
     } else fallback
 
 /** The card editor and its close action both follow the session that owns the request. */
@@ -112,6 +112,7 @@ fun RequestEditor(
     blockedReason: String? = null,
     /** False for a session without a terminal (a Codex thread, an agent runtime's): no "handle in terminal" note. */
     terminalHelp: Boolean = true,
+    refusal: String? = null,
     onAnswer: (AnswerAction, AnswerDraft, Boolean) -> Unit,
 ) {
     val context = LocalContext.current.applicationContext
@@ -157,5 +158,6 @@ fun RequestEditor(
                 transient = AnswerDraft()
                 onAnswer(action, submitted, read)
             }
-        }, onTerminal, onExpand, items.items, readOnly, linkVisible, blockedReason = requestBlock, showTerminalHelp = terminalHelp)
+        }, onTerminal, onExpand, items.items, readOnly, linkVisible, blockedReason = requestBlock, showTerminalHelp = terminalHelp,
+        refusal = refusal)
 }

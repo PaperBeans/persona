@@ -99,6 +99,19 @@ import Testing
         let legacy = projection([input(), narration])
         #expect(quiet(legacy.timeline) != nil)
         #expect(legacy.activity.isEmpty)
+
+        // An Antigravity silent finish wrapped in leading Created At / Completed At headers + fallback "OK" reply retires cleanly.
+        let agyFinish = call(2, "mcp_persona_supervision_finish", id: "agy-finish")
+        let agyHeaders = "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n" +
+            "Created At: 2026-11-23T16:10:40+08:00\nCompleted At: 2026-11-23T16:10:44+08:00\n"
+        let agySilent = projection([
+            input(),
+            agyFinish,
+            result(3, agyFinish, text: agyHeaders + #"{"level":"triage","summary":"Handled silently.","visibility":"silent"}"#),
+            item(4, text: "OK"),
+        ])
+        #expect(agySilent.timeline.isEmpty)
+        #expect(agySilent.activity.count == 1)
     }
 
     @Test func everyPromotionKeepsTheWholeRoundOnMain() {

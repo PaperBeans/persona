@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/apierr"
 	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -50,7 +52,7 @@ func (b *BusHub) DisableWaterExtension(w http.ResponseWriter, r *http.Request, s
 	if e := b.opts.Extensions; e != nil {
 		return e.DisableWaterExtension(w, r, storageKey)
 	}
-	intakeUnavailable(w)
+	apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("assistant-health_intake.unavailable")) // as the Health module answers
 	return false
 }
 
@@ -131,9 +133,15 @@ func (s *Service) ownerHeard(session string) {
 	}
 }
 
+// domainTrackKinds is the in-process source of extension-owned track kinds.
+type domainTrackKinds interface {
+	DomainTrackKindsJSON(context.Context) (json.RawMessage, error)
+}
+
 // SetExtensions gives the service the extensions' tools (before Run).
 func (s *Service) SetExtensions(e ExtensionTools) {
 	s.ext = e
+	s.trackKindsExt, _ = e.(domainTrackKinds)
 	s.heard, _ = e.(ownerHeard)
 	if r, ok := e.(launcherSecrets); ok {
 		s.refs = r
@@ -194,4 +202,6 @@ func (s *Service) mainMachine(ctx context.Context) string { return s.settings(ct
 func (s *Service) userTZ() string { return s.settings(context.Background()).Timezone }
 
 // toolsNow are the assistant's tools (a connector's may not shadow one).
-func (s *Service) toolsNow() []proto.Tool { return s.Tools(context.Background()) }
+func (s *Service) toolsNow() []proto.Tool {
+	return append(s.Tools(context.Background()), toolsNamed(healthToolNames)...)
+}

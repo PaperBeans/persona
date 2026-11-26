@@ -26,6 +26,8 @@ func hiddenAgentDirsKey(machine string) string { return "agent_dirs_hidden/" + m
 // assistant reads the rules for every session row it shows.
 const hiddenAgentDirsRetry = 5 * time.Second
 
+var errHiddenAgentDirsChanged = errors.New("agent directory rules changed")
+
 // hiddenDirsCache is the machine's rules as last read or written. Only this manager writes them.
 type hiddenDirsCache struct {
 	mu       sync.Mutex
@@ -167,7 +169,7 @@ func (m *Machine) hiddenAgentDirsState(rules []proto.HiddenAgentDir) proto.Hidde
 	if rules == nil {
 		rules = []proto.HiddenAgentDir{}
 	}
-	return proto.HiddenAgentDirs{Rules: rules, Home: m.nodeHome()}
+	return proto.HiddenAgentDirs{Rules: rules, Home: m.nodeHome(), SupportsExpectedRules: true}
 }
 
 func (d *Devices) getHiddenAgentDirs(w http.ResponseWriter, r *http.Request, m *Machine) {
@@ -182,13 +184,17 @@ func (d *Devices) getHiddenAgentDirs(w http.ResponseWriter, r *http.Request, m *
 // putHiddenAgentDirs replaces the machine's whole list, like PUT claude-dirs/blocked.
 func (d *Devices) putHiddenAgentDirs(w http.ResponseWriter, r *http.Request, m *Machine) {
 	var in struct {
-		Rules []proto.HiddenAgentDir `json:"rules"`
+		Rules         []proto.HiddenAgentDir  `json:"rules"`
+		ExpectedRules *[]proto.HiddenAgentDir `json:"expected_rules"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("bad body: %w", err))
 		return
 	}
 	rules, err := m.editHiddenAgentDirs(r.Context(), func(now []proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error) {
+		if in.ExpectedRules != nil && !slices.Equal(now, *in.ExpectedRules) {
+			return nil, errHiddenAgentDirsChanged
+		}
 		// An app from before blocking sends no actions: a rule it lists that exists keeps its own, so switching
 		// another rule there does not turn blocks into hides. A new rule without one hides, as it did then.
 		for i, rule := range in.Rules {
@@ -204,7 +210,9 @@ func (d *Devices) putHiddenAgentDirs(w http.ResponseWriter, r *http.Request, m *
 	})
 	if err != nil {
 		code := http.StatusInternalServerError
-		if errors.Is(err, errBadPattern) {
+		if errors.Is(err, errHiddenAgentDirsChanged) {
+			code = http.StatusConflict
+		} else if errors.Is(err, errBadPattern) {
 			code = http.StatusBadRequest
 		}
 		writeErr(w, code, err)

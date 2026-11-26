@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { api } from "./api";
 import { isEnabled, isSignedIn, listConnectors, otherConnectors, signsInHere, storesData, type HubConnector } from "./connectors";
-import { loadMailAccounts } from "./mail";
+import { loadMailAccounts, useMailboxEnabled } from "./mail";
 import { ownedSub } from "./manager-choice";
 import { larkOn, useStore } from "./store";
 
@@ -17,7 +17,8 @@ export interface SourceOffer {
 }
 
 export interface SourcesInput {
-  mail: number;
+  /** Mail accounts, or undefined when live mail is unavailable. */
+  mail?: number;
   /** Feishu: undefined on a hub without it (feature lark), else whether it is set up. */
   lark?: boolean;
   connectors: HubConnector[];
@@ -36,8 +37,8 @@ function feeds(c: HubConnector): boolean {
  *  connectors that sign in here (a QR code, a device code) and bring items in. */
 export function inboxSources(input: SourcesInput): { connected: boolean; offers: SourceOffer[] } {
   const others = otherConnectors(input.connectors, input.lark !== undefined);
-  const connected = input.mail > 0 || input.lark === true || others.some(feeds);
-  const offers: SourceOffer[] = [{ id: "mail", name: t("lib-inbox-sources.mail"), href: connectorsHref() }];
+  const connected = (input.mail ?? 0) > 0 || input.lark === true || others.some(feeds);
+  const offers: SourceOffer[] = input.mail === undefined ? [] : [{ id: "mail", name: t("lib-inbox-sources.mail"), href: connectorsHref() }];
   if (input.lark === false) offers.push({ id: "lark", name: t("lib-inbox-sources.lark"), href: connectorsHref() });
   const signIns = others.filter((c) => signsInHere(c) && storesData(c) && !isSignedIn(c)).slice(0, MAX_CONNECTOR_OFFERS);
   for (const c of signIns) offers.push({ id: c.id, name: c.name, href: connectorsHref(c.id, c.manager) });
@@ -48,21 +49,22 @@ export function inboxSources(input: SourcesInput): { connected: boolean; offers:
  *  keeps its plain "All caught up"). */
 export function useInboxSources(on: boolean): { connected: boolean; offers: SourceOffer[] } | null {
   const lark = useStore(larkOn);
+  const mailOn = useMailboxEnabled();
   const hasConnectors = useStore((s) => s.features.includes("connectors"));
   const [sources, setSources] = useState<{ connected: boolean; offers: SourceOffer[] } | null>(null);
   useEffect(() => {
     if (!on) return;
     let live = true;
     Promise.all([
-      loadMailAccounts(),
+      mailOn ? loadMailAccounts() : Promise.resolve(undefined),
       lark ? api<{ configured?: boolean }>("/lark/status").then((s) => !!s.configured) : Promise.resolve(undefined),
       hasConnectors ? listConnectors() : Promise.resolve([] as HubConnector[]),
     ])
-      .then(([mail, larkSet, connectors]) => live && setSources(inboxSources({ mail: mail.length, lark: larkSet, connectors })))
+      .then(([mail, larkSet, connectors]) => live && setSources(inboxSources({ mail: mail?.length, lark: larkSet, connectors })))
       .catch(() => live && setSources(null));
     return () => {
       live = false;
     };
-  }, [on, lark, hasConnectors]);
+  }, [on, lark, mailOn, hasConnectors]);
   return on ? sources : null;
 }

@@ -70,7 +70,7 @@ func memoFixture(t *testing.T) (*Service, *downStore, *settingReadCounter) {
 	setModel(t, s, "kb", ModelBinding{Provider: "launcher.api2", Model: "large"})
 	setModel(t, s, assistantwire.ExtensionPurposePrefix+"curator", ModelBinding{Provider: "launcher.api1"})
 	counter := &settingReadCounter{downStore: st, reads: map[string]int{}}
-	s.store = func() Store { return counter }
+	s.setStore(func() Store { return counter })
 	return s, st, counter
 }
 

@@ -35,5 +35,10 @@
   "agents": "Agents on this project",
   "code_dirs": "Code folders",
   "copy_path": "Copy path",
-  "message_line": "{sender}: {text}"
+  "message_line": "{sender}: {text}",
+  "recording_minutes": "Minutes",
+  "recording_day_recap": "Day recap",
+  "recording_transcript": "Transcript",
+  "recording_photos": "Photos",
+  "recording_photo_label": "Photo {n}"
 }

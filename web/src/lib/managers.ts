@@ -21,6 +21,8 @@ export interface Manager {
   /** That is in effect (not the default, no computer): the switcher leaves it out. An older hub says neither. */
   hidden?: boolean;
   host?: string;
+  /** Host machine's stable UID, when reported by newer managers/hubs (#14963). */
+  machine_uid?: string;
   os?: string;
   arch?: string;
   /** How it runs, as it reported: "child" (the hub's own), "service", "docker", "external"… */
@@ -34,6 +36,8 @@ export interface Manager {
   installing?: string;
   /** Online on a build that reads no settings of its own (no `config.own`): it runs on built-in defaults until updated. */
   needs_update?: boolean;
+  /** On-disk personad binary was replaced while this manager was busy; it will restart automatically once idle (#14963). */
+  pending_restart?: boolean;
   /** Its open inbox items that need the user (the inbox page's badge). Absent: not known (offline, installing, an
    *  older hub), counted as none. The hub pushes `managers` when it changes. */
   inbox_needs_you?: number;
@@ -270,7 +274,13 @@ function noteCurrentAssistant() {
   if (picked && roster) notePickedName(roster.managers.find((m) => m.id === picked)?.name ?? null);
   if (!roster) return;
   const current = installedManagers(roster).find((m) => m.id === shownManager());
-  noteShownIdentity(current ? { id: current.id, name: current.name } : null);
+  noteShownIdentity(current ? {
+    id: current.id,
+    name: current.name,
+    isDefault: current.id === roster.default,
+    line: switcherLine(current),
+    tone: statusLine(current).tone,
+  } : null);
 }
 onManagerChoice(noteCurrentAssistant);
 
@@ -284,7 +294,7 @@ export function watchRoster() {
   void loadRoster();
 }
 
-function subscribeRoster(l: () => void) {
+export function subscribeRoster(l: () => void) {
   watchRoster();
   rosterListeners.add(l);
   return () => void rosterListeners.delete(l);
@@ -292,7 +302,7 @@ function subscribeRoster(l: () => void) {
 
 /** The roster, or null until (and unless) the hub has one. */
 export function useRoster(): ManagerList | null {
-  return useSyncExternalStore(subscribeRoster, () => roster, () => roster);
+  return useSyncExternalStore(subscribeRoster, currentRoster, currentRoster);
 }
 
 /** The managers that run (or ran): the ones still being installed have nothing to show yet. */
@@ -370,4 +380,66 @@ export function switcherLine(m: Manager, now = Date.now()): string {
 /** The current assistant's record: the one picked, else the default's; null without a roster. */
 export function managerOf(list: ManagerList | null, id: string): Manager | null {
   return list?.managers.find((m) => m.id === id) ?? null;
+}
+
+const normHost = (s: string | undefined): string => s?.trim().toLowerCase() ?? "";
+
+type HostMachine = { id: string; hostname?: string; host?: string; machine_uid?: string };
+
+/** The kind of binding, so a caller looking up one host can prefer a UID match over a legacy name match. */
+export function managerHostMatch(manager: Manager, machine: HostMachine): "uid" | "host" | undefined {
+  const managerUid = normHost(manager.machine_uid);
+  const machineUid = normHost(machine.machine_uid);
+  if (managerUid && machineUid) return managerUid === machineUid ? "uid" : undefined;
+  const managerHost = normHost(manager.host);
+  const machineHost = normHost(machine.hostname) || normHost(machine.host) || normHost(machine.id);
+  return managerHost && managerHost === machineHost ? "host" : undefined;
+}
+
+/** Installed managers hosted on `machine`, in display order (default first). Matches by `machine_uid` when both carry
+ *  one (never falling back to `host` when two distinct UIDs disagree), and falls back safely to case-insensitive host
+ *  matching for older managers or hubs (#14964). */
+export function hostedManagersForMachine(
+  roster: ManagerList | null,
+  machine: HostMachine,
+): Manager[] {
+  return roster ? managerOrder(roster).filter((m) => managerHostMatch(m, machine)) : [];
+}
+
+const NON_COMPARABLE_VERSION = new Set(["", "dev", "unknown"]);
+const BUILD_STAMP = /-(\d{12})$/;
+const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)/;
+
+/** Whether an online hosted manager is running an older/different version behind the computer's node version.
+ *  Comparable build timestamps (`-YYYYMMDDHHMM`) and semver triples flag lag only when the manager is older. */
+export function managerVersionLag(manager: Pick<Manager, "online" | "version">, nodeVersion: string | undefined): boolean {
+  if (!manager.online) return false;
+  const mv = manager.version?.trim() ?? "";
+  const nv = nodeVersion?.trim() ?? "";
+  if (NON_COMPARABLE_VERSION.has(mv.toLowerCase()) || NON_COMPARABLE_VERSION.has(nv.toLowerCase())) return false;
+  if (mv === nv) return false;
+  const ms = BUILD_STAMP.exec(mv);
+  const ns = BUILD_STAMP.exec(nv);
+  if (ms && ns) return ms[1]! < ns[1]!;
+  const mvSem = SEMVER.exec(mv);
+  const nvSem = SEMVER.exec(nv);
+  if (mvSem && nvSem) {
+    for (let i = 1; i <= 3; i++) {
+      const diff = Number(mvSem[i]) - Number(nvSem[i]);
+      if (diff !== 0) return diff < 0;
+    }
+  }
+  return true;
+}
+
+export type HostedManagerAttention = "pending_restart" | "version_lag" | null;
+
+/** Attention state for a co-located manager: explicit `pending_restart` takes priority over version lag. */
+export function hostedManagerAttention(
+  manager: Pick<Manager, "online" | "version" | "pending_restart">,
+  nodeVersion: string | undefined,
+): HostedManagerAttention {
+  if (manager.pending_restart) return "pending_restart";
+  if (managerVersionLag(manager, nodeVersion)) return "version_lag";
+  return null;
 }

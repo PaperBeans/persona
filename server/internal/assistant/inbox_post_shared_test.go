@@ -141,7 +141,7 @@ func TestInboxPostSharedDatabaseCannotCommitAfterDeletion(t *testing.T) {
 			st := &heldPostInboxStore{DB: database, entered: make(chan struct{}), release: make(chan struct{})}
 			resume := sync.OnceFunc(func() { close(st.release) })
 			defer resume()
-			blue.store = func() Store { return st }
+			blue.setStore(func() Store { return st })
 			done := make(chan error, 1)
 			go func() {
 				_, err := blue.postToInbox(ctx, machine, id, inboxPostArgs{Title: private, Summary: private, Reason: "late callback"}, time.Now())
@@ -222,7 +222,7 @@ func TestInboxPostSharedDatabaseDoesNotExposePendingPost(t *testing.T) {
 			resumeSave := sync.OnceFunc(func() { close(st.finish) })
 			defer resumeRead()
 			defer resumeSave()
-			blue.store = func() Store { return st }
+			blue.setStore(func() Store { return st })
 			posted := make(chan error, 1)
 			go func() {
 				_, err := blue.postToInbox(ctx, "server", "work-0000-0000", inboxPostArgs{Title: private, Summary: private, Reason: "late callback"}, time.Now())
@@ -310,7 +310,7 @@ func TestInboxPostDetachedCommitPreservesConcurrentReadAndNotes(t *testing.T) {
 			resumeSave := sync.OnceFunc(func() { close(st.finish) })
 			defer resumeRead()
 			defer resumeSave()
-			blue.store = func() Store { return st }
+			blue.setStore(func() Store { return st })
 			posted := make(chan error, 1)
 			go func() {
 				_, err := blue.postToInbox(ctx, "server", "work-0000-0000", inboxPostArgs{Title: "New post", Summary: "next-result-body", Reason: "owner asked"}, time.Now())

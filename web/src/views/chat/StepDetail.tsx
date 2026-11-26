@@ -3,6 +3,7 @@
 // assistant's ask_user also what the user picked, ticked (its card is gone once answered, so the conversation keeps
 // what was asked and what came back here).
 import { askUserAnswers, baseToolName, optionDisplay, pickedOption, toolQuestions, typedAnswer, type ToolQuestion } from "../../lib/tool-detail";
+import { canonicalMcpToolName, stripToolResultTimestampHeaders } from "../../lib/turns";
 import type { Item } from "../../lib/types";
 import { cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -12,9 +13,11 @@ import { RecommendedTag } from "../../ui/RecommendedTag";
 
 const STRUCTURED = new Set(["ExitPlanMode", "AskUserQuestion", "ask_user"]);
 
+const stepToolName = (name?: string): string => baseToolName(canonicalMcpToolName(name) ?? "");
+
 /** The step draws its own detail (StepDetail) instead of its input as text: a plan, or questions, to show. */
 export function hasStepDetail(use: Item): boolean {
-  const name = baseToolName(use.tool_name ?? "");
+  const name = stepToolName(use.tool_name);
   if (!STRUCTURED.has(name)) return false;
   const input = (use.tool_input ?? {}) as Record<string, unknown>;
   return name === "ExitPlanMode" ? typeof input.plan === "string" && input.plan.trim() !== "" : toolQuestions(input).length > 0;
@@ -22,11 +25,11 @@ export function hasStepDetail(use: Item): boolean {
 
 /** ask_user's result is what the detail ticks: it is not shown again under it, unless it failed. */
 export function showsResult(name: string, result: Item | undefined): boolean {
-  return baseToolName(name) !== "ask_user" || Boolean(result?.is_error);
+  return stepToolName(name) !== "ask_user" || Boolean(result?.is_error);
 }
 
 export function StepDetail({ use, result }: { use: Item; result?: Item }) {
-  const name = baseToolName(use.tool_name ?? "");
+  const name = stepToolName(use.tool_name);
   const input = (use.tool_input ?? {}) as Record<string, unknown>;
   if (name === "ExitPlanMode") {
     const plan = typeof input.plan === "string" ? input.plan : "";
@@ -38,7 +41,7 @@ export function StepDetail({ use, result }: { use: Item; result?: Item }) {
   }
   const questions = toolQuestions(input);
   const ask = name === "ask_user";
-  const answers = ask && result?.text ? askUserAnswers(result.text, questions) : {};
+  const answers = ask && result?.text ? askUserAnswers(stripToolResultTimestampHeaders(result.text), questions) : {};
   if (!questions.length) return null;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-step-detail={ask ? "ask-user" : "questions"}>

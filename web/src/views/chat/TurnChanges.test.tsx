@@ -21,6 +21,7 @@ vi.mock("../../lib/store", async (importOriginal) => {
 });
 
 import { closePanel, getPanel } from "../../lib/panel";
+import { loadPages } from "../../lib/lazy-page";
 import { emptyTaskIndex } from "../../lib/tasks";
 import { segments, type Step } from "../../lib/turns";
 import type { Item } from "../../lib/types";
@@ -168,15 +169,18 @@ afterEach(() => {
 });
 
 const ctx = (lineStyle: ChatContextValue["lineStyle"]): ChatContextValue => ({ tasks: emptyTaskIndex(), subagents: [], scope: "t:", lineStyle });
-function draw(items: Item[], o: { lineStyle?: ChatContextValue["lineStyle"]; live?: boolean; trace?: boolean } = {}) {
+async function draw(items: Item[], o: { lineStyle?: ChatContextValue["lineStyle"]; live?: boolean; trace?: boolean } = {}) {
   const seg = segments(items)[0];
-  act(() =>
+  await act(async () => {
     root.render(
       <ChatContext.Provider value={ctx("lineStyle" in o ? o.lineStyle : "agents")}>
         <SegmentView seg={seg} live={o.live ?? false} trace={o.trace} mid="m" sid="s" expandFold={async () => {}} />
       </ChatContext.Provider>,
-    ),
-  );
+    );
+  });
+  await act(async () => {
+    await loadPages();
+  });
 }
 const card = () => host.querySelector<HTMLElement>("[data-turn-changes]");
 const rows = () => [...host.querySelectorAll<HTMLElement>("[data-changed-file]")].map((r) => r.dataset.changedFile);
@@ -184,8 +188,8 @@ const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("b
 const five = () => [ask(), ...["a", "b", "c", "d", "e"].flatMap((n) => edit(`${CWD}/src/${n}.ts`, "1", "2")), done()];
 
 describe("the card in the chat", () => {
-  it("ends a finished Agent exchange, after its last words", () => {
-    draw([ask(), ...edit(`${CWD}/a.ts`, "1\n2", "1\n3"), ...write(`${CWD}/b.ts`, 2), done()]);
+  it("ends a finished Agent exchange, after its last words", async () => {
+    await draw([ask(), ...edit(`${CWD}/a.ts`, "1\n2", "1\n3"), ...write(`${CWD}/b.ts`, 2), done()]);
     expect(card()).not.toBeNull();
     expect(card()!.textContent).toContain("已更改 2 个文件");
     expect(card()!.textContent).toContain("+3 -1");
@@ -195,35 +199,35 @@ describe("the card in the chat", () => {
     expect(card()!.previousElementSibling?.hasAttribute("data-latest-text")).toBe(true);
   });
 
-  it("never shows in a Persona conversation, nor without a known conversation type", () => {
-    draw([ask(), ...edit(`${CWD}/a.ts`, "1", "2"), done()], { lineStyle: "assistant" });
+  it("never shows in a Persona conversation, nor without a known conversation type", async () => {
+    await draw([ask(), ...edit(`${CWD}/a.ts`, "1", "2"), done()], { lineStyle: "assistant" });
     expect(card()).toBeNull();
-    draw([ask(), ...edit(`${CWD}/a.ts`, "1", "2"), done()], { lineStyle: undefined });
+    await draw([ask(), ...edit(`${CWD}/a.ts`, "1", "2"), done()], { lineStyle: undefined });
     expect(card()).toBeNull();
   });
 
-  it("shows after a reload whose page folded the work, from the fold's changes", () => {
+  it("shows after a reload whose page folded the work, from the fold's changes", async () => {
     const fold = item({ kind: "fold", fold: { items: 8, tools: 4, thoughts: 0, through_seq: seq + 4, changes: [
       { path: `${CWD}/src/a.ts`, add: 3, del: 1, exact: true }, { path: `${CWD}/src/b.ts`, add: 2, del: 0, exact: true },
     ] } });
-    draw([ask(), fold, done()]);
+    await draw([ask(), fold, done()]);
     expect(card()!.textContent).toContain("已更改 2 个文件");
     expect(card()!.textContent).toContain("+5 -1");
     expect(rows()).toEqual(["src/a.ts", "src/b.ts"]);
   });
 
-  it("never shows while the exchange runs, nor in a supervision trace", () => {
+  it("never shows while the exchange runs, nor in a supervision trace", async () => {
     const items = [ask(), ...edit(`${CWD}/a.ts`, "1", "2"), done()];
-    draw(items, { live: true });
+    await draw(items, { live: true });
     expect(card()).toBeNull();
-    draw(items, { trace: true });
+    await draw(items, { trace: true });
     expect(card()).toBeNull();
-    draw(items);
+    await draw(items);
     expect(card()).not.toBeNull();
   });
 
-  it("lists three files, then Show N more files, and Show less", () => {
-    draw(five());
+  it("lists three files, then Show N more files, and Show less", async () => {
+    await draw(five());
     expect(rows()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
     const more = button("再显示 2 个文件")!;
     expect(more.getAttribute("aria-expanded")).toBe("false");
@@ -234,54 +238,54 @@ describe("the card in the chat", () => {
     expect(rows()).toHaveLength(3);
   });
 
-  it("Review opens the branch's review (the turn's commits and what is not committed), a file opens it at that file", () => {
+  it("Review opens the branch's review (the turn's commits and what is not committed), a file opens it at that file", async () => {
     fake.features = ["git_review"];
-    draw(five());
+    await draw(five());
     act(() => button("评审")!.click());
     expect(getPanel()).toEqual({ kind: "review", mid: "m", sid: "s", cwd: CWD, scope: "branch" });
     act(() => host.querySelector<HTMLButtonElement>('[data-changed-file="src/b.ts"]')!.click());
     expect(getPanel()).toEqual({ kind: "review", mid: "m", sid: "s", cwd: CWD, scope: "branch", at: { path: `${CWD}/src/b.ts`, file: true } });
   });
 
-  it("a file outside the session's folder opens in the files panel, not the review", () => {
+  it("a file outside the session's folder opens in the files panel, not the review", async () => {
     fake.features = ["git_review"];
-    draw([ask(), ...edit("/Users/me/.config/tool.json", "1", "2"), ...edit(`${CWD}/./src//a.ts`, "1", "2"), done()]);
+    await draw([ask(), ...edit("/Users/me/.config/tool.json", "1", "2"), ...edit(`${CWD}/./src//a.ts`, "1", "2"), done()]);
     expect(rows()).toEqual(["/Users/me/.config/tool.json", "src/a.ts"]);
     act(() => host.querySelector<HTMLButtonElement>('[data-changed-file="/Users/me/.config/tool.json"]')!.click());
     expect(getPanel()).toEqual({ kind: "file", mid: "m", path: "/Users/me/.config/tool.json", cwd: CWD, sid: "s" });
   });
 
-  it("is not drawn when the page starts inside the exchange: edits before it would be missing", () => {
-    draw([...edit(`${CWD}/a.ts`, "1", "2"), done()]);
+  it("is not drawn when the page starts inside the exchange: edits before it would be missing", async () => {
+    await draw([...edit(`${CWD}/a.ts`, "1", "2"), done()]);
     expect(card()).toBeNull();
   });
 
-  it("without a review on this hub, has no Review and a file opens in the files panel", () => {
-    draw(five());
+  it("without a review on this hub, has no Review and a file opens in the files panel", async () => {
+    await draw(five());
     expect(button("评审")).toBeUndefined();
     act(() => host.querySelector<HTMLButtonElement>('[data-changed-file="src/a.ts"]')!.click());
     expect(getPanel()).toEqual({ kind: "file", mid: "m", path: `${CWD}/src/a.ts`, cwd: CWD, sid: "s" });
   });
 
-  it("is part of the exchange's guessed height off screen, folded at three rows and Show more", () => {
-    const est = (lineStyle: ChatContextValue["lineStyle"]) => {
+  it("is part of the exchange's guessed height off screen, folded at three rows and Show more", async () => {
+    const est = async (lineStyle: ChatContextValue["lineStyle"]) => {
       const seg = segments(five())[0];
-      act(() =>
+      await act(async () => {
         root.render(
           <ChatContext.Provider value={ctx(lineStyle)}>
             <SegmentView seg={seg} live={false} mid="m" sid="s" expandFold={async () => {}} offscreen={() => () => {}} />
           </ChatContext.Provider>,
-        ),
-      );
+        );
+      });
       return parseFloat(host.querySelector<HTMLElement>("[data-segment]")!.style.getPropertyValue("--seg-est"));
     };
-    expect(est("agents") - est("assistant")).toBe(12 + 8 + 2 + 64 + 1 + 16 + 3 * 36 + 32);
+    expect((await est("agents")) - (await est("assistant"))).toBe(12 + 8 + 2 + 64 + 1 + 16 + 3 * 36 + 32);
   });
 
-  it("without the session's folder, has no Review either", () => {
+  it("without the session's folder, has no Review either", async () => {
     fake.features = ["git_review"];
     fake.cwd = undefined;
-    draw([ask(), ...edit("/Users/me/code/weather/a.ts", "1", "2"), done()]);
+    await draw([ask(), ...edit("/Users/me/code/weather/a.ts", "1", "2"), done()]);
     expect(card()).not.toBeNull();
     expect(button("评审")).toBeUndefined();
   });

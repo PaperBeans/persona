@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +83,39 @@ class BaselineProfileTest(unittest.TestCase):
         methods, classes, _, _ = self.rules('HSLpersona/a/Kept;->run(Lpersona/a/Kept;)V\nLpersona/a/Kept;\n')
         self.assertEqual({'H', 'S'}, methods[('Lpersona/a/Kept;', 'run', '(Lpersona/a/Gone;)V')])
         self.assertEqual({'Lpersona/a/Kept;', 'Lpersona/a/Gone;'}, classes)
+
+    def test_cli_preserves_existing_files_when_no_rules_remain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dump, mapping, output, report = (root / name for name in ('dump.txt', 'mapping.txt', 'profile.txt', 'report.json'))
+            mapping.write_text(MAPPING)
+            command = [sys.executable, '-B', str(Path(__file__).with_name('android_baseline_profile.py')), 'rules',
+                       str(dump), '--mapping', str(mapping), '--out', str(output), '--report', str(report)]
+            for source, extra in [('', []), ('capture unavailable\n', []), (DUMP, ['--only', 'persona.missing'])]:
+                with self.subTest(source=source[:30], extra=extra):
+                    dump.write_text(source)
+                    output.write_text('existing profile\n')
+                    report.write_text('existing report\n')
+                    run = subprocess.run(command + extra, capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(run.returncode, 0, run.stdout)
+                    self.assertIn('no baseline profile rules', run.stderr)
+                    self.assertEqual(output.read_text(), 'existing profile\n')
+                    self.assertEqual(report.read_text(), 'existing report\n')
+
+    def test_cli_accepts_class_only_and_method_only_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dump, mapping, output = (root / name for name in ('dump.txt', 'mapping.txt', 'profile.txt'))
+            mapping.write_text('')
+            for rule in ('Lpersona/example/Fixture;', 'HLpersona/example/Fixture;->work()V'):
+                with self.subTest(rule=rule):
+                    dump.write_text(rule + '\n')
+                    command = [sys.executable, '-B', str(Path(__file__).with_name('android_baseline_profile.py')), 'rules',
+                               str(dump), '--mapping', str(mapping), '--out', str(output)]
+                    run = subprocess.run(command, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertEqual(json.loads(run.stdout)['rules'], 1)
+                    self.assertEqual(output.read_text().splitlines()[-1], rule)
 
 
 if __name__ == '__main__':

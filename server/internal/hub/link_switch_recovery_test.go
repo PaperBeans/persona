@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -328,10 +329,10 @@ func TestLinkSwitchAndMovesWaitForEachOther(t *testing.T) {
 
 // A switch its manager never ends holds its computer for linkSwitchFor only; a success after that is still taken.
 func TestLinkSwitchTimeRunsOut(t *testing.T) {
-	was := linkSwitchFor
-	linkSwitchFor = 300 * time.Millisecond
-	t.Cleanup(func() { linkSwitchFor = was })
-	h, _, _ := switchHub(t)
+	h, database, _ := switchHub(t)
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	h.linkSwitch.now = func() time.Time { return time.Unix(0, clock.Load()) }
 	ctx := context.Background()
 	op := newSwitchOp()
 	got, err := busBegin(h, nil, devicewire.LinkSwitchBegin{MachineID: "lsw-box", Operation: op, SSHHost: "me@box.example"})
@@ -341,11 +342,22 @@ func TestLinkSwitchTimeRunsOut(t *testing.T) {
 	if _, err := h.moveMachine(ctx, "lsw-box", "m-0e0e0e"); !errors.Is(err, errLinkSwitchInProgress) {
 		t.Fatalf("moved while it switched: %v", err)
 	}
-	eventually(t, 5*time.Second, "the switch's time to run out", func() bool {
-		busy, err := h.linkSwitchAudited(ctx, "lsw-box")
-		return err == nil && !busy && !h.linkSwitch.live("lsw-box", time.Now())
-	})
-	if h.linkSwitch.live("lsw-box", time.Now()) {
+	// A begin is timed in memory before its durable audit row is written. Exercise both holds
+	// at their actual boundary, independently of how long the database or the caller took.
+	rows, err := database.LinkSwitchHistory(ctx, "lsw-box", op)
+	if err != nil || len(rows) == 0 || rows[0].Step != switchBegin {
+		t.Fatalf("missing persisted begin: %v", err)
+	}
+	expires := max(clock.Load(), rows[0].At.UnixNano()) + int64(linkSwitchFor)
+	clock.Store(expires - 1)
+	if _, err := h.moveMachine(ctx, "lsw-box", "m-0e0e0e"); !errors.Is(err, errLinkSwitchInProgress) {
+		t.Fatalf("move before expiry: %v", err)
+	}
+	clock.Store(expires)
+	if busy, err := h.linkSwitchAudited(ctx, "lsw-box"); err != nil || busy {
+		t.Fatalf("persisted hold after expiry: busy %v, error %v", busy, err)
+	}
+	if h.linkSwitch.live("lsw-box", h.linkSwitch.clock()) {
 		t.Fatal("still under way after its time ran out")
 	}
 	if _, err := h.moveMachine(ctx, "lsw-box", "m-0e0e0e"); errors.Is(err, errLinkSwitchInProgress) {

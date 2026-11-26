@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/fleetcount/fleetcountadapt"
+	"github.com/nwverse/persona/server/internal/assistant/fleetview"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -278,11 +280,15 @@ func randomFleet(rng *rand.Rand) ([]fleetInput, []proto.Interaction, map[string]
 }
 
 // The fleet and Persona Link's summary are what they were before the agents were read by pointer and only the shown
-// items were made, byte for byte, for random fleets in each language.
+// items were made, byte for byte, for random fleets in each language. The agents are the ones fleetInputsInto hands
+// over, without quiet tasks' and directory-hidden ones (a quiet task's cards stay, as visiblePendingCards keeps them):
+// fleetcount leaves those agents off the Live Activity, whose rule the working rows follow too, where the oracle
+// counted every agent it was handed.
 func TestFleetMatchesOracle(t *testing.T) {
 	rng := rand.New(rand.NewPCG(7, 11))
 	for round := range 1500 {
 		agents, ixs, told := randomFleet(rng)
+		agents = slices.DeleteFunc(agents, func(a fleetInput) bool { return fleetcountadapt.Visibility(a.Session).LeftOut() })
 		old := make([]oracleInput, len(agents))
 		for i, a := range agents {
 			old[i] = oracleInput{Machine: a.Machine, Session: *a.Session, Muted: a.Muted, TurnStart: a.TurnStart}
@@ -300,3 +306,18 @@ func TestFleetMatchesOracle(t *testing.T) {
 		}
 	}
 }
+
+// The oracle's names for what it shares with the fleet, now that the rule a form stands for no agent is fleetcount's
+// and the text is fleetview's: the oracle keeps the words it was written in.
+func cardStands(ix proto.Interaction) bool { return ix.Kind != proto.IxElicitation }
+
+func agentTitle(sess *proto.Session, n int) string {
+	return fleetview.AgentTitle(sessionTitle(sess), n)
+}
+
+var (
+	agentPlace        = fleetview.AgentPlace
+	interactionDetail = fleetview.InteractionDetail
+	unixSeconds       = fleetview.UnixSeconds
+	fit               = fleetview.Fit
+)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestTopicOpeningUsesReadableTitle(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	const link = "https://docs.example.com/wiki/garden-notes-2026"
 	post := func(body string) botcard.MessageEvent {
 		ev := rootEvent("om_first", "")
@@ -113,6 +114,7 @@ func TestTopicOpeningUsesReadableTitle(t *testing.T) {
 }
 
 func TestTopicTitleRenamesFromTheOriginalLink(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	database := todoTestDB(t)
 	e := newThreadEnv(t, database)
 	e.f.fakeModel(t)
@@ -140,6 +142,7 @@ func TestTopicTitleRenamesFromTheOriginalLink(t *testing.T) {
 }
 
 func TestRequestFromAnotherChatKeepsItsOpeningWords(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	for _, home := range []string{askHome, ""} {
 		t.Run(home, func(t *testing.T) {
 			e := newAskEnv(t, nil)

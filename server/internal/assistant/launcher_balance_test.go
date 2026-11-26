@@ -280,7 +280,7 @@ func TestLauncherBalancesKeepsSamplesWhenTheMachineKeyStoreCannotBeRead(t *testi
 		t.Fatalf("first read: known=%v accounts=%+v", known, accounts)
 	}
 
-	s.store = func() Store { return keyFailStore{Store: st, fail: launchersMachineKeysKey} }
+	s.setStore(func() Store { return keyFailStore{Store: st, fail: launchersMachineKeysKey} })
 	if accounts, known := s.LauncherBalances(ctx); known || accounts != nil {
 		t.Fatalf("an unreadable key store must not answer: known=%v accounts=%+v", known, accounts)
 	}

@@ -332,7 +332,7 @@
       "type": "string",
       "enum": ["status", "tools", "actions", "events", "inbox", "settle", "archive", "chats", "items", "login",
                "options", "threads", "snapshot", "group", "meta", "fallback", "machines", "recall", "history",
-               "history_anchors", "catalog"]
+               "history_anchors", "catalog", "inbox_visibility"]
     },
     "ConnectorState": {
       "description": "ConnectorStatus.state. disabled is the hub's own (the user switched it off); a program never answers it.",
@@ -479,6 +479,7 @@
       "properties": {
         "text": {"type": "string"},
         "images": {"type": "array", "items": {"$ref": "#/$defs/ConnectorToolImage"}, "description": "tools.call only (actions.do and catalog.call ignore it): pictures for the model after the text, on a hub whose initialize lists the capability tool_images (an older hub ignores them; the text must stand on its own). At most 16, each a whole JPEG, PNG or WebP of at most 1 MiB and 2000 pixels a side, together at most 4 MiB and 8 million pixels; the hub leaves out any over a limit and says so after the text."},
+        "views": {"type": "array", "maxItems": 4, "items": {"$ref": "view.schema.json#/$defs/View"}, "description": "tools.call only (actions.do and catalog.call ignore it): declarative Views rendered out-of-band inline on the tool call item in chat (never added to the model's context), on a hub whose initialize lists the capability tool_views. At most 4 views and 128 KiB JSON total; the text must still stand on its own."},
         "message_ref": {"type": "string", "description": "actions.do only (tools.call ignores it): the id, on the other side, of the message the write made, when the service gave one (a comment's id, a mail's Message-ID, a chat message's id). The hub trims it and keeps it as the sent-as-user ledger row's message_ref; one longer than 200 characters is dropped (the row has none), not cut. Leave it out when there is none."}
       }
     },
@@ -1122,6 +1123,12 @@
         "note": {"type": "string"},
         "seen": {"type": "string", "format": "date-time"},
         "signals": {"type": "array", "items": {"type": "string", "enum": ["mentions", "comment_mentions", "authored", "viewed"]}, "uniqueItems": true, "description": "Why it concerns the owner, as far as the program can tell: mentions (the document mentions the owner), comment_mentions (a comment or reply on it does), authored (the owner owns it), viewed (the owner opened it recently). The knowledge base's selection keeps documents by them; leave out what the program cannot tell."},
+        "canonical_key": {"type": "string", "description": "The content's identity across sources (feishu_doc:<obj_token>): items from two sources with the same key are kept once, with both in sources."},
+        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Other ids other sources store the same content under (a wiki node token)."},
+        "revision": {"type": "integer", "description": "Only grows: an item handed over with a lower revision than the stored one does not replace it."},
+        "body_hash": {"type": "string"},
+        "content": {"type": "string", "description": "The item's text (a document as Markdown, a meeting's transcript), bounded by the source."},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/ConnectorKBSourceRef"}, "description": "Every place the content was read from."},
         "importance": {"type": "string"},
         "relevance": {"type": "integer"},
         "tags": {"type": "array", "items": {"type": "string"}},
@@ -1133,6 +1140,18 @@
         "excluded": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}, "description": "The store's: the links the user removed, by list. A connector's is ignored."}
       },
       "required": ["kind", "id", "title"]
+    },
+    "ConnectorKBSourceRef": {
+      "description": "One place a knowledge-base item was read from.",
+      "type": "object",
+      "properties": {
+        "channel": {"type": "string"},
+        "binding": {"type": "string"},
+        "account": {"type": "string"},
+        "entry": {"type": "string"},
+        "seen_at": {"type": "string", "format": "date-time"}
+      },
+      "required": ["channel"]
     },
     "ConnectorKBProvenance": {
       "description": "Who holds a locked field of a knowledge-base entity, and from what (kb.schema.json KBProvenance).",

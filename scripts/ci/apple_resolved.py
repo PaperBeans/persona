@@ -22,8 +22,10 @@ def stage(tracked, staged, meta, evidence):
     """Write only staged, preserving tracked and the original originHash."""
     if meta not in ("YES", "NO"):
         raise ValueError("Meta configuration must be YES or NO")
-    if tracked.resolve() == staged.resolve():
+    if tracked.samefile(staged):
         raise ValueError("the staged resolved file must be a disposable copy")
+    if evidence.exists() and (evidence.samefile(tracked) or evidence.samefile(staged)):
+        raise ValueError("the evidence file must be separate from both resolved files")
 
     tracked_before = tracked.read_bytes()
     staged_before = staged.read_bytes()

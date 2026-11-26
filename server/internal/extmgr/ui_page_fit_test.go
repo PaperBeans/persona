@@ -147,6 +147,35 @@ func TestPageFitMemoKeepsTheAnswer(t *testing.T) {
 	}
 }
 
+func TestPageFitMemoMatchesFitNativeUnsupported(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "schema", "extension", "examples", "View.v12-map-route.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatal(err)
+	}
+	secs := obj["sections"].([]any)
+	sec0 := secs[0].(map[string]any)
+	sec0["key"] = "s0"
+	rawWithKey, _ := json.Marshal(obj)
+
+	var memo pageFitMemo
+	slot := extension.UISlots[0]
+	keep, err := memo.fitNativeFor(rawWithKey, slot, 12, nil, i18n.En)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downgraded, err := memo.fitNativeFor(rawWithKey, slot, 12, []string{"map"}, i18n.En)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(keep, downgraded) {
+		t.Fatal("unsupported [map] reused cached non-downgraded answer")
+	}
+}
+
 func errText(err error) string {
 	if err == nil {
 		return ""

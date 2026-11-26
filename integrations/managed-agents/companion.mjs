@@ -7,7 +7,7 @@
 //   node integrations/managed-agents/companion.mjs --check      (reads the config, lists each profile's sessions once)
 
 import { parseArgs } from 'node:util'
-import { loadConfig, DEFAULT_CONFIG } from './lib/config.js'
+import { defaultConfigPath, loadConfig } from './lib/config.js'
 import { createClient } from './lib/client.js'
 import { createSecrets } from './lib/secrets.js'
 import { createManagedAgentsRuntime } from './lib/runtime.js'
@@ -16,7 +16,7 @@ const { values } = parseArgs({ options: {
   config: { type: 'string' }, socket: { type: 'string' }, listen: { type: 'string' }, host: { type: 'string' }, check: { type: 'boolean' },
 } })
 const log = (m) => process.stderr.write(`persona-managed-agents: ${m}\n`)
-const configPath = values.config ?? DEFAULT_CONFIG
+const configPath = values.config ?? defaultConfigPath()
 
 if (values.check) {
   // A read-only check of each profile: the key resolves and the server answers. Prints counts, never keys or content.

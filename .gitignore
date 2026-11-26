@@ -28,6 +28,7 @@ florak/
 /CLAUDE.local.md
 /apple/PersonaLink/.build/
 /apple/PersonaLink/Input/.build/
+/apple/PersonaLink/App/.build/
 # swift test in a local package (apple/Packages/PersonaKit, #2095): its build output, never committed.
 /apple/Packages/PersonaCore/build/
 /apple/Packages/PersonaCore/Inputs.stamp

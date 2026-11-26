@@ -3,13 +3,16 @@
 // size. It lives here, with no imports of the client code, so the config
 // can load it and a test can check it against src/i18n/index.ts: the languages it has catalogs for (LANGS) and how it
 // picks one (preferredLanguage) must stay the same as the client's.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import ts from "typescript";
 import { brotliCompress, constants, gzip as gzipCompress } from "node:zlib";
 import { startupMatcher } from "./i18n/startup-keys";
+import { MODULE_SWITCH_KEY } from "./core/module-switch";
+import { MODULE_HUB_KEY_PREFIX } from "./core/module-hub-storage";
 
 /** The languages under `dir` (src/i18n/locales): code → the language subtags its _meta.json matches. Build time only. */
 export function localeDirs(dir: string): Record<string, string[]> {
@@ -28,10 +31,25 @@ export function localeDirs(dir: string): Record<string, string[]> {
 export interface PreloadFiles {
   shared: string[];
   app: string[];
-  screen: string[];
+  /** The modules' pages of their own (core/module-host.ts `standalonePages`), by their address' first segment: the
+   *  module (left out while this browser switched it off, core/module-switch.ts) and its standalone.tsx's files. */
+  standalone: Record<string, { module: string; files: string[] }>;
   catalogs: Record<string, string>;
   /** language subtag → language code (each _meta.json's matches) */
   matches: Record<string, string>;
+}
+
+/** The modules' pages of their own (core/module-host.ts `standalonePages`), read from each src/modules/<id>/module.ts as
+ *  eslint.modules.config.mjs reads `needs`: each address segment with its module, whose code is its standalone.tsx. */
+export function standalonePages(dir = fileURLToPath(new URL("./modules/", import.meta.url))): { base: string; module: string }[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(dir, e.name, "module.ts")))
+    .flatMap((e) => {
+      const list = /\bstandalonePages:\s*\[([^\]]*)\]/.exec(readFileSync(join(dir, e.name, "module.ts"), "utf8"))?.[1];
+      if (list === undefined) return [];
+      if (!existsSync(join(dir, e.name, "standalone.tsx"))) throw new Error(`startup-preload: module "${e.name}" names standalonePages but has no standalone.tsx`);
+      return [...list.matchAll(/["']([a-z][a-z0-9-]*)["']/g)].map((m) => ({ base: m[1]!, module: e.name }));
+    });
 }
 
 /** The script: it adds a modulepreload (or style preload) link for the preferred language's catalog and the page's files. */
@@ -57,8 +75,22 @@ export function preloadScript(files: PreloadFiles): string {
   }
   var base = new URL(document.baseURI).pathname;
   var path = location.pathname.indexOf(base) === 0 ? location.pathname.slice(base.length - 1) : location.pathname;
-  var screen = /^\\/screen\\/[^/]/.test(path);
-  [files.catalogs[lang]].concat(files.shared, screen ? files.screen : files.app).forEach(add);
+  var seg = /^\\/([^/]+)\\/[^/]/.exec(path);
+  var own = seg && Object.prototype.hasOwnProperty.call(files.standalone, seg[1]) ? files.standalone[seg[1]] : null;
+  if (own) {
+    try {
+      var off = JSON.parse(localStorage.getItem(${JSON.stringify(MODULE_SWITCH_KEY)}) || "[]");
+      if (Array.isArray(off) && off.indexOf(own.module) >= 0) own = null;
+    } catch (e) {}
+  }
+  if (own) {
+    try {
+      var kept = JSON.parse(localStorage.getItem(${JSON.stringify(MODULE_HUB_KEY_PREFIX)} + location.origin + base.replace(/\\/+$/, "")) || "null");
+      var valid = Array.isArray(kept) && kept.every(function (x) { return typeof x === "string" && x.indexOf("module.") === 0; });
+      if (valid && kept.indexOf("module." + own.module) < 0) own = null;
+    } catch (e) {}
+  }
+  [files.catalogs[lang]].concat(files.shared, own ? own.files : files.app).forEach(add);
 })();`;
 }
 
@@ -546,13 +578,29 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // Interactions.tsx). 799 B in ja, measured in one environment against main 7be9a71cc (ja 484,445 B to 485,244 B; en
 // 481,786 B to 482,585 B, zh-Hans 482,421 B to 483,220 B). Main had 46 B of room, so the budget is main's 484,491 B
 // ceiling plus those 799 B. The web half of #13431 takes voice's first-screen parts off with the move into a module.
+// #13021: main ec2563b7d7 itself measures ja 484,587 B (en 481,938 B, zh-Hans 482,579 B), 96 B over the 484,491 B
+// above. The question rail's marks add 141 B in ja (en 141 B, zh-Hans 141 B): the rail now drawn on a touch screen for
+// Persona's chats, the marks' state in ChatView and the lazy import of views/chat/QuestionMarksHost.tsx (the rules and
+// read marks moved out of the first screen into that chunk, which took 808 B off the first version). ja 484,728 B;
+// 10 B of room on top. Merged with #13846, the voice module's first-screen reduction leaves room for these 141 B,
+// so the budget stays at #13846's 485,290 B ceiling.
 // #13803: mount-once long-chat windowing adds 200 B to the ja first screen, measured in one environment against main at
 // 464c1b17b3 (ja 484,433 B to 484,633 B; en 481,792 B to 481,992 B, zh-Hans 482,418 B to 482,618 B). The near-viewport
 // observer, searchable estimated placeholders and synchronous scroll compensation start with the chat; rich bodies stay
 // deferred. The budget moves by the same 200 B, keeping the 58 B of room main had. Merged with #13846, the measured
 // first screens are ja 485,259 B, en 482,600 B and zh-Hans 483,235 B; the budget keeps #13846's 46 B of room rather
 // than adding the whole separate allowance again.
-export const FIRST_SCREEN_BUDGET = 485_305;
+// #14398: the Agents list's ⋯ menu toggles "按最近更新排序" and "显示筛选" (sidebar.sort_activity, sidebar.show_list_filter;
+// the sidebar namespace is first-screen whole) add 77 B to the ja first screen, measured with origin/main 1ad9a001e6
+// merged: en 482,711 B, ja 485,382 B, zh-Hans 483,352 B. The budget moves by the same 77 B plus 10 B of room.
+// #12585: keeping read Unread/Just finished Agent rows in place until refresh adds lib/seen-rows.ts, heldSeen grouping
+// in lib/agent-groups.ts, and sidebar/store wiring (SeenRowsNotice, ClearSeenButton, SeenRowsSetting and seen-rows
+// strings stay lazy); measured on origin/main 9baa8e3a1: en 483,193 B, ja 485,750 B, zh-Hans 483,805 B. Raise budget
+// to the measured ja size plus 10 B of room.
+// #15511: an explicitly promoted main relay keeps its incoming source collapsed until opened, including its deferred
+// placeholder. This change on base 4bab19c283 measures en 483,782 B, ja 486,399 B, zh-Hans 484,384 B. Raise the budget
+// to the measured ja size plus 10 B of room.
+export const FIRST_SCREEN_BUDGET = 486_409;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;
@@ -788,7 +836,10 @@ export function firstScreenOverBudget(bytes: [string, number][], budget = FIRST_
 // And 26 B for the stalled-background hint (#13744): the idle sidebar rows (SidebarRows.tsx) draw "Background commands
 // quiet for N h" under a Working row whose background work has stalled (ui/BackgroundStallHint.tsx). Main 7b023aa70 with
 // #13842 sends 46,091 B at idle, 16 B over; 10 B of room on top.
-export const IDLE_TIER_BUDGET = 46_101;
+// And 33 B for Dashboards phase 2 watch rendering (#13020): the idle renderer (ViewBody.tsx) wraps a lone metric's
+// label and detail instead of truncating and caps a row's value at max-w-[45%]. Core-only build on main 9760656350
+// with #13020 sends 46,124 B at idle (23 B over); 10 B of room on top.
+export const IDLE_TIER_BUDGET = 46_134;
 
 const gzip = promisify(gzipCompress);
 

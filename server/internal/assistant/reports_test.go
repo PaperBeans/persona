@@ -175,12 +175,7 @@ func TestTaskReportSkipsAskAlreadyInChat(t *testing.T) {
 	agentTurn(s, f, proto.StatusBlocked, "", 1)
 	ix := proto.Interaction{ID: "ix2", MachineID: "box", SessionID: "s1", Kind: proto.IxQuestion,
 		Questions: []proto.Question{{Question: "用哪个分支？", Options: []proto.QuestionOption{{Label: "main"}}}}}
-	s.fbot.mu.Lock()
-	if s.fbot.cards == nil {
-		s.fbot.cards = map[string]botCard{}
-	}
-	s.fbot.cards[ix.ID] = botCard{}
-	s.fbot.mu.Unlock()
+	keepChatCard(s, ix.ID, &botCard{}) // claimed: the bot is posting its card
 	s.taskReport(todo, reportNeeds, "box", [2]string{"box", "s1"}, noticeAsk(ix), &ix)
 	time.Sleep(6 * testReportDelay)
 	if got := posts(); len(got) != 0 {

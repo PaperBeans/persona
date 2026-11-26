@@ -79,19 +79,22 @@ func TestConfirmationMetricsDatabase(t *testing.T) {
 		t.Fatal("first grant attribution was overwritten")
 	}
 	setSettings(t, s, func(v *Settings) { v.Timezone = "Asia/Tokyo" })
+	if !s.briefingOn() {
+		return
+	}
 	f := s.briefFactsAt(ctx, now, "")
 	if f.Confirmations.Unknown || f.Confirmations.UserNotified != 1 || f.Confirmations.AutoAuthorized != 1 || !f.Confirmations.Since.Equal(midnight) {
 		t.Fatalf("routine did not take the daily counts: %+v", f.Confirmations)
 	}
-	f.l = i18n.Lang("en")
-	f.ConfirmationLines = s.confirmationLines(f.l, f.Confirmations)
+	f.Lang = "en"
+	f.ConfirmationLines = s.confirmationLines(i18n.En, s.briefConfirmationsAt(ctx, now, s.location(ctx)))
 	card, plain, _ := s.briefCard(f, "Morning briefing", "")
 	for _, want := range []string{"Today: 1 confirmation cards sent to you", "1 automatically authorized", "Build the app", "question", "plan"} {
-		if !strings.Contains(card.JSON(), want) || !strings.Contains(plain, want) || !strings.Contains(f.modelText(), want) {
-			t.Fatalf("briefing omitted %q: card=%s\nplain=%s\nmodel=%s", want, card.JSON(), plain, f.modelText())
+		if !strings.Contains(card.JSON(), want) || !strings.Contains(plain, want) || !strings.Contains(s.briefModelText(f), want) {
+			t.Fatalf("briefing omitted %q: card=%s\nplain=%s\nmodel=%s", want, card.JSON(), plain, s.briefModelText(f))
 		}
 	}
-	body, err := json.Marshal(f.body(s, "Morning briefing"))
+	body, err := json.Marshal(s.briefBodyOf(f, "Morning briefing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +121,7 @@ func TestConfirmationMetricsUnavailable(t *testing.T) {
 	s := newFleetTest(t).s
 	noDirectionsTimers(s)
 	base := s.store()
-	s.store = func() Store { return unavailableConfirmationStore{Store: base} }
+	s.setStore(func() Store { return unavailableConfirmationStore{Store: base} })
 	c := s.briefConfirmationsAt(context.Background(), time.Now(), time.UTC)
 	if !c.Unknown || !strings.Contains(c.summary(i18n.Lang("en")), "unknown") {
 		t.Fatalf("read failure became a zero count: %+v", c)

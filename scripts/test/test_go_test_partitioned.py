@@ -16,11 +16,11 @@ import go_test_partitioned as gtp
 MODULE = ["example/server/cmd/personad", "example/server/internal/assistant", "example/server/internal/assistantwire",
           "example/server/internal/node", "example/server/internal/node/sub"]
 NODE, ASSISTANT = "./internal/node", "./internal/assistant"
-# The fixture module has no internal/hub, internal/devices, internal/extmgr or internal/modules/voice: they split the way
-# internal/assistant does.
+# The fixture module has no internal/hub, internal/devices, internal/extmgr, internal/modules/voice or internal/db:
+# they split the way internal/assistant does.
 PATTERNS = {NODE: ["^(TestA|TestC)$", "^(TestB)$"], ASSISTANT: ["^(TestX|TestZ)$", "^(TestY)$"],
             "./internal/hub": ["^(TestH)$"], "./internal/devices": ["^(TestD)$"], "./internal/extmgr": ["^(TestM)$"],
-            "./internal/modules/voice": ["^(TestV)$"]}
+            "./internal/modules/voice": ["^(TestV)$"], "./internal/db": ["^(TestDB)$"]}
 PREFIX = "example/server/"
 # MODULE with subpackages of internal/assistant, for the ./<dir>/... arguments check-fast passes (#12765).
 TREE = MODULE + [PREFIX + "internal/assistant/inbox", PREFIX + "internal/assistant/inbox/item"]
@@ -240,6 +240,34 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(gtp.describe(["go", "test", "-run", "^(TestX)$", ASSISTANT]),
                          "./internal/assistant partition (1 tests)")
         self.assertEqual(gtp.describe(["go", "test", "-count=1", "./internal/hub", "./internal/kb"]), "2 package(s)")
+
+    def test_build_flags_forwards_only_build_affecting_flags_to_discovery(self):
+        flags = [
+            "-count=1", "-p", "1", "-timeout", "290s", "-v", "-skip", "-race",
+            "-tags", "persona_core_only", "--tags=extra", "-race", "-trimpath=false",
+            "-covermode=atomic", "-gcflags=all=-N", "-ldflags", "-w",
+            "-a", "-x", "-json", "-o", "/tmp/pkg.test", "-coverprofile", "",
+        ]
+        self.assertEqual(
+            gtp.build_flags(flags),
+            ["-tags", "persona_core_only", "--tags=extra", "-race", "-trimpath=false",
+             "-covermode=atomic", "-gcflags=all=-N", "-ldflags", "-w"],
+        )
+
+    def test_main_forwards_build_flags_to_partition_listing(self):
+        argv = ["go", "test", "-count=1", "-tags", "persona_core_only", "-race", "-trimpath", ASSISTANT]
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(go_partitions, "list_patterns", return_value=["^(TestX)$", "^(TestY)$"]) as listed, \
+                mock.patch.object(gtp, "run", return_value=0) as runner:
+            os.environ.pop("GOFLAGS", None)
+            self.assertEqual(gtp.main(argv), 0)
+        listed.assert_called_once_with(
+            os.getcwd(), ASSISTANT, env=None, flags=["-tags", "persona_core_only", "-race", "-trimpath"],
+        )
+        self.assertEqual(runner.call_args.args[0], [
+            ["go", "test", "-count=1", "-tags", "persona_core_only", "-race", "-trimpath", "-run", "^(TestX)$", ASSISTANT],
+            ["go", "test", "-count=1", "-tags", "persona_core_only", "-race", "-trimpath", "-run", "^(TestY)$", ASSISTANT],
+        ])
 
 
 class SubtreePlanTests(unittest.TestCase):

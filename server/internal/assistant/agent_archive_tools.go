@@ -53,7 +53,7 @@ func (s *Service) toolAgentArchive(ctx context.Context, machine, self string, ar
 		}
 		s.logf("agent_unarchive %s on %s (from %s)", short(c.SessionID), am.ID, short(self))
 		return fmt.Sprintf("Restored %s to the Agents list. Nothing was reopened on the computer; a message to it (agent_send) resumes it.%s",
-			who, nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, c.SessionID))), nil
+			who, nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, archiveSessionOf(c)))), nil
 	case a.Force:
 		if err := s.forceArchiveConfirmation(ctx, am.ID, c.SessionID); err != nil {
 			return "", err
@@ -62,7 +62,7 @@ func (s *Service) toolAgentArchive(ctx context.Context, machine, self string, ar
 	case a.Close:
 		return s.archiveAndCloseTool(ctx, machine, self, am, c, who, args)
 	case c.Archived:
-		return fmt.Sprintf("%s was archived already. Nothing changed.%s", who, nativeArchiveWords(s.nativeArchiveView(am.ID, c.SessionID))), nil
+		return fmt.Sprintf("%s was archived already. Nothing changed.%s", who, nativeArchiveWords(s.nativeArchiveView(am.ID, archiveSessionOf(c)))), nil
 	}
 	if _, err := s.setAgentArchive(ctx, am.ID, c.SessionID, true); err != nil {
 		return "", archiveToolError(who, err)
@@ -74,7 +74,7 @@ func (s *Service) toolAgentArchive(ctx context.Context, machine, self string, ar
 	}
 	return fmt.Sprintf("Archived %s: it left the Agents list and is under Archived in the app; nothing was deleted, and agent_unarchive "+
 		"brings it back. New activity in it brings it back by itself.%s%s", who, still,
-		nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, c.SessionID))), nil
+		nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, archiveSessionOf(c)))), nil
 }
 
 // archiveAndCloseTool is agent_archive with close: refused when busy, confirmed on the phone, then archived and closed.
@@ -106,7 +106,7 @@ func (s *Service) archiveAndCloseTool(ctx context.Context, machine, self string,
 		return "", archiveToolError(who, err)
 	}
 	s.logf("agent_archive close %s on %s (from %s): %s", short(c.SessionID), am.ID, short(self), res.Outcome)
-	native := nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, c.SessionID))
+	native := nativeArchiveWords(s.nativeArchiveAwaited(ctx, am.ID, archiveSessionOf(c)))
 	switch res.Outcome {
 	case archiveCloseClosed:
 		return fmt.Sprintf("Archived %s and closed its agent on the computer (close: closed): its tab and process are gone, its transcript "+

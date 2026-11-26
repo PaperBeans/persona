@@ -1,0 +1,11 @@
+{
+  "awaiting_judgment": "latest symptom: unjudged",
+  "interrupted": "agent interrupted",
+  "last_interrupted": "latest symptom: interrupted",
+  "offline": "agent offline",
+  "rework_round": "rework round {round}",
+  "sep": ", ",
+  "stopped": "agent stopped",
+  "stopped_error": "agent stopped with error",
+  "unjudged": "completion unjudged"
+}

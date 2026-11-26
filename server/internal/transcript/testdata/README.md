@@ -6,7 +6,7 @@
 | `claude-compact.jsonl` | 真实会话的两段 | 后台任务通知、上下文压缩（compact_boundary、isCompactSummary、informational） |
 | `claude-notifications.jsonl` | 真实会话 | 同一个后台任务的三次通知（内容不同，都是真事件，不能按 task-id 去重） |
 | `claude-subagent.jsonl` | 真实 subagent transcript 的开头 | 全是 sidechain 的行 |
-| `codex-0.163.jsonl` | 真实 Codex 0.163 rollout 的几段 | session_meta、response_item（跳过）、Extension（web.search）、McpToolCall、12 个文件的 FileChange、ImageView、compacted / ContextCompaction、turn_aborted、`task_complete.duration_ms` 及 `turn_id` |
+| `codex-0.163.jsonl` | 真实 Codex 0.163 rollout 的几段；`thread_settings_applied` 的 `reasoning_effort` 被 `--words` 打乱，已手工改回同一时刻 turn_context 的强度（xhigh） | session_meta、thread_settings_applied（#12572）、response_item（跳过）、Extension（web.search）、McpToolCall、12 个文件的 FileChange、ImageView、compacted / ContextCompaction、turn_aborted、`task_complete.duration_ms` 及 `turn_id` |
 | `claude-queued-images.jsonl` | 真实会话的 6 行 | Claude 工作中从 App 发的带图消息：queue-operation + `attachment/queued_command`，prompt 是 [text, image] 块（图片以前被丢掉，气泡里看不到） |
 | `claude-background.jsonl` | 两个真实会话的 10 行 | 没写 description 的后台 heredoc 命令（通知里是整条命令、带 `&gt;` `&lt;`）、Monitor 启动（`Monitor started (task …`）、Monitor 事件（只有 task-id）、Monitor 结束（带最后几行） |
 | `claude-workflow-notices.jsonl` | 本机真实会话的 2 条完成通知；只读核对后仅保留消息结构，路径、id、时间和内容全换为占位值 | `Dynamic workflow "…" completed` 的 user 消息和 queued_command attachment；保留 task-id / tool-use-id 供卡片跳转。本机没有 failed / was stopped 语料，这两种按 issue 原文写在单测里 |

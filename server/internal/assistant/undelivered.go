@@ -323,6 +323,21 @@ func (s *Service) undeliveredCount(id string) int {
 	return len(b.st[id])
 }
 
+// hasKeptUndelivered reports whether message id is currently kept in undelivered for conversation sid (conservatively
+// true if the undelivered book cannot be read, so a kept message's quiet-relay reservation is not discarded).
+func (s *Service) hasKeptUndelivered(ctx context.Context, sid, id string) bool {
+	if sid == "" || id == "" {
+		return false
+	}
+	b := &s.undelivered
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.undeliveredLocked(ctx) {
+		return true
+	}
+	return s.keptLocked(sid, id) != nil
+}
+
 // undeliveredAhead: the owner's message id to conversation sid would overtake kept ones (any not given up on).
 func (s *Service) undeliveredAhead(ctx context.Context, sid, id string) bool {
 	b := &s.undelivered
@@ -428,6 +443,35 @@ func (s *Service) undeliveredSeen(d DeviceSessions) {
 			if q[i].State == proto.UndeliveredWaiting && !q[i].inDoubt() && q[i].Machine == d.MachineID && q[i].NextAt.After(now) {
 				q[i].NextAt, woke = now, true
 			}
+		}
+	}
+	b.mu.Unlock()
+	if woke {
+		s.wakeUndelivered()
+	}
+}
+
+// wakeUndeliveredFor moves waiting kept messages for (machine, sid) forward to now
+// so they drain immediately after a cross-machine failover rebind.
+func (s *Service) wakeUndeliveredFor(machine, sid string) {
+	b := &s.undelivered
+	b.mu.Lock()
+	if !s.undeliveredLocked(context.Background()) {
+		b.mu.Unlock()
+		return
+	}
+	q := b.st[sid]
+	if len(q) == 0 {
+		b.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	woke := false
+	for i := range q {
+		if q[i].State == proto.UndeliveredWaiting && !q[i].inDoubt() && (machine == "" || q[i].Machine == machine) {
+			q[i].NextAt = now
+			q[i].WaitIdle = false
+			woke = true
 		}
 	}
 	b.mu.Unlock()
@@ -758,6 +802,12 @@ func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, e
 	if err != nil {
 		return false, err // nothing was sent
 	}
+	laterSettled := false
+	defer func() {
+		if !laterSettled {
+			laterDone(false)
+		}
+	}()
 	s.undelivered.mu.Lock()
 	revoked = s.undelivered.revoked[k.CredentialID]
 	s.undelivered.mu.Unlock()
@@ -768,6 +818,7 @@ func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, e
 	tried := time.Now()
 	err = s.call(sctx, k.Machine, DeviceSessionSend, params, nil)
 	if err == nil {
+		laterSettled = true
 		laterDone(true)
 		return false, nil
 	}
@@ -775,6 +826,7 @@ func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, e
 		return false, err
 	}
 	if s.undeliveredLandedSince(k, tried) {
+		laterSettled = true
 		laterDone(true)
 		return false, nil
 	}

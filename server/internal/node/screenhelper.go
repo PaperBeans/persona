@@ -498,9 +498,9 @@ func (n *Node) startScreenHelper(ctx context.Context, id, pair string, keepAwake
 		n.streams.Abort(id, errors.New("the screen-sharing stream closed"))
 		return false, nil
 	}
-	if link && n.links != nil {
+	if link && n.screenLinks() != nil {
 		// The video joins the pair's screen session as a channel (#6398); the session closes c when it ends.
-		if s := n.links.Get(pair); s != nil {
+		if s := n.screenLinks().Get(pair); s != nil {
 			if relay, ok := s.Video(c); ok {
 				n.streams.Start(id, relay)
 				return true, nil

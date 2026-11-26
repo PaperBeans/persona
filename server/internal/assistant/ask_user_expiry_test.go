@@ -18,7 +18,7 @@ import (
 )
 
 // The main conversation's ask_user card against the Lark nudge (#6084, #9): the nudge waits nudge_after, 60 minutes
-// unless set (assistantwire.NudgeAfterDefault), and a card that is gone is never nudged (feishu_nudge.go), so the card
+// unless set (assistantwire.NudgeAfterDefault), and a card that is gone is never nudged (the lark module's nudge.go), so the card
 // has to outlive the default wait. The user writing in the conversation takes a waiting question back.
 // All ids are placeholders.
 
@@ -51,7 +51,7 @@ func askUserCard(t *testing.T, s *Service) proto.Interaction {
 func TestAskUserCardOutlivesTheDefaultNudge(t *testing.T) {
 	r := newNudgeRig(t)
 	ix := askUserCard(t, r.s)
-	nudgeDue := ix.CreatedAt.Add(nudgeAfterOf(FeishuStatus{})) // the status says nothing: the default
+	nudgeDue := ix.CreatedAt.Add(time.Hour) // the status says nothing: the default nudge_after (the module's nudgeAfterOf)
 	if !ix.ExpiresAt.After(nudgeDue) {
 		t.Errorf("the ask_user card lives %v (expires %s) but the default nudge is due after %v (%s): the card is gone before the nudge",
 			ix.ExpiresAt.Sub(ix.CreatedAt), ix.ExpiresAt.Format(time.TimeOnly), nudgeDue.Sub(ix.CreatedAt), nudgeDue.Format(time.TimeOnly))
@@ -82,7 +82,7 @@ func newAskRig(t *testing.T) *askRig {
 	mem := newFleetMem()
 	s := withSettings(t, r.f, New(Options{Hub: r.f, Store: func() Store { return mem }, Logf: testLogf(t), Devices: hookDevs{r.d, r}}))
 	s.fleet.interactions = map[string]*pending{}
-	s.fbot.now = func() time.Time { return r.now }
+	s.setLarkNow(func() time.Time { return r.now })
 	var mu sync.Mutex
 	updates := []string{}
 	r.f.answerApp(AppFeishu, FeishuUpdateCard, func(p json.RawMessage) (any, error) {
@@ -117,10 +117,7 @@ func (a *askRig) ask(t *testing.T) (ix proto.Interaction, done chan string) {
 		if qs := a.s.pendingQuestions(); len(qs) == 1 {
 			ix = qs[0]
 			if _, up := a.s.pendingIx(ix.ID); up {
-				b := &a.s.fbot
-				b.mu.Lock()
-				a.s.keepBotCardLocked(ix.ID, &botCard{MessageID: "om_" + ix.ID, Thread: "om_run", Ix: ix, At: a.now})
-				b.mu.Unlock()
+				keepChatCard(a.s, ix.ID, &botCard{MessageID: "om_" + ix.ID, Thread: "om_run", Ix: ix, At: a.now})
 				return ix, done
 			}
 		}
@@ -143,6 +140,7 @@ func (a *askRig) result(t *testing.T, done chan string) string {
 
 // With the defaults, the Lark bot nudges once under a waiting ask_user card, a minute after nudge_after.
 func TestAskUserCardIsNudgedAfterTheDefaultWait(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	a := newAskRig(t)
 	ix, _ := a.ask(t)
 	a.tick(a.s, time.Duration(assistantwire.NudgeAfterDefault-1)*time.Minute)
@@ -160,6 +158,7 @@ func TestAskUserCardIsNudgedAfterTheDefaultWait(t *testing.T) {
 // The user writing in the conversation takes back the question it waits on: the tool returns at once with the reason,
 // the card is closed as dismissed with "replied in the chat" (not "expired"), and a later answer finds nothing.
 func TestUserWritingWithdrawsTheWaitingAskUser(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	a := newAskRig(t)
 	ix, done := a.ask(t)
 	a.s.UserSpoke(context.Background(), SessionRef{MachineID: "mac", SessionID: "s1"})
@@ -249,8 +248,13 @@ func TestMessageAfterAWithdrawnQuestionIsNotALateAnswer(t *testing.T) {
 	for time.Now().Before(deadline) && a.closed() == "" {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if a.s.botAnswerQuestion(context.Background(), "om_next", "Yes", "oa_1", "", "") {
-		t.Fatal("a message after the withdrawal was taken as a late answer and swallowed")
+	// Taken as a late answer, it would be swallowed with a note under it that it was handled elsewhere.
+	feishuSay(t, a.s, a.f, nil, p2pText("om_next", "Yes", "", ""), "oa_1")
+	elsewhere := i18n.T(a.s.botLang(context.Background()), "assistant-channels_plugin.answered_elsewhere")
+	for _, n := range a.f.appParams(AppFeishu, FeishuText) {
+		if n["reply_to"] == "om_next" && n["text"] == elsewhere {
+			t.Fatal("a message after the withdrawal was taken as a late answer and swallowed")
+		}
 	}
 }
 
@@ -285,16 +289,14 @@ func TestUserWritingWithdrawsAskUserWithoutTheQueue(t *testing.T) {
 // to the to-dos (the question becomes one, ask_todo.go), and it is never nudged. The wait is shortened to 300 ms here; the real one
 // is askUserWait.
 func TestExpiredAskUserCardIsEndedForGood(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	a := newAskRig(t)
 	card, _ := a.ask(t) // the real tool's card, only for its shape
 	short := card
 	short.ID = "ix_expiring"
 	short.CreatedAt = time.Now().UTC()
 	short.ExpiresAt = short.CreatedAt.Add(300 * time.Millisecond)
-	b := &a.s.fbot
-	b.mu.Lock()
-	a.s.keepBotCardLocked(short.ID, &botCard{MessageID: "om_" + short.ID, Thread: "om_run", Ix: short, At: a.now})
-	b.mu.Unlock()
+	keepChatCard(a.s, short.ID, &botCard{MessageID: "om_" + short.ID, Thread: "om_run", Ix: short, At: a.now})
 	res, err := a.s.waitInteraction(context.Background(), short)
 	if err != nil || !res.Dismiss {
 		t.Fatalf("expired card resolved with %+v, %v; want a dismiss", res, err)

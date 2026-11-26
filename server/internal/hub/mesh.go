@@ -169,24 +169,45 @@ func (h *Hub) meshTouch() {
 
 // meshPublish builds this hub's record and floods it when it differs from the last one (or always, when forced).
 func (h *Hub) meshPublish(force bool) {
-	rec := h.buildRecord()
-	body, _ := json.Marshal(rec)
+	h.meshPublishRecord(force, h.buildRecord)
+}
+
+func (h *Hub) meshPublishRecord(force bool, build func() *hubRecord) {
 	ms := &h.mesh
 	ms.mu.Lock()
-	if !ms.running || !force && bytes.Equal(body, ms.built) {
+	for ms.running {
+		base := ms.rev
 		ms.mu.Unlock()
+
+		rec := build()
+		body, _ := json.Marshal(rec)
+
+		ms.mu.Lock()
+		if ms.rev != base {
+			// Another publisher finished while we read the hub and its machines.
+			// Read them again before assigning this snapshot a newer revision.
+			continue
+		}
+		if !ms.running {
+			break
+		}
+		// Even an unchanged snapshot supersedes an older build that is still in flight.
+		ms.rev++
+		if !force && bytes.Equal(body, ms.built) {
+			break
+		}
+		ms.built = body
+		rec.Epoch, rec.Rev = ms.epoch, ms.rev
+		ms.records[rec.HubID], ms.seenAt[rec.HubID] = rec, time.Now()
+		links := ms.linkList()
+		ms.mu.Unlock()
+		for _, l := range links {
+			l.send("rec", rec)
+		}
+		h.meshRebuild()
 		return
 	}
-	ms.built = body
-	ms.rev++
-	rec.Epoch, rec.Rev = ms.epoch, ms.rev
-	ms.records[rec.HubID], ms.seenAt[rec.HubID] = rec, time.Now()
-	links := ms.linkList()
 	ms.mu.Unlock()
-	for _, l := range links {
-		l.send("rec", rec)
-	}
-	h.meshRebuild()
 }
 
 // buildRecord is this hub's record as things are now (epoch and rev are set when it is published).

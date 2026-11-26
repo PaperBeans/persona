@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"errors"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func (s *Recordings) followupRoute(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, err)
 		return
 	}
-	m, rec, err := e.MeetingRead(id)
+	m, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil {
 		writeMeetingError(w, err)
 		return
@@ -62,7 +63,7 @@ func (s *Recordings) followupRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	// A trimmed recording keeps chars in meta.json with its transcript gone, so its only material is its minutes (an
 	// all-day one past recording_days keeps its recap and no minutes: nothing to seed a follow-up with).
-	case (rec.Chars == 0 || rec.Trimmed()) && !e.Store.HasMinutes(rec.ID):
+	case (rec.Chars == 0 || rec.Trimmed()) && !writersOf(e).HasMinutes(rec.ID):
 		apierr.WriteCode(w, http.StatusConflict, codeNoMaterial, i18n.Err("assistant-meeting.no_material"))
 		return
 	}
@@ -78,7 +79,7 @@ func (s *Recordings) followupRoute(w http.ResponseWriter, r *http.Request) {
 
 // meetingRunning: recording rec's meeting is not over for a follow-up: no ended_at (counted as ended feedStale after
 // its last upload, and a trimmed one as ended), or a room still starting, ready or unavailable.
-func meetingRunning(rec kb.Recording, m kb.Meeting, now time.Time) bool {
+func meetingRunning(rec recordingwire.Recording, m recordingwire.Meeting, now time.Time) bool {
 	if rec.Trimmed() {
 		return false
 	}
@@ -89,7 +90,7 @@ func meetingRunning(rec kb.Recording, m kb.Meeting, now time.Time) bool {
 		return false
 	}
 	switch m.Room.State {
-	case kb.RoomStarting, kb.RoomReady, kb.RoomUnavailable:
+	case recordingwire.RoomStarting, recordingwire.RoomReady, recordingwire.RoomUnavailable:
 		return true
 	}
 	return false
@@ -97,12 +98,12 @@ func meetingRunning(rec kb.Recording, m kb.Meeting, now time.Time) bool {
 
 // followupSend sends msg to recording id's follow-up, making it with msg the first time; the follow-up and whether
 // this call made it.
-func (s *Recordings) followupSend(ctx context.Context, e *kb.Engine, id string, msg meetingMessage) (kb.ConvView, bool, error) {
+func (s *Recordings) followupSend(ctx context.Context, e *kb.Engine, id string, msg meetingMessage) (recordingwire.ConvView, bool, error) {
 	unlock := s.meetLocks.lock(id)
 	defer unlock()
-	m, rec, err := e.MeetingRead(id)
+	m, rec, err := writersOf(e).MeetingRead(id)
 	if err != nil {
-		return kb.ConvView{}, false, err
+		return recordingwire.ConvView{}, false, err
 	}
 	msgID := "followup-" + msg.ID
 	if f := m.Followup; f != nil && f.Pending {
@@ -114,7 +115,7 @@ func (s *Recordings) followupSend(ctx context.Context, e *kb.Engine, id string, 
 		switch {
 		case ok && f.OpID == msg.ID:
 			s.followupSet(e, id, &found)
-			return kb.ConvView{MachineID: found.MachineID, SessionID: found.SessionID}, true, nil
+			return recordingwire.ConvView{MachineID: found.MachineID, SessionID: found.SessionID}, true, nil
 		case ok:
 			m.Followup = &found
 			s.followupSet(e, id, &found)
@@ -127,7 +128,7 @@ func (s *Recordings) followupSend(ctx context.Context, e *kb.Engine, id string, 
 		if f.OpID == msg.ID {
 			// The call that made it, repeated (its answer lost, its receipt left unknown): its words went with the
 			// creation; nothing is sent again.
-			return kb.ConvView{MachineID: f.MachineID, SessionID: f.SessionID}, true, nil
+			return recordingwire.ConvView{MachineID: f.MachineID, SessionID: f.SessionID}, true, nil
 		}
 		p := map[string]any{"session_id": f.SessionID, "text": msg.Text, "client_msg_id": msgID}
 		if len(msg.Images) > 0 {
@@ -136,37 +137,37 @@ func (s *Recordings) followupSend(ctx context.Context, e *kb.Engine, id string, 
 		s.UserSpoke(ctx, SessionRef{MachineID: f.MachineID, SessionID: f.SessionID})
 		params, err := s.SendParams(ctx, SendParams{MachineID: f.MachineID, SessionID: f.SessionID, Params: p})
 		if err != nil {
-			return kb.ConvView{}, false, err
+			return recordingwire.ConvView{}, false, err
 		}
 		if err := s.sendOnce(ctx, f.MachineID, params); err != nil {
-			return kb.ConvView{}, false, err
+			return recordingwire.ConvView{}, false, err
 		}
-		return kb.ConvView{MachineID: f.MachineID, SessionID: f.SessionID}, false, nil
+		return recordingwire.ConvView{MachineID: f.MachineID, SessionID: f.SessionID}, false, nil
 	}
 	machine := s.settings(ctx).MachineID
 	if machine == "" {
-		return kb.ConvView{}, false, s.missingAssistantMachine(ctx)
+		return recordingwire.ConvView{}, false, s.missingAssistantMachine(ctx)
 	}
 	want := meetingSessionID(id, partFollowup)
-	pending := &kb.MeetingFollowup{MachineID: machine, SessionID: want, Pending: true, OpID: msg.ID}
+	pending := &recordingwire.MeetingFollowup{MachineID: machine, SessionID: want, Pending: true, OpID: msg.ID}
 	if !s.followupSet(e, id, pending) {
-		return kb.ConvView{}, false, errors.New("the meeting could not be written")
+		return recordingwire.ConvView{}, false, errors.New("the meeting could not be written")
 	}
 	text := s.followupSeed(ctx, e, rec, m, msg.Text)
 	sess, err := s.startSignedIn(ctx, StartParams{Text: text, Images: msg.Images, Origin: OriginMeetingFollowup, OriginRef: id, MachineID: machine,
 		NewSessionID: want, ClientMsgID: msgID})
 	if err != nil {
-		return kb.ConvView{}, false, err
+		return recordingwire.ConvView{}, false, err
 	}
 	s.titleFixed(sess.MachineID, sess.SessionID, rec.StartedAt, titleMeeting, feedMeetingName(rec, s.location(ctx)))
-	made := &kb.MeetingFollowup{MachineID: sess.MachineID, SessionID: sess.SessionID, OpID: msg.ID}
+	made := &recordingwire.MeetingFollowup{MachineID: sess.MachineID, SessionID: sess.SessionID, OpID: msg.ID}
 	s.followupSet(e, id, made)
-	return kb.ConvView{MachineID: sess.MachineID, SessionID: sess.SessionID}, true, nil
+	return recordingwire.ConvView{MachineID: sess.MachineID, SessionID: sess.SessionID}, true, nil
 }
 
 // followupSet writes recording id's follow-up (nil: none); false when it could not be written.
-func (s *Recordings) followupSet(e *kb.Engine, id string, f *kb.MeetingFollowup) bool {
-	if _, err := e.MeetingUpdate(id, func(m *kb.Meeting, _ kb.Recording) error { m.Followup = f; return nil }); err != nil {
+func (s *Recordings) followupSet(e *kb.Engine, id string, f *recordingwire.MeetingFollowup) bool {
+	if _, err := writersOf(e).MeetingUpdate(id, func(m *recordingwire.Meeting, _ recordingwire.Recording) error { m.Followup = f; return nil }); err != nil {
 		s.logf("meeting %s: follow-up: %v", short(id), err)
 		return false
 	}
@@ -175,21 +176,21 @@ func (s *Recordings) followupSet(e *kb.Engine, id string, f *kb.MeetingFollowup)
 
 // followupFound is the follow-up a pending creation f made, when there is one: the conversation under its id on its
 // computer, else one whose origin says it is this recording's follow-up (a node that started it under its own id).
-func (s *Recordings) followupFound(ctx context.Context, id string, f *kb.MeetingFollowup) (kb.MeetingFollowup, bool) {
+func (s *Recordings) followupFound(ctx context.Context, id string, f *recordingwire.MeetingFollowup) (recordingwire.MeetingFollowup, bool) {
 	if _, ok := s.session(ctx, f.MachineID, f.SessionID); ok {
-		return kb.MeetingFollowup{MachineID: f.MachineID, SessionID: f.SessionID}, true
+		return recordingwire.MeetingFollowup{MachineID: f.MachineID, SessionID: f.SessionID}, true
 	}
 	for _, o := range s.originsOf(ctx, OriginMeetingFollowup) {
 		if o.ref == id {
-			return kb.MeetingFollowup{MachineID: o.machine, SessionID: o.session}, true
+			return recordingwire.MeetingFollowup{MachineID: o.machine, SessionID: o.session}, true
 		}
 	}
-	return kb.MeetingFollowup{}, false
+	return recordingwire.MeetingFollowup{}, false
 }
 
 // followupSeed is the follow-up's first message: the meeting's material in a context block (prompts/meeting/
 // followup_seed.md), then the owner's text.
-func (s *Recordings) followupSeed(ctx context.Context, e *kb.Engine, rec kb.Recording, m kb.Meeting, text string) string {
+func (s *Recordings) followupSeed(ctx context.Context, e *kb.Engine, rec recordingwire.Recording, m recordingwire.Meeting, text string) string {
 	loc := s.location(ctx)
 	d := prompts.MeetingFollowupSeed{Title: feedMeetingName(rec, loc), Started: rec.StartedAt.In(loc).Format("2006-01-02 15:04 MST"),
 		RecordingID: rec.ID, Trimmed: rec.Trimmed(), Text: text}
@@ -220,7 +221,7 @@ func (s *Recordings) followupSeed(ctx context.Context, e *kb.Engine, rec kb.Reco
 			d.Notes = append(d.Notes, p)
 		}
 	}
-	if l, _, err := e.LiveRead(rec.ID); err == nil {
+	if l, _, err := writersOf(e).LiveRead(rec.ID); err == nil {
 		d.Topics = meetingTopics(l.Topics)
 		for _, h := range l.Highlights { // at their place in the transcript below
 			d.Highlights = append(d.Highlights, prompts.MeetingHighlight{At: meetingClock(h.At), Text: oneLine(h.Text)})
@@ -236,7 +237,7 @@ func (s *Recordings) followupSeed(ctx context.Context, e *kb.Engine, rec kb.Reco
 		}
 	}
 	var lines []string
-	for _, sg := range kb.MeetingLines(e.Store.RecordingSegments(rec.ID)) { // Persona's echo is not the meeting's (#5905)
+	for _, sg := range recordingwire.MeetingLines(e.Store.RecordingSegments(rec.ID)) { // Persona's echo is not the meeting's (#5905)
 		lines = append(lines, "["+meetingClock(sg.Start)+"] "+oneLine(sg.Text))
 	}
 	d.Transcript, d.Cut = cutMiddle(strings.Join(lines, "\n"), followupTranscriptRunes)

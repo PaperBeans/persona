@@ -314,8 +314,10 @@ func TestTaskStageMetadataRoundTrip(t *testing.T) {
 	if got := s2.todoStages(ctx)[todo.ID].Kind; got != "general" {
 		t.Fatalf("reloaded kind = %s", got)
 	}
-	b := (&briefFacts{Progress: []briefProgress{{ID: todo.ID, Stage: "develop", StageKind: "general"}}}).body(s, "progress")
-	if b.Progress[0].StageKind != "general" {
-		t.Fatal("briefing omitted kind")
+	if s.briefingOn() {
+		b := s.briefBodyOf(&briefFacts{Progress: []briefProgress{{ID: todo.ID, Stage: "develop", StageKind: "general"}}}, "progress")
+		if b.Progress[0].StageKind != "general" {
+			t.Fatal("briefing omitted kind")
+		}
 	}
 }

@@ -260,3 +260,96 @@ func TestLoopsBack(t *testing.T) {
 		}
 	}
 }
+
+// A session can have several entries in the index: one under each account's directory, and older ones left behind
+// that still name the transcript it ran before it went on in another. The most recently active entry describes the
+// session, whichever file is read last (#15262): a side session is drawn under its parent's current transcript, and the
+// parent's archived state is that entry's. With the same lastActivityAt the file written later decides.
+func TestSideSessionsFollowTheNewestEntryOfTheirParent(t *testing.T) {
+	const (
+		before  = "abababab-0000-4000-8000-000000000001" // the transcript early ran first
+		early   = "abababab-0000-4000-8000-000000000002" // its older entry is in a directory read first
+		earlyS  = "abababab-0000-4000-8000-000000000003"
+		after   = "abababab-0000-4000-8000-000000000004" // the transcript late ran first
+		late    = "abababab-0000-4000-8000-000000000005" // its older entry is in a directory read last
+		lateS   = "abababab-0000-4000-8000-000000000006"
+		closed  = "abababab-0000-4000-8000-000000000007" // archived now; an older entry read last says it is open
+		closedS = "abababab-0000-4000-8000-000000000008"
+		opened  = "abababab-0000-4000-8000-000000000009" // open now; an older entry read last says it is archived
+		openedS = "abababab-0000-4000-8000-00000000000a"
+		tieOld  = "abababab-0000-4000-8000-00000000000b" // the transcript tie ran first
+		tie     = "abababab-0000-4000-8000-00000000000c" // both entries name one lastActivityAt: the later file decides
+		tieS    = "abababab-0000-4000-8000-00000000000d"
+	)
+	n, home := testNode(t)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
+	dir := filepath.Join(home, ".claude", "projects", "-src-app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{early, earlyS, late, lateS, closed, closedS, opened, openedS, tie, tieS} {
+		writeEntrypointTranscript(t, dir, id, "claude-desktop", time.Duration(i+1)*time.Minute)
+	}
+	_, third := useDesktopDirs(t)
+	// entry writes one entry of the session local under the account directory account, which decides when it is read
+	// (a < m < z), and returns its path.
+	entry := func(account, local, transcript string, archived bool, prior []string, activity int64, extra string) string {
+		t.Helper()
+		p := writeDesktopEntry(t, third, local, transcript, archived, prior, fmt.Sprintf(`,"lastActivityAt":%d%s`, activity, extra))
+		to := filepath.Join(third, "claude-code-sessions", account, "org", filepath.Base(p))
+		if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(p, to); err != nil {
+			t.Fatal(err)
+		}
+		return to
+	}
+	from := func(local string) string {
+		return `,"spawnedFrom":{"sessionId":"local_` + local + `","taskId":"task_1","sideSession":true}`
+	}
+	const then, now = 1_700_000_000_000, 1_700_000_900_000
+	// early: the older entry is read first, the current one last.
+	entry("a", early, before, false, nil, then, "")
+	entry("m", early, early, false, []string{before}, now, "")
+	entry("m", earlyS, earlyS, false, nil, now, from(early))
+	// late: the older entry is read last, and used to decide.
+	entry("m", late, late, false, []string{after}, now, "")
+	entry("z", late, after, false, nil, then, "")
+	entry("m", lateS, lateS, false, nil, now, from(late))
+	// closed: archived now, so its side session links nothing, though an older entry read last says open.
+	entry("m", closed, closed, true, nil, now, "")
+	entry("z", closed, closed, false, nil, then, "")
+	entry("m", closedS, closedS, false, nil, now, from(closed))
+	// opened: open now, so its side session is under it, though an older entry read last says archived.
+	entry("m", opened, opened, false, nil, now, "")
+	entry("z", opened, opened, true, nil, then, "")
+	entry("m", openedS, openedS, false, nil, now, from(opened))
+	// tie: the same lastActivityAt in both; the file written later is the current one, though it is read first.
+	current := entry("m", tie, tie, false, []string{tieOld}, now, "")
+	stale := entry("z", tie, tieOld, false, nil, now, "")
+	entry("m", tieS, tieS, false, nil, now, from(tie))
+	at := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(stale, at, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(current, at.Add(time.Minute), at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{earlyS: early, lateS: late, closedS: "", openedS: opened, tieS: tie}
+	rows := map[string]proto.Session{}
+	for _, s := range n.sessionList(context.Background(), false) {
+		rows[s.SessionID] = s
+	}
+	for id, p := range want {
+		s, ok := rows[id]
+		if !ok {
+			t.Errorf("%s is not listed", id)
+			continue
+		}
+		if got := s.ParentAgentID(); got != p {
+			t.Errorf("%s parent_agent_id = %q, want %q", id, got, p)
+		}
+	}
+}

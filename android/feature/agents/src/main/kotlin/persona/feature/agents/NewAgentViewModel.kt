@@ -2,6 +2,7 @@ package persona.feature.agents
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import persona.core.contracts.ImageLimits
 import persona.core.contracts.Machine
 import persona.core.contracts.PaseoAgent
 import persona.core.contracts.ProtocolCompatibility
@@ -15,6 +16,9 @@ import persona.feature.chat.ComposerUploadLimiter
 import persona.feature.chat.ForwardMessage
 import persona.feature.chat.ForwardPlacements
 import persona.feature.chat.ForwardPlacement
+import persona.feature.chat.PhotoCandidate
+import persona.feature.chat.composerPhotoRoom
+import persona.feature.chat.planComposerPhotos
 import persona.feature.chat.R as ChatR
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -841,14 +845,36 @@ internal class NewAgentViewModel(
     val attachable: Boolean get() = uploads != null && sender != null
     /** Whether [machineId]'s hub can take uploads now (none offline or in the demo): the add menu shows only then. */
     fun canUpload(machineId: String): Boolean = machineId.isNotEmpty() && uploads?.service?.invoke(machineId) != null
-    /** How many more photos fit (iOS `MessagePhotos.limit`, 4). */
-    fun photoRoom(): Int = (NewAgentAttachments.MAX_PHOTOS - state.value.attachments.count { it.media }).coerceAtLeast(0)
-    /** How many more ordinary files fit; this is separate from the photo/video places. */
-    fun fileRoom(): Int = (NewAgentAttachments.MAX_FILES - state.value.attachments.count { !it.media }).coerceAtLeast(0)
+    /** The hub's image limits for the selected computer and agent (defaults to [ImageLimits.Standard]). */
+    fun imageLimits(): ImageLimits = uploads?.imageLimits?.invoke(state.value.machineId, state.value.agentType) ?: ImageLimits.Standard
+    /** How many more inline photos fit by count alone. */
+    fun photoRoom(): Int = composerPhotoRoom(state.value.attachments, imageLimits())
+    /** How many more ordinary files fit; this is separate from inline photos. */
+    fun fileRoom(): Int = (NewAgentAttachments.MAX_FILES - state.value.attachments.count { !it.media && it.uploadState != DraftUploadState.Invalid }).coerceAtLeast(0)
+    /** Selection room for the photo picker (inline photos plus file slots pictures can spill into). */
+    fun photoPickerRoom(): Int = photoRoom() + if (canUpload(state.value.machineId)) fileRoom() else 0
     private val noticeChannel = Channel<AgentText>(Channel.BUFFERED)
     /** What the form's toast says (iOS `model.toast`): a pick not taken, an upload that failed. */
     val notices: Flow<AgentText> = noticeChannel.receiveAsFlow()
     fun notice(text: AgentText) { noticeChannel.trySend(text) }
+    /** Picked photos with measured scaled sizes join the form, spilling overflow photos into file attachments. */
+    fun attachPhotos(candidates: List<PhotoCandidate>, showLimit: Boolean = true, forward: ChatLinkContext? = null): Int {
+        val uploads = uploads
+        val current = state.value
+        if (uploads == null || candidates.isEmpty() || current.locked || !current.takesAttachments || current.machineId.isEmpty()) {
+            candidates.forEach { uploads?.discard?.invoke(it.attachment) }
+            return candidates.size
+        }
+        val limits = imageLimits()
+        val plan = planComposerPhotos(current.attachments, candidates, limits, canSpill = canUpload(current.machineId))
+        plan.refused.forEach(uploads.discard)
+        if (showLimit) emitPhotoPlanNotices(plan, limits)
+        if (plan.added.isEmpty()) return plan.refused.size
+        forward?.photoSource?.let { source -> plan.added.forEach { photoSources[it.id] = source } }
+        mutable.update { it.copy(attachments = it.attachments + plan.added, attachedOn = it.machineId, attachNote = null) }
+        plan.added.forEach { upload(it.id) }
+        return plan.refused.size
+    }
     /** Picked photos and files join the form and go to the computer picked, three at a time. Returns how many did not fit. */
     fun attach(picked: List<persona.feature.chat.ComposerAttachment>, showLimit: Boolean = true, forward: ChatLinkContext? = null): Int {
         val uploads = uploads
@@ -857,21 +883,47 @@ internal class NewAgentViewModel(
             picked.forEach { uploads?.discard?.invoke(it) }
             return picked.size
         }
-        var files = fileRoom()
-        var media = photoRoom()
-        val accepted = picked.filter { attachment ->
-            if (attachment.media) (media > 0).also { if (it) media-- }
-            else (files > 0).also { if (it) files-- }
+        val (photos, other) = picked.partition { it.image }
+        val limits = imageLimits()
+        val photoPlan = if (photos.isNotEmpty()) {
+            planComposerPhotos(current.attachments, photos.map { PhotoCandidate(it, it.scaledBytes) }, limits, canSpill = canUpload(current.machineId))
+        } else null
+        val afterPhotos = current.attachments + photoPlan?.added.orEmpty()
+        var files = (NewAgentAttachments.MAX_FILES - afterPhotos.count { !it.media && it.uploadState != DraftUploadState.Invalid }).coerceAtLeast(0)
+        val acceptedOther = other.filter { attachment ->
+            if (attachment.video) false else (files > 0).also { if (it) files-- }
         }
-        val refused = picked.filterNot { it in accepted }
-        refused.forEach(uploads.discard)
-        if (showLimit && refused.isNotEmpty()) notice(AgentText(
-            if (refused.any { it.media }) R.string.agents_attach_photo_limit else ChatR.string.chat_composer_file_limit))
-        if (accepted.isEmpty()) return refused.size
+        val refusedOther = other.filterNot { it in acceptedOther }
+        photoPlan?.refused.orEmpty().forEach(uploads.discard)
+        refusedOther.forEach(uploads.discard)
+        if (showLimit) {
+            if (photoPlan != null) emitPhotoPlanNotices(photoPlan, limits)
+            if (refusedOther.isNotEmpty()) notice(AgentText(ChatR.string.chat_composer_file_limit))
+        }
+        val accepted = photoPlan?.added.orEmpty() + acceptedOther
+        if (accepted.isEmpty()) return (photoPlan?.refused?.size ?: 0) + refusedOther.size
         forward?.photoSource?.let { source -> accepted.forEach { photoSources[it.id] = source } }
         mutable.update { it.copy(attachments = it.attachments + accepted, attachedOn = it.machineId, attachNote = null) }
         accepted.forEach { upload(it.id) }
-        return refused.size
+        return (photoPlan?.refused?.size ?: 0) + refusedOther.size
+    }
+    private fun emitPhotoPlanNotices(plan: persona.feature.chat.ComposerPhotoPlan, limits: ImageLimits) {
+        if (plan.spilledByCount > 0) notice(
+            if (plan.spilledByCount == 1) AgentText(ChatR.string.chat_composer_photos_as_files_one, limits.perMessage)
+            else AgentText(ChatR.string.chat_composer_photos_as_files_other, limits.perMessage, plan.spilledByCount)
+        )
+        if (plan.spilledByBytes > 0) notice(
+            if (plan.spilledByBytes == 1) AgentText(ChatR.string.chat_composer_photos_bytes_as_files_one)
+            else AgentText(ChatR.string.chat_composer_photos_bytes_as_files_other, plan.spilledByBytes)
+        )
+        if (plan.refusedByCount > 0) notice(
+            if (plan.spilledByCount > 0) AgentText(ChatR.string.chat_composer_file_limit)
+            else AgentText(R.string.agents_attach_photo_limit, limits.perMessage)
+        )
+        if (plan.refusedByBytes > 0) notice(
+            if (plan.spilledByBytes > 0) AgentText(ChatR.string.chat_composer_file_limit)
+            else AgentText(ChatR.string.chat_composer_photos_too_large)
+        )
     }
     /** A failed file stays in the form; Retry goes through the same three-slot pump. */
     fun retryAttachment(id: String) {
@@ -951,13 +1003,21 @@ internal class NewAgentViewModel(
                             if (it.id == id) it.copy(error = null, uploadState = DraftUploadState.Uploading) else it
                         })
                     }
-                    uploads.upload(service, persona.core.contracts.SessionKey(machine, ""), attachment) { size ->
+                    val limits = imageLimits()
+                    val onStaged: suspend (Long) -> Unit = { size ->
                         mutable.update { s ->
                             s.copy(attachments = s.attachments.map {
-                                if (it.id == id) it.copy(size = size) else it
+                                if (it.id == id) {
+                                    if (it.image) {
+                                        val staged = size.takeIf { v -> v > 0L }
+                                        it.copy(size = staged ?: it.size, scaledBytes = staged ?: it.scaledBytes)
+                                    } else it.copy(size = size)
+                                } else it
                             })
                         }
                     }
+                    uploads.uploadWithLimits?.invoke(service, persona.core.contracts.SessionKey(machine, ""), attachment, limits, onStaged)
+                        ?: uploads.upload(service, persona.core.contracts.SessionKey(machine, ""), attachment, onStaged)
                 }
                 // Another computer picked meanwhile: this one's path is no use there.
                 mutable.update { s ->

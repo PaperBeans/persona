@@ -35,6 +35,7 @@ var Redistributable = map[string]string{
 	workGuideName:       "Persona’s own Assistant work management guide",
 	MachineOpsSkillName: "Persona's opt-in read-only machine diagnostics guide (docs/server/machines.md)",
 	"persona-office":    "Persona's own (personad office's skill, docs/assistant/office.md)",
+	viewsGuideName:      "Persona's own rich-view construction guide (docs/assistant/assistant-views.md)",
 }
 
 // ForAgents are the built-in skills the agents Persona starts get too, as the plugin WritePlugin makes (the
@@ -68,8 +69,11 @@ func (s Selection) wanted(name string) bool {
 
 const (
 	// Codex can discover both native skill roots. One canonical file keeps a single catalog entry.
-	runtimeGuideLink = "../../.claude/skills/" + workGuideName
-	workGuideName    = "persona-work"
+	runtimeGuideLink        = "../../.claude/skills/" + workGuideName
+	workGuideName           = "persona-work"
+	viewsGuideName          = "persona-views"
+	viewsGuideOwnershipFile = ".persona-managed"
+	viewsGuideOwnershipLink = ".persona-views-managed"
 	// MachineOpsSkillName is the built-in opt-in read-only machine diagnostics skill (#13053).
 	MachineOpsSkillName  = "persona-machine-ops"
 	machineOpsDigestFile = ".persona-machine-ops-digest"
@@ -148,7 +152,7 @@ func Sync(dir, user string, selection Selection, logf func(string, ...any)) erro
 			}
 			_ = os.Remove(at)
 		} else if st, err := os.Lstat(at); err == nil && st.IsDir() {
-			if name == workGuideName || name == MachineOpsSkillName || !slices.Contains(builtinNames(), name) {
+			if name == workGuideName || name == MachineOpsSkillName || (name == viewsGuideName && !ownsViewsGuide(dir)) || !slices.Contains(builtinNames(), name) {
 				logf("assistant skills: %s is a directory of its own in %s; %s is not linked over it", name, dir, target)
 				continue
 			}
@@ -235,6 +239,38 @@ func WorkGuideInstalled(dir string) bool {
 func WorkGuideReady(cwd string) bool {
 	return cwd != "" && WorkGuideInstalled(filepath.Join(cwd, ".claude", "skills")) &&
 		WorkGuideInstalled(filepath.Join(cwd, ".agents", "skills"))
+}
+
+// ViewsGuideReady reports whether both native skill roots contain the managed rich-view guide. The marker inside the
+// skill and its ownership file beside it must be the same inode: copying and editing the directory therefore revokes
+// readiness instead of transferring Persona's ownership. The legacy shared stamp deliberately omits persona-views so
+// an older node cannot remove it as an unknown built-in. A cached same-name extension also disables compact selection:
+// an older node may copy that cache over the guide before this node can restore its full-instruction fallback. The
+// user's source directory is checked directly too: after a restart, the fallback runs without a connector-wide sync,
+// so a stale managed copy must not hide a newly added personal guide.
+func ViewsGuideReady(cwd string) bool {
+	if cwd == "" || filePresent(filepath.Join(UserDir(), viewsGuideName, "SKILL.md")) || slices.Contains(pluginNames(PluginDir()), viewsGuideName) {
+		return false
+	}
+	for _, runtime := range []string{".claude", ".agents"} {
+		if !viewsGuideInstalled(filepath.Join(cwd, runtime, "skills")) {
+			return false
+		}
+	}
+	return true
+}
+
+func viewsGuideInstalled(dir string) bool {
+	return ownsViewsGuide(dir) && filePresent(filepath.Join(dir, viewsGuideName, "SKILL.md"))
+}
+
+func ownsViewsGuide(dir string) bool {
+	inside, err := os.Stat(filepath.Join(dir, viewsGuideName, viewsGuideOwnershipFile))
+	if err != nil || !inside.Mode().IsRegular() {
+		return false
+	}
+	outside, err := os.Stat(filepath.Join(dir, viewsGuideOwnershipLink))
+	return err == nil && outside.Mode().IsRegular() && os.SameFile(inside, outside)
 }
 
 const guideDigestFile = ".persona-work-digest"
@@ -353,11 +389,22 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 				return err
 			}
 		}
+		if n == viewsGuideName && !ownsViewsGuide(dir) {
+			// This built-in is new to an upgrading node. An existing unmarked path is not a copy this binary owns.
+			if _, err := os.Lstat(filepath.Join(dir, n)); err == nil {
+				continue
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
 		if !slices.Contains(mine, n) && selection.wanted(n) {
 			names = append(names, n)
 		}
 	}
-	want := builtinVersion() + " " + strings.Join(names, ",")
+	// Older binaries remove names in this shared stamp that their own inventory does not know. Keep the always-on
+	// views guide out of it so a downgrade cannot delete the skill a compact resumed prompt still references.
+	stampNames := slices.DeleteFunc(slices.Clone(names), func(n string) bool { return n == viewsGuideName })
+	want := builtinVersion() + " " + strings.Join(stampNames, ",")
 	if strings.TrimSpace(string(old)) == want {
 		workOK := !slices.Contains(names, workGuideName)
 		if !workOK {
@@ -365,11 +412,15 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 			workOK = target == guideLink && workGuideFilePresent(dir) && (guideLink != "" || filePresent(filepath.Join(dir, guideDigestFile)))
 		}
 		opsOK := !slices.Contains(names, MachineOpsSkillName) || (ownsManagedMachineOps(dir) && filePresent(filepath.Join(dir, MachineOpsSkillName, "SKILL.md")))
-		if workOK && opsOK {
+		viewsOK := !slices.Contains(names, viewsGuideName) || viewsGuideInstalled(dir)
+		if workOK && opsOK && viewsOK {
 			return nil
 		}
 	}
 	for _, n := range installed {
+		if n == viewsGuideName {
+			continue // ownership is marked inside the directory; older shared stamps may still name it
+		}
 		if fs.ValidPath(n) && n != "." && filepath.Base(n) == n && !slices.Contains(names, n) {
 			if n == workGuideName && !ownsGuide {
 				continue
@@ -397,10 +448,24 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 		} else if err := copyBuiltin(name, tmp); err != nil {
 			return err
 		}
+		if name == viewsGuideName {
+			if err := os.WriteFile(filepath.Join(tmp, viewsGuideOwnershipFile), []byte("managed by Persona\n"), 0o644); err != nil {
+				return err
+			}
+		}
 		final := filepath.Join(dir, name)
 		_ = os.RemoveAll(final)
 		if err := os.Rename(tmp, final); err != nil {
 			return err
+		}
+		if name == viewsGuideName {
+			owner := filepath.Join(dir, viewsGuideOwnershipLink)
+			if err := os.Remove(owner); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err := os.Link(filepath.Join(final, viewsGuideOwnershipFile), owner); err != nil {
+				return err
+			}
 		}
 	}
 	if guideLink == "" && slices.Contains(names, workGuideName) {

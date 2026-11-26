@@ -14,7 +14,7 @@ import { readView, type UIAction, type UIItem } from "../../lib/extension-ui";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { t } from "../../i18n";
 import { INERT, ViewSections } from "./ViewBody";
-import { forgetGraphStores, GraphCanvas } from "./ViewBody10";
+import { forgetGraphStores, GraphCanvas, graphFoldReach, graphFoldScale } from "./ViewBody10";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.hoisted(() => {
@@ -1296,5 +1296,141 @@ describe("UI 10: the control room", () => {
     await act(async () => {});
     expect(document.querySelector("[role=dialog]")).toBeNull();
     spy.mockRestore();
+  });
+
+  it("uses container queries to widen the outline pane and timeline labels on wide workspaces", () => {
+    const d = doc(renderToStaticMarkup(<GraphCanvas item={draw(RICH())} busy="" onPress={() => {}} />));
+    const shell = d.querySelector(".graph-shell")!;
+    expect(shell.className).toContain("@container");
+    const outlinePane = d.querySelector("[data-graph-outline-pane]")!;
+    expect(outlinePane.className).toContain("w-[208px]");
+    expect(outlinePane.className).toContain("@min-[60rem]:w-[260px]");
+    expect(outlinePane.className).toContain("@min-[80rem]:w-[300px]");
+    const timelineRow = d.querySelector('[data-graph-timeline-row="run"]')!;
+    const labelSpan = timelineRow.querySelector("span")!;
+    expect(labelSpan.className).toContain("w-[148px]");
+    expect(labelSpan.className).toContain("@min-[60rem]:w-[200px]");
+  });
+
+  it("bounds FoldControl scale inside the node gap across 0.25-2.0 zoom and does not double-scale reveal reach", () => {
+    // Horizontal gap = 48 px, vertical gap = 28 px at standard text scale.
+    const lowRight = graphFoldScale(0.25, 48);
+    expect(lowRight).toBeLessThanOrEqual(1.35);
+    expect(24 * lowRight).toBeLessThanOrEqual(44); // leaves >= 4 px breathing room in the 48 px gap
+    expect(35 * lowRight).toBeLessThan(48); // even a 3-digit +123 pill fits inside the 48 px gap
+
+    const lowDown = graphFoldScale(0.25, 28);
+    expect(lowDown).toBe(1);
+    expect(24 * lowDown).toBeLessThanOrEqual(24); // leaves 4 px breathing room in the 28 px vertical gap
+
+    // Opening zoom (0.75) on right trees still holds the fold control at 24 px on screen.
+    expect(24 * graphFoldScale(0.75, 48) * 0.75).toBeCloseTo(24, 6);
+    // Zooming in (2.0) keeps the fold control at 24 px on screen rather than growing to 48 px.
+    expect(graphFoldScale(2, 48)).toBeCloseTo(0.5, 6);
+    expect(24 * graphFoldScale(2, 48) * 2).toBeCloseTo(24, 6);
+
+    // Reveal reach stays in screen pixels (not multiplied by 1/zoom a second time).
+    const reachRight = graphFoldReach(0.25, 48);
+    expect(reachRight).toBeCloseTo((48 / 2 + 12 * lowRight) * 0.25, 6);
+    expect(reachRight).toBeLessThan(48 * 0.25); // strictly within the 12 px screen-space gap, not 120 px
+
+    const reachDown = graphFoldReach(0.25, 28);
+    expect(reachDown).toBeCloseTo((28 / 2 + 12 * lowDown) * 0.25, 6);
+    expect(reachDown).toBeLessThan(28 * 0.25); // strictly within the 7 px screen-space gap
+  });
+
+  it("keeps --graph-fold-scale clamped at zoom=0.25, removes transform transition lag, and reveals without over-panning", async () => {
+    const spy = sizeStage(300, 180);
+    const wide = {
+      sections: [{
+        items: [{
+          type: "graph",
+          key: "low-zoom-right",
+          nodes: [
+            { id: "n0", title: "Root" },
+            ...Array.from({ length: 12 }, (_, i) => ({ id: `n${i + 1}`, title: `Stage ${i + 1}` })),
+          ],
+          edges: Array.from({ length: 12 }, (_, i) => ({ from: `n${i}`, to: `n${i + 1}` })),
+        }],
+      }],
+    };
+    await mount(draw(wide), { compact: false, onPress: () => {} });
+    const layer = host.querySelector("[data-graph-layer]") as HTMLElement;
+    act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${t("extensions-viewbody.graph_fit")}"]`)!.click());
+    const fitted = transformOf(layer);
+    expect(fitted[2]).toBeCloseTo(0.25, 6);
+
+    const foldScaleRight = Number.parseFloat(layer.style.getPropertyValue("--graph-fold-scale"));
+    expect(foldScaleRight).toBeCloseTo(graphFoldScale(0.25, 48), 6);
+    expect(foldScaleRight).toBeLessThan(1.5); // never 4x at zoom=0.25
+
+    const foldBtn = host.querySelector<HTMLElement>('[data-graph-fold="n0"]')!;
+    expect(foldBtn.className).not.toContain("transition-transform");
+    expect(foldBtn.className).toContain("transition-colors");
+
+    // Focus the rightmost node at zoom=0.25: reveal() places it near the right edge using screen-space reach, not 4x reach.
+    const farNode = host.querySelector<HTMLElement>('[data-graph-node="n12"]')!;
+    act(() => farNode.focus());
+    const afterReveal = transformOf(layer);
+    const farWrap = host.querySelector<HTMLElement>('[data-graph-at="n12"]')!;
+    const farRightScreen = afterReveal[0] + (Number.parseFloat(farWrap.style.left) + Number.parseFloat(farWrap.style.width)) * afterReveal[2];
+    expect(farRightScreen).toBeCloseTo(300 - 12 - graphFoldReach(0.25, 48), 4);
+    expect(Number.parseFloat(layer.style.getPropertyValue("--graph-fold-scale"))).toBeCloseTo(graphFoldScale(0.25, 48), 6);
+
+    // In down direction at zoom=0.25, vertical gap is 28 px so fold scale clamps to 1.
+    const tallDown = {
+      sections: [{
+        items: [{
+          type: "graph",
+          key: "low-zoom-down",
+          direction: "down",
+          nodes: [
+            { id: "d0", title: "Root" },
+            ...Array.from({ length: 12 }, (_, i) => ({ id: `d${i + 1}`, title: `Stage ${i + 1}` })),
+          ],
+          edges: Array.from({ length: 12 }, (_, i) => ({ from: `d${i}`, to: `d${i + 1}` })),
+        }],
+      }],
+    };
+    await mount(draw(tallDown), { compact: false, onPress: () => {} });
+    const downLayer = host.querySelector("[data-graph-layer]") as HTMLElement;
+    act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${t("extensions-viewbody.graph_fit")}"]`)!.click());
+    expect(transformOf(downLayer)[2]).toBeCloseTo(0.25, 6);
+    expect(Number.parseFloat(downLayer.style.getPropertyValue("--graph-fold-scale"))).toBe(1);
+    spy.mockRestore();
+  });
+
+  it("renders one contiguous group frame per group on layered multi-parent graphs without splitting", () => {
+    const layered = {
+      sections: [{
+        items: [{
+          type: "graph",
+          key: "layered-groups",
+          layout: "layered",
+          nodes: [
+            { id: "gw1", title: "Gateway 1" },
+            { id: "gw2", title: "Gateway 2" },
+            { id: "gw3", title: "Gateway 3" },
+            { id: "gw4", title: "Gateway 4" },
+            { id: "a1", title: "Auth A", group: "Auth" },
+            { id: "b1", title: "Billing A", group: "Billing" },
+            { id: "a2", title: "Auth B", group: "Auth" },
+            { id: "b2", title: "Billing B", group: "Billing" },
+          ],
+          edges: [
+            { from: "gw1", to: "a1" },
+            { from: "gw2", to: "b1" },
+            { from: "gw3", to: "a2" },
+            { from: "gw4", to: "b2" },
+          ],
+        }],
+      }],
+    };
+    const d = doc(renderToStaticMarkup(<GraphCanvas item={draw(layered)} busy="" onPress={() => {}} />));
+    const frames = [...d.querySelectorAll<HTMLElement>("[data-graph-frame]")];
+    expect(frames.map((el) => el.getAttribute("data-graph-frame"))).toEqual(["Auth", "Billing"]);
+    const topOf = (el: HTMLElement) => Number.parseFloat(el.style.top);
+    const bottomOf = (el: HTMLElement) => topOf(el) + Number.parseFloat(el.style.height);
+    expect(bottomOf(frames[0])).toBeLessThan(topOf(frames[1])); // Auth and Billing frames are strictly disjoint
   });
 });

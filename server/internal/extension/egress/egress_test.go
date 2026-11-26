@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -76,6 +78,9 @@ func TestProxyAllowsOnlyItsHosts(t *testing.T) {
 	var decided []string
 	p := newProxy(t, addr, nil)
 	p.OnDecision = func(ext, host string, ok bool) { decided = append(decided, fmt.Sprintf("%s %s %v", ext, host, ok)) }
+	var logMu sync.Mutex
+	var logged []string
+	p.Logf = func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() }
 	purl := p.Register("notes", Rule{Hosts: []string{"api.example.com", "*.cdn.example.net", "192.0.2.7"}})
 
 	c := client(purl)
@@ -101,6 +106,11 @@ func TestProxyAllowsOnlyItsHosts(t *testing.T) {
 	if code, body := get("http://evil.example.org/"); code != 403 || !strings.Contains(body, "permissions.network") {
 		t.Fatalf("other host: %d %q", code, body)
 	}
+	// The program and the log both say it was the sandbox's egress rule, with the port (#15707).
+	if code, body := get("http://evil.example.org:8080/"); code != 403 || !strings.Contains(body, "persona sandbox egress: evil.example.org:8080 ") ||
+		!strings.Contains(body, "hosts its owner allowed") {
+		t.Fatalf("refusal names the sandbox: %d %q", code, body)
+	}
 	if code, _ := get("http://192.0.2.8/"); code != 403 {
 		t.Fatalf("an IP not listed: %d", code)
 	}
@@ -108,10 +118,18 @@ func TestProxyAllowsOnlyItsHosts(t *testing.T) {
 		t.Fatalf("the hub without a token of it: %d", code)
 	}
 	st := p.Stats("notes")
-	if st.Allowed != 2 || st.Denied != 4 || st.LastDenied == "" {
+	if st.Allowed != 2 || st.Denied != 5 || st.LastDenied == "" {
 		t.Fatalf("counts %+v", st)
 	}
-	if len(decided) != 6 {
+	logMu.Lock()
+	refusedLogged := slices.ContainsFunc(logged, func(l string) bool {
+		return strings.Contains(l, "notes: sandbox egress refused evil.example.org:8080 ")
+	})
+	logMu.Unlock()
+	if !refusedLogged {
+		t.Fatal("the refusal's log line does not name the sandbox egress rule and port")
+	}
+	if len(decided) != 7 {
 		t.Fatalf("decisions %v", decided)
 	}
 }

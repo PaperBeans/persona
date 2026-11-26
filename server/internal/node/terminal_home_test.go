@@ -47,6 +47,11 @@ esac
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Each fixture installs a new CLI, while the node caches the installed Herdr's capability probe.
+	// Finish that executable's first launch before the pane-size request starts its normal deadline.
+	if out, err := exec.Command(bin, "terminal", "session", "control", "--help").CombinedOutput(); err != nil {
+		t.Fatalf("test Herdr control is unavailable: %v: %s", err, out)
+	}
 	return bin, log
 }
 

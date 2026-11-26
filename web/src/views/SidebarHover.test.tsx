@@ -6,31 +6,38 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
-  window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
+  window.matchMedia = ((query: string) => ({ matches: query === "(hover: hover) and (pointer: fine)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
-// Sidebar's body calls sidebarConversations and AgentsBlock's calls arrangeSpaces on every render: counted
+// Count calls made directly in each body, including a re-render that only changes local state.
 const calls = vi.hoisted(() => ({ sidebar: 0, agents: 0 }));
-vi.mock("../lib/conversation-pins", async (load) => {
-  const real = await load<typeof import("../lib/conversation-pins")>();
-  return { ...real, sidebarConversations: (...a: Parameters<typeof real.sidebarConversations>) => (calls.sidebar++, real.sidebarConversations(...a)) };
+vi.mock("../lib/conversation-origins", async (load) => {
+  const real = await load<typeof import("../lib/conversation-origins")>();
+  return { ...real, recentConversations: (...a: Parameters<typeof real.recentConversations>) => (calls.sidebar++, real.recentConversations(...a)) };
 });
-vi.mock("../lib/agent-filter", async (load) => {
-  const real = await load<typeof import("../lib/agent-filter")>();
-  return { ...real, arrangeSpaces: (...a: Parameters<typeof real.arrangeSpaces>) => (calls.agents++, real.arrangeSpaces(...a)) };
+vi.mock("../lib/agent-groups", async (load) => {
+  const real = await load<typeof import("../lib/agent-groups")>();
+  return { ...real, agentGrouping: (...a: Parameters<typeof real.agentGrouping>) => (calls.agents++, real.agentGrouping(...a)) };
 });
 import { refresh, reset } from "../lib/store";
 import type { Machine, Session } from "../lib/types";
 import { Sidebar } from "./Sidebar";
+import { SidebarRowHoverHost } from "./SidebarRowHover";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const machines: Machine[] = [{ id: "mac", name: "MacBook", online: true }];
 const sessions: Session[] = Array.from({ length: 12 }, (_, i) => ({ machine_id: "mac", session_id: `s${i + 1}`, title: `task ${i + 1}`, cwd: "/code", status: "idle", state: "idle" }));
-const answers: Record<string, unknown> = { "/api/v1/sessions": { sessions }, "/api/v1/machines": { machines } };
+const chat: Session = { machine_id: "hub", session_id: "trip", title: "1125 | Plan | Trip itinerary", cwd: "/plans", status: "idle", assistant: true, last_text: "Three day trips are ready to compare." };
+const answers: Record<string, unknown> = {
+  "/api/v1/sessions": { sessions },
+  "/api/v1/machines": { machines },
+  "/api/v1/assistant": { machine_id: "hub", online: true, main: "main", conversations: [{ ...chat, session_id: "main", title: "Persona" }, chat] },
+};
 
 let host: HTMLDivElement;
 let root: Root;
 const flush = async () => {
+  await act(async () => { await vi.dynamicImportSettled(); });
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 };
 
@@ -95,5 +102,54 @@ describe("hovering sidebar rows", () => {
     act(() => void links[9].dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
     expect(glide.style.opacity).toBe("0");
     expect(calls.sidebar).toBe(0);
+  });
+
+  it("opens and dismisses Persona and Agent cards without rendering either list", async () => {
+    await act(() => refresh());
+    act(() => root.render(<>
+      <Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />
+      <SidebarRowHoverHost />
+    </>));
+    await flush();
+    const persona = host.querySelector<HTMLAnchorElement>('a[href="/persona/trip"]')!;
+    const agents = [...host.querySelectorAll<HTMLAnchorElement>('a[href^="/s/mac/"]')].slice(0, 5);
+    const card = () => document.querySelector('[data-sidebar-row-hover-card]');
+    const pointer = (row: HTMLElement, type: "pointerover" | "pointerout") => {
+      act(() => row.dispatchEvent(new PointerEvent(type, { pointerType: "mouse", bubbles: true, relatedTarget: document.body })));
+    };
+
+    expect(persona).toBeTruthy();
+    expect(agents).toHaveLength(5);
+    expect(calls.sidebar).toBeGreaterThan(0);
+    expect(calls.agents).toBeGreaterThan(0);
+    calls.sidebar = calls.agents = 0;
+    vi.useFakeTimers();
+    try {
+      for (const row of agents) {
+        pointer(row, "pointerover");
+        act(() => vi.advanceTimersByTime(35));
+        pointer(row, "pointerout");
+      }
+      act(() => vi.advanceTimersByTime(250));
+      expect(card()).toBeNull();
+
+      for (const row of [persona, agents[0]]) {
+        pointer(row, "pointerover");
+        act(() => vi.advanceTimersByTime(249));
+        expect(card()).toBeNull();
+        await act(async () => { vi.advanceTimersByTime(1); });
+        await flush();
+        expect(card()).not.toBeNull();
+        expect(card()?.textContent).toContain(row.textContent);
+        expect(host.contains(card())).toBe(false);
+        pointer(row, "pointerout");
+        expect(card()).toBeNull();
+      }
+      console.info(`Persona and Agent cards: Sidebar renders ${calls.sidebar}, AgentsBlock renders ${calls.agents}`);
+      expect(calls.sidebar).toBe(0);
+      expect(calls.agents).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

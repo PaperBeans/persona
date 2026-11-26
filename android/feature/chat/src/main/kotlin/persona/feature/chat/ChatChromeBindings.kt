@@ -23,6 +23,10 @@ data class ChatChromeBindings(
     /** Worktree status and removal for Close Agent / Delete Chat (#4532), by the group's own machine ids; null: none offered. */
     val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     val onOpenSession: ((SessionKey) -> Unit)? = null,
+    /** Opens a subagent's full detail view without redirecting back to its parent. */
+    val onOpenSubagent: ((SessionKey) -> Unit)? = null,
+    /** Opens Session Overview focused on its Subagents section (e.g. from parent-row rollup tap). */
+    val openSubagents: Boolean = false,
     /**
      * Opens a side session's own chat over this one (#7944, `ChatRoute.side`): from the header's Side sessions, and
      * when a link to a side landed on its parent. Null: sides are not offered.
@@ -78,6 +82,8 @@ data class ChatChromeBindings(
     val forkActions: ChatActions? = actions,
     /** Explicit Codex takeover / continuation actions, also available when previewing an offline codex_history session. */
     val takeoverActions: ChatActions? = actions,
+    /** Hub setting `use_herdr_tab_name`: promotes the herdr tab name to main title and uses the unified Rename dialog (#13899). */
+    val preferHerdrTabName: Boolean = false,
 )
 
 /** Where a branch made by "Branch to new chat" opens: an assistant's branch is an assistant conversation, an agent's an agent chat. */

@@ -21,6 +21,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -48,9 +52,37 @@ class FeishuBotShotsTest {
     private var dark by mutableStateOf(false)
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/feishu-bot-shots").also { it.mkdirs() }
 
-    private class Bot(val status: FeishuBotStatus) : FeishuBotSettings {
+    private class Bot(val status: FeishuBotStatus, override val sync: LarkSyncSettings? = null) : FeishuBotSettings {
         override suspend fun status() = status
         override suspend fun update(update: FeishuBotUpdate) = status
+    }
+
+    /**
+     * The daily sync (#15392) with example data: the chat bot waiting for the admin's approval, its account up to date;
+     * a second company's sync bot with one account to authorize again, one whose access ends soon, and one waiting too;
+     * and a bot whose setup was left half way.
+     */
+    private val syncView: LarkSyncView get() {
+        val now = Instant.now()
+        val ago = now.minusSeconds(3 * 3600).toString()
+        val next = now.plusSeconds(20 * 3600).toString()
+        return LarkSyncView(available = true, scheduleHour = 3,
+            accounts = listOf(LarkSyncAccount("a1", label = "示例用户"), LarkSyncAccount("a2", name = "Example Co."),
+                LarkSyncAccount("a3", label = "Lark 工作区"), LarkSyncAccount("a4")),
+            bots = listOf(
+                LarkSyncBot("b1", label = "示例公司", tier = LarkSync.TierDocs, hasSecret = true),
+                LarkSyncBot("primary", appId = "cli_a1b2c3", domain = "https://open.feishu.cn", tier = LarkSync.TierFull,
+                    approval = "awaiting_approval", primary = true, hasSecret = true),
+                LarkSyncBot("b2", label = "未完成的机器人", hasSecret = false, registering = true),
+            ),
+            bindings = listOf(
+                LarkSyncBinding("primary:a1", "primary", "a1", tier = LarkSync.TierFull, enabled = true, health = "ok", reauthDueDays = 300,
+                    lastRunAt = ago, nextRunAt = next, lastMessages = 128, lastDocs = 6),
+                LarkSyncBinding("b1:a2", "b1", "a2", enabled = true, health = "needs_reauth", lastRunAt = ago, lastMessages = 0, lastDocs = 3),
+                LarkSyncBinding("b1:a3", "b1", "a3", enabled = true, health = "ok", reauthDueDays = 9, lastRunAt = ago, nextRunAt = next,
+                    lastMessages = 0, lastDocs = 1),
+                LarkSyncBinding("b1:a4", "b1", "a4", enabled = true, health = "awaiting_approval"),
+            ))
     }
 
     private val paired = FeishuBotStatus(enabled = true, appId = "cli_a1b2c3", domain = "https://open.feishu.cn", hasSecret = true, connected = true,
@@ -85,6 +117,57 @@ class FeishuBotShotsTest {
         rule.onNodeWithText("验证并保存").assertIsNotEnabled()
         rule.onAllNodes(androidx.compose.ui.test.hasText("https://open.feishu.cn")).assertCountEquals(0) // Feishu, not the URL
         shots("paired")
+    }
+
+    /** Every style, light and dark, scrolled to [target] once the page is drawn again in that style and [prepare]d. */
+    private fun syncShots(name: String, target: String, prepare: () -> Unit) {
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.waitForIdle()
+            prepare()
+            bringIn(target)
+            rule.waitForIdle()
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(out(), "feishu-bot-$name-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
+                .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+
+    /** Scrolls the page until [text] is on screen, once the page has it. */
+    private fun bringIn(text: String) = rule.waitUntil(5_000) {
+        runCatching { rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasText(text)) }.isSuccess
+    }
+
+    @Test fun theDailySync() {
+        show(Bot(paired.copy(agents = null), FakeLarkSync(syncView)))
+        // The chat bot first, its app waiting for the admin; then the second company's accounts, each in its state.
+        for (text in listOf("每天同步到知识库", "聊天机器人", "等待管理员审批", "示例用户", "示例公司", "需要重新授权", "重新授权",
+            "授权还有 9 天到期，重新授权后可继续同步。", "账号 4", "继续设置", "同步时间", "添加账号或机器人")) {
+            bringIn(text)
+            rule.onAllNodes(hasText(text, substring = true), useUnmergedTree = true)[0].assertIsDisplayed()
+        }
+        syncShots("sync", "添加账号或机器人") {}
+    }
+
+    @Test fun addingAnAccount() {
+        val sync = FakeLarkSync(syncView)
+        show(Bot(paired.copy(agents = null), sync))
+        syncShots("sync-add", "扫码新建") {
+            bringIn("添加账号或机器人")
+            rule.onNodeWithText("添加账号或机器人").performClick()
+            rule.waitForIdle()
+        }
+        bringIn("用聊天机器人")
+        bringIn("扫码新建")
+        rule.onNodeWithText("扫码新建").performClick()
+        rule.waitUntil(5_000) { sync.calls.any { it.startsWith("create") } }
+        bringIn("第 1 步，共 2 步：创建应用")
+    }
+
+    @Test fun anOlderHubShowsNoSync() {
+        show(Bot(paired.copy(agents = null), FakeLarkSync(null)))
+        bringIn("怎么建机器人")
+        rule.onAllNodes(hasText("每天同步到知识库")).assertCountEquals(0)
     }
 
     @Test fun noCredentialsYet() {

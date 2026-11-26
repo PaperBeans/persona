@@ -184,14 +184,15 @@ func (s *Service) outcomeAgents(ctx context.Context, t Todo) []outcomeAgent {
 		if m, ok := s.device(ctx, a.MachineID); ok {
 			name = m.Name
 		}
-		_, text := s.lastTurn(ctx, a.MachineID, a.SessionID)
+		resolved, sid, listed := s.resolveTaskSession(ctx, a.MachineID, a.SessionID)
+		_, text := s.lastTurn(ctx, a.MachineID, sid)
 		cwd := a.Cwd
-		if c, ok := s.session(ctx, a.MachineID, a.SessionID); ok {
+		if listed {
 			if text == "" {
-				text = strings.TrimSpace(c.LastText)
+				text = strings.TrimSpace(resolved.LastText)
 			}
 			if cwd == "" {
-				cwd = c.Cwd
+				cwd = resolved.Cwd
 			}
 		}
 		if text = strings.TrimSpace(text); text == "" || cutOff(text) {

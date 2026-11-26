@@ -324,19 +324,39 @@ class RealInboxRepository(
 
     override suspend fun refreshNow() { actions?.collectNow(); refresh() }
 
-    override suspend fun personaContext(itemId: String): String? {
+    override suspend fun personaContext(itemId: String): PersonaContext? {
         val transport = requireTransport()
         val key = "${transport.scope}:inbox-context:$itemId"
-        val cached = snapshots.restore<JsonObject>(key)?.optional("context")
+        val cachedJson = snapshots.restore<JsonObject>(key)
+        val cached = cachedJson?.let { json ->
+            json.optional("context")?.let { text -> PersonaContext(text, clippingOf(json)) }
+        }
         if (!online() || actions == null) return cached
         return try {
             val record = recordOf(itemId)
-            asItem(record) { actions.context(record?.hubItemId ?: itemId) }.takeIf { it.isNotBlank() }?.also { context ->
+            val detail = asItem(record) { actions.context(record?.hubItemId ?: itemId) }
+            detail.text.takeIf { it.isNotBlank() }?.also { context ->
                 if (!owns(transport)) throw CancellationException("Pairing changed")
-                snapshots.save(key, buildJsonObject { put("context", context) })
-            } ?: cached
+                val truncated = detail.mailBodyTruncated
+                snapshots.save(key, buildJsonObject {
+                    put("context", context)
+                    if (truncated != null) put("mail_body_truncated", truncated)
+                })
+            }?.let { PersonaContext(it, StoredMailClipping.fromHub(detail.mailBodyTruncated)) } ?: cached
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { cached }
+    }
+
+    /** The cached `mail_body_truncated` as the closed tri-state; only a real JSON boolean decides. */
+    private fun clippingOf(json: JsonObject): StoredMailClipping {
+        val primitive = json["mail_body_truncated"] as? JsonPrimitive
+        val flag = when {
+            primitive == null || primitive.isString -> null
+            primitive.content == "true" -> true
+            primitive.content == "false" -> false
+            else -> null
+        }
+        return StoredMailClipping.fromHub(flag)
     }
 
     override suspend fun setDone(itemId: String, done: Boolean) {

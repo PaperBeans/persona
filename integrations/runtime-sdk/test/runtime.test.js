@@ -1463,3 +1463,50 @@ test('supervision_policy and assistant_environment are explicit assistant-only c
   assert.equal(noSend.hello.caps.supervision_policy, undefined, 'never advertised when start/send are incomplete')
   assert.equal(noSend.hello.caps.assistant_environment, undefined)
 })
+
+test('hello carries codex_claims only when codexClaims names an app-server instance (#12571)', async (t) => {
+  const plain = await startFakeNode(t)
+  const unclaimed = createRuntime(minimal(), { runtime: 'plain', socketPath: plain.path, retryMs: 20 })
+  t.after(() => unclaimed.stop())
+  unclaimed.start()
+  await plain.ready
+  assert.equal(plain.hello.codex_claims, undefined, 'absent without the option')
+
+  const n = await startFakeNode(t, { features: ['prefer_running', 'codex_claims'] })
+  let asked = 0
+  const rt = createRuntime(minimal(), {
+    runtime: 'codexd',
+    socketPath: n.path,
+    retryMs: 20,
+    codexClaims: () => {
+      asked++
+      return [{ home: '/srv/codex', endpoint: 'unix:///srv/codex/app.sock' }, { endpoint: 'ws://127.0.0.1:4500', note: 'x' }, { home: 7 }, null, {}]
+    },
+  })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  assert.deepEqual(n.hello.codex_claims, [{ home: '/srv/codex', endpoint: 'unix:///srv/codex/app.sock' }, { endpoint: 'ws://127.0.0.1:4500' }],
+    'only the entries that name a home or an endpoint, with nothing else')
+  assert.equal(asked, 1, 'a function is asked once per hello')
+  await until('the node took the claims', () => rt.nodeHas('codex_claims'))
+
+  const old = await startFakeNode(t)
+  const listed = createRuntime(minimal(), { runtime: 'listed', socketPath: old.path, retryMs: 20, codexClaims: [{ home: '/srv/codex' }] })
+  t.after(() => listed.stop())
+  listed.start()
+  await old.ready
+  assert.deepEqual(old.hello.codex_claims, [{ home: '/srv/codex' }], 'a list is sent as it is')
+  assert.equal(listed.nodeHas('codex_claims'), false, 'a node without the feature ignores the claims')
+
+  for (const codexClaims of [[], [{}], () => { throw new Error('not yet') }]) {
+    const none = await startFakeNode(t)
+    const logged = []
+    const quiet = createRuntime(minimal(), { runtime: 'none', socketPath: none.path, retryMs: 20, codexClaims, log: (line) => logged.push(line) })
+    t.after(() => quiet.stop())
+    quiet.start()
+    await none.ready
+    assert.equal(none.hello.codex_claims, undefined, 'nothing to claim sends no codex_claims')
+    if (typeof codexClaims === 'function') assert.ok(logged.some((line) => line.includes('codexClaims: not yet')), 'a failing function is logged')
+  }
+})

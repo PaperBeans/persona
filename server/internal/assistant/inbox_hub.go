@@ -1,7 +1,9 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -64,6 +66,29 @@ const (
 // inboxConfigFor is how long the hub's inbox settings are taken as they were read.
 const inboxConfigFor = 5 * time.Second
 
+// queryInboxConfig distinguishes a valid configuration object (including {}) from an absent response. appCall accepts
+// empty responses for other methods, but an authorization configuration must be an actual JSON object.
+func (s *Service) queryInboxConfig(ctx context.Context) (assistantwire.InboxConfig, error) {
+	params, _ := json.Marshal(map[string]any{})
+	p := AppCall{AppID: AppInbox, Method: assistantwire.InboxConfigMethod, Params: params}
+	res, ok, err := s.localFleetAppCall(ctx, p)
+	if !ok {
+		res, err = s.hub.AppCall(ctx, p)
+	}
+	if err != nil {
+		return assistantwire.InboxConfig{}, err
+	}
+	res = bytes.TrimSpace(res)
+	if len(res) == 0 || bytes.Equal(res, []byte("null")) {
+		return assistantwire.InboxConfig{}, errors.New("empty inbox configuration response")
+	}
+	var cfg assistantwire.InboxConfig
+	if err := json.Unmarshal(res, &cfg); err != nil {
+		return assistantwire.InboxConfig{}, err
+	}
+	return cfg, nil
+}
+
 // inboxConfig is the hub's inbox settings (InboxConfigMethod), read again after a few seconds; while the hub can't
 // say, the last ones (none: the zero settings).
 func (s *Service) inboxConfig(ctx context.Context) assistantwire.InboxConfig {
@@ -73,13 +98,28 @@ func (s *Service) inboxConfig(ctx context.Context) assistantwire.InboxConfig {
 	if !b.cfgAt.IsZero() && time.Since(b.cfgAt) < inboxConfigFor {
 		return b.cfg
 	}
-	var cfg assistantwire.InboxConfig
-	if err := s.appCall(ctx, AppInbox, assistantwire.InboxConfigMethod, map[string]any{}, &cfg); err != nil {
+	cfg, err := s.queryInboxConfig(ctx)
+	if err != nil {
 		s.logf("inbox: the hub's settings: %v", err)
 		return b.cfg
 	}
 	b.cfg, b.cfgAt = cfg, time.Now()
 	return cfg
+}
+
+// inboxConfigFresh is the outbound authorization read. Unlike the display/background cache, it never substitutes a
+// previous or zero configuration when the hub cannot answer: an outward action must not rely on an unknown policy.
+func (s *Service) inboxConfigFresh(ctx context.Context) (assistantwire.InboxConfig, error) {
+	b := &s.inbox
+	b.cfgMu.Lock()
+	defer b.cfgMu.Unlock()
+	cfg, err := s.queryInboxConfig(ctx)
+	if err != nil {
+		s.logf("inbox: fresh settings before an outward action: %v", err)
+		return assistantwire.InboxConfig{}, err
+	}
+	b.cfg, b.cfgAt = cfg, time.Now()
+	return cfg, nil
 }
 
 // inboxMailBody is one mail read in full by the hub.

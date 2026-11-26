@@ -19,7 +19,7 @@ import urllib.request
 
 from playwright.sync_api import expect, sync_playwright
 
-PERSONA = 'a[title="Persona 的主对话"]'
+PERSONA = 'a[aria-description="Persona 的主对话"]'
 
 
 def ok(msg):

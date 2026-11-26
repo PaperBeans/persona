@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -13,13 +14,18 @@ import (
 // them all back). Meta.Plan counts the latest list. The list is rebuilt from the calls' successful results the way
 // the transcript view folds them (foldTaskSnapshots), so a call that failed changes nothing.
 
+const claudeDesktopPlan = "mcp__ccd_turn__update_plan"
+const claudeDesktopWrapUp = "mcp__ccd_turn__wrap_up"
+
 // planTools are the tools whose results change the plan.
-var planTools = map[string]bool{"TodoWrite": true, "TaskCreate": true, "TaskUpdate": true, "TaskList": true}
+var planTools = map[string]bool{claudeDesktopPlan: true, "TodoWrite": true, "TaskCreate": true, "TaskUpdate": true, "TaskList": true}
 
 // PlanMarkers are the bytes a line calling a plan tool contains, for readers that skip the other lines. A call's
 // result line does not name its tool: such readers also take the lines holding Meta.PlanPending's ids.
+// `update_plan"` matches Claude Desktop's mcp__ccd_turn__update_plan as well as Codex's update_plan and
+// functions.update_plan without expanding the node's Aho-Corasick marker table.
 var PlanMarkers = [][]byte{[]byte(`"name":"TodoWrite"`), []byte(`"name":"TaskCreate"`), []byte(`"name":"TaskUpdate"`),
-	[]byte(`"name":"TaskList"`)}
+	[]byte(`"name":"TaskList"`), []byte(`update_plan"`), []byte(`"plan_update"`)}
 
 // planCurrentLen (runes): the step in progress is one line on a task card and in the snapshot.
 const planCurrentLen = 120
@@ -58,6 +64,16 @@ func (m *Meta) trackPlan(it proto.Item) {
 		if text := strings.TrimSpace(it.Text); use.ToolName == "TaskUpdate" && strings.HasPrefix(text, "Task #") && strings.HasSuffix(text, " not found") {
 			return // Claude Code answers an unknown id with text, not an error: nothing changed
 		}
+		if use.ToolName == claudeDesktopPlan && !it.IsError && strings.HasPrefix(strings.TrimSpace(it.Text), "Plan updated") {
+			if slices.Contains(m.desktopPlanDeltas, it.ToolUseID) {
+				return
+			}
+			if m.applyDesktopPlanDelta(use.ToolInput) {
+				m.desktopPlanDeltas = append(slices.Clone(m.desktopPlanDeltas), it.ToolUseID)
+				m.countPlan(at)
+				return
+			}
+		}
 		var activeForm string
 		if use.ToolName == "TaskCreate" || use.ToolName == "TaskUpdate" {
 			if s := taskObject(use.ToolInput).str("activeForm"); s != nil {
@@ -69,6 +85,64 @@ func (m *Meta) trackPlan(it proto.Item) {
 		}
 		m.countPlan(at)
 	}
+}
+
+// Claude Desktop numbers steps from one. A successful incremental receipt edits the
+// previous checklist; a turn ending does not itself complete any steps.
+func (m *Meta) applyDesktopPlanDelta(raw json.RawMessage) bool {
+	var delta struct {
+		Items   json.RawMessage
+		Advance json.RawMessage
+		Done    []int
+		Start   *int
+	}
+	if json.Unmarshal(raw, &delta) != nil || delta.Items != nil {
+		return false
+	}
+	advance := string(delta.Advance) == "true" || string(delta.Advance) == `"true"`
+	if !advance && len(delta.Done) == 0 && delta.Start == nil {
+		return false
+	}
+	// Other task tools can share the session; the indices apply only to the desktop list.
+	var indices []int
+	for i, step := range m.planItems {
+		if strings.HasPrefix(step.id, "todo:") {
+			indices = append(indices, i)
+		}
+	}
+	for _, n := range delta.Done {
+		if n < 1 || n > len(indices) {
+			return true
+		}
+	}
+	if delta.Start != nil && (*delta.Start < 1 || *delta.Start > len(indices)) {
+		return true
+	}
+	m.planItems = slices.Clone(m.planItems)
+	for _, n := range delta.Done {
+		m.planItems[indices[n-1]].status = "completed"
+	}
+	if delta.Start != nil {
+		m.planItems[indices[*delta.Start-1]].status = "in_progress"
+	}
+	if advance {
+		next := 0
+		for i, idx := range indices {
+			if m.planItems[idx].status == "in_progress" {
+				m.planItems[idx].status = "completed"
+				next = i + 1
+				break
+			}
+		}
+		for i := range indices {
+			idx := indices[(next+i)%len(indices)]
+			if m.planItems[idx].status == "pending" {
+				m.planItems[idx].status = "in_progress"
+				break
+			}
+		}
+	}
+	return true
 }
 
 // PlanPending is the ids of plan tool calls still waiting for their result (nil when none is), for readers that skip
@@ -83,6 +157,9 @@ func (m *Meta) pendingIDs() {
 	for id := range m.planUses {
 		m.planPending = append(m.planPending, []byte(id))
 	}
+	for _, call := range m.codexPlanCalls {
+		m.planPending = append(m.planPending, []byte(call.id))
+	}
 }
 
 // applyPlan applies one result to the list, as the clients rebuild a folded run's tasks: TodoWrite replaces the todo
@@ -91,6 +168,7 @@ func (m *Meta) applyPlan(snap proto.FoldTaskSnapshot, activeForm string) {
 	m.planItems = slices.Clone(m.planItems) // a copy of the Meta may hold the old list
 	switch snap.Replace {
 	case "todo":
+		m.desktopPlanDeltas = nil
 		m.planItems = dropItems(m.planItems, func(p planItem) bool { return strings.HasPrefix(p.id, "todo:") })
 	case "task":
 		keep := map[string]bool{}

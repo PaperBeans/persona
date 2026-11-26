@@ -7,8 +7,12 @@ import type { UIPlace } from "../../lib/extension-ui";
 import { onOverlayEntry } from "../../lib/back-close";
 import { InboxExtensionBody } from "./InboxExtensionBody";
 
+const extMock = vi.hoisted(() => ({ onWide: undefined as ((wide: boolean) => void) | undefined }));
 vi.mock("../settings/ExtensionView", () => ({
-  ExtensionUI: ({ onOpenSource }: { onOpenSource: () => void }) => <button type="button" onClick={onOpenSource}>Open in conversation</button>,
+  ExtensionUI: ({ onOpenSource, onWide }: { onOpenSource: () => void; onWide?: (wide: boolean) => void }) => {
+    extMock.onWide = onWide;
+    return <button type="button" onClick={onOpenSource}>Open in conversation</button>;
+  },
 }));
 
 const item: InboxItem = {
@@ -80,5 +84,23 @@ describe("Back from an extension item's source", () => {
     expect(host.querySelector("[data-inbox-source]")).toBeNull();
     expect(host.textContent).not.toContain("own body");
     expect(host.querySelector("[data-extension-inbox]")?.className).not.toContain("hidden");
+  });
+
+  it("widens the inbox extension container for wide canvas views and resets on narrow views or item switch", () => {
+    const container = () => host.querySelector<HTMLElement>("[data-extension-inbox-container]")!;
+    expect(container().className).toContain("max-w-[760px]");
+    expect(container().className).not.toContain("max-w-[1680px]");
+
+    act(() => extMock.onWide?.(true));
+    expect(container().className).toContain("max-w-[1680px]");
+    expect(container().className).not.toContain("max-w-[760px]");
+
+    act(() => extMock.onWide?.(false));
+    expect(container().className).toContain("max-w-[760px]");
+
+    act(() => extMock.onWide?.(true));
+    expect(container().className).toContain("max-w-[1680px]");
+    act(() => root.render(<InboxExtensionBody item={{ ...item, id: "examplechat:2" }} place={place} own={() => <p>own body</p>} />));
+    expect(container().className).toContain("max-w-[760px]");
   });
 });

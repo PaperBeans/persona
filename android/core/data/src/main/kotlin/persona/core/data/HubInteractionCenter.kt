@@ -126,9 +126,10 @@ class HubInteractionCenter(
         val asked = card?.sessionKey
         val since = asked?.let { key -> sessions?.value?.firstOrNull { it.key == key }?.stateSince }
         val marked = handoffCard && resolution.allow == true && card?.isSecretHandoff == true
+        val envMarked = handoffCard && resolution.allow == true && card?.secretRun?.delivery == "env"
         val outcome = try {
             // Every ordinary answer keeps the old overload: delegated transports must not bypass their existing path.
-            if (marked) transport.resolveOutcome(id, resolution, handoffCard = true)
+            if (marked || envMarked) transport.resolveOutcome(id, resolution, handoffCard = true, secretRunEnv = envMarked)
             else transport.resolveOutcome(id, resolution)
         } catch (gone: InteractionGoneException) {
             lock.withLock { end(id, here = true) }

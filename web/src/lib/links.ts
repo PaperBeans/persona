@@ -23,7 +23,7 @@ import { navigate, parse as parseRoute } from "./router";
 import { BASE, stripBase } from "./base";
 import { contextXML } from "./context-xml";
 import { otherManager } from "./manager-choice";
-import { localhostLink, PREVIEW_FEATURE } from "./preview";
+import { localhostLink, PREVIEW_FEATURE } from "./preview-link";
 import type { PortLink } from "./port-links";
 import { getSession, getState, hubHas, larkOn, onHubEvent } from "./store";
 import { mediaMatches, NARROW } from "./viewport";
@@ -145,7 +145,7 @@ function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | n
     const id = p[1] || u.searchParams.get("id");
     if (id) return { kind: "task", id };
   }
-  return parseRoute(path, u.search).name === "not-found" ? null : { kind: "page", path: path + u.search };
+  return parseRoute(path, u.search).name === "not-found" ? null : { kind: "page", path: path + u.search + u.hash };
 }
 
 /**

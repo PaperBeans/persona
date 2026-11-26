@@ -1,0 +1,18 @@
+{
+  "unavailable": "このハブでは毎日の同期を使えません",
+  "settings_unavailable": "毎日の同期の設定を読み込めませんでした。しばらくしてからもう一度お試しください",
+  "no_bot": "このボットは毎日の同期に設定されていません",
+  "no_binding": "このアカウントは毎日の同期につながっていません",
+  "no_app": "このボットにはまだアプリがありません。先に設定を完了してください",
+  "bad_redirect": "戻り先はWebアプリの /lark-oauth ページである必要があります",
+  "auth_expired": "認可の期限が切れました。もう一度始めてください",
+  "auth_failed": "Larkが認可を受け付けませんでした。もう一度始めてください",
+  "auth_denied": "Larkで認可が拒否されました",
+  "register_hint": "Larkでページを開いて確認してください。Personaが、あなたのチャットとドキュメントをナレッジベースに読み込むアプリを作成します。別のデバイスでは、Larkでコードをスキャンすることもできます。",
+  "device_hint": "Larkでページを開き（またはLarkでコードをスキャンし）、Personaがあなたとして読み取ることを許可してください",
+  "device_open_link": "Larkで開く",
+  "reauth_title": "Larkの同期にもう一度許可が必要です",
+  "reauth_body_one": "毎日の同期を続けるには、{count}日以内に{label}をもう一度認可してください",
+  "reauth_body_other": "毎日の同期を続けるには、{count}日以内に{label}をもう一度認可してください",
+  "account_n": "アカウント {n}"
+}

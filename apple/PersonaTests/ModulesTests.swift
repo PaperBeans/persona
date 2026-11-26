@@ -15,7 +15,7 @@ struct ModulesTests {
     @Test func theListRegistersWithoutProblems() {
         let all = ModuleRegistry<PersonaHostApp>(modules: Modules.builtIn, isEnabled: { _ in true })
         #expect(all.problems.isEmpty)
-        #expect(all.active.map(\.id) == ["glasses", "screen-share", "health"])
+        #expect(all.active.map(\.id) == ["glasses", "screen-share", "health", "voice"])
         #expect(Modules.registry.problems.isEmpty)
     }
 
@@ -80,6 +80,7 @@ struct ModulesTests {
         for place in [PersonaHostApp.Place.chatMenu, .chatFooter, .toolCall] { #expect(off.views(at: place).isEmpty) }
         #expect(off.settingsEntry(id: "live-screen") == nil)
         #expect(off.capability((any LiveScreen).self) == nil)
+        #expect(off.audioLease(id: "screen-share.pip") == nil)
     }
 
     @Test func screenShareOnServesItsPlaces() {
@@ -90,6 +91,7 @@ struct ModulesTests {
         }
         #expect(on.settingsEntry(id: "live-screen")?.module == "screen-share")
         #expect(on.capability((any LiveScreen).self) != nil)
+        #expect(on.audioLease(id: "screen-share.pip") == ModuleAudioLease(id: "screen-share.pip", module: "screen-share", kind: .playback))
     }
 
     @Test func screenShareFollowsItsHubFlag() {
@@ -133,6 +135,93 @@ struct ModulesTests {
             s.heard(["modules", "module.screen-share"], from: "home", isHub: true, defaults: d)
             #expect(s.registry.offByHub == ["health"])
             #expect(s.registry.shellPage(id: SidebarRoute.healthPage) == nil)
+        }
+    }
+
+    // Voice (#13431): the core reaches the conversation's voice only through `ConversationVoice`, so with it off the
+    // page has no call, no bar and no captions; the composer's dictation is the core's and stays.
+    @Test func voiceOffProvidesNoConversationVoice() {
+        let off = registry(glasses: false)
+        #expect(!off.isActive("voice"))
+        #expect(off.capability((any ConversationVoice).self) == nil)
+    }
+
+    @Test func voiceOnProvidesConversationVoice() {
+        let on = ModuleRegistry<PersonaHostApp>(modules: Modules.builtIn, isEnabled: { $0.descriptor.id == "voice" })
+        #expect(on.problems.isEmpty)
+        #expect(on.capability((any ConversationVoice).self) === ConversationVoiceState.shared)
+    }
+
+    @Test func voiceFollowsItsHubFlag() {
+        #expect(VoiceModule().descriptor.feature == "module.voice")
+        withDefaults { d in
+            let s = ModuleState(group: "home", defaults: d, isEnabled: { $0.descriptor.id == "voice" })
+            s.heard(["file_upload"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.isActive("voice"), "an older hub leaves it on")
+            s.heard(["modules", "module.voice"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.capability((any ConversationVoice).self) != nil)
+            s.heard(["modules", "module.health"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.offByHub == ["voice"])
+            #expect(s.registry.capability((any ConversationVoice).self) == nil)
+            s.heard(["modules", "module.voice"], from: "home", isHub: true, defaults: d)
+            #expect(s.registry.capability((any ConversationVoice).self) != nil, "back on with the flag")
+        }
+    }
+
+    // Recording (#15214): not a packaged module on Apple yet, so the registry lists none; its allowance is read from the
+    // same hub answer by the same rule, and follows each hello.
+    @Test func recordingFollowsItsHubFlag() {
+        #expect(RecordingModule.descriptor.feature == "module.recording")
+        withDefaults { d in
+            let s = ModuleState(group: "home", defaults: d, isEnabled: { $0.descriptor.id == "voice" })
+            @MainActor func allowance() -> RecordingAllowance { RecordingAllowance(hub: s.registry.hub) }
+            #expect(allowance() == .on, "nothing heard yet")
+            s.heard(["file_upload"], from: "home", isHub: true, defaults: d)
+            #expect(allowance() == .on, "an older hub leaves it on")
+            s.heard(["modules", "module.recording"], from: "home", isHub: true, defaults: d)
+            #expect(allowance() == .on)
+            s.heard(["modules", "module.voice"], from: "home", isHub: true, defaults: d)
+            #expect(allowance() == .off)
+            #expect(s.registry.offByHub.isEmpty, "recording is no listed module: voice stays on, and nothing else is turned off")
+            #expect(s.registry.isActive("voice"))
+            s.heard(["modules", "module.voice", "module.recording"], from: "home", isHub: true, defaults: d)
+            #expect(allowance() == .on, "back on with the flag")
+            // Another hub's hello changes nothing until that hub is the one followed.
+            s.heard(["modules"], from: "work", isHub: false, defaults: d)
+            #expect(allowance() == .on)
+            s.follow("work", features: [], defaults: d)
+            #expect(allowance() == .off)
+            // The remembered answer, before the next launch's hello.
+            #expect(RecordingAllowance(hub: HubModuleMemory.remembered("work", in: d)) == .off)
+            #expect(RecordingAllowance(hub: HubModuleMemory.remembered("home", in: d)) == .on)
+        }
+    }
+
+    /// Lark is no packaged Apple module either: the Lark bot's entry points follow `module.lark` by the same rule (#15995).
+    @Test func larkFollowsItsHubFlag() {
+        #expect(LarkModule.descriptor.feature == "module.lark")
+        withDefaults { d in
+            let s = ModuleState(group: "home", defaults: d, isEnabled: { $0.descriptor.id == "voice" })
+            @MainActor func entry() -> LarkBotEntry { LarkBotEntry(hub: s.registry.hub) }
+            #expect(entry() == .offered, "nothing heard yet")
+            s.heard(["file_upload", "lark"], from: "home", isHub: true, defaults: d)
+            #expect(entry() == .offered, "an older hub leaves it offered")
+            s.heard(["modules", "module.lark"], from: "home", isHub: true, defaults: d)
+            #expect(entry() == .offered)
+            s.heard(["modules", "module.voice", "lark"], from: "home", isHub: true, defaults: d)
+            #expect(entry() == .moduleOff, "the Lark extension's `lark` is not the module's flag")
+            #expect(s.registry.offByHub.isEmpty, "lark is no listed module: voice stays on, and nothing else is turned off")
+            #expect(s.registry.isActive("voice"))
+            s.heard(["modules", "module.voice", "module.lark"], from: "home", isHub: true, defaults: d)
+            #expect(entry() == .offered, "back with the flag")
+            // Another hub's hello changes nothing until that hub is the one followed.
+            s.heard(["modules"], from: "work", isHub: false, defaults: d)
+            #expect(entry() == .offered)
+            s.follow("work", features: [], defaults: d)
+            #expect(entry() == .moduleOff)
+            // The remembered answer, before the next launch's hello.
+            #expect(LarkBotEntry(hub: HubModuleMemory.remembered("work", in: d)) == .moduleOff)
+            #expect(LarkBotEntry(hub: HubModuleMemory.remembered("home", in: d)) == .offered)
         }
     }
 

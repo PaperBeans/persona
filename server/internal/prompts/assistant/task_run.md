@@ -8,7 +8,9 @@
 
 {{.Facts}}{{end}}{{if .TodoID}}
 
-Linked to-do: {{.TodoID}}. Advance this to-do within its approved scope. Report new output and evidence accurately; if no work could be advanced, say why. Persona checks observable progress after this run; repeating a status summary does not count as progress.{{end}}
+Linked to-do: {{.TodoID}}. Advance this to-do within its approved scope. Report new output and evidence accurately; if no work could be advanced, say why. Persona checks observable progress after this run; repeating a status summary does not count as progress.{{end}}{{if .PageHeader}}
+
+{{.PageHeader}}{{end}}
 
 {{.Prompt}}{{if and .KBHint (not .Continued)}}
 

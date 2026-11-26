@@ -1,8 +1,24 @@
 import Foundation
 
+/// What the Agents search reads (#7443): the web's Filter › Search in (`SEARCH_SCOPES`), in its order. Chosen in the
+/// list's ⋯ menu (Search In) and kept, as the grouping is.
 nonisolated enum AgentSearchScope: String, CaseIterable, Identifiable, Sendable {
     case all, title, conversation, user, assistant, errors
     var id: String { rawValue }
+
+    /// Where the choice is kept: a user setting, as the row style's (`agents.rowStyle`). No screen ever wrote the
+    /// developer key it had before (`dev.searchScope`), so nothing moves over.
+    static let key = "agents.searchScope"
+
+    /// The scope a list applies: none until something is searched, so a closed search shows the whole list; an open
+    /// search under Errors shows the Agents with an error before anything is typed, as the web's does.
+    func applied(query: String, searching: Bool) -> Self {
+        !query.isEmpty || (searching && self == .errors) ? self : .all
+    }
+
+    /// Whether an applied scope with this query is a search: something typed, or a scope that lists on its own (Errors,
+    /// while searching). An empty list is then a search with no results, never the first-run screen.
+    func isSearch(query: String) -> Bool { !query.isEmpty || self != .all }
 }
 
 nonisolated struct AgentEvidenceSnippet: Equatable, Sendable {
@@ -220,11 +236,15 @@ nonisolated struct AgentListProjection: Sendable {
         var project = ""
         var model = ""
         var pinnedOnly = false
+        var showEmptyWorkspaces = false
         var hub = ""
         var multiHub = false
         var kept = Set<SessionKey>()
         var held: SessionKey?
         var heldJustFinished = false
+        /// The rows seen during this visit that keep their place (`AppModel.seenThisVisit`, #12514); empty with
+        /// `SeenRows.leave`.
+        var heldSeen: [SessionKey: AgentListOrder.Held] = [:]
         var preferences: [String: Preferences] = [:]
         var pagedGroups = Set<String>()
         var listQuery = SessionListQuery()
@@ -248,7 +268,8 @@ nonisolated struct AgentListProjection: Sendable {
         }
 
         var order: AgentListOrder {
-            AgentListOrder(isPinned: pinned, isMuted: muted, byRank: filter == .all && sort == "state", held: held, heldJustFinished: heldJustFinished)
+            AgentListOrder(isPinned: pinned, isMuted: muted, byRank: filter == .all && sort == "state", held: held,
+                           heldJustFinished: heldJustFinished, heldSeen: heldSeen)
         }
 
         func scope(machine: String, hub: String, space: String = "", project: String = "") -> RuntimeSessionLists.Scope {
@@ -280,6 +301,8 @@ nonisolated struct AgentListProjection: Sendable {
         var space: SpaceGroup?
         var counts: SpaceGroup
         var unread: [SessionKey]
+        /// Every row of the repository: its Mark All as Seen lets the held ones go with the unread ones (#12514).
+        var keys: [SessionKey] = []
         var quiet: Bool
     }
 
@@ -290,6 +313,11 @@ nonisolated struct AgentListProjection: Sendable {
     var unpinned: [Session] = []
     var pinnedAgents: [Session] = []
     var unread: [SessionKey] = []
+    /// The rows the list shows as Unread or Just finished now, by that section: what this visit holds once seen
+    /// (`AppModel.noteShownUnseen`, #12514).
+    var needsSeen: [SessionKey: AgentListOrder.Held] = [:]
+    /// The listed rows that are seen and keep the place they were shown in (`AgentListOrder.isHeldSeen`).
+    var heldSeen: [SessionKey] = []
     var active: [SpaceGroup] = []
     var quiet: [SpaceGroup] = []
     var tree: [RepoTree.Host] = []
@@ -420,6 +448,11 @@ nonisolated struct AgentListProjection: Sendable {
             .map { (session: $0, rank: settings.preferences[$0.group]?.pins.sessions.firstIndex(of: "\($0.machineID)/\($0.sessionID)") ?? 0) }
             .sorted { $0.rank < $1.rank }.map(\.session)
         result.unread = result.filtered.filter { $0.state == .unread }.map(\.key)
+        for session in result.base {
+            if session.state == .unread { result.needsSeen[session.key] = .unread }
+            else if session.showsJustFinished(muted: settings.muted(session)) { result.needsSeen[session.key] = .justFinished }
+        }
+        if !settings.heldSeen.isEmpty || settings.held != nil { result.heldSeen = result.filtered.filter(order.isHeldSeen).map(\.key) }
         result.byHost = settings.machine.isEmpty && Set(result.base.lazy.filter { $0.state.isLive }.map(\.machineRef)).count > 1
         for machine in input.machines {
             result.scopes["machine/" + machine.ref.path] = settings.scope(machine: machine.id, hub: machine.group)
@@ -444,13 +477,21 @@ nonisolated struct AgentListProjection: Sendable {
             for group in groups { result.rows[group.id] = partition(group.sessions, settings: settings) }
             result.menuSections = result.active.map(\.id)
         } else if settings.grouping == "repo" {
-            let catalog = input.workspaces.filter { workspace in
-                input.machines.contains { $0.ref == workspace.machineRef } &&
-                    (settings.machine.isEmpty || workspace.machineRef.path == settings.machine) &&
-                    (!settings.multiHub || HubFilter.matches(settings.hub, workspace.group))
+            let catalog = input.workspaces.compactMap { workspace -> HostWorkspace? in
+                guard let machine = result.machinesByRef[workspace.machineRef],
+                      settings.machine.isEmpty || workspace.machineRef.path == settings.machine,
+                      !settings.multiHub || HubFilter.matches(settings.hub, workspace.group) else { return nil }
+                var workspace = workspace
+                if !machine.online { workspace.online = false }
+                return workspace
             }
+            // A worktree with no Agent has no title, conversation or error: a search in anything but Full text does
+            // not find it by its name or path (#7443).
+            let scoped = settings.searchScope != .all && (!settings.query.isEmpty || settings.searchScope == .errors)
             result.tree = RepoTree.build(result.unpinned.filter { $0.archived != true && ($0.state.isLive || inPinnedWorkspace($0)) }, machines: input.machines.map(\.ref),
-                                         workspaces: catalog, includeEmpty: settings.filter == .all, search: settings.query)
+                                         workspaces: catalog, includeEmpty: settings.filter == .all && !scoped,
+                                         showEmptyWorkspaces: settings.showEmptyWorkspaces, search: scoped ? "" : settings.query,
+                                         navigationSessions: result.pinnedAgents.filter { $0.archived != true })
             result.byHost = settings.machine.isEmpty && result.tree.count > 1
             for host in result.tree {
                 for repo in host.repos {
@@ -464,7 +505,8 @@ nonisolated struct AgentListProjection: Sendable {
                     let quiet = !repo.structured && settings.filter == .all && sessions.allSatisfy { !order.stays($0) }
                     result.repositories[repo.id] = Repository(sessions: sessions,
                         space: spaces.count == 1 && spaces[0].spaceID != "-" ? spaces[0] : nil,
-                        counts: counts, unread: sessions.filter { $0.needsSeen(muted: settings.muted($0)) }.map(\.key), quiet: quiet)
+                        counts: counts, unread: sessions.filter { $0.needsSeen(muted: settings.muted($0)) }.map(\.key),
+                        keys: sessions.map(\.key), quiet: quiet)
                     for worktree in repo.worktrees {
                         func prepare(_ item: RepoTree.Worktree) {
                             result.rows[item.id] = partition(item.sessions, settings: settings)

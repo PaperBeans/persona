@@ -44,6 +44,7 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 	}
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 	defer cancel()
+	sctx = context.WithValue(sctx, placementTaskKey{}, t.ID)
 	prompt := prompts.RenderTaskSuccessor(prompts.TaskSuccessor{Previous: agentLabel(last), PreviousID: last.SessionID,
 		LastReply: clip(last.LastText, 2000), Files: prompts.RenderTaskFiles(answerLanguage(s.hello(ctx).Locale)), Text: text})
 	prompt = s.withTodoDecisions(sctx, t.ID, prompt)
@@ -55,6 +56,7 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 	if err := s.applyModel(sctx, "agent.new", params); err != nil {
 		return proto.Session{}, err
 	}
+	dispatchAllowAll(sctx, s, m, last.Launcher, params)
 	var res struct {
 		Session proto.Session `json:"session"`
 	}

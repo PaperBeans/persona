@@ -15,6 +15,8 @@ globalThis.__attachmentRuntime = {
 
 registerHooks({
   resolve(specifier, context, next) {
+    if (context.parentURL?.endsWith('/Compatibility.ets') && specifier === '../core/ChatForwardWire')
+      return {url:new URL('../core/ChatForwardWire.ts',context.parentURL).href,shortCircuit:true};
     if(specifier==='../platform/HubTransport')return {url:'persona-test:transport',shortCircuit:true};
     if (specifier.endsWith('/core/StorageOwnership') || specifier.endsWith('/core/AttachmentTypes')) return {url:new URL(specifier+'.ts',context.parentURL).href,shortCircuit:true};
     if (specifier === '@kit.AbilityKit') return { url: 'persona-test:ability', shortCircuit: true };

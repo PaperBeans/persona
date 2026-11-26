@@ -55,6 +55,7 @@ export function waitingForMerge(todo: Todo, lookup: SessionLookup | undefined, n
   if (todo.done_at || !openMergePRs(todo, now).length) return false;
   const status = todoStatus(todo, lookup);
   if (status === "failed" || status === "needs_you" || status === "interrupted" || status === "working" || status === "waiting") return false;
+  if (hasActiveAgentWork(todo, lookup)) return false;
   if (reviewState(todo) === "user_check") return false;
   if (!decisionDismissed(todo) && waitsForOwner(todo)) return false;
   return true;
@@ -102,6 +103,15 @@ function ms(at: string | null | undefined): number {
   if (!at) return 0;
   const v = Date.parse(at);
   return Number.isNaN(v) ? 0 : v;
+}
+
+/** Unread on one session does not hide another session's live turn or background work. */
+export function hasActiveAgentWork(todo: Todo, lookup: SessionLookup | undefined): boolean {
+  return (todo.agents ?? []).some((a) => {
+    if (a.released_at || a.start_error) return false;
+    const background = lookup?.(a.machine_id, a.session_id)?.background_working;
+    return background || ["working", "waiting"].includes(todoStatus({ ...todo, agents: [a] }, lookup));
+  });
 }
 
 /** The last moment the to-do or any of its agents moved: its own times, its supervision's (reviews, reports), its
@@ -186,6 +196,9 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
   // a decision the owner chose Don't handle on no longer waits on them (decisionDismissed)
   if (!decisionDismissed(todo) && waitsForOwner(todo)) return at("waiting", "owner_decides");
   if (heldDelivery(todo)?.unblock === "user") return at("waiting", "delivery_ok");
+  // A projected wait includes run, step and active-blocker waits that have no local park or PR record.
+  // Live owner requests above still have an actionable home.
+  if (todo.wait != null && !todo.done_at) return at("parked", todo.wait.kind === "pr_merge" ? "pr_open" : "parked");
   // rule 8's signals, read here so rule 9 yields to them: a turn or review still awaiting acceptance stays Just finished
   const finished = status === "unread" || review === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done";
   const acceptanceRequired = review === "pending_review" || Boolean(todo.supervision?.supervisor);
@@ -198,6 +211,7 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
   }
   if (status === "working" || status === "waiting") return at("working", "agent_running");
   if (todo.done_at) return at(todo.kind === "concern" && fresh(ms(todo.done_at)) ? "just_done" : "done", "closed");
+  if (!settled && hasActiveAgentWork(todo, lookup)) return at("working", "agent_running");
   // A fallback date is not a state transition: keep overdue waits visible until the hub actually wakes them.
   if (review === "parked") return at("parked", "parked");
   if (!concern && acceptanceStands(todo)) return at("done", "accepted");
@@ -303,9 +317,38 @@ export function viewWaitsOnOwner(todo: Todo): OwnerWait | null | undefined {
     case "interrupted":
     case "stopped_unfinished":
       return "agent_asks";
-    default:
+    case "owner_decides":
+    case "verify":
+    case "steps_proposed":
+    case "signin":
+    case "can_wait":
+    case "awaits_reply":
+    case "persona_working":
+    case "agent_running":
+    case "starting":
+    case "queued":
+    case "background":
+    case "closed_unseen":
+    case "completed":
+    case "canceled":
+    case "reported":
+    case "superseded":
+    case "parked":
+    case "finished_unseen":
+    case "finished_recent":
+    case "pr_open":
+    case "usage_limit":
+    case "computer_offline":
+    case "scheduled_report":
+    case "someone_else":
+    case "finished_seen":
+    case "deferred":
+    case "rest":
       return "owner_decides";
   }
+  // TodoReason is closed and VIEW_REASONS let through only its values: a new one fails to compile above.
+  const exhaustive: never = v.reason;
+  return exhaustive;
 }
 
 /**

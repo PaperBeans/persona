@@ -135,7 +135,7 @@ func validOpaqueID(value string) bool {
 type replyIdentity struct{ brand, appID, account string }
 
 func (c *Connector) replyAuth(ctx context.Context, watch connectorwire.LarkReplyWatch) (replyIdentity, error) {
-	auth, err := c.runner.AuthStatus(ctx)
+	auth, err := c.runner.FreshAuthStatus(ctx)
 	if err != nil {
 		return replyIdentity{}, fmt.Errorf("read Lark account identity: %w", err)
 	}

@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/modules/recording/writers"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -44,19 +45,19 @@ func TestMeetingTopics(t *testing.T) {
 		`{"title":"Pricing","state":"current","at":61},{"title":"Hiring","state":"open"}]}`); res.IsError || !strings.Contains(text, "nothing changed") {
 		t.Fatalf("the same again: %s", text)
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); l.TopicsRev != 1 {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); l.TopicsRev != 1 {
 		t.Fatalf("the same list moved the revision: %d", l.TopicsRev)
 	}
 
-	many := make([]map[string]any, kb.MaxTopics+1)
+	many := make([]map[string]any, recordingwire.MaxTopics+1)
 	for i := range many {
 		many[i] = map[string]any{"title": fmt.Sprintf("t%d", i), "state": "open"}
 	}
 	manyArgs, _ := json.Marshal(map[string]any{"topics": many})
 	for name, c := range map[string]struct{ args, want string }{
 		"too many":      {string(manyArgs), "over the 20"},
-		"long title":    {`{"topics":[{"title":"` + strings.Repeat("字", kb.MaxTopicTitle+1) + `","state":"open"}]}`, "over the 80"},
-		"long note":     {`{"topics":[{"title":"x","state":"open","note":"` + strings.Repeat("a", kb.MaxTopicNote+1) + `"}]}`, "over the 200"},
+		"long title":    {`{"topics":[{"title":"` + strings.Repeat("字", recordingwire.MaxTopicTitle+1) + `","state":"open"}]}`, "over the 80"},
+		"long note":     {`{"topics":[{"title":"x","state":"open","note":"` + strings.Repeat("a", recordingwire.MaxTopicNote+1) + `"}]}`, "over the 200"},
 		"two current":   {`{"topics":[{"title":"a","state":"current"},{"title":"b","state":"current"}]}`, "at most one"},
 		"bad state":     {`{"topics":[{"title":"a","state":"later"}]}`, "not done, current or open"},
 		"no title":      {`{"topics":[{"title":"  ","state":"open"}]}`, "topic 1 has no title"},
@@ -69,7 +70,7 @@ func TestMeetingTopics(t *testing.T) {
 			t.Errorf("%s: %v %s", name, res.IsError, text)
 		}
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); len(l.Topics) != 3 || l.TopicsRev != 1 {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); len(l.Topics) != 3 || l.TopicsRev != 1 {
 		t.Fatalf("a refused call changed the topics: %+v", l.Topics)
 	}
 	waitFor(t, "a meeting_live event for the topics", func() bool {
@@ -99,7 +100,7 @@ func TestMeetingTopics(t *testing.T) {
 
 	// The follow-up's seed lists them.
 	rec, _ := r.engine().Store.Recording(meetingRec)
-	m, _, _ := r.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(r.engine()).MeetingRead(meetingRec)
 	if seed := r.s.followupSeed(context.Background(), r.engine(), *rec, m, "Draft the email."); !strings.Contains(seed, "- open: Hiring") {
 		t.Fatalf("seed %s", seed)
 	}
@@ -112,7 +113,7 @@ func TestMeetingTopics(t *testing.T) {
 	if res, text := r.topicsCall(sid, `{"topics":[]}`); !res.IsError || !strings.Contains(text, "unknown tool") {
 		t.Fatalf("an older room set topics: %s", text)
 	}
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
 		l.FedAt = l.FedAt.Add(-2 * feedBatchEvery)
 		return nil
 	}); err != nil {
@@ -156,14 +157,14 @@ func TestMeetingHighlights(t *testing.T) {
 		t.Fatalf("POST …/live: %v", out)
 	}
 	rec, _ := r.engine().Store.Recording(meetingRec)
-	clock := func(sec float64) string { return kb.LiveClock(*rec, sec, loc) }
+	clock := func(sec float64) string { return writers.LiveClock(*rec, sec, loc) }
 	m0, m1, m3 := clock(5), clock(61), clock(190)
 	if clock(59) != m0 || clock(60) != m1 {
 		t.Fatalf("the recording does not start on a minute: %s %s %s", m0, clock(59), m1)
 	}
 	// The first line's minute in UTC or in this machine's zone is no minute of the meeting in the user's.
 	for _, other := range []*time.Location{time.UTC, time.Local} {
-		said := kb.LiveClock(*rec, 5, other)
+		said := writers.LiveClock(*rec, 5, other)
 		if res, text := r.highlightsCall(sid, `{"highlights":[{"text":"The cap stays.","said_at":"`+said+`"}]}`); !res.IsError ||
 			!strings.Contains(text, "highlight 1's said_at "+said+" is not the minute of any line of the meeting so far") {
 			t.Fatalf("a said_at in %s: %s", other, text)
@@ -194,11 +195,11 @@ func TestMeetingHighlights(t *testing.T) {
 	if res, text := r.highlightsCall(sid, same); res.IsError || text != "The highlights are as they were: nothing changed." {
 		t.Fatalf("the same again: %s", text)
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); l.HighlightsRev != 1 {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); l.HighlightsRev != 1 {
 		t.Fatalf("the same list moved the revision: %d", l.HighlightsRev)
 	}
 
-	five := make([]map[string]any, kb.MaxHighlights+1)
+	five := make([]map[string]any, recordingwire.MaxHighlights+1)
 	for i := range five {
 		five[i] = map[string]any{"text": fmt.Sprintf("point %d", i), "said_at": m0}
 	}
@@ -214,7 +215,7 @@ func TestMeetingHighlights(t *testing.T) {
 		"a number text":   {one(`{"text":5,"said_at":"` + m0 + `"}`), "highlight 1 is not an object"},
 		"no said_at":      {one(`{"text":"The cap stays."}`), "highlight 1 is not an object"},
 		"no text":         {one(`{"text":" \n ","said_at":"` + m0 + `"}`), "highlight 1 has no text"},
-		"long text":       {one(`{"text":"` + strings.Repeat("字", kb.MaxHighlightText+1) + `","said_at":"` + m0 + `"}`), "over the 80"},
+		"long text":       {one(`{"text":"` + strings.Repeat("字", recordingwire.MaxHighlightText+1) + `","said_at":"` + m0 + `"}`), "over the 80"},
 		"an offset":       {one(`{"text":"The cap stays.","said_at":"1:02:03"}`), "not the H:MM or HH:MM of a batch line"},
 		"no hour 24":      {one(`{"text":"The cap stays.","said_at":"24:05"}`), "not the H:MM or HH:MM"},
 		"a minute unsaid": {one(`{"text":"The cap stays.","said_at":"` + m3 + `"}`), "is not the minute of any line of the meeting so far"},
@@ -223,7 +224,7 @@ func TestMeetingHighlights(t *testing.T) {
 			t.Errorf("%s: %v %s", name, res.IsError, text)
 		}
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); len(l.Highlights) != 2 || l.HighlightsRev != 1 {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); len(l.Highlights) != 2 || l.HighlightsRev != 1 {
 		t.Fatalf("a refused call changed the highlights: %+v", l.Highlights)
 	}
 	waitFor(t, "a meeting_live event for the highlights", func() bool {
@@ -243,10 +244,10 @@ func TestMeetingHighlights(t *testing.T) {
 	if res, text := r.highlightsCall(sid, same); res.IsError || text != "Highlights saved." {
 		t.Fatalf("a grown minute: %s", text)
 	}
-	if l, _, _ := r.engine().LiveRead(meetingRec); l.HighlightsRev != 2 || l.Highlights[0].End != 59.5 {
+	if l, _, _ := writersOf(r.engine()).LiveRead(meetingRec); l.HighlightsRev != 2 || l.Highlights[0].End != 59.5 {
 		t.Fatalf("a grown minute %+v", l)
 	}
-	d, err := r.engine().Get(kb.KindRecording, meetingRec, 0)
+	d, err := r.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +276,7 @@ func TestMeetingHighlights(t *testing.T) {
 	}
 
 	// The follow-up's seed lists them, at their place in the transcript.
-	m, _, _ := r.engine().MeetingRead(meetingRec)
+	m, _, _ := writersOf(r.engine()).MeetingRead(meetingRec)
 	if seed := r.s.followupSeed(context.Background(), r.engine(), *rec, m, "Draft the email."); !strings.Contains(seed,
 		"- [0:05] The export cap stays for this release.\n- [1:01] Open: who owns the hiring plan?") {
 		t.Fatalf("seed %s", seed)
@@ -297,7 +298,7 @@ func TestMeetingHighlights(t *testing.T) {
 	if res, text := r.highlightsCall(sid, same); !res.IsError || !strings.Contains(text, "unknown tool") {
 		t.Fatalf("an older room set highlights: %s", text)
 	}
-	if _, err := r.engine().LiveUpdate(meetingRec, func(l *kb.Live, _ kb.Recording) error {
+	if _, err := writersOf(r.engine()).LiveUpdate(meetingRec, func(l *recordingwire.Live, _ recordingwire.Recording) error {
 		l.FedAt = l.FedAt.Add(-2 * feedBatchEvery)
 		return nil
 	}); err != nil {
@@ -420,7 +421,7 @@ func TestMeetingLiveLines(t *testing.T) {
 		}
 		return false
 	})
-	d, err := r.engine().Get(kb.KindRecording, meetingRec, 0)
+	d, err := r.engine().Get(recordingwire.KindRecording, meetingRec, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

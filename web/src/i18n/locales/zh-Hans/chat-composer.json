@@ -1,5 +1,6 @@
 {
   "skills_changed": "执行环境已变化，草稿已保留。请移除所选技能并重新选择。",
+  "reference_load_failed": "无法加载引用。草稿已保留，请重试。",
   "cmd_continue_word": "/继续",
   "cmd_continue_desc": "让它接着做",
   "cmd_continue_text": "继续",
@@ -29,10 +30,6 @@
   "images_bytes_as_files_other": "这些图加起来太大了，其中 {count} 张作为文件发送",
   "images_too_large": "这些图加起来太大了，没法一起发送",
   "image_unreadable": "读不了 {name}",
-  "suggestion_label": "Claude 建议：{suggestion}",
-  "suggestion_use": "采用",
-  "suggestion_use_hint": "填入输入框（Tab）",
-  "suggestion_send": "直接发送",
   "message": "消息",
   "interrupt": "中断",
   "interrupt_hint": "中断（Esc）",
@@ -41,7 +38,6 @@
   "send_hint": "发送（Enter）· 换行（Shift+Enter）",
   "blocked_hint": "还没发出去：{label}。写的字会留在这里。",
   "expand": "展开输入框",
-  "collapse": "收起输入框",
   "more_actions": "更多操作",
   "add_more": "添加文件、图片等",
   "queue": "排队发送",
@@ -53,5 +49,9 @@
   "file_waiting": "等待中",
   "file_failed": "失败 · 点击重试",
   "file_cancel": "取消上传 {name}",
-  "file_retry": "重试 {name}"
+  "file_retry": "重试 {name}",
+  "confirm_run_title": "执行 {word}？",
+  "confirm_ok": "确定",
+  "confirm_cancel": "取消",
+  "drop_here": "拖放图片或文件到此处"
 }

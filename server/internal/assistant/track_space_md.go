@@ -117,7 +117,7 @@ func (s *Service) trackSpaceMDGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) trackSpaceMDPut(w http.ResponseWriter, r *http.Request) {
-	if !userOnly(w, r) {
+	if !spacesWriter(w, r) {
 		return
 	}
 	var in assistantwire.SpaceMDPut

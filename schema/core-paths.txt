@@ -1,0 +1,139 @@
+# Which paths are Persona Core, for the checks that control changes to it (#14916, part of #13430;
+# CONTRIBUTING.md "Changing Persona Core", docs/architecture/core-and-modules.md "Guards").
+#
+# Persona Core has no UI: it is the abilities and interfaces for Agents, sessions, tasks and to-dos (the hub API and the
+# data model). The clients' interface code is one default panel built on Core. There are two tiers, plus modules:
+#   core    strictly controlled: the core-change check (label + reason) and CODEOWNERS apply, and no module reference.
+#           The server core, the clients' HEADLESS code (wire types, the hub client, data models) and the foundation
+#           interfaces (module host, switch, guards and gates).
+#   panel   the default panel: the clients' interface code. Not under the core-change check, not in CODEOWNERS; only
+#           the no-module-reference guard applies (scripts/test/test_core_references_no_module.py).
+#   module  module directories: neither tier, free to change.
+#
+# Read by scripts/test/core_paths.py (`is_core`, `is_panel`, `tier`, `core_files`). Checked by scripts/test/test_core_paths.py:
+# the file parses, every explicit path exists (a stale line fails), module directories are never core or panel, sample
+# paths classify as expected, and a `headless` path holds no UI import (androidx.compose, SwiftUI, UIKit, AppKit, React,
+# .tsx; in web also ../ui/, ../views/, ./router, ./store, ./palette; test files excluded). It feeds scripts/hooks/codeowners.py (the generated block of .github/CODEOWNERS, tier core
+# only) and scripts/hooks/core-change-check.py (the merge gate in scripts/hooks/merge-pr.sh, tier core only).
+#
+# Lines (`#` starts a comment):
+#   classified <tier> <kind> <root>...
+#                                 every file under the roots whose unit schema/module-classification.txt classifies `core`
+#                                 gets the tier (kind: go, web, gradle, apple); a unit it classifies as a module id is a
+#                                 module. The classification file is the one list of units, so it is not repeated here.
+#                                 The server is tier core; the three clients' interface code is tier panel unless a
+#                                 line below lifts it.
+#                                   go      server/ and sdk/go/: a file with no classified directory above it (go.mod,
+#                                           migrations) is core
+#                                   web     web/src/
+#                                   gradle  android/: a file belongs to the project with the longest matching directory
+#                                   apple   apple/: a file belongs to the nearest classified directory
+#   core <path>                   a foundation path named explicitly so it is visible at a glance: a file, a directory
+#                                 (and all below it) or a glob with `*`. Tier core. A test-only change in it does not count.
+#   headless <path>               client code with no UI (a directory, a file or a glob; `*` stays inside one path segment): tier core. Proven by the test
+#                                 above, so a file with a UI import cannot be listed.
+#   guard <path>                  tier core, but a test file in it counts too: the path is itself a guard or a gate
+#
+# Test-only changes do not count as a core change; tests may be added freely. A file is test-only when it is
+#   Go     *_test.go, or anything under testdata/
+#   web    *.test.ts, *.test.tsx, *.test.js, *.test.mjs, *.spec.*, anything under __tests__/
+#   Android  a source set of tests under a project: a directory named test, androidTest, testFixtures or *Test(s)
+#            (src/test, src/androidTest, src/testFixtures, src/integrationTest, ... or beside src/)
+#   Apple  a path with a directory named *Tests (PersonaTests, PersonaUITests), or a file *Tests.swift / *Test.swift
+# unless a `guard` line names the path. Fixtures a test reads sit in these places too (testdata/, test directories).
+
+classified core go server sdk/go
+classified panel web web/src
+classified panel gradle android
+classified panel apple apple
+
+# --- The clients' headless code (tier core): wire types, hub client, data models, no UI import -----------------------
+# Decided directory by directory (#14916). A directory with any UI import, or one whose job is drawing, stays in the panel.
+headless native/app-core
+headless android/core/hub
+headless android/core/data
+headless android/core/contracts
+headless android/core/domain
+headless android/core/inbox
+headless android/core/rustcore
+headless android/core/rustcore-android
+headless apple/Packages/PersonaWire
+headless apple/Packages/PersonaCore
+headless apple/Packages/PersonaKit
+headless web/src/lib/configuration
+# web/src/lib is one flat directory of ~1,160 files mixing protocol/store code with React hooks and presentation helpers.
+# Only the data, protocol and state-derivation files are listed, one by one (no prefix globs: `task*`, `model*`, `node*`
+# also hold a page's own labels, menu glue and view models, which are panel). A file is listed when it is no .tsx, imports
+# no React and none of the panel-only modules (../ui/, ./router, ./store, ./palette: checked by test_core_paths.py), and
+# its own header does not say it serves one page, menu, popover or the browser's display preferences. The rest stays panel.
+headless web/src/lib/agent-kind.ts
+headless web/src/lib/agent-filter.ts
+headless web/src/lib/agent-groups.ts
+headless web/src/lib/agent-outgoing.ts
+headless web/src/lib/agent-repos-core.ts
+headless web/src/lib/session-list.ts
+headless web/src/lib/session-groups.ts
+headless web/src/lib/session-actions.ts
+headless web/src/lib/session-history.ts
+headless web/src/lib/session-review-agent.ts
+headless web/src/lib/task-association.ts
+headless web/src/lib/task-cards.ts
+headless web/src/lib/task-completion-check.ts
+headless web/src/lib/task-repositories.ts
+headless web/src/lib/task-trust.ts
+headless web/src/lib/todo-pushes.ts
+headless web/src/lib/todo-reorganize.ts
+headless web/src/lib/todo-tree.ts
+headless web/src/lib/todo-triage.ts
+headless web/src/lib/todo-view-wire.ts
+headless web/src/lib/hub-notify.ts
+headless web/src/lib/hub-update.ts
+headless web/src/lib/hubs.ts
+headless web/src/lib/machine-diagnosis.ts
+headless web/src/lib/model-config.ts
+headless web/src/lib/model-id.ts
+headless web/src/lib/model-profiles.ts
+
+# --- The foundation interfaces and the composition roots ----------------------------------------------------------
+core server/internal/modapi
+core server/internal/assistant/kernel
+core server/internal/moduleswitch
+core server/internal/modules/all
+core web/src/core/module-*
+core android/core/moduleapi
+core apple/Packages/PersonaModuleAPI
+core apple/Persona/App/Modules.swift
+core apple/modules.yml
+core apple/modules-core-only.yml
+core schema/module.schema.json
+core schema/module-classification.txt
+core schema/core-paths.txt
+
+# --- Hub feature flags --------------------------------------------------------------------------------------------
+core server/internal/proto/proto.go
+core server/internal/proto/features_*.go
+core server/internal/hub/extensions_link.go
+
+# --- Guards and gates (a test file here counts) --------------------------------------------------------------------
+guard server/internal/archguard
+guard web/src/core/module-boundary.lint.test.ts
+guard web/eslint.modules.config.mjs
+guard android/module-guard-baseline.txt
+guard scripts/test/test_module_*.py
+guard scripts/test/module_classification.py
+guard scripts/test/test_apple_module_refs.py
+guard scripts/test/apple_module_refs_baseline.json
+guard scripts/test/core_paths.py
+guard scripts/test/test_core_paths.py
+guard scripts/test/test_core_references_no_module.py
+guard scripts/ci/module-e2e.py
+guard scripts/ci/core-only-smoke.py
+guard scripts/ci/web_module_boundary_ratchet.py
+guard scripts/hooks/merge-pr.sh
+guard scripts/hooks/core-change-check.py
+guard scripts/hooks/codeowners.py
+guard scripts/test/test_codeowners.py
+guard scripts/test/test_core_change_check.py
+guard scripts/test/test_merge_pr_sh.py
+guard scripts/test/fake_gh.py
+guard .github/CODEOWNERS

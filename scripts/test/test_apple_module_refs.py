@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,9 +35,23 @@ BASELINE = Path(__file__).resolve().with_name("apple_module_refs_baseline.json")
 # (#13843), the one list of what is core and what is a module. A module joins here once its references from the core
 # are worth counting; the other classified modules (about 700 references today) would only make every move churn the
 # baseline.
-GUARDED = ("glasses", "screen-share", "health")
+GUARDED = ("glasses", "screen-share", "health", "voice")
 _DIRS = module_classification.apple_module_dirs()
-MODULES = {module: _DIRS.get(module, []) for module in GUARDED}
+_, _RULES = module_classification.parse((ROOT / "schema/module-classification.txt").read_text(encoding="utf-8"))
+_APPLE_OWNERS = {r.pattern.removesuffix("/..."): r.target for r in _RULES if r.kind == "apple" and "*" not in r.pattern}
+
+
+def guarded_dirs(dirs):
+    """A module's directories as this ratchet counts them. Once a module has a home of its own (apple/Modules/<Name>), the
+    directories the classification still gives it inside the app's core tree (apple/Persona/...) are its future homes,
+    not yet moved: they count as the core until they move, so the core may still call them (#13431: voice's engine,
+    calls and CarPlay stay in apple/Persona while its views live in apple/Modules/Voice)."""
+    if any(d.startswith("apple/Modules/") for d in dirs):
+        return [d for d in dirs if not d.startswith("apple/Persona/")]
+    return list(dirs)
+
+
+MODULES = {module: guarded_dirs(_DIRS.get(module, [])) for module in GUARDED}
 # The one core file allowed to name module types: the module list (the seed of PersonaHostApp).
 MODULE_LIST = "apple/Persona/App/Modules.swift"
 # Tests and tooling are not the core.
@@ -45,6 +60,8 @@ SKIP_PARTS = {"PersonaTests", "PersonaUITests", "PersonaWatchTests", "Tests", "v
 DECLARATION = re.compile(
     r"^((?:(?:@\w+(?:\([^)\n]*\))?|public|internal|fileprivate|private|final|nonisolated|indirect)\s+)*)"
     r"(?:struct|class|enum|protocol|actor|typealias)\s+([A-Z]\w*)", re.M)
+# A nested private type also shadows a module symbol inside its file; module symbol collection stays top-level only.
+LOCAL_DECLARATION = re.compile(r"^\s*" + DECLARATION.pattern.removeprefix("^"), re.M)
 
 
 def declared(code):
@@ -107,30 +124,46 @@ def swift_files(root=ROOT):
             yield rel
 
 
-def owner(rel):
-    """The module whose directory holds this file, or None for the core."""
-    s = rel.as_posix()
-    for module, dirs in MODULES.items():
-        if any(s == d or s.startswith(d + "/") for d in dirs):
-            return module
+def owner(rel, root=ROOT):
+    """The guarded owner of the closest classified directory, following a source symlink to its declaration."""
+    path = Path(root) / rel
+    if path.is_symlink():
+        resolved = path.resolve()
+        try:
+            rel = resolved.relative_to(Path(root).resolve())
+        except ValueError:
+            return None
+    for parent in rel.parents:
+        directory = parent.as_posix()
+        module = _APPLE_OWNERS.get(directory)
+        if module is not None:
+            return module if directory in MODULES.get(module, ()) else None
     return None
 
 
-def symbols(files):
-    """{module: set of type names} declared at the top level of each module's files."""
+def symbols(files, root=ROOT):
+    """{module: set of type names} declared only by that module, not ambiguously by the core too."""
     out = {m: set() for m in MODULES}
+    core = set()
     for rel in files:
-        module = owner(rel)
+        names = declared(blank((root / rel).read_text(encoding="utf-8", errors="replace")))
+        module = owner(rel, root=root)
         if module:
-            out[module].update(declared(blank((ROOT / rel).read_text(encoding="utf-8", errors="replace"))))
+            out[module].update(names)
+        else:
+            core.update(names)
+    for names in out.values():
+        names.difference_update(core)
     return out
 
 
 def references(src, syms):
-    """(module, line, symbol) for each reference to a module's type in one Swift file."""
+    """(module, line, symbol) for each unambiguous reference to a module's type in one Swift file."""
     code = blank(src)
+    local = {name for _, name in LOCAL_DECLARATION.findall(code)}
     found = []
     for module, names in syms.items():
+        names = names - local
         if not names:
             continue
         pattern = re.compile(r"(?<![\w.])(?:" + "|".join(sorted(map(re.escape, names))) + r")\b")
@@ -208,6 +241,8 @@ class AppleModuleRefsTests(unittest.TestCase):
         self.assertEqual(references("MetaGlasses.shared.configure()", syms), [("glasses", 1, "MetaGlasses")])
         self.assertEqual(references("x\n.sheet { GlassesCaptureSheet { add($0) } }", syms), [("glasses", 2, "GlassesCaptureSheet")])
         self.assertEqual(references("extension MetaGlasses {}", syms), [("glasses", 1, "MetaGlasses")])
+        self.assertEqual(references("private final class MetaGlasses {}\nMetaGlasses()", syms), [])
+        self.assertEqual(references("struct Outer {\n private final class MetaGlasses {}\n func f() { MetaGlasses() }\n}", syms), [])
         self.assertEqual(references("// MetaGlasses.shared\n/* GlassesCaptureSheet */", syms), [])
         self.assertEqual(references('let s = "MetaGlasses"\nlet t = String(localized: "Glasses Photo")', syms), [])
         self.assertEqual(references('let s = #"MetaGlasses"#\nlet m = """\nMetaGlasses\n"""', syms), [])
@@ -219,6 +254,49 @@ class AppleModuleRefsTests(unittest.TestCase):
         src = ("nonisolated struct GlassesError: Error {}\n@Observable\n@MainActor\nfinal class MetaGlasses {\n"
                "    enum Inner {}\n}\nprivate struct Helper {}\n// struct Commented {}\n")
         self.assertEqual(declared(blank(src)), ["GlassesError", "MetaGlasses"])  # a private type is the file's own
+
+    def test_linked_source_keeps_its_declaration_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            shared = root / "apple/Shared/Compatibility.swift"
+            module = root / MODULES["screen-share"][0]
+            shared.parent.mkdir(parents=True)
+            module.mkdir(parents=True)
+            shared.write_text("enum SharedCompatibility {}\n", encoding="utf-8")
+            alias = module / "Compatibility.swift"
+            alias.symlink_to(shared)
+            screen = module / "Presentation.swift"
+            screen.write_text("struct ScreenPresentation {}\n", encoding="utf-8")
+            found = symbols([alias.relative_to(root), screen.relative_to(root)], root=root)
+            self.assertEqual(found["screen-share"], {"ScreenPresentation"})
+
+    def test_link_app_has_its_own_classification(self):
+        self.assertIsNone(owner(Path("apple/PersonaLink/App/Sources/PersonaLink/PairView.swift")))
+        self.assertEqual(owner(Path("apple/PersonaLink/Sources/PersonaScreen/ScreenCaptureSource.swift")), "screen-share")
+
+    def test_module_symbols_do_not_alias_core_types(self):
+        files = list(swift_files())
+        core = set()
+        for rel in files:
+            if not owner(rel):
+                core.update(declared(blank((ROOT / rel).read_text(encoding="utf-8", errors="replace"))))
+        for module, names in symbols(files).items():
+            self.assertFalse(core & names, f"{module} aliases core types: {sorted(core & names)}")
+
+    def test_compatibility_symlink_keeps_the_shared_declaration_in_core(self):
+        # Persona Link shares the core's migration source, not a second ScreenShare declaration.
+        self.assertIsNone(owner(Path("apple/PersonaLink/App/Sources/PersonaLink/NativeCompatibility.swift")))
+
+    def test_core_declarations_disambiguate_the_link_app(self):
+        self.assertIsNone(owner(Path("apple/PersonaLink/App/Sources/PersonaLink/AppDelegate.swift")))
+        self.assertEqual(owner(Path("apple/PersonaLink/Sources/PersonaScreen/main.swift")), "screen-share")
+
+    def test_guarded_dirs(self):
+        # Before a home: every classified directory counts as the module's (glasses).
+        self.assertEqual(guarded_dirs(["apple/Persona/Glasses"]), ["apple/Persona/Glasses"])
+        # With a home: what is still inside apple/Persona counts as the core until it moves (voice).
+        self.assertEqual(guarded_dirs(["apple/Modules/Voice", "apple/Persona/Calls", "apple/Persona/Voice", "apple/PersonaCallIntents"]),
+                         ["apple/Modules/Voice", "apple/PersonaCallIntents"])
 
     def test_compare(self):
         self.assertEqual(compare({"a": {"x": 2}}, {"a": {"x": 1}}), (["a: x 1 -> 2"], []))

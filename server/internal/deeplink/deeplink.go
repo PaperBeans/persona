@@ -5,6 +5,8 @@
 //
 // Path segments are escaped as url.PathEscape does and query values as url.QueryEscape; the query keys follow the
 // table's order. spec/fixtures/deep-links/cases.json holds what each builder writes, byte for byte.
+//
+//persona:layer library
 package deeplink
 
 import (

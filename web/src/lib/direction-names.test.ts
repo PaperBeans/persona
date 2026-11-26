@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countsLabel, directionLabel, directionNames, leaderCounts, leaderExternalDirections, totalCounts, treeLeaders } from "./direction-names";
+import { countsLabel, directionLabel, directionNames, leaderCounts, leaderExternalDirections, totalCounts, treeLeaders, visibleSectionCounts } from "./direction-names";
 
 describe("direction names", () => {
   it("keep the current leaders' names by id, leaving out ended ones and blank names", () => {
@@ -52,5 +52,18 @@ describe("what a lead's row shows of its direction (#4331, #6626)", () => {
     const c = new Map([["a", { running: false, needs_you: 1 }], ["b", { running: true, needs_you: 2 }]]);
     expect(totalCounts(c, ["a", "b", "gone"])).toEqual({ running: true, needs_you: 3 });
     expect(totalCounts(c, ["a"])).toEqual({ running: false, needs_you: 1 });
+  });
+  it("tallies only visible directions and visible recent chats, excluding hidden directions, main, and unlisted rows", () => {
+    const c = new Map([
+      ["dir-alpha", { running: true, needs_you: 2 }],
+      ["dir-beta", { running: false, needs_you: 1 }],
+      ["dir-hidden", { running: true, needs_you: 5 }],
+      ["bg-supervisor", { running: false, needs_you: 3 }],
+      ["main", { running: false, needs_you: 1 }],
+      ["recent-visible", { running: false, needs_you: 1 }],
+      ["recent-folded", { running: false, needs_you: 2 }],
+    ]);
+    expect(visibleSectionCounts(c, ["dir-alpha", "dir-beta"])).toEqual({ running: true, needs_you: 3 });
+    expect(visibleSectionCounts(c, ["dir-alpha", "dir-beta", "dir-alpha"], ["recent-visible", "dir-alpha"])).toEqual({ running: true, needs_you: 4 });
   });
 });

@@ -11,9 +11,11 @@ import (
 // docs/server/launcher-health.md "Capacity-aware notes"). The manager already collects, read-only, how many
 // subscription accounts of each upstream provider are schedulable and when the nearest one recovers.
 //
-// The first cut deliberately does not reorder machines: one launcher maps to one upstream provider, so every
-// machine offering it sees the same provider-level capacity (and two different providers are not equivalent — the
-// model configuration must not be silently changed, docs/assistant/model-config.md). What capacity adds here is the
+// Machines are not reordered by capacity: one launcher maps to one upstream provider, so every machine offering it
+// sees the same provider-level capacity. Launchers are chosen by quota only among the candidates the user listed,
+// in their order, on one tier (candidate_headroom.go, candidate_score.go, #14701): two providers are not equivalent,
+// and the model configuration is never silently changed outside that list (docs/assistant/model-config.md "Tier
+// candidates are not a silent change"); a switch says why on the task card. What capacity adds here is the
 // "why and when" on the detour path (healthDetour, the one chokepoint the agent_start tool and task plans share):
 // when a launcher is rerouted or started anyway despite a failed check, a saturated pool is named, with the nearest
 // recovery time. Stale or missing data says nothing and changes nothing.

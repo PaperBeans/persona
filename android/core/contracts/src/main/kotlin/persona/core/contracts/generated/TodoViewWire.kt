@@ -3,114 +3,318 @@
 
 package persona.core.contracts.generated
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonElement
+
+/**
+ * Called with a closed enum's name and the raw value each time one with x-unknown "count" decodes a value this app
+ * does not know. null: nothing is called.
+ */
+object TodoViewWireDefects {
+    @Volatile
+    var unknownEnum: ((enumName: String, raw: String) -> Unit)? = null
+}
 
 /**
  * The to-do's state in the domain (proposal 6.3): needs_you, the owner has to act; working, Persona or an Agent works
  * on it now; waiting, it waits on something named; ready, finished work nobody has ticked; todo, nobody works on it
  * and nothing waits; someday, the owner put it off; done, closed. done holds exactly when the to-do is closed, and a
- * start that failed reads as open. Open: a newer hub may send other values.
+ * start that failed reads as open. Closed: a client decodes a value a newer hub sends as unknown and counts it. A
+ * value this app does not know decodes to Unknown with the raw value, and encodes back as it came.
  */
-object TodoPhase {
-    const val NEEDS_YOU = "needs_you"
-    const val WORKING = "working"
-    const val WAITING = "waiting"
-    const val READY = "ready"
-    const val TODO = "todo"
-    const val SOMEDAY = "someday"
-    const val DONE = "done"
-    val ALL = listOf("needs_you", "working", "waiting", "ready", "todo", "someday", "done")
+@Serializable(with = TodoPhaseSerializer::class)
+sealed interface TodoPhase {
+    val raw: String
+
+    data object NeedsYou : TodoPhase { override val raw: String = "needs_you" }
+    data object Working : TodoPhase { override val raw: String = "working" }
+    data object Waiting : TodoPhase { override val raw: String = "waiting" }
+    data object Ready : TodoPhase { override val raw: String = "ready" }
+    data object Todo : TodoPhase { override val raw: String = "todo" }
+    data object Someday : TodoPhase { override val raw: String = "someday" }
+    data object Done : TodoPhase { override val raw: String = "done" }
+
+    /** A value this app does not know, kept as it came. */
+    data class Unknown(override val raw: String) : TodoPhase
+
+    companion object {
+        val ALL: List<TodoPhase> = listOf(TodoPhase.NeedsYou, TodoPhase.Working, TodoPhase.Waiting, TodoPhase.Ready, TodoPhase.Todo, TodoPhase.Someday, TodoPhase.Done)
+
+        fun of(raw: String): TodoPhase = when (raw) {
+            "needs_you" -> TodoPhase.NeedsYou
+            "working" -> TodoPhase.Working
+            "waiting" -> TodoPhase.Waiting
+            "ready" -> TodoPhase.Ready
+            "todo" -> TodoPhase.Todo
+            "someday" -> TodoPhase.Someday
+            "done" -> TodoPhase.Done
+            else -> TodoPhase.Unknown(raw)
+        }
+    }
+}
+
+object TodoPhaseSerializer : KSerializer<TodoPhase> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("persona.core.contracts.generated.TodoPhase", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): TodoPhase {
+        val raw = decoder.decodeString()
+        val value = TodoPhase.of(raw)
+        if (value is TodoPhase.Unknown) TodoViewWireDefects.unknownEnum?.invoke("TodoPhase", raw)
+        return value
+    }
+
+    override fun serialize(encoder: Encoder, value: TodoPhase) {
+        encoder.encodeString(value.raw)
+    }
 }
 
 /**
  * Where the list draws the row, in the list's order (proposal 3.4): needs_you; can_wait, folded at the foot of Needs
  * you, listed but not counted; working; waiting; todo; just_finished, open work finished and not ticked, and closed
- * work not seen yet within 24 hours; someday; done. Open: a newer hub may send other values.
+ * work not seen yet within 24 hours; someday; done. Closed: a client decodes a value a newer hub sends as unknown,
+ * counts it and draws the row in no section. A value this app does not know decodes to Unknown with the raw value,
+ * and encodes back as it came.
  */
-object TodoListSection {
-    const val NEEDS_YOU = "needs_you"
-    const val CAN_WAIT = "can_wait"
-    const val WORKING = "working"
-    const val WAITING = "waiting"
-    const val TODO = "todo"
-    const val JUST_FINISHED = "just_finished"
-    const val SOMEDAY = "someday"
-    const val DONE = "done"
-    val ALL = listOf("needs_you", "can_wait", "working", "waiting", "todo", "just_finished", "someday", "done")
+@Serializable(with = TodoListSectionSerializer::class)
+sealed interface TodoListSection {
+    val raw: String
+
+    data object NeedsYou : TodoListSection { override val raw: String = "needs_you" }
+    data object CanWait : TodoListSection { override val raw: String = "can_wait" }
+    data object Working : TodoListSection { override val raw: String = "working" }
+    data object Waiting : TodoListSection { override val raw: String = "waiting" }
+    data object Todo : TodoListSection { override val raw: String = "todo" }
+    data object JustFinished : TodoListSection { override val raw: String = "just_finished" }
+    data object Someday : TodoListSection { override val raw: String = "someday" }
+    data object Done : TodoListSection { override val raw: String = "done" }
+
+    /** A value this app does not know, kept as it came. */
+    data class Unknown(override val raw: String) : TodoListSection
+
+    companion object {
+        val ALL: List<TodoListSection> = listOf(TodoListSection.NeedsYou, TodoListSection.CanWait, TodoListSection.Working, TodoListSection.Waiting, TodoListSection.Todo, TodoListSection.JustFinished, TodoListSection.Someday, TodoListSection.Done)
+
+        fun of(raw: String): TodoListSection = when (raw) {
+            "needs_you" -> TodoListSection.NeedsYou
+            "can_wait" -> TodoListSection.CanWait
+            "working" -> TodoListSection.Working
+            "waiting" -> TodoListSection.Waiting
+            "todo" -> TodoListSection.Todo
+            "just_finished" -> TodoListSection.JustFinished
+            "someday" -> TodoListSection.Someday
+            "done" -> TodoListSection.Done
+            else -> TodoListSection.Unknown(raw)
+        }
+    }
+}
+
+object TodoListSectionSerializer : KSerializer<TodoListSection> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("persona.core.contracts.generated.TodoListSection", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): TodoListSection {
+        val raw = decoder.decodeString()
+        val value = TodoListSection.of(raw)
+        if (value is TodoListSection.Unknown) TodoViewWireDefects.unknownEnum?.invoke("TodoListSection", raw)
+        return value
+    }
+
+    override fun serialize(encoder: Encoder, value: TodoListSection) {
+        encoder.encodeString(value.raw)
+    }
 }
 
 /**
  * Why the row is where it is: the row of proposal 6.3 that placed it (docs/design/proposals/todos-redesign.md 3.4 and
- * 6.3 say which reasons each section holds). Inactivity is a mark (TodoSummary.inactive), not a reason. Open: a newer
- * hub may send other values.
+ * 6.3 say which reasons each section holds). Inactivity is a mark (TodoSummary.inactive), not a reason. Closed: a
+ * client decodes a value a newer hub sends as unknown and counts it. A value this app does not know decodes to
+ * Unknown with the raw value, and encodes back as it came.
  */
-object TodoReason {
-    const val FAILED_START = "failed_start"
-    const val AGENT_ASKS = "agent_asks"
-    const val INTERRUPTED = "interrupted"
-    const val STOPPED_UNFINISHED = "stopped_unfinished"
-    const val OWNER_DECIDES = "owner_decides"
-    const val VERIFY = "verify"
-    const val STEPS_PROPOSED = "steps_proposed"
-    const val SIGNIN = "signin"
-    const val CAN_WAIT = "can_wait"
-    const val AWAITS_REPLY = "awaits_reply"
-    const val PERSONA_WORKING = "persona_working"
-    const val AGENT_RUNNING = "agent_running"
-    const val STARTING = "starting"
-    const val QUEUED = "queued"
-    const val BACKGROUND = "background"
-    const val CLOSED_UNSEEN = "closed_unseen"
-    const val COMPLETED = "completed"
-    const val CANCELED = "canceled"
-    const val REPORTED = "reported"
-    const val SUPERSEDED = "superseded"
-    const val PARKED = "parked"
-    const val FINISHED_UNSEEN = "finished_unseen"
-    const val FINISHED_RECENT = "finished_recent"
-    const val PR_OPEN = "pr_open"
-    const val USAGE_LIMIT = "usage_limit"
-    const val COMPUTER_OFFLINE = "computer_offline"
-    const val SCHEDULED_REPORT = "scheduled_report"
-    const val SOMEONE_ELSE = "someone_else"
-    const val FINISHED_SEEN = "finished_seen"
-    const val DEFERRED = "deferred"
-    const val REST = "rest"
-    val ALL = listOf("failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest")
+@Serializable(with = TodoReasonSerializer::class)
+sealed interface TodoReason {
+    val raw: String
+
+    data object FailedStart : TodoReason { override val raw: String = "failed_start" }
+    data object AgentAsks : TodoReason { override val raw: String = "agent_asks" }
+    data object Interrupted : TodoReason { override val raw: String = "interrupted" }
+    data object StoppedUnfinished : TodoReason { override val raw: String = "stopped_unfinished" }
+    data object OwnerDecides : TodoReason { override val raw: String = "owner_decides" }
+    data object Verify : TodoReason { override val raw: String = "verify" }
+    data object StepsProposed : TodoReason { override val raw: String = "steps_proposed" }
+    data object Signin : TodoReason { override val raw: String = "signin" }
+    data object CanWait : TodoReason { override val raw: String = "can_wait" }
+    data object AwaitsReply : TodoReason { override val raw: String = "awaits_reply" }
+    data object PersonaWorking : TodoReason { override val raw: String = "persona_working" }
+    data object AgentRunning : TodoReason { override val raw: String = "agent_running" }
+    data object Starting : TodoReason { override val raw: String = "starting" }
+    data object Queued : TodoReason { override val raw: String = "queued" }
+    data object Background : TodoReason { override val raw: String = "background" }
+    data object ClosedUnseen : TodoReason { override val raw: String = "closed_unseen" }
+    data object Completed : TodoReason { override val raw: String = "completed" }
+    data object Canceled : TodoReason { override val raw: String = "canceled" }
+    data object Reported : TodoReason { override val raw: String = "reported" }
+    data object Superseded : TodoReason { override val raw: String = "superseded" }
+    data object Parked : TodoReason { override val raw: String = "parked" }
+    data object FinishedUnseen : TodoReason { override val raw: String = "finished_unseen" }
+    data object FinishedRecent : TodoReason { override val raw: String = "finished_recent" }
+    data object PrOpen : TodoReason { override val raw: String = "pr_open" }
+    data object UsageLimit : TodoReason { override val raw: String = "usage_limit" }
+    data object ComputerOffline : TodoReason { override val raw: String = "computer_offline" }
+    data object ScheduledReport : TodoReason { override val raw: String = "scheduled_report" }
+    data object SomeoneElse : TodoReason { override val raw: String = "someone_else" }
+    data object FinishedSeen : TodoReason { override val raw: String = "finished_seen" }
+    data object Deferred : TodoReason { override val raw: String = "deferred" }
+    data object Rest : TodoReason { override val raw: String = "rest" }
+
+    /** A value this app does not know, kept as it came. */
+    data class Unknown(override val raw: String) : TodoReason
+
+    companion object {
+        val ALL: List<TodoReason> = listOf(TodoReason.FailedStart, TodoReason.AgentAsks, TodoReason.Interrupted, TodoReason.StoppedUnfinished, TodoReason.OwnerDecides, TodoReason.Verify, TodoReason.StepsProposed, TodoReason.Signin, TodoReason.CanWait, TodoReason.AwaitsReply, TodoReason.PersonaWorking, TodoReason.AgentRunning, TodoReason.Starting, TodoReason.Queued, TodoReason.Background, TodoReason.ClosedUnseen, TodoReason.Completed, TodoReason.Canceled, TodoReason.Reported, TodoReason.Superseded, TodoReason.Parked, TodoReason.FinishedUnseen, TodoReason.FinishedRecent, TodoReason.PrOpen, TodoReason.UsageLimit, TodoReason.ComputerOffline, TodoReason.ScheduledReport, TodoReason.SomeoneElse, TodoReason.FinishedSeen, TodoReason.Deferred, TodoReason.Rest)
+
+        fun of(raw: String): TodoReason = when (raw) {
+            "failed_start" -> TodoReason.FailedStart
+            "agent_asks" -> TodoReason.AgentAsks
+            "interrupted" -> TodoReason.Interrupted
+            "stopped_unfinished" -> TodoReason.StoppedUnfinished
+            "owner_decides" -> TodoReason.OwnerDecides
+            "verify" -> TodoReason.Verify
+            "steps_proposed" -> TodoReason.StepsProposed
+            "signin" -> TodoReason.Signin
+            "can_wait" -> TodoReason.CanWait
+            "awaits_reply" -> TodoReason.AwaitsReply
+            "persona_working" -> TodoReason.PersonaWorking
+            "agent_running" -> TodoReason.AgentRunning
+            "starting" -> TodoReason.Starting
+            "queued" -> TodoReason.Queued
+            "background" -> TodoReason.Background
+            "closed_unseen" -> TodoReason.ClosedUnseen
+            "completed" -> TodoReason.Completed
+            "canceled" -> TodoReason.Canceled
+            "reported" -> TodoReason.Reported
+            "superseded" -> TodoReason.Superseded
+            "parked" -> TodoReason.Parked
+            "finished_unseen" -> TodoReason.FinishedUnseen
+            "finished_recent" -> TodoReason.FinishedRecent
+            "pr_open" -> TodoReason.PrOpen
+            "usage_limit" -> TodoReason.UsageLimit
+            "computer_offline" -> TodoReason.ComputerOffline
+            "scheduled_report" -> TodoReason.ScheduledReport
+            "someone_else" -> TodoReason.SomeoneElse
+            "finished_seen" -> TodoReason.FinishedSeen
+            "deferred" -> TodoReason.Deferred
+            "rest" -> TodoReason.Rest
+            else -> TodoReason.Unknown(raw)
+        }
+    }
+}
+
+object TodoReasonSerializer : KSerializer<TodoReason> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("persona.core.contracts.generated.TodoReason", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): TodoReason {
+        val raw = decoder.decodeString()
+        val value = TodoReason.of(raw)
+        if (value is TodoReason.Unknown) TodoViewWireDefects.unknownEnum?.invoke("TodoReason", raw)
+        return value
+    }
+
+    override fun serialize(encoder: Encoder, value: TodoReason) {
+        encoder.encodeString(value.raw)
+    }
 }
 
 /**
  * The line keys produced by this version of the projection; see the Line keys table in
- * spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+ * spec/fixtures/todo-view/README.md. Closed: a client reads a row's TodoLine.key as one of these, a newer key as
+ * unknown, and draws no line for that. TodoLine.key itself stays a string: a timeline entry's line takes the keys of
+ * spec/fixtures/todo-rounds/README.md. A value this app does not know decodes to Unknown with the raw value, and
+ * encodes back as it came.
  */
-object TodoLineKey {
-    const val FAILED_START = "failed_start"
-    const val AGENT_ASKS = "agent_asks"
-    const val INTERRUPTED = "interrupted"
-    const val DECISION = "decision"
-    const val DECISION_DEFAULT = "decision_default"
-    const val CANNOT = "cannot"
-    const val AWAITS_REPLY = "awaits_reply"
-    const val WORKING = "working"
-    const val PERSONA_WORKING = "persona_working"
-    const val STARTING = "starting"
-    const val BACKGROUND = "background"
-    const val PARKED = "parked"
-    const val FINISHED = "finished"
-    const val ACCEPTED = "accepted"
-    const val DEPLOYED = "deployed"
-    const val PR_OPEN = "pr_open"
-    const val USAGE_LIMIT = "usage_limit"
-    const val RUN_WAITS = "run_waits"
-    const val FINISHED_SEEN = "finished_seen"
-    const val COMPLETED = "completed"
-    const val CANCELED = "canceled"
-    const val REPORTED = "reported"
-    const val SUPERSEDED = "superseded"
-    const val SOMEDAY = "someday"
-    val ALL = listOf("failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday")
+@Serializable(with = TodoLineKeySerializer::class)
+sealed interface TodoLineKey {
+    val raw: String
+
+    data object FailedStart : TodoLineKey { override val raw: String = "failed_start" }
+    data object AgentAsks : TodoLineKey { override val raw: String = "agent_asks" }
+    data object Interrupted : TodoLineKey { override val raw: String = "interrupted" }
+    data object Decision : TodoLineKey { override val raw: String = "decision" }
+    data object DecisionDefault : TodoLineKey { override val raw: String = "decision_default" }
+    data object Cannot : TodoLineKey { override val raw: String = "cannot" }
+    data object AwaitsReply : TodoLineKey { override val raw: String = "awaits_reply" }
+    data object Working : TodoLineKey { override val raw: String = "working" }
+    data object PersonaWorking : TodoLineKey { override val raw: String = "persona_working" }
+    data object Starting : TodoLineKey { override val raw: String = "starting" }
+    data object Background : TodoLineKey { override val raw: String = "background" }
+    data object Parked : TodoLineKey { override val raw: String = "parked" }
+    data object Finished : TodoLineKey { override val raw: String = "finished" }
+    data object Accepted : TodoLineKey { override val raw: String = "accepted" }
+    data object Deployed : TodoLineKey { override val raw: String = "deployed" }
+    data object PrOpen : TodoLineKey { override val raw: String = "pr_open" }
+    data object UsageLimit : TodoLineKey { override val raw: String = "usage_limit" }
+    data object RunWaits : TodoLineKey { override val raw: String = "run_waits" }
+    data object FinishedSeen : TodoLineKey { override val raw: String = "finished_seen" }
+    data object Completed : TodoLineKey { override val raw: String = "completed" }
+    data object Canceled : TodoLineKey { override val raw: String = "canceled" }
+    data object Reported : TodoLineKey { override val raw: String = "reported" }
+    data object Superseded : TodoLineKey { override val raw: String = "superseded" }
+    data object Someday : TodoLineKey { override val raw: String = "someday" }
+
+    /** A value this app does not know, kept as it came. */
+    data class Unknown(override val raw: String) : TodoLineKey
+
+    companion object {
+        val ALL: List<TodoLineKey> = listOf(TodoLineKey.FailedStart, TodoLineKey.AgentAsks, TodoLineKey.Interrupted, TodoLineKey.Decision, TodoLineKey.DecisionDefault, TodoLineKey.Cannot, TodoLineKey.AwaitsReply, TodoLineKey.Working, TodoLineKey.PersonaWorking, TodoLineKey.Starting, TodoLineKey.Background, TodoLineKey.Parked, TodoLineKey.Finished, TodoLineKey.Accepted, TodoLineKey.Deployed, TodoLineKey.PrOpen, TodoLineKey.UsageLimit, TodoLineKey.RunWaits, TodoLineKey.FinishedSeen, TodoLineKey.Completed, TodoLineKey.Canceled, TodoLineKey.Reported, TodoLineKey.Superseded, TodoLineKey.Someday)
+
+        fun of(raw: String): TodoLineKey = when (raw) {
+            "failed_start" -> TodoLineKey.FailedStart
+            "agent_asks" -> TodoLineKey.AgentAsks
+            "interrupted" -> TodoLineKey.Interrupted
+            "decision" -> TodoLineKey.Decision
+            "decision_default" -> TodoLineKey.DecisionDefault
+            "cannot" -> TodoLineKey.Cannot
+            "awaits_reply" -> TodoLineKey.AwaitsReply
+            "working" -> TodoLineKey.Working
+            "persona_working" -> TodoLineKey.PersonaWorking
+            "starting" -> TodoLineKey.Starting
+            "background" -> TodoLineKey.Background
+            "parked" -> TodoLineKey.Parked
+            "finished" -> TodoLineKey.Finished
+            "accepted" -> TodoLineKey.Accepted
+            "deployed" -> TodoLineKey.Deployed
+            "pr_open" -> TodoLineKey.PrOpen
+            "usage_limit" -> TodoLineKey.UsageLimit
+            "run_waits" -> TodoLineKey.RunWaits
+            "finished_seen" -> TodoLineKey.FinishedSeen
+            "completed" -> TodoLineKey.Completed
+            "canceled" -> TodoLineKey.Canceled
+            "reported" -> TodoLineKey.Reported
+            "superseded" -> TodoLineKey.Superseded
+            "someday" -> TodoLineKey.Someday
+            else -> TodoLineKey.Unknown(raw)
+        }
+    }
+}
+
+object TodoLineKeySerializer : KSerializer<TodoLineKey> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("persona.core.contracts.generated.TodoLineKey", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): TodoLineKey {
+        val raw = decoder.decodeString()
+        val value = TodoLineKey.of(raw)
+        if (value is TodoLineKey.Unknown) TodoViewWireDefects.unknownEnum?.invoke("TodoLineKey", raw)
+        return value
+    }
+
+    override fun serialize(encoder: Encoder, value: TodoLineKey) {
+        encoder.encodeString(value.raw)
+    }
 }
 
 /**
@@ -174,11 +378,11 @@ data class TodoRunRef(
     /**
      * The machine the session runs on.
      */
-    @SerialName("machine_id") val machineId: String = "",
+    @SerialName("machine_id") val machineId: MachineID = MachineID(""),
     /**
      * The session.
      */
-    @SerialName("session_id") val sessionId: String = "",
+    @SerialName("session_id") val sessionId: SessionID = SessionID(""),
     /**
      * The session's title as the session list has it, else as the to-do's link recorded it; absent when neither has
      * one.
@@ -317,7 +521,7 @@ data class OwnerAsk(
      * oldest), answered through POST /api/v1/interactions/{id}/resolve; only on a run's ask, and absent while the hub
      * holds no card for the run (its kind is then question).
      */
-    val interaction: String? = null,
+    val interaction: InteractionID? = null,
 )
 
 /**
@@ -328,9 +532,9 @@ data class OwnerAsk(
  */
 @Serializable
 data class TodoSummary(
-    val phase: String = "",
-    val section: String = "",
-    val reason: String = "",
+    val phase: TodoPhase = TodoPhase.Unknown(""),
+    val section: TodoListSection = TodoListSection.Unknown(""),
+    val reason: TodoReason = TodoReason.Unknown(""),
     /**
      * Line 2 of the row; absent when there is nothing to say (a plain To do row).
      */
@@ -439,7 +643,7 @@ data class TodoCounts(
      * Rows per section, every section named, 0 included, so the bytes stay stable and the hub adds maps up key by
      * key. Quiet tasks count here as the rows they are.
      */
-    val sections: Map<String, Int> = emptyMap(),
+    val sections: TodoCountsSections = TodoCountsSections(),
 )
 
 /**
@@ -481,27 +685,73 @@ object TodoMessageState {
  * and run_failed, a run put on the to-do, let go of, or not started; interrupted, a run whose latest turn in the
  * round was cut off; ask, a question for the owner; decision, a call Persona, a run or the hub made; result, what the
  * work came to; closed, the to-do was closed; scope, its scope changed; review, parked, report and overdue,
- * supervision nobody asked for. Open: a newer hub may send other values, which clients skip.
+ * supervision nobody asked for. Closed: a client decodes a value a newer hub sends as unknown, counts it and skips
+ * the entry. A value this app does not know decodes to Unknown with the raw value, and encodes back as it came.
  */
-object TodoEntryType {
-    const val INSTRUCTION = "instruction"
-    const val ANSWER = "answer"
-    const val RELAY = "relay"
-    const val RUN = "run"
-    const val RUN_STARTED = "run_started"
-    const val RUN_ENDED = "run_ended"
-    const val RUN_FAILED = "run_failed"
-    const val INTERRUPTED = "interrupted"
-    const val ASK = "ask"
-    const val DECISION = "decision"
-    const val RESULT = "result"
-    const val CLOSED = "closed"
-    const val SCOPE = "scope"
-    const val REVIEW = "review"
-    const val PARKED = "parked"
-    const val REPORT = "report"
-    const val OVERDUE = "overdue"
-    val ALL = listOf("instruction", "answer", "relay", "run", "run_started", "run_ended", "run_failed", "interrupted", "ask", "decision", "result", "closed", "scope", "review", "parked", "report", "overdue")
+@Serializable(with = TodoEntryTypeSerializer::class)
+sealed interface TodoEntryType {
+    val raw: String
+
+    data object Instruction : TodoEntryType { override val raw: String = "instruction" }
+    data object Answer : TodoEntryType { override val raw: String = "answer" }
+    data object Relay : TodoEntryType { override val raw: String = "relay" }
+    data object Run : TodoEntryType { override val raw: String = "run" }
+    data object RunStarted : TodoEntryType { override val raw: String = "run_started" }
+    data object RunEnded : TodoEntryType { override val raw: String = "run_ended" }
+    data object RunFailed : TodoEntryType { override val raw: String = "run_failed" }
+    data object Interrupted : TodoEntryType { override val raw: String = "interrupted" }
+    data object Ask : TodoEntryType { override val raw: String = "ask" }
+    data object Decision : TodoEntryType { override val raw: String = "decision" }
+    data object Result : TodoEntryType { override val raw: String = "result" }
+    data object Closed : TodoEntryType { override val raw: String = "closed" }
+    data object Scope : TodoEntryType { override val raw: String = "scope" }
+    data object Review : TodoEntryType { override val raw: String = "review" }
+    data object Parked : TodoEntryType { override val raw: String = "parked" }
+    data object Report : TodoEntryType { override val raw: String = "report" }
+    data object Overdue : TodoEntryType { override val raw: String = "overdue" }
+
+    /** A value this app does not know, kept as it came. */
+    data class Unknown(override val raw: String) : TodoEntryType
+
+    companion object {
+        val ALL: List<TodoEntryType> = listOf(TodoEntryType.Instruction, TodoEntryType.Answer, TodoEntryType.Relay, TodoEntryType.Run, TodoEntryType.RunStarted, TodoEntryType.RunEnded, TodoEntryType.RunFailed, TodoEntryType.Interrupted, TodoEntryType.Ask, TodoEntryType.Decision, TodoEntryType.Result, TodoEntryType.Closed, TodoEntryType.Scope, TodoEntryType.Review, TodoEntryType.Parked, TodoEntryType.Report, TodoEntryType.Overdue)
+
+        fun of(raw: String): TodoEntryType = when (raw) {
+            "instruction" -> TodoEntryType.Instruction
+            "answer" -> TodoEntryType.Answer
+            "relay" -> TodoEntryType.Relay
+            "run" -> TodoEntryType.Run
+            "run_started" -> TodoEntryType.RunStarted
+            "run_ended" -> TodoEntryType.RunEnded
+            "run_failed" -> TodoEntryType.RunFailed
+            "interrupted" -> TodoEntryType.Interrupted
+            "ask" -> TodoEntryType.Ask
+            "decision" -> TodoEntryType.Decision
+            "result" -> TodoEntryType.Result
+            "closed" -> TodoEntryType.Closed
+            "scope" -> TodoEntryType.Scope
+            "review" -> TodoEntryType.Review
+            "parked" -> TodoEntryType.Parked
+            "report" -> TodoEntryType.Report
+            "overdue" -> TodoEntryType.Overdue
+            else -> TodoEntryType.Unknown(raw)
+        }
+    }
+}
+
+object TodoEntryTypeSerializer : KSerializer<TodoEntryType> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("persona.core.contracts.generated.TodoEntryType", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): TodoEntryType {
+        val raw = decoder.decodeString()
+        val value = TodoEntryType.of(raw)
+        if (value is TodoEntryType.Unknown) TodoViewWireDefects.unknownEnum?.invoke("TodoEntryType", raw)
+        return value
+    }
+
+    override fun serialize(encoder: Encoder, value: TodoEntryType) {
+        encoder.encodeString(value.raw)
+    }
 }
 
 /**
@@ -559,7 +809,7 @@ data class TodoTimelineEntry(
      * Opaque to clients (spec/fixtures/todo-rounds/README.md says how the hub forms it).
      */
     val id: String = "",
-    val type: String = "",
+    val type: TodoEntryType = TodoEntryType.Unknown(""),
     /**
      * When it happened; a run line's latest turn, or since when the run works for a live line that has no turn yet.
      */
@@ -771,7 +1021,7 @@ data class TodoDecidePush(
     /**
      * The to-do.
      */
-    val id: String = "",
+    val id: TodoID = TodoID(""),
     /**
      * The round the decision waits in, as POST /api/v1/todos/{id}/accept takes it: an answer to an earlier round
      * takes nothing.
@@ -918,3 +1168,33 @@ data class TodoItemDetail(
      */
     val results: List<TodoResult>? = null,
 )
+
+/**
+ * One field for each TodoListSection of TodoCounts.sections.
+ */
+@Serializable
+data class TodoCountsSections(
+    @SerialName("needs_you") val needsYou: Int = 0,
+    @SerialName("can_wait") val canWait: Int = 0,
+    val working: Int = 0,
+    val waiting: Int = 0,
+    val todo: Int = 0,
+    @SerialName("just_finished") val justFinished: Int = 0,
+    val someday: Int = 0,
+    val done: Int = 0,
+) {
+    /**
+     * The field of one TodoListSection: an unknown one reads 0.
+     */
+    operator fun get(key: TodoListSection): Int = when (key) {
+        TodoListSection.NeedsYou -> needsYou
+        TodoListSection.CanWait -> canWait
+        TodoListSection.Working -> working
+        TodoListSection.Waiting -> waiting
+        TodoListSection.Todo -> todo
+        TodoListSection.JustFinished -> justFinished
+        TodoListSection.Someday -> someday
+        TodoListSection.Done -> done
+        is TodoListSection.Unknown -> 0
+    }
+}

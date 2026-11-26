@@ -151,15 +151,27 @@ func TestSubscribeWhileARestartedManagerWaitsForTheComputer(t *testing.T) {
 	a := dialApp(t, mh, tok)
 	a.send(t, map[string]any{"type": "subscribe", "machine_id": "box", "session_id": "s1"})
 	a.pongWithin(t, "p1", "while the manager waits for the computer")
-	// The watch is still out, waiting for the node: the ping did not just follow a call that failed at once.
+	// The watch is still out, waiting for the node: the ping did not just follow a call that failed at once. The
+	// manager's own catch-up (watchAgain, run when the new manager attaches) may queue a second sync for the same
+	// session behind the subscriber's, so the slot is held by one or more calls, not exactly one.
 	m := mh.h.localMachine("box")
 	eventually(t, readLoopLimit, "the watch still waiting for the node", func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		slot := m.watchMu["s1"]
 		_, told := m.nodeWatch["s1"]
-		return m.watchers["s1"] == 1 && slot != nil && slot.refs == 1 && !told
+		// The restarted manager may also have queued its resubscription behind this call.
+		return m.watchers["s1"] == 1 && slot != nil && slot.refs >= 1 && len(slot.sem) == 1 && !told
 	})
+	box.mu.Lock()
+	delete(box.refuse, mh.h)
+	box.mu.Unlock()
+	if err := mh.mgr.d.Reconnect("box"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 15*time.Second, "the reconnected node watches the open session", func() bool { return boxWatches(box, "s1") })
+	box.addItem("s1", "after the sleeping computer returned")
+	a.wait(t, "the same app receives items after the node reconnects", 0, hasItem("after the sleeping computer returned"))
 }
 
 // watchedHub is a hub over TLS with no manager, whose computer m1 is a watchNode: it answers the hub directly, keeps

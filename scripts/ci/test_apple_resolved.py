@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,8 +10,8 @@ import apple_resolved
 
 ROOT = Path(__file__).resolve().parents[2]
 RESOLVED = ROOT / "apple/Packages/PersonaSSH/Package.resolved"
-TRACKED_SHA256 = "f50bac69a331777699739a95986393fa9c9a35a5b1087610b8bd4f57db961ae5"
-DEFAULT_SHA256 = "d6091eab6c13e65aa7af543970c51bfc4bc7b0f5947b3213277779842dce002b"
+TRACKED_SHA256 = "16e3c3bd49535709b1cde4faf834bd964f692481ecf08d5bcc7913ed8410b7fc"
+DEFAULT_SHA256 = "655f7e5280dd00dd342bc4205f18b47c8b50feb2d1abf7bd66e5ac5ec0a6b118"
 
 
 class AppleResolvedTests(unittest.TestCase):
@@ -59,6 +60,28 @@ class AppleResolvedTests(unittest.TestCase):
     def test_staging_requires_a_distinct_disposable_copy(self):
         with self.assertRaisesRegex(ValueError, "disposable copy"):
             apple_resolved.stage(self.tracked, self.tracked, "NO", self.evidence)
+
+
+    def test_staged_hardlink_is_rejected_before_either_write(self):
+        self.staged.unlink()
+        os.link(self.tracked, self.staged)
+        with self.assertRaisesRegex(ValueError, "disposable copy"):
+            apple_resolved.stage(self.tracked, self.staged, "NO", self.evidence)
+        self.assertEqual(self.tracked.read_bytes(), self.original)
+        self.assertEqual(self.staged.read_bytes(), self.original)
+        self.assertFalse(self.evidence.exists())
+
+    def test_evidence_cannot_alias_either_lockfile(self):
+        for target in (self.tracked, self.staged):
+            with self.subTest(target=target.name):
+                self.tracked.write_bytes(self.original)
+                self.staged.write_bytes(self.original)
+                self.evidence.unlink(missing_ok=True)
+                os.link(target, self.evidence)
+                with self.assertRaisesRegex(ValueError, "evidence file must be separate"):
+                    apple_resolved.stage(self.tracked, self.staged, "NO", self.evidence)
+                self.assertEqual(self.tracked.read_bytes(), self.original)
+                self.assertEqual(self.staged.read_bytes(), self.original)
 
 
 if __name__ == "__main__":

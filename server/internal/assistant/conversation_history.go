@@ -16,7 +16,11 @@ import (
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
-const conversationHistoryKey = "assistant.history"
+const (
+	conversationHistoryKey      = "assistant.history"
+	historyProbeInterval        = 30 * time.Second
+	historyOfflineProbeInterval = 10 * time.Minute
+)
 
 var errHistoryGenerationUnavailable = errors.New("runtime did not provide a history generation")
 
@@ -31,10 +35,21 @@ type conversationHistoryStore interface {
 
 type conversationHistoryBook struct {
 	mu               sync.Mutex
+	now              func() time.Time
 	wake             chan struct{}
 	changes, checked map[searchKey]uint64
 	probed           map[searchKey]time.Time
 	retry            map[searchKey]historyRetry
+}
+
+func (s *Service) historyNow() time.Time {
+	s.history.mu.Lock()
+	nowFn := s.history.now
+	s.history.mu.Unlock()
+	if nowFn != nil {
+		return nowFn()
+	}
+	return time.Now()
 }
 
 type historyRetry struct {
@@ -107,6 +122,7 @@ type historyParams struct {
 	FoldWork   bool   `json:"fold_work"`
 	Strict     bool   `json:"strict_read"`
 	UserInputs bool   `json:"user_inputs"`
+	MetaOnly   bool   `json:"meta_only"`
 }
 
 type historyPage struct {
@@ -458,6 +474,11 @@ func (s *Service) historyRemember(ctx context.Context, st conversationHistorySto
 	for _, it := range page.Items {
 		through = max(through, it.Seq)
 	}
+	if page.ToSeq != nil && through < from {
+		// The source ends before the reader's cursor, which is from an earlier numbering of it: what the page
+		// proves is that end. Stored at the cursor, the tail would claim lines the source does not have.
+		from = through
+	}
 	through = max(from, through)
 	expected, history := "", page.History
 	if previous != nil {
@@ -643,6 +664,7 @@ func (s *Service) historyLoop(ctx context.Context) {
 	for {
 		s.logicalSweep(ctx)
 		s.wakeConversationSwitches()
+		s.machineFallbackSweep(ctx, time.Now())
 		if st := s.historyDB(ctx); st != nil {
 			s.historySweep(ctx, st)
 		} else if st, ok := s.store().(conversationHistoryStore); ok {
@@ -728,11 +750,12 @@ func (s *Service) historySweep(ctx context.Context, st conversationHistoryStore)
 			}
 			if err := s.historySync(ctx, st, source, c); err != nil && !errors.Is(err, db.ErrConversationHistoryChanged) && ctx.Err() == nil {
 				k := searchKey{source, c.SessionID}
+				now := s.historyNow()
 				s.history.mu.Lock()
 				if s.history.retry == nil {
 					s.history.retry = map[searchKey]historyRetry{}
 				}
-				s.history.retry[k] = historyRetry{time.Now().Add(time.Minute), c.Rev, s.history.changes[k]}
+				s.history.retry[k] = historyRetry{now.Add(time.Minute), c.Rev, s.history.changes[k]}
 				s.history.mu.Unlock()
 				if !errors.Is(err, errHistoryGenerationUnavailable) {
 					s.logf("assistant: synchronize durable conversation: %v", err)
@@ -744,14 +767,24 @@ func (s *Service) historySweep(ctx context.Context, st conversationHistoryStore)
 
 func (s *Service) historySync(ctx context.Context, st conversationHistoryStore, machine string, c proto.Session) error {
 	k := searchKey{machine, c.SessionID}
+	now := s.historyNow()
 	s.history.mu.Lock()
 	change := s.history.changes[k]
-	force := change != s.history.checked[k] || time.Since(s.history.probed[k]) >= 30*time.Second
+	dirty := change != s.history.checked[k]
+	probedAt := s.history.probed[k]
 	retry := s.history.retry[k]
 	s.history.mu.Unlock()
-	if retry.revision == c.Rev && retry.change == change && time.Now().Before(retry.until) {
+	if retry.revision == c.Rev && retry.change == change && now.Before(retry.until) {
 		return nil
 	}
+	probeInterval := historyProbeInterval
+	if c.Status == proto.StatusOffline {
+		// Idle offline conversations whose durable history already covers the full
+		// range at the current revision do not need a forced node probe every 30s;
+		// still re-probe periodically so a same-revision rewrite is detected.
+		probeInterval = historyOfflineProbeInterval
+	}
+	force := dirty || probedAt.IsZero() || now.Sub(probedAt) >= probeInterval
 	for range 8 {
 		if s.historyDB(ctx) == nil {
 			return nil
@@ -845,6 +878,7 @@ func (s *Service) historySync(ctx context.Context, st conversationHistoryStore, 
 					}
 				}
 			}
+			probedAt := s.historyNow()
 			s.history.mu.Lock()
 			if s.history.checked == nil {
 				s.history.checked = map[searchKey]uint64{}
@@ -852,7 +886,7 @@ func (s *Service) historySync(ctx context.Context, st conversationHistoryStore, 
 			if s.history.probed == nil {
 				s.history.probed = map[searchKey]time.Time{}
 			}
-			s.history.checked[k], s.history.probed[k] = change, time.Now()
+			s.history.checked[k], s.history.probed[k] = change, probedAt
 			delete(s.history.retry, k)
 			s.history.mu.Unlock()
 			return nil

@@ -184,7 +184,9 @@ func (n *Node) rewind(ctx context.Context, id string, o rewindOpts) (map[string]
 		if o.PromptsAfter != nil {
 			params["prompts_after"] = *o.PromptsAfter
 		}
+		finishAgy := n.runtimes.agyWorkBegin(h, "session.rewind", id)
 		err := h.peer.Call(cctx, "session.rewind", params, &res)
+		finishAgy(err, false)
 		return res, err
 	}
 	if _, known := n.codexSource(id); known {

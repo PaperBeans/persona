@@ -12,12 +12,25 @@ import { t } from "../../i18n";
 /** The side of a thumbnail: the same as an image item's in the bubble (Thumb size 96). */
 const SIDE = 96;
 
-export function AttachedPhotos({ paths, mid, sid }: { paths: string[]; mid: string; sid: string }) {
+export interface AttachedPhotosProps {
+  paths: string[];
+  mid: string;
+  sid: string;
+  /** An explicit directory skips the default panel's session lookup. */
+  cwd?: string;
+  /** A panel with its own file resources supplies both resolvers and needs no session lookup. */
+  resolveThumbURL?: (path: string, size: number) => string;
+  resolveDownloadURL?: (path: string, options: { inline?: boolean }) => string;
+}
+
+export function AttachedPhotos({ paths, mid, sid, cwd: controlledCWD, resolveThumbURL, resolveDownloadURL }: AttachedPhotosProps) {
   const [open, setOpen] = useState<number | null>(null);
   // per photo: 0 its thumbnail, 1 the file itself (the machine could not draw a thumbnail), 2 neither
   const [failed, setFailed] = useState<Record<string, number>>({});
   if (!paths.length) return null;
-  const cwd = getSession(mid, sid)?.cwd;
+  const cwd = controlledCWD ?? (resolveThumbURL && resolveDownloadURL ? undefined : getSession(mid, sid)?.cwd);
+  const thumbURL = (path: string) => resolveThumbURL ? resolveThumbURL(path, 256) : fileThumbURL(mid, path, cwd, 256);
+  const downloadURL = (path: string) => resolveDownloadURL ? resolveDownloadURL(path, { inline: true }) : fileDownloadURL(mid, path, cwd, { inline: true });
   return (
     <div className="flex flex-wrap justify-end gap-1.5" data-attached-photos>
       {paths.map((path, i) => (
@@ -37,7 +50,7 @@ export function AttachedPhotos({ paths, mid, sid }: { paths: string[]; mid: stri
             </span>
           ) : (
             <img
-              src={failed[path] ? fileDownloadURL(mid, path, cwd, { inline: true }) : fileThumbURL(mid, path, cwd, 256)}
+              src={failed[path] ? downloadURL(path) : thumbURL(path)}
               alt=""
               loading="lazy"
               decoding="async"
@@ -48,7 +61,7 @@ export function AttachedPhotos({ paths, mid, sid }: { paths: string[]; mid: stri
         </button>
       ))}
       {open !== null && (
-        <ImageViewer images={paths.map((path) => ({ id: path, src: fileDownloadURL(mid, path, cwd, { inline: true }) }))} start={open} onClose={() => setOpen(null)} />
+        <ImageViewer images={paths.map((path) => ({ id: path, src: downloadURL(path) }))} start={open} onClose={() => setOpen(null)} />
       )}
     </div>
   );

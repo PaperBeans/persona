@@ -15,17 +15,21 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// secret_run: commands that need a password only the user knows (a computer's sudo password). The card shows the
-// computer, the purpose and every command verbatim; the user types the password into it in the Persona app (iPhone,
-// Mac, Vision Pro, Android or the web; the watch can only decline), and the target computer's node runs exactly those
-// commands with it on their stdin (proto.MethodSecretRun). The Agent gets exit codes and redacted output, never the
-// password (docs/assistant/assistant.md "Password card", #1137).
+// secret_run: commands that need a password only the user knows (a computer's sudo password, or a one-off LAN/CLI
+// credential). The card shows the computer, the purpose and every command verbatim; the user types the password into
+// it in the Persona app (iPhone, Mac, Vision Pro, Android or the web; the watch can only decline), and the target
+// computer's node runs exactly those commands (proto.MethodSecretRun). The default delivers only to sudo -S stdin;
+// explicit env delivery puts it in every command's PERSONA_SECRET and warns on every card. The Agent gets exit codes
+// and redacted output, never the password (docs/assistant/assistant.md "Password card", #1137, #11945).
 //
 // The password lives only in this call while it waits on the node: it is never logged, put in an error, kept for
 // another try (askOnPhone) or written to the history (redacted), and the byte slice handed to the node is zeroed.
 
 // secretRunCardWait is how long the card waits to be filled in (a variable so tests shorten it).
 var secretRunCardWait = 10 * time.Minute
+
+// errSecretRunEnv refuses an approval whose client did not prove it rendered the env warning.
+var errSecretRunEnv = i18n.Err("assistant-secret_run.env_elsewhere")
 
 const (
 	secretRunDefaultTimeout = 300 * time.Second
@@ -73,6 +77,9 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 	if err != nil {
 		return "", err
 	}
+	if a.Delivery == "" {
+		a.Delivery = proto.SecretRunDeliveryStdin
+	}
 	m, ok := s.machineByName(ctx, a.Machine)
 	if !ok {
 		return "", fmt.Errorf("unknown machine %q (machines: %s)", a.Machine, s.machineIDs(ctx))
@@ -82,7 +89,7 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 	var check struct {
 		OK bool `json:"ok"`
 	}
-	err = s.call(cctx, m.ID, proto.MethodSecretRun, proto.SecretRunParams{Check: true}, &check)
+	err = s.call(cctx, m.ID, proto.MethodSecretRun, proto.SecretRunParams{Check: true, Delivery: a.Delivery}, &check)
 	cancel()
 	if err == nil && !check.OK {
 		err = errors.New("its node did not confirm it can")
@@ -93,14 +100,14 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 	l := s.lang(ctx)
 	name := secretRunMachineLabel(m, s.devices(ctx))
 	input, _ := json.Marshal(map[string]any{"machine": m.ID, "machine_name": name, "purpose": a.Purpose, "commands": a.Commands,
-		"delivery": "stdin"})
+		"delivery": a.Delivery})
 	now := time.Now().UTC()
-	expires := now.Add(secretRunCardWait)
+	expires := now.Add(ownerCardMaxWait)
 	r, err := s.ask(withCard(ctx, cardSecretForm), proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, SessionTitle: "Persona",
-		Kind: proto.IxPermission, ToolName: proto.SecretRunTool, ToolInput: input, Summary: secretRunSummary(l, name, a.Purpose, a.Commands),
+		Kind: proto.IxPermission, ToolName: proto.SecretRunTool, ToolInput: input, Summary: secretRunSummary(l, name, a.Purpose, a.Delivery, a.Commands),
 		Fields: []proto.Field{{Key: secretRunField, Label: i18n.T(l, "assistant-secret_run.password"),
 			Placeholder: i18n.T(l, "assistant-secret_run.password_hint"), Secret: true}},
-		CreatedAt: now, ExpiresAt: expires})
+		CreatedAt: now, ExpiresAt: expires, SeenTTLSeconds: secondsCeil(secretRunCardWait)})
 	if err != nil {
 		return "", err
 	}
@@ -123,7 +130,7 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 		out.Status, out.Message = secretRefused, fmt.Sprintf("The password the user typed is longer than %d bytes, more "+
 			"than a run takes: nothing ran.", proto.SecretRunMaxPassword)
 	default:
-		ans, err := s.runSecret(ctx, m.ID, a.Commands, password, timeout)
+		ans, err := s.runSecret(ctx, m.ID, a.Commands, a.Delivery, password, timeout)
 		if err != nil {
 			out.Status = secretFailed
 			out.Message = fmt.Sprintf("The run on %s failed after the user approved: %v. Some commands may have run; check "+
@@ -170,21 +177,23 @@ func secretRunDismissal(r proto.Resolution, now, expires time.Time) (status, mes
 // runSecret has machine's node run commands with password. The wait is not detached from the tool call: the node is
 // not told when this call stops waiting (secret.run sends no rpc cancel) and stops the commands at the run's timeout
 // itself, while giving up with the call drops this side's reference to the password at once.
-func (s *Service) runSecret(ctx context.Context, machine string, commands []string, password string, timeout time.Duration) (proto.SecretRunAnswer, error) {
+func (s *Service) runSecret(ctx context.Context, machine string, commands []string, delivery, password string, timeout time.Duration) (proto.SecretRunAnswer, error) {
 	pw := []byte(password)
 	defer clear(pw)
 	rctx, cancel := context.WithTimeout(ctx, timeout+secretRunMargin)
 	defer cancel()
 	var ans proto.SecretRunAnswer
-	err := s.call(rctx, machine, proto.MethodSecretRun, proto.SecretRunParams{Commands: commands, Password: pw,
+	err := s.call(rctx, machine, proto.MethodSecretRun, proto.SecretRunParams{Commands: commands, Delivery: delivery, Password: pw,
 		TimeoutMS: timeout.Milliseconds()}, &ans)
 	return ans, err
 }
 
 // checkSecretRunArgs checks a call before anything is asked, and returns the run's timeout.
 func checkSecretRunArgs(a secretRunArgs) (time.Duration, error) {
-	if a.Delivery != "" && a.Delivery != "stdin" {
-		return 0, fmt.Errorf("delivery %q: only stdin is supported", a.Delivery)
+	switch a.Delivery {
+	case "", proto.SecretRunDeliveryStdin, proto.SecretRunDeliveryEnv:
+	default:
+		return 0, fmt.Errorf("delivery %q: only stdin or env is supported", a.Delivery)
 	}
 	if strings.TrimSpace(a.Machine) == "" { // machineByName would take "" for the first computer without an ssh alias
 		return 0, errors.New("machine must name the computer to run on: its id or name")
@@ -235,13 +244,19 @@ func secretRunMachineLabel(m Device, all []Device) string {
 }
 
 // secretRunSummary is the card's text, for a client that does not know secret_run: the computer, the purpose and
-// every command verbatim, one per line after "$ ".
-func secretRunSummary(l i18n.Lang, machine, purpose string, commands []string) string {
+// every command verbatim, one per line after "$ ". Explicit environment delivery also carries its warning here, so
+// Watch and generic fallback views show the same risk. Older specialized clients suppress this text and are refused
+// by the hub/manager instead of approving an ordinary-looking env card.
+func secretRunSummary(l i18n.Lang, machine, purpose, delivery string, commands []string) string {
 	var b strings.Builder
 	b.WriteString(i18n.T(l, "assistant-secret_run.summary", i18n.Args{"machine": machine, "purpose": purpose}))
 	for _, c := range commands {
 		b.WriteString("\n$ ")
 		b.WriteString(c)
+	}
+	if delivery == proto.SecretRunDeliveryEnv {
+		b.WriteString("\n")
+		b.WriteString(i18n.T(l, "assistant-secret_run.env_warning"))
 	}
 	return b.String()
 }

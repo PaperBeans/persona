@@ -38,4 +38,5 @@
     <string name="chat_decision_handled">処理済みです</string>
     <string name="chat_decision_failed">回答を送信できませんでした。%1$s</string>
     <string name="chat_decision_confirm">確認：%1$s</string>
+    <string name="chat_decision_tap_to_confirm">もう一度タップして確認</string>
 </resources>

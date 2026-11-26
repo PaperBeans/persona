@@ -1,10 +1,19 @@
+import PersonaWire
 import SwiftUI
 
 /// Answering a decision on its row (#3804, docs/assistant/todos.md "Decisions the owner can answer"): which option of
 /// a round is armed, which answer is on its way, and what became of it. Kept here by round, not in the row, so the same
-/// decision drawn in the Needs You tray and on the task board says the same thing, and a row
-/// drawn again (scrolled away and back) still says what happened. Every answer goes through
+/// decision drawn in the Needs You tray, on the task board, on a V1 To-dos row and in its `AskCard` says the same thing,
+/// and a row drawn again (scrolled away and back) still says what happened. Every answer goes through
 /// `POST /api/v1/todos/{id}/accept`, as the recommendation's Take always did.
+///
+/// While To-dos is V1 (#10465; DESIGN_SYSTEM 4.8 "To-dos"; `Hold`), a chosen answer is held instead: written with its op
+/// id to `TodoOutbox` at the tap, "✓ You chose … · Undo" for `Theme.Motion.todoUndo`, then sent (through the asks route
+/// while the hub lists `todo_asks`), at once when the scene leaves the foreground, and again at launch with the same op
+/// id. Its ask counts as answered from the tap on (`TodoCountsSource`). A round answered elsewhere meanwhile says
+/// "Answered elsewhere", with no error haptic; one nobody can say reached the Agent says so, and is never sent again.
+/// Nothing undoes a decision on the hub, so Undo works only while it is held. The fixed answers are not held: they go
+/// at once, through the asks route while the hub lists it.
 @MainActor @Observable final class DecisionAnswers {
     /// Where answering a round stands.
     enum State: Equatable, Sendable {
@@ -18,17 +27,61 @@ import SwiftUI
         case answered(String)
         /// 409: that round was over (asked again since, or answered elsewhere).
         case alreadyHandled
+        /// V1: the owner chose this answer (its words, "You chose …"): held on this device, then sent; the row says so
+        /// instead of its buttons, with Undo while it is held (`canUndo`).
+        case chosen(String)
+        /// V1: the round ended before this device's answer reached it (answered on another device, asked again): the
+        /// first answer anywhere won.
+        case elsewhere
+        /// V1: nobody can say whether this device's answer reached the Agent (`TodoOutbox.Sent.inDoubt`): never sent
+        /// again; the to-do's view says next whether the round still waits.
+        case unsure
 
         /// The round is over for this row: no button sends anything again.
         var ended: Bool {
             switch self {
-            case .answered, .alreadyHandled: true
+            case .answered, .alreadyHandled, .chosen, .elsewhere, .unsure: true
             case .busy, .sentBack: false
             }
         }
     }
 
-    static let shared = DecisionAnswers()
+    /// What V1 holds an answer with: the outbox it waits in, the numbers its ask leaves at once, and how its to-do's view
+    /// names the ask. nil while V1 is off: every answer goes at once, as before.
+    struct Hold {
+        var outbox: TodoOutbox
+        var counts: TodoCountsSource
+        /// The id the to-do's view lists for its decision asked at `round` ("" when its view lists none).
+        var askID: @MainActor (_ todo: String, _ round: String) -> String
+        /// The to-do's assistant (its `manager` stamp), whose route the answer goes through.
+        var manager: @MainActor (_ todo: String) -> String?
+        /// How long an answer waits for Undo: longer while VoiceOver or Switch Control runs, whose users reach Undo
+        /// through the row's actions.
+        var window: @MainActor () -> Duration = { Theme.Motion.todoUndo }
+        var toast: @MainActor (Toast) -> Void
+        /// A fixed answer to the decision asked at `round`, not held: through the asks route while the hub lists it, else
+        /// today's accept route (`TodoStore.respond`).
+        var respond: @MainActor (_ todo: String, _ round: String, _ response: String) async throws -> Void
+
+        /// The app's, while To-dos is V1: made once, since every read of a round's state asks for it.
+        static var live: Hold? { TodosV1.shared.isOn ? app : nil }
+
+        private static let app: Hold = {
+            let store = TodoStore.shared
+            return Hold(outbox: .shared, counts: store.countsSource, askID: { store.askID(todo: $0, round: $1) },
+                        manager: { store.byID[$0]?.manager }, window: {
+                            #if canImport(UIKit)
+                            if UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning {
+                                return Theme.Motion.todoUndoAssistive
+                            }
+                            #endif
+                            return Theme.Motion.todoUndo
+                        }, toast: { AppModel.shared.toast = $0 },
+                        respond: { try await store.respond(todo: $0, round: $1, response: $2) })
+        }()
+    }
+
+    static let shared = DecisionAnswers(hold: { Hold.live })
 
     private(set) var states: [String: State] = [:]
     /// The option a first tap armed, for a decision that takes two (`TodoAsk.needsConfirmation`).
@@ -39,36 +92,145 @@ import SwiftUI
     @ObservationIgnored private let failed: (String) -> Void
     /// After an answer was taken (or found already handled): the to-do's state changed on the hub.
     @ObservationIgnored private let taken: () -> Void
+    @ObservationIgnored private let hold: @MainActor () -> Hold?
 
     init(api: @escaping (String) -> APIClient? = { AppModel.shared.api($0) },
          failed: @escaping (String) -> Void = { AppModel.shared.toast = Toast($0, style: .error) },
-         taken: @escaping () -> Void = { TasksStore.shared.reloadTodos() }) {
+         taken: @escaping () -> Void = { TasksStore.shared.reloadTodos() },
+         hold: @escaping @MainActor () -> Hold? = { nil }) {
         self.api = api
         self.failed = failed
         self.taken = taken
+        self.hold = hold
     }
 
     /// A round of a to-do on a hub: the same round on two surfaces is one answer.
-    static func key(todo: String, ask: TodoAsk, group: String) -> String { "\(group)|\(todo)|\(ask.askedAt)" }
+    static func key(todo: String, ask: TodoAsk, group: String) -> String { key(todo: todo, round: ask.askedAt, group: group) }
 
-    func state(todo: String, ask: TodoAsk, group: String) -> State? { states[Self.key(todo: todo, ask: ask, group: group)] }
+    /// A round by its moment, so the list's `asked_at` and the view's `round` meet however the hub spelled the time; an
+    /// ask without a round (a retry) by its id, which is never parsed (`todo:retry@…` fails every parser, the slowest
+    /// last; P4).
+    static func key(todo: String, round: String, group: String) -> String {
+        let moment = round.first?.isASCII == true && round.first?.isNumber == true
+            ? JSON.parseDate(round).map { String($0.timeIntervalSince1970) } ?? round : round
+        return "\(group)|\(todo)|\(moment)"
+    }
+
+    /// The round a held answer keeps on this device: its step's when it is a step's ask on its parent's row.
+    static func key(_ entry: TodoOutbox.Entry, _ answer: TodoOutbox.AskAnswer) -> String {
+        key(todo: answer.step ?? entry.todo, round: answer.round ?? answer.ask, group: entry.hub)
+    }
+
+    func state(todo: String, ask: TodoAsk, group: String) -> State? { state(todo: todo, round: ask.askedAt, group: group) }
+
+    /// What answering the round stands at: an answer still in the outbox says it was chosen, also after a relaunch.
+    func state(todo: String, round: String, group: String) -> State? {
+        let key = Self.key(todo: todo, round: round, group: group)
+        if let held = heldAnswer(key, group: group) { return .chosen(held.answer.label) }
+        return states[key]
+    }
+
     func armedOption(todo: String, ask: TodoAsk, group: String) -> Int? { armed[Self.key(todo: todo, ask: ask, group: group)] }
+    func armedOption(todo: String, round: String, group: String) -> Int? { armed[Self.key(todo: todo, round: round, group: group)] }
+
+    /// The answer chosen for the round still waits out its Undo window here, unsent.
+    func canUndo(todo: String, round: String, group: String) -> Bool {
+        guard let hold = hold(), let held = heldAnswer(Self.key(todo: todo, round: round, group: group), group: group)
+        else { return false }
+        return hold.outbox.holds(held.id)
+    }
 
     /// A tap on option `index`. A step that cannot be undone, or that other people will see, takes two: the first
-    /// arms the option ("Confirm: …"), the second on the same one sends it. Any other decision sends at once.
+    /// arms the option ("Confirm: …"), the second on the same one sends it. Any other decision sends at once (V1:
+    /// holds it).
     func choose(_ index: Int, of ask: TodoAsk, todo: String, group: String) async {
         let options = ask.decisionOptions
         guard options.indices.contains(index) else { return }
         let key = Self.key(todo: todo, ask: ask, group: group)
-        guard Self.free(states[key]) else { return }
+        guard Self.free(state(todo: todo, ask: ask, group: group)) else { return }
         if ask.needsConfirmation, armed[key] != index {
             armed[key] = index
             return
         }
         let label = options[index].label
+        if let hold = hold() {
+            let answer = TodoOutbox.AskAnswer(ask: hold.askID(todo, ask.askedAt), kind: OwnerAskKind.decision, round: ask.askedAt,
+                                              option: label, label: String(localized: "You chose \(label) [To-dos Answers]"))
+            held(answer, todo: todo, group: group, key: key, hold)
+            return
+        }
         await send(key, group: group, answer: "option:\(index)", done: .answered(String(localized: "Answered: \(label)"))) {
             try await $0.acceptTodo(todo, askedAt: ask.askedAt, option: label)
         }
+    }
+
+    /// An answer to one of a V1 to-do's own asks (a row's OK or Retry, an `AskCard`'s option): held through its Undo
+    /// window, then sent. `arm`: an option that takes two taps (an open decision) is armed by the first, as `choose`.
+    /// While V1 is off (a card drawn before the gate went), at once through today's routes. `todo` is the row's; a step's
+    /// ask lifted onto it is kept, and answered through today's routes, as the step's.
+    func answer(_ answer: TodoOutbox.AskAnswer, todo: String, group: String, arm option: Int? = nil) async {
+        let round = answer.round ?? answer.ask
+        let target = answer.step ?? todo
+        let key = Self.key(todo: target, round: round, group: group)
+        guard Self.free(state(todo: target, round: round, group: group)) else { return }
+        if let option, armed[key] != option {
+            armed[key] = option
+            return
+        }
+        if let hold = hold() {
+            held(answer, todo: todo, group: group, key: key, hold)
+            return
+        }
+        await send(key, group: group, answer: answer.option.map { "option:" + $0 } ?? answer.kind,
+                   done: .answered(String(localized: "Answered: \(answer.label)"))) {
+            if answer.kind == OwnerAskKind.retry {
+                _ = try await $0.retryTodo(target)
+            } else if let round = answer.round {
+                try await $0.acceptTodo(target, askedAt: round, option: answer.option, response: answer.response)
+            } else {
+                // No round to answer by (an ask the accept route cannot name): nothing went.
+                throw APIError(status: 409, message: String(localized: "Already handled"), fields: ["code": TodoAskRefusal.stale])
+            }
+        }
+    }
+
+    /// Undo on an answer still held: taken back, nothing sent, and its ask counts again. Said when it has gone already,
+    /// since nothing undoes a decision on the hub.
+    @discardableResult
+    func undo(todo: String, round: String, group: String) -> Bool {
+        let key = Self.key(todo: todo, round: round, group: group)
+        guard let hold = hold(), let held = heldAnswer(key, group: group) else { return false }
+        guard hold.outbox.holds(held.id), hold.outbox.takeBack(held.id) else {
+            Haptics.error()
+            hold.toast(Toast(String(localized: "It can't be undone anymore. [To-dos Toast]"), style: .error))
+            return false
+        }
+        Haptics.tap()
+        states[key] = nil
+        armed[key] = nil
+        return true
+    }
+
+    /// How a held answer's send ended (`TodoOutbox.Deps.settled`): taken, its words stay until the to-do's view moves
+    /// it on; answered elsewhere, said so (no error haptic); nobody sure it reached the Agent, said so; refused (or let
+    /// go unsent), its buttons back (the outbox said why). The first three keep its ask out of the numbers until the
+    /// view stops listing it.
+    func settled(_ entry: TodoOutbox.Entry, _ sent: TodoOutbox.Sent) {
+        guard case .answer(let a) = entry.write else { return }
+        let key = Self.key(entry, a)
+        switch sent {
+        case .done:
+            states[key] = .chosen(a.label)
+        case .elsewhere:
+            states[key] = .elsewhere
+        case .inDoubt:
+            states[key] = .unsure
+        case .refused, .notSent, .unknown:
+            states[key] = nil
+            return
+        }
+        if !a.ask.isEmpty { hold()?.counts.answered(a.ask, of: entry.todo) }
+        taken()
     }
 
     /// One of the fixed answers ("You Decide", "This Isn't What I Asked For", "Tell Me the Background First"): never armed,
@@ -76,14 +238,38 @@ import SwiftUI
     /// leaves the round open on the hub, and the others end it there, which the to-dos read after it says.
     func respond(_ response: TodoAsk.Response, to ask: TodoAsk, todo: String, group: String) async {
         let key = Self.key(todo: todo, ask: ask, group: group)
-        guard Self.free(states[key]) else { return }
+        guard Self.free(state(todo: todo, ask: ask, group: group)) else { return }
+        let hold = hold()
         await send(key, group: group, answer: "response:\(response.rawValue)", done: .sentBack) {
-            try await $0.acceptTodo(todo, askedAt: ask.askedAt, response: response.rawValue)
+            if let hold {
+                try await hold.respond(todo, ask.askedAt, response.rawValue)
+            } else {
+                try await $0.acceptTodo(todo, askedAt: ask.askedAt, response: response.rawValue)
+            }
         }
     }
 
     /// No request of the round is out and it has not ended: a tap may send.
     private static func free(_ state: State?) -> Bool { state == nil || state == .sentBack }
+
+    /// V1: `answer` into the outbox for its Undo window; its ask leaves the numbers at once (`TodoOutbox.answering`).
+    private func held(_ answer: TodoOutbox.AskAnswer, todo: String, group: String, key: String, _ hold: Hold) {
+        guard hold.outbox.add(.answer(answer), todo: todo, manager: hold.manager(todo), hold: hold.window(), hub: group) != nil else {
+            let why = String(localized: "Not connected to a hub [Todo Store 04f822]")
+            failed(String(localized: "Couldn't send your answer. \(why)"))
+            return
+        }
+        Haptics.tap()
+        armed[key] = nil
+        states[key] = .chosen(answer.label)
+    }
+
+    /// The outbox's latest answer to round `key`, while one is there: by its round, so two answers held on one to-do
+    /// (two rounds, or a step's ask and its parent's) each keep their own.
+    private func heldAnswer(_ key: String, group: String) -> (id: UUID, answer: TodoOutbox.AskAnswer)? {
+        guard let hold = hold() else { return nil }
+        return hold.outbox.lastAnswer(hub: group) { Self.key($0, $1) == key }.map { ($0.entry.id, $0.answer) }
+    }
 
     private func send(_ key: String, group: String, answer: String, done: State, _ call: (APIClient) async throws -> Void) async {
         guard let api = api(group) else {
@@ -250,6 +436,17 @@ struct DecisionRow: View {
             outcome(text)
         case .alreadyHandled?:
             outcome(String(localized: "Already handled"))
+        case .chosen(let text)?:
+            // V1: held on this device, then sent; Undo while it is held.
+            AskChosenLine(text: text, undo: answers.canUndo(todo: todo.id, round: ask.askedAt, group: group)
+                ? { _ = answers.undo(todo: todo.id, round: ask.askedAt, group: group) } : nil)
+                .accessibilityIdentifier("decision.chosen.\(todo.id)")
+        case .elsewhere?:
+            AskChosenLine(text: String(localized: "Answered elsewhere [To-dos Answers]"), elsewhere: true)
+                .accessibilityIdentifier("decision.elsewhere.\(todo.id)")
+        case .unsure?:
+            AskChosenLine(text: String(localized: "Not sure your answer went through [To-dos Answers]"), elsewhere: true)
+                .accessibilityIdentifier("decision.unsure.\(todo.id)")
         case .busy?, .sentBack?, nil:
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 // A fixed answer was given ("Tell Me the Background First"): the decision still waits, and can still

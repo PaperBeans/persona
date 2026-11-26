@@ -277,8 +277,8 @@ func TestDecisionPushFixtures(t *testing.T) {
 	}
 }
 
-// A manager from before the lock-screen rule gets the push it always got, byte for byte, though it sends its options
-// and fixed answers: TODO_DECIDE, whose Take Recommendation the iOS app offers.
+// A manager from before the lock-screen rule gets TODO_DECIDE with no lockscreen/options/mutable-content, plus top-level
+// todo_id (and no interaction_id, #13916), though it sends its options and fixed answers.
 func TestOlderManagersDecisionPushIsUnchanged(t *testing.T) {
 	n := decideNotification(t)
 	n.Todo.Options, n.Todo.Responses = []string{"先灰度 10%", "直接全量"}, []string{"decide_yourself", "not_what_i_asked", "explain_first"}
@@ -289,7 +289,8 @@ func TestOlderManagersDecisionPushIsUnchanged(t *testing.T) {
 	const want = `{"aps":{"alert":{"body":"🤔 要你拍板：先灰度还是直接全量\n推荐：先灰度 10%","subtitle":"Persona","title":"结论：修登录崩溃"},` +
 		`"category":"TODO_DECIDE","interruption-level":"time-sensitive","sound":"default","thread-id":"conv1"},` +
 		`"machine_id":"m","session_id":"conv1",` +
-		`"todo":{"asked_at":"2026-11-09T05:06:07.123456789Z","id":"todo_1","manager":"assistant","recommend":"先灰度 10%"}}`
+		`"todo":{"asked_at":"2026-11-09T05:06:07.123456789Z","id":"todo_1","manager":"assistant","recommend":"先灰度 10%"},` +
+		`"todo_id":"todo_1"}`
 	if string(got) != want {
 		t.Fatalf("an older manager's push changed:\n got %s\nwant %s", got, want)
 	}

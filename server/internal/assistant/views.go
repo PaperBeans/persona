@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/healthhost"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,27 +70,11 @@ func (s *Service) toolView(ctx context.Context, machine, conversation, name stri
 		if err != nil {
 			return "", fmt.Errorf("invalid view: %w", err)
 		}
-		view, err := json.Marshal(v)
+		out, err := s.showView(ctx, st, machine, conversation, "view_"+randomHex(8), v)
 		if err != nil {
 			return "", err
 		}
-		at := time.Now().UTC()
-		row := db.AssistantViewRow{ID: "view_" + randomHex(8), Conversation: conversation, MachineID: machine, View: view, Version: 1, CreatedAt: at, UpdatedAt: at}
-		out, err := storedView(row)
-		if err != nil {
-			return "", err
-		}
-		body, err := json.Marshal(map[string]any{"view": out})
-		if err != nil {
-			return "", err
-		}
-		feed := db.FeedRow{ID: "feed_" + randomHex(8), Conversation: conversation, At: at, Kind: feedView, Ref: row.ID, Body: body}
-		if err := st.CreateAssistantView(ctx, row, feed); err != nil {
-			return "", err
-		}
-		s.event(ctx, map[string]any{"type": "assistant_feed", "conversation": conversation, "item": FeedItem{ID: feed.ID, Conversation: conversation, At: at, Kind: feedView, Ref: row.ID, Body: body}})
-		s.viewChanged(out)
-		return viewToolJSON(map[string]any{"id": row.ID, "version": row.Version})
+		return viewToolJSON(map[string]any{"id": out.ID, "version": out.Version})
 	}
 	if in.ID == "" {
 		return "", errors.New("id is required")
@@ -99,6 +85,9 @@ func (s *Service) toolView(ctx context.Context, machine, conversation, name stri
 	}
 	if err != nil {
 		return "", err
+	}
+	if name == "view_update" && strings.HasPrefix(in.ID, healthhost.CardPrefix) {
+		return "", errors.New("forbidden: this card belongs to Health; use health_strength")
 	}
 	if row.MachineID != machine {
 		return "", errors.New("forbidden: this card was created by an assistant conversation on another machine")
@@ -122,6 +111,9 @@ func (s *Service) toolView(ctx context.Context, machine, conversation, name stri
 			wire.AssistantView
 			Actions []wire.ViewAction `json:"actions"`
 		}{AssistantView: out, Actions: actions})
+	}
+	if s.pageOffer(ctx, in.ID) {
+		return "", errors.New("forbidden: this card offers a dashboard draft; change the draft with page update")
 	}
 	v, err := wire.ParseAssistantView(in.View)
 	if err != nil {

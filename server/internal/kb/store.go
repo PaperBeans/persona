@@ -17,12 +17,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // Kinds of entities, also the directory names under the data dir.
@@ -31,29 +33,14 @@ const (
 	KindPerson  = "people"
 	KindProject = "projects"
 	KindDoc     = "docs"
-	KindMeeting = "meetings"
-	KindEvent   = "events"
+	KindMeeting = recordingwire.KindMeeting
+	KindEvent   = recordingwire.KindEvent
 )
 
 // Tagging ranks anything in the knowledge base. The AI fills it in; Locked ones were set by hand (the app or a
-// kb_update call) and the AI no longer overrides importance / relevance.
-type Tagging struct {
-	Importance string    `json:"importance,omitempty"` // P0 (critical) … P3 (ignorable)
-	Relevance  int       `json:"relevance"`            // 0–100: how much it concerns the owner
-	Tags       []string  `json:"tags,omitempty"`
-	Locked     bool      `json:"locked,omitempty"`
-	TaggedAt   time.Time `json:"tagged_at,omitempty"`
-	// Pinned contains confirmed facts; pipeline writes cannot replace or clear it.
-	Pinned string `json:"pinned,omitempty"`
-	// LockedFields names update fields that automatic writes must preserve.
-	LockedFields []string `json:"locked_fields,omitempty"`
-	// Provenance: the extension holding a locked field (attribution.go); without an entry a locked field is the user's.
-	Provenance map[string]Provenance `json:"provenance,omitempty"`
-	// Excluded: links the user removed by hand, by list ("people", "chats", "projects", "items") and the id that list
-	// named: automatic writes leave them out while the rest of the list keeps changing (exclude.go).
-	Excluded  map[string][]string `json:"excluded,omitempty"`
-	persisted bool
-}
+// kb_update call) and the AI no longer overrides importance / relevance. It is the contract's type (kbwire.Tagging),
+// so a type that embeds it can live in a contract package (docs/plans/plan-kb-recording-port.md).
+type Tagging = kbwire.Tagging
 
 // Chat is one conversation: a Feishu chat (lark-<feedId>) or the mail exchanged with one address (mail-<account>-<addr>).
 type Chat struct {
@@ -215,6 +202,14 @@ type Item struct {
 	Note     string    `json:"note,omitempty"`
 	Seen     time.Time `json:"seen"`
 	Signals  []string  `json:"signals,omitempty"` // kbwire.Signal*: why it concerns the owner, as the source told
+	// The fields below come only from sources that know them (the Lark user sync); kbwire.Item says what each means.
+	// An item without a CanonicalKey is collected exactly as before them (CollectItems).
+	CanonicalKey string             `json:"canonical_key,omitempty"`
+	Aliases      []string           `json:"aliases,omitempty"`
+	Revision     int64              `json:"revision,omitempty"`
+	BodyHash     string             `json:"body_hash,omitempty"`
+	Content      string             `json:"content,omitempty"`
+	Sources      []kbwire.SourceRef `json:"sources,omitempty"`
 	Tagging
 }
 
@@ -226,14 +221,16 @@ type Store struct {
 	metaMu   sync.Mutex // acquire before mu when both are needed (projectInput reads Log under metaMu)
 	applyMu  sync.Mutex
 
-	recMu      sync.Mutex   // a recording's read-compare-write (recordings.go)
+	recMu      sync.Mutex   // a recording's read-compare-write (the upload, a hand edit, delete, retention)
 	recFilesMu sync.RWMutex // acquire before metaMu for recording snapshots and recovery
-	liveMu     sync.Mutex   // a live log's read-modify-write (live.go); after recMu, before recFilesMu
-	meetMu     sync.Mutex   // meeting.json's read-modify-write (meeting.go); after recMu, before liveMu
-	// audioMapMu guards audioRecs, hub-mode recordings' audio state (recording_audio.go); a leaf lock. Each one's own
-	// mutex comes after liveMu and before recFilesMu.
-	audioMapMu        sync.Mutex
-	audioRecs         map[string]*audioRec
+	meetMu     sync.Mutex   // meeting.json's read-modify-write (meeting_keep.go); after recMu, before recFilesMu
+	// Two more locks sit between meetMu and recFilesMu and are the recording module's own
+	// (internal/modules/recording/writers, storeState): the live log's (liveMu, a live log's read-modify-write) and,
+	// after it, each hub-mode recording's audio mutex (audioRec.mu); an audio append holds recFilesMu for reading.
+	// The order of the six: recMu, meetMu, liveMu, audio mutex, recFilesMu, metaMu.
+	// recordings is the recording module's write side once it hooked a knowledge base on this store (recording_port.go:
+	// the audio touch points of delete, retention and the trim); nil without the module.
+	recordings        atomic.Pointer[recordingwire.Provider]
 	recordingWrite    func(string, []byte) error // per-store candidate fault injection
 	recordingReadWait func()                     // per-store read-entry observation for concurrency tests
 	recordingRemove   func(string) error         // per-store commit fault injection
@@ -243,6 +240,9 @@ type Store struct {
 	// sources' distill marks (topic_distill.go). Acquire before metaMu.
 	topicMu  sync.Mutex
 	ingestMu sync.Mutex // live identity filtering through attachment preparation and commit
+	// superseded: gateway lines the aligner found shorter than a sync message it let through (align_loose.go), by
+	// sync chat id and message id, dropped once that message is written (Engine.settleSuperseded). Under ingestMu.
+	superseded map[string]map[string]gatewayDrop
 	// chatMu: a chat's read-modify-write of meta.json by the pipeline (Ingest, saveArchived, WriteHistory in history.go,
 	// and compression's write-back, putCompressed), so none writes back a stale copy over what another wrote. Each
 	// reads the chat again under it and changes only the fields it owns. Hand edits (Apply, unlink) take it through
@@ -375,7 +375,7 @@ func (s *Store) Chat(id string) (*Chat, bool) {
 	if !ok || err != nil {
 		return nil, false
 	}
-	c.persisted = true
+	c.Persisted = true
 	return &c, true
 }
 
@@ -387,7 +387,7 @@ func (s *Store) Person(id string) (*Person, bool) {
 	if !ok || err != nil {
 		return nil, false
 	}
-	p.persisted = true
+	p.Persisted = true
 	return &p, true
 }
 
@@ -401,7 +401,7 @@ func (s *Store) Project(slug string) (*Project, bool) {
 	if !ok || err != nil {
 		return nil, false
 	}
-	p.persisted = true
+	p.Persisted = true
 	return &p, true
 }
 
@@ -416,7 +416,7 @@ func (s *Store) Item(kind, id string) (*Item, bool) {
 	if !ok || err != nil {
 		return nil, false
 	}
-	it.persisted = true
+	it.Persisted = true
 	return &it, true
 }
 

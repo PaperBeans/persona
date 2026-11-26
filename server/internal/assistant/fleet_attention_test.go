@@ -150,8 +150,8 @@ func TestLinkAttentionCapsAndClips(t *testing.T) {
 		t.Fatalf("item %+v", it)
 	}
 	exact := strings.Repeat("t", linkTextMax)
-	if it := linkItem("en", needer{agent: fleetInput{Machine: "Mac", Session: &proto.Session{MachineID: "mac", SessionID: "s",
-		Title: exact}}}); it.Title != exact {
+	if it := linkAttention("en", []fleetInput{{Machine: "Mac", Session: &proto.Session{MachineID: "mac", SessionID: "s",
+		Title: exact, State: proto.StateNeedsYou}}}, nil, nil).Items[0]; it.Title != exact {
 		t.Fatalf("a title of exactly %d runes was cut: %q", linkTextMax, it.Title)
 	}
 	a.Rev, a.WebURL = strings.Repeat("f", 16), "https://hub.example.com/"+strings.Repeat("p", 200)

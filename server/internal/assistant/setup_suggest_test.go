@@ -443,18 +443,18 @@ func TestSetupBlockSwitchesNothingOn(t *testing.T) {
 		}
 		return out
 	}
-	before, puts := snapshot(), store.puts
+	before, puts := snapshot(), store.putCount()
 
 	b := s.setupFor(ctx, now, s.location(ctx), i18n.En, testWeb)
 	if got := setupIDs(b); !slices.Equal(got, []string{setupDelegate, setupAutoContinue}) {
 		t.Fatalf("block: %v", got)
 	}
-	if store.puts != puts {
-		t.Fatalf("computing the block wrote %d settings", store.puts-puts)
+	if after := store.putCount(); after != puts {
+		t.Fatalf("computing the block wrote %d settings", after-puts)
 	}
 	s.setupTold(b, now)
-	if store.puts != puts+1 {
-		t.Fatalf("telling the block wrote %d settings, want its own book only", store.puts-puts)
+	if after := store.putCount(); after != puts+1 {
+		t.Fatalf("telling the block wrote %d settings, want its own book only", after-puts)
 	}
 	after := snapshot()
 	if len(after) != len(before) {
@@ -633,36 +633,37 @@ func TestSetupBlockIsOnTheCardTheItemAndTheFacts(t *testing.T) {
 	e := newBriefEnv(t)
 	now := e.clk.Now()
 	f := e.s.briefFactsAt(context.Background(), now, "")
+	l := i18n.Lang(f.Lang)
 	plainCard, _, _ := e.s.briefCard(f, "Morning", "")
-	if strings.Contains(string(plainCard.JSON()), i18n.T(f.l, "assistant-setup_suggest.heading")) || f.body(e.s, "Morning").Setup != nil ||
-		strings.Contains(f.modelText(), "建议的设置") {
+	if strings.Contains(string(plainCard.JSON()), i18n.T(l, "assistant-setup_suggest.heading")) || e.s.briefBodyOf(f, "Morning").Setup != nil ||
+		strings.Contains(e.s.briefModelText(f), "建议的设置") {
 		t.Fatal("a briefing without a block shows one")
 	}
 
-	f.Setup = &setupBlock{Week: "2026-W46", Suggestions: []setupSuggestion{
-		setupWord(f.l, testWeb, setupDelegate, setupNumber{n: 4}), setupWord(f.l, testWeb, setupWake, setupNumber{n: 3})}}
+	f.Setup = toBriefSetup(&setupBlock{Week: "2026-W46", Suggestions: []setupSuggestion{
+		setupWord(l, testWeb, setupDelegate, setupNumber{n: 4}), setupWord(l, testWeb, setupWake, setupNumber{n: 3})}})
 	card, fallback, _ := e.s.briefCard(f, "Morning", "")
 	raw := string(card.JSON())
-	if !strings.Contains(raw, i18n.T(f.l, "assistant-setup_suggest.heading")) || !strings.Contains(fallback, f.Setup.Suggestions[0].Text) ||
-		!strings.Contains(fallback, f.Setup.Suggestions[1].Text) || !strings.Contains(fallback, i18n.T(f.l, "assistant-setup_suggest.intro")) {
+	if !strings.Contains(raw, i18n.T(l, "assistant-setup_suggest.heading")) || !strings.Contains(fallback, f.Setup.Suggestions[0].Text) ||
+		!strings.Contains(fallback, f.Setup.Suggestions[1].Text) || !strings.Contains(fallback, i18n.T(l, "assistant-setup_suggest.intro")) {
 		t.Fatalf("card without the block: %s\n%s", raw, fallback)
 	}
 	if !strings.Contains(raw, testWeb+"/settings?tab=persona") {
 		t.Fatalf("card without the settings link: %s", raw)
 	}
-	body := f.body(e.s, "Morning")
+	body := e.s.briefBodyOf(f, "Morning")
 	if len(body.Setup) != 2 || body.Setup[0].ID != setupDelegate || body.Setup[0].Count != 4 || body.Setup[1].Link == "" {
 		t.Fatalf("brief item: %+v", body.Setup)
 	}
-	text := f.modelText()
+	text := e.s.briefModelText(f)
 	if !strings.Contains(text, f.Setup.Suggestions[0].Text) || !strings.Contains(text, f.Setup.Suggestions[1].Text) || !strings.Contains(text, "不要替用户打开") {
 		t.Fatalf("model facts: %s", text)
 	}
 	// A block that names nothing adds no section anywhere.
-	f.Setup = &setupBlock{Week: "2026-W46"}
+	f.Setup = toBriefSetup(&setupBlock{Week: "2026-W46"})
 	empty, _, _ := e.s.briefCard(f, "Morning", "")
-	if strings.Contains(string(empty.JSON()), i18n.T(f.l, "assistant-setup_suggest.heading")) || f.body(e.s, "Morning").Setup != nil ||
-		strings.Contains(f.modelText(), "建议的设置") {
+	if strings.Contains(string(empty.JSON()), i18n.T(l, "assistant-setup_suggest.heading")) || e.s.briefBodyOf(f, "Morning").Setup != nil ||
+		strings.Contains(e.s.briefModelText(f), "建议的设置") {
 		t.Fatal("an empty block shows a section")
 	}
 }
@@ -671,6 +672,7 @@ func TestSetupBlockIsOnTheCardTheItemAndTheFacts(t *testing.T) {
 // conversation open, it is muted, the task pushes only what its runs send); the push itself marks nothing, and a run
 // that failed leaves the block for its retry or the next briefing.
 func TestSetupBlockIsMarkedWhenTheRunEndsNotWhenItIsPushed(t *testing.T) {
+	needsBriefingModule(t)
 	// The bubble's fixed clock keeps the next briefing in the same ISO week without expiring the run.
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
@@ -681,7 +683,7 @@ func TestSetupBlockIsMarkedWhenTheRunEndsNotWhenItIsPushed(t *testing.T) {
 		if len(setupIDs(b)) != 1 {
 			t.Fatalf("block: %+v", b)
 		}
-		s.brief.bySession = map[string]*briefRun{"sess1": {facts: &briefFacts{At: now, l: i18n.En, loc: s.location(ctx), Setup: b}}}
+		s.briefSetSessionRun("sess1", &briefRun{Facts: &briefFacts{At: now, Lang: string(i18n.En), Loc: s.location(ctx), Setup: toBriefSetup(b)}})
 		if s.briefPush("sess1", i18n.En, true) == "" {
 			t.Fatal("no push text")
 		}
@@ -705,6 +707,7 @@ func TestSetupBlockIsMarkedWhenTheRunEndsNotWhenItIsPushed(t *testing.T) {
 // The watcher of a scheduled run tells the block when the run's turn ends normally with no push at all, and not when
 // the turn ends in an error.
 func TestScheduledRunEndTellsTheSetupBlock(t *testing.T) {
+	needsBriefingModule(t)
 	for _, failed := range []bool{false, true} {
 		synctest.Test(t, func(t *testing.T) {
 			f := newFakeHub().withMachine()
@@ -715,7 +718,7 @@ func TestScheduledRunEndTellsTheSetupBlock(t *testing.T) {
 				MachineID: "server", Facts: true}
 			setTasks(s, task)
 			block := &setupBlock{Week: "2026-W46", Suggestions: []setupSuggestion{{ID: setupDelegate, Count: 4, Text: "line"}}}
-			s.brief.bySession = map[string]*briefRun{"s1": {facts: &briefFacts{At: time.Now(), l: i18n.En, loc: time.UTC, Setup: block}}}
+			s.briefSetSessionRun("s1", &briefRun{Facts: &briefFacts{At: time.Now(), Lang: string(i18n.En), Loc: time.UTC, Setup: toBriefSetup(block)}})
 			f.items = []proto.Item{{ID: "ask", Role: "user", Kind: proto.KindText, Text: "⏰ Brief me"}}
 			f.setSessions("server", proto.Session{SessionID: "s1", Status: proto.StatusWorking, State: proto.StateWorking, Assistant: true})
 			run := ScheduleRun{RefID: task.ID, Status: runOK, SessionID: "s1", Retried: true}

@@ -4,4 +4,4 @@
 
 1. 任务「Example task」（todo_example，signal=draft_pr）：（关联的自家 PR https://github.com/example/app/pull/12（head head-a）仍是草稿，不是在等上游评审或合并。
 ）
-   验收标准：The task PR is merged.
+   验收标准用 todo_get 取原文

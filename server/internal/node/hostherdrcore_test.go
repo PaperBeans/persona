@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,9 +114,13 @@ func TestHerdrCoreStatusAndAgent(t *testing.T) {
 		{"claude-code", "idle", "claude", "claude", proto.StatusIdle},
 		{"claude-code", "error", "claude", "claude", proto.StatusUnknown},
 		{"codex", "working", "codex", "codex", proto.StatusWorking},
+		{"traex", "working", "traex", traexAgent, proto.StatusWorking},
+		{"traecli", "done", "traecli", traexAgent, proto.StatusDone},
+		{"codex", "done", "traecli", traexAgent, proto.StatusDone},
 		{"grok-build", "idle", "grok", "", ""},            // not a program the node drives: left for a compatible CLI
 		{"", "", "claude", "claude", proto.StatusUnknown}, // has not reported yet
 		{"", "", "/opt/bin/codex", "codex", proto.StatusUnknown},
+		{"", "", "/opt/bin/traecli", traexAgent, proto.StatusUnknown},
 		{"", "", "zsh", "", ""},
 		{"claude-code", "done", "zsh", "", ""},      // claude exited: its last state stays on the terminal
 		{"claude-code", "done", "-zsh", "", ""},     // a login shell
@@ -147,10 +152,15 @@ func TestHerdrCoreStatusAndAgent(t *testing.T) {
 // hcSession is a node with one claude session in herdr-core terminal t1.
 func hcSession(t *testing.T) (*Node, *fakeHC) {
 	t.Helper()
+	return hcSessionWithPID(t, 4242)
+}
+
+func hcSessionWithPID(t *testing.T, pid int) (*Node, *fakeHC) {
+	t.Helper()
 	n, _, hc, home := hcNode(t)
 	writeTranscript(t, home, hcCwd, sidA, time.Now().Add(-time.Minute), `{"type":"custom-title","customTitle":"x"}`)
-	writeClaudePID(t, home, 4242, sidA)
-	hc.setTerminals(hcTerminal("t1", "claude-code", "idle", 4242, "claude", hcCwd, "", "", ""))
+	writeClaudePID(t, home, pid, sidA)
+	hc.setTerminals(hcTerminal("t1", "claude-code", "idle", pid, "claude", hcCwd, "", "", ""))
 	if m := byID(listSessions(t, n)); m[sidA].PaneID != "herdr-core:t1" {
 		t.Fatalf("not listed: %v", m)
 	}
@@ -218,19 +228,44 @@ func TestHerdrCoreSendRefusedByHerdrCore(t *testing.T) {
 // The claude exited and the terminal is back at its shell, its last state still on it: the shell does not get the
 // message as a command — refused before anything is typed.
 func TestHerdrCoreSendAfterTheAgentExited(t *testing.T) {
-	n, hc := hcSession(t)
-	exited := hcTerminal("t1", "claude-code", "done", 4242, "claude", hcCwd, "", "", "")
-	exited["foreground"] = map[string]any{"pid": 4241, "name": "zsh", "argv": []string{"-zsh"}, "cwd": hcCwd}
+	pid, exit := idleTerminalTestProcess(t)
+	n, hc := hcSessionWithPID(t, pid)
+	exit()
+	exited := hcTerminal("t1", "claude-code", "done", pid, "claude", hcCwd, "", "", "")
+	exited["foreground"] = map[string]any{"pid": pid - 1, "name": "zsh", "argv": []string{"-zsh"}, "cwd": hcCwd}
 	hc.setTerminals(exited)
 	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "rm -rf build"})
 	if code, _ := refusalOf(t, err); code != "not_delivered" {
 		t.Fatalf("send to an exited agent: %v", err)
+	}
+	if _, data := refusalOf(t, err); data["reason"] != "terminal_finished" {
+		t.Fatalf("send to an exited agent data = %v, want reason=terminal_finished", data)
 	}
 	if tr := hc.trace("terminal.send"); len(tr) != 0 {
 		t.Errorf("typed: %v", tr)
 	}
 	if m := byID(listSessions(t, n)); m[sidA].PaneID != "" {
 		t.Errorf("an exited agent still listed live: %+v", m[sidA])
+	}
+
+	// A live terminal running an unrecognized foreground app (not exited/shell) is still refused with delivered=none,
+	// but uses the generic terminal_refused reason rather than claiming the terminal ended.
+	n2, hc2 := hcSession(t)
+	other := hcTerminal("t1", "grok-build", "idle", 5000, "grok", hcCwd, "", "", "")
+	hc2.setTerminals(other)
+	_, err = request(t, n2, "session.send", map[string]any{"session_id": sidA, "text": "hello"})
+	if code, data := refusalOf(t, err); code != "not_delivered" || data["delivered"] != "none" || data["reason"] != "terminal_refused" {
+		t.Fatalf("send to live unrecognized foreground: code=%q data=%v", code, data)
+	}
+
+	// A live terminal with missing foreground metadata must also stay terminal_refused (not terminal_finished).
+	n3, hc3 := hcSession(t)
+	missingFg := hcTerminal("t1", "claude-code", "idle", 5000, "claude", hcCwd, "", "", "")
+	delete(missingFg, "foreground")
+	hc3.setTerminals(missingFg)
+	_, err = request(t, n3, "session.send", map[string]any{"session_id": sidA, "text": "hello"})
+	if code, data := refusalOf(t, err); code != "not_delivered" || data["delivered"] != "none" || data["reason"] != "terminal_refused" {
+		t.Fatalf("send to live missing foreground: code=%q data=%v", code, data)
 	}
 }
 
@@ -263,6 +298,91 @@ func TestHerdrCoreKeysAndText(t *testing.T) {
 			t.Errorf("%v pressed %v", params, tr)
 		}
 	}
+}
+
+// A herdr-core work-agent session (agy) converts herdr-core delivery refusals (blocked, unavailable, finished,
+// status_mismatch) into structured dialog_open / not_delivered refusals with delivered=none instead of uncoded 502s,
+// and never passes force on ordinary session.send calls.
+func TestHerdrCoreWorkAgentSendRefusals(t *testing.T) {
+	n, _, hc, _ := hcNode(t)
+	blocked := hcTerminal("t13", "antigravity", "blocked", 5151, "agy", hcCwd, "", "", "")
+	hc.setTerminals(blocked)
+	if err := n.refreshHosts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	id := otherSession(host.Agent{Agent: agyAgent, PaneID: "herdr-core:t13"})
+	if _, ok := n.agent(id); !ok {
+		t.Fatalf("agy herdr-core session %q not listed", id)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		kind       string
+		screen     string
+		wantCode   string
+		wantReason string
+		wantDialog string
+	}{
+		{name: "blocked bare screen", kind: "blocked", screen: " Antigravity CLI\n", wantCode: "dialog_open"},
+		{name: "blocked with dialog", kind: "blocked", screen: "Allow command?\n❯ 1. Yes\n  2. No\n\nEsc to cancel\n", wantCode: "dialog_open", wantDialog: "Allow command?"},
+		{name: "unavailable", kind: "unavailable", wantCode: "not_delivered", wantReason: "terminal_refused"},
+		{name: "finished", kind: "finished", wantCode: "not_delivered", wantReason: "terminal_finished"},
+		{name: "status_mismatch", kind: "status_mismatch", wantCode: "not_delivered", wantReason: "terminal_refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hc.reset()
+			hc.setScreen("t13", tc.screen)
+			var sawForce any
+			hc.handle("terminal.send", func(p map[string]any) any {
+				sawForce = p["force"]
+				return hcFail{tc.kind}
+			})
+			_, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "hello"})
+			code, data := refusalOf(t, err)
+			if code != tc.wantCode || data["delivered"] != "none" {
+				t.Fatalf("%s: code=%q data=%v, want code=%q delivered=none", tc.name, code, data, tc.wantCode)
+			}
+			if tc.wantReason != "" && data["reason"] != tc.wantReason {
+				t.Fatalf("%s: data=%v, want reason=%q", tc.name, data, tc.wantReason)
+			}
+			if sawForce != nil {
+				t.Fatalf("ordinary session.send must never pass force, got %v", sawForce)
+			}
+			if tc.wantDialog != "" {
+				if data["dialog"] != tc.wantDialog || data["notice"] != false {
+					t.Fatalf("dialog data = %v, want dialog=%q notice=false", data, tc.wantDialog)
+				}
+			} else if _, has := data["dialog"]; has {
+				t.Fatalf("unexpected dialog headline in data: %v", data)
+			}
+		})
+	}
+
+	// After terminal.send confirms a blocked refusal, workAgentCalls never issues a post-failure terminal.read
+	// (reusing only the screen already captured before sending) so refusal latency cannot turn into a caller timeout.
+	t.Run("blocked refusal does not issue post-send screen read", func(t *testing.T) {
+		var afterSend atomic.Bool
+		postReads := 0
+		hc.reset()
+		hc.handle("terminal.send", func(map[string]any) any {
+			afterSend.Store(true)
+			return hcFail{"blocked"}
+		})
+		hc.handle("terminal.read", func(map[string]any) any {
+			if afterSend.Load() {
+				postReads++
+			}
+			return map[string]any{"text": "Allow command?\n❯ 1. Yes\n  2. No\n\nEsc to cancel\n", "complete": true, "how": "screen"}
+		})
+		_, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "hello"})
+		code, data := refusalOf(t, err)
+		if code != "dialog_open" || data["delivered"] != "none" || data["dialog"] != "Allow command?" {
+			t.Fatalf("code=%q data=%v, want dialog_open delivered=none dialog=Allow command?", code, data)
+		}
+		if postReads != 0 {
+			t.Fatalf("post-send terminal.read called %d times, want 0", postReads)
+		}
+	})
 }
 
 // A colored screen read gets the plain rows (CRLF-ended like colored ones); "recent" reads the screen too (asking for

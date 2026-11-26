@@ -45,8 +45,14 @@ func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool, star
 	if c.p.model.Model != "" {
 		params["model"] = c.p.model.Model
 	}
-	// The same on every start of the thread, apart from the memory index: the live snapshot goes with each message.
-	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir), c.p.model.SupervisionInstructions)
+	// AGENTS.md supplies the bounded entry. Codex has no native .agents/rules loader, so the exact remainder
+	// travels on both start and resume through its authoritative developer-instruction channel.
+	remainder, err := assistantInstructionRemainder(cwd)
+	if err != nil {
+		return err
+	}
+	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir),
+		joinInstructionRemainderAndPolicy(remainder, c.p.model.SupervisionInstructions))
 	var res struct {
 		Model       string          `json:"model"`
 		ServiceTier json.RawMessage `json:"serviceTier"`
@@ -73,7 +79,9 @@ func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool, star
 	c.serviceTier = codexServiceTier(res.ServiceTier)
 	c.mu.Unlock()
 	n.mu.Lock()
+	c.p.mu.Lock()
 	c.p.id = res.Thread.ID
+	c.p.mu.Unlock()
 	if res.Thread.Path != "" {
 		n.paths[res.Thread.ID] = res.Thread.Path // Codex said so (CODEX_HOME may not be ~/.codex)
 		if n.pathsAt == nil {
@@ -200,7 +208,7 @@ func (c *codexConn) deliver(ctx context.Context, live, text string, images []pro
 	}
 	n.ttft.arm(c.p.id, sentAt, res.Turn.ID)
 	c.mu.Lock()
-	if res.Turn.ID != "" {
+	if res.Turn.ID != "" && c.endedTurnID != res.Turn.ID {
 		c.turnID = res.Turn.ID
 	}
 	c.mu.Unlock()

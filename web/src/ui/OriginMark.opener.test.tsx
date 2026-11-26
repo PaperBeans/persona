@@ -22,9 +22,10 @@ import { NO_WORKFLOW_CALLS } from "../lib/workflows";
 import { ChatContext } from "../views/chat/chat-context";
 import { SegmentView } from "../views/chat/SegmentView";
 import { SessionRow } from "../views/Sidebar";
+import { SidebarRowHoverHost } from "../views/SidebarRowHover";
 import { OriginMark } from "./ChannelMark";
 
-vi.mock("../lib/channels", async (original) => ({ ...(await original<typeof import("../lib/channels")>()), useChannels: () => [] }));
+vi.mock("../lib/channel-source", async (original) => ({ ...(await original<typeof import("../lib/channel-source")>()), useChannels: () => [] }));
 
 // A conversation an extension opened is marked with that extension's own icon and named after it (#10358): a
 // third-party extension that reuses lark.agent is neither drawn nor named as Lark. Without its icon drawn (loading, none,
@@ -209,20 +210,44 @@ describe("an extension's conversation is marked with the extension that opened i
     expect(line().textContent).toBe("来自 飞书 /agent");
   });
 
-  it("names the opener in the sidebar row's tooltip while its icon is drawn", async () => {
+  it("names the opener in the sidebar hover card while its icon is drawn", async () => {
     const s: Session = { machine_id: "hub", session_id: "c1", title: "1105 | 研究 | 群里的需求汇总", cwd: "", status: "idle", assistant: true, origin: "lark_agent", opened_by: "chat-bridge" };
     const props = { k: "j:c1", reg: () => () => {}, hover: () => {}, active: false, to: { name: "persona", sid: "c1" } as const, go: () => () => {}, showState: false };
     const row = () => host.querySelector<HTMLAnchorElement>("a")!;
-    act(() => root.render(<SessionRow {...props} s={s} />));
-    await flush();
-    expect(row().title).toContain("来自 飞书 /agent");
-    load(row());
-    expect(row().title).toContain("来自 Chat Bridge");
-    expect(row().title).not.toContain("飞书 /agent");
-    // the Lark extension's own row says Lark /agent
-    act(() => root.render(<SessionRow {...props} s={{ ...s, opened_by: "lark" }} />));
-    await flush();
-    expect(logo(row())).toBeNull();
-    expect(row().title).toContain("来自 飞书 /agent");
+    const show = (session: Session) => act(() => root.render(<>
+      <aside data-sidebar-root><SessionRow {...props} s={session} /></aside>
+      <SidebarRowHoverHost />
+    </>));
+    const media = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true, addEventListener() {} } as unknown as MediaQueryList);
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ height: 32, top: 80, right: 280 } as DOMRect);
+    async function source() {
+      vi.useFakeTimers();
+      try {
+        act(() => row().dispatchEvent(new PointerEvent("pointerover", { pointerType: "mouse", bubbles: true })));
+        await act(async () => { vi.advanceTimersByTime(250); });
+        await act(async () => { await vi.dynamicImportSettled(); });
+        const card = document.querySelector("[data-sidebar-row-hover-card]");
+        const name = [...(card?.querySelectorAll("dd") ?? [])].map((dd) => dd.textContent).find((text) => text.startsWith("来自"));
+        act(() => row().dispatchEvent(new PointerEvent("pointerout", { pointerType: "mouse", bubbles: true, relatedTarget: document.body })));
+        return name;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+    try {
+      show(s);
+      await flush();
+      expect(row().title).toBe("");
+      expect(await source()).toBe("来自 飞书 /agent");
+      load(row());
+      expect(await source()).toBe("来自 Chat Bridge");
+      show({ ...s, opened_by: "lark" });
+      await flush();
+      expect(logo(row())).toBeNull();
+      expect(await source()).toBe("来自 飞书 /agent");
+    } finally {
+      media.mockRestore();
+      rect.mockRestore();
+    }
   });
 });

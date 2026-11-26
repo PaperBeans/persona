@@ -42,7 +42,8 @@ func uiRequestFromParams(p extension.UIParams) uiRequest {
 	return in
 }
 func (h *Manager) pageOpen(ctx context.Context, who extwire.UIPrincipal, req wire.UIStreamRequest) (json.RawMessage, error) {
-	if req.Context.Stream == nil || req.Context.Stream.Protocol != 1 {
+	// the hub's own pages (an id starting with "-", pages_hook.go) are drawn over HTTP only
+	if req.Context.Stream == nil || req.Context.Stream.Protocol != 1 || reservedExtension(req.Extension) {
 		return nil, pageError("negotiation")
 	}
 	var in uiRequest
@@ -66,6 +67,7 @@ func (h *Manager) pageOpen(ctx context.Context, who extwire.UIPrincipal, req wir
 		defer close(s.openDone)
 		s.manifest = p.Manifest
 		s.item = item
+		s.unsupported = sanitizeUnsupported(in.Context.Unsupported)
 		s.components = map[string]bool{}
 		for _, tag := range req.Context.Stream.Components {
 			s.components[tag] = true

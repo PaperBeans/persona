@@ -1,0 +1,108 @@
+{
+  "string": [
+    {
+      "name": "phone_pair_title",
+      "value": "ハブに接続"
+    },
+    {
+      "name": "phone_pair_method",
+      "value": "接続方法"
+    },
+    {
+      "name": "phone_pair_password",
+      "value": "パスワードログイン"
+    },
+    {
+      "name": "phone_pair_token",
+      "value": "スキャンまたはトークン"
+    },
+    {
+      "name": "phone_pair_https",
+      "value": "HTTPS ハブアドレス"
+    },
+    {
+      "name": "phone_pair_address",
+      "value": "サーバーアドレス"
+    },
+    {
+      "name": "phone_pair_code",
+      "value": "ペアリングコード"
+    },
+    {
+      "name": "phone_pair_photo",
+      "value": "写真から選択"
+    },
+    {
+      "name": "phone_pair_manual",
+      "value": "手動で入力"
+    },
+    {
+      "name": "phone_pair_command",
+      "value": "コマンドライン"
+    },
+    {
+      "name": "phone_pair_other_info",
+      "value": "アドレスを入力する、SSH トンネル経由で接続する、または hub のマシンでコマンドを使ってコードを出します。"
+    },
+    {
+      "name": "phone_pair_command_info",
+      "value": "hub のマシンでターミナルを使う場合：そのマシンでこの行を実行すると、QR コードとペアリングリンクが表示されます。"
+    },
+    {
+      "name": "phone_pair_password_info",
+      "value": "システムのログイン画面で管理者が設定した接続用パスワードを入力してください。自己署名証明書の場合は QR コードでペアリングしてください。"
+    },
+    {
+      "name": "phone_password_address",
+      "value": "有効な HTTPS ハブアドレスを入力してください。"
+    },
+    {
+      "name": "phone_password_expired",
+      "value": "ログイン認証の有効期限が切れました。もう一度ログインしてください。"
+    },
+    {
+      "name": "phone_password_browser",
+      "value": "システムのログイン画面を開けませんでした。"
+    },
+    {
+      "name": "phone_pair_photo_invalid",
+      "value": "ハブのペアリングコードが1つ写った写真を選んでください。"
+    },
+    {
+      "name": "phone_pair_access",
+      "value": "Cloudflare Access"
+    },
+    {
+      "name": "phone_pair_access_info",
+      "value": "Cloudflare Access で公開されたハブ用のサービストークンの Client ID と Client Secret です。このハブのペアリング情報とともに端末に安全に保存されます。"
+    },
+    {
+      "name": "phone_pair_ssh",
+      "value": "SSHトンネル経由で接続"
+    },
+    {
+      "name": "phone_pair_ssh_info",
+      "value": "このデバイスからハブのアドレスに届かない場合（別のネットワーク、VPN未接続など）は、ハブにアクセスできるSSHサーバーを経由できます。"
+    },
+    {
+      "name": "phone_pair_access_id",
+      "value": "Client ID"
+    },
+    {
+      "name": "phone_pair_access_secret",
+      "value": "Client Secret"
+    },
+    {
+      "name": "phone_pair_ssh_configured",
+      "value": "設定した SSH トンネルでこのハブに接続します。"
+    },
+    {
+      "name": "phone_pair_camera_reason",
+      "value": "ハブに接続するときにカメラでペアリング用の QR コードを読み取ります。"
+    },
+    {
+      "name": "phone_pair_scan_info",
+      "value": "ハブの設定時に表示された QR コード、または接続済み端末の「設定 › デバイス › 新しいデバイスを接続」の QR コードを読み取ります。"
+    }
+  ]
+}

@@ -28,10 +28,13 @@ class SecretRunCardTest {
     private val input = """{"machine":"macmini","machine_name":"Mac mini","purpose":"Install the launch daemon for the backup job",
         "commands":["sudo -S -k -p '' launchctl bootstrap system /Library/LaunchDaemons/com.example.backup.plist",
                     "sudo -S -k -p '' sh -c \"echo  two  spaces > /tmp/x\""],"delivery":"stdin"}"""
+    private val envCommands = listOf("example auth login --password-stdin", "example verify  --json")
+    private val envInput = """{"machine":"macmini","machine_name":"Mac mini","purpose":"Authenticate the one-off example commands",
+        "commands":["example auth login --password-stdin","example verify  --json"],"delivery":"env"}"""
     private val typed = "correct horse battery staple"
 
     @Test fun runSendsExactlyTheTypedPassword() {
-        for (request in listOf(card(input), card(input, fields = "[]"))) {
+        for (request in listOf(card(input), card(input, fields = "[]"), card(envInput))) {
             val result = AnswerBuilder.build(request, AnswerAction.Allow, AnswerDraft(password = typed))
             assertEquals(Resolution(allow = true, values = mapOf(SecretRunRequest.PASSWORD to typed)), result.resolution)
         }
@@ -67,11 +70,12 @@ class SecretRunCardTest {
         // Not while it is being sent, not once it is over.
         assertFalse(AnswerBuilder.build(request, AnswerAction.Allow, AnswerDraft(password = typed), AnswerContext(sending = true)).allowed)
         assertFalse(AnswerBuilder.build(request, AnswerAction.Allow, AnswerDraft(password = typed), AnswerContext(state = "unknown")).allowed)
+        assertFalse(AnswerBuilder.build(card(envInput), AnswerAction.Always, AnswerDraft(password = typed)).allowed)
     }
 
     /** Notifications, the lock screen, the watch and shortcuts never allow it, even if a value reached them. */
     @Test fun quickEntriesOnlyDecline() {
-        for (request in listOf(card(input), card(input, fields = "[]"))) {
+        for (request in listOf(card(input), card(input, fields = "[]"), card(envInput))) {
             for (entry in AnswerEntry.entries - AnswerEntry.Conversation) {
                 val context = AnswerContext(entry = entry)
                 for (action in AnswerAction.entries - AnswerAction.Deny) {
@@ -106,6 +110,18 @@ class SecretRunCardTest {
         assertNull(card(input, tool = "Bash").secretRun)
         assertNull(card(input, kind = "question").secretRun)
         assertFalse(card(input, kind = "question").isSecretRun)
+    }
+
+    @Test fun readsExplicitEnvDeliveryAndKeepsCommandsExactly() {
+        val parsed = card(envInput).secretRun
+        assertEquals("Mac mini", parsed?.machine)
+        assertEquals("Authenticate the one-off example commands", parsed?.purpose)
+        assertEquals(envCommands, parsed?.commands)
+        // Read the additive wire value reflectively so this test compiles before the contract grows its delivery property.
+        val delivery = parsed?.javaClass?.methods
+            ?.firstOrNull { it.name == "getDelivery" && it.parameterCount == 0 }
+            ?.invoke(parsed)?.toString()?.lowercase()
+        assertEquals("env", delivery)
     }
 
     @Test fun headlineNamesTheComputerInsteadOfTheRawTool() {

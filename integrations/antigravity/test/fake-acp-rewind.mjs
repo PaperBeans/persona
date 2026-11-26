@@ -51,6 +51,13 @@ const server = createServer(async (req, res) => {
       }
     }
     if (!snapshot.trajectory.steps?.length) delete snapshot.trajectory.steps
+    if (snapshot.afterRevertBadLength) {
+      delete snapshot.afterRevertBadLength
+      const response = { ...snapshot, trajectory: { ...snapshot.trajectory, steps: [...(snapshot.trajectory.steps || []), { type: 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' }] } }
+      writeFileSync(`${directory}/trajectory.json`, JSON.stringify(snapshot))
+      res.end(JSON.stringify(response))
+      return
+    }
     if (hold) {
       res.end(JSON.stringify(snapshot), () => writeFileSync(`${directory}/trajectory-response-sent`, ''))
       return
@@ -65,6 +72,15 @@ const server = createServer(async (req, res) => {
   if (method === 'GetCascadeTrajectorySteps') {
     while (JSON.parse(readFileSync(`${directory}/trajectory.json`, 'utf8')).holdErrors) {
       await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    if (snapshot.stepsUnavailable) {
+      res.writeHead(503).end('{"message":"Native service unavailable"}')
+      return
+    }
+    // Like agy for a conversation another process created: no steps until it is loaded.
+    if (snapshot.stepsRequireLoad && !loaded.has(params.cascadeId)) {
+      res.end('{}')
+      return
     }
     res.end(JSON.stringify({ steps: (snapshot.trajectory.steps || []).slice(params.stepOffset) }))
     return
@@ -99,6 +115,7 @@ const server = createServer(async (req, res) => {
     }
     snapshot.trajectory.steps = (snapshot.trajectory.steps || []).slice(0, params.stepIndex + 1)
     if (snapshot.holdAfterRevertOnce) snapshot.afterRevertArmed = true
+    if (snapshot.badAfterRevertLength) snapshot.afterRevertBadLength = true
     writeFileSync(`${directory}/trajectory.json`, JSON.stringify(snapshot))
     const db = new DatabaseSync(`${directory}/config/conversation_summaries.db`)
     db.prepare('UPDATE conversation_summaries SET step_count = ?, last_modified_time = ? WHERE conversation_id = ?')
@@ -134,9 +151,13 @@ input.on('line', (line) => {
     const sessionId = req.params.sessionId
     const update = (value) => send({ method: 'session/update', params: { sessionId, update: value } })
     if (plan.thinking) update({ sessionUpdate: 'agent_thought_chunk', content: { text: plan.thinking } })
-    if (plan.reply && !plan.exportOnly) update({ sessionUpdate: 'agent_message_chunk', content: { text: plan.reply } })
     const tool = { sessionUpdate: 'tool_call_update', toolCallId: 'test-tool', status: 'completed' }
-    if (plan.tool) update(tool)
+    if (plan.toolStart) {
+      update({ sessionUpdate: 'tool_call', toolCallId: 'test-tool', name: 'run_command', status: 'in_progress' })
+      update(tool)
+    }
+    if (plan.reply && !plan.exportOnly) update({ sessionUpdate: 'agent_message_chunk', content: { text: plan.reply } })
+    if (plan.tool && !plan.toolStart) update(tool)
     if (plan.lateTool) setTimeout(() => update(tool), plan.lateTool)
     if (plan.export || plan.flushReply) {
       const transcript = `${directory}/config/brain/${sessionId}/.system_generated/logs/transcript_full.jsonl`
@@ -154,8 +175,16 @@ input.on('line', (line) => {
         if (plan.undatedStep) appendFileSync(transcript,
           JSON.stringify({ type: 'SYSTEM_MESSAGE', content: 'System notice.', step_index: index++, status: 'DONE' }) + '\n')
         if (plan.error) append('ERROR_MESSAGE', { content: plan.error })
-        if (plan.reply !== undefined || plan.thinking || plan.calls) {
-          append('PLANNER_RESPONSE', { content: plan.reply, thinking: plan.thinking, tool_calls: plan.calls })
+        if ((plan.reply !== undefined && !plan.streamOnly) || plan.thinking || plan.calls) {
+          let content = plan.reply
+          const extra = {}
+          if (plan.reply && plan.truncateReply) {
+            const { head, tail } = plan.truncateReply
+            const omitted = Buffer.byteLength(plan.reply) - Buffer.byteLength(head) - Buffer.byteLength(tail)
+            content = `${head}<truncated ${omitted} bytes>${tail}`
+            extra.truncated_fields = ['content']
+          }
+          append('PLANNER_RESPONSE', { content, thinking: plan.thinking, tool_calls: plan.calls, ...extra })
         }
       }
     }

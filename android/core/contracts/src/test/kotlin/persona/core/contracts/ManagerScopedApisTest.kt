@@ -11,6 +11,7 @@ import persona.core.contracts.api.ConnectorsManagement
 import persona.core.contracts.api.GitHubInboxOptions
 import persona.core.contracts.api.FeishuBotSettings
 import persona.core.contracts.api.HubSent
+import persona.core.contracts.api.LarkSyncSettings
 import persona.core.contracts.api.RequestManager
 import persona.core.contracts.api.forManager
 import java.lang.reflect.Proxy
@@ -53,5 +54,17 @@ class ManagerScopedApisTest {
         assertEquals(listOf("switches", "connectors", "mailAccounts", "larkStatus", "deleteMailAccount", "gitHubAuth", "setGitHubAuth", "setGitHubInboxOptions", "channels", "unbind", "status", "page"),
             seen.map { it.first })
         assertEquals(List(seen.size) { "m-2" }, seen.map { it.second })
+    }
+
+    @Test fun theLarkBotsDailySyncNamesItsManagerToo() = runBlocking {
+        val seen = mutableListOf<Pair<String, String?>>()
+        val sync = recorder(LarkSyncSettings::class.java, seen)
+        val bot = recorder(FeishuBotSettings::class.java, seen) { name -> if (name == "getSync") sync else null }
+        val scoped = bot.forManager("m-2").sync!!
+        val _ = runCatching { scoped.view() }
+        val _ = runCatching { scoped.runBinding("k") }
+        val _ = runCatching { scoped.finishOAuth("s", "c") }
+        val _ = runCatching { scoped.oauthRedirectUri() }
+        assertEquals(listOf("getSync" to null, "view" to "m-2", "runBinding" to "m-2", "finishOAuth" to "m-2", "oauthRedirectUri" to "m-2"), seen)
     }
 }

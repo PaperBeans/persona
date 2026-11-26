@@ -142,6 +142,8 @@ func (d *mirrorDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot
 	return proto.CapacitySnapshot{}
 }
 
+func (d *mirrorDevices) UsageAccounts(context.Context) []proto.UsageAccount { return nil }
+
 func (d *mirrorDevices) GatewayRetryAt(string, string, time.Time) time.Time { return time.Time{} }
 
 func (d *mirrorDevices) SetAttention(link.Attention) {}
@@ -152,6 +154,9 @@ func (d *mirrorDevices) HeldMessages(string, i18n.Lang) map[string][]proto.Undel
 }
 func (d *mirrorDevices) HeldRetry(context.Context, string, string) (bool, error)  { return false, nil }
 func (d *mirrorDevices) HeldDelete(context.Context, string, string) (bool, error) { return false, nil }
+func (d *mirrorDevices) AgentTransfer(context.Context, devices.AgentTransfer) (devices.AgentTransferResult, error) {
+	return devices.AgentTransferResult{}, &devices.AgentTransferError{Code: "offline", Message: "no transfers on the mirror"}
+}
 
 // mirrors are the tests' hubs' mirror devices.
 var mirrors sync.Map // *Hub → *mirrorDevices

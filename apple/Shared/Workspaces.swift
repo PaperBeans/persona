@@ -24,6 +24,7 @@ nonisolated struct HostWorkspace: Decodable, Hashable, Identifiable, Sendable {
     var group: String = ""
     var online = true
     var available = true
+    var hiddenByDirectory = false
     var id: String { key }
     var machineRef: MachineRef { MachineRef(group: group, id: machineID) }
     var key: String { machineRef.path + "/" + source + ":" + sourceID }
@@ -34,7 +35,7 @@ nonisolated struct HostWorkspace: Decodable, Hashable, Identifiable, Sendable {
         case parentSourceID = "parent_source_id", index, online, available
         case projectID = "project_id", projectName = "project_name", projectPath = "project_path", isMain = "is_main"
         case unread, sidebarStatus = "sidebar_status", workspaceKind = "workspace_kind"
-        case pinnedAt = "pinned_at"
+        case pinnedAt = "pinned_at", hiddenByDirectory = "hidden_by_directory"
     }
 
     /// Explicit Orca placement wins. Older providers may only know a directory; use that only when it is unambiguous.
@@ -89,6 +90,7 @@ extension HostWorkspace {
         pinnedAt = (try? c.decodeIfPresent(String.self, forKey: .pinnedAt)).flatMap(JSON.parseDate)
         online = try c.decodeIfPresent(Bool.self, forKey: .online) ?? true
         available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? true
+        hiddenByDirectory = try c.decodeIfPresent(Bool.self, forKey: .hiddenByDirectory) ?? false
     }
 }
 

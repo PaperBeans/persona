@@ -166,8 +166,8 @@ func New(version string, restart func(string), opts Options) *Manager {
 		return m
 	}
 	m.exe = exe
-	m.identity, err = os.Stat(exe)
-	if err != nil || !m.identity.Mode().IsRegular() {
+	m.identity, err = executableInfo(exe)
+	if err != nil {
 		m.reason = "常驻 node 的执行文件不可用"
 		return m
 	}
@@ -311,6 +311,10 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	if u.Offset != u.Spec.Size {
 		return proto.NodeUpdateCommitResult{}, errors.New("node executable upload is incomplete")
 	}
+	checked, err := executableInfo(m.exe)
+	if err != nil {
+		return proto.NodeUpdateCommitResult{}, err
+	}
 	// The hub sends the kind of program the node runs (devices/deploy.go nodeBinary); this keeps a personad that may
 	// run a hub or a manager too from becoming persona-node all the same.
 	if err := update.CheckReplace(m.exe, u.Path); err != nil {
@@ -331,29 +335,47 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 		if err := checkPendingSwap(m.exe); err != nil {
 			return err
 		}
-		if m.identity != nil {
-			current, err := os.Lstat(m.exe)
-			if err != nil {
+		current, err := executableInfo(m.exe)
+		if err != nil {
+			return err
+		}
+		// Validate the program kind again if another installer changed the file during staging.
+		if !sameFileState(checked, current) {
+			if err := update.CheckReplace(m.exe, u.Path); err != nil {
 				return err
-			}
-			if !os.SameFile(m.identity, current) {
-				return m.adoptInstalled(ctx, u, newHash, current, check.AdoptionMarker, idle)
 			}
 		}
 		oldHash, err := fileHash(m.exe)
 		if err != nil {
 			return err
 		}
+		if err := checkFileState(m.exe, current); err != nil {
+			return err
+		}
+		drifted := m.identity != nil && !os.SameFile(m.identity, current)
+		if drifted && (oldHash == newHash || oldHash == u.Spec.SHA256) {
+			return m.adoptInstalled(ctx, u, newHash, oldHash, current, check.AdoptionMarker, idle)
+		}
 		backup := backupPath(m.exe, id)
 		if err := copyFile(m.exe, backup); err != nil {
 			return err
+		}
+		from := m.version
+		if drifted {
+			// Startup releases the rollback barrier when the restored version runs.
+			// The backup can hold a different version from this still-running node.
+			from, err = rollbackVersion(ctx, backup, oldHash, u.Spec.Version)
+			if err != nil {
+				_ = os.Remove(backup)
+				return err
+			}
 		}
 		birth, err := processStart(os.Getpid())
 		if err != nil {
 			_ = os.Remove(backup)
 			return err
 		}
-		p := pending{ID: id, Exe: m.exe, Backup: backup, Stage: stage, Version: u.Spec.Version, From: m.version, OldHash: oldHash, NewHash: newHash, PID: os.Getpid(), ProcessStart: birth, ProcessPrecise: osproc.Identify(os.Getpid()).Start, Deadline: time.Now().Add(m.timeout)}
+		p := pending{ID: id, Exe: m.exe, Backup: backup, Stage: stage, Version: u.Spec.Version, From: from, OldHash: oldHash, NewHash: newHash, PID: os.Getpid(), ProcessStart: birth, ProcessPrecise: osproc.Identify(os.Getpid()).Start, Deadline: time.Now().Add(m.timeout)}
 		p.SupervisorPID, p.SupervisorStart = supervisorOf()
 		if err := savePending(p); err != nil {
 			_ = os.Remove(backup)
@@ -374,7 +396,11 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 		// deployment (a plain copy, a package manager) never takes it. The swap
 		// lands only while the installed file is still the one this transaction
 		// examined, checked through one descriptor right before the rename.
-		if err := renameStill(stage, m.exe, oldHash); err != nil {
+		err = checkFileState(m.exe, current)
+		if err == nil {
+			err = renameStill(stage, m.exe, oldHash)
+		}
+		if err != nil {
 			_ = cleanupPendingOnly(p)
 			return err
 		}
@@ -396,19 +422,27 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	return result, nil
 }
 
+func rollbackVersion(ctx context.Context, backup, oldHash, targetVersion string) (string, error) {
+	sum, err := fileHash(backup)
+	if err != nil {
+		return "", err
+	}
+	if sum != oldHash {
+		return "", errSuperseded
+	}
+	check, err := runCheck(ctx, backup)
+	if err != nil {
+		return "", fmt.Errorf("check node rollback backup: %w", err)
+	}
+	if strings.TrimSpace(check.Version) == "" || check.Version == targetVersion {
+		return "", errors.New("node rollback backup must report a version distinct from the target")
+	}
+	return check.Version, nil
+}
+
 // adoptInstalled records confirmation for a target already installed by another updater.
 // Matching the checked stage also verifies the bytes that passed its platform and self-checks.
-func (m *Manager) adoptInstalled(ctx context.Context, u *upload, newHash string, current os.FileInfo, adoptionMarker bool, idle func() error) error {
-	if !current.Mode().IsRegular() || (runtime.GOOS != "windows" && current.Mode().Perm()&0o111 == 0) {
-		return errSuperseded
-	}
-	sum, err := fileHash(m.exe)
-	if err != nil {
-		return err
-	}
-	if sum != newHash && sum != u.Spec.SHA256 {
-		return errSuperseded
-	}
+func (m *Manager) adoptInstalled(ctx context.Context, u *upload, newHash, sum string, current os.FileInfo, adoptionMarker bool, idle func() error) error {
 	// An exact upload can already meet the configured signature. Legacy targets
 	// also need that signature when configured so their startup leaves the file untouched.
 	if sum != newHash || (m.signer != nil && !adoptionMarker) {
@@ -420,13 +454,8 @@ func (m *Manager) adoptInstalled(ctx context.Context, u *upload, newHash string,
 		return err
 	}
 	// The Hub can replace the file during verification or the idle check.
-	after, err := os.Lstat(m.exe)
-	if err != nil {
+	if err := checkFileState(m.exe, current); err != nil {
 		return err
-	}
-	if !os.SameFile(current, after) || current.Mode() != after.Mode() ||
-		current.Size() != after.Size() || !current.ModTime().Equal(after.ModTime()) {
-		return errSuperseded
 	}
 	deadline := time.Now().Add(m.timeout)
 	if adoptionMarker {
@@ -674,8 +703,54 @@ func fileHash(path string) (string, error) {
 // someone else's now and must be left in place, the transaction cleaned up.
 var errSuperseded = errors.New("node executable was replaced by another deployment")
 
+func executableInfo(path string) (os.FileInfo, error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() || (runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0) {
+		return nil, errSuperseded
+	}
+	if runtime.GOOS != "windows" {
+		return st, nil
+	}
+	// A Windows path stat defers reading the file ID until SameFile. Capture
+	// the ID from a handle while this path still names the inspected file.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	snapshot, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !sameFileState(st, snapshot) {
+		return nil, errSuperseded
+	}
+	return snapshot, nil
+}
+
+func sameFileState(a, b os.FileInfo) bool {
+	return a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && os.SameFile(a, b)
+}
+
+func checkFileState(path string, expected os.FileInfo) error {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return errSuperseded
+	}
+	if err != nil {
+		return err
+	}
+	if !sameFileState(expected, st) {
+		return errSuperseded
+	}
+	return nil
+}
+
 // renameStill replaces dst with src only while dst is still the file whose
-// sha256 is want. The file's inode, size and modification time are snapshotted
+// sha256 is want. The file's inode, mode, size and modification time are snapshotted
 // before and rechecked after the hash is read through one open descriptor, and
 // once more against the path immediately before the rename, so a deployment
 // that renamed dst into place or rewrote it in place (cp never takes the
@@ -684,6 +759,10 @@ var errSuperseded = errors.New("node executable was replaced by another deployme
 // adjacent syscalls. The descriptor is closed before the rename: Windows will not
 // rename a file over one this process holds open.
 func renameStill(src, dst, want string) error {
+	current, err := executableInfo(dst)
+	if err != nil {
+		return err
+	}
 	f, err := os.Open(dst)
 	if err != nil {
 		return err
@@ -692,6 +771,9 @@ func renameStill(src, dst, want string) error {
 	before, err := f.Stat()
 	if err != nil {
 		return err
+	}
+	if !sameFileState(current, before) {
+		return errSuperseded
 	}
 	sum := sha256.New()
 	if _, err := io.Copy(sum, f); err != nil {
@@ -704,16 +786,12 @@ func renameStill(src, dst, want string) error {
 	if err != nil {
 		return err
 	}
-	if !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+	if !sameFileState(before, after) {
 		return errSuperseded
 	}
 	_ = f.Close()
-	now, err := os.Stat(dst)
-	if err != nil {
+	if err := checkFileState(dst, after); err != nil {
 		return err
-	}
-	if !os.SameFile(after, now) || !now.ModTime().Equal(after.ModTime()) || now.Size() != after.Size() {
-		return errSuperseded
 	}
 	return replaceFile(src, dst)
 }

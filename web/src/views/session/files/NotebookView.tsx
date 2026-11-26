@@ -3,7 +3,8 @@
 // the one form lib/notebook.ts picked. HTML outputs (pandas tables, widgets' fallbacks) go into a frame with no scripts
 // and no network, like the Office previews: a notebook is someone else's content.
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { extendStates, languageOf, lexLine, splitLines, type LexState, type Token } from "../../../lib/files";
+import { extendStates, languageOf, lexLine, type LexState, type Token } from "../../../lib/files-syntax";
+import { splitLines } from "../../../lib/files";
 import { languageFile, withAttachmentRefs, type Cell, type Notebook, type Output } from "../../../lib/notebook";
 import { cx } from "../../../ui/atoms";
 import { useDark } from "../../../ui/use-dark";

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,8 +20,8 @@ import (
 
 const launcherRepairUpgrade = "upgrade_cli"
 
-// repairMachine starts a repair round for d's launchers that failed and are due one.
-func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig) {
+// repairMachine starts repairs for current failures among the launchers covered by the periodic check.
+func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig, eligible []string) {
 	external := s.externalLauncherSet(d.ID)
 	b := &s.health
 	b.mu.Lock()
@@ -31,7 +32,7 @@ func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig)
 	}
 	var due []LauncherHealth
 	for _, r := range b.recs {
-		if r.Machine == d.ID && r.State == healthFailing && r.repairNow() &&
+		if r.Machine == d.ID && slices.Contains(eligible, r.Launcher) && r.repairNow() &&
 			!proto.IsExternalLauncher(r.Launcher) && !external[r.Launcher] {
 			due = append(due, *r)
 		}
@@ -84,7 +85,7 @@ func (s *Service) repairMachine(ctx context.Context, d Device, cfg healthConfig)
 	}
 	var left []LauncherHealth
 	for _, r := range todo {
-		if now, ok := s.launcherHealth(ctx, d.ID, r.Launcher); ok && now.State == healthFailing && now.repairNow() { // not a usage limit met since
+		if now, ok := s.launcherHealth(ctx, d.ID, r.Launcher); ok && now.repairNow() { // not a usage limit met since
 			left = append(left, now)
 		}
 	}

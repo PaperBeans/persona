@@ -109,4 +109,22 @@ import PersonaWire
         let old = try await hub.client.todos(etag: nil)
         #expect(old.list?.count == 1 && old.views.isEmpty && old.counts == nil)
     }
+
+    /// The phase, section, reason and a row's line key are closed (typed core plan P4, #15397): a newer hub's value decodes to
+    /// `.unknown` with the raw string, never to one this build knows, files the row by the app's own rules, and writes
+    /// back as it came. The counts' sections are one field each: a section this build does not know reads 0.
+    @Test func aNewerHubsValuesDecodeAsUnknown() throws {
+        let json = #"{"line":{"key":"a_newer_line"},"phase":"a_newer_phase","rank":0,"reason":"a_newer_reason","section":"a_newer_section"}"#
+        let view = try JSONDecoder().decode(TodoSummary.self, from: Data(json.utf8))
+        #expect(view.phase == .unknown("a_newer_phase") && view.section == .unknown("a_newer_section"))
+        #expect(view.reason == .unknown("a_newer_reason") && TodoLineKey(rawValue: view.line?.key ?? "") == .unknown("a_newer_line"))
+        #expect(!TodoFiling.knows(view))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(String(decoding: try encoder.encode(view), as: UTF8.self) == json)
+        var counts = TodoCountsSections(todo: 2)
+        #expect(counts[.todo] == 2 && counts[.unknown("a_newer_section")] == 0)
+        counts[.unknown("a_newer_section")] = 5
+        #expect(counts == TodoCountsSections(todo: 2), "setting a section this build does not know changes nothing")
+    }
 }

@@ -104,7 +104,7 @@ test('A2A tools in OpenCode use the executing session and its cancellation signa
   const tools = []
   ctx.tool = { transform: async (define) => define({ add: (tool) => tools.push(tool) }) }
   await registerA2A(ctx, host.runtime)
-  assert.deepEqual(tools.map((tool) => tool.name), ['a2a_sessions', 'a2a_get', 'a2a_send', 'a2a_report', 'a2a_cancel'])
+  assert.deepEqual(tools.map((tool) => tool.name), ['a2a_sessions', 'a2a_read', 'a2a_get', 'a2a_send', 'a2a_report', 'a2a_cancel'])
   await n.ready
   await until('OpenCode A2A session listed', () => n.last('runtime.sessions')?.sessions.some(s => s.session_id === 'ses_a2a'))
   const report = tools.find((tool) => tool.name === 'a2a_report')

@@ -1,4 +1,4 @@
-Switch atomically to a model profile by id when the user asks (for example economy or performance). Saves a before-image for model_profile_rollback and records actor/time. Applies on next model call or Agent start; does not interrupt running work. Inspect profiles first; do not assume economy needs any particular model.{{template "shared/mcp_language" .}}
+Switch atomically to a profile by id; inspect first. Saves a rollback point and affects new model calls/Agent starts, not running work.{{template "shared/mcp_language" .}}
 
 ```json
 {

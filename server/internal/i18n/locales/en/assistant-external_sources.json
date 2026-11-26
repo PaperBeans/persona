@@ -1,0 +1,17 @@
+{
+  "create_binding": "Link {binding} for future Inbox updates.",
+  "update_binding": "Change the Inbox link from {before} to {after}.",
+  "delete_binding": "Remove the Inbox link {binding}. Other rules can take over, including automatic to-do creation.",
+  "set_policy": "Replace the routing rule for {source}. Sources that inherit this rule will use the change for future updates.",
+  "declined": "You declined the routing change.",
+  "realtime": "Send updates as they arrive.",
+  "digest": "Send updates in a digest.",
+  "on_demand": "Show updates on request.",
+  "off": "Turn off automatic forwarding for this rule.",
+  "interval": "Set the digest interval to {minutes} minutes.",
+  "fyi": "Share updates for information only.",
+  "owner": "Allow the recipient to act on updates.",
+  "inherit_new_work": "Inherit the rule for new work. Inherited and more specific rules can allow automatic to-do creation.",
+  "auto_todo": "Allow Persona to create to-dos without asking each time.",
+  "ask_owner": "Ask before creating a to-do at this scope. More specific rules can still allow automatic to-do creation."
+}

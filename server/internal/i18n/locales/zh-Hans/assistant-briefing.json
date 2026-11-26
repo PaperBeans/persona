@@ -40,5 +40,8 @@
   "count_none": "没有要你处理的事",
   "count_sep": " · ",
   "later_done": "已处理",
-  "later_handled": "已标记为处理过。"
+  "later_handled": "已标记为处理过。",
+  "pr_followup_host_not_connected": "未监控：{host} 未连接。",
+  "pr_followup_unsupported_host": "未监控：Persona 暂不支持读取 {host} 上的评审或冲突状态。",
+  "pr_followup_unwatched": "未监控：代码托管未连接。"
 }

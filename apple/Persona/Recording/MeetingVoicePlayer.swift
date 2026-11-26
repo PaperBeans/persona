@@ -164,9 +164,8 @@ final class MeetingVoicePlayer: MeetingVoicePlayback {
     /// again on its own): the answer is cut, not finished later, out of place in the meeting.
     private func observe(_ engine: AVAudioEngine?) {
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { @Sendable [weak self] note in
-            let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init) == .began
-            guard began else { return }
+        observers.append(AudioSessionBroker.shared.observeInterruptions(queue: .main) { @Sendable [weak self] event in
+            guard case .began = event else { return }
             MainActor.assumeIsolated { self?.cut("an interruption") }
         })
         if let engine {

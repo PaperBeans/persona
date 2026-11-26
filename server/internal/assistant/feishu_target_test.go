@@ -12,6 +12,7 @@ import (
 // The wrappers' target adds chat_id / in_thread to feishu.post and feishu.text only when set: the usual calls carry
 // exactly the fields they always did.
 func TestFeishuTargetParams(t *testing.T) {
+	needsLarkLayer(t) // the chat is the lark module's
 	f, posts := feishuHub("ou_a", time.Unix(100, 0))
 	var notes []map[string]any
 	f.answerApp(AppFeishu, FeishuText, func(p json.RawMessage) (any, error) {

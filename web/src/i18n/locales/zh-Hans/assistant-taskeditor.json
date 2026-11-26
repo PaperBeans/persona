@@ -106,7 +106,7 @@
   "cron_checking": "正在检查…",
   "cron_next": "接下来的运行时间（{zone}）",
   "cron_examples": "示例",
-  "execution_options": "执行选项",
+  "execution_options": "高级选项",
   "execution_inheritance": "未指定的选项继承主对话。选择其他 agent 后，模型与思考强度使用该 agent 的默认值。这些设置只影响当前任务。",
   "execution_computer": "执行电脑",
   "computer_default": "跟随助手 · {name}",

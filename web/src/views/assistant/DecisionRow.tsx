@@ -10,6 +10,7 @@ import { openTask } from "../../lib/handoff";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { ApiError, errorText } from "../../lib/api";
+import { EvidenceLink } from "./EvidenceLink";
 import { acceptBrief, setRoute, type AskAnswer } from "../../lib/feed";
 import { clock } from "../../lib/format";
 import { conversationPage } from "../../lib/conversation-page";
@@ -186,6 +187,7 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
       <p data-decision-question className="text-[13.5px] font-medium select-text [overflow-wrap:anywhere]">
         {question}
       </p>
+      <EvidenceLink link={ask.link} todoId={todo.id} />
       {ask.background && (
         <p data-decision-background className="line-clamp-2 text-[12px] text-ink-2 [overflow-wrap:anywhere]" title={ask.background}>
           {ask.background}

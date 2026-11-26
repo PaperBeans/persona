@@ -44,7 +44,7 @@ struct AvatarUploadTests {
     private func uploads(_ hub: FakeHub, _ store: PersonaStore, features: Set<String> = [AvatarUploadsModel.feature],
                          demo: Bool = false) -> AvatarUploadsModel {
         AvatarUploadsModel(deps: .init(api: { hub.client }, features: { features }, isDemo: { demo }, store: { store },
-                                       crop: { AvatarUploadModel(image: $0, deps: .init(api: { hub.client }, store: { store })) }))
+                                       crop: { AvatarUploadModel(picture: $0, states: $1, deps: .init(api: { hub.client }, store: { store })) }))
     }
 
     /// A w×h image: a gradient, opaque unless `alpha`.

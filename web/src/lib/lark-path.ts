@@ -1,5 +1,5 @@
 // A Lark request's path for one paired account (ol_account) and one manager. Not in lark-accounts.ts: the chat list
-// (lark-chats.ts, on the first screen) needs only this, and importing it from there put the accounts store and its
+// (the lark module's lark-chats.ts) needs only this, and importing it from there put the accounts store and its
 // words on every first screen.
 import { withManager } from "./manager-choice";
 

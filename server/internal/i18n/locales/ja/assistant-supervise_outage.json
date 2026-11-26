@@ -1,0 +1,11 @@
+{
+  "awaiting_judgment": "最新事象：未判定",
+  "interrupted": "Agent 中断",
+  "last_interrupted": "最新事象：中断",
+  "offline": "Agent オフライン",
+  "rework_round": "やり直し第 {round} ラウンド",
+  "sep": "、",
+  "stopped": "Agent 停止中",
+  "stopped_error": "Agent エラー停止",
+  "unjudged": "完了未判定"
+}

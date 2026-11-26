@@ -14,9 +14,12 @@ import persona.core.contracts.Interaction
 import persona.core.designsystem.DecisionButtons
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JCodeBlock
+import persona.core.designsystem.JNotice
 import persona.core.designsystem.JSecretField
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
+import persona.core.designsystem.icons.PersonaIcons
 
 /**
  * A password card's body (#1137), in the chat and in the Agents tab: why the password is needed and every command
@@ -35,6 +38,9 @@ fun SecretRunSummary(request: Interaction) {
             Text(stringResource(R.string.chat_request_secret_run_commands), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
             // One block per command: a long one that wraps never reads as two.
             run.commands.forEach { JCodeBlock(it) }
+        }
+        if (run.delivery == "env") {
+            JNotice(stringResource(R.string.chat_request_secret_run_env_warning), status = Status.NeedsYou, icon = PersonaIcons.error)
         }
     }
 }

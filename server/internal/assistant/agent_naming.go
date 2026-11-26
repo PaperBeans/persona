@@ -66,8 +66,8 @@ type agentNamingBook struct {
 	timerSeq  uint64
 	runs      sync.WaitGroup     // active naming passes; database-backed test fixtures wait before closing their store
 	requests  singleflight.Group // one model call per session for requested names (agent_naming_request.go)
-	// beforeRequest lets a concurrency test observe every caller reaching the singleflight gate; nil in production.
-	beforeRequest func()
+	// requestJoined observes admission to the shared model call in the concurrency test.
+	requestJoined func()
 	// unconfigured: the background naming found no model set up and the log has said so; not said again (for each
 	// session it tries) until a model answers (agentNamingSay).
 	unconfigured bool

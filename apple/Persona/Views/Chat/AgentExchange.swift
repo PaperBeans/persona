@@ -78,6 +78,8 @@ struct FoldToggle: View {
     var prefix: String
     var tint: Color? = nil
     var showMore = false
+    /// When true, expands the tappable label itself to a full-width 44 pt row (e.g. inside card footers).
+    var fullRow = false
     var title: String? = nil
     var action: () -> Void
 
@@ -91,7 +93,9 @@ struct FoldToggle: View {
             }
             .font(Theme.Font.captionStrong)
             .foregroundStyle(tint ?? Theme.accent)
-            .frame(maxWidth: showMore ? .infinity : nil, alignment: .leading)
+            .padding(.horizontal, fullRow ? Theme.Space.s : Theme.Space.flush)
+            .frame(maxWidth: showMore || fullRow ? .infinity : nil, alignment: .leading)
+            .scaledFrame(minHeight: fullRow ? Theme.Size.tapTarget : nil)
             // A bubble's Show More: the caption line and 16 pt around it, at least `Theme.Size.tapTarget` tall, with
             // nothing laid out around it (what the bubble looks like stays as it is).
             .contentShape(Rectangle().inset(by: showMore ? -Theme.Space.l : 0))

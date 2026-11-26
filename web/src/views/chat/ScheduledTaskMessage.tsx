@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { sourceLabel } from "../../lib/message-source";
+import { splitInlineTrailer } from "../../lib/inline-mentions";
 import { cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { useChatContext } from "./chat-context";
@@ -15,7 +16,7 @@ export default function ScheduledTaskMessage({ msg, mid, sid }: SourceProps) {
   const [open, setOpen] = useExpanded(`${scope}source:${msg.id}`);
   const item = msg.rawInput?.find((part) => part.id === msg.id);
   const full = useFullText(item, mid, sid);
-  const text = item ? full.text : msg.text;
+  const text = item ? splitInlineTrailer(full.text).text : msg.text;
   const preview = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState<boolean>();
   useLayoutEffect(() => {

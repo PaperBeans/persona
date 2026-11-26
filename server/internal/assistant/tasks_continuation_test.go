@@ -187,8 +187,17 @@ func TestContinuationUnknownComputerDoesNotPermitReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res, "cannot confirm") || todoCount(e.s) != 1 || len(e.f.starts) != 0 {
-		t.Fatalf("an unconfirmed predecessor permitted a replacement: %q", res)
+	// Continuing from machine "unknown" onto "box" is a cross-machine handoff, so task_plan waits for owner Start.
+	planID := planIDRe.FindString(res)
+	if planID == "" || !strings.Contains(res, "nothing has started") {
+		t.Fatalf("expected cross-machine continuation card before Start, got: %q", res)
+	}
+	started, err := e.s.startPlan(ownerStart(context.Background()), planID, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(started.Tasks) != 1 || !strings.Contains(started.Tasks[0].Error, "cannot confirm") || todoCount(e.s) != 1 || len(e.f.starts) != 0 {
+		t.Fatalf("an unconfirmed predecessor permitted a replacement: %+v", started.Tasks)
 	}
 	if todoNow(e.s, "todo_x").Agents[0].ReleasedAt != nil {
 		t.Fatal("unknown predecessor was released without confirmation")

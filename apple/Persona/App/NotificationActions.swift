@@ -116,6 +116,7 @@ nonisolated enum NotificationActions {
             var client = try HubStore.client(group: group)
             if let manager = decision.manager { client.managerID = manager }
             try await AppModel.shared.outside(client) { try await $0.acceptTodo(decision.todoID, askedAt: decision.askedAt) }
+            await AppModel.shared.withdrawResolved([NotificationWithdrawal.todoAskPrefix + decision.todoID], group: group) {}
         } catch {
             await reportFailure(id: decision.todoID, title: failureTitle(action: takeRecommendation), error: error)
         }

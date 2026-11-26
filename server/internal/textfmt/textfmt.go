@@ -1,6 +1,8 @@
 // Package textfmt is the small text formatting the hub and the assistant (internal/assistant, a process of its own)
 // both write with, for people and for models: a clip or a cut, one line, how long ago, a short id, how an agent's
 // session is named and its state. One copy that both import; neither imports the other.
+//
+//persona:layer library
 package textfmt
 
 import (

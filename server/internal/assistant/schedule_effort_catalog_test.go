@@ -22,6 +22,8 @@ func scheduledCatalogFixture(t *testing.T, assistantEfforts []string) (*Service,
 	f.ownModels = true // No HTTP model server: every exercised boundary is the fake node RPC.
 	f.launcherList = []proto.Launcher{{Name: "shared", Source: "zshrc", Agent: "claude"}}
 	s := newTestService(t, f)
+	// Workout admission appends to the schedule; unrelated default routines must not dispatch in this fixture.
+	setTasks(s)
 	f.answerNode(assistantwire.DeviceLaunchersModels, func(_ string, raw json.RawMessage) (any, error) {
 		var p struct{ Purpose string }
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -83,7 +85,7 @@ func TestScheduledAssistantUsesExecutionCatalog(t *testing.T) {
 					s.runDue(t.Context(), time.Now().Add(time.Second))
 				}
 				runs := waitRuns(t, s, 1)
-				if runs[0].Status != runOK || f.sent() != 1 {
+				if len(runs) != 1 || runs[0].RefID != task.ID || runs[0].Status != runOK || f.sent() != 1 {
 					t.Fatalf("scheduled dispatch: runs=%+v sends=%d", runs, f.sent())
 				}
 				got := f.lastSend(t)
@@ -165,8 +167,17 @@ func TestScheduledConfigurationFailureIsNotRetried(t *testing.T) {
 				if len(runs) != 1 || runs[0].Status != runFailed || runs[0].Retried || runs[0].SessionID != "" || f.sent() != 0 {
 					t.Fatalf("configuration failure created another attempt: runs=%+v sends=%d", runs, f.sent())
 				}
-				if got := len(f.pushed()); got != 1 {
-					t.Fatalf("failure/fallback notices=%d, want one", got)
+				if task.Facts || task.Report {
+					if got := len(f.pushed()); got != 1 {
+						t.Fatalf("briefing fallback notices=%d, want one", got)
+					}
+				} else {
+					if got := len(f.pushed()); got != 0 {
+						t.Fatalf("non-briefing schedule_failed pushed=%d, want 0", got)
+					}
+					if !hasRelayFrom(s, "main", cardScheduleFailed, "") {
+						t.Fatalf("non-briefing schedule_failed did not route to main: %+v", laterFor(s, "main"))
+					}
 				}
 			})
 		})

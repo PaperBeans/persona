@@ -1,6 +1,7 @@
 package persona.feature.chat
 
 import android.graphics.Bitmap
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -15,7 +16,9 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentDataType
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -35,6 +38,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -90,6 +94,17 @@ class SecretRunCardUiTest {
             put("commands", JsonArray(commands.map { JsonPrimitive(it) })); put("delivery", "stdin")
         },
         fields = listOf(InteractionField(key = "password", label = "Password", secret = true)))
+    private val envCommands = listOf("example auth login --password-stdin", "example verify  --json")
+    private val envCard = card.copy(
+        summary = "Mac mini\nAuthenticate the one-off example commands\n${envCommands.joinToString("\n") { "$ $it" }}",
+        toolInput = buildJsonObject {
+            put("machine", "macmini"); put("machine_name", "Mac mini"); put("purpose", "Authenticate the one-off example commands")
+            put("commands", JsonArray(envCommands.map { JsonPrimitive(it) })); put("delivery", "env")
+        },
+    )
+    private val envWarningZh = "警告：上面列出的每个命令都会通过 PERSONA_SECRET 直接收到你输入的密码。"
+    private val envWarningEn = "Warning: every listed command receives your typed password directly in PERSONA_SECRET."
+    private val envWarningJa = "警告：上記の各コマンドは、入力したパスワードを PERSONA_SECRET 経由で直接受け取ります。"
     private val typed = "correct horse battery staple"
     private val sent = mutableListOf<Resolution>()
 
@@ -102,7 +117,12 @@ class SecretRunCardUiTest {
     @Composable private fun Panel(requests: List<Interaction> = listOf(card), onSent: () -> Unit = {}) =
         InteractionPanel(requests, null, 800.dp, null, emptySet(), { _, resolution -> sent += resolution; onSent() }, null, {})
 
-    private fun show() = rule.setContent { PersonaTheme(reduceMotion = true) { Panel() } }
+    private fun show(request: Interaction = card) = rule.setContent { PersonaTheme(reduceMotion = true) { Panel(listOf(request)) } }
+
+    private fun assertEnvWarningAndCommands(warning: String) {
+        rule.onAllNodes(hasText(warning, substring = true), useUnmergedTree = true).assertCountEquals(1)
+        envCommands.forEach { rule.onNodeWithText(it, useUnmergedTree = true).assertExists() }
+    }
 
     @Test fun showsWhatWouldRunWithAPasswordFieldDeclineAndRun() {
         show()
@@ -117,6 +137,7 @@ class SecretRunCardUiTest {
         field().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         field().assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDataType, ContentDataType.None))
         rule.onNodeWithText("只用这一次，不会保存，助手也看不到。").assertExists()
+        rule.onAllNodes(hasText("PERSONA_SECRET", substring = true), useUnmergedTree = true).assertCountEquals(0)
         runButton().assertIsNotEnabled().performClick()
         // Nothing to hand back to a computer, no terminal to explain: the card is the assistant's own.
         rule.onAllNodesWithText("交给电脑处理").assertCountEquals(0)
@@ -124,10 +145,37 @@ class SecretRunCardUiTest {
         assertTrue(sent.isEmpty())
     }
 
+    @Test fun envDeliveryWarnsThatEveryListedCommandReceivesThePassword() {
+        show(envCard)
+        assertEnvWarningAndCommands(envWarningZh)
+    }
+
+    @Test @Config(sdk = [35], qualifiers = "en-w400dp-h1000dp-xhdpi", application = QuestionTestApplication::class)
+    fun envDeliveryWarningIsLocalizedInEnglish() {
+        show(envCard)
+        assertEnvWarningAndCommands(envWarningEn)
+    }
+
+    @Test @Config(sdk = [35], qualifiers = "ja-w400dp-h1000dp-xhdpi", application = QuestionTestApplication::class)
+    fun envDeliveryWarningIsLocalizedInJapanese() {
+        show(envCard)
+        assertEnvWarningAndCommands(envWarningJa)
+    }
+
     @Test fun runSendsTheTypedPasswordOnceAndEmptiesTheField() {
         show()
         field().performTextInput(typed)
         assertEquals(typed.length, typedLength())
+        runButton().assertIsEnabled().performClick()
+        assertEquals(listOf(Resolution(allow = true, values = mapOf("password" to typed))), sent)
+        assertEquals(0, typedLength())
+        runButton().assertIsNotEnabled().performClick()
+        assertEquals(1, sent.size)
+    }
+
+    @Test fun envRunSendsOnlyTheFreshPasswordOnceAndEmptiesTheField() {
+        show(envCard)
+        field().performTextInput(typed)
         runButton().assertIsEnabled().performClick()
         assertEquals(listOf(Resolution(allow = true, values = mapOf("password" to typed))), sent)
         assertEquals(0, typedLength())
@@ -216,6 +264,48 @@ class SecretRunCardUiTest {
         assertEquals(0, typedLength())
         runButton().assertIsNotEnabled()
         assertTrue(sent.isEmpty())
+    }
+
+    @Test fun drawsEnvWarningInLightAndDarkAtDefaultAndLargestText() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.setContent {
+            val scale = if (large) 2f else 1f
+            val configuration = Configuration(LocalConfiguration.current).apply { fontScale = scale }
+            CompositionLocalProvider(
+                LocalConfiguration provides configuration,
+                LocalDensity provides Density(LocalDensity.current.density, scale),
+            ) {
+                PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
+                    Column(Modifier.width(400.dp).background(PersonaTheme.palette.background).testTag("secret-run-env-shot")) {
+                        Panel(listOf(envCard))
+                    }
+                }
+            }
+        }
+        val output = File("build/secret-run-shots").also { it.mkdirs() }
+        for (s in AppStyle.entries) {
+            style = s
+            for (big in listOf(false, true)) {
+                val pixels = mutableListOf<IntArray>()
+                for (d in listOf(false, true)) {
+                    large = big; dark = d
+                    Snapshot.sendApplyNotifications(); rule.waitForIdle()
+                    assertEnvWarningAndCommands(envWarningZh)
+                    val bitmap = rule.onNodeWithTag("secret-run-env-shot").captureToImage().asAndroidBitmap()
+                    val font = if (big) "largest-text" else "default-text"
+                    val appearance = if (d) "dark" else "light"
+                    File(output, "env-${s.name.lowercase()}-$font-$appearance.png").outputStream().use {
+                        assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    pixels += IntArray(bitmap.width * bitmap.height).also {
+                        bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                    }
+                }
+                assertFalse("env ${s.name} ${if (big) "largest" else "default"} text: light and dark must differ", pixels[0].contentEquals(pixels[1]))
+            }
+        }
     }
 
     /** The finished run as the chat shows it today: the assistant's secret_run step with its result. */

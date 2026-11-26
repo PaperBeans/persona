@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, onCredentialChange } from "../../lib/api";
+import { api, credentialOwner, onCredentialChange } from "../../lib/api";
 import { heldPushDestination, heldPushGroups, lnModeEnabled, type HeldPushDestination, type HeldPushGroups, type HeldPushItem } from "../../lib/push-intercepts";
 import { getState } from "../../lib/store";
 import { formatDate, t } from "../../i18n";
@@ -69,47 +69,67 @@ function HeldPushList({ groups, destinations }: { groups: HeldPushGroups; destin
   );
 }
 
+const EMPTY_GROUPS: HeldPushGroups = { p1: [], p2: [] };
+
 export function useHeldPushes() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [groups, setGroups] = useState<HeldPushGroups>({ p1: [], p2: [] });
+  const [groups, setGroups] = useState<HeldPushGroups>(EMPTY_GROUPS);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const mounted = useRef(true);
+  const latest = useRef(0);
+  const ownerRef = useRef(credentialOwner());
 
   const refresh = useCallback(async () => {
+    const id = ++latest.current;
+    const owner = credentialOwner();
+    if (owner !== ownerRef.current) {
+      ownerRef.current = owner;
+      setEnabled(null);
+      setGroups(EMPTY_GROUPS);
+      setFailed(false);
+    }
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
     setLoading(true);
     try {
       const mode = await api<unknown>("/push/ln-mode", { signal: controller.signal });
-      if (controller.signal.aborted || !mounted.current) return;
+      if (controller.signal.aborted || !mounted.current || id !== latest.current || owner !== credentialOwner()) return;
       const on = lnModeEnabled(mode);
       setEnabled(on);
       if (!on) {
-        setGroups({ p1: [], p2: [] });
+        setGroups(EMPTY_GROUPS);
         setFailed(false);
         return;
       }
       const records = await api<unknown>("/push/intercepts", { signal: controller.signal });
-      if (controller.signal.aborted || !mounted.current) return;
+      if (controller.signal.aborted || !mounted.current || id !== latest.current || owner !== credentialOwner()) return;
       setGroups(heldPushGroups(records));
       setFailed(false);
     } catch (error) {
-      if (controller.signal.aborted || !mounted.current) return;
+      if (controller.signal.aborted || !mounted.current || id !== latest.current || owner !== credentialOwner()) return;
       setFailed(true);
       // A missing route is an older hub: it has no ln-mode entry to show.
       if (typeof error === "object" && error !== null && "status" in error && (error.status === 404 || error.status === 405)) setEnabled(false);
     } finally {
-      if (!controller.signal.aborted && mounted.current) setLoading(false);
+      if (!controller.signal.aborted && mounted.current && id === latest.current && owner === credentialOwner()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const stop = onCredentialChange(() => void refresh());
+    const stop = onCredentialChange(() => {
+      latest.current++;
+      abort.current?.abort();
+      ownerRef.current = credentialOwner();
+      setEnabled(null);
+      setGroups(EMPTY_GROUPS);
+      setFailed(false);
+      void refresh();
+    });
     const onVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
@@ -120,6 +140,7 @@ export function useHeldPushes() {
     return () => {
       mounted.current = false;
       stop();
+      latest.current++;
       document.removeEventListener("visibilitychange", onVisible);
       window.clearInterval(timer);
       abort.current?.abort();
@@ -127,6 +148,102 @@ export function useHeldPushes() {
   }, [refresh]);
 
   return { enabled, groups, loading, failed, refresh };
+}
+
+function HeldPushesDialogBody({ groups, loading, failed, refresh, destinations }: {
+  groups: HeldPushGroups;
+  loading: boolean;
+  failed: boolean;
+  refresh: () => void;
+  destinations?: (item: HeldPushItem) => HeldPushDestination | undefined;
+}) {
+  const count = groups.p1.length + groups.p2.length;
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-label text-ink-3">{t("push-intercepts.held_explanation")}</p>
+        <Button icon="retry" busy={loading} onClick={refresh}>{t("assistant-tasks.retry")}</Button>
+      </div>
+      {failed && <div role="alert" className="mb-3 rounded-control bg-danger-wash px-3 py-2 text-label text-ink">{t("push-intercepts.held_load_failed")}</div>}
+      {loading && count === 0 && !failed ? <Loading label={t("push-intercepts.held_loading")} /> : <HeldPushList groups={groups} destinations={destinations} />}
+    </>
+  );
+}
+
+/** On-demand dialog for secondary settings screens: fetches `/push/intercepts` only while open and isolates state by credential owner. */
+export function HeldPushesDialog({ open, onClose, destinations }: {
+  open: boolean;
+  onClose: () => void;
+  destinations?: (item: HeldPushItem) => HeldPushDestination | undefined;
+}) {
+  const [groups, setGroups] = useState<HeldPushGroups>(EMPTY_GROUPS);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [credGen, setCredGen] = useState(0);
+  const abort = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const latest = useRef(0);
+  const ownerRef = useRef(credentialOwner());
+
+  const refresh = useCallback(async () => {
+    const id = ++latest.current;
+    const owner = credentialOwner();
+    if (owner !== ownerRef.current) {
+      ownerRef.current = owner;
+      setGroups(EMPTY_GROUPS);
+    }
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const records = await api<unknown>("/push/intercepts", { signal: controller.signal });
+      if (controller.signal.aborted || !mounted.current || id !== latest.current || owner !== credentialOwner()) return;
+      setGroups(heldPushGroups(records));
+      setFailed(false);
+    } catch {
+      if (controller.signal.aborted || !mounted.current || id !== latest.current || owner !== credentialOwner()) return;
+      setFailed(true);
+    } finally {
+      if (!controller.signal.aborted && mounted.current && id === latest.current && owner === credentialOwner()) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    const stop = onCredentialChange(() => {
+      latest.current++;
+      abort.current?.abort();
+      ownerRef.current = credentialOwner();
+      setGroups(EMPTY_GROUPS);
+      setLoading(false);
+      setFailed(false);
+      setCredGen((n) => n + 1);
+    });
+    return () => {
+      mounted.current = false;
+      stop();
+      latest.current++;
+      abort.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      latest.current++;
+      abort.current?.abort();
+      setLoading(false);
+      return;
+    }
+    void refresh();
+  }, [open, credGen, refresh]);
+
+  return (
+    <Dialog open={open} onClose={onClose} title={t("push-intercepts.held_title")} width={560}>
+      {open && <HeldPushesDialogBody groups={groups} loading={loading} failed={failed} refresh={() => void refresh()} destinations={destinations} />}
+    </Dialog>
+  );
 }
 
 export function HeldPushesEntry({ className, destinations }: { className?: string; destinations?: (item: HeldPushItem) => HeldPushDestination | undefined }) {
@@ -153,12 +270,7 @@ export function HeldPushesEntry({ className, destinations }: { className?: strin
         {count > 0 && <span className="tabular-nums text-ink-2">{count}</span>}
       </button>
       <Dialog open={open} onClose={() => setOpen(false)} title={t("push-intercepts.held_title")} width={560}>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-label text-ink-3">{t("push-intercepts.held_explanation")}</p>
-          <Button icon="retry" busy={loading} onClick={() => void refresh()}>{t("assistant-tasks.retry")}</Button>
-        </div>
-        {failed && <div role="alert" className="mb-3 rounded-control bg-danger-wash px-3 py-2 text-label text-ink">{t("push-intercepts.held_load_failed")}</div>}
-        {loading && count === 0 && !failed ? <Loading label={t("push-intercepts.held_loading")} /> : <HeldPushList groups={groups} destinations={destinations} />}
+        <HeldPushesDialogBody groups={groups} loading={loading} failed={failed} refresh={() => void refresh()} destinations={destinations} />
       </Dialog>
     </>
   );

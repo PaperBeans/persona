@@ -18,7 +18,9 @@ enum WatchMeetingSamples {
                                  decisions: ["默认用中文转写，中英混说也要能用"],
                                  actions: ["张三: 补上长录音的真机测试 · 周五前"]),
             WatchMinutes.Meeting(id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!, title: "设计评审",
-                                 date: start.addingTimeInterval(7200), state: .writing),
+                                 date: start.addingTimeInterval(7200), state: .writing,
+                                 // `-recording.phoneModule off`: as the phone relays it then, paused.
+                                 paused: PhoneRecordingAllowance.stored() == .off ? .moduleOff : nil),
         ])
         guard mode == "recording" || mode == "running" else { return }
         RecordingLibrary.shared.restore(live)

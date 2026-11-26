@@ -15,17 +15,33 @@ export interface QueueCandidate extends QueueEntry {
 
 function content(raw: string, images = 0) {
   const { text, photos, files, contexts } = parseQueued(raw, images);
+  const norm = text.replace(/\s+/g, " ").trim();
   return {
-    words: JSON.stringify([text.replace(/\s+/g, " ").trim(), files.map(({ kind, path }) => [kind, path]), contexts]),
+    text: norm,
+    words: JSON.stringify([norm, files.map(({ kind, path }) => [kind, path]), contexts]),
     photos: photos.length + images,
   };
 }
 
-function matches(raw: string, local: QueueCandidate): boolean {
+function previewPrefix(text: string): string | undefined {
+  const m = text.match(/^(.*?)(?:\.{3}|…)$/);
+  const base = m?.[1]?.trim();
+  return base && base.length >= 4 ? base : undefined;
+}
+
+export function matchesQueuedEntry(raw: string, local: Pick<QueueEntry, "raw" | "images">): boolean {
   const sent = content(local.raw, local.images?.length);
   const queued = content(raw);
-  if (!local.raw.trim() && !queued.photos) return false;
-  return sent.words === queued.words && (!queued.photos || sent.photos === queued.photos);
+  if (!sent.text && !queued.photos) return false;
+  if (queued.photos && sent.photos !== queued.photos) return false;
+  if (sent.words === queued.words) return true;
+  // An agy TUI screen preview may truncate a longer queued prompt with "..." or "…".
+  const prefix = previewPrefix(queued.text);
+  return Boolean(prefix && sent.text.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+function matches(raw: string, local: QueueCandidate): boolean {
+  return matchesQueuedEntry(raw, local);
 }
 
 interface QueueEdit {

@@ -33,6 +33,8 @@ const stubs = new Map([
 
 registerHooks({
   resolve(specifier, context, next) {
+    if (context.parentURL?.endsWith('/Compatibility.ets') && specifier === '../core/ChatForwardWire')
+      return {url:new URL('../core/ChatForwardWire.ts',context.parentURL).href,shortCircuit:true};
     if (specifier === '../platform/HubTransport') return { url: 'demo-stub:transport', shortCircuit: true };
     if (specifier === '../platform/LocalStore') return { url: 'demo-stub:local-store', shortCircuit: true };
     if (specifier === './MutationStore') return { url: 'demo-stub:mutation-store', shortCircuit: true };
@@ -144,6 +146,17 @@ test('todo create, edit, complete, reopen, and deletion return real-shaped envel
   assert.equal(globalThis.__demoTransportCalls, 0);
 });
 
+test('the local to-do detail applies and clears the same plan fields without reaching a transport',async()=>{
+  const repo=new DemoRepository();
+  const available=await repo.call('/api/v1/todos?manager=demo','GET');const id=available.todos[0].id;
+  const path='/api/v1/todos/'+id+'?manager=demo';
+  let r=await repo.call(path,'PATCH',{due_date:'2026-11-25',remind_at:'2026-11-24T10:00:00Z',priority:'high',project:'demo-project-release'});
+  assert.equal(r.todo.due_date,'2026-11-25');assert.equal(r.todo.priority,'high');assert.equal(r.todo.project,'demo-project-release');
+  r=await repo.call(path,'PATCH',{due_at:null,remind_at:null,priority:'',project:''});
+  assert.ok(!r.todo.due_at&&!r.todo.due_date&&!r.todo.remind_at&&!r.todo.project);assert.equal(r.todo.priority,'');
+  await assert.rejects(repo.call(path,'PATCH',{project:'missing-project'}));assert.equal(globalThis.__demoTransportCalls,0);
+});
+
 test('knowledge detail, tags, search, and related moments mutate only sample entries', async () => {
   const repo = new DemoRepository();
   const projects = await repo.knowledge('projects');
@@ -237,7 +250,8 @@ test('generic demo thread replies validate their parent and replay only the matc
 test('agent roster mutations and todo linking use only admitted local state', async () => {
   const repo = new DemoRepository();
   const roster = repo.roster(), machine = roster.machines[0], todo = roster.todos[0];
-  const created = await repo.createAgent('Prepare a sample report', machine, '/demo/ReleaseDesk', 'codex', 'demo-create-agent', todo.id);
+  const created = await repo.createAgent('Prepare a sample report', machine, '/demo/ReleaseDesk', 'codex', 'demo-create-agent', todo.id, undefined, '', '', '', '', '  Sample report  ');
+  assert.equal(created.data().slot_name, 'Sample report');
   assert.equal(created.manager, 'demo');
   assert.equal(created.machine, machine.id);
   const linked = await repo.call('/api/v1/todos/' + todo.id + '/agents/' + machine.id + '/' + created.id + '?manager=demo', 'PUT');
@@ -276,4 +290,28 @@ test('unsupported actions and rejected admission do not mutate or touch transpor
   await assert.rejects(repo.call('/api/v1/mail/send?manager=demo', 'POST', { text: 'No real send.' }), { code: 'demo_unsupported' });
   await assert.rejects(repo.call('/api/v1/extensions?manager=demo'), { code: 'demo_unsupported' });
   assert.equal(globalThis.__demoTransportCalls, 0);
+});
+
+test('demo manager permissions, new conversations and the independent AI twin stay local and separate',async()=>{
+ const repo=new DemoRepository(),conf='/api/v1/assistant?manager=demo',twin='/api/v1/model-config/purposes/inbox.agent?manager=demo';
+ const initial=(await repo.call(conf)).conversations;
+ assert.equal((await repo.call(conf)).default_permission_mode,'default');
+ await repo.call(conf,'PUT',{default_permission_mode:'acceptEdits'});
+ const created=await repo.call('/api/v1/assistant/conversations?manager=demo','POST',{});
+ assert.equal(created.session.permission_mode,'acceptEdits');
+ const specific=await repo.call('/api/v1/assistant/conversations?manager=demo','POST',{permission_mode:'plan'});
+ assert.equal(specific.session.permission_mode,'plan');
+ assert.deepEqual((await repo.call(conf)).conversations.slice(0,initial.length),initial);
+ const purposes=(await repo.call('/api/v1/model-config?manager=demo')).purposes;
+ assert.ok(Array.isArray(purposes.find(p=>p.id==='agent.new').uses));
+ const before=(await repo.call(twin)).purpose;assert.equal(before.effective.permission_mode,'default');
+ const changed=(await repo.call(twin,'PATCH',{revision:before.revision,permission_mode:'auto',model:'other'})).purpose;
+ assert.equal(changed.override.permission_mode,'auto');
+ await assert.rejects(repo.call(twin,'PATCH',{revision:before.revision,permission_mode:'default'}),{status:409});
+ const clean=(await repo.call(twin,'PATCH',{revision:changed.revision,permission_mode:null})).purpose;
+ assert.deepEqual(clean.override,{model:'other'});assert.equal(clean.effective.permission_mode,'default');
+ await assert.rejects(repo.call(twin.replace('manager=demo','manager=other')),{status:404});
+ assert.equal((await repo.call(conf)).default_permission_mode,'acceptEdits');
+ repo.seed();assert.equal((await repo.call(conf)).default_permission_mode,'default');assert.deepEqual((await repo.call(twin)).purpose.override,{});
+ assert.equal(globalThis.__demoTransportCalls,0);
 });

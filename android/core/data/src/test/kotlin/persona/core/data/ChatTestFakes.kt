@@ -48,6 +48,7 @@ internal class FakeChatTransport : ChatTransport {
     var fetch: suspend (ItemsQuery) -> ItemsResponse = { error("Unexpected items request") }
     var resolved: String? = null
     var handoffCard: Boolean? = null
+    var secretRunEnv: Boolean? = null
     var outcome = ResolveOutcome()
     var goneStatus: String? = null
     var fullItemId: String? = null
@@ -59,11 +60,14 @@ internal class FakeChatTransport : ChatTransport {
     override suspend fun resolveOutcome(id: String, resolution: Resolution): ResolveOutcome {
         resolved = id
         handoffCard = false
+        secretRunEnv = false
         goneStatus?.let { goneStatus = null; throw InteractionGoneException(it) }
         return outcome
     }
     override suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean): ResolveOutcome =
         resolveOutcome(id, resolution).also { this.handoffCard = handoffCard }
+    override suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean, secretRunEnv: Boolean): ResolveOutcome =
+        resolveOutcome(id, resolution, handoffCard).also { this.secretRunEnv = secretRunEnv }
     override suspend fun image(session: SessionKey, itemId: String) = byteArrayOf()
     override suspend fun fullItem(session: SessionKey, itemId: String): Item {
         fullItemId = itemId

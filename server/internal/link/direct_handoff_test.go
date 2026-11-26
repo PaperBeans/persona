@@ -18,6 +18,20 @@ import (
 	"github.com/nwverse/persona/server/internal/osproc"
 )
 
+type handoffUpgradeWriter struct {
+	http.ResponseWriter
+	beforeUpgrade func()
+}
+
+func (w handoffUpgradeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w handoffUpgradeWriter) WriteHeader(code int) {
+	if code == http.StatusSwitchingProtocols {
+		w.beforeUpgrade()
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
 func serveDirectHandoffLink(t *testing.T, hub *sshTestHub, w http.ResponseWriter, r *http.Request, onAccept func(*websocket.Conn), onEnd func()) {
 	t.Helper()
 	if r.Header.Get("Authorization") != "Bearer jd_ssh" {
@@ -169,14 +183,18 @@ func TestDirectRecoveryAdoptsAcceptedSocket(t *testing.T) {
 			default:
 			}
 			<-releaseAccept
-			serveDirectHandoffLink(t, hub, w, r, func(c *websocket.Conn) {
-				accepted.Add(1)
-				acceptedConn <- c
+			// After the 101 is written the client can adopt the socket and close SSH
+			// while this handler is still returning from websocket.Accept.
+			upgrade := handoffUpgradeWriter{ResponseWriter: w, beforeUpgrade: func() {
 				select {
 				case <-sshLink.ended:
 					oldEndedBeforeAccept.Store(true)
 				default:
 				}
+			}}
+			serveDirectHandoffLink(t, hub, upgrade, r, func(c *websocket.Conn) {
+				accepted.Add(1)
+				acceptedConn <- c
 			}, nil)
 			return
 		}
@@ -222,15 +240,8 @@ func TestDirectRecoveryAdoptsAcceptedSocket(t *testing.T) {
 	waitFor(t, status, func(s Status) bool {
 		return s.State == "connected" && s.Kind == "lan" && s.Address == direct.URL
 	})
-	if got := dialed.Load(); got != 1 {
-		t.Fatalf("direct recovery WebSocket dials = %d, want the one adopted candidate", got)
-	}
-	if got := accepted.Load(); got != 1 {
-		t.Fatalf("accepted direct WebSockets = %d, want 1", got)
-	}
-	if oldEndedBeforeAccept.Load() {
-		t.Fatal("working SSH link ended before the direct WebSocket was accepted")
-	}
+	// The connected status is published by the client. Join the server-side
+	// observations before asserting which connection sent the hello.
 	var directLink sshHubConn
 	select {
 	case directLink = <-hub.links:
@@ -244,6 +255,15 @@ func TestDirectRecoveryAdoptsAcceptedSocket(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("direct candidate was not accepted")
+	}
+	if got := dialed.Load(); got != 1 {
+		t.Fatalf("direct recovery WebSocket dials = %d, want the one adopted candidate", got)
+	}
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("accepted direct WebSockets = %d, want 1", got)
+	}
+	if oldEndedBeforeAccept.Load() {
+		t.Fatal("working SSH link ended before the direct WebSocket was accepted")
 	}
 	if directLink.hello.Address != direct.URL {
 		t.Fatalf("adopted direct hello address = %q, want %q", directLink.hello.Address, direct.URL)

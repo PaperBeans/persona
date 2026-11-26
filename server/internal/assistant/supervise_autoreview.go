@@ -222,6 +222,7 @@ func (s *Service) runAutoReview(ctx context.Context, todoID string, run AutoRevi
 		Session proto.Session `json:"session"`
 	}
 	sctx, cancel := context.WithTimeout(ctx, taskStartTimeout)
+	sctx = context.WithValue(sctx, placementTaskKey{}, todoID)
 	err = s.call(sctx, run.MachineID, DeviceSessionStart, params, &res)
 	cancel()
 	if err == nil && (res.Session.SessionID == "" || res.Session.StartError != "") {

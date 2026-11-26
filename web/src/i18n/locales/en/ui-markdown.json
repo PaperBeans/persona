@@ -3,5 +3,7 @@
   "copy": "Copy",
   "copy_table": "Copy table",
   "quote_more": "Show all",
-  "quote_less": "Show less"
+  "quote_less": "Show less",
+  "toggle_wrap": "Toggle word wrap",
+  "wrap": "Wrap"
 }

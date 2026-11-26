@@ -97,11 +97,21 @@ class ShardTests(unittest.TestCase):
 
     def test_workflow_lanes_and_cache_write_policy(self):
         workflow = (ROOT / ".github/workflows/android-test.yml").read_text()
+        self.assertIn("permissions:\n  actions: read\n  contents: read", workflow)
+        for caller in ("ci.yml", "release-pr.yml"):
+            with self.subTest(caller=caller):
+                source = (ROOT / ".github/workflows" / caller).read_text()
+                self.assertRegex(source, r"(?m)^permissions:\n  actions: read\n  contents: read\n")
         match = re.search(r"lane: \[([^\]]+)\]", workflow)
         self.assertIsNotNone(match)
         self.assertEqual([value.strip() for value in match[1].split(",")], list(CI_LANES))
         self.assertIn("fail-fast: false", workflow)
         self.assertIn("--lane '${{ matrix.lane }}' --profile", workflow)
+        self.assertIn("id: checks", workflow)
+        self.assertIn("id: evidence", workflow)
+        self.assertIn("CHECKS_OUTCOME: ${{ steps.checks.outcome }}", workflow)
+        self.assertIn("EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}", workflow)
+        self.assertIn("scripts/ci/android_result.py bind", workflow)
         self.assertIn("cache-read-only: ${{ github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main' }}", workflow)
         restore = workflow.split("- name: Restore public Robolectric runtime dependencies", 1)[1].split("- name:", 1)[0]
         save = workflow.split("- name: Save public Robolectric runtime dependencies", 1)[1].split("- name: Upload", 1)[0]
@@ -112,9 +122,23 @@ class ShardTests(unittest.TestCase):
         self.assertIn("actions/cache/save@v4", save)
         cached_paths = re.findall(r"^\s+(~/.m2/\S+)$", workflow, re.M)
         self.assertEqual(set(cached_paths), {"~/.m2/repository/org/robolectric/android-all",
-                                            "~/.m2/repository/org/robolectric/android-all-instrumented"})
+                                            "~/.m2/repository/org/robolectric/android-all-instrumented",
+                                            "~/.m2/repository/org/robolectric/nativeruntime-dist-compat"})
+        # Both steps include the native runtime: Maven Central's HTTP 429 must not make each uncached run fail (#14693).
+        for step in (restore, save):
+            self.assertIn("~/.m2/repository/org/robolectric/nativeruntime-dist-compat", step)
         self.assertNotIn("continue-on-error", workflow)
         self.assertIn("timeout-minutes: 90", workflow)
+        aggregate = workflow.split("\n  result:\n", 1)[1]
+        self.assertIn("needs: android", aggregate)
+        self.assertIn("if: always()", aggregate)
+        self.assertIn("gh run download", aggregate)
+        self.assertIn("--pattern", aggregate)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", aggregate)
+        self.assertNotIn("continue-on-error", aggregate)
+        self.assertIn("scripts/ci/android_result.py verify", aggregate)
+        self.assertIn("name: android-source-result-${{ steps.source.outputs.commit }}-${{ github.run_id }}-${{ github.run_attempt }}", aggregate)
+        self.assertIn("if-no-files-found: error", aggregate)
 
 
 class ShellLaneTests(unittest.TestCase):
@@ -147,6 +171,9 @@ class ShellLaneTests(unittest.TestCase):
         (self.root / "scripts/assets").mkdir()
         (self.root / "scripts/assets/gen_tokens.py").write_text("pass\n")  # the generated-tokens check (#4209)
         (self.root / "scripts/assets/gen_icon_meanings.py").write_text("pass\n")  # the icon meanings check (#4209)
+        (self.root / "scripts/test").mkdir()
+        # The client domain guard's Android scan (docs/server/architecture.md "Domain model", 'Client modules').
+        (self.root / "scripts/test/test_client_domain_modules.py").write_text("pass\n")
         (self.root / "android/settings.gradle.kts").write_text(SETTINGS)
         (self.root / "android/gradle/libs.versions.toml").write_text('[versions]\njdk = "21"\ncompileSdk = "37"\nbuildTools = "37.0.0"\n')
         (self.root / "android/gradle/wrapper/gradle-wrapper.jar").touch()

@@ -395,8 +395,9 @@ extension LiveActivityController {
         state.assistant = phase != "done"
         if phase == "cleared" { state = FleetState(phase: .needsYou, needsYou: 1, items: [ask]) }
         if phase == "offline" { state = FleetState(phase: .working, working: 3, unread: 1, items: [work, done], workingSince: now - 754) }
+        // The Studio's threads wait for a core (1.4 per core, past 100: #12519), so the busiest shows how that reads.
         state.stats = .init(tpm: 12000, tokens: 42_000_000, requests: 1200,
-                            loads: [.init(id: "studio", name: "Studio", percent: 35), .init(id: "macbook", name: "MacBook", percent: 70)])
+                            loads: [.init(id: "studio", name: "Studio", percent: 140), .init(id: "macbook", name: "MacBook", percent: 70)])
         Task {
             try? await Task.sleep(for: .seconds(1)) // the scene must be active to start one
             // `apply` starts no activity for finished agents alone (the hub does not either) and keeps it fresh: these

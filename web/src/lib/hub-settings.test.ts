@@ -112,7 +112,22 @@ describe("hub update", () => {
     expect(updateView(hub({ latest }))).toEqual({ kind: "newer", working: false });
     expect(updateView(hub({ latest, state: "waiting_idle" }))).toEqual({ kind: "newer", working: true });
     expect(updateView(hub({ state: "confirming" }))).toEqual({ kind: "working" });
-    expect(updateView(hub({ latest: { ...latest, newer: false } }))).toEqual({ kind: "current" });
+    expect(updateView(hub({ build: latest.build, latest: { ...latest, newer: false } }))).toEqual({ kind: "current" });
+  });
+
+  it("compares build numbers for release manifests and keeps other update flows separate", () => {
+    const latest = { version: "v1", build: 1, newer: false, bad: false };
+    expect(updateView(hub({ build: 2, latest }))).toEqual({ kind: "ahead" });
+    expect(updateView(hub({ source: "beta", build: 2, latest, can_update: false }))).toEqual({ kind: "ahead" });
+    expect(updateView(hub({ source: "release", build: 2, latest, state: "confirming" }))).toEqual({ kind: "working" });
+    expect(updateView(hub({ source: "web-dev", build: 2, latest }))).toEqual({ kind: "current" });
+    expect(updateView(hub({ channel: "docker", build: 2, latest }))).toEqual({ kind: "docker" });
+    expect(updateView(hub({ source: "release", build: 2, latest: { ...latest, build: 0 } }))).toEqual({ kind: "current" });
+  });
+
+  it.each(["release", "beta"] as const)("classifies an unchecked %s source", source => {
+    expect(updateView(hub({ source }))).toEqual({ kind: "unchecked" });
+    expect(updateView(hub({ source, last_check: "2026-11-20T15:04:05Z" }))).toEqual({ kind: "current" });
   });
 
   it("warns about a release that went back or is held", () => {
@@ -132,7 +147,8 @@ describe("hub update", () => {
     expect(sourceBehindWarning(hub({ ...site, update_url_from: "hub.json", source_behind: true }))).toContain("（hub.json 的 update.url）");
     expect(sourceBehindWarning(hub(site))).toBeNull(); // a current source: "Up to date" as before
     expect(sourceBehindWarning(hub({ source_behind: true }))).toBeNull(); // nothing to name
-    expect(updateView(hub({ ...site, source_behind: true }))).toEqual({ kind: "current" });
+    const stopped = hub({ ...site, build: 202611141806, source_behind: true });
+    expect(updateView(stopped)).toEqual({ kind: "source_behind", warning: sourceBehindWarning(stopped) });
   });
 
   it("tells a Docker hub what to run", () => {

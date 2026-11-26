@@ -6,16 +6,18 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The push of a routine with facts says the counts Persona worked out, not the first words of the model's answer
 // (briefing.go): the same numbers as the card. A conversation that is on no such run is pushed as ever.
 func TestBriefRoutinePushSaysTheCounts(t *testing.T) {
+	needsBriefingModule(t)
 	ft := newFleetTestNoStore(t)
 	fastDone(ft)
-	ft.s.brief.bySession = map[string]*briefRun{"s1": {facts: &briefFacts{At: time.Now(), l: i18n.ZhHans,
-		Waiting: make([]boardRow, 3), Failed: []todayFailed{{ID: "r1"}}, FailedTotal: 1, Accept: make([]boardRow, 2)}}}
+	ft.s.briefSetSessionRun("s1", &briefRun{Facts: &briefFacts{At: time.Now(), Lang: string(i18n.ZhHans),
+		Waiting: make([]modapi.BriefBoardRow, 3), Failed: []modapi.BriefFailure{{ID: "r1"}}, FailedTotal: 1, Accept: make([]modapi.BriefBoardRow, 2)}})
 	work := proto.Session{SessionID: "s1", Title: "早报", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
 		UpdatedAt: time.Now()}
 	turn := func(session, text string) {
@@ -44,9 +46,10 @@ func TestBriefRoutinePushSaysTheCounts(t *testing.T) {
 // Only the turn a scheduled run started says the counts: what the owner types into the routine's conversation later is
 // pushed as ever, and a turn that asks a question pushes the question.
 func TestBriefRoutinePushLeavesOtherTurnsAlone(t *testing.T) {
+	needsBriefingModule(t)
 	ft := newFleetTestNoStore(t)
 	fastDone(ft)
-	ft.s.brief.bySession = map[string]*briefRun{"s1": {facts: &briefFacts{At: time.Now(), l: i18n.ZhHans, Waiting: make([]boardRow, 3)}}}
+	ft.s.briefSetSessionRun("s1", &briefRun{Facts: &briefFacts{At: time.Now(), Lang: string(i18n.ZhHans), Waiting: make([]modapi.BriefBoardRow, 3)}})
 	turn := func(text string, asks bool) {
 		w := proto.Session{SessionID: "s1", Title: "早报", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1", UpdatedAt: time.Now()}
 		ft.sessions("mac", w)

@@ -231,12 +231,7 @@ func (n *Node) restoreModel(ctx context.Context, id string) (map[string]any, err
 	if st, err = os.Stat(path); err != nil {
 		return nil, refusal(restoreGone, "找不到这个会话的记录", nil)
 	}
-	n.mu.Lock()
-	if prev, ok := n.metas[path]; ok {
-		prev.readAt = time.Time{} // past metaMinInterval: read what was written since
-		n.metas[path] = prev
-	}
-	n.mu.Unlock()
+	n.forgetMeta(path) // past metaMinInterval: read what was written since
 	m = n.meta(path, st)
 	if err := fallbackToRestore(m); err != nil {
 		if r := n.modelRecovery(id); modelRecoverySwitched(r) {

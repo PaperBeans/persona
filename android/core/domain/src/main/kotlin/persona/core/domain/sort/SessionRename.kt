@@ -11,10 +11,26 @@ data class SessionRename(val title: String? = null, val tabName: String? = null)
         (tabName == null || session.slotName == tabName)
 
     companion object {
-        fun changes(session: Session, title: String?, tabName: String?): SessionRename = SessionRename(
-            title?.trim()?.takeIf { it.isNotEmpty() && it != session.title },
-            tabName?.trim()?.takeIf { !session.paneId.isNullOrBlank() && it.isNotEmpty() && it != session.slotName },
-        )
+        fun changes(session: Session, title: String?, tabName: String?, unified: Boolean = false): SessionRename {
+            if (unified) return unifiedChanges(session, tabName ?: title)
+            return SessionRename(
+                title?.trim()?.takeIf { it.isNotEmpty() && it != session.title },
+                tabName?.trim()?.takeIf { !session.paneId.isNullOrBlank() && it.isNotEmpty() && it != session.slotName },
+            )
+        }
+
+        /**
+         * Unified rename when "Use the herdr tab name as the session name" is enabled (#13899, web `renameBody`):
+         * renames the herdr tab and, for Claude Code or Codex sessions, also updates the CLI session title.
+         */
+        fun unifiedChanges(session: Session, name: String?): SessionRename {
+            val next = name?.trim()?.takeIf(String::isNotEmpty) ?: return SessionRename()
+            val tab = session.herdrTabName ?: return SessionRename()
+            val cli = session.agent?.takeIf(String::isNotEmpty) ?: "claude"
+            val syncTitle = cli == "claude" || cli == "codex"
+            if (next == tab && (!syncTitle || next == session.title)) return SessionRename()
+            return SessionRename(title = if (syncTitle) next else null, tabName = next)
+        }
     }
 }
 
@@ -22,4 +38,8 @@ data class SessionRename(val title: String? = null, val tabName: String? = null)
 interface SessionRenamer {
     fun project(source: Flow<List<Session>>): Flow<List<Session>>
     suspend fun rename(session: Session, title: String?, tabName: String?): Boolean
+    suspend fun renameUnified(session: Session, name: String): Boolean {
+        val edit = SessionRename.unifiedChanges(session, name)
+        return if (edit.changed) rename(session, edit.title, edit.tabName) else false
+    }
 }

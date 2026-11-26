@@ -9,6 +9,8 @@
 //
 // In a test binary New compiles at once, as regexp.MustCompile did: a broken pattern still fails every test of its
 // package, not only the one that reaches it (the standard library's internal/lazyregexp does the same).
+//
+//persona:layer library
 package lazyre
 
 import (

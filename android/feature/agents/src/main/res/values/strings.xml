@@ -280,7 +280,9 @@
     <string name="agents_dialog_rename_text">The tab name syncs to herdr; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="agents_dialog_rename_text_tern">The tab name syncs to Tern; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="agents_dialog_rename_text_rex">The tab name syncs to Rex; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
+    <string name="agents_dialog_rename_text_unified">Updates the herdr tab and, where supported, the CLI session name.</string>
     <string name="agents_dialog_save">Save</string>
+    <string name="agents_dialog_name">Name</string>
     <string name="agents_dialog_tab_name">Tab name (herdr tab)</string>
     <string name="agents_dialog_tab_name_tern">Tab name (Tern tab)</string>
     <string name="agents_dialog_tab_name_rex">Tab name (Rex tab)</string>
@@ -662,4 +664,13 @@
         <item quantity="other">%1$d without a due date</item>
     </plurals>
     <string name="agents_sidebar_heading">Agents</string>
+    <string name="agents_side_unread_kicker">New side reply: %1$s</string>
+    <string name="agents_side_unread_more">+%1$d</string>
+    <string name="agents_side_unread_spoken">Side session “%1$s” has a new reply</string>
+    <string name="agents_side_unread_open">Open side session “%1$s”</string>
+    <string name="agents_side_unread_also">Also with new replies: %1$s</string>
+    <plurals name="agents_side_unread_count">
+        <item quantity="one">%1$d side session has a new reply</item>
+        <item quantity="other">%1$d side sessions have new replies</item>
+    </plurals>
 </resources>

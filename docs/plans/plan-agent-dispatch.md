@@ -37,7 +37,7 @@ The clients show "From <machine>" on threads started over a link.
 | Running work on a chosen computer | The assistant's `agent_start` and `task_plan` (`server/internal/prompts/mcp/agents/`) start an Agent on a named computer; `machines_list` reports connection state, resources, working Agents and failing launchers. |
 | Worktrees | `agent_start` and `task_plan` take `worktree.branch`; the target computer's engine (herdr, Orca) makes the worktree, so the apps list it. |
 | Launcher and model choice | Model Settings › Agents, tiers, per-computer launcher fit and launcher health with a detour to a computer where the launcher works (`docs/server/launcher-health.md`). |
-| Placement policy | `task_plan` tasks are `machine_policy=fixed` by default and may be `flexible`. |
+| Placement | Task plans default to `fixed` and may opt into `flexible`. Dispatch keeps its named computer. Manager placement records the applicable filters in report mode, including a busy machine or full launcher group (#13355). |
 | Following and results | Supervision in the main conversation: task cards, `agent_read`, `agent_send`, `agent_interrupt`, the Agents' `report_to_supervisor`, independent review, triage and wakeups (`docs/assistant/unified-entry.md`, `docs/assistant/agent-work.md`). |
 | Watching from anywhere | Every session is visible and answerable in all clients. |
 | Privacy boundaries | Work computers and guest conversations get a reduced tool set (`server/internal/assistant/fleet_tools.go`). |

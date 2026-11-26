@@ -343,9 +343,11 @@ type Agent struct {
 	// Name is the agent's name in the host (NameAgent).
 	Name string
 	// AgentStatus is the host's state for the agent (proto.Status*), "" when it has none.
-	AgentStatus   string
-	Cwd           string
-	ForegroundCwd string
+	AgentStatus    string
+	Cwd            string
+	ForegroundCwd  string
+	ForegroundPID  int
+	ForegroundArgv []string
 	// PaneID is the pane as a PaneRef string (String): a herdr pane id as is ("@<session>:<id>" for a named herdr
 	// session's, herdr.QualifyID).
 	PaneID string

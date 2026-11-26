@@ -1,0 +1,52 @@
+{
+  "string": [
+    {
+      "name": "phone_sources_graph",
+      "value": "Source Relationships"
+    },
+    {
+      "name": "phone_sources_direct",
+      "value": "Direct"
+    },
+    {
+      "name": "phone_sources_all",
+      "value": "All"
+    },
+    {
+      "name": "phone_sources_inbox",
+      "value": "To Inbox"
+    },
+    {
+      "name": "phone_sources_kb",
+      "value": "To Knowledge"
+    },
+    {
+      "name": "phone_sources_idle",
+      "value": "Can't Read"
+    },
+    {
+      "name": "phone_sources_empty",
+      "value": "No Sources Yet"
+    },
+    {
+      "name": "phone_sources_empty_hint",
+      "value": "Nothing brings things into the Inbox or the knowledge base yet."
+    },
+    {
+      "name": "phone_sources_graph_hint",
+      "value": "Where each source comes from, how it's read and where it goes. Tap one to see its whole path."
+    },
+    {
+      "name": "phone_sources_open",
+      "value": "Open Settings"
+    },
+    {
+      "name": "phone_sources_ask",
+      "value": "Set Up with the Assistant"
+    },
+    {
+      "name": "phone_sources_duplicate",
+      "value": "May bring the same things as “{name}”. If they do, turn one of them off."
+    }
+  ]
+}

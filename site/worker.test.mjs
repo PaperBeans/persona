@@ -321,6 +321,26 @@ test("the catalog is fetched once while fresh, and a stale copy outlives GitHub"
   assert.equal(calls.length, 2);
 });
 
+test("a failed catalog cache read still tries the official upstream", async () => {
+  edge();
+  globalThis.caches.default.match = async () => { throw new Error("cache unavailable"); };
+  let fail = false;
+  const calls = upstream(() => fail
+    ? new Response("down", { status: 502 })
+    : Response.json(index([entry("github", "GitHub")])));
+
+  const fresh = await catalog();
+  assert.equal(fresh.status, 200);
+  assert.deepEqual((await fresh.json()).extensions.map((e) => e.id), ["github"]);
+  assert.equal(calls.length, 1);
+
+  fail = true;
+  const unavailable = await catalog();
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get("cache-control"), "no-store");
+  assert.equal(calls.length, 2);
+});
+
 test("catalog replacements and icons refresh after expiry without a site deployment", async () => {
   const store = edge();
   let current = index([
@@ -424,6 +444,10 @@ test("Accept-Language prefers supported ranges and uses English for other positi
     ["en;q=0x1,zh;q=0.7", false],
     ["en;q=0.1234,zh;q=0.5", false],
     ["en;q=0.8;q=0.9,zh;q=0.7", false],
+    ["en;q=,zh;q=0.7", false],
+    ["en;q,zh;q=0.7", false],
+    ["en;q=0 .8,zh;q=0.7", false],
+    ["en;q=;q=0.8,zh;q=0.7", false],
     ["fr-FR,*;q=0.8", true],
     ["en;q=1.5,zh;q=0.5", false],
     ["en;q=bogus,zh;q=0.5", false],

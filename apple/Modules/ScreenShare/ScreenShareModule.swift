@@ -10,7 +10,7 @@ struct ScreenShareModule: PersonaModule {
 
     let descriptor = ModuleDescriptor(id: "screen-share", hubGated: true,
                                       slots: [.launchHooks, .settings, .toolbarItems, .chatAccessories, .chatCardKinds,
-                                              .capabilities])
+                                              .capabilities, .audioLeases])
 
     /// Built into every iPhone and iPad build that compiles the module (apple/modules.yml).
     var isAvailable: Bool { true }
@@ -29,6 +29,7 @@ struct ScreenShareModule: PersonaModule {
             if let call = c.call { ScreenEntry(call: call) }
         }
         #if os(iOS)
+        registrar.audioLease(id: "screen-share.pip", kind: .playback)
         registrar.settingsEntry(id: "live-screen",
                                 info: SettingsEntry(id: "live-screen", title: String(localized: "Live Screen"), symbol: Theme.Icon.screen,
                                                     group: .device, page: .module("live-screen"),

@@ -19,6 +19,7 @@ import re
 import uuid
 from urllib.parse import unquote
 
+import hub_modules_mock
 import mock_domains
 
 MAIL_ACCOUNTS = [{"id": "acc1", "name": "个人邮箱", "email": "me@example.com", "provider": "imap", "auth": "password",
@@ -153,7 +154,66 @@ def route(h, req):
     return False
 
 
+def mail_off():
+    """The hub publishes module flags and mail is not among them (MOCK_HUB_MODULES, hub_modules_mock.py): a hub that
+    turned the mail module off."""
+    listed = hub_modules_mock.flags(hub_modules_mock.MODE)
+    return bool(listed) and "module.mail" not in listed
+
+
+STORED_TEXT_MODES = ("", "clipped", "unknown")
+LONG_TEXT = "".join("这是示例长邮件的第 %d 段，说明这封邮件的正文比 hub 保存的长度更长。\n\n" % i for i in range(1, 200))
+
+
+def stored_text_mode():
+    """MOCK_MAIL_STORED_TEXT, what the hub says about a mail's stored text (mail_body_truncated on the item's page):
+    unset: as the text is (the fixtures are short, so `false`: whole); `clipped`: every stored mail is a long one cut at
+    3,000 characters (`true`); `unknown`: the key is left out, as for an item stored before the hub recorded it."""
+    mode = os.environ.get("MOCK_MAIL_STORED_TEXT", "")
+    if mode not in STORED_TEXT_MODES:
+        raise SystemExit("MOCK_MAIL_STORED_TEXT is %r: one of clipped, unknown, or unset" % mode)
+    return mode
+
+
+def stored_text(hub, item):
+    """(the newest mail's text as the hub stores it, whether it was clipped): at most 3,000 characters."""
+    uid = item["mail"]["uids"][-1]
+    whole = hub.MAIL_MESSAGES.get(uid) or {}
+    text = (whole.get("text") or hub.MAIL_BODIES.get(uid) or item.get("preview") or "").strip()
+    if stored_text_mode() == "clipped":
+        text = (text + "\n\n" + LONG_TEXT).strip()
+    return text[:3000], len(text) > 3000
+
+
+def stored_context(hub, item):
+    """The text a hub keeps with a mail's inbox item (server/internal/assistant/inbox_mail.go readMailBody): lines for
+    the model, then up to 3,000 characters of the newest mail's text."""
+    uid = item["mail"]["uids"][-1]
+    whole = hub.MAIL_MESSAGES.get(uid) or {}
+    sender = whole.get("from") or item["mail"].get("from") or {}
+    text = stored_text(hub, item)[0]
+    return "邮箱 %s 收到的未读邮件（共 %d 封，下面是最新一封）：\n发件人：%s <%s>\n收件人：%s\n抄送：%s\n时间：%s\n主题：%s\n\n%s" % (
+        "me@example.com", len(item["mail"]["uids"]), sender.get("name", ""), sender.get("email", ""), "me@example.com",
+        ", ".join(c.get("email", "") for c in whole.get("cc") or []), item.get("updated_at", ""), item.get("title", ""), text)
+
+
+def stored_item(h, req, hub):
+    """GET /api/v1/inbox/{id} of a mail with mail off: the item with the context the hub stored (the Inbox's own route
+    answers whether or not the hub has mail), and whether that text was clipped (stored_text_mode)."""
+    item = next((x for x in hub.INBOX + hub.INBOX_HISTORY if x["id"] == unquote(req.match["id"]) and x.get("mail")), None)
+    if item is None:
+        return False
+    out = dict(item, context=item.get("context") or stored_context(hub, item))
+    if stored_text_mode() != "unknown" and not item.get("context"):  # an item with its own context says nothing of it
+        out["mail_body_truncated"] = stored_text(hub, item)[1]
+    return h.send_json(out)
+
+
 def register(d):
     load(d.hub)
     d.route("GET", "/mock/mail", route)
+    if mail_off():  # no mail routes, as extmgr answers without the module; what the hub stored stays readable (#15995)
+        d.route(mock_domains.METHODS, r"/api/v1/mail/.*", lambda h, req: h.send_json({"error": "mail is not set up"}, 404))
+        d.route("GET", r"/api/v1/inbox/(?P<id>mail(?::|%3A)[^/]+)", lambda h, req: stored_item(h, req, d.hub))
+        return
     d.route(mock_domains.METHODS, r"/api/v1/mail/.*", route)

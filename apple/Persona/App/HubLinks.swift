@@ -23,6 +23,8 @@ final class HubLink: Identifiable {
     var desktops: [DesktopDevice] = []
     /// Pinned and muted spaces / agents: each hub keeps its own.
     @ObservationIgnored let pins: PinsStore
+    /// Hub-wide Agents display settings (`use_herdr_tab_name`, #13899): each hub keeps its own.
+    @ObservationIgnored let agentsDisplay: AgentsDisplayStore
     /// The last good workspace snapshot for this group's @ menus; replaced, never accumulated, and dropped with the link.
     @ObservationIgnored let workspaceMentions = MentionWorkspaceCache()
     /// Where requests go when the socket has not picked a hub yet: the group's first hub.
@@ -33,10 +35,11 @@ final class HubLink: Identifiable {
     @ObservationIgnored var transportForTests: APIClient.Transport?
     #endif
 
-    init(group: String, config: ServerConfig, pins: PinsStore) {
+    init(group: String, config: ServerConfig, pins: PinsStore, agentsDisplay: AgentsDisplayStore? = nil) {
         self.group = group
         self.fallback = config
         self.pins = pins
+        self.agentsDisplay = agentsDisplay ?? AgentsDisplayStore(deps: .init(api: { nil }))
         live.usesSessionList = true
         #if os(iOS)
         live.usesExtensionUIStream = true
@@ -52,7 +55,9 @@ final class HubLink: Identifiable {
         c.personaNaming = live.personaContracts
         c.sessionLookup = features.contains("sessions_lookup")
         c.sessionList = features.contains("sessions_list")
+        c.sessionsPageCounts = features.contains("sessions_page_counts")
         c.sessionsHierarchy = features.contains(ChildSessions.feature)
+        c.sessionsCrossMachineHierarchy = features.contains(ChildSessions.crossMachineFeature)
         #if DEBUG
         c.transport = transportForTests
         #endif
