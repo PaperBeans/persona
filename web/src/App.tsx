@@ -673,7 +673,6 @@ function Shell() {
       data-mac-bay={macBay ?? (macWindowed ? "expanded" : undefined)}
       className="flex h-full overflow-hidden bg-page"
     >
-      {macBay && <MacBayTools onSearch={() => openPalette("jump")} />}
       {/* wide: a fixed column; narrow: a drawer over the page, clear of a landscape notch and the home indicator */}
       <div
         ref={drawerBox}
@@ -716,6 +715,7 @@ function Shell() {
           <PageBoundary page={href(route)}><Suspense fallback={<PageLoading />}><PerAssistant route={route}>{main}</PerAssistant></Suspense></PageBoundary>
         </div>
       </main>
+      {macBay && <MacBayTools bay={macBay} onSearch={() => openPalette("jump")} />}
       <SidebarRowHoverHost />
       <SidePanelHost />
       {paletteOpened && (

@@ -85,6 +85,12 @@ type Chat struct {
 	State     string    `json:"state,omitempty"`
 	StateAt   time.Time `json:"state_at,omitzero"`
 	SourceURL string    `json:"source_url,omitempty"`
+
+	// HeldOffProjects: the user took the chat off every project and held its list (a removal from the chat's side
+	// with lock_lists that left none). While its projects stay locked, compression links it to none of the projects
+	// it names (heldOffProjects). The user linking a project to it by hand, or allowing one again, lifts it; an
+	// extension's link does not.
+	HeldOffProjects bool `json:"held_off_projects,omitempty"`
 }
 
 // Ended reports whether the conversation has ended at its source (a pull request merged or closed, an issue closed).

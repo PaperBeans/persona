@@ -609,6 +609,9 @@ func (e *Engine) apply(kind, id string, uu UserUpdate, le linkEdit, writer strin
 		for _, cid := range u.Chats {
 			c, ok, err := e.Store.editChat(cid, func(c *Chat) {
 				c.Projects = addUnique(c.Projects, p.Slug)
+				if le.user { // an extension's link does not lift what the user held
+					c.HeldOffProjects = false
+				}
 				if u.Lock == nil || *u.Lock {
 					c.LockedFields = addUnique(c.LockedFields, "projects")
 				}
@@ -673,8 +676,14 @@ func (e *Engine) apply(kind, id string, uu UserUpdate, le linkEdit, writer strin
 				c.Projects = addUnique(c.Projects, pr.Slug)
 				le.linked(&c.Tagging, "projects", pr.Slug)
 			}
+			if le.user && (len(linked) > 0 || len(le.allow["projects"]) > 0) { // the user's own link, not an extension's
+				c.HeldOffProjects = false
+			}
 			c.People = removeStrings(c.People, u.RemovePeople)
 			c.Projects = removeStrings(c.Projects, u.RemoveProjects)
+			if le.user && le.lockLists && len(u.RemoveProjects) > 0 && len(c.Projects) == 0 {
+				c.HeldOffProjects = true // took off every project and held the list: compression links it to none
+			}
 			le.removed(&c.Tagging, "people", e.existing(KindPerson, u.RemovePeople)...)
 			le.removed(&c.Tagging, "projects", e.existing(KindProject, u.RemoveProjects)...)
 			le.allowed(&c.Tagging, "people", "projects")

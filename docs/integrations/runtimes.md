@@ -742,8 +742,10 @@ catalog on `models({launcher})` and refreshes on demand once the five-minute TTL
 `models({launcher, refresh: true})` (`caps.models`, `launchers.models`; #15253).
 Discovery never sends a prompt. The native settings file determines the advertised
 default. New sessions and availability checks explicitly apply that model through ACP, since ACP may ignore the
-settings file when choosing its initial model. An explicit caller model takes precedence, and resumed sessions retain
-their native selection. An unavailable catalog returns the native error instead of advertising a built-in model list.
+settings file when choosing its initial model. An idle conversation resumed on a fresh ACP connection also applies
+the configured model before its first prompt. An explicit caller model takes precedence, and an acknowledged model
+choice stays in effect on that connection. Reading history does not change the model or resume the session. An
+unavailable catalog returns the native error instead of advertising a built-in model list.
 A CLI whose stored sign-in expired long ago does not fail `agy models`: it hangs. The companion kills it after 25 seconds
 and reports that the sign-in may have expired and that running `agy` once on the computer signs in again; each
 discovery in a row that times out doubles the backoff for unforced lookups (from five minutes up to an hour), while an

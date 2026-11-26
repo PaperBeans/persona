@@ -728,6 +728,14 @@ select:not([multiple], [size], .appearance-none) {
 
 /* ── macOS unified titlebar + 44 px co-linear Apple G2 control bay (#16607) ────────────────────────────────── */
 @media (width >= 64rem) {
+  [data-app-shell][data-mac-chrome="windowed"] {
+    position: relative;
+  }
+  [data-app-shell] [data-mac-bay-tools],
+  [data-app-shell] [data-mac-bay-tools] * {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
   [data-app-shell][data-mac-bay="expanded"] [data-sidebar-root] {
     position: relative;
     padding-top: 38px;

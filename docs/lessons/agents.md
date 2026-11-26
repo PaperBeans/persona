@@ -1437,8 +1437,10 @@ workspace sharing the probe prefix while it still exists.
 ## AGY ACP can ignore the configured initial model (#3817)
 
 Native settings and `session/new` can disagree even when the configured model is valid. Resolve native display names or
-IDs against the catalog and apply the configured default explicitly to new sessions and availability checks. Preserve
-explicit caller choices and the native state of resumed conversations. Announce a model only after ACP accepts it.
+IDs against the catalog and apply the configured default explicitly to new sessions and availability checks. ACP can
+also discard the selected model when a process restarts (#15537). Before the first prompt on the new connection, apply
+the configured default to an idle conversation unless the caller chose a model or the connection already applied one.
+Leave history reads passive and announce a model only after ACP accepts it.
 
 ## A long-running agy acp keeps the account it saw (#10368)
 

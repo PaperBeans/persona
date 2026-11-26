@@ -20,7 +20,7 @@ import { useMainWaiting } from "./assistant/use-main-waiting";
 import type { UIColor } from "../lib/extension-ui-v6";
 
 /** The button that folds the sidebar to the rail and opens it again (⌘⌥B by default; the hint follows a rebinding). */
-export function CollapseButton({ collapsed, chord, size = "md" }: { collapsed: boolean; chord?: string; size?: "sm" | "md" }) {
+export function CollapseButton({ collapsed, chord, size = "md", onToggle }: { collapsed: boolean; chord?: string; size?: "sm" | "md"; onToggle?: (keepFocus: boolean) => void }) {
   const label = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
   // pressed with the focus on it, this one is drawn in place of the other (the rail ⇄ the sidebar) and takes the focus
   const self = useRef<HTMLButtonElement>(null);
@@ -31,7 +31,7 @@ export function CollapseButton({ collapsed, chord, size = "md" }: { collapsed: b
     <button
       ref={self}
       type="button"
-      onClick={(e) => toggleSidebarColumn(document.activeElement === e.currentTarget)}
+      onClick={(e) => (onToggle ?? toggleSidebarColumn)(document.activeElement === e.currentTarget)}
       aria-label={label}
       aria-expanded={!collapsed}
       title={chord ? `${label} (${formatChord(chord)})` : label}

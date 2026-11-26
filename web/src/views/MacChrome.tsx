@@ -1,21 +1,30 @@
-import { useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
+import { useLayoutEffect, useState, type RefObject } from "react";
 import { t } from "../i18n";
+import { setSidebarCollapsed, toggleMaximized } from "../lib/layout";
 import { appleG2Contour } from "../lib/mac-chrome";
 import { jumpHint, useBindings } from "../lib/shortcuts";
 import { Icon } from "../ui/icons";
 import { CollapseButton } from "./SidebarRail";
 
 /** Controls parked inside the 44 px Apple G2 bay beside the macOS traffic lights when the sidebar is collapsed or hidden. */
-export function MacBayTools({ onSearch }: { onSearch: () => void }) {
+export function MacBayTools({ bay, onSearch }: { bay: "rail" | "hidden"; onSearch: () => void }) {
   const bindings = useBindings();
   return (
     <div
       data-mac-bay-tools
-      className="pointer-events-auto absolute z-40 flex h-7 items-center gap-0.5 max-lg:hidden"
-      style={{ left: 74, top: 11, WebkitAppRegion: "no-drag" } as CSSProperties}
+      className="pointer-events-auto absolute z-50 flex h-7 items-center gap-0.5 max-lg:hidden"
+      style={{ left: 76, top: 11 }}
     >
       <span aria-hidden className="mr-1 h-3.5 w-px bg-line" />
-      <CollapseButton collapsed chord={bindings["left-sidebar"]} size="sm" />
+      <CollapseButton
+        collapsed
+        chord={bindings["left-sidebar"]}
+        size="sm"
+        onToggle={bay === "hidden" ? () => {
+          setSidebarCollapsed(false);
+          toggleMaximized();
+        } : undefined}
+      />
       <button
         type="button"
         onClick={onSearch}
