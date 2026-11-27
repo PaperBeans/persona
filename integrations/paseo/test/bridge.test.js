@@ -22,6 +22,8 @@ const ENTRIES = [
   { provider: 'my-codex', enabled: true, status: 'ready', label: 'My Codex', models: [{ id: 'gpt', label: 'GPT', isDefault: true }] },
   { provider: 'grok', enabled: true, status: 'ready', label: 'Grok', models: [] },
 ]
+// macOS keeps /tmp behind a link to /private/tmp; the bridge creates an Agent in the resolved folder.
+const TMP = realpathSync('/tmp')
 const PROJECT = { projectKey: 'prj_1', projectName: 'proj', workspaceName: '主线', checkout: { cwd: '/tmp', isGit: false } }
 
 function agents() {
@@ -683,7 +685,7 @@ test("an Agent for a provider that takes no MCP servers is created again without
   const [first, second, ...more] = fake.requestsOf('agent.create.request')
   assert.equal(more.length, 0, 'one more request, not a loop')
   assert.ok(first.config.mcpServers.persona.env.PERSONA_SESSION_ID)
-  assert.deepEqual(second.config, { provider: 'grok', cwd: '/tmp' }, 'the old configuration, no mcpServers')
+  assert.deepEqual(second.config, { provider: 'grok', cwd: TMP }, 'the old configuration, no mcpServers')
   assert.notEqual(second.agentId, first.agentId, 'a new agent id: the failed one has a record in Paseo')
   assert.equal(first.labels['persona.session'], `paseo-${first.agentId}`)
   assert.equal(second.labels['persona.session'], first.labels['persona.session'], 'the Persona session stays; only the Paseo agent is new')
@@ -746,7 +748,7 @@ test('a new session without a usable MCP config is created as before, and the lo
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const missing = await setup(t, { mcpConfig: join(dir, 'absent.json') })
   await call(missing.node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-claude' })
-  assert.deepEqual(missing.fake.requestsOf('agent.create.request')[0].config, { provider: 'my-claude', cwd: '/tmp' })
+  assert.deepEqual(missing.fake.requestsOf('agent.create.request')[0].config, { provider: 'my-claude', cwd: TMP })
   assert.ok(missing.logs.some((l) => /cannot read the MCP config .*absent\.json.*no Persona tools/.test(l)), missing.logs.join('\n'))
   const unset = await setup(t)
   await call(unset.node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-claude' })
@@ -898,7 +900,7 @@ test('an unchanged or unspecified launcher keeps the requested model and effort'
   for (const params of [{ launcher: 'my-claude' }, { launcher: 'my-claude', shell_launcher: true }, {}, { launcher: '' }]) {
     await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', model: 'fable[1m]', effort: 'high', ...params })
     assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, {
-      provider: 'my-claude', cwd: '/tmp', model: 'fable[1m]', thinkingOptionId: 'high',
+      provider: 'my-claude', cwd: TMP, model: 'fable[1m]', thinkingOptionId: 'high',
     })
   }
 })
@@ -917,7 +919,7 @@ test('a provider in error is replaced only by one of its own kind; with none, th
   const second = await setup(t, { providers: { ...PROVIDERS, 'backup-claude': { extends: 'claude' } }, entries: [...failing(ENTRIES), backup] })
   const res = await call(second.node, 'session.start', params)
   assert.deepEqual(second.fake.requestsOf('agent.create.request').at(-1).config,
-    { provider: 'backup-claude', cwd: '/tmp', model: 'fable[1m]', modeId: 'bypassPermissions', thinkingOptionId: 'high' })
+    { provider: 'backup-claude', cwd: TMP, model: 'fable[1m]', modeId: 'bypassPermissions', thinkingOptionId: 'high' })
   assert.deepEqual(res.instead, { launcher: 'my-claude' })
 })
 
@@ -945,7 +947,7 @@ test('a read-only (plan) start: Paseo\'s plan mode on a Claude provider, never a
   assert.equal(fake.requestsOf('agent.create.request').at(-1).config.modeId, 'plan')
   // A Claude Code launcher Paseo does not have: its Claude provider in plan mode, without the model it does not offer.
   const stood = await plan({ launcher: 'cc_gateway', agent_type: 'claude', model: 'preset-only-model', effort: 'high' })
-  assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, { provider: 'my-claude', cwd: '/tmp', modeId: 'plan', thinkingOptionId: 'high' })
+  assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, { provider: 'my-claude', cwd: TMP, modeId: 'plan', thinkingOptionId: 'high' })
   assert.deepEqual(stood.instead, { launcher: 'cc_gateway', model: 'preset-only-model' })
   const before = fake.requestsOf('agent.create.request').length
   // A non-Claude provider, or a Codex launcher Paseo lacks (its Codex provider holds no plan mode): refused, never a

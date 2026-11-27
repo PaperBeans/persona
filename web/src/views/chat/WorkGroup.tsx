@@ -5,7 +5,7 @@ import { childMachineOf, childSessionOf, isChildSessionStep } from "../../lib/ch
 import { useSessionLive } from "../../lib/live";
 import { useStore } from "../../lib/store";
 import type { Item } from "../../lib/types";
-import { actionSummary, explorationSummary, groupTitle, nestedLineDefault, togglesLiveOverride, workLineOpen, workLineOpens, isAgentStep, isPlanStep, isRowStep, isWorkflowStep, planTodos, workDuration, type AgentStatus, type ToolStep, type WorkGroupNode, type WorkLineStyle, type WorkNode } from "../../lib/work-groups";
+import { actionSummary, groupTitle, nestedLineDefault, togglesLiveOverride, workLineOpen, workLineOpens, isAgentStep, isPlanStep, isRowStep, isWorkflowStep, planTodos, workDuration, type AgentStatus, type ToolStep, type WorkGroupNode, type WorkLineStyle, type WorkNode } from "../../lib/work-groups";
 import type { WorkflowCalls } from "../../lib/workflows";
 import type { Step } from "../../lib/turns";
 import { Collapse, cx, Spinner, useNow } from "../../ui/atoms";
@@ -217,13 +217,9 @@ export const WorkGroup = memo(function WorkGroup({ g, p, limit }: { g: WorkGroup
       : null;
   const summary = useMemo(() => {
     if (p.nested && actions.text) return "";
-    if (g.live) {
-      const count = collectToolSteps(g.children).length;
-      return count > 0 ? t("chat-workgroup.live_steps", { count }) : "";
-    }
-    // groupTitle already includes explorationSummary when the group only read/searched
-    if (explorationSummary(g)) return "";
-    return summarizeWorkSteps(g.children);
+    if (!g.live) return "";
+    const count = collectToolSteps(g.children).length;
+    return count > 0 ? t("chat-workgroup.live_steps", { count }) : "";
   }, [g, p.nested, actions.text]);
   return (
     <div className="flex w-full min-w-0 flex-col" data-work-group={g.live ? "live" : "done"} data-group-id={g.id}>

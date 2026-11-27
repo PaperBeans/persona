@@ -58,6 +58,9 @@ async function startCompanion(t, f, args = []) {
   return { servers, log: () => stderr.join('') }
 }
 
+// How a chat's persona MCP server runs the node program: Agents reach it through mcp-proxy.mjs (#15822).
+const runs = (server) => server.args.slice(-3)
+
 test('nodeProgram takes the node\'s program, else personad, else persona-node beside it', (t) => {
   const f = fixture(t)
   const { nodeProgram } = compat
@@ -74,14 +77,14 @@ test('the companion hands its chats the program --personad-bin names', async (t)
   const f = fixture(t)
   const named = f.program(join(f.home, 'elsewhere'), 'persona-node') // in no state directory: only the option finds it
   const companion = await startCompanion(t, f, ['--personad-bin', named])
-  assert.deepEqual((await companion.servers()).map((s) => [s.name, s.command, s.args]), [['persona', named, ['mcp']]], companion.log())
+  assert.deepEqual((await companion.servers()).map((s) => [s.name, runs(s)]), [['persona', ['--agent', named, 'mcp']]], companion.log())
 })
 
 test('a companion started without --personad-bin finds persona-node where personad would be', async (t) => {
   const f = fixture(t)
   const link = f.program(f.bin, 'persona-node')
   const companion = await startCompanion(t, f)
-  assert.deepEqual((await companion.servers()).map((s) => s.command), [link], companion.log())
+  assert.deepEqual((await companion.servers()).map(runs), [['--agent', link, 'mcp']], companion.log())
   assert.ok(!companion.log().includes(NOT_FOUND))
 })
 
