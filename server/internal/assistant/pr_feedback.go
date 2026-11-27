@@ -14,18 +14,25 @@ import (
 )
 
 const (
-	prFeedbackCursorsKey = "assistant.pr_feedback_cursors"
-	prFeedbackReviews    = "reviews"
+	prFeedbackCursorsKey    = "assistant.pr_feedback_cursors"
+	prFeedbackReviews       = "reviews"
+	prFeedbackIssueComments = "issue_comments"
 )
 
-// A cursor remembers every handled ID at its newest timestamp. Another review submitted in that
-// second can appear on a later poll, regardless of its ID's order.
+// A cursor remembers every handled ID at its newest timestamp. Feedback from that same second
+// can appear on a later poll, regardless of its ID's order.
 type prFeedbackCursor struct {
 	At    time.Time `json:"at"`
 	IDsAt []string  `json:"ids_at,omitempty"`
 }
 
 type prFeedbackCursors map[string]map[string]prFeedbackCursor // (todo, normalized PR URL) -> stream -> cursor
+
+type prFeedbackItem struct {
+	githubPRFeedbackPost
+	at       time.Time
+	commitID string // reviews refer to a particular head
+}
 
 type prFeedbackBook struct {
 	locks   cardLocks // one routing pass per task and PR, without holding a lock across other PRs' sends
@@ -70,17 +77,24 @@ func (s *Service) savePRFeedbackCursor(ctx context.Context, st Store, key, strea
 
 func prReviewEventID(id int64) string { return "review:" + strconv.FormatInt(id, 10) }
 
-func (f prFeedback) reviewsAfter(cursor prFeedbackCursor) []githubPRReview {
-	var pending []githubPRReview
+func prFeedbackEventID(stream string, id int64) string {
+	if stream == prFeedbackIssueComments {
+		return "issue_comment:" + strconv.FormatInt(id, 10)
+	}
+	return prReviewEventID(id)
+}
+
+func pendingPRFeedback(stream string, items []prFeedbackItem, cursor prFeedbackCursor) []prFeedbackItem {
+	var pending []prFeedbackItem
 	seen := make(map[int64]bool)
-	for _, r := range f.reviews {
-		if !seen[r.ID] && !cursor.handled(r.SubmittedAt, prReviewEventID(r.ID)) {
-			seen[r.ID] = true
-			pending = append(pending, r)
+	for _, item := range items {
+		if item.ID > 0 && !item.at.IsZero() && !seen[item.ID] && !cursor.handled(item.at, prFeedbackEventID(stream, item.ID)) {
+			seen[item.ID] = true
+			pending = append(pending, item)
 		}
 	}
-	slices.SortFunc(pending, func(a, b githubPRReview) int {
-		if order := a.SubmittedAt.Compare(b.SubmittedAt); order != 0 {
+	slices.SortFunc(pending, func(a, b prFeedbackItem) int {
+		if order := a.at.Compare(b.at); order != 0 {
 			return order
 		}
 		return cmp.Compare(a.ID, b.ID)
@@ -90,9 +104,22 @@ func (f prFeedback) reviewsAfter(cursor prFeedbackCursor) []githubPRReview {
 
 func (s *Service) prFeedbackTarget(todoID, url, head string, checkedAt time.Time) (Todo, bool) {
 	t, ok := s.todoNow(todoID)
-	return t, ok && taskOpen(t) && !needsUserWakeEligible(t) && t.PRURL == url && s.stagePR(todoID) == url &&
-		t.PRStatus != nil && t.PRStatus.URL == url && t.PRStatus.State == "open" && t.PRStatus.HeadOID == head &&
-		t.PRStatus.CheckedAt.Equal(checkedAt)
+	if !ok {
+		return t, false
+	}
+	p := s.prFeedbackBinding(t, url)
+	return t, p != nil && p.HeadOID == head && p.CheckedAt.Equal(checkedAt)
+}
+
+func (s *Service) prFeedbackBinding(t Todo, url string) *TodoPRStatus {
+	if !taskOpen(t) || t.PRURL != url || s.stagePR(t.ID) != url {
+		return nil
+	}
+	p := t.PRStatus
+	if p == nil || p.URL != url || p.State != "open" || p.HeadOID == "" {
+		return nil
+	}
+	return p
 }
 
 func (s *Service) routePRFeedback(ctx context.Context, todoID string, status TodoPRStatus, g githubForge, feedback prFeedback) error {
@@ -113,72 +140,100 @@ func (s *Service) routePRFeedback(ctx context.Context, todoID string, status Tod
 	if _, err := st.Setting(ctx, prFeedbackCursorsKey, &saved); err != nil {
 		return fmt.Errorf("read feedback cursors: %w", err)
 	}
-	cursor, initialized := saved[key][prFeedbackReviews]
-	pending := feedback.reviewsAfter(cursor)
-	if initialized && len(pending) == 0 {
-		return nil
-	}
-	var events []prRoutedEvent
-	if initialized {
-		var err error
-		events, err = feedback.reviewEvents(ctx, todoID, status, g, pending)
-		if err != nil {
-			return err // no sends or cursor writes from a partial observation
-		}
-	}
-	if len(pending) > 0 {
-		if err := g.checkPRFeedbackHead(ctx, feedback.pullPath, status.HeadOID); err != nil {
-			return err
-		}
-	}
-	for _, ev := range events {
-		t, ok := s.prFeedbackTarget(todoID, status.URL, status.HeadOID, status.CheckedAt)
-		if !ok {
+	route := func(stream string, items []prFeedbackItem) error {
+		cursor, initialized := saved[key][stream]
+		pending := pendingPRFeedback(stream, items, cursor)
+		if initialized && len(pending) == 0 {
 			return nil
 		}
-		if err := s.deliverPRFeedback(ctx, t, ev); err != nil {
-			return err
+		var events []prRoutedEvent
+		if initialized {
+			var err error
+			events, err = feedback.events(ctx, todoID, status, g, stream, pending)
+			if err != nil {
+				return err // no sends or cursor writes from a partial stream
+			}
 		}
+		if len(pending) > 0 {
+			head := status.HeadOID
+			if stream == prFeedbackIssueComments {
+				head = "" // discussion follows the PR across head changes
+			}
+			if err := g.checkPRFeedbackSource(ctx, feedback.pullPath, head); err != nil {
+				return err
+			}
+		}
+		for _, ev := range events {
+			t, ok := s.prFeedbackTarget(todoID, status.URL, status.HeadOID, status.CheckedAt)
+			if !ok {
+				return nil
+			}
+			if err := s.deliverPRFeedback(ctx, t, ev); err != nil {
+				return err
+			}
+		}
+		if _, ok := s.prFeedbackTarget(todoID, status.URL, status.HeadOID, status.CheckedAt); !ok {
+			return nil
+		}
+		// Baseline the first complete list, keeping only its newest timestamp and IDs. An empty saved
+		// cursor distinguishes an observed empty stream from one this hub has never read.
+		for _, item := range pending {
+			cursor.advance(item.at, prFeedbackEventID(stream, item.ID))
+		}
+		return s.savePRFeedbackCursor(ctx, st, key, stream, cursor)
 	}
+	reviewErr := route(prFeedbackReviews, feedback.reviews)
 	if _, ok := s.prFeedbackTarget(todoID, status.URL, status.HeadOID, status.CheckedAt); !ok {
-		return nil
+		return reviewErr
 	}
-	// On the first complete observation, baseline the reviews already present without fetching their
-	// comments. An empty cursor is still persisted to distinguish an observed empty PR from a new one.
-	for _, r := range pending {
-		cursor.advance(r.SubmittedAt, prReviewEventID(r.ID))
+	rows, err := readPRPages[githubPRIssueComment](ctx, g, feedback.commentsPath)
+	if err != nil {
+		return errors.Join(reviewErr, err)
 	}
-	return s.savePRFeedbackCursor(ctx, st, key, prFeedbackReviews, cursor)
+	comments := make([]prFeedbackItem, 0, len(rows))
+	for _, row := range rows {
+		// Editing a handled comment does not create a new discussion event.
+		comments = append(comments, prFeedbackItem{githubPRFeedbackPost: row.githubPRFeedbackPost, at: row.CreatedAt})
+	}
+	return errors.Join(reviewErr, route(prFeedbackIssueComments, comments))
 }
 
-func (f prFeedback) reviewEvents(ctx context.Context, todoID string, status TodoPRStatus, g githubForge, reviews []githubPRReview) ([]prRoutedEvent, error) {
+func (f *prFeedback) events(ctx context.Context, todoID string, status TodoPRStatus, g githubForge, stream string, items []prFeedbackItem) ([]prRoutedEvent, error) {
 	var events []prRoutedEvent
-	viewer, viewerChecked := f.viewer, f.viewerChecked
-	for _, r := range reviews {
-		author := strings.TrimSpace(r.User.Login)
-		if r.CommitID != status.HeadOID || author == "" || strings.EqualFold(author, f.author) ||
-			isBotReviewAuthor(author, r.User.Type) || !reviewAuthorHasWriteAssociation(r.AuthorAssociation) {
+	reviews := stream == prFeedbackReviews
+	for _, item := range items {
+		author := strings.TrimSpace(item.User.Login)
+		if reviews && item.commitID != status.HeadOID || author == "" || strings.EqualFold(author, f.author) ||
+			isBotReviewAuthor(author, item.User.Type) || !reviewAuthorHasWriteAssociation(item.AuthorAssociation) {
 			continue
 		}
-		if !viewerChecked {
-			viewer = g.prViewer(ctx)
-			viewerChecked = true
+		if !f.viewerChecked {
+			f.viewer = g.prViewer(ctx)
+			f.viewerChecked = true
 		}
-		if strings.EqualFold(author, viewer) {
+		if strings.EqualFold(author, f.viewer) {
 			continue
 		}
-		inline, err := g.prReviewComments(ctx, f.pullPath, r.ID)
-		if err != nil {
-			return nil, err
-		}
-		body, substantive := combinedPRReview(r.Body, inline)
-		if !substantive {
+		body := strings.TrimSpace(item.Body)
+		kind, reviewState, anchor := prEventKindComment, "", "#issuecomment-"
+		if reviews {
+			inline, err := g.prReviewComments(ctx, f.pullPath, item.ID)
+			if err != nil {
+				return nil, err
+			}
+			var substantive bool
+			body, substantive = combinedPRReview(body, inline)
+			if !substantive {
+				continue
+			}
+			kind, reviewState, anchor = prEventKindReview, "COMMENTED", "#pullrequestreview-"
+		} else if commentedReviewLooksInformational(body) {
 			continue
 		}
 		events = append(events, prRoutedEvent{
-			TodoID: todoID, PRURL: status.URL, HeadSHA: status.HeadOID, Kind: prEventKindReview,
-			EventID: prReviewEventID(r.ID), ReviewState: r.State, Author: author, Body: body,
-			EventURL:  cmp.Or(strings.TrimSpace(r.HTMLURL), triageNormalizePRURL(status.URL)+"#pullrequestreview-"+strconv.FormatInt(r.ID, 10)),
+			TodoID: todoID, PRURL: status.URL, HeadSHA: status.HeadOID, Kind: kind,
+			EventID: prFeedbackEventID(stream, item.ID), ReviewState: reviewState, Author: author, Body: body,
+			EventURL:  cmp.Or(strings.TrimSpace(item.HTMLURL), triageNormalizePRURL(status.URL)+anchor+strconv.FormatInt(item.ID, 10)),
 			CheckedAt: status.CheckedAt,
 		})
 	}

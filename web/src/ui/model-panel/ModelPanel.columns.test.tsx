@@ -246,7 +246,7 @@ describe("the model panel's columns", () => {
     expect(rows()[0].textContent).toBe("GPT-5.5");
   });
 
-  it("separates Orchestrator, GPT-OSS, and Other from Claude Sonnet in three-column mode", async () => {
+  it("groups models by series (Orchestrator under Gemini, GPT-OSS under GPT) with Other for unrecognized rows in three-column mode", async () => {
     const agyMixed: PanelProvider = {
       id: "agy",
       name: "agy",
@@ -282,12 +282,9 @@ describe("the model panel's columns", () => {
 
     const groups = [...document.body.querySelectorAll<HTMLElement>("[data-panel-family]")];
     expect(groups.map((g) => [g.dataset.panelFamily, g.getAttribute("aria-label")])).toEqual([
-      ["gemini:neon", "Gemini Neon"],
-      ["gemini:flash", "Gemini Flash"],
-      ["orchestrator", "Orchestrator"],
-      ["claude:opus", "Claude Opus"],
-      ["claude:sonnet", "Claude Sonnet"],
-      ["gpt-oss", "GPT-OSS"],
+      ["gemini", "Gemini"],
+      ["claude", "Claude"],
+      ["gpt", "GPT"],
       ["other", "其他"],
     ]);
 
@@ -295,14 +292,22 @@ describe("the model panel's columns", () => {
       [...groups.find((g) => g.dataset.panelFamily === key)!.querySelectorAll<HTMLElement>("[data-panel-row]")].map(
         (r) => r.querySelector(".truncate")?.textContent,
       );
-    expect(groupRows("claude:sonnet")).toEqual(["Claude Sonnet 5.5"]);
-    expect(groupRows("orchestrator")).toEqual(["Orchestrator (Neon)", "Orchestrator (Carbon)", "Orchestrator (Argon)"]);
-    expect(groupRows("gpt-oss")).toEqual(["GPT-OSS 120B (Medium)"]);
+    expect(groupRows("gemini")).toEqual([
+      "Gemini 4 Neon",
+      "Gemini 3.8 Flash",
+      "Orchestrator (Neon)",
+      "Orchestrator (Carbon)",
+      "Orchestrator (Argon)",
+    ]);
+    expect(groups.find((g) => g.dataset.panelFamily === "gemini")?.querySelector("[data-panel-fold]")?.textContent).toBe("更早版本 · 1");
+    expect(groupRows("claude")).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5"]);
+    expect(groupRows("gpt")).toEqual(["GPT-OSS 120B (Medium)"]);
     expect(groupRows("other")).toEqual(["Custom Alpha"]);
     expect(
-      groups.find((g) => g.dataset.panelFamily === "orchestrator")?.querySelector('[data-current="true"]')?.textContent,
+      groups.find((g) => g.dataset.panelFamily === "gemini")?.querySelector('[data-current="true"]')?.textContent,
     ).toContain("Orchestrator (Neon)");
-    expect(groups.find((g) => g.dataset.panelFamily === "orchestrator")?.querySelector("[data-panel-fold]")).toBeNull();
+    expect(groups.find((g) => g.dataset.panelFamily === "claude")?.querySelector("[data-panel-fold]")).toBeNull();
+    expect(groups.find((g) => g.dataset.panelFamily === "gpt")?.querySelector("[data-panel-fold]")).toBeNull();
     expect(groups.find((g) => g.dataset.panelFamily === "other")?.querySelector("[data-panel-fold]")).toBeNull();
   });
 });

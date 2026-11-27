@@ -1810,16 +1810,19 @@ chat (#5033), where the panel only offers models and says plainly which one the 
   Launcher summaries retain each provider's full name as their accessible name and tooltip; the former provider rail
   and its shortened captions are replaced by the shared column (#10249).
 - Model families (`web/src/lib/model-families.ts`, `docs/web/web.md` "Model pill and model panel"): inside a provider
-  group, each family's name is a 11.5 px `text-submeta` line in `ink-3` (12 px side padding, 6 px above, 2 px below)
-  over its rows; its right end holds the fold, a text button in the same size and colour ("Earlier versions · N" with
-  an 11 px chevron, "Hide earlier" with the chevron turned up), a `--hover-2` fill and `ink` on hover, one line, its
-  accessible name naming the family. The newest row says "Latest" after its name in `text-submeta` `ink-3`, no chip.
-  Unversioned peer families (`Orchestrator`, `GPT-OSS`) share the same family header without folding when family
-  grouping is active and never trigger family headers on their own. Leading entries outside any family (`Default` and
-  the running row pinned at the top of Recommended) have no header; trailing rows outside any family (unrecognized
-  models and custom typed IDs) sit under a localized **Other** header in the same `text-submeta` `ink-3` style (no fold)
-  so they never visually fall under the preceding family. Why: one family's versions read as one
-  choice and the newest is the one most people want, while older ones stay one tap (or a search) away (2026-11-17).
+  group, models are grouped by series (`Claude`, `Gemini`, `GPT`, `DeepSeek`, `GLM`, `MiniMax`, `Seed`, `Qwen`, `Kimi`,
+  `Grok`) once at least two series appear in the section or any versioned line has older versions; each series header
+  is a 11.5 px `text-submeta` line in `ink-3` (12 px side padding, 6 px above, 2 px below) over its rows. Version
+  comparison and folding stay per internal line (e.g. `Orchestrator` stays inside `Gemini`, `GPT-OSS` inside `GPT`, and
+  Claude tiers ordered `Fable → Opus → Sonnet → Haiku`), and any folded older versions combine into one right-aligned
+  text button in the series header ("Earlier versions · N" with an 11 px chevron, "Hide earlier" with the chevron
+  turned up, `--hover-2` fill and `ink` on hover, accessible label naming the series). The newest row of each
+  versioned line says "Latest" after its name in `text-submeta` `ink-3`, no chip. Leading entries outside any series
+  (`Default` and the running row pinned at the top of Recommended) have no header; trailing rows outside any series
+  (unrecognized models and custom typed IDs) sit under a localized **Other** header in the same `text-submeta` `ink-3`
+  style (no fold) so they never visually fall under the preceding series. Why: grouping at series level avoids noisy
+  per-tier header clutter while keeping each line's newest version visible and older ones one tap (or search) away
+  (2026-11-17, updated #16792).
 - Usage placement (#5056): the Agent's context meter is a separate, right-aligned row below the composer card, not part of
   the header or the model-pill container. The composer, Session Insights and enabled sidebar details use the same
   context share and progress bar. When only the current context size is available, the composer and Session Insights

@@ -78,13 +78,29 @@ func (s *Service) emitNeedsUserExternalInfo(ctx context.Context, t Todo, source,
 	if !needsUserWakeEligible(t) {
 		return false
 	}
-	source = clip(oneLine(strings.TrimSpace(source)), 160)
-	summary = clip(oneLine(strings.TrimSpace(summary)), 500)
-	signalKey = strings.TrimSpace(signalKey)
-	if summary == "" || signalKey == "" {
+	g := superviseSignal{
+		Key:            strings.TrimSpace(signalKey),
+		ExternalSource: clip(oneLine(strings.TrimSpace(source)), 160),
+		Detail:         clip(oneLine(strings.TrimSpace(summary)), 500),
+	}
+	return s.enqueueNeedsUserExternalInfo(ctx, t, g, s.needsUserRoundKey(t))
+}
+
+func (s *Service) maybeWakeNeedsUserForPRFeedback(ctx context.Context, t Todo, ev prRoutedEvent, round string) bool {
+	return s.enqueueNeedsUserExternalInfo(ctx, t, superviseSignal{
+		Key:            ev.supervisorKey(),
+		PRURL:          ev.PRURL,
+		PREventID:      ev.EventID,
+		Report:         ev.Kind,
+		ExternalSource: ev.EventURL,
+		Detail:         prEventNotice + "\nEvent: " + ev.Kind + "\n" + ev.feedbackContent(),
+	}, round)
+}
+
+func (s *Service) enqueueNeedsUserExternalInfo(ctx context.Context, t Todo, g superviseSignal, round string) bool {
+	if g.Detail == "" || g.Key == "" {
 		return false
 	}
-	to := ""
 	if s.agentSupervised(t) {
 		// A coding task leader works without permission prompts and does not hold the owner's needs_user card;
 		// route external info to the supervising conversation above it.
@@ -92,18 +108,11 @@ func (s *Service) emitNeedsUserExternalInfo(ctx context.Context, t Todo, source,
 		if up == "" {
 			return false
 		}
-		to = up
+		g.To = up
 	}
-	key := signalKey + "@round:" + s.needsUserRoundKey(t)
-	s.signal(superviseSignal{
-		Todo:           t.ID,
-		Kind:           sigNeedsUserExternalInfo,
-		Key:            key,
-		ExternalSource: source,
-		Detail:         summary,
-		To:             to,
-	})
-	return true
+	g.Todo, g.Kind = t.ID, sigNeedsUserExternalInfo
+	g.Key += "@round:" + round
+	return s.signalReplacing(nil, g)
 }
 
 // needsUserExternalInfoStillHolds revalidates a queued external-info wake right before delivery: the task must still
@@ -112,7 +121,16 @@ func (s *Service) needsUserExternalInfoStillHolds(t Todo, g superviseSignal) boo
 	if !needsUserWakeEligible(t) {
 		return false
 	}
-	return strings.HasSuffix(g.Key, "@round:"+s.needsUserRoundKey(t))
+	round := "@round:" + s.needsUserRoundKey(t)
+	if g.PREventID == "" {
+		return strings.HasSuffix(g.Key, round)
+	}
+	p := s.prFeedbackBinding(t, g.PRURL)
+	if p == nil {
+		return false
+	}
+	ev := prRoutedEvent{PRURL: p.URL, HeadSHA: p.HeadOID, Kind: g.Report, EventID: g.PREventID}
+	return g.Key == ev.supervisorKey()+round
 }
 
 // needsUserExternalInfoEntry builds the localized prompt payload for a needs_user_external_info supervision entry.

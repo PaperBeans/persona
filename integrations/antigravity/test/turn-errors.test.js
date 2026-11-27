@@ -616,3 +616,28 @@ test('a pending native error probe does not hold a completed prompt active', asy
   }
   await items()
 })
+
+test('prepareTranscript refreshes the exported transcript after awaiting a native error probe', async (t) => {
+  const { calls, items, write, state, nativeFile } = await fixture(t, { holdErrors: true })
+  const release = () => {
+    const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+    snapshot.holdErrors = false
+    writeFileSync(nativeFile, JSON.stringify(snapshot))
+  }
+  const pending = items()
+  await until('native error probe started', () => calls().some((call) => call.method === 'GetCascadeTrajectorySteps'))
+  try {
+    write([
+      input,
+      { step_index: 1, type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-01-02T12:00:05Z', content: 'Fresh reply during error probe' },
+    ])
+    state(2)
+  } finally {
+    release()
+  }
+  const page = await pending
+  assert.ok(
+    page.items.some((item) => item.text === 'Fresh reply during error probe'),
+    'session.items must include steps written while awaiting errFlight',
+  )
+})

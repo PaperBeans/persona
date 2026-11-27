@@ -86,6 +86,7 @@ DOMAINS = [
     "todo_wait_reasons_mock",  # to-dos waiting for different reasons with the hub's typed `wait` (#16168), MOCK_TODO_WAIT_REASONS
     "dashboards_mock",  # Dashboards: the -pages places and pages, the `dashboards` switch (#15017), MOCK_DASHBOARDS
     "kb_chat_inbox_mock",  # a chat's Inbox items on its knowledge page and its items' kb_chat (#15356), MOCK_KB_CHAT_INBOX
+    "command_input_mock",  # an Antigravity command waiting at a prompt (#14527), MOCK_COMMAND_INPUT
 ]
 
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
