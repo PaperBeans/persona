@@ -315,7 +315,12 @@ nonisolated extension DirectionTree {
     /// Whether a conversation-backed leader is absent from the page's conversations and needs one assistant reread.
     /// Outside ids are complete directions in their own right, not temporarily missing conversations (#8236).
     func hasUnlistedConversation(known: Set<String>) -> Bool {
-        leaders.contains { !$0.isExternal && !known.contains($0.id) }
+        !unlistedConversations(known: known).isEmpty
+    }
+
+    /// The conversation-backed leaders absent from `known`, by id (`hasUnlistedConversation`).
+    func unlistedConversations(known: Set<String>) -> Set<String> {
+        Set(leaders.lazy.filter { !$0.isExternal && !known.contains($0.id) }.map(\.id))
     }
 
     /// The directions with a to-do, in the tree's order: the To-dos page's and the Agents page's sections.

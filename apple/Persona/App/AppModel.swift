@@ -587,6 +587,8 @@ final class AppModel {
             #endif
             // The shell routes it now, not when a view is next drawn (docs/apple/shell.md).
             if selectedTab != oldValue { tabRouter?.route(selectedTab, in: self) }
+            // A to-dos push held while the Persona tab was not in front is read as it comes back.
+            if selectedTab != oldValue { TodoStore.frontChanged() }
             #if os(visionOS)
             // The Inbox's own tab, which the TabView keeps up: picked, or routed to again while in front (a widget).
             if selectedTab == .mail { inboxEntries += 1 }
@@ -667,6 +669,10 @@ final class AppModel {
     private(set) var assistantConfigLoadFailed = false
     /// Distinguishes visits to the same hub and assistant when an earlier request is still in flight.
     @ObservationIgnored private var assistantPageGeneration = 0
+    /// The conversation-backed directions the settings were read again for because the page's conversations did not
+    /// list them (`refreshDirectionTree`): once each. One the hub never lists there (archived, on another computer, in
+    /// another space) read them again on every tree push before.
+    @ObservationIgnored private var directionsReadFor: Set<String> = []
     /// The directions' names by leader conversation id (`GET /api/v1/assistant/leaders`): the sidebar's Directions group
     /// shows these instead of the conversations' titles. Read again with the assistant; empty without leaders.
     private(set) var directionNames: [String: String] = [:]
@@ -1340,6 +1346,7 @@ final class AppModel {
     /// Sign Out of everything: every group, every hub (Settings › Disconnect with one group, a revoked credential of this device).
     func unpair() {
         assistantPageGeneration += 1
+        directionsReadFor = []
         directionNames = [:]
         forgetSeen()
         updateHeldRetryReceipts { _ in [] }
@@ -1578,7 +1585,8 @@ final class AppModel {
             let st = try await api.assistant()
             guard isCurrent() else { return } // another group or manager was picked meanwhile
             let previousMain = assistantMain
-            assistantConfig = st
+            // Unchanged settings tell no reader (and write no snapshot): the tree's pushes used to read them again.
+            if st != assistantConfig { assistantConfig = st }
             // A different main for the manager that was cleared: the empty page is over, and someone looking at it
             // sees what the hub has. Another manager's refresh does not drop this one's flag.
             if mainClear.note(group: api.group, manager: assistantManagerID ?? "", mainSessionID: st.main),
@@ -1718,9 +1726,14 @@ final class AppModel {
         }
         // An unlisted conversation-backed direction needs the whole settings read so its row appears without a relaunch.
         // An outside direction is already complete here: treating its opaque id as a missing conversation would reread
-        // the assistant after every tree push (#8236).
+        // the assistant after every tree push (#8236). Each is read for once: a direction whose conversation the settings
+        // never list (archived, on another computer, in another space) would otherwise reread them on every push.
         let known = Set((assistantConfig?.conversations ?? []).map(\.sessionID))
-        if followLeaders, tree.hasUnlistedConversation(known: known) { await refreshAssistant() }
+        let unread = tree.unlistedConversations(known: known).subtracting(directionsReadFor)
+        if followLeaders, !unread.isEmpty {
+            directionsReadFor.formUnion(unread)
+            await refreshAssistant()
+        }
     }
 
     /// The Couldn't Load Settings retry: the page flips back to Reading at once, and repeated taps share the one request (#4200).
@@ -3471,7 +3484,8 @@ final class AppModel {
         case .inbox:
             if isHub { InboxStore.shared.reload() }
         case .todos:
-            if isHub { TodoStore.shared.reload() }
+            // Every report of a running Agent pushes this: the store spaces its reads and asks the revision first.
+            if isHub { TodoStore.shared.pushed() }
         case .savedPrompts(let manager):
             // another device changed the list: only the shown assistant's is read again (#9436)
             if isHub, SavedPromptStore.concerns(eventManager: manager, shownManager: api?.shownManager) { SavedPromptStore.shared.reload() }
@@ -5202,6 +5216,7 @@ final class AppModel {
     /// Another group was picked for the hub-level pages: their data starts over from that group's.
     func hubChanged() {
         assistantPageGeneration += 1
+        directionsReadFor = []
         directionNames = [:]
         ModuleState.shared.follow(hub?.group ?? "", features: hub?.features ?? []) // the modules this hub allows (#13849)
         RecordingModule.tellSurfaces()
@@ -5254,7 +5269,10 @@ final class AppModel {
         assistantLauncherRequestRevision += 1
         assistantConfig = heldAssistant(hub?.group ?? "")
         // The tree is the default manager's: kept through a re-read of it, dropped for any other.
-        if switched { assistantPageGeneration += 1 }
+        if switched {
+            assistantPageGeneration += 1
+            directionsReadFor = []
+        }
         if switched || !assistantShows(nil) {
             directionNames = [:]
             directionTree = nil // the other manager's; `refreshAssistant` below reads this one's

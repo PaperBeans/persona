@@ -211,7 +211,8 @@ final class TasksStore {
         if item.kind == .message { messageWrites[item.id, default: 0] &+= 1 }
         viewStore.receive(item, group: group)
         merge([item], into: item.conversation)
-        if item.kind == .task || item.kind == .receipt || item.kind == .review || item.kind == .report { reloadTodos() }
+        // As a `todos` push: spaced, and only when the hub's revision moved (`TodoStore.pushed`).
+        if item.kind == .task || item.kind == .receipt || item.kind == .review || item.kind == .report { todoStore.pushed() }
     }
 
     func received(_ plan: TaskPlan) {
