@@ -403,6 +403,8 @@ type tasksState struct {
 	reusing map[string]bool
 	// outcomeRuns are the outcome recordings still going (goRecordTaskOutcome; the tests wait on them).
 	outcomeRuns sync.WaitGroup
+	// terminalRuns are the terminal cleanups an owner's Pass started (goFinishTaskTerminal; the tests wait on them).
+	terminalRuns sync.WaitGroup
 	// todayLocks: a conversation's id -> the lock ensureToday holds from looking for the day's "Today" card to
 	// appending it, so that concurrent opens of a chat make one card, not one each.
 	todayLocks cardLocks

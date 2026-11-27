@@ -667,8 +667,11 @@ recorded choice. To withdraw it, send `DELETE /api/v1/todos/{id}/terminal-cleanu
 `{"terminal_cleanup":"skipped"}` until the manager has given the node its final authorization to close, including
 while the node is still checking the tab. An authorized close returns 409. This is a per-task choice.
 
-Only a supervisor or main conversation's `task_review` that saves `accepted` with outcome `done` uses that choice.
-Tasks still waiting for the owner's verification keep their tabs. The manager checks current viewers and recent
+Only a supervisor or main conversation's `task_review` that saves `accepted` with outcome `done` uses that choice,
+or the owner's Pass on a task that review accepted with `user_check` (#16948). Tasks still waiting for the owner's
+verification keep their tabs. Pass answers at once and the close attempt follows in the background under the same
+checks; a tab that is busy or watched at that moment is skipped, and the Agent is left to the completed-task stop
+below (which also closes the terminal when `assistant.close_ended_terminals` is on). The manager checks current viewers and recent
 owner activity again when authorizing the close. The original Claude Code or Codex tab must have been created
 for this start on Herdr, with the same agent process still in its only pane. The node checks focus,
 terminal viewers, drafts, queued input, interactions and work again. If there is no other tab in that workspace,

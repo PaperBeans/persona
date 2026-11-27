@@ -80,6 +80,26 @@ func (s *Service) taskTerminalRoute() {
 	})
 }
 
+// goFinishTaskTerminal runs finishTaskTerminal for an acceptance the owner's Pass just recorded, off the Pass's path:
+// the owner's answer does not wait for the node (counted in tasks.terminalRuns; the tests wait on them). A terminal
+// that is busy, watched or no longer the task's alone at that moment is not closed (finishTaskTerminal's checks).
+func (s *Service) goFinishTaskTerminal(ctx context.Context, t Todo) {
+	ctx = context.WithoutCancel(ctx)
+	s.tasks.terminalRuns.Add(1)
+	go func() {
+		defer s.tasks.terminalRuns.Done()
+		// The node's final check reads when the owner last looked at the Agent; Pass itself did not load it. Unknown
+		// activity keeps the terminal open.
+		s.loadSeen(ctx)
+		if err := s.loadTaskActivity(ctx); err != nil {
+			s.logf("task %s: owner Pass: load activity for terminal cleanup: %v", t.ID, err)
+		}
+		if status := s.finishTaskTerminal(ctx, t, true); status != devicewire.TaskTerminalSkipped {
+			s.logf("task %s: owner Pass: terminal cleanup %s", t.ID, status)
+		}
+	}()
+}
+
 // finishTaskTerminal claims one close attempt in the plan before it can reach
 // the node. A lost reply leaves the outcome pending and cannot cause a resend.
 func (s *Service) finishTaskTerminal(ctx context.Context, t Todo, accepted bool) string {

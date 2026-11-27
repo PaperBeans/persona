@@ -410,6 +410,9 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 			}
 			if closed || changed {
 				s.taskReviewed(ctx, v.Supervisor, id, reviewAccepted, v)
+				// The owner's Pass is the acceptance task_review(user_check) deferred: the terminal cleanup the owner
+				// opted into at Start follows it, under the same checks as a direct acceptance (#16948).
+				s.goFinishTaskTerminal(ctx, t)
 			}
 		}
 		completeDismissal()

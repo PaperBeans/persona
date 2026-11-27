@@ -37,7 +37,7 @@ var terminalClosers = map[string][]string{
 	"panes.close": {},
 	"tabs.close":  {},
 	"session.close_task_terminal": {
-		"finishTaskTerminal", // the owner opted in at dispatch and task_review accepted durable completion (#10201)
+		"finishTaskTerminal", // the owner opted in at dispatch and task_review, or the owner's Pass, accepted durable completion (#10201, #16948)
 		"tracksNodeWrite",    // classification only: compares method names and never calls a node
 	},
 }

@@ -253,7 +253,7 @@ workspace behavior.
   Agent that quit has its shell closed only on Herdr (the #9648 checks). The transcript stays and Resume opens a new tab
   (`server/internal/assistant/agent_terminal_close.go`).
 - **Closing one task's tab after acceptance** (#10201): the owner can opt in when starting a new planned task. After
-  `task_review` saves its acceptance as done, Persona can close the original Herdr tab of that task's Claude Code or
+  `task_review` saves its acceptance as done, or the owner passes a task it accepted with `user_check`, Persona can close the original Herdr tab of that task's Claude Code or
   Codex Agent. It checks the tab and running process from dispatch, the current layout and focus, open terminal views,
   input, pending interactions and live work. A split tab or a workspace's last tab stays open. The transcript and
   worktree stay. See `docs/assistant/todos.md` ("Close a task's tab after acceptance").
