@@ -457,7 +457,7 @@ final class TodoStore {
             defer { if pushLoop?.id == id { pushLoop = nil } }
             while pushDirty, generation == requested, !Task.isCancelled {
                 if !pushes.shown(), pushes.hiddenWait > .zero {
-                    let wait = Task { [self] in try? await pushes.sleep(pushes.hiddenWait) }
+                    let wait = Task { [self] in _ = try? await pushes.sleep(pushes.hiddenWait) }
                     hiddenWait = wait
                     await wait.value
                     if hiddenWait == wait { hiddenWait = nil }
