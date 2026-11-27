@@ -1757,17 +1757,6 @@ if os.environ.get("MOCK_TERMINAL_ONLY") == "1":
     SESSIONS.append(sess("macbook", TERMINAL_ONLY, "kiro-demo", "/Users/me/code/kiro-demo", "idle", "idle", "kiro-demo", 8, "kiro", 1, 1,
                          "", agent="kiro", launcher="kiro", read_only_reason="Persona 还不能读 kiro 的对话：手机上只能看终端、按键盘"))  # i18n-ignore
 
-# MOCK_COMMAND_INPUT=1 (#14527, docs/integrations/engines.md "Commands waiting for input"): an Antigravity (agy) Agent in a
-# herdr pane whose background task, a command-line sign-in, waits at its prompt for the code the sign-in page shows: the
-# node's command_input card (COMMAND_INPUT_CARD below) asks for that line. Open it with -openSession macbook/<COMMAND_INPUT>.
-COMMAND_INPUT = "c0de0000-0000-4000-8000-000000014527"
-MOCK_COMMAND_INPUT = os.environ.get("MOCK_COMMAND_INPUT") == "1"
-if MOCK_COMMAND_INPUT:
-    SESSIONS.append(sess("macbook", COMMAND_INPUT, "Sign in to the cloud CLI", "/Users/me/code/notebooks", "working", "needs_you",
-                         "notebooks", 9, "agy", 1, 1, "The sign-in is waiting for the code from its page.", agent="agy",
-                         agent_label="Antigravity", launcher="agy", pending=1))
-
-
 # MOCK_OMP=1 (docs/integrations/omp.md): every computer lists the omp launcher, which takes no model, mode, effort or
 # ultracode (omp's own config decides) and starts with its first message, as the node does (control.go): a start that
 # is async or sets any of those is refused (omp_options), else it answers with omp's session, the first message in it.
@@ -10669,26 +10658,6 @@ if os.environ.get("MOCK_SECRET_RUN") in ("pending", "ran", "withheld", "long"):
             ensure_ascii=False), 1) + [
             it("assistant", "text", 0.5, text="第二条命令失败了（退出码 5）：launchd 没能加载这个任务。我先看看 plist 的权限再告诉你。")]
 
-
-# MOCK_COMMAND_INPUT=1: the agy task's card, as the node lists it and the manager words it (fleet_ix_command.go). Send
-# answers it with the line (values.input); Not now with a plain no. GET /mock/resolved has the answers.
-COMMAND_INPUT_PROMPT = "Enter the authorization code:"
-COMMAND_INPUT_CARD = {
-    "id": "ci_0c14527a5e1f2b3c", "machine_id": "macbook", "session_id": COMMAND_INPUT, "session_title": "Sign in to the cloud CLI",
-    "cwd": "/Users/me/code/notebooks", "kind": "permission", "created_at": ago(minutes=1), "expires_at": later(hours=24),
-    "tool_name": "command_input", "tool_title": "Command input", "agent": "agy", "agent_label": "Antigravity",
-    "tool_input": {"command": "example-cli auth login --no-browser", "task": "task-7", "prompt": COMMAND_INPUT_PROMPT,
-                   "masked": True,
-                   "output": "To sign in, open this page in any browser:\n  https://auth.example.com/authorize?client=demo&scope=usage\n"
-                             "After approving, the page shows a code."},
-    "summary": "A command is waiting for your input: " + COMMAND_INPUT_PROMPT,
-    "fields": [{"key": "input", "label": COMMAND_INPUT_PROMPT, "placeholder": "Type what the command asks for", "secret": True}]}
-if MOCK_COMMAND_INPUT:
-    ITEMS[COMMAND_INPUT] = [
-        it("user", "text", 4, text="Sign in to the cloud CLI and tell me this month's usage."),
-        it("assistant", "text", 2, text="The sign-in is running. Open the address it printed, approve, and send me the code the page shows."),
-    ]
-    INTERACTIONS.append(COMMAND_INPUT_CARD)
 
 # MOCK_SECRET_HANDOFF=1: the hand-off card (secret_handoff, #3962) in Persona's main conversation: the assistant asked to
 # start an Agent on the MacBook with two values from a made-up provider; nothing has been handed over. Its approval is

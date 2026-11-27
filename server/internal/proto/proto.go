@@ -14,7 +14,6 @@ const (
 // Features are what this hub supports beyond the first protocol, listed in the WebSocket hello and /health for
 // clients that need to know before they try (docs/protocol/protocol.md).
 var Features = []string{
-	nodeproto.SessionStartServiceTier,
 	nodeproto.PersonaContracts, // bidirectional pre-cutover runtime identities
 	"look_uploads",             // POST /api/v1/looks/uploads, DELETE /api/v1/looks/uploads/{id}: avatars made from an uploaded image
 	"locale",                   // Accept-Language, client_hello.locale and a device's locale pick the language of text for people (docs/protocol/i18n.md)

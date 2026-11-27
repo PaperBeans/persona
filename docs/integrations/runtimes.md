@@ -638,21 +638,32 @@ the local export names the corresponding file in that conversation's task direct
 
 A session is listed `unknown` when the evidence cannot say working, idle or done (`transcriptState` in
 `integrations/antigravity/lib/map.js`). It is never guessed as idle: an idle native summary closes a turn only when its
-step count covers the last exported step. The companion logs why, as reason counts, each time the tally across listed
+step count covers the last exported step (or when both the export and an idle summary have zero steps). A freshly
+`session.start`-ed conversation with no completed turns also stays `idle` if `agy` writes a 0-byte `transcript.jsonl`
+before populating a summary row (provided the summary store is readable and shows zero steps and no active/unrecognized
+status). Active native
+states (`CASCADE_RUN_STATUS_RUNNING`, `CASCADE_RUN_STATUS_CANCELING`, `CASCADE_RUN_STATUS_BUSY`, and `not_fully_idle`)
+all report `working`. The companion logs why, as reason counts, each time the tally across listed
 sessions changes (`agy unknown status: no_summary 1, summary_behind 2`, then `none` once it clears, #12003):
 `read_failed` (the native summary database could not be read), `no_summary`, `summary_not_idle`, `summary_behind` (the
 summary's step count does not cover the last exported step), `no_step_index`, and `no_relevant_step` (no user input,
-response, tool result or error has been exported). A failed summary read is logged when it starts or its cause changes,
+response, tool result or error has been exported). Any non-empty unrecognized summary status value is also logged once
+as a sanitized enum token (`agy unrecognized summary status: …`). A failed summary read is logged when it starts or its cause changes,
 with SQLite's result-code text only, and once more when reads recover, with the number of failures. The lines carry no
 session IDs, message text or paths; under `personad node` they appear in the node log after `agy runtime:`.
 
 A settled Persona-owned ACP reply writes `.persona-turn-completion` beside the conversation's history-epoch file (mode
 0600). It stores SHA-256 fingerprints of the branch and actual settled reply index: one for the full reply and one for
-its byte length and first/last eight characters so truncated exports can match, never message text. After a restart, a
-`summary_behind` row becomes `done` only while the current export matches that settled turn; a missing or mismatched
-marker, including one followed by later native work, leaves `unknown`. Starting another prompt or issuing a native rewind clears
-the marker, and a known or pending native-cut check suppresses recovery. Transcript-only status rules and the step-count
-coverage check above are unchanged.
+its byte length and first/last eight characters so truncated exports can match, never message text (a clean tool-only
+turn ending without trailing text writes an `idle:` fingerprint of the completed `GENERIC` step instead). After a restart,
+a `summary_behind`, `no_summary` (with a readable summary store), or unspecified `summary_not_idle` (`""` or
+`CASCADE_RUN_STATUS_UNSPECIFIED`, with no unexported native steps past the export) row becomes `done` (or `idle` for a
+settled tool-only turn) only while the current export matches that settled turn; a missing or mismatched marker, an
+unrecognized future summary status, or later native work leaves `unknown`. When `GetCascadeTrajectory` has already
+verified an idle native trajectory matching every exported step past a lagging `summary_behind` count, that cached
+verification resolves the row until the export or summary changes. Starting another prompt, an autonomous wake, or a
+native rewind clears the marker and verification cache, and a known or pending native-cut check suppresses recovery.
+Transcript-only status rules and the step-count coverage check above are unchanged.
 
 What subagents and background tasks send back reaches the CLI companion's chat (#14625). agy 1.5.15 writes each
 as a `SYSTEM_MESSAGE` step whose body is `[Message] … sender=<id> … content=<text>`; the companion maps it to a

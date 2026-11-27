@@ -65,24 +65,34 @@ type prStatusForge interface {
 // prFeedback is an observation for the routing pass. It stays out of persisted PR status and park evidence.
 type prFeedback struct {
 	pullPath      string
+	commentsPath  string
 	author        string
 	viewer        string
 	viewerChecked bool
-	reviews       []githubPRReview
+	reviews       []prFeedbackItem
 }
 
-type githubPRReview struct {
-	ID                int64     `json:"id"`
-	State             string    `json:"state"`
-	CommitID          string    `json:"commit_id"`
-	SubmittedAt       time.Time `json:"submitted_at"`
-	Body              string    `json:"body"`
-	HTMLURL           string    `json:"html_url"`
-	AuthorAssociation string    `json:"author_association"`
+type githubPRFeedbackPost struct {
+	ID                int64  `json:"id"`
+	Body              string `json:"body"`
+	HTMLURL           string `json:"html_url"`
+	AuthorAssociation string `json:"author_association"`
 	User              struct {
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
+}
+
+type githubPRReview struct {
+	githubPRFeedbackPost
+	State       string    `json:"state"`
+	CommitID    string    `json:"commit_id"`
+	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+type githubPRIssueComment struct {
+	githubPRFeedbackPost
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type githubPRInlineComment struct {
@@ -105,7 +115,7 @@ func (g githubForge) prViewer(ctx context.Context) string {
 
 // The connector and CLI transports return decoded bodies. A full page needs a continuation even
 // when there is no Link header available to the caller. Never use an incomplete list as evidence.
-func readPRReviewPages[T any](ctx context.Context, g githubForge, path string) ([]T, error) {
+func readPRPages[T any](ctx context.Context, g githubForge, path string) ([]T, error) {
 	const pageSize = 100
 	const maxPages = 100
 	first := fmt.Sprintf("%s?per_page=%d", path, pageSize)
@@ -127,14 +137,14 @@ func readPRReviewPages[T any](ctx context.Context, g githubForge, path string) (
 			return all, nil
 		}
 	}
-	return nil, fmt.Errorf("%s: review pagination exceeded %d pages", path, maxPages)
+	return nil, fmt.Errorf("%s: pagination exceeded %d pages", path, maxPages)
 }
 
 func (g githubForge) prReviewComments(ctx context.Context, path string, reviewID int64) ([]githubPRInlineComment, error) {
-	return readPRReviewPages[githubPRInlineComment](ctx, g, fmt.Sprintf("%s/reviews/%d/comments", path, reviewID))
+	return readPRPages[githubPRInlineComment](ctx, g, fmt.Sprintf("%s/reviews/%d/comments", path, reviewID))
 }
 
-func (g githubForge) checkPRFeedbackHead(ctx context.Context, path, head string) error {
+func (g githubForge) checkPRFeedbackSource(ctx context.Context, path, head string) error {
 	var pr struct {
 		State string `json:"state"`
 		Head  struct {
@@ -144,8 +154,8 @@ func (g githubForge) checkPRFeedbackHead(ctx context.Context, path, head string)
 	if err := g.get(ctx, path, &pr); err != nil {
 		return err
 	}
-	if pr.State != "open" || pr.Head.SHA != head {
-		return fmt.Errorf("PR changed while reading review feedback")
+	if pr.State != "open" || head != "" && pr.Head.SHA != head {
+		return fmt.Errorf("PR changed while reading feedback")
 	}
 	return nil
 }
@@ -198,7 +208,7 @@ func (g githubForge) readPRStatus(ctx context.Context, repo string, number int, 
 	if pr.Head.SHA == "" {
 		return TodoPRStatus{}, fmt.Errorf("PR has no head commit")
 	}
-	reviews, err := readPRReviewPages[githubPRReview](ctx, g, path+"/reviews")
+	reviews, err := readPRPages[githubPRReview](ctx, g, path+"/reviews")
 	if err != nil {
 		return TodoPRStatus{}, err
 	}
@@ -403,10 +413,13 @@ func (g githubForge) readPRStatus(ctx context.Context, repo string, number int, 
 		}
 	}
 	if feedback != nil {
-		*feedback = prFeedback{pullPath: path, author: pr.User.Login, viewer: viewer, viewerChecked: viewerChecked}
+		*feedback = prFeedback{
+			pullPath: path, commentsPath: fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number),
+			author: pr.User.Login, viewer: viewer, viewerChecked: viewerChecked,
+		}
 		for _, r := range reviews {
-			if r.State == "COMMENTED" && r.ID > 0 && !r.SubmittedAt.IsZero() {
-				feedback.reviews = append(feedback.reviews, r)
+			if r.State == "COMMENTED" {
+				feedback.reviews = append(feedback.reviews, prFeedbackItem{githubPRFeedbackPost: r.githubPRFeedbackPost, at: r.SubmittedAt, commitID: r.CommitID})
 			}
 		}
 	}

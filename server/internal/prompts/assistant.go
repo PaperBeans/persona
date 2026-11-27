@@ -1009,11 +1009,6 @@ func RenderSuperviseReviewRework(r SuperviseReviewRework) string {
 	return render("assistant/supervise_review_rework", r)
 }
 
-// RenderTaskInvestigation is the finding-report contract of an opted-in investigation.
-func RenderTaskInvestigation() string {
-	return render("assistant/task_investigation", nil)
-}
-
 // RenderTaskDoneWhen is what follows a supervised task's prompt: what done means, and that the agent shows it.
 func RenderTaskDoneWhen(criteria []string) string {
 	return render("assistant/task_done_when", struct{ Criteria []string }{criteria})

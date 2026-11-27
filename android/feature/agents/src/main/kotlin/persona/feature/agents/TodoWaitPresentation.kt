@@ -38,7 +38,6 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.Tone
 import persona.core.designsystem.icons.PersonaIcons
-import persona.core.designsystem.icons.PhIcons
 
 private const val WaitSeparator = " · "
 
@@ -142,7 +141,7 @@ internal fun TodoWaitSection(
                         waitingOn ?: handoffId,
                         { onOpenTodo(handoffId) },
                         modifier = Modifier.testTag("todo-wait-handoff"),
-                        icon = PhIcons.ArrowSquareOut,
+                        icon = PersonaIcons.openDocument,
                     )
                 }
             } else if (waitingOn != null) {
@@ -182,7 +181,7 @@ internal fun TodoWaitSection(
                             stringResource(R.string.agents_todo_wait_open_message),
                             { val _ = runCatching { links.openUri(url) } },
                             modifier = Modifier.testTag("todo-wait-contact"),
-                            icon = PhIcons.ArrowSquareOut,
+                            icon = PersonaIcons.openDocument,
                         )
                     }
                 }
@@ -193,7 +192,7 @@ internal fun TodoWaitSection(
                     stringResource(if (detail.isPr) R.string.agents_todo_wait_view_pr else R.string.agents_todo_wait_open_source),
                     { val _ = runCatching { links.openUri(url) } },
                     modifier = Modifier.testTag("todo-wait-source"),
-                    icon = PhIcons.ArrowSquareOut,
+                    icon = PersonaIcons.openDocument,
                 )
             }
 

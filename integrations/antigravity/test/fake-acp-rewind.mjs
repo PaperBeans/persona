@@ -151,14 +151,24 @@ input.on('line', (line) => {
     const sessionId = req.params.sessionId
     const update = (value) => send({ method: 'session/update', params: { sessionId, update: value } })
     if (plan.thinking) update({ sessionUpdate: 'agent_thought_chunk', content: { text: plan.thinking } })
-    const tool = { sessionUpdate: 'tool_call_update', toolCallId: 'test-tool', status: 'completed' }
-    if (plan.toolStart) {
+    const tool = { sessionUpdate: 'tool_call_update', toolCallId: 'test-tool', status: plan.toolFailed ? 'failed' : 'completed' }
+    if (plan.toolStart || plan.toolStartOnly) {
       update({ sessionUpdate: 'tool_call', toolCallId: 'test-tool', name: 'run_command', status: 'in_progress' })
-      update(tool)
+      if (!plan.toolStartOnly) update(tool)
     }
     if (plan.reply && !plan.exportOnly) update({ sessionUpdate: 'agent_message_chunk', content: { text: plan.reply } })
-    if (plan.tool && !plan.toolStart) update(tool)
+    if (plan.tool && !plan.toolStart && !plan.toolStartOnly) update(tool)
     if (plan.lateTool) setTimeout(() => update(tool), plan.lateTool)
+    if (plan.wakeOnFile) {
+      const waitWake = () => {
+        if (existsSync(`${directory}/${plan.wakeOnFile}`)) {
+          update({ sessionUpdate: 'tool_call', toolCallId: 'wake-tool', name: 'run_command', status: 'in_progress' })
+          return
+        }
+        setTimeout(waitWake, 20)
+      }
+      setTimeout(waitWake, 20)
+    }
     if (plan.export || plan.flushReply) {
       const transcript = `${directory}/config/brain/${sessionId}/.system_generated/logs/transcript_full.jsonl`
       let index = readFileSync(transcript, 'utf8').trim().split('\n').length
@@ -185,6 +195,9 @@ input.on('line', (line) => {
             extra.truncated_fields = ['content']
           }
           append('PLANNER_RESPONSE', { content, thinking: plan.thinking, tool_calls: plan.calls, ...extra })
+        }
+        if (plan.toolOutput !== undefined) {
+          append('GENERIC', { content: plan.toolOutput, status: plan.toolStatus || 'DONE' })
         }
       }
     }

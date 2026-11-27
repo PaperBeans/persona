@@ -6,7 +6,7 @@ import persona.core.designsystem.*
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.icons.PersonaIcons
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.res.pluralStringResource
@@ -35,7 +35,7 @@ internal sealed interface AgentOperationDialog {
 internal fun workspaceCopyPathAction(workspace: AgentWorkspace?): JAction? {
     val path = workspace?.cwd?.takeIf(String::isNotBlank) ?: return null
     val copy = rememberCopy()
-    return JAction(stringResource(R.string.agents_copy_workspace_path), PhIcons.Copy, onClick = { copy(path, null) })
+    return JAction(stringResource(R.string.agents_copy_workspace_path), PersonaIcons.copy, onClick = { copy(path, null) })
 }
 
 @Composable
@@ -164,8 +164,8 @@ internal fun AgentSpaceMenu(session: Session, pinned: Boolean, muted: Boolean, b
     if (!named && onOpen == null && onMarkRead == null && todo == null) return
     var menu by remember { mutableStateOf(false) }
     val actions = stringResource(R.string.agents_space_actions)
-    if (compact) HeadingAction(PhIcons.DotsThree, actions, onClick = { menu = true })
-    else JIconButton(PhIcons.DotsThree, actions, { menu = true })
+    if (compact) HeadingAction(PersonaIcons.more, actions, onClick = { menu = true })
+    else JIconButton(PersonaIcons.more, actions, { menu = true })
     if (menu) JActionSheet(agentSpaceActions(session, pinned, muted, busy, onPin, onMute, onRename, onMarkRead, onOpen, todo),
         { menu = false }, title = session.spaceName?.takeIf { it.isNotBlank() } ?: actions)
 }
@@ -178,17 +178,17 @@ internal fun AgentSpaceMenu(session: Session, pinned: Boolean, muted: Boolean, b
 internal fun agentSpaceActions(session: Session, pinned: Boolean, muted: Boolean, busy: Boolean,
     onPin: () -> Unit, onMute: () -> Unit, onRename: () -> Unit, onMarkRead: (() -> Unit)? = null,
     onOpen: (() -> Unit)? = null, todo: SpaceTodoActions? = null): List<JAction> = buildList {
-    if (onOpen != null) add(JAction(stringResource(R.string.agents_space_open), PhIcons.SquaresFour, onClick = onOpen))
-    if (onMarkRead != null) add(JAction(stringResource(R.string.agents_mark_all_read), PhIcons.Check, onClick = onMarkRead))
+    if (onOpen != null) add(JAction(stringResource(R.string.agents_space_open), PersonaIcons.allMachines, onClick = onOpen))
+    if (onMarkRead != null) add(JAction(stringResource(R.string.agents_mark_all_read), PersonaIcons.done, onClick = onMarkRead))
     if (!session.spaceName.isNullOrBlank()) {
-        add(JAction(stringResource(if (pinned) R.string.agents_space_unpin else R.string.agents_space_pin), PhIcons.PushPin, enabled = !busy, onClick = onPin))
-        add(JAction(stringResource(if (muted) R.string.agents_space_unmute else R.string.agents_space_mute), PhIcons.Prohibit, enabled = !busy, onClick = onMute))
-        add(JAction(stringResource(R.string.agents_dialog_rename_space), PhIcons.NotePencil, enabled = !busy && session.operationWorkspaceId != null, onClick = onRename))
+        add(JAction(stringResource(if (pinned) R.string.agents_space_unpin else R.string.agents_space_pin), PersonaIcons.highPriority, enabled = !busy, onClick = onPin))
+        add(JAction(stringResource(if (muted) R.string.agents_space_unmute else R.string.agents_space_mute), PersonaIcons.interrupt, enabled = !busy, onClick = onMute))
+        add(JAction(stringResource(R.string.agents_dialog_rename_space), PersonaIcons.compose, enabled = !busy && session.operationWorkspaceId != null, onClick = onRename))
     }
     if (todo != null) {
-        add(JAction(stringResource(if (todo.linked) R.string.agents_space_todo_move else R.string.agents_space_todo_link), PhIcons.ListChecks,
+        add(JAction(stringResource(if (todo.linked) R.string.agents_space_todo_move else R.string.agents_space_todo_link), PersonaIcons.backgroundTasks,
             separatorBefore = isNotEmpty(), onClick = todo.onLink))
-        todo.onUnlink?.let { add(JAction(stringResource(R.string.agents_space_todo_unlink), PhIcons.LinkSimple, destructive = true, onClick = it)) }
+        todo.onUnlink?.let { add(JAction(stringResource(R.string.agents_space_todo_unlink), PersonaIcons.link, destructive = true, onClick = it)) }
     }
 }
 

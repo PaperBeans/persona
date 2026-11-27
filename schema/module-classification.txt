@@ -64,6 +64,7 @@ go server/cmd/persona-node core
 go server/cmd/persona-projects core
 go server/cmd/personad core
 go server/internal/acceptloop core
+go server/internal/agentprompt core
 go server/internal/agentref core
 go server/internal/agentref/agentrefadapt core
 go server/internal/agents core
@@ -145,6 +146,7 @@ go server/internal/domainkit/opt core
 go server/internal/domainkit/outcome core
 go server/internal/domainkit/slot core
 go server/internal/errreport core
+go server/internal/exportfile core
 go server/internal/extension core
 go server/internal/extension/conformance core
 go server/internal/extension/denohost core
@@ -238,6 +240,7 @@ go server/internal/proto core
 go server/internal/proxyproto core
 go server/internal/pushcrypto core
 go server/internal/quota core
+go server/internal/recordingcli core
 go server/internal/recordingwire core
 go server/internal/recordinghost core
 go server/internal/relay core
@@ -404,6 +407,7 @@ web web/src/showcase/v6 core
 web web/src/test core
 web web/src/ui core
 web web/src/ui/brands core
+web web/src/ui/font-assets core
 web web/src/ui/model-panel core
 web web/src/ui/stream core
 web web/src/views core

@@ -29,7 +29,7 @@ const (
 	sigStarted       = "started"        // its agent started after the supervisor's retry (start_remedy.go)
 	sigPRConflict    = "pr_conflict"    // the task's current open PR has merge conflicts at this head
 	sigDraftPR       = "draft_pr"       // an own linked PR is still draft, not waiting for upstream review
-	sigPREvent       = "pr_event"       // a current-head PR CI failure or review fell back from direct Agent routing
+	sigPREvent       = "pr_event"       // a PR CI failure, review, or discussion comment fell back from direct Agent routing
 	sigReport        = "report"         // its agent reported to the supervisor (report_to_supervisor, agent_control.go)
 	sigEscalated     = "escalated"      // its leader conversation judged it needs the user (supervise_leader.go): told the main one
 	sigOrphaned      = "orphaned"       // nobody works on it: its agents are closed or offline and nothing brings one back (tasks_orphan.go)
@@ -96,8 +96,8 @@ type superviseSignal struct {
 	// PendingPredecessors: keys of earlier stretches of this id replaced before their delivery or queue acknowledgment.
 	// An ACK removes exactly its own Key; a still-present predecessor's dedup reservation is not delivery proof.
 	PendingPredecessors []string
-	PRURL               string // draft_pr: the current or earlier followed PR, revalidated before delivery
-	PREventID           string `json:"pr_event_id,omitempty"` // independent feedback events may wait together
+	PRURL               string // the followed PR, revalidated before delivery
+	PREventID           string `json:"pr_event_id,omitempty"` // names a review or comment, including during owner decisions
 	// Unreachable: this decision exists because its assigned task leader Agent or Assistant supervisor could not be
 	// reached, not because the worker waits for the user. It stays a decision even when the worker is not needs_user.
 	// Recipient distinguishes an unreachable Assistant supervisor from the existing task-leader-Agent escalation.
@@ -243,6 +243,7 @@ func (g superviseSignal) id() string {
 		return g.Todo + "|" + g.Kind + ":unhandled@" + g.Key
 	}
 	if g.Kind == sigNeedsUserExternalInfo {
+		// The key includes the source event ID and the decision round, so feedback can share a digest.
 		return g.Todo + "|" + g.Kind + "@" + g.Key
 	}
 	return g.Todo + "|" + g.Kind
