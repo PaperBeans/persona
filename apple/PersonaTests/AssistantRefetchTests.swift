@@ -3,24 +3,36 @@ import Testing
 @testable import Persona
 import PersonaWire
 
-/// The test's own clock for `TodoStore.Pushes.sleep`: a wait ends only when the test moves time on.
+/// The test's own clock for `TodoStore.Pushes.sleep`: a wait ends only when the test moves time on, either all at once
+/// (`advance`) or by the clock's own time (`tick`).
 @MainActor
 private final class PushClock {
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var waiting: [(until: Duration, wake: CheckedContinuation<Void, Never>)] = []
     private(set) var naps: [Duration] = []
+    /// The time since the test began.
+    private(set) var now: Duration = .zero
     var sleeping: Int { waiting.count }
 
     func sleep(_ d: Duration) async throws {
         naps.append(d)
-        await withCheckedContinuation { waiting.append($0) }
+        let until = now + d
+        await withCheckedContinuation { waiting.append((until, $0)) }
         try Task.checkCancellation()
     }
 
-    /// The waits so far are over.
+    /// The waits so far are over, however long they were.
     func advance() {
         let woken = waiting
         waiting = []
-        for c in woken { c.resume() }
+        for w in woken { w.wake.resume() }
+    }
+
+    /// Time moves on by `d`: the waits that end by then are over.
+    func tick(_ d: Duration) {
+        now += d
+        let due = waiting.filter { $0.until <= now }
+        waiting.removeAll { $0.until <= now }
+        for w in due { w.wake.resume() }
     }
 }
 
@@ -59,7 +71,7 @@ private final class PushedHub {
 struct AssistantRefetchTests {
     private func store(_ hub: PushedHub, clock: PushClock? = nil, revision: Bool = false,
                        shown: @escaping @MainActor () -> Bool = { true }) -> TodoStore {
-        var pushes = TodoStore.Pushes(gap: .seconds(2), hiddenWait: .seconds(30), revisionListed: { revision },
+        var pushes = TodoStore.Pushes(gap: .seconds(2), maxGap: .seconds(10), hiddenWait: .seconds(30), revisionListed: { revision },
                                       shown: shown, revision: { try await hub.revision($0, $1) })
         if let clock { pushes.sleep = { try await clock.sleep($0) } }
         return TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, read: { try await hub.read($0, $1) },
@@ -71,8 +83,8 @@ struct AssistantRefetchTests {
         try await waitForRefreshTest { clock.sleeping == 1 && !store.loading }
     }
 
-    /// 51 pushes over about ten seconds (ten per two-second gap), each changing the list, as a busy Agent's reports do:
-    /// one read per gap rather than one per push, and the last list lands once they stop.
+    /// 51 pushes in six bursts, each changing the list, as a busy Agent's reports do: one read per wait rather than one
+    /// per push, the wait doubling from 2 s to at most 10 s while they keep coming, and the last list lands once they stop.
     @Test func aBurstOfPushesReadsTheListOncePerGapAndLandsTheLast() async throws {
         let hub = PushedHub(), clock = PushClock()
         let store = store(hub, clock: clock)
@@ -95,9 +107,55 @@ struct AssistantRefetchTests {
         clock.advance()
         await store.pushesSettled()
         #expect(hub.version == 51)
-        #expect(hub.listReads == 6, "51 pushes: one read, then one per gap (was one per push)")
+        #expect(hub.listReads == 6, "51 pushes: one read, then one per wait (was one per push)")
         #expect(store.todos.map(\.id) == ["v51"], "the state once the pushes stop is the latest")
-        #expect(clock.naps.allSatisfy { $0 == .seconds(2) })
+        #expect(clock.naps == [2, 4, 8, 10, 10, 10].map { Duration.seconds($0) })
+    }
+
+    /// A minute of pushes, one a second, each changing the list (an Agent reporting steadily): the reads come at 0, 2, 6,
+    /// 14, 24, 34, 44 and 54 s and once more after the pushes stop, 9 instead of 60, and that last one has the last list.
+    /// After a whole quiet wait the next push reads at once and waits 2 s again.
+    @Test func aMinuteOfPushesReadsAFewTimesAndLandsTheLast() async throws {
+        let hub = PushedHub(), clock = PushClock()
+        let store = store(hub, clock: clock)
+        defer { store.forget() }
+        let api = FakeHub().client
+        func settled() async throws {
+            try await waitForRefreshTest { !store.loading && (clock.sleeping == 1 || !store.pushing) }
+        }
+        var readAt: [Duration] = []
+        var seen = 0
+        func note() {
+            if hub.listReads > seen { readAt.append(clock.now); seen = hub.listReads }
+        }
+        for _ in 0..<60 {
+            hub.version += 1
+            store.pushed(api: api)
+            try await settled()
+            note()
+            clock.tick(.seconds(1))
+            try await settled()
+            note()
+        }
+        while store.pushing {
+            clock.tick(.seconds(1))
+            try await settled()
+            note()
+        }
+        #expect(hub.listReads == 9, "60 pushes in a minute read the list \(hub.listReads) times")
+        #expect(readAt == [0, 2, 6, 14, 24, 34, 44, 54, 64].map { Duration.seconds($0) })
+        #expect(store.todos.map(\.id) == ["v60"], "the state once the pushes stop is the last")
+
+        // A whole 10 s wait went by without a push: the next one reads at once and waits 2 s again.
+        let naps = clock.naps.count
+        hub.version += 1
+        store.pushed(api: api)
+        try await settled()
+        #expect(hub.listReads == 10)
+        #expect(clock.naps.dropFirst(naps).first == .seconds(2))
+        clock.advance()
+        await store.pushesSettled()
+        #expect(store.todos.map(\.id) == ["v61"])
     }
 
     /// With `todo_revision`, a push whose revision did not move reads nothing; one that moved reads the list once.

@@ -184,6 +184,10 @@ final class TodoStore {
     struct Pushes {
         /// How long after a pushed read ends the next may begin: the pushes meanwhile are one read, made after it.
         var gap: Duration = .zero
+        /// While pushes keep coming, each trailing read waits twice as long as the last, up to this (never below `gap`);
+        /// a whole wait without a push goes back to `gap`. A busy Agent's reports, each changing the list, would
+        /// otherwise read it every `gap` for as long as it runs.
+        var maxGap: Duration = .zero
         /// While no page that shows to-dos is in front (`shown`), a push waits for one to come back, at most this long,
         /// so the counts and widgets still catch up. Zero: no wait.
         var hiddenWait: Duration = .zero
@@ -200,7 +204,7 @@ final class TodoStore {
         static var immediate: Pushes { Pushes() }
         /// The app's.
         static var live: Pushes {
-            .init(gap: .seconds(2), hiddenWait: .seconds(30),
+            .init(gap: .seconds(2), maxGap: .seconds(10), hiddenWait: .seconds(30),
                   revisionListed: { AppModel.shared.hub?.hello.features.contains(TodoStore.revisionFeature) == true },
                   shown: { AppModel.shared.selectedTabNow == .assistant })
         }
@@ -444,9 +448,11 @@ final class TodoStore {
     }
 
     /// The hub pushed `todos`, or the assistant's feed brought a task, receipt, review or report (`TasksStore`): the
-    /// list may have changed. Answered by `pushes`: at most one read per `gap` (the pushes meanwhile are one read after
-    /// it, so the last state always lands); while the hub lists `todo_revision` the cheap revision is asked first and an
-    /// unchanged one reads nothing; while no page that shows to-dos is in front, it waits for one (`hiddenWait`).
+    /// list may have changed. Answered by `pushes`: the first push after a quiet spell reads at once; the pushes during
+    /// a read and the wait after it are one read after that wait (so the last state always lands), the wait doubling
+    /// from `gap` to `maxGap` while they keep coming and back to `gap` after a whole wait without one. While the hub
+    /// lists `todo_revision` the cheap revision is asked first and an unchanged one reads nothing; while no page that
+    /// shows to-dos is in front, a push waits for one (`hiddenWait`).
     func pushed(api: APIClient? = nil) {
         if let api { pushAPI = api }
         pushDirty = true
@@ -455,23 +461,30 @@ final class TodoStore {
         let id = pushLoops, requested = generation
         let task = Task { [self] in
             defer { if pushLoop?.id == id { pushLoop = nil } }
+            var wait = pushes.gap
             while pushDirty, generation == requested, !Task.isCancelled {
                 if !pushes.shown(), pushes.hiddenWait > .zero {
-                    let wait = Task { [self] in _ = try? await pushes.sleep(pushes.hiddenWait) }
-                    hiddenWait = wait
-                    await wait.value
-                    if hiddenWait == wait { hiddenWait = nil }
+                    let held = Task { [self] in _ = try? await pushes.sleep(pushes.hiddenWait) }
+                    hiddenWait = held
+                    await held.value
+                    if hiddenWait == held { hiddenWait = nil }
                     guard generation == requested, !Task.isCancelled else { return }
                 }
                 pushDirty = false
                 await pushedRead(api: pushAPI, generation: requested)
                 guard generation == requested, !Task.isCancelled else { return }
                 // The pushes during the read and this wait are one read after it.
-                if pushes.gap > .zero { try? await pushes.sleep(pushes.gap) }
+                if wait > .zero { try? await pushes.sleep(wait) }
+                // Still coming: the next read waits longer. A whole wait without one ends the loop, and the next push
+                // starts again from `gap`.
+                if pushDirty { wait = min(wait * 2, max(pushes.maxGap, pushes.gap)) }
             }
         }
         pushLoop = (id, task)
     }
+
+    /// Whether a pushed read is under way or waiting (tests).
+    var pushing: Bool { pushLoop != nil }
 
     /// Waits until the pushed reads are done (tests).
     func pushesSettled() async {
