@@ -104,7 +104,7 @@ type PromptPort interface {
 type ScheduleFactsRunner interface {
 	Start(ctx context.Context, task BriefTaskInfo, now time.Time) string
 	StartReport(ctx context.Context, task BriefTaskInfo, now time.Time) string
-	Sent(taskID, session string, retried bool)
+	Sent(BriefScheduleRun)
 	HasSession(session string) bool
 	IsFailure(session, asked string, cut bool) bool
 	Claim(session, asked, turn string, cut bool) (run *BriefRun, claimed bool)
@@ -462,6 +462,7 @@ type BriefPRFollowup struct {
 
 // BriefSnapshot is what one run of a routine with facts on says, as it was when the run started.
 type BriefSnapshot struct {
+	Contributions     []RoutineContribution
 	At                time.Time
 	NorthStar         BriefNorthStar
 	NorthStarLines    []string
@@ -507,13 +508,14 @@ type BriefRun struct {
 
 // BriefTaskInfo is the narrow slice of a scheduled Task the briefing needs.
 type BriefTaskInfo struct {
-	ID           string
-	Label        string
-	Facts        bool
-	Report       bool
-	SessionID    string
-	RunSessionID string
-	MachineID    string
+	Contributions []RoutineContribution
+	ID            string
+	Label         string
+	Facts         bool
+	Report        bool
+	SessionID     string
+	RunSessionID  string
+	MachineID     string
 }
 
 // BriefScheduleRun is the narrow slice of a ScheduleRun the briefing needs.
@@ -548,6 +550,7 @@ type BriefFallbackSend struct {
 
 // BriefBody is a `brief` item's JSON body.
 type BriefBody struct {
+	Contributions    []RoutineContribution  `json:"contributions,omitempty"`
 	NorthStar        BriefBodyNorthStar     `json:"north_star"`
 	Confirmations    BriefConfirmations     `json:"confirmations"`
 	Title            string                 `json:"title"`

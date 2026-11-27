@@ -64,6 +64,7 @@ func TestAssistantViewToAnExtension(t *testing.T) {
 func TestConversationFeedToAnExtension(t *testing.T) {
 	const told, summary, renew, notice = "Resting heart rate was 48 all week", "Logged the new prescription",
 		"Bring the old passport", "The morning run was skipped"
+	const providerSection = "Private notes from the briefing provider"
 	const formAnswer, clinicDraft, officeDraft = "The renewal form", "About your sleep clinic", "Thanks, see you on Monday"
 	health := identity.HealthDir("/home/owner")
 	todoStores(t, func(t *testing.T, e *todoEnv, _ *db.DB) {
@@ -114,12 +115,16 @@ func TestConversationFeedToAnExtension(t *testing.T) {
 		feed("conv1", feedBrief, "routine_morning", map[string]any{"title": "Morning", "waiting": []map[string]string{{"id": "ix_sleep", "title": scopeAsk}}})
 		feed("conv1", feedToday, "2026-11-19", map[string]any{"date": "2026-11-19", "done": []map[string]string{{"title": "Chart the readings"}}})
 		feed("conv1", feedNotice, "", noticeBody{Text: notice})
+		// Even an otherwise visible ref must not make another provider's report readable.
+		if _, err := e.s.appendFeedOnce(ctx, routineContributionNoticePrefix+"fixture", "conv1", feedNotice, shown, noticeBody{Text: providerSection}); err != nil {
+			t.Fatal(err)
+		}
 		feed("h0", feedRouted, hidden, map[string]string{"text": told, "machine_id": "server", "session_id": "h1"})
 		if w := e.doAs(roleExtension, "GET", "/api/v1/todos/"+hidden, ""); w.Code != http.StatusNotFound {
 			t.Fatalf("the to-do is hidden from the to-do routes: %d", w.Code)
 		}
 
-		words := []string{told, summary, scopeReport, scopeAsk, scopeAnswer, formAnswer, clinicDraft, hidden, "Chart the readings",
+		words := []string{providerSection, told, summary, scopeReport, scopeAsk, scopeAnswer, formAnswer, clinicDraft, hidden, "Chart the readings",
 			health, "Sort the sleep diary", "plan_hidden", "plan_in_space", "routine_morning", "A private task's launcher changed", `"today"`}
 		for _, q := range []string{"", "?paginate=1"} {
 			path := "/api/v1/assistant/conversations/conv1/feed" + q

@@ -891,3 +891,6 @@ select:not([multiple], [size], .appearance-none) {
 .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--accent), var(--shadow-btn); }
 .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--accent), var(--shadow-btn); }
 .range:disabled { opacity: 0.5; cursor: default; }
+
+/* The phone's tab bar (views/PhoneTabBar.tsx) gives its room to the composer while the keyboard is up (lib/viewport.ts). */
+:root[data-kb] [data-phone-tabs] { display: none; }

@@ -21,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -98,6 +99,8 @@ type Task struct {
 	RunIf  *routineCheck `json:"run_if,omitempty"`
 	// factsText is the run's facts as the model is given them (briefing.go); set on the copy a run is made from, never stored.
 	factsText string
+	// Contributions belong to this run snapshot and never enter the stored routine.
+	routineContributions []modapi.RoutineContribution
 	// kbDir is the knowledge directory the run's hint names (a daily run with the knowledge base on); set on the copy, never stored.
 	kbDir string
 	// The conversation it came from (on MachineID), runs go into it; empty = the task's own conversation.
@@ -2196,7 +2199,7 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 	if err != nil {
 		// Task/model admission precedes normal fact preparation; its failure still needs this run's fixed facts.
 		if t.Facts || t.Report {
-			t.factsText = s.runFacts(ctx, t, time.Now())
+			s.prepareRoutineFacts(ctx, &t, time.Now())
 		}
 		return s.failTaskRun(ctx, t, run, err, false)
 	}
@@ -2271,7 +2274,7 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 	if kb {
 		t.kbDir = s.kb.dir // the hint names where the knowledge base is, not the default
 	}
-	t.factsText = s.runFacts(ctx, t, time.Now()) // the run's facts, worked out once (north_star.go)
+	s.prepareRoutineFacts(ctx, &t, time.Now()) // the run's facts, worked out once (north_star.go)
 	t, trainingDay := s.workoutPromptNow(ctx, t)
 	if trainingDay != "" {
 		if ref, ok := s.trainingChat(ctx, trainingDay); ok {
@@ -2639,7 +2642,8 @@ func (s *Service) startScheduledRun(run ScheduleRun, t Task, m *Device) {
 	delete(s.sched.waitTold, t.ID) // it runs again: a later wait on the user is news again
 	s.sched.mu.Unlock()
 	if t.Facts || t.Report {
-		s.briefSent(t.ID, run.SessionID, run.Retried)
+		s.briefSent(run)
+		s.writeRoutineContributionNotice(run, t)
 	}
 	if !t.pushesOnlyAsked() {
 		s.noteReportTurn(run.SessionID) // its answer is pushed however quick it was (#3438)

@@ -98,6 +98,7 @@ type Facts struct {
 type Agent struct {
 	MachineID   string     `json:"machine_id"`
 	SessionID   string     `json:"session_id"`
+	LinkedAt    *time.Time `json:"linked_at,omitempty"`
 	ReleasedAt  *time.Time `json:"released_at,omitempty"`
 	Title       string     `json:"title"`
 	StartError  string     `json:"start_error,omitempty"`
@@ -137,6 +138,7 @@ type Supervision struct {
 	Parked       *Parked    `json:"parked,omitempty"`
 	Reviews      []Review   `json:"reviews"`
 	PendingSince *time.Time `json:"pending_since,omitempty"`
+	FollowedUpAt *time.Time `json:"followed_up_at,omitempty"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	Progress     *Progress  `json:"progress,omitempty"`
 }
@@ -165,6 +167,7 @@ type ParkEvidence struct {
 type Review struct {
 	At        time.Time `json:"at"`
 	Verdict   string    `json:"verdict"`
+	By        string    `json:"by,omitempty"`
 	Note      string    `json:"note,omitempty"`
 	Reason    string    `json:"reason,omitempty"`
 	Recommend string    `json:"recommend,omitempty"`

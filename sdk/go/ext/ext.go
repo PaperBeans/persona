@@ -51,6 +51,8 @@ type Program struct {
 	// Shortcuts are the shortcuts by contribution id: shortcut.run goes to them. "shortcut" is Shortcuts' unless
 	// given in Namespaces.
 	Shortcuts map[string]Shortcut
+	// RoutineFacts collects the day's facts and report sections by manifest contribution ID.
+	RoutineFacts map[string]RoutineFactsCollector
 	// HTTP, if set, is served on the socket the hub gives (runtime.http in the manifest) by Main.
 	HTTP http.Handler
 }
@@ -284,6 +286,9 @@ func (s *server) handle(ctx context.Context, method string, params json.RawMessa
 	}
 	if ns == "shortcut" && s.prog.Shortcuts != nil {
 		return s.shortcut(ctx, rest, params)
+	}
+	if ns == "routine_facts" && s.prog.RoutineFacts != nil {
+		return s.collectRoutineFacts(ctx, rest, params)
 	}
 	return nil, UnknownMethod(method)
 }

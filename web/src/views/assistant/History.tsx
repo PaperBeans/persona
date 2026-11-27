@@ -260,7 +260,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("assistant-history.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="min-w-0 truncate text-[14px] font-semibold text-ink">{t("sidebar.all_chats")}</h1>
+          <h1 className="min-w-0 truncate text-[14px] font-semibold text-ink">{filter === "external" ? t("shellswitch.external") : t("sidebar.all_chats")}</h1>
           {total > 0 && (
             <GroupCount n={total} label={t("sidebar.unarchived_chat_count", { count: total })} className="shrink-0" />
           )}
@@ -291,10 +291,11 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
 
           {(sources.length > 0 || filter !== "all") && (
             <div role="group" aria-label={t("assistant-conversations.origin_filter")} className="-mt-2 mb-5 flex flex-wrap gap-1.5">
-              {(["all", "mine", ...sources.map((g) => g.origin)] as OriginFilter[]).map((f) => (
+              {/* External (the phone tab bar's, lib/phone-nav.ts) is a chip only while it is the filter, so the default list is unchanged */}
+              {(["all", "mine", ...(filter === "external" ? ["external"] : []), ...sources.map((g) => g.origin)] as OriginFilter[]).map((f) => (
                 <Chip key={f} on={filter === f} onClick={() => navigate({ name: "history", origin: f === "all" ? undefined : f }, true)}>
-                  {f === "all" ? t("assistant-conversations.origin_all") : f === "mine" ? t("assistant-conversations.origin_mine") : originLabel(f)}
-                  {f !== "all" && f !== "mine" && <span className="ml-1 tabular-nums opacity-60">{sources.find((g) => g.origin === f)?.count}</span>}
+                  {f === "all" ? t("assistant-conversations.origin_all") : f === "mine" ? t("assistant-conversations.origin_mine") : f === "external" ? t("shellswitch.external") : originLabel(f)}
+                  {f !== "all" && f !== "mine" && f !== "external" && <span className="ml-1 tabular-nums opacity-60">{sources.find((g) => g.origin === f)?.count}</span>}
                 </Chip>
               ))}
             </div>
@@ -337,6 +338,11 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
           )}
           {searching && said.answer?.partial && <p className="-mt-3 mb-4 px-1 text-[12px] text-ink-3" role="status">{t("assistant-history.search_partial")}</p>}
           {!loading && searching && hits.length === 0 && all.length > 0 && <Empty icon="search" title={t("assistant-history.no_results", { query: query.trim() })} />}
+          {!loading && !error && !searching && !activeTag && filter === "external" && all.length > 0 && visible.length === 0 && (
+            <Empty icon="at" title={t("assistant-history.external_empty_title")}>
+              {t("assistant-history.external_empty_body")}
+            </Empty>
+          )}
           {!loading && !searching && activeTag && visible.length === 0 && (
             <Empty icon="tag" title={t("assistant-history.tag_empty", { tag: activeTag })} action={<Button tone="quiet" onClick={() => setActiveTag("")}>{t("assistant-history.tag_clear")}</Button>} />
           )}

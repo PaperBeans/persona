@@ -505,6 +505,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				r.SupersededReason = supersededReason
 			}
 			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
+			v.FollowedUpAt = &r.At
 			if verdict == reviewAccepted && a.UserCheck {
 				v.State = reviewUserCheck
 			}

@@ -412,6 +412,9 @@ redesign changes them:
   model failure while the hub's "Continue" is on its way, which rule 2 reads as cut off.
 - **Can wait**: a decision marked for the briefing (`can_wait`) and a run that ended on a plain-text question
   (`awaits_reply`) are listed under Needs you's fold, not counted in its number.
+- **Unfinished stops are not finished replies** (#9823): after more than one hour without supervisor follow-up,
+  they need the owner (`stopped_unfinished`), even when the legacy To-dos page reads an unread reply or pending
+  review as Just finished. The shadow names this decided difference; it does not change the page or its counts.
 - **Inactive is a mark, not a section**: the to-do keeps its section (To do) with the time activity stopped. A restore
   counts as activity: the view reads the hub's `restored_at` ("Restores and Someday" in `docs/assistant/todos.md`),
   not each device's own.

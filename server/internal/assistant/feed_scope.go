@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -136,6 +137,11 @@ func (s *Service) extensionFeed(ctx context.Context, items []FeedItem, plans map
 	planItems := map[string]bool{} // the plans whose items it is shown
 	out := make([]FeedItem, 0, len(items))
 	for _, it := range items {
+		// A report-only routine stores its provider digest as an ordinary notice for older
+		// clients. Give it the same extension visibility as the structured brief item.
+		if it.Kind == feedNotice && strings.HasPrefix(it.ID, routineContributionNoticePrefix) {
+			continue
+		}
 		var shown bool
 		switch {
 		case aboutTodo(it):

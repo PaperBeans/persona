@@ -538,6 +538,11 @@ func (s *Service) Unreachable(err error) bool {
 
 func (s *Service) Offline(err error) bool { return errors.Is(err, errOffline) }
 
+func (s *Service) Answered(err error) bool {
+	var reply *rpc.Error
+	return errors.As(err, &reply)
+}
+
 // StepParts is a tool call's step in the words of the core's botStepParts, for the tools these tests call.
 func (s *Service) StepParts(_ i18n.Lang, it proto.Item) (string, string) {
 	var in struct {
@@ -750,10 +755,6 @@ func (s *Service) WorkbenchItem(id string) (assistantwire.WorkbenchItem, bool) {
 
 func (s *Service) WorkbenchBoard(context.Context, i18n.Lang, string, time.Time) []assistantwire.WorkbenchBoardRow {
 	return s.wb().board
-}
-
-func (s *Service) SessionNames(_ context.Context, sess proto.Session) (string, string) {
-	return sess.Title, ""
 }
 
 func (s *Service) NextMeeting(context.Context, time.Time) *assistantwire.WorkbenchMeeting { return nil }

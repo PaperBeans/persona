@@ -293,6 +293,19 @@ export function BriefCard({ item }: { item: FeedItem }) {
           <More n={body.later_total - body.later.length} text="assistant-brief.later_more" />
         </Section>
       )}
+      {body.contributions.map((entry) => (
+        <Section key={entry.extension_id + ":" + entry.contribution_id} icon="list" tint="bg-field text-ink-2" title={entry.title}>
+          <div className="space-y-1 py-1 text-meta [overflow-wrap:anywhere]">
+            {entry.facts.map((fact, i) => <p key={i}>{fact}</p>)}
+            {entry.sections.map((section, i) => (
+              <div key={i}>
+                <h4 className="font-medium">{section.title}</h4>
+                <p className="whitespace-pre-line text-ink-2">{section.body}</p>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ))}
       {body.progress_total > 0 && (
         <Section icon="gear" tint="bg-orange-tint text-orange" title={t("assistant-brief.progress_head", { n: body.progress_total })}>
           {body.progress.map((p) => (

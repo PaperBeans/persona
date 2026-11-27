@@ -70,7 +70,7 @@ export type Panel =
   | { kind: "changes"; mid: string; sid: string; turn?: string; at?: { path: string; call?: string } }
   /** `sid`: the session whose message box takes the comments made in it (else the one last used). `readOnly`: suppress
    *  edit and Show-in-Files write entries (for read-only archive views such as disabled Health data). */
-  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string; readOnly?: boolean }
+  | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string; readOnly?: boolean; navigationId?: string }
   /** `manager`: the chat's it was opened from, which reads it (none: the default's). */
   | { kind: "link"; url: string; title?: string; manager?: string }
   /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its

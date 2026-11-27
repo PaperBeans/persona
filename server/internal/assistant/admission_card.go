@@ -15,32 +15,41 @@ import (
 // The setting itself stays under the card's "Show input".
 
 // admissionSide is one side of a changed line: whether the setting carries the line itself, the value in force, and
-// how the card shows it (a value the setting does not carry is shown with the line it falls back to).
+// the line a value the setting does not carry falls back to.
 type admissionSide struct {
 	set   bool
 	exact string // the value as stored: what tells two sides apart
 	value string // the value as the card writes it
-	shown string // value, marked with the line it falls back to when the setting does not carry it
+	// from marks a value the setting does not carry with the line it falls back to; nil when the setting carries it
+	from func(value string) string
 }
 
 func admissionOwn(value string) admissionSide {
-	return admissionSide{set: true, exact: value, value: value, shown: value}
+	return admissionSide{set: true, exact: value, value: value}
 }
 
 // admissionOwnBytes is a memory line the setting carries. The card writes it in binary units, which round: two sizes
 // that read the same are still two values, so the byte count is kept beside it.
 func admissionOwnBytes(n int64) admissionSide {
-	size := humanBytes(n)
-	return admissionSide{set: true, exact: strconv.FormatInt(n, 10) + " B", value: size, shown: size}
+	return admissionSide{set: true, exact: strconv.FormatInt(n, 10) + " B", value: humanBytes(n)}
 }
 
 // admissionBuiltIn is the number built into the gate, in force when the setting does not carry the line.
 func admissionBuiltIn(l i18n.Lang, value string) admissionSide {
-	return admissionSide{value: value, shown: i18n.T(l, "assistant-settings_tool.admission_default", i18n.Args{"value": value})}
+	return admissionSide{exact: value, value: value, from: func(value string) string {
+		return i18n.T(l, "assistant-settings_tool.admission_default", i18n.Args{"value": value})
+	}}
+}
+
+// admissionBuiltInBytes is admissionBuiltIn for a memory line; it keeps the byte count like admissionOwnBytes.
+func admissionBuiltInBytes(l i18n.Lang, n int64) admissionSide {
+	v := admissionBuiltIn(l, humanBytes(n))
+	v.exact = strconv.FormatInt(n, 10) + " B"
+	return v
 }
 
 // admissionAbsent is a direction, project or launcher group the setting does not name: no line, in the words given.
-func admissionAbsent(words string) admissionSide { return admissionSide{shown: words} }
+func admissionAbsent(words string) admissionSide { return admissionSide{exact: words, value: words} }
 
 // asGeneral is v as what a computer's own line falls back to: the setting's line for every computer when it carries
 // one, the built-in number otherwise.
@@ -48,7 +57,9 @@ func (v admissionSide) asGeneral(l i18n.Lang) admissionSide {
 	if !v.set {
 		return v
 	}
-	return admissionSide{value: v.value, shown: i18n.T(l, "assistant-settings_tool.admission_general", i18n.Args{"value": v.value})}
+	return admissionSide{exact: v.exact, value: v.value, from: func(value string) string {
+		return i18n.T(l, "assistant-settings_tool.admission_general", i18n.Args{"value": value})
+	}}
 }
 
 // asHub is asGeneral for the hub's computer, which falls back to the hub lines.
@@ -56,7 +67,9 @@ func (v admissionSide) asHub(l i18n.Lang) admissionSide {
 	if !v.set {
 		return v
 	}
-	return admissionSide{value: v.value, shown: i18n.T(l, "assistant-settings_tool.admission_hub", i18n.Args{"value": v.value})}
+	return admissionSide{exact: v.exact, value: v.value, from: func(value string) string {
+		return i18n.T(l, "assistant-settings_tool.admission_hub", i18n.Args{"value": value})
+	}}
 }
 
 // asEveryDirection is v, the cap for every direction, as what a direction's or project's own cap falls back to.
@@ -64,7 +77,9 @@ func (v admissionSide) asEveryDirection(l i18n.Lang) admissionSide {
 	if !v.set {
 		return v
 	}
-	return admissionSide{value: v.value, shown: i18n.T(l, "assistant-settings_tool.admission_direction_general", i18n.Args{"value": v.value})}
+	return admissionSide{exact: v.exact, value: v.value, from: func(value string) string {
+		return i18n.T(l, "assistant-settings_tool.admission_direction_general", i18n.Args{"value": value})
+	}}
 }
 
 // changed: the setting carries the line on one side only, or carries a different value. A line that is set on neither
@@ -73,14 +88,25 @@ func (v admissionSide) changed(now admissionSide) bool {
 	return v.set != now.set || v.set && v.exact != now.exact
 }
 
-// admissionSidesShown is how the two sides of a changed line read. Two values the setting carries that would read the
-// same (memory sizes within one rounding step) are written with their exact value, so a row never reads "x → x".
-func admissionSidesShown(l i18n.Lang, was, now admissionSide) (before, after string) {
-	if !was.set || !now.set || was.shown != now.shown {
-		return was.shown, now.shown
+// shown is how the card writes the side: the value, with the stored value beside it when precise is asked for and the
+// two differ, marked with the line it falls back to when the setting does not carry it.
+func (v admissionSide) shown(l i18n.Lang, precise bool) string {
+	text := v.value
+	if precise && v.exact != v.value {
+		text = i18n.T(l, "assistant-settings_tool.admission_exact", i18n.Args{"value": v.value, "exact": v.exact})
 	}
-	return i18n.T(l, "assistant-settings_tool.admission_exact", i18n.Args{"value": was.value, "exact": was.exact}),
-		i18n.T(l, "assistant-settings_tool.admission_exact", i18n.Args{"value": now.value, "exact": now.exact})
+	if v.from != nil {
+		return v.from(text)
+	}
+	return text
+}
+
+// admissionSidesShown is how the two sides of a changed line read. Two different values that would be written the same
+// (memory sizes within one rounding step, on a line the setting carries or one it falls back to) are both written with
+// their stored value, so a row never hides the number being approved behind the same text on both sides.
+func admissionSidesShown(l i18n.Lang, was, now admissionSide) (before, after string) {
+	precise := was.value == now.value && was.exact != now.exact
+	return was.shown(l, precise), now.shown(l, precise)
 }
 
 func admissionBytesSide(v *int64, fallback admissionSide) admissionSide {
@@ -128,9 +154,9 @@ func resolveAdmissionLines(l i18n.Lang, cfg AdmissionSettings, hubMachine string
 		gate:        builtIn(i18n.T(l, "assistant-settings_tool.on")),
 		load:        admissionLoadSide(cfg.LoadPerCore, builtIn(admissionLoadText(admissionLoadPerCore))),
 		direction:   admissionCountSide(cfg.DirectionCap, builtIn(strconv.Itoa(admissionDirectionCap))),
-		memory:      admissionBytesSide(cfg.MinMemoryBytes, builtIn(humanBytes(admissionMinMemoryBytes))),
+		memory:      admissionBytesSide(cfg.MinMemoryBytes, admissionBuiltInBytes(l, admissionMinMemoryBytes)),
 		working:     admissionCountSide(cfg.MaxClaudeProcs, builtIn(strconv.Itoa(admissionMaxClaudeProcs))),
-		hubMemory:   admissionBytesSide(cfg.HubMinMemoryBytes, builtIn(humanBytes(admissionHubMinMemory))),
+		hubMemory:   admissionBytesSide(cfg.HubMinMemoryBytes, admissionBuiltInBytes(l, admissionHubMinMemory)),
 		hubWorking:  admissionCountSide(cfg.HubMaxClaudeProcs, builtIn(strconv.Itoa(admissionHubMaxClaudeProcs))),
 		machines:    cfg.Machines,
 		byDirection: cfg.DirectionCapByDirection,
@@ -190,12 +216,12 @@ func (v admissionLines) group(name string) (cap, launchers, pool admissionSide) 
 	if !ok {
 		return none, none, none
 	}
-	// A launcher is matched by its exact name (launcherGroup), so two lists are told apart as written, quoted, while
-	// the card writes each name on one line.
+	// Two lists are told apart as the setting stores them, quoted, white space included, while the card writes each
+	// name on one line.
 	members, written := make([]string, 0, len(g.Launchers)), make([]string, 0, len(g.Launchers))
 	for _, launcher := range g.Launchers {
 		members = append(members, oneLine(launcher))
-		written = append(written, strconv.Quote(strings.TrimSpace(launcher)))
+		written = append(written, strconv.Quote(launcher))
 	}
 	cap = admissionOwn(strconv.Itoa(g.Cap))
 	launchers = admissionOwn(strings.Join(members, ", "))

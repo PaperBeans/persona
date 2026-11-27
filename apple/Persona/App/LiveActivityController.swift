@@ -259,12 +259,20 @@ final class LiveActivityController {
         all.filter(\.running).max { ($0.staleDate ?? .distantPast) < ($1.staleDate ?? .distantPast) }?.id
     }
 
-    /// The app went to the background. With no push route to this phone (the hub's `none`), nothing can update or
-    /// end the activity from now on: it would go stale and keep showing old counts and an old request for hours. It
-    /// ends now instead, and the app starts it again when it is back in front (#12982).
-    func left(pushReaches: Bool?) {
-        guard pushReaches == false else { return }
+    /// The app went to the background. With no push route to this phone at `group`'s hub (its `none`, or no route at
+    /// all for this credential, #16756), nothing can update or end the activity from now on: it would go stale and keep
+    /// showing old counts and an old request for hours. It ends now instead, and the app starts it again when it is back
+    /// in front (#12982).
+    func left(health: PushHealth, group: String?) {
+        guard Self.endsOnLeaving(health, group: group) else { return }
         endAll()
+    }
+
+    /// Only a confirmed outage ends the activity. An unknown route (an older hub that reports none, or none read yet)
+    /// keeps it: such a hub may well push, and ending a working activity at every switch away would cost more than an
+    /// activity that might go stale.
+    nonisolated static func endsOnLeaving(_ health: PushHealth, group: String?) -> Bool {
+        group.flatMap { health.pushReaches(group: $0) } == false
     }
 
     func endAll() {

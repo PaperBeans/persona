@@ -192,6 +192,7 @@ func (r refused) Unwrap() error { return r.error }
 
 // session is one run's protocol connection.
 type session struct {
+	run    string // host-minted identity of callbacks from this exact process attempt
 	peer   *rpc.Peer
 	result extension.InitializeResult
 }
@@ -270,6 +271,15 @@ type invocationRunKey struct{}
 func InvocationRun(ctx context.Context) string {
 	run, _ := ctx.Value(invocationRunKey{}).(string)
 	return run
+}
+
+// OwnsInvocation reports whether this callback came from the initialized
+// process currently serving requests. A restart creates a new run identity.
+func (p *Proc) OwnsInvocation(ctx context.Context) bool {
+	run := InvocationRun(ctx)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return run != "" && ctx.Err() == nil && p.ready && p.sess != nil && p.sess.run == run
 }
 
 // Generation identifies the active initialized process run, never a source claim.
@@ -736,7 +746,7 @@ func (p *Proc) runOnce(ctx context.Context) error {
 		}
 		peer.OnEvent = p.spec.OnEvent
 		go func() { _ = peer.Serve(context.Background(), out) }()
-		s = &session{peer: peer}
+		s = &session{peer: peer, run: InvocationRun(runCtx)}
 		if err := p.initialize(runCtx, s); err != nil {
 			stopRun()
 			p.end(ch, peer)

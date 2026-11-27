@@ -747,14 +747,15 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 		f.Agents = make([]projection.Agent, len(t.Agents))
 	}
 	for i, a := range t.Agents {
-		f.Agents[i] = projection.Agent{MachineID: a.MachineID, SessionID: a.SessionID, ReleasedAt: a.ReleasedAt,
+		f.Agents[i] = projection.Agent{MachineID: a.MachineID, SessionID: a.SessionID, LinkedAt: &a.LinkedAt, ReleasedAt: a.ReleasedAt,
 			Title: a.Title, StartError: a.StartError, DismissedAt: a.DismissedAt}
 		if c, ok := sessions[[2]string{a.MachineID, a.SessionID}]; ok && (a.ReleasedAt == nil || linked) && a.DismissedAt == nil {
 			f.Sessions = append(f.Sessions, c)
 		}
 	}
 	if v := t.Supervision; v != nil {
-		f.Supervision = &projection.Supervision{State: v.State, Supervisor: v.Supervisor, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
+		f.Supervision = &projection.Supervision{State: v.State, Supervisor: v.Supervisor, PendingSince: v.PendingSince,
+			FollowedUpAt: v.FollowedUpAt, UpdatedAt: v.UpdatedAt}
 		if p := v.Parked; p != nil {
 			parked := &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
 			if p.Evidence != nil {
@@ -789,7 +790,7 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 			f.Supervision.Reviews = make([]projection.Review, len(v.Reviews))
 		}
 		for i, r := range v.Reviews {
-			f.Supervision.Reviews[i] = projection.Review{At: r.At, Verdict: r.Verdict, Note: r.Note, Reason: r.Reason,
+			f.Supervision.Reviews[i] = projection.Review{At: r.At, Verdict: r.Verdict, By: r.By, Note: r.Note, Reason: r.Reason,
 				Recommend: r.Recommend}
 		}
 		if v.Progress != nil {

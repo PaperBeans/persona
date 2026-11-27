@@ -276,7 +276,8 @@ marked as the default, the line for every computer or the hub computer's line (`
 `server/internal/assistant/admission_card.go`). A project the setting does not name shows the cap for every direction;
 a direction does too unless the setting carries project caps, where its fallback depends on the task and the row says
 it has no line of its own. Lines are compared by their stored value, so two memory sizes that round to the same text
-both appear, with their byte counts, and two launcher lists that read the same appear as written, quoted. Names are
+both appear with their byte counts, also when one side is the line the value falls back to, and two launcher lists
+that read the same appear as stored, quoted, white space included. Names are
 written on one line, so a line break inside one cannot start a row. The list is not clipped, and rows are in a fixed
 order because the card is built again when it is answered and must match what was shown. The stored JSON stays under
 the card's "Show input".

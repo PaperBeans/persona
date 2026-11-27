@@ -328,7 +328,7 @@ function SecondLine({ line, draft }: { line: { lead?: string; text: string; tone
  *  A folded Persona chats or Recent heading counts the chats it hides that are (#13425). Just finished is not counted
  *  there, as in the Agents list's folded tally (docs/protocol/agent-states.md "Just finished"). */
 export function unreadShown(s: Session): boolean {
-  return stateOf(s) === "unread" && !usageLimitLabel(s);
+  return activityOf(s) === "unread" && !usageLimitLabel(s);
 }
 
 /** Reads a parent's folded rows while its row names an unread side session (useChildSessions): they are held for the

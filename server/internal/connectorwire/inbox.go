@@ -86,8 +86,8 @@ type InboxThing struct {
 	Parent *ThingParent `json:"parent,omitempty"`
 }
 
-// ThingParent is a thing's parent: kind "inbox" (an item's id), "todo" (a todo's id) or "session"
-// ("<machine>/<session>").
+// ThingParent is a thing's parent: kind "inbox" (an item's id), "todo" (a todo's id), "session" (a coding Agent's
+// "<machine>/<session>") or "agent" (a personal Agent's "<source>:<sessionKey>").
 type ThingParent struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`

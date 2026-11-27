@@ -186,7 +186,7 @@ func assertBriefingAbsent(t *testing.T, s *Service) {
 		t.Errorf("acceptance reminders wait %d minutes for a briefing that does not come", g)
 	}
 	// The hooks of a scheduled run find no briefing run and do nothing.
-	s.briefSent("morning", "sess", false)
+	s.briefSent(ScheduleRun{RefID: "morning", SessionID: "sess", Due: now})
 	s.briefReached("sess")
 	if push := s.briefPush("sess", s.botLang(ctx), true); push != "" {
 		t.Errorf("a push for a briefing without the module: %q", push)

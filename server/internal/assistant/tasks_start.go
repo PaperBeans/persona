@@ -1622,8 +1622,20 @@ func (s *Service) retryTaskStart(ctx context.Context, todoID string, with retryW
 	}
 	t.Permission = strings.TrimSpace(t.Permission)
 	if t.Machine == "" {
-		if with.launcher != "" || with.answer != "" {
-			return nil, false, i18n.Err("assistant-tasks.no_machine", i18n.Args{"machine": strconv.Quote(t.Machine)})
+		if with.answer != "" {
+			return nil, false, errAnswerNotWaiting
+		}
+		if with.launcher == "" && with.model != "" {
+			return nil, false, planInvalid{i18n.Err("assistant-tasks.retry_model_without_launcher")}
+		}
+		if err := checkModelID(with.model); err != nil {
+			return nil, false, planInvalid{err}
+		}
+		from := s.ranLauncher(ctx, t)
+		if with.launcher != "" {
+			t.Launcher, t.Model, t.Tier = with.launcher, with.model, ""
+			t.LauncherDefaultModel = with.model == ""
+			t.RetryWith = nil
 		}
 		reopened, ok, err := s.reopenFailedTodo(ctx, todoID)
 		if err != nil {
@@ -1638,15 +1650,29 @@ func (s *Service) retryTaskStart(ctx context.Context, todoID string, with retryW
 		}
 		q := s.pendingPlacementQueueEntry(ctx, p.ID, 1, 0, s.placementNow())
 		q.Retry = true
+		var savedPlacement *placement
 		if err := s.patchPlanTask(ctx, p.ID, i, func(pt *PlanTask) {
 			*pt = t
 			pt.Queue = &q
+			pt.Placement = nil
 			pt.Placement = queuedPlacement(*pt, &q)
+			savedPlacement = pt.Placement
 			pt.WorkspaceError = nil
 			pt.Error, pt.ErrorCode, pt.ErrorArgs, pt.RetryWith = "", "", nil, nil
 		}); err != nil {
-			s.logf("plan %s: %v", p.ID, err)
+			s.logf("task %s: retry placement requeue failed (plan %s): %v", todoID, p.ID, err)
+			if ferr := s.failTodo(ctx, todoID, err.Error()); ferr != nil {
+				s.logf("task %s: retry placement rollback fail: %v", todoID, ferr)
+			}
+			return nil, false, err
 		}
+		if savedPlacement != nil {
+			s.savePlacement(ctx, savedPlacement)
+		}
+		if with.launcher != "" && with.launcher != from && with.by != "" {
+			s.remedyStep(ctx, p.Conversation, todoID, startRemedyBody{Action: "retry", By: with.by, LauncherFrom: from, LauncherTo: with.launcher})
+		}
+		s.logf("task %s: retrying its start via placement queue (plan %s)", todoID, p.ID)
 		started = true
 		s.endTaskStart(todoID, st, proto.Session{})
 		s.onPendingPlacementEnqueued(ctx, p.ID, todoID, 1)

@@ -106,8 +106,16 @@ type Cards interface {
 	// the process panel on the first when steps is not nil, foot under the last, none for quiet. name names the button
 	// of a bare address in the answer (nil: by its host).
 	AnswerCards(l i18n.Lang, name func(*url.URL) string, answer string, quiet bool, steps []string, foot string) (cards []*botcard.Card, fallbacks []string)
-	// MissingPiecesNote says which pieces of an answer did not get to Feishu (1-based) and where the whole is.
-	MissingPiecesNote(l i18n.Lang, missing []int) string
+}
+
+// Push delivers notices and turn mirrors outside the bot's normal reply path. Without the module a
+// keyed push returns nil, and there is no delivery or retry. Core records skipped copies separately.
+type Push interface {
+	PushKeyed(ctx context.Context, to assistantwire.SessionRef, title, body, key string, receipt assistantwire.LarkPushCopy) error
+	TodoReminder(to assistantwire.SessionRef, reminder assistantwire.LarkReminder)
+	AgentDone(to assistantwire.SessionRef, view func(context.Context) (assistantwire.LarkAgentDone, bool))
+	Mirror(ctx context.Context, to assistantwire.LarkMirror, lang i18n.Lang, turn assistantwire.LarkMirrorTurn)
+	MirrorPost(ctx context.Context, to assistantwire.LarkMirror, lang i18n.Lang, cards []*botcard.Card, fallbacks []string, key string, sent func())
 }
 
 // Asks is the interaction port: what the core tells the chat of what Persona and the agents ask (a question, a
@@ -175,12 +183,12 @@ type Handoffs interface {
 }
 
 // Layer is what the core asks of the lark module: the outbound port, the Feishu turns, the cards of what is asked, the
-// workbench, the board, the chat and the proxy replies. It
-// grows as the assistant's Feishu files move into the module (#13404).
+// workbench, the board, the chat, pushes and the proxy replies (#13404).
 type Layer interface {
 	Outbound
 	Turns
 	Cards
+	Push
 	Asks
 	Workbench
 	Board
@@ -263,6 +271,8 @@ type Host interface {
 	// Unreachable: the call did not reach the hub or did not come back; Offline: the hub is not connected.
 	Unreachable(err error) bool
 	Offline(err error) bool
+	// Answered reports a definitive hub refusal, so a status failure does not consume a push retry.
+	Answered(err error) bool
 	StepParts(l i18n.Lang, it proto.Item) (verb, detail string)
 	// RunProgress is what run r's progress card shows besides its steps (the channels' live state of it).
 	RunProgress(r *channel.Run) assistantwire.RunProgress
@@ -293,7 +303,6 @@ type Host interface {
 	WorkbenchInbox() []assistantwire.WorkbenchItem
 	WorkbenchItem(id string) (assistantwire.WorkbenchItem, bool)
 	WorkbenchBoard(ctx context.Context, l i18n.Lang, web string, now time.Time) []assistantwire.WorkbenchBoardRow
-	SessionNames(ctx context.Context, sess proto.Session) (primary, secondary string)
 	NextMeeting(ctx context.Context, now time.Time) *assistantwire.WorkbenchMeeting
 	TodayBody(ctx context.Context) json.RawMessage
 	TasksOverview(ctx context.Context) (cards []*botcard.Card, fallbacks []string)
@@ -449,7 +458,16 @@ func (None) Wait(context.Context) error                   { return nil }
 func (None) AnswerCards(i18n.Lang, func(*url.URL) string, string, bool, []string, string) ([]*botcard.Card, []string) {
 	return nil, nil
 }
-func (None) MissingPiecesNote(i18n.Lang, []int) string { return "" }
+func (None) PushKeyed(context.Context, assistantwire.SessionRef, string, string, string, assistantwire.LarkPushCopy) error {
+	return nil
+}
+func (None) TodoReminder(assistantwire.SessionRef, assistantwire.LarkReminder) {}
+func (None) AgentDone(assistantwire.SessionRef, func(context.Context) (assistantwire.LarkAgentDone, bool)) {
+}
+func (None) Mirror(context.Context, assistantwire.LarkMirror, i18n.Lang, assistantwire.LarkMirrorTurn) {
+}
+func (None) MirrorPost(context.Context, assistantwire.LarkMirror, i18n.Lang, []*botcard.Card, []string, string, func()) {
+}
 
 // No board without a channel: nothing is edited, no card carries the workbench button, no companion takes a notice.
 func (None) BoardChanged()                                                   {}

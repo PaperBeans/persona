@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/modapi"
 )
@@ -30,13 +32,14 @@ type (
 
 func briefTaskInfo(t Task) modapi.BriefTaskInfo {
 	return modapi.BriefTaskInfo{
-		ID:           t.ID,
-		Label:        t.label(),
-		Facts:        t.Facts,
-		Report:       t.Report,
-		SessionID:    t.SessionID,
-		RunSessionID: t.RunSessionID,
-		MachineID:    t.MachineID,
+		ID:            t.ID,
+		Label:         t.label(),
+		Contributions: t.routineContributions,
+		Facts:         t.Facts,
+		Report:        t.Report,
+		SessionID:     t.SessionID,
+		RunSessionID:  t.RunSessionID,
+		MachineID:     t.MachineID,
 	}
 }
 
@@ -76,9 +79,9 @@ func (s *Service) briefReportStart(ctx context.Context, t Task, now time.Time) s
 	return r.StartReport(ctx, briefTaskInfo(t), now)
 }
 
-func (s *Service) briefSent(id, session string, retried bool) {
+func (s *Service) briefSent(run ScheduleRun) {
 	if r, ok := s.briefingRunner(); ok {
-		r.Sent(id, session, retried)
+		r.Sent(briefScheduleRun(run))
 	}
 }
 
@@ -142,19 +145,22 @@ func (s *Service) briefingGrace(ctx context.Context, local time.Time, start int)
 
 // briefMirror sends the cards of a routine with facts in place of its answer's cards (feishuMirror): the model's answer
 // on top, the facts under it. Required owner waits continue onto more cards rather than crossing Feishu's physical
-// budget. mirrorSend's per-index key makes every continuation retry independently and idempotently.
+// budget. The push port's per-index key makes every continuation retry independently and idempotently.
 func (s *Service) briefMirror(ctx context.Context, machine, session, label string, run *briefRun, answer, turn string) {
 	card, fallback, shown := s.briefCard(run.Facts, run.Label, answer)
 	card.Buttons(s.openButton(ctx, machine, session))
 	cards := splitBriefAnswerCards(card, fallback, run.Label)
 	sum := sha256.Sum256([]byte("brief\x00" + machine + "\x00" + session + "\x00" + turn + "\x00" + answer))
-	m := &mirrorSend{
-		l: i18n.Lang(run.Facts.Lang), cards: cards,
-		target: botTarget{Kind: targetPersona, MachineID: machine, SessionID: session}, label: label,
-		answer: answer, turn: turn, key: "b" + hex.EncodeToString(sum[:8]),
-		sent: func() { s.briefAsked(run.Facts, shown) },
+	to := s.larkMirror(machine, session, label, false, answer, turn)
+	s.postBriefMirror(ctx, to, i18n.Lang(run.Facts.Lang), cards, "b"+hex.EncodeToString(sum[:8]), func() { s.briefAsked(run.Facts, shown) })
+}
+
+func (s *Service) postBriefMirror(ctx context.Context, to assistantwire.LarkMirror, lang i18n.Lang, cards []botAnswerCard, key string, sent func()) {
+	drawings, fallbacks := make([]*botcard.Card, len(cards)), make([]string, len(cards))
+	for i, card := range cards {
+		drawings[i], fallbacks[i] = card.card, card.fallback
 	}
-	s.feishuMirrorPost(ctx, m, 0)
+	s.larkModule().MirrorPost(ctx, to, lang, drawings, fallbacks, key, sent)
 }
 
 // briefAsked notes that the briefing card with the Accept buttons of the tasks shown went out: those tasks are not

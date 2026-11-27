@@ -53,6 +53,25 @@ describe("收件箱：线索", () => {
     expect(html).not.toContain("m1/s1");
     expect(html).not.toContain("s1");
   });
+  it("names a personal Agent from the local list and opens it on the Agents page", () => {
+    const tree: InboxTree = {
+      node: { kind: "inbox", id: "b" },
+      item: item("b", "示例 B"),
+      ancestors: [{ kind: "agent", id: "gateway:agent/key" }],
+      children: [],
+    };
+    const named = lineRows(tree, undefined, { agent: (id) => id === "gateway:agent/key" ? "整理发布" : undefined });
+    expect(named[0]).toMatchObject({
+      label: "个人 Agent",
+      title: "整理发布",
+      route: { name: "agents", id: "gateway:agent/key" },
+    });
+    const unnamed = lineRows(tree);
+    expect(unnamed[0].title).toBe("");
+    const html = renderToStaticMarkup(<LineList rows={unnamed} />);
+    expect(html).toContain("个人 Agent");
+    expect(html).not.toContain("gateway:agent/key");
+  });
   it("pairs every ancestor with the item directly below it, and only offers detach for an existing item", () => {
     const rows = lineRows({
       node: { kind: "inbox", id: "b" },
@@ -104,7 +123,10 @@ describe("收件箱：线索", () => {
     const { fetchInboxTree, parentRoute } = await import("../../lib/inbox-page");
     await fetchInboxTree("inbox", "lark:F1:900");
     await fetchInboxTree("session", "m 1/s1");
-    expect(apiCalls.map((c) => c.path)).toEqual(["/inbox/tree/inbox/lark:F1:900", "/inbox/tree/session/m%201/s1"]);
+    await fetchInboxTree("agent", "gateway:agent/key");
+    expect(apiCalls.map((c) => c.path)).toEqual(["/inbox/tree/inbox/lark:F1:900", "/inbox/tree/session/m%201/s1", "/inbox/tree/agent/gateway:agent%2Fkey"]);
     expect(parentRoute({ kind: "session", id: "nosplit" })).toBeUndefined();
+    expect(parentRoute({ kind: "agent", id: "gateway:agent/key" })).toEqual({ name: "agents", id: "gateway:agent/key" });
+    expect(parentRoute({ kind: "agent", id: "nosource" })).toBeUndefined();
   });
 });

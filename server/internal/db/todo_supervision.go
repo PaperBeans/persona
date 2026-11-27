@@ -36,6 +36,7 @@ type TodoSupervisionRow struct {
 	// PendingSince is when the task entered pending_review; nil in every other state, and for a task that was already
 	// waiting for review with no time recorded.
 	PendingSince *time.Time `json:"pending_since,omitempty"`
+	FollowedUpAt *time.Time `json:"followed_up_at,omitempty"`
 	// CardlessToldAt is when the watch handed the current pending_review round back to its supervisor because it waits
 	// on the owner with no card (supervise_cardless.go); nil when this review round was never handed back that way.
 	CardlessToldAt *time.Time `json:"cardless_told_at,omitempty"`
@@ -77,7 +78,7 @@ func AlignTodoCriteria(doneWhen []string, criteria []TodoCriterion) []TodoCriter
 
 // ListTodoSupervision returns every supervised task's ledger.
 func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, error) {
-	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings
+	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings, followed_up_at
 		FROM todo_supervision`)
 	if err != nil {
 		return nil, err
@@ -87,7 +88,7 @@ func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, err
 	for rows.Next() {
 		var r TodoSupervisionRow
 		var when, auto, waits, ownerWork, criteria []byte
-		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &ownerWork, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt, &r.InvestigationFindings); err != nil {
+		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &ownerWork, &r.UpdatedAt, &criteria, &r.PendingSince, &r.SupervisorSource, &r.CardlessToldAt, &r.InvestigationFindings, &r.FollowedUpAt); err != nil {
 			return nil, err
 		}
 		if len(auto) > 0 {
@@ -137,14 +138,14 @@ func putTodoSupervision(ctx context.Context, q execer, r TodoSupervisionRow) err
 	if len(r.Waits) > 0 {
 		waits = r.Waits
 	}
-	tag, err := q.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
+	tag, err := q.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, owner_work, updated_at, criteria, pending_since, supervisor_source, cardless_told_at, investigation_findings, followed_up_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
 		ON CONFLICT (todo_id) DO UPDATE SET supervisor = EXCLUDED.supervisor, done_when = EXCLUDED.done_when,
 			expect_minutes = EXCLUDED.expect_minutes, state = EXCLUDED.state, round = EXCLUDED.round,
 			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, waits = EXCLUDED.waits, owner_work = EXCLUDED.owner_work,
 			updated_at = EXCLUDED.updated_at, criteria = EXCLUDED.criteria,
-			pending_since = EXCLUDED.pending_since, supervisor_source = EXCLUDED.supervisor_source, cardless_told_at = EXCLUDED.cardless_told_at, investigation_findings = EXCLUDED.investigation_findings`,
-		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, ownerWork, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt, r.InvestigationFindings)
+			pending_since = EXCLUDED.pending_since, supervisor_source = EXCLUDED.supervisor_source, cardless_told_at = EXCLUDED.cardless_told_at, investigation_findings = EXCLUDED.investigation_findings, followed_up_at = EXCLUDED.followed_up_at`,
+		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, ownerWork, r.UpdatedAt, criteria, r.PendingSince, r.SupervisorSource, r.CardlessToldAt, r.InvestigationFindings, r.FollowedUpAt)
 	if err != nil {
 		return err
 	}

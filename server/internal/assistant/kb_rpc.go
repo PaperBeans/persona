@@ -77,6 +77,9 @@ func (s *Service) kbRPCRequest(ctx context.Context, method string, raw json.RawM
 		method = assistantwire.MethodKBDay
 	}
 	switch method {
+	case assistantwire.MethodKBProviderCheckpoint, assistantwire.MethodKBProviderSentMarkers:
+		result, err := s.kbProviderRead(ctx, method, raw)
+		return result, true, err
 	case assistantwire.MethodKBExtensionPutRecording:
 		out, err := s.kbPutRecording(ctx, raw)
 		return out, true, err

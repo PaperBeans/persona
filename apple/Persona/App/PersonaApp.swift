@@ -149,8 +149,7 @@ struct PersonaApp: App {
                 ClipboardOfferWatcher.shared.left()
                 // The Live Activity follows the first group's hub (LiveActivityController.report): without a push route
                 // there it would only go stale (#12982).
-                let group = model.links.first?.api.group
-                LiveActivityController.shared.left(pushReaches: group.flatMap { PushHealthStore.shared.health.routes[$0]?.reaches })
+                LiveActivityController.shared.left(health: PushHealthStore.shared.health, group: model.links.first?.api.group)
                 #endif
                 // A suspended app's socket looks alive to the hub until it times out, and phone_* calls sent to it hang.
                 // Closed, the hub knows the phone is away and wakes it with a silent push instead; and nothing opens it
