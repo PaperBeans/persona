@@ -189,6 +189,15 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		room.section(c, &plain, l, i18n.T(l, "assistant-setup_suggest.heading"), setup, len(setup))
 	}
 
+	// Provider text stays in plain-text elements. In particular, URLs and card-style
+	// tags in report sections cannot turn into links, mentions, or action buttons.
+	for _, contribution := range f.Contributions {
+		for _, line := range contribution.PlainLines() {
+			c.Note(line)
+			plain = append(plain, line)
+		}
+	}
+
 	c.Note(i18n.T(l, "assistant-briefing.note", i18n.Args{"time": briefClock(f, f.At)}))
 	if required := strings.Join(plain[:requiredPlain], "\n"); len([]rune(required)) > reportFallbackMax {
 		return c, required, shown

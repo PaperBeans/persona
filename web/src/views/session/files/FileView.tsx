@@ -35,6 +35,7 @@ import { GutterNumber, LineBox, useLinePick, type LinePick } from "./LineComment
 import { BackHeader, Empty, FileGlyph, Segmented, useWindow } from "./parts";
 import { parseNotebook } from "../../../lib/notebook";
 import { HtmlPreview } from "./HtmlPreview";
+import { FileSelection, type FileCommentTarget } from "./FileSelection";
 import { MediaPlayer } from "../../../ui/Media";
 import { NotebookView } from "./NotebookView";
 import { SheetLoader } from "./SheetLoader";
@@ -309,6 +310,7 @@ export function FileView({
 
   const name = f?.name || fileName(path);
   const full = f?.path || path;
+  const comment = !readOnly && f && commentKey(mid, sid) ? { path: full, mid, sid, cwd } : undefined;
   const where = kind === "directory" ? shortPath(full) : shortPath(dirName(full)) || full; // the name is the title
   const actions = (
     <>
@@ -397,7 +399,7 @@ export function FileView({
     );
     if (kind !== "binary") body = <ModuleFilePreview key={f.path} kind={kind} mid={mid} cwd={cwd} file={f} onDownload={download}>{body}</ModuleFilePreview>;
   } else if (kind === "markdown" && mode === "rendered") {
-    body = <MarkdownView doc={doc} file={f} mid={mid} onOpenPath={onOpenPath} />;
+    body = <MarkdownView doc={doc} file={f} mid={mid} onOpenPath={onOpenPath} comment={comment} />;
   } else {
     const shown = kind === "json" && mode === "rendered" && json?.pretty != null ? json.pretty : doc.text;
     const note =
@@ -416,7 +418,7 @@ export function FileView({
             : json?.error
               ? t("session-files-fileview.invalid_json", { error: json.error })
               : "";
-    body = <CodeView doc={doc} file={f} text={shown} line={line} lineTo={lineTo} note={note} where={{ mid, sid, cwd, readOnly }} />;
+    body = <CodeView doc={doc} file={f} text={shown} line={line} lineTo={lineTo} note={note} where={{ mid, sid, cwd, readOnly }} source={shown === doc.text} />;
   }
 
   if (editing && canWrite && f) {
@@ -454,7 +456,7 @@ export function FileView({
 
 // ── code ──────────────────────────────────────────────────
 
-function CodeView({ doc, file, text, line, lineTo, note, where }: { doc: FileDoc; file: FileContent; text: string; line?: number; lineTo?: number; note: string; where: { mid: string; sid?: string; cwd?: string; readOnly?: boolean } }) {
+function CodeView({ doc, file, text, line, lineTo, note, where, source }: { doc: FileDoc; file: FileContent; text: string; line?: number; lineTo?: number; note: string; where: { mid: string; sid?: string; cwd?: string; readOnly?: boolean }; source: boolean }) {
   const name = file.name;
   const lines = useMemo(() => splitLines(text), [text]);
   const lang = useMemo<Lang | null>(() => (text.length <= COLOR_BYTES && lines.length <= COLOR_LINES ? languageOf(name, lines[0]) : null), [name, text.length, lines]);
@@ -541,6 +543,7 @@ function CodeView({ doc, file, text, line, lineTo, note, where }: { doc: FileDoc
           </div>
         </div>
       )}
+      {key && lines.length > 0 && <FileSelection view={scroller} file={{ path: file.path, ...where }} lines={lines} source={source} maxWidth={MAX_LINE} />}
       {key && pick.range && (
         <LineBox
           where={`${relativeTo(where.cwd, file.path)}:${rangeLabel(pick.range.from, pick.range.to)}`}
@@ -583,9 +586,9 @@ function CodeRow({ n, digits, text, tokens, cut, mark, picked, gutter }: { n: nu
         className={cx("sticky left-0 shrink-0 border-r border-line pr-3 pl-3 text-right tabular-nums select-none", mark || picked ? "font-semibold text-accent-ink" : "bg-inset text-ink-3")}
         style={{ width: `calc(${digits}ch + 25px)`, ...(mark || picked ? { background: "linear-gradient(var(--accent-tint), var(--accent-tint)), var(--inset)" } : {}) }}
       />
-      <span className="pr-6 pl-3 whitespace-pre text-ink">
+      <span data-file-code-text className="pr-6 pl-3 whitespace-pre text-ink">
         {parts}
-        {cut && <span className="text-ink-3 select-none">{t("session-files-fileview.line_cut", { max: MAX_LINE })}</span>}
+        {cut && <span data-file-truncation-marker className="text-ink-3 select-none">{t("session-files-fileview.line_cut", { max: MAX_LINE })}</span>}
       </span>
     </div>
   );
@@ -622,9 +625,10 @@ function machineImage(mid: string, path: string): Promise<string | null> {
   return p;
 }
 
-function MarkdownView({ doc, file, mid, onOpenPath }: { doc: FileDoc; file: FileContent; mid: string; onOpenPath: (p: string) => void }) {
+function MarkdownView({ doc, file, mid, onOpenPath, comment }: { doc: FileDoc; file: FileContent; mid: string; onOpenPath: (p: string) => void; comment?: FileCommentTarget }) {
   const chunks = useMemo(() => markdownChunks(simplifyHTML(doc.text)), [doc.text]);
   const box = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const base = dirName(file.path);
 
   // Relative images point at the machine, not at this page: swap them for the bytes read from there before paint.
@@ -656,7 +660,7 @@ function MarkdownView({ doc, file, mid, onOpenPath }: { doc: FileDoc; file: File
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto" onClick={click} data-testid="file-markdown">
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" onClick={click} data-testid="file-markdown">
       <div ref={box} className="mx-auto flex max-w-[760px] flex-col gap-4 px-5 py-5 sm:px-7">
         {chunks.map((c, i) => (
           <div key={i} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 480px" }}>
@@ -674,6 +678,7 @@ function MarkdownView({ doc, file, mid, onOpenPath }: { doc: FileDoc; file: File
           </div>
         )}
       </div>
+      {comment && <FileSelection view={scroller} file={comment} />}
     </div>
   );
 }

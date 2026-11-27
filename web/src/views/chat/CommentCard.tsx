@@ -5,7 +5,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { jumpToComment } from "../../lib/comment-marks";
 import { codePreview, diffLabel, openSpot, rangeLabel, type CodeSpot, type ElementSpot } from "../../lib/comments";
-import { openPanel } from "../../lib/panel";
+import { openPanel, type Panel } from "../../lib/panel";
+import { getSession } from "../../lib/store";
+import { uuid } from "../../lib/format";
 import { addressOf } from "../../lib/preview";
 import { cancelNote, setCommentImages, setNote, type CommentImage, type CommentImagePicker, type DraftQuote } from "../../lib/drafts";
 import { cx, EASE, toast } from "../../ui/atoms";
@@ -35,6 +37,7 @@ export function elementWhere(e: ElementSpot): string {
 
 /** Where a comment points, worded for the reader: a file's lines, or an element of a preview. */
 function whereOf(c: NonNullable<DraftQuote["comment"]>): string {
+  if (c.file) return c.file.location;
   return c.element ? elementWhere(c.element) : c.spot ? spotWhere(c.spot) : "";
 }
 
@@ -75,6 +78,22 @@ function Excerpt({ q, lines }: { q: DraftQuote; lines: number }) {
   );
 }
 
+/** Recover the viewer target from a sent comment in its Agent session. Drafts already carry the original target. */
+export function fileCommentPanel(file: NonNullable<DraftQuote["comment"]>["file"], mid?: string, sid?: string): Extract<Panel, { kind: "file" }> | undefined {
+  if (!file || file.panel) return file?.panel;
+  if (!mid || !sid) return;
+  const cwd = getSession(mid, sid)?.cwd;
+  const range = /^(.+):([1-9]\d*)(?:-([1-9]\d*))?$/.exec(file.location);
+  if (range) {
+    const line = Number(range[2]);
+    const to = Number(range[3] ?? range[2]);
+    if (Number.isSafeInteger(line) && Number.isSafeInteger(to) && to >= line) {
+      return { kind: "file", mid, sid, cwd, path: range[1], line, to };
+    }
+  }
+  return { kind: "file", mid, sid, cwd, path: file.location };
+}
+
 export interface CommentPreviewTarget {
   mid: string;
   sid: string;
@@ -85,6 +104,11 @@ export interface CommentPreviewTarget {
 }
 
 export interface CommentNavigationHandlers {
+  /** Machine and session context for resolving sent file comments when no panel target is stored. */
+  mid?: string;
+  sid?: string;
+  /** Opens a file viewer panel for a file comment instead of the default side-panel singleton. */
+  openFile?: (target: Extract<Panel, { kind: "file" }>) => boolean | void;
   /** Opens a preview panel for an element comment instead of the default side-panel singleton. */
   openPreview?: (target: CommentPreviewTarget) => boolean | void;
   /** Opens a code or diff spot instead of the default `openSpot` singleton. */
@@ -100,6 +124,18 @@ export function goToComment(q: DraftQuote, handlers?: CommentNavigationHandlers)
   const c = q.comment;
   if (!c) return false;
   const notice = handlers?.onNotice ?? toast;
+  const file = fileCommentPanel(c.file, handlers?.mid, handlers?.sid);
+  if (file) {
+    // Jump again even if the same file is open and the viewer has switched modes or scrolled away.
+    const target = { ...file, navigationId: uuid() };
+    if (handlers?.openFile) {
+      const ok = handlers.openFile(target) !== false;
+      if (!ok) notice(t("chat-comments.jump_code_gone"));
+      return ok;
+    }
+    openPanel(target);
+    return true;
+  }
   if (c.element) {
     const e = c.element;
     // the preview of that session, at the page the element was on
@@ -227,7 +263,12 @@ export function CommentsChip({ draftKey, comments, onRemove, onAddImages }: {
                     data-comment-jump={n}
                     title={t("chat-comments.jump")}
                     onClick={() => {
-                      goToComment(q);
+                      if (draftKey) {
+                        const [mid, ...sid] = draftKey.split("/");
+                        goToComment(q, { mid, sid: sid.join("/") });
+                      } else {
+                        goToComment(q);
+                      }
                       setOpen(false);
                     }}
                     className="flex min-w-0 flex-1 items-start gap-2 rounded-[6px] px-1 py-0.5 text-left focus-visible:outline-2 focus-visible:outline-accent"

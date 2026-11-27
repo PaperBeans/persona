@@ -355,7 +355,7 @@ func TestRunnerLifecycleAndWireJSON(t *testing.T) {
 	}
 
 	// Sent attaches the run and writes the `brief` feed item once (retried writes none).
-	r.Sent("morning", "sess1", false)
+	r.Sent(modapi.BriefScheduleRun{RefID: "morning", SessionID: "sess1", Due: now})
 	if r.TaskRunCount() != 0 || !r.HasSession("sess1") || len(h.feed.items) != 1 {
 		t.Fatalf("after Sent: tasks=%d has=%v feed=%d", r.TaskRunCount(), r.HasSession("sess1"), len(h.feed.items))
 	}

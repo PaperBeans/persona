@@ -304,6 +304,11 @@ export interface Permissions {
    */
   agent_runtimes?: boolean;
   /**
+   * The routine sends its local date and language to this extension and may include its facts and report sections in
+   * the briefing.
+   */
+  routine_facts?: boolean;
+  /**
    * It receives the error and crash reports of the hub and the user's devices, scrubbed (no message text, tokens,
    * user names, machine names or IP addresses). Needed by contributes.error_reports.
    */
@@ -359,6 +364,7 @@ export interface Contributes {
   triage_templates?: TriageTemplateItem[];
   agent_filters?: AgentFilterItem[];
   tunnels?: TunnelItem[];
+  routine_facts?: RoutineFactsItem[];
   error_reports?: ErrorReportsItem[];
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
@@ -664,6 +670,24 @@ export interface RepositoryLinkLabel {
  */
 export type RepositoryLinkKind = "issue" | "pull_request" | (string & {});
 export const REPOSITORY_LINK_KINDS = ["issue", "pull_request"] as const;
+
+/**
+ * Identifies one routine facts source within its extension.
+ */
+export type RoutineContributionID = string & { readonly __brand: "RoutineContributionID" };
+/** A RoutineContributionID from its raw string. */
+export function routineContributionID(raw: string): RoutineContributionID {
+  return raw as RoutineContributionID;
+}
+
+/**
+ * A source of facts and report sections for a scheduled briefing. Requires an RPC runtime and
+ * permissions.routine_facts.
+ */
+export interface RoutineFactsItem {
+  id: RoutineContributionID;
+  title: string;
+}
 
 /**
  * It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the
@@ -5504,6 +5528,57 @@ export interface ChannelEditParams {
   text: string;
 }
 
+/**
+ * The host selects the provider, source, account and chat for this import.
+ */
+export interface KBImportCheckpointParams {
+}
+
+/**
+ * The host importer’s committed state for the selected chat.
+ */
+export type KBImportState = "pending" | "running" | "done" | "paused" | "error" | "unreadable";
+export const KBIMPORT_STATES: readonly KBImportState[] = ["pending", "running", "done", "paused", "error", "unreadable"];
+
+/** A KBImportState this app does not know, kept as it came. */
+export interface UnknownKBImportState {
+  unknown: string;
+}
+
+/** A raw KBImportState: one this app knows, or UnknownKBImportState with the raw value. */
+export function parseKBImportState(raw: string): KBImportState | UnknownKBImportState {
+  const known = KBIMPORT_STATES.find((value) => value === raw);
+  if (known !== undefined) {
+    return known;
+  }
+  const unknown: UnknownKBImportState = { unknown: raw };
+  return unknown;
+}
+
+export interface KBImportCheckpointResult {
+  state: KBImportState;
+  approval: string;
+  read: number;
+  written: number;
+}
+
+export interface KBSentMarkersParams {
+  day: string;
+  approval: string;
+  after?: number;
+}
+
+export interface KBSentMarker {
+  n: number;
+  sent_by: string;
+  recalled_at?: string;
+}
+
+export interface KBSentMarkersResult {
+  markers: KBSentMarker[];
+  next_after?: number;
+}
+
 export type KBKind = "projects" | "chats" | "people" | "docs" | "meetings" | "events" | "recordings" | "topics" | (string & {});
 export const KBKINDS = ["projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics"] as const;
 
@@ -7953,6 +8028,27 @@ export interface OffloadError {
   items?: OffloadRunItem[];
 }
 
+export interface RoutineFactsParams {
+  contribution: RoutineContributionID;
+  /** Calendar date in the routine's time zone. */
+  date: string;
+  language: string;
+}
+
+export interface RoutineReportSection {
+  title: string;
+  /** Plain text. The host owns report layout. */
+  body: string;
+}
+
+/**
+ * A read-only snapshot. Return an empty object when the contribution has nothing for this date.
+ */
+export interface RoutineFactsResult {
+  facts?: string[];
+  sections?: RoutineReportSection[];
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -8021,6 +8117,8 @@ export const CALLS: Record<string, Call> = {
   "kb.update": { from: "program", params: "KBUpdateParams", result: "KBUpdateResult" },
   "kb.owner": { from: "program", params: "KBOwnerParams", result: "KBOwner" },
   "kb.recent": { from: "program", params: "KBRecentParams", result: "KBRecentResult" },
+  "kb.import_checkpoint": { from: "program", params: "KBImportCheckpointParams", result: "KBImportCheckpointResult" },
+  "kb.sent_markers": { from: "program", params: "KBSentMarkersParams", result: "KBSentMarkersResult" },
   "kb.put_recording": { from: "program", params: "KBPutRecordingParams", result: "KBPutRecordingResult" },
   "event.kb.changed": { from: "hub", params: "KBChangedEvent", event: true },
   "event.kb.forgotten": { from: "hub", params: "KBForgottenEvent", event: true },
@@ -8070,4 +8168,5 @@ export const CALLS: Record<string, Call> = {
   "offload.run": { from: "hub", params: "OffloadRunParams", result: "OffloadRunResult" },
   "offload.job": { from: "hub", params: "OffloadJobParams", result: "OffloadJob" },
   "offload.cancel": { from: "hub", params: "OffloadJobParams", result: "Empty" },
+  "routine_facts.collect": { from: "hub", params: "RoutineFactsParams", result: "RoutineFactsResult" },
 };

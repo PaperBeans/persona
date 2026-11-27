@@ -1,6 +1,8 @@
 package assistantwire
 
 import (
+	"github.com/nwverse/persona/server/internal/wireids"
+
 	"encoding/json"
 
 	"github.com/nwverse/persona/server/internal/kbwire"
@@ -19,11 +21,30 @@ const (
 	// id, which the extension cannot set (KBExtensionUpdate). Not on the extensions' allowlist.
 	MethodKBExtensionUpdate = "kb.extension_update"
 	// MethodKBExtensionDay adds sent provenance after the extension manager checks sent.read.
-	MethodKBExtensionDay = "kb.extension_day"
+	MethodKBExtensionDay        = "kb.extension_day"
+	MethodKBProviderCheckpoint  = "kb.provider_import_checkpoint"
+	MethodKBProviderSentMarkers = "kb.provider_sent_markers"
 	// CodeKBConflict: an extension's kb.update touches fields the user or another extension holds; data is
 	// KBConflict.
 	CodeKBConflict = "conflict"
 )
+
+// KBProviderRequest is the manager's authenticated installation and its bounded query.
+// InstalledAt identifies the installation across process restarts and upgrades.
+type KBProviderRequest struct {
+	Extension   wireids.ExtensionID `json:"extension"`
+	StorageID   wireids.ExtensionID `json:"storage_id"`
+	InstalledAt string              `json:"installed_at"`
+	Params      KBImportQuery       `json:"params"`
+}
+
+// KBImportQuery holds the only selectors forwarded from the SDK. A checkpoint
+// uses an empty object. A marker page must supply a day and its approval.
+type KBImportQuery struct {
+	Day      string `json:"day,omitempty"`
+	Approval string `json:"approval,omitempty"`
+	After    int    `json:"after,omitempty"`
+}
 
 // KBExtensionUpdate is an extension's kb.update params as it sent them, and who it is.
 type KBExtensionUpdate struct {

@@ -190,6 +190,14 @@ export function todayFailedRow(body: TodayBody): { title: string; detail: string
   return { title: t("assistant-tasks.today_failed_n", { count }), detail: more > 0 ? `${titles} · ${t("assistant-tasks.more_asks", { count: more })}` : titles, first };
 }
 
+export interface BriefContribution {
+  extension_id: string;
+  contribution_id: string;
+  title: string;
+  facts: string[];
+  sections: { title: string; body: string }[];
+}
+
 export interface BriefBody {
   title: string;
   at: string;
@@ -210,6 +218,7 @@ export interface BriefBody {
    *  that is off would have removed how many of the last 7 days' asks or background rounds. The hub counted and worded
    *  each line; nothing is turned on from here. A hub that does not know it leaves the list out. */
   setup: BriefSetup[];
+  contributions: BriefContribution[];
 }
 
 /** One mechanism of a `brief` item's `setup`: `text` is the whole line (count, cost, where it is turned on). */

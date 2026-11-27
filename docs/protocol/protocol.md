@@ -6726,6 +6726,8 @@ At most one quote block starts a message (the quoted words; for a task card, the
 The user's typed text
 ```
 
+When the selected text is from a Web file preview, a `File: <path>` line follows the quoted text, before the blank line. Source selections append the line or range to the path, as in `File: /work/src/app.ts:12-14`. Older clients read the same quote and show the location with the note.
+
 Limits: comments up to 4000 characters, attached code up to 60 lines (extra lines are counted in `Truncated` but not included); the fence has one more backtick than the longest run in the code. Numbers follow the order of comments above the input, starting at 1.
 Web selection comments with images (#14518) add the optional image line before `Selected text:`. Its numbers are
 one-based positions in the message's `images` array. Main composer images come first, followed by each inline
