@@ -850,6 +850,7 @@ func (s *Service) setAdmission(ctx context.Context, v json.RawMessage) (*ownChan
 			s.admission.mu.Lock()
 			s.admission.cached, s.admission.at = nil, time.Time{}
 			s.admission.mu.Unlock()
+			s.wakePendingPlacement()
 			return "assistant.admission updated; the next execution-agent start uses the new lines.", nil
 		}}, nil
 }
