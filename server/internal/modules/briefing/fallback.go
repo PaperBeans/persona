@@ -15,6 +15,7 @@ import (
 // on success, so a successful Report has exactly its old card/feed/push behavior.
 func (r *runner) StartReport(ctx context.Context, task modapi.BriefTaskInfo, now time.Time) string {
 	run := &modapi.BriefRun{Facts: r.FactsAt(ctx, now, task.ID), Label: task.Label, FallbackOnly: true}
+	run.Facts.Contributions = task.Contributions
 	r.SetTaskRun(task.ID, run)
 	if !run.Facts.NorthStar.HasStore || r.prompts == nil {
 		return ""

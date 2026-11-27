@@ -101,8 +101,10 @@ func TestLarkSupervisedTerminalDialog(t *testing.T) {
 			t.Errorf("title lacks %q: %s", want, card.Header.Title.Content)
 		}
 	}
-	preview, _ := card.Config["summary"].(map[string]any)
-	summary, _ := preview["content"].(string)
+	if card.Config == nil || card.Config.Summary == nil {
+		t.Fatal("missing chat preview")
+	}
+	summary := card.Config.Summary.Content
 	if !strings.Contains(summary, dialog.Question) {
 		t.Errorf("chat preview lacks question: %q", summary)
 	}

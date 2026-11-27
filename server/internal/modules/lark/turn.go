@@ -216,7 +216,7 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		}
 	}
 	// Unless the owner asked with the switch to answer in the group directly, a /read's answer goes to the owner's
-// private chat, and into the group only when the owner posts it (read_held.go, #14437): the group
+	// private chat, and into the group only when the owner posts it (read_held.go, #14437): the group
 	// sees nothing of it meanwhile but the reaction. r is a copy of the run (channels_answer.go): its Ext is read
 	// without the lock.
 	if read && r.Ext[readDirectKey] == "" {

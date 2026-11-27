@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -41,6 +42,7 @@ const (
 
 	prEventUntrustedOpenTag  = "<untrusted_external_content"
 	prEventUntrustedCloseTag = "</untrusted_external_content>"
+	prEventBodyLimit         = 2000
 )
 
 type prRoutedEvent struct {
@@ -56,12 +58,14 @@ type prRoutedEvent struct {
 	CheckName   string
 	CheckCount  int
 	Summary     string
+	CheckedAt   time.Time // the observation that selected COMMENTED feedback
 }
 
 type prEventRouteRecord struct {
-	TodoID  string    `json:"todo_id"`
-	Outcome string    `json:"outcome"`
-	At      time.Time `json:"at"`
+	TodoID          string    `json:"todo_id"`
+	Outcome         string    `json:"outcome"`
+	At              time.Time `json:"at"`
+	FallbackPending bool      `json:"fallback_pending,omitempty"`
 }
 
 type prEventRouteBook struct {
@@ -262,15 +266,11 @@ func extractPREvents(t Todo, cur todoStage, held *TaskReview, status TodoPRStatu
 	}
 	if status.URL == cur.PR || parkReviewChangeRequested(held, status) {
 		switch {
-		case status.actionableReview.State != "":
+		case status.actionableReview.State == "CHANGES_REQUESTED":
 			r := status.actionableReview
-			if strings.EqualFold(r.State, "COMMENTED") &&
-				(status.Review == "approved" || commentedReviewLooksInformational(r.Body)) {
-				break
-			}
 			eventID := strings.ToLower(r.State)
 			if r.ID > 0 {
-				eventID = fmt.Sprintf("review:%d", r.ID)
+				eventID = prReviewEventID(r.ID)
 			} else if !r.SubmittedAt.IsZero() {
 				eventID = strings.ToLower(r.State) + ":" + r.SubmittedAt.UTC().Format(time.RFC3339Nano)
 			}
@@ -314,31 +314,99 @@ func reviewAuthorHasWriteAssociation(assoc string) bool {
 	}
 }
 
-// commentedReviewLooksInformational filters out purely informational or no-defect COMMENTED reviews
-// (such as automated semantic reviews and short LGTM/QA-pass notes) so they never wake Agents or supervisors.
+var (
+	prCheckStatusLine    = lazyre.New(`^(?:(?:all )?ci(?: checks?| status)?|all checks|checks|(?:all )?tests|test suite|build|lint)(?:: ?| (?:has |have |is |are )?)(?:[✅❌] ?)?(?:passed|passing|failed|failing|green|red|succeeded|successful|success|failure|pending|complete|completed)$`)
+	prCoverageStatusLine = lazyre.New(`^(?:code )?coverage(?: report)?(?:: ?| (?:is )?)(?:[0-9]+(?:\.[0-9]+)?%|updated|passed|failed|unchanged)$`)
+	prWatcherReviewLine  = lazyre.New("^automated independent semantic review(?: at `[0-9a-f]+`)? found no blocking defects$")
+	prWatcherCheckLine   = lazyre.New("^- `[^`]+`$")
+)
+
+// Match whole acknowledgments and known status lines. Any additional finding keeps the review actionable.
 func commentedReviewLooksInformational(body string) bool {
-	lower := strings.ToLower(strings.TrimSpace(body))
-	if lower == "" {
-		return true
-	}
-	for _, phrase := range []string{
-		"no blocking defects",
-		"no blocking issues",
-		"found no blocking",
-		"no defects found",
-		"no issues found",
-		"nothing blocking",
-	} {
-		if strings.Contains(lower, phrase) {
-			return true
+	watcher := false
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.ToLower(strings.Join(strings.Fields(line), " "))
+		line = strings.Trim(line, " .!:✅👍🎉*_")
+		switch line {
+		case "", "lgtm", "looks good", "looks good to me", "approved", "ship it", "thanks", "thank you", "great work", "nice work",
+			"all green", "qa passed", "verified", "verified on a separate machine", "no blocking defects",
+			"no blocking issues", "found no blocking defects", "found no blocking issues", "no defects found", "no issues found", "nothing blocking",
+			"the watcher merged current main into the same-repository branch to resolve the stale base. the new head will be reviewed",
+			"the verification branch was behind main. the watcher merged current main into the same-repository branch and will review the new head":
+			continue
+		}
+		if prWatcherReviewLine.MatchString(line) {
+			watcher = true
+			continue
+		}
+		if watcher {
+			switch line {
+			case "local checks completed", "- no additional successful lanes",
+				"this records only the checks listed above; it does not claim unrun device or visual acceptance",
+				"semantic-only mode: no full build/vet, cross-platform, build-tag or full-test suite was run. only the lightweight checks listed above and the exact-head merge gates apply",
+				"screenshot acceptance was not performed: no ui evidence adapter is configured":
+				continue
+			}
+			if prWatcherCheckLine.MatchString(line) {
+				continue
+			}
+		}
+		if !prCheckStatusLine.MatchString(line) && !prCoverageStatusLine.MatchString(line) {
+			return false
 		}
 	}
-	trimmed := strings.Trim(lower, " .!✅👍🎉\t\r\n")
-	switch trimmed {
-	case "lgtm", "looks good", "looks good to me", "ship it", "all green", "qa passed", "verified":
-		return true
+	return true
+}
+
+// Feedback is serialized per task and PR. Its route record protects a completed send or fallback if
+// the separate cursor write fails. An uncertain direct send retries only the supervisor fallback.
+func (s *Service) deliverPRFeedback(ctx context.Context, t Todo, ev prRoutedEvent) error {
+	key := prEventDedupeKey(ev)
+	b := &s.prEventRoute
+	b.mu.Lock()
+	s.loadPREventRouteSeenLocked(ctx)
+	prior, handled := b.seen[key]
+	loaded := b.loaded
+	b.mu.Unlock()
+	if !loaded {
+		return errors.New("PR event dedupe history could not be read")
 	}
-	return false
+	switch prior.Outcome {
+	case prRouteOutcomeSent, prRouteOutcomeQueued, prRouteOutcomeResumed:
+		return nil
+	case prRouteOutcomeFallback:
+		if !prior.FallbackPending {
+			return nil
+		}
+	}
+	cause := errors.New("direct Agent routing was unavailable")
+	if prior.Outcome == prRouteOutcomeUncertain {
+		cause = errors.New("delivery to Agent is unconfirmed")
+	}
+	if !handled {
+		outcome, err := s.deliverPREventToAgent(ctx, t, ev, key)
+		if err == nil {
+			return s.recordPREventRoute(ctx, key, prEventRouteRecord{TodoID: t.ID, Outcome: outcome})
+		}
+		cause = err
+		pending := prEventRouteRecord{TodoID: t.ID, Outcome: prRouteOutcomeFallback, FallbackPending: true}
+		if sendUnknown(err) {
+			pending.Outcome = prRouteOutcomeUncertain
+		} else if t.Supervision == nil {
+			return err
+		}
+		// Hold the fallback route across retries even if the Agent comes back while the outbox is being saved.
+		if err := s.recordPREventRoute(ctx, key, pending); err != nil {
+			return err
+		}
+	}
+	if _, ok := s.prFeedbackTarget(t.ID, ev.PRURL, ev.HeadSHA, ev.CheckedAt); !ok {
+		return errors.New("PR feedback no longer matches the task")
+	}
+	if t.Supervision == nil || !s.signalReplacing(nil, prEventFallbackSignal(t.ID, ev, cause)) {
+		return fmt.Errorf("could not enqueue review %s for the supervisor: %w", ev.EventID, cause)
+	}
+	return s.recordPREventRoute(ctx, key, prEventRouteRecord{TodoID: t.ID, Outcome: prRouteOutcomeFallback})
 }
 
 // routePREvents routes actionable PR events directly to the bound Agent when assistant.pr_events_route_to_agent is on.
@@ -448,7 +516,7 @@ func prEventFallbackSignal(todoID string, ev prRoutedEvent, cause error) supervi
 		detail = fmt.Sprintf("PR %s at head %s event %s; direct Agent routing unavailable (%s).",
 			ev.PRURL, shortSHA(ev.HeadSHA), ev.Kind, clip(oneLine(cause.Error()), 120))
 	}
-	return superviseSignal{
+	signal := superviseSignal{
 		Todo:   todoID,
 		Kind:   sigPREvent,
 		PRURL:  ev.PRURL,
@@ -456,6 +524,11 @@ func prEventFallbackSignal(todoID string, ev prRoutedEvent, cause error) supervi
 		Key:    key,
 		Detail: detail,
 	}
+	if ev.ReviewState == "COMMENTED" {
+		signal.PREventID = ev.EventID
+		signal.Detail += " Review: " + ev.EventURL + "\n" + wrapUntrustedExternalContent("github_pr_review", ev.Author, ev.PRURL, ev.HeadSHA, ev.Body)
+	}
+	return signal
 }
 
 func (s *Service) prEventSignalStillHolds(t Todo, g superviseSignal) bool {
@@ -476,11 +549,10 @@ func (s *Service) prEventSignalStillHolds(t Todo, g superviseSignal) bool {
 	case prEventKindCIFailure:
 		return p.Checks == "failure"
 	case prEventKindReview:
-		if p.Review == "changes_requested" {
-			return true
+		if g.PREventID != "" {
+			return t.PRURL == g.PRURL && s.stagePR(t.ID) == g.PRURL && !needsUserWakeEligible(t)
 		}
-		return p.Review != "approved" && p.actionableReview.State != "" &&
-			!commentedReviewLooksInformational(p.actionableReview.Body)
+		return p.Review == "changes_requested"
 	default:
 		return false
 	}
@@ -541,11 +613,19 @@ func (s *Service) deliverPREventToAgent(ctx context.Context, t Todo, ev prRouted
 		if latest, ok := s.todoNow(t.ID); !ok || !taskOpen(latest) {
 			return "", errors.New("task closed before delivery")
 		}
+		if ev.ReviewState == "COMMENTED" {
+			if _, ok := s.prFeedbackTarget(t.ID, ev.PRURL, ev.HeadSHA, ev.CheckedAt); !ok {
+				return "", errors.New("PR feedback no longer matches the task")
+			}
+		}
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
 		defer cancel()
 		var sent agentSendReply
 		if err := s.call(sctx, am.ID, DeviceSessionSend, params, &sent); err != nil {
 			return "", err
+		}
+		if ev.ReviewState == "COMMENTED" && !sent.OK && !sent.Queued {
+			return "", &completedNodeWriteError{errors.New("the node did not confirm review delivery")}
 		}
 		s.progressMade(am.ID, c.SessionID, time.Now())
 		if cur.Origin != "" {
@@ -596,19 +676,14 @@ func (s *Service) deliverPREventToAgent(ctx context.Context, t Todo, ev prRouted
 	return prRouteOutcomeResumed, nil
 }
 
+var prEventClosingTag = lazyre.New(`(?i)</untrusted_external_content`)
+
 // wrapUntrustedExternalContent encloses external PR/review text in an explicit untrusted-content envelope and
 // neutralizes any embedded closing tag so untrusted text cannot break out of the delimiter.
 func wrapUntrustedExternalContent(source, author, prURL, headSHA, body string) string {
-	sanitized := strings.TrimSpace(body)
-	if sanitized != "" {
-		sanitized = clip(sanitized, 2000)
-		// Neutralize case-insensitive closing tags inside untrusted content.
-		lower := strings.ToLower(sanitized)
-		for idx := strings.Index(lower, "</untrusted_external_content"); idx >= 0; idx = strings.Index(lower, "</untrusted_external_content") {
-			sanitized = sanitized[:idx] + "&lt;/" + sanitized[idx+2:]
-			lower = strings.ToLower(sanitized)
-		}
-	}
+	sanitized := prEventClosingTag.ReplaceAllStringFunc(clip(strings.TrimSpace(body), prEventBodyLimit), func(tag string) string {
+		return "&lt;" + tag[1:]
+	})
 	var attrs strings.Builder
 	fmt.Fprintf(&attrs, `source=%q`, source)
 	if author != "" {

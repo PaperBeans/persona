@@ -390,7 +390,7 @@ func (h larkHost) AcceptAction(ctx context.Context, a *botcard.CardAction) (stri
 			ask.Chosen = "" // the recommended one: taken as OK takes it
 		}
 	} else if at := a.Str("asked_at"); at != "" { // a button of a briefing card: it accepts the round it was asked in (briefing.go)
-		result, err = s.acceptTryFromBrief(ctx, a.Str("id"), at)
+		result, err = s.acceptReviewRound(ctx, a.Str("id"), at)
 	} else {
 		result, err = s.acceptTry(ctx, a.Str("id"), a.Context.MessageID)
 	}

@@ -4025,5 +4025,82 @@ class MergeTests(unittest.TestCase):
         nothing.assert_not_called()
 
 
+class PrepareWorktreeTests(unittest.TestCase):
+    """The checkout's FETCH_HEAD is shared with every other fetch in the same clone (#16759)."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="pr-watch-prepare-")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        (self.root / "checkout").mkdir()
+        self.config = {"repositories": [{"name": "example/one", "checkout": str(self.root / "checkout"),
+                                        "base": "main", "verify": {"profile": "commands", "commands": [["true"]]},
+                                        "merge": False, "privacy": None, "notify_command": None}],
+                       "reviewer": {}, "webhook": {}, "poll_seconds": 60, "workers": 1,
+                       "state": str(self.root / "state.json")}
+        self.watcher = pr_watch.Watcher(self.config, verbose=False)
+
+    def test_each_fetch_lands_in_its_own_ref_not_the_shared_fetch_head(self):
+        calls = []
+        def fake_checked(argv, **kwargs):
+            calls.append(argv)
+            if argv[:3] == ["gh", "repo", "view"]:
+                return "example/one\n"
+            if argv[:2] == ["git", "rev-parse"]:
+                return (SHA_BASE if argv[2].endswith("/base") else SHA_A) + "\n"
+            return ""
+        with patch.object(pr_watch, "checked", side_effect=fake_checked):
+            worktree = self.watcher.prepare_worktree("example/one", 7, pr())
+        self.assertEqual(worktree.parent, pr_watch_recovery.owned_root(self.config["state"]))
+        self.assertIn(["git", "fetch", "-q", "origin", "+refs/heads/main:refs/pr-watch/prepare/7/base"], calls)
+        self.assertIn(["git", "fetch", "-q", "origin", "+pull/7/head:refs/pr-watch/prepare/7/head"], calls)
+        self.assertIn(["git", "rev-parse", "refs/pr-watch/prepare/7/base"], calls)
+        self.assertIn(["git", "rev-parse", "refs/pr-watch/prepare/7/head"], calls)
+        self.assertEqual([argv for argv in calls if "FETCH_HEAD" in argv], [])
+
+    def test_another_fetch_in_the_checkout_does_not_invalidate_the_preparation(self):
+        """Reproduce the race: merge-pr.sh fetches the PR head between the watcher's two fetches."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "GH_", "PYTHON"))}
+        env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+        def git(*args, cwd=None):
+            result = subprocess.run(("git",) + args, cwd=cwd or self.root / "checkout", env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result.stdout.strip()
+        git("init", "-q", "--bare", str(self.root / "origin.git"))
+        git("init", "-q", "-b", "main")
+        git("config", "user.name", "Test User")
+        git("config", "user.email", "test@example.com")
+        git("config", "commit.gpgSign", "false")
+        (self.root / "checkout" / "a.txt").write_text("base\n")
+        git("add", "a.txt")
+        git("commit", "-q", "-m", "Base")
+        base = git("rev-parse", "HEAD")
+        git("remote", "add", "origin", str(self.root / "origin.git"))
+        git("push", "-q", "origin", "main")
+        git("checkout", "-q", "-b", "feature")
+        (self.root / "checkout" / "b.txt").write_text("head\n")
+        git("add", "b.txt")
+        git("commit", "-q", "-m", "Head")
+        head = git("rev-parse", "HEAD")
+        git("push", "-q", "origin", "+HEAD:refs/pull/7/head")
+        git("checkout", "-q", "main")
+        real = pr_watch_common.checked
+        def racing_checked(argv, **kwargs):
+            if argv[:3] == ["gh", "repo", "view"]:
+                return "example/one\n"
+            result = real(argv, **kwargs)
+            if argv[:2] == ["git", "fetch"] and "refs/heads/main" in argv[4]:
+                # Another process (scripts/hooks/merge-pr.sh) fetches its PR head into FETCH_HEAD right now.
+                real(["git", "fetch", "-q", "origin", "pull/7/head"], cwd=kwargs["cwd"], timeout=60)
+            return result
+        with patch.object(pr_watch, "checked", side_effect=racing_checked):
+            worktree = self.watcher.prepare_worktree("example/one", 7, pr(head=head, baseRefOid=base))
+        try:
+            self.assertEqual(git("rev-parse", "HEAD", cwd=worktree), head)
+        finally:
+            self.watcher.remove_worktree("example/one", worktree)
+
+
 if __name__ == "__main__":
     unittest.main()

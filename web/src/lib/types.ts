@@ -190,6 +190,8 @@ export interface SessionCapabilities {
 /** A session's work state (docs/assistant/agent-work.md): working, blocked on a named precondition, or done. */
 export interface WorkState {
   phase: "working" | "blocked" | "done" | "";
+  /** End of this turn, unlike state_since which changes when a reply is read or the hub restarts. */
+  turn_at?: string;
   /** What a blocked one waits on: user (a decision), agent, external (a deploy, CI, a time), transient (a model error). */
   on?: "user" | "agent" | "external" | "transient";
   /** One line for the lists: what it waits for, or what it concluded. */

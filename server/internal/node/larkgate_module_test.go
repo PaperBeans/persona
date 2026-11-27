@@ -97,7 +97,7 @@ func TestLarkGateDisabledDegradesCleanly(t *testing.T) {
 	if got := larkDecision(cfg, readCall); got != "allow" {
 		t.Fatalf("generic GET decision = %q, want allow", got)
 	}
-	if !larkRead(readCall) || !larkBypassSafe(readCall) || larkCallOutwardWrite(readCall) {
+	if !larkRead(readCall) || !larkBypassSafe(readCall) || larkCallOutwardWrite(cfg.Gates, readCall) {
 		t.Fatalf("generic GET read/bypass/outward unexpected")
 	}
 	ordinaryWrite := larkCall{Gate: 0, Method: "POST", Path: "/notes", Body: `{}`}
@@ -105,11 +105,11 @@ func TestLarkGateDisabledDegradesCleanly(t *testing.T) {
 		t.Fatalf("generic ordinary write decision=%q bypassSafe=%v", got, larkBypassSafe(ordinaryWrite))
 	}
 	sendCall := larkCall{Gate: 0, Method: "POST", Path: "/conversations/7123/messages", Body: `{"text":"hi"}`}
-	if larkBypassSafe(sendCall) || !larkCallOutwardWrite(sendCall) {
+	if larkBypassSafe(sendCall) || !larkCallOutwardWrite(cfg.Gates, sendCall) {
 		t.Fatalf("generic outbound write must stay behind confirmation")
 	}
 	delCall := larkCall{Gate: 0, Method: "DELETE", Path: "/files/1"}
-	if larkBypassSafe(delCall) || !larkCallOutwardWrite(delCall) {
+	if larkBypassSafe(delCall) || !larkCallOutwardWrite(cfg.Gates, delCall) {
 		t.Fatalf("generic delete must stay behind confirmation")
 	}
 	if got := callTitle(cfg.Gates, sendCall); got != "示例" {
@@ -128,7 +128,7 @@ func TestLarkGateDisabledDegradesCleanly(t *testing.T) {
 		t.Fatalf("cli read must fail closed with lark off")
 	}
 	cliBotSend := larkCall{Gate: -1, CLI: true, Method: "CLI", Path: "/im/+messages-send", Risk: "write", Args: []string{"im", "+messages-send", "--as", "bot"}}
-	if larkBypassSafe(cliBotSend) || !larkCallOutwardWrite(cliBotSend) {
+	if larkBypassSafe(cliBotSend) || !larkCallOutwardWrite(cfg.Gates, cliBotSend) {
 		t.Fatalf("cli --as bot send must fail closed with lark off")
 	}
 	cliAPI := larkCall{Gate: -1, CLI: true, Method: "POST", Path: "/open-apis/im/v1/messages", Args: []string{"api", "POST", "/open-apis/im/v1/messages"}}

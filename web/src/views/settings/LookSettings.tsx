@@ -15,6 +15,7 @@ import {
 import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar-recent";
 import { setSidebarUsageShown, useSidebarUsageShown } from "../../lib/sidebar-usage";
 import { setSidebarIconMode, SIDEBAR_ICON_MODES, useSidebarIconMode, type SidebarIconMode } from "../../lib/sidebar-icons";
+import { PHONE_NAV_MODES, setPhoneNavMode, usePhoneNavMode, type PhoneNavMode } from "../../lib/phone-nav";
 import { usePersona } from "../assistant/Persona";
 import { Segmented } from "../assistant/parts";
 import { Slider } from "../../ui/Slider";
@@ -249,6 +250,16 @@ export function SidebarIconsRow() {
   return (
     <Row label={t("ui-look.sidebar_icons")} hint={t("ui-look.sidebar_icons_hint")} wrapHint stackOnNarrow anchor="sidebar-icons">
       <Segmented<SidebarIconMode> label={t("ui-look.sidebar_icons")} value={mode} options={SIDEBAR_ICON_MODES.map((v) => ({ v, label: t(`ui-look.sidebar_icons_${v}`) }))} onChange={setSidebarIconMode} />
+    </Row>
+  );
+}
+
+/** "Phone navigation" (lib/phone-nav.ts): the top bar's switch, the default, or a tab bar along the bottom. */
+export function PhoneNavRow() {
+  const mode = usePhoneNavMode();
+  return (
+    <Row label={t("ui-look.phone_nav")} hint={t("ui-look.phone_nav_hint")} wrapHint stackOnNarrow anchor="phone-nav">
+      <Segmented<PhoneNavMode> label={t("ui-look.phone_nav")} value={mode} options={PHONE_NAV_MODES.map((v) => ({ v, label: t(`ui-look.phone_nav_${v}`) }))} onChange={setPhoneNavMode} />
     </Row>
   );
 }

@@ -318,8 +318,11 @@ Each received push redraws both the Dynamic Island and the Lock Screen, so the h
   that token replaces, and it ends an activity `fleetRetireBefore` (20 minutes) before `fleetMaxAge`, so the next start never sits
   beside a card iOS ended.
 - **No push route, no card in the background** (#12982): going to the background while the first group's hub has no push route
-  to this phone (`PushRoute.route == "none"`, e.g. the relay refusing its topic), the app ends the activity: nothing could update
-  or end it any more, and it would keep old counts and an old request for hours. It starts again when the app is back in front.
+  to this phone (`PushRoute.route == "none"`, e.g. the relay refusing its topic, or no route at all for this credential, which
+  Settings › Notifications reads as "no push registration for this device", #16756), the app ends the activity: nothing could
+  update or end it any more, and it would keep old counts and an old request for hours. It starts again when the app is back in
+  front. An unknown route (an older hub that reports none, or none read yet) keeps the activity: that hub may well push
+  (`PushHealth.pushReaches`, `LiveActivityController.endsOnLeaving`).
 
 ## Buttons (`apple/LiveActivity/FleetIntents.swift`)
 

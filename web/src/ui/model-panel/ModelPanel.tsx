@@ -648,51 +648,54 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     );
   };
 
-  // a provider's rows by family (lib/model-families.ts): a family's header and its fold, then its rows
-  const renderBlocks = (s: PanelSection) =>
-    s.blocks
-      ? s.blocks.map((b) =>
-          b.family ? (
-            <div key={b.key} role="group" aria-label={b.family.label} data-panel-family={b.family.key}>
-              <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 pb-0.5">
-                <span aria-hidden className="min-w-0 truncate text-submeta leading-[1.4] text-ink-3">
-                  {b.family.label}
-                </span>
-                {b.older > 0 && (
-                  <button
-                    type="button"
-                    aria-expanded={Boolean(b.open)}
-                    aria-label={
-                      b.open
-                        ? t("ui-modelpanel.hide_older_of", {
-                            family: b.family.label,
-                          })
-                        : t("ui-modelpanel.older_of", {
-                            family: b.family.label,
-                            count: b.older,
-                          })
-                    }
-                    data-panel-fold={b.key}
-                    disabled={picking}
-                    onClick={() => toggleFamily(b.key)}
-                    className="ml-auto flex shrink-0 items-center gap-0.5 rounded-control px-1.5 py-0.5 text-submeta leading-[1.4] whitespace-nowrap text-ink-3 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
-                  >
-                    {b.open
-                      ? t("ui-modelpanel.hide_older")
-                      : t("ui-modelpanel.older", {
-                          count: b.older,
-                        })}
-                    <Icon name="chevron" size={11} className={cx("shrink-0 transition-transform duration-150", b.open && "rotate-180")} />
-                  </button>
-                )}
-              </div>
-              {b.rows.map(renderRow)}
-            </div>
-          ) : (
-            <div key={b.key}>{b.rows.map(renderRow)}</div>
-          ),
-        )
-      : s.rows.map(renderRow);
+  // a provider's rows by family (lib/model-families.ts): a family's header and its fold, then its rows;
+  // trailing unclassified/custom rows sit under a localized "Other" header so they never appear under the last family
+  const renderBlocks = (s: PanelSection) => {
+    if (!s.blocks) return s.rows.map(renderRow);
+    const hasFamilies = s.blocks.some((b) => Boolean(b.family));
+    return s.blocks.map((b) => {
+      const heading = b.family?.label ?? (b.other && hasFamilies ? t("ui-modelpanel.other") : undefined);
+      return heading ? (
+        <div key={b.key} role="group" aria-label={heading} data-panel-family={b.family?.key ?? "other"}>
+          <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 pb-0.5">
+            <span aria-hidden className="min-w-0 truncate text-submeta leading-[1.4] text-ink-3">
+              {heading}
+            </span>
+            {b.family && b.older > 0 && (
+              <button
+                type="button"
+                aria-expanded={Boolean(b.open)}
+                aria-label={
+                  b.open
+                    ? t("ui-modelpanel.hide_older_of", {
+                        family: b.family.label,
+                      })
+                    : t("ui-modelpanel.older_of", {
+                        family: b.family.label,
+                        count: b.older,
+                      })
+                }
+                data-panel-fold={b.key}
+                disabled={picking}
+                onClick={() => toggleFamily(b.key)}
+                className="ml-auto flex shrink-0 items-center gap-0.5 rounded-control px-1.5 py-0.5 text-submeta leading-[1.4] whitespace-nowrap text-ink-3 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
+              >
+                {b.open
+                  ? t("ui-modelpanel.hide_older")
+                  : t("ui-modelpanel.older", {
+                      count: b.older,
+                    })}
+                <Icon name="chevron" size={11} className={cx("shrink-0 transition-transform duration-150", b.open && "rotate-180")} />
+              </button>
+            )}
+          </div>
+          {b.rows.map(renderRow)}
+        </div>
+      ) : (
+        <div key={b.key}>{b.rows.map(renderRow)}</div>
+      );
+    });
+  };
   const flyMode = (row: PanelRow): FlyoutMode => {
     if (row.kind === "favorite") return "favorite";
     return row.customized || (row.kind === "model" && row.current && currentExtraReset) ? "customized" : "recommended";

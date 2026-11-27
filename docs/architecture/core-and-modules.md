@@ -484,23 +484,23 @@ platform compiles cannot hide a violation (`TestModuleGuardsSeeEveryBuild` prove
 
 ### The briefing pilot
 
-The daily briefing (`internal/assistant/briefing*.go`) is a module (#13430, decision 3; #13845). Fact gathering, the
-evening all-day recording summary, the `brief` chat feed item, the model-failure fallback, the wait-row setting and the
-wait rules live in `server/internal/modules/briefing` behind narrow `modapi.Host` ports; the Lark card renderer
-(`briefing_card.go`) and HTTP routes (`briefRoutes` in `briefing_feed.go`) stay in package assistant until a neutral
-`Card` model and the `hub_routes` slot land.
+The daily briefing is a built-in module (#13430, decision 3; #13845). The scheduler calls its runner through
+`modapi`. The runner prepares the facts, feed item and paginated message cards for delivery.
 
 - **The module owns** (`server/internal/modules/briefing`): the `assistant.briefing_waits` setting (its type, defaults,
   validation and card text), the wait rules of the briefing's per-direction rows, routine fact gathering (`FactsAt`,
   Inbox follow-up filtering, in-progress sorting, per-run retention and schedule lifecycle hooks), the evening day
-  recording summary (`Day`, `BoundDay`), the `brief` feed item body and writer, and the model-failure fallback lifecycle.
+  recording summary (`Day`, `BoundDay`), the `brief` feed item body and writer, the model-failure fallback lifecycle,
+  card rendering and pagination, and the `POST /api/v1/later/{id}/handled` feed action registered through `AddHubRoute`.
 - **The core keeps** the stored value (the `briefing_waits` field of the assistant's settings, byte for byte as before),
   the setting's description in `persona_settings`, the ledgers behind the narrow `modapi.Ports` adapters
-  (`server/internal/assistant/modules_ports.go`), the Lark card renderer (`briefing_card.go`) and `briefRoutes`.
+  (`server/internal/assistant/modules_ports.go`), transport retries and the shared `POST /api/v1/todos/{id}/accept`
+  action used by ordinary to-do reviews and decisions.
 - **With the module absent** a routine with facts on opens with no facts and keeps no briefing run, so its answer goes
   out as a routine with facts off does (no brief item, no briefing rows on the Lark card); a daily report gets the north
   star's lines alone; the acceptance reminders wait for no briefing; `assistant.briefing_waits` is hidden from
-  `persona_settings` but stays stored. `server/internal/assistant/modules_test.go` covers each of these.
+  `persona_settings` but stays stored. The later-item action returns 404. Conversation history still serves stored
+  brief items and the shared to-do acceptance action stays available. `server/internal/assistant/modules_test.go` covers each of these.
 
 ### Volcengine speech
 

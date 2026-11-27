@@ -200,7 +200,12 @@ export function applyLook(doc: Document = document) {
     if (desktopGlass) root.dataset.desktopGlass = "1";
     else delete root.dataset.desktopGlass;
   }
-  if (typeof window !== "undefined" && doc === document) window.personaDesktop?.setSurfaceStyle?.(style);
+  if (typeof window !== "undefined" && doc === document) {
+    const rawTheme = read("persona.theme");
+    const theme = rawTheme === "light" || rawTheme === "dark" ? rawTheme : "system";
+    window.personaDesktop?.setThemeSource?.(theme);
+    window.personaDesktop?.setSurfaceStyle?.(style);
+  }
 }
 
 // Another tab of this browser changed one (or its storage was cleared): this one follows at once, as with the appearance

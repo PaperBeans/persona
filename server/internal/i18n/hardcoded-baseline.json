@@ -14,7 +14,6 @@
   "internal/assistant/done.go": 3,
   "internal/modules/lark/ask_cards.go": 2,
   "internal/modules/lark/commands.go": 9,
-  "internal/assistant/feishu_push.go": 1,
   "internal/assistant/feishu_steps.go": 1,
   "internal/assistant/feishu_turn.go": 1,
   "internal/assistant/fleet_delegate.go": 1,

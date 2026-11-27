@@ -43,6 +43,7 @@
   "hide_older": "Hide earlier",
   "hide_older_of": "{family}: hide earlier versions",
   "latest": "Latest",
+  "other": "Other",
   "model_count": "{count} models",
   "current_launcher": "Current",
   "default_launcher": "Default",

@@ -159,7 +159,7 @@ func (s *Service) acceptTryFromApp(ctx context.Context, id, askedAt string) (acc
 			}
 		}
 	}
-	return s.acceptTryFromBrief(ctx, id, askedAt)
+	return s.acceptReviewRound(ctx, id, askedAt)
 }
 
 // The app's first press requests a one-time owner approval using the existing app

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"strings"
@@ -90,8 +91,10 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 		}
 		return
 	}
+	attempt := 1
 	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		q := admissionQueueEntry(now, reason, key, retry, pt.Queue)
+		attempt = q.Attempt
 		pt.Queue = &q
 		pt.Placement = queuedPlacement(t, &q)
 		pt.Error = ""
@@ -99,7 +102,7 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 	}); perr != nil {
 		s.logf("task %s: admission queue: persist: %v", t.TodoID, perr)
 	}
-	s.logf("task %s: admission queued (attempt %d): %s", t.TodoID, queueAttempt(t), reason)
+	s.logf("task %s: admission queued (attempt %d): %s", t.TodoID, attempt, reason)
 }
 
 func admissionQueueEntry(now time.Time, reason, key string, retry bool, before *TaskQueue) TaskQueue {
@@ -112,13 +115,6 @@ func admissionQueueEntry(now time.Time, reason, key string, retry bool, before *
 		}
 	}
 	return q
-}
-
-func queueAttempt(t PlanTask) int {
-	if t.Queue != nil {
-		return t.Queue.Attempt
-	}
-	return 1
 }
 
 // admissionQueueLoop retries queued starts until they pass the gate or exceed the queue bounds.
@@ -261,7 +257,7 @@ func (s *Service) failQueuedStart(ctx context.Context, p *TaskPlan, i int, pt Pl
 		s.taskStartFailed(ctx, todo, pt.Machine, pt.Start, reason) // a retry's timeout is news even with the same reason (#6027)
 		s.taskReport(todo, reportFailed, pt.Machine, [2]string{}, reason, nil)
 	}
-	s.logf("task %s: admission queue: gave up after %d attempt(s)", pt.TodoID, q.Attempt)
+	s.logf("task %s: admission queue: gave up after %d attempt(s) (queue=%s): %s", pt.TodoID, q.Attempt, cmp.Or(q.Key, "admission"), q.Reason)
 }
 
 // taskQueueStore lists recently updated or durably queued plans whose task blobs may hold admission queue records.

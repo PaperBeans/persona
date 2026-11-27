@@ -104995,6 +104995,121 @@
       },
       "extractionState": "manual"
     },
+    "Mail is turned off on the hub machine, so accounts can't be added or changed here. Mail already in your Inbox stays.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail is turned off on the hub machine, so accounts can't be added or changed here. Mail already in your Inbox stays."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでメール機能がオフになっているため、ここではアカウントの追加や変更はできません。受信トレイにあるメールはそのまま残ります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上已关闭邮件功能，所以这里不能添加或更改邮箱账号。收件箱里已有的邮件会保留。"
+          }
+        }
+      }
+    },
+    "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier, and it is cut short.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier, and it is cut short."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでメール機能がオフになっているため、メールの全文と添付ファイルは読み込めません。以前に保存されたテキストを表示しています。このテキストは途中までです。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上已关闭邮件功能，无法加载完整邮件和附件。这里是之前保存的文字，内容不完整。"
+          }
+        }
+      }
+    },
+    "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでメール機能がオフになっているため、メールの全文と添付ファイルは読み込めません。以前に保存されたテキストを表示しています。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上已关闭邮件功能，无法加载完整邮件和附件。这里是之前保存的文字。"
+          }
+        }
+      }
+    },
+    "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier; a long message may be cut short.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. This is the text saved earlier; a long message may be cut short."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでメール機能がオフになっているため、メールの全文と添付ファイルは読み込めません。以前に保存されたテキストを表示しています。長いメールは途中までの場合があります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上已关闭邮件功能，无法加载完整邮件和附件。这里是之前保存的文字，较长的邮件可能不完整。"
+          }
+        }
+      }
+    },
+    "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. No text was saved for this mail.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail is turned off on the hub machine, so the full message and its attachments can't be loaded. No text was saved for this mail."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブのマシンでメール機能がオフになっているため、メールの全文と添付ファイルは読み込めません。このメールのテキストは保存されていません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 所在的机器上已关闭邮件功能，无法加载完整邮件和附件。这封邮件没有保存下来的文字。"
+          }
+        }
+      }
+    },
     "Mail [Mail Views 730752]": {
       "localizations": {
         "en": {

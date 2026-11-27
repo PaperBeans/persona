@@ -852,6 +852,58 @@ a command-line tool on the computer, `offload.run` answers `needs_install` with 
 apps ask the user a second time and only then send `install: true`. The routes, errors and the install confirmation
 are in `docs/server/machine-usage-map.md` "Extension point `disk_offload`".
 
+### Facts and report sections for scheduled routines
+
+A library extension can add upcoming book returns to a morning briefing. The extension supplies the words and
+the routine decides when to run, how to display the section, and where to deliver the report.
+
+Declare a titled source and request the **routine facts** permission. The owner sees the request when installing
+the extension or upgrading a version that adds this permission.
+
+```json
+{
+  "permissions": { "routine_facts": true },
+  "contributes": {
+    "routine_facts": [{ "id": "loans", "title": "Library" }]
+  }
+}
+```
+
+Use an RPC runtime. A host that supports this contract advertises `routine_facts: 1` in
+`initialize.hub.extension_points`. On a run with facts or reporting enabled, the host calls
+`routine_facts.collect` with the manifest contribution ID, the local date (`YYYY-MM-DD`) and the report
+language (`en`, `zh-Hans` or `ja`). The grant permits contributing to the report. Access to a Persona
+data source still requires that source's own permission.
+
+The TypeScript SDK dispatches the call by contribution ID. A Go extension can register the same collector in
+`ext.Program.RoutineFacts` and return a `wire.RoutineFactsResult`.
+
+```ts
+import { main } from "@persona/extension";
+
+main({
+  id: "example-library",
+  version: "1.0.0",
+  routineFacts: {
+    async loans({ date, language }) {
+      const loans = await localLibrary.dueOn(date, language);
+      if (!loans.length) return {};
+      return {
+        facts: [localLibrary.dueCount(loans.length, language)],
+        sections: [{ title: localLibrary.dueHeading(language), body: loans[0].title }],
+      };
+    },
+  },
+});
+```
+
+Here `localLibrary` is the extension's own collection and translation code. Each response can contain up to
+four single-line facts of 280 characters each and two report sections. A section has a single-line title of
+up to 80 characters and a plain-text body of up to 1,600 characters. An empty object contributes nothing.
+Collect from a local snapshot when possible. The host calls up to eight sources in extension ID and contribution
+ID order, concurrently, with a shared two-second deadline and a 32 KiB limit on each response.
+Late or invalid responses are omitted from that run. Rendering an existing briefing uses its saved content.
+
 ### Memory sources
 
 A memory extension keeps entries about the user in its own state. The hub, not the extension, decides which of them

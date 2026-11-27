@@ -281,6 +281,7 @@ func (r *runner) Start(ctx context.Context, task modapi.BriefTaskInfo, now time.
 		}
 	}
 	run := &modapi.BriefRun{Facts: r.FactsAt(ctx, now, task.ID), Label: task.Label}
+	run.Facts.Contributions = task.Contributions
 	if r.tasks != nil {
 		// What the briefs say since the last briefing, told once: only a real run moves the mark, not a look at the facts.
 		run.Facts.Briefs, run.Facts.BriefsDone = r.tasks.TaskBriefDigest(ctx, now, run.Facts.Loc, true)
@@ -295,13 +296,13 @@ func (r *runner) Start(ctx context.Context, task modapi.BriefTaskInfo, now time.
 // are written into the conversation as a `brief` item at once (feed.go), whether or not a Lark card follows. The retry
 // of a run that failed (retried) adds no item: the conversation has the first one, and the retry's facts are the card's
 // and the model's.
-func (r *runner) Sent(id, session string, retried bool) {
-	run := r.attach(id, session)
+func (r *runner) Sent(scheduled modapi.BriefScheduleRun) {
+	run := r.attach(scheduled.RefID, scheduled.SessionID)
 	if run == nil {
 		return
 	}
-	if !retried && !run.FallbackOnly {
-		r.writeFeed(session, id, run.Label, run.Facts)
+	if !scheduled.Retried && !run.FallbackOnly {
+		r.writeFeed(scheduled, run.Label, run.Facts)
 	}
 }
 

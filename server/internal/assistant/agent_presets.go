@@ -60,10 +60,11 @@ func (s *Service) agentStartTier(ctx context.Context, m Device, tier, launcher s
 	if tier == "" {
 		return a2aRun{}, nil
 	}
-	t, err := s.tierModel(ctx, tier)
+	pick, err := s.pickTierCandidate(ctx, tier, tierFacts{Machine: m.ID}) // the tier's candidate for the computer it starts on
 	if err != nil {
 		return a2aRun{}, err
 	}
+	t := pick.Tier
 	run := a2aRun{Launcher: launcher}
 	if !layTier(t, &run.Launcher, &run.Model, &run.Effort) {
 		return a2aRun{}, nil // a launcher of the caller's own: the tier gives it nothing

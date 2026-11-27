@@ -121,7 +121,7 @@ func (s *Service) todoVerdicts(ctx context.Context, ids []string, gone map[strin
 // history (todoFeedConversations): a store-wide failure, which leaves every to-do it would have read on todoUntold
 // rather than one to-do's (#12216).
 func (s *Service) todoVerdictsRead(ctx context.Context, ids []string, gone map[string]Todo, read map[[2]string]proto.Session) (map[string]todoVerdict, error) {
-	return s.todoVerdictsFor(ctx, ids, gone, read, func(p TrackPolicy) bool { return p.HideFromExtensions })
+	return s.todoVerdictsReadFor(ctx, ids, gone, read, func(p TrackPolicy) bool { return p.HideFromExtensions })
 }
 
 // todoVerdictsFor is todoVerdicts parameterized by the track-policy predicate blocked (HideFromExtensions for extension

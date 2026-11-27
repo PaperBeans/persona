@@ -289,6 +289,49 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 	step := startRemedyBody{Action: "retry", By: "assistant", Attempt: attempt, Reason: reason}
 	switch {
 	case pt.Start != nil && pt.Start.State == remedying:
+		if pt.Queue != nil {
+			return "", fmt.Errorf("it is already queued to start (%s): wait for that attempt to finish or fail before retrying", cmp.Or(pt.Queue.Key, "admission"))
+		}
+		if pt.Machine == "" {
+			if with.launcher == "" && with.model != "" {
+				return "", i18n.Err("assistant-tasks.retry_model_without_launcher")
+			}
+			if err := checkModelID(with.model); err != nil {
+				return "", err
+			}
+			q := s.pendingPlacementQueueEntry(ctx, p.ID, 1, 0, s.placementNow())
+			q.Retry = true
+			var savedPlacement *placement
+			if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) {
+				if with.launcher != "" {
+					t.Launcher, t.Model, t.Tier = with.launcher, with.model, ""
+					t.LauncherDefaultModel = with.model == ""
+				}
+				t.Queue = &q
+				t.Placement = nil
+				t.Placement = queuedPlacement(*t, &q)
+				savedPlacement = t.Placement
+				if t.Start != nil {
+					t.Start.Attempt, t.Start.By, t.Start.At = attempt, "assistant", time.Now().UTC()
+				}
+				t.WorkspaceError = nil
+				t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", nil, nil
+			}); err != nil {
+				return "", err
+			}
+			if savedPlacement != nil {
+				s.savePlacement(ctx, savedPlacement)
+			}
+			on := ""
+			if with.launcher != "" && with.launcher != from {
+				step.LauncherFrom, step.LauncherTo = from, with.launcher
+				on = " with launcher " + with.launcher
+			}
+			s.remedyStep(ctx, p.Conversation, todo.ID, step)
+			s.logf("task %s: retrying its start via placement queue (plan %s)", todo.ID, p.ID)
+			s.onPendingPlacementEnqueued(ctx, p.ID, todo.ID, 1)
+			return fmt.Sprintf("starting again in a new tab%s (retry %d of %d); how it ends comes as a supervision message", on, attempt, startRemedyRetries), nil
+		}
 	case todo.failedStart(): // failed for good: reopened, in a new tab
 		// Marked first: the start retryTask runs reads its task as the plan has it, and tells the supervisor how it ends.
 		prev := pt.Start

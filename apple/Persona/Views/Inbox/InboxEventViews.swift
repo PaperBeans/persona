@@ -460,7 +460,7 @@ struct InboxSuggestionCard: View {
     /// Side by side, the main one last at the trailing edge (as the draft card had them); where that does not fit (the
     /// Mac's narrow action column) one under another, full width, the main one first.
     private func buttons(_ s: InboxItem.Suggestion) -> some View {
-        let actions = InboxEventText.actions(s)
+        let actions = MailModule.access.suggestionActions(s, for: item)
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 0)
@@ -1031,7 +1031,7 @@ struct InboxSourcePage: View {
             }
         case .mail:
             if let mail {
-                MailDetailView(summary: mail, accounts: accounts)
+                MailReaderView(item: item, summary: mail, accounts: accounts)
             } else {
                 EmptyStateView(symbol: Theme.Icon.info, title: item.title, message: item.preview)
             }
@@ -1125,7 +1125,8 @@ struct InboxEventPage: View {
 
     /// Draft Reply is offered when the item can be answered from here and no suggested reply is there already.
     private var canDraft: Bool {
-        let canReply = item.connector.map { $0.canReply == true } ?? true
+        // A mail's reply goes out through the hub's mail module: not offered while it is off (#15995).
+        let canReply = (item.connector.map { $0.canReply == true } ?? true) && MailModule.access.offersReply(to: item)
         return canReply && item.currentSuggestion?.kind != "reply" && !item.isDone
     }
 }

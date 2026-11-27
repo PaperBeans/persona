@@ -23,7 +23,10 @@ struct InboxActionBar: View {
             InboxLineSection(tree: line)
             HStack(spacing: Theme.Space.s) {
                 // A connector's thread that cannot be answered (a CI run) has only Hand to AI.
-                if item.connector.map({ $0.canReply == true }) ?? true {
+                // Nor has a mail while the hub's mail module is off: its reply could not go out (#15995).
+                if !MailModule.access.offersReply(to: item) {
+                    EmptyView()
+                } else if item.connector.map({ $0.canReply == true }) ?? true {
                     action(item.agentDraft == nil ? String(localized: "AI Draft Reply") : String(localized: "View Draft"), symbol: Theme.Icon.draftReply, prominent: true, perform: draft)
                 } else if let open = item.connector?.openURL, let url = Self.systemURL(open, draft: item.agentDraft) {
                     // Answered in the source's own app (Reply in Messages: Messages with the number, and the AI twin's draft;

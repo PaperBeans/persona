@@ -8,6 +8,7 @@ import { classifyConnectError } from "./connect-errors.js";
 import { allowPinnedSessionRequest, isValidPin, verifyPinnedCertificate } from "./tls-pin.js";
 import type { HubPin } from "./tls-pin.js";
 import { installDesktopIPC, DesktopNotifications } from "./ipc.js";
+import { applyDesktopThemeSource } from "./theme-source.js";
 import { PageRoutes } from "./page-routes.js";
 import { installSetupIPC, installSetupProtocol } from "./setup-ipc.js";
 import type { ConnectResponse } from "./setup-ipc.js";
@@ -289,6 +290,9 @@ async function showMain(): Promise<BrowserWindow | undefined> {
     setSurfaceStyle: style => {
       surfaceStyle = style;
       applySurfaceStyle(current, style);
+    },
+    setThemeSource: theme => {
+      applyDesktopThemeSource(nativeTheme, theme, () => applySurfaceStyle(current, surfaceStyle));
     },
   });
   const save = () => {
@@ -619,5 +623,5 @@ app.on("window-all-closed", () => {
 
 // Developing Persona (#9675): the shell's own record while the page's switch is on (dev-diagnostics.ts).
 import { installDevDiagnostics } from "./dev-diagnostics.js";
-import type { DesktopSurfaceStyle, DesktopWindowChrome } from "../../spec/desktop-bridge.js";
+import type { DesktopSurfaceStyle, DesktopThemeSource, DesktopWindowChrome } from "../../spec/desktop-bridge.js";
 installDevDiagnostics();

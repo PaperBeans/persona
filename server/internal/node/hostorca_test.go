@@ -102,6 +102,9 @@ func TestMain(m *testing.M) {
 	// #16217): the fixtures write ~/.zshrc, so a developer whose login shell is bash would run them in a bash that
 	// never reads it. zsh, as on most Macs; a test that wants another sets SHELL, or macLoginShell for an unset one.
 	pinTestLoginShell()
+	// Nor the user's login-shell proxy variables: tests exercising shell proxy fallback call readShellProxy directly
+	// or stub detectShellProxy themselves so unrelated tests never spawn a real login shell against the developer's HOME.
+	detectShellProxy = func(context.Context) shellProxy { return shellProxy{} }
 	// Nor the user's Claude config directory (claude under a profile, or these tests run from inside a Claude Code
 	// session): the node's own default is then ~/.claude of the test's home (#2140; a test that wants one sets its own).
 	os.Unsetenv("CLAUDE_CONFIG_DIR")

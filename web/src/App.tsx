@@ -32,6 +32,7 @@ import type { Session } from "./lib/types";
 import { useTabLookup } from "./lib/tab-lookup";
 import { ConnectionPill } from "./views/ConnectionPill";
 import { NARROW, useKeyboardFrame, useMedia } from "./lib/viewport";
+import { usePhoneNavMode } from "./lib/phone-nav";
 import { connect, disconnect, getState, reset, subscribe, type State, useHubUnreachable, useStore } from "./lib/store";
 import { watchRoster } from "./lib/managers";
 import { t } from "./i18n";
@@ -123,6 +124,8 @@ const Palette = lazyPage(() => import("./views/Palette").then((m) => m.Palette),
 // wide screen loads too; Shell loads it once the screen is narrow. A load that fails leaves the toasts at the bottom of
 // the page until the next toast tries again.
 const ToastLift = lazyPage(() => import("./ui/toast-lift").then((m) => m.ToastLift));
+// the phone tab bar (lib/phone-nav.ts) loads only where it is drawn: a narrow screen that chose it
+const PhoneTabBar = lazyPage(() => import("./views/PhoneTabBar").then((m) => m.PhoneTabBar));
 function PhoneToasts(props: ToastLiftProps) {
   return (
     <OverlayBoundary open onClose={() => {}}>
@@ -450,6 +453,7 @@ function Shell() {
 
   // ── the sidebar: a column on a wide screen, a drawer over the page on a narrow one (#1996) ──
   const narrow = useMedia(NARROW);
+  const phoneNav = usePhoneNavMode();
   // the toasts' placement, in before the first toast in practice
   useEffect(() => {
     if (narrow) void ToastLift.preload().catch(() => {});
@@ -719,6 +723,8 @@ function Shell() {
         <div className="relative min-h-0 flex-1">
           <PageBoundary page={href(route)}><Suspense fallback={<PageLoading />}><PerAssistant route={route}>{main}</PerAssistant></Suspense></PageBoundary>
         </div>
+        {/* Settings › Advanced › Appearance › Phone navigation: Tab bar puts the four main places along the bottom (#16761) */}
+        {narrow && phoneNav === "tabs" && <Suspense fallback={null}><PhoneTabBar route={route} /></Suspense>}
       </main>
       {macBay && <MacBayTools bay={macBay} onSearch={() => openPalette("jump")} />}
       <SidebarRowHoverHost />

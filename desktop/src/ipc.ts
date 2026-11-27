@@ -7,7 +7,8 @@ import { DesktopIPCOwner } from "./ipc-owner.js";
 import type { HubAddress } from "./urls.js";
 import type { IslandStatus } from "./island-model.js";
 import type { PageRoutes } from "./page-routes.js";
-import type { DesktopSurfaceStyle, DesktopWindowChrome } from "../../spec/desktop-bridge.js";
+import type { DesktopSurfaceStyle, DesktopThemeSource, DesktopWindowChrome } from "../../spec/desktop-bridge.js";
+import { parseDesktopThemeSource } from "./theme-source.js";
 
 function text(value: unknown, maximum: number): string {
   return typeof value === "string" ? value.trim().slice(0, maximum) : "";
@@ -66,15 +67,16 @@ export function installDesktopIPC(window: BrowserWindow, deps: {
     readonly set: (enabled: boolean) => Promise<IslandStatus>;
     readonly state: (value: unknown) => void;
   };
-  /** Unified macOS titlebar state & surface style (#16607). */
+  /** Unified macOS titlebar state & surface style (#16607, #16776). */
   readonly windowChrome: () => DesktopWindowChrome;
   readonly setSurfaceStyle: (style: DesktopSurfaceStyle) => void;
+  readonly setThemeSource: (theme: DesktopThemeSource) => void;
 }): () => void {
   const authorized = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => {
     const hub = deps.hub();
     return event.sender === window.webContents && !window.isDestroyed() && event.senderFrame === event.sender.mainFrame && !!hub && inHub(hub, event.senderFrame.url);
   };
-  const names = ["desktop:notification-permission", "desktop:badge", "desktop:notify", "desktop:notifications-clear", "desktop:notification-close", "desktop:presence", "desktop:open-local-settings", "desktop:island-state", "desktop:page-started", "desktop:notification-listening", "desktop:window-chrome", "desktop:surface-style"];
+  const names = ["desktop:notification-permission", "desktop:badge", "desktop:notify", "desktop:notifications-clear", "desktop:notification-close", "desktop:presence", "desktop:open-local-settings", "desktop:island-state", "desktop:page-started", "desktop:notification-listening", "desktop:window-chrome", "desktop:surface-style", "desktop:theme-source"];
   const handlers = ["desktop:login-get", "desktop:login-set", "desktop:island-get", "desktop:island-set"];
   const releaseOwnership = ipcOwner.install();
   for (const name of names) ipcMain.removeAllListeners(name);
@@ -143,6 +145,11 @@ export function installDesktopIPC(window: BrowserWindow, deps: {
   listen("desktop:surface-style", (event: Electron.IpcMainEvent, value: unknown) => {
     if (!authorized(event)) return;
     if (value === "default" || value === "liquid-glass") deps.setSurfaceStyle(value);
+  });
+  listen("desktop:theme-source", (event: Electron.IpcMainEvent, value: unknown) => {
+    if (!authorized(event)) return;
+    const theme = parseDesktopThemeSource(value);
+    if (theme) deps.setThemeSource(theme);
   });
   return () => {
     releaseOwnership();

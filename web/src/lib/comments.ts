@@ -5,7 +5,7 @@
 // here: the caps, line ranges, the block as written into the message and read back (an edit, a sent bubble).
 import type { DraftQuote } from "./drafts";
 import type { DiffLine } from "./files";
-import { openPanel } from "./panel";
+import { openPanel, type Panel } from "./panel";
 
 /** A comment's note is cut at this many characters. */
 export const MAX_COMMENT_CHARS = 4000;
@@ -89,6 +89,8 @@ export interface QuoteComment {
   body: string;
   anchor?: TextAnchor;
   spot?: CodeSpot;
+  /** The displayed file location and, for a draft, the file panel it came from. */
+  file?: { location: string; panel?: Extract<Panel, { kind: "file" }> };
   /** An element picked in a dev server preview (lib/preview.ts, #150); its HTML is the quote's text. */
   element?: ElementSpot;
 }
@@ -254,6 +256,8 @@ export function commentBlock(q: DraftQuote, n: number, images?: readonly number[
     out.push(`Comment ${n}`);
     if (images?.length) out.push(`Attached images for this comment (positions in this message): ${images.join(", ")}`);
     out.push("Selected text:", ...q.text.split("\n").map((l) => `> ${l}`));
+    // Old clients still read the selection. They show these lines at the start of the note.
+    if (c.file) out.push(`File: ${c.file.location}`);
   }
   if (note) out.push("", note);
   return out.join("\n");
@@ -270,8 +274,11 @@ export function parseCommentBlock(block: string): DraftQuote | null {
     if (lines[i]?.trim() === "Selected text:") i++;
     const words: string[] = [];
     while (i < lines.length && /^ {0,3}>/.test(lines[i])) words.push(lines[i++].replace(/^ {0,3}> ?/, ""));
+    const location = /^File: (.+)$/.exec(lines[i] ?? "")?.[1];
+    if (location) i++;
     const body = lines.slice(i).join("\n").trim();
-    return { text: words.join("\n").trim(), comment: { body } };
+    const text = words.join("\n");
+    return { text: location ? text : text.trim(), comment: location ? { body, file: { location } } : { body } };
   }
   if (head[1] === "Element comment") return parseElementBlock(lines.slice(1));
   const spot: Partial<CodeSpot> = { omitted: 0 };

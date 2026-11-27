@@ -283,6 +283,26 @@ class MergePrTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.merges(calls)), 1)
 
+    def test_a_competing_fetch_between_the_two_fetches_cannot_change_the_merged_base(self):
+        """The watcher preparing a worktree in the same clone fetches the PR head into the shared FETCH_HEAD (#16759).
+        That fetch is made to land between merge-pr.sh's own base and head fetches; the base it verified must still
+        merge, because each fetch lands in its own ref instead of FETCH_HEAD."""
+        head = self.open_pr()
+        base = self.git("rev-parse", "main")
+        real_git = shutil.which("git")
+        wrapper = Path(self.env["PATH"].split(os.pathsep)[0]) / "git"
+        wrapper.write_text("#!/bin/sh\n\"%s\" \"$@\"\nstatus=$?\n"
+                           "case \" $* \" in\n"
+                           "  (*\" fetch \"*\" refs/heads/main\"*) \"%s\" -C \"%s\" fetch -q origin pull/7/head ;;\n"
+                           "esac\nexit $status\n" % (real_git, real_git, self.repo))
+        wrapper.chmod(0o755)
+        try:
+            result, calls = self.merge_pr(self.view(head), extra_args=["--expect-head", head, "--expect-base", base])
+        finally:
+            wrapper.unlink()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.merges(calls)), 1)
+
     def test_expected_head_and_base_are_required(self):
         head = self.open_pr()
         base = self.git("rev-parse", "main")

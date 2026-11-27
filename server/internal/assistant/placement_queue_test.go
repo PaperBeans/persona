@@ -39,7 +39,20 @@ type placementTestEnv struct {
 	store  *placementTaskStore
 	mu     sync.Mutex
 	now    time.Time
+	logs   []string
 	events []recordedKBEvent
+}
+
+func (e *placementTestEnv) logsText() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.Join(e.logs, "\n")
+}
+
+func (e *placementTestEnv) clearLogs() {
+	e.mu.Lock()
+	e.logs = nil
+	e.mu.Unlock()
 }
 
 func (e *placementTestEnv) clockNow() time.Time {
@@ -115,7 +128,22 @@ func newPlacementTestEnv(t *testing.T) *placementTestEnv {
 	}
 
 	store := &placementTaskStore{profileTaskStore: &profileTaskStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s := New(Options{Hub: th, Store: func() Store { return store }})
+	env := &placementTestEnv{
+		f:     th,
+		d:     d,
+		store: store,
+		now:   time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC),
+	}
+	s := New(Options{
+		Hub:   th,
+		Store: func() Store { return store },
+		Logf: func(format string, args ...any) {
+			env.mu.Lock()
+			env.logs = append(env.logs, fmt.Sprintf(format, args...))
+			env.mu.Unlock()
+		},
+	})
+	env.s = s
 	t.Cleanup(func() {
 		waitFor(t, "task starts settle", func() bool { return s.taskStarting.Load() == 0 })
 	})
@@ -133,13 +161,6 @@ func newPlacementTestEnv(t *testing.T) *placementTestEnv {
 		v.MachineID = "hub-1"
 	})
 
-	env := &placementTestEnv{
-		s:     s,
-		f:     th,
-		d:     d,
-		store: store,
-		now:   time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC),
-	}
 	s.placementSched.now = env.clockNow
 	s.placementSched.manualSweep = true
 	// Register public/private conversation spaces in the space book so todoVerdicts knows them immediately.
@@ -769,6 +790,423 @@ func TestPlacementFallbackZeroSecondFifteenSecondAndTimeout(t *testing.T) {
 			t.Fatalf("todo should record StartError at 30m timeout: %+v", todo)
 		}
 	})
+}
+
+func (e *placementTestEnv) setDevicesOnline(online map[string]bool) {
+	e.f.mu.Lock()
+	defer e.f.mu.Unlock()
+	for i := range e.f.devices {
+		on := online[e.f.devices[i].ID]
+		e.f.devices[i].Online = on
+		e.f.devices[i].Reachable = on
+	}
+}
+
+func TestPlacementFallbackUsesHubWhenNoEligibleNonHubOnline(t *testing.T) {
+	t.Run("hub-only-online-remote-offline", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.setDevicesOnline(map[string]bool{"hub-1": true})
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Hub only auto placement",
+				"prompt":"Run task on the only online computer",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Finish check",
+				"user_requested":true,
+				"why":"Single online hub computer"
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "hub fallback starts on hub-1", func() bool {
+			return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+		})
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "hub-1" {
+			t.Fatalf("started on %v, want [hub-1]", starts)
+		}
+		p, err := e.s.loadPlan(ctx, planID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Tasks[0].Queue != nil || p.Tasks[0].Machine != "hub-1" {
+			t.Fatalf("plan task after hub fallback = %+v", p.Tasks[0])
+		}
+		if p.Tasks[0].Placement == nil || p.Tasks[0].Placement.Choice != "hub-1" || p.Tasks[0].Placement.ReasonKey != placementReasonFallback {
+			t.Fatalf("placement audit = %+v", p.Tasks[0].Placement)
+		}
+		logs := e.logsText()
+		for _, want := range []string{"placement queue: enqueued", "placement queue: assigned to hub-1"} {
+			if !strings.Contains(logs, want) {
+				t.Errorf("logs missing %q:\n%s", want, logs)
+			}
+		}
+	})
+
+	t.Run("hub-fallback-when-only-non-hub-fails-hard-constraints", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.setDevicesOnline(map[string]bool{"hub-1": true, "mac-1": true})
+
+		_, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Linux task on hub with darwin worker online",
+				"prompt":"Run linux build",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Build on linux",
+				"user_requested":true,
+				"why":"Needs linux",
+				"placement_constraints":{"os":"linux"}
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.s.sweepPendingPlacement(ctx)
+		waitFor(t, "linux task falls back to hub-1", func() bool {
+			return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+		})
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "hub-1" {
+			t.Fatalf("started on %v, want [hub-1]", starts)
+		}
+	})
+
+	t.Run("hub-fallback-respects-candidate-machines", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.setDevicesOnline(map[string]bool{"hub-1": true})
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Pinned to offline worker",
+				"prompt":"Wait for worker",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Run on worker",
+				"user_requested":true,
+				"why":"Must run on linux-idle",
+				"placement_constraints":{"candidate_machines":["linux-idle"]}
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		e.s.sweepPendingPlacement(ctx)
+		if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+			t.Fatalf("hub not in candidate_machines must not start: %v", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue == nil || !strings.Contains(p.Tasks[0].Queue.Reason, "candidate_machines") {
+			t.Fatalf("queue reason should name candidate_machines constraint: %+v", p.Tasks[0].Queue)
+		}
+	})
+
+	t.Run("extension-assign-allows-hub-when-no-eligible-non-hub-online", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.setDevicesOnline(map[string]bool{"hub-1": true})
+		_ = e.doReq(http.MethodGet, "/api/v1/assistant/placement/pending", roleExtension, "sched-ext", "")
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Extension hub fallback",
+				"prompt":"Run via scheduler on hub",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Confirm hub assign",
+				"user_requested":true,
+				"why":"Single online hub"
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		p, _ := e.s.loadPlan(ctx, planID)
+		todoID := p.Tasks[0].TodoID
+		rec := e.doReq(http.MethodPost, "/api/v1/assistant/placement/"+todoID+"/assign", roleExtension, "sched-ext", `{"machine":"hub-1","reason":"only online computer","version":1}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("hub assign with no online non-hub = %d %s, want 200", rec.Code, rec.Body.String())
+		}
+		waitFor(t, "assigned hub task starts", func() bool {
+			return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+		})
+		if starts := taskStartMachines(e.f.fakeHub); starts[0] != "hub-1" {
+			t.Fatalf("started on %v, want [hub-1]", starts)
+		}
+	})
+}
+
+func TestPlacementDiagnosticReasonAndGiveUpLogNameGateAndNumbers(t *testing.T) {
+	t.Run("overloaded-non-hub-keeps-hub-protected-and-reports-exact-numbers", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.f.hello.Locale = "en"
+		e.setDevicesOnline(map[string]bool{"hub-1": true, "linux-idle": true, "linux-heavy": true})
+		e.d.samples["linux-idle"] = admissionSample(99.0, 32<<30, 8<<30, 0)
+		e.d.samples["linux-heavy"] = admissionSample(0.5, 32<<30, 8<<30, 40)
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Busy linux fleet",
+				"prompt":"Wait for linux capacity",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Check capacity",
+				"user_requested":true,
+				"why":"Capacity test",
+				"placement_constraints":{"os":"linux"}
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		e.s.sweepPendingPlacement(ctx)
+
+		if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+			t.Fatalf("hub must stay protected when matching non-hub workers are online: %v", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		todoID := p.Tasks[0].TodoID
+		if p.Tasks[0].Queue == nil || p.Tasks[0].Queue.Attempt != 1 {
+			t.Fatalf("expected queued attempt 1, got %+v", p.Tasks[0].Queue)
+		}
+		for _, want := range []string{"Linux Idle", "99.0", "8", "Linux Heavy", "40", "Hub", "require_hub=false"} {
+			if !strings.Contains(p.Tasks[0].Queue.Reason, want) {
+				t.Errorf("queue reason missing %q: %s", want, p.Tasks[0].Queue.Reason)
+			}
+		}
+
+		// Task card displays the concrete blocking gate and numbers while waiting.
+		cards, err := e.s.taskCards(ctx, []FeedItem{{Kind: feedPlan, Ref: planID, At: e.clockNow()}}, map[string]*TaskPlan{planID: p})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cardReason string
+		for _, c := range cards {
+			if c.TodoID == todoID {
+				cardReason = c.Reason
+			}
+		}
+		if !strings.Contains(cardReason, "99.0") {
+			t.Fatalf("waiting task card reason missing concrete load reading: %q", cardReason)
+		}
+
+		// Unrelated wakes before pendingPlacementRetryInterval must not hammer retries.
+		e.advance(10 * time.Second)
+		e.s.sweepPendingPlacement(ctx)
+		p, _ = e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue.Attempt != 1 {
+			t.Fatalf("sweep before retry interval ran attempt %d, want 1", p.Tasks[0].Queue.Attempt)
+		}
+
+		// Timeout after 30m writes gate+numbers into StartError and the give-up log.
+		e.advance(admissionQueueMaxWait)
+		e.s.sweepPendingPlacement(ctx)
+		todo := todoNow(e.s, todoID)
+		if todo.DoneAt == nil || !strings.Contains(todo.StartError, "99.0") || !strings.Contains(todo.StartError, "40") {
+			t.Fatalf("timed-out StartError missing concrete readings: %+v", todo)
+		}
+		logs := e.logsText()
+		for _, want := range []string{
+			"placement queue (attempt 1):",
+			"assistant-tasks.admission_load(cores=8,load=99.0",
+			"admission queue: gave up after 1 attempt(s) (queue=pending_placement):",
+			"99.0",
+		} {
+			if !strings.Contains(logs, want) {
+				t.Errorf("logs missing %q:\n%s", want, logs)
+			}
+		}
+	})
+
+	t.Run("hub-only-hits-hub-procs-limit-and-reports-count-and-limit", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.f.hello.Locale = "en"
+		e.setDevicesOnline(map[string]bool{"hub-1": true})
+		e.d.samples["hub-1"] = admissionSample(0.2, 32<<30, 8<<30, admissionHubMaxClaudeProcs)
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Hub procs full",
+				"prompt":"Wait for hub slot",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Run when free",
+				"user_requested":true,
+				"why":"Hub admission check"
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		e.s.sweepPendingPlacement(ctx)
+		if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+			t.Fatalf("hub over hub_max_claude_procs must not start: %v", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue == nil {
+			t.Fatal("expected task to stay queued")
+		}
+		if strings.Contains(p.Tasks[0].Queue.Reason, "require_hub=false") {
+			t.Fatalf("hub-only failure should report actual hub gate, not hub_excluded: %s", p.Tasks[0].Queue.Reason)
+		}
+		wantProcs := fmt.Sprintf("%d", admissionHubMaxClaudeProcs)
+		if !strings.Contains(p.Tasks[0].Queue.Reason, wantProcs) {
+			t.Fatalf("queue reason missing hub procs reading %s: %s", wantProcs, p.Tasks[0].Queue.Reason)
+		}
+		logs := e.logsText()
+		if !strings.Contains(logs, "assistant-tasks.admission_procs(count=20,limit=20)") {
+			t.Fatalf("logs missing structured hub procs hit:\n%s", logs)
+		}
+	})
+
+	t.Run("hub-only-hits-direction-cap-and-reports-running-and-limit", func(t *testing.T) {
+		e := newPlacementTestEnv(t)
+		ctx := context.Background()
+		e.f.hello.Locale = "en"
+		e.setDevicesOnline(map[string]bool{"hub-1": true})
+		on := true
+		cap1 := 1
+		e.s.admission.cached = &AdmissionSettings{Enabled: &on, DirectionCap: &cap1}
+		e.s.admission.directionClaims["conv_pub"] = 1
+
+		res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+			"tasks":[{
+				"title":"Direction cap blocked",
+				"prompt":"Wait for direction slot",
+				"cwd":"~/repo",
+				"role":"worker",
+				"readonly":true,
+				"goal":"Run when slot opens",
+				"user_requested":true,
+				"why":"Direction cap diagnostic check"
+			}]
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		planID := extractPlanID(t, res)
+		e.s.sweepPendingPlacement(ctx)
+		if starts := taskStartMachines(e.f.fakeHub); len(starts) != 0 {
+			t.Fatalf("direction cap exceeded must not start: %v", starts)
+		}
+		p, _ := e.s.loadPlan(ctx, planID)
+		if p.Tasks[0].Queue == nil || !strings.Contains(p.Tasks[0].Queue.Reason, "1 agents running, at its limit of 1") {
+			t.Fatalf("queue reason should name direction cap running/limit: %+v", p.Tasks[0].Queue)
+		}
+		logs := e.logsText()
+		if !strings.Contains(logs, "assign hub-1 failed:") || !strings.Contains(logs, "limit of 1") {
+			t.Fatalf("logs missing direction cap assignment failure:\n%s", logs)
+		}
+	})
+}
+
+func TestPlacementTaskRetryReenqueuesLogsAndGuardsDuplicateRemedy(t *testing.T) {
+	e := newPlacementTestEnv(t)
+	ctx := context.Background()
+	e.f.hello.Locale = "en"
+	e.setDevicesOnline(map[string]bool{"hub-1": true})
+	e.d.samples["hub-1"] = admissionSample(0.2, 32<<30, 8<<30, admissionHubMaxClaudeProcs)
+
+	res, err := e.s.toolTaskPlan(ctx, "conv_pub", json.RawMessage(`{
+		"tasks":[{
+			"title":"Retryable auto-placed task",
+			"prompt":"Retry after capacity frees",
+			"cwd":"~/repo",
+			"launcher":"claude",
+			"role":"worker",
+			"readonly":true,
+			"goal":"Run after retry",
+			"user_requested":true,
+			"why":"Retry test"
+		}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	planID := extractPlanID(t, res)
+	e.s.sweepPendingPlacement(ctx)
+	e.advance(admissionQueueMaxWait)
+	e.s.sweepPendingPlacement(ctx)
+
+	p, _ := e.s.loadPlan(ctx, planID)
+	todoID := p.Tasks[0].TodoID
+	if todo := todoNow(e.s, todoID); todo.DoneAt == nil || !todo.failedStart() {
+		t.Fatalf("precondition failed: todo must be failedStart after timeout: %+v", todo)
+	}
+
+	e.clearLogs()
+	retryArgs, _ := json.Marshal(map[string]string{
+		"todo_id":  todoID,
+		"reason":   "capacity recovered; switch launcher",
+		"launcher": "codex",
+	})
+	out, err := e.s.toolTaskRetry(ctx, "conv_pub", retryArgs)
+	if err != nil {
+		t.Fatalf("toolTaskRetry on pending_placement failed: %v", err)
+	}
+	if !strings.Contains(out, "starting again") || !strings.Contains(out, "codex") {
+		t.Fatalf("unexpected toolTaskRetry output: %s", out)
+	}
+	p, _ = e.s.loadPlan(ctx, planID)
+	if p.Tasks[0].Queue == nil || p.Tasks[0].Queue.Key != pendingPlacementQueueKey || !p.Tasks[0].Queue.Retry {
+		t.Fatalf("task_retry must re-enqueue pending_placement: %+v", p.Tasks[0].Queue)
+	}
+	if p.Tasks[0].Launcher != "codex" || p.Tasks[0].Machine != "" {
+		t.Fatalf("task_retry launcher override not persisted: launcher=%q machine=%q", p.Tasks[0].Launcher, p.Tasks[0].Machine)
+	}
+	if todo := todoNow(e.s, todoID); todo.DoneAt != nil || todo.StartError != "" {
+		t.Fatalf("task_retry must reopen failed todo: %+v", todo)
+	}
+	logs := e.logsText()
+	for _, want := range []string{
+		fmt.Sprintf("task %s: retrying its start via placement queue (plan %s)", todoID, planID),
+		fmt.Sprintf("task %s: placement queue: enqueued (plan %s", todoID, planID),
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("retry logs missing %q:\n%s", want, logs)
+		}
+	}
+
+	// A second task_retry while the first retry is still queued in remedying must refuse cleanly and keep Queue intact.
+	if _, err := e.s.toolTaskRetry(ctx, "conv_pub", retryArgs); err == nil || !strings.Contains(err.Error(), "already queued") {
+		t.Fatalf("duplicate task_retry while queued = %v, want already queued error", err)
+	}
+	p, _ = e.s.loadPlan(ctx, planID)
+	if p.Tasks[0].Queue == nil || p.Tasks[0].Queue.Key != pendingPlacementQueueKey {
+		t.Fatalf("duplicate task_retry destroyed pending_placement queue: %+v", p.Tasks[0].Queue)
+	}
+
+	// Once capacity frees, sweep launches the retried task on hub-1 with the overridden launcher.
+	e.d.samples["hub-1"] = admissionSample(0.2, 32<<30, 8<<30, 0)
+	e.s.sweepPendingPlacement(ctx)
+	waitFor(t, "retried task starts on hub-1", func() bool {
+		return len(taskStartMachines(e.f.fakeHub)) == 1 && e.s.taskStarting.Load() == 0
+	})
+	if starts := taskStartMachines(e.f.fakeHub); starts[0] != "hub-1" {
+		t.Fatalf("retried task started on %v, want [hub-1]", starts)
+	}
+	p, _ = e.s.loadPlan(ctx, planID)
+	if p.Tasks[0].Queue != nil || p.Tasks[0].Machine != "hub-1" || p.Tasks[0].Launcher != "codex" {
+		t.Fatalf("retried task final state = %+v", p.Tasks[0])
+	}
 }
 
 // placementAuditHitKeys returns the filter hit keys recorded on machine in the task's placement audit.

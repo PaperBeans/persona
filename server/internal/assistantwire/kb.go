@@ -1,6 +1,10 @@
 package assistantwire
 
 import (
+	"github.com/nwverse/persona/server/internal/wireids"
+
+	"time"
+
 	"github.com/nwverse/persona/server/internal/connectorwire"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/kbwire"
@@ -153,12 +157,14 @@ type KBRemoteFolder struct {
 // KBSettings is the knowledge base's settings the manager goes by: its manager.json's kb section, laid over the hub's
 // hello (an older hub still sends its hub.json's). Its ai is the models' (HubModels.KBAI).
 type KBSettings struct {
-	ReadOnly       bool             `json:"read_only,omitempty"`       // serve local archives without collection, models or writes
-	Off            bool             `json:"off,omitempty"`             // kb.enabled false: no knowledge base at all
-	TextDays       int              `json:"text_days,omitempty"`       // 0: 365
-	AttachmentDays int              `json:"attachment_days,omitempty"` // 0: 30
-	ExtraDirs      []string         `json:"extra_dirs,omitempty"`      // as written; "~/" is the assistant's home
-	RemoteFolders  []KBRemoteFolder `json:"remote_folders,omitempty"`
+	// ImportProvider is manager-local binding information. A remote hello cannot supply it.
+	ImportProvider *KBImportProvider `json:"-"`
+	ReadOnly       bool              `json:"read_only,omitempty"`       // serve local archives without collection, models or writes
+	Off            bool              `json:"off,omitempty"`             // kb.enabled false: no knowledge base at all
+	TextDays       int               `json:"text_days,omitempty"`       // 0: 365
+	AttachmentDays int               `json:"attachment_days,omitempty"` // 0: 30
+	ExtraDirs      []string          `json:"extra_dirs,omitempty"`      // as written; "~/" is the assistant's home
+	RemoteFolders  []KBRemoteFolder  `json:"remote_folders,omitempty"`
 	// AttachmentDaysBySource: attachment_days for the chats of one source (kb.attachment_days_by_source); the sources
 	// not in it, and non-positive values, keep attachment_days.
 	AttachmentDaysBySource map[string]int `json:"attachment_days_by_source,omitempty"`
@@ -168,6 +174,19 @@ type KBSettings struct {
 	// LarkMinutes is kb.lark_minutes, importing the owner's Lark minutes and document titles through lark-cli (nil or
 	// not enabled: off). Like History it is read afresh every round, so a change never reopens the knowledge base.
 	LarkMinutes *KBLarkMinutes `json:"lark_minutes,omitempty"`
+}
+
+// KBSourceChatID identifies a chat in its connector account, before filing in the knowledge base.
+type KBSourceChatID string
+
+// KBImportProvider pins one installation to an exact connector chat and filing namespace.
+type KBImportProvider struct {
+	Extension   wireids.ExtensionID `json:"extension"`
+	StorageID   wireids.ExtensionID `json:"storage_id"`
+	InstalledAt time.Time           `json:"installed_at"`
+	Connector   wireids.ConnectorID `json:"connector"`
+	SourceID    KBSourceChatID      `json:"source_id"`
+	FiledAs     string              `json:"filed_as"`
 }
 
 // KBLarkMinutes is kb.lark_minutes (docs/assistant/knowledge.md "Lark minutes and documents"): meeting minutes and

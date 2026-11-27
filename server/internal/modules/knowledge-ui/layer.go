@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/sdk/go/wire"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connectorwire"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -117,6 +119,16 @@ func (l *Layer) ChatsProblem(err error, lang i18n.Lang) (string, string) {
 func (l *Layer) Need(sel *kb.Selection, ret kb.Retention, connector string, c connectorwire.HistoryChat) kb.ReadPlan {
 	return kbhistory.Need(sel, ret, connector, kbhistory.PlanChat{ID: c.ID, Name: c.Name, Kind: c.Kind, Muted: c.Muted,
 		Collapsed: c.Collapsed, Done: c.Done, Bot: c.Bot, Estimate: c.Estimate, FiledAs: c.Source})
+}
+
+// ProviderCheckpoint resolves the owner's exact connector identity before exposing any progress.
+func (l *Layer) ProviderCheckpoint(e *kb.Engine, cfg *assistantwire.KBHistory, binding assistantwire.KBImportProvider, day string, now time.Time) (wire.KBImportCheckpointResult, bool) {
+	chat := kb.ChatID(binding.FiledAs, string(binding.SourceID))
+	cp, ok := kbhistory.ProviderCheckpoint(e, cfg, binding.Connector.String(), chat, day, now)
+	if !ok || cp.SourceID != string(binding.SourceID) || cp.FiledAs != binding.FiledAs {
+		return wire.KBImportCheckpointResult{}, false
+	}
+	return wire.KBImportCheckpointResult{Approval: cp.Approval, State: wire.KBImportState(cp.State), Read: cp.Read, Written: cp.Written}, true
 }
 
 // Day is the day p names with the lines the owner sent from Persona marked (kbsent).

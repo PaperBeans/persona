@@ -43,6 +43,7 @@
   "hide_older": "以前のバージョンを隠す",
   "hide_older_of": "{family}：以前のバージョンを隠す",
   "latest": "最新",
+  "other": "その他",
   "model_count": "{count} モデル",
   "current_launcher": "現在",
   "default_launcher": "デフォルト",

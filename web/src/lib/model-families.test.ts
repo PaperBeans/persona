@@ -104,6 +104,10 @@ describe("familyBlocks", () => {
       "Claude Opus: opus^ (+1)",
       "-: glm-5.3, deepseek-v4, vendor/model-x",
     ]);
+    const blocks = familyBlocks(rowsOf(gateway), opts())!;
+    expect(blocks[0].other).toBeUndefined();
+    expect(blocks.slice(1, -1).every((b) => b.other === undefined)).toBe(true);
+    expect(blocks.at(-1)?.other).toBe(true);
   });
 
   it("an older version in use stays out of the fold, in version order, and is not counted in it", () => {
@@ -384,5 +388,149 @@ describe("Antigravity thinking/effort variants and cross-engine qualifiers", () 
     expect(lowSearch?.blocks?.map((b) => `${b.family?.label ?? "-"}: ${b.rows.map((r) => `${r.model.id}${r.latest ? "^" : ""}`).join(", ")}`)).toEqual([
       "GPT: gpt-5.5-low, gpt-5.4-low",
     ]);
+  });
+
+  it("classifies Orchestrator and GPT-OSS as unversioned peer families while rejecting malformed suffixes", () => {
+    for (const id of [
+      "gemini-pro-orchestrator-neon",
+      "gemini-pro-orchestrator",
+      "gemini-pro-orchestrator-argon",
+      "gemini-orchestrator-neon",
+      "google-antigravity/gemini-pro-orchestrator-neon:high",
+      "gemini-pro-orchestrator-neon[1m]",
+    ]) {
+      expect(modelFamily({ id })).toEqual({
+        key: "orchestrator",
+        label: "Orchestrator",
+        vendor: "orchestrator",
+        version: [],
+        unversioned: true,
+      });
+    }
+    for (const bad of [
+      "gemini-pro-orchestrator:custom",
+      "gemini-pro-orchestrator:high:low",
+      "gemini-pro-orchestrator-neon-high:low",
+      "gemini-pro-orchestrator-neon-high-low",
+    ]) {
+      expect(modelFamily({ id: bad })).toBeUndefined();
+    }
+
+    for (const model of [
+      { id: "gpt-oss-120b-medium" },
+      { id: "openai/gpt-oss-120b-medium" },
+      { id: "gpt-oss-120b" },
+      { id: "gpt-oss-20b" },
+      { id: "openai/gpt-oss-120b:high" },
+      { id: "gpt-oss-120b-20250805-medium" },
+      { id: "gpt-oss-120b-high", variants: { base: "gpt-oss-120b" } },
+    ]) {
+      expect(modelFamily(model)).toEqual({
+        key: "gpt-oss",
+        label: "GPT-OSS",
+        vendor: "gpt",
+        version: [],
+        unversioned: true,
+      });
+    }
+    for (const bad of ["gpt-oss-120b-high-low", "gpt-oss-120b-high:low", "gpt-oss-120b:custom"]) {
+      expect(modelFamily({ id: bad })).toBeUndefined();
+    }
+  });
+
+  it("keeps flat Antigravity catalogs ungrouped when only unversioned peers repeat, and groups Orchestrator, GPT-OSS, and Other when versioned families activate", () => {
+    const flatAgy: PanelProvider = {
+      id: "agy-flat",
+      name: "agy",
+      engine: "agy",
+      models: [
+        { id: "gemini-4-neon-high", name: "Gemini 4 Neon (High)", efforts: ["low", "high"], defaultEffort: "high" },
+        { id: "gemini-4-neon-low", name: "Gemini 4 Neon (Low)", efforts: ["low", "high"], defaultEffort: "low" },
+        { id: "gemini-pro-orchestrator-neon", name: "Orchestrator (Neon)", efforts: [] },
+        { id: "gemini-pro-orchestrator", name: "Orchestrator (Carbon)", efforts: [] },
+        { id: "gemini-pro-orchestrator-argon", name: "Orchestrator (Argon)", efforts: [] },
+        { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", efforts: ["low", "high"], defaultEffort: "high" },
+        { id: "claude-opus-5-5-low", name: "Claude Opus 5.5 (Low)", efforts: ["low", "high"], defaultEffort: "low" },
+        { id: "claude-sonnet-5-5-low", name: "Claude Sonnet 5.5 (Low)", efforts: ["low", "high"], defaultEffort: "low" },
+        { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", efforts: ["medium"], defaultEffort: "medium" },
+        { id: "gpt-oss-20b", name: "GPT-OSS 20B", efforts: [] },
+      ],
+    };
+    const flatSection = panelSections({
+      providers: [flatAgy],
+      state: { current: null, recommended: [] },
+      view: { kind: "provider", provider: "agy-flat" },
+      query: "",
+      favorites: [],
+      recent: [],
+      overrides: {},
+    }).find((s) => s.key === "provider:agy-flat");
+    expect(flatSection?.blocks).toBeUndefined();
+
+    const versionedAgy: PanelProvider = {
+      ...flatAgy,
+      id: "agy-versioned",
+      models: [
+        ...flatAgy.models!,
+        { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Low)", efforts: ["low"], defaultEffort: "low" },
+        { id: "deepseek-v4", name: "DeepSeek V4", efforts: [] },
+      ],
+    };
+    const section = panelSections({
+      providers: [versionedAgy],
+      state: { current: null, recommended: [] },
+      view: { kind: "provider", provider: "agy-versioned" },
+      query: "",
+      favorites: [],
+      recent: [],
+      overrides: {},
+    }).find((s) => s.key === "provider:agy-versioned");
+    expect(
+      section?.blocks?.map((b) => ({
+        key: b.family?.key ?? (b.other ? "other" : "lead"),
+        label: b.family?.label ?? (b.other ? "OTHER" : "-"),
+        other: b.other,
+        older: b.older,
+        rows: b.rows.map((r) => `${r.model.id}${r.latest ? "^" : ""}`),
+      })),
+    ).toEqual([
+      { key: "gemini:neon", label: "Gemini Neon", other: undefined, older: 0, rows: ["gemini-4-neon-high"] },
+      { key: "gemini:flash", label: "Gemini Flash", other: undefined, older: 1, rows: ["gemini-3.8-flash-high^"] },
+      {
+        key: "orchestrator",
+        label: "Orchestrator",
+        other: undefined,
+        older: 0,
+        rows: ["gemini-pro-orchestrator-neon", "gemini-pro-orchestrator", "gemini-pro-orchestrator-argon"],
+      },
+      { key: "claude:opus", label: "Claude Opus", other: undefined, older: 0, rows: ["claude-opus-5-5-low"] },
+      { key: "claude:sonnet", label: "Claude Sonnet", other: undefined, older: 0, rows: ["claude-sonnet-5-5-low"] },
+      { key: "gpt-oss", label: "GPT-OSS", other: undefined, older: 0, rows: ["gpt-oss-120b-medium", "gpt-oss-20b"] },
+      { key: "other", label: "OTHER", other: true, older: 0, rows: ["deepseek-v4"] },
+    ]);
+
+    // All-view truncation keeps `other: true` on a surviving trailing block
+    const truncated = panelSections({
+      providers: [
+        {
+          id: "mix",
+          name: "mix",
+          engine: "claude",
+          models: [
+            { id: "claude-opus-5-5", name: "Opus 5.5", efforts: [] },
+            { id: "claude-opus-5", name: "Opus 5", efforts: [] },
+            { id: "glm-5.3", name: "GLM 5.3", efforts: [] },
+          ],
+        },
+        { id: "second", name: "second", engine: "codex", models: [{ id: "gpt-5.5", name: "GPT 5.5", efforts: [] }] },
+      ],
+      state: { current: null, recommended: [] },
+      view: { kind: "all" },
+      query: "",
+      favorites: [],
+      recent: [],
+      overrides: {},
+    }).find((s) => s.key === "provider:mix");
+    expect(truncated?.blocks?.at(-1)?.other).toBe(true);
   });
 });

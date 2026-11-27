@@ -43,6 +43,7 @@
   "hide_older": "收起更早版本",
   "hide_older_of": "{family}：收起更早版本",
   "latest": "最新",
+  "other": "其他",
   "model_count": "{count} 个模型",
   "current_launcher": "当前",
   "default_launcher": "默认",

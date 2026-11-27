@@ -2,6 +2,7 @@
   "kind_inbox": "事件",
   "kind_todo": "待办",
   "kind_session": "Agent 会话",
+  "kind_agent": "个人 Agent",
   "gone": "已不在收件箱里",
   "next": "下一步",
   "title": "线索",

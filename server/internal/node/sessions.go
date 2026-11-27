@@ -396,7 +396,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				if hasRuntimeRow {
 					n.resolveAgyContext(&s, agyConversations[id])
 				} else {
-					n.mergeAgyTranscript(&s, u)
+					n.mergeAgyTranscript(&s, conversation)
 				}
 				n.agyPaneControls(&s, id)
 				n.agyPaneTitle(&s, agyConversations[id]) // its conversation's title, not the terminal's (agytitle.go)
@@ -909,9 +909,6 @@ func (n *Node) codexPaneControls(s *proto.Session, rollout quickMeta) {
 	n.codexEffortRow(id, &s.Efforts, &s.Effort, rollout) // joined on its app-server: its effort (codex_effort.go)
 	n.codexTerminalRow(id, s, rollout)                   // on the terminal route: typed /model (codex_terminal_modes.go)
 	n.codexSpeedRow(s)
-	if len(s.ServiceTiers) == 0 {
-		n.terminalSpeedRow(s, rollout)
-	}
 	if s.ServiceTier == "" {
 		s.ServiceTier = rollout.speed.Tier
 	}

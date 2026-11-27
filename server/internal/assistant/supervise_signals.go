@@ -97,6 +97,7 @@ type superviseSignal struct {
 	// An ACK removes exactly its own Key; a still-present predecessor's dedup reservation is not delivery proof.
 	PendingPredecessors []string
 	PRURL               string // draft_pr: the current or earlier followed PR, revalidated before delivery
+	PREventID           string `json:"pr_event_id,omitempty"` // independent feedback events may wait together
 	// Unreachable: this decision exists because its assigned task leader Agent or Assistant supervisor could not be
 	// reached, not because the worker waits for the user. It stays a decision even when the worker is not needs_user.
 	// Recipient distinguishes an unreachable Assistant supervisor from the existing task-leader-Agent escalation.
@@ -220,7 +221,11 @@ func (g superviseSignal) id() string {
 		return g.Todo + "|" + g.Kind + "@" + normalizePRKey(g.PRURL)
 	}
 	if g.Kind == sigPREvent {
-		return g.Todo + "|" + g.Kind + "@" + g.PRURL + ":" + g.Report
+		id := g.Todo + "|" + g.Kind + "@" + g.PRURL + ":" + g.Report
+		if g.PREventID != "" {
+			id += ":" + g.PREventID
+		}
+		return id
 	}
 	if g.Kind == sigReport || g.Kind == sigCheck {
 		return g.Todo + "|" + g.Kind + ":" + g.Report
@@ -414,12 +419,12 @@ func (s *Service) restoreSupervisePending(ctx context.Context) {
 // updateSupervisePending changes the durable outbox. Callers may hold supervise.mu: relay code never takes that lock
 // while holding relays.mu. Keeping this per signal, rather than replacing it from pending, preserves in-flight digests.
 // A failed write rolls the in-memory durable state back too; delivery checks supervisePendingDurably before it can ACK.
-func (s *Service) updateSupervisePending(change func(map[string]superviseSignal)) {
+func (s *Service) updateSupervisePending(change func(map[string]superviseSignal)) bool {
 	r := &s.relays
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !s.relayLocked(context.Background()) {
-		return
+		return false
 	}
 	previous := maps.Clone(r.st.SupervisePending)
 	next := maps.Clone(previous)
@@ -433,7 +438,9 @@ func (s *Service) updateSupervisePending(change func(map[string]superviseSignal)
 	r.st.SupervisePending = next
 	if err := s.saveRelayLocked(); err != nil {
 		r.st.SupervisePending = previous
+		return false
 	}
+	return true
 }
 
 // supervisePendingDurably reports whether every signal that is about to be delivered still has its exact durable
@@ -943,17 +950,18 @@ func (s *Service) signal(g superviseSignal) {
 }
 
 // signalReplacing records g and, when old is still pending, atomically replaces that older stretch in the outbox.
-func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
+// It reports whether the outbox write succeeded.
+func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) bool {
 	if !s.supervisionAllowed(context.Background(), g) {
-		return // the mode drops it (off, or a routine check under outcomes): nothing is gathered, scheduled or told (supervise_switch.go)
+		return false // the mode drops it (off, or a routine check under outcomes): nothing is gathered, scheduled or told (supervise_switch.go)
 	}
 	if g.Todo != "" {
 		if t, ok := s.todoNow(g.Todo); ok && s.reporterStopped(context.Background(), t.Origin) {
-			return // /stop silences the reporting task's notices on every route until the user speaks again (#3308)
+			return false // /stop silences the reporting task's notices on every route until the user speaks again (#3308)
 		}
 	}
 	if g.level() == supervisionInfo && g.Kind != sigParkedSummary {
-		return // Progress is already recorded on the task card; it never wakes the assistant.
+		return false // Progress is already recorded on the task card; it never wakes the assistant.
 	}
 	if g.At.IsZero() {
 		g.At = time.Now()
@@ -966,9 +974,9 @@ func (s *Service) signalReplacing(old *superviseSignal, g superviseSignal) {
 		b.init()
 		b.sent[g.id()] = g.Key
 		b.mu.Unlock()
-		return
+		return false
 	}
-	s.queueSignalReplacing(old, g)
+	return s.queueSignalReplacing(old, g)
 }
 
 // queueSignal only adds a validated signal to the in-memory digest. It does not change the turn ledger.
@@ -1010,9 +1018,9 @@ func (s *Service) releaseReportsLocked(g superviseSignal) []string {
 }
 
 // queueSignalReplacing also removes the older stretch it supersedes from the durable outbox.
-func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) {
+func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) bool {
 	if !s.supervisionAllowed(context.Background(), g) {
-		return // the same for a signal that skipped signal (supervise_switch.go)
+		return false // the same for a signal that skipped signal (supervise_switch.go)
 	}
 	if g.Kind != sigAsk {
 		g = s.currentSupervisorSignal(g)
@@ -1029,12 +1037,12 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	// This early cache is not an unhandled source's delivery receipt: an owner wait
-	// can discard the entry before dispatch. Its durable fingerprint deduplicates delivery.
-	unhandled := g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled"
-	if b.sent[g.id()] == g.Key && !unhandled && g.Key != "" {
+	// Source-backed events need a durable receipt. Their fingerprints deduplicate delivery even
+	// after the digest has dequeued the signal and the source retries its cursor write.
+	sourceBacked := g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" || g.PREventID != ""
+	if b.sent[g.id()] == g.Key && !sourceBacked && g.Key != "" {
 		b.mu.Unlock()
-		return
+		return false
 	}
 	var absorbedIDs []string
 	if cur, ok := b.pending[g.id()]; ok {
@@ -1043,7 +1051,7 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 		} else if g.Kind == sigFailed {
 			if cur.Key != g.Key && newerFailedSignal(cur, g) {
 				b.mu.Unlock()
-				return // a restored or delayed old attempt cannot replace the newer pending one
+				return false // a restored or delayed old attempt cannot replace the newer pending one
 			}
 			if cur.Key == g.Key {
 				g.At = cur.At // the same failed attempt keeps its queue position and delivery generation
@@ -1102,7 +1110,7 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 		g, absorbedIDs = absorbPendingOutageSiblingLocked(b, g)
 	}
 	held := s.releaseReportsLocked(g)
-	s.updateSupervisePending(func(pending map[string]superviseSignal) {
+	persisted := s.updateSupervisePending(func(pending map[string]superviseSignal) {
 		for _, id := range held {
 			if cur, ok := pending[id]; ok {
 				cur.NotBefore = time.Time{}
@@ -1130,6 +1138,7 @@ func (s *Service) queueSignalReplacing(old *superviseSignal, g superviseSignal) 
 	b.pending[g.id()] = g
 	s.scheduleDigestLocked(time.Now())
 	b.mu.Unlock()
+	return persisted
 }
 
 // scheduleDigestLocked sets the timer for when the pending signals are due; s.supervise.mu is held.

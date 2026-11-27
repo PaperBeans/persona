@@ -30,7 +30,7 @@ type TodoPRStatus struct {
 
 	terminalAt       time.Time          // forge time for a merge or close, when known
 	submittedReview  prSubmittedReview  // consumed by the park in the same pass, separate from the stage's review summary
-	actionableReview prActionableReview // current-head changes_requested / actionable review for opt-in Agent routing
+	actionableReview prActionableReview // current-head changes_requested for opt-in Agent routing
 	failingCheck     prFailingCheck     // current-head failing CI summary for opt-in Agent routing
 }
 
@@ -62,7 +62,99 @@ type prStatusForge interface {
 	PRStatus(context.Context, string, int) (TodoPRStatus, error)
 }
 
+// prFeedback is an observation for the routing pass. It stays out of persisted PR status and park evidence.
+type prFeedback struct {
+	pullPath      string
+	author        string
+	viewer        string
+	viewerChecked bool
+	reviews       []githubPRReview
+}
+
+type githubPRReview struct {
+	ID                int64     `json:"id"`
+	State             string    `json:"state"`
+	CommitID          string    `json:"commit_id"`
+	SubmittedAt       time.Time `json:"submitted_at"`
+	Body              string    `json:"body"`
+	HTMLURL           string    `json:"html_url"`
+	AuthorAssociation string    `json:"author_association"`
+	User              struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+}
+
+type githubPRInlineComment struct {
+	ID           int64  `json:"id"`
+	Body         string `json:"body"`
+	Path         string `json:"path"`
+	Line         int    `json:"line"`
+	OriginalLine int    `json:"original_line"`
+}
+
+func (g githubForge) prViewer(ctx context.Context) string {
+	var viewer struct {
+		Login string `json:"login"`
+	}
+	if err := g.get(ctx, "/user", &viewer); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(viewer.Login)
+}
+
+// The connector and CLI transports return decoded bodies. A full page needs a continuation even
+// when there is no Link header available to the caller. Never use an incomplete list as evidence.
+func readPRReviewPages[T any](ctx context.Context, g githubForge, path string) ([]T, error) {
+	const pageSize = 100
+	const maxPages = 100
+	first := fmt.Sprintf("%s?per_page=%d", path, pageSize)
+	var all []T
+	for page := 1; page <= maxPages; page++ {
+		request := first
+		if page > 1 {
+			request += "&page=" + strconv.Itoa(page)
+		}
+		var rows []T
+		if err := g.get(ctx, request, &rows); err != nil {
+			return nil, fmt.Errorf("%s page %d: %w", path, page, err)
+		}
+		if rows == nil {
+			return nil, fmt.Errorf("%s page %d: expected a list", path, page)
+		}
+		all = append(all, rows...)
+		if len(rows) < pageSize {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("%s: review pagination exceeded %d pages", path, maxPages)
+}
+
+func (g githubForge) prReviewComments(ctx context.Context, path string, reviewID int64) ([]githubPRInlineComment, error) {
+	return readPRReviewPages[githubPRInlineComment](ctx, g, fmt.Sprintf("%s/reviews/%d/comments", path, reviewID))
+}
+
+func (g githubForge) checkPRFeedbackHead(ctx context.Context, path, head string) error {
+	var pr struct {
+		State string `json:"state"`
+		Head  struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := g.get(ctx, path, &pr); err != nil {
+		return err
+	}
+	if pr.State != "open" || pr.Head.SHA != head {
+		return fmt.Errorf("PR changed while reading review feedback")
+	}
+	return nil
+}
+
 func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (TodoPRStatus, error) {
+	return g.readPRStatus(ctx, repo, number, nil)
+}
+
+func (g githubForge) readPRStatus(ctx context.Context, repo string, number int, feedback *prFeedback) (TodoPRStatus, error) {
 	path := fmt.Sprintf("/repos/%s/pulls/%d", repo, number)
 	var pr struct {
 		Title          string    `json:"title"`
@@ -96,37 +188,21 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 	if out.State != "open" {
 		return out, nil
 	}
-	if out.Draft && pr.User.Login != "" {
-		var viewer struct {
-			Login string `json:"login"`
-		}
+	viewerChecked := out.Draft && pr.User.Login != ""
+	viewer := ""
+	if viewerChecked {
 		// Unknown ownership must not turn someone else's draft into work for our supervisor.
-		if err := g.get(ctx, "/user", &viewer); err == nil {
-			out.Own = viewer.Login != "" && strings.EqualFold(viewer.Login, pr.User.Login)
-		}
+		viewer = g.prViewer(ctx)
+		out.Own = viewer != "" && strings.EqualFold(viewer, pr.User.Login)
 	}
 	if pr.Head.SHA == "" {
 		return TodoPRStatus{}, fmt.Errorf("PR has no head commit")
 	}
-	type review struct {
-		ID                int64     `json:"id"`
-		State             string    `json:"state"`
-		CommitID          string    `json:"commit_id"`
-		SubmittedAt       time.Time `json:"submitted_at"`
-		Body              string    `json:"body"`
-		HTMLURL           string    `json:"html_url"`
-		AuthorAssociation string    `json:"author_association"`
-		User              struct {
-			Login string `json:"login"`
-			Type  string `json:"type"`
-		} `json:"user"`
-	}
-	var reviews []review
-	// An incomplete review page cannot prove approval; retain a conservative label.
-	if err := g.get(ctx, path+"/reviews?per_page=100", &reviews); err != nil {
+	reviews, err := readPRReviewPages[githubPRReview](ctx, g, path+"/reviews")
+	if err != nil {
 		return TodoPRStatus{}, err
 	}
-	latest := map[string]review{}
+	latest := map[string]githubPRReview{}
 	for _, r := range reviews {
 		// A submitted review is an event even if it did not change the review verdict. Use provider time and head.
 		switch r.State {
@@ -150,8 +226,8 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 	for _, r := range latest {
 		if r.State == "CHANGES_REQUESTED" {
 			out.Review = "changes_requested"
-			// A local poll time cannot date a review. A full page may omit its later dismissal or approval.
-			if len(reviews) < 100 && strings.TrimSpace(r.User.Login) != "" && r.CommitID == pr.Head.SHA && !r.SubmittedAt.IsZero() &&
+			// Only the provider can date a review.
+			if strings.TrimSpace(r.User.Login) != "" && r.CommitID == pr.Head.SHA && !r.SubmittedAt.IsZero() &&
 				(out.ChangesRequestedAt == nil || r.SubmittedAt.After(*out.ChangesRequestedAt) ||
 					r.SubmittedAt.Equal(*out.ChangesRequestedAt) && r.ID > out.actionableReview.ID) {
 				at := r.SubmittedAt.UTC()
@@ -167,37 +243,8 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 			}
 		}
 	}
-	if out.actionableReview.State == "" && out.Review != "approved" && len(reviews) < 100 {
-		for _, r := range reviews {
-			if r.State != "COMMENTED" || r.ID <= 0 || r.CommitID != pr.Head.SHA || r.SubmittedAt.IsZero() {
-				continue
-			}
-			author := strings.TrimSpace(r.User.Login)
-			body := strings.TrimSpace(r.Body)
-			if author == "" || body == "" || (pr.User.Login != "" && strings.EqualFold(author, pr.User.Login)) {
-				continue
-			}
-			if isBotReviewAuthor(author, r.User.Type) || !reviewAuthorHasWriteAssociation(r.AuthorAssociation) || commentedReviewLooksInformational(body) {
-				continue
-			}
-			if r.SubmittedAt.After(out.actionableReview.SubmittedAt) ||
-				r.SubmittedAt.Equal(out.actionableReview.SubmittedAt) && r.ID > out.actionableReview.ID {
-				out.actionableReview = prActionableReview{
-					ID:          r.ID,
-					Author:      author,
-					State:       r.State,
-					Body:        body,
-					URL:         strings.TrimSpace(r.HTMLURL),
-					SubmittedAt: r.SubmittedAt.UTC(),
-				}
-			}
-		}
-	}
 	if out.Review != "changes_requested" && len(pr.Reviewers)+len(pr.Teams) > 0 {
 		out.Review = "required"
-	}
-	if len(reviews) == 100 && out.Review == "approved" {
-		out.Review = "pending"
 	}
 	var status struct {
 		State    string `json:"state"`
@@ -353,6 +400,14 @@ func (g githubForge) PRStatus(ctx context.Context, repo string, number int) (Tod
 			Summary:    failedItems[0].summary,
 			Count:      len(failedItems),
 			Digest:     digestStr,
+		}
+	}
+	if feedback != nil {
+		*feedback = prFeedback{pullPath: path, author: pr.User.Login, viewer: viewer, viewerChecked: viewerChecked}
+		for _, r := range reviews {
+			if r.State == "COMMENTED" && r.ID > 0 && !r.SubmittedAt.IsZero() {
+				feedback.reviews = append(feedback.reviews, r)
+			}
 		}
 	}
 	return out, nil
@@ -515,12 +570,18 @@ func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
 			p.seen[key] = last // failures are attempts too, not fresh evidence
 			p.mu.Unlock()
 			var status TodoPRStatus
+			var feedback prFeedback
+			g, canReadFeedback := f.(githubForge)
 			var err error
 			if other != nil {
 				status, err = otherPRStatus(ctx, other, url)
 			} else {
 				number, _ := strconv.Atoi(m[2])
-				status, err = f.PRStatus(ctx, m[1], number)
+				if canReadFeedback && url == t.PRURL && s.prEventsRouteToAgentOn(ctx) {
+					status, err = g.readPRStatus(ctx, m[1], number, &feedback)
+				} else {
+					status, err = f.PRStatus(ctx, m[1], number)
+				}
 			}
 			if err != nil {
 				s.logf("task %s: PR status: %v", t.ID, err)
@@ -534,6 +595,12 @@ func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
 			status.URL, status.CheckedAt = url, observedAt
 			if err := s.applyPRStatus(ctx, t, status); err != nil {
 				s.logf("task %s: keep PR status: %v", t.ID, err)
+				continue
+			}
+			if feedback.pullPath != "" {
+				if err := s.routePRFeedback(ctx, t.ID, status, g, feedback); err != nil {
+					s.logf("task %s: route PR feedback: %v", t.ID, err)
+				}
 			}
 		}
 	}
