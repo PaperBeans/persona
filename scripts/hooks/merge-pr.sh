@@ -91,12 +91,16 @@ PY
 { IFS= read -r head; IFS= read -r branch; IFS= read -r same_repo; IFS= read -r base; } < "$tmp/fields"
 subject="$(<"$tmp/subject")"
 [ -z "$expect_head" ] || [ "$head" = "$expect_head" ] || { echo "merge-pr: the PR head differs from the reviewed head" >&2; exit 1; }
-# The fetched sha, not origin/<base>: that ref only moves when the clone's fetch refspec maps it.
-git -C "$root" fetch -q origin "refs/heads/$base"
-base_sha="$(git -C "$root" rev-parse FETCH_HEAD)"
+# The fetched sha, not origin/<base>: that ref only moves when the clone's fetch refspec maps it. Each fetch lands in
+# its own per-PR ref, never FETCH_HEAD, which belongs to the whole checkout: another fetch in it (the watcher preparing
+# a worktree in the same clone, #16759) would replace the value between these two lines.
+base_ref="refs/merge-pr/$pr/base"
+head_ref="refs/merge-pr/$pr/head"
+git -C "$root" fetch -q origin "+refs/heads/$base:$base_ref"
+base_sha="$(git -C "$root" rev-parse "$base_ref")"
 [ -z "$expect_base" ] || [ "$base_sha" = "$expect_base" ] || { echo "merge-pr: the PR base differs from the reviewed base" >&2; exit 1; }
-git -C "$root" fetch -q origin "pull/$pr/head"
-[ "$(git -C "$root" rev-parse FETCH_HEAD)" = "$head" ] || { echo "merge-pr: the PR moved while fetching; run it again" >&2; exit 1; }
+git -C "$root" fetch -q origin "+pull/$pr/head:$head_ref"
+[ "$(git -C "$root" rev-parse "$head_ref")" = "$head" ] || { echo "merge-pr: the PR moved while fetching; run it again" >&2; exit 1; }
 python3 "$root/scripts/privacy_check.py" --range "$base_sha..$head" --message "$tmp/message" \
   || { echo "merge-pr: #$pr not merged: fix the hits above in the PR first" >&2; exit 1; }
 # Only the files the PR changes, as the merge leaves them: a file main already fails is left to its own fix.

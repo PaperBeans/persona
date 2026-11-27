@@ -157,7 +157,8 @@ export interface InboxItem {
   todo_forward?: InboxTodoForward;
   /** New foreign mail translated by the hub as it came in (for a device whose Settings › Translation asks), by target language. */
   translations?: Record<string, { subject: string; preview: string }>;
-  /** What it grew out of (docs/assistant/inbox.md "Relationships: parents and children"): another item, a todo or an agent session ("<machine>/<session>"). */
+  /** What it grew out of (docs/assistant/inbox.md "Relationships: parents and children"): another item, a todo, a
+   *  coding Agent's session ("<machine>/<session>") or a personal Agent's session ("<source>:<sessionKey>"). */
   parent?: InboxParent;
   /** The folder path it is filed under ("work/alerts/engine"; docs/assistant/inbox.md "Folders"); absent: unfiled. `folder_by`
    *  says who filed it: the model, or the user (then the model leaves it alone). */
@@ -213,11 +214,11 @@ export interface InboxMute extends InboxMuteOption {
   manager?: string;
 }
 
-export type InboxParentKind = "inbox" | "todo" | "session";
+export type InboxParentKind = "inbox" | "todo" | "session" | "agent";
 export interface InboxParent { kind: InboxParentKind; id: string; by?: "continues" | "connector" | "user" }
 
-/** GET /api/v1/inbox/tree/{kind}/{id}: the node's ancestors (nearest first; the last may be a todo or a session,
- * with no item) and the items right under it. */
+/** GET /api/v1/inbox/tree/{kind}/{id}: the node's ancestors (nearest first; the last may be a todo, a coding Agent
+ * session or a personal Agent session, with no item) and the items right under it. */
 export interface InboxTree {
   node: InboxParent;
   item?: InboxItem;

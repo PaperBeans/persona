@@ -1105,13 +1105,51 @@ func TestMergeUsageAccountsAntigravityNamedAccountAndPlan(t *testing.T) {
 		t.Fatalf("remaining local pool lost account identity: %+v", gotLocal)
 	}
 
-	// Two distinct named Antigravity accounts with distinct resets remain separate with their own names and plans.
-	distinct := mergeUsageAccounts([]proto.UsageAccount{
-		{Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", Local: true, Origin: "node-a/0", Machines: []string{"node-a"}, SampledAt: now, Windows: []proto.UsageWindow{mw("7d", 10080, 40, weekG, "Gemini Models")}},
-		{Provider: "agy", Name: "bob@example.com", Plan: "Google AI Pro", Local: true, Origin: "node-b/0", Machines: []string{"node-b"}, SampledAt: now, Windows: []proto.UsageWindow{mw("7d", 10080, 15, weekG.Add(time.Hour), "Gemini Models")}},
+	// Two distinct named Antigravity accounts remain separate even when their reset timestamps match to the second
+	// (for example, members of a shared Google One family pool) or when AccountKeys differ, and preserve deterministic IDs.
+	sharedResetA := proto.UsageAccount{
+		Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", CodexAccountKey: "agy-key-alice",
+		Local: true, Origin: "node-a/0", Machines: []string{"node-a"}, SampledAt: now.Add(-time.Minute),
+		Windows: []proto.UsageWindow{mw("5h", 300, 12, fiveG, "Gemini Models"), mw("7d", 10080, 40, weekG, "Gemini Models")},
+	}
+	sharedResetB := proto.UsageAccount{
+		Provider: "agy", Name: "bob@example.com", Plan: "Google AI Ultra", CodexAccountKey: "agy-key-bob",
+		Local: true, Origin: "node-b/0", Machines: []string{"node-b"}, SampledAt: now,
+		Windows: []proto.UsageWindow{mw("5h", 300, 12, fiveG, "Gemini Models"), mw("7d", 10080, 40, weekG, "Gemini Models")},
+	}
+	forwardShared := mergeUsageAccounts([]proto.UsageAccount{sharedResetA, sharedResetB}, now)
+	reverseShared := mergeUsageAccounts([]proto.UsageAccount{sharedResetB, sharedResetA}, now)
+	if len(forwardShared) != 2 || len(reverseShared) != 2 {
+		t.Fatalf("expected 2 separate accounts on shared reset times, got %+v / %+v", forwardShared, reverseShared)
+	}
+	byName := map[string]proto.UsageAccount{}
+	for _, acct := range forwardShared {
+		byName[acct.Name] = acct
+	}
+	if !slices.Equal(byName["alice@example.com"].Machines, []string{"node-a"}) || !slices.Equal(byName["bob@example.com"].Machines, []string{"node-b"}) {
+		t.Fatalf("distinct Antigravity accounts merged machines: %+v", forwardShared)
+	}
+	for _, acct := range reverseShared {
+		if acct.ID != byName[acct.Name].ID {
+			t.Fatalf("input order changed ID for %s: %q vs %q", acct.Name, acct.ID, byName[acct.Name].ID)
+		}
+	}
+
+	// Same Antigravity account across two machines merges even when all windows are untouched (nil ResetsAt).
+	idleSame := mergeUsageAccounts([]proto.UsageAccount{
+		{
+			Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", CodexAccountKey: "agy-key-alice",
+			Local: true, Origin: "node-a/0", Machines: []string{"node-a"}, SampledAt: now.Add(-2 * time.Minute),
+			Windows: []proto.UsageWindow{{Label: "5h", WindowMinutes: 300, UsedPercent: 0, Model: "Gemini Models"}},
+		},
+		{
+			Provider: "agy", Name: "alice@example.com", Plan: "Google AI Ultra", CodexAccountKey: "agy-key-alice",
+			Local: true, Origin: "node-b/0", Machines: []string{"node-b"}, SampledAt: now,
+			Windows: []proto.UsageWindow{{Label: "5h", WindowMinutes: 300, UsedPercent: 0, Model: "Gemini Models"}},
+		},
 	}, now)
-	if len(distinct) != 2 || distinct[0].Name != "alice@example.com" || distinct[0].Plan != "Google AI Ultra" || distinct[1].Name != "bob@example.com" || distinct[1].Plan != "Google AI Pro" {
-		t.Fatalf("expected two distinct named accounts, got %+v", distinct)
+	if len(idleSame) != 1 || !slices.Equal(idleSame[0].Machines, []string{"node-a", "node-b"}) {
+		t.Fatalf("expected idle same-account Antigravity samples to merge across machines, got %+v", idleSame)
 	}
 }
 
@@ -1509,4 +1547,67 @@ func TestMergeUsageAccountsRefusesAmbiguousOrDistinctPassMerges(t *testing.T) {
 			t.Fatalf("different providers sharing reset time must not merge: %+v", got)
 		}
 	})
+}
+
+func TestMergeUsageAccountsPreservesIdleEpochZeroResetWindows(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	five, week := now.Add(2*time.Hour), now.Add(3*24*time.Hour)
+	epoch := time.Unix(0, 0).UTC()
+
+	extClaude := proto.UsageAccount{
+		Provider:  "antigravity",
+		Name:      "Antigravity Claude/GPT",
+		Plan:      "Ultra",
+		Ref:       "src:agy-3p",
+		Origin:    "src:agy-3p",
+		Sources:   []string{"Antigravity"},
+		SampledAt: now,
+		Windows: []proto.UsageWindow{
+			uw("5h", 300, 0, epoch),
+			uw("7d", 10080, 0, epoch),
+		},
+	}
+	extGemini := proto.UsageAccount{
+		Provider:  "antigravity",
+		Name:      "Antigravity Gemini",
+		Plan:      "Ultra",
+		Ref:       "src:agy-gemini",
+		Origin:    "src:agy-gemini",
+		Sources:   []string{"Antigravity"},
+		SampledAt: now,
+		Windows: []proto.UsageWindow{
+			uw("5h", 300, 8, five),
+			uw("7d", 10080, 15, week),
+		},
+	}
+	localAgy := proto.UsageAccount{
+		Provider:  "agy",
+		Name:      "Antigravity",
+		Local:     true,
+		Origin:    "host-a/0",
+		Machines:  []string{"host-a"},
+		SampledAt: now,
+		Windows: []proto.UsageWindow{
+			{Label: "5h", WindowMinutes: 300, UsedPercent: 0, Model: "Claude and GPT models"},
+			{Label: "7d", WindowMinutes: 10080, UsedPercent: 0, Model: "Claude and GPT models"},
+			{Label: "5h", WindowMinutes: 300, UsedPercent: 8, ResetsAt: &five, Model: "Gemini Models"},
+			{Label: "7d", WindowMinutes: 10080, UsedPercent: 15, ResetsAt: &week, Model: "Gemini Models"},
+		},
+	}
+
+	merged := mergeUsageAccounts([]proto.UsageAccount{extClaude, extGemini, localAgy}, now)
+	var claudeSeat *proto.UsageAccount
+	for i := range merged {
+		if merged[i].Name == "Antigravity Claude/GPT" {
+			claudeSeat = &merged[i]
+		}
+	}
+	if claudeSeat == nil || len(claudeSeat.Windows) != 2 {
+		t.Fatalf("expected untouched epoch-zero external seat to survive merge, got %+v", merged)
+	}
+	for _, w := range claudeSeat.Windows {
+		if w.ResetsAt != nil || w.UsedPercent != 0 {
+			t.Fatalf("expected nil ResetsAt on untouched epoch-zero window, got %+v", w)
+		}
+	}
 }

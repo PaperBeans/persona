@@ -11,6 +11,8 @@
   "load_failed": "读不到对话",
   "empty_title": "还没有对话",
   "empty_body": "在 Persona 里说句话，对话就会出现在这里。",
+  "external_empty_title": "还没有外部对话",
+  "external_empty_body": "飞书 /agent 或其他扩展替你开启的对话会出现在这里。",
   "no_results": "没有和「{query}」相关的对话",
   "search_partial": "较早的对话还在整理，可能有些暂时搜不到。",
   "archived_count_other": "已归档（{count}）",

@@ -5,8 +5,6 @@ import { defaultStateRoot, legacyEnvName } from '../../runtime-sdk/lib/compat.js
 import { stateDir } from '../../runtime-sdk/lib/identity.js'
 import { selfPackage } from '../../runtime-sdk/lib/package.js'
 
-// On Windows the daemon is personad.exe: without the suffix it was never found, so the assistant got no Persona tools.
-const exe = (options) => ((options.platform || process.platform) === 'win32' ? '.exe' : '')
 // The previous context tag still begins a cached preview; its literal stays in this adapter.
 export function contextOpening(text) {
   return /^(?:<persona-context\b|<jarvis-context\b)/.test(text)

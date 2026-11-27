@@ -78,6 +78,7 @@ const SHARED_INDEX: SearchGroup[] = [
   { tab: "advanced", group: t("ui-extensionthemepicker.label"), anchor: "extension-theme" },
   { tab: "advanced", group: t("ui-look.font"), hint: words(t("ui-look.font_sans"), t("ui-look.font_mono"), t("ui-look.font_browser")), anchor: "font" },
   { tab: "advanced", group: t("ui-look.sidebar_icons"), hint: words(t("ui-look.sidebar_icons_monochrome"), t("ui-look.sidebar_icons_colored")), anchor: "sidebar-icons" },
+  { tab: "advanced", group: t("ui-look.phone_nav"), hint: words(t("ui-look.phone_nav_switch"), t("ui-look.phone_nav_tabs")), anchor: "phone-nav" },
   // the assistant's profile
   { tab: "persona", group: t("settings-assistantsettings.routines"), hint: t("settings-assistantsettings.proactive_title"), anchor: "routines" },
   { tab: "persona", group: t("settings-assistantsettings.quiet_tasks"), anchor: "quiet-tasks" },

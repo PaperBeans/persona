@@ -175,6 +175,50 @@ describe("detectLocalExternalOverlaps", () => {
     expect(overlaps.get("loc-agy")).toBe("Antigravity · Gemini");
     expect(overlaps.has("loc-far")).toBe(false);
   });
+
+  it("matches a second machine's local row against a reconciled external row and folds stale local sibling duplicates", () => {
+    const reconciled = acct("ext-merged", "codex", "Work Codex", [win("7d", 10080, 17, 48 * H)], {
+      local: true,
+      machines: ["host-a"],
+      sources: ["Extension"],
+    });
+    const unmergedMachineB = acct("loc-b", "codex", "Codex Plus", [win("7d", 10080, 14, 48 * H)], {
+      local: true,
+      stale: true,
+      machines: ["host-b"],
+    });
+    expect(detectLocalExternalOverlaps([reconciled, unmergedMachineB], NOW).get("loc-b")).toBe("Work Codex");
+
+    const liveLocal = acct("codex-live", "codex", "Codex Plus", [win("5h", 300, 1, 2 * H), win("7d", 10080, 17, 48 * H)], {
+      local: true,
+      machines: ["host-a"],
+    });
+    const staleRollout = acct("codex-stale", "codex", "Codex Plus", [win("7d", 10080, 14, 48 * H)], {
+      local: true,
+      stale: true,
+      machines: ["host-b"],
+    });
+    const freshOther = acct("codex-fresh-2", "codex", "Codex Plus 2", [win("7d", 10080, 10, 48 * H)], {
+      local: true,
+      machines: ["host-c"],
+    });
+    const siblingOverlaps = detectLocalExternalOverlaps([liveLocal, staleRollout, freshOther], NOW);
+    expect(siblingOverlaps.get("codex-stale")).toBe("Codex Plus");
+    expect(siblingOverlaps.has("codex-live")).toBe(false);
+    expect(siblingOverlaps.has("codex-fresh-2")).toBe(false);
+
+    // Distinct signed-in email accounts never fold into each other even when reset timestamps match and one is stale.
+    const agyHostA = acct("agy-a", "antigravity", "alice@example.com", [win("7d", 10080, 18, 48 * H, { model: "Gemini Models" })], {
+      local: true,
+      machines: ["host-a"],
+    });
+    const agyHostB = acct("agy-b", "antigravity", "bob@example.com", [win("7d", 10080, 18, 48 * H, { model: "Gemini Models" })], {
+      local: true,
+      stale: true,
+      machines: ["host-b"],
+    });
+    expect(detectLocalExternalOverlaps([agyHostA, agyHostB], NOW).size).toBe(0);
+  });
 });
 
 describe("buildUsageTable and nextTimelineReset", () => {

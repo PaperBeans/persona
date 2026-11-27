@@ -1,4 +1,4 @@
-package assistant
+package textfmt
 
 import (
 	"strings"
@@ -8,7 +8,7 @@ import (
 
 func TestClipMarkdown(t *testing.T) {
 	short := "**完成**：改了 `a.go`"
-	if got := clipMarkdown(short, 100); got != short {
+	if got := ClipMarkdown(short, 100); got != short {
 		t.Errorf("a short text is kept: %q", got)
 	}
 	for _, tc := range []struct {
@@ -39,9 +39,9 @@ func TestClipMarkdown(t *testing.T) {
 		{"a bracket inside a closed link url stays", "见 [a](http://x/[?q=1) 后面的文字很多", 24, "见 [a](http://x/[?q=1) 后面…"},
 		{"a code block is closed", "说明\n```go\nfunc a() {}\nfunc b() {}\nfunc c() {}", 34, "说明\n```go\nfunc a() {}\nfunc b() {}\n```\n…"},
 	} {
-		got := clipMarkdown(tc.in, tc.n)
+		got := ClipMarkdown(tc.in, tc.n)
 		if got != tc.want {
-			t.Errorf("%s: clipMarkdown = %q, want %q", tc.name, got, tc.want)
+			t.Errorf("%s: ClipMarkdown = %q, want %q", tc.name, got, tc.want)
 		}
 		if outside := marksOutsideCode(got); outside.boldStar != 0 || outside.boldUnder != 0 || outside.star != 0 || outside.under != 0 || outside.strike != 0 || outside.bracket != 0 || outside.endsInCode {
 			t.Errorf("%s: unpaired marks outside code in %q: %+v", tc.name, got, outside)

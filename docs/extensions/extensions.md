@@ -142,6 +142,7 @@ What an extension contributes where is written in the manifest's `contributes`: 
 | `triage_templates` (version 1) | — | `id`, `title` (≤ 40 characters), `text` (≤ 4000 characters) | Declarative is enough | Templates to pick from when filling in Inbox triage rules (`triage_rules`), see "Declarative contributions" |
 | `agent_filters` (version 1) | — | `id`, `title?` (≤ 40 characters), `when?` (name of a boolean field in the config), `agents?` (`claude` / `codex`), `originators?`, `added_dirs?`, `first_message_prefixes?` (at least one kind) | Declarative is enough | Which Agent sessions on your computers stay out of Agents, see "Agent filters" below |
 | `tunnels` (version 1) | — | `id`, `name` (1–40 characters, the row title in App settings) | Pure declaration; `configuration` must have a required `string` field `target_host`; `target_port` and `ssh_port`, if present, must be `integer` | When the phone cannot reach the hub address, connect through the App's built-in tunnel core; see "In-App tunnels" below |
+| `routine_facts` (version 1) | `routine_facts.` | `id`, `title` (1–80 characters) | RPC runtime, permission `routine_facts` | Facts and report sections for scheduled briefings, collected with the contribution ID, local date and report language; see "Facts and report sections for scheduled routines" below |
 | `messaging` (version 1, #2138) | — | `id` (`^[a-z][a-z0-9_]{0,31}$`, also the source id in API paths and events), `name`, `icon?`, `capabilities?`, `composer_modes?`, `settings_ui?` (an `extension_page` from the same extension), `links?` | `runtime.http`, with `on_startup` in `activation_events` | The App's **Messages** entry: conversations, chats and sending all go through `/api/v1/messaging/<id>/…`, drawn by the App with shared native messaging components; see [extension-messaging.md](extension-messaging.md) |
 | `error_reports` (version 1, #5533) | `error_reports.` | `id`, `sources?` (`hub` / `manager` / `web` / `android` / `ios` / `mac` / `watch` / `vision`; omitted means all) | Process speaks the protocol, `on_startup`, permission `error_reports` | The hub's and the devices' errors and crashes, scrubbed, given to the program as `error_reports.deliver`; see "Error reports" below |
 | `auth_relay` (version 1, #5644) | `auth_relay.` | `id`, `name?`, `hosts` (exact lowercase host names, 1–16), `paths` (exact paths, 1–16; a trailing `/` is ignored) | Process speaks the protocol, permission `auth_relay`; **starts off** at install and when an upgrade adds it, whatever `off_by_default` says | Authorization links the user's Agents stop at, on these hosts and paths and printed by the Agent's own command, handed to the program as `auth_relay.complete` to complete with the account it is signed in with; see [auth-relay.md](../operations/auth-relay.md) |
@@ -851,6 +852,58 @@ offload is checked on the computer with `machine.storage.check` before the progr
 a command-line tool on the computer, `offload.run` answers `needs_install` with the tool and where it comes from; the
 apps ask the user a second time and only then send `install: true`. The routes, errors and the install confirmation
 are in `docs/server/machine-usage-map.md` "Extension point `disk_offload`".
+
+### Facts and report sections for scheduled routines
+
+A library extension can add upcoming book returns to a morning briefing. The extension supplies the words and
+the routine decides when to run, how to display the section, and where to deliver the report.
+
+Declare a titled source and request the **routine facts** permission. The owner sees the request when installing
+the extension or upgrading a version that adds this permission.
+
+```json
+{
+  "permissions": { "routine_facts": true },
+  "contributes": {
+    "routine_facts": [{ "id": "loans", "title": "Library" }]
+  }
+}
+```
+
+Use an RPC runtime. A host that supports this contract advertises `routine_facts: 1` in
+`initialize.hub.extension_points`. On a run with facts or reporting enabled, the host calls
+`routine_facts.collect` with the manifest contribution ID, the local date (`YYYY-MM-DD`) and the report
+language (`en`, `zh-Hans` or `ja`). The grant permits contributing to the report. Access to a Persona
+data source still requires that source's own permission.
+
+The TypeScript SDK dispatches the call by contribution ID. A Go extension can register the same collector in
+`ext.Program.RoutineFacts` and return a `wire.RoutineFactsResult`.
+
+```ts
+import { main } from "@persona/extension";
+
+main({
+  id: "example-library",
+  version: "1.0.0",
+  routineFacts: {
+    async loans({ date, language }) {
+      const loans = await localLibrary.dueOn(date, language);
+      if (!loans.length) return {};
+      return {
+        facts: [localLibrary.dueCount(loans.length, language)],
+        sections: [{ title: localLibrary.dueHeading(language), body: loans[0].title }],
+      };
+    },
+  },
+});
+```
+
+Here `localLibrary` is the extension's own collection and translation code. Each response can contain up to
+four single-line facts of 280 characters each and two report sections. A section has a single-line title of
+up to 80 characters and a plain-text body of up to 1,600 characters. An empty object contributes nothing.
+Collect from a local snapshot when possible. The host calls up to eight sources in extension ID and contribution
+ID order, concurrently, with a shared two-second deadline and a 32 KiB limit on each response.
+Late or invalid responses are omitted from that run. Rendering an existing briefing uses its saved content.
 
 ### Memory sources
 

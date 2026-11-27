@@ -70,6 +70,24 @@ function drawDecision(row: BriefRow) {
 const rows = (kind: string) => [...host.querySelectorAll(`[data-brief-row=${kind}]`)];
 
 describe("a brief item", () => {
+  it("shows the provider's facts and report as text and skips unreadable contributions", () => {
+    const provider = { extension_id: "example", contribution_id: "library", title: "Library" };
+    draw(item(body({ contributions: [
+      { ...provider, facts: ["Two books due", null], sections: [
+        { title: "Due today", body: "<b>Field guide</b>\nReturn before noon" }, { title: "Incomplete" }, null,
+      ] },
+      { ...provider, contribution_id: "empty", title: "Empty" }, null, { facts: ["Unknown provider"] },
+    ] })));
+    const section = [...host.querySelectorAll("section")].find((s) => s.textContent?.includes("Library"));
+    expect(section?.textContent).toContain("Two books due");
+    expect(section?.textContent).toContain("Due today");
+    expect(section?.textContent).toContain("<b>Field guide</b>");
+    expect(section?.querySelector("b")).toBeNull();
+    expect(host.textContent).not.toMatch(/Incomplete|Empty|Unknown provider/);
+    draw(item());
+    expect(host.textContent).not.toContain("Library");
+  });
+
   it("draws the sections: what waits, the last hours (failed first), what is to be verified", () => {
     draw(item());
     const text = host.textContent ?? "";

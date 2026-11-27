@@ -11,7 +11,7 @@ import { plainMarkdown } from "../../lib/plain-markdown";
 import { cx, EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
-import { CommentBlock, CommentsChip, goToComment } from "./CommentCard";
+import { CommentBlock, CommentsChip, fileCommentPanel, goToComment } from "./CommentCard";
 import { t } from "../../i18n";
 
 /** "Quoting Persona · 16:45" / "Quoting task "…" · 16:45": who said it, or which task, and when, as far as is known. */
@@ -68,7 +68,7 @@ export function QuoteBars({ draftKey, quotes, onRemove, onAddCommentImages }: {
 }
 
 /** A sent message's leading quote blocks (splitQuotes): the quote card, and a comment card for each comment. `mid`/`sid`
- *  let a code comment open its file or diff again. */
+ *  let a file or code comment open its source again. */
 export function QuoteStack({ blocks, mid, sid }: { blocks: readonly string[]; mid?: string; sid?: string }) {
   const quotes = parseQuotes(blocks);
   let n = 0;
@@ -80,6 +80,7 @@ export function QuoteStack({ blocks, mid, sid }: { blocks: readonly string[]; mi
         const cwd = mid && sid ? getSession(mid, sid)?.cwd : undefined;
         // the path the agent read is relative to the session's folder; with the folder known it opens again
         let open = spot && mid && cwd ? () => openSpot({ ...spot, mid, sid, cwd, path: spot.diff || spot.file.startsWith("/") ? spot.path : `${cwd.replace(/\/+$/, "")}/${spot.file}` }) : undefined;
+        if (fileCommentPanel(q.comment.file, mid, sid)) open = () => goToComment(q, { mid, sid });
         // an element of a preview: that session's preview, at the page it was on (the port is the page's)
         const el = q.comment.element;
         const port = el ? Number(new URL(el.url, "http://localhost").port) : 0;

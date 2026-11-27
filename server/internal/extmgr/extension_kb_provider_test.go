@@ -1,0 +1,130 @@
+package extmgr
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/rpc"
+)
+
+func TestKBProviderProcessPermissionsAndWire(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	a := withAssistant(h)
+	a.on(assistantwire.MethodKBProviderCheckpoint, func(json.RawMessage) (any, error) {
+		return json.RawMessage(`{"state":"running","approval":"plan","read":3,"written":2}`), nil
+	})
+	a.on(assistantwire.MethodKBProviderSentMarkers, func(json.RawMessage) (any, error) {
+		return json.RawMessage(`{"markers":[{"n":2,"sent_by":"assistant"}]}`), nil
+	})
+	for _, tc := range []struct {
+		id, scopes        string
+		progress, markers bool
+	}{
+		{"kb-legacy-reader", `["kb.read","sent.read"]`, false, false},
+		{"kb-checkpoint-reader", `["kb.import_status"]`, true, false},
+		{"kb-marker-reader", `["kb.import_status","sent.read"]`, true, true},
+	} {
+		startKBProcess(t, h, tc.id, tc.scopes)
+		p := h.extensions.get(tc.id)
+		for _, read := range []struct {
+			call, params, internal string
+			ok                     bool
+		}{
+			{"checkpoint", "{}", assistantwire.MethodKBProviderCheckpoint, tc.progress},
+			{"markers", `{"approval":"plan","day":"2026-03-14"}`, assistantwire.MethodKBProviderSentMarkers, tc.markers},
+		} {
+			var out json.RawMessage
+			before := len(a.got(read.internal))
+			err := p.proc.Call(t.Context(), "kbtest."+read.call, json.RawMessage(read.params), &out)
+			if read.ok {
+				if err != nil {
+					t.Fatal(err)
+				}
+				calls := a.got(read.internal)
+				if len(calls) != before+1 {
+					t.Fatalf("assistant calls %d", len(calls))
+				}
+				var who assistantwire.KBProviderRequest
+				if json.Unmarshal(calls[before], &who) != nil {
+					t.Fatal("invalid internal envelope")
+				}
+				born := h.extensions.reg.SnapshotExact(tc.id).Record.InstalledAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+				if who.Extension.String() != tc.id || who.StorageID.String() != tc.id || who.InstalledAt != born {
+					t.Fatalf("installation attribution %+v", who)
+				}
+			} else {
+				var re *rpc.Error
+				if !errors.As(err, &re) || re.Code != extension.CodePermissionDenied || len(a.got(read.internal)) != before {
+					t.Fatalf("unexpected permission result: %s %v", tc.id, err)
+				}
+			}
+		}
+	}
+	p := h.extensions.get("kb-marker-reader")
+	for _, q := range []string{
+		`{"approval":"plan","day":"2026-03-14","storage_id":"other"}`,
+		`{"approval":"plan","day":"2026-03-14","source":"other"}`,
+		`{"approval":"plan","day":"2026-03-14","after":-1}`,
+	} {
+		var out json.RawMessage
+		before := len(a.got(assistantwire.MethodKBProviderSentMarkers))
+		err := p.proc.Call(t.Context(), "kbtest.markers", json.RawMessage(q), &out)
+		var re *rpc.Error
+		if !errors.As(err, &re) || re.Code != "invalid_params" || len(a.got(assistantwire.MethodKBProviderSentMarkers)) != before {
+			t.Fatalf("foreign fields reached assistant: %v", err)
+		}
+	}
+	a.on(assistantwire.MethodKBProviderSentMarkers, func(json.RawMessage) (any, error) {
+		return json.RawMessage(`{"markers":[{"n":1,"sent_by":"assistant","text":"archived private data"}]}`), nil
+	})
+	var raw json.RawMessage
+	err := p.proc.Call(t.Context(), "kbtest.markers", json.RawMessage(`{"approval":"plan","day":"2026-03-14"}`), &raw)
+	if err == nil || strings.Contains(err.Error(), "archived private data") || len(raw) > 0 {
+		t.Fatalf("upstream returned an unapproved field: %s %v", raw, err)
+	}
+}
+
+func TestKBProviderProcessRetiredWhileReading(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	a := withAssistant(h)
+	startKBProcess(t, h, "kb-changing", `["kb.import_status"]`)
+	started, release := make(chan struct{}), make(chan struct{})
+	a.on(assistantwire.MethodKBProviderCheckpoint, func(json.RawMessage) (any, error) {
+		close(started)
+		select {
+		case <-release:
+		case <-t.Context().Done():
+		}
+		return json.RawMessage(`{"state":"running","approval":"private-reply","read":1,"written":1}`), nil
+	})
+	result := make(chan error, 1)
+	ctx := t.Context()
+	p := h.extensions.get("kb-changing")
+	go func() {
+		var out json.RawMessage
+		err := p.proc.Call(ctx, "kbtest.checkpoint", json.RawMessage("{}"), &out)
+		if err == nil {
+			err = errors.New("disclosed: " + string(out))
+		}
+		result <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("provider never reached the assistant")
+	}
+	if err := h.extensions.reg.SetEnabled(ctx, "kb-changing", false, "test"); err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-result; err == nil || strings.Contains(err.Error(), "private-reply") {
+		t.Fatalf("reply after grant expired: %v", err)
+	}
+}

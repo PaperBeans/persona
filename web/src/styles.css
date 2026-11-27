@@ -786,15 +786,15 @@ select:not([multiple], [size], .appearance-none) {
   }
 }
 
-/* ── Opt-in Liquid Glass surface style (Settings › Advanced › Appearance, #16607) ────────────────────────── */
+/* ── Opt-in Liquid Glass surface style (Settings › Advanced › Appearance, #16607, #16776) ────────────────── */
 :root[data-surface-style="liquid-glass"] {
   --glass-t: 0.68;
   --glass-blur: calc(6px + var(--glass-t) * 24px);
-  --glass-sat: calc(115% + var(--glass-t) * 75%);
-  --canvas: rgba(242, 244, 248, calc(0.92 - var(--glass-t) * 0.56));
-  --page: rgba(250, 250, 253, calc(0.96 - var(--glass-t) * 0.24));
-  --surface: rgba(255, 255, 255, calc(0.94 - var(--glass-t) * 0.30));
-  --inset: rgba(241, 243, 247, calc(0.86 - var(--glass-t) * 0.36));
+  --glass-sat: calc(105% + var(--glass-t) * 25%);
+  --canvas: rgba(244, 245, 248, calc(0.92 - var(--glass-t) * 0.36));
+  --page: rgba(250, 250, 253, calc(0.96 - var(--glass-t) * 0.22));
+  --surface: rgba(255, 255, 255, calc(0.94 - var(--glass-t) * 0.26));
+  --inset: rgba(241, 243, 247, calc(0.86 - var(--glass-t) * 0.30));
   --hover: rgba(17, 17, 19, 0.065);
   --hover-2: rgba(255, 255, 255, 0.82);
   --line: rgba(17, 17, 19, 0.09);
@@ -802,10 +802,10 @@ select:not([multiple], [size], .appearance-none) {
   --mac-rim-top: rgba(255, 255, 255, 0.90);
 }
 :root.dark[data-surface-style="liquid-glass"] {
-  --canvas: rgba(12, 16, 24, calc(0.90 - var(--glass-t) * 0.62));
-  --page: rgba(18, 20, 26, calc(0.95 - var(--glass-t) * 0.30));
-  --surface: rgba(28, 31, 40, calc(0.92 - var(--glass-t) * 0.36));
-  --inset: rgba(12, 14, 20, calc(0.82 - var(--glass-t) * 0.42));
+  --canvas: rgba(16, 17, 21, calc(0.92 - var(--glass-t) * 0.34));
+  --page: rgba(20, 21, 26, calc(0.95 - var(--glass-t) * 0.25));
+  --surface: rgba(28, 30, 36, calc(0.93 - var(--glass-t) * 0.28));
+  --inset: rgba(12, 13, 17, calc(0.84 - var(--glass-t) * 0.30));
   --hover: rgba(255, 255, 255, 0.08);
   --hover-2: rgba(255, 255, 255, 0.13);
   --line: rgba(255, 255, 255, 0.11);
@@ -838,14 +838,17 @@ select:not([multiple], [size], .appearance-none) {
 :root[data-surface-style="liquid-glass"] .sidebar-group-heading[data-edge]::after {
   display: none;
 }
-:root[data-surface-style="liquid-glass"] [data-app-shell] {
+:root[data-surface-style="liquid-glass"]:not([data-desktop-glass="1"]) [data-app-shell] {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+}
+:root[data-surface-style="liquid-glass"]:not([data-desktop-glass="1"]) [data-app-shell] > main,
+:root[data-surface-style="liquid-glass"]:not([data-desktop-glass="1"]) [data-app-shell] > aside {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 :root[data-surface-style="liquid-glass"] [data-app-shell] > main,
 :root[data-surface-style="liquid-glass"] [data-app-shell] > aside {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: inset 0 1px 0 var(--mac-rim-top);
 }
 :root[data-surface-style="liquid-glass"] [data-app-shell]:is([data-mac-bay="rail"], [data-mac-bay="hidden"]) > main {
@@ -891,3 +894,6 @@ select:not([multiple], [size], .appearance-none) {
 .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--accent), var(--shadow-btn); }
 .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--accent), var(--shadow-btn); }
 .range:disabled { opacity: 0.5; cursor: default; }
+
+/* The phone's tab bar (views/PhoneTabBar.tsx) gives its room to the composer while the keyboard is up (lib/viewport.ts). */
+:root[data-kb] [data-phone-tabs] { display: none; }

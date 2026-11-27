@@ -461,12 +461,18 @@ class Watcher:
                 if identity.strip() != repo:
                     raise WatchError("checkout does not belong to " + repo)
                 base = pr["baseRefOid"]
-                checked(["git", "fetch", "-q", "origin", "refs/heads/" + pr["baseRefName"]], cwd=root, timeout=180)
-                fetched_base = checked(["git", "rev-parse", "FETCH_HEAD"], cwd=root).strip()
+                # FETCH_HEAD belongs to the checkout, not to this process: merge-pr.sh and
+                # every other fetch in the same clone overwrite it between these two lines.
+                # Each fetch lands in its own per-PR ref and the check reads that ref (#16759).
+                base_ref = "refs/pr-watch/prepare/%s/base" % number
+                head_ref = "refs/pr-watch/prepare/%s/head" % number
+                checked(["git", "fetch", "-q", "origin", "+refs/heads/" + pr["baseRefName"] + ":" + base_ref],
+                        cwd=root, timeout=180)
+                fetched_base = checked(["git", "rev-parse", base_ref], cwd=root).strip()
                 if fetched_base != base:
                     raise WatchError("base moved while preparing the PR")
-                checked(["git", "fetch", "-q", "origin", "pull/%s/head" % number], cwd=root, timeout=180)
-                if checked(["git", "rev-parse", "FETCH_HEAD"], cwd=root).strip() != pr["headRefOid"]:
+                checked(["git", "fetch", "-q", "origin", "+pull/%s/head:%s" % (number, head_ref)], cwd=root, timeout=180)
+                if checked(["git", "rev-parse", head_ref], cwd=root).strip() != pr["headRefOid"]:
                     raise WatchError("head moved while preparing the PR")
                 # The temporary directory exists only as an mkdtemp reservation.
                 worktree.rmdir()

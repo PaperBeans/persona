@@ -885,4 +885,53 @@ describe("model families", () => {
     await key(now, "ArrowUp");
     expect(document.activeElement).toBe(row("Opus 5.5"));
   });
+
+  it("renders Orchestrator, GPT-OSS, and trailing Other rows in their own groups while keeping Default headerless", async () => {
+    const mixed: PanelProvider = {
+      id: "agy-mix",
+      name: "agy-mix",
+      engine: "agy",
+      models: [
+        { id: "default", name: "Default (recommended)", providerDefault: true, efforts: [] },
+        { id: "claude-opus-5-5", name: "Opus 5.5", efforts: [] },
+        { id: "claude-opus-4-8", name: "Opus 4.8", efforts: [] },
+        { id: "claude-sonnet-5-5", name: "Sonnet 5.5", efforts: [] },
+        { id: "gemini-pro-orchestrator-neon", name: "Orchestrator (Neon)", efforts: [] },
+        { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", efforts: [] },
+        { id: "glm-5.3", name: "GLM 5.3", efforts: [] },
+        { id: "vendor/model-x", name: "vendor/model-x", efforts: [], custom: true },
+      ],
+    };
+    await open({
+      providers: [mixed, codex()],
+      state: { current: null, recommended: [] },
+    });
+    act(() => launcher("agy-mix").click());
+
+    const familyEls = [...document.body.querySelectorAll<HTMLElement>("[data-panel-family]")];
+    expect(familyEls.map((el) => [el.dataset.panelFamily, el.getAttribute("aria-label")])).toEqual([
+      ["claude:opus", "Claude Opus"],
+      ["claude:sonnet", "Claude Sonnet"],
+      ["orchestrator", "Orchestrator"],
+      ["gpt-oss", "GPT-OSS"],
+      ["other", "其他"],
+    ]);
+
+    const otherGroup = familyEls.find((el) => el.dataset.panelFamily === "other")!;
+    expect(otherGroup.getAttribute("role")).toBe("group");
+    expect(otherGroup.querySelector(".text-submeta")?.textContent).toBe("其他");
+    expect(otherGroup.querySelector("[data-panel-fold]")).toBeNull();
+    expect([...otherGroup.querySelectorAll("[data-panel-row]")].map((r) => r.querySelector(".truncate")?.textContent)).toEqual([
+      "GLM 5.3",
+      "vendor/model-x",
+    ]);
+    expect(row("Default (recommended)").closest("[data-panel-family]")).toBeNull();
+
+    const gptOssRow = row("GPT-OSS 120B (Medium)");
+    act(() => gptOssRow.focus());
+    await key(gptOssRow, "ArrowDown");
+    expect(document.activeElement).toBe(row("GLM 5.3"));
+    await key(row("GLM 5.3"), "ArrowUp");
+    expect(document.activeElement).toBe(gptOssRow);
+  });
 });

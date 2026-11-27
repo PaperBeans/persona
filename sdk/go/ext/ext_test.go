@@ -166,6 +166,32 @@ func TestPushForOlderApps(t *testing.T) {
 	}
 }
 
+func TestCollectRoutineFacts(t *testing.T) {
+	c := start(t, Program{ID: "example", Version: "1.0.0", RoutineFacts: map[string]RoutineFactsCollector{
+		"library": func(_ context.Context, req wire.RoutineFactsParams) (wire.RoutineFactsResult, error) {
+			return wire.RoutineFactsResult{
+				Facts:    []string{req.Date},
+				Sections: []wire.RoutineReportSection{{Title: req.Language, Body: "Two books are due."}},
+			}, nil
+		},
+	}})
+	c.call("initialize", wire.InitializeParams{Protocol: Protocol})
+	req := wire.RoutineFactsParams{Contribution: "library", Date: "2026-11-27", Language: "en"}
+	response := c.call("routine_facts.collect", req)
+	var got wire.RoutineFactsResult
+	if err := json.Unmarshal(response.Result, &got); err != nil || len(got.Facts) != 1 || got.Facts[0] != req.Date ||
+		len(got.Sections) != 1 || got.Sections[0].Title != req.Language {
+		t.Fatalf("collect answered %s (%v)", response.Result, response.Error)
+	}
+	req.Contribution = "missing"
+	if f := c.call("routine_facts.collect", req); f.Error == nil || f.Error.Code != wire.ErrorCodeNoContribution {
+		t.Fatalf("missing contribution: %+v", f)
+	}
+	if f := c.call("routine_facts.status", req); f.Error == nil || f.Error.Code != wire.ErrorCodeUnknownMethod {
+		t.Fatalf("unknown method: %+v", f)
+	}
+}
+
 func TestShortcuts(t *testing.T) {
 	c := start(t, Program{ID: "example", Version: "1.0.0", Shortcuts: map[string]Shortcut{
 		"count": func(ctx context.Context, r *ShortcutRequest) (*wire.ShortcutResult, error) {

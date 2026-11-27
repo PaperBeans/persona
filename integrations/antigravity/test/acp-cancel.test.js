@@ -641,11 +641,31 @@ test('permission cards forward always_label, honor always responses, and never s
 
   await t.test('Assistant sessions omit always_label and never pass allow_always to ACP', async (t) => {
     const { n, record, start } = await agyRuntime(t)
+    assert.equal(n.hello.caps.keep_always, true)
     n.resolve = () => ({ allow: true, always: true })
     const pid = await start(`ask-options ${JSON.stringify(fullOptions)}`, { assistant: true })
     await until('assistant permission answered', () => permissionAnswers(record).length === 1, SLOW)
     assert.equal('always_label' in n.asked[0], false)
     assert.deepEqual(permissionAnswers(record)[0].result, { outcome: { outcome: 'selected', optionId: 'once' } })
+    await n.peer.call('session.interrupt', { session_id: pid })
+
+    // Remembered hub Always grant on a second matching call still selects allow_once, never allow_always.
+    n.resolve = () => ({ allow: true, always: true, remembered: true })
+    await n.peer.call('session.send', { session_id: pid, text: `ask-options ${JSON.stringify(fullOptions)}`, assistant: true })
+    await until('remembered assistant permission answered', () => permissionAnswers(record).length === 2, SLOW)
+    assert.equal('always_label' in n.asked[1], false)
+    assert.deepEqual(permissionAnswers(record)[1].result, { outcome: { outcome: 'selected', optionId: 'once' } })
+    await n.peer.call('session.interrupt', { session_id: pid })
+
+    // Assistant request lacking allow_once (allow_always-only) cancels without raising a card or selecting allow_always.
+    const alwaysOnly = [
+      { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ]
+    await n.peer.call('session.send', { session_id: pid, text: `ask-options ${JSON.stringify(alwaysOnly)}`, assistant: true })
+    await until('assistant allow_always-only cancelled without asking hub', () => permissionAnswers(record).length === 3, SLOW)
+    assert.equal(n.asked.length, 2)
+    assert.deepEqual(permissionAnswers(record)[2].result, cancelled)
     await n.peer.call('session.interrupt', { session_id: pid })
   })
 

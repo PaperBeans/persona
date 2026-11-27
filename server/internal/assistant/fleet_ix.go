@@ -354,7 +354,7 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 		ix.AlwaysKeys = nil
 	}
 	confirms := s.ixPolicy(ctx, ix).ConfirmOutbound || inboxWholeBash ||
-		(ix.ToolName == "Bash" && len(ix.AlwaysKeys) == 0 && s.isInboxOrigin(ctx, ix.MachineID, ix.SessionID, false))
+		(strings.EqualFold(ix.ToolName, "Bash") && len(ix.AlwaysKeys) == 0 && s.isInboxOrigin(ctx, ix.MachineID, ix.SessionID, false))
 	ix = nodeCard(ix, s.fleetStore() != nil, confirms, inAssistant)
 	if ix.Kind == proto.IxPermission {
 		l := s.lang(ctx)
@@ -388,11 +388,13 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 			return r, nil
 		}
 	}
-	if r, ok := s.alwaysAllowed(ctx, ix); ok {
-		if ix.Resumable { // its hook's earlier attempt left the card pending: it is answered too
-			_ = s.resolveRemembered(ix.ID, r, false)
+	if !confirms {
+		if r, ok := s.alwaysAllowed(ctx, ix); ok {
+			if ix.Resumable { // its hook's earlier attempt left the card pending: it is answered too
+				_ = s.resolveRemembered(ix.ID, r, false)
+			}
+			return r, nil
 		}
-		return r, nil
 	}
 	if ix.Detachable {
 		return s.waitDetachedCard(ctx, ix)
@@ -1867,14 +1869,32 @@ func (s *Service) isInboxOrigin(ctx context.Context, machine, session string, fa
 		return failClosed
 	}
 	o := b.m[session]
+	if o == nil {
+		if parent, _, ok := strings.Cut(session, "@"); ok && parent != "" {
+			o = b.m[parent]
+		}
+	}
 	return o != nil && o.Origin == OriginInbox && (o.MachineID == "" || s.sameMachine(machine, o.MachineID))
 }
 
-// isInboxWholeBashAlways reports whether ix asks for a whole-tool "tool:Bash" session grant on an
+// isWholeBashAlwaysKey reports whether key grants whole-tool Bash ("tool:Bash" or "runtime:<rt>:tool:Bash").
+func isWholeBashAlwaysKey(key string) bool {
+	if strings.EqualFold(key, "tool:Bash") {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(key, "runtime:"); ok {
+		if _, tool, ok := strings.Cut(rest, ":tool:"); ok && strings.EqualFold(tool, "Bash") {
+			return true
+		}
+	}
+	return false
+}
+
+// isInboxWholeBashAlways reports whether ix asks for a whole-tool Bash session grant on an
 // Inbox handling conversation. Inbox turns process untrusted external messages, so a single Always
 // click on a benign read command must never auto-approve arbitrary later shell mutations (#15267).
 func (s *Service) isInboxWholeBashAlways(ctx context.Context, ix proto.Interaction) bool {
-	return slices.Contains(ix.AlwaysKeys, "tool:Bash") &&
+	return slices.ContainsFunc(ix.AlwaysKeys, isWholeBashAlwaysKey) &&
 		s.isInboxOrigin(ctx, ix.MachineID, ix.SessionID, true)
 }
 
@@ -1906,7 +1926,7 @@ func (s *Service) keepAlways(ix proto.Interaction, r proto.Resolution) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), historyTimeout)
-	if s.isInboxWholeBashAlways(ctx, ix) {
+	if s.isInboxWholeBashAlways(ctx, ix) || s.ixPolicy(ctx, ix).ConfirmOutbound {
 		cancel()
 		return
 	}
@@ -1920,13 +1940,17 @@ func (s *Service) keepAlways(ix proto.Interaction, r proto.Resolution) {
 	var waiting []proto.Interaction
 	for _, p := range s.fleet.interactions {
 		if p.ix.ID != ix.ID && p.ix.SessionID == ix.SessionID && p.ix.MachineID == ix.MachineID &&
-			p.local == nil && !p.codex && !p.claimed && alwaysCard(p.ix) {
+			p.local == nil && !p.codex && !p.claimed && alwaysCard(p.ix) && (p.ix.AlwaysHonored == nil || *p.ix.AlwaysHonored) {
 			waiting = append(waiting, p.ix)
 		}
 	}
 	s.fleet.mu.Unlock()
 	for _, w := range waiting {
 		ctx, cancel := context.WithTimeout(context.Background(), historyTimeout)
+		if s.ixPolicy(ctx, w).ConfirmOutbound {
+			cancel()
+			continue
+		}
 		res, ok := s.alwaysAllowed(ctx, w)
 		cancel()
 		if ok {

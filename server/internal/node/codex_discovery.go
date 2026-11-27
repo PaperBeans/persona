@@ -24,13 +24,13 @@ type codexProcess struct {
 	herdrSession string
 	// desktop is true for the Codex desktop App GUI process or its bundled stdio app-server, not for CLI or unrelated
 	// app-server processes.
-	desktop      bool
-	tmuxPane     string // TMUX_PANE (e.g. "%11")
-	tmuxSocket   string // tmux server socket extracted from TMUX ("" for the default server)
-	herdrCore    string // HC_TERMINAL_ID
-	ternPane     string // TERN_PANE
-	orcaHandle   string // ORCA_TERMINAL_HANDLE
-	orcaPane     string // ORCA_PANE_KEY / ORCA_AGENT_PANE
+	desktop    bool
+	tmuxPane   string // TMUX_PANE (e.g. "%11")
+	tmuxSocket string // tmux server socket extracted from TMUX ("" for the default server)
+	herdrCore  string // HC_TERMINAL_ID
+	ternPane   string // TERN_PANE
+	orcaHandle string // ORCA_TERMINAL_HANDLE
+	orcaPane   string // ORCA_PANE_KEY / ORCA_AGENT_PANE
 }
 
 func (p codexProcess) hasTakeoverTerminal() bool {

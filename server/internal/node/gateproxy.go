@@ -172,6 +172,72 @@ func (n *Node) gates() *gateProxy {
 	return p
 }
 
+// gateProxyIfInit returns the active gateProxy without lazily initializing one.
+func (n *Node) gateProxyIfInit() *gateProxy {
+	if n == nil {
+		return nil
+	}
+	if k := n.keeper; k != nil {
+		k.mu.Lock()
+		gp := k.gp
+		k.mu.Unlock()
+		return gp
+	}
+	n.mu.Lock()
+	gp := n.gp
+	n.mu.Unlock()
+	return gp
+}
+
+// isSpaceSession reports whether the gate proxy already latched session as belonging to a space,
+// without lazily initializing a gate proxy listener when none exists yet.
+func (n *Node) isSpaceSession(session string) bool {
+	if session == "" {
+		return false
+	}
+	gp := n.gateProxyIfInit()
+	return gp != nil && gp.spaceSession(session)
+}
+
+// isRemoteSession reports whether session carries the remote-assistant confirm-writes posture,
+// mirroring isRemoteRuntimeSession without lazily initializing a gate proxy listener.
+func (n *Node) isRemoteSession(session string) bool {
+	if n == nil || session == "" {
+		return false
+	}
+	id := session
+	if parent, _, ok := splitRuntimeChild(session); ok {
+		id = parent
+	}
+	if gp := n.gateProxyIfInit(); gp != nil && (gp.remoteSession(id) || (id != session && gp.remoteSession(session))) {
+		return true
+	}
+	if n.state != nil {
+		for _, candidate := range []string{id, session} {
+			if st, ok := n.state.get(candidate); ok {
+				if st.RemoteAgent {
+					return true
+				}
+				if st.Launcher != "" {
+					if h := n.assistantRuntime(st.Launcher); h != nil && h.remoteAgent() {
+						return true
+					}
+				}
+			}
+			if candidate == session {
+				break
+			}
+		}
+	}
+	if n.runtimes != nil && n.runtimes.isRemoteSession(session) {
+		return true
+	}
+	if n.state != nil && n.state.isLoading() && runtimeSessionID(id) {
+		return true
+	}
+	return false
+}
+
 func (p *gateProxy) ensureListenerLocked() error {
 	if p.ln != nil {
 		return nil

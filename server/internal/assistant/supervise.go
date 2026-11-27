@@ -94,6 +94,8 @@ type Supervision struct {
 	// its supervisor's to do, and an older one under Needs you (docs/assistant/unified-entry.md "Needs you and In
 	// progress"). nil in every other state, and for a task that waited for review before the hub kept the time.
 	PendingSince *time.Time `json:"pending_since,omitempty"`
+	// FollowedUpAt records a successful supervisor review or Agent send, not an automatic judgment or progress report.
+	FollowedUpAt *time.Time `json:"followed_up_at,omitempty"`
 	// CardlessToldAt: when the watch handed this pending_review round back to its supervisor because it waits on the
 	// owner with no card they can answer (supervise_cardless.go); one hand-back per review round, nil outside
 	// pending_review and on every new review round.
@@ -288,6 +290,10 @@ func (v *Supervision) clone() *Supervision {
 		at := *v.PendingSince
 		out.PendingSince = &at
 	}
+	if v.FollowedUpAt != nil {
+		at := *v.FollowedUpAt
+		out.FollowedUpAt = &at
+	}
 	if v.CardlessToldAt != nil {
 		at := *v.CardlessToldAt
 		out.CardlessToldAt = &at
@@ -351,7 +357,7 @@ func (s *Service) supervisionDB() supervisionStore {
 
 func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
 	v := &Supervision{Supervisor: r.Supervisor, SupervisorSource: r.SupervisorSource, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
-		PendingSince: r.PendingSince, CardlessToldAt: r.CardlessToldAt, UpdatedAt: r.UpdatedAt}
+		PendingSince: r.PendingSince, CardlessToldAt: r.CardlessToldAt, FollowedUpAt: r.FollowedUpAt, UpdatedAt: r.UpdatedAt}
 	_ = json.Unmarshal(r.Reviews, &v.Reviews)
 	if len(r.OwnerWork) > 0 {
 		_ = json.Unmarshal(r.OwnerWork, &v.OwnerWork)
@@ -457,7 +463,7 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	}
 	return db.TodoSupervisionRow{TodoID: todoID, InvestigationFindings: investigation, Supervisor: v.Supervisor, SupervisorSource: v.SupervisorSource, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
 		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, OwnerWork: ownerWork,
-		PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, UpdatedAt: v.UpdatedAt}
+		PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, FollowedUpAt: v.FollowedUpAt, UpdatedAt: v.UpdatedAt}
 }
 
 // cleanDoneWhen is a task's criteria as kept: trimmed, no empty or repeated ones, at most 6 of at most 200 characters.

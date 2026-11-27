@@ -224,13 +224,8 @@ func classifyGateAction(method, path string) (string, int) {
 }
 
 func larkDeletionCall(c larkCall) bool {
-	action := c.Method + " " + c.Path
-	for _, candidate := range larkActions {
-		if candidate.boundary == larkDeletion && candidate.re.MatchString(action) {
-			return true
-		}
-	}
-	return false
+	_, boundary := classifyGateAction(c.Method, c.Path) // the lark module's rules live in modules/lark/larkgate now
+	return boundary == larkgateport.BoundaryDeletion
 }
 
 // larkSummary is the phone card's text: what each write does, then its method, path and body.

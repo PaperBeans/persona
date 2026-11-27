@@ -437,12 +437,24 @@ nonisolated enum SessionModes {
         }.joined(separator: " ")
     }
 
-    /// A model's short name for that button: "claude-opus-5-5-20260101" → "Opus 5.5", "opus" / "opus[1m]" → "Opus",
-    /// "gpt-6.1-sol" → "GPT-6.1 Sol"; other names retain the existing `Fmt.model` behavior.
+    /// The composer displays effort separately from Gemini's family and variant.
+    private static func geminiModelName(_ raw: String) -> String? {
+        let id = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard id.hasPrefix("gemini-") else { return nil }
+        var parts = id.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.allSatisfy({ !$0.isEmpty && !$0.contains(where: \.isWhitespace) }) else { return nil }
+        if parts.count > 2, let suffix = parts.last, ["low", "medium", "high", "xhigh", "max"].contains(String(suffix)) {
+            parts.removeLast()
+        }
+        return parts.map { $0.capitalized }.joined(separator: " ")
+    }
+
+    /// Model display names for the composer. The session keeps its original model ID.
     static func modelName(_ model: String?) -> String? {
         guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let raw = Fmt.model(model) else { return nil }
         if let gpt = gptModelName(raw) { return gpt }
+        if let gemini = geminiModelName(raw) { return gemini }
         // A context-window suffix ("[1m]") is not part of the version; the name keeps no 1M marker.
         let lower = raw.lowercased().replacingOccurrences(of: #"\[[^\]]*\]$"#, with: "", options: .regularExpression)
         for family in ["fable", "opus", "sonnet", "haiku"] {

@@ -18,6 +18,7 @@ func (r *runner) Body(f *modapi.BriefSnapshot, title string) modapi.BriefBody {
 		return modapi.BriefBody{}
 	}
 	b := modapi.BriefBody{
+		Contributions:    f.Contributions,
 		Confirmations:    f.Confirmations,
 		Title:            title,
 		At:               f.At,
@@ -128,13 +129,16 @@ func (r *runner) Body(f *modapi.BriefSnapshot, title string) modapi.BriefBody {
 }
 
 // writeFeed writes a run's facts into its conversation, with the time it was sent as its time: after the run's ⏰ message.
-func (r *runner) writeFeed(session, task, title string, f *modapi.BriefSnapshot) {
+func (r *runner) writeFeed(run modapi.BriefScheduleRun, title string, f *modapi.BriefSnapshot) {
 	if r.feed == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := r.feed.Append(ctx, session, modapi.FeedKindBrief, task, r.Body(f, title)); err != nil {
-		r.logf("brief: the feed item of %s: %v", task, err)
+	// Use the scheduled occurrence rather than the process-local start time: a
+	// redelivery after restart must resolve to the same chat entry.
+	id := "feed_brief_run_" + FallbackID(run.RefID, run.Due)
+	if err := r.feed.AppendOnce(ctx, id, run.SessionID, modapi.FeedKindBrief, run.RefID, r.Body(f, title)); err != nil {
+		r.logf("brief: the feed item of %s: %v", run.RefID, err)
 	}
 }

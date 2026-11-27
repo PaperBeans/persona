@@ -959,7 +959,13 @@ func (n *Node) askOnce(ctx context.Context, ix proto.Interaction) (proto.Resolut
 	var res proto.Resolution
 	params := map[string]any{"interaction": ix}
 	if ix.SessionID != "" {
-		if origin := n.assistantOrigin(ix.SessionID); origin != "" {
+		origin := n.assistantOrigin(ix.SessionID)
+		if origin == "" {
+			if parent, _, ok := splitRuntimeChild(ix.SessionID); ok {
+				origin = n.assistantOrigin(parent)
+			}
+		}
+		if origin != "" {
 			params["origin"] = origin
 		}
 	}

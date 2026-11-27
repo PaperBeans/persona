@@ -42,6 +42,26 @@ struct ComposerModesTitleTests {
         #expect(SessionModes.composerTitle(model: SessionModes.modelName(raw), effort: "高")?.spoken == "\(expected) 高")
     }
 
+    @Test(arguments: [
+        ("gemini-4-carbon-high", "Gemini 4 Carbon"),
+        ("gemini-4-neon-xhigh", "Gemini 4 Neon"),
+        ("gemini-3.8-flash-medium", "Gemini 3.8 Flash"),
+        ("gemini-4-carbon-low", "Gemini 4 Carbon"),
+        ("gemini-4-neon-max", "Gemini 4 Neon"),
+        ("google/GEMINI-4-CARBON", "Gemini 4 Carbon"),
+        ("gemini-pro-orchestrator", "Gemini Pro Orchestrator"),
+        ("gemini-pro-orchestrator-neon", "Gemini Pro Orchestrator Neon"),
+        ("gemini-pro-orchestrator-neon-high", "Gemini Pro Orchestrator Neon"),
+        ("gemini-4-flash-high-preview", "Gemini 4 Flash High Preview"),
+        ("gemini--4", "gemini--4"),
+        ("Gemini 4 Carbon", "Gemini 4 Carbon")
+    ])
+    func geminiDisplayNames(raw: String, expected: String) {
+        let model = SessionModes.modelName(raw)
+        #expect(model == expected)
+        #expect(SessionModes.composerTitle(model: model, effort: "High")?.spoken == "\(expected) High")
+    }
+
     @Test func emptyAndUnknownNames() {
         #expect(SessionModes.modelName("   ") == nil)
         #expect(SessionModes.modelName("unknown-model") == "unknown-model")

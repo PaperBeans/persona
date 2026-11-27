@@ -394,7 +394,6 @@ export function KnowledgeMap({ onToggleSidebar }: { onToggleSidebar: () => void 
     setZoom(1);
     setView(v);
   };
-  const select = useCallback((n: MapNode) => setSel(n.id), []);
   const toggle = useCallback((n: MapNode) => {
     const { L, shift } = shown.current, p = L?.placed.find((x) => x.node === n);
     kept.current = p ? { id: n.id, x: p.x + shift.x, y: p.y + shift.y } : null;

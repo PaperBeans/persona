@@ -580,11 +580,9 @@ func (s *Service) remind(ctx context.Context, id string, at, now time.Time) {
 	// notice on every copy.
 	// Feishu's copy, which carries the notes and a link, also stays behind the notice when the origin cannot be told,
 	// with the notice it always had then.
-	lark := &todoReminderSend{private: private || !known, space: space}
-	if !private && !known {
-		lark.noticeTitle, lark.noticeBody = spaceNotice(s.botLang(ctx))
-	}
-	go s.feishuTodoReminderSend(set.MachineID, set.Main, larkTitle, larkBody, todo, lark)
+	to := assistantwire.SessionRef{MachineID: set.MachineID, SessionID: set.Main}
+	reminder := s.larkReminder(ctx, to, todo, larkTitle, larkBody, private, known, space)
+	go s.larkModule().TodoReminder(to, reminder)
 	go s.channelPush(set.MachineID, set.Main, channelTitle, channelBody)
 	s.logf("todo %s: reminded (due %s)", id, at.Format(time.RFC3339))
 }

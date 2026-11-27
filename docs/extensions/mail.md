@@ -299,8 +299,8 @@ with its subject, sender, date, preview and `context` (the header lines and up t
 mail's text, `GET /api/v1/inbox/{id}`), a translation it kept, and the mail filed into the knowledge base. The full
 body, the HTML and the attachments were never stored: they are fetched from the mail server as a mail opens, so they
 are not available until the module is back. Clients show the stored text and say so in one plain line, and leave out
-the controls that would write to the mailbox; the web's is described in `docs/web/web.md` ("Modules"), and the Apple
-and Android apps follow in #15995.
+the controls that would write to the mailbox; the web's is described in `docs/web/web.md` ("Modules"), the iPhone
+and iPad app's in `docs/apple/ios.md` ("Modules"), and the Android app follows in #15995.
 
 ## Known limitations
 

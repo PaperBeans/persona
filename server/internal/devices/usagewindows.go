@@ -201,11 +201,9 @@ func (u *usageWindowsHub) refresh(ctx context.Context, sources []usageSource, no
 			// what a node says of where it came from is not taken: it is this machine, by the name it has now
 			acct.Local, acct.Machines, acct.Sources, acct.Problem, acct.Ref = true, []string{name}, nil, "", ""
 			acct.Origin = id + "/" + strconv.Itoa(n)
-			if acct.Provider == "codex" {
-				acct.CodexAccountKey = sample.AccountKey
-				if sample.SourceKey != "" {
-					acct.Origin = id + "/source/" + sample.SourceKey
-				}
+			acct.CodexAccountKey = sample.AccountKey
+			if acct.Provider == "codex" && sample.SourceKey != "" {
+				acct.Origin = id + "/source/" + sample.SourceKey
 			}
 			all = append(all, acct)
 		}
@@ -254,6 +252,9 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 		}
 		var wins []proto.UsageWindow
 		for _, w := range a.Windows {
+			if w.ResetsAt != nil && w.UsedPercent == 0 && w.ResetsAt.Unix() <= 0 {
+				w.ResetsAt = nil
+			}
 			if w.ResetsAt != nil && !w.ResetsAt.After(now) {
 				continue
 			}
@@ -292,9 +293,11 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 	seen := map[key]int{}
 	codexAccounts := map[string]int{}
 	// A component can grow through several samples. Checking only the first-seen sample lets a local sample bridge two
-	// different accounts of one gateway (#7324), so carry every component's refs and reject any conflict before joining it.
+	// different accounts of one gateway (#7324), so carry every component's refs and members and reject any conflict before joining it.
 	refs := make(map[int][]string, len(live))
+	compMembers := make(map[int][]int, len(live))
 	for i, a := range live {
+		compMembers[i] = []int{i}
 		if a.Ref != "" {
 			refs[i] = []string{a.Ref}
 		}
@@ -306,7 +309,12 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 			continue
 		}
 		if j, ok := balanceRefs[a.Ref]; ok {
-			parent[find(i)] = find(j)
+			left, right := find(i), find(j)
+			if left != right {
+				parent[left] = right
+				compMembers[right] = append(compMembers[right], compMembers[left]...)
+				delete(compMembers, left)
+			}
 		} else {
 			balanceRefs[a.Ref] = i
 		}
@@ -350,9 +358,16 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 				continue
 			}
 			conflict := false
-			for _, a := range refs[left] {
-				for _, b := range refs[right] {
-					if sameSourceOtherAccount(a, b) {
+			for _, aRef := range refs[left] {
+				for _, bRef := range refs[right] {
+					if sameSourceOtherAccount(aRef, bRef) {
+						conflict = true
+					}
+				}
+			}
+			for _, mi := range compMembers[left] {
+				for _, mj := range compMembers[right] {
+					if sameProviderAccountConflict(live[mi], live[mj]) {
 						conflict = true
 					}
 				}
@@ -363,9 +378,12 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 			parent[left] = right
 			refs[right] = append(refs[right], refs[left]...)
 			delete(refs, left)
+			compMembers[right] = append(compMembers[right], compMembers[left]...)
+			delete(compMembers, left)
 		}
 	}
 	mergeModelOnlyAccounts(modelOnlyInfos, parent, find)
+	mergeIdenticalAntigravityAccounts(live, parent, find)
 	groups := map[int][]proto.UsageAccount{}
 	var order []int
 	for i, a := range live {
@@ -411,11 +429,17 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 		provider := canonicalUsageProvider(newest.Provider)
 		var sources, machines []string
 		for i, m := range members {
+			if acct.CodexAccountKey == "" && m.CodexAccountKey != "" {
+				acct.CodexAccountKey = m.CodexAccountKey
+			}
 			if acct.Plan == "" && m.Plan != "" { // the newest sample that knows the plan names the account
 				acct.Plan = m.Plan
 				if naming < 0 {
 					acct.Name = m.Name
 				}
+			}
+			if naming < 0 && antigravityAccountIdentity(acct) == "" && antigravityAccountIdentity(m) != "" {
+				acct.Name = m.Name
 			}
 			acct.Local = acct.Local || m.Local
 			sources = append(sources, m.Sources...)
@@ -475,6 +499,9 @@ func mergeUsageAccounts(in []proto.UsageAccount, now time.Time) []proto.UsageAcc
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ID != out[j].ID {
 			return out[i].ID < out[j].ID
+		}
+		if kA, kB := cmp.Or(out[i].CodexAccountKey, antigravityAccountIdentity(out[i])), cmp.Or(out[j].CodexAccountKey, antigravityAccountIdentity(out[j])); kA != kB {
+			return kA < kB
 		}
 		return out[i].Origin < out[j].Origin
 	})
@@ -829,6 +856,7 @@ type modelOnlySlot struct {
 
 type modelOnlyInfo struct {
 	index    int
+	sample   proto.UsageAccount
 	provider string
 	local    bool
 	ref      string
@@ -840,6 +868,7 @@ type modelOnlyInfo struct {
 func buildModelOnlyInfo(index int, provider string, a proto.UsageAccount) (modelOnlyInfo, bool) {
 	info := modelOnlyInfo{
 		index:    index,
+		sample:   a,
 		provider: provider,
 		local:    a.Local,
 		ref:      a.Ref,
@@ -869,10 +898,14 @@ func buildModelOnlyInfo(index int, provider string, a proto.UsageAccount) (model
 }
 
 func modelOnlyConflict(a, b modelOnlyInfo) bool {
+	if sameProviderAccountConflict(a.sample, b.sample) {
+		return true
+	}
 	if a.ref != "" && b.ref != "" && sameSourceOtherAccount(a.ref, b.ref) {
 		return true
 	}
-	if a.local && b.local && a.origin != "" && b.origin != "" && sameMachineOtherOrigin(a.origin, b.origin) {
+	if a.local && b.local && a.origin != "" && b.origin != "" && sameMachineOtherOrigin(a.origin, b.origin) &&
+		(a.sample.CodexAccountKey == "" || a.sample.CodexAccountKey != b.sample.CodexAccountKey) {
 		return true
 	}
 	for slot, ra := range a.resets {
@@ -998,6 +1031,58 @@ func mergeModelOnlyAccounts(infos []modelOnlyInfo, parent []int, find func(int) 
 	}
 }
 
+// mergeIdenticalAntigravityAccounts joins local Antigravity samples across machines that explicitly identify the same
+// signed-in account (matching AccountKey or signed-in email/name) even when every window is currently untouched (no
+// ResetsAt yet), while refusing any union whose existing components conflict.
+func mergeIdenticalAntigravityAccounts(live []proto.UsageAccount, parent []int, find func(int) int) {
+	byIdentity := map[string][]int{}
+	for i, a := range live {
+		if canonicalUsageProvider(a.Provider) != antigravityUsageProvider || !a.Local || len(a.Sources) > 0 {
+			continue
+		}
+		if a.CodexAccountKey != "" {
+			byIdentity["key:"+a.CodexAccountKey] = append(byIdentity["key:"+a.CodexAccountKey], i)
+		}
+		if id := antigravityAccountIdentity(a); id != "" {
+			byIdentity["id:"+id] = append(byIdentity["id:"+id], i)
+		}
+	}
+	for _, group := range byIdentity {
+		if len(group) < 2 {
+			continue
+		}
+		for i := 1; i < len(group); i++ {
+			left, right := find(group[0]), find(group[i])
+			if left == right {
+				continue
+			}
+			conflict := false
+			for mi := range live {
+				if find(mi) != left {
+					continue
+				}
+				infoA, _ := buildModelOnlyInfo(mi, antigravityUsageProvider, live[mi])
+				for mj := range live {
+					if find(mj) != right {
+						continue
+					}
+					infoB, _ := buildModelOnlyInfo(mj, antigravityUsageProvider, live[mj])
+					if modelOnlyConflict(infoA, infoB) {
+						conflict = true
+						break
+					}
+				}
+				if conflict {
+					break
+				}
+			}
+			if !conflict {
+				parent[right] = left
+			}
+		}
+	}
+}
+
 // mostUsed is the used percentage of the account's fullest plan window: a per-model allowance that ran out is not the
 // account running out, so model windows only count when the account has no plan window (as the clients' fullest).
 func mostUsed(a proto.UsageAccount) float64 {
@@ -1056,7 +1141,7 @@ func usageAccountID(a proto.UsageAccount) string {
 	case a.Ref != "":
 		key += "|" + a.Ref
 	case w.ResetsAt == nil:
-		key += "|" + a.Origin
+		key += "|" + cmp.Or(a.CodexAccountKey, antigravityAccountIdentity(a), a.Origin)
 	}
 	return usageRowID(a.Provider, key)
 }

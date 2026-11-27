@@ -673,7 +673,7 @@ function body(p: Panel, onClose: () => void) {
     case "changes":
       return <ChangesPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} opened={p} onClose={onClose} />;
     case "file":
-      return <FileViewerPanel key={`${p.mid}:${p.path}:${p.line ?? ""}-${p.to ?? ""}${p.readOnly ? ":ro" : ""}`} mid={p.mid} sid={p.sid} path={p.path} cwd={p.cwd} line={p.line} to={p.to} readOnly={p.readOnly} onClose={onClose} />;
+      return <FileViewerPanel key={`${p.mid}:${p.path}:${p.line ?? ""}-${p.to ?? ""}${p.readOnly ? ":ro" : ""}:${p.navigationId ?? ""}`} mid={p.mid} sid={p.sid} path={p.path} cwd={p.cwd} line={p.line} to={p.to} readOnly={p.readOnly} onClose={onClose} />;
     case "link":
       return <LinkPanel key={`${p.manager ?? ""} ${p.url}`} url={p.url} title={p.title} manager={p.manager} onClose={onClose} />;
     case "conversation-tasks":

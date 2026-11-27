@@ -161,7 +161,8 @@ func (n *Node) runtimeUsageWindows(h *runtimeConn, params json.RawMessage, now t
 		return
 	}
 	var required struct {
-		Windows []struct {
+		AccountKey string `json:"account_key"`
+		Windows    []struct {
 			UsedPercent *float64 `json:"used_percent"`
 		} `json:"windows"`
 	}
@@ -169,10 +170,11 @@ func (n *Node) runtimeUsageWindows(h *runtimeConn, params json.RawMessage, now t
 	if json.Unmarshal(params, &required) != nil || len(required.Windows) != len(a.Windows) {
 		return
 	}
+	accountKey := strings.TrimSpace(required.AccountKey)
 	a.Provider = strings.TrimSpace(a.Provider)
 	a.Name = strings.TrimSpace(a.Name)
 	a.Plan = strings.TrimSpace(a.Plan)
-	if a.Provider == "" || len(a.Provider) > 64 || a.Name == "" || len(a.Name) > 128 || len(a.Plan) > 128 ||
+	if a.Provider == "" || len(a.Provider) > 64 || a.Name == "" || len(a.Name) > 128 || len(a.Plan) > 128 || len(accountKey) > 128 ||
 		a.SampledAt.IsZero() || now.Sub(a.SampledAt) > usageWindowsMaxAge || a.SampledAt.After(now.Add(5*time.Minute)) ||
 		a.Windows == nil || len(a.Windows) > 32 {
 		return
@@ -192,6 +194,7 @@ func (n *Node) runtimeUsageWindows(h *runtimeConn, params json.RawMessage, now t
 	}
 	a.Windows = liveWindows(windows, now)
 	a.SampledAt = a.SampledAt.UTC()
+	enrichLegacyAgyUsage(&a, &accountKey, now)
 
 	h.mu.Lock()
 	source := "runtime:" + h.hello.Runtime
@@ -211,7 +214,7 @@ func (n *Node) runtimeUsageWindows(h *runtimeConn, params json.RawMessage, now t
 	if len(a.Windows) == 0 {
 		delete(st.accounts, source)
 	} else {
-		st.accounts[source] = proto.UsageNodeAccount{UsageAccount: a, SourceKey: source}
+		st.accounts[source] = proto.UsageNodeAccount{UsageAccount: a, AccountKey: accountKey, SourceKey: source}
 	}
 	st.at = now
 }

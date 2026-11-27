@@ -1,4 +1,4 @@
-package assistant
+package briefing
 
 import (
 	"encoding/json"
@@ -6,13 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/botcard"
-
+	"github.com/nwverse/persona/server/internal/deeplink"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/modapi"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 const (
+	fallbackMax = 1500 // runes in the phone notification when all required rows fit
+
 	// briefAnswerRunes is how much of the model's answer (its summary, the calendar and the chats) the card quotes at the top.
 	briefAnswerRunes = 1500
 	// briefTailBytes is kept free for the "and N more" lines and the note under the sections.
@@ -30,23 +34,28 @@ type briefBlock struct {
 	todo  string // the task a button accepts
 }
 
-// briefCard renders the logical card a routine with facts sends instead of its answer: the model's answer first, then
-// the sections, each row as on the standing board. Production passes it through splitBriefAnswerCards, which enforces
-// Feishu's physical budgets with continuations. Optional rows that do not fit are counted ("and N more"); required
-// owner waits are never folded by the renderer. shown are the tasks whose Accept buttons are on the logical card.
-func (s *Service) briefCard(f *briefFacts, label, answer string) (card *botcard.Card, fallback string, shown []string) {
-	return s.briefCardWithHeader(f, label, answer, "")
+// RenderCards renders one logical card, then paginates it after adding the conversation button.
+func (r *runner) RenderCards(f *modapi.BriefSnapshot, label, answer, header, openLabel, openURL string) ([]modapi.BriefCardPage, string, []string) {
+	card, plain, shown := r.briefCardWithHeader(f, label, answer, header)
+	if openURL != "" {
+		card.Buttons(botcard.PageBtn(openLabel, openURL))
+	}
+	title := label
+	if header != "" {
+		title = header
+	}
+	return splitBriefAnswerCards(card, plain, title), plain, shown
 }
 
 // briefCardWithHeader is briefCard with a fixed first line in place of the usual routine title. The model-failure
 // fallback uses it: both the Feishu title and the plain-text body's first line say the model was unavailable.
-func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header string) (card *botcard.Card, fallback string, shown []string) {
+func (runner *runner) briefCardWithHeader(f *modapi.BriefSnapshot, label, answer, header string) (card *botcard.Card, fallback string, shown []string) {
 	l := i18n.Lang(f.Lang)
 	color := botcard.Blue
 	if len(f.Waiting) > 0 {
 		color = botcard.Orange
 	}
-	title, subtitle := label, briefCountsIn(f, l)
+	title, subtitle := label, runner.CountsIn(f, f.Lang)
 	plain := []string{label}
 	if header != "" {
 		title, subtitle = header, label
@@ -54,15 +63,15 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 	}
 	c := botcard.NewCard(title, color, subtitle)
 	if answer = strings.TrimSpace(answer); answer != "" {
-		// Charts become text first, as the bot's answers do (the lark module's answer.go): clipMarkdown drops a persona-card block
+		// Charts become text first, as the bot's answers do (the lark module's answer.go): textfmt.ClipMarkdown drops a persona-card block
 		// it cannot draw down to its title, so a chart on a long answer would lose its numbers.
-		c.Markdown(botcard.CardMarkdown(clipMarkdown(botcard.PersonaCards(answer), briefAnswerRunes)))
-		plain = append(plain, clip(answer, briefAnswerRunes))
+		c.Markdown(botcard.CardMarkdown(textfmt.ClipMarkdown(botcard.PersonaCards(answer), briefAnswerRunes)))
+		plain = append(plain, textfmt.Clip(answer, briefAnswerRunes))
 		if len([]rune(answer)) > briefAnswerRunes {
 			c.Note(i18n.T(l, "assistant-briefing.answer_clipped"))
 		}
 	}
-	room := briefBudget{bytes: reportCardMaxBytes - briefTailBytes - len(c.JSON()), els: reportCardMaxElements - briefSpareEls - len(c.Body.Elements)}
+	room := briefBudget{bytes: botcard.MaxBytes - briefTailBytes - len(c.JSON()), els: botcard.MaxElements - briefSpareEls - len(c.Body.Elements)}
 
 	// The north star first: the report opens with it (north_star.go).
 	var star []briefBlock
@@ -74,7 +83,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 	}
 
 	var confirmations []briefBlock
-	confSummary := briefConfirmationsSummary(l, f.Confirmations)
+	confSummary := runner.confirmationSummary(f.Lang, f.Confirmations)
 	confirmations = append(confirmations, briefBlock{md: botcard.EscapeMarkdown(confSummary), plain: confSummary})
 	for _, line := range f.ConfirmationLines {
 		confirmations = append(confirmations, briefBlock{md: botcard.EscapeMarkdown(line), plain: line})
@@ -84,7 +93,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 	// Waiting for you: the board's rows that hold an Agent up.
 	var waiting []briefBlock
 	for i, r := range f.Waiting {
-		waiting = append(waiting, briefBlock{md: boardRowMarkdown(l, i+1, fromBriefBoardRow(r)), plain: boardRowPlain(l, i+1, r)})
+		waiting = append(waiting, briefBlock{md: runner.prompts.BoardRowMarkdown(f.Lang, i+1, r), plain: runner.prompts.BoardRowPlain(f.Lang, i+1, r)})
 	}
 	if f.WaitingUnknown { // the cards waiting were not read yet: it does not say that none waits
 		line := botcard.EscapeMarkdown(i18n.T(l, "assistant-briefing.waiting_unknown"))
@@ -110,38 +119,38 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 	}
 	for _, d := range f.Done {
 		line := func(esc func(string) string) string {
-			return i18n.T(l, "assistant-briefing.done_line", i18n.Args{"title": esc(clip(oneLine(d.Title), 60)), "time": briefClock(f, d.At)})
+			return i18n.T(l, "assistant-briefing.done_line", i18n.Args{"title": esc(textfmt.Clip(oneLine(d.Title), 60)), "time": briefClock(f, d.At)})
 		}
-		past = append(past, briefBlock{md: line(botcard.EscapeMarkdown) + briefLink(l, todoLink(f.Web, d.ID)), plain: line(func(s string) string { return s })})
+		past = append(past, briefBlock{md: line(botcard.EscapeMarkdown) + briefLink(l, deeplink.Web(f.Web, deeplink.Todo(d.ID))), plain: line(func(s string) string { return s })})
 	}
-	pastHead := i18n.T(l, "assistant-briefing.head_past", i18n.Args{"hours": int(briefWindow / time.Hour), "done": f.DoneTotal, "failed": f.FailedTotal})
+	pastHead := i18n.T(l, "assistant-briefing.head_past", i18n.Args{"hours": int(Window / time.Hour), "done": f.DoneTotal, "failed": f.FailedTotal})
 	room.section(c, &plain, l, pastHead, past, f.DoneTotal+f.FailedTotal)
 
 	// To verify, each row with its Accept button.
 	var accept []briefBlock
 	for i, r := range f.Accept {
-		md := boardRowMarkdown(l, i+1, fromBriefBoardRow(r))
+		md := runner.prompts.BoardRowMarkdown(f.Lang, i+1, r)
 		btnLabel := i18n.T(l, "assistant-reports.accept_pass")
 		a, asked := f.Asks[r.ID]
 		if asked && !a.Conclusion { // a conclusion's row says its verdict already (boardRows); verification work says it here (#1226)
 			md += "\n" + botcard.EscapeMarkdown(a.Verdict)
 		}
 		if ch := f.Changed[r.ID]; ch != "" {
-			md += "\n" + botcard.EscapeMarkdown(clip(oneLine(ch), 80))
+			md += "\n" + botcard.EscapeMarkdown(textfmt.Clip(oneLine(ch), 80))
 		}
 		if rec := a.RecommendText; asked && rec != "" {
 			md += "\n" + botcard.EscapeMarkdown(rec)
 			btnLabel = i18n.T(l, "assistant-reports.verdict_take")
 		} else if asked && a.Decide {
 			// Nothing recommended: there is nothing for a button to take, the owner answers its card.
-			accept = append(accept, briefBlock{md: md, plain: boardRowPlain(l, i+1, r)})
+			accept = append(accept, briefBlock{md: md, plain: runner.prompts.BoardRowPlain(f.Lang, i+1, r)})
 			continue
 		} else if asked && a.Conclusion {
 			btnLabel = i18n.T(l, "assistant-reports.verdict_ack")
 		}
 		btn := botcard.Btn(btnLabel, botcard.Primary,
-			map[string]any{"a": "accept", "id": r.ID, "asked_at": r.Asked.UTC().Format(timeKeyLayout)})
-		accept = append(accept, briefBlock{md: md, plain: boardRowPlain(l, i+1, r), btn: btn, todo: r.ID})
+			map[string]any{"a": "accept", "id": r.ID, "asked_at": r.Asked.UTC().Format(time.RFC3339Nano)})
+		accept = append(accept, briefBlock{md: md, plain: runner.prompts.BoardRowPlain(f.Lang, i+1, r), btn: btn, todo: r.ID})
 	}
 	shown = room.section(c, &plain, l, i18n.T(l, "assistant-briefing.head_accept", i18n.Args{"n": len(f.Accept)}), accept, len(f.Accept))
 
@@ -150,7 +159,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		var later []briefBlock
 		for i, r := range f.Later {
 			btn := botcard.Btn(i18n.T(l, "assistant-briefing.later_done"), botcard.Default, map[string]any{"a": "later_done", "id": r.ID})
-			later = append(later, briefBlock{md: boardRowMarkdown(l, i+1, fromBriefBoardRow(r)), plain: boardRowPlain(l, i+1, r), btn: btn})
+			later = append(later, briefBlock{md: runner.prompts.BoardRowMarkdown(f.Lang, i+1, r), plain: runner.prompts.BoardRowPlain(f.Lang, i+1, r), btn: btn})
 		}
 		room.section(c, &plain, l, i18n.T(l, "assistant-briefing.head_later", i18n.Args{"n": f.LaterTotal}), later, f.LaterTotal)
 	}
@@ -161,10 +170,10 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		for i, p := range f.Progress {
 			stage := ""
 			if p.StageKind != "general" {
-				stage = stageBar(l, p.Stage, false) // open work: never done
+				stage = runner.prompts.OpenStageBar(f.Lang, p.Stage) // open work: never done
 			}
-			md := fmt.Sprintf("**%d** %s\n%s", i+1, botcard.EscapeMarkdown(clip(oneLine(p.Title), 60)), stage+briefLink(l, todoLink(f.Web, p.ID)))
-			working = append(working, briefBlock{md: md, plain: fmt.Sprintf("%d. %s", i+1, clip(oneLine(p.Title), 60))})
+			md := fmt.Sprintf("**%d** %s\n%s", i+1, botcard.EscapeMarkdown(textfmt.Clip(oneLine(p.Title), 60)), stage+briefLink(l, deeplink.Web(f.Web, deeplink.Todo(p.ID))))
+			working = append(working, briefBlock{md: md, plain: fmt.Sprintf("%d. %s", i+1, textfmt.Clip(oneLine(p.Title), 60))})
 		}
 		room.section(c, &plain, l, i18n.T(l, "assistant-briefing.head_progress", i18n.Args{"n": f.ProgressTotal}), working, f.ProgressTotal)
 	}
@@ -189,23 +198,32 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		room.section(c, &plain, l, i18n.T(l, "assistant-setup_suggest.heading"), setup, len(setup))
 	}
 
+	// Provider text stays in plain-text elements. In particular, URLs and card-style
+	// tags in report sections cannot turn into links, mentions, or action buttons.
+	for _, contribution := range f.Contributions {
+		for _, line := range contribution.PlainLines() {
+			c.Note(line)
+			plain = append(plain, line)
+		}
+	}
+
 	c.Note(i18n.T(l, "assistant-briefing.note", i18n.Args{"time": briefClock(f, f.At)}))
-	if required := strings.Join(plain[:requiredPlain], "\n"); len([]rune(required)) > reportFallbackMax {
+	if required := strings.Join(plain[:requiredPlain], "\n"); len([]rune(required)) > fallbackMax {
 		return c, required, shown
 	}
-	return c, clip(strings.Join(plain, "\n"), reportFallbackMax), shown
+	return c, textfmt.Clip(strings.Join(plain, "\n"), fallbackMax), shown
 }
 
 // splitBriefAnswerCards keeps every fixed wait row inside Feishu's real per-card limits. The original card is returned
 // unchanged when it fits. Otherwise Markdown is split only at line boundaries (or inside one exceptionally long line),
 // then elements are packed in their original order; no required row is replaced by an overflow count. plain remains the
 // complete phone notification, while each rich card gets only its own text as its plain-text substitute.
-func splitBriefAnswerCards(card *botcard.Card, plain, title string) []botAnswerCard {
+func splitBriefAnswerCards(card *botcard.Card, plain, title string) []modapi.BriefCardPage {
 	fits := func(c *botcard.Card) bool {
-		return len(c.JSON()) <= reportCardMaxBytes && len(c.Body.Elements) <= reportCardMaxElements
+		return len(c.JSON()) <= botcard.MaxBytes && len(c.Body.Elements) <= botcard.MaxElements
 	}
 	if fits(card) {
-		return []botAnswerCard{{card: card, fallback: plain}}
+		return []modapi.BriefCardPage{{Card: (*assistantwire.BotCard)(card), Fallback: plain}}
 	}
 	empty := func() *botcard.Card {
 		c := *card // header and config are immutable here; each continuation gets its own element slice
@@ -271,9 +289,9 @@ func splitBriefAnswerCards(card *botcard.Card, plain, title string) []botAnswerC
 		}
 	}
 	flush()
-	out := make([]botAnswerCard, len(cards))
+	out := make([]modapi.BriefCardPage, len(cards))
 	for i, c := range cards {
-		out[i] = botAnswerCard{card: c, fallback: briefCardElementText(c, title)}
+		out[i] = modapi.BriefCardPage{Card: (*assistantwire.BotCard)(c), Fallback: briefCardElementText(c, title)}
 	}
 	return out
 }
@@ -305,7 +323,7 @@ func briefCardElementText(c *botcard.Card, title string) string {
 
 // briefFixedDirections writes every collected direction wait. Folding is data, decided by foldBriefDirection, not a
 // side effect of the card's remaining byte budget: in particular no owner row can disappear here.
-func briefFixedDirections(c *botcard.Card, plain *[]string, room *briefBudget, f *briefFacts) {
+func briefFixedDirections(c *botcard.Card, plain *[]string, room *briefBudget, f *modapi.BriefSnapshot) {
 	if len(f.Directions) == 0 {
 		return
 	}
@@ -324,7 +342,7 @@ func briefFixedDirections(c *botcard.Card, plain *[]string, room *briefBudget, f
 		for _, w := range d.Waits {
 			body.WriteString("\n" + botcard.EscapeMarkdown(w.Line) + briefLink(l, w.Link))
 			row := w.Line
-			if boardLinkOK(w.Link) {
+			if botcard.MarkdownLinkOK(w.Link) {
 				row += " · " + w.Link
 			}
 			*plain = append(*plain, row)
@@ -340,7 +358,7 @@ func briefFixedDirections(c *botcard.Card, plain *[]string, room *briefBudget, f
 	room.bytes, room.els = room.bytes-mdCost(text), room.els-1
 }
 
-func briefFixedDisabled(c *botcard.Card, plain *[]string, room *briefBudget, f *briefFacts) {
+func briefFixedDisabled(c *botcard.Card, plain *[]string, room *briefBudget, f *modapi.BriefSnapshot) {
 	if len(f.DisabledRoutines) == 0 {
 		return
 	}
@@ -358,14 +376,11 @@ func briefFixedDisabled(c *botcard.Card, plain *[]string, room *briefBudget, f *
 	room.bytes, room.els = room.bytes-mdCost(text), room.els-1
 }
 
-// timeKeyLayout writes the time a "Please verify" card was asked in a button: it is compared back to the ask by value.
-const timeKeyLayout = "2006-01-02T15:04:05.999999999Z07:00"
-
 // briefBudget is what is left of the card's bytes and elements.
 type briefBudget struct{ bytes, els int }
 
 // section adds a heading and as many of its blocks as fit, in one Markdown element, or (when some block has a button)
-// one per block; the blocks that do not fit, and those beyond briefRowsMax, are counted in an "and N more" line. total is
+// one per block; the blocks that do not fit, and those beyond RowsMax, are counted in an "and N more" line. total is
 // how many rows the section stands for (its blocks may be fewer: the lists are cut before). It returns the todos of the
 // blocks with buttons that were added.
 func (b *briefBudget) section(c *botcard.Card, plain *[]string, l i18n.Lang, head string, blocks []briefBlock, total int) (shown []string) {
@@ -392,7 +407,7 @@ func (b *briefBudget) section(c *botcard.Card, plain *[]string, l i18n.Lang, hea
 		}
 	}
 	for _, bl := range blocks {
-		if added >= briefRowsMax {
+		if added >= RowsMax {
 			break
 		}
 		if hasButtons && bl.btn == nil { // a row without one among rows with buttons (a decision with nothing recommended)
@@ -403,7 +418,7 @@ func (b *briefBudget) section(c *botcard.Card, plain *[]string, l i18n.Lang, hea
 			c.Markdown(bl.md)
 			b.bytes, b.els = b.bytes-n, b.els-1
 		} else if hasButtons {
-			n := feishuElBytes(func(x *botcard.Card) { x.Markdown(bl.md).Buttons(bl.btn) })
+			n := botcard.ElementBytes(func(x *botcard.Card) { x.Markdown(bl.md).Buttons(bl.btn) })
 			if n > b.bytes || b.els < 2 {
 				break
 			}
@@ -440,7 +455,7 @@ func mdCost(s string) int {
 }
 
 // briefClock is t as the owner's time of day.
-func briefClock(f *briefFacts, t time.Time) string {
+func briefClock(f *modapi.BriefSnapshot, t time.Time) string {
 	loc := f.Loc
 	if loc == nil {
 		loc = time.UTC
@@ -448,16 +463,9 @@ func briefClock(f *briefFacts, t time.Time) string {
 	return t.In(loc).Format("15:04")
 }
 
-func briefConfirmationsSummary(l i18n.Lang, c modapi.BriefConfirmations) string {
-	if c.Unknown {
-		return i18n.T(l, "assistant-confirmations.unknown")
-	}
-	return i18n.T(l, "assistant-confirmations.summary", i18n.Args{"user": c.UserNotified, "auto": c.AutoAuthorized})
-}
-
 // briefFailedLine is one thing that did not go through, as a line: what it was, what happened, and why; md: for a
 // card's Markdown (escaped), else for its plain-text fallback.
-func briefFailedLine(f *briefFacts, x modapi.BriefFailure, md bool) string {
+func briefFailedLine(f *modapi.BriefSnapshot, x modapi.BriefFailure, md bool) string {
 	esc := func(s string) string { return s }
 	if md {
 		esc = botcard.EscapeMarkdown
@@ -469,7 +477,7 @@ func briefFailedLine(f *briefFacts, x modapi.BriefFailure, md bool) string {
 	case x.Kind == "routine":
 		key = "failed_run"
 	}
-	line := i18n.T(i18n.Lang(f.Lang), "assistant-briefing."+key, i18n.Args{"title": esc(clip(oneLine(x.Title), 60)), "time": briefClock(f, x.At)})
+	line := i18n.T(i18n.Lang(f.Lang), "assistant-briefing."+key, i18n.Args{"title": esc(textfmt.Clip(oneLine(x.Title), 60)), "time": briefClock(f, x.At)})
 	if x.Why != "" {
 		line += " — " + esc(x.Why)
 	}
@@ -481,34 +489,8 @@ func briefFailedLine(f *briefFacts, x modapi.BriefFailure, md bool) string {
 
 // briefLink is " · [Open](link)" for an address a card link can hold, else nothing.
 func briefLink(l i18n.Lang, link string) string {
-	if !boardLinkOK(link) {
+	if !botcard.MarkdownLinkOK(link) {
 		return ""
 	}
 	return " · [" + i18n.T(l, "assistant-feishu_cards.board_open") + "](" + link + ")"
-}
-
-// boardRowPlain is a row as one line of the card's plain-text fallback.
-func boardRowPlain(l i18n.Lang, n int, r modapi.BriefBoardRow) string {
-	return fmt.Sprintf("%d. %s · %s · %s", n, r.Summary, i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.Waited)}), r.From)
-}
-
-// briefCountsIn is the counts the card subtitle says, in l: "waiting for you 3 · not through 1 · to verify 2".
-func briefCountsIn(f *briefFacts, l i18n.Lang) string {
-	var parts []string
-	add := func(key string, n int) {
-		if n > 0 {
-			parts = append(parts, i18n.T(l, "assistant-briefing."+key, i18n.Args{"n": n}))
-		}
-	}
-	if !f.WaitingUnknown {
-		add("count_waiting", len(f.Waiting))
-	}
-	add("count_failed", f.FailedTotal)
-	add("count_done", f.DoneTotal)
-	add("count_accept", len(f.Accept))
-	add("count_later", f.LaterTotal)
-	if len(parts) == 0 {
-		return i18n.T(l, "assistant-briefing.count_none")
-	}
-	return strings.Join(parts, i18n.T(l, "assistant-briefing.count_sep"))
 }

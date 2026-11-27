@@ -157,43 +157,67 @@ function canonicalScopeName(raw: string | undefined): string {
   return s;
 }
 
-/** Non-destructive detection of local-only rows whose active window reset times match an external/extension row under
- *  the same provider (within 60s), returning a map of local account id -> matched external account name. */
+function explicitAccountEmail(name: string | undefined): string {
+  const head = (name ?? "").split("·")[0]?.trim().toLowerCase() ?? "";
+  return head.includes("@") ? head : "";
+}
+
+/** Non-destructive detection of local-only rows whose active window reset times match an external/extension row (or,
+ *  when the local row is stale, a live sibling row) under the same provider within 60s, returning a map of local
+ *  account id -> matched peer account name. */
 export function detectLocalExternalOverlaps(accounts: readonly UsageAccount[], now: number): Map<string, string> {
   const out = new Map<string, string>();
-  const byProvider = new Map<string, { locals: UsageAccount[]; externals: UsageAccount[] }>();
+  const byProvider = new Map<string, { locals: UsageAccount[]; externals: UsageAccount[]; reconciled: UsageAccount[] }>();
   for (const a of accounts) {
     const p = canonicalUsageProvider(a.provider);
     let bucket = byProvider.get(p);
     if (!bucket) {
-      bucket = { locals: [], externals: [] };
+      bucket = { locals: [], externals: [], reconciled: [] };
       byProvider.set(p, bucket);
     }
-    const isLocalOnly = Boolean(a.local) && !(a.sources?.length);
-    const isExternalOnly = !a.local && (a.sources?.length ?? 0) > 0;
-    if (isLocalOnly) bucket.locals.push(a);
-    else if (isExternalOnly) bucket.externals.push(a);
+    const hasSources = (a.sources?.length ?? 0) > 0;
+    if (Boolean(a.local) && !hasSources) bucket.locals.push(a);
+    else if (!a.local && hasSources) bucket.externals.push(a);
+    else if (Boolean(a.local) && hasSources) bucket.reconciled.push(a);
   }
-  for (const { locals, externals } of byProvider.values()) {
-    if (!locals.length || !externals.length) continue;
+  const activeWinsOf = (a: UsageAccount) => {
+    const nameScope = canonicalScopeName(a.name.includes("·") ? a.name.split("·").slice(1).join("·") : "");
+    return a.windows
+      .map((w) => ({
+        mins: windowMinutes(w),
+        at: w.resets_at ? Date.parse(w.resets_at) : NaN,
+        scope: canonicalScopeName(w.model || w.group) || nameScope,
+      }))
+      .filter((w) => w.mins > 0 && Number.isFinite(w.at) && w.at > now);
+  };
+  const sharesMachine = (a: UsageAccount, b: UsageAccount) =>
+    Boolean(a.machines?.length && b.machines?.some((m) => a.machines!.includes(m)));
+
+  for (const { locals, externals, reconciled } of byProvider.values()) {
+    if (!locals.length) continue;
     for (const local of locals) {
       const localWins = local.windows
         .map((w) => ({ mins: windowMinutes(w), at: w.resets_at ? Date.parse(w.resets_at) : NaN, scope: canonicalScopeName(w.model || w.group) }))
         .filter((w) => w.mins > 0 && Number.isFinite(w.at) && w.at > now);
       if (!localWins.length) continue;
-      for (const ext of externals) {
-        const extNameScope = canonicalScopeName(ext.name.includes("·") ? ext.name.split("·").slice(1).join("·") : "");
-        const matched = ext.windows.some((ew) => {
-          const em = windowMinutes(ew);
-          const eat = ew.resets_at ? Date.parse(ew.resets_at) : NaN;
-          if (!(em > 0) || !Number.isFinite(eat) || eat <= now) return false;
-          const es = canonicalScopeName(ew.model || ew.group) || extNameScope;
-          return localWins.some(
-            (lw) => lw.mins === em && Math.abs(lw.at - eat) <= OVERLAP_TOLERANCE_MS && (!lw.scope || !es || lw.scope === es),
-          );
-        });
+
+      const candidates = [
+        ...externals,
+        ...reconciled.filter((r) => !sharesMachine(local, r)),
+        ...(local.stale ? locals.filter((peer) => !peer.stale && peer.id !== local.id) : []),
+      ];
+      const localEmail = explicitAccountEmail(local.name);
+      for (const peer of candidates) {
+        const peerEmail = explicitAccountEmail(peer.name);
+        if (localEmail && peerEmail && localEmail !== peerEmail) continue;
+        const peerWins = activeWinsOf(peer);
+        const matched = peerWins.some((pw) =>
+          localWins.some(
+            (lw) => lw.mins === pw.mins && Math.abs(lw.at - pw.at) <= OVERLAP_TOLERANCE_MS && (!lw.scope || !pw.scope || lw.scope === pw.scope),
+          ),
+        );
         if (matched) {
-          out.set(local.id, ext.name);
+          out.set(local.id, peer.name);
           break;
         }
       }

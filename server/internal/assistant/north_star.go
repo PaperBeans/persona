@@ -17,6 +17,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -895,8 +896,8 @@ func signedPoints(d float64) string {
 }
 
 // body is the north star as a `brief` item says it.
-func (b briefNorthStar) body(lines []string) briefBodyNorthStar {
-	out := briefBodyNorthStar{Lines: lines}
+func (b briefNorthStar) body(lines []string) modapi.BriefBodyNorthStar {
+	out := modapi.BriefBodyNorthStar{Lines: lines}
 	if out.Lines == nil {
 		out.Lines = []string{}
 	}

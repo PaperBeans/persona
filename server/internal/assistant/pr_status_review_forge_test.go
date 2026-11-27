@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestPRReviewWakeForgeEvidence(t *testing.T) {
@@ -40,10 +43,12 @@ func TestPRReviewWakeForgeEvidence(t *testing.T) {
 		t3   = "2026-11-17T03:04:05Z"
 	)
 	cases := []struct {
-		name       string
-		reviews    func(*testing.T) string
-		wantAt     string
-		wantReview string
+		name          string
+		reviews       func(*testing.T) string
+		secondPage    string
+		wantPageError bool
+		wantAt        string
+		wantReview    string
 	}{
 		{
 			name: "current head active request",
@@ -129,15 +134,26 @@ func TestPRReviewWakeForgeEvidence(t *testing.T) {
 			wantAt: t1, wantReview: "changes_requested",
 		},
 		{
-			name: "saturated review page has no wake time",
+			name: "later approval clears a request on the first page",
 			reviews: func(t *testing.T) string {
 				rows := make([]reviewRow, 100)
 				for i := range rows {
-					rows[i] = makeReview(fmt.Sprintf("reviewer-%03d", i), "CHANGES_REQUESTED", head, t1)
+					rows[i] = makeReview("reviewer-a", "COMMENTED", head, t1)
 				}
+				rows[0] = makeReview("reviewer-a", "CHANGES_REQUESTED", head, t1)
 				return marshalReviews(t, rows)
 			},
-			wantReview: "changes_requested",
+			secondPage: `[{"user":{"login":"reviewer-a"},"state":"APPROVED","commit_id":"abc123","submitted_at":"2026-11-17T03:04:05Z"}]`,
+			wantReview: "approved",
+		},
+		{
+			name: "incomplete list provides no verdict",
+			reviews: func(t *testing.T) string {
+				rows := make([]reviewRow, 100)
+				rows[0] = makeReview("reviewer-a", "APPROVED", head, t1)
+				return marshalReviews(t, rows)
+			},
+			wantPageError: true,
 		},
 	}
 
@@ -151,6 +167,12 @@ func TestPRReviewWakeForgeEvidence(t *testing.T) {
 					body = `{"state":"open","head":{"sha":"` + head + `"}}`
 				case "/repos/example/app/pulls/12/reviews?per_page=100":
 					body = reviews
+				case "/repos/example/app/pulls/12/reviews?per_page=100&page=2":
+					if tc.wantPageError {
+						http.Error(w, "reviews unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					body = tc.secondPage
 				case "/repos/example/app/commits/abc123/status":
 					body = `{"state":"success","total_count":0}`
 				case "/repos/example/app/commits/abc123/check-runs?per_page=100&filter=latest":
@@ -165,6 +187,12 @@ func TestPRReviewWakeForgeEvidence(t *testing.T) {
 			defer srv.Close()
 
 			got, err := (githubForge{base: srv.URL, client: srv.Client()}).PRStatus(context.Background(), "example/app", 12)
+			if tc.wantPageError {
+				if err == nil || got.Review != "" || got.ChangesRequestedAt != nil {
+					t.Fatalf("incomplete reviews gave status %+v and error %v", got, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("PRStatus: %v", err)
 			}
@@ -205,4 +233,75 @@ func TestPRReviewWakeForgeEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+const feedbackTestPullPath = "/repos/example/app/pulls/12"
+
+type feedbackTestForge struct {
+	mu            sync.Mutex
+	head          string
+	headAfterList string
+	reviews       []githubPRReview
+	inline        map[int64][]githubPRInlineComment
+	requests      map[string]int
+	failRequest   string
+}
+
+func newFeedbackTestForge(t *testing.T) (*feedbackTestForge, githubForge) {
+	t.Helper()
+	f := &feedbackTestForge{head: "head-one", requests: make(map[string]int)}
+	server := httptest.NewServer(f)
+	t.Cleanup(server.Close)
+	return f, githubForge{base: server.URL, client: server.Client()}
+}
+
+func (f *feedbackTestForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests[r.URL.RequestURI()]++
+	if r.URL.RequestURI() == f.failRequest {
+		http.Error(w, "temporary forge failure", http.StatusServiceUnavailable)
+		return
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	var body any
+	switch path := r.URL.Path; {
+	case path == feedbackTestPullPath:
+		body = map[string]any{"state": "open", "head": map[string]string{"sha": f.head}, "user": map[string]string{"login": "pr-author"}}
+	case path == feedbackTestPullPath+"/reviews":
+		body = feedbackTestPage(f.reviews, page)
+		if f.headAfterList != "" {
+			f.head, f.headAfterList = f.headAfterList, ""
+		}
+	case strings.HasPrefix(path, feedbackTestPullPath+"/reviews/") && strings.HasSuffix(path, "/comments"):
+		id, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(path, feedbackTestPullPath+"/reviews/"), "/comments"), 10, 64)
+		body = feedbackTestPage(f.inline[id], page)
+	case strings.HasSuffix(path, "/status"):
+		body = map[string]int{"total_count": 0}
+	case strings.HasSuffix(path, "/check-runs"):
+		body = map[string]int{"total_count": 0}
+	case path == "/user":
+		body = map[string]string{"login": "hub-poster"}
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func feedbackTestPage[T any](rows []T, page int) []T {
+	start := min((max(page, 1)-1)*100, len(rows))
+	return append([]T{}, rows[start:min(start+100, len(rows))]...)
+}
+
+func feedbackTestReview(id int64, at time.Time, body string) githubPRReview {
+	r := githubPRReview{ID: id, State: "COMMENTED", SubmittedAt: at, CommitID: "head-one", Body: body, AuthorAssociation: "COLLABORATOR"}
+	r.User.Login, r.User.Type = "reviewer", "User"
+	return r
+}
+
+func (f *feedbackTestForge) calls(uri string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests[uri]
 }

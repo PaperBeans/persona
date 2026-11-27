@@ -149,6 +149,9 @@ func (m *Manifest) Validate() error {
 				}
 			}
 		}
+		if name == "routine_facts" && !m.Permissions.RoutineFacts {
+			bad("contributes.routine_facts needs permissions.routine_facts")
+		}
 		if name == "error_reports" && !m.Permissions.ErrorReports {
 			bad("contributes.error_reports needs permissions.error_reports (the user agrees that it gets the error and crash reports)")
 		}

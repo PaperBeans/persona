@@ -50,10 +50,10 @@ func TestUserCheckRecoversMissingPassAsk(t *testing.T) {
 			if saved := askOf(again, todo.ID); saved == nil || !saved.AskedAt.Equal(fresh.AskedAt) {
 				t.Fatalf("recovery did not keep the same persisted ask: %+v", saved)
 			}
-			if result, err := again.acceptTryFromBrief(ctx, todo.ID, old.AskedAt.Format(timeKeyLayout)); err != nil || result.taken {
+			if result, err := again.acceptReviewRound(ctx, todo.ID, old.AskedAt.Format(timeKeyLayout)); err != nil || result.taken {
 				t.Fatalf("an older Pass accepted the recovered round: %+v, %v", result, err)
 			}
-			if result, err := again.acceptTryFromBrief(ctx, todo.ID, fresh.AskedAt.Format(timeKeyLayout)); err != nil || !result.taken {
+			if result, err := again.acceptReviewRound(ctx, todo.ID, fresh.AskedAt.Format(timeKeyLayout)); err != nil || !result.taken {
 				t.Fatalf("the recovered Pass could not complete the task: %+v, %v", result, err)
 			}
 		})
@@ -176,7 +176,7 @@ func TestUserCheckPassWaitsForItsOwnRound(t *testing.T) {
 					s.acceptReply(ctx, "om_reply", "Pass", false, old.MessageID)
 					finished <- nil
 				default:
-					_, err := s.acceptTryFromBrief(ctx, todo.ID, old.AskedAt.Format(timeKeyLayout))
+					_, err := s.acceptReviewRound(ctx, todo.ID, old.AskedAt.Format(timeKeyLayout))
 					finished <- err
 				}
 			}()

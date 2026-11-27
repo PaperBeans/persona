@@ -499,7 +499,7 @@ private struct SettingsDestinations: ViewModifier {
             #else
             EmptyView()
             #endif
-        case .mail: MailAccountsView(inSheet: false)
+        case .mail: MailSettingsGate { MailAccountsView(inSheet: false) }
         case .feishu(let manager): FeishuConnectorView(manager: manager)
         case .connector(let id, let manager):
             if id == "imessage" { MessagesConnectorView(manager: manager ?? model.assistantManagerID) } else { HubConnectorView(id: id, manager: manager) }

@@ -16,8 +16,8 @@ import (
 
 // The ask a to-do waits on, on the to-do itself (#2056, docs/assistant/todos.md "Waiting for the owner"): the apps list
 // the to-dos, not the briefing, and a to-do whose conclusion needs the owner's decision is where they show the
-// recommendation and take it with one tap (POST /api/v1/todos/{id}/accept, briefing_feed.go). It is the briefing's
-// `accept[]` row (briefing_feed.go), read from the same book (awaitingAcceptance): a "Please verify" ask, or a supervised
+// recommendation and take it with one tap (POST /api/v1/todos/{id}/accept, todo_accept_route.go). It is the briefing's
+// `accept[]` row (modules/briefing/feed.go), read from the same book (awaitingAcceptance): a "Please verify" ask, or a supervised
 // task's conclusion (conclusion.go). A decision that recommends an option is also pushed with that option, and the
 // push's OK takes it the same way (pushDecision).
 

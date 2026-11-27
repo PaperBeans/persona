@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -94,7 +95,15 @@ func (n *Node) codexResumableIn(ctx context.Context, id string, pass *codexListP
 		}
 	}
 	m, ok := metaOfIn(src.home, src.path, pass)
-	if !ok || n.codexEncryptedFailed(id, m) || desktop && n.codexTurnRunning(src, m) {
+	if !ok {
+		return false
+	}
+	// The turn state is the session scan's (quickMeta), not the rollout header's.
+	var turn quickMeta
+	if st, err := os.Stat(src.path); err == nil {
+		turn = n.meta(src.path, st)
+	}
+	if n.codexEncryptedFailed(id, turn) || desktop && n.codexTurnRunning(src, turn) {
 		return false
 	}
 	return !m.sub && m.cwd != ""

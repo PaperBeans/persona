@@ -137,7 +137,7 @@ conversation's id) last. The app neither groups to-dos by supervisor nor works o
 ## iPhone Agents 分组入口与长列表（#5766）
 
 - 快速筛选下方增加独立 List 单元中的分组菜单，始终显示当前分组名称，不与搜索输入框共用单元。菜单与原 ⋯ 菜单共用 `dev.grouping`，重启后保留选择。已有分组和默认值不变，平铺视图仍叫「最近使用」。
-- In the new shell a **Personal Agents ›** pill sits right of the grouping menu (`AgentsPersonalPill`, #140) and opens the personal agents page: on a phone the shell has no toolbar, so this is the only way there. When the two don't fit on one line (large text) they stack. The iPad and Mac keep the toolbar button and show no pill. UI test `PersonalAgentsEntryTests`.
+- In the new shell **Personal Agents** is a group of its own above the computers (`AgentsPersonalHeading`, #140, #16769): drawn as a computer's heading (its mark in a tile, the name, how many there are) with a forward chevron, it opens the personal agents page; on a phone the shell has no toolbar, so this is the only way there. It shows over the whole list only (All, no search). It used to be a lone pill under the quick filters, which read as left over once the grouping joined the filter bar. The iPad and Mac keep the toolbar button and the sidebar heading's. UI test `PersonalAgentsEntryTests`.
 - 分组折叠继续使用 `dev.folded`，搜索时展开匹配内容。
 - 长列表首次显示前 20 项并提供「显示全部 N 个」；不超过 25 项时全部显示。适用于最近使用、状态、待办、机器的活跃行，以及项目和工作树的活跃项；快速筛选或搜索时不截断。Mac 不截断，保留 ↑ / ↓ 导航行为。
 - 「显示全部」的展开状态与分组折叠分开，不跨重启保存。项目内一个多 Agent tab 仍作为一项，不拆散 tab。
@@ -1903,6 +1903,20 @@ every platform are described from #13430; this section is the Apple side.
   shows the page's title and one line (`ModuleOffPage`) without asking the hub anything. This is not `LarkFeatures`:
   those are the installed Lark extension's (`lark`, `lark_moments`, …) and keep deciding Settings › Connectors › Lark,
   Messages, the Inbox's Lark chats and the readers, which use `/api/v1/lark/…` and stay as they are with the module off.
+- **`mail`, the same kind of flag** (#15995): `MailModule.access` (`apple/Persona/App/MailModule.swift`) answers the
+  closed `MailAccess` (`live`, `storedOnly`) from the registry's hub answer with the descriptor id `mail`. It is the
+  one decision between "the whole message" and "the stored text because mail is off"; pages take the type. Stored-only
+  (the hub's hello has `modules` and no `module.mail`): the Mail row leaves Settings › Connectors and its accounts are
+  not read, a link to its page lands on one line (`ModuleOffPage`), the Inbox's New Email is not offered, and nothing
+  that would send a mail is (AI Draft Reply, Draft Reply, the AI twin's draft card on a row, Send and Edit on a
+  suggested reply to a mail). A mail already in the Inbox still opens: `MailReaderView` shows `MailStoredView` in the
+  live reader's place, which reads the item's own page (`GET /api/v1/inbox/{id}`, a Core route) and shows the text
+  the hub stored (`context`, without the header lines the hub writes for its models), then one line saying the full
+  message and its attachments cannot be loaded and, from the hub's `mail_body_truncated` decoded as the closed
+  `MailStoredClipping` (`clipped`, `whole`, `unknown`), whether that text is cut short. It asks no route under
+  `/api/v1/mail`: no message, no flags (opening marks nothing read), no translation of the live body. Hand to AI, Done,
+  mute and folders are the Inbox's own and stay. The Inbox keeps naming its mail groups and filters from the accounts
+  it cached before.
 - **Adding a module.** Give its sources a directory of their own, classify that directory with the module id in
   `schema/module-classification.txt` (`docs/architecture/core-and-modules.md`, "Classification") and add the id to
   `GUARDED` in the ratchet; write a type

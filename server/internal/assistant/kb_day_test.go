@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"github.com/nwverse/persona/server/internal/recordingwire"
 	"math"
 	"net/http"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
+	"github.com/nwverse/persona/server/internal/recordingwire"
 )
 
 // All-day recordings through the manager's HTTP, their recap's push, to-dos, kb_get and the evening routine's facts
@@ -377,7 +377,7 @@ func TestEveningFactsSayTodaysDayRecording(t *testing.T) {
 		t.Errorf("facts carry the points:\n%s", text)
 	}
 	card, fallback, _ := d.s.briefCard(f, "晚报", "ok")
-	if strings.Contains(card.JSON(), "Export review") || strings.Contains(fallback, "Export review") || strings.Contains(briefCountsIn(f, i18n.Lang(f.Lang)), "Export review") {
+	if strings.Contains(card.JSON(), "Export review") || strings.Contains(fallback, "Export review") || strings.Contains(briefRunnerForTest(t).CountsIn(f, f.Lang), "Export review") {
 		t.Fatalf("the card or the push carries the day: %s\n%s", card.JSON(), fallback)
 	}
 	if f := d.s.briefFactsAt(ctx, time.Now(), "morning"); f.Day != nil || strings.Contains(d.s.briefModelText(f), "全天录音") {

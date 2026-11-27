@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connector/proc"
 	"github.com/nwverse/persona/server/internal/extension"
@@ -503,7 +504,7 @@ func checkOpenURL(id string, m *extension.Manifest, ui extension.UIItem, itemID,
 		return i18n.Err("hub-extension_ui.open_not_prompt")
 	}
 	if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Host == "" {
-		if lower := strings.ToLower(raw); strings.HasPrefix(lower, "persona://compose") || strings.HasPrefix(lower, "jarvis://compose") {
+		if u, err := url.Parse(raw); err == nil && u != nil && compat.IsAppScheme(strings.ToLower(u.Scheme)) && strings.EqualFold(u.Host, "compose") {
 			return i18n.Err("hub-extension_ui.open_not_prompt")
 		}
 		if strings.HasPrefix(raw, "persona:") {

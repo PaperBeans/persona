@@ -137,4 +137,31 @@ describe("窗口外观风格", () => {
     expect(setSurface).toHaveBeenLastCalledWith("default");
     delete (window as { personaDesktop?: unknown }).personaDesktop;
   });
+
+  it("syncs web theme source before surface style and omits gracefully on older shells", () => {
+    const order: string[] = [];
+    const setThemeSource = vi.fn((theme: string) => order.push(`theme:${theme}`));
+    const setSurface = vi.fn((style: string) => order.push(`surface:${style}`));
+    Object.assign(window, { personaDesktop: { platform: "darwin", setThemeSource, setSurfaceStyle: setSurface } });
+
+    localStorage.setItem("persona.theme", "dark");
+    applyLook();
+    expect(order).toEqual(["theme:dark", "surface:default"]);
+
+    localStorage.setItem("persona.theme", "light");
+    applyLook();
+    expect(setThemeSource).toHaveBeenLastCalledWith("light");
+
+    localStorage.setItem("persona.theme", "sepia");
+    applyLook();
+    expect(setThemeSource).toHaveBeenLastCalledWith("system");
+
+    localStorage.removeItem("persona.theme");
+    applyLook();
+    expect(setThemeSource).toHaveBeenLastCalledWith("system");
+
+    Object.assign(window, { personaDesktop: { platform: "darwin", setSurfaceStyle: setSurface } });
+    expect(() => applyLook()).not.toThrow();
+    delete (window as { personaDesktop?: unknown }).personaDesktop;
+  });
 });

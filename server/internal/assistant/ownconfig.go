@@ -46,7 +46,8 @@ type ownConfig struct {
 		// AttachmentDaysBySource: attachment_days per source, e.g. years for a chat source whose history is imported.
 		AttachmentDaysBySource map[string]int `json:"attachment_days_by_source"`
 		// History: the history import (docs/assistant/knowledge.md "History import"); missing or not enabled: off.
-		History *assistantwire.KBHistory `json:"history"`
+		History        *assistantwire.KBHistory        `json:"history"`
+		ImportProvider *assistantwire.KBImportProvider `json:"import_provider"`
 		// LarkMinutes: importing Lark minutes and document titles through lark-cli; missing or not enabled: off.
 		LarkMinutes *assistantwire.KBLarkMinutes `json:"lark_minutes"`
 	} `json:"kb"`
@@ -143,7 +144,7 @@ func (c ownConfig) over(h Hello) Hello {
 	if k := c.KB; k != nil {
 		h.KB = &assistantwire.KBSettings{Off: k.Enabled != nil && !*k.Enabled, ReadOnly: k.ReadOnly, TextDays: k.TextDays,
 			AttachmentDays: k.AttachmentDays, ExtraDirs: k.ExtraDirs, RemoteFolders: k.RemoteFolders, AttachmentDaysBySource: positiveDays(k.AttachmentDaysBySource), History: k.History,
-			LarkMinutes: k.LarkMinutes}
+			LarkMinutes: k.LarkMinutes, ImportProvider: k.ImportProvider}
 		h.Models.KBAI = k.AI
 	}
 	if c.AI != nil {

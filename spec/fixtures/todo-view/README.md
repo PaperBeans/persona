@@ -12,7 +12,7 @@ unchanged (Go `server/internal/assistantwire/todo_view_gen_test.go`, Kotlin
 
 | File | What it pins | Cases |
 | --- | --- | --- |
-| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 63: every phase and section at least once, every reason the hub produces, each kind of ask's risk, and compatibility edge cases |
+| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 65: every phase and section at least once, every reason the hub produces, each kind of ask's risk, and compatibility edge cases, unfinished closeout and pending acceptance |
 
 ## Format
 
@@ -217,6 +217,7 @@ strings, and a time is absolute RFC 3339. The keys are stable identifiers: never
 | `failed_start` | `failed_start` | `error`: the to-do's `start_error`, the hub's text (see "Judgement calls") |
 | `agent_asks` | `agent_asks` | `run`: the asking run's title; `text`: what it asks (as its ask's `text`), absent when nothing says |
 | `interrupted` | `interrupted` | `run` |
+| `stopped_unfinished` | `stopped_unfinished` | `run`, optional `text` |
 | `decision` | `owner_decides` or `can_wait`, for a decision | `text`: the question (a `needs_user` review's when no ask is listed); `recommend`, absent when none is recommended |
 | `decision_default` | `can_wait`, for a decision Persona takes at its deadline | `text`, `recommend`, `default_at` |
 | `cannot` | `owner_decides`, for a conclusion that says it cannot be done | none |
@@ -360,7 +361,6 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
 The projection never answers these reasons, since today's list row carries no input for them; each comes with the
 fact it needs, adding a case here:
 
-- `stopped_unfinished`: a run's end reason, which the session list does not carry yet.
 - `steps_proposed`, `signin` and `duplicate`: no such ask exists on the hub yet.
 - `queued`: a start the admission gate holds is kept in the plan (`PlanTask.Queue`), not on the listed to-do.
 - `computer_offline`: Start When It's Back has no state yet. An open to-do whose runs' computer is away (`orphaned`
@@ -374,3 +374,20 @@ fact it needs, adding a case here:
 python3 scripts/test/test_wire_schema.py                                      # every view holds to TodoSummary
 (cd server && go test ./internal/assistantwire -run TodoView)                 # Go reads and writes each one back
 ```
+
+### Closeout follow-up (#9823, aligned with #10174)
+
+The projection reads the session's structured closeout and `work.turn_at`; an older snapshot without either keeps its
+compatibility reading, including the upstream unread/wait judgement call below. A known unfinished stop, or a seen
+missing-closeout stop with a recorded turn time, is To do during its
+follow-up window, then Needs you (`stopped_unfinished`) only after a full hour. Explicit owner asks, actual foreground,
+child/background work, a named Agent/external wait (#10411), an intentional park and settled work keep their own homes. The latest evidenced stopped run
+wins over an older closeout. The clock uses the turn and `supervision.followed_up_at` or an explicit review (empty
+`by`), never a read receipt, an automatic review or the ledger's `updated_at`. `next_change_at` names the strict
+one-hour boundary plus one nanosecond.
+
+A reported `done` is ready, never closed, even after its reply was read. Its finish time stays the recorded turn time;
+Just finished's seen window uses that result rather than a later read-receipt timestamp. The shared cases
+`stopped_unfinished_closeout_needs_followup` and `reported_done_seen_awaits_acceptance` pin those two classifications;
+`projection/closeout_test.go` also checks the exact boundary, follow-up provenance, resumed work, parks, acceptance,
+the seen window and counts (Needs you 1, Waiting 1, uncounted Just finished 1; Open 3).

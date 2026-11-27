@@ -4,19 +4,20 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/compat"
 )
 
 // composePrompt says whether raw is the narrow link an extension page may open to put one of its own
-// quick prompts in the assistant's composer: persona://compose?prompt=<id>&text=<text> (or the jarvis:
-// alias), one non-empty prompt id and one text, no user info, extra query, path or fragment. The caller
+// quick prompts in the assistant's composer: persona://compose?prompt=<id>&text=<text> (or the
+// previous scheme's alias), one non-empty prompt id and one text, no user info, extra query, path or fragment. The caller
 // checks both against the extension's manifest; this only holds the link's shape.
 func composePrompt(raw string) (id, text string, ok bool) {
 	u, err := url.Parse(raw)
 	if err != nil || u == nil || u.User != nil {
 		return "", "", false
 	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "persona" && scheme != "jarvis" {
+	if !compat.IsAppScheme(strings.ToLower(u.Scheme)) {
 		return "", "", false
 	}
 	if !strings.EqualFold(u.Host, "compose") || (u.Path != "" && u.Path != "/") {

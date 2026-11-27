@@ -67,15 +67,16 @@ func (r *reading) own() placement {
 		return r.failedStart()
 	}
 	for _, row := range []func() (placement, bool){
-		r.runAsks,        // row 2
-		r.ownerDecides,   // row 3
-		r.canWait,        // row 4
-		r.working,        // row 5
-		r.parked,         // row 8
-		r.finishedRecent, // row 9
-		r.waiting,        // row 10
-		r.finishedSeen,   // row 11
-		r.someday,        // row 12
+		r.runAsks,           // row 2
+		r.ownerDecides,      // row 3
+		r.stoppedUnfinished, // row 2's unattended-stop fallback; explicit owner asks keep their own reason
+		r.canWait,           // row 4
+		r.working,           // row 5
+		r.parked,            // row 8
+		r.finishedRecent,    // row 9
+		r.waiting,           // row 10
+		r.finishedSeen,      // row 11
+		r.someday,           // row 12
 	} {
 		if p, ok := row(); ok {
 			return p
@@ -241,7 +242,7 @@ func (r *reading) failedStart() placement {
 // ---- row 2: a run asks, or was cut off ----
 
 // runAsks: a run waits on the owner (agent_asks; every run that asks is an ask, the oldest first) or was cut off by a
-// model error (interrupted). stopped_unfinished needs a run's end reason, which the session list does not carry yet.
+// model error (interrupted). Unattended closeouts are handled separately, after explicit owner decisions.
 func (r *reading) runAsks() (placement, bool) {
 	var asking []run
 	for _, rn := range r.runs {
@@ -269,6 +270,63 @@ func (r *reading) runAsks() (placement, bool) {
 		}
 	}
 	return placement{}, false
+}
+
+// stoppedTurn reads the latest evidenced stop, not a read receipt or automatic ledger update. A newer stopped
+// run supersedes an older report; any actual execution keeps the task out of the unattended-stop fallback.
+func (r *reading) stoppedTurn() (run, time.Time, bool) {
+	var lead run
+	var at time.Time
+	found := false
+	for _, rn := range r.runs {
+		switch rn.kind {
+		case runRunning, runPersona, runStarting, runBackground:
+			return run{}, time.Time{}, false
+		}
+		if !rn.found || rn.s.Work == nil || rn.kind != runIdle && rn.kind != runUnread && rn.kind != runWaits {
+			continue
+		}
+		if rn.reportStatus() == "" && rn.kind != runIdle {
+			continue // preserve upstream's unread/wait compatibility when there is no closeout report
+		}
+		if rn.reportStatus() == "" && rn.s.Work.TurnAt.IsZero() {
+			continue // older snapshots without stop evidence keep their compatibility reading
+		}
+		end := rn.since()
+		if end.IsZero() && rn.link.LinkedAt != nil {
+			end = *rn.link.LinkedAt
+		}
+		if !found || end.After(at) {
+			lead, at, found = rn, end, true
+		}
+	}
+	at = latest(at, r.f.CreatedAt)
+	if sv := r.f.Supervision; sv != nil {
+		at = later(at, sv.FollowedUpAt)
+		for _, review := range sv.Reviews {
+			if review.By == "" {
+				at = latest(at, review.At)
+			}
+		}
+	}
+	return lead, at, found
+}
+
+func (r *reading) stoppedUnfinished() (placement, bool) {
+	if r.f.Unreached || r.settled() || reviewState(r.f) == reviewParked {
+		return placement{}, false
+	}
+	rn, since, ok := r.stoppedTurn()
+	if !ok || rn.kind == runWaits || rn.reportStatus() == proto.CloseoutDone || since.IsZero() || r.now.Sub(since) <= stoppedFollowupAfter {
+		return placement{}, false
+	}
+	text := rn.s.Work.Wait
+	if c := rn.s.Work.Closeout; c != nil {
+		text = cmp.Or(c.Waiting, c.Missing, text)
+	}
+	p := r.at(assistantwire.TodoPhaseNeedsYou, assistantwire.TodoListSectionNeedsYou, assistantwire.TodoReasonStoppedUnfinished)
+	p.Line, p.Since = line(assistantwire.TodoLineKeyStoppedUnfinished, "run", rn.title(), "text", text), utc(since)
+	return p, true
 }
 
 // runAsk is run rn's ask, at home in its session, its id following the moment the session came to wait: what its
@@ -571,6 +629,16 @@ func (r *reading) finish() (time.Time, *assistantwire.TodoLine, bool) {
 		}
 		return at, line(assistantwire.TodoLineKeyDeployed), true
 	}
+	if rn, since, ok := r.stoppedTurn(); ok {
+		if rn.reportStatus() != proto.CloseoutDone {
+			return time.Time{}, nil, false
+		}
+		at := rn.since()
+		if at.IsZero() {
+			at = since
+		}
+		return at, line(assistantwire.TodoLineKeyFinished, "run", rn.title()), true
+	}
 	if rn, ok := firstRun(r.runs, runUnread); ok {
 		return rn.since(), line(assistantwire.TodoLineKeyFinished, "run", rn.title()), true
 	}
@@ -602,6 +670,9 @@ func (r *reading) finishedRecent() (placement, bool) {
 	}
 	p := r.at(assistantwire.TodoPhaseReady, assistantwire.TodoListSectionJustFinished, assistantwire.TodoReasonFinishedUnseen)
 	p.Line, p.Since = l, utc(at)
+	if rn, _, known := r.stoppedTurn(); known && rn.reportStatus() == proto.CloseoutDone {
+		p.Seen = r.seenSince(at)
+	}
 	if !p.Seen {
 		return p, true
 	}
@@ -620,6 +691,9 @@ func (r *reading) finishedSeen() (placement, bool) {
 	}
 	p := r.at(assistantwire.TodoPhaseTodo, assistantwire.TodoListSectionTodo, assistantwire.TodoReasonFinishedSeen)
 	p.Line, p.Since = line(assistantwire.TodoLineKeyFinishedSeen, assistantwire.TodoLineArgAt, stamp(at)), utc(at)
+	if rn, _, known := r.stoppedTurn(); known && rn.reportStatus() == proto.CloseoutDone {
+		p.Seen = r.seenSince(at)
+	}
 	return p, true
 }
 
@@ -866,6 +940,9 @@ func moments(f *Facts, now time.Time) []time.Time {
 		if t.After(now) && t.Before(somedayNoDate) {
 			out = append(out, t)
 		}
+	}
+	if rn, since, ok := read(f, now).stoppedTurn(); ok && rn.reportStatus() != proto.CloseoutDone && !since.IsZero() {
+		add(since.Add(stoppedFollowupAfter).Add(time.Nanosecond))
 	}
 	add(f.UpdatedAt.Add(failedStartFor))
 	if f.DoneAt != nil {

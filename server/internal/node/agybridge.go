@@ -270,8 +270,9 @@ var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin, instan
 }
 
 // agyBridgeEnv constructs the companion environment from base, applying the runtime socket and any managed agy
-// provider environment, and falling back to OS system proxy settings (macOS `scutil --proxy`) when neither base nor
-// the provider explicitly names any proxy variable (including an explicit empty value such as `HTTPS_PROXY=`).
+// provider environment, and falling back to OS system proxy settings (macOS `scutil --proxy`) and then login-shell
+// proxy variables when neither base nor the provider explicitly names any proxy variable (including an explicit empty
+// value such as `HTTPS_PROXY=`).
 func agyBridgeEnv(ctx context.Context, rh *RuntimeHost, base []string) []string {
 	env := slices.Clone(base)
 	if rh != nil {
@@ -282,7 +283,8 @@ func agyBridgeEnv(ctx context.Context, rh *RuntimeHost, base []string) []string 
 			}
 		}
 	}
-	return withSystemProxyEnv(ctx, env)
+	env = withSystemProxyEnv(ctx, env)
+	return withShellProxyEnv(ctx, env)
 }
 
 func (rh *RuntimeHost) agyConnected() bool {

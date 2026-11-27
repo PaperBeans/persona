@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,44 +10,10 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// The `brief` item's body and writer live in server/internal/modules/briefing/feed.go. These HTTP routes stay in
-// package assistant until modapi serves the hub_routes slot (#13845 item 4).
-
-const feedBrief = modapi.FeedKindBrief
-
-type (
-	briefBody           = modapi.BriefBody
-	briefBodyNorthStar  = modapi.BriefBodyNorthStar
-	briefBodyRow        = modapi.BriefBodyRow
-	briefBodyPRFollowup = modapi.BriefPRFollowup
-)
-
-func (s *Service) briefRoutes() {
-	// POST /api/v1/later/{id}/handled: the Handled button of a question in a `brief` item's later list. It leaves the queue
-	// (an ask_user nobody answered ends with it: its to-do is closed, laterHandled); a question already handled, dropped (its
-	// to-do ended, or 7 days) or unknown is 409. A queue, or such a to-do, that can't be read or written is 503, and the
-	// question stays.
-	s.handle("POST /api/v1/later/{id}/handled", func(w http.ResponseWriter, r *http.Request) {
-		if !fullRole(r) {
-			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot change the queue"))
-			return
-		}
-		ok, err := s.laterHandled(r.Context(), r.PathValue("id"), time.Now())
-		if err != nil {
-			apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
-			return
-		}
-		if !ok {
-			apierr.Write(w, http.StatusConflict, i18n.Err("assistant-feishu_cards.already_handled"))
-			return
-		}
-		apierr.WriteJSON(w, map[string]any{"ok": true})
-	})
-
+func (s *Service) todoAcceptRoute() {
 	// POST /api/v1/todos/{id}/accept {"asked_at"}: the Accept button of a `brief` item. It verifies the task when asked_at is
 	// the round that waits now; a button of an earlier round, or a task already verified, is 409. A decision whose
 	// recommendation could not be sent to the task's agent is 502 accept_not_taken (423 with the node's code when the node
@@ -162,4 +129,21 @@ func nodeRefusal(err error) bool {
 		return false
 	}
 	return true
+}
+
+const timeKeyLayout = time.RFC3339Nano
+
+// acceptReviewRound accepts task id when the round the button was made for
+// (askedAt, as the card wrote it) is the round that waits now. The card is not one of the ask's own messages, so
+// acceptTry cannot tell an old round's button from a current one by its message id. The errors are acceptTry's: a
+// decision whose recommendation did not reach the agent, or errAcceptStore (the asks cannot be read or the acceptance
+// saved), which is not "another round".
+func (s *Service) acceptReviewRound(ctx context.Context, id, askedAt string) (acceptResult, error) {
+	at, err := time.Parse(timeKeyLayout, askedAt)
+	if err != nil {
+		return acceptResult{}, nil
+	}
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	return s.acceptTryAsDismissalLocked(ctx, id, "", at, false)
 }

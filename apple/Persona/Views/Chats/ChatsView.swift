@@ -315,8 +315,10 @@ struct ChatsView: View {
     #if os(iOS)
     @State private var personalEntry = PersonalAgentEntryModel()
     private var showsPersonalEntry: Bool { personalEntry.isAvailable(for: model.api) }
+    private var personalCount: Int? { personalEntry.count(for: model.api) }
     #else
     private var showsPersonalEntry: Bool { true }
+    private var personalCount: Int? { nil }
     #endif
     /// The ⋯ menu's actions, kept current by the list (not observed: see `AgentsListMenu`).
     @State private var menuActions = AgentsListMenu.Actions()
@@ -752,7 +754,7 @@ struct ChatsView: View {
     private func agentsList(rows: AnyView?) -> AgentsList {
         AgentsList(path: listPushPath, spaceAt: $spaceAt, query: $query, searching: $searching,
                    searchedBeforePush: $searchedBeforePush, showNew: newSession, menuActions: menuActions, ownsTop: ownsTop,
-                   showsPersonalEntry: showsPersonalEntry, beginSearch: beginSearch, sidebarRows: rows)
+                   showsPersonalEntry: showsPersonalEntry, personalCount: personalCount, beginSearch: beginSearch, sidebarRows: rows)
     }
 
     /// The chat asked for from outside the list (a notification, a launch onto it): open, and the request taken.
@@ -935,6 +937,8 @@ private struct AgentsList: View {
     /// A phone: the page's own top (`AgentsHeader`), not the system's search.
     var ownsTop: Bool
     var showsPersonalEntry: Bool
+    /// How many personal agent conversations there are, for their group's heading (nil while unknown).
+    var personalCount: Int?
     var beginSearch: () -> Void
     /// The Sidebar layout (#6332): the Persona sidebar's rows (the pages, Persona's chats), held above the Agents, which
     /// get a heading of their own with the list's ⋯, Personal Agents and New Session (`UnifiedSidebarColumn`).
@@ -1351,14 +1355,6 @@ private struct AgentsList: View {
                             machineFilterChip
                         }
                     }
-                    #if os(iOS)
-                    if shell != nil, showsPersonalEntry {
-                        AgentsPersonalPill { openFromList(PersonalAgentsRoute()) }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, Theme.Space.page)
-                            .padding(.bottom, Theme.Space.sm)
-                    }
-                    #endif
                 }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
@@ -1430,6 +1426,20 @@ private struct AgentsList: View {
                     SectionHeader(title: String(localized: "section.pinned", defaultValue: "Pinned"), count: nil, tone: StatusPalette.idle)
                 }
             }
+
+            #if os(iOS)
+            // The shell's way to the personal agents (#140): a group of its own above the computers' (#16769), only
+            // over the whole list (not a quick filter's or a search's results, which it is not one of).
+            if shell != nil, showsPersonalEntry, quick == .all, query.isEmpty {
+                Section {
+                    AgentsPersonalHeading(count: personalCount) { openFromList(PersonalAgentsRoute()) }
+                        .modifier(ButtonRowInsets(edges: Self.hostHeadingInsets))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                .listSectionSpacing(.custom(0))
+            }
+            #endif
 
             if grouping == .recent {
                 recentSection(unpinned)

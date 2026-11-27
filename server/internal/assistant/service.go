@@ -15,8 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/moduleswitch"
-
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/kernel"
 	"github.com/nwverse/persona/server/internal/assistant/kernel/seam"
@@ -30,6 +28,7 @@ import (
 	"github.com/nwverse/persona/server/internal/knowledgeuihost"
 	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/modelhttp"
+	"github.com/nwverse/persona/server/internal/moduleswitch"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/remoteimage"
@@ -335,6 +334,7 @@ type Service struct {
 	attention      attentionClock         // attention.go: the attention mode as last read, and its end
 	deploy         deployProbe            // deploy_check.go: is the work in the running hub
 	prEventRoute   prEventRouteBook       // pr_status_route.go: opt-in direct PR-event routing dedupe
+	prFeedback     prFeedbackBook         // pr_feedback.go: per-PR feedback cursors and routing serialization
 	parkReplies    parkReplyBook          // park_reply.go: bounded source reads for explicitly bound person replies
 
 	reviewDismissals  taskReviewDismissalBook // task_review_dismissals.go
@@ -531,7 +531,7 @@ func New(o Options) *Service {
 	s.taskRoutes()
 	s.viewActionRoutes()
 	s.todayRoutes()
-	s.briefRoutes()
+	s.todoAcceptRoute()
 	s.todoRoutes()
 	s.agentRoutes()
 	s.sessionReviewRoutes()
