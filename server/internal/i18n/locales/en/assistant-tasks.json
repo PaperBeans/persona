@@ -87,6 +87,7 @@
   "admission_memory": "Only {available} of free memory left, below its limit of {limit}.",
   "admission_procs": "{count} claude processes are already running, at its limit of {limit}.",
   "admission_load": "Load {load} exceeds {cores} cores × {multiplier}.",
+  "admission_swap": "Swap is {percent}% used ({used} of {total}) and only {available} of memory is free.",
   "admission_direction_full": "This direction already has {running} agents running, at its limit of {limit}.",
   "admission_launcher_group_full": "Launcher group {group} already has {running} tasks running, at its limit of {limit}.",
   "admission_refused": "Computer {machine} cannot start this agent: {reason}.{recommend}",

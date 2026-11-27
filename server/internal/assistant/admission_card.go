@@ -106,6 +106,16 @@ func admissionLoadSide(v *float64, fallback admissionSide) admissionSide {
 
 func admissionLoadText(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
+// admissionSwapSide is the swap line; like percentOr, a value outside (0, 100] is not the setting's own.
+func admissionSwapSide(v *float64, fallback admissionSide) admissionSide {
+	if v != nil && *v > 0 && *v <= 100 {
+		return admissionOwn(admissionSwapText(*v))
+	}
+	return fallback
+}
+
+func admissionSwapText(v float64) string { return admissionLoadText(v) + "%" }
+
 // admissionName is a name from the setting as one row's label: on one line, so a line break inside a computer,
 // direction, project, group or launcher name cannot start a row of its own on the card.
 func admissionName(name string) i18n.Verbatim { return i18n.Verbatim(oneLine(name)) }
@@ -113,6 +123,7 @@ func admissionName(name string) i18n.Verbatim { return i18n.Verbatim(oneLine(nam
 // admissionLines are the resolved lines of one setting that do not depend on a name.
 type admissionLines struct {
 	gate, load, direction  admissionSide
+	swap                   admissionSide
 	memory, working        admissionSide
 	hubMemory, hubWorking  admissionSide
 	machines               map[string]MachineAdmission
@@ -127,6 +138,7 @@ func resolveAdmissionLines(l i18n.Lang, cfg AdmissionSettings, hubMachine string
 	v := admissionLines{
 		gate:        builtIn(i18n.T(l, "assistant-settings_tool.on")),
 		load:        admissionLoadSide(cfg.LoadPerCore, builtIn(admissionLoadText(admissionLoadPerCore))),
+		swap:        admissionSwapSide(cfg.MaxSwapPercent, builtIn(admissionSwapText(admissionMaxSwapPercent))),
 		direction:   admissionCountSide(cfg.DirectionCap, builtIn(strconv.Itoa(admissionDirectionCap))),
 		memory:      admissionBytesSide(cfg.MinMemoryBytes, builtIn(humanBytes(admissionMinMemoryBytes))),
 		working:     admissionCountSide(cfg.MaxClaudeProcs, builtIn(strconv.Itoa(admissionMaxClaudeProcs))),
@@ -151,16 +163,18 @@ func resolveAdmissionLines(l i18n.Lang, cfg AdmissionSettings, hubMachine string
 	return v
 }
 
-// machine is one computer's three lines. A line its entry does not set follows limitsFor: the hub's computer takes the
-// hub lines for memory and working Agents, every other computer the general ones, and load is general everywhere.
-func (v admissionLines) machine(id string) (memory, working, load admissionSide) {
+// machine is one computer's four lines. A line its entry does not set follows limitsFor: the hub's computer takes the
+// hub lines for memory and working Agents, every other computer the general ones, and load and swap are general
+// everywhere.
+func (v admissionLines) machine(id string) (memory, working, load, swap admissionSide) {
 	over := v.machines[id]
 	memoryFrom, workingFrom := v.memory.asGeneral(v.lang), v.working.asGeneral(v.lang)
 	if id == v.hubMachine && id != "" {
 		memoryFrom, workingFrom = v.hubMemory.asHub(v.lang), v.hubWorking.asHub(v.lang)
 	}
 	return admissionBytesSide(over.MinMemoryBytes, memoryFrom), admissionCountSide(over.MaxClaudeProcs, workingFrom),
-		admissionLoadSide(over.LoadPerCore, v.load.asGeneral(v.lang))
+		admissionLoadSide(over.LoadPerCore, v.load.asGeneral(v.lang)),
+		admissionSwapSide(over.MaxSwapPercent, v.swap.asGeneral(v.lang))
 }
 
 // projectCap is one project's own cap. A project the setting does not name takes the cap for every direction.
@@ -228,17 +242,19 @@ func admissionChangeCard(l i18n.Lang, before, after AdmissionSettings, hubMachin
 
 	line(i18n.T(l, "assistant-settings_tool.admission_gate"), was.gate, now.gate)
 	line(i18n.T(l, "assistant-settings_tool.admission_load"), was.load, now.load)
+	line(i18n.T(l, "assistant-settings_tool.admission_swap"), was.swap, now.swap)
 	line(i18n.T(l, "assistant-settings_tool.admission_memory"), was.memory, now.memory)
 	line(i18n.T(l, "assistant-settings_tool.admission_working"), was.working, now.working)
 	line(i18n.T(l, "assistant-settings_tool.admission_hub_memory"), was.hubMemory, now.hubMemory)
 	line(i18n.T(l, "assistant-settings_tool.admission_hub_working"), was.hubWorking, now.hubWorking)
 	for _, id := range both(slices.Collect(maps.Keys(was.machines)), slices.Collect(maps.Keys(now.machines))) {
-		wasMemory, wasWorking, wasLoad := was.machine(id)
-		nowMemory, nowWorking, nowLoad := now.machine(id)
+		wasMemory, wasWorking, wasLoad, wasSwap := was.machine(id)
+		nowMemory, nowWorking, nowLoad, nowSwap := now.machine(id)
 		machine := i18n.Args{"machine": admissionName(id)}
 		line(i18n.T(l, "assistant-settings_tool.admission_machine_memory", machine), wasMemory, nowMemory)
 		line(i18n.T(l, "assistant-settings_tool.admission_machine_working", machine), wasWorking, nowWorking)
 		line(i18n.T(l, "assistant-settings_tool.admission_machine_load", machine), wasLoad, nowLoad)
+		line(i18n.T(l, "assistant-settings_tool.admission_machine_swap", machine), wasSwap, nowSwap)
 	}
 	line(i18n.T(l, "assistant-settings_tool.admission_direction"), was.direction, now.direction)
 	for _, key := range both(slices.Collect(maps.Keys(was.byDirection)), slices.Collect(maps.Keys(now.byDirection))) {

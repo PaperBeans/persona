@@ -269,6 +269,17 @@ A direction override takes precedence over a project override. A retained comput
 (older than 30 seconds), unknown cores or ambiguous memory fails admission. Missing optional load or process readings
 skip their respective lines. A computer outside the resource layer skips machine checks.
 
+The swap line (#16757) refuses a computer whose swap is at least `max_swap_percent` used (80 by default, settable for
+every computer and in `machines.<id>`; a value outside 0–100 keeps the default) while less than a quarter of its memory
+is available. Past physical memory a computer falls off a cliff rather than slowing down evenly: each new Agent's
+builds swap, and load1 only crosses its line long after. The memory condition keeps a computer whose swap holds stale
+pages but whose memory is free admitting, which is common on long-running Linux machines; on macOS, where swap grows
+in files as it is needed, available memory is usually under a quarter anyway and the swap reading decides. A sample
+with no swap (none configured, or not readable) or a swap reading out of range skips the line; it never refuses. The
+load multiplier stays four for every computer: memory is the swap line's job, and a load line scaled by memory size
+would also hold back CPU-light Agents on a small computer that has room. A computer that needs a tighter load line
+sets `machines.<id>.load_per_core`.
+
 `persona_settings` changes `assistant.admission` behind an approval card. The card lists each line that changes, one per
 row, with the old value and the new one in words: what the number bounds, on which computer, direction, project or
 launcher group, and memory in binary units. A value the setting does not carry is shown as the line it falls back to,

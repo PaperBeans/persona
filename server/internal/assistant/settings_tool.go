@@ -515,7 +515,7 @@ func (s *Service) allOwnSettings() []ownSetting {
 			set: s.setModelTiers},
 		{Setting: Setting{Key: admissionSettingsKey, Title: "Execution Agent admission gate", Actions: getSet,
 			About: "the lines an execution Agent's start is checked against on every computer: enabled, load_per_core, min_memory_bytes, " +
-				"max_claude_procs (and the hub machine's own hub_* lines, per-machine overrides), and the per-direction cap. " +
+				"max_claude_procs, max_swap_percent (and the hub machine's own hub_* lines, per-machine overrides), and the per-direction cap. " +
 				"direction_cap_by_direction keys are a supervisor conversation id or a direction's displayed name and win over " +
 				"direction_cap_by_project, which wins over direction_cap and the code default. launcher_groups (none by default) caps " +
 				"running tasks across launchers that share one budget, on every computer: each {name, launchers (exact launcher names), " +
