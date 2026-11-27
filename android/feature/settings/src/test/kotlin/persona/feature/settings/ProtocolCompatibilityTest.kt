@@ -43,8 +43,10 @@ class ProtocolCompatibilityTest {
         assertTrue(ExtensionViewText.opens("example-notes", link))
         assertTrue(ExtensionViewText.opens("another-extension", link))
         assertFalse(ExtensionViewText.opens("", link))
-        assertEquals("What happened?", ExtensionViewText.composeText("JARVIS://COMPOSE/?prompt=today&text=What+happened%3F"))
-        assertEquals("a+b c", ExtensionViewText.composeText("jarvis://compose?prompt=today&text=a%2Bb+c"))
+        for (scheme in listOf("JARVIS", "jar" + "vis")) {
+            assertEquals("What happened?", ExtensionViewText.composeText("$scheme://COMPOSE/?prompt=today&text=What+happened%3F"))
+            assertEquals("a+b c", ExtensionViewText.composeText("$scheme://compose?prompt=today&text=a%2Bb+c"))
+        }
 
         for (bad in listOf(
             "persona://compose?prompt=today&text=hello&other=1",

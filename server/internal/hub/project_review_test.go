@@ -469,7 +469,7 @@ func TestProjectReviewFirstInputBeforeListing(t *testing.T) {
 		// Before the computer lists a start with the metadata that says so, where it runs decides.
 		{"health folder", trusted, proto.Session{SessionID: "health-cwd", Cwd: "/home/u/.persona/health/reports"}, false, false},
 		{"meeting room", trusted, proto.Session{SessionID: "room", Cwd: "/home/u/.persona/guest-meeting/m1"}, false, false},
-		{"guest", trusted, proto.Session{SessionID: "guest", Cwd: "/home/u/.jarvis/guest"}, false, false},
+		{"guest", trusted, proto.Session{SessionID: "guest", Cwd: "/home/u/.persona/guest"}, false, false},
 		{"a project folder named guest", trusted, proto.Session{SessionID: "guest-project", Cwd: "/code/guest"}, false, true},
 		{"untrusted", r, proto.Session{SessionID: "untrusted", Cwd: "/code"}, false, false},
 		{"share sheet", trusted, proto.Session{SessionID: "shared", Cwd: "/code"}, true, false},

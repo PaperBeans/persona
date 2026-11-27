@@ -377,14 +377,14 @@ function balanceProblemText(a: UsageAccount): string {
 }
 
 function connectHint(p: UnconnectedProvider): string {
-  if (p.agent === "claude" && p.id === "claude") return tr("usage.connect_hint_claude");
-  if (p.agent === "agy" || p.agent === "antigravity" || (p.agent === "codex" && p.id === "codex")) return tr("usage.connect_hint_pending", { name: p.title });
+  if (p.agent === "claude" && p.id === "claude" && !p.base_url) return tr("usage.connect_hint_claude");
+  if (!p.base_url && (p.agent === "agy" || p.agent === "antigravity" || (p.agent === "codex" && p.id === "codex"))) return tr("usage.connect_hint_pending", { name: p.title });
   return tr("usage.connect_hint_other");
 }
 
 function connectPrompt(p: UnconnectedProvider): string {
-  if (p.agent === "claude" && p.id === "claude") return tr("usage.connect_prompt_claude", { id: p.id });
-  if (p.agent === "agy" || p.agent === "antigravity") return tr("usage.connect_prompt_agy", { id: p.id });
+  if (p.agent === "claude" && p.id === "claude" && !p.base_url) return tr("usage.connect_prompt_claude", { id: p.id });
+  if (!p.base_url && (p.agent === "agy" || p.agent === "antigravity")) return tr("usage.connect_prompt_agy", { id: p.id });
   return tr("usage.connect_prompt_other", { name: p.title, id: p.id });
 }
 

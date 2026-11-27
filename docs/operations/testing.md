@@ -810,6 +810,31 @@ DOCKER=<docker client> python3 scripts/ci/module-e2e.py --core-only [--no-build-
 
 Simulator limits: computer-use can't click simulators while the screen is locked; use DEBUG launch arguments to open pages directly. Push, real HealthKit data and WatchConnectivity sync need devices.
 
+## Android real core-only and full hubs
+
+Run `python3 scripts/ci/android-core-only-hub.py --evidence /tmp/android-hub-editions.json` from the repository root with
+Go, Docker (`DOCKER` names another client), JDK 21 and the Android build toolchain. Lane 0 of `scripts/ci/android.sh`
+runs the same check without private configuration.
+
+The driver builds and starts two independent hubs in turn: one with `-tags persona_core_only`, then a default full build.
+Each has a temporary `HOME` and explicit `PERSONA_HOME`, a generated pairing token, a free loopback port and its own
+uniquely named disposable Postgres 18 container; the driver prints the home and confirmed loopback address before
+Android pairs, and removes only its own hub processes and container. It runs
+`persona.android.CoreOnlyHubLiveTest` in the default app build with `PERSONA_ANDROID_CORE_HUB_FIXTURE` naming the
+phase's 0600 fixture. Ordinary Android test runs skip this test when that variable is absent.
+
+The JVM test uses the production `HubPairingClient` to obtain a device credential (falling back to the pairing token is
+a failure), opens `OkHttpHubConnection`, consumes the real WebSocket hello, reads the manager roster, sessions and
+current device through the production transports, and applies the live features to `Modules.carried`, `ModuleRegistry`
+and `HubModule`. On the core-only hub every carried module and Recording/Lark/Mail is off, so no module's `navEntries`
+runs and every debug page the carried modules expose falls through to the unavailable-page fallback; on the full hub
+the same modules and pages are on and registered. The
+sanitized evidence contains counts, ids and flags, never either credential. The script bounds each Gradle invocation
+(`--gradle-timeout`, default 900 seconds) and prints one `PASS`, `FAIL` or `TIMEOUT` verdict.
+
+This is hub/client integration evidence, not an emulator or device UI test. It does not claim Android screen rendering,
+crash freedom across UI flows, microphone or permission behavior, push, or other device-only paths.
+
 ## Android Inbox Agent handoff to a named manager
 
 Run `python3 scripts/test/android-named-inbox-handoff.py --report /tmp/persona-handoff.json` from the repository root with Docker, Go and the Android build toolchain available. The fixture creates a loopback hub, two managers with separate PostgreSQL stores, and two controlled target machines. Seed data and credentials live in its temporary directory.

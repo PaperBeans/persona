@@ -245,7 +245,7 @@ func TestProjectReviewDynamicScope(t *testing.T) {
 			!strings.Contains(msg, next.ID+" triage_only") {
 			t.Fatalf("unauthorized facts in review-only prompt: %s", msg)
 		}
-		if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+		if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -266,7 +266,7 @@ func TestProjectReviewDynamicScope(t *testing.T) {
 	if err != nil || !ok || !strings.Contains(string(next.Event), "replacement-done") || !strings.Contains(string(next.Event), alpha.ID) {
 		t.Fatalf("replacement's event did not retain project attribution: %+v %v", next, err)
 	}
-	if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+	if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.projectReviewOwnerInput(ctx, assistantwire.ProjectReviewOwnerInput{
@@ -278,7 +278,7 @@ func TestProjectReviewDynamicScope(t *testing.T) {
 	if err != nil || !ok || !strings.Contains(string(next.Event), "continued-task") || !strings.Contains(string(next.Event), alpha.ID) {
 		t.Fatalf("continuation on replacement did not follow the task ledger: %+v %v", next, err)
 	}
-	if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+	if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := store.NextProjectReview(ctx, string(target)); err != nil || ok {
@@ -305,7 +305,7 @@ func TestProjectReviewDynamicScope(t *testing.T) {
 	if strings.Contains(msg, loose.ID) || strings.Contains(msg, end.Key) || !strings.Contains(msg, next.ID+" triage_only") {
 		t.Fatalf("unassigned task leaked to triage: %s", msg)
 	}
-	if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+	if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("main, unrelated project, revoked binding and opted-in unassigned task arrived as opaque triage; continuation and replacement inherited their authorized task")
@@ -359,7 +359,7 @@ func TestProjectReviewPairedFeishuOwnerInput(t *testing.T) {
 		!strings.Contains(string(event.Event), `"project": ""`) || strings.Contains(string(event.Event), "private original") {
 		t.Fatalf("want an opaque owner event: %s %v %v", event.Event, ok, err)
 	}
-	if err := store.SettleProjectReview(ctx, event.ID, "fixture"); err != nil {
+	if err := store.SettleProjectReview(ctx, event.ID, "review_receipt_no_change"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := store.NextProjectReview(ctx, string(target)); err != nil || ok {
@@ -413,7 +413,7 @@ func TestProjectReviewOwnerInputAssignmentEpoch(t *testing.T) {
 		if got := strings.Contains(string(next.Event), alpha.ID); got != c.scoped {
 			t.Errorf("%s: scoped=%v, want %v: %s", c.id, got, c.scoped, next.Event)
 		}
-		if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+		if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -519,7 +519,7 @@ func TestProjectReviewNodeTimesBeforeTheLink(t *testing.T) {
 		if err != nil || !ok || !strings.Contains(string(next.Event), `"`+want[0]+`"`) || !strings.Contains(string(next.Event), want[1]) {
 			t.Fatalf("%s: not queued for %s: %s %v %v", want[1], want[0], next.Event, ok, err)
 		}
-		if err := store.SettleProjectReview(ctx, next.ID, "test_drained"); err != nil {
+		if err := store.SettleProjectReview(ctx, next.ID, "send_unconfirmed"); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -487,6 +487,7 @@ export interface UnconnectedProvider {
   id: string;
   title: string;
   agent: string;
+  base_url?: string;
 }
 
 const emptyAccounts: UsageAccount[] = [];

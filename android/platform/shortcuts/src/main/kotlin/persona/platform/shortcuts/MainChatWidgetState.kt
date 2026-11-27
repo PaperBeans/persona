@@ -329,20 +329,10 @@ object MainChatWidgetState {
 
 /**
  * Plain-language text sanitizer and formatter for [MainChatWidget].
- * Strips context blocks (`<persona-context>` / `<jarvis-context>`), internal tags, Markdown syntax,
+ * Strips context blocks and internal tags through [ProtocolCompatibility], Markdown syntax,
  * raw file paths, UUIDs, internal session/task IDs, and raw model IDs per `DESIGN_SYSTEM.md` §5.6.
  */
 object MainChatText {
-    private val unclosedContextBlock = Regex("<(?:persona|jarvis)-(?:context|file)\\b[^>]*>[\\s\\S]*$", RegexOption.IGNORE_CASE)
-    private val strayClosingTag = Regex("</\\s*(?:persona|jarvis)-(?:context|file)\\s*>", RegexOption.IGNORE_CASE)
-    private val internalTagBlock = Regex(
-        "<(system-reminder|command-name|command-message|command-args|local-command-[a-z-]+)\\b[^>]*>[\\s\\S]*?</\\1>",
-        RegexOption.IGNORE_CASE,
-    )
-    private val internalTagSingle = Regex(
-        "</?(?:system-reminder|command-name|command-message|command-args|local-command-[a-z-]+|persona-[a-z-]+|jarvis-[a-z-]+)\\b[^>]*>",
-        RegexOption.IGNORE_CASE,
-    )
     private val crossSessionTag = Regex("<cross-session-message[^>]*>([\\s\\S]*?)</cross-session-message>", RegexOption.IGNORE_CASE)
     private val codeFenceLine = Regex("^```[A-Za-z0-9_.+-]*\\s*$", RegexOption.MULTILINE)
     private val singleStarEmphasis = Regex("(?<!\\*)\\*([^\\s*][^*]*?[^\\s*]|[^\\s*])\\*(?!\\*)")
@@ -381,10 +371,10 @@ object MainChatText {
             text = ProtocolCompatibility.fileTag.replace(text, " ")
         } while (text != previous)
 
-        text = unclosedContextBlock.replace(text, " ")
-        text = strayClosingTag.replace(text, " ")
-        text = internalTagBlock.replace(text, " ")
-        text = internalTagSingle.replace(text, " ")
+        text = ProtocolCompatibility.unclosedContextBlock.replace(text, " ")
+        text = ProtocolCompatibility.strayClosingTag.replace(text, " ")
+        text = ProtocolCompatibility.internalTagBlock.replace(text, " ")
+        text = ProtocolCompatibility.internalTagSingle.replace(text, " ")
         text = crossSessionTag.replace(text, "$1")
         text = messageText(text, files = false).text
         text = codeFenceLine.replace(text, "")

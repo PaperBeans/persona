@@ -10,6 +10,7 @@ import {
   cleanAssistantText,
   cleanGenericOutput,
   cleanUserText,
+  mapPermissionToolCall,
   mapToolCall,
   mapToolInput,
   mapToolName,
@@ -690,5 +691,43 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(wakeDurations.length, 2)
     assert.equal(wakeDurations[0].turn_duration.user_item_id, wakeDone.items[0].id)
     assert.equal(wakeDurations[1].turn_duration.user_item_id, undefined)
+  })
+
+  it('maps multi_replace_file_content to MultiEdit and notebook_edit to NotebookEdit with normalized path fields', () => {
+    assert.equal(mapToolName('multi_replace_file_content'), 'MultiEdit')
+    assert.equal(mapToolName('notebook_edit'), 'NotebookEdit')
+
+    const multi = mapPermissionToolCall({
+      name: 'multi_replace_file_content',
+      rawInput: {
+        TargetFile: '/tmp/work/app.go',
+        ReplacementChunks: [{ TargetContent: 'a', ReplacementContent: 'b' }],
+      },
+    })
+    assert.equal(multi.toolName, 'MultiEdit')
+    assert.equal(multi.toolInput.file_path, '/tmp/work/app.go')
+    assert.deepEqual(multi.toolInput.ReplacementChunks, [{ TargetContent: 'a', ReplacementContent: 'b' }])
+
+    const multiTitle = mapPermissionToolCall({
+      name: 'multi_replace_file_content',
+      title: 'File /tmp/work/title.go',
+      rawInput: {},
+    })
+    assert.equal(multiTitle.toolName, 'MultiEdit')
+    assert.equal(multiTitle.toolInput.file_path, '/tmp/work/title.go')
+
+    const nbTarget = mapPermissionToolCall({
+      name: 'notebook_edit',
+      rawInput: { TargetFile: '/tmp/work/analysis.ipynb', new_source: 'print(1)' },
+    })
+    assert.equal(nbTarget.toolName, 'NotebookEdit')
+    assert.equal(nbTarget.toolInput.notebook_path, '/tmp/work/analysis.ipynb')
+
+    const nbDirect = mapPermissionToolCall({
+      name: 'notebook_edit',
+      rawInput: { notebook_path: '/tmp/work/direct.ipynb' },
+    })
+    assert.equal(nbDirect.toolName, 'NotebookEdit')
+    assert.equal(nbDirect.toolInput.notebook_path, '/tmp/work/direct.ipynb')
   })
 })

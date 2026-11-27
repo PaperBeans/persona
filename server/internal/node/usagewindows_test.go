@@ -15,6 +15,10 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+func init() {
+	agyLocalUserStatus = func() (agyUserIdentity, bool) { return agyUserIdentity{}, false }
+}
+
 func usageFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "usagewindows", name))
@@ -501,6 +505,70 @@ func TestCodexUsageRefreshDoesNotBlockSnapshotsAndDisableCancelsIt(t *testing.T)
 	}
 }
 
+func TestCodexUsageRefreshForwardsLoginShellProxyEnv(t *testing.T) {
+	useFakeCodexUsageApp(t)
+	prevShell := detectShellProxy
+	detectShellProxy = func(context.Context) shellProxy {
+		return shellProxy{HTTPSProxy: "http://proxy.example.test:8080", NoProxy: "127.0.0.1,localhost"}
+	}
+	t.Cleanup(func() { detectShellProxy = prevShell })
+	for _, k := range shellProxyEnvClear {
+		t.Setenv(k, "")
+		_ = os.Unsetenv(k)
+	}
+
+	n := &Node{home: t.TempDir(), dir: t.TempDir()}
+	mkdir(t, n.codexHome())
+	writeCodexUsageReply(t, n.codexHome(), `{"accountId":"proxy-acct","rateLimits":{"planType":"plus","primary":{"usedPercent":17,"windowDurationMins":10080}}}`)
+
+	n.refreshUsageWindows(t.Context())
+	snap := n.usageSnapshot()
+	if len(snap.Accounts) != 1 || snap.Accounts[0].AccountKey != codexUsageKey("proxy-acct") {
+		t.Fatalf("expected account-bound usage, got %+v", snap)
+	}
+	gotProxy, err := os.ReadFile(filepath.Join(n.codexHome(), "fixture-usage-https-proxy"))
+	if err != nil || string(gotProxy) != "http://proxy.example.test:8080" {
+		t.Fatalf("expected app-server to receive HTTPS_PROXY, got %q (err=%v)", string(gotProxy), err)
+	}
+}
+
+func TestRuntimeUsageWindowsPreservesAccountKeyAndEnrichesLegacyAgy(t *testing.T) {
+	now := time.Date(2026, 11, 27, 2, 0, 0, 0, time.UTC)
+	reset := now.Add(2 * time.Hour).Format(time.RFC3339)
+
+	n := &Node{home: t.TempDir(), dir: t.TempDir()}
+	conn := &runtimeConn{hello: runtimeHello{Runtime: "agy"}}
+	payload := fmt.Sprintf(`{"provider":"agy","name":"alice@example.com","plan":"Google AI Ultra","account_key":"acct-digest-alice","sampled_at":%q,"windows":[{"label":"5h","window_minutes":300,"used_percent":12.5,"resets_at":%q,"model":"Gemini Models"}]}`, now.Format(time.RFC3339), reset)
+	n.runtimeUsageWindows(conn, json.RawMessage(payload), now)
+	snap := n.usageSnapshot()
+	if len(snap.Accounts) != 1 || snap.Accounts[0].AccountKey != "acct-digest-alice" || snap.Accounts[0].Name != "alice@example.com" {
+		t.Fatalf("expected runtime account_key in snapshot, got %+v", snap)
+	}
+
+	parsed, ok := parseAgyUserStatusJSON([]byte(`{"userStatus":{"email":"bob@example.com","name":"Bob","userTier":{"name":"Google AI Ultra"}}}`))
+	if !ok || parsed.name != "bob@example.com" || parsed.plan != "Google AI Ultra" || len(parsed.accountKey) != 64 {
+		t.Fatalf("unexpected parsed user status: %+v ok=%v", parsed, ok)
+	}
+	prev := agyLocalUserStatus
+	agyLocalUserStatus = func() (agyUserIdentity, bool) { return parsed, true }
+	agyIdentityCache.mu.Lock()
+	agyIdentityCache.checked = false
+	agyIdentityCache.mu.Unlock()
+	t.Cleanup(func() {
+		agyLocalUserStatus = prev
+		agyIdentityCache.mu.Lock()
+		agyIdentityCache.checked = false
+		agyIdentityCache.mu.Unlock()
+	})
+
+	legacy := fmt.Sprintf(`{"provider":"agy","name":"Antigravity","sampled_at":%q,"windows":[{"label":"5h","window_minutes":300,"used_percent":20,"resets_at":%q,"model":"Gemini Models"}]}`, now.Add(time.Minute).Format(time.RFC3339), reset)
+	n.runtimeUsageWindows(conn, json.RawMessage(legacy), now.Add(time.Minute))
+	snap = n.usageSnapshot()
+	if len(snap.Accounts) != 1 || snap.Accounts[0].Name != "bob@example.com" || snap.Accounts[0].Plan != "Google AI Ultra" || snap.Accounts[0].AccountKey != parsed.accountKey {
+		t.Fatalf("expected legacy agy sample to be enriched with local identity, got %+v", snap)
+	}
+}
+
 func useFakeCodexUsageApp(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -552,6 +620,9 @@ func TestFakeCodexUsageApp(t *testing.T) {
 		case "initialized":
 			initialized = true
 		case "account/rateLimits/read":
+			if p := os.Getenv("HTTPS_PROXY"); p != "" {
+				_ = os.WriteFile(filepath.Join(home, "fixture-usage-https-proxy"), []byte(p), 0o600)
+			}
 			var params map[string]bool
 			if err := json.Unmarshal(message.Params, &params); err != nil || !initialized || !params["excludeResetCreditDetails"] {
 				t.Fatal("unexpected usage request")

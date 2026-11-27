@@ -109,6 +109,12 @@ test('userStatus populates signed-in account name and subscription plan with agy
   })
   assert.equal(full.name, 'alice@example.com')
   assert.equal(full.plan, 'Google AI Ultra')
+  assert.match(full.account_key, /^[0-9a-f]{64}$/)
+
+  const upperEmail = usageAccountFromQuota(quota, sampledAt, {
+    userStatus: { email: '  ALICE@Example.COM \n' },
+  })
+  assert.equal(upperEmail.account_key, full.account_key)
 
   const displayNameFallback = usageAccountFromQuota(quota, sampledAt, {
     userStatus: {
@@ -119,6 +125,7 @@ test('userStatus populates signed-in account name and subscription plan with agy
   })
   assert.equal(displayNameFallback.name, 'Bob Example')
   assert.equal(displayNameFallback.plan, 'Pro')
+  assert.equal('account_key' in displayNameFallback, false)
 
   const topPlanInfoFallback = usageAccountFromQuota(quota, sampledAt, {
     userStatus: { email: 'carol@example.com' },
@@ -126,6 +133,7 @@ test('userStatus populates signed-in account name and subscription plan with agy
   })
   assert.equal(topPlanInfoFallback.name, 'carol@example.com')
   assert.equal(topPlanInfoFallback.plan, 'Enterprise')
+  assert.notEqual(topPlanInfoFallback.account_key, full.account_key)
 
   const tierIdFallback = usageAccountFromQuota(quota, sampledAt, {
     userStatus: { userTier: { id: 'g1-pro-tier' } },
@@ -160,4 +168,17 @@ test('missing, malformed, or oversized userStatus values fall back and respect 1
   assert.ok(Buffer.byteLength(longAccount.plan) <= 128)
   assert.equal(Buffer.byteLength(longAccount.plan), 128)
   assert.equal(longAccount.plan, '🚀'.repeat(32))
+})
+
+test('epoch-zero resetTime on an untouched bucket omits resets_at instead of dropping the window', () => {
+  const account = usageAccountFromQuota({ response: { groups: [
+    { displayName: 'Claude and GPT models', buckets: [
+      { bucketId: '3p-5h', window: '5h', remainingFraction: 1, resetTime: '1970-01-01T00:00:00Z' },
+      { bucketId: '3p-weekly', window: 'weekly', remainingFraction: 1, resetTime: '1970-01-01T00:00:00Z' },
+    ] },
+  ] } }, sampledAt)
+  assert.deepEqual(account.windows, [
+    { label: '5h', window_minutes: 300, used_percent: 0, model: 'Claude and GPT models' },
+    { label: '7d', window_minutes: 10080, used_percent: 0, model: 'Claude and GPT models' },
+  ])
 })
